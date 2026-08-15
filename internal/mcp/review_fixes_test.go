@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/storageadmin"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -740,6 +744,12 @@ func TestEditFiltersLinkChangePeersOutsideScope(t *testing.T) {
 			writeJSON(writer, map[string]any{
 				"issue": issue, "labels": []any{}, "comments": []any{}, "links": []any{},
 			})
+		case request.URL.Path == "/api/v1/projects/1/issues/def2":
+			issue := issueJSON(1, "spoke-project", "def2")
+			issue["uid"] = "01HCCCCCCCCCCCCCCCCCCCCCCC"
+			writeJSON(writer, map[string]any{
+				"issue": issue, "labels": []any{}, "comments": []any{}, "links": []any{},
+			})
 		case request.Method == http.MethodPatch:
 			issue := issueJSON(1, "spoke-project", "abc1")
 			writeJSON(writer, map[string]any{
@@ -798,6 +808,12 @@ func TestEditFiltersArchivedLinkChangePeerOutsideActiveScope(t *testing.T) {
 				projects = append(projects, archived)
 			}
 			writeJSON(writer, map[string]any{"projects": projects})
+		case request.URL.Path == "/api/v1/projects/1/issues/def2":
+			issue := issueJSON(1, "spoke-project", "def2")
+			issue["uid"] = "01HCCCCCCCCCCCCCCCCCCCCCCC"
+			writeJSON(writer, map[string]any{
+				"issue": issue, "labels": []any{}, "comments": []any{}, "links": []any{},
+			})
 		case request.Method == http.MethodPatch:
 			writeJSON(writer, map[string]any{
 				"changed": true, "issue": issueJSON(1, "spoke-project", "abc1"),
@@ -839,6 +855,12 @@ func TestEditReportsCommittedMutationWhenLinkChangeScopingFails(t *testing.T) {
 			writeJSON(writer, map[string]any{"projects": []any{
 				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
 			}})
+		case request.URL.Path == "/api/v1/projects/1/issues/def2":
+			issue := issueJSON(1, "spoke-project", "def2")
+			issue["uid"] = "01HCCCCCCCCCCCCCCCCCCCCCCC"
+			writeJSON(writer, map[string]any{
+				"issue": issue, "labels": []any{}, "comments": []any{}, "links": []any{},
+			})
 		case request.Method == http.MethodPatch:
 			writeJSON(writer, map[string]any{
 				"changed": true, "issue": issueJSON(1, "spoke-project", "abc1"),
@@ -877,6 +899,74 @@ func TestEditReportsCommittedMutationWhenLinkChangeScopingFails(t *testing.T) {
 	require.True(t, output.Changed)
 	require.Equal(t, "spoke-project#abc1", output.Issue.QualifiedRef)
 	require.Nil(t, output.Changes, "unresolved supplemental changes must be omitted after commit")
+}
+
+func TestEditRelationshipTargetSurvivesScopedProjectNameReuse(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	sourceProject, err := store.CreateProject(t.Context(), "source-project")
+	require.NoError(t, err)
+	targetProject, err := store.CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	foreignProject, err := store.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	source, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: sourceProject.ID, Title: "Source issue", Author: "example-agent",
+	})
+	require.NoError(t, err)
+	target, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: targetProject.ID, UID: "01ARZ3NDEKTSV4RRFFQ69GABC1", ShortIDOverride: "abc1",
+		Title: "Scoped target", Author: "example-agent",
+	})
+	require.NoError(t, err)
+	foreign, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: foreignProject.ID, UID: "01BRZ3NDEKTSV4RRFFQ69GABC1", ShortIDOverride: "abc1",
+		Title: "Foreign target", Author: "example-agent",
+	})
+	require.NoError(t, err)
+
+	daemonServer := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
+	t.Cleanup(func() { require.NoError(t, daemonServer.Close()) })
+	var namesReused atomic.Bool
+	daemonHandler := daemonServer.Handler()
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodPatch && namesReused.CompareAndSwap(false, true) {
+			if _, renameErr := store.RenameProject(request.Context(), targetProject.ID, "renamed-target"); renameErr != nil {
+				http.Error(writer, renameErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			if _, renameErr := store.RenameProject(request.Context(), foreignProject.ID, "target-project"); renameErr != nil {
+				http.Error(writer, renameErr.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		daemonHandler.ServeHTTP(writer, request)
+	}))
+	t.Cleanup(httpServer.Close)
+	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
+	require.NoError(t, err)
+	scope, err := NewAllowlistScope([]ProjectIdentity{
+		{ID: sourceProject.ID, UID: sourceProject.UID, Name: sourceProject.Name},
+		{ID: targetProject.ID, UID: targetProject.UID, Name: targetProject.Name},
+	})
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{
+		Client: client, Scope: scope, Actor: "example-agent", Version: "test-version",
+	})
+
+	callWorkflowTool(t, session, "kata.edit", map[string]any{
+		"ref": sourceProject.Name + "#" + source.ShortID,
+		"add_blocks": []any{
+			targetProject.Name + "#" + target.ShortID,
+		},
+	})
+	require.True(t, namesReused.Load())
+	links, err := store.LinksByIssue(t.Context(), source.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.Equal(t, target.ID, links[0].ToIssueID)
+	require.NotEqual(t, foreign.ID, links[0].ToIssueID)
 }
 
 func TestEventRedactionPreservesOpaqueMetadataAndDiffValues(t *testing.T) {
@@ -1260,12 +1350,12 @@ func TestAllowlistListAndReadyApplyLimitAfterScopedFanout(t *testing.T) {
 					}})
 				case "/api/v1/projects/1/issues", "/api/v1/projects/1/ready":
 					issue := issueJSON(1, "spoke-project", "spk1")
-					issue["updated_at"] = "2026-08-10T00:00:00Z"
+					issue["updated_at"] = "2026-08-11T00:00:00Z"
 					writeJSON(writer, map[string]any{"issues": []any{issue}})
 				case "/api/v1/projects/2/issues", "/api/v1/projects/2/ready":
 					issue := issueJSON(2, "hub-project", "hub1")
 					issue["project_uid"] = "01HBBBBBBBBBBBBBBBBBBBBBBB"
-					issue["updated_at"] = "2026-08-11T00:00:00Z"
+					issue["updated_at"] = "2026-08-11T00:00:00.1Z"
 					writeJSON(writer, map[string]any{"issues": []any{issue}})
 				default:
 					globalRequests.Add(1)
@@ -1337,13 +1427,13 @@ func TestAllowlistNextPreservesMergedReadyOrderingForEqualPriority(t *testing.T)
 		case "/api/v1/projects/1/ready":
 			issue := issueJSON(1, "spoke-project", "spk1")
 			issue["priority"] = 1
-			issue["updated_at"] = "2026-08-11T00:00:00Z"
+			issue["updated_at"] = "2026-08-11T00:00:00.1Z"
 			writeJSON(writer, map[string]any{"issues": []any{issue}})
 		case "/api/v1/projects/2/ready":
 			issue := issueJSON(2, "hub-project", "hub1")
 			issue["project_uid"] = "01HBBBBBBBBBBBBBBBBBBBBBBB"
 			issue["priority"] = 1
-			issue["updated_at"] = "2026-08-10T00:00:00Z"
+			issue["updated_at"] = "2026-08-11T00:00:00Z"
 			writeJSON(writer, map[string]any{"issues": []any{issue}})
 		default:
 			http.NotFound(writer, request)
@@ -1412,6 +1502,42 @@ func TestEditRejectsMixedIssueAndMetadataChangesBeforeMutation(t *testing.T) {
 	_, _, err = handlers.edit(t.Context(), nil, EditInput{Ref: "spk1", Title: &title, ScheduledOn: &scheduledOn})
 	require.ErrorContains(t, err, "separate calls")
 	require.Zero(t, requests.Load())
+}
+
+func TestEditMissingRelationshipRemovalRemainsIdempotent(t *testing.T) {
+	var patchRequests atomic.Int64
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/abc1":
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusNotFound)
+			writeJSON(writer, map[string]any{"status": 404, "error": map[string]any{"code": "issue_not_found", "message": "not found"}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/src1":
+			writeJSON(writer, map[string]any{
+				"issue": issueJSON(1, "spoke-project", "src1"), "labels": []any{}, "comments": []any{}, "links": []any{},
+			})
+		case request.Method == http.MethodPatch:
+			patchRequests.Add(1)
+			http.Error(writer, "unexpected mutation", http.StatusInternalServerError)
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewBoundScope(ProjectIdentity{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, output, err := handlers.edit(t.Context(), nil, EditInput{Ref: "src1", RemoveBlocks: []string{"abc1"}})
+	require.NoError(t, err)
+	require.False(t, output.Changed)
+	require.Equal(t, "src1", output.Issue.Ref)
+	require.Zero(t, patchRequests.Load(), "a missing idempotent removal must not be forwarded as a mutable reference")
 }
 
 func TestProjectsListsArchivedRecordsWithoutShowRequest(t *testing.T) {

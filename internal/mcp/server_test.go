@@ -551,6 +551,11 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				require.Len(t, changes["related_added"], 1)
 			}
 
+			if tt.tool == "kata.edit" {
+				resolution := <-requests
+				require.Equal(t, http.MethodGet, resolution.Method)
+				require.Equal(t, "/api/v1/projects/42/issues/def2", resolution.Path)
+			}
 			request := <-requests
 			require.Equal(t, tt.wantMethod, request.Method)
 			require.Equal(t, tt.wantPath, request.Path)
@@ -570,7 +575,10 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				require.NotContains(t, body, "project")
 				if tt.tool == "kata.edit" {
 					links := body["links_delta"].(map[string]any)
-					require.Equal(t, []any{"def2"}, links["add_related"])
+					require.Equal(t, []any{"01ARZ3NDEKTSV4RRFFQ69G5FAV"}, links["add_related"])
+					require.Equal(t, map[string]any{
+						"01ARZ3NDEKTSV4RRFFQ69G5FAV": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
+					}, links["expected_project_uids"])
 				}
 				if tt.tool == "kata.set_deadline" {
 					require.Equal(t, map[string]any{"deadline_on": "2026-09-01T09:30"}, body["patch"])

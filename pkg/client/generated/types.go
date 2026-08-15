@@ -559,9 +559,10 @@ func (c CreateFederationReplicaRequestBody) Validate() error {
 }
 
 type CreateInitialLinkBody struct {
-	Incoming *bool                     `json:"incoming,omitempty"`
-	ToRef    string                    `json:"to_ref" validate:"required"`
-	Type     CreateInitialLinkBodyType `json:"type" validate:"required"`
+	Incoming     *bool                     `json:"incoming,omitempty"`
+	ToProjectUID *string                   `json:"to_project_uid,omitempty"`
+	ToRef        string                    `json:"to_ref" validate:"required"`
+	Type         CreateInitialLinkBodyType `json:"type" validate:"required"`
 }
 
 func (c CreateInitialLinkBody) Validate() error {
@@ -2030,14 +2031,15 @@ func (l LinkPeer) Validate() error {
 }
 
 type LinksDelta struct {
-	AddBlockedBy    []string `json:"add_blocked_by,omitempty"`
-	AddBlocks       []string `json:"add_blocks,omitempty"`
-	AddRelated      []string `json:"add_related,omitempty"`
-	RemoveBlockedBy []string `json:"remove_blocked_by,omitempty"`
-	RemoveBlocks    []string `json:"remove_blocks,omitempty"`
-	RemoveParent    *string  `json:"remove_parent,omitempty"`
-	RemoveRelated   []string `json:"remove_related,omitempty"`
-	SetParent       *string  `json:"set_parent,omitempty"`
+	AddBlockedBy        []string          `json:"add_blocked_by,omitempty"`
+	AddBlocks           []string          `json:"add_blocks,omitempty"`
+	AddRelated          []string          `json:"add_related,omitempty"`
+	ExpectedProjectUids map[string]string `json:"expected_project_uids,omitempty"`
+	RemoveBlockedBy     []string          `json:"remove_blocked_by,omitempty"`
+	RemoveBlocks        []string          `json:"remove_blocks,omitempty"`
+	RemoveParent        *string           `json:"remove_parent,omitempty"`
+	RemoveRelated       []string          `json:"remove_related,omitempty"`
+	SetParent           *string           `json:"set_parent,omitempty"`
 }
 
 type ListAllIssuesResponseBody struct {

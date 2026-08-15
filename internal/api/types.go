@@ -402,13 +402,16 @@ type CreateIssueRequest struct {
 // direction: the new issue is the link's "from" side (e.g. for type=blocks
 // the new issue blocks ToRef). Incoming applies only to type=blocks: when
 // true the link runs from ToRef to the new issue (i.e. the new issue is
-// blocked by ToRef). type=parent rejects Incoming=true with 400 validation
-// (there is no inverse parent form; the child files the link via
-// type=parent). type=related ignores Incoming — the edge is symmetric.
+// blocked by ToRef). ToProjectUID optionally pins the resolved target to an
+// immutable project identity inside the create transaction. type=parent
+// rejects Incoming=true with 400 validation (there is no inverse parent form;
+// the child files the link via type=parent). type=related ignores Incoming —
+// the edge is symmetric.
 type CreateInitialLinkBody struct {
-	Type     string `json:"type" enum:"parent,blocks,related"`
-	ToRef    string `json:"to_ref"`
-	Incoming bool   `json:"incoming,omitempty"`
+	Type         string `json:"type" enum:"parent,blocks,related"`
+	ToRef        string `json:"to_ref"`
+	ToProjectUID string `json:"to_project_uid,omitempty"`
+	Incoming     bool   `json:"incoming,omitempty"`
 }
 
 // MutationResponse is the standard mutation envelope (§4.5). OriginalEvent is
@@ -708,15 +711,19 @@ type EditIssueRequest struct {
 //	set_parent        — set URL issue's parent (replaces existing)
 //	remove_parent     — strict: must equal current parent
 //	remove_blocks/_blocked_by/_related — idempotent
+//
+// ExpectedProjectUIDs optionally maps canonical target issue UIDs to the
+// immutable project UIDs that must still own them in the edit transaction.
 type LinksDelta struct {
-	SetParent       *string  `json:"set_parent,omitempty"`
-	RemoveParent    *string  `json:"remove_parent,omitempty"`
-	AddBlocks       []string `json:"add_blocks,omitempty"`
-	AddBlockedBy    []string `json:"add_blocked_by,omitempty"`
-	AddRelated      []string `json:"add_related,omitempty"`
-	RemoveBlocks    []string `json:"remove_blocks,omitempty"`
-	RemoveBlockedBy []string `json:"remove_blocked_by,omitempty"`
-	RemoveRelated   []string `json:"remove_related,omitempty"`
+	SetParent           *string           `json:"set_parent,omitempty"`
+	RemoveParent        *string           `json:"remove_parent,omitempty"`
+	AddBlocks           []string          `json:"add_blocks,omitempty"`
+	AddBlockedBy        []string          `json:"add_blocked_by,omitempty"`
+	AddRelated          []string          `json:"add_related,omitempty"`
+	RemoveBlocks        []string          `json:"remove_blocks,omitempty"`
+	RemoveBlockedBy     []string          `json:"remove_blocked_by,omitempty"`
+	RemoveRelated       []string          `json:"remove_related,omitempty"`
+	ExpectedProjectUIDs map[string]string `json:"expected_project_uids,omitempty"`
 }
 
 // LinkChanges reports link mutations actually applied. Every entry carries the

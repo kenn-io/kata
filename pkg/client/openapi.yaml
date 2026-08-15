@@ -399,6 +399,8 @@ components:
       properties:
         incoming:
           type: boolean
+        to_project_uid:
+          type: string
         to_ref:
           type: string
         type:
@@ -2133,6 +2135,10 @@ components:
             type: string
           nullable: true
           type: array
+        expected_project_uids:
+          additionalProperties:
+            type: string
+          type: object
         remove_blocked_by:
           items:
             type: string

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -33,6 +34,9 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 
 	issue, projectName, err := lookupIssueForEvent(ctx, tx, p.IssueID)
 	if err != nil {
+		return db.EditIssueAtomicResult{}, err
+	}
+	if err := validateExpectedLinkProjectUIDsTx(ctx, tx, p.ExpectedLinkProjectUIDs); err != nil {
 		return db.EditIssueAtomicResult{}, err
 	}
 	p.Actor, err = d.effectiveLocalMutationActorTx(ctx, tx, issue.ProjectID, p.Actor)
@@ -173,6 +177,29 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 		Changes:   changes,
 		AnyChange: anyChange,
 	}, nil
+}
+
+func validateExpectedLinkProjectUIDsTx(ctx context.Context, tx *sql.Tx, expected map[int64]string) error {
+	ids := make([]int64, 0, len(expected))
+	for issueID := range expected {
+		ids = append(ids, issueID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, issueID := range ids {
+		var projectUID string
+		err := tx.QueryRowContext(ctx, `
+			SELECT p.uid
+			  FROM issues i
+			  JOIN projects p ON p.id = i.project_id
+			 WHERE i.id = ?`, issueID).Scan(&projectUID)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && projectUID != expected[issueID] {
+			return &db.LinkTargetNotFoundError{Number: issueID}
+		}
+		if err != nil {
+			return fmt.Errorf("validate link target project identity: %w", err)
+		}
+	}
+	return nil
 }
 
 // linksChangedPayload marshals c plus ts into the legacy wire bytes.

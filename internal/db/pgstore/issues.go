@@ -144,15 +144,22 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 		linkPayloads := make([]createdLink, 0, len(links))
 		for _, link := range links {
 			var targetID int64
-			var targetUID, targetShortID string
+			var targetUID, targetShortID, targetProjectUID string
 			err := tx.QueryRowContext(ctx,
-				`SELECT id, uid, short_id FROM issues WHERE id = $1 AND deleted_at IS NULL`, link.ToNumber,
-			).Scan(&targetID, &targetUID, &targetShortID)
+				`SELECT i.id, i.uid, i.short_id, p.uid
+				   FROM issues i
+				   JOIN projects p ON p.id = i.project_id
+				  WHERE i.id = $1 AND i.deleted_at IS NULL
+				  FOR SHARE OF i`, link.ToNumber,
+			).Scan(&targetID, &targetUID, &targetShortID, &targetProjectUID)
 			if errors.Is(err, sql.ErrNoRows) {
 				return db.ErrInitialLinkTargetNotFound
 			}
 			if err != nil {
 				return mapSQLError(err, nil)
+			}
+			if link.ExpectedProjectUID != "" && targetProjectUID != link.ExpectedProjectUID {
+				return db.ErrInitialLinkTargetNotFound
 			}
 			if targetID == issueID {
 				return db.ErrSelfLink

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -345,8 +346,8 @@ func (h toolHandlers) ready(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 
 func sortIssueSummaries(issues []IssueSummary) {
 	sort.SliceStable(issues, func(i, j int) bool {
-		if issues[i].UpdatedAt != issues[j].UpdatedAt {
-			return issues[i].UpdatedAt > issues[j].UpdatedAt
+		if !issues[i].updatedAt.Equal(issues[j].updatedAt) {
+			return issues[i].updatedAt.After(issues[j].updatedAt)
 		}
 		return issues[i].QualifiedRef < issues[j].QualifiedRef
 	})
@@ -520,7 +521,7 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if err := validatePriority(input.Priority); err != nil {
 		return nil, EditOutput{}, err
 	}
-	delta, err := h.linksDelta(ctx, project, input)
+	delta, linksRequested, err := h.linksDelta(ctx, project, input)
 	if err != nil {
 		return nil, EditOutput{}, err
 	}
@@ -542,10 +543,10 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		body.Owner = &empty
 	}
 	hasIssueEdit := body.Title != nil || body.Body != nil || body.Owner != nil || body.SetPriority != nil || body.ClearPriority != nil || body.LinksDelta != nil
-	if !hasIssueEdit && len(metadataPatch) == 0 {
+	if !hasIssueEdit && !linksRequested && len(metadataPatch) == 0 {
 		return nil, EditOutput{}, errors.New("edit requires at least one change")
 	}
-	if hasIssueEdit && len(metadataPatch) > 0 {
+	if (hasIssueEdit || linksRequested) && len(metadataPatch) > 0 {
 		return nil, EditOutput{}, errors.New("issue fields and metadata must be changed in separate calls")
 	}
 	var issue generated.Issue
@@ -553,6 +554,15 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	var mainEvent *EventSummary
 	var changes *LinkChangesSummary
 	events := make([]EventSummary, 0)
+	if !hasIssueEdit && linksRequested {
+		response, showErr := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
+			PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
+		})
+		if showErr != nil {
+			return nil, EditOutput{}, showErr
+		}
+		issue = response.Issue
+	}
 	if hasIssueEdit {
 		response, editErr := h.options.Client.EditIssue(ctx, &generated.EditIssueRequestOptions{
 			PathParams: &generated.EditIssuePath{ProjectID: project.ID, Ref: ref},
@@ -826,7 +836,7 @@ func (h toolHandlers) reopen(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 func (h toolHandlers) createLinks(ctx context.Context, project ProjectIdentity, input CreateInput) ([]generated.CreateInitialLinkBody, error) {
 	links := make([]generated.CreateInitialLinkBody, 0, 1+len(input.Blocks)+len(input.BlockedBy)+len(input.Related))
 	add := func(ref string, linkType generated.CreateInitialLinkBodyType, incoming bool) error {
-		bound, err := h.relationshipRef(ctx, project, ref)
+		target, err := h.relationshipRef(ctx, project, ref)
 		if err != nil {
 			return err
 		}
@@ -834,7 +844,9 @@ func (h toolHandlers) createLinks(ctx context.Context, project ProjectIdentity, 
 		if incoming {
 			incomingPointer = &incoming
 		}
-		links = append(links, generated.CreateInitialLinkBody{Type: linkType, ToRef: bound, Incoming: incomingPointer})
+		links = append(links, generated.CreateInitialLinkBody{
+			Type: linkType, ToRef: target.IssueUID, ToProjectUID: &target.ProjectUID, Incoming: incomingPointer,
+		})
 		return nil
 	}
 	if input.Parent != "" {
@@ -860,55 +872,75 @@ func (h toolHandlers) createLinks(ctx context.Context, project ProjectIdentity, 
 	return links, nil
 }
 
-func (h toolHandlers) linksDelta(ctx context.Context, project ProjectIdentity, input EditInput) (*generated.LinksDelta, error) {
+func (h toolHandlers) linksDelta(ctx context.Context, project ProjectIdentity, input EditInput) (*generated.LinksDelta, bool, error) {
 	delta := &generated.LinksDelta{}
 	var changed bool
+	var requested bool
+	addExpectedProject := func(target relationshipTarget) {
+		if delta.ExpectedProjectUids == nil {
+			delta.ExpectedProjectUids = make(map[string]string)
+		}
+		delta.ExpectedProjectUids[target.IssueUID] = target.ProjectUID
+	}
 	setOne := func(target **string, raw string) error {
-		ref, err := h.relationshipRef(ctx, project, raw)
+		requested = true
+		resolved, err := h.relationshipRef(ctx, project, raw)
 		if err != nil {
 			return err
 		}
-		*target = &ref
+		*target = &resolved.IssueUID
+		addExpectedProject(resolved)
 		changed = true
 		return nil
 	}
-	setMany := func(target *[]string, raw []string) error {
+	setMany := func(target *[]string, raw []string, tolerateMissing bool) error {
 		for _, item := range raw {
-			ref, err := h.relationshipRef(ctx, project, item)
+			requested = true
+			resolved, err := h.relationshipRef(ctx, project, item)
 			if err != nil {
+				if tolerateMissing && isHTTPStatus(err, http.StatusNotFound) {
+					continue
+				}
 				return err
 			}
-			*target = append(*target, ref)
+			*target = append(*target, resolved.IssueUID)
+			addExpectedProject(resolved)
 			changed = true
 		}
 		return nil
 	}
 	if input.Parent != nil {
 		if err := setOne(&delta.SetParent, *input.Parent); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if input.RemoveParent != nil {
 		if err := setOne(&delta.RemoveParent, *input.RemoveParent); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	for target, refs := range map[*[]string][]string{
-		&delta.AddBlocks:       input.AddBlocks,
+		&delta.AddBlocks:    input.AddBlocks,
+		&delta.AddBlockedBy: input.AddBlockedBy,
+		&delta.AddRelated:   input.AddRelated,
+	} {
+		if err := setMany(target, refs, false); err != nil {
+			return nil, false, err
+		}
+	}
+	for target, refs := range map[*[]string][]string{
 		&delta.RemoveBlocks:    input.RemoveBlocks,
-		&delta.AddBlockedBy:    input.AddBlockedBy,
 		&delta.RemoveBlockedBy: input.RemoveBlockedBy,
-		&delta.AddRelated:      input.AddRelated,
 		&delta.RemoveRelated:   input.RemoveRelated,
 	} {
-		if err := setMany(target, refs); err != nil {
-			return nil, err
+		if err := setMany(target, refs, true); err != nil {
+			return nil, false, err
 		}
 	}
 	if !changed {
-		return nil, nil
+		return nil, requested, nil
 	}
-	return delta, nil
+	return delta, requested, nil
 }
 
 func (h toolHandlers) boundRelationshipRef(raw string) (string, error) {
@@ -1034,34 +1066,57 @@ func copyMetadata(source map[string]any) map[string]any {
 	return result
 }
 
-func (h toolHandlers) relationshipRef(ctx context.Context, source ProjectIdentity, raw string) (string, error) {
+type relationshipTarget struct {
+	IssueUID   string
+	ProjectUID string
+}
+
+func (h toolHandlers) relationshipRef(ctx context.Context, source ProjectIdentity, raw string) (relationshipTarget, error) {
 	ref := strings.TrimSpace(raw)
 	if ref == "" {
-		return "", errors.New("relationship reference must not be empty")
+		return relationshipTarget{}, errors.New("relationship reference must not be empty")
 	}
 	parsed, err := shortid.Parse(ref)
 	if err != nil {
-		return "", fmt.Errorf("relationship reference %q is invalid", ref)
+		return relationshipTarget{}, fmt.Errorf("relationship reference %q is invalid", ref)
 	}
 	if parsed.ULID != "" {
-		return "", fmt.Errorf("relationship reference %q is an unscoped UID; use a project-qualified short reference", ref)
+		return relationshipTarget{}, fmt.Errorf("relationship reference %q is an unscoped UID; use a project-qualified short reference", ref)
 	}
 	if len(parsed.ShortID) == shortid.MaxLength {
-		return "", fmt.Errorf("relationship reference %q uses an ambiguous full-length short ID; use a shorter project-qualified reference", ref)
+		return relationshipTarget{}, fmt.Errorf("relationship reference %q uses an ambiguous full-length short ID; use a shorter project-qualified reference", ref)
 	}
+	targetProject := source
 	if h.options.Scope.Mode() == ScopeBound {
 		if parsed.Project != "" && parsed.Project != source.Name {
-			return "", fmt.Errorf("relationship reference %q is outside bound project %q", ref, source.Name)
+			return relationshipTarget{}, fmt.Errorf("relationship reference %q is outside bound project %q", ref, source.Name)
 		}
-		return parsed.ShortID, nil
+	} else {
+		if parsed.Project == "" {
+			return relationshipTarget{}, errors.New("multi-project relationships require project#ref")
+		}
+		targetProject, err = h.options.Scope.Project(ctx, h.options.Client, parsed.Project, false)
+		if err != nil {
+			return relationshipTarget{}, err
+		}
 	}
-	if parsed.Project == "" {
-		return "", errors.New("multi-project relationships require project#ref")
+	shown, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
+		PathParams: &generated.ShowIssuePath{ProjectID: targetProject.ID, Ref: parsed.ShortID},
+	})
+	if err != nil {
+		return relationshipTarget{}, err
 	}
-	if _, err := h.options.Scope.Project(ctx, h.options.Client, parsed.Project, false); err != nil {
-		return "", err
+	projectUID := ""
+	if shown.Issue.ProjectUID != nil {
+		projectUID = *shown.Issue.ProjectUID
 	}
-	return parsed.Project + "#" + parsed.ShortID, nil
+	if targetProject.UID != "" && projectUID != targetProject.UID {
+		return relationshipTarget{}, fmt.Errorf("relationship reference %q resolved outside the MCP startup scope", ref)
+	}
+	if shown.Issue.UID == "" || projectUID == "" {
+		return relationshipTarget{}, fmt.Errorf("relationship reference %q did not resolve to immutable identity", ref)
+	}
+	return relationshipTarget{IssueUID: shown.Issue.UID, ProjectUID: projectUID}, nil
 }
 
 // outputProjectScope returns the singular project only when exactly one
@@ -1095,6 +1150,7 @@ func (h toolHandlers) summaryFromIssue(project ProjectIdentity, issue generated.
 		UpdatedAt:    formatTime(issue.UpdatedAt),
 		ScheduledOn:  metadataString(issue.Metadata, "scheduled_on"),
 		Timezone:     metadataString(issue.Metadata, "timezone"),
+		updatedAt:    issue.UpdatedAt,
 	}
 }
 
@@ -1117,6 +1173,7 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 		UpdatedAt:    formatTime(issue.UpdatedAt),
 		ScheduledOn:  metadataString(issue.Metadata, "scheduled_on"),
 		Timezone:     metadataString(issue.Metadata, "timezone"),
+		updatedAt:    issue.UpdatedAt,
 	}
 }
 
@@ -1127,6 +1184,7 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 		Labels: stringSlicePointer(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
+		updatedAt: issue.UpdatedAt,
 	}
 }
 
@@ -1137,6 +1195,7 @@ func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSumma
 		Labels: stringSlicePointer(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
+		updatedAt: issue.UpdatedAt,
 	}
 }
 
@@ -1328,11 +1387,11 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	result.Command = optionalString(input.Command)
 	result.Rationale = optionalString(input.Rationale)
 	if input.IssueRef != "" {
-		ref, err := h.relationshipRef(ctx, project, input.IssueRef)
+		target, err := h.relationshipRef(ctx, project, input.IssueRef)
 		if err != nil {
 			return generated.Evidence{}, err
 		}
-		result.IssueRef = &ref
+		result.IssueRef = &target.IssueUID
 	}
 	switch typeName {
 	case "commit":

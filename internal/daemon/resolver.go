@@ -211,9 +211,10 @@ func resolveInitialLinks(ctx context.Context, store db.Storage, projectID int64,
 			return nil, nil, err
 		}
 		out = append(out, db.InitialLink{
-			Type:     l.Type,
-			ToNumber: target.ID,
-			Incoming: l.Incoming,
+			Type:               l.Type,
+			ToNumber:           target.ID,
+			ExpectedProjectUID: l.ToProjectUID,
+			Incoming:           l.Incoming,
 		})
 		targets = append(targets, target)
 	}
@@ -252,6 +253,12 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 		}
 		if _, err := authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false); err != nil {
 			return db.Issue{}, err
+		}
+		if expected, ok := d.ExpectedProjectUIDs[issue.UID]; ok {
+			if params.ExpectedLinkProjectUIDs == nil {
+				params.ExpectedLinkProjectUIDs = make(map[int64]string)
+			}
+			params.ExpectedLinkProjectUIDs[issue.ID] = expected
 		}
 		return issue, nil
 	}

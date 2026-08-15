@@ -650,6 +650,7 @@ type IssueSummary struct {
 	UpdatedAt    string    `json:"updated_at"`
 	ScheduledOn  *string   `json:"scheduled_on,omitempty"`
 	Timezone     *string   `json:"timezone,omitempty"`
+	updatedAt    time.Time
 }
 
 // IssueListOutput is a bounded collection without issue bodies or comments.

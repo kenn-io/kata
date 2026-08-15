@@ -177,7 +177,7 @@ func DedupeLinks(in []InitialLink) []InitialLink {
 		if l.Type == "related" {
 			normalized.Incoming = false
 		}
-		k := key(normalized)
+		k := key{Type: normalized.Type, ToNumber: normalized.ToNumber, Incoming: normalized.Incoming}
 		if _, ok := seen[k]; ok {
 			continue
 		}

@@ -488,6 +488,19 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("load issue after rolled-back atomic edit: %w", err)
 	}
 	assert.Equal(t, title, afterRollback.Title)
+	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: fixture.Issue.ID, Actor: "atomic-editor", Title: &rollbackTitle,
+		AddBlocks: []int64{blocked.ID},
+		ExpectedLinkProjectUIDs: map[int64]string{
+			blocked.ID: fixture.Project.UID + "-other",
+		},
+	})
+	assert.ErrorAs(t, err, &missingTarget)
+	afterIdentityRollback, err := store.IssueByID(ctx, fixture.Issue.ID)
+	if err != nil {
+		return fmt.Errorf("load issue after project identity rollback: %w", err)
+	}
+	assert.Equal(t, title, afterIdentityRollback.Title)
 
 	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: fixture.Project.ID, Limit: 100})
 	if err != nil {

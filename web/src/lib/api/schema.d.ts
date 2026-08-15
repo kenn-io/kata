@@ -1455,6 +1455,7 @@ export interface components {
     }
     CreateInitialLinkBody: {
       incoming?: boolean
+      to_project_uid?: string
       to_ref: string
       /** @enum {string} */
       type: 'parent' | 'blocks' | 'related'
@@ -2297,6 +2298,9 @@ export interface components {
       add_blocked_by?: string[] | null
       add_blocks?: string[] | null
       add_related?: string[] | null
+      expected_project_uids?: {
+        [key: string]: string
+      }
       remove_blocked_by?: string[] | null
       remove_blocks?: string[] | null
       remove_parent?: string

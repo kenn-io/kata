@@ -666,16 +666,22 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64,
 			toIssueID      int64
 			toIssueUID     string
 			toIssueShortID string
+			toProjectUID   string
 		)
 		err := tx.QueryRowContext(ctx,
-			`SELECT id, uid, short_id FROM issues
-			 WHERE id = ? AND deleted_at IS NULL`,
-			l.ToNumber).Scan(&toIssueID, &toIssueUID, &toIssueShortID)
+			`SELECT i.id, i.uid, i.short_id, p.uid
+			   FROM issues i
+			   JOIN projects p ON p.id = i.project_id
+			  WHERE i.id = ? AND i.deleted_at IS NULL`,
+			l.ToNumber).Scan(&toIssueID, &toIssueUID, &toIssueShortID, &toProjectUID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, db.Event{}, db.ErrInitialLinkTargetNotFound
 		}
 		if err != nil {
 			return 0, db.Event{}, fmt.Errorf("resolve initial link target: %w", err)
+		}
+		if l.ExpectedProjectUID != "" && toProjectUID != l.ExpectedProjectUID {
+			return 0, db.Event{}, db.ErrInitialLinkTargetNotFound
 		}
 		resolvedTargets = append(resolvedTargets, createdLinkTarget{UID: toIssueUID, ShortID: toIssueShortID})
 		// Canonical ordering is a storage concern: the payload reports the
@@ -867,7 +873,7 @@ func dedupeLinks(in []db.InitialLink) []db.InitialLink {
 		if l.Type == "related" {
 			normalized.Incoming = false
 		}
-		k := key(normalized)
+		k := key{Type: normalized.Type, ToNumber: normalized.ToNumber, Incoming: normalized.Incoming}
 		if _, ok := seen[k]; ok {
 			continue
 		}

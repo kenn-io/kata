@@ -22,7 +22,9 @@ const (
 // Methods that take/return these live in the impl files.
 
 // InitialLink describes one of the optional links created in the same TX as
-// the issue itself. The to_number is resolved within the same project.
+// the issue itself. ToNumber is a globally unique issue row ID. When
+// ExpectedProjectUID is non-empty, the transaction verifies that the target
+// still belongs to that immutable project identity.
 //
 // Default direction (Incoming=false): the new issue is the link's "from"
 // side. Incoming=true reverses for type=blocks so the new issue is the
@@ -30,9 +32,10 @@ const (
 // (no inverse parent direction is exposed); meaningless for type=related
 // which is symmetric.
 type InitialLink struct {
-	Type     string // "parent" | "blocks" | "related"
-	ToNumber int64
-	Incoming bool
+	Type               string // "parent" | "blocks" | "related"
+	ToNumber           int64
+	ExpectedProjectUID string
+	Incoming           bool
 }
 
 // CreateIssueParams carries inputs for CreateIssue.
@@ -268,6 +271,11 @@ type EditIssueAtomicParams struct {
 	RemoveBlocks    []int64
 	RemoveBlockedBy []int64
 	RemoveRelated   []int64
+
+	// ExpectedLinkProjectUIDs pins resolved peer rows to their project
+	// identities inside the mutation transaction. Missing entries retain the
+	// legacy unrestricted behavior for non-scoped clients.
+	ExpectedLinkProjectUIDs map[int64]string
 }
 
 // PeerIdentity is the stable identity of a link peer as captured inside
