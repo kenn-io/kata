@@ -97,7 +97,9 @@ kata close abc4 --done \
 For agent-heavy workspaces, `kata init --with-agents` also writes a managed kata
 briefing into agent guidance files. It refreshes existing real `AGENTS.md` and
 `CLAUDE.md` files, or creates `AGENTS.md` when neither exists, without
-overwriting the rest of either file.
+overwriting the rest of either file. Codex-only workspaces can instead use
+`kata init --with-codex-hooks` to install dynamic contract context and the
+`work.attention` SessionStart lifecycle into `.codex/hooks.json`.
 
 ## Why kata
 
@@ -176,6 +178,47 @@ contract: search before creating, pass an idempotency key on create, prefer
 verified. Close each verified issue promptly with valid evidence and a
 substantive message. [Agent workflows](docs/workflows/agents.md) is the same
 contract in long form.
+
+Agent harnesses can load the shorter managed briefing without changing the
+repository:
+
+```sh
+kata quickstart --format contract
+# equivalent alias; selectors are accepted for user-local integrations
+kata agent-instructions --format contract --workspace /path/to/workspace
+kata quickstart --format contract --project spoke-project
+```
+
+Contract output is marker-free, has no terminal framing, works without an
+initialized workspace, and performs no workspace mutation. It is rendered from
+the same canonical body that `kata init --with-agents` places between its
+managed markers, so static and session-injected guidance cannot drift.
+
+For example, a user-level Claude Code SessionStart hook can remain inert outside
+Kata workspaces while injecting the installed Kata version's contract:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if test -f \"$CLAUDE_PROJECT_DIR/.kata.toml\"; then kata quickstart --format contract --workspace \"$CLAUDE_PROJECT_DIR\"; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex SessionStart hooks require structured JSON rather than plain contract
+stdout. `kata init --with-codex-hooks` installs Kata's structured adapter for
+startup, resume, clear, and compaction while keeping attention reset limited to
+startup, resume, and clear.
 
 ## Contributing
 

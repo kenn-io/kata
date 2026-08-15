@@ -148,7 +148,7 @@ get committed.`,
 	cmd.Flags().BoolVar(&opts.Reassign, "reassign", false, "move an existing alias to this project")
 	cmd.Flags().BoolVar(&opts.WithAgents, "with-agents", false, "write kata agent guidance into AGENTS.md/CLAUDE.md in the workspace")
 	cmd.Flags().BoolVar(&opts.WithHooks, "with-hooks", false, "install work.attention harness hooks into the workspace's Claude Code config (.claude/)")
-	cmd.Flags().BoolVar(&opts.WithCodexHooks, "with-codex-hooks", false, "install Codex CLI work.attention hook wiring (.codex/hooks.json)")
+	cmd.Flags().BoolVar(&opts.WithCodexHooks, "with-codex-hooks", false, "install Codex CLI contract and work.attention hooks (.codex/hooks.json)")
 
 	return cmd
 }
@@ -642,14 +642,6 @@ func ensureGitignoreEntry(dir, entry string) (bool, error) {
 	}
 }
 
-// agentsBlockBegin and agentsBlockEnd delimit the section kata manages inside
-// an agent guidance file. They let init refresh kata's guidance in place across
-// re-runs without disturbing anything else a project keeps in that file.
-const (
-	agentsBlockBegin = "<!-- BEGIN KATA (managed by `kata init --with-agents`) -->"
-	agentsBlockEnd   = "<!-- END KATA -->"
-)
-
 // beadsBlockBeginPrefix and beadsBlockEnd match the integration block Beads
 // writes into AGENTS.md/CLAUDE.md. The begin marker carries a trailing
 // version/profile/hash, so we match on its prefix and scan to the end marker.
@@ -662,47 +654,6 @@ const (
 // file in place because it still carries a beads integration block. The user
 // reviews it and moves it over the original when ready.
 const agentsProposalSuffix = ".kata-proposed"
-
-// agentsBlockBody is the guidance kata injects between the markers. It mirrors
-// the contract `kata quickstart` prints, kept short so it complements rather
-// than duplicates the full quickstart text.
-const agentsBlockBody = "## kata issue tracker\n\n" +
-	"This project uses [kata](https://github.com/kenn-io/kata) as its shared issue\n" +
-	"ledger. Run `kata quickstart` at the start of each session for the full agent\n" +
-	"contract. The short version:\n\n" +
-	"- Search before creating: `kata search \"<keywords>\" --agent`.\n" +
-	"- Prefer updating existing issues over duplicates (`kata comment`, `kata label add`, `kata edit`).\n" +
-	"- Default to `--agent` for ordinary reads and mutations; use `--json` only when a script needs structured data.\n" +
-	"- Close only verified work: `kata close <ref> --done --message \"<scope + verification>\" --commit <sha>`.\n" +
-	"- If work is incomplete, label `needs-review` and comment what remains rather than closing.\n" +
-	"- Never `kata delete` or `kata purge` without explicit user authorization.\n\n" +
-	"## kata planning dates\n\n" +
-	"- Park work until a date or time with `kata schedule <ref> <date-or-time>`;\n" +
-	"  clear it with `kata schedule <ref> -`. This maps to `scheduled_on`; a future value excludes the issue\n" +
-	"  from `ready` and `next` until its gate opens.\n" +
-	"- Set a deadline with `kata deadline <ref> <date-or-time>`; clear it with `kata deadline <ref> -`.\n" +
-	"  This maps to `deadline_on`; a deadline does not park the issue.\n" +
-	"- Park work with no date by running `kata meta set <ref> someday true --json-value`;\n" +
-	"  return it to the queue with `kata meta unset <ref> someday` (do not store `false`).\n" +
-	"- Date and time values accept `YYYY-MM-DD`, local `YYYY-MM-DDTHH:MM[:SS]`, or an\n" +
-	"  RFC 3339 UTC instant ending in `Z`.\n\n" +
-	"## kata work.* conventions (agent orchestration)\n\n" +
-	"When working a kata-tracked issue, keep its `work.*` metadata truthful\n" +
-	"(see https://katatracker.com/operations/agent-orchestration/ for the full recipe):\n\n" +
-	"- On claim/start: `kata meta set <ref> work.attention ok`; if the work has a\n" +
-	"  dedicated branch, stamp it once with `kata meta set <ref> work.branch <branch>`.\n" +
-	"- Signal live state: `kata meta set <ref> work.attention stuck|needs-human|ok`\n" +
-	"  plus a one-line `work.attention_msg` saying why. Raise `stuck` when you cannot\n" +
-	"  proceed, `needs-human` when you want review; clear back to `ok` when unblocked.\n" +
-	"- Never stop with the signal stale: close the issue, or leave the attention\n" +
-	"  pair reflecting the hand-off.\n" +
-	"- Coordinators read `work.*` on issues they delegated; only the working agent\n" +
-	"  writes them. `work.*` on closed issues is meaningless.\n"
-
-// agentsManagedBlock returns the full marker-delimited block kata writes.
-func agentsManagedBlock() string {
-	return agentsBlockBegin + "\n" + agentsBlockBody + agentsBlockEnd
-}
 
 // applyAgentGuidance is the entry point for `--with-agents`. It writes kata's
 // block into existing real agent guidance files (AGENTS.md and CLAUDE.md), or

@@ -79,6 +79,78 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.")
 }
 
+func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
+
+	assert.True(t, strings.HasPrefix(out, "Kata is the system of record for intent."))
+	assert.Contains(t, out, "Never `kata delete` or `kata purge` without explicit user authorization.")
+	assert.Contains(t, out, "~~~dot\ndigraph kata {")
+	assert.Contains(t, out, "}\n~~~\n")
+	assert.Contains(t, out, "kata meta set <ref> work.attention ok")
+	assert.Contains(t, out, "kata meta set <ref> work.branch <branch>")
+	assert.Contains(t, out, "kata create ... --meta work.branch=<branch> --idempotency-key <key>")
+	assert.Contains(t, out, "kata meta set <ref> work.attention stuck|needs-human|ok")
+	assert.Contains(t, out, `kata meta set <ref> work.attention_msg \"<why>\"`)
+	assert.Contains(t, out, "kata wait <refs> --until attention --any")
+	assert.Contains(t, out, ".issue.short_id")
+	assert.Contains(t, out, "kata close <ref> --done")
+	assert.Contains(t, out, "kata label add <ref> needs-review")
+	assert.Contains(t, out, "kata schedule <ref> <date-or-time>")
+	assert.Contains(t, out, "kata meta set <ref> someday true --json-value")
+	assert.Contains(t, out, "kata meta unset <ref> someday")
+	assert.Contains(t, out, "kata deadline <ref> <date-or-time>")
+	assert.NotContains(t, out, "20z0", "a universal contract cannot use a project-scoped issue ref")
+	assert.NotContains(t, out, agentsBlockBegin)
+	assert.NotContains(t, out, agentsBlockEnd)
+	assert.NotContains(t, out, "# kata agent quickstart")
+}
+
+// The contract is rendered into other projects' AGENTS.md files, so it must
+// describe kata itself rather than any single workspace's local conventions.
+func TestQuickstart_ContractOmitsNonKataConcepts(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
+
+	for _, absent := range []string{
+		"projects/<slug>", // labeling convention kata does not define
+		"waiting.for",     // no such metadata key in kata
+		"waiting.since",
+		"tickler",
+		"friction",
+	} {
+		assert.NotContains(t, out, absent)
+	}
+}
+
+func TestQuickstart_ContractMatchesManagedBlockBody(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "--format", "contract", "quickstart"))
+	managed := agentsManagedBlock()
+
+	require.True(t, strings.HasPrefix(managed, agentsBlockBegin+"\n"))
+	require.True(t, strings.HasSuffix(managed, agentsBlockEnd))
+	body := strings.TrimPrefix(managed, agentsBlockBegin+"\n")
+	body = strings.TrimSuffix(body, agentsBlockEnd)
+	assert.Equal(t, out, body)
+}
+
+func TestQuickstart_ContractAliasAndSelectorsPreserveOutput(t *testing.T) {
+	resetFlags(t)
+	want := string(executeRoot(t, newRootCmd(), "--format", "contract", "quickstart"))
+
+	for name, args := range map[string][]string{
+		"alias":              {"agent-instructions", "--format", "contract"},
+		"workspace selector": {"--workspace", "/path/that/does/not/exist", "quickstart", "--format", "contract"},
+		"project selector":   {"quickstart", "--project", "spoke-project", "--format", "contract"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resetFlags(t)
+			assert.Equal(t, want, string(executeRoot(t, newRootCmd(), args...)))
+		})
+	}
+}
+
 func TestQuickstart_AgentInstructionsAliasMentionsAgentOutput(t *testing.T) {
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "agent-instructions"))

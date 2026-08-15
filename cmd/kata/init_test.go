@@ -452,7 +452,7 @@ func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), agentsBlockBegin)
 	assert.Contains(t, string(content), agentsBlockEnd)
-	assert.Contains(t, string(content), "kata quickstart")
+	assert.Contains(t, string(content), "Kata is the system of record for intent.")
 }
 
 func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) {
@@ -577,15 +577,15 @@ func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.NotContains(t, string(content), "old kata guidance that should be replaced")
-	assert.Contains(t, string(content), "kata quickstart")
+	assert.Contains(t, string(content), "Kata is the system of record for intent.")
 	assert.Contains(t, string(content), "# House rules", "content outside the markers must survive")
 	assert.Equal(t, 1, strings.Count(string(content), agentsBlockBegin))
 }
 
-// TestInit_WithAgents_BlockIncludesWorkConventions pins the work.* conventions
-// section kata appends to its managed block, so an agent working a kata-tracked
-// issue finds the attention-signal recipe without leaving the guidance file.
-func TestInit_WithAgents_BlockIncludesWorkConventions(t *testing.T) {
+// TestInit_WithAgents_BlockIncludesWorkflowConventions pins the distinction
+// between incomplete work, attention state, and delegation in the managed
+// briefing installed for agents.
+func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -600,11 +600,10 @@ func TestInit_WithAgents_BlockIncludesWorkConventions(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	got := string(content)
-	assert.Contains(t, got, "## kata work.* conventions")
-	assert.Contains(t, got, "kata meta set <ref> work.attention ok")
-	assert.Contains(t, got, "work.attention_msg")
-	assert.Contains(t, got, "https://katatracker.com/operations/agent-orchestration/")
-	assert.NotContains(t, got, "docs/operations/agent-orchestration.md")
+	assert.Contains(t, got, "Never `kata delete` or `kata purge` without explicit user authorization.")
+	assert.Contains(t, got, "kata meta set <ref> work.attention stuck|needs-human|ok")
+	assert.Contains(t, got, "kata close <ref> --done")
+	assert.Contains(t, got, "kata label add <ref> needs-review")
 }
 
 func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testing.T) {
@@ -668,8 +667,9 @@ func TestInit_WithAgents_RefreshesPreWorkConventionsBlock(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	got := string(content)
-	assert.Contains(t, got, "## kata work.* conventions", "refresh must add the work.* section to an older block")
-	assert.Contains(t, got, "kata meta set <ref> work.attention ok")
+	assert.Contains(t, got, "Kata is the system of record for intent.",
+		"refresh must install the current intent workflow over an older block")
+	assert.Contains(t, got, "digraph kata {")
 	assert.Contains(t, got, "# House rules", "content before the markers must survive")
 	assert.Contains(t, got, "Keep this line.")
 	assert.Contains(t, got, "## Trailing section", "content after the markers must survive")
@@ -714,7 +714,7 @@ func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(proposed), "Legacy notes.")
 	assert.Contains(t, string(proposed), agentsBlockBegin)
-	assert.Contains(t, string(proposed), "kata quickstart")
+	assert.Contains(t, string(proposed), "Kata is the system of record for intent.")
 	assert.NotContains(t, string(proposed), beadsBlockBeginPrefix)
 	assert.NotContains(t, string(proposed), beadsBlockEnd)
 

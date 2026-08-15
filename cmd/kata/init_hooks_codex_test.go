@@ -31,6 +31,28 @@ func expectedCodexHandler() map[string]any {
 	}
 }
 
+func expectedCodexContractHandler() map[string]any {
+	return map[string]any{
+		"type":           "command",
+		"command":        "kata agent-contract-hook --source kata-agent-contract-hook",
+		"commandWindows": "kata agent-contract-hook --source kata-agent-contract-hook",
+		"timeout":        json.Number("10"),
+	}
+}
+
+func expectedCodexSessionStartGroups() []any {
+	return []any{
+		map[string]any{
+			"matcher": codexSessionStartMatcher,
+			"hooks":   []any{expectedCodexHandler()},
+		},
+		map[string]any{
+			"matcher": codexContractSessionStartMatcher,
+			"hooks":   []any{expectedCodexContractHandler()},
+		},
+	}
+}
+
 func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
@@ -44,12 +66,24 @@ func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
 	assert.Empty(t, warnings)
 	assert.Equal(t, map[string]any{
 		"hooks": map[string]any{
-			"SessionStart": []any{map[string]any{
-				"matcher": codexSessionStartMatcher,
-				"hooks":   []any{expectedCodexHandler()},
-			}},
+			"SessionStart": expectedCodexSessionStartGroups(),
 		},
 	}, readCodexHooks(t, dir))
+}
+
+func TestApplyCodexHooks_UpgradesCurrentAttentionOnlyInstall(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	require.NoError(t, os.MkdirAll(codexDir, 0o750))
+	current := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"kata attention-hook start --source kata-agent-hook-start","commandWindows":"kata attention-hook start --source kata-agent-hook-start","timeout":10}]}]}}`
+	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(current), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	changed, warnings, err := applyCodexHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Empty(t, warnings)
+	assert.Equal(t, expectedCodexSessionStartGroups(),
+		readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 }
 
 func TestApplyCodexHooks_PreservesLegacyCommandWithExplicitNonScopedMatcher(t *testing.T) {
@@ -84,7 +118,7 @@ func TestApplyCodexHooks_PreservesLegacyCommandWithExplicitNonScopedMatcher(t *t
 			require.NoError(t, err)
 			hooks := readCodexHooks(t, dir)["hooks"].(map[string]any)
 			groups := hooks["SessionStart"].([]any)
-			require.Len(t, groups, 2)
+			require.Len(t, groups, 3)
 			assert.Equal(t, tt.matcher, groups[0].(map[string]any)["matcher"])
 			assert.Equal(t, []any{legacyHandler}, groups[0].(map[string]any)["hooks"])
 		})
