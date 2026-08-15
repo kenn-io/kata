@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1942,4 +1943,22 @@ func TestDestructiveActionsAddressIssueByUID(t *testing.T) {
 	require.True(t, purged.Purged)
 	require.Equal(t, "spoke-project#abc4", purged.Ref, "display refs keep the confirmed short id")
 	require.Zero(t, shortIDMutations)
+}
+
+// TestReadEventStreamRejectsCleanCloseBeforeEvent covers the daemon closing
+// a stream cleanly (overflow disconnect, authority loss, internal failure)
+// before delivering an event or reset: that must surface as an error, not as
+// a successful empty batch a caller could mistake for "nothing happened".
+func TestReadEventStreamRejectsCleanCloseBeforeEvent(t *testing.T) {
+	_, err := readEventStream(t.Context(), strings.NewReader(": keepalive\n\nevent: heartbeat\ndata: {}\n\n"), 7, 10)
+	require.ErrorContains(t, err, "ended before delivering an event")
+
+	output, err := readEventStream(t.Context(), strings.NewReader("event: sync.reset_required\ndata: {\"reset_after_id\":3}\n\n"), 7, 10)
+	require.NoError(t, err)
+	require.True(t, output.ResetRequired)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = readEventStream(ctx, strings.NewReader(""), 7, 10)
+	require.ErrorIs(t, err, context.Canceled, "a cancelled context wins over the stream-ended error")
 }

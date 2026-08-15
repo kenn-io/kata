@@ -1056,7 +1056,14 @@ func readEventStream(ctx context.Context, reader io.Reader, after, limit int64) 
 		}
 		return EventsOutput{}, err
 	}
-	return output, nil
+	// The daemon closes a stream cleanly on overflow disconnect, authority
+	// loss, or an internal read failure. Reaching EOF without an event or
+	// reset is therefore an interrupted wait, not an empty result; the
+	// caller maps a context deadline to the documented timeout first.
+	if ctx.Err() != nil {
+		return EventsOutput{}, ctx.Err()
+	}
+	return EventsOutput{}, errors.New("event stream ended before delivering an event; retry from the same after_id")
 }
 
 func streamEvent(event generated.EventEnvelope) StreamEvent {
