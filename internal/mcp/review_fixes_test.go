@@ -1818,6 +1818,56 @@ func TestFixedScopeCannotSeeOrRevokeWildcardFederationEnrollment(t *testing.T) {
 	require.Zero(t, revokeRequests.Load())
 }
 
+// TestEnrollmentRevokeCoversArchivedScopeProjects pins that an enrollment on
+// an archived allowlist member stays revocable (archiving retains enrollment
+// credentials) while enrollments outside the startup scope remain rejected.
+func TestEnrollmentRevokeCoversArchivedScopeProjects(t *testing.T) {
+	var revoked []string
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			projects := []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}
+			if request.URL.Query().Get("include") == "archived" {
+				archived := projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "archived-project")
+				archived["deleted_at"] = "2026-08-12T00:00:00Z"
+				projects = append(projects, archived)
+			}
+			writeJSON(writer, map[string]any{"projects": projects})
+		case request.URL.Path == "/api/v1/federation/enrollments" && request.Method == http.MethodGet:
+			enrollment := func(id, projectID int64) map[string]any {
+				return map[string]any{
+					"id": id, "project_id": projectID, "spoke_instance_uid": "01HCCCCCCCCCCCCCCCCCCCCCCC",
+					"capabilities": "pull", "actor": "example-agent",
+					"created_at": "2026-08-11T00:00:00Z", "updated_at": "2026-08-11T00:00:00Z",
+				}
+			}
+			writeJSON(writer, map[string]any{"enrollments": []any{enrollment(9, 2), enrollment(10, 3), enrollment(11, 0)}})
+		case strings.Contains(request.URL.Path, "/federation/enrollments/"):
+			revoked = append(revoked, request.URL.Path)
+			writeJSON(writer, map[string]any{"id": 9, "revoked": true})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{
+		{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"},
+		{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "archived-project"},
+	})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, output, err := handlers.federationEnrollmentRevoke(t.Context(), nil, FederationEnrollmentRevokeInput{ID: 9})
+	require.NoError(t, err, "an enrollment on an archived allowlist member must stay revocable")
+	require.True(t, output.Revoked)
+	_, _, err = handlers.federationEnrollmentRevoke(t.Context(), nil, FederationEnrollmentRevokeInput{ID: 10})
+	require.ErrorContains(t, err, "outside the MCP startup scope")
+	_, _, err = handlers.federationEnrollmentRevoke(t.Context(), nil, FederationEnrollmentRevokeInput{ID: 11})
+	require.ErrorContains(t, err, "outside the MCP startup scope", "global enrollments stay daemon-wide only")
+	_, _, err = handlers.federationEnrollmentRevoke(t.Context(), nil, FederationEnrollmentRevokeInput{ID: 12})
+	require.ErrorContains(t, err, "outside the MCP startup scope", "unknown enrollments are rejected")
+	require.Len(t, revoked, 1)
+}
+
 func TestRecurrencePatchRequiresPositiveRevisionBeforeRequest(t *testing.T) {
 	var requests atomic.Int64
 	client := reviewClient(t, func(writer http.ResponseWriter, _ *http.Request) {

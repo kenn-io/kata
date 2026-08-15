@@ -363,17 +363,33 @@ func (h toolHandlers) federationEnrollmentRevoke(ctx context.Context, _ *sdkmcp.
 	if input.ID <= 0 {
 		return nil, FederationEnrollmentRevokeOutput{}, errors.New("id must be positive")
 	}
-	// Resolve and scope the enrollment before revocation.
-	_, status, err := h.federationStatus(ctx, nil, FederationStatusInput{})
+	// Archiving a project retains its enrollments and their credentials, so
+	// revocation authorizes against the scope including archived members;
+	// federationStatus lists only active projects. Global enrollments
+	// (project_id 0) stay daemon-wide only.
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, true)
+	if err != nil {
+		return nil, FederationEnrollmentRevokeOutput{}, err
+	}
+	scoped := make(map[int64]struct{}, len(projects))
+	for _, project := range projects {
+		scoped[project.ID] = struct{}{}
+	}
+	list, err := h.options.Client.ListFederationEnrollments(ctx)
 	if err != nil {
 		return nil, FederationEnrollmentRevokeOutput{}, err
 	}
 	allowed := false
-	for _, enrollment := range status.Enrollments {
-		if enrollment.ID == input.ID {
-			allowed = true
-			break
+	for _, enrollment := range list.Enrollments {
+		if enrollment.ID != input.ID {
+			continue
 		}
+		if enrollment.ProjectID == 0 {
+			allowed = h.options.Scope.Mode() == ScopeAll
+		} else {
+			_, allowed = scoped[enrollment.ProjectID]
+		}
+		break
 	}
 	if !allowed {
 		return nil, FederationEnrollmentRevokeOutput{}, errors.New("enrollment is outside the MCP startup scope")
