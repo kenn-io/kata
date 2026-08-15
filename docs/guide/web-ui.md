@@ -101,9 +101,13 @@ network, authentication, and proxy setup.
 
 The default local experience is intentionally simple: a browser connecting
 directly to the daemon's loopback listener receives a tab-scoped local session.
-Browser requests combine that tab-local credential with an HttpOnly instance
-cookie, and mutations also require same-origin CSRF validation. Restarting the
-daemon invalidates its browser sessions.
+The mint requires the exact listener Host and normally the exact Origin. An
+embedded owner-local browser may omit or send an empty Origin only on this
+direct-loopback mint; cross-site Fetch Metadata, forwarded requests, and
+non-loopback peers remain rejected. Browser requests combine the resulting
+tab-local credential with an HttpOnly instance cookie, and later mutations also
+require exact-origin CSRF validation. Restarting the daemon invalidates its
+browser sessions.
 
 Non-loopback, authenticated, or proxied deployments do not receive local-web
 authority automatically. They require the configured login mechanism and an

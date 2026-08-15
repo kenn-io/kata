@@ -126,13 +126,16 @@ and TUI never set `Origin`, so they are unaffected.
 
 The separate browser listener uses the established host-local, keyless-loopback
 trust boundary. A direct-loopback tab can create a local-web
-session only with the exact configured Host and Origin and without forwarding
-headers. All later data requests require both its HttpOnly instance cookie and
-tab-local session header; mutations also require its CSRF value. Configuring
-daemon authentication, a proxy origin, or a non-loopback listener disables the
-direct local bootstrap path. Other processes or users able to connect from the
-same host are inside this ordinary browser-UI boundary; local-web authority does
-not include token administration.
+session only with the exact configured Host and without forwarding headers. The
+mint normally requires the exact Origin; an embedded owner-local browser may
+omit or send an empty Origin only on this endpoint, and cross-site Fetch
+Metadata remains forbidden. Exact Host validation stays ahead of the exception
+as the DNS-rebinding boundary. All later data requests require both the HttpOnly
+instance cookie and tab-local session header; mutations also require its CSRF
+value and exact Origin. Configuring daemon authentication, a proxy origin, or a
+non-loopback listener disables the direct local bootstrap path. Other processes
+or users able to connect from the same host are inside this ordinary browser-UI
+boundary; local-web authority does not include token administration.
 
 **Shared and remote modes** add a network boundary. They require a bearer token
 and an explicit trust opt-in before the daemon will put credentials on a
