@@ -211,12 +211,14 @@ func buildAuditRows(
 			Actor:   ev.Actor,
 			Reason:  p.Reason,
 			Message: p.Message,
+			EventID: ev.ID,
 		}
 		if ev.IssueShortID != nil {
 			row.Issue = *ev.IssueShortID
 		}
 		switch {
 		case p.ParentUID != nil && *p.ParentUID != "":
+			row.ParentUID = *p.ParentUID
 			if q, ok := parentQualifiers[*p.ParentUID]; ok {
 				// Same-project parent renders bare; a foreign parent
 				// renders qualified ("project#short_id") so the ref is

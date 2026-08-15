@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-08-12
+last_edited: 2026-08-15
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -14,6 +14,40 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Added paired `kata schedule` / `kata deadline` commands and
   `kata.set_schedule` / `kata.set_deadline` MCP tools for first-class planning
   date updates.
+- Expanded the native MCP server from the original project-bound issue tools
+  to complete scoped issue, project, token, federation, synchronization,
+  recurrence, import, digest, and live-event workflows.
+- Scoped `kata mcp serve` to the current workspace project by default, with
+  explicit one-project (`--project`/`--workspace`), fixed-allowlist
+  (`--projects`, pinned by immutable UID and rename-safe), and daemon-wide
+  (`--all-projects`) boundaries. Scoped graph, pagination, token, and
+  federation operations cannot cross their startup boundary, and an allowlist
+  keeps serving its remaining projects when one member is archived or merged
+  away.
+- Added 13 section loaders that progressively disclose the detailed typed MCP
+  tools and publish tool-list change notifications.
+- Added first-class MCP scheduling fields, force-create and force-claim, and
+  generic metadata support for native markers such as `someday=true`.
+- Added explicit host-local JSONL export and configured-target import tools
+  behind `--storage-root` and startup target aliases. Storage operations stay
+  anchored to the configured root, protect active SQLite databases and
+  sidecars, require exact confirmation before replacing an artifact or target,
+  and install restores race-safely with owner-only permissions.
+- Gated daemon token administration behind the explicit `--enable-token-admin`
+  capability in daemon-wide scope, kept federation topology changes
+  (enrollment and spoke join) outside MCP entirely, restricted enabling
+  issue synchronization — which selects the repository the daemon's GitHub
+  credentials read — to the daemon-wide scope, and required that same scope
+  for project administration: a scoped server can read its projects but
+  cannot rename, merge, archive, restore, or purge them.
+- Redacted cross-scope relationship identities, including parent, link,
+  relationship-array, moved-project, close-evidence, close-throttle, and
+  audit parent references, from scoped MCP issue, event, digest, edit-delta,
+  and close-audit results, and rejected close-audit parent filters that
+  cannot prove startup-scope membership.
+- Compared PostgreSQL storage-import targets with the active daemon storage
+  by persisted instance identity, so equivalent DSN spellings cannot bypass
+  the textual overlap guard.
 
 **Improvements**
 
@@ -21,6 +55,25 @@ All notable changes to kata, grouped by release. Versioned releases start with
   projection rules as `scheduled_on`.
 - Added schedule, deadline, and someday commands to generated agent guidance and
   public workflow documentation.
+- Added `event_id` and the close-time frozen `parent_uid` to close-audit
+  rows so audit results page with an immutable cursor and parent display
+  refs carry provable provenance.
+- Bumped the HTTP API schema version to `0.11.0` for the pinned relationship
+  target fields (`to_project_uid`, `expected_project_uids`) and close-audit
+  `event_id`; `kata mcp serve` now checks the daemon API version at startup
+  and refuses older daemons instead of failing later inside tool calls.
+
+**Bug fixes**
+
+- Rejected add-side link targets whose project is archived inside the mutation
+  transaction (initial links, atomic-edit adds and `set_parent`, and link
+  creation) with the same `409 link_target_archived` the preflight returns, so
+  an archival that races the preflight cannot insert a link to an archived
+  project. PostgreSQL share-locks the target project row alongside the issue
+  row; existing links to archived projects stay removable.
+- Restored the `clear_owner` and `clear_priority` recurrence template fields
+  to the generated Go client; a stale template had silently dropped them from
+  `pkg/client` since their introduction.
 
 ## 0.14.3
 <small>2026-08-10</small>

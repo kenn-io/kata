@@ -156,6 +156,14 @@ var storageScenarios = []scenario{
 		run: checkLinksAndRelationshipProjections,
 	},
 	{
+		name: "archived link targets",
+		methods: []string{
+			"CreateIssue", "CreateLink", "CreateLinkAndEvent", "CreateProject", "EditIssueAtomic",
+			"IssueByID", "LinksByIssue", "RemoveProject",
+		},
+		run: checkArchivedLinkTargets,
+	},
+	{
 		name: "ready queues and discovery",
 		methods: []string{
 			"AddLabel", "CloseIssue", "CreateComment", "CreateIssue", "CreateLink", "CreateProject", "EditIssue",

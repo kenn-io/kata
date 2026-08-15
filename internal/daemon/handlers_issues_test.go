@@ -555,6 +555,37 @@ func TestEditIssue_LinksDelta_AddBlocks(t *testing.T) {
 	assert.Equal(t, target, show.Links[0].To.ShortID)
 }
 
+func TestEditIssue_LinksDeltaRejectsMovedTargetProjectIdentity(t *testing.T) {
+	h, ts, sourceProjectID, sourceID := bootstrapProjectWithIssue(t)
+	targetProject, err := h.DB().CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	otherProject, err := h.DB().CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	target, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: targetProject.ID, Title: "Target issue", Author: "example-agent",
+	})
+	require.NoError(t, err)
+	_, err = h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: target.ID, FromProjectID: targetProject.ID, ToProjectID: otherProject.ID,
+		IfMatchRev: target.Revision, Actor: "example-agent",
+	})
+	require.NoError(t, err)
+
+	resp, body := patchJSON(t, ts, issueURL(sourceProjectID, sourceID, ""), map[string]any{
+		"actor": "example-agent",
+		"links_delta": map[string]any{
+			"add_blocks": []string{target.UID},
+			"expected_project_uids": map[string]string{
+				target.UID: targetProject.UID,
+			},
+		},
+	})
+	assertAPIError(t, resp.StatusCode, body, http.StatusNotFound, "issue_not_found")
+	links, err := h.DB().LinksByIssue(t.Context(), sourceID)
+	require.NoError(t, err)
+	require.Empty(t, links)
+}
+
 // TestEditIssue_LinksDelta_PeerCarriesStatus pins that edit-delta LinkPeer
 // entries carry the peer issue's own status (0.9.0), matching the list
 // response's LinkPeer contract — the wire schema marks status required, so

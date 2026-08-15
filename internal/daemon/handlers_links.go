@@ -208,7 +208,10 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			Type:        in.Body.Type,
 			Author:      actor,
 		}, linkEv)
+		var archivedTarget *db.LinkTargetArchivedError
 		switch {
+		case errors.As(err, &archivedTarget):
+			return nil, linkTargetArchivedError(archivedTarget)
 		case errors.Is(err, db.ErrLinkExists):
 			// Duplicate (from, to, type) → no-op. Re-fetch and return existing.
 			existing, lookupErr := cfg.DB.LinkByEndpoints(ctx, storageFromID, storageToID, in.Body.Type)

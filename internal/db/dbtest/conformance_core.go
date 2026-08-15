@@ -903,6 +903,13 @@ func checkIssueCreateEnvelope(t *testing.T, store db.Storage) error {
 	})
 	assert.ErrorIs(t, err, db.ErrInitialLinkTargetNotFound)
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "moved link target", Author: "conformance-agent",
+		Links: []db.InitialLink{{
+			Type: "related", ToNumber: target.ID, ExpectedProjectUID: project.UID + "-other",
+		}},
+	})
+	assert.ErrorIs(t, err, db.ErrInitialLinkTargetNotFound)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID, Title: "bad label", Author: "conformance-agent", Labels: []string{"Bad Label"},
 	})
 	assert.ErrorIs(t, err, db.ErrLabelInvalid)

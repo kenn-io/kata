@@ -144,15 +144,29 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 		linkPayloads := make([]createdLink, 0, len(links))
 		for _, link := range links {
 			var targetID int64
-			var targetUID, targetShortID string
+			var targetUID, targetShortID, targetProjectUID, targetProjectName string
+			var targetProjectArchived bool
+			// Sharing the project row lock serializes against RemoveProject's
+			// FOR UPDATE, so an archival cannot commit between this check and
+			// the link insert.
 			err := tx.QueryRowContext(ctx,
-				`SELECT id, uid, short_id FROM issues WHERE id = $1 AND deleted_at IS NULL`, link.ToNumber,
-			).Scan(&targetID, &targetUID, &targetShortID)
+				`SELECT i.id, i.uid, i.short_id, p.uid, p.name, p.deleted_at IS NOT NULL
+				   FROM issues i
+				   JOIN projects p ON p.id = i.project_id
+				  WHERE i.id = $1 AND i.deleted_at IS NULL
+				  FOR SHARE OF i, p`, link.ToNumber,
+			).Scan(&targetID, &targetUID, &targetShortID, &targetProjectUID, &targetProjectName, &targetProjectArchived)
 			if errors.Is(err, sql.ErrNoRows) {
 				return db.ErrInitialLinkTargetNotFound
 			}
 			if err != nil {
 				return mapSQLError(err, nil)
+			}
+			if link.ExpectedProjectUID != "" && targetProjectUID != link.ExpectedProjectUID {
+				return db.ErrInitialLinkTargetNotFound
+			}
+			if targetProjectArchived {
+				return &db.LinkTargetArchivedError{Number: targetID, ShortID: targetShortID, Project: targetProjectName}
 			}
 			if targetID == issueID {
 				return db.ErrSelfLink

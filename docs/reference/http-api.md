@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-08
+last_edited: 2026-08-15
 ---
 
 # HTTP API schema
@@ -42,7 +42,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.10.0",
+  "api_schema_version": "0.11.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db"
@@ -68,7 +68,10 @@ The first-party CLI uses this check before requests where an older daemon
 could ignore a filter and return unfiltered rows. Filtered `search` and
 filtered `ready --all` require API `0.8.0`; filtered `list --all` requires API
 `0.9.0`. The CLI stops before the filtered query and tells the operator to
-upgrade when the daemon is too old.
+upgrade when the daemon is too old. `kata mcp serve` performs the same check
+once at startup and requires API `0.11.0`, because its relationship tools
+always send the pinned-target fields and its close-audit paging relies on
+`event_id`.
 
 The field is **optional in the schema** even though current daemons always send
 it. That is deliberate: a version-detection field has to survive version skew,
@@ -82,6 +85,7 @@ and decline to render issue detail.
 
 | Version | Change |
 | --- | --- |
+| `0.11.0` | Added optional `to_project_uid` on create-time initial links and `expected_project_uids` on edit link deltas so clients can pin resolved relationship targets to immutable project identities inside the mutation transaction. Close-audit rows gain a required `event_id` (stable pagination cursor) and optional `parent_uid`. |
 | `0.10.0` | Added the repeatable `issue_uid` query parameter to UI references so embedding hosts can hydrate summaries by stable issue UID. |
 | `0.9.0` | Added owner, label, exclusion, and metadata filters to the cross-project issue list. Global list rows now include `project_name`. |
 | `0.8.0` | Added repeatable `label` and `exclude_label` query parameters to project-scoped search. It also identifies daemons that support filtered global ready queries. |

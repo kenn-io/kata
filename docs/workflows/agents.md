@@ -78,17 +78,19 @@ for the recipe.
 
 ## Use Kata through MCP
 
-Agents with an MCP client can start Kata as a project-bound stdio server:
+Agents with an MCP client can start Kata as a stdio server bound to the
+current workspace's project:
 
 ```sh
-kata --workspace /path/to/repository mcp serve
+kata mcp serve
 ```
 
-The MCP server exposes the normal search, list, show, ready, label discovery,
-create, edit, comment, claim, label, metadata, close, and reopen workflows. It
-fixes the project and actor at startup, requires idempotency keys for create and
-comment, and omits administrative and destructive deletion tools. See the
-[MCP reference](../reference/mcp.md) for configuration and exact schemas.
+The server starts with 13 section loaders. An agent loads only the detailed
+issue, project, administration, automation, or event tools needed for its task.
+Pass `--workspace` or `--project` for an explicit project, `--projects` for a
+fixed allowlist, or `--all-projects` to use every project visible to the
+selected daemon. The actor stays fixed at startup. See the [MCP reference](../reference/mcp.md) for configuration and
+exact schemas.
 
 ## Search before creating
 

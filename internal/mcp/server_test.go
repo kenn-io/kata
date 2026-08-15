@@ -27,8 +27,100 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+var sectionLoaderNames = []string{
+	"kata.load_activity",
+	"kata.load_federation",
+	"kata.load_import",
+	"kata.load_issue_discovery",
+	"kata.load_issue_lifecycle",
+	"kata.load_issue_mutation",
+	"kata.load_leases",
+	"kata.load_projects",
+	"kata.load_recurrence",
+	"kata.load_storage",
+	"kata.load_sync",
+	"kata.load_system",
+	"kata.load_tokens",
+}
+
+func TestServerPublishesOnlySectionLoadersInitially(t *testing.T) {
+	session := connectRawTestServerWithOptions(t, Options{
+		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+		Actor: "example-agent", Version: "test-version",
+	})
+
+	require.True(t, session.InitializeResult().Capabilities.Tools.ListChanged)
+	result, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	require.Equal(t, sectionLoaderNames, toolNames(result.Tools))
+	for _, tool := range result.Tools {
+		require.True(t, tool.Annotations.ReadOnlyHint, tool.Name)
+		require.False(t, *tool.Annotations.DestructiveHint, tool.Name)
+	}
+}
+
+func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
+	session := connectRawTestServerWithOptions(t, Options{
+		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+		Actor: "example-agent", Version: "test-version",
+	})
+
+	for range 2 {
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+			Name: "kata.load_activity", Arguments: map[string]any{},
+		})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		var output ToolSectionOutput
+		require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &output))
+		require.Equal(t, ToolSectionOutput{
+			Section: "activity", Available: true, Loaded: true,
+			Tools: []string{"kata.digest", "kata.events"},
+		}, output)
+	}
+
+	result, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	want := append(append([]string(nil), sectionLoaderNames...), "kata.digest", "kata.events")
+	sort.Strings(want)
+	require.Equal(t, want, toolNames(result.Tools))
+}
+
+func TestTokenSectionRequiresExplicitStartupCapability(t *testing.T) {
+	session := connectRawTestServerWithOptions(t, Options{
+		Client: &kataclient.Client{}, Scope: NewAllScope(),
+		Actor: "example-agent", Version: "test-version",
+	})
+
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.load_tokens", Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	var output ToolSectionOutput
+	require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &output))
+	require.False(t, output.Available)
+	require.False(t, output.Loaded)
+
+	enabled := connectRawTestServerWithOptions(t, Options{
+		Client: &kataclient.Client{}, Scope: NewAllScope(), EnableTokenAdmin: true,
+		Actor: "example-agent", Version: "test-version",
+	})
+	result, err = enabled.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.load_tokens", Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &output))
+	require.True(t, output.Available)
+	require.True(t, output.Loaded)
+}
+
 func TestServerPublishesCurrentToolsOnly(t *testing.T) {
-	session := connectTestServer(t)
+	session := connectTestServerWithOptions(t, Options{
+		Client: &kataclient.Client{}, Scope: NewAllScope(), EnableTokenAdmin: true,
+		Actor: "example-agent", Version: "test-version",
+	})
 
 	initialized := session.InitializeResult()
 	require.Equal(t, currentProtocolVersion, initialized.ProtocolVersion)
@@ -36,7 +128,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	require.Equal(t, "kata", initialized.ServerInfo.Name)
 	require.Equal(t, "test-version", initialized.ServerInfo.Version)
 	require.NotNil(t, initialized.Capabilities.Tools)
-	require.False(t, initialized.Capabilities.Tools.ListChanged)
+	require.True(t, initialized.Capabilities.Tools.ListChanged)
 	require.Nil(t, initialized.Capabilities.Prompts)
 	require.Nil(t, initialized.Capabilities.Resources)
 	capabilities := string(mustJSON(t, initialized.Capabilities))
@@ -48,23 +140,79 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	require.Equal(t, "private", result.CacheScope)
 
 	wantNames := []string{
+		"kata.audit_closes",
 		"kata.claim",
 		"kata.close",
 		"kata.comment",
 		"kata.create",
+		"kata.delete",
+		"kata.digest",
 		"kata.edit",
+		"kata.edit_comment",
+		"kata.events",
+		"kata.federation_enrollment_revoke",
+		"kata.federation_leave",
+		"kata.federation_quarantine",
+		"kata.federation_rebind",
+		"kata.federation_status",
+		"kata.graph",
+		"kata.import_issues",
 		"kata.labels",
+		"kata.lease",
+		"kata.lease_force_release",
+		"kata.lease_status",
+		"kata.lease_steal",
 		"kata.list",
+		"kata.move",
+		"kata.next",
+		"kata.project_create",
+		"kata.project_merge",
+		"kata.project_purge",
+		"kata.project_remove",
+		"kata.project_restore",
+		"kata.project_update",
+		"kata.projects",
+		"kata.purge",
 		"kata.ready",
+		"kata.recurrence_delete",
+		"kata.recurrence_update",
+		"kata.recurrences",
 		"kata.reopen",
+		"kata.restore",
 		"kata.search",
 		"kata.set_deadline",
 		"kata.set_label",
 		"kata.set_metadata",
 		"kata.set_schedule",
 		"kata.show",
+		"kata.sync_once",
+		"kata.sync_status",
+		"kata.sync_update",
+		"kata.system",
+		"kata.token_create",
+		"kata.token_revoke",
+		"kata.tokens",
+		"kata.wait",
 	}
+	wantNames = append(wantNames, sectionLoaderNames...)
+	sort.Strings(wantNames)
 	gotNames := make([]string, 0, len(result.Tools))
+	projectSelectors := map[string]bool{
+		"kata.audit_closes": true,
+		"kata.create":       true, "kata.digest": true, "kata.events": true,
+		"kata.federation_leave": true, "kata.federation_quarantine": true, "kata.federation_rebind": true,
+		"kata.import_issues": true, "kata.labels": true, "kata.list": true, "kata.next": true,
+		"kata.project_purge": true, "kata.project_remove": true, "kata.project_restore": true,
+		"kata.project_update": true, "kata.projects": true, "kata.ready": true,
+		"kata.recurrence_delete": true, "kata.recurrence_update": true, "kata.recurrences": true,
+		"kata.search": true, "kata.sync_once": true, "kata.sync_status": true, "kata.sync_update": true,
+	}
+	openWorld := map[string]bool{
+		"kata.federation_enrollment_revoke": true,
+		"kata.federation_leave":             true, "kata.federation_quarantine": true,
+		"kata.federation_rebind": true, "kata.federation_status": true, "kata.import_issues": true,
+		"kata.search": true, "kata.sync_once": true, "kata.sync_status": true, "kata.sync_update": true,
+	}
 	for _, tool := range result.Tools {
 		gotNames = append(gotNames, tool.Name)
 		require.NotEmpty(t, tool.Title, tool.Name)
@@ -76,41 +224,74 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		require.Equal(t, "object", input["type"], tool.Name)
 		require.Equal(t, false, input["additionalProperties"], tool.Name)
 		properties, _ := input["properties"].(map[string]any)
-		require.NotContains(t, properties, "actor", tool.Name)
-		require.NotContains(t, properties, "project", tool.Name)
+		if tool.Name != "kata.audit_closes" {
+			require.NotContains(t, properties, "actor", tool.Name)
+		}
+		require.Equal(t, projectSelectors[tool.Name], properties["project"] != nil, tool.Name)
 		require.NotContains(t, properties, "project_id", tool.Name)
 		require.NotContains(t, properties, "workspace", tool.Name)
 
 		annotations := tool.Annotations
 		require.NotNil(t, annotations, tool.Name)
 		require.NotNil(t, annotations.OpenWorldHint, tool.Name)
-		require.Equal(t, tool.Name == "kata.search", *annotations.OpenWorldHint, tool.Name)
+		require.Equal(t, openWorld[tool.Name], *annotations.OpenWorldHint, tool.Name)
 	}
 	require.Equal(t, wantNames, gotNames)
 	require.True(t, sort.StringsAreSorted(gotNames))
 }
 
 func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
-	session := connectTestServer(t)
+	session := connectTestServerWithOptions(t, Options{
+		Client: &kataclient.Client{}, Scope: NewAllScope(), EnableTokenAdmin: true,
+		Actor: "example-agent", Version: "test-version",
+	})
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 
 	readOnly := map[string]bool{
-		"kata.labels": true,
-		"kata.list":   true,
-		"kata.ready":  true,
-		"kata.search": true,
-		"kata.show":   true,
+		"kata.audit_closes":      true,
+		"kata.digest":            true,
+		"kata.events":            true,
+		"kata.federation_status": true,
+		"kata.graph":             true,
+		"kata.labels":            true,
+		"kata.lease_status":      true,
+		"kata.list":              true,
+		"kata.next":              true,
+		"kata.projects":          true,
+		"kata.ready":             true,
+		"kata.recurrences":       true,
+		"kata.search":            true,
+		"kata.show":              true,
+		"kata.sync_status":       true,
+		"kata.system":            true,
+		"kata.tokens":            true,
+		"kata.wait":              true,
 	}
+	for _, name := range sectionLoaderNames {
+		readOnly[name] = true
+	}
+	// Mixed-mode tools with any overwriting or removing input (forced
+	// claims, lease release, recurrence patch) advertise destructive.
 	additive := map[string]bool{
-		"kata.claim":   true,
-		"kata.comment": true,
-		"kata.create":  true,
+		"kata.comment": true, "kata.create": true,
+		"kata.project_create": true, "kata.project_restore": true,
+		"kata.restore": true, "kata.token_create": true,
+	}
+	nonIdempotentTools := map[string]bool{
+		// Identical retries mint new records: no idempotency key or natural
+		// unique key deduplicates these creations.
+		"kata.token_create":      true,
+		"kata.recurrence_update": true,
+		// Identical retries produce additional effects: renew extends the
+		// lease expiry again and a sync pass re-imports from the provider.
+		"kata.lease":     true,
+		"kata.sync_once": true,
 	}
 	for _, tool := range result.Tools {
 		annotations := tool.Annotations
 		require.Equal(t, readOnly[tool.Name], annotations.ReadOnlyHint, tool.Name)
-		require.True(t, annotations.IdempotentHint, tool.Name)
+		require.Equal(t, !nonIdempotentTools[tool.Name], annotations.IdempotentHint, tool.Name)
 		require.NotNil(t, annotations.DestructiveHint, tool.Name)
 		if readOnly[tool.Name] || additive[tool.Name] {
 			require.False(t, *annotations.DestructiveHint, tool.Name)
@@ -229,7 +410,7 @@ func TestCreateAndCommentRequireIdempotencyKeys(t *testing.T) {
 
 	require.Len(t, schemaObject(t, byName["kata.list"].InputSchema)["allOf"], 1)
 	require.Len(t, schemaObject(t, byName["kata.ready"].InputSchema)["allOf"], 1)
-	require.Len(t, schemaObject(t, byName["kata.edit"].InputSchema)["allOf"], 3)
+	require.Len(t, schemaObject(t, byName["kata.edit"].InputSchema)["allOf"], 5)
 
 	labelProperties := schemaObject(t, byName["kata.set_label"].InputSchema)["properties"].(map[string]any)
 	require.EqualValues(t, 64, labelProperties["label"].(map[string]any)["maxLength"])
@@ -295,6 +476,14 @@ func TestSetScheduleInputSchemaRequiresOneMutation(t *testing.T) {
 	require.Error(t, schema.Validate(map[string]any{"ref": "abc1"}))
 	require.Error(t, schema.Validate(map[string]any{"ref": "abc1", "schedule": "2026-09-01", "clear_schedule": true}))
 	require.Error(t, schema.Validate(map[string]any{"ref": "abc1", "clear_schedule": false}))
+}
+
+func TestRecurrencePatchSchemaRequiresRevision(t *testing.T) {
+	schema, err := inputSchemaFor[RecurrenceUpdateInput]("kata.recurrence_update").Resolve(nil)
+	require.NoError(t, err)
+	require.Error(t, schema.Validate(map[string]any{"action": "patch", "uid": "recurrence-uid"}))
+	require.NoError(t, schema.Validate(map[string]any{"action": "patch", "uid": "recurrence-uid", "revision": 1}))
+	require.NoError(t, schema.Validate(map[string]any{"action": "create", "template": map[string]any{"title": "Review"}}))
 }
 
 func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
@@ -366,6 +555,11 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				require.Len(t, changes["related_added"], 1)
 			}
 
+			if tt.tool == "kata.edit" {
+				resolution := <-requests
+				require.Equal(t, http.MethodGet, resolution.Method)
+				require.Equal(t, "/api/v1/projects/42/issues/def2", resolution.Path)
+			}
 			request := <-requests
 			require.Equal(t, tt.wantMethod, request.Method)
 			require.Equal(t, tt.wantPath, request.Path)
@@ -385,7 +579,10 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				require.NotContains(t, body, "project")
 				if tt.tool == "kata.edit" {
 					links := body["links_delta"].(map[string]any)
-					require.Equal(t, []any{"def2"}, links["add_related"])
+					require.Equal(t, []any{"01ARZ3NDEKTSV4RRFFQ69G5FAV"}, links["add_related"])
+					require.Equal(t, map[string]any{
+						"01ARZ3NDEKTSV4RRFFQ69G5FAV": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
+					}, links["expected_project_uids"])
 				}
 				if tt.tool == "kata.set_deadline" {
 					require.Equal(t, map[string]any{"deadline_on": "2026-09-01T09:30"}, body["patch"])
@@ -393,6 +590,11 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				if tt.tool == "kata.set_schedule" {
 					require.Equal(t, map[string]any{"scheduled_on": "2026-09-01T09:30"}, body["patch"])
 				}
+			}
+			if tt.tool == "kata.edit" {
+				scopeRequest := <-requests
+				require.Equal(t, http.MethodGet, scopeRequest.Method)
+				require.Equal(t, "/api/v1/issues/01ARZ3NDEKTSV4RRFFQ69G5FAW", scopeRequest.Path)
 			}
 		})
 	}
@@ -784,6 +986,17 @@ func connectTestServerWithClient(t *testing.T, apiClient *kataclient.Client) *sd
 }
 
 func connectTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientSession {
+	t.Helper()
+	session := connectRawTestServerWithOptions(t, options)
+	for _, name := range sectionLoaderNames {
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: name, Arguments: map[string]any{}})
+		require.NoError(t, err)
+		require.False(t, result.IsError, "%s: %s", name, mustJSON(t, result))
+	}
+	return session
+}
+
+func connectRawTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientSession {
 	t.Helper()
 	server, err := New(options)
 	require.NoError(t, err)

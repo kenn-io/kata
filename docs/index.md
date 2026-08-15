@@ -146,8 +146,8 @@ is a local ledger for the work itself. They coexist. See
 -   [__Concepts__](guide/concepts.md). The data model and how the pieces fit.
 -   [__Web UI__](guide/web-ui.md). Manage projects and issues in the browser.
 -   [__CLI reference__](reference/cli.md). Every command and flag.
--   [__Model Context Protocol__](reference/mcp.md). Connect an MCP agent to one
-    bound Kata project.
+-   [__Model Context Protocol__](reference/mcp.md). Connect an MCP agent to the
+    workspace project, a fixed allowlist, or the whole daemon.
 -   [__Semantic search__](guide/semantic-search.md). Improve issue discovery
     with opt-in embeddings.
 -   [__GitHub sync__](operations/github-sync.md). Bring GitHub issues into kata.

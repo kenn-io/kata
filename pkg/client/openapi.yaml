@@ -82,6 +82,9 @@ components:
       properties:
         actor:
           type: string
+        event_id:
+          format: int64
+          type: integer
         evidence_types:
           items:
             type: string
@@ -98,6 +101,8 @@ components:
           type: string
         parent:
           type: string
+        parent_uid:
+          type: string
         reason:
           type: string
         time:
@@ -107,6 +112,7 @@ components:
         - actor
         - issue
         - reason
+        - event_id
       type: object
     AuditClosesResponseBody:
       properties:
@@ -393,6 +399,8 @@ components:
       properties:
         incoming:
           type: boolean
+        to_project_uid:
+          type: string
         to_ref:
           type: string
         type:
@@ -2127,6 +2135,10 @@ components:
             type: string
           nullable: true
           type: array
+        expected_project_uids:
+          additionalProperties:
+            type: string
+          type: object
         remove_blocked_by:
           items:
             type: string
@@ -4009,7 +4021,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.10.0
+  version: 0.11.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

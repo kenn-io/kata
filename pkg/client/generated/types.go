@@ -110,11 +110,13 @@ func (a AssignRequestBody) Validate() error {
 
 type AuditCloseRow struct {
 	Actor         string   `json:"actor" validate:"required"`
+	EventID       int64    `json:"event_id"`
 	EvidenceTypes []string `json:"evidence_types,omitempty"`
 	Flags         []string `json:"flags,omitempty"`
 	Issue         string   `json:"issue" validate:"required"`
 	Message       *string  `json:"message,omitempty"`
 	Parent        *string  `json:"parent,omitempty"`
+	ParentUID     *string  `json:"parent_uid,omitempty"`
 	Reason        string   `json:"reason" validate:"required"`
 	Time          string   `json:"time" validate:"required"`
 }
@@ -557,9 +559,10 @@ func (c CreateFederationReplicaRequestBody) Validate() error {
 }
 
 type CreateInitialLinkBody struct {
-	Incoming *bool                     `json:"incoming,omitempty"`
-	ToRef    string                    `json:"to_ref" validate:"required"`
-	Type     CreateInitialLinkBodyType `json:"type" validate:"required"`
+	Incoming     *bool                     `json:"incoming,omitempty"`
+	ToProjectUID *string                   `json:"to_project_uid,omitempty"`
+	ToRef        string                    `json:"to_ref" validate:"required"`
+	Type         CreateInitialLinkBodyType `json:"type" validate:"required"`
 }
 
 func (c CreateInitialLinkBody) Validate() error {
@@ -2028,14 +2031,15 @@ func (l LinkPeer) Validate() error {
 }
 
 type LinksDelta struct {
-	AddBlockedBy    []string `json:"add_blocked_by,omitempty"`
-	AddBlocks       []string `json:"add_blocks,omitempty"`
-	AddRelated      []string `json:"add_related,omitempty"`
-	RemoveBlockedBy []string `json:"remove_blocked_by,omitempty"`
-	RemoveBlocks    []string `json:"remove_blocks,omitempty"`
-	RemoveParent    *string  `json:"remove_parent,omitempty"`
-	RemoveRelated   []string `json:"remove_related,omitempty"`
-	SetParent       *string  `json:"set_parent,omitempty"`
+	AddBlockedBy        []string          `json:"add_blocked_by,omitempty"`
+	AddBlocks           []string          `json:"add_blocks,omitempty"`
+	AddRelated          []string          `json:"add_related,omitempty"`
+	ExpectedProjectUids map[string]string `json:"expected_project_uids,omitempty"`
+	RemoveBlockedBy     []string          `json:"remove_blocked_by,omitempty"`
+	RemoveBlocks        []string          `json:"remove_blocks,omitempty"`
+	RemoveParent        *string           `json:"remove_parent,omitempty"`
+	RemoveRelated       []string          `json:"remove_related,omitempty"`
+	SetParent           *string           `json:"set_parent,omitempty"`
 }
 
 type ListAllIssuesResponseBody struct {
@@ -3110,12 +3114,14 @@ func (r RecurrenceTemplateInput) Validate() error {
 }
 
 type RecurrenceTemplateUpdateInput struct {
-	Body     *string         `json:"body,omitempty"`
-	Labels   *[]string       `json:"labels,omitempty"`
-	Metadata *map[string]any `json:"metadata,omitempty"`
-	Owner    *string         `json:"owner,omitempty"`
-	Priority *int64          `json:"priority,omitempty"`
-	Title    *string         `json:"title,omitempty"`
+	Body          *string         `json:"body,omitempty"`
+	ClearOwner    bool            `json:"clear_owner,omitempty"`
+	ClearPriority bool            `json:"clear_priority,omitempty"`
+	Labels        *[]string       `json:"labels,omitempty"`
+	Metadata      *map[string]any `json:"metadata,omitempty"`
+	Owner         *string         `json:"owner,omitempty"`
+	Priority      *int64          `json:"priority,omitempty"`
+	Title         *string         `json:"title,omitempty"`
 }
 
 type RemoveProjectResponseBody struct {

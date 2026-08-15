@@ -152,6 +152,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 		}
+		var archivedTarget *db.LinkTargetArchivedError
 		issue, evt, err := cfg.DB.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID:              in.ProjectID,
 			Title:                  in.Body.Title,
@@ -177,6 +178,8 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case errors.Is(err, db.ErrInitialLinkTargetNotFound):
 			return nil, api.NewError(404, "issue_not_found",
 				"initial link target not found", "", nil)
+		case errors.As(err, &archivedTarget):
+			return nil, linkTargetArchivedError(archivedTarget)
 		case errors.Is(err, db.ErrSelfLink):
 			return nil, api.NewError(400, "validation",
 				"cannot link an issue to itself", "", nil)
@@ -553,10 +556,13 @@ func linksDeltaRequestsAnyOp(d *api.LinksDelta) bool {
 // human-readable error messages.
 func mapAtomicEditError(err error, issueShortID string, delta *api.LinksDelta) error {
 	var lt *db.LinkTargetNotFoundError
+	var archivedTarget *db.LinkTargetArchivedError
 	switch {
 	case errors.As(err, &lt):
 		return api.NewError(404, "issue_not_found",
 			"link target not found", "", nil)
+	case errors.As(err, &archivedTarget):
+		return linkTargetArchivedError(archivedTarget)
 	case errors.Is(err, db.ErrNotFound):
 		return api.NewError(404, "issue_not_found",
 			"target issue not found", "", nil)
