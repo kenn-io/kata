@@ -44,7 +44,7 @@ func checkArchivedLinkTargets(t *testing.T, store db.Storage) error {
 		ProjectID: subject.Project.ID, Title: "links into archived project", Author: "link-author",
 		Links: []db.InitialLink{{Type: "related", ToNumber: peer.Issue.ID}},
 	})
-	if assert.ErrorAs(t, err, &archived, "initial link to archived target") {
+	if assert.ErrorAs(t, err, &archived, "initial link to archived target") && archived != nil {
 		assert.Equal(t, peer.Issue.ID, archived.Number)
 		assert.Equal(t, peer.Project.Name, archived.Project)
 	}
