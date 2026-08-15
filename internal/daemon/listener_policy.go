@@ -70,8 +70,7 @@ func ApplyListenerPolicy(next http.Handler, policy ListenerPolicy) (http.Handler
 				return
 			}
 			if policy.Kind == ListenerBrowser || isBrowserRequest(r) {
-				originHeader := r.Header.Get("Origin")
-				if isMutation(r.Method) && originHeader != policy.Origin {
+				if isMutation(r.Method) && !browserMutationOriginAllowed(r, policy.Origin) {
 					api.WriteEnvelope(w, http.StatusForbidden, "origin_forbidden", "Origin header does not match browser origin")
 					return
 				}
@@ -99,6 +98,17 @@ func restrictLocalSession(next http.Handler, policy ListenerPolicy) http.Handler
 
 func isLocalSessionRequest(r *http.Request) bool {
 	return r.Method == http.MethodPost && r.URL.Path == "/api/v1/ui/session/local"
+}
+
+func browserMutationOriginAllowed(r *http.Request, expectedOrigin string) bool {
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		return origin == expectedOrigin
+	}
+	if !isLocalSessionRequest(r) {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site")
 }
 
 func directLoopbackSessionAllowed(r *http.Request, policy ListenerPolicy) bool {
