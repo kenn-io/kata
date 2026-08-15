@@ -254,6 +254,126 @@ func TestDigestRedactsForeignLinkActionTargets(t *testing.T) {
 		"historical link tokens carry no provable identity, so every target is stripped to its action type; a current same-short-ID link must not vouch a historical peer")
 }
 
+func TestAllProjectActivityUsesOnlyActiveProjectEndpoints(t *testing.T) {
+	const (
+		activeProjectUID   = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+		archivedProjectUID = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+	)
+	activeEvent := reviewActivityEventJSON(7, 1, activeProjectUID, "active-project")
+	archivedEvent := reviewActivityEventJSON(8, 2, archivedProjectUID, "archived-project")
+	archivedStreamEvent, err := json.Marshal(archivedEvent)
+	require.NoError(t, err)
+	var globalRequests atomic.Int64
+	var projectDigestRequests atomic.Int64
+	var projectEventRequests atomic.Int64
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, activeProjectUID, "active-project"),
+			}})
+		case "/api/v1/projects/1/digest":
+			projectDigestRequests.Add(1)
+			writeJSON(writer, reviewDigestBodyJSON(1, "active-project"))
+		case "/api/v1/projects/1/events":
+			projectEventRequests.Add(1)
+			writeJSON(writer, map[string]any{"events": []any{activeEvent}, "next_after_id": 7, "reset_required": false})
+		case "/api/v1/digest":
+			globalRequests.Add(1)
+			writeJSON(writer, reviewDigestBodyJSON(2, "archived-project"))
+		case "/api/v1/events":
+			globalRequests.Add(1)
+			writeJSON(writer, map[string]any{"events": []any{archivedEvent}, "next_after_id": 8, "reset_required": false})
+		case "/api/v1/events/stream":
+			globalRequests.Add(1)
+			writer.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprintf(writer, "event: issue.edited\ndata: %s\n\n", archivedStreamEvent)
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	handlers := toolHandlers{options: Options{Client: client, LongRunningClient: client, Scope: NewAllScope()}}
+
+	_, digest, err := handlers.digest(t.Context(), nil, DigestInput{Since: "2026-08-11T00:00:00Z"})
+	require.NoError(t, err)
+	require.Len(t, digest.Digests, 1)
+	require.NotNil(t, digest.Digests[0].Project)
+	require.Equal(t, "active-project", digest.Digests[0].Project.Name)
+	require.Equal(t, "active-project", digest.Digests[0].Digest.Actors[0].Issues[0].ProjectName)
+
+	_, polled, err := handlers.events(t.Context(), nil, EventsInput{Mode: "poll"})
+	require.NoError(t, err)
+	require.Len(t, polled.Events, 1)
+	require.Equal(t, activeProjectUID, polled.Events[0].ProjectUID)
+
+	_, waited, err := handlers.events(t.Context(), nil, EventsInput{Mode: "wait", WaitSeconds: 1})
+	require.NoError(t, err)
+	require.Len(t, waited.Events, 1)
+	require.Equal(t, activeProjectUID, waited.Events[0].ProjectUID)
+	require.Zero(t, globalRequests.Load(), "all-project activity must not use archive-inclusive global endpoints")
+	require.EqualValues(t, 1, projectDigestRequests.Load())
+	require.EqualValues(t, 2, projectEventRequests.Load())
+}
+
+func TestAllProjectEventPollToleratesProjectArchivedAfterCatalogRead(t *testing.T) {
+	const activeProjectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+	activeEvent := reviewActivityEventJSON(7, 1, activeProjectUID, "active-project")
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, activeProjectUID, "active-project"),
+				projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "soon-archived-project"),
+			}})
+		case "/api/v1/projects/1/events":
+			writeJSON(writer, map[string]any{"events": []any{activeEvent}, "next_after_id": 7, "reset_required": false})
+		case "/api/v1/projects/2/events":
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusNotFound)
+			writeJSON(writer, map[string]any{
+				"status": 404, "error": map[string]any{"code": "project_not_found", "message": "project was archived"},
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	handlers := toolHandlers{options: Options{Client: client, Scope: NewAllScope()}}
+
+	output, err := handlers.pollScopedEvents(t.Context(), "", 0, 20)
+	require.NoError(t, err)
+	require.Len(t, output.Events, 1)
+	require.Equal(t, activeProjectUID, output.Events[0].ProjectUID)
+}
+
+func TestAllProjectDigestToleratesProjectArchivedAfterCatalogRead(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "active-project"),
+				projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "soon-archived-project"),
+			}})
+		case "/api/v1/projects/1/digest":
+			writeJSON(writer, reviewDigestBodyJSON(1, "active-project"))
+		case "/api/v1/projects/2/digest":
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusNotFound)
+			writeJSON(writer, map[string]any{
+				"status": 404, "error": map[string]any{"code": "project_not_found", "message": "project was archived"},
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	handlers := toolHandlers{options: Options{Client: client, Scope: NewAllScope()}}
+
+	_, output, err := handlers.digest(t.Context(), nil, DigestInput{Since: "2026-08-11T00:00:00Z"})
+	require.NoError(t, err)
+	require.Len(t, output.Digests, 1)
+	require.NotNil(t, output.Digests[0].Project)
+	require.Equal(t, "active-project", output.Digests[0].Project.Name)
+}
+
 func TestAuditPaginationInvalidatesWhenHistoryBelowCursorChanges(t *testing.T) {
 	auditRow := func(eventID int, issue string) map[string]any {
 		return map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": issue, "event_id": eventID}
@@ -1632,6 +1752,31 @@ func TestAllowlistEventResetAdvancesToResetCursor(t *testing.T) {
 	require.EqualValues(t, 42, output.NextAfterID)
 	require.NotNil(t, output.ResetAfterID)
 	require.EqualValues(t, 42, *output.ResetAfterID)
+}
+
+func reviewActivityEventJSON(eventID, projectID int64, projectUID, projectName string) map[string]any {
+	return map[string]any{
+		"actor": "example-agent", "content_hash": "hash", "created_at": "2026-08-12T00:00:00Z",
+		"event_id": eventID, "event_uid": fmt.Sprintf("event-%d", eventID), "hlc_counter": 0,
+		"hlc_physical_ms": 1, "origin_instance_uid": "01HCCCCCCCCCCCCCCCCCCCCCCC",
+		"payload": map[string]any{"body": projectName + " body"}, "project_id": projectID,
+		"project_name": projectName, "project_uid": projectUID, "type": "issue.edited",
+	}
+}
+
+func reviewDigestBodyJSON(projectID int64, projectName string) map[string]any {
+	return map[string]any{
+		"project_id": projectID, "event_count": 1,
+		"since": "2026-08-11T00:00:00Z", "until": "2026-08-12T00:00:00Z",
+		"totals": map[string]any{},
+		"actors": []any{map[string]any{
+			"actor": "example-agent", "totals": map[string]any{},
+			"issues": []any{map[string]any{
+				"issue_uid": "01HDDDDDDDDDDDDDDDDDDDDDDD", "issue_short_id": "abc1",
+				"project_id": projectID, "project_name": projectName, "actions": []any{"edited"},
+			}},
+		}},
+	}
 }
 
 func reviewClient(t *testing.T, handler http.HandlerFunc) *kataclient.Client {

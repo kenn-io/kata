@@ -775,13 +775,7 @@ func (h toolHandlers) digest(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if strings.TrimSpace(input.Since) == "" {
 		return nil, DigestOutput{}, errors.New("since is required")
 	}
-	if strings.TrimSpace(input.Project) == "" && h.options.Scope.Mode() == ScopeAll {
-		response, err := h.options.Client.DigestGlobal(ctx, &generated.DigestGlobalRequestOptions{Query: &generated.DigestGlobalQuery{Since: input.Since, Until: optionalString(input.Until), Actor: input.Actors}})
-		if err != nil {
-			return nil, DigestOutput{}, err
-		}
-		return successResult(), DigestOutput{Digests: []ProjectDigest{{Digest: *response}}}, nil
-	}
+	aggregate := strings.TrimSpace(input.Project) == "" && h.options.Scope.Mode() != ScopeBound
 	projects, err := h.activityProjects(ctx, input.Project)
 	if err != nil {
 		return nil, DigestOutput{}, err
@@ -790,6 +784,9 @@ func (h toolHandlers) digest(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	for _, project := range projects {
 		response, digestErr := h.options.Client.DigestProject(ctx, &generated.DigestProjectRequestOptions{PathParams: &generated.DigestProjectPath{ProjectID: project.ID}, Query: &generated.DigestProjectQuery{Since: input.Since, Until: optionalString(input.Until), Actor: input.Actors}})
 		if digestErr != nil {
+			if aggregate && isHTTPStatus(digestErr, http.StatusNotFound) {
+				continue
+			}
 			return nil, DigestOutput{}, digestErr
 		}
 		if h.options.Scope.Mode() != ScopeAll {
@@ -867,9 +864,10 @@ func (h toolHandlers) events(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		return nil, EventsOutput{}, errors.New("wait_seconds must be between 1 and 300")
 	}
 	h = h.withLongRunningClient()
-	// One stream can filter one project or all projects. A fixed multi-project
-	// allowlist uses bounded polling so events outside its scope never leak.
-	if strings.TrimSpace(input.Project) == "" && h.options.Scope.Mode() == ScopeAllowlist {
+	// One stream can safely filter one active project. Dynamic and fixed
+	// multi-project scopes use bounded per-project polling so archived projects
+	// cannot leak through the daemon-global stream.
+	if strings.TrimSpace(input.Project) == "" && h.options.Scope.Mode() != ScopeBound {
 		return h.waitPollEvents(ctx, input.Project, input.After, limit, waitSeconds)
 	}
 	var projectID *int64
@@ -925,13 +923,7 @@ func (h toolHandlers) activityProjects(ctx context.Context, name string) ([]Proj
 }
 
 func (h toolHandlers) pollScopedEvents(ctx context.Context, projectName string, after, limit int64) (EventsOutput, error) {
-	if strings.TrimSpace(projectName) == "" && h.options.Scope.Mode() == ScopeAll {
-		response, err := h.options.Client.PollEvents(ctx, &generated.PollEventsRequestOptions{Query: &generated.PollEventsQuery{AfterID: &after, Limit: &limit}})
-		if err != nil {
-			return EventsOutput{}, err
-		}
-		return eventsOutput(response), nil
-	}
+	aggregate := strings.TrimSpace(projectName) == "" && h.options.Scope.Mode() != ScopeBound
 	projects, err := h.activityProjects(ctx, projectName)
 	if err != nil {
 		return EventsOutput{}, err
@@ -940,6 +932,9 @@ func (h toolHandlers) pollScopedEvents(ctx context.Context, projectName string, 
 	for _, project := range projects {
 		response, pollErr := h.options.Client.PollProjectEvents(ctx, &generated.PollProjectEventsRequestOptions{PathParams: &generated.PollProjectEventsPath{ProjectID: project.ID}, Query: &generated.PollProjectEventsQuery{AfterID: &after, Limit: &limit}})
 		if pollErr != nil {
+			if aggregate && isHTTPStatus(pollErr, http.StatusNotFound) {
+				continue
+			}
 			return EventsOutput{}, pollErr
 		}
 		if response.ResetRequired {
@@ -992,17 +987,6 @@ func (h toolHandlers) waitPollEvents(ctx context.Context, project string, after,
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-}
-
-func eventsOutput(response *generated.PollEventsBody) EventsOutput {
-	if response.ResetRequired {
-		return EventsOutput{NextAfterID: response.NextAfterID, ResetRequired: true, ResetAfterID: response.ResetAfterID}
-	}
-	events := make([]StreamEvent, 0, len(response.Events))
-	for _, event := range response.Events {
-		events = append(events, streamEvent(event))
-	}
-	return EventsOutput{Events: events, NextAfterID: response.NextAfterID}
 }
 
 func readEventStream(ctx context.Context, reader io.Reader, after, limit int64) (EventsOutput, error) {
