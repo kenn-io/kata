@@ -248,6 +248,10 @@ func (h toolHandlers) projectUpdate(ctx context.Context, _ *sdkmcp.CallToolReque
 		if strings.TrimSpace(input.From) == "" || strings.TrimSpace(input.To) == "" {
 			return nil, ProjectMutationOutput{}, errors.New("rewrite_author requires from and to")
 		}
+		current, showErr := h.projectSummaryByID(ctx, project.ID)
+		if showErr != nil {
+			return nil, ProjectMutationOutput{}, showErr
+		}
 		response, rewriteErr := h.options.Client.RewriteAuthorIdentity(ctx, &generated.RewriteAuthorIdentityRequestOptions{
 			PathParams: &generated.RewriteAuthorIdentityPath{ProjectID: project.ID},
 			Body:       &generated.RewriteAuthorIdentityBody{Actor: &h.options.Actor, From: input.From, To: input.To},
@@ -255,14 +259,14 @@ func (h toolHandlers) projectUpdate(ctx context.Context, _ *sdkmcp.CallToolReque
 		if rewriteErr != nil {
 			return nil, ProjectMutationOutput{}, rewriteErr
 		}
-		current, showErr := h.projectSummaryByID(ctx, project.ID)
-		if showErr != nil {
-			return nil, ProjectMutationOutput{}, showErr
-		}
 		return successResult(), ProjectMutationOutput{Project: current, Changed: response.Changed, Event: eventSummary(response.Event), Details: map[string]any{"total": response.Total, "issue_authors": response.IssueAuthors, "issue_owners": response.IssueOwners, "comment_authors": response.CommentAuthors, "link_authors": response.LinkAuthors}}, nil
 	case "detach_alias":
 		if input.AliasID <= 0 {
 			return nil, ProjectMutationOutput{}, errors.New("detach_alias requires alias_id")
+		}
+		current, showErr := h.projectSummaryByID(ctx, project.ID)
+		if showErr != nil {
+			return nil, ProjectMutationOutput{}, showErr
 		}
 		response, detachErr := h.options.Client.DetachProjectAlias(ctx, &generated.DetachProjectAliasRequestOptions{
 			PathParams: &generated.DetachProjectAliasPath{ProjectID: project.ID, AliasID: input.AliasID},
@@ -270,10 +274,6 @@ func (h toolHandlers) projectUpdate(ctx context.Context, _ *sdkmcp.CallToolReque
 		})
 		if detachErr != nil {
 			return nil, ProjectMutationOutput{}, detachErr
-		}
-		current, showErr := h.projectSummaryByID(ctx, project.ID)
-		if showErr != nil {
-			return nil, ProjectMutationOutput{}, showErr
 		}
 		return successResult(), ProjectMutationOutput{Project: current, Changed: true, Event: eventSummary(&response.Event), Details: map[string]any{"alias_id": response.Alias.ID, "alias_kind": response.Alias.AliasKind}}, nil
 	default:
@@ -395,7 +395,7 @@ func (h toolHandlers) projectSummaryByID(ctx context.Context, projectID int64) (
 			return projectSummaryOut(project), nil
 		}
 	}
-	return ProjectSummary{}, fmt.Errorf("project ID %d was not found after mutation", projectID)
+	return ProjectSummary{}, fmt.Errorf("project ID %d was not found in the project catalog", projectID)
 }
 
 func projectSummary(project generated.Project) ProjectSummary {

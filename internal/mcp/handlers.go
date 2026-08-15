@@ -565,10 +565,9 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		changed = response.Changed
 		mainEvent = eventSummary(&response.Event)
 		scopedChanges, changesErr := h.scopedLinkChanges(ctx, response.Changes)
-		if changesErr != nil {
-			return nil, EditOutput{}, changesErr
+		if changesErr == nil {
+			changes = linkChangesSummary(scopedChanges)
 		}
-		changes = linkChangesSummary(scopedChanges)
 		for index := range response.Events {
 			if event := eventSummary(&response.Events[index]); event != nil {
 				events = append(events, *event)

@@ -832,6 +832,53 @@ func TestEditFiltersArchivedLinkChangePeerOutsideActiveScope(t *testing.T) {
 	require.Nil(t, output.Changes.ParentRemoved, "archived relationship peer must not leak through edit changes")
 }
 
+func TestEditReportsCommittedMutationWhenLinkChangeScopingFails(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case request.Method == http.MethodPatch:
+			writeJSON(writer, map[string]any{
+				"changed": true, "issue": issueJSON(1, "spoke-project", "abc1"),
+				"event": map[string]any{
+					"event_id": 7, "event_uid": "01HEEEEEEEEEEEEEEEEEEEEEE7", "type": "issue.links_changed",
+					"actor": "example-agent", "content_hash": "hash", "created_at": "2026-08-12T00:00:00Z",
+					"origin_instance_uid": "01HFFFFFFFFFFFFFFFFFFFFFFF", "payload": "{}",
+					"project_id": 1, "project_name": "spoke-project", "project_uid": "01HAAAAAAAAAAAAAAAAAAAAAAA",
+				},
+				"changes": map[string]any{
+					"related_added": []any{map[string]any{
+						"project": "spoke-project", "qualified_id": "spoke-project#def2",
+						"short_id": "def2", "status": "open", "uid": "01HCCCCCCCCCCCCCCCCCCCCCCC",
+					}},
+				},
+			})
+		case strings.HasPrefix(request.URL.Path, "/api/v1/issues/"):
+			writer.WriteHeader(http.StatusInternalServerError)
+			writeJSON(writer, map[string]any{
+				"status": http.StatusInternalServerError,
+				"error":  map[string]any{"code": "internal_error", "message": "try again"},
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	parent := "spoke-project#def2"
+	_, output, err := handlers.edit(t.Context(), nil, EditInput{Ref: "spoke-project#abc1", Parent: &parent})
+	require.NoError(t, err)
+	require.True(t, output.Changed)
+	require.Equal(t, "spoke-project#abc1", output.Issue.QualifiedRef)
+	require.Nil(t, output.Changes, "unresolved supplemental changes must be omitted after commit")
+}
+
 func TestEventRedactionPreservesOpaqueMetadataAndDiffValues(t *testing.T) {
 	var issueLookups int
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {

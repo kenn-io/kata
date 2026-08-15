@@ -1,8 +1,10 @@
 package mcpserver
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -200,6 +202,73 @@ func TestProjectUpdateDetachAliasReturnsArchivedProjectSummary(t *testing.T) {
 	require.Equal(t, formatTime(archived.CreatedAt), summary["created_at"])
 	require.Equal(t, true, summary["archived"])
 	require.Equal(t, formatTime(*archived.DeletedAt), summary["deleted_at"])
+}
+
+func TestProjectUpdateDoesNotReadProjectAfterMutationCommit(t *testing.T) {
+	for _, action := range []string{"rewrite_author", "detach_alias"} {
+		t.Run(action, func(t *testing.T) {
+			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			project, err := store.CreateProject(t.Context(), "example-project")
+			require.NoError(t, err)
+			issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: project.ID, Title: "Example issue", Author: "user-a",
+			})
+			require.NoError(t, err)
+			alias, err := store.AttachAlias(t.Context(), project.ID, "host-a.example/repository", "git")
+			require.NoError(t, err)
+
+			daemonServer := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
+			t.Cleanup(func() { require.NoError(t, daemonServer.Close()) })
+			var mutationCommitted atomic.Bool
+			var postMutationReads atomic.Int32
+			daemonHandler := daemonServer.Handler()
+			httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if mutationCommitted.Load() && request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects" {
+					postMutationReads.Add(1)
+					http.Error(writer, "project catalog unavailable", http.StatusInternalServerError)
+					return
+				}
+				daemonHandler.ServeHTTP(writer, request)
+				if request.Method == http.MethodPost || request.Method == http.MethodDelete {
+					mutationCommitted.Store(true)
+				}
+			}))
+			t.Cleanup(httpServer.Close)
+			client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
+			require.NoError(t, err)
+			session := connectTestServerWithOptions(t, Options{
+				Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
+			})
+
+			arguments := map[string]any{"project": project.Name, "action": action}
+			if action == "rewrite_author" {
+				arguments["from"] = "user-a"
+				arguments["to"] = "user-b"
+			} else {
+				arguments["alias_id"] = alias.ID
+				arguments["force"] = true
+			}
+			output := callAdministrationTool(t, session, "kata.project_update", arguments)
+			require.True(t, mutationCommitted.Load())
+			require.Zero(t, postMutationReads.Load())
+			summary := output["project"].(map[string]any)
+			require.EqualValues(t, project.ID, summary["id"])
+			require.Equal(t, project.UID, summary["uid"])
+			require.EqualValues(t, project.Revision, summary["revision"])
+			require.Equal(t, formatTime(project.CreatedAt), summary["created_at"])
+			if action == "rewrite_author" {
+				require.Equal(t, true, output["changed"])
+				updated, showErr := store.IssueByID(t.Context(), issue.ID)
+				require.NoError(t, showErr)
+				require.Equal(t, "user-b", updated.Author)
+			} else {
+				_, aliasErr := store.AliasByID(t.Context(), alias.ID)
+				require.ErrorIs(t, aliasErr, db.ErrNotFound)
+			}
+		})
+	}
 }
 
 func callAdministrationTool(t *testing.T, session *sdkmcp.ClientSession, name string, arguments map[string]any) map[string]any {
