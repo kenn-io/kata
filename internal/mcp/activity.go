@@ -408,12 +408,12 @@ func (h toolHandlers) move(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 }
 
 func (h toolHandlers) deleteIssue(ctx context.Context, _ *sdkmcp.CallToolRequest, input DeleteInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	project, ref, qualified, err := h.destructiveTarget(ctx, input.Ref, input.Confirm, "DELETE")
+	project, target, qualified, err := h.destructiveTarget(ctx, input.Ref, input.Confirm, "DELETE")
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
 	response, err := h.options.Client.DeleteIssue(ctx, &generated.DeleteIssueRequestOptions{
-		PathParams: &generated.DeleteIssuePath{ProjectID: project.ID, Ref: ref},
+		PathParams: &generated.DeleteIssuePath{ProjectID: project.ID, Ref: target.UID},
 		Body:       &generated.DeleteIssueBody{Actor: h.options.Actor, Reason: optionalString(input.Reason)},
 		Header:     &generated.DeleteIssueHeaders{XKataConfirm: &qualified},
 	})
@@ -439,25 +439,33 @@ func (h toolHandlers) restoreIssue(ctx context.Context, _ *sdkmcp.CallToolReques
 }
 
 func (h toolHandlers) purgeIssue(ctx context.Context, _ *sdkmcp.CallToolRequest, input PurgeInput) (*sdkmcp.CallToolResult, PurgeOutput, error) {
-	project, ref, qualified, err := h.destructiveTarget(ctx, input.Ref, input.Confirm, "PURGE")
+	project, target, qualified, err := h.destructiveTarget(ctx, input.Ref, input.Confirm, "PURGE")
 	if err != nil {
 		return nil, PurgeOutput{}, err
 	}
 	response, err := h.options.Client.PurgeIssue(ctx, &generated.PurgeIssueRequestOptions{
-		PathParams: &generated.PurgeIssuePath{ProjectID: project.ID, Ref: ref},
+		PathParams: &generated.PurgeIssuePath{ProjectID: project.ID, Ref: target.UID},
 		Body:       &generated.PurgeIssueBody{Actor: h.options.Actor, Reason: optionalString(input.Reason)},
 		Header:     &generated.PurgeIssueHeaders{XKataConfirm: &qualified},
 	})
 	if err != nil {
 		return nil, PurgeOutput{}, err
 	}
-	return successResult(), PurgeOutput{Project: project, Ref: project.Name + "#" + ref, Purged: true, Log: response.PurgeLog}, nil
+	return successResult(), PurgeOutput{Project: project, Ref: project.Name + "#" + target.ShortID, Purged: true, Log: response.PurgeLog}, nil
 }
 
-func (h toolHandlers) destructiveTarget(ctx context.Context, rawRef, confirm, verb string) (ProjectIdentity, string, string, error) {
+// destructiveIssue is the issue confirmed by a destructive preflight. UID
+// addresses the mutation so a short ID reused after the preflight cannot
+// redirect it; ShortID is the confirmed display reference.
+type destructiveIssue struct {
+	UID     string
+	ShortID string
+}
+
+func (h toolHandlers) destructiveTarget(ctx context.Context, rawRef, confirm, verb string) (ProjectIdentity, destructiveIssue, string, error) {
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, rawRef, true)
 	if err != nil {
-		return ProjectIdentity{}, "", "", err
+		return ProjectIdentity{}, destructiveIssue{}, "", err
 	}
 	// Resolve soft-deleted rows for DELETE as well as PURGE so a retry
 	// after a lost response reaches the daemon's idempotent re-delete
@@ -468,14 +476,14 @@ func (h toolHandlers) destructiveTarget(ctx context.Context, rawRef, confirm, ve
 		Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
 	})
 	if err != nil {
-		return ProjectIdentity{}, "", "", err
+		return ProjectIdentity{}, destructiveIssue{}, "", err
 	}
 	canonical := project.Name + "#" + shown.Issue.ShortID
 	expected := verb + " " + canonical
 	if confirm != expected {
-		return ProjectIdentity{}, "", "", fmt.Errorf("confirm must equal %q", expected)
+		return ProjectIdentity{}, destructiveIssue{}, "", fmt.Errorf("confirm must equal %q", expected)
 	}
-	return project, shown.Issue.ShortID, expected, nil
+	return project, destructiveIssue{UID: shown.Issue.UID, ShortID: shown.Issue.ShortID}, expected, nil
 }
 
 func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input WaitInput) (*sdkmcp.CallToolResult, WaitOutput, error) {

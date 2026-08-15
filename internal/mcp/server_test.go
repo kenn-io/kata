@@ -283,6 +283,10 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 		// unique key deduplicates these creations.
 		"kata.token_create":      true,
 		"kata.recurrence_update": true,
+		// Identical retries produce additional effects: renew extends the
+		// lease expiry again and a sync pass re-imports from the provider.
+		"kata.lease":     true,
+		"kata.sync_once": true,
 	}
 	for _, tool := range result.Tools {
 		annotations := tool.Annotations

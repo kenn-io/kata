@@ -118,11 +118,18 @@ timestamps cannot skip or repeat rows and a project merge or issue purge
 during pagination fails the page with a restart error instead of silently
 skewing it. `kata.show` returns at most 100 comments. Create and
 comment require idempotency keys. `kata.token_create`, recurrence creation,
-and `kata.storage_import` are annotated non-idempotent: the first two mint a
-new record on every identical retry, and a forced storage import replaces the
-target again, with a fresh instance identity when `new_instance` is set.
+`kata.storage_import`, `kata.lease`, and `kata.sync_once` are annotated
+non-idempotent: the first two mint a new record on every identical retry, a
+forced storage import replaces the target again (with a fresh instance
+identity when `new_instance` is set), a lease renewal extends the expiry on
+every call, and each sync pass re-imports from the provider.
+`kata.lease_steal` acquires first and only force-releases a holder that
+denies that acquire, so a retry after a lost response keeps a lease the
+startup principal already holds instead of releasing and re-acquiring it.
 Destructive tools preserve Kata's exact
-confirmation and revision contracts.
+confirmation and revision contracts. `kata.delete` and `kata.purge` confirm
+against `project#short_id` and then address the daemon by the issue's
+immutable UID.
 
 Recurrence patch and delete calls require the current positive `revision` and
 send it as `If-Match`. Create calls do not use a revision.

@@ -134,7 +134,7 @@ type FederationQuarantineOutput struct {
 func registerLeaseTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, false)
 	destructive := toolHints(false, true, false)
-	addTool(server, "kata.lease", "Manage lease", "Acquire, renew, or release the startup actor's federation write lease.", destructive, handlers.lease)
+	addTool(server, "kata.lease", "Manage lease", "Acquire, renew, or release the startup actor's federation write lease; renew extends the expiry on every call.", nonIdempotent(toolHints(false, true, false)), handlers.lease)
 	addTool(server, "kata.lease_force_release", "Force-release lease", "Administratively release another lease with a reason.", destructive, handlers.leaseForceRelease)
 	addTool(server, "kata.lease_status", "Lease status", "Read the current federation write lease for an issue.", read, handlers.leaseStatus)
 	addTool(server, "kata.lease_steal", "Steal lease", "Resumably force-release and acquire a lease as the startup actor.", destructive, handlers.leaseSteal)
@@ -218,29 +218,29 @@ func (h toolHandlers) leaseForceRelease(ctx context.Context, _ *sdkmcp.CallToolR
 	return successResult(), leaseMutationOutput(project, ref, response), nil
 }
 
+// leaseSteal acquires first: the daemon re-grants a lease already held by the
+// startup principal, so a retry after a lost response keeps the lease instead
+// of force-releasing it and racing other claimants. Only a denied acquire
+// force-releases the reported holder before one more acquire attempt.
 func (h toolHandlers) leaseSteal(ctx context.Context, _ *sdkmcp.CallToolRequest, input LeaseStealInput) (*sdkmcp.CallToolResult, LeaseOutput, error) {
-	statusResult, status, err := h.leaseStatus(ctx, nil, LeaseStatusInput{Ref: input.Ref})
-	_ = statusResult
+	acquire := LeaseInput{Ref: input.Ref, Action: "acquire", TTLSeconds: input.TTLSeconds, Purpose: input.Purpose}
+	_, acquired, err := h.lease(ctx, nil, acquire)
 	if err != nil {
 		return nil, LeaseOutput{}, err
 	}
-	previous := status.Holder
-	if status.Held {
-		if _, _, err := h.leaseForceRelease(ctx, nil, LeaseForceReleaseInput{Ref: input.Ref, Reason: input.Reason}); err != nil {
-			return nil, LeaseOutput{}, err
-		}
+	if acquired.Granted || acquired.Pending {
+		return successResult(), acquired, nil
 	}
-	_, acquired, err := h.lease(ctx, nil, LeaseInput{
-		Ref: input.Ref, Action: "acquire", TTLSeconds: input.TTLSeconds, Purpose: input.Purpose,
-	})
+	previous := acquired.Holder
+	if _, _, err := h.leaseForceRelease(ctx, nil, LeaseForceReleaseInput{Ref: input.Ref, Reason: input.Reason}); err != nil {
+		return nil, LeaseOutput{}, err
+	}
+	_, acquired, err = h.lease(ctx, nil, acquire)
 	if err != nil {
 		return nil, LeaseOutput{}, err
 	}
 	acquired.PreviousHolder = previous
 	if !acquired.Granted && !acquired.Pending {
-		if !status.Held {
-			return nil, LeaseOutput{}, fmt.Errorf("lease steal acquisition was denied for %s", acquired.Ref)
-		}
 		return nil, LeaseOutput{}, fmt.Errorf("lease steal force-release succeeded but lease acquisition was denied for %s", acquired.Ref)
 	}
 	return successResult(), acquired, nil

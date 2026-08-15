@@ -465,8 +465,10 @@ func toolHints(readOnly, destructive, openWorld bool) *sdkmcp.ToolAnnotations {
 	}
 }
 
-// nonIdempotent marks a creation tool whose identical retry mints a new
-// record because no idempotency key or natural unique key deduplicates it.
+// nonIdempotent marks a tool whose identical retry has additional effects:
+// a creation with no idempotency key or natural unique key mints a new
+// record, a lease renewal extends the expiry again, and a sync pass
+// re-imports from the provider.
 func nonIdempotent(hints *sdkmcp.ToolAnnotations) *sdkmcp.ToolAnnotations {
 	hints.IdempotentHint = false
 	return hints

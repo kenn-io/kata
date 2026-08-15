@@ -1866,3 +1866,56 @@ func reviewClient(t *testing.T, handler http.HandlerFunc) *kataclient.Client {
 	require.NoError(t, err)
 	return client
 }
+
+// TestDestructiveActionsAddressIssueByUID pins the delete and purge requests
+// to the immutable UID resolved during the confirmation preflight so a short
+// ID reused between preflight and mutation cannot redirect the action.
+func TestDestructiveActionsAddressIssueByUID(t *testing.T) {
+	const issueUID = "01HCCCCCCCCCCCCCCCCCCCCCCC"
+	var shortIDMutations int
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects/1/issues/abc4":
+			issue := issueJSON(1, "spoke-project", "abc4")
+			issue["uid"] = issueUID
+			writeJSON(writer, map[string]any{"issue": issue, "labels": []any{}, "comments": []any{}, "links": []any{}})
+		case "/api/v1/projects/1/issues/abc4/actions/delete", "/api/v1/projects/1/issues/abc4/actions/purge":
+			shortIDMutations++
+			http.Error(writer, "mutation addressed by mutable short id", http.StatusInternalServerError)
+		case "/api/v1/projects/1/issues/" + issueUID + "/actions/delete":
+			require.Equal(t, "DELETE spoke-project#abc4", request.Header.Get("X-Kata-Confirm"))
+			issue := issueJSON(1, "spoke-project", "abc4")
+			issue["uid"] = issueUID
+			issue["status"] = "deleted"
+			writeJSON(writer, map[string]any{
+				"changed": true, "issue": issue,
+				"event": map[string]any{
+					"event_id": 7, "event_uid": "01HEEEEEEEEEEEEEEEEEEEEEE7", "type": "issue.deleted",
+					"actor": "example-agent", "content_hash": "hash", "created_at": "2026-08-12T00:00:00Z",
+					"origin_instance_uid": "01HFFFFFFFFFFFFFFFFFFFFFFF", "payload": "{}",
+					"project_id": 1, "project_name": "spoke-project", "project_uid": "01HAAAAAAAAAAAAAAAAAAAAAAA",
+				},
+			})
+		case "/api/v1/projects/1/issues/" + issueUID + "/actions/purge":
+			require.Equal(t, "PURGE spoke-project#abc4", request.Header.Get("X-Kata-Confirm"))
+			writeJSON(writer, map[string]any{"purge_log": map[string]any{
+				"id": 1, "project_id": 1, "issue_uid": issueUID, "actor": "example-agent",
+				"purged_at": "2026-08-12T00:00:00Z",
+			}})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewBoundScope(ProjectIdentity{ID: 1, Name: "spoke-project"})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+
+	_, deleted, err := handlers.deleteIssue(t.Context(), nil, DeleteInput{Ref: "abc4", Confirm: "DELETE spoke-project#abc4"})
+	require.NoError(t, err)
+	require.Equal(t, "spoke-project#abc4", deleted.Issue.QualifiedRef)
+	_, purged, err := handlers.purgeIssue(t.Context(), nil, PurgeInput{Ref: "abc4", Confirm: "PURGE spoke-project#abc4"})
+	require.NoError(t, err)
+	require.True(t, purged.Purged)
+	require.Equal(t, "spoke-project#abc4", purged.Ref, "display refs keep the confirmed short id")
+	require.Zero(t, shortIDMutations)
+}

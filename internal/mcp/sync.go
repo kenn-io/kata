@@ -62,7 +62,7 @@ type SyncOnceOutput struct {
 func registerSyncTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.sync_status", "Sync status", "Read issue synchronization state without returning credentials.", toolHints(true, false, true), handlers.syncStatus)
 	addTool(server, "kata.sync_update", "Update sync", "Enable or disable issue synchronization for one project.", toolHints(false, true, true), handlers.syncUpdate)
-	addTool(server, "kata.sync_once", "Run sync", "Run one issue synchronization pass; imported changes overwrite synced issue fields.", toolHints(false, true, true), handlers.syncOnce)
+	addTool(server, "kata.sync_once", "Run sync", "Run one issue synchronization pass; imported changes overwrite synced issue fields.", nonIdempotent(toolHints(false, true, true)), handlers.syncOnce)
 }
 
 func (h toolHandlers) syncStatus(ctx context.Context, _ *sdkmcp.CallToolRequest, input SyncStatusInput) (*sdkmcp.CallToolResult, SyncStatusOutput, error) {

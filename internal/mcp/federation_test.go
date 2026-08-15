@@ -142,16 +142,15 @@ func TestLeaseStealForceReleasesHeldLeaseForSameActorDifferentClient(t *testing.
 func TestLeaseStealRejectsNonPendingDeniedAcquire(t *testing.T) {
 	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 	pending := false
+	var forced, acquires int
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch {
-		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/lease"):
-			writeJSON(writer, generated.ClaimStatusBody{
-				Held: false, HubNow: now,
-				Holder: generated.ClaimPrincipalOut{
-					Holder: "user-a", HolderInstanceUID: "01HUUUUUUUUUUUUUUUUUUUUUUU", ClientKind: "cli",
-				},
-			})
+		case strings.HasSuffix(request.URL.Path, "/actions/force_release"):
+			forced++
+			writeJSON(writer, releasedLeaseResponse(now))
 		case strings.HasSuffix(request.URL.Path, "/actions/acquire"):
+			acquires++
+			// A racing claimant wins both before and after the force-release.
 			writeJSON(writer, generated.ClaimActionResponseBody{
 				Granted: false, Pending: &pending,
 				Holder: generated.ClaimPrincipalOut{
@@ -170,7 +169,46 @@ func TestLeaseStealRejectsNonPendingDeniedAcquire(t *testing.T) {
 	_, _, err = handlers.leaseSteal(t.Context(), nil, LeaseStealInput{
 		Ref: "abc4", Reason: "operator handoff",
 	})
-	require.ErrorContains(t, err, "lease steal acquisition was denied")
+	require.ErrorContains(t, err, "force-release succeeded but lease acquisition was denied")
+	require.Equal(t, 1, forced)
+	require.Equal(t, 2, acquires)
+}
+
+// TestLeaseStealRetryKeepsOwnLease covers a retry after a lost response: the
+// startup principal already holds the lease, so the steal must re-grant it
+// without a force-release that would open a window for another claimant.
+func TestLeaseStealRetryKeepsOwnLease(t *testing.T) {
+	var forced int
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case strings.HasSuffix(request.URL.Path, "/actions/force_release"):
+			forced++
+			http.Error(writer, "must not force-release an owned lease", http.StatusInternalServerError)
+		case strings.HasSuffix(request.URL.Path, "/actions/acquire"):
+			// The daemon re-grants an acquire from the principal that already holds it.
+			writeJSON(writer, generated.ClaimActionResponseBody{
+				Granted: true,
+				Holder: generated.ClaimPrincipalOut{
+					Holder: "example-agent", HolderInstanceUID: "01HIIIIIIIIIIIIIIIIIIIIIII", ClientKind: "mcp",
+				},
+				Lease: leaseRecord("example-agent", "mcp", nil),
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewBoundScope(ProjectIdentity{ID: 1, Name: "spoke-project"})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+
+	_, output, err := handlers.leaseSteal(t.Context(), nil, LeaseStealInput{
+		Ref: "abc4", Reason: "operator handoff",
+	})
+	require.NoError(t, err)
+	require.Zero(t, forced, "a lease already held by the startup principal must not be released")
+	require.True(t, output.Granted)
+	require.True(t, output.Held)
+	require.Empty(t, output.PreviousHolder, "no holder was displaced")
 }
 
 func TestLeaseStealAllowsPendingAcquire(t *testing.T) {
