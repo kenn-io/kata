@@ -35,7 +35,7 @@ only Kata wire data and host-supplied actions.
 {/if}
 ```
 
-`supportsKataAPISchema` accepts Kata API schemas `>=0.9.0 <0.11.0`. A missing
+`supportsKataAPISchema` accepts Kata API schemas `>=0.9.0 <0.12.0`. A missing
 or empty `api_schema_version` is incompatible for an embedding host. Read the
 version from `GET /api/v1/health`; issue-detail responses do not carry it.
 The embedding host must fetch health and issue data through its authenticated

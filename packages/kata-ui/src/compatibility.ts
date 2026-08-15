@@ -4,5 +4,5 @@ export function supportsKataAPISchema(version: string): boolean {
 
   const major = Number(match[1])
   const minor = Number(match[2])
-  return major === 0 && (minor === 9 || minor === 10)
+  return major === 0 && minor >= 9 && minor <= 11
 }
