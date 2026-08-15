@@ -103,7 +103,7 @@ Go writes the binary to `$(go env GOBIN)` when set, otherwise to
 Check the install:
 
 ```sh
-kata version
+kata version   # or kata --version
 kata --help
 ```
 

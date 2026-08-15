@@ -20,6 +20,10 @@ current flag list in your installed binary.
 | `--format human|json|agent` | Select output mode explicitly. |
 | `--quiet` | Suppress non-essential output. |
 
+`kata --version` prints the same build identity as the `version` command below
+and honors `--json`/`--agent`. It is a root-level flag, so it is not accepted
+on subcommands. There is no `-v` shorthand.
+
 ## Workspace initialization
 
 ```sh
@@ -566,6 +570,7 @@ kata health
 kata whoami
 kata quickstart
 kata version [--json]
+kata --version
 kata update [--check] [--force] [--yes]
 kata tui [issue-ref]
 ```
@@ -597,6 +602,8 @@ describe the build runtime and target. `agent_format` is the version of the
 agent-readable text contract. Consumers should use
 `kata_api_version` to select the JSON schema and ignore additional fields they
 do not recognize. Plain `kata version` retains its human-readable output.
+`kata --version` is an equivalent spelling of the same command and accepts the
+same output-mode flags.
 
 `kata update --check` checks Kata's GitHub release feed without installing.
 Its JSON result includes `distribution` and `package_release_may_lag`, plus an

@@ -27,6 +27,7 @@ type globalFlags struct {
 	Workspace    string
 	Project      string
 	Daemon       string
+	Version      bool
 }
 
 var flags globalFlags
@@ -46,6 +47,25 @@ func newRootCmd() *cobra.Command {
 		Short:         "kata — lightweight issue tracker for agents",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// The root is runnable only to serve the conventional `--version`
+		// flag; with no flag it falls back to printing help. Registering
+		// the flag ourselves (rather than setting cobra's Version field)
+		// keeps --json/--agent working, because cobra's built-in version
+		// flag short-circuits before PersistentPreRunE resolves the output
+		// mode.
+		//
+		// A runnable root also means PersistentPreRunE now runs for a bare
+		// `kata`, where cobra previously short-circuited to help before it.
+		// Plain `kata` still prints help and exits zero, but invalid or
+		// conflicting global output flags are now a usage error on the root
+		// instead of being silently ignored, matching every subcommand.
+		// TestRoot_NoArgsValidatesGlobalOutputFlags pins that contract.
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if flags.Version {
+				return writeVersion(cmd.OutOrStdout(), currentOutputMode())
+			}
+			return cmd.Help()
+		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			runEEntered = true
 			errorCommandName = commandLeaf(cmd)
@@ -69,6 +89,11 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "path used for project resolution (default: cwd)")
 	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name for project-scoped commands")
 	cmd.PersistentFlags().StringVar(&flags.Daemon, "daemon", "", "named daemon catalog entry to target for this command")
+	// Root-local, not persistent: `kata --version` is the conventional
+	// spelling, while `kata list --version` should stay an unknown flag.
+	// No `-v` shorthand: that spelling conventionally means verbose, and
+	// reclaiming it after release would break callers.
+	cmd.Flags().BoolVar(&flags.Version, "version", false, "print version information")
 	// Catch the cobra/pflag pitfall where a positional that looks like
 	// a negative integer (kata show -1, kata delete -1) is parsed as
 	// a flag and produces "unknown shorthand flag: '1' in -1" — useless
