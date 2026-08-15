@@ -28,10 +28,7 @@ func TestE2E_InitWithCodexHooks(t *testing.T) {
 	assert.FileExists(t, filepath.Join(dir, ".kata.toml"))
 	assert.Equal(t, map[string]any{
 		"hooks": map[string]any{
-			"SessionStart": []any{map[string]any{
-				"matcher": "startup|resume|clear",
-				"hooks":   []any{expectedCodexHandler()},
-			}},
+			"SessionStart": expectedCodexSessionStartGroups(),
 		},
 	}, readCodexHooks(t, dir))
 }
@@ -69,10 +66,7 @@ func TestE2E_InitWithCodexHooks_ComposesWithAgentsAndHooks(t *testing.T) {
 	codexPath := filepath.Join(dir, ".codex", "hooks.json")
 	assert.Equal(t, map[string]any{
 		"hooks": map[string]any{
-			"SessionStart": []any{map[string]any{
-				"matcher": "startup|resume|clear",
-				"hooks":   []any{expectedCodexHandler()},
-			}},
+			"SessionStart": expectedCodexSessionStartGroups(),
 		},
 	}, readCodexHooks(t, dir))
 

@@ -198,6 +198,9 @@ func newQuickstartCmd() *cobra.Command {
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			switch currentOutputMode() {
+			case outputContract:
+				_, err := fmt.Fprint(cmd.OutOrStdout(), agentContractText)
+				return err
 			case outputJSON:
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, map[string]string{

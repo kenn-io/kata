@@ -17,9 +17,10 @@ import (
 type outputMode string
 
 const (
-	outputHuman outputMode = "human"
-	outputJSON  outputMode = "json"
-	outputAgent outputMode = "agent"
+	outputHuman    outputMode = "human"
+	outputJSON     outputMode = "json"
+	outputAgent    outputMode = "agent"
+	outputContract outputMode = "contract"
 
 	agentFormatVersion = 1
 )
@@ -114,9 +115,19 @@ func printAgentMutationDecoded(
 	return nil
 }
 
-func resolveOutputModeFormats(formats []string, fallback string, importLegacy bool, jsonFlag, agentFlag bool) (outputMode, error) {
+func resolveOutputModeFormats(
+	formats []string,
+	fallback string,
+	importLegacy bool,
+	contractAllowed bool,
+	jsonFlag, agentFlag bool,
+) (outputMode, error) {
 	if len(formats) == 0 && fallback != "" {
 		formats = []string{fallback}
+	}
+	wanted := "human, json, or agent"
+	if contractAllowed {
+		wanted = "human, json, agent, or contract"
 	}
 	var selected []outputMode
 	for _, format := range formats {
@@ -127,9 +138,15 @@ func resolveOutputModeFormats(formats []string, fallback string, importLegacy bo
 		switch outputMode(format) {
 		case outputHuman, outputJSON, outputAgent:
 			selected = append(selected, outputMode(format))
+		case outputContract:
+			if contractAllowed {
+				selected = append(selected, outputContract)
+				continue
+			}
+			fallthrough
 		default:
 			return "", &cliError{
-				Message:  "unsupported output format " + strconv.Quote(format) + " (want human, json, or agent)",
+				Message:  "unsupported output format " + strconv.Quote(format) + " (want " + wanted + ")",
 				Kind:     kindUsage,
 				ExitCode: ExitUsage,
 			}
@@ -154,7 +171,7 @@ func resolveOutputModeFormats(formats []string, fallback string, importLegacy bo
 }
 
 func resolveOutputModeValues(format string, jsonFlag, agentFlag bool) (outputMode, error) {
-	return resolveOutputModeFormats(nil, format, false, jsonFlag, agentFlag)
+	return resolveOutputModeFormats(nil, format, false, false, jsonFlag, agentFlag)
 }
 
 func currentOutputMode() outputMode {
@@ -175,7 +192,14 @@ func resolveOutputModeForCommand(cmd *cobra.Command) (outputMode, error) {
 	if isImportCommand(cmd) && isImportLegacySourceFormat(format) {
 		format = ""
 	}
-	return resolveOutputModeFormats(flags.FormatValues, format, isImportCommand(cmd), flags.JSON, flags.Agent)
+	return resolveOutputModeFormats(
+		flags.FormatValues,
+		format,
+		isImportCommand(cmd),
+		supportsContractOutput(cmd),
+		flags.JSON,
+		flags.Agent,
+	)
 }
 
 func resolveOutputModeArgs(args []string, format string, jsonFlag, agentFlag bool) (outputMode, error) {
@@ -195,7 +219,9 @@ func resolveOutputModeArgsForCommand(
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
-			return resolveOutputModeFormats(formats, format, importLegacy, jsonFlag, agentFlag)
+			return resolveOutputModeFormats(
+				formats, format, importLegacy, supportsContractOutput(cmd), jsonFlag, agentFlag,
+			)
 		}
 		name, value, hasValue, ok := splitLongFlag(arg)
 		if !ok {
@@ -249,7 +275,9 @@ func resolveOutputModeArgsForCommand(
 			}
 		}
 	}
-	return resolveOutputModeFormats(formats, format, importLegacy, jsonFlag, agentFlag)
+	return resolveOutputModeFormats(
+		formats, format, importLegacy, supportsContractOutput(cmd), jsonFlag, agentFlag,
+	)
 }
 
 func splitLongFlag(arg string) (name, value string, hasValue bool, ok bool) {
@@ -327,6 +355,10 @@ func outputFormatValue(format string, importLegacy bool) string {
 
 func isImportCommand(cmd *cobra.Command) bool {
 	return cmd != nil && cmd.Name() == "import"
+}
+
+func supportsContractOutput(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Name() == "quickstart"
 }
 
 func isImportLegacySourceFormat(format string) bool {

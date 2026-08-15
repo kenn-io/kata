@@ -214,6 +214,14 @@ func TestRoot_QuickstartAdvertised(t *testing.T) {
 	assert.Contains(t, quickstart.Aliases, "agent-instructions")
 }
 
+func TestHelp_DescribesAgentContractSurfaces(t *testing.T) {
+	rootHelp := string(executeRoot(t, newRootCmd(), "--help"))
+	assert.Contains(t, rootHelp, "human|json|agent; contract for quickstart")
+
+	initHelp := string(executeRoot(t, newRootCmd(), "init", "--help"))
+	assert.Contains(t, initHelp, "Codex CLI contract and work.attention hooks")
+}
+
 func TestHelp_RefFlagsDoNotAdvertiseLegacyNumbers(t *testing.T) {
 	for _, args := range [][]string{
 		{"create", "--help"},
@@ -340,6 +348,59 @@ func TestOutputMode_RepeatedFormatConflicts(t *testing.T) {
 	require.Error(t, err)
 	assert.Empty(t, stdout)
 	assert.Contains(t, stderr, "conflicting output modes")
+}
+
+func TestOutputMode_ContractAcceptedOnlyForQuickstart(t *testing.T) {
+	for _, command := range []string{"quickstart", "agent-instructions"} {
+		t.Run(command, func(t *testing.T) {
+			resetRunEEntered(t)
+			resetFlags(t)
+			stdout, stderr, err := executeRootCapture(t, context.Background(),
+				"--format", "contract", command)
+			require.NoError(t, err)
+			assert.NotEmpty(t, stdout)
+			assert.Empty(t, stderr)
+		})
+	}
+}
+
+func TestOutputMode_ContractRejectedForUnrelatedCommands(t *testing.T) {
+	for _, args := range [][]string{
+		{"--format", "contract", "version"},
+		{"--format", "contract", "list"},
+		{"--format", "contract"},
+	} {
+		resetRunEEntered(t)
+		resetFlags(t)
+		stdout, stderr, err := executeRootCapture(t, context.Background(), args...)
+		require.Error(t, err)
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, `unsupported output format "contract"`)
+	}
+}
+
+func TestOutputMode_QuickstartUsageListsContractFormat(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	stdout, stderr, err := executeRootCapture(t, context.Background(),
+		"--format", "bogus", "quickstart")
+	require.Error(t, err)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "want human, json, agent, or contract")
+}
+
+func TestOutputMode_ContractConflictsWithAgentAndJSON(t *testing.T) {
+	for _, flag := range []string{"--agent", "--json"} {
+		t.Run(flag, func(t *testing.T) {
+			resetRunEEntered(t)
+			resetFlags(t)
+			stdout, stderr, err := executeRootCapture(t, context.Background(),
+				"--format", "contract", flag, "quickstart")
+			require.Error(t, err)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, "conflicting output modes")
+		})
+	}
 }
 
 func TestEmitError_RawModeScanParsesJSONTrueValue(t *testing.T) {

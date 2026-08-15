@@ -14,7 +14,10 @@ import (
 // `kata init --with-codex-hooks` wires the work.attention lifecycle into a
 // Codex CLI workspace. Kit owns config parsing, hook ownership, and updates.
 
-const codexSessionStartMatcher = "startup|resume|clear"
+const (
+	codexSessionStartMatcher         = "startup|resume|clear"
+	codexContractSessionStartMatcher = "startup|resume|clear|compact"
+)
 
 func applyCodexHooks(dir string) (bool, []string, error) {
 	root, err := os.OpenRoot(dir)
@@ -55,7 +58,7 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	result, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
+	attentionResult, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
 		ConfigPath: configPath,
 		Executable: "kata",
 		Arguments:  []string{"attention-hook", "start", "--source", attentionHookSource + "start"},
@@ -69,7 +72,21 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	return migrated || result.Changed, codexConfigHooksWarnings(root), nil
+	contractResult, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
+		ConfigPath: configPath,
+		Executable: "kata",
+		Arguments:  []string{"agent-contract-hook", "--source", agentContractHookSource},
+		Marker:     "--source " + agentContractHookSource,
+		Hooks: []agenthook.Hook{{
+			Event:   agenthook.EventSessionStart,
+			Matcher: codexContractSessionStartMatcher,
+			Timeout: 10 * time.Second,
+		}},
+	})
+	if err != nil {
+		return false, nil, err
+	}
+	return migrated || attentionResult.Changed || contractResult.Changed, codexConfigHooksWarnings(root), nil
 }
 
 // codexConfigHooksWarnings warns when Codex also has TOML-managed hooks.
