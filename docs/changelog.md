@@ -65,6 +65,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 **Bug fixes**
 
+- Rejected add-side link targets whose project is archived inside the mutation
+  transaction (initial links, atomic-edit adds and `set_parent`, and link
+  creation) with the same `409 link_target_archived` the preflight returns, so
+  an archival that races the preflight cannot insert a link to an archived
+  project. PostgreSQL share-locks the target project row alongside the issue
+  row; existing links to archived projects stay removable.
 - Restored the `clear_owner` and `clear_priority` recurrence template fields
   to the generated Go client; a stale template had silently dropped them from
   `pkg/client` since their introduction.

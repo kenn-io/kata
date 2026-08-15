@@ -153,6 +153,32 @@ func validateExpectedLinkProjectUIDsTx(ctx context.Context, tx *sql.Tx, expected
 	return nil
 }
 
+// requireAddableLinkTargetTx share-locks an add-side link target and its
+// project row and rejects the add when that project is archived. The daemon
+// gates the same condition before the transaction; the shared project lock
+// serializes against RemoveProject's FOR UPDATE so an archival cannot commit
+// between this check and the link insert. Removals never call it.
+func requireAddableLinkTargetTx(ctx context.Context, tx *sql.Tx, targetID int64) error {
+	var shortID, projectName string
+	var archived bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT i.short_id, p.name, p.deleted_at IS NOT NULL
+		  FROM issues i
+		  JOIN projects p ON p.id = i.project_id
+		 WHERE i.id = $1
+		 FOR SHARE OF i, p`, targetID).Scan(&shortID, &projectName, &archived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &db.LinkTargetNotFoundError{Number: targetID}
+	}
+	if err != nil {
+		return mapSQLError(err, nil)
+	}
+	if archived {
+		return &db.LinkTargetArchivedError{Number: targetID, ShortID: shortID, Project: projectName}
+	}
+	return nil
+}
+
 func (s *Store) applyAtomicLinkDeltaTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -178,6 +204,9 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		}
 		if target.ID == issue.ID {
 			return changed, db.ErrSelfLink
+		}
+		if err := requireAddableLinkTargetTx(ctx, tx, target.ID); err != nil {
+			return changed, err
 		}
 		if err := assertNoParentCycleTx(ctx, tx, issue.ID, target.ID); err != nil {
 			return changed, err
@@ -329,6 +358,9 @@ func atomicAddEdgeTx(
 	}
 	if target.ID == issue.ID {
 		return false, db.PeerIdentity{}, db.ErrSelfLink
+	}
+	if err := requireAddableLinkTargetTx(ctx, tx, target.ID); err != nil {
+		return false, db.PeerIdentity{}, err
 	}
 	fromID, toID := issue.ID, target.ID
 	if reverse {

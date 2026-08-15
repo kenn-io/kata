@@ -62,6 +62,15 @@ func (s *Store) CreateLinkAndEvent(
 		if err := prepareLinkInsertTx(ctx, tx, params, true); err != nil {
 			return err
 		}
+		// The peer of the event issue is the add-side target; its project
+		// must still be live at commit time.
+		peerID := params.ToIssueID
+		if params.FromIssueID != eventIssue.ID {
+			peerID = params.FromIssueID
+		}
+		if err := requireAddableLinkTargetTx(ctx, tx, peerID); err != nil {
+			return err
+		}
 		link, err = insertLinkTx(ctx, tx, params)
 		if err != nil {
 			return err

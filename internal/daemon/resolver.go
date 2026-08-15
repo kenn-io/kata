@@ -148,12 +148,21 @@ func requireLinkTargetAddable(ctx context.Context, store db.Storage, subjectProj
 		return internalAPIError(err)
 	}
 	if project.DeletedAt != nil {
-		return api.NewError(409, "link_target_archived",
-			fmt.Sprintf("link target %s is in archived project %q",
-				qualifiedID(project.Name, target.ShortID), project.Name),
-			"unarchive the project to add links", nil)
+		return linkTargetArchivedError(&db.LinkTargetArchivedError{
+			Number: target.ID, ShortID: target.ShortID, Project: project.Name,
+		})
 	}
 	return nil
+}
+
+// linkTargetArchivedError is the 409 link_target_archived envelope shared by
+// the pre-transaction gate above and the store's in-transaction re-check,
+// which catches an archival that commits between the two.
+func linkTargetArchivedError(target *db.LinkTargetArchivedError) error {
+	return api.NewError(409, "link_target_archived",
+		fmt.Sprintf("link target %s is in archived project %q",
+			qualifiedID(target.Project, target.ShortID), target.Project),
+		"unarchive the project to add links", nil)
 }
 
 // validateInitialLinkType rejects an initial link whose type the DB layer

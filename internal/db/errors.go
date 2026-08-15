@@ -241,6 +241,23 @@ func (e *LinkTargetNotFoundError) Error() string {
 
 func (e *LinkTargetNotFoundError) Unwrap() error { return ErrNotFound }
 
+// LinkTargetArchivedError is returned when an add-side link mutation (an
+// initial link, an atomic-edit add or set-parent, or a standalone link
+// insert) resolves a target whose project is archived inside the mutation
+// transaction. Removals never raise it: existing links to archived projects
+// stay removable. Handlers gate the same condition before the transaction;
+// this catches an archival that commits between that preflight and the
+// insert. ShortID and Project name the target for the API message.
+type LinkTargetArchivedError struct {
+	Number  int64
+	ShortID string
+	Project string
+}
+
+func (e *LinkTargetArchivedError) Error() string {
+	return fmt.Sprintf("link target %s#%s is in archived project %q", e.Project, e.ShortID, e.Project)
+}
+
 // ProjectHasOpenIssuesError carries the open-issue count alongside the
 // sentinel error so handlers can format the refusal message with the actual
 // number ("3 open issues remain").

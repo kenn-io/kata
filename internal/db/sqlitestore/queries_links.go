@@ -733,6 +733,17 @@ func scanLink(r rowScanner) (db.Link, error) {
 // Storage endpoints come from p (canonicalized for related when fromID > toID
 // at the call site); event attribution comes from ev. For parent/blocks the
 // two coincide; for related they may differ when canonicalization swapped.
+// linkPeerID returns the endpoint of a requested link that is not the issue
+// the mutation was requested on.
+func linkPeerID(p db.CreateLinkParams, eventIssueID int64) int64 {
+	if p.FromIssueID == eventIssueID {
+		return p.ToIssueID
+	}
+	return p.FromIssueID
+}
+
+// CreateLinkAndEvent inserts a relationship, records its event, and touches
+// the issue on whose surface the mutation was requested.
 func (d *Store) CreateLinkAndEvent(ctx context.Context, p db.CreateLinkParams, ev db.LinkEventParams) (db.Link, db.Event, error) {
 	return retryWrite2(ctx, d, func() (db.Link, db.Event, error) {
 		return d.createLinkAndEvent(ctx, p, ev)
@@ -769,6 +780,11 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 		if err := assertNoParentCycleTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
 			return db.Link{}, db.Event{}, err
 		}
+	}
+	// The peer of the event issue is the add-side target; its project must
+	// still be live at commit time.
+	if err := requireAddableLinkTargetTx(ctx, tx, linkPeerID(p, ev.EventIssueID)); err != nil {
+		return db.Link{}, db.Event{}, err
 	}
 
 	res, err := tx.ExecContext(ctx,

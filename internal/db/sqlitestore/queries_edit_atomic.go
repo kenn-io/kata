@@ -233,6 +233,9 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 		if target.ID == issue.ID {
 			return changed, db.ErrSelfLink
 		}
+		if err := requireAddableLinkTargetTx(ctx, tx, target.ID); err != nil {
+			return changed, err
+		}
 		if err := assertNoParentCycleTx(ctx, tx, issue.ID, target.ID); err != nil {
 			return changed, err
 		}
@@ -451,6 +454,9 @@ func addEdgeTx(ctx context.Context, tx *sql.Tx, urlIssue db.Issue, targetID int6
 	if target.ID == urlIssue.ID {
 		return false, db.PeerIdentity{}, db.ErrSelfLink
 	}
+	if err := requireAddableLinkTargetTx(ctx, tx, target.ID); err != nil {
+		return false, db.PeerIdentity{}, err
+	}
 	from, to := urlIssue.ID, target.ID
 	if reverseDirection {
 		from, to = to, from
@@ -583,6 +589,31 @@ func insertLinkRowTx(ctx context.Context, tx *sql.Tx, fromID, toID int64, linkTy
 // lookupIssueByIDTx fetches one issue by its row id within a TX,
 // excluding soft-deleted rows. Used by add-link paths that accept
 // cross-project issue IDs (storage v16+).
+// requireAddableLinkTargetTx rejects an add-side link target whose project
+// is archived at commit time. The daemon gates the same condition before the
+// transaction; this catches an archival that commits between that preflight
+// and the insert. Removals never call it. SQLite's single writer serializes
+// the check against RemoveProject.
+func requireAddableLinkTargetTx(ctx context.Context, tx *sql.Tx, targetID int64) error {
+	var shortID, projectName string
+	var archived bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT i.short_id, p.name, p.deleted_at IS NOT NULL
+		  FROM issues i
+		  JOIN projects p ON p.id = i.project_id
+		 WHERE i.id = ?`, targetID).Scan(&shortID, &projectName, &archived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &db.LinkTargetNotFoundError{Number: targetID}
+	}
+	if err != nil {
+		return fmt.Errorf("check link target project: %w", err)
+	}
+	if archived {
+		return &db.LinkTargetArchivedError{Number: targetID, ShortID: shortID, Project: projectName}
+	}
+	return nil
+}
+
 func lookupIssueByIDTx(ctx context.Context, tx *sql.Tx, id int64) (db.Issue, error) {
 	row := tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ? AND i.deleted_at IS NULL`, id)
 	return scanIssue(row)
