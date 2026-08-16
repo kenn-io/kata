@@ -289,7 +289,7 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 		if errors.Is(err, os.ErrPermission) {
 			return "", fmt.Errorf(
 				"auto-start daemon: cannot write Kata state directory %s: %w; "+
-					"this may be caused by a sandbox or restricted environment; grant access to the Kata state directory and retry",
+					"check filesystem permissions or sandbox access and retry",
 				dataDir, err,
 			)
 		}

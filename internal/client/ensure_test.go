@@ -194,7 +194,7 @@ func TestAutoStartReportsRestrictedStateDirectoryBeforeSpawn(t *testing.T) {
 	_, err := autoStart(t.Context(), dataDir)
 
 	require.ErrorIs(t, err, os.ErrPermission)
-	assert.Contains(t, err.Error(), "sandbox or restricted environment")
+	assert.Contains(t, err.Error(), "check filesystem permissions or sandbox access and retry")
 	assert.Contains(t, err.Error(), dataDir)
 	assert.False(t, started, "daemon should not be spawned when its state directory is inaccessible")
 }
