@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-12
+last_edited: 2026-08-16
 ---
 
 # CLI reference
@@ -17,7 +17,7 @@ current flag list in your installed binary.
 | `--as <actor>` | Override the actor for this command. |
 | `--agent` | Emit concise agent-readable text. |
 | `--json` | Emit machine-readable JSON. |
-| `--format human|json|agent` | Select output mode explicitly. |
+| `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
 | `--quiet` | Suppress non-essential output. |
 
 `kata --version` prints the same build identity as the `version` command below
@@ -64,19 +64,34 @@ Everything else in `settings.json` is preserved, re-running is a no-op, and a
 symlinked `settings.json` or `.claude` directory is refused. Hook ownership and
 config mutation use kit's shared agent-hook manager.
 
-Pass `--with-codex-hooks` to install the start half of the same
-[attention harness hooks](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
-into the workspace's Codex CLI config. It additively installs one command
-hook entry in `.codex/hooks.json`: `SessionStart` runs `kata attention-hook
-start` for new, resumed, and cleared sessions, but not context compaction,
-using the launcher-provided `KATA_REF` and intentionally doing nothing when it
-is absent. Codex has no stable session-end hook event yet, so this flag does
-not install an end hook; pair it with a launcher wrapper that runs `kata
-attention-hook end` after the `codex` invocation exits. Everything else in
-`hooks.json` is preserved, re-running is a no-op, a symlinked `hooks.json` or
-`.codex` directory is refused, and a pre-existing `[hooks]` table in
-`.codex/config.toml` produces a non-fatal warning since Codex loads both files'
-hooks together.
+Pass `--with-codex-hooks` to install two additive `SessionStart` hooks in the
+workspace's `.codex/hooks.json`. The contract hook injects the same canonical
+briefing as `kata quickstart --format contract` on startup, resume, clear, and
+context compaction. The
+[attention harness](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
+runs `kata attention-hook start` on startup, resume, and clear, but not
+compaction; it uses the launcher-provided `KATA_REF` and does nothing when the
+variable is absent. Codex has no stable session-end hook event yet, so pair the
+attention hook with a launcher wrapper that runs `kata attention-hook end`
+after Codex exits. Everything else in `hooks.json` is preserved, re-running is
+a no-op, a symlinked `hooks.json` or `.codex` directory is refused, and a
+pre-existing `[hooks]` table in `.codex/config.toml` produces a non-fatal
+warning because Codex loads both files' hooks together.
+
+## Agent contract output
+
+```sh
+kata quickstart --format contract
+kata agent-instructions --format contract --workspace /path/to/workspace
+kata quickstart --format contract --project example-project
+```
+
+The `contract` format prints kata's managed agent briefing without guidance-file
+markers or terminal framing. It works outside an initialized workspace, does
+not mutate workspace files, and comes from the same canonical text that
+`kata init --with-agents` writes. `contract` is valid only for `quickstart` and
+its `agent-instructions` alias; it conflicts with `--json` and `--agent` like
+the other output modes.
 
 ## Model Context Protocol
 

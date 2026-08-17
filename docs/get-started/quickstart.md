@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-12
+last_edited: 2026-08-16
 ---
 
 # Quickstart
@@ -248,7 +248,10 @@ kata list --agent
 kata list --json | jq .
 ```
 
-`--format human|json|agent` is equivalent to the dedicated switches.
+`--format human|json|agent` is equivalent to the dedicated switches. For agent
+harness injection, `kata quickstart --format contract` prints the shorter
+canonical managed briefing without mutating the workspace; see
+[Agent contract output](../reference/cli.md#agent-contract-output).
 
 ## Close with evidence
 
