@@ -123,10 +123,11 @@ change independently. Re-running the command is a no-op, and symlinked
 `.claude` or `settings.json` paths are refused. Kit's shared agent-hook manager
 owns the additive config mutation and preserves unrelated hook entries.
 
-For Codex CLI workspaces, `kata init --with-codex-hooks` installs the
-start half of the same wiring into `.codex/hooks.json`: a `SessionStart`
-command hook runs `kata attention-hook start` for new, resumed, and cleared
-sessions, but not context compaction, using the same launcher-provided
+For Codex CLI workspaces, `kata init --with-codex-hooks` installs two
+`SessionStart` hooks in `.codex/hooks.json`. The contract hook injects the
+canonical marker-free agent briefing on startup, resume, clear, and context
+compaction. The attention hook runs `kata attention-hook start` on startup,
+resume, and clear, but not compaction, using the same launcher-provided
 `KATA_REF` and hidden subcommand as the Claude Code wiring. Codex prompts to
 trust project-layer hooks the first time it loads them, so expect one
 interactive confirmation on first run. Re-running the command is a no-op, and

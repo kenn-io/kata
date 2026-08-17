@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-12
+last_edited: 2026-08-16
 ---
 
 # Agent workflows
@@ -25,6 +25,20 @@ kata whoami --agent
 
 Default to `--agent` for ordinary reads and mutations in agent logs. Use
 `--json` only when the script needs full structured data.
+
+Agent harnesses can load kata's shorter managed briefing dynamically without
+changing a repository:
+
+```sh
+kata quickstart --format contract
+# Equivalent alias; selectors are available for user-local integrations.
+kata agent-instructions --format contract --workspace /path/to/workspace
+```
+
+Contract output is marker-free, has no terminal framing, works without an
+initialized workspace, and performs no workspace mutation. It comes from the
+same canonical body that `kata init --with-agents` writes, so static and
+session-injected guidance stay aligned.
 
 To make a workspace self-documenting for agents, run `kata init --with-agents`
 once. It writes a marker-delimited kata briefing into existing real `AGENTS.md`
@@ -66,13 +80,13 @@ start` for new, resumed, and cleared sessions (but not context compaction), and
 than clear/resume transitions. Both use the
 launcher-provided `KATA_REF` and intentionally do nothing when it is absent.
 
-For Codex CLI workspaces, `kata init --with-codex-hooks` installs the start
-half of the same wiring into `.codex/hooks.json`: a `SessionStart` command
-hook runs `kata attention-hook start` for new, resumed, and cleared sessions
-(but not context compaction), using the same launcher-provided `KATA_REF`.
-Codex has no stable session-end hook event yet, so pair this with a launcher
-wrapper that runs `kata attention-hook end` after the `codex` invocation exits
-— see
+For Codex CLI workspaces, `kata init --with-codex-hooks` installs two
+`SessionStart` hooks in `.codex/hooks.json`. One injects the canonical agent
+contract on startup, resume, clear, and context compaction. The other runs
+`kata attention-hook start` on startup, resume, and clear (but not compaction),
+using the same launcher-provided `KATA_REF`. Codex has no stable session-end
+hook event yet, so pair the attention hook with a launcher wrapper that runs
+`kata attention-hook end` after the Codex invocation exits — see
 [agent orchestration](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 for the recipe.
 

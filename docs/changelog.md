@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-08-15
+last_edited: 2026-08-16
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,71 +9,62 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+## 0.15.0
+<small>2026-08-16</small>
+
+kata 0.15.0 expands the native Model Context Protocol (MCP) server into a
+full agent-facing workflow, adds first-class planning dates and dynamic agent
+guidance, and makes local daemon and browser integrations easier to diagnose
+and embed safely.
+
 **New features**
 
+- Expanded the native MCP server from the original project-bound issue tools
+  to scoped issue, project, activity, recurrence, federation, synchronization,
+  import, token, and storage workflows. Thirteen section loaders can
+  progressively expose up to 55 typed tools without placing the full catalog
+  in an agent's initial context.
 - Added paired `kata schedule` / `kata deadline` commands and
   `kata.set_schedule` / `kata.set_deadline` MCP tools for first-class planning
-  date updates.
-- Expanded the native MCP server from the original project-bound issue tools
-  to complete scoped issue, project, token, federation, synchronization,
-  recurrence, import, digest, and live-event workflows.
-- Scoped `kata mcp serve` to the current workspace project by default, with
-  explicit one-project (`--project`/`--workspace`), fixed-allowlist
-  (`--projects`, pinned by immutable UID and rename-safe), and daemon-wide
-  (`--all-projects`) boundaries. Scoped graph, pagination, token, and
-  federation operations cannot cross their startup boundary, and an allowlist
-  keeps serving its remaining projects when one member is archived or merged
-  away.
-- Added 13 section loaders that progressively disclose the detailed typed MCP
-  tools and publish tool-list change notifications.
-- Added first-class MCP scheduling fields, force-create and force-claim, and
-  generic metadata support for native markers such as `someday=true`.
-- Added explicit host-local JSONL export and configured-target import tools
-  behind `--storage-root` and startup target aliases. Storage operations stay
-  anchored to the configured root, protect active SQLite databases and
-  sidecars, require exact confirmation before replacing an artifact or target,
-  and install restores race-safely with owner-only permissions.
-- Gated daemon token administration behind the explicit `--enable-token-admin`
-  capability in daemon-wide scope, kept federation topology changes
-  (enrollment and spoke join) outside MCP entirely, restricted enabling
-  issue synchronization — which selects the repository the daemon's GitHub
-  credentials read — to the daemon-wide scope, and required that same scope
-  for project administration: a scoped server can read its projects but
-  cannot rename, merge, archive, restore, or purge them.
-- Redacted cross-scope relationship identities, including parent, link,
-  relationship-array, moved-project, close-evidence, close-throttle, and
-  audit parent references, from scoped MCP issue, event, digest, edit-delta,
-  and close-audit results, and rejected close-audit parent filters that
-  cannot prove startup-scope membership.
-- Compared PostgreSQL storage-import targets with the active daemon storage
-  by persisted instance identity, so equivalent DSN spellings cannot bypass
-  the textual overlap guard.
+  dates. A future schedule parks work; a deadline does not.
+- Added `kata quickstart --format contract` as a marker-free, non-mutating
+  agent briefing generated from the same canonical text as
+  `kata init --with-agents`. `kata init --with-codex-hooks` now injects that
+  contract on startup, resume, clear, and compaction.
+- Added the conventional `kata --version` root flag with the same human, JSON,
+  and agent output as `kata version`.
 
 **Improvements**
 
-- Gave deadlines the same date, local date-time, UTC-instant, and timezone
-  projection rules as `scheduled_on`.
-- Added schedule, deadline, and someday commands to generated agent guidance and
-  public workflow documentation.
-- Added `event_id` and the close-time frozen `parent_uid` to close-audit
-  rows so audit results page with an immutable cursor and parent display
-  refs carry provable provenance.
-- Bumped the HTTP API schema version to `0.11.0` for the pinned relationship
-  target fields (`to_project_uid`, `expected_project_uids`) and close-audit
-  `event_id`; `kata mcp serve` now checks the daemon API version at startup
-  and refuses older daemons instead of failing later inside tool calls.
+- Allowed an embedded owner-local browser to omit or send an empty `Origin`
+  only when minting a direct-loopback local Web UI session. Exact Host,
+  loopback, forwarding-header, and cross-site Fetch Metadata checks remain in
+  force.
+- Allowed legacy bindings that predate binding-level `allow_insecure`
+  persistence, with the opt-in retained only in the same-endpoint credential,
+  to rebind to their validated HTTPS endpoint.
+- Removed durability flushes from both SQLite stores when the test-only
+  `KATA_TEST_FAST_SQLITE` mode is enabled. Production durability is unchanged.
 
 **Bug fixes**
 
-- Rejected add-side link targets whose project is archived inside the mutation
-  transaction (initial links, atomic-edit adds and `set_parent`, and link
-  creation) with the same `409 link_target_archived` the preflight returns, so
-  an archival that races the preflight cannot insert a link to an archived
-  project. PostgreSQL share-locks the target project row alongside the issue
-  row; existing links to archived projects stay removable.
-- Restored the `clear_owner` and `clear_priority` recurrence template fields
-  to the generated Go client; a stale template had silently dropped them from
-  `pkg/client` since their introduction.
+- Reported the recorded PID, endpoint, and underlying connection failure when
+  a live local daemon cannot be reached, instead of treating it as stopped and
+  attempting to start another daemon.
+
+**Acknowledgements**
+
+- Thanks to [Rusty Shackleford](https://github.com/salmonumbrella) for the
+  expanded MCP server, planning-date workflows, agent contract output, and
+  conventional version flag.
+- Thanks to [Wes McKinney](https://github.com/wesm) for originless embedded
+  local sessions, legacy federation rebinding, and the release documentation.
+- Thanks to [Phillip Cloud](https://github.com/cpcloud) for removing durability
+  flushes from SQLite fast mode.
+- Thanks to [codyw912](https://github.com/codyw912) for clear unreachable
+  local-daemon errors.
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for the Go
+  1.26.6 toolchain security update included in this release.
 
 ## 0.14.3
 <small>2026-08-10</small>
@@ -150,12 +141,6 @@ federation, and daemon operations safer and more observable.
 
 **Improvements**
 
-- Added the conventional `kata --version` root flag, which prints the same
-  build identity as `kata version` and honors `--json` and `--agent`.
-  As a result, global output flags are now validated on the bare `kata`
-  invocation too: `kata --json --agent` and `kata --format bogus` exit `2` with
-  a usage error instead of silently printing help. Plain `kata` still prints
-  help and exits `0`.
 - Centralized Claude Code and Codex hook configuration on kit's shared
   agent-hook manager while preserving the existing init flags, lifecycle
   matchers, attention behavior, unrelated configuration, and workspace

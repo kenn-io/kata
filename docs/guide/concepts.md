@@ -123,7 +123,7 @@ consumer expects newline-delimited JSON or a full response envelope.
 
 ## Output modes
 
-kata supports three output modes:
+kata supports three general output modes:
 
 | Mode | Use |
 | --- | --- |
@@ -132,6 +132,11 @@ kata supports three output modes:
 | JSON | Complete machine-readable response for scripts. |
 
 Use `--agent`, `--json`, or `--format human|agent|json`.
+
+`kata quickstart` and its `agent-instructions` alias also accept the
+command-scoped `--format contract` mode. It prints the canonical managed agent
+briefing for dynamic harness injection; see
+[Agent contract output](../reference/cli.md#agent-contract-output).
 
 ## Close discipline
 
