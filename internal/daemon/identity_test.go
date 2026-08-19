@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"net"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,4 +85,42 @@ func TestPrincipalWebLocalAllowsOrdinaryWritesButNotTokenAdministration(t *testi
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, 403, apiErr.Status)
 	assert.Equal(t, "token_admin_forbidden", apiErr.Code)
+}
+
+func TestTUIBypassAllowed_RequiresOwnerLocalTransport(t *testing.T) {
+	tests := []struct {
+		name string
+		addr net.Addr
+		want bool
+	}{
+		{
+			name: "unix socket",
+			addr: &net.UnixAddr{Name: "/run/user/1000/kata.sock", Net: "unix"},
+			want: true,
+		},
+		{
+			name: "loopback TCP",
+			addr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777},
+			want: true,
+		},
+		{
+			name: "private network TCP",
+			addr: &net.TCPAddr{IP: net.ParseIP("100.64.0.5"), Port: 7777},
+			want: false,
+		},
+		{
+			name: "missing transport metadata",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tt.addr != nil {
+				ctx = context.WithValue(ctx, http.LocalAddrContextKey, tt.addr)
+			}
+			assert.Equal(t, tt.want, tuiBypassAllowed(ctx, "tui", "done"))
+		})
+	}
 }

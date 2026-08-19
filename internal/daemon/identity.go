@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"net"
+	"net/http"
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
@@ -138,7 +140,28 @@ func tuiBypassAllowed(ctx context.Context, source, reason string) bool {
 			return false
 		}
 	}
-	return true
+	return ownerLocalTransport(ctx)
+}
+
+// ownerLocalTransport recognizes the daemon transports that stay inside the
+// owner-local host boundary. net/http supplies LocalAddrContextKey from the
+// accepted listener, so a request body or forwarding header cannot claim this
+// state. Loopback TCP remains local for Windows, where the default daemon
+// transport is not a Unix socket. Missing and unknown address types fail
+// closed.
+func ownerLocalTransport(ctx context.Context) bool {
+	addr, ok := ctx.Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok || addr == nil {
+		return false
+	}
+	switch local := addr.(type) {
+	case *net.UnixAddr:
+		return true
+	case *net.TCPAddr:
+		return local.IP.IsLoopback()
+	default:
+		return false
+	}
 }
 
 func principalFromAPIToken(tok db.APIToken) Principal {
