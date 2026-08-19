@@ -174,6 +174,31 @@ func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 	assert.Contains(t, string(logData), "daemon stderr")
 }
 
+func TestAutoStartReportsRestrictedStateDirectoryBeforeSpawn(t *testing.T) {
+	dataDir := setupKataEnv(t)
+	originalCheckState := checkDaemonStateForEnsure
+	originalStart := startDetachedDaemonForEnsure
+	checkDaemonStateForEnsure = func(string) error {
+		return os.ErrPermission
+	}
+	started := false
+	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
+		started = true
+		return nil
+	}
+	t.Cleanup(func() {
+		checkDaemonStateForEnsure = originalCheckState
+		startDetachedDaemonForEnsure = originalStart
+	})
+
+	_, err := autoStart(t.Context(), dataDir)
+
+	require.ErrorIs(t, err, os.ErrPermission)
+	assert.Contains(t, err.Error(), "check filesystem permissions or sandbox access and retry")
+	assert.Contains(t, err.Error(), dataDir)
+	assert.False(t, started, "daemon should not be spawned when its state directory is inaccessible")
+}
+
 func TestAutoStartAllowsDaemonStartupBeyondFiveSeconds(t *testing.T) {
 	dataDir := setupKataEnv(t)
 	originalStart := startDetachedDaemonForEnsure
