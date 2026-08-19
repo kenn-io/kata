@@ -700,6 +700,7 @@ kata export [--project NAME] [--project-id N] [--output PATH]
 kata export --allow-running-daemon --output PATH
 
 kata import --input PATH --target PATH_OR_POSTGRES_DSN [--force]
+kata import --merge --input PATH --target PATH_OR_POSTGRES_DSN
 kata import --source-format beads
 ```
 
@@ -707,12 +708,21 @@ Export reads host-local storage directly. It refuses `--daemon` and configured
 remote server targets rather than silently exporting an unrelated local
 database; run it on the daemon host with the intended storage configuration.
 
-The kata-format `import` creates a fresh SQLite database at a target path or a
-fresh Postgres `kata` schema at a Postgres DSN; it is not a merge operation. An
-initialized target requires `--force`, which atomically replaces kata-owned
-state. The `--source-format beads` form is different: it drives the `bd` CLI
-and merges into the current project. See
-[Migrating from Beads](../guide/migrating-from-beads.md).
+Without `--merge`, the kata-format `import` creates a fresh SQLite database at a
+target path or a fresh Postgres `kata` schema at a Postgres DSN. An initialized
+target requires `--force`, which atomically replaces kata-owned state.
+
+`--merge` instead adds exactly one non-system project snapshot to an existing
+SQLite or Postgres target. It remaps numeric database IDs while preserving
+portable identities and leaves unrelated projects unchanged. A multi-project
+snapshot or any imported UID that already exists in the target causes the
+transaction to be refused. Stop every daemon using the target first. See
+[Backup and restore](../operations/backup-restore.md) for name collisions,
+cross-project links, and credential-state handling.
+
+The `--source-format beads` form is different: it drives the `bd` CLI and
+merges into the current project. See [Migrating from
+Beads](../guide/migrating-from-beads.md).
 
 ## Remote and identity tokens
 

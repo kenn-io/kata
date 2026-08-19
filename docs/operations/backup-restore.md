@@ -3,9 +3,10 @@
 `kata export` writes the host-local database as JSONL. It is an offline storage
 operation, not a remote-daemon API: `KATA_SERVER`, a remote workspace target,
 or `--daemon` makes it fail before opening any local database. Run exports on
-the daemon host with that daemon's storage configuration. `kata import`
-rebuilds a database from that file. Use these commands for backups, machine
-moves, and schema cutovers.
+the daemon host with that daemon's storage configuration. `kata import` can
+rebuild a database from that file or add one scoped project snapshot to an
+existing database. Use these commands for backups, selective project restores,
+machine moves, and schema cutovers.
 
 ## Use JSONL exports
 
@@ -46,8 +47,8 @@ The target must not exist unless `--force` is set. To use the restored
 database, stop the daemon, point `KATA_DSN` or `KATA_DB` at the restored file,
 or move it into `KATA_HOME` as `kata.db`, then restart.
 
-`kata import` is not a merge operation. It creates a target database from the
-input snapshot.
+Without `--merge`, `kata import` creates a target database from the input
+snapshot. It does not add records to an existing database.
 
 For Postgres, pass a DSN as the target:
 
@@ -101,36 +102,60 @@ Use `--project` or `--project-id` to scope an export:
 
 ```sh
 kata daemon stop
-kata --project myproj export --output backups/myproj.jsonl
+kata --project example-project export --output backups/example-project.jsonl
 kata daemon start
 ```
 
 Round-trip into a fresh database:
 
 ```sh
-kata import --input backups/myproj.jsonl --target /tmp/myproj-only.db
+kata import --input backups/example-project.jsonl \
+  --target /tmp/example-project-only.db
 ```
 
 This is useful for archiving one project, handing history to a collaborator who
 will set up a fresh kata install, or moving one project to another host.
 
-Links may span projects, and a scoped export only contains the named
-project's issues — so the envelope can carry a link edge whose peer issue is
-absent. Import skips those links (and any import-mapping records that
-reference them) instead of failing, and prints an aggregate
-`note: skipped N link record(s)…` to stderr. Importing a fuller envelope that
-contains both endpoints later recreates the skipped edges.
+Links may span projects, and a scoped export only contains the named project's
+issues. A fresh restore or project merge skips links whose peer is outside the
+snapshot, along with import-mapping records that reference those links, and
+prints an aggregate `note: skipped N link record(s)…` to stderr. A merge does
+not connect an imported issue to an existing project's issue, even when that
+peer is already in the target. This keeps the scoped import from changing
+another project's dependency graph. A full-database snapshot preserves links
+when it contains both endpoints.
 
-What does not work today:
+## Merge a single-project snapshot
 
-- importing a per-project snapshot into an existing populated database;
-- stitching multiple per-project files into one existing database;
-- re-importing a snapshot on top of itself to refresh incrementally.
+Use `--merge` to add a scoped snapshot to an existing SQLite or Postgres
+database without replacing its other projects:
 
-For multi-project backups, take a full-database export. A per-project merge
-import (applying one project's snapshot to an existing database without
-disturbing other projects) is planned; see
-[kenn-io/kata#42](https://github.com/kenn-io/kata/issues/42).
+```sh
+kata daemon stop
+kata import --merge --input backups/example-project.jsonl \
+  --target ~/.kata/kata.db
+kata daemon start
+```
+
+The target must already exist, and every daemon using it must be stopped. For
+Postgres, pass the initialized database's schema-owner DSN as `--target`.
+`--force` and `--new-instance` cannot be combined with `--merge`.
+
+The merge must contain exactly one non-system project. It runs in one
+transaction, allocates new numeric database IDs, and preserves the project's
+UIDs, issue short IDs, and event identity. Existing projects remain unchanged.
+If another project already has the imported name, kata assigns the next
+available suffix, such as `example-project-2`.
+
+The import is refused without mutation if an imported project or object UID
+already exists. As a result, re-importing the same snapshot is not an
+incremental refresh. Run one merge per scoped snapshot when restoring several
+projects; use a full-database export when cross-project links must also be
+restored.
+
+Imported issue-sync bindings remain disabled until re-enabled locally. Imported
+federation state is discarded so the project must join federation again with
+credentials for the target environment.
 
 ## Beads import
 
