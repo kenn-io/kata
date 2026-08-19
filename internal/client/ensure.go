@@ -82,7 +82,9 @@ var (
 	stopRunningDaemonsForEnsure  = stopRunningDaemons
 	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
 	discoverDaemonForAutoStart   = discoverForEnsureWithError
-	checkDaemonStateForEnsure    = checkDaemonStateWritable
+	checkDaemonStateForEnsure    = func(dataDir string) error {
+		return (kitdaemon.RuntimeStore{Dir: dataDir}).CheckWritable()
+	}
 )
 
 // EnsureRunning returns a live daemon's base URL, auto-starting the daemon
@@ -326,22 +328,6 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 		return "", unreachable
 	}
 	return "", fmt.Errorf("daemon failed to start within %s; inspect kata daemon status and kata daemon logs", daemonStartupWait)
-}
-
-// checkDaemonStateWritable verifies that an auto-started daemon can write its
-// runtime record before spawning it. Without this check, a sandboxed child can
-// fail silently and leave the caller waiting for the full readiness deadline.
-func checkDaemonStateWritable(dataDir string) error {
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(dataDir, ".kata-write-check-*")
-	if err != nil {
-		return err
-	}
-	path := f.Name()
-	defer func() { _ = os.Remove(path) }()
-	return f.Close()
 }
 
 // daemonLogWriter opens <dataDir>/daemon.log for the auto-started daemon's
