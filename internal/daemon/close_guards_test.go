@@ -65,6 +65,79 @@ func TestCloseIssue_NonLoopbackStaticTokenCannotForgeTUIBypass(t *testing.T) {
 	assert.Equal(t, "open", got.Status)
 }
 
+func TestCloseIssue_NonLoopbackUnauthenticatedWritesCannotForgeTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		Auth: config.AuthConfig{
+			AllowUnauthenticatedPrivateNetworkWrites: true,
+		},
+	})
+	t.Cleanup(func() { _ = server.Close() })
+
+	request := httptest.NewRequest(http.MethodPost,
+		issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("100.64.0.5"), Port: 7777})))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
+}
+
+func TestCloseIssue_LoopbackStaticTokenPreservesTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		Auth:      config.AuthConfig{Token: "static-token"},
+	})
+	t.Cleanup(func() { _ = server.Close() })
+
+	request := httptest.NewRequest(http.MethodPost,
+		issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
+	request.Header.Set("Authorization", "Bearer static-token")
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777})))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "closed", got.Status)
+}
+
 func TestCloseIssue_IdentityModeDoesNotTrustBodySourceTUI(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	pid := mkProject(t, env, "github.com/test/a", "a")
