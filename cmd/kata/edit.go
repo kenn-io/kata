@@ -43,7 +43,7 @@ func newEditCmd() *cobra.Command {
 	// StringSliceVar so duplicate flags are visible to collapseSingletonRef
 	// rather than silently last-winning under cobra's StringVar.
 	cmd.Flags().Var(newRefSliceValue(&parentRefSlice), "parent",
-		"set parent to <ref> (replaces existing; ≤1; <ref> must finish before this issue starts; "+issueRefHelp+")")
+		"set parent to <ref> (replaces existing; containment only; does not gate readiness; ≤1; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&blocks), "blocks",
 		"this issue blocks <ref> (this must finish before <ref> can; repeatable; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&blockedBy), "blocked-by",

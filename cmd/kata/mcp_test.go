@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
 	internalclient "go.kenn.io/kata/internal/client"
@@ -60,6 +63,350 @@ func serveMCPTestHealth(writer http.ResponseWriter, request *http.Request) bool 
 	writer.Header().Set("Content-Type", "application/json")
 	_, _ = fmt.Fprintf(writer, `{"ok":true,"api_schema_version":%q}`, daemon.APISchemaVersion)
 	return true
+}
+
+func startMCPHTTPTestServer(t *testing.T, daemonURL string, extraArgs ...string) string {
+	t.Helper()
+	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
+	command := newRootCmd()
+	stderrReader, stderrWriter := io.Pipe()
+	command.SetOut(io.Discard)
+	command.SetErr(stderrWriter)
+	command.SetArgs(append([]string{
+		"mcp", "serve", "--all-projects", "--http", "127.0.0.1:0",
+		"--http-token-env", "KATA_MCP_TEST_TOKEN",
+	}, extraArgs...))
+	commandContext, cancel := context.WithCancel(context.WithValue(
+		t.Context(), internalclient.BaseURLKey{}, daemonURL,
+	))
+	command.SetContext(commandContext)
+	done := make(chan error, 1)
+	go func() {
+		done <- command.Execute()
+		_ = stderrWriter.Close()
+	}()
+
+	firstLine := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(stderrReader)
+		if scanner.Scan() {
+			firstLine <- scanner.Text()
+		}
+		for scanner.Scan() {
+		}
+	}()
+
+	const prefix = "kata mcp: listening on "
+	var endpoint string
+	select {
+	case line := <-firstLine:
+		if !strings.HasPrefix(line, prefix) {
+			cancel()
+			<-done
+			t.Fatalf("unexpected MCP listener output %q", line)
+		}
+		endpoint = strings.TrimPrefix(line, prefix)
+	case err := <-done:
+		cancel()
+		require.NoError(t, err, "MCP HTTP server exited before listening")
+		t.Fatal("MCP HTTP server exited before reporting its endpoint")
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("timed out waiting for MCP HTTP listener")
+	}
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Error("MCP HTTP server did not stop after context cancellation")
+		}
+		_ = stderrReader.Close()
+	})
+	return endpoint
+}
+
+func newMCPHTTPTestClient() *sdkmcp.Client {
+	return sdkmcp.NewClient(&sdkmcp.Implementation{
+		Name:    "kata-http-test",
+		Version: "1.0.0",
+	}, nil)
+}
+
+func newAuthenticatedMCPHTTPTestTransport(endpoint string) *sdkmcp.StreamableClientTransport {
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		clone := request.Clone(request.Context())
+		clone.Header.Set("Authorization", "Bearer test-mcp-token")
+		return http.DefaultTransport.RoundTrip(clone)
+	})}
+	return &sdkmcp.StreamableClientTransport{
+		Endpoint:             endpoint,
+		HTTPClient:           httpClient,
+		DisableStandaloneSSE: true,
+	}
+}
+
+func TestMCPServeHTTPServesStreamableEndpointAndHealth(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	t.Cleanup(daemon.Close)
+
+	endpoint := startMCPHTTPTestServer(t, daemon.URL)
+	healthRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+		strings.TrimSuffix(endpoint, "/mcp")+"/healthz", nil)
+	require.NoError(t, err)
+	healthResponse, err := http.DefaultClient.Do(healthRequest)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = healthResponse.Body.Close() })
+	require.Equal(t, http.StatusOK, healthResponse.StatusCode)
+
+	client := newMCPHTTPTestClient()
+	connectContext, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	session, err := client.Connect(connectContext, newAuthenticatedMCPHTTPTestTransport(endpoint), nil)
+	require.NoError(t, err)
+	defer func() { _ = session.Close() }()
+	tools, err := session.ListTools(connectContext, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, tools.Tools)
+}
+
+func TestMCPServeHTTPBearerProtectsMCPButNotHealth(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	t.Cleanup(daemon.Close)
+
+	endpoint := startMCPHTTPTestServer(t, daemon.URL)
+	healthResponse, err := http.Get(strings.TrimSuffix(endpoint, "/mcp") + "/healthz") //nolint:noctx // bounded local test server
+	require.NoError(t, err)
+	require.NoError(t, healthResponse.Body.Close())
+	require.Equal(t, http.StatusOK, healthResponse.StatusCode)
+
+	connectContext, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err = newMCPHTTPTestClient().Connect(connectContext, &sdkmcp.StreamableClientTransport{
+		Endpoint:             endpoint,
+		DisableStandaloneSSE: true,
+	}, nil)
+	require.Error(t, err, "MCP requests without the configured bearer must be rejected")
+
+	session, err := newMCPHTTPTestClient().Connect(
+		connectContext,
+		newAuthenticatedMCPHTTPTestTransport(endpoint),
+		nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, session.Close())
+}
+
+func TestMCPServeHTTPCrossOriginBrowserMutationRejected(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	t.Cleanup(daemon.Close)
+
+	endpoint := startMCPHTTPTestServer(t, daemon.URL)
+	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"browser","version":"1.0.0"}}}`)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, body)
+	require.NoError(t, err)
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Authorization", "Bearer test-mcp-token")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://attacker.example")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	require.Equal(t, http.StatusForbidden, response.StatusCode)
+}
+
+func TestMCPServeHTTPLocalhostProtectionRejectsForeignHost(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	t.Cleanup(daemon.Close)
+
+	endpoint := startMCPHTTPTestServer(t, daemon.URL)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, endpoint, nil)
+	require.NoError(t, err)
+	request.Host = "attacker.example"
+	request.Header.Set("Authorization", "Bearer test-mcp-token")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	require.Equal(t, http.StatusForbidden, response.StatusCode)
+}
+
+func TestMCPServeHTTPRejectsLoopbackHostThatDoesNotMatchConfiguredAuthority(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	t.Cleanup(daemon.Close)
+
+	endpoint := startMCPHTTPTestServer(t, daemon.URL)
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(strings.TrimSuffix(endpoint, "/mcp"), "http://"))
+	require.NoError(t, err)
+	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"browser","version":"1.0.0"}}}`)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, body)
+	require.NoError(t, err)
+	request.Host = net.JoinHostPort("localhost", port)
+	request.Header.Set("Origin", "http://"+request.Host)
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Authorization", "Bearer test-mcp-token")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	require.Equal(t, http.StatusForbidden, response.StatusCode)
+}
+
+func TestResolveMCPHTTPTokenLoopbackRequiresBearer(t *testing.T) {
+	_, err := resolveMCPHTTPToken("127.0.0.1:8080", "", false)
+	require.ErrorContains(t, err, "--http-token-env")
+}
+
+func TestMCPServeHTTPLoopbackRequiresBearer(t *testing.T) {
+	command := newRootCmd()
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"mcp", "serve", "--all-projects", "--http", "127.0.0.1:0"})
+	require.ErrorContains(t, command.Execute(), "--http-token-env")
+}
+
+func TestRunMCPHTTPServerWaitsForInflightHandlersDuringShutdown(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			close(started)
+			<-release
+			close(finished)
+			writer.WriteHeader(http.StatusNoContent)
+		}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	serveContext, cancel := context.WithCancel(t.Context())
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- runMCPHTTPServer(serveContext, server, listener) }()
+
+	requestDone := make(chan error, 1)
+	go func() {
+		request, requestErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+listener.Addr().String(), nil)
+		if requestErr != nil {
+			requestDone <- requestErr
+			return
+		}
+		response, requestErr := http.DefaultClient.Do(request)
+		if requestErr == nil {
+			requestErr = response.Body.Close()
+		}
+		requestDone <- requestErr
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for HTTP handler to start")
+	}
+	cancel()
+	select {
+	case err := <-serveDone:
+		t.Fatalf("server returned before its in-flight handler completed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-serveDone)
+	select {
+	case <-finished:
+	default:
+		t.Fatal("server returned before handler cleanup completed")
+	}
+	require.NoError(t, <-requestDone)
+}
+
+func TestMCPServeHTTPNonLoopbackRequiresToken(t *testing.T) {
+	command := newRootCmd()
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"mcp", "serve", "--all-projects", "--http", "0.0.0.0:0"})
+	require.ErrorContains(t, command.Execute(), "--http-token-env")
+}
+
+func TestMCPServeHTTPNonLoopbackRequiresExplicitPrivateNetworkTrust(t *testing.T) {
+	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
+	command := newRootCmd()
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{
+		"mcp", "serve", "--all-projects", "--http", "0.0.0.0:0",
+		"--http-token-env", "KATA_MCP_TEST_TOKEN",
+	})
+	require.ErrorContains(t, command.Execute(), "--trust-private-network")
+}
+
+func TestMCPServeHTTPTrustedPrivateNetworkRejectsPublicAndHostnameBinds(t *testing.T) {
+	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
+	for _, address := range []string{"203.0.113.10:8080", "daemon.example:8080"} {
+		t.Run(address, func(t *testing.T) {
+			_, err := resolveMCPHTTPToken(address, "KATA_MCP_TEST_TOKEN", true)
+			require.ErrorContains(t, err, "non-public")
+		})
+	}
+}
+
+func TestMCPServeHTTPTrustedPrivateNetworkAllowsPrivateAndWildcardBinds(t *testing.T) {
+	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
+	for _, address := range []string{"10.0.0.5:8080", "100.64.0.5:8080", "0.0.0.0:8080", "[::]:8080"} {
+		t.Run(address, func(t *testing.T) {
+			token, err := resolveMCPHTTPToken(address, "KATA_MCP_TEST_TOKEN", true)
+			require.NoError(t, err)
+			require.Equal(t, "test-mcp-token", token)
+		})
+	}
+}
+
+func TestMCPServeHTTPTokenEnvMustBeSet(t *testing.T) {
+	t.Setenv("KATA_MCP_MISSING_TOKEN", "")
+	command := newRootCmd()
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{
+		"mcp", "serve", "--all-projects", "--http", "127.0.0.1:0",
+		"--http-token-env", "KATA_MCP_MISSING_TOKEN",
+	})
+	require.ErrorContains(t, command.Execute(), "KATA_MCP_MISSING_TOKEN")
 }
 
 func TestMCPServeAllProjectsServesDaemonWideScope(t *testing.T) {

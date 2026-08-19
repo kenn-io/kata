@@ -30,7 +30,7 @@ digraph kata {
 
   subgraph cluster_delegate {
     label="Delegating work as separate issues (fan-out/join)";
-    fanout [label="Create each sub-issue with --meta work.branch=...\nand an idempotency key; capture refs from --json\n(.issue.short_id)"];
+    fanout [label="Create each delegated child with\n--parent <epic-or-coordinating-issue>,\n--meta work.branch=..., and an idempotency key;\ncapture refs from --json (.issue.short_id).\nAdd dependency links only for actual prerequisites."];
     join   [label="Join with kata wait <refs> --until attention --any\nMatches needs-human or stuck; a close also completes the wait,\nand the reported reason distinguishes which. Use --timeout so a\nwrapper can tell timeout from satisfaction."];
     coord  [label="As coordinator you read work.* —\nyou never write it on issues you delegated."];
     fanout -> join -> coord;
@@ -56,6 +56,8 @@ digraph kata {
   park -> review   [label="no"];
 
   always [shape=note label="Always: one writer per key. work.* on closed issues is meaningless —\nnever write it there, ignore it when reading. Never end a session with\nthe signal stale: before stopping, either close the issue or set the\nattention pair to reflect the hand-off."];
+
+  relationships [shape=note label="Relationships: Parent links express containment and roll-up only;\nthey do not gate readiness, and a parent cannot close with open children.\nUse --blocks <dependent> / --blocked-by <prerequisite>\nonly for real prerequisites; those links gate kata ready.\nUse --related <ref> for context only.\nkata wait observes state; it does not require a dependency edge."];
 
   gate [shape=note label="A future scheduled_on or someday=true keeps an issue\nout of ready and next. kata deadline <ref> <date-or-time>\nsets deadline_on, which never gates either."];
 }

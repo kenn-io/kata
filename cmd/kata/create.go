@@ -44,7 +44,7 @@ func newCreateCmd() *cobra.Command {
 	// silent last-wins on StringVar; collapseSingletonRef rejects multiple
 	// distinct values explicitly.
 	cmd.Flags().Var(newRefSliceValue(&parentRefSlice), "parent",
-		"initial parent (must finish before this issue starts; ≤1; "+issueRefHelp+")")
+		"initial parent (containment only; does not gate readiness; ≤1; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&blocks), "blocks",
 		"this issue blocks <ref> (this must finish before <ref> can; repeatable; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&blockedBy), "blocked-by",

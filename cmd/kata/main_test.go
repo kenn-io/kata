@@ -222,6 +222,14 @@ func TestHelp_DescribesAgentContractSurfaces(t *testing.T) {
 	assert.Contains(t, initHelp, "Codex CLI contract and work.attention hooks")
 }
 
+func TestHelp_DescribesParentAsContainment(t *testing.T) {
+	for _, args := range [][]string{{"create", "--help"}, {"edit", "--help"}} {
+		help := string(executeRoot(t, newRootCmd(), args...))
+		assert.Contains(t, help, "containment only; does not gate readiness")
+		assert.NotContains(t, help, "must finish before this issue starts")
+	}
+}
+
 func TestHelp_RefFlagsDoNotAdvertiseLegacyNumbers(t *testing.T) {
 	for _, args := range [][]string{
 		{"create", "--help"},
