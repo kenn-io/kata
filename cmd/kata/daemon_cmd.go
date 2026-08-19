@@ -35,7 +35,7 @@ import (
 
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "manage the kata daemon"}
-	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd())
+	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonLocateCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd())
 	return cmd
 }
 
@@ -71,6 +71,83 @@ type daemonStartOutput struct {
 	Address string `json:"address"`
 	DBPath  string `json:"db_path,omitempty"`
 	WebURL  string `json:"web_url,omitempty"`
+}
+
+type daemonLocateOutput struct {
+	Source         string `json:"source"`
+	Kind           string `json:"kind"`
+	Network        string `json:"network"`
+	Scheme         string `json:"scheme"`
+	Address        string `json:"address"`
+	RequestBaseURL string `json:"request_base_url,omitempty"`
+}
+
+func daemonLocateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "locate",
+		Short: "print or start the selected daemon endpoint",
+		Long: "Print the daemon endpoint selected by Kata, starting it when the selection is local and stopped. Resolution order is " +
+			"--daemon, KATA_SERVER, .kata.local.toml [server].url walking up from " +
+			"--workspace or the current directory, active_daemon, then the local daemon. " +
+			"Local addresses use unix:///path for Unix sockets or host:port for HTTP over TCP; " +
+			"configured remotes use their canonical HTTP(S) URL. Output never includes authentication credentials.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			out, err := locateDaemon(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if currentOutputMode() == outputJSON {
+				return emitJSON(cmd.OutOrStdout(), out)
+			}
+			if currentOutputMode() == outputAgent {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK daemon source=%s kind=%s network=%s scheme=%s address=%s",
+					agentValue(out.Source), agentValue(out.Kind), agentValue(out.Network),
+					agentValue(out.Scheme), agentValue(out.Address))
+				if err == nil && out.RequestBaseURL != "" {
+					_, err = fmt.Fprintf(cmd.OutOrStdout(), " request_base_url=%s", agentValue(out.RequestBaseURL))
+				}
+				if err == nil {
+					_, err = fmt.Fprintln(cmd.OutOrStdout())
+				}
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), out.Address)
+			return err
+		},
+	}
+}
+
+func locateDaemon(ctx context.Context) (daemonLocateOutput, error) {
+	var (
+		target client.RunningDaemon
+		source = "configured"
+		err    error
+	)
+	if flags.Daemon != "" {
+		target, err = client.LocateNamedRunningTarget(ctx, flags.Daemon)
+		source = "daemon_flag"
+	} else {
+		target, err = client.LocateRunningTargetInWorkspace(ctx, workspaceStartForRemote())
+	}
+	if err != nil {
+		return daemonLocateOutput{}, cliDaemonTargetError(err)
+	}
+	kind := "remote"
+	if !target.ConfiguredRemote {
+		kind = "local"
+		if flags.Daemon == "" {
+			source = "local_default"
+		}
+	}
+	requestBaseURL := target.BaseURL
+	if target.Network == "unix" {
+		requestBaseURL = ""
+	}
+	return daemonLocateOutput{
+		Source: source, Kind: kind, Network: target.Network, Scheme: target.Scheme,
+		Address: target.Address, RequestBaseURL: requestBaseURL,
+	}, nil
 }
 
 var (

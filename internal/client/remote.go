@@ -83,6 +83,39 @@ func EnsureNamedRunning(ctx context.Context, name string) (string, error) {
 	return target.BaseURL, nil
 }
 
+// LocateNamedRunningTarget ensures a named local daemon is running or probes a
+// named remote, returning sanitized connection metadata without resolving its
+// authentication credential.
+func LocateNamedRunningTarget(ctx context.Context, name string) (RunningDaemon, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return RunningDaemon{}, fmt.Errorf("%w: empty name", ErrNamedDaemonNotFound)
+	}
+	cfg, err := config.ReadDaemonConfig()
+	if err != nil {
+		return RunningDaemon{}, err
+	}
+	for _, daemon := range cfg.Daemons {
+		if daemon.Name != name {
+			continue
+		}
+		if daemon.Local {
+			return EnsureLocalRunningTarget(ctx)
+		}
+		baseURL, err := normalizeRemoteURL(daemon.URL, daemon.AllowInsecure)
+		if err != nil {
+			return RunningDaemon{}, fmt.Errorf("%s daemon %q url %q: %w",
+				daemonConfigSource(), daemon.Name, remoteURLForError(daemon.URL), err)
+		}
+		if !probeRemote(ctx, baseURL) {
+			return RunningDaemon{}, fmt.Errorf("%w: %s (%s daemon %q)",
+				ErrRemoteUnavailable, baseURL, daemonConfigSource(), daemon.Name)
+		}
+		return remoteRunningDaemon(baseURL, true), nil
+	}
+	return RunningDaemon{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
+}
+
 // NormalizeRemoteURL exposes kata's remote URL validation/canonicalization
 // for TUI daemon-catalog entries. It returns scheme://host[:port] with path
 // and query stripped, and applies the same allow_insecure semantics used by
@@ -136,10 +169,14 @@ func RemoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 // CWD; otherwise running from outside the repo with `--workspace`
 // would silently miss the workspace's local override.
 func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, error) {
+	return resolveRemoteEndpoint(ctx, workspaceStart, true)
+}
+
+func resolveRemoteEndpoint(ctx context.Context, workspaceStart string, resolveCredentials bool) (string, bool, error) {
 	if v := os.Getenv(remoteServerEnvVar); v != "" {
 		u, err := normalizeRemoteURL(v, envAllowInsecure())
 		if err != nil {
-			return "", false, fmt.Errorf("KATA_SERVER %q: %w", v, err)
+			return "", false, fmt.Errorf("KATA_SERVER %q: %w", remoteURLForError(v), err)
 		}
 		if !probeRemote(ctx, u) {
 			return "", false, fmt.Errorf("%w: %s (KATA_SERVER)", ErrRemoteUnavailable, u)
@@ -151,7 +188,7 @@ func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 		return "", false, err
 	}
 	if !ok {
-		return resolveActiveRemote(ctx)
+		return resolveActiveRemote(ctx, resolveCredentials)
 	}
 	cfg, err := config.ReadLocalConfig(root)
 	if err != nil {
@@ -161,11 +198,11 @@ func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 		return "", false, fmt.Errorf("read %s: %w", path, err)
 	}
 	if cfg.Server.URL == "" {
-		return resolveActiveRemote(ctx)
+		return resolveActiveRemote(ctx, resolveCredentials)
 	}
 	u, err := normalizeRemoteURL(cfg.Server.URL, cfg.Server.AllowInsecure)
 	if err != nil {
-		return "", false, fmt.Errorf("%s server.url %q: %w", path, cfg.Server.URL, err)
+		return "", false, fmt.Errorf("%s server.url %q: %w", path, remoteURLForError(cfg.Server.URL), err)
 	}
 	if !probeRemote(ctx, u) {
 		return "", false, fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, u, path)
@@ -173,12 +210,12 @@ func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 	return u, true, nil
 }
 
-func resolveActiveRemote(ctx context.Context) (string, bool, error) {
+func resolveActiveRemote(ctx context.Context, resolveCredentials bool) (string, bool, error) {
 	target, ok, err := activeRemoteFromConfig()
 	if err != nil || !ok {
 		return "", false, err
 	}
-	if !globalAuthTokenOverrideSet() {
+	if resolveCredentials && !globalAuthTokenOverrideSet() {
 		_, err = resolveActiveRemoteTargetToken(target)
 	}
 	if err != nil {
@@ -300,7 +337,7 @@ func namedDaemonTargetFromCatalog(
 		baseURL, err = normalizeRemoteURL(daemon.URL, daemon.AllowInsecure)
 		if err != nil {
 			return namedDaemonTarget{}, fmt.Errorf("%s daemon %q url %q: %w",
-				daemonConfigSource(), daemon.Name, daemon.URL, err)
+				daemonConfigSource(), daemon.Name, remoteURLForError(daemon.URL), err)
 		}
 	}
 	target := activeRemoteTarget{
@@ -346,7 +383,7 @@ func activeRemoteFromConfig() (activeRemoteTarget, bool, error) {
 		if err != nil {
 			return activeRemoteTarget{}, false,
 				fmt.Errorf("%s daemon %q url %q: %w",
-					daemonConfigSource(), daemon.Name, daemon.URL, err)
+					daemonConfigSource(), daemon.Name, remoteURLForError(daemon.URL), err)
 		}
 		return activeRemoteTarget{
 			Name:          daemon.Name,
@@ -709,7 +746,7 @@ func localConfigTrackState(root string) (tracked, determined bool) {
 func normalizeRemoteURL(v string, allowInsecure bool) (string, error) {
 	u, err := url.Parse(v)
 	if err != nil {
-		return "", fmt.Errorf("parse url: %w", err)
+		return "", errors.New("invalid URL syntax")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
@@ -737,6 +774,14 @@ func requireSecureOrPrivate(u *url.URL, allowInsecure bool) error {
 		return fmt.Errorf("plain http to %q is not allowed: %w; use https or set allow_insecure (env KATA_ALLOW_INSECURE=1, or [server].allow_insecure=true in .kata.local.toml)", host, err)
 	}
 	return nil
+}
+
+func remoteURLForError(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "<invalid-url>"
+	}
+	return (&url.URL{Scheme: strings.ToLower(parsed.Scheme), Host: parsed.Host}).String()
 }
 
 // probeRemote checks an explicitly configured remote using the normal
