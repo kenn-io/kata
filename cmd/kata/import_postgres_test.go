@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -13,8 +14,101 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	home := setupKataEnv(t)
+	ctx := context.Background()
+	source := openKataTestDB(t, filepath.Join(home, "source-merge.db"))
+	importedProject, err := source.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	importedIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: importedProject.ID, Title: "imported issue", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	purgedIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: importedProject.ID, Title: "purged issue", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	sourcePurge, err := source.PurgeIssue(ctx, purgedIssue.ID, "fixture-author", nil)
+	require.NoError(t, err)
+	require.NotNil(t, sourcePurge.PurgeResetAfterEventID)
+	var snapshot bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &snapshot, jsonl.ExportOptions{
+		ProjectID: importedProject.ID, IncludeDeleted: true,
+	}))
+	require.NoError(t, source.Close())
+	input := filepath.Join(home, "spoke-project.jsonl")
+	require.NoError(t, os.WriteFile(input, snapshot.Bytes(), 0o600))
+
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	target, err := storeopen.Open(ctx, dsn)
+	require.NoError(t, err)
+	existingProject, err := target.CreateProject(ctx, "existing-project")
+	require.NoError(t, err)
+	existingIssue, _, err := target.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: existingProject.ID, Title: "existing issue", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	_, err = admin.ExecContext(ctx, `SELECT setval(pg_get_serial_sequence('kata.issues','id'), 2000, true)`)
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx, `
+		INSERT INTO kata.project_purge_log(
+			uid, origin_instance_uid, project_id, project_name,
+			issue_count, event_count, alias_count, comment_count, link_count,
+			label_count, claim_count, pending_claim_request_count,
+			purge_reset_after_event_id, actor
+		) VALUES ($1, $2, $3, $4, 0, 0, 0, 0, 0, 0, 0, 0, 3000, $5)`,
+		"01H00000000000000000000009", target.InstanceUID(), existingProject.ID,
+		existingProject.Name, "fixture-author")
+	require.NoError(t, err)
+	require.NoError(t, target.Close())
+
+	_, err = runCmdOutput(t, nil,
+		"import", "--merge", "--input", input, "--target", dsn)
+	require.NoError(t, err)
+
+	merged, err := storeopen.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = merged.Close() })
+	gotExisting, err := merged.ProjectByUID(ctx, existingProject.UID)
+	require.NoError(t, err)
+	assert.Equal(t, existingProject.Name, gotExisting.Name)
+	_, err = merged.IssueByUID(ctx, existingIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	gotImported, err := merged.ProjectByUID(ctx, importedProject.UID)
+	require.NoError(t, err)
+	gotImportedIssue, err := merged.IssueByUID(ctx, importedIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	assert.Equal(t, gotImported.ID, gotImportedIssue.ProjectID)
+	assert.Equal(t, importedIssue.ShortID, gotImportedIssue.ShortID)
+	assert.Greater(t, gotImportedIssue.ID, int64(2000), "merge must allocate above the target sequence high-water mark")
+	mergedEvents, err := merged.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: gotImported.ID, Limit: 100,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, mergedEvents)
+	assert.Greater(t, mergedEvents[0].ID, int64(3000), "merge events must remain visible beyond the purge reset cursor")
+	var mergedSourceReset int64
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT purge_reset_after_event_id FROM kata.purge_log WHERE issue_uid = $1`, purgedIssue.UID).
+		Scan(&mergedSourceReset))
+	_, postMergeEvent, err := merged.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: gotImportedIssue.ID, Author: "fixture-author", Body: "after merge",
+	})
+	require.NoError(t, err)
+	assert.Greater(t, postMergeEvent.ID, mergedSourceReset,
+		"a post-merge event must remain visible beyond the imported purge reset cursor")
+}
 
 func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T) {
 	if testing.Short() {

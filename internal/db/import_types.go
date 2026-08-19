@@ -40,6 +40,10 @@ type ImportOptions struct {
 	// schema cutover; normal JSONL restore leaves restored bindings disabled
 	// until a local operator re-enables them.
 	PreserveIssueSyncBindingEnabled bool
+
+	// MergeProject remaps a single project-scoped replay onto fresh numeric IDs
+	// and inserts it without clearing existing domain state.
+	MergeProject bool
 }
 
 // ImportRecord is one normalized, current-shape import row: a Kind discriminator

@@ -21,6 +21,7 @@ func newImportCmd() *cobra.Command {
 	var target string
 	var force bool
 	var newInstance bool
+	var merge bool
 	var sourceFormat string
 	cmd := &cobra.Command{
 		Use:   "import",
@@ -32,7 +33,7 @@ func newImportCmd() *cobra.Command {
 			}
 			switch strings.TrimSpace(format) {
 			case "", "kata":
-				return runKataJSONLImport(cmd, input, target, force, newInstance)
+				return runKataJSONLImport(cmd, input, target, force, newInstance, merge)
 			case "beads":
 				if err := validateBeadsImportFlags(cmd); err != nil {
 					return err
@@ -49,10 +50,12 @@ func newImportCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&sourceFormat, "source-format", "kata", "import source format (kata or beads)")
 	cmd.Flags().StringVar(&input, "input", "", "path to JSONL export")
-	cmd.Flags().StringVar(&target, "target", "", "SQLite database path or Postgres DSN to create")
+	cmd.Flags().StringVar(&target, "target", "", "SQLite database path or Postgres DSN to create or merge into")
 	cmd.Flags().BoolVar(&force, "force", false, "replace existing target database")
 	cmd.Flags().BoolVar(&newInstance, "new-instance", false,
 		"keep the target database's new identity instead of reusing the source identity; useful when restoring into a separate copy")
+	cmd.Flags().BoolVar(&merge, "merge", false,
+		"merge one project snapshot into an existing target database")
 	return cmd
 }
 
@@ -86,7 +89,7 @@ func legacyImportSourceFormat() string {
 }
 
 func validateBeadsImportFlags(cmd *cobra.Command) error {
-	for _, name := range []string{"input", "target", "force", "new-instance"} {
+	for _, name := range []string{"input", "target", "force", "new-instance", "merge"} {
 		if cmd.Flags().Changed(name) {
 			return &cliError{
 				Message:  fmt.Sprintf("--%s is not supported with --source-format beads", name),
@@ -98,7 +101,13 @@ func validateBeadsImportFlags(cmd *cobra.Command) error {
 	return nil
 }
 
-func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInstance bool) error {
+func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInstance, merge bool) error {
+	if merge && force {
+		return &cliError{Message: "--force cannot be combined with --merge", Kind: kindValidation, ExitCode: ExitValidation}
+	}
+	if merge && newInstance {
+		return &cliError{Message: "--new-instance cannot be combined with --merge", Kind: kindValidation, ExitCode: ExitValidation}
+	}
 	if input == "" {
 		return &cliError{Message: "import requires --input", Kind: kindValidation, ExitCode: ExitValidation}
 	}
@@ -114,7 +123,13 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 		return err
 	}
 	if backend == storeopen.BackendPostgres {
+		if merge {
+			return runPostgresJSONLMerge(cmd, input, target)
+		}
 		return runPostgresJSONLImport(cmd, input, target, force, newInstance)
+	}
+	if merge {
+		return runSQLiteJSONLMerge(cmd, input, target)
 	}
 	targetExists, err := sqliteFileSetExists(target)
 	if err != nil {
@@ -161,6 +176,68 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	}
 	installed = true
 	return writeImportSuccess(cmd, target)
+}
+
+func runSQLiteJSONLMerge(cmd *cobra.Command, input, target string) error {
+	exists, err := sqliteFileSetExists(target)
+	if err != nil {
+		return fmt.Errorf("stat merge target: %w", err)
+	}
+	if !exists {
+		return &cliError{Message: "merge target does not exist", Kind: kindValidation, ExitCode: ExitValidation}
+	}
+	in, err := os.Open(input) //nolint:gosec // import path is user-provided CLI input
+	if err != nil {
+		return fmt.Errorf("open import input: %w", err)
+	}
+	defer func() { _ = in.Close() }()
+	store, err := storeopen.Open(cmd.Context(), target)
+	if err != nil {
+		return err
+	}
+	if err := jsonl.ImportWithOptions(cmd.Context(), in, store, jsonl.ImportOptions{MergeProject: true}); err != nil {
+		_ = store.Close()
+		return err
+	}
+	if err := store.Close(); err != nil {
+		return fmt.Errorf("close merge target: %w", err)
+	}
+	return writeImportSuccess(cmd, target)
+}
+
+func runPostgresJSONLMerge(cmd *cobra.Command, input, target string) error {
+	identity, err := config.CanonicalDSNIdentity(target)
+	if err != nil {
+		return err
+	}
+	pgConfig, err := postgresRestoreConfig(cmd.Context())
+	if err != nil {
+		return err
+	}
+	version, err := pgstore.PeekSchemaVersionWithConfig(cmd.Context(), target, pgConfig)
+	if err != nil {
+		return err
+	}
+	if version == 0 {
+		return &cliError{Message: "merge target does not exist", Kind: kindValidation, ExitCode: ExitValidation}
+	}
+	in, err := os.Open(input) //nolint:gosec // import path is user-provided CLI input
+	if err != nil {
+		return fmt.Errorf("open import input: %w", err)
+	}
+	defer func() { _ = in.Close() }()
+	store, err := pgstore.OpenWithConfig(cmd.Context(), target, pgConfig)
+	if err != nil {
+		return err
+	}
+	if err := jsonl.ImportWithOptions(cmd.Context(), in, store, jsonl.ImportOptions{MergeProject: true}); err != nil {
+		_ = store.Close()
+		return err
+	}
+	if err := store.Close(); err != nil {
+		return fmt.Errorf("close merge target: %w", err)
+	}
+	return writeImportSuccess(cmd, identity)
 }
 
 func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, newInstance bool) error {
