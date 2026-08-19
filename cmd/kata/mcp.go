@@ -32,9 +32,12 @@ func newMCPServeCmd() *cobra.Command {
 	var storageRoot string
 	var storageTargets []string
 	var enableTokenAdmin bool
+	var httpAddress string
+	var httpTokenEnv string
+	var trustPrivateNetwork bool
 	command := &cobra.Command{
 		Use:   "serve",
-		Short: "serve Kata tools over stdio",
+		Short: "serve Kata tools over stdio or streamable HTTP",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if strings.TrimSpace(storageRoot) == "" && len(storageTargets) > 0 {
@@ -51,6 +54,10 @@ func newMCPServeCmd() *cobra.Command {
 			}
 			if enableTokenAdmin && !allProjects {
 				return errors.New("--enable-token-admin requires --all-projects")
+			}
+			httpToken, err := resolveMCPHTTPToken(httpAddress, httpTokenEnv, trustPrivateNetwork)
+			if err != nil {
+				return err
 			}
 			ctx := command.Context()
 			var storage *storageadmin.Admin
@@ -139,6 +146,9 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if strings.TrimSpace(httpAddress) != "" {
+				return serveMCPHTTP(ctx, command.ErrOrStderr(), httpAddress, httpToken, server)
+			}
 			transport := mcpserver.NewStdioTransport(
 				asReadCloser(command.InOrStdin()),
 				command.OutOrStdout(),
@@ -158,6 +168,9 @@ func newMCPServeCmd() *cobra.Command {
 	command.Flags().StringVar(&storageRoot, "storage-root", "", "enable host-local JSONL artifacts under this directory")
 	command.Flags().StringArrayVar(&storageTargets, "storage-target", nil, "approved import target alias=path-or-DSN (repeatable)")
 	command.Flags().BoolVar(&enableTokenAdmin, "enable-token-admin", false, "enable daemon token administration tools")
+	command.Flags().StringVar(&httpAddress, "http", "", "serve streamable HTTP on host:port instead of stdio")
+	command.Flags().StringVar(&httpTokenEnv, "http-token-env", "", "require an inbound bearer read from this environment variable")
+	command.Flags().BoolVar(&trustPrivateNetwork, "trust-private-network", false, "trust plaintext MCP HTTP on a non-loopback private network")
 	return command
 }
 
