@@ -10,6 +10,10 @@ import (
 // far above any practical database size.
 const maxProjectMergeID int64 = math.MaxInt64 / 2
 
+// Imported clocks use the same lower-half limit so a merge cannot exhaust
+// the signed HLC range needed by later target-wide events.
+const maxProjectMergeHLCValue int64 = maxProjectMergeID
+
 // ProjectMergeOffsets reserves fresh numeric ID ranges in an existing target.
 // TargetProjectID is the exact new project ID; every other value is added to
 // source IDs from the project snapshot.
@@ -48,6 +52,8 @@ func PrepareProjectMergeRecords(
 	}
 	var project *ProjectExport
 	importedIssues := make(map[int64]string)
+	importedRecurrencesByID := make(map[int64]string)
+	importedRecurrencesByUID := make(map[string]int64)
 	for _, rec := range recs {
 		if rec.Project != nil {
 			if rec.Project.UID == SystemProjectUID || rec.Project.Name == SystemProjectName {
@@ -61,6 +67,10 @@ func PrepareProjectMergeRecords(
 		}
 		if rec.Issue != nil {
 			importedIssues[rec.Issue.ID] = rec.Issue.UID
+		}
+		if rec.Recurrence != nil {
+			importedRecurrencesByID[rec.Recurrence.ID] = rec.Recurrence.UID
+			importedRecurrencesByUID[rec.Recurrence.UID] = rec.Recurrence.ID
 		}
 	}
 	if project == nil {
@@ -142,6 +152,24 @@ func PrepareProjectMergeRecords(
 			if err = requireMergeProjectID(cloned.Issue.ProjectID, projectID, cloned.Kind); err == nil {
 				cloned.Issue.ID, err = addMergeOffset(cloned.Issue.ID, offsets.Issue, cloned.Kind)
 				cloned.Issue.ProjectID = offsets.TargetProjectID
+				if err == nil && cloned.Issue.RecurrenceUID != nil {
+					sourceRecurrenceID, ok := importedRecurrencesByUID[*cloned.Issue.RecurrenceUID]
+					if !ok {
+						err = fmt.Errorf("project merge issue recurrence UID %q is not part of the imported project",
+							*cloned.Issue.RecurrenceUID)
+					} else if cloned.Issue.RecurrenceID == nil {
+						cloned.Issue.RecurrenceID = &sourceRecurrenceID
+					} else if *cloned.Issue.RecurrenceID != sourceRecurrenceID {
+						err = fmt.Errorf("project merge issue recurrence ID %d does not match recurrence UID %q",
+							*cloned.Issue.RecurrenceID, *cloned.Issue.RecurrenceUID)
+					}
+				}
+				if err == nil && cloned.Issue.RecurrenceID != nil {
+					if _, ok := importedRecurrencesByID[*cloned.Issue.RecurrenceID]; !ok {
+						err = fmt.Errorf("project merge issue recurrence ID %d is not part of the imported project",
+							*cloned.Issue.RecurrenceID)
+					}
+				}
 				if err == nil && cloned.Issue.RecurrenceID != nil {
 					*cloned.Issue.RecurrenceID, err = addMergeOffset(*cloned.Issue.RecurrenceID, offsets.Recurrence, cloned.Kind+" recurrence")
 				}
@@ -210,9 +238,14 @@ func PrepareProjectMergeRecords(
 			}
 		case ImportKindEvent:
 			if err = requireMergeProjectID(cloned.Event.ProjectID, projectID, cloned.Kind); err == nil {
+				if cloned.Event.HLCPhysicalMS > maxProjectMergeHLCValue || cloned.Event.HLCCounter > maxProjectMergeHLCValue {
+					err = fmt.Errorf("project merge event HLC exceeds safe range")
+				}
 				// UID, content hash, and payload form the event's portable
 				// identity. Only target-local numeric columns are remapped.
-				cloned.Event.ID, err = addMergeOffset(cloned.Event.ID, offsets.Event, cloned.Kind)
+				if err == nil {
+					cloned.Event.ID, err = addMergeOffset(cloned.Event.ID, offsets.Event, cloned.Kind)
+				}
 				cloned.Event.ProjectID = offsets.TargetProjectID
 				if err == nil && cloned.Event.IssueID != nil {
 					*cloned.Event.IssueID, err = resolveImportedIssue(
@@ -220,7 +253,13 @@ func PrepareProjectMergeRecords(
 					)
 				}
 				if err == nil && cloned.Event.RelatedIssueID != nil {
-					*cloned.Event.RelatedIssueID, err = resolveIssue(*cloned.Event.RelatedIssueID, mergeStringValue(cloned.Event.RelatedIssueUID))
+					var resolvedID int64
+					resolvedID, err = resolveIssue(*cloned.Event.RelatedIssueID, mergeStringValue(cloned.Event.RelatedIssueUID))
+					if err == nil && resolvedID == 0 {
+						cloned.Event.RelatedIssueID = nil
+					} else if err == nil {
+						*cloned.Event.RelatedIssueID = resolvedID
+					}
 				}
 			}
 		case ImportKindPurgeLog:

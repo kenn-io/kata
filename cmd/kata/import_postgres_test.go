@@ -38,6 +38,9 @@ func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProje
 	sourcePurge, err := source.PurgeIssue(ctx, purgedIssue.ID, "fixture-author", nil)
 	require.NoError(t, err)
 	require.NotNil(t, sourcePurge.PurgeResetAfterEventID)
+	_, err = source.ExecContext(ctx, `UPDATE events SET hlc_physical_ms = ?, hlc_counter = ?`,
+		projectMergeHLCSafeBoundary, projectMergeHLCSafeBoundary)
+	require.NoError(t, err)
 	var snapshot bytes.Buffer
 	require.NoError(t, jsonl.Export(ctx, source, &snapshot, jsonl.ExportOptions{
 		ProjectID: importedProject.ID, IncludeDeleted: true,
@@ -108,6 +111,9 @@ func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProje
 	require.NoError(t, err)
 	assert.Greater(t, postMergeEvent.ID, mergedSourceReset,
 		"a post-merge event must remain visible beyond the imported purge reset cursor")
+	assert.Equal(t, projectMergeHLCSafeBoundary, postMergeEvent.HLCPhysicalMS)
+	assert.Equal(t, projectMergeHLCSafeBoundary+1, postMergeEvent.HLCCounter,
+		"a post-merge event must advance beyond the imported HLC boundary")
 	postMergeIssue, _, err := merged.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: gotImported.ID, Title: "after merge", Author: "fixture-author",
 	})

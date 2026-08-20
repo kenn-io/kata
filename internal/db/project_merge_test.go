@@ -112,6 +112,38 @@ func TestPrepareProjectMergeRecordsRejectsIDsWithoutSequenceHeadroom(t *testing.
 	}
 }
 
+func TestPrepareProjectMergeRecordsRejectsHLCPhysicalValueWithoutHeadroom(t *testing.T) {
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
+		{Kind: ImportKindEvent, Event: &EventExport{
+			ID: 7, UID: "01H00000000000000000000001", ProjectID: 2,
+			HLCPhysicalMS: maxProjectMergeHLCValue + 1,
+		}},
+	}
+
+	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Event: 20,
+	}, nil)
+	require.ErrorContains(t, err, "event HLC")
+	require.ErrorContains(t, err, "safe range")
+}
+
+func TestPrepareProjectMergeRecordsRejectsHLCCounterWithoutHeadroom(t *testing.T) {
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
+		{Kind: ImportKindEvent, Event: &EventExport{
+			ID: 7, UID: "01H00000000000000000000001", ProjectID: 2,
+			HLCPhysicalMS: 1, HLCCounter: maxProjectMergeHLCValue + 1,
+		}},
+	}
+
+	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Event: 20,
+	}, nil)
+	require.ErrorContains(t, err, "event HLC")
+	require.ErrorContains(t, err, "safe range")
+}
+
 func TestPrepareProjectMergeRecordsRemapsIDs(t *testing.T) {
 	issueID := int64(5)
 	peerID := int64(9)
@@ -144,6 +176,81 @@ func TestPrepareProjectMergeRecordsRemapsIDs(t *testing.T) {
 	assert.Equal(t, peerID, records[4].Link.ToIssueID, "source link must not be mutated")
 }
 
+func TestPrepareProjectMergeRecordsRejectsRecurrenceUIDOutsideImport(t *testing.T) {
+	recurrenceUID := "01H00000000000000000000002"
+	occurrenceKey := "2026-08-20"
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
+		{Kind: ImportKindIssue, Issue: &IssueExport{
+			ID: 5, UID: "01H00000000000000000000001", ProjectID: 2,
+			RecurrenceUID: &recurrenceUID, OccurrenceKey: &occurrenceKey,
+		}},
+	}
+
+	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Issue: 10, Recurrence: 20,
+	}, nil)
+	require.ErrorContains(t, err, "recurrence UID")
+	require.ErrorContains(t, err, "not part of the imported project")
+}
+
+func TestPrepareProjectMergeRecordsRejectsRecurrenceIdentityMismatch(t *testing.T) {
+	recurrenceID := int64(3)
+	recurrenceUID := "01H00000000000000000000004"
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
+		{Kind: ImportKindRecurrence, Recurrence: &RecurrenceExport{ID: 3, UID: "01H00000000000000000000002", ProjectID: 2}},
+		{Kind: ImportKindRecurrence, Recurrence: &RecurrenceExport{ID: 4, UID: recurrenceUID, ProjectID: 2}},
+		{Kind: ImportKindIssue, Issue: &IssueExport{
+			ID: 5, UID: "01H00000000000000000000001", ProjectID: 2,
+			RecurrenceID: &recurrenceID, RecurrenceUID: &recurrenceUID,
+		}},
+	}
+
+	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Issue: 10, Recurrence: 20,
+	}, nil)
+	require.ErrorContains(t, err, "recurrence ID 3")
+	require.ErrorContains(t, err, "does not match recurrence UID")
+}
+
+func TestPrepareProjectMergeRecordsRejectsRecurrenceIDOutsideImport(t *testing.T) {
+	recurrenceID := int64(3)
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
+		{Kind: ImportKindIssue, Issue: &IssueExport{
+			ID: 5, UID: "01H00000000000000000000001", ProjectID: 2,
+			RecurrenceID: &recurrenceID,
+		}},
+	}
+
+	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Issue: 10, Recurrence: 20,
+	}, nil)
+	require.ErrorContains(t, err, "recurrence ID 3")
+	require.ErrorContains(t, err, "not part of the imported project")
+}
+
+func TestPrepareProjectMergeRecordsRemapsRecurrenceUIDWithinImport(t *testing.T) {
+	recurrenceUID := "01H00000000000000000000002"
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
+		{Kind: ImportKindRecurrence, Recurrence: &RecurrenceExport{ID: 3, UID: recurrenceUID, ProjectID: 2}},
+		{Kind: ImportKindIssue, Issue: &IssueExport{
+			ID: 5, UID: "01H00000000000000000000001", ProjectID: 2,
+			RecurrenceUID: &recurrenceUID,
+		}},
+	}
+
+	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Issue: 10, Recurrence: 20,
+	}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, prepared[2].Issue.RecurrenceID)
+	assert.Equal(t, int64(23), *prepared[2].Issue.RecurrenceID)
+	assert.Nil(t, records[2].Issue.RecurrenceID, "source issue must not be mutated")
+}
+
 func TestPrepareProjectMergeRecordsDoesNotResolveExternalLinkPeer(t *testing.T) {
 	records := []ImportRecord{
 		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
@@ -166,6 +273,28 @@ func TestPrepareProjectMergeRecordsDoesNotResolveExternalLinkPeer(t *testing.T) 
 	assert.Equal(t, int64(15), prepared[2].Link.FromIssueID)
 	assert.Zero(t, prepared[2].Link.ToIssueID)
 	assert.False(t, lookupCalled)
+}
+
+func TestPrepareProjectMergeRecordsClearsUnresolvedEventRelatedIssueID(t *testing.T) {
+	relatedIssueID := int64(9)
+	relatedIssueUID := "01H00000000000000000000002"
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
+		{Kind: ImportKindEvent, Event: &EventExport{
+			ID: 7, UID: "01H00000000000000000000001", ProjectID: 2,
+			RelatedIssueID: &relatedIssueID, RelatedIssueUID: &relatedIssueUID,
+		}},
+	}
+
+	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Event: 20,
+	}, func(string) (int64, bool, error) { return 0, false, nil })
+	require.NoError(t, err)
+	require.Len(t, prepared, 2)
+	assert.Nil(t, prepared[1].Event.RelatedIssueID)
+	require.NotNil(t, prepared[1].Event.RelatedIssueUID)
+	assert.Equal(t, relatedIssueUID, *prepared[1].Event.RelatedIssueUID)
+	assert.Equal(t, int64(9), *records[1].Event.RelatedIssueID, "source event must not be mutated")
 }
 
 func TestPrepareProjectMergeRecordsDropsFederationState(t *testing.T) {

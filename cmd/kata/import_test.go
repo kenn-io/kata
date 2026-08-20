@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/jsonl"
 )
+
+const projectMergeHLCSafeBoundary = int64(math.MaxInt64 / 2)
 
 func setupImportTest(t *testing.T) (home, input, target string) {
 	t.Helper()
@@ -187,6 +190,9 @@ func TestImportMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *te
 	sourcePurge, err := source.PurgeIssue(ctx, purgedIssue.ID, "fixture-author", nil)
 	require.NoError(t, err)
 	require.NotNil(t, sourcePurge.PurgeResetAfterEventID)
+	_, err = source.ExecContext(ctx, `UPDATE events SET hlc_physical_ms = ?, hlc_counter = ?`,
+		projectMergeHLCSafeBoundary, projectMergeHLCSafeBoundary)
+	require.NoError(t, err)
 	sourceEvents, err := source.EventsAfter(ctx, db.EventsAfterParams{
 		ProjectID: importedProject.ID, Limit: 100,
 	})
@@ -279,6 +285,9 @@ func TestImportMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *te
 	require.NoError(t, err)
 	assert.Greater(t, postMergeEvent.ID, mergedSourceReset,
 		"a post-merge event must remain visible beyond the imported purge reset cursor")
+	assert.Equal(t, projectMergeHLCSafeBoundary, postMergeEvent.HLCPhysicalMS)
+	assert.Equal(t, projectMergeHLCSafeBoundary+1, postMergeEvent.HLCCounter,
+		"a post-merge event must advance beyond the imported HLC boundary")
 	postMergeIssue, _, err := merged.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: gotImported.ID, Title: "after merge", Author: "fixture-author",
 	})
