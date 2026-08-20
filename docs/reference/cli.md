@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-16
+last_edited: 2026-08-20
 ---
 
 # CLI reference
@@ -99,20 +99,23 @@ the other output modes.
 kata [--workspace PATH | --project NAME] [--daemon NAME] [--as ACTOR] mcp serve
 kata mcp serve --projects NAME[,NAME...]
 kata mcp serve --all-projects [--enable-token-admin]
+kata mcp serve --http HOST:PORT --http-token-env ENV_NAME
 ```
 
-`kata mcp serve` starts Kata's native MCP stdio server bound to the current
-workspace's project by default. `--workspace` or `--project` selects one
-explicit project. `--projects` fixes an allowlist of project names, pinned by
-immutable project UID. `--all-projects` follows every project in the selected
-daemon catalog. The
-startup scope and actor apply to every tool call. The initial catalog contains
-13 section loaders that progressively expose the detailed typed tools. Optional
-`--storage-root` and repeatable `--storage-target
+`kata mcp serve` starts Kata's native MCP server over stdio by default.
+`--http` selects Streamable HTTP instead; every HTTP listener requires an
+inbound bearer from `--http-token-env`, and non-loopback binds also require
+`--trust-private-network`. The server binds to the current workspace's project
+by default. `--workspace` or `--project` selects one explicit project.
+`--projects` fixes an allowlist of project names, pinned by immutable project
+UID. `--all-projects` follows every project in the selected daemon catalog.
+The startup scope and actor apply to every tool call. The initial catalog
+contains 13 section loaders that progressively expose the detailed typed
+tools. Optional `--storage-root` and repeatable `--storage-target
 alias=path-or-DSN` enable the otherwise absent host-local JSONL tools. See the
-[MCP reference](mcp.md) for the complete catalog, scheduling formats, safety
-rules, and limits. Daemon-wide token tools are absent unless
-`--enable-token-admin` is explicit.
+[MCP reference](mcp.md) for transport configuration, the complete catalog,
+scheduling formats, safety rules, and limits. Daemon-wide token tools are
+absent unless `--enable-token-admin` is explicit.
 
 ## Issue lifecycle
 
