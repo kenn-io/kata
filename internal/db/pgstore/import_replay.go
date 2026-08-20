@@ -116,7 +116,7 @@ func (s *Store) importReplayTx(
 			return err
 		}
 	}
-	if err := s.reconcileReplayIdentities(ctx, tx, sequenceFloors); err != nil {
+	if err := s.reconcileReplayIdentities(ctx, tx, sequenceFloors, opts.MergeProject); err != nil {
 		return err
 	}
 	return nil

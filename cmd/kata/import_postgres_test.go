@@ -59,10 +59,16 @@ func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProje
 		ProjectID: existingProject.ID, Title: "existing issue", Author: "fixture-author",
 	})
 	require.NoError(t, err)
+	_, _, err = target.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: existingIssue.ID, Author: "fixture-author", Body: "existing comment",
+	})
+	require.NoError(t, err)
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 	_, err = admin.ExecContext(ctx, `SELECT setval(pg_get_serial_sequence('kata.issues','id'), 2000, true)`)
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx, `SELECT setval(pg_get_serial_sequence('kata.comments','id'), 4000, true)`)
 	require.NoError(t, err)
 	_, err = admin.ExecContext(ctx, `
 		INSERT INTO kata.project_purge_log(
@@ -105,10 +111,12 @@ func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProje
 	require.NoError(t, admin.QueryRowContext(ctx,
 		`SELECT purged_issue_id, purge_reset_after_event_id FROM kata.purge_log WHERE issue_uid = $1`, purgedIssue.UID).
 		Scan(&mergedPurgedIssueID, &mergedSourceReset))
-	_, postMergeEvent, err := merged.CreateComment(ctx, db.CreateCommentParams{
+	postMergeComment, postMergeEvent, err := merged.CreateComment(ctx, db.CreateCommentParams{
 		IssueID: gotImportedIssue.ID, Author: "fixture-author", Body: "after merge",
 	})
 	require.NoError(t, err)
+	assert.Greater(t, postMergeComment.ID, int64(4000),
+		"a post-merge comment must not reuse the target sequence's reserved IDs")
 	assert.Greater(t, postMergeEvent.ID, mergedSourceReset,
 		"a post-merge event must remain visible beyond the imported purge reset cursor")
 	assert.Equal(t, projectMergeHLCSafeBoundary, postMergeEvent.HLCPhysicalMS)
