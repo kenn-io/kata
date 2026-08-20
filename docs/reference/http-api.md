@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-15
+last_edited: 2026-08-19
 ---
 
 # HTTP API schema
@@ -7,6 +7,9 @@ last_edited: 2026-08-15
 The daemon exposes an HTTP API (used by the CLI, TUI, and remote clients). Its
 shape is published as an OpenAPI 3.1 document so out-of-process clients can
 generate typed clients instead of hand-copying wire structs.
+
+Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
+transport for those requests with the same selection rules as the CLI.
 
 ## Getting the schema
 

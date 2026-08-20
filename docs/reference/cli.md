@@ -586,6 +586,7 @@ after login. Kata never puts a remote token or another credential in the URL.
 ```sh
 kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly]
 kata daemon status
+kata daemon locate [--json | --agent]
 kata daemon stop
 kata daemon restart [--listen <host:port>] [--insecure-readonly]
 kata daemon reload
@@ -649,6 +650,11 @@ transient startup overrides. Background start and restart output reports the
 resolved web UI URL on its own line after the daemon transport address.
 `daemon status` reports the running daemon's address, web UI URL, PID, version,
 and uptime.
+`daemon locate` selects the same endpoint as ordinary CLI commands, starts a
+stopped local selection, and prints connection metadata without exposing
+credentials. Its JSON form is the supported discovery interface for external
+clients; see [Daemon discovery](daemon-discovery.md) for precedence, address
+forms, and the output schema.
 When a live local daemon record exists but its endpoint cannot be reached,
 client commands report the PID, endpoint, and underlying connection error
 instead of treating the daemon as stopped or attempting to start another one.

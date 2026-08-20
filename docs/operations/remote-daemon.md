@@ -80,6 +80,19 @@ If none of those are set, clients next honor `active_daemon` in
 `<KATA_HOME>/config.toml`; otherwise they use local daemon discovery or
 auto-start.
 
+To inspect the endpoint selected by those rules, including its transport and
+canonical request URL, run:
+
+```sh
+kata daemon locate --json
+```
+
+The command probes configured remotes without printing or resolving their
+tokens. External clients should use this supported output instead of
+reimplementing the selection order. See
+[Daemon discovery](../reference/daemon-discovery.md) for the schema and Unix
+socket address form.
+
 ## Browser access
 
 `kata ui` follows the same daemon selection order. A configured remote opens
