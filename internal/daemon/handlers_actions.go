@@ -28,8 +28,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		// Owner-local TUI closes bypass substance / evidence validation:
 		// the interactive human path is "press x to close" and a 40-char
-		// rationale prompt would just annoy the user. Non-loopback TCP
-		// callers cannot assert this exception through the request body.
+		// rationale prompt would just annoy the user. Forwarded and
+		// non-loopback TCP callers cannot assert this exception through
+		// the request body.
 		// Structural guards (parent-close, throttle, repeated-message)
 		// still apply, so the audit trail still gates lazy parent-closes
 		// and reviewers can spot the no-evidence rows.

@@ -234,9 +234,9 @@ func NewServer(cfg ServerConfig) *Server {
 	applyErrorEnvelopeResponses(humaAPI.OpenAPI())
 	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
 
-	s.baseHandler = withGzip(requireBearer(cfg.authPolicy(), cfg.DB)(
+	s.baseHandler = withOwnerLocalTransport(withGzip(requireBearer(cfg.authPolicy(), cfg.DB)(
 		withTrustedProxyActor(cfg)(withFederationIngestPreauthorization(cfg, mux)),
-	))
+	)))
 	s.handler, _ = ApplyListenerPolicy(s.baseHandler, ListenerPolicy{Kind: ListenerSocket})
 	return s
 }

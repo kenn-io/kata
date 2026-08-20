@@ -121,9 +121,9 @@ func (c *Client) CreateIssue(
 
 // Close transitions the issue to status=closed. source=tui asks an
 // owner-local daemon to skip the substance and evidence checks that gate
-// CLI-side closes; non-loopback daemons reject that exemption. The structural
-// guards (parent-close completeness, sibling throttle, repeated-message)
-// still apply.
+// CLI-side closes; forwarded and non-loopback requests reject that exemption.
+// The structural guards (parent-close completeness, sibling throttle,
+// repeated-message) still apply.
 func (c *Client) Close(
 	ctx context.Context, projectID int64, ref, actor string,
 ) (*MutationResp, error) {

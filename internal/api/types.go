@@ -808,9 +808,10 @@ type ActionRequest struct {
 		// Source signals the caller's UI surface. "tui" relaxes the
 		// substance / evidence validation so an interactive human close
 		// is one keystroke, but only over an owner-local Unix socket or
-		// direct loopback TCP connection. Non-loopback TCP and
-		// identity-backed, trusted-proxy, or browser principals get full
-		// validation even when they send source="tui". Structural guards
+		// direct, unforwarded loopback TCP connection. Forwarded TCP,
+		// non-loopback TCP, and identity-backed, trusted-proxy, or browser
+		// principals get full validation even when they send source="tui".
+		// Structural guards
 		// (parent-close, sibling throttle) always apply. Empty string means
 		// "agent / CLI" and gets full validation.
 		Source   string     `json:"source,omitempty" enum:"tui,"`

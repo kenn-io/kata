@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -89,9 +90,11 @@ func TestPrincipalWebLocalAllowsOrdinaryWritesButNotTokenAdministration(t *testi
 
 func TestTUIBypassAllowed_RequiresOwnerLocalTransport(t *testing.T) {
 	tests := []struct {
-		name string
-		addr net.Addr
-		want bool
+		name       string
+		addr       net.Addr
+		remoteAddr string
+		headers    map[string]string
+		want       bool
 	}{
 		{
 			name: "unix socket",
@@ -99,9 +102,29 @@ func TestTUIBypassAllowed_RequiresOwnerLocalTransport(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "loopback TCP",
-			addr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777},
-			want: true,
+			name:    "forwarded unix socket",
+			addr:    &net.UnixAddr{Name: "/run/user/1000/kata.sock", Net: "unix"},
+			headers: map[string]string{"Forwarded": "for=192.0.2.10"},
+			want:    false,
+		},
+		{
+			name:       "direct loopback TCP",
+			addr:       &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777},
+			remoteAddr: "127.0.0.1:40123",
+			want:       true,
+		},
+		{
+			name:       "non-loopback peer on loopback TCP",
+			addr:       &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777},
+			remoteAddr: "192.0.2.10:40123",
+			want:       false,
+		},
+		{
+			name:       "forwarded loopback TCP",
+			addr:       &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777},
+			remoteAddr: "127.0.0.1:40123",
+			headers:    map[string]string{"X-Forwarded-For": "192.0.2.10"},
+			want:       false,
 		},
 		{
 			name: "private network TCP",
@@ -116,11 +139,21 @@ func TestTUIBypassAllowed_RequiresOwnerLocalTransport(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/actions/close", nil)
+			request.RemoteAddr = tt.remoteAddr
 			if tt.addr != nil {
-				ctx = context.WithValue(ctx, http.LocalAddrContextKey, tt.addr)
+				request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, tt.addr))
 			}
-			assert.Equal(t, tt.want, tuiBypassAllowed(ctx, "tui", "done"))
+			for name, value := range tt.headers {
+				request.Header.Set(name, value)
+			}
+
+			var got bool
+			withOwnerLocalTransport(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				got = tuiBypassAllowed(r.Context(), "tui", "done")
+			})).ServeHTTP(httptest.NewRecorder(), request)
+
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
