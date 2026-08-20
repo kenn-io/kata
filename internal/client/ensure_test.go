@@ -114,6 +114,23 @@ func TestEnsureRunningTargetMarksLocalDiscovery(t *testing.T) {
 	assert.Equal(t, 1, restore.startCalls)
 }
 
+func TestEnsureRunningTargetRetainsSelectedLocalEndpoint(t *testing.T) {
+	t.Setenv("KATA_SERVER", "")
+	home := setupKataEnv(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": currentVersionForEnsure(),
+	})
+	require.NoError(t, writeRuntimeRecord(t, home, addr))
+
+	target, err := EnsureRunningTarget(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, addr, target.Address)
+	assert.Equal(t, "tcp", target.Network)
+	assert.Equal(t, "http", target.Scheme)
+	assert.Equal(t, "http://"+addr, target.BaseURL)
+}
+
 func TestDiscoverWebRuntime(t *testing.T) {
 	record := kitdaemon.RuntimeRecord{
 		PID: 4242,
@@ -160,10 +177,11 @@ func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 	}
 	t.Cleanup(func() { startDetachedDaemonForEnsure = orig })
 
-	url, err := autoStart(context.Background(), ns.DataDir)
+	target, err := autoStart(context.Background(), ns.DataDir)
 
 	require.NoError(t, err)
-	assert.Equal(t, "http://"+addr, url)
+	assert.Equal(t, "http://"+addr, target.BaseURL)
+	assert.Equal(t, addr, target.Address)
 	assert.Equal(t, []string{"daemon", "start", "--foreground"}, got.Args)
 	assert.True(t, got.RefuseEphemeral)
 	assert.Contains(t, got.Env, daemon.AutoStartMarkerEnv+"=1")
@@ -213,17 +231,17 @@ func TestAutoStartAllowsDaemonStartupBeyondFiveSeconds(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		startedAt := time.Now()
-		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool, error) {
+		discoverDaemonForAutoStart = func(context.Context, string) (RunningDaemon, bool, bool, error) {
 			if time.Since(startedAt) < 6*time.Second {
-				return "", false, false, nil
+				return RunningDaemon{}, false, false, nil
 			}
-			return "http://127.0.0.1:27123", true, true, nil
+			return remoteRunningDaemon("http://127.0.0.1:27123", false), true, true, nil
 		}
 
-		url, err := autoStart(t.Context(), dataDir)
+		target, err := autoStart(t.Context(), dataDir)
 
 		require.NoError(t, err)
-		assert.Equal(t, "http://127.0.0.1:27123", url)
+		assert.Equal(t, "http://127.0.0.1:27123", target.BaseURL)
 	})
 }
 
@@ -241,17 +259,17 @@ func TestAutoStartWaitsForUnreachableSpawnedDaemonToBecomeReady(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		startedAt := time.Now()
-		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool, error) {
+		discoverDaemonForAutoStart = func(context.Context, string) (RunningDaemon, bool, bool, error) {
 			if time.Since(startedAt) < 6*time.Second {
-				return "", false, false, fmt.Errorf("%w: listener not ready", ErrLocalDaemonUnreachable)
+				return RunningDaemon{}, false, false, fmt.Errorf("%w: listener not ready", ErrLocalDaemonUnreachable)
 			}
-			return "http://127.0.0.1:27123", true, true, nil
+			return remoteRunningDaemon("http://127.0.0.1:27123", false), true, true, nil
 		}
 
-		url, err := autoStart(t.Context(), dataDir)
+		target, err := autoStart(t.Context(), dataDir)
 
 		require.NoError(t, err)
-		assert.Equal(t, "http://127.0.0.1:27123", url)
+		assert.Equal(t, "http://127.0.0.1:27123", target.BaseURL)
 	})
 }
 
@@ -269,8 +287,8 @@ func TestAutoStartReportsPersistentUnreachableDaemonAfterReadinessDeadline(t *te
 
 	synctest.Test(t, func(t *testing.T) {
 		probeErr := fmt.Errorf("%w: daemon pid 123 at unix:///tmp/kata.sock", ErrLocalDaemonUnreachable)
-		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool, error) {
-			return "", false, false, probeErr
+		discoverDaemonForAutoStart = func(context.Context, string) (RunningDaemon, bool, bool, error) {
+			return RunningDaemon{}, false, false, probeErr
 		}
 
 		_, err := autoStart(t.Context(), dataDir)
@@ -607,9 +625,9 @@ func patchEnsureHooks(t *testing.T, version, startedURL string) *ensurePatchStat
 		state.stopCalls++
 		return nil
 	}
-	startDaemonForEnsure = func(context.Context, string) (string, error) {
+	startDaemonForEnsure = func(context.Context, string) (RunningDaemon, error) {
 		state.startCalls++
-		return startedURL, nil
+		return remoteRunningDaemon(startedURL, false), nil
 	}
 	t.Cleanup(func() {
 		currentVersionForEnsure = origCurrent

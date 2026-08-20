@@ -30,6 +30,7 @@ nav = [
   ]},
   {"Reference" = [
     {"CLI" = "reference/cli.md"},
+    {"Daemon discovery" = "reference/daemon-discovery.md"},
     {"Model Context Protocol" = "reference/mcp.md"},
     {"Configuration" = "reference/configuration.md"},
     {"Metadata" = "reference/metadata.md"},

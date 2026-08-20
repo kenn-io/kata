@@ -47,6 +47,232 @@ func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
 	assert.Equal(t, "No kata daemon is running.\n", string(out))
 }
 
+func TestDaemonLocate_JSONReportsConfiguredRemoteWithoutSecrets(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	addr, cleanup := pipeServer(t)
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_SERVER", "http://"+addr)
+	t.Setenv("KATA_AUTH_TOKEN", "secret-that-must-not-be-emitted")
+
+	out := executeRoot(t, newRootCmd(), "daemon", "locate", "--json")
+
+	var got struct {
+		KataAPIVersion int    `json:"kata_api_version"`
+		Source         string `json:"source"`
+		Kind           string `json:"kind"`
+		Network        string `json:"network"`
+		Scheme         string `json:"scheme"`
+		Address        string `json:"address"`
+		RequestBaseURL string `json:"request_base_url"`
+	}
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, 1, got.KataAPIVersion)
+	assert.Equal(t, "configured", got.Source)
+	assert.Equal(t, "remote", got.Kind)
+	assert.Equal(t, "tcp", got.Network)
+	assert.Equal(t, "http", got.Scheme)
+	assert.Equal(t, "http://"+addr, got.Address)
+	assert.Equal(t, "http://"+addr, got.RequestBaseURL)
+	assert.NotContains(t, string(out), "secret-that-must-not-be-emitted")
+}
+
+func TestDaemonLocate_JSONReportsNamedRemoteWithoutCatalogToken(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	addr, cleanup := pipeServer(t)
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_EXAMPLE_REMOTE_TOKEN", "catalog-secret-that-must-not-be-emitted")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`
+[[daemon]]
+name = "example-remote"
+url = "http://%s"
+allow_insecure = true
+token_env = "KATA_EXAMPLE_REMOTE_TOKEN"
+`, addr)), 0o600))
+
+	out := executeRoot(t, newRootCmd(),
+		"--daemon", "example-remote", "daemon", "locate", "--json")
+
+	var got daemonLocateOutput
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, "daemon_flag", got.Source)
+	assert.Equal(t, "remote", got.Kind)
+	assert.Equal(t, "tcp", got.Network)
+	assert.Equal(t, "http", got.Scheme)
+	assert.Equal(t, "http://"+addr, got.Address)
+	assert.NotContains(t, string(out), "catalog-secret-that-must-not-be-emitted")
+}
+
+func TestDaemonLocate_JSONReportsActiveRemoteWithoutResolvingCatalogToken(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	addr, cleanup := pipeServer(t)
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_MISSING_REMOTE_TOKEN", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`
+active_daemon = "example-remote"
+
+[[daemon]]
+name = "example-remote"
+url = "http://%s"
+allow_insecure = true
+token_env = "KATA_MISSING_REMOTE_TOKEN"
+`, addr)), 0o600))
+
+	out := executeRoot(t, newRootCmd(), "daemon", "locate", "--json")
+
+	var got daemonLocateOutput
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, "configured", got.Source)
+	assert.Equal(t, "remote", got.Kind)
+	assert.Equal(t, "http://"+addr, got.Address)
+}
+
+func TestDaemonLocate_ErrorRedactsConfiguredURLUserInfo(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("KATA_SERVER", "http://fixture-user:fixture-secret@127.0.0.1:7777")
+
+	_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "locate")
+
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "fixture-user")
+	assert.NotContains(t, err.Error(), "fixture-secret")
+	assert.NotContains(t, stderr, "fixture-user")
+	assert.NotContains(t, stderr, "fixture-secret")
+}
+
+func TestDaemonLocate_ErrorRedactsMalformedConfiguredURLUserInfo(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("KATA_SERVER", "http://fixture-user:fixture-secret@127.0.0.1:bad")
+
+	_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "locate")
+
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "fixture-user")
+	assert.NotContains(t, err.Error(), "fixture-secret")
+	assert.NotContains(t, stderr, "fixture-user")
+	assert.NotContains(t, stderr, "fixture-secret")
+}
+
+func TestDaemonLocate_ErrorRedactsConfiguredURLPathQueryAndFragment(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("KATA_SERVER", "http://public.example/secret-path?token=secret-query#secret-fragment")
+
+	_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "locate")
+
+	require.Error(t, err)
+	for _, secret := range []string{"secret-path", "secret-query", "secret-fragment"} {
+		assert.NotContains(t, err.Error(), secret)
+		assert.NotContains(t, stderr, secret)
+	}
+}
+
+func TestDaemonLocate_JSONReportsLocalTCPConfigAddress(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("KATA_SERVER", "")
+	addr, cleanup := pipeServer(t)
+	t.Cleanup(cleanup)
+	require.NoError(t, writeRuntimeFor(home, addr))
+
+	out := executeRoot(t, newRootCmd(), "daemon", "locate", "--json")
+
+	var got daemonLocateOutput
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, "local_default", got.Source)
+	assert.Equal(t, "local", got.Kind)
+	assert.Equal(t, "tcp", got.Network)
+	assert.Equal(t, "http", got.Scheme)
+	assert.Equal(t, addr, got.Address)
+	assert.Equal(t, "http://"+addr, got.RequestBaseURL)
+}
+
+func TestDaemonLocate_JSONReportsLocalUnixConfigAddress(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix sockets are unavailable on Windows")
+	}
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "1")
+	socketDir := filepath.Join(t.TempDir(), "socket dir")
+	require.NoError(t, os.Mkdir(socketDir, 0o700))
+	socketPath := filepath.Join(socketDir, "kata.sock")
+	listener, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	})
+	go func() { _ = http.Serve(listener, mux) }() //nolint:gosec // test-only Unix socket
+
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "unix", Address: socketPath,
+	})
+	require.NoError(t, err)
+
+	out := executeRoot(t, newRootCmd(), "daemon", "locate", "--json")
+
+	var got daemonLocateOutput
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, "local_default", got.Source)
+	assert.Equal(t, "local", got.Kind)
+	assert.Equal(t, "unix", got.Network)
+	assert.Equal(t, "http", got.Scheme)
+	assert.Equal(t, "unix://"+socketPath, got.Address)
+	assert.Empty(t, got.RequestBaseURL)
+
+	agent := executeRoot(t, newRootCmd(), "--agent", "daemon", "locate")
+	assert.Equal(t,
+		"OK daemon source=local_default kind=local network=unix scheme=http address="+
+			agentValue("unix://"+socketPath)+"\n",
+		string(agent))
+}
+
+func TestDaemonLocate_HumanAndAgentOutput(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	addr, cleanup := pipeServer(t)
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_SERVER", "http://"+addr)
+
+	human := executeRoot(t, newRootCmd(), "daemon", "locate")
+	assert.Equal(t, "http://"+addr+"\n", string(human))
+
+	agent := executeRoot(t, newRootCmd(), "--agent", "daemon", "locate")
+	assert.Equal(t,
+		"OK daemon source=configured kind=remote network=tcp scheme=http address=http://"+addr+
+			" request_base_url=http://"+addr+"\n",
+		string(agent))
+}
+
+func TestDaemonLocate_HelpDocumentsResolutionOrder(t *testing.T) {
+	root := newRootCmd()
+	cmd, _, err := root.Find([]string{"daemon", "locate"})
+	require.NoError(t, err)
+
+	wantInOrder := []string{
+		"--daemon", "KATA_SERVER", ".kata.local.toml", "active_daemon", "local daemon",
+	}
+	last := -1
+	for _, want := range wantInOrder {
+		index := strings.Index(cmd.Long, want)
+		assert.Greater(t, index, last, "%q should follow the prior resolution source", want)
+		last = index
+	}
+	assert.Contains(t, cmd.Long, "unix:///path")
+	assert.Contains(t, cmd.Long, "host:port")
+	assert.Contains(t, cmd.Long, "never includes authentication credentials")
+}
+
 func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)

@@ -66,6 +66,9 @@ type BaseURLKey struct{}
 // a configured remote may be reached through a loopback SSH tunnel.
 type RunningDaemon struct {
 	BaseURL          string
+	Address          string
+	Network          string
+	Scheme           string
 	ConfiguredRemote bool
 }
 
@@ -81,7 +84,7 @@ var (
 	startDetachedDaemonForEnsure = kitdaemon.StartDetached
 	stopRunningDaemonsForEnsure  = stopRunningDaemons
 	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
-	discoverDaemonForAutoStart   = discoverForEnsureWithError
+	discoverDaemonForAutoStart   = discoverTargetForEnsureWithError
 	checkDaemonStateForEnsure    = func(dataDir string) error {
 		return (kitdaemon.RuntimeStore{Dir: dataDir}).CheckWritable()
 	}
@@ -132,19 +135,26 @@ func EnsureRunningInWorkspace(ctx context.Context, workspaceStart string) (strin
 }
 
 func ensureRunningTargetInWorkspace(ctx context.Context, workspaceStart string) (RunningDaemon, error) {
+	return runningTargetInWorkspace(ctx, workspaceStart, true)
+}
+
+// LocateRunningTargetInWorkspace selects and probes the same endpoint as
+// EnsureRunningTargetInWorkspace without resolving bearer credentials. Local
+// selections are still started when necessary.
+func LocateRunningTargetInWorkspace(ctx context.Context, workspaceStart string) (RunningDaemon, error) {
+	return runningTargetInWorkspace(ctx, workspaceStart, false)
+}
+
+func runningTargetInWorkspace(ctx context.Context, workspaceStart string, resolveCredentials bool) (RunningDaemon, error) {
 	if v, ok := ctx.Value(BaseURLKey{}).(string); ok && v != "" {
-		return RunningDaemon{BaseURL: v}, nil
+		return remoteRunningDaemon(v, false), nil
 	}
-	if url, ok, err := resolveRemote(ctx, workspaceStart); err != nil {
+	if url, ok, err := resolveRemoteEndpoint(ctx, workspaceStart, resolveCredentials); err != nil {
 		return RunningDaemon{}, err
 	} else if ok {
-		return RunningDaemon{BaseURL: url, ConfiguredRemote: true}, nil
+		return remoteRunningDaemon(url, true), nil
 	}
-	url, err := ensureLocalRunning(ctx)
-	if err != nil {
-		return RunningDaemon{}, err
-	}
-	return RunningDaemon{BaseURL: url}, nil
+	return ensureLocalRunningTarget(ctx)
 }
 
 // EnsureLocalRunning returns a live local daemon's base URL, ignoring
@@ -158,21 +168,35 @@ func EnsureLocalRunning(ctx context.Context) (string, error) {
 	return ensureLocalRunning(ctx)
 }
 
+// EnsureLocalRunningTarget is EnsureLocalRunning with the exact selected
+// runtime endpoint retained for callers that must publish or reuse it.
+func EnsureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
+	if v, ok := ctx.Value(BaseURLKey{}).(string); ok && v != "" {
+		return remoteRunningDaemon(v, false), nil
+	}
+	return ensureLocalRunningTarget(ctx)
+}
+
 func ensureLocalRunning(ctx context.Context) (string, error) {
+	target, err := ensureLocalRunningTarget(ctx)
+	return target.BaseURL, err
+}
+
+func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	ns, err := daemon.NewNamespace()
 	if err != nil {
-		return "", err
+		return RunningDaemon{}, err
 	}
-	url, compatible, ok, err := discoverForEnsureWithError(ctx, ns.DataDir)
+	target, compatible, ok, err := discoverTargetForEnsureWithError(ctx, ns.DataDir)
 	if err != nil {
-		return "", err
+		return RunningDaemon{}, err
 	}
 	if ok {
 		if compatible {
-			return url, nil
+			return target, nil
 		}
 		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
-			return "", err
+			return RunningDaemon{}, err
 		}
 		return startDaemonForEnsure(ctx, ns.DataDir)
 	}
@@ -180,11 +204,16 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 }
 
 func discoverForEnsureWithError(ctx context.Context, dataDir string) (string, bool, bool, error) {
+	target, compatible, ok, err := discoverTargetForEnsureWithError(ctx, dataDir)
+	return target.BaseURL, compatible, ok, err
+}
+
+func discoverTargetForEnsureWithError(ctx context.Context, dataDir string) (RunningDaemon, bool, bool, error) {
 	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
 	if err != nil {
-		return "", false, false, err
+		return RunningDaemon{}, false, false, err
 	}
-	var staleURL string
+	var staleTarget RunningDaemon
 	var unreachable error
 	for _, r := range recs {
 		if !daemon.RuntimeProcessAlive(r) {
@@ -194,7 +223,7 @@ func discoverForEnsureWithError(ctx context.Context, dataDir string) (string, bo
 		url, info, probeErr := probeAddressWithError(ctx, address)
 		if probeErr != nil {
 			if err := ctx.Err(); err != nil {
-				return "", false, false, err
+				return RunningDaemon{}, false, false, err
 			}
 			if unreachable == nil {
 				unreachable = &localDaemonUnreachableError{
@@ -205,20 +234,21 @@ func discoverForEnsureWithError(ctx context.Context, dataDir string) (string, bo
 			}
 			continue
 		}
+		target := localRunningDaemon(url, address)
 		if daemonVersionCheckSkipped() || daemonVersionCompatible(info) {
-			return url, true, true, nil
+			return target, true, true, nil
 		}
-		if staleURL == "" {
-			staleURL = url
+		if staleTarget.BaseURL == "" {
+			staleTarget = target
 		}
 	}
 	if unreachable != nil {
-		return "", false, false, unreachable
+		return RunningDaemon{}, false, false, unreachable
 	}
-	if staleURL != "" {
-		return staleURL, false, true, nil
+	if staleTarget.BaseURL != "" {
+		return staleTarget, false, true, nil
 	}
-	return "", false, false, nil
+	return RunningDaemon{}, false, false, nil
 }
 
 func daemonVersionCheckSkipped() bool {
@@ -274,7 +304,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 	return errors.New("old daemon did not stop within 3s")
 }
 
-func autoStart(ctx context.Context, dataDir string) (string, error) {
+func autoStart(ctx context.Context, dataDir string) (RunningDaemon, error) {
 	opts := kitdaemon.StartDetachedOptions{
 		Args:            []string{"daemon", "start", "--foreground"},
 		Env:             append(os.Environ(), daemon.AutoStartMarkerEnv+"=1"),
@@ -289,13 +319,13 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 	// never hand the daemon the caller's stderr.
 	if err := checkDaemonStateForEnsure(dataDir); err != nil {
 		if errors.Is(err, os.ErrPermission) {
-			return "", fmt.Errorf(
+			return RunningDaemon{}, fmt.Errorf(
 				"auto-start daemon: cannot write Kata state directory %s: %w; "+
 					"check filesystem permissions or sandbox access and retry",
 				dataDir, err,
 			)
 		}
-		return "", fmt.Errorf("auto-start daemon: cannot write Kata state directory %s: %w", dataDir, err)
+		return RunningDaemon{}, fmt.Errorf("auto-start daemon: cannot write Kata state directory %s: %w", dataDir, err)
 	}
 	if logw := daemonLogWriter(dataDir); logw != nil {
 		defer func() { _ = logw.Close() }() // child keeps its own handle after Start
@@ -303,31 +333,52 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 		opts.Stderr = logw
 	}
 	if err := startDetachedDaemonForEnsure(ctx, opts); err != nil {
-		return "", fmt.Errorf("auto-start daemon: %w", err)
+		return RunningDaemon{}, fmt.Errorf("auto-start daemon: %w", err)
 	}
 	deadline := time.Now().Add(daemonStartupWait)
 	var unreachable error
 	for time.Now().Before(deadline) {
-		url, compatible, ok, err := discoverDaemonForAutoStart(ctx, dataDir)
+		target, compatible, ok, err := discoverDaemonForAutoStart(ctx, dataDir)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
-			return "", err
+			return RunningDaemon{}, err
 		}
 		if errors.Is(err, ErrLocalDaemonUnreachable) {
 			unreachable = err
 		}
 		if ok && compatible {
-			return url, nil
+			return target, nil
 		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return RunningDaemon{}, ctx.Err()
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
 	if unreachable != nil {
-		return "", unreachable
+		return RunningDaemon{}, unreachable
 	}
-	return "", fmt.Errorf("daemon failed to start within %s; inspect kata daemon status and kata daemon logs", daemonStartupWait)
+	return RunningDaemon{}, fmt.Errorf("daemon failed to start within %s; inspect kata daemon status and kata daemon logs", daemonStartupWait)
+}
+
+func localRunningDaemon(baseURL, address string) RunningDaemon {
+	network := "tcp"
+	if strings.HasPrefix(address, "unix://") {
+		network = "unix"
+	}
+	return RunningDaemon{
+		BaseURL: baseURL, Address: address, Network: network, Scheme: "http",
+	}
+}
+
+func remoteRunningDaemon(baseURL string, configured bool) RunningDaemon {
+	scheme := "http"
+	if parsed, err := url.Parse(baseURL); err == nil && parsed.Scheme != "" {
+		scheme = parsed.Scheme
+	}
+	return RunningDaemon{
+		BaseURL: baseURL, Address: baseURL, Network: "tcp", Scheme: scheme,
+		ConfiguredRemote: configured,
+	}
 }
 
 // daemonLogWriter opens <dataDir>/daemon.log for the auto-started daemon's
