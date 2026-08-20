@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,6 +265,65 @@ func TestWebDaemonGatewayCannotProxyTUIBypassToLoopbackTarget(t *testing.T) {
 	got, err := targetStore.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", got.Status)
+}
+
+func TestWebDaemonGatewayForwardsNonBypassCloseBodiesUnchanged(t *testing.T) {
+	var forwardedBodies []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/instance" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"web_ui_contract_version": api.UISnapshotContractVersion,
+				"web_ui_capabilities": api.UICapabilities{
+					Writable: true, Updates: "poll", ActorPolicy: "request",
+				},
+			})
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		forwardedBodies = append(forwardedBodies, string(body))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	bodies := []string{
+		`{"actor":"agent","reason":"done","message":"A substantive close message that remains intact."}`,
+		`{"actor":"agent","source":"tui","reason":"wontfix","message":"A valid non-bypass TUI close remains intact."}`,
+	}
+	for _, body := range bodies {
+		response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodPost,
+			"/api/v1/projects/7/issues/abcd/actions/close", strings.NewReader(body), "")
+		assert.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
+	}
+	assert.Equal(t, bodies, forwardedBodies)
+}
+
+func TestWebDaemonGatewayRejectsOversizedCloseBeforeContactingTarget(t *testing.T) {
+	var targetCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetCalls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	body := `{"message":"` + strings.Repeat("x", (1<<20)+1) + `"}`
+	response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodPost,
+		"/api/v1/projects/7/issues/abcd/actions/close", strings.NewReader(body), "")
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "close_request_too_large")
+	assert.Equal(t, 0, targetCalls)
 }
 
 func TestWebDaemonGatewayBoundsTargetAuthorityCheck(t *testing.T) {
@@ -578,6 +638,9 @@ func authorizedGatewayRequest(
 	request.Header.Set(webCSRFHeader, issued.CSRF)
 	request.Header.Set("Origin", "http://127.0.0.1:27123")
 	request.Header.Set("If-None-Match", ifNoneMatch)
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	request.AddCookie(manager.Cookie(issued.Cookie))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

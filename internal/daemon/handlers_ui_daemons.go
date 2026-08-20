@@ -235,8 +235,10 @@ func rejectWebDaemonTUIClose(w http.ResponseWriter, r *http.Request) bool {
 	}
 	var input struct {
 		Source string `json:"source"`
+		Reason string `json:"reason"`
 	}
-	if json.Unmarshal(body, &input) == nil && input.Source == "tui" {
+	if json.Unmarshal(body, &input) == nil && input.Source == "tui" &&
+		(input.Reason == "" || input.Reason == "done") {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_operation_forbidden")
 		return true
 	}
