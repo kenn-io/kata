@@ -140,6 +140,57 @@ func TestCloseIssue_LoopbackStaticTokenPreservesTUIBypass(t *testing.T) {
 	assert.Equal(t, "closed", got.Status)
 }
 
+func TestCloseIssue_StaticTokenBrowserSessionCannotForgeTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{
+		Origin: "http://127.0.0.1:27123", InstanceID: "instance_a",
+		Writable: true, Updates: "sse", Auth: config.AuthConfig{Token: "static-token"}, DB: d.db,
+	})
+	require.NoError(t, err)
+	issued, err := manager.IssueSession(daemon.Principal{Kind: daemon.PrincipalStaticToken}, "/kata")
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now, WebSessions: manager,
+		Auth: config.AuthConfig{Token: "static-token"},
+	})
+	t.Cleanup(func() { _ = server.Close() })
+	handler, err := server.HandlerFor(daemon.ListenerPolicy{
+		Kind: daemon.ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true,
+	})
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost,
+		"http://127.0.0.1:27123"+issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"forged","source":"tui","reason":"done"}`))
+	request.Host = "127.0.0.1:27123"
+	request.RemoteAddr = "127.0.0.1:40123"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "http://127.0.0.1:27123")
+	request.Header.Set("X-Kata-Web-Session", issued.Session)
+	request.Header.Set("X-Kata-CSRF", issued.CSRF)
+	request.AddCookie(manager.Cookie(issued.Cookie))
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 27123})))
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
+}
+
 func TestCloseIssue_HostPrincipalCannotForgeTUIBypass(t *testing.T) {
 	d := openTestDB(t)
 	project, err := d.db.CreateProject(context.Background(), "example-workspace")

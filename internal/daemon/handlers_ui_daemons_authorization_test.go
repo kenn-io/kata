@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 )
 
 func TestWebDaemonGatewayAppliesWebLocalProjectPolicyBeforeForwarding(t *testing.T) {
@@ -216,6 +218,52 @@ func TestWebDaemonGatewayChecksTargetAuthorityBeforeMutation(t *testing.T) {
 			assert.Equal(t, test.wantMutation, mutationCalls)
 		})
 	}
+}
+
+func TestWebDaemonGatewayCannotProxyTUIBypassToLoopbackTarget(t *testing.T) {
+	targetStore := openAuthTestDB(t)
+	project, err := targetStore.CreateProject(t.Context(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := targetStore.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+	targetDaemon := NewServer(ServerConfig{
+		DB: targetStore, StartedAt: time.Now().UTC(),
+		Auth: config.AuthConfig{Token: "target-token"},
+	})
+	t.Cleanup(func() { _ = targetDaemon.Close() })
+	target := httptest.NewServer(targetDaemon.Handler())
+	t.Cleanup(target.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: target.URL, Token: "target-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	body := bytes.NewBufferString(`{"actor":"forged","source":"tui","reason":"done"}`)
+	request := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:27123/api/v1/ui/proxy/api/v1/projects/%d/issues/%s/actions/close",
+			project.ID, issue.ShortID), body)
+	request.Host = "127.0.0.1:27123"
+	request.RemoteAddr = "127.0.0.1:40123"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(webDaemonHeaderName, "example-remote")
+	request.Header.Set(webSessionHeader, issued.Session)
+	request.Header.Set(webCSRFHeader, issued.CSRF)
+	request.Header.Set("Origin", "http://127.0.0.1:27123")
+	request.AddCookie(manager.Cookie(issued.Cookie))
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "web_daemon_operation_forbidden")
+	got, err := targetStore.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
 }
 
 func TestWebDaemonGatewayBoundsTargetAuthorityCheck(t *testing.T) {

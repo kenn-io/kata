@@ -159,6 +159,9 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if rejected {
 		return
 	}
+	if rejectWebDaemonTUIClose(w, r) {
+		return
+	}
 	if isMutation(r.Method) && !readOnlyProjectRequest && !policy.writable {
 		writeWebDaemonError(w, http.StatusForbidden, "read_only")
 		return
@@ -211,6 +214,33 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del("Accept-Encoding")
 	}
 	proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), webDaemonSourcePolicyKey{}, policy)))
+}
+
+func rejectWebDaemonTUIClose(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/actions/close") || r.Body == nil {
+		return false
+	}
+	const maxCloseRequest = 1 << 20
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxCloseRequest+1))
+	if err != nil {
+		writeWebDaemonError(w, http.StatusBadRequest, "invalid_close_request")
+		return true
+	}
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	if len(body) > maxCloseRequest {
+		writeWebDaemonError(w, http.StatusRequestEntityTooLarge, "close_request_too_large")
+		return true
+	}
+	var input struct {
+		Source string `json:"source"`
+	}
+	if json.Unmarshal(body, &input) == nil && input.Source == "tui" {
+		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_operation_forbidden")
+		return true
+	}
+	return false
 }
 
 func classifyWebDaemonProjectRequest(w http.ResponseWriter, r *http.Request) (readOnly, rejected bool) {
