@@ -140,6 +140,44 @@ func TestCloseIssue_LoopbackStaticTokenPreservesTUIBypass(t *testing.T) {
 	assert.Equal(t, "closed", got.Status)
 }
 
+func TestCloseIssue_HostPrincipalCannotForgeTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+	})
+	t.Cleanup(func() { _ = server.Close() })
+
+	request := httptest.NewRequest(http.MethodPost,
+		issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"forged","source":"tui","reason":"done"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = "127.0.0.1:40123"
+	request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{
+		Kind: daemon.PrincipalHost, Subject: "mounted-service", Actor: "host-actor",
+	}))
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777})))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
+}
+
 func TestCloseIssue_MultiValueForwardedLoopbackCannotForgeTUIBypass(t *testing.T) {
 	d := openTestDB(t)
 	project, err := d.db.CreateProject(context.Background(), "example-workspace")

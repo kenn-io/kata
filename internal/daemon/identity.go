@@ -138,7 +138,7 @@ func tuiBypassAllowed(ctx context.Context, source, reason string) bool {
 	}
 	if p, ok := PrincipalFromContext(ctx); ok {
 		switch p.Kind {
-		case PrincipalDBToken, PrincipalTrustedProxy, PrincipalTrustedProxyAbsent, PrincipalWebLocal:
+		case PrincipalDBToken, PrincipalTrustedProxy, PrincipalTrustedProxyAbsent, PrincipalHost, PrincipalWebLocal:
 			return false
 		}
 	}
