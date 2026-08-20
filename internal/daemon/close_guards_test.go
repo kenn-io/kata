@@ -140,7 +140,7 @@ func TestCloseIssue_LoopbackStaticTokenPreservesTUIBypass(t *testing.T) {
 	assert.Equal(t, "closed", got.Status)
 }
 
-func TestCloseIssue_ForwardedLoopbackStaticTokenCannotForgeTUIBypass(t *testing.T) {
+func TestCloseIssue_MultiValueForwardedLoopbackCannotForgeTUIBypass(t *testing.T) {
 	d := openTestDB(t)
 	project, err := d.db.CreateProject(context.Background(), "example-workspace")
 	require.NoError(t, err)
@@ -163,7 +163,7 @@ func TestCloseIssue_ForwardedLoopbackStaticTokenCannotForgeTUIBypass(t *testing.
 		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
 	request.Header.Set("Authorization", "Bearer static-token")
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Forwarded-For", "192.0.2.10")
+	request.Header["X-Forwarded-For"] = []string{"", "192.0.2.10"}
 	request.RemoteAddr = "127.0.0.1:40123"
 	request = request.WithContext(context.WithValue(request.Context(),
 		http.LocalAddrContextKey,

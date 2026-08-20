@@ -120,7 +120,7 @@ func directLoopbackSessionAllowed(r *http.Request, policy ListenerPolicy) bool {
 
 func requestHasForwardingHeaders(r *http.Request) bool {
 	for _, header := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-IP"} {
-		if r.Header.Get(header) != "" {
+		if _, present := r.Header[http.CanonicalHeaderKey(header)]; present {
 			return true
 		}
 	}
