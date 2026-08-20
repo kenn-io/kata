@@ -51,7 +51,7 @@ func TestPrepareProjectMergeRecordsDropsSequenceFloors(t *testing.T) {
 	assert.Equal(t, int64(9), records[1].Sequence.Seq, "source sequence must not be mutated")
 }
 
-func TestPrepareProjectMergeRecordsDerivesEventFloorFromPurgeCursor(t *testing.T) {
+func TestPrepareProjectMergeRecordsDerivesSequenceFloorsFromPurgeTombstone(t *testing.T) {
 	resetCursor := int64(50)
 	records := []ImportRecord{
 		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
@@ -65,12 +65,17 @@ func TestPrepareProjectMergeRecordsDerivesEventFloorFromPurgeCursor(t *testing.T
 		TargetProjectID: 4, Issue: 100, Event: 200, PurgeLog: 300,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, 3)
+	require.Len(t, prepared, 4)
+	assert.Equal(t, int64(103), prepared[1].PurgeLog.PurgedIssueID)
 	require.NotNil(t, prepared[1].PurgeLog.PurgeResetAfterEventID)
 	assert.Equal(t, int64(250), *prepared[1].PurgeLog.PurgeResetAfterEventID)
 	require.NotNil(t, prepared[2].Sequence)
-	assert.Equal(t, "events", prepared[2].Sequence.Name)
-	assert.Equal(t, int64(250), prepared[2].Sequence.Seq)
+	assert.Equal(t, "issues", prepared[2].Sequence.Name)
+	assert.Equal(t, int64(103), prepared[2].Sequence.Seq)
+	require.NotNil(t, prepared[3].Sequence)
+	assert.Equal(t, "events", prepared[3].Sequence.Name)
+	assert.Equal(t, int64(250), prepared[3].Sequence.Seq)
+	assert.Equal(t, int64(3), records[1].PurgeLog.PurgedIssueID, "source issue ID must not be mutated")
 	assert.Equal(t, int64(50), *records[1].PurgeLog.PurgeResetAfterEventID, "source cursor must not be mutated")
 }
 

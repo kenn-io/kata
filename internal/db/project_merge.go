@@ -108,7 +108,7 @@ func PrepareProjectMergeRecords(
 	}
 	projectID := project.ID
 	out := make([]ImportRecord, 0, len(recs)-2)
-	var eventSequenceFloor int64
+	var issueSequenceFloor, eventSequenceFloor int64
 	for _, rec := range recs {
 		if rec.Kind == ImportKindMeta {
 			continue
@@ -230,6 +230,9 @@ func PrepareProjectMergeRecords(
 				if err == nil {
 					cloned.PurgeLog.PurgedIssueID, err = addMergeOffset(cloned.PurgeLog.PurgedIssueID, offsets.Issue, cloned.Kind+" issue")
 				}
+				if err == nil && cloned.PurgeLog.PurgedIssueID > issueSequenceFloor {
+					issueSequenceFloor = cloned.PurgeLog.PurgedIssueID
+				}
 				if err == nil {
 					err = shiftEventPointers(
 						cloned.PurgeLog.EventsDeletedMinID,
@@ -247,14 +250,23 @@ func PrepareProjectMergeRecords(
 			return nil, fmt.Errorf("project merge does not accept project_purge_log records")
 		case ImportKindSQLiteSequence:
 			// Scoped exports carry whole-database sequence floors. They do not
-			// describe this project, and explicit imported IDs advance the
-			// target sequences during replay.
+			// describe this project. Live imported IDs and the derived tombstone
+			// floors below advance target sequences during replay.
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, cloned)
+	}
+	if issueSequenceFloor > 0 {
+		out = append(out, ImportRecord{
+			Kind: ImportKindSQLiteSequence,
+			Sequence: &SequenceExport{
+				Name: "issues",
+				Seq:  issueSequenceFloor,
+			},
+		})
 	}
 	if eventSequenceFloor > 0 {
 		out = append(out, ImportRecord{

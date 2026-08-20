@@ -98,16 +98,22 @@ func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProje
 	require.NoError(t, err)
 	require.NotEmpty(t, mergedEvents)
 	assert.Greater(t, mergedEvents[0].ID, int64(3000), "merge events must remain visible beyond the purge reset cursor")
-	var mergedSourceReset int64
+	var mergedPurgedIssueID, mergedSourceReset int64
 	require.NoError(t, admin.QueryRowContext(ctx,
-		`SELECT purge_reset_after_event_id FROM kata.purge_log WHERE issue_uid = $1`, purgedIssue.UID).
-		Scan(&mergedSourceReset))
+		`SELECT purged_issue_id, purge_reset_after_event_id FROM kata.purge_log WHERE issue_uid = $1`, purgedIssue.UID).
+		Scan(&mergedPurgedIssueID, &mergedSourceReset))
 	_, postMergeEvent, err := merged.CreateComment(ctx, db.CreateCommentParams{
 		IssueID: gotImportedIssue.ID, Author: "fixture-author", Body: "after merge",
 	})
 	require.NoError(t, err)
 	assert.Greater(t, postMergeEvent.ID, mergedSourceReset,
 		"a post-merge event must remain visible beyond the imported purge reset cursor")
+	postMergeIssue, _, err := merged.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: gotImported.ID, Title: "after merge", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	assert.Greater(t, postMergeIssue.ID, mergedPurgedIssueID,
+		"a post-merge issue must not reuse the imported tombstone's numeric ID")
 }
 
 func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T) {
