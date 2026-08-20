@@ -1,16 +1,15 @@
 package db
 
 import (
-	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	katauid "go.kenn.io/kata/internal/uid"
 )
 
-func TestPrepareProjectMergeRecordsRemapsEventLinkIDAndContentHash(t *testing.T) {
-	payload := json.RawMessage(`{"link_id":3,"type":"blocks"}`)
+func TestPrepareProjectMergeRecordsPreservesEventIdentityAndPayload(t *testing.T) {
+	payload := []byte(`{"link_id":3,"type":"blocks"}`)
 	event := &EventExport{
 		ID: 7, UID: "01H00000000000000000000003", OriginInstanceUID: "01H00000000000000000000004",
 		ProjectID: 2, ProjectName: "spoke-project", Type: "issue.linked", Actor: "fixture-author",
@@ -27,30 +26,18 @@ func TestPrepareProjectMergeRecordsRemapsEventLinkIDAndContentHash(t *testing.T)
 	require.NoError(t, err)
 	require.Len(t, prepared, 2)
 
-	var gotPayload struct {
-		LinkID int64 `json:"link_id"`
-	}
-	require.NoError(t, json.Unmarshal(prepared[1].Event.Payload, &gotPayload))
-	assert.Equal(t, int64(203), gotPayload.LinkID)
-	assert.NotEqual(t, event.UID, prepared[1].Event.UID)
-	assert.True(t, katauid.Valid(prepared[1].Event.UID))
-	wantHash, err := EventContentHash(EventHashInput{
-		UID: prepared[1].Event.UID, OriginInstanceUID: event.OriginInstanceUID,
-		ProjectUID: records[0].Project.UID, Type: event.Type, Actor: event.Actor,
-		HLCPhysicalMS: event.HLCPhysicalMS, CreatedAt: event.CreatedAt,
-		Payload: prepared[1].Event.Payload,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, wantHash, prepared[1].Event.ContentHash)
+	assert.Equal(t, event.UID, prepared[1].Event.UID)
+	assert.Equal(t, event.ContentHash, prepared[1].Event.ContentHash)
+	assert.JSONEq(t, string(payload), string(prepared[1].Event.Payload))
 	assert.JSONEq(t, string(payload), string(event.Payload), "source event payload must not be mutated")
 	assert.Equal(t, "source-hash", event.ContentHash, "source event hash must not be mutated")
 }
 
-func TestPrepareProjectMergeRecordsRemapsSequenceFloors(t *testing.T) {
+func TestPrepareProjectMergeRecordsDropsSequenceFloors(t *testing.T) {
 	records := []ImportRecord{
 		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
 		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "projects", Seq: 9}},
-		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "issues", Seq: 20}},
+		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "issues", Seq: math.MaxInt64}},
 		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "events", Seq: 50}},
 		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "api_tokens", Seq: 99}},
 	}
@@ -59,14 +46,65 @@ func TestPrepareProjectMergeRecordsRemapsSequenceFloors(t *testing.T) {
 		TargetProjectID: 4, Issue: 200, Event: 100,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, 4)
-	assert.Equal(t, "projects", prepared[1].Sequence.Name)
-	assert.Equal(t, int64(11), prepared[1].Sequence.Seq)
-	assert.Equal(t, "issues", prepared[2].Sequence.Name)
-	assert.Equal(t, int64(220), prepared[2].Sequence.Seq)
-	assert.Equal(t, "events", prepared[3].Sequence.Name)
-	assert.Equal(t, int64(150), prepared[3].Sequence.Seq)
+	require.Len(t, prepared, 1)
+	assert.Equal(t, int64(4), prepared[0].Project.ID)
 	assert.Equal(t, int64(9), records[1].Sequence.Seq, "source sequence must not be mutated")
+}
+
+func TestPrepareProjectMergeRecordsDerivesEventFloorFromPurgeCursor(t *testing.T) {
+	resetCursor := int64(50)
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
+		{Kind: ImportKindPurgeLog, PurgeLog: &PurgeLogExport{
+			ID: 1, ProjectID: 2, PurgedIssueID: 3, PurgeResetAfterEventID: &resetCursor,
+		}},
+		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "events", Seq: math.MaxInt64}},
+	}
+
+	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Issue: 100, Event: 200, PurgeLog: 300,
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, prepared, 3)
+	require.NotNil(t, prepared[1].PurgeLog.PurgeResetAfterEventID)
+	assert.Equal(t, int64(250), *prepared[1].PurgeLog.PurgeResetAfterEventID)
+	require.NotNil(t, prepared[2].Sequence)
+	assert.Equal(t, "events", prepared[2].Sequence.Name)
+	assert.Equal(t, int64(250), prepared[2].Sequence.Seq)
+	assert.Equal(t, int64(50), *records[1].PurgeLog.PurgeResetAfterEventID, "source cursor must not be mutated")
+}
+
+func TestPrepareProjectMergeRecordsRejectsIDsWithoutSequenceHeadroom(t *testing.T) {
+	project := ImportRecord{Kind: ImportKindProject, Project: &ProjectExport{
+		ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project",
+	}}
+	tests := []struct {
+		name   string
+		record ImportRecord
+	}{
+		{
+			name: "issue",
+			record: ImportRecord{Kind: ImportKindIssue, Issue: &IssueExport{
+				ID: math.MaxInt64, UID: "01H00000000000000000000001", ProjectID: 2,
+			}},
+		},
+		{
+			name: "event",
+			record: ImportRecord{Kind: ImportKindEvent, Event: &EventExport{
+				ID: math.MaxInt64, UID: "01H00000000000000000000002", ProjectID: 2,
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := PrepareProjectMergeRecords(
+				[]ImportRecord{project, tt.record},
+				ProjectMergeOffsets{TargetProjectID: 4},
+				nil,
+			)
+			require.ErrorContains(t, err, "safe ID range")
+		})
+	}
 }
 
 func TestPrepareProjectMergeRecordsRemapsIDs(t *testing.T) {
@@ -88,7 +126,7 @@ func TestPrepareProjectMergeRecordsRemapsIDs(t *testing.T) {
 		TargetProjectID: 20, Issue: 100, Link: 200,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, 5)
+	require.Len(t, prepared, 4)
 	assert.Equal(t, int64(20), prepared[0].Project.ID)
 	assert.Equal(t, int64(105), prepared[1].Issue.ID)
 	assert.Equal(t, int64(20), prepared[1].Issue.ProjectID)
@@ -96,8 +134,6 @@ func TestPrepareProjectMergeRecordsRemapsIDs(t *testing.T) {
 	assert.Equal(t, int64(203), prepared[3].Link.ID)
 	assert.Equal(t, int64(105), prepared[3].Link.FromIssueID)
 	assert.Equal(t, int64(109), prepared[3].Link.ToIssueID)
-	assert.Equal(t, "issues", prepared[4].Sequence.Name)
-	assert.Equal(t, int64(199), prepared[4].Sequence.Seq)
 
 	assert.Equal(t, issueID, records[2].Issue.ID, "source records must not be mutated")
 	assert.Equal(t, peerID, records[4].Link.ToIssueID, "source link must not be mutated")

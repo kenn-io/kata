@@ -1,12 +1,14 @@
 package db
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
-
-	katauid "go.kenn.io/kata/internal/uid"
 )
+
+// Keep imported rows in the lower half of the signed ID range. This leaves
+// ample room for the target's shared sequences after a merge while remaining
+// far above any practical database size.
+const maxProjectMergeID int64 = math.MaxInt64 / 2
 
 // ProjectMergeOffsets reserves fresh numeric ID ranges in an existing target.
 // TargetProjectID is the exact new project ID; every other value is added to
@@ -67,6 +69,9 @@ func PrepareProjectMergeRecords(
 	if offsets.TargetProjectID <= 0 {
 		return nil, fmt.Errorf("project merge target project ID must be positive")
 	}
+	if offsets.TargetProjectID > maxProjectMergeID {
+		return nil, fmt.Errorf("project merge target project ID exceeds safe ID range")
+	}
 
 	resolveIssue := func(sourceID int64, uid string) (int64, error) {
 		if _, ok := importedIssues[sourceID]; ok {
@@ -103,6 +108,7 @@ func PrepareProjectMergeRecords(
 	}
 	projectID := project.ID
 	out := make([]ImportRecord, 0, len(recs)-2)
+	var eventSequenceFloor int64
 	for _, rec := range recs {
 		if rec.Kind == ImportKindMeta {
 			continue
@@ -204,6 +210,8 @@ func PrepareProjectMergeRecords(
 			}
 		case ImportKindEvent:
 			if err = requireMergeProjectID(cloned.Event.ProjectID, projectID, cloned.Kind); err == nil {
+				// UID, content hash, and payload form the event's portable
+				// identity. Only target-local numeric columns are remapped.
 				cloned.Event.ID, err = addMergeOffset(cloned.Event.ID, offsets.Event, cloned.Kind)
 				cloned.Event.ProjectID = offsets.TargetProjectID
 				if err == nil && cloned.Event.IssueID != nil {
@@ -213,9 +221,6 @@ func PrepareProjectMergeRecords(
 				}
 				if err == nil && cloned.Event.RelatedIssueID != nil {
 					*cloned.Event.RelatedIssueID, err = resolveIssue(*cloned.Event.RelatedIssueID, mergeStringValue(cloned.Event.RelatedIssueUID))
-				}
-				if err == nil {
-					err = remapMergedEventLinkID(cloned.Event, offsets.Link, project.UID)
 				}
 			}
 		case ImportKindPurgeLog:
@@ -233,120 +238,34 @@ func PrepareProjectMergeRecords(
 						offsets.Event,
 					)
 				}
+				if err == nil && cloned.PurgeLog.PurgeResetAfterEventID != nil &&
+					*cloned.PurgeLog.PurgeResetAfterEventID > eventSequenceFloor {
+					eventSequenceFloor = *cloned.PurgeLog.PurgeResetAfterEventID
+				}
 			}
 		case ImportKindProjectPurgeLog:
 			return nil, fmt.Errorf("project merge does not accept project_purge_log records")
 		case ImportKindSQLiteSequence:
-			var keep bool
-			cloned.Sequence.Seq, keep, err = remapProjectMergeSequence(
-				cloned.Sequence.Name, cloned.Sequence.Seq, projectID, offsets,
-			)
-			if !keep {
-				continue
-			}
+			// Scoped exports carry whole-database sequence floors. They do not
+			// describe this project, and explicit imported IDs advance the
+			// target sequences during replay.
+			continue
 		}
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, cloned)
 	}
+	if eventSequenceFloor > 0 {
+		out = append(out, ImportRecord{
+			Kind: ImportKindSQLiteSequence,
+			Sequence: &SequenceExport{
+				Name: "events",
+				Seq:  eventSequenceFloor,
+			},
+		})
+	}
 	return out, nil
-}
-
-func remapProjectMergeSequence(
-	name string,
-	seq int64,
-	sourceProjectID int64,
-	offsets ProjectMergeOffsets,
-) (int64, bool, error) {
-	if seq < 0 {
-		return 0, false, fmt.Errorf("project merge sequence %s has negative floor %d", name, seq)
-	}
-	if name == "projects" {
-		if seq <= sourceProjectID {
-			return offsets.TargetProjectID, true, nil
-		}
-		shifted, err := addSequenceFloor(seq-sourceProjectID, offsets.TargetProjectID, name)
-		return shifted, true, err
-	}
-	offsetByName := map[string]int64{
-		"project_aliases":        offsets.Alias,
-		"issue_sync_bindings":    offsets.SyncBinding,
-		"recurrences":            offsets.Recurrence,
-		"issues":                 offsets.Issue,
-		"comments":               offsets.Comment,
-		"links":                  offsets.Link,
-		"import_mappings":        offsets.ImportMapping,
-		"federation_quarantine":  offsets.Quarantine,
-		"federation_enrollments": offsets.Enrollment,
-		"issue_claims":           offsets.Claim,
-		"pending_claim_requests": offsets.PendingClaim,
-		"events":                 offsets.Event,
-		"purge_log":              offsets.PurgeLog,
-		"project_purge_log":      offsets.ProjectPurgeLog,
-	}
-	offset, ok := offsetByName[name]
-	if !ok {
-		return 0, false, nil
-	}
-	shifted, err := addSequenceFloor(seq, offset, name)
-	return shifted, true, err
-}
-
-func addSequenceFloor(seq, offset int64, name string) (int64, error) {
-	if offset < 0 || offset > math.MaxInt64-seq {
-		return 0, fmt.Errorf("project merge sequence %s floor overflows", name)
-	}
-	return seq + offset, nil
-}
-
-func remapMergedEventLinkID(event *EventExport, offset int64, projectUID string) error {
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(event.Payload, &payload); err != nil {
-		return fmt.Errorf("project merge event %d payload: %w", event.ID, err)
-	}
-	rawLinkID, ok := payload["link_id"]
-	if !ok {
-		return nil
-	}
-	var linkID int64
-	if err := json.Unmarshal(rawLinkID, &linkID); err != nil {
-		return fmt.Errorf("project merge event %d link_id: %w", event.ID, err)
-	}
-	shifted, err := addMergeOffset(linkID, offset, "event link")
-	if err != nil {
-		return err
-	}
-	payload["link_id"], err = json.Marshal(shifted)
-	if err != nil {
-		return fmt.Errorf("project merge event %d link_id: %w", event.ID, err)
-	}
-	event.Payload, err = json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("project merge event %d payload: %w", event.ID, err)
-	}
-	event.UID, err = katauid.New()
-	if err != nil {
-		return fmt.Errorf("project merge event %d uid: %w", event.ID, err)
-	}
-	event.ContentHash, err = EventContentHash(EventHashInput{
-		UID:               event.UID,
-		OriginInstanceUID: event.OriginInstanceUID,
-		ProjectUID:        projectUID,
-		ProjectName:       event.ProjectName,
-		IssueUID:          event.IssueUID,
-		RelatedIssueUID:   event.RelatedIssueUID,
-		Type:              event.Type,
-		Actor:             event.Actor,
-		HLCPhysicalMS:     event.HLCPhysicalMS,
-		HLCCounter:        event.HLCCounter,
-		CreatedAt:         event.CreatedAt,
-		Payload:           event.Payload,
-	})
-	if err != nil {
-		return fmt.Errorf("project merge event %d content_hash: %w", event.ID, err)
-	}
-	return nil
 }
 
 func requireMergeProjectID(got, want int64, kind string) error {
@@ -360,8 +279,8 @@ func addMergeOffset(id, offset int64, kind string) (int64, error) {
 	if id <= 0 {
 		return 0, fmt.Errorf("project merge %s ID must be positive, got %d", kind, id)
 	}
-	if offset > math.MaxInt64-id {
-		return 0, fmt.Errorf("project merge %s ID overflows", kind)
+	if offset < 0 || offset > maxProjectMergeID || id > maxProjectMergeID-offset {
+		return 0, fmt.Errorf("project merge %s ID exceeds safe ID range", kind)
 	}
 	return offset + id, nil
 }
