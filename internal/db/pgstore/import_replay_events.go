@@ -287,12 +287,21 @@ func (s *Store) reconcileReplayIdentities(
 	ctx context.Context,
 	tx *sql.Tx,
 	floors map[string]int64,
+	preserveTargetHighWater bool,
 ) error {
 	for _, table := range replayIdentityTables {
 		var maxID int64
-		query := `SELECT COALESCE(MAX(id),0) FROM ` + quoteIdentifier(table)
-		if err := tx.QueryRowContext(ctx, query).Scan(&maxID); err != nil {
-			return fmt.Errorf("max id for %s: %w", table, mapSQLError(err, nil))
+		if preserveTargetHighWater {
+			var err error
+			maxID, err = pgIdentityHighWater(ctx, tx, table)
+			if err != nil {
+				return err
+			}
+		} else {
+			query := `SELECT COALESCE(MAX(id),0) FROM ` + quoteIdentifier(table)
+			if err := tx.QueryRowContext(ctx, query).Scan(&maxID); err != nil {
+				return fmt.Errorf("max id for %s: %w", table, mapSQLError(err, nil))
+			}
 		}
 		floor := floors[table]
 		if maxID > floor {

@@ -50,9 +50,18 @@ func (s *Store) importReplayTx(
 	records []db.ImportRecord,
 	opts db.ImportOptions,
 ) error {
-	preservedInstanceUID, err := s.pgReplayClearTarget(ctx, tx, opts)
-	if err != nil {
-		return err
+	preservedInstanceUID := s.instanceUID
+	var err error
+	if opts.MergeProject {
+		records, err = s.prepareProjectMergeTx(ctx, tx, records)
+		if err != nil {
+			return err
+		}
+	} else {
+		preservedInstanceUID, err = s.pgReplayClearTarget(ctx, tx, opts)
+		if err != nil {
+			return err
+		}
 	}
 
 	var missingPeers, duplicates, skippedMappings int
@@ -99,13 +108,15 @@ func (s *Store) importReplayTx(
 		preservedInstanceUID); err != nil {
 		return fmt.Errorf("restore target instance_uid: %w", mapSQLError(err, nil))
 	}
-	if err := s.replayAPITokens(ctx, tx); err != nil {
-		return err
+	if !opts.MergeProject {
+		if err := s.replayAPITokens(ctx, tx); err != nil {
+			return err
+		}
+		if err := pgReplayRecordSchemaVersion(ctx, tx); err != nil {
+			return err
+		}
 	}
-	if err := pgReplayRecordSchemaVersion(ctx, tx); err != nil {
-		return err
-	}
-	if err := s.reconcileReplayIdentities(ctx, tx, sequenceFloors); err != nil {
+	if err := s.reconcileReplayIdentities(ctx, tx, sequenceFloors, opts.MergeProject); err != nil {
 		return err
 	}
 	return nil

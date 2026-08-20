@@ -35,6 +35,10 @@ type ImportOptions struct {
 	// External JSONL restores leave sync bindings disabled until re-enabled
 	// locally so restored provider config cannot use daemon credentials.
 	PreserveIssueSyncBindingEnabled bool
+
+	// MergeProject adds one project-scoped snapshot to an existing database
+	// without replacing unrelated state.
+	MergeProject bool
 }
 
 // Import reads JSONL records from r and inserts them into store.
@@ -48,6 +52,9 @@ func Import(ctx context.Context, r io.Reader, store db.Storage) error {
 // atomically via store.ImportReplay. ImportWithOptions itself holds no SQL or
 // transaction state — the entire atomic insert lives in db.ImportReplay.
 func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts ImportOptions) error {
+	if opts.MergeProject && (opts.RequireFreshTarget || opts.NewInstance) {
+		return fmt.Errorf("project merge cannot use fresh-target or new-instance restore options")
+	}
 	envs, err := NewDecoder(r).ReadAll(ctx)
 	if err != nil {
 		return err
@@ -90,6 +97,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		DedupeLegacyActivePendingClaims: exportVersion < 12,
 		RecomputeEventContentHash:       exportVersion < eventReplayFieldsSchemaVersion,
 		PreserveIssueSyncBindingEnabled: opts.PreserveIssueSyncBindingEnabled,
+		MergeProject:                    opts.MergeProject,
 	})
 }
 

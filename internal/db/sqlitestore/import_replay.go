@@ -49,8 +49,30 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	if _, err := tx.ExecContext(ctx, `PRAGMA defer_foreign_keys=ON`); err != nil {
 		return fmt.Errorf("defer foreign keys: %w", err)
 	}
-	if err := clearReplayTarget(ctx, tx, opts.RequireFreshTarget, d.instanceUID); err != nil {
-		return err
+	if opts.MergeProject {
+		offsets, err := projectMergeOffsets(ctx, tx)
+		if err != nil {
+			return err
+		}
+		recs, err = db.PrepareProjectMergeRecords(recs, offsets,
+			func(uid string) (int64, bool, error) {
+				var id int64
+				err := tx.QueryRowContext(ctx, `SELECT id FROM issues WHERE uid = ?`, uid).Scan(&id)
+				if errors.Is(err, sql.ErrNoRows) {
+					return 0, false, nil
+				}
+				return id, err == nil, err
+			})
+		if err != nil {
+			return err
+		}
+		if err := refuseProjectMergeUIDCollisions(ctx, tx, recs); err != nil {
+			return err
+		}
+	} else {
+		if err := clearReplayTarget(ctx, tx, opts.RequireFreshTarget, d.instanceUID); err != nil {
+			return err
+		}
 	}
 
 	var skippedMissingPeer, skippedDup, skippedMappings int
@@ -90,11 +112,13 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	if err := ensureSystemProject(ctx, tx); err != nil {
 		return err
 	}
-	if err := replayAPITokenProjection(ctx, tx); err != nil {
-		return err
-	}
-	if err := recordImportSchemaVersion(ctx, tx); err != nil {
-		return err
+	if !opts.MergeProject {
+		if err := replayAPITokenProjection(ctx, tx); err != nil {
+			return err
+		}
+		if err := recordImportSchemaVersion(ctx, tx); err != nil {
+			return err
+		}
 	}
 	if err := reconcileSequences(ctx, tx); err != nil {
 		return err
@@ -104,6 +128,82 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit import: %w", err)
+	}
+	return nil
+}
+
+func projectMergeOffsets(ctx context.Context, tx *sql.Tx) (db.ProjectMergeOffsets, error) {
+	var offsets db.ProjectMergeOffsets
+	err := tx.QueryRowContext(ctx, `
+		SELECT
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM projects), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='projects'), 0)) + 1,
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM project_aliases), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='project_aliases'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM issue_sync_bindings), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='issue_sync_bindings'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM recurrences), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='recurrences'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM issues), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='issues'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM comments), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='comments'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM links), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='links'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM import_mappings), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='import_mappings'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM federation_quarantine), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='federation_quarantine'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM federation_enrollments), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='federation_enrollments'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM issue_claims), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='issue_claims'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM pending_claim_requests), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='pending_claim_requests'), 0)),
+		 MAX(
+			(SELECT COALESCE(MAX(id), 0) FROM events),
+			COALESCE((SELECT seq FROM sqlite_sequence WHERE name='events'), 0),
+			(SELECT COALESCE(MAX(purge_reset_after_event_id), 0) FROM purge_log),
+			(SELECT COALESCE(MAX(purge_reset_after_event_id), 0) FROM project_purge_log)
+		 ),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM purge_log), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='purge_log'), 0)),
+		 MAX((SELECT COALESCE(MAX(id), 0) FROM project_purge_log), COALESCE((SELECT seq FROM sqlite_sequence WHERE name='project_purge_log'), 0))
+	`).Scan(
+		&offsets.TargetProjectID, &offsets.Alias, &offsets.SyncBinding,
+		&offsets.Recurrence, &offsets.Issue, &offsets.Comment, &offsets.Link,
+		&offsets.ImportMapping, &offsets.Quarantine, &offsets.Enrollment,
+		&offsets.Claim, &offsets.PendingClaim, &offsets.Event,
+		&offsets.PurgeLog, &offsets.ProjectPurgeLog,
+	)
+	if err != nil {
+		return db.ProjectMergeOffsets{}, fmt.Errorf("inspect project merge ID ranges: %w", err)
+	}
+	return offsets, nil
+}
+
+func refuseProjectMergeUIDCollisions(ctx context.Context, tx *sql.Tx, recs []db.ImportRecord) error {
+	type uidCheck struct{ table, column, kind, uid string }
+	checks := make([]uidCheck, 0, len(recs))
+	for _, rec := range recs {
+		switch {
+		case rec.Project != nil:
+			checks = append(checks, uidCheck{"projects", "uid", "project", rec.Project.UID})
+		case rec.Issue != nil:
+			checks = append(checks, uidCheck{"issues", "uid", "issue", rec.Issue.UID})
+		case rec.Comment != nil:
+			checks = append(checks, uidCheck{"comments", "uid", "comment", rec.Comment.UID})
+		case rec.Recurrence != nil:
+			checks = append(checks, uidCheck{"recurrences", "uid", "recurrence", rec.Recurrence.UID})
+		case rec.IssueClaim != nil:
+			checks = append(checks, uidCheck{"issue_claims", "claim_uid", "claim", rec.IssueClaim.ClaimUID})
+		case rec.PendingClaimRequest != nil:
+			checks = append(checks, uidCheck{"pending_claim_requests", "request_uid", "pending claim", rec.PendingClaimRequest.RequestUID})
+		case rec.Event != nil:
+			checks = append(checks, uidCheck{"events", "uid", "event", rec.Event.UID})
+		case rec.PurgeLog != nil:
+			checks = append(checks, uidCheck{"purge_log", "uid", "purge log", rec.PurgeLog.UID})
+		}
+	}
+	for _, check := range checks {
+		if check.uid == "" {
+			continue
+		}
+		var exists bool
+		query := `SELECT EXISTS (SELECT 1 FROM ` + check.table + ` WHERE ` + check.column + ` = ?)`
+		if err := tx.QueryRowContext(ctx, query, check.uid).Scan(&exists); err != nil { //nolint:gosec // identifiers are fixed above
+			return fmt.Errorf("check project merge %s UID: %w", check.kind, err)
+		}
+		if exists {
+			return fmt.Errorf("project merge refused: %s UID %q already exists", check.kind, check.uid)
+		}
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/jsonl"
 )
+
+const projectMergeHLCSafeBoundary = int64(math.MaxInt64 / 2)
 
 func setupImportTest(t *testing.T) (home, input, target string) {
 	t.Helper()
@@ -107,6 +110,274 @@ func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 	_, err = runCmdOutput(t, nil, "import", "--input", input, "--target", target)
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, ce.Message, "target already exists")
+}
+
+func TestImportMergeRejectsReplacementFlags(t *testing.T) {
+	setupKataEnv(t)
+	for _, incompatible := range []string{"--force", "--new-instance"} {
+		t.Run(incompatible, func(t *testing.T) {
+			_, err := runCmdOutput(t, nil,
+				"import", "--merge", incompatible, "--input", "snapshot.jsonl", "--target", "target.db")
+			ce := requireCLIError(t, err, ExitValidation)
+			assert.Contains(t, ce.Message, incompatible+" cannot be combined with --merge")
+		})
+	}
+}
+
+func TestImportMergeRejectsUninitializedSQLiteTargetsWithoutMutation(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		targetSuffix  string
+		wantErrorText string
+	}{
+		{name: "empty main file", wantErrorText: "merge target is not initialized"},
+		{name: "orphan WAL sidecar", targetSuffix: "-wal", wantErrorText: "merge target does not exist"},
+		{name: "orphan SHM sidecar", targetSuffix: "-shm", wantErrorText: "merge target does not exist"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := setupKataEnv(t)
+			ctx := context.Background()
+			source := openKataTestDB(t, filepath.Join(home, "source.db"))
+			project, err := source.CreateProject(ctx, "spoke-project")
+			require.NoError(t, err)
+			var snapshot bytes.Buffer
+			require.NoError(t, jsonl.Export(ctx, source, &snapshot, jsonl.ExportOptions{ProjectID: project.ID}))
+			require.NoError(t, source.Close())
+			input := filepath.Join(home, "spoke-project.jsonl")
+			require.NoError(t, os.WriteFile(input, snapshot.Bytes(), 0o600))
+			target := filepath.Join(home, "target.db")
+			marker := target + tt.targetSuffix
+			require.NoError(t, os.WriteFile(marker, nil, 0o600))
+
+			_, err = runCmdOutput(t, nil,
+				"import", "--merge", "--input", input, "--target", target)
+			ce := requireCLIError(t, err, ExitValidation)
+			assert.Contains(t, ce.Message, tt.wantErrorText)
+
+			if tt.targetSuffix != "" {
+				_, statErr := os.Stat(target)
+				assert.True(t, os.IsNotExist(statErr), "merge must not create a missing main database file")
+			}
+			info, statErr := os.Stat(marker)
+			require.NoError(t, statErr)
+			assert.Zero(t, info.Size(), "merge must not modify the uninitialized target marker")
+		})
+	}
+}
+
+func TestImportMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *testing.T) {
+	home := setupKataEnv(t)
+	ctx := context.Background()
+
+	sourcePath := filepath.Join(home, "source.db")
+	source := openKataTestDB(t, sourcePath)
+	importedProject, err := source.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	importedIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: importedProject.ID, Title: "imported issue", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	_, _, err = source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: importedIssue.ID, Author: "fixture-author", Body: "imported comment",
+	})
+	require.NoError(t, err)
+	_, err = source.AddLabel(ctx, importedIssue.ID, "portable", "fixture-author")
+	require.NoError(t, err)
+	purgedIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: importedProject.ID, Title: "purged issue", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	sourcePurge, err := source.PurgeIssue(ctx, purgedIssue.ID, "fixture-author", nil)
+	require.NoError(t, err)
+	require.NotNil(t, sourcePurge.PurgeResetAfterEventID)
+	_, err = source.ExecContext(ctx, `UPDATE events SET hlc_physical_ms = ?, hlc_counter = ?`,
+		projectMergeHLCSafeBoundary, projectMergeHLCSafeBoundary)
+	require.NoError(t, err)
+	sourceEvents, err := source.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: importedProject.ID, Limit: 100,
+	})
+	require.NoError(t, err)
+	var snapshot bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &snapshot, jsonl.ExportOptions{
+		ProjectID: importedProject.ID, IncludeDeleted: true,
+	}))
+	require.NoError(t, source.Close())
+	input := filepath.Join(home, "spoke-project.jsonl")
+	require.NoError(t, os.WriteFile(input, snapshot.Bytes(), 0o600))
+
+	target := filepath.Join(home, "target.db")
+	targetStore := openKataTestDB(t, target)
+	existingProject, err := targetStore.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	existingIssue, _, err := targetStore.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: existingProject.ID, Title: "existing issue", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	targetEvents, err := targetStore.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: existingProject.ID, Limit: 100,
+	})
+	require.NoError(t, err)
+	_, err = targetStore.ExecContext(ctx, `UPDATE sqlite_sequence SET seq = 2000 WHERE name = 'issues'`)
+	require.NoError(t, err)
+	_, err = targetStore.ExecContext(ctx, `
+		INSERT INTO project_purge_log(
+			uid, origin_instance_uid, project_id, project_name,
+			issue_count, event_count, alias_count, comment_count, link_count,
+			label_count, claim_count, pending_claim_request_count,
+			purge_reset_after_event_id, actor
+		) VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 3000, ?)`,
+		"01H00000000000000000000009", targetStore.InstanceUID(), existingProject.ID,
+		existingProject.Name, "fixture-author")
+	require.NoError(t, err)
+	require.NoError(t, targetStore.Close())
+
+	out, err := runCmdOutput(t, nil,
+		"import", "--merge", "--input", input, "--target", target)
+	require.NoError(t, err)
+	assert.Contains(t, out, target)
+
+	merged := openKataTestDB(t, target)
+	t.Cleanup(func() { _ = merged.Close() })
+	gotExisting, err := merged.ProjectByUID(ctx, existingProject.UID)
+	require.NoError(t, err)
+	assert.Equal(t, existingProject.Name, gotExisting.Name)
+	gotExistingIssue, err := merged.IssueByUID(ctx, existingIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	assert.Equal(t, "existing issue", gotExistingIssue.Title)
+	gotImported, err := merged.ProjectByUID(ctx, importedProject.UID)
+	require.NoError(t, err)
+	assert.NotEqual(t, importedProject.ID, gotImported.ID, "colliding numeric project ID must be remapped")
+	assert.Equal(t, "spoke-project-2", gotImported.Name)
+	gotImportedIssue, err := merged.IssueByUID(ctx, importedIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	assert.Greater(t, gotImportedIssue.ID, int64(2000), "merge must allocate above the target sequence high-water mark")
+	assert.Equal(t, gotImported.ID, gotImportedIssue.ProjectID)
+	assert.Equal(t, importedIssue.ShortID, gotImportedIssue.ShortID)
+	comments, err := merged.CommentsByIssue(ctx, gotImportedIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	assert.Equal(t, "imported comment", comments[0].Body)
+	labels, err := merged.LabelsByIssue(ctx, gotImportedIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, labels, 1)
+	assert.Equal(t, "portable", labels[0].Label)
+	mergedEvents, err := merged.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: gotImported.ID, Limit: 100,
+	})
+	require.NoError(t, err)
+	require.Len(t, mergedEvents, len(sourceEvents))
+	for i := range sourceEvents {
+		assert.Equal(t, sourceEvents[i].UID, mergedEvents[i].UID)
+		if i > 0 {
+			assert.Greater(t, mergedEvents[i].ID, mergedEvents[i-1].ID)
+		}
+	}
+	require.NotEmpty(t, targetEvents)
+	assert.Greater(t, mergedEvents[0].ID, targetEvents[len(targetEvents)-1].ID)
+	assert.Greater(t, mergedEvents[0].ID, int64(3000), "merge events must remain visible beyond the purge reset cursor")
+	var mergedPurgedIssueID, mergedSourceReset int64
+	require.NoError(t, merged.QueryRowContext(ctx,
+		`SELECT purged_issue_id, purge_reset_after_event_id FROM purge_log WHERE issue_uid = ?`, purgedIssue.UID).
+		Scan(&mergedPurgedIssueID, &mergedSourceReset))
+	_, postMergeEvent, err := merged.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: gotImportedIssue.ID, Author: "fixture-author", Body: "after merge",
+	})
+	require.NoError(t, err)
+	assert.Greater(t, postMergeEvent.ID, mergedSourceReset,
+		"a post-merge event must remain visible beyond the imported purge reset cursor")
+	assert.Equal(t, projectMergeHLCSafeBoundary, postMergeEvent.HLCPhysicalMS)
+	assert.Equal(t, projectMergeHLCSafeBoundary+1, postMergeEvent.HLCCounter,
+		"a post-merge event must advance beyond the imported HLC boundary")
+	postMergeIssue, _, err := merged.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: gotImported.ID, Title: "after merge", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	assert.Greater(t, postMergeIssue.ID, mergedPurgedIssueID,
+		"a post-merge issue must not reuse the imported tombstone's numeric ID")
+	require.NoError(t, merged.Close())
+
+	_, err = runCmdOutput(t, nil,
+		"import", "--merge", "--input", input, "--target", target)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "project UID")
+	assert.Contains(t, err.Error(), "already exists")
+
+	unchanged := openKataTestDB(t, target)
+	t.Cleanup(func() { _ = unchanged.Close() })
+	_, err = unchanged.IssueByUID(ctx, existingIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+}
+
+func TestImportMergeRefusesMultiProjectSnapshotWithoutMutation(t *testing.T) {
+	_, input, target := setupImportTest(t)
+	ctx := context.Background()
+	targetStore := openKataTestDB(t, target)
+	existing, err := targetStore.CreateProject(ctx, "existing-project")
+	require.NoError(t, err)
+	require.NoError(t, targetStore.Close())
+
+	_, err = runCmdOutput(t, nil,
+		"import", "--merge", "--input", input, "--target", target)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "project merge requires one non-system project")
+
+	unchanged := openKataTestDB(t, target)
+	t.Cleanup(func() { _ = unchanged.Close() })
+	got, err := unchanged.ProjectByUID(ctx, existing.UID)
+	require.NoError(t, err)
+	assert.Equal(t, existing.Name, got.Name)
+}
+
+func TestImportMergeSkipsCrossProjectLink(t *testing.T) {
+	home := setupKataEnv(t)
+	ctx := context.Background()
+	source := openKataTestDB(t, filepath.Join(home, "source-links.db"))
+	importedProject, err := source.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	peerProject, err := source.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	importedIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: importedProject.ID, Title: "imported issue", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	peerIssue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: peerProject.ID, Title: "peer issue", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	_, err = source.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: importedIssue.ID, ToIssueID: peerIssue.ID,
+		Type: "blocks", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	var importedSnapshot, peerSnapshot bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &importedSnapshot, jsonl.ExportOptions{
+		ProjectID: importedProject.ID, IncludeDeleted: true,
+	}))
+	require.NoError(t, jsonl.Export(ctx, source, &peerSnapshot, jsonl.ExportOptions{
+		ProjectID: peerProject.ID, IncludeDeleted: true,
+	}))
+	require.NoError(t, source.Close())
+
+	target := filepath.Join(home, "target-links.db")
+	targetStore := openKataTestDB(t, target)
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(peerSnapshot.Bytes()), targetStore,
+		jsonl.ImportOptions{RequireFreshTarget: true}))
+	require.NoError(t, targetStore.Close())
+	input := filepath.Join(home, "spoke-links.jsonl")
+	require.NoError(t, os.WriteFile(input, importedSnapshot.Bytes(), 0o600))
+
+	_, err = runCmdOutput(t, nil,
+		"import", "--merge", "--input", input, "--target", target)
+	require.NoError(t, err)
+
+	merged := openKataTestDB(t, target)
+	t.Cleanup(func() { _ = merged.Close() })
+	gotImported, err := merged.IssueByUID(ctx, importedIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	gotPeer, err := merged.IssueByUID(ctx, peerIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = merged.LinkByEndpoints(ctx, gotImported.ID, gotPeer.ID, "blocks")
+	require.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestImportRejectsExistingTargetSidecarWithoutForce(t *testing.T) {
