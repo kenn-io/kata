@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -23,6 +27,244 @@ type throttledEventRecord struct {
 	Actor        string          `json:"actor"`
 	IssueShortID *string         `json:"issue_short_id"`
 	Payload      json.RawMessage `json:"payload"`
+}
+
+func TestCloseIssue_NonLoopbackStaticTokenCannotForgeTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		Auth:      config.AuthConfig{Token: "static-token"},
+	})
+	t.Cleanup(func() { _ = server.Close() })
+
+	request := httptest.NewRequest(http.MethodPost,
+		issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
+	request.Header.Set("Authorization", "Bearer static-token")
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = "127.0.0.1:40123"
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("100.64.0.5"), Port: 7777})))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
+}
+
+func TestCloseIssue_NonLoopbackUnauthenticatedWritesCannotForgeTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		Auth: config.AuthConfig{
+			AllowUnauthenticatedPrivateNetworkWrites: true,
+		},
+	})
+	t.Cleanup(func() { _ = server.Close() })
+
+	request := httptest.NewRequest(http.MethodPost,
+		issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("100.64.0.5"), Port: 7777})))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
+}
+
+func TestCloseIssue_LoopbackStaticTokenPreservesTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		Auth:      config.AuthConfig{Token: "static-token"},
+	})
+	t.Cleanup(func() { _ = server.Close() })
+
+	request := httptest.NewRequest(http.MethodPost,
+		issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
+	request.Header.Set("Authorization", "Bearer static-token")
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = "127.0.0.1:40123"
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777})))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "closed", got.Status)
+}
+
+func TestCloseIssue_StaticTokenBrowserSessionCannotForgeTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{
+		Origin: "http://127.0.0.1:27123", InstanceID: "instance_a",
+		Writable: true, Updates: "sse", Auth: config.AuthConfig{Token: "static-token"}, DB: d.db,
+	})
+	require.NoError(t, err)
+	issued, err := manager.IssueSession(daemon.Principal{Kind: daemon.PrincipalStaticToken}, "/kata")
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now, WebSessions: manager,
+		Auth: config.AuthConfig{Token: "static-token"},
+	})
+	t.Cleanup(func() { _ = server.Close() })
+	handler, err := server.HandlerFor(daemon.ListenerPolicy{
+		Kind: daemon.ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true,
+	})
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost,
+		"http://127.0.0.1:27123"+issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"forged","source":"tui","reason":"done"}`))
+	request.Host = "127.0.0.1:27123"
+	request.RemoteAddr = "127.0.0.1:40123"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "http://127.0.0.1:27123")
+	request.Header.Set("X-Kata-Web-Session", issued.Session)
+	request.Header.Set("X-Kata-CSRF", issued.CSRF)
+	request.AddCookie(manager.Cookie(issued.Cookie))
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 27123})))
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
+}
+
+func TestCloseIssue_HostPrincipalCannotForgeTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+	})
+	t.Cleanup(func() { _ = server.Close() })
+
+	request := httptest.NewRequest(http.MethodPost,
+		issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"forged","source":"tui","reason":"done"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = "127.0.0.1:40123"
+	request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{
+		Kind: daemon.PrincipalHost, Subject: "mounted-service", Actor: "host-actor",
+	}))
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777})))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
+}
+
+func TestCloseIssue_MultiValueForwardedLoopbackCannotForgeTUIBypass(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		Auth:      config.AuthConfig{Token: "static-token"},
+	})
+	t.Cleanup(func() { _ = server.Close() })
+
+	request := httptest.NewRequest(http.MethodPost,
+		issuePathRef(project.ID, issue.ShortID, "actions/close"),
+		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
+	request.Header.Set("Authorization", "Bearer static-token")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header["X-Forwarded-For"] = []string{"", "192.0.2.10"}
+	request.RemoteAddr = "127.0.0.1:40123"
+	request = request.WithContext(context.WithValue(request.Context(),
+		http.LocalAddrContextKey,
+		net.Addr(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777})))
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
+	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
 }
 
 func TestCloseIssue_IdentityModeDoesNotTrustBodySourceTUI(t *testing.T) {

@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"net"
+	"net/http"
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
@@ -128,17 +130,60 @@ func tokenAdminAuditActor(ctx context.Context, fallback string) string {
 	return fallback
 }
 
+type ownerLocalTransportContextKey struct{}
+
 func tuiBypassAllowed(ctx context.Context, source, reason string) bool {
 	if source != "tui" || reason != "done" {
 		return false
 	}
+	if webSessionAuthenticated(ctx) {
+		return false
+	}
 	if p, ok := PrincipalFromContext(ctx); ok {
 		switch p.Kind {
-		case PrincipalDBToken, PrincipalTrustedProxy, PrincipalTrustedProxyAbsent, PrincipalWebLocal:
+		case PrincipalDBToken, PrincipalTrustedProxy, PrincipalTrustedProxyAbsent, PrincipalHost, PrincipalWebLocal:
 			return false
 		}
 	}
-	return true
+	return ownerLocalTransport(ctx)
+}
+
+// withOwnerLocalTransport derives the local TUI trust fact from the accepted
+// listener and the live HTTP request before Huma projects the request onto a
+// context.Context handler.
+func withOwnerLocalTransport(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), ownerLocalTransportContextKey{}, ownerLocalRequest(r))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// ownerLocalRequest recognizes daemon requests that stay inside the
+// owner-local host boundary. Unix sockets are owner-local by construction.
+// Loopback TCP additionally requires a direct loopback peer and no forwarding
+// headers, preserving the Windows TUI while excluding reverse-proxy requests.
+// Missing and unknown address types fail closed.
+func ownerLocalRequest(r *http.Request) bool {
+	if requestHasForwardingHeaders(r) {
+		return false
+	}
+	addr, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok || addr == nil {
+		return false
+	}
+	switch local := addr.(type) {
+	case *net.UnixAddr:
+		return true
+	case *net.TCPAddr:
+		return local.IP.IsLoopback() && requestPeerIsLoopback(r)
+	default:
+		return false
+	}
+}
+
+func ownerLocalTransport(ctx context.Context) bool {
+	trusted, _ := ctx.Value(ownerLocalTransportContextKey{}).(bool)
+	return trusted
 }
 
 func principalFromAPIToken(tok db.APIToken) Principal {

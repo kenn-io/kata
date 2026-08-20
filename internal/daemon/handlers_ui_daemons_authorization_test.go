@@ -3,9 +3,11 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 )
 
 func TestWebDaemonGatewayAppliesWebLocalProjectPolicyBeforeForwarding(t *testing.T) {
@@ -216,6 +219,111 @@ func TestWebDaemonGatewayChecksTargetAuthorityBeforeMutation(t *testing.T) {
 			assert.Equal(t, test.wantMutation, mutationCalls)
 		})
 	}
+}
+
+func TestWebDaemonGatewayCannotProxyTUIBypassToLoopbackTarget(t *testing.T) {
+	targetStore := openAuthTestDB(t)
+	project, err := targetStore.CreateProject(t.Context(), "example-workspace")
+	require.NoError(t, err)
+	issue, _, err := targetStore.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "close me",
+		Author:    "setup",
+	})
+	require.NoError(t, err)
+	targetDaemon := NewServer(ServerConfig{
+		DB: targetStore, StartedAt: time.Now().UTC(),
+		Auth: config.AuthConfig{Token: "target-token"},
+	})
+	t.Cleanup(func() { _ = targetDaemon.Close() })
+	target := httptest.NewServer(targetDaemon.Handler())
+	t.Cleanup(target.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: target.URL, Token: "target-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	body := bytes.NewBufferString(`{"actor":"forged","source":"tui","reason":"done"}`)
+	request := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:27123/api/v1/ui/proxy/api/v1/projects/%d/issues/%s/actions/close",
+			project.ID, issue.ShortID), body)
+	request.Host = "127.0.0.1:27123"
+	request.RemoteAddr = "127.0.0.1:40123"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(webDaemonHeaderName, "example-remote")
+	request.Header.Set(webSessionHeader, issued.Session)
+	request.Header.Set(webCSRFHeader, issued.CSRF)
+	request.Header.Set("Origin", "http://127.0.0.1:27123")
+	request.AddCookie(manager.Cookie(issued.Cookie))
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "web_daemon_operation_forbidden")
+	got, err := targetStore.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
+}
+
+func TestWebDaemonGatewayForwardsNonBypassCloseBodiesUnchanged(t *testing.T) {
+	var forwardedBodies []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/instance" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"web_ui_contract_version": api.UISnapshotContractVersion,
+				"web_ui_capabilities": api.UICapabilities{
+					Writable: true, Updates: "poll", ActorPolicy: "request",
+				},
+			})
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		forwardedBodies = append(forwardedBodies, string(body))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	bodies := []string{
+		`{"actor":"agent","reason":"done","message":"A substantive close message that remains intact."}`,
+		`{"actor":"agent","source":"tui","reason":"wontfix","message":"A valid non-bypass TUI close remains intact."}`,
+	}
+	for _, body := range bodies {
+		response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodPost,
+			"/api/v1/projects/7/issues/abcd/actions/close", strings.NewReader(body), "")
+		assert.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
+	}
+	assert.Equal(t, bodies, forwardedBodies)
+}
+
+func TestWebDaemonGatewayRejectsOversizedCloseBeforeContactingTarget(t *testing.T) {
+	var targetCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetCalls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	body := `{"message":"` + strings.Repeat("x", (1<<20)+1) + `"}`
+	response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodPost,
+		"/api/v1/projects/7/issues/abcd/actions/close", strings.NewReader(body), "")
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "close_request_too_large")
+	assert.Equal(t, 0, targetCalls)
 }
 
 func TestWebDaemonGatewayBoundsTargetAuthorityCheck(t *testing.T) {
@@ -530,6 +638,9 @@ func authorizedGatewayRequest(
 	request.Header.Set(webCSRFHeader, issued.CSRF)
 	request.Header.Set("Origin", "http://127.0.0.1:27123")
 	request.Header.Set("If-None-Match", ifNoneMatch)
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	request.AddCookie(manager.Cookie(issued.Cookie))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

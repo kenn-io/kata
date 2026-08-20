@@ -289,11 +289,11 @@ func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {
 	assert.Contains(t, stderr, "needs-review")
 }
 
-// TestCloseAPI_TUISourceBypassesSubstanceAndEvidence pins that a
-// close posted with source="tui" succeeds without --message or
-// --evidence, so the interactive close keystroke isn't broken by the
-// CLI substance/evidence gate. Posts directly to the daemon endpoint
-// to mirror the wire shape internal/tui/client.Close uses.
+// TestCloseAPI_TUISourceBypassesSubstanceAndEvidence pins that an
+// owner-local close posted with source="tui" succeeds without --message
+// or --evidence, so the interactive close keystroke isn't broken by the
+// CLI substance/evidence gate. Posts directly to the loopback daemon
+// endpoint to mirror the wire shape internal/tui/client.Close uses.
 func TestCloseAPI_TUISourceBypassesSubstanceAndEvidence(t *testing.T) {
 	env, _, pid, ref := setupWorkspaceWithIssue(t, "issue one")
 	body, err := json.Marshal(map[string]any{

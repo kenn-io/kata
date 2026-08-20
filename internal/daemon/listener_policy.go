@@ -115,11 +115,19 @@ func directLoopbackSessionAllowed(r *http.Request, policy ListenerPolicy) bool {
 	if !policy.AllowLocalSession {
 		return false
 	}
+	return !requestHasForwardingHeaders(r) && requestPeerIsLoopback(r)
+}
+
+func requestHasForwardingHeaders(r *http.Request) bool {
 	for _, header := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-IP"} {
-		if r.Header.Get(header) != "" {
-			return false
+		if _, present := r.Header[http.CanonicalHeaderKey(header)]; present {
+			return true
 		}
 	}
+	return false
+}
+
+func requestPeerIsLoopback(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return false

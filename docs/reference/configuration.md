@@ -1,3 +1,7 @@
+---
+last_edited: 2026-08-20
+---
+
 # Configuration
 
 kata configuration is split between environment variables, committed workspace
@@ -467,8 +471,11 @@ resolved window.
 
 Normal CLI and API close paths still run the parent-completeness refusal,
 message-substance checks, and evidence checks. The TUI close path skips the
-message-substance and evidence checks because an interactive human confirms each
-close; the structural guards still apply.
+message-substance and evidence checks only when the daemon accepts the request
+over an owner-local Unix socket or direct loopback TCP connection with no
+forwarding headers, because an interactive human confirms each close. Users of
+a forwarded or non-loopback TUI must close through the normal evidence-bearing
+CLI or API flow. Structural guards still apply to every transport.
 
 ## Semantic search
 

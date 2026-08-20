@@ -807,11 +807,13 @@ type ActionRequest struct {
 		Message string `json:"message,omitempty"`
 		// Source signals the caller's UI surface. "tui" relaxes the
 		// substance / evidence validation so an interactive human close
-		// is one keystroke. Structural guards (parent-close, sibling
-		// throttle) still apply. Empty string means "agent / CLI" and
-		// gets the full validation. In token identity mode the daemon
-		// only honors this bypass when the request actor matches the
-		// authenticated token actor; otherwise full validation applies.
+		// is one keystroke, but only over an owner-local Unix socket or
+		// direct, unforwarded loopback TCP connection. Forwarded TCP,
+		// non-loopback TCP, and identity-backed, trusted-proxy, or browser
+		// principals get full validation even when they send source="tui".
+		// Structural guards
+		// (parent-close, sibling throttle) always apply. Empty string means
+		// "agent / CLI" and gets full validation.
 		Source   string     `json:"source,omitempty" enum:"tui,"`
 		Evidence []Evidence `json:"evidence,omitempty"`
 		DryRun   bool       `json:"dry_run,omitempty"`
