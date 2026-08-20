@@ -1,13 +1,52 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-08-16
+last_edited: 2026-08-20
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+## 0.15.1
+<small>2026-08-20</small>
+
+kata 0.15.1 is a bugfix release that tightens daemon and remote TUI behavior,
+while adding Streamable HTTP access for MCP clients and clearer daemon
+discovery and autostart diagnostics.
+
+**New features**
+
+- Added Streamable HTTP transport for MCP clients. The listener requires an
+  environment-sourced bearer token and keeps the existing project scope,
+  actor, daemon authorization, and tool safeguards.
+
+**Improvements**
+
+- Added a supported `kata daemon locate` interface that reports the selected
+  daemon's locality, transport, scheme, and request base URL without exposing
+  credentials.
+- Made CLI errors identify runtime-store permission failures before daemon
+  autostart and explain when a restricted environment might be responsible.
+
+**Bug fixes**
+
+- Limited the TUI close-policy exception to owner-local Unix sockets and
+  direct, unforwarded loopback connections. Remote TUI clients must now meet
+  the daemon's normal close message and evidence safeguards.
+- Delegated runtime-store writability checks to kit's shared validation so
+  symlink, ownership, and private-directory failures are detected consistently.
+
+**Acknowledgements**
+
+- Thanks to [Rusty Shackleford](https://github.com/salmonumbrella) for the
+  Streamable HTTP MCP transport, support-aware daemon discovery, and remote
+  TUI close safeguard.
+- Thanks to [codyw912](https://github.com/codyw912) for clear daemon autostart
+  errors in restricted environments.
+- Thanks to [Wes McKinney](https://github.com/wesm) for the shared
+  runtime-store writability check and the release documentation.
 
 ## 0.15.0
 <small>2026-08-16</small>

@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-16
+last_edited: 2026-08-20
 ---
 
 # Agent workflows
@@ -92,19 +92,29 @@ for the recipe.
 
 ## Use Kata through MCP
 
-Agents with an MCP client can start Kata as a stdio server bound to the
-current workspace's project:
+Agents with an MCP client can start Kata as a stdio server bound to the current
+workspace's project:
 
 ```sh
 kata mcp serve
+```
+
+Clients that cannot launch a stdio subprocess can connect through Streamable
+HTTP. The listener requires an environment-sourced bearer token:
+
+```sh
+export KATA_MCP_HTTP_TOKEN='<random bearer token>'
+kata mcp serve \
+  --http 127.0.0.1:8080 \
+  --http-token-env KATA_MCP_HTTP_TOKEN
 ```
 
 The server starts with 13 section loaders. An agent loads only the detailed
 issue, project, administration, automation, or event tools needed for its task.
 Pass `--workspace` or `--project` for an explicit project, `--projects` for a
 fixed allowlist, or `--all-projects` to use every project visible to the
-selected daemon. The actor stays fixed at startup. See the [MCP reference](../reference/mcp.md) for configuration and
-exact schemas.
+selected daemon. The actor stays fixed at startup. See the [MCP
+reference](../reference/mcp.md) for transport configuration and exact schemas.
 
 ## Search before creating
 

@@ -1,12 +1,13 @@
 ---
-last_edited: 2026-08-15
+last_edited: 2026-08-20
 ---
 
 # Model Context Protocol server
 
-Kata includes a native stdio MCP server for coding agents and other MCP
-clients. The server gives typed access to Kata issue data, administration,
-automation, and event workflows.
+Kata includes a native Model Context Protocol (MCP) server for coding agents
+and other MCP clients. It supports stdio and Streamable HTTP transport and
+gives typed access to Kata issue data, administration, automation, and event
+workflows.
 
 ```sh
 # The current workspace's project (default)
@@ -26,13 +27,49 @@ kata mcp serve --all-projects
 kata mcp serve --all-projects --enable-token-admin
 ```
 
-JSON-RPC uses stdin and stdout. Kata writes no status text or logs to stdout.
-The actor is fixed when the process starts and uses the normal precedence:
-`--as`, `KATA_AUTHOR`, `USER`, Git `user.name`, then `anonymous`.
+With the default stdio transport, JSON-RPC uses stdin and stdout. Kata writes
+no status text or logs to stdout. The actor is fixed when the process starts
+and uses the normal precedence: `--as`, `KATA_AUTHOR`, `USER`, Git `user.name`,
+then `anonymous`.
+
+## Transport
+
+The default transport is stdio. Use `--http` to run a Streamable HTTP listener
+instead:
+
+```sh
+export KATA_MCP_HTTP_TOKEN='<random bearer token>'
+kata mcp serve --all-projects \
+  --http 127.0.0.1:8080 \
+  --http-token-env KATA_MCP_HTTP_TOKEN
+```
+
+Configure the MCP client with `http://127.0.0.1:8080/mcp` and the same bearer
+token. `--http-token-env` names the environment variable that the Kata process
+reads; the token value does not appear in the process arguments. Every HTTP
+listener requires this inbound bearer, including a loopback listener. This
+credential protects the MCP listener and is separate from the daemon
+credential that the Kata process uses for its own API calls.
+
+Loopback listeners require the exact configured Host and reject cross-origin
+requests. A non-loopback listener additionally requires
+`--trust-private-network` and a literal non-public IP or wildcard bind:
+
+```sh
+kata mcp serve --all-projects \
+  --http 0.0.0.0:8080 \
+  --http-token-env KATA_MCP_HTTP_TOKEN \
+  --trust-private-network
+```
+
+Use that plaintext mode only on an operator-trusted private network or behind
+an HTTPS reverse proxy. Public IPs and DNS hostnames are rejected. The
+listener also serves unauthenticated `GET` and `HEAD` requests at `/healthz`;
+the probe returns only readiness text and disables caching.
 
 ## Client configuration
 
-A typical client command has this shape:
+A typical stdio client command has this shape:
 
 ```json
 {
