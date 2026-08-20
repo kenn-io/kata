@@ -121,6 +121,47 @@ func TestImportMergeRejectsReplacementFlags(t *testing.T) {
 	}
 }
 
+func TestImportMergeRejectsUninitializedSQLiteTargetsWithoutMutation(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		targetSuffix  string
+		wantErrorText string
+	}{
+		{name: "empty main file", wantErrorText: "merge target is not initialized"},
+		{name: "orphan WAL sidecar", targetSuffix: "-wal", wantErrorText: "merge target does not exist"},
+		{name: "orphan SHM sidecar", targetSuffix: "-shm", wantErrorText: "merge target does not exist"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := setupKataEnv(t)
+			ctx := context.Background()
+			source := openKataTestDB(t, filepath.Join(home, "source.db"))
+			project, err := source.CreateProject(ctx, "spoke-project")
+			require.NoError(t, err)
+			var snapshot bytes.Buffer
+			require.NoError(t, jsonl.Export(ctx, source, &snapshot, jsonl.ExportOptions{ProjectID: project.ID}))
+			require.NoError(t, source.Close())
+			input := filepath.Join(home, "spoke-project.jsonl")
+			require.NoError(t, os.WriteFile(input, snapshot.Bytes(), 0o600))
+			target := filepath.Join(home, "target.db")
+			marker := target + tt.targetSuffix
+			require.NoError(t, os.WriteFile(marker, nil, 0o600))
+
+			_, err = runCmdOutput(t, nil,
+				"import", "--merge", "--input", input, "--target", target)
+			ce := requireCLIError(t, err, ExitValidation)
+			assert.Contains(t, ce.Message, tt.wantErrorText)
+
+			if tt.targetSuffix != "" {
+				_, statErr := os.Stat(target)
+				assert.True(t, os.IsNotExist(statErr), "merge must not create a missing main database file")
+			}
+			info, statErr := os.Stat(marker)
+			require.NoError(t, statErr)
+			assert.Zero(t, info.Size(), "merge must not modify the uninitialized target marker")
+		})
+	}
+}
+
 func TestImportMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *testing.T) {
 	home := setupKataEnv(t)
 	ctx := context.Background()

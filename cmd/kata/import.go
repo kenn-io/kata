@@ -179,12 +179,18 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 }
 
 func runSQLiteJSONLMerge(cmd *cobra.Command, input, target string) error {
-	exists, err := sqliteFileSetExists(target)
-	if err != nil {
+	if _, err := os.Stat(target); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return &cliError{Message: "merge target does not exist", Kind: kindValidation, ExitCode: ExitValidation}
+		}
 		return fmt.Errorf("stat merge target: %w", err)
 	}
-	if !exists {
-		return &cliError{Message: "merge target does not exist", Kind: kindValidation, ExitCode: ExitValidation}
+	version, err := storeopen.PeekSchemaVersion(cmd.Context(), target)
+	if err != nil {
+		return fmt.Errorf("inspect merge target: %w", err)
+	}
+	if version == 0 {
+		return &cliError{Message: "merge target is not initialized", Kind: kindValidation, ExitCode: ExitValidation}
 	}
 	in, err := os.Open(input) //nolint:gosec // import path is user-provided CLI input
 	if err != nil {
