@@ -120,7 +120,9 @@ func startMCPHTTPTestServer(t *testing.T, daemonURL string, extraArgs ...string)
 		select {
 		case err := <-done:
 			require.NoError(t, err)
-		case <-time.After(5 * time.Second):
+		// Let the server report its own bounded shutdown error instead of
+		// racing a shorter test deadline under load.
+		case <-time.After(mcpHTTPShutdownTimeout + 5*time.Second):
 			t.Error("MCP HTTP server did not stop after context cancellation")
 		}
 		_ = stderrReader.Close()
