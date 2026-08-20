@@ -297,6 +297,27 @@ func TestPrepareProjectMergeRecordsClearsUnresolvedEventRelatedIssueID(t *testin
 	assert.Equal(t, int64(9), *records[1].Event.RelatedIssueID, "source event must not be mutated")
 }
 
+func TestPrepareProjectMergeRecordsRejectsEventRelatedIssueUIDMismatch(t *testing.T) {
+	relatedIssueID := int64(5)
+	relatedIssueUID := "01H00000000000000000000002"
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
+		{Kind: ImportKindIssue, Issue: &IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2}},
+		{Kind: ImportKindIssue, Issue: &IssueExport{ID: 6, UID: relatedIssueUID, ProjectID: 2}},
+		{Kind: ImportKindEvent, Event: &EventExport{
+			ID: 7, UID: "01H00000000000000000000003", ProjectID: 2,
+			RelatedIssueID: &relatedIssueID, RelatedIssueUID: &relatedIssueUID,
+		}},
+	}
+
+	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Issue: 10, Event: 20,
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "event related issue UID")
+	assert.Contains(t, err.Error(), "does not match imported issue 5")
+}
+
 func TestPrepareProjectMergeRecordsDropsFederationState(t *testing.T) {
 	projectID := int64(2)
 	records := []ImportRecord{

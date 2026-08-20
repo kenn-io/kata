@@ -83,9 +83,20 @@ func PrepareProjectMergeRecords(
 		return nil, fmt.Errorf("project merge target project ID exceeds safe ID range")
 	}
 
+	resolveImportedIssue := func(sourceID int64, uid, kind string) (int64, error) {
+		importedUID, ok := importedIssues[sourceID]
+		if !ok {
+			return 0, fmt.Errorf("project merge %s issue %d is not part of the imported project", kind, sourceID)
+		}
+		if uid != "" && uid != importedUID {
+			return 0, fmt.Errorf("project merge %s issue UID %q does not match imported issue %d UID %q",
+				kind, uid, sourceID, importedUID)
+		}
+		return addMergeOffset(sourceID, offsets.Issue, kind+" issue")
+	}
 	resolveIssue := func(sourceID int64, uid string) (int64, error) {
 		if _, ok := importedIssues[sourceID]; ok {
-			return addMergeOffset(sourceID, offsets.Issue, "issue")
+			return resolveImportedIssue(sourceID, uid, "event related")
 		}
 		if uid == "" || lookupExistingIssue == nil {
 			return 0, nil
@@ -98,17 +109,6 @@ func PrepareProjectMergeRecords(
 			return 0, nil
 		}
 		return id, nil
-	}
-	resolveImportedIssue := func(sourceID int64, uid, kind string) (int64, error) {
-		importedUID, ok := importedIssues[sourceID]
-		if !ok {
-			return 0, fmt.Errorf("project merge %s issue %d is not part of the imported project", kind, sourceID)
-		}
-		if uid != "" && uid != importedUID {
-			return 0, fmt.Errorf("project merge %s issue UID %q does not match imported issue %d UID %q",
-				kind, uid, sourceID, importedUID)
-		}
-		return addMergeOffset(sourceID, offsets.Issue, kind+" issue")
 	}
 	resolveLinkIssue := func(sourceID int64) (int64, error) {
 		if _, ok := importedIssues[sourceID]; !ok {
