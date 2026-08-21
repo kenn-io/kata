@@ -9,4 +9,7 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@kenn-io/kit-ui'],
   },
+  ssr: {
+    noExternal: ['@kenn-io/kit-ui', '@lucide/svelte'],
+  },
 })

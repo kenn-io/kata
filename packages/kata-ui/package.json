@@ -29,7 +29,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "check:svelte": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
-    "check": "bun run typecheck && bun run check:svelte"
+    "check": "bun run typecheck && bun run check:svelte && bun run check:usage",
+    "check:usage": "kit-ui-check src && bun run scripts/check-kit-ui-usage.ts src"
   },
   "dependencies": {
     "@kenn-io/kit-ui": "github:kenn-io/kit-ui#97be355ef25a02ce96de6da4f3627ed5b922c4c3"

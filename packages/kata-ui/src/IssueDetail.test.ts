@@ -91,7 +91,10 @@ describe('IssueDetail', () => {
       },
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Open in Kata' }))
+    const action = screen.getByRole('button', { name: 'Open in Kata' })
+    expect(action.classList.contains('kit-button')).toBe(true)
+
+    await fireEvent.click(action)
     expect(invoke).toHaveBeenCalledOnce()
   })
 })

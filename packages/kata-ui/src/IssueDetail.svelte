@@ -1,5 +1,6 @@
 <script lang="ts">
   /* eslint-disable svelte/no-at-html-tags -- kit-ui sanitizes rendered markdown. */
+  import { Button } from '@kenn-io/kit-ui'
   import { renderMarkdownSync } from '@kenn-io/kit-ui/utils/markdown'
 
   import IssueChecklist from './components/IssueChecklist.svelte'
@@ -25,14 +26,12 @@
     {#if actions.length > 0}
       <div class="host-actions">
         {#each actions as action (action.id)}
-          <button
-            type="button"
-            disabled={action.disabled || action.busy}
-            aria-busy={action.busy ?? false}
+          <Button
+            size="sm"
+            disabled={Boolean(action.disabled || action.busy)}
+            label={action.busy ? `${action.label}…` : action.label}
             onclick={() => invoke(action)}
-          >
-            {action.busy ? `${action.label}…` : action.label}
-          </button>
+          />
         {/each}
       </div>
     {/if}
@@ -68,7 +67,7 @@
 <style>
   .kata-issue-detail {
     display: grid;
-    gap: 18px;
+    gap: var(--space-6, 16px);
     min-width: 0;
     color: var(--text-primary, #202124);
   }
@@ -107,21 +106,6 @@
     gap: 8px;
   }
 
-  button {
-    border: 1px solid var(--border-default, #d5d7dc);
-    border-radius: 6px;
-    padding: 6px 10px;
-    background: var(--surface-interactive, #fff);
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-  }
-
-  button:disabled {
-    cursor: default;
-    opacity: 0.55;
-  }
-
   .claim-state > span {
     border: 1px solid var(--border-muted, #e2e4e8);
     border-radius: 999px;
@@ -150,7 +134,7 @@
     margin-bottom: 0;
   }
 
-  @media (max-width: 560px) {
+  @media (max-width: 640px) {
     .detail-header {
       display: grid;
     }
