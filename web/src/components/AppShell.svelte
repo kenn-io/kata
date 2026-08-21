@@ -722,7 +722,7 @@
     font-size: var(--font-size-sm);
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 700px) {
     .kata-layout {
       grid-template-columns: 1fr;
       grid-template-rows: auto minmax(0, 1fr);

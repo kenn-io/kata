@@ -368,11 +368,16 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-blue) 18%, transparent);
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 700px) {
     .kata-sidebar {
       border-right: 0;
       border-bottom: 1px solid var(--border-default);
       max-height: 220px;
+    }
+
+    .kata-nav {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      padding: 8px;
     }
   }
 </style>
