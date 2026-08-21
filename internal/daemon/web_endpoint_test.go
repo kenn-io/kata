@@ -89,13 +89,13 @@ func TestResolveWebEndpointSharesTCPListener(t *testing.T) {
 	assert.True(t, resolved.OriginStable)
 }
 
-func TestWebEndpointAllowsLocalSessionOnlyForKeylessDirectLoopback(t *testing.T) {
+func TestWebEndpointAllowsLocalSessionForDirectLoopback(t *testing.T) {
 	loopback := WebEndpoint{
 		Endpoint: kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:27123"},
 		Origin:   "http://127.0.0.1:27123",
 	}
 	assert.True(t, loopback.AllowsLocalSession(config.AuthConfig{}))
-	assert.False(t, loopback.AllowsLocalSession(config.AuthConfig{Token: "configured-token"}))
+	assert.True(t, loopback.AllowsLocalSession(config.AuthConfig{Token: "configured-token"}))
 	assert.False(t, loopback.AllowsLocalSession(config.AuthConfig{RequireTokenIdentity: true}))
 	assert.False(t, loopback.AllowsLocalSession(config.AuthConfig{
 		Proxy: config.ProxyConfig{TrustedActorHeader: "X-Example-Actor"},

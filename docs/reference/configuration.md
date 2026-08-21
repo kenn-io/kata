@@ -278,11 +278,12 @@ behavior; set a nonzero port when a fixed browser origin is required. The
 top-level `listen` remains the daemon API listener and is shared with the
 browser when it is TCP (including Windows and hosted mode).
 
-On a keyless direct-loopback origin, a fresh browser tab transparently receives
-a local-web session. Kata disables this local convenience when the listener or
-public origin is non-loopback, a forwarding header is present, or daemon token,
-identity, or trusted-proxy authentication is configured. Authenticated browser
-requests still require both the HttpOnly cookie and tab-local session header.
+On a direct-loopback origin, a fresh browser tab transparently receives a
+local-web session. A static daemon token does not disable this owner-local path.
+Kata disables it when the listener or public origin is non-loopback, a forwarding
+header is present, or identity or trusted-proxy authentication is configured.
+Authenticated browser requests still require both the HttpOnly cookie and
+tab-local session header.
 If the browser listener is itself named in
 `[auth.proxy].trusted_proxy_listeners`, the browser transparently exchanges the
 proxy-asserted actor for that tab-scoped session instead of showing token login.

@@ -547,15 +547,15 @@ kata ui 01HZNQ7VFPK1XGD8R5MABCD4EX
 ```
 
 Kata resolves the ref before launching and opens the stable
-`/kata?scope=<project-uid>&issue=<issue-uid>` route. A default keyless loopback
-daemon opens directly; the browser transparently creates its local-web session
-on that origin.
+`/kata?scope=<project-uid>&issue=<issue-uid>` route. A default loopback daemon
+opens directly; the browser transparently creates its local-web session on that
+origin, including when the daemon also has a static API token.
 
 The remaining browser-session authority is split between an HttpOnly cookie
 and same-tab session storage. Reloading that tab preserves the session. A fresh
-tab on the default keyless loopback UI transparently creates its own local-web
+tab on the default loopback UI transparently creates its own local-web
 session, so the URL reported by `kata daemon status` can be opened directly.
-Authenticated, proxied, and non-loopback origins require token login.
+Identity-authenticated, proxied, and non-loopback origins require login.
 Daemon restart invalidates the process-scoped session. Presentation
 preferences survive only when the browser origin remains the same.
 

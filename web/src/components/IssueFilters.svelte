@@ -212,7 +212,7 @@
     width: 92px;
   }
 
-  @media (max-width: 900px) {
+  @container list-pane (max-width: 900px) {
     .kata-search-toolbar {
       flex-wrap: wrap;
     }

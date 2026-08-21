@@ -35,7 +35,7 @@ const (
 	// adapter. It never comes from a network header.
 	PrincipalHost PrincipalKind = "host"
 	// PrincipalWebLocal is issued through the owner-local launch proof or the
-	// direct keyless-loopback browser boundary. It permits ordinary attributed
+	// direct owner-local loopback browser boundary. It permits ordinary attributed
 	// writes without granting bearer-token administration authority.
 	PrincipalWebLocal PrincipalKind = "web_local"
 )

@@ -137,7 +137,7 @@ func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL string) 
 	return DiscoveredWebRuntime{}, errors.New("live daemon did not publish matching browser runtime metadata")
 }
 
-// OpenWebUI opens keyless loopback targets directly and selects login for
+// OpenWebUI opens owner-local loopback targets directly and selects login for
 // authenticated browser listeners.
 func OpenWebUI(
 	ctx context.Context,

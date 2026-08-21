@@ -176,7 +176,8 @@ authorization service. Review browser changes against these boundaries:
   loopback browser listener. A direct tab on that listener creates its own
   local-web session only when the exact Host matches, the request arrives
   directly from loopback, no forwarding headers are present, and daemon
-  token/identity/proxy authentication is unconfigured. The mint normally
+  identity/proxy authentication is unconfigured. A static daemon token does
+  not disable this owner-local browser path. The mint normally
   requires the exact Origin. An embedded owner-local browser may omit or send
   an empty Origin only on this mint; exact Host validation remains the
   DNS-rebinding boundary, and cross-site Fetch Metadata remains forbidden.
@@ -209,7 +210,7 @@ authorization service. Review browser changes against these boundaries:
   owner filesystem paths or aliases. Configured logins retain their token principal;
   in identity mode the bootstrap principal remains non-writable. A browser 401
   clears tab-local credentials, fences accepted snapshots and drafts from
-  further writes. A keyless loopback tab attempts one transparent local-session
+  further writes. A direct loopback tab attempts one transparent local-session
   renewal; authenticated deployments return to their explicit token-login
   mechanism. An explicit login waits for token exchange before reading
   authority. Every mutation path, including project creation, uses that

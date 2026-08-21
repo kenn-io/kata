@@ -688,6 +688,8 @@
     flex-direction: column;
     overflow: hidden;
     background: var(--bg-primary);
+    container-type: inline-size;
+    container-name: list-pane;
   }
 
   .detail-column {

@@ -109,9 +109,11 @@ tab-local credential with an HttpOnly instance cookie, and later mutations also
 require exact-origin CSRF validation. Restarting the daemon invalidates its
 browser sessions.
 
-Non-loopback, authenticated, or proxied deployments do not receive local-web
-authority automatically. They require the configured login mechanism and an
-exact public origin. Plain HTTP outside loopback is limited to an explicitly
+Non-loopback, identity-authenticated, or proxied deployments do not receive
+local-web authority automatically. They require the configured login mechanism
+and an exact public origin. A static daemon token does not disable the direct
+loopback session, so `kata ui` remains local and passwordless when that token is
+also used by API clients. Plain HTTP outside loopback is limited to an explicitly
 trusted private network; otherwise terminate HTTPS at the same origin.
 `--insecure-readonly` can serve an anonymous browser but never grants mutation
 authority.

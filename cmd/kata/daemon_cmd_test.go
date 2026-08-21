@@ -2392,7 +2392,7 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 	}
 }
 
-func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyRequiresLogin(t *testing.T) {
+func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
@@ -2420,7 +2420,7 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyRequiresLogin(t *testing
 			record.Metadata["web_origin"] != ""
 	}, 3*time.Second, 10*time.Millisecond)
 
-	assert.Equal(t, "login,poll", record.Metadata["web_capabilities"])
+	assert.Equal(t, "loopback,poll", record.Metadata["web_capabilities"])
 
 	cancel()
 	select {
