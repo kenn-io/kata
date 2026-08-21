@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	mcpserver "go.kenn.io/kata/internal/mcp"
 	"go.kenn.io/kata/internal/storageadmin"
 	"go.kenn.io/kata/internal/version"
@@ -89,9 +92,14 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := requireDaemonAPIVersion(ctx, httpClient, baseURL, apiVersionMCPServer, "kata mcp serve"); err != nil {
+			health, err := requireDaemonAPIVersionHealth(
+				ctx, httpClient, baseURL, apiVersionMCPServer, "kata mcp serve",
+			)
+			if err != nil {
 				return err
 			}
+			stopKeepalive := startMCPIdleKeepalive(ctx, httpClient, baseURL, health)
+			defer stopKeepalive()
 			actor, _ := resolveActor(ctx, flags.As, nil)
 			apiClient, err := kataclient.NewWithHTTPClient(baseURL, httpClient)
 			if err != nil {
@@ -172,6 +180,63 @@ func newMCPServeCmd() *cobra.Command {
 	command.Flags().StringVar(&httpTokenEnv, "http-token-env", "", "require an inbound bearer read from this environment variable")
 	command.Flags().BoolVar(&trustPrivateNetwork, "trust-private-network", false, "trust plaintext MCP HTTP on a non-loopback private network")
 	return command
+}
+
+func startMCPIdleKeepalive(
+	ctx context.Context,
+	client *http.Client,
+	baseURL string,
+	health daemonAPIHealth,
+) context.CancelFunc {
+	if health.IdleShutdown == nil {
+		return func() {}
+	}
+	timeout, err := time.ParseDuration(strings.TrimSpace(health.IdleShutdown.Timeout))
+	if err != nil || timeout < config.MinAutostartIdleTimeout {
+		return func() {}
+	}
+	return startMCPIdleKeepaliveLoop(ctx, client, baseURL, timeout/2)
+}
+
+func startMCPIdleKeepaliveLoop(
+	ctx context.Context,
+	client *http.Client,
+	baseURL string,
+	interval time.Duration,
+) context.CancelFunc {
+	if interval <= 0 {
+		return func() {}
+	}
+	keepaliveCtx, cancel := context.WithCancel(ctx)
+	sendMCPIdleKeepalive(keepaliveCtx, client, baseURL)
+	go func() {
+		timer := time.NewTimer(interval)
+		defer timer.Stop()
+		for {
+			select {
+			case <-keepaliveCtx.Done():
+				return
+			case <-timer.C:
+				sendMCPIdleKeepalive(keepaliveCtx, client, baseURL)
+				timer.Reset(interval)
+			}
+		}
+	}()
+	return cancel
+}
+
+func sendMCPIdleKeepalive(ctx context.Context, client *http.Client, baseURL string) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/ping", nil)
+	if err != nil {
+		return
+	}
+	request.Header.Set(daemon.IdleKeepaliveHeader, "1")
+	response, err := client.Do(request)
+	if err != nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
 }
 
 func parseMCPStorageTargets(values []string) (map[string]string, error) {

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
@@ -23,11 +24,12 @@ type embedder interface {
 
 // ReconcilerConfig tunes the reconciler.
 type ReconcilerConfig struct {
-	BatchSize  int
-	SweepEvery time.Duration // periodic safety sweep; default 5m
-	MinBackoff time.Duration // default 1s
-	MaxBackoff time.Duration // default 5m
-	Now        func() time.Time
+	BatchSize      int
+	SweepEvery     time.Duration // periodic safety sweep; default 5m
+	MinBackoff     time.Duration // default 1s
+	MaxBackoff     time.Duration // default 5m
+	Now            func() time.Time
+	DrainAdmission activity.WaitableAdmission
 }
 
 // ReconcilerHealth is the operator-visible state surfaced in /health.
@@ -187,10 +189,21 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 		case <-r.wake:
 		case <-timer.C:
 		}
-		if err := r.reconcileOnce(ctx); err == nil {
+		attempted, err := r.reconcileAdmitted(ctx)
+		if !attempted {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			timer.Reset(0)
+			continue
+		}
+		if err == nil {
 			backoff = r.cfg.MinBackoff
 			timer.Reset(r.cfg.SweepEvery)
 		} else {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if leaseErr := r.idx.ValidateReconcilerLease(ctx); leaseErr != nil {
 				return errors.Join(err, leaseErr)
 			}
@@ -198,6 +211,27 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 			timer.Reset(backoff)
 		}
 	}
+}
+
+func (r *Reconciler) reconcileAdmitted(ctx context.Context) (bool, error) {
+	if r.cfg.DrainAdmission == nil {
+		return true, r.reconcileOnce(ctx)
+	}
+	lease, admitted, retry := r.cfg.DrainAdmission()
+	if !admitted {
+		if retry == nil {
+			<-ctx.Done()
+			return false, ctx.Err()
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-retry:
+			return false, nil
+		}
+	}
+	defer lease.Release()
+	return true, r.reconcileOnce(ctx)
 }
 
 func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {

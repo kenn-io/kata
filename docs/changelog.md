@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**New features**
+
+- Added opt-in idle shutdown for implicitly started owner-local daemons. Active
+  requests and finite background work drain safely, while running stdio or
+  streamable-HTTP MCP server processes renew the advertised timeout
+  automatically.
+
 ## 0.15.1
 <small>2026-08-20</small>
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/embedding"
@@ -29,6 +30,62 @@ func newReconcilerTestStore(t *testing.T) *sqlitestore.Store {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 	return d
+}
+
+func TestReconcilerLeaderRetriesWhenDrainAdmissionReopens(t *testing.T) {
+	retry := make(chan struct{})
+	attempted := make(chan int, 2)
+	released := make(chan struct{})
+	calls := 0
+	store := newReconcilerTestStore(t)
+	r := NewReconciler(
+		store,
+		openTestVectorIndex(t),
+		&fakeEmbedder{model: "m1", dims: 2},
+		ReconcilerConfig{
+			MinBackoff: time.Millisecond,
+			SweepEvery: time.Hour,
+			DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+				calls++
+				attempted <- calls
+				if calls == 1 {
+					return nil, false, retry
+				}
+				return activity.NewLease(func() { close(released) }, nil), true, nil
+			},
+		},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.runLeader(ctx) }()
+
+	select {
+	case attempt := <-attempted:
+		require.Equal(t, 1, attempt)
+	case <-time.After(time.Second):
+		t.Fatal("reconciler did not attempt drain admission")
+	}
+	select {
+	case attempt := <-attempted:
+		t.Fatalf("reconciler retried before admission reopened: attempt %d", attempt)
+	default:
+	}
+
+	close(retry)
+	select {
+	case attempt := <-attempted:
+		require.Equal(t, 2, attempt)
+	case <-time.After(time.Second):
+		t.Fatal("reconciler did not retry after admission reopened")
+	}
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("reconciler did not finish the admitted cycle")
+	}
+	require.NotNil(t, r.Health().LastSuccessAt)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 // openTestVectorIndex opens a fresh vector.Index at a temp path and registers

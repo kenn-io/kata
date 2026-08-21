@@ -45,12 +45,31 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.11.0",
+  "api_schema_version": "0.12.0",
   "version": "1.4.2",
   "uptime": "5m0s",
-  "db_path": "/path/to/kata.db"
+  "db_path": "/path/to/kata.db",
+  "idle_shutdown": {
+    "timeout": "15m0s",
+    "state": "armed",
+    "deadline": "2026-08-17T17:15:00Z"
+  }
 }
 ```
+
+`idle_shutdown` is present only when this process is an implicitly started,
+owner-local daemon with an effective timeout. Its state is one of:
+
+| State | Meaning |
+| --- | --- |
+| `armed` | No foreground request is active; `deadline` is the next eligible shutdown time. |
+| `foreground` | Client work is active and the idle deadline is suspended. |
+| `blocked` | The prior deadline elapsed, but already-admitted finite background work is still draining. |
+| `stopping` | New work is no longer admitted and root shutdown has started. |
+
+`deadline` is present for `armed` and `blocked`, and absent while foreground
+work suspends the deadline or shutdown is already committed. Monitoring reads
+of health, ping, and instance state do not renew the deadline.
 
 Three distinct version fields appear here; they answer different questions:
 
@@ -88,6 +107,7 @@ and decline to render issue detail.
 
 | Version | Change |
 | --- | --- |
+| `0.12.0` | Added the optional `idle_shutdown` health block for effective auto-start idle shutdown state and capability discovery. |
 | `0.11.0` | Added optional `to_project_uid` on create-time initial links and `expected_project_uids` on edit link deltas so clients can pin resolved relationship targets to immutable project identities inside the mutation transaction. Close-audit rows gain a required `event_id` (stable pagination cursor) and optional `parent_uid`. |
 | `0.10.0` | Added the repeatable `issue_uid` query parameter to UI references so embedding hosts can hydrate summaries by stable issue UID. |
 | `0.9.0` | Added owner, label, exclusion, and metadata filters to the cross-project issue list. Global list rows now include `project_name`. |

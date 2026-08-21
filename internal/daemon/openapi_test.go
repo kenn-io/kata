@@ -242,10 +242,26 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsPinnedRelationshipTargets(t *testing.T) {
-	if APISchemaVersion != "0.11.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.11.0 for pinned relationship targets and audit event IDs", APISchemaVersion)
+func TestOpenAPISchemaVersionReflectsIdleShutdownCapability(t *testing.T) {
+	if APISchemaVersion != "0.12.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.12.0 for the idle shutdown health capability", APISchemaVersion)
 	}
+}
+
+func TestOpenAPIDocumentDefinesIdleShutdownHealthStates(t *testing.T) {
+	doc := OpenAPIDocument()
+	health := doc.Components.Schemas.Map()["HealthResponseBody"]
+	require.NotNil(t, health)
+	require.Contains(t, health.Properties, "idle_shutdown")
+	require.NotContains(t, health.Properties, "idle")
+	require.False(t, slices.Contains(health.Required, "idle_shutdown"))
+
+	idle := doc.Components.Schemas.Map()["IdleShutdownHealth"]
+	require.NotNil(t, idle)
+	require.Equal(t,
+		[]any{"armed", "foreground", "blocked", "stopping"},
+		idle.Properties["state"].Enum,
+	)
 }
 
 func TestOpenAPIDocumentIncludesConfigDrivenFederationContract(t *testing.T) {

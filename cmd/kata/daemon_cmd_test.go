@@ -36,6 +36,7 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/vector"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -558,6 +559,122 @@ func TestDaemonStart_RuntimeRecordSerializesTCPAddressAsHostPort(t *testing.T) {
 	assert.NotContains(t, got.Address, "://")
 }
 
+func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv("KATA_AUTOSTART_IDLE_TIMEOUT", "10s")
+
+	orig := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = orig })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		done <- runDaemonWithListen(ctx, "", false)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-exited:
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop during test cleanup")
+		}
+	})
+
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		_, statErr := os.Stat(runtimePath)
+		return statErr == nil
+	}, 3*time.Second, 10*time.Millisecond, "daemon did not publish its runtime record")
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("auto-started daemon did not exit after its idle timeout")
+	}
+	_, err = os.Stat(runtimePath)
+	require.ErrorIs(t, err, os.ErrNotExist, "idle exit left a discoverable runtime record")
+}
+
+func TestDaemonDoesNotPublishRuntimeBeforeEmbeddingInitializationCompletes(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[search.embeddings]
+base_url = "http://127.0.0.1:1"
+model = "example-model"
+`), 0o600))
+
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+
+	originalOpen := openEmbeddingVectorIndex
+	initializing := make(chan struct{})
+	releaseInitialization := make(chan struct{})
+	var releaseOnce sync.Once
+	openEmbeddingVectorIndex = func(context.Context, db.Storage, string) (*vector.Index, error) {
+		close(initializing)
+		<-releaseInitialization
+		return nil, errors.New("test embedding index failure")
+	}
+	t.Cleanup(func() { openEmbeddingVectorIndex = originalOpen })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		releaseOnce.Do(func() { close(releaseInitialization) })
+		select {
+		case <-exited:
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop during test cleanup")
+		}
+	})
+
+	select {
+	case <-initializing:
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not begin embedding initialization")
+	}
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	_, err = os.Stat(runtimePath)
+	require.ErrorIs(t, err, os.ErrNotExist,
+		"daemon advertised readiness while embedding initialization was blocked")
+
+	releaseOnce.Do(func() { close(releaseInitialization) })
+	select {
+	case runErr := <-done:
+		require.ErrorContains(t, runErr, "test embedding index failure")
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not return after embedding initialization failed")
+	}
+	_, err = os.Stat(runtimePath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 type daemonRuntimeRecordJSON struct {
 	Network string `json:"network"`
 	Address string `json:"address"`
@@ -992,6 +1109,10 @@ func TestDaemonRestart_AllowsFullGracefulShutdownBudget(t *testing.T) {
 	out := executeRoot(t, newRootCmd(), "daemon", "restart")
 
 	assert.Equal(t, "restarted pid=4244 address=127.0.0.1:7777\n", string(out))
+}
+
+func TestDaemonRestartReservesProcessExitMarginBeyondDrainBudget(t *testing.T) {
+	require.Equal(t, 5*time.Second, daemonRestartProcessWaitTimeout-daemonShutdownDrainTimeout)
 }
 
 func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) {
@@ -1552,6 +1673,54 @@ func TestListenFromPortEnv(t *testing.T) {
 	})
 }
 
+func TestAutostartIdleControllerRequiresMarkerAndOwnerLocalExposure(t *testing.T) {
+	localDaemon := kitdaemon.Endpoint{Network: kitdaemon.NetworkUnix, Address: "/tmp/kata.sock"}
+	localWeb := daemon.WebEndpoint{
+		Endpoint: kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:27123"},
+		Origin:   "http://127.0.0.1:27123",
+	}
+	configured := config.DaemonConfig{AutostartIdleTimeout: "15m"}
+
+	controller, ineligible, err := newAutostartIdleController(
+		configured, false, localDaemon, localWeb, func() {},
+	)
+	require.NoError(t, err)
+	require.Nil(t, controller)
+	require.False(t, ineligible)
+
+	controller, ineligible, err = newAutostartIdleController(
+		configured, true,
+		kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "100.64.0.5:7777"},
+		localWeb, func() {},
+	)
+	require.NoError(t, err)
+	require.Nil(t, controller)
+	require.True(t, ineligible)
+
+	controller, ineligible, err = newAutostartIdleController(
+		configured, true, localDaemon, localWeb, func() {},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, controller)
+	require.False(t, ineligible)
+	require.Equal(t, 15*time.Minute, controller.Snapshot().Timeout)
+}
+
+func TestWithoutEnvironmentKeyRemovesOnlyAutostartMarker(t *testing.T) {
+	got := withoutEnvironmentKey([]string{
+		"PATH=/example/bin",
+		daemon.AutoStartMarkerEnv + "=1",
+		"kata_autostart=1",
+		"Kata_Autostart=1",
+		"KATA_AUTOSTART_IDLE_TIMEOUT=15m",
+	}, daemon.AutoStartMarkerEnv)
+
+	assert.Equal(t, []string{
+		"PATH=/example/bin",
+		"KATA_AUTOSTART_IDLE_TIMEOUT=15m",
+	}, got)
+}
+
 // TestDaemonStart_PortEnvBindsWildcard verifies that when the platform
 // injects PORT and the daemon is started explicitly in the foreground (no auto-start
 // marker), with no --listen flag and no config value, the bind address
@@ -1894,7 +2063,7 @@ func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *te
 	t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	wake := startGitHubSyncRunner(ctx, store, fetcher, bcast, hooks.NewNoop(), log.New(io.Discard, "", 0))
+	wake := startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, bcast, hooks.NewNoop(), log.New(io.Discard, "", 0))
 	defer cancel()
 
 	require.Eventually(t, func() bool {
@@ -1905,7 +2074,7 @@ func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *te
 	assert.Same(t, fetcher, configs[0].Fetcher)
 	assert.Equal(t, 25*time.Millisecond, configs[0].Interval)
 	assert.NotNil(t, configs[0].Wake)
-	assert.NotNil(t, configs[0].EventSink)
+	assert.NotNil(t, configs[0].EventSinkFrom)
 	assert.NotNil(t, configs[0].Logger)
 	require.NotNil(t, wake)
 	require.NotPanics(t, wake)
@@ -1926,7 +2095,7 @@ func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	startGitHubSyncRunner(ctx, store, nil, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
+	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, nil, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
 
 	require.Eventually(t, func() bool {
 		return runner.wasRun()
@@ -1944,7 +2113,7 @@ func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	startGitHubSyncRunner(ctx, store, fetcher, bcast, hooks.NewNoop(), log.New(io.Discard, "", 0))
+	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, bcast, hooks.NewNoop(), log.New(io.Discard, "", 0))
 
 	require.Eventually(t, func() bool {
 		got, err := store.IssueSyncBindingByID(context.Background(), binding.ID)
@@ -1968,7 +2137,7 @@ func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	startGitHubSyncRunner(ctx, store, fetcher, bcast, hookSink, log.New(io.Discard, "", 0))
+	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, bcast, hookSink, log.New(io.Discard, "", 0))
 
 	var msg daemon.StreamMsg
 	select {
@@ -1998,7 +2167,7 @@ func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testi
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	wake := startGitHubSyncRunner(ctx, store, fetcher, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
+	wake := startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
 
 	select {
 	case <-fetcher.blockRepository:

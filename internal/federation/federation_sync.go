@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
@@ -744,6 +745,11 @@ type Runner struct {
 	Debounce       time.Duration
 	OnError        func(error)
 	OnPulledEvents func(projectID int64, events []db.Event)
+	// OnPulledEventsFrom takes precedence over OnPulledEvents and receives the
+	// fork source for hook jobs caused by this admitted spoke pass. The source
+	// is nil when the pass has no parent activity lease.
+	OnPulledEventsFrom func(projectID int64, events []db.Event, fork activity.Admission)
+	DrainAdmission     activity.WaitableAdmission
 }
 
 type runnerLeaseStore interface {
@@ -774,33 +780,52 @@ type activeSpokeBinding struct {
 // RunOnce executes one pull pass. With no spoke bindings it returns without
 // reading credentials or making network requests.
 func (r *Runner) RunOnce(ctx context.Context) error {
-	return r.runOnce(ctx, nil)
+	_, _, err := r.runOnce(ctx, nil)
+	return err
 }
 
-func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context) error) error {
-	bindings, err := r.DB.ListFederationBindings(ctx)
-	if err != nil {
-		return err
+func (r *Runner) runOnce(
+	ctx context.Context,
+	validateLease func(context.Context) error,
+) (<-chan struct{}, bool, error) {
+	var scan *activity.Lease
+	if r.DrainAdmission != nil {
+		var admitted bool
+		var retry <-chan struct{}
+		scan, admitted, retry = r.DrainAdmission()
+		if !admitted {
+			return retry, true, nil
+		}
 	}
-	spokes := make([]activeSpokeBinding, 0, len(bindings))
-	for _, binding := range bindings {
-		if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
-			continue
+	spokes, err := func() ([]activeSpokeBinding, error) {
+		if scan != nil {
+			defer scan.Release()
 		}
-		project, err := r.DB.ProjectByID(ctx, binding.ProjectID)
+		bindings, err := r.DB.ListFederationBindings(ctx)
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return err
+			return nil, err
+		}
+		active := make([]activeSpokeBinding, 0, len(bindings))
+		for _, binding := range bindings {
+			if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
+				continue
 			}
-			return err
+			project, err := r.DB.ProjectByID(ctx, binding.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			if project.DeletedAt != nil {
+				continue
+			}
+			active = append(active, activeSpokeBinding{binding: binding, project: project})
 		}
-		if project.DeletedAt != nil {
-			continue
-		}
-		spokes = append(spokes, activeSpokeBinding{binding: binding, project: project})
+		return active, nil
+	}()
+	if err != nil {
+		return nil, false, err
 	}
 	if len(spokes) == 0 {
-		return nil
+		return nil, false, nil
 	}
 	credentialStore := r.Credentials
 	if credentialStore == nil {
@@ -808,74 +833,92 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 	}
 	var errs []error
 	for _, spoke := range spokes {
+		var drain *activity.Lease
+		if r.DrainAdmission != nil {
+			var admitted bool
+			var retry <-chan struct{}
+			drain, admitted, retry = r.DrainAdmission()
+			if !admitted {
+				return retry, true, errors.Join(errs...)
+			}
+		}
+		spokeErr := func() error {
+			if drain != nil {
+				defer drain.Release()
+			}
+			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
+		}()
+		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
+			return nil, false, spokeErr
+		}
+		if spokeErr != nil {
+			errs = append(errs, spokeErr)
+		}
+	}
+	return nil, false, errors.Join(errs...)
+}
+
+func (r *Runner) runSpoke(
+	ctx context.Context,
+	spoke activeSpokeBinding,
+	credentialStore config.FederationCredentialStore,
+	validateLease func(context.Context) error,
+	drain *activity.Lease,
+) error {
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return err
+	}
+	finishSync, err := federationcoord.BeginSync(ctx,
+		federationcoord.Key(r.DB.InstanceUID(), spoke.binding.ProjectID), r.DB, spoke.binding.ProjectID)
+	if err != nil {
+		return fmt.Errorf("coordinate federation sync: %w", err)
+	}
+	defer finishSync()
+	binding, err := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
+	if err != nil {
+		return err
+	}
+	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
+		return nil
+	}
+	cred, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
+	if err != nil {
+		return errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
+	}
+	cred = config.FederationTransportCredential(
+		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
+	)
+	opts := r.clientOpts()
+	var errs []error
+	if err := retryPendingClaimsOnceWithFence(ctx, r.DB, binding, cred, opts, validateLease); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
+			return err
+		}
+		errs = append(errs, err)
+	}
+	onPulledEvents := r.OnPulledEvents
+	if r.OnPulledEventsFrom != nil {
+		onPulledEvents = func(projectID int64, events []db.Event) {
+			var fork activity.Admission
+			if drain != nil {
+				fork = drain.Fork
+			}
+			r.OnPulledEventsFrom(projectID, events, fork)
+		}
+	}
+	if err := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
+			return err
+		}
+		errs = append(errs, err)
+	}
+	if len(errs) == 0 {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
-		finishSync, coordinationErr := federationcoord.BeginSync(
-			ctx,
-			federationcoord.Key(r.DB.InstanceUID(), spoke.binding.ProjectID),
-			r.DB,
-			spoke.binding.ProjectID,
-		)
-		if coordinationErr != nil {
-			if errors.Is(coordinationErr, context.Canceled) {
-				return coordinationErr
-			}
-			errs = append(errs, fmt.Errorf("coordinate federation sync: %w", coordinationErr))
-			continue
-		}
-		binding, bindingReadErr := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
-		if bindingReadErr != nil {
-			finishSync()
-			if errors.Is(bindingReadErr, context.Canceled) {
-				return bindingReadErr
-			}
-			errs = append(errs, bindingReadErr)
-			continue
-		}
-		if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
-			finishSync()
-			continue
-		}
-		bindingErrs := len(errs)
-		project := spoke.project
-		cred, _, credentialErr := credentialStore.FederationCredential(ctx, project.UID)
-		if credentialErr != nil {
-			errs = append(errs, credentialErr)
-			if recordErr := r.DB.RecordFederationSyncError(ctx, binding.ProjectID, credentialErr, time.Now().UTC()); recordErr != nil {
-				errs = append(errs, recordErr)
-			}
-			finishSync()
-			continue
-		}
-		cred = config.FederationTransportCredential(
-			binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
-		)
-		opts := r.clientOpts()
-		if err := retryPendingClaimsOnceWithFence(ctx, r.DB, binding, cred, opts, validateLease); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
-				finishSync()
-				return err
-			}
+		if err := r.DB.ClearFederationSyncError(ctx, binding.ProjectID); err != nil {
 			errs = append(errs, err)
 		}
-		if err := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, r.OnPulledEvents, validateLease); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
-				finishSync()
-				return err
-			}
-			errs = append(errs, err)
-		}
-		if len(errs) == bindingErrs {
-			if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-				finishSync()
-				return err
-			}
-			if err := r.DB.ClearFederationSyncError(ctx, binding.ProjectID); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		finishSync()
 	}
 	return errors.Join(errs...)
 }
@@ -1155,13 +1198,26 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 				return err
 			}
 		}
-		if err := r.runOnce(ctx, validateLease); err != nil {
+		retry, denied, err := r.runOnce(ctx, validateLease)
+		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
 			}
 			if r.OnError != nil {
 				r.OnError(err)
 			}
+		}
+		if denied && retry != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-retry:
+				continue
+			}
+		}
+		if denied {
+			<-ctx.Done()
+			return ctx.Err()
 		}
 		select {
 		case <-ctx.Done():

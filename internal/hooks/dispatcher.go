@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -19,6 +20,13 @@ import (
 type Sink interface {
 	Enqueue(evt db.Event)
 }
+
+// ActivityLease retains the dispatcher-facing lease name while sharing the
+// common finite-work contract with other daemon workers.
+type ActivityLease = activity.Lease
+
+// AcquireActivity admits finite dispatcher work.
+type AcquireActivity = activity.Admission
 
 // DispatcherDeps wires the dispatcher to its environment. Resolvers
 // are pluggable so tests can inject deterministic snapshots without
@@ -33,18 +41,23 @@ type DispatcherDeps struct {
 	ProjectResolver func(ctx context.Context, projectID int64) (ProjectSnapshot, error)
 	Now             func() time.Time
 	GraceWindow     time.Duration
+	AcquireDrain    AcquireActivity
+	Environment     []string
 }
 
-// Dispatcher is the live hook runtime. The exported API is
-// Enqueue/Reload/CurrentConfig/Shutdown; unexported state is held
-// by-value (no need for a separate state struct).
+// Dispatcher is the live hook runtime. BeginProducerDrain is a daemon-lifecycle
+// handoff used before Shutdown; unexported state is held by-value (no need for
+// a separate state struct).
 type Dispatcher struct {
 	deps                     DispatcherDeps
 	cfg                      Config
-	queue                    chan HookJob
+	queue                    chan queuedHookJob
 	done                     chan struct{}
 	waited                   chan struct{} // closed when wg.Wait returns; shared by all Shutdown callers
 	stopped                  atomic.Bool
+	producerDrain            atomic.Bool
+	abortOnce                sync.Once
+	enqueueMu                sync.RWMutex
 	wg                       sync.WaitGroup
 	snapshot                 atomic.Pointer[Snapshot]
 	dropped                  atomic.Int64
@@ -59,6 +72,11 @@ type Dispatcher struct {
 	// finishing job's pruner.AddRun never unlinks a peer worker's
 	// in-progress capture.
 	active sync.Map
+}
+
+type queuedHookJob struct {
+	HookJob
+	lease *ActivityLease
 }
 
 // noopSink is the unexported implementation of Sink returned by
@@ -96,7 +114,7 @@ func New(loaded LoadedConfig, deps DispatcherDeps) (*Dispatcher, error) {
 	d := &Dispatcher{
 		deps:      deps,
 		cfg:       loaded.Config,
-		queue:     make(chan HookJob, loaded.Config.QueueCap),
+		queue:     make(chan queuedHookJob, loaded.Config.QueueCap),
 		done:      make(chan struct{}),
 		waited:    make(chan struct{}),
 		appender:  app,
@@ -130,12 +148,58 @@ func applyDispatcherDefaults(deps DispatcherDeps) DispatcherDeps {
 	if deps.DaemonLog == nil {
 		deps.DaemonLog = log.New(os.Stderr, "", log.LstdFlags)
 	}
+	if deps.Environment == nil {
+		deps.Environment = os.Environ()
+	} else {
+		deps.Environment = append([]string(nil), deps.Environment...)
+	}
 	return deps
 }
 
 // Enqueue is the Sink-side fan-out point. Non-blocking by contract: a
 // full queue increments dropped and rate-limit-logs.
 func (d *Dispatcher) Enqueue(evt db.Event) {
+	d.enqueue(evt, d.deps.AcquireDrain)
+}
+
+// EnqueueFrom uses a parent operation's fork source for jobs caused by
+// already-admitted background work. This preserves delivery after the idle
+// deadline blocks unrelated top-level drains.
+func (d *Dispatcher) EnqueueFrom(evt db.Event, acquire AcquireActivity) {
+	d.enqueue(evt, acquire)
+}
+
+// BeginProducerDrain keeps the dispatcher open for handoffs from already
+// admitted producers after daemon-wide idle admission closes. Jobs accepted in
+// this phase need no idle lease because the shutdown coordinator joins the
+// dispatcher explicitly after every producer exits.
+func (d *Dispatcher) BeginProducerDrain() {
+	d.producerDrain.Store(true)
+}
+
+// EnqueueFrom routes an event through a parent activity source when the sink
+// supports it, falling back to the ordinary Sink contract for lightweight
+// test and disabled implementations.
+func EnqueueFrom(sink Sink, evt db.Event, acquire AcquireActivity) {
+	if acquire == nil {
+		sink.Enqueue(evt)
+		return
+	}
+	if aware, ok := sink.(interface {
+		EnqueueFrom(db.Event, AcquireActivity)
+	}); ok {
+		aware.EnqueueFrom(evt, acquire)
+		return
+	}
+	sink.Enqueue(evt)
+}
+
+func (d *Dispatcher) enqueue(evt db.Event, acquire AcquireActivity) {
+	if d.stopped.Load() {
+		return
+	}
+	d.enqueueMu.RLock()
+	defer d.enqueueMu.RUnlock()
 	if d.stopped.Load() {
 		return
 	}
@@ -153,10 +217,25 @@ func (d *Dispatcher) Enqueue(evt db.Event) {
 			return
 		default:
 		}
-		job := HookJob{Event: evt, Hook: h, EnqueuedAt: d.deps.Now()}
+		var lease *ActivityLease
+		if acquire != nil {
+			var admitted bool
+			lease, admitted = acquire()
+			if !admitted {
+				if !d.producerDrain.Load() {
+					continue
+				}
+				lease = nil
+			}
+		}
+		job := queuedHookJob{
+			HookJob: HookJob{Event: evt, Hook: h, EnqueuedAt: d.deps.Now()},
+			lease:   lease,
+		}
 		select {
 		case d.queue <- job:
 		default:
+			releaseActivity(lease)
 			d.dropped.Add(1)
 			d.maybeLogQueueFull()
 		}
@@ -205,15 +284,18 @@ func (d *Dispatcher) Reload(loaded LoadedConfig) {
 	d.deps.DaemonLog.Printf("hooks reload ok: %d hook(s) active", len(loaded.Snapshot.Hooks))
 }
 
-// Shutdown closes the done channel, waits for workers up to ctx, and
-// closes the runs appender. The first call closes d.done and starts
-// the wg.Wait goroutine; later calls share the same `waited` channel
+// Shutdown seals the queue, drains accepted jobs, and waits for workers up to
+// ctx before closing the runs appender. If ctx expires, it closes done to
+// cancel in-flight work and drops any queue remainder. Later calls share the
+// same `waited` channel
 // so a retry after the first call timed out blocks until completion
 // (or its own ctx expires) — never spuriously returns nil while
 // workers are still running.
 func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	if d.stopped.CompareAndSwap(false, true) {
-		close(d.done)
+		d.enqueueMu.Lock()
+		close(d.queue)
+		d.enqueueMu.Unlock()
 		go func() {
 			d.wg.Wait()
 			close(d.waited)
@@ -221,10 +303,13 @@ func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	}
 	select {
 	case <-d.waited:
+		d.releaseQueued()
 		// Close appender once; appender.Close is itself idempotent.
 		_ = d.appender.Close()
 		return nil
 	case <-ctx.Done():
+		d.abortOnce.Do(func() { close(d.done) })
+		d.releaseQueued()
 		d.deps.DaemonLog.Printf("hooks shutdown timed out: %d in-flight", d.inflight.Load())
 		// Drain best-effort: don't close appender — workers may still
 		// be writing. Caller proceeds with daemon shutdown anyway.
@@ -232,11 +317,9 @@ func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	}
 }
 
-// worker pops one HookJob at a time and runs it. The two-phase select
-// pattern (re-check done after pop) ensures that a job sitting in the
-// queue at Shutdown time is not started — Go's select chooses cases
-// uniformly among ready ones, so the post-pop check drops at most one
-// just-popped job per worker.
+// worker pops one HookJob at a time and runs it. Graceful shutdown closes the
+// queue so workers drain every accepted job. Forced shutdown closes done; the
+// post-pop check then drops at most one just-popped job per worker.
 func (d *Dispatcher) worker() {
 	defer d.wg.Done()
 	rd := d.runDeps()
@@ -250,6 +333,7 @@ func (d *Dispatcher) worker() {
 			}
 			select {
 			case <-d.done:
+				releaseActivity(job.lease)
 				return // drop the just-popped job; do not start runJob
 			default:
 			}
@@ -263,7 +347,9 @@ func (d *Dispatcher) worker() {
 // alive and the counters accurate so Shutdown's "in-flight" log
 // doesn't drift, and so the pruner's isActive predicate never strands
 // a stale "still writing" entry.
-func (d *Dispatcher) runOne(rd runDeps, job HookJob) {
+func (d *Dispatcher) runOne(rd runDeps, queued queuedHookJob) {
+	defer releaseActivity(queued.lease)
+	job := queued.HookJob
 	key := groupKey{eventID: job.Event.ID, hookIndex: job.Hook.Index}
 	d.active.Store(key, struct{}{})
 	d.inflight.Add(1)
@@ -279,6 +365,26 @@ func (d *Dispatcher) runOne(rd runDeps, job HookJob) {
 	ctx, cancel := contextFromShutdown(d.done)
 	defer cancel()
 	runJob(ctx, d.done, job, rd)
+}
+
+func releaseActivity(lease *ActivityLease) {
+	if lease != nil {
+		lease.Release()
+	}
+}
+
+func (d *Dispatcher) releaseQueued() {
+	for {
+		select {
+		case job, ok := <-d.queue:
+			if !ok {
+				return
+			}
+			releaseActivity(job.lease)
+		default:
+			return
+		}
+	}
 }
 
 // contextFromShutdown returns a context that is canceled the moment
@@ -305,6 +411,7 @@ func (d *Dispatcher) runDeps() runDeps {
 		DaemonLog:   d.deps.DaemonLog,
 		Now:         d.deps.Now,
 		GraceWindow: d.deps.GraceWindow,
+		Environment: append([]string(nil), d.deps.Environment...),
 		Project:     d.deps.ProjectResolver,
 		Issue:       d.deps.IssueResolver,
 		Comment:     d.deps.CommentResolver,

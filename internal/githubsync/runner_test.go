@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
@@ -854,6 +856,133 @@ func TestRunnerRunAttemptsLaterDueBindingsAfterBindingFailure(t *testing.T) {
 	assert.Contains(t, status.LastError, "github unavailable")
 }
 
+func TestRunnerRunAdmitsEachDueBindingAsFiniteDrainWork(t *testing.T) {
+	var acquired atomic.Int32
+	var released atomic.Int32
+	h := newRunnerHarness(t, withDrainAdmission(func() (*activity.Lease, bool) {
+		acquired.Add(1)
+		return activity.NewLease(func() { released.Add(1) }, nil), true
+	}))
+	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+
+	require.NoError(t, h.runner.Run(h.ctx))
+	require.Equal(t, int32(2), acquired.Load())
+	require.Equal(t, int32(2), released.Load())
+}
+
+func TestRunnerPassMakesParentDrainAvailableToEventSink(t *testing.T) {
+	h := newRunnerHarness(t, withDrainAdmission(func() (*activity.Lease, bool) {
+		return activity.NewLease(func() {}, func() (*activity.Lease, bool) {
+			return activity.NewLease(func() {}, nil), true
+		}), true
+	}))
+	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+	var forked bool
+	h.runner.config.EventSinkFrom = func(
+		_ context.Context, _ int64, _ []db.Event, fork activity.Admission,
+	) error {
+		require.NotNil(t, fork)
+		child, admitted := fork()
+		require.True(t, admitted)
+		child.Release()
+		forked = true
+		return nil
+	}
+
+	require.NoError(t, h.runner.Run(h.ctx))
+	require.True(t, forked)
+}
+
+func TestRunnerRunSkipsDueBindingWhenDrainAdmissionIsClosed(t *testing.T) {
+	var acquired atomic.Int32
+	h := newRunnerHarness(t, withDrainAdmission(func() (*activity.Lease, bool) {
+		acquired.Add(1)
+		return nil, false
+	}))
+
+	require.NoError(t, h.runner.Run(h.ctx))
+	require.Equal(t, int32(1), acquired.Load())
+	require.Zero(t, h.fetcher.repoCallCount())
+}
+
+func TestRunnerRunRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.T) {
+	reopened := make(chan struct{})
+	var attempts atomic.Int32
+	h := newRunnerHarness(t, withWaitableDrainAdmission(func() (*activity.Lease, bool, <-chan struct{}) {
+		if attempts.Add(1) == 1 {
+			return nil, false, reopened
+		}
+		return activity.NewLease(func() {}, nil), true, nil
+	}))
+	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+
+	done := make(chan error, 1)
+	go func() { done <- h.runner.Run(h.ctx) }()
+	require.Eventually(t, func() bool { return attempts.Load() == 1 }, time.Second, time.Millisecond)
+	require.Zero(t, h.fetcher.repoCallCount())
+
+	close(reopened)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("runner did not retry after drain admission reopened")
+	}
+	require.GreaterOrEqual(t, attempts.Load(), int32(3), "retry should admit the scan and due binding")
+	require.Equal(t, 1, h.fetcher.repoCallCount())
+}
+
+func TestRunnerRunRetriesWhenBindingAdmissionReopens(t *testing.T) {
+	reopened := make(chan struct{})
+	var attempts atomic.Int32
+	h := newRunnerHarness(t, withWaitableDrainAdmission(func() (*activity.Lease, bool, <-chan struct{}) {
+		switch attempts.Add(1) {
+		case 1:
+			return activity.NewLease(func() {}, nil), true, nil // first scan
+		case 2:
+			return nil, false, reopened // first binding
+		default:
+			return activity.NewLease(func() {}, nil), true, nil
+		}
+	}))
+	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+
+	done := make(chan error, 1)
+	go func() { done <- h.runner.Run(h.ctx) }()
+	require.Eventually(t, func() bool { return attempts.Load() == 2 }, time.Second, time.Millisecond)
+	require.Zero(t, h.fetcher.repoCallCount())
+
+	close(reopened)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("runner did not retry after binding admission reopened")
+	}
+	require.GreaterOrEqual(t, attempts.Load(), int32(4), "retry should readmit the scan and binding")
+	require.Equal(t, 1, h.fetcher.repoCallCount())
+}
+
+func TestRunnerRunWaitsForCancellationAfterTerminalDrainDenial(t *testing.T) {
+	var attempts atomic.Int32
+	h := newRunnerHarness(t,
+		withInterval(5*time.Millisecond),
+		withWaitableDrainAdmission(func() (*activity.Lease, bool, <-chan struct{}) {
+			attempts.Add(1)
+			return nil, false, nil
+		}),
+	)
+	ctx, cancel := context.WithCancel(h.ctx)
+	done := make(chan error, 1)
+	go func() { done <- h.runner.Run(ctx) }()
+	require.Eventually(t, func() bool { return attempts.Load() >= 1 }, time.Second, time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	require.Equal(t, int32(1), attempts.Load(), "terminal denial must not be polled")
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
 func TestRunnerIntervalModeLogsBindingFailuresAndKeepsRunning(t *testing.T) {
 	h := newRunnerHarness(t, withInterval(time.Hour))
 	secondBinding := h.mustCreateBinding("hub-project", "R_second_repo", "second-repo", 202)
@@ -993,6 +1122,21 @@ func withInterval(interval time.Duration) runnerOption {
 func withWake(wake <-chan struct{}) runnerOption {
 	return func(config *RunnerConfig) {
 		config.Wake = wake
+	}
+}
+
+func withDrainAdmission(admission activity.Admission) runnerOption {
+	return func(config *RunnerConfig) {
+		config.DrainAdmission = func() (*activity.Lease, bool, <-chan struct{}) {
+			lease, admitted := admission()
+			return lease, admitted, nil
+		}
+	}
+}
+
+func withWaitableDrainAdmission(admission activity.WaitableAdmission) runnerOption {
+	return func(config *RunnerConfig) {
+		config.DrainAdmission = admission
 	}
 }
 

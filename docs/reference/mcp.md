@@ -85,6 +85,17 @@ daemon's `api_schema_version` once at startup and refuses to serve a daemon
 older than API `0.11.0` (see the [HTTP API version history](http-api.md));
 upgrade the daemon rather than the MCP client in that case.
 
+When the selected daemon advertises effective auto-start idle shutdown in its
+health response, the MCP server sends a marked liveness ping immediately and
+then waits half of the advertised timeout after each completed attempt. The
+marked keepalive uses `GET /api/v1/ping` and runs for the lifetime of the
+`kata mcp serve` process in both stdio and `--http` modes. This keeps a quiet
+stdio session usable and keeps a
+streamable-HTTP bridge ready for future clients without relying on the MCP
+process's local Kata configuration.
+Stop the MCP server process when that bridge should no longer keep the selected
+daemon resident.
+
 ## Project scope
 
 The server binds the current workspace's project by default, so a bare

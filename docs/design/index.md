@@ -10,6 +10,7 @@ constraints that are too detailed for the main documentation.
 ## Available notes
 
 - [Architecture and design principles](architecture.md)
+- [Auto-start daemon idle shutdown](autostart-idle-shutdown.md)
 - [Data model and durability](data-model.md)
 - [Federation technical notes](federation.md)
 - [GitHub sync](github-sync.md)

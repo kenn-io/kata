@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -23,10 +24,12 @@ var newFederationConfigReconciler = func(
 
 func startFederationConfigReconciler(
 	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
 	daemonConfig *config.DaemonConfig,
 	store db.Storage,
 	federationWake func(),
-	projectEventSink func(db.Event),
+	projectEventSink func(db.Event, activity.Admission),
 	daemonLog *log.Logger,
 ) func() api.FederationConfigHealth {
 	if len(daemonConfig.Federation.Projects) == 0 {
@@ -50,13 +53,14 @@ func startFederationConfigReconciler(
 		) (federation.Hub, error) {
 			return federation.NewHubClient(ctx, catalog)
 		},
-		Wake:             federationWake,
-		ProjectEventSink: projectEventSink,
-		Logger:           daemonLog,
+		Wake:                 federationWake,
+		ProjectEventSinkFrom: projectEventSink,
+		DrainAdmission:       drainAdmission,
+		Logger:               daemonLog,
 	})
-	go func() {
+	workers.Go(func() {
 		_ = reconciler.Run(ctx)
-	}()
+	})
 	return func() api.FederationConfigHealth {
 		health := reconciler.Health()
 		return api.FederationConfigHealth{

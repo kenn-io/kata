@@ -1381,6 +1381,8 @@ components:
           $ref: "#/components/schemas/EmbeddingsHealth"
         federation_config:
           $ref: "#/components/schemas/FederationConfigHealth"
+        idle_shutdown:
+          $ref: "#/components/schemas/IdleShutdownHealth"
         ok:
           type: boolean
         schema_version:
@@ -1400,6 +1402,24 @@ components:
         - version
         - uptime
         - started_at
+      type: object
+    IdleShutdownHealth:
+      properties:
+        deadline:
+          format: date-time
+          type: string
+        state:
+          enum:
+            - armed
+            - foreground
+            - blocked
+            - stopping
+          type: string
+        timeout:
+          type: string
+      required:
+        - timeout
+        - state
       type: object
     ImportBatchResult:
       properties:
@@ -4021,7 +4041,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.11.0
+  version: 0.12.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

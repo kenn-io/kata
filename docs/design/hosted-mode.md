@@ -30,8 +30,8 @@ suitable for platform liveness / readiness probes.
 
 ## Shutdown
 
-The daemon handles SIGTERM gracefully (up to 10s for in-flight
-requests).
+The daemon handles SIGTERM gracefully. HTTP handlers receive up to 10s to
+drain, within a shared 25s budget for handlers, background workers, and hooks.
 
 ## Single-instance assumption
 

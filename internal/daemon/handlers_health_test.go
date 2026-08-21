@@ -33,6 +33,44 @@ func TestHealth_ReportsSchemaAndUptime(t *testing.T) {
 	assert.NotEmpty(t, body.DBPath)
 }
 
+func TestHealthIncludesEffectiveIdleShutdownCapability(t *testing.T) {
+	d := openTestDB(t)
+	deadline := time.Date(2026, 8, 17, 17, 15, 0, 0, time.UTC)
+	ts := startTestServer(t, daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		IdleShutdownHealth: func() daemon.IdleSnapshot {
+			return daemon.IdleSnapshot{
+				Timeout:  15 * time.Minute,
+				State:    daemon.IdleStateArmed,
+				Deadline: deadline,
+			}
+		},
+	})
+
+	var body struct {
+		IdleShutdown *api.IdleShutdownHealth `json:"idle_shutdown"`
+		LegacyIdle   json.RawMessage         `json:"idle"`
+	}
+	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	require.NotNil(t, body.IdleShutdown)
+	assert.Nil(t, body.LegacyIdle)
+	assert.Equal(t, "15m0s", body.IdleShutdown.Timeout)
+	assert.Equal(t, "armed", body.IdleShutdown.State)
+	require.NotNil(t, body.IdleShutdown.Deadline)
+	assert.True(t, body.IdleShutdown.Deadline.Equal(deadline))
+}
+
+func TestHealthOmitsIdleShutdownWhenIneffective(t *testing.T) {
+	ts, _ := startDefaultTestServer(t)
+
+	var body struct {
+		IdleShutdown *api.IdleShutdownHealth `json:"idle_shutdown"`
+	}
+	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	assert.Nil(t, body.IdleShutdown)
+}
+
 func TestHealth_OmitsEmbeddingsWhenUnconfigured(t *testing.T) {
 	ts, _ := startDefaultTestServer(t)
 

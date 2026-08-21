@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -433,6 +435,78 @@ func TestMCPServeAllProjectsServesDaemonWideScope(t *testing.T) {
 
 	require.NoError(t, command.Execute())
 	require.Zero(t, requests, "daemon-wide startup must not resolve the current workspace")
+}
+
+func TestMCPServeRenewsAdvertisedAutostartDaemon(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	keepalive := make(chan struct{}, 1)
+	daemonServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/health":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(writer,
+				`{"ok":true,"api_schema_version":%q,"idle_shutdown":{"timeout":"15m0s","state":"armed"}}`,
+				daemon.APISchemaVersion,
+			)
+		case "/api/v1/ping":
+			require.Equal(t, "1", request.Header.Get(daemon.IdleKeepaliveHeader))
+			keepalive <- struct{}{}
+			_, _ = writer.Write([]byte(`{"ok":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(daemonServer.Close)
+
+	command := newRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"mcp", "serve", "--all-projects"})
+	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemonServer.URL))
+
+	require.NoError(t, command.Execute())
+	select {
+	case <-keepalive:
+	case <-time.After(5 * time.Second):
+		t.Fatal("MCP did not send an immediate marked idle keepalive")
+	}
+}
+
+func TestMCPIdleKeepaliveWaitsAFullIntervalAfterSlowFailure(t *testing.T) {
+	var requests atomic.Int32
+	var mu sync.Mutex
+	var secondCompleted time.Time
+	thirdStarted := make(chan time.Time, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		switch requests.Add(1) {
+		case 2:
+			time.Sleep(60 * time.Millisecond)
+			mu.Lock()
+			secondCompleted = time.Now()
+			mu.Unlock()
+			http.Error(writer, "temporary failure", http.StatusServiceUnavailable)
+		case 3:
+			thirdStarted <- time.Now()
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			writer.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	cancel := startMCPIdleKeepaliveLoop(t.Context(), server.Client(), server.URL, 25*time.Millisecond)
+	t.Cleanup(cancel)
+	select {
+	case started := <-thirdStarted:
+		mu.Lock()
+		completed := secondCompleted
+		mu.Unlock()
+		require.GreaterOrEqual(t, started.Sub(completed), 20*time.Millisecond)
+	case <-time.After(time.Second):
+		t.Fatal("third keepalive did not arrive")
+	}
 }
 
 func TestMCPServeRejectsDaemonBeforeRelationshipPinning(t *testing.T) {

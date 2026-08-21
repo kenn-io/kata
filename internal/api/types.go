@@ -41,7 +41,16 @@ type HealthResponse struct {
 		StartedAt        time.Time               `json:"started_at"`
 		Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 		FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
+		IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
 	}
+}
+
+// IdleShutdownHealth advertises effective auto-start idle shutdown behavior. The
+// entire block is absent when this daemon will not stop itself when idle.
+type IdleShutdownHealth struct {
+	Timeout  string     `json:"timeout"`
+	State    string     `json:"state" enum:"armed,foreground,blocked,stopping"`
+	Deadline *time.Time `json:"deadline,omitempty"`
 }
 
 // UILocalSessionRequest starts a browser session on a direct loopback listener.

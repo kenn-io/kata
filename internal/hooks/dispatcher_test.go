@@ -8,9 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -38,12 +42,24 @@ func mustNewDispatcher(t *testing.T, hooks []ResolvedHook, cfg Config) (*Dispatc
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = d.Shutdown(ctx)
-	})
+	t.Cleanup(func() { cleanupDispatcher(t, d) })
 	return d, logBuf, filepath.Join(root, "hooks", dbHash, "runs.jsonl")
+}
+
+// cleanupDispatcher first allows a graceful drain, then waits for the forced
+// cancellation path to finish before TempDir cleanup removes runs.jsonl. The
+// second wait matters on Windows, where an open appender prevents unlinking.
+func cleanupDispatcher(t *testing.T, d *Dispatcher) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	err := d.Shutdown(ctx)
+	cancel()
+	if err == nil {
+		return
+	}
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer waitCancel()
+	require.NoError(t, d.Shutdown(waitCtx))
 }
 
 // newTestHook builds a ResolvedHook that runs the hookprobe binary with the
@@ -104,6 +120,79 @@ func TestDispatcher_Enqueue_RoutesToMatchingHooks(t *testing.T) {
 	}
 }
 
+func TestDispatcherEnqueueLeasesEachAcceptedHookJob(t *testing.T) {
+	hookA := newTestHook(t, "*", "exit", "0")
+	hookB := newTestHook(t, "*", "exit", "0")
+	hookB.Index = 1
+	cfg := defaultConfig()
+	cfg.PoolSize = 2
+	cfg.QueueCap = 4
+	d, _, runsPath := mustNewDispatcher(t, []ResolvedHook{hookA, hookB}, cfg)
+	var acquired atomic.Int32
+	var released atomic.Int32
+	d.deps.AcquireDrain = func() (*ActivityLease, bool) {
+		acquired.Add(1)
+		return activity.NewLease(func() { released.Add(1) }, nil), true
+	}
+
+	d.Enqueue(db.Event{ID: 1, Type: "issue.created", ProjectID: 1, ProjectName: "x"})
+	require.True(t, waitForLines(t, runsPath, 2, 5*time.Second))
+	require.Eventually(t, func() bool { return released.Load() == 2 }, time.Second, time.Millisecond)
+	require.Equal(t, int32(2), acquired.Load())
+}
+
+func TestDispatcherEnqueueFromUsesAdmittedParentFork(t *testing.T) {
+	hook := newTestHook(t, "*", "exit", "0")
+	cfg := defaultConfig()
+	cfg.PoolSize = 1
+	cfg.QueueCap = 1
+	d, _, runsPath := mustNewDispatcher(t, []ResolvedHook{hook}, cfg)
+	d.deps.AcquireDrain = func() (*ActivityLease, bool) { return nil, false }
+	var released atomic.Int32
+
+	EnqueueFrom(d, db.Event{ID: 1, Type: "issue.created", ProjectID: 1}, func() (*ActivityLease, bool) {
+		return activity.NewLease(func() { released.Add(1) }, nil), true
+	})
+
+	require.True(t, waitForLines(t, runsPath, 1, 5*time.Second))
+	require.Eventually(t, func() bool { return released.Load() == 1 }, time.Second, time.Millisecond)
+}
+
+func TestDispatcherAttemptsAdmissionForEachMatchingHook(t *testing.T) {
+	hookA := newTestHook(t, "*", "exit", "0")
+	hookB := newTestHook(t, "*", "exit", "0")
+	hookB.Index = 1
+	cfg := defaultConfig()
+	d, _, runsPath := mustNewDispatcher(t, []ResolvedHook{hookA, hookB}, cfg)
+	var attempts atomic.Int32
+	d.deps.AcquireDrain = func() (*ActivityLease, bool) {
+		attempts.Add(1)
+		return nil, false
+	}
+
+	d.Enqueue(db.Event{ID: 1, Type: "issue.created", ProjectID: 1})
+	require.Equal(t, int32(2), attempts.Load())
+	require.Zero(t, countJSONLLines(runsPath))
+}
+
+func TestDispatcherReleasesActivityWhenHookExecutionPanics(t *testing.T) {
+	hook := newTestHook(t, "*", "exit", "0")
+	cfg := defaultConfig()
+	d, _, _ := mustNewDispatcher(t, []ResolvedHook{hook}, cfg)
+	rd := d.runDeps()
+	rd.Alias = func(context.Context, db.Event) (AliasSnapshot, bool, error) {
+		panic("resolver panic")
+	}
+	var released atomic.Int32
+
+	d.runOne(rd, queuedHookJob{
+		HookJob: HookJob{Event: db.Event{ID: 1, Type: "issue.created"}, Hook: hook},
+		lease:   activity.NewLease(func() { released.Add(1) }, nil),
+	})
+
+	require.Equal(t, int32(1), released.Load())
+}
+
 func TestDispatcher_Enqueue_RoutesProjectAndRecurrenceExactAndWildcardHooks(t *testing.T) {
 	projectHook := newTestHook(t, "project.created", "exit", "0")
 	recurrenceHook := newTestHook(t, "recurrence.created", "exit", "0")
@@ -133,11 +222,21 @@ func TestDispatcher_Enqueue_QueueFullDropsAndCounts(t *testing.T) {
 	cfg.QueueCap = 1
 	cfg.QueueFullLogInterval = 10 * time.Millisecond
 	d, _, _ := mustNewDispatcher(t, []ResolvedHook{slow}, cfg)
+	var acquired atomic.Int32
+	var released atomic.Int32
+	d.deps.AcquireDrain = func() (*ActivityLease, bool) {
+		acquired.Add(1)
+		return activity.NewLease(func() { released.Add(1) }, nil), true
+	}
 	enqueueEvents(d, "issue.created", 200, 10)
 	// At least N-2 should drop (1 in queue + 1 in flight + N-2 dropped).
 	if got := d.dropped.Load(); got < 5 {
 		t.Fatalf("dropped=%d, want >=5", got)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, d.Shutdown(ctx))
+	require.Equal(t, acquired.Load(), released.Load(), "every accepted or dropped job must release its lease")
 }
 
 func TestDispatcher_Enqueue_AfterShutdown_NoOp(t *testing.T) {
@@ -183,12 +282,18 @@ func TestDispatcher_Shutdown_Timeout_ReportsInflight(t *testing.T) {
 	}
 }
 
-func TestDispatcher_Shutdown_DropsQueued(t *testing.T) {
-	hold := newTestHook(t, "*", "sleep", "500ms")
+func TestDispatcher_Shutdown_DrainsQueued(t *testing.T) {
+	hold := newTestHook(t, "*", "sleep", "20ms")
 	cfg := defaultConfig()
 	cfg.PoolSize = 1
-	cfg.QueueCap = 4
+	cfg.QueueCap = 5
 	d, _, runsPath := mustNewDispatcher(t, []ResolvedHook{hold}, cfg)
+	var acquired atomic.Int32
+	var released atomic.Int32
+	d.deps.AcquireDrain = func() (*ActivityLease, bool) {
+		acquired.Add(1)
+		return activity.NewLease(func() { released.Add(1) }, nil), true
+	}
 	enqueueEvents(d, "issue.created", 400, 5)
 	time.Sleep(50 * time.Millisecond) // worker has popped one
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -197,11 +302,27 @@ func TestDispatcher_Shutdown_DropsQueued(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := countJSONLLines(runsPath)
-	// Only the in-flight job should have produced a line. (4xx all
-	// completing would be > 1.) Allow <=2 to tolerate edge timing.
-	if lines > 2 {
-		t.Fatalf("expected <=2 runs after shutdown, got %d", lines)
-	}
+	require.Equal(t, 5, lines, "graceful shutdown must drain every accepted hook")
+	require.Equal(t, acquired.Load(), released.Load(), "shutdown must release in-flight and queued leases")
+}
+
+func TestDispatcher_ProducerDrainAcceptsHandoffsAfterIdleAdmissionCloses(t *testing.T) {
+	hook := newTestHook(t, "*", "exit", "0")
+	cfg := defaultConfig()
+	d, _, runsPath := mustNewDispatcher(t, []ResolvedHook{hook}, cfg)
+	d.deps.AcquireDrain = func() (*ActivityLease, bool) { return nil, false }
+
+	d.Enqueue(db.Event{ID: 1, Type: "issue.created"})
+	d.BeginProducerDrain()
+	d.Enqueue(db.Event{ID: 2, Type: "issue.created"})
+	d.EnqueueFrom(db.Event{ID: 3, Type: "issue.created"}, func() (*ActivityLease, bool) {
+		return nil, false
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, d.Shutdown(ctx))
+	require.Equal(t, 2, countJSONLLines(runsPath))
 }
 
 func TestDispatcher_Reload_AtomicWithEnqueue(t *testing.T) {
@@ -258,6 +379,7 @@ func TestDispatcher_AliasResolverContext_CancelsOnShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { cleanupDispatcher(t, d) })
 
 	enqueueEvents(d, "issue.created", 500, 1)
 	// Wait briefly for the worker to invoke the resolver.
@@ -286,6 +408,9 @@ func TestDispatcher_AliasResolverContext_CancelsOnShutdown(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("alias resolver context did not cancel after Shutdown")
 	}
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer waitCancel()
+	require.NoError(t, d.Shutdown(waitCtx))
 }
 
 func waitForLines(t *testing.T, path string, n int, timeout time.Duration) bool {
