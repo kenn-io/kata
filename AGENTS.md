@@ -11,6 +11,10 @@
   skill (including `roborev-fix` or `roborev-design-review-branch`) unless the
   user explicitly asks for that skill.
 - Test First: Write a failing test before the implementation, then make it pass, then refactor (red, green, refactor). Don't add production code without a failing test that requires it.
+- Evidence-Gated Regression Tests: Before writing a regression test, reproduce
+  the failure or name the explicit product contract it exercises. Do not encode
+  an inferred cause or hypothetical failure. Browser-specific coverage requires
+  a reproduced browser-specific failure; otherwise use the default test browser.
 - Explicit Database Change Consent: Do not add, remove, or modify a production
   database migration or persisted database schema without the user's explicit
   consent in the current conversation. This includes canonical/bootstrap DDL,
