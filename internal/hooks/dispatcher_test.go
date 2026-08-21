@@ -18,6 +18,8 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+const dispatcherTestGraceWindow = 250 * time.Millisecond
+
 // mustNewDispatcher builds a Dispatcher rooted at a fresh temp KataHome with
 // no-op resolvers and returns the dispatcher, a buffer capturing the daemon
 // log, and the absolute path to the runs.jsonl appender for that DB.
@@ -35,7 +37,7 @@ func mustNewDispatcher(t *testing.T, hooks []ResolvedHook, cfg Config) (*Dispatc
 		CommentResolver: func(_ context.Context, _ int64) (CommentSnapshot, error) { return CommentSnapshot{}, nil },
 		ProjectResolver: func(_ context.Context, _ int64) (ProjectSnapshot, error) { return ProjectSnapshot{}, nil },
 		Now:             time.Now,
-		GraceWindow:     50 * time.Millisecond,
+		GraceWindow:     dispatcherTestGraceWindow,
 	}
 	loaded := LoadedConfig{Snapshot: Snapshot{Hooks: hooks}, Config: cfg}
 	d, err := New(loaded, deps)
@@ -318,7 +320,7 @@ func TestDispatcher_Shutdown_CancelsInFlightBeforeDeadlineAndJoins(t *testing.T)
 	enqueueEvents(d, "issue.created", 500, 1)
 	waitForInflight(t, d, 1, 5*time.Second)
 
-	const budget = 600 * time.Millisecond
+	const budget = 5 * dispatcherTestGraceWindow
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	err := d.Shutdown(ctx)
