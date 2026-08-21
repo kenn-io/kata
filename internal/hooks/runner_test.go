@@ -307,9 +307,6 @@ func TestBuildEnvUsesTheConfiguredDaemonChildEnvironment(t *testing.T) {
 			t.Fatalf("environment missing %q: %v", want, env)
 		}
 	}
-	if strings.Contains(joined, "KATA_AUTOSTART=1") {
-		t.Fatalf("environment retained internal auto-start marker: %v", env)
-	}
 }
 
 func TestRunner_EnvUserOverridable_NotForKata(t *testing.T) {

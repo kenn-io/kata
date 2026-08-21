@@ -241,7 +241,11 @@ database path still apply.
 after a period without client activity. It is off by default. The setting is
 ignored for explicit daemon starts and for daemons exposed through non-loopback
 listeners, a public web origin, trusted-proxy configuration, or shared-listener
-host aliases. Active requests and already-admitted finite background work
+host aliases. `kata daemon start` replaces a running idle-eligible auto-started
+daemon with an explicit one so it stays resident, and `kata daemon restart`
+always starts an explicit daemon. The daemon writes one
+`kata daemon: idle shutdown after ...` line to its log when it exits for this
+reason. Active requests and already-admitted finite background work
 receive a bounded drain before process exit, so exit can occur after the
 configured interval. Ordinary health probes do not renew the timeout. A running
 `kata mcp serve` process discovers the effective timeout from `/health` and

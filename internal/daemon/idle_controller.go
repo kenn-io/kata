@@ -35,17 +35,6 @@ func (c *IdleController) WaitableDrainAdmission() activity.WaitableAdmission {
 	}
 }
 
-// ForegroundAdmission adapts explicit client work to the shared lease shape.
-func (c *IdleController) ForegroundAdmission() activity.Admission {
-	return func() (*activity.Lease, bool) {
-		lease, admitted := c.TryForeground()
-		if !admitted {
-			return nil, false
-		}
-		return activity.NewLease(lease.Release, nil), true
-	}
-}
-
 func activityLeaseFromIdle(lease *IdleLease) *activity.Lease {
 	if lease == nil {
 		return nil

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -83,11 +85,12 @@ func newConfiguredGitHubSyncFetcher(cfg config.GitHubSyncConfig) githubsync.Fetc
 }
 
 type daemonStartOutput struct {
-	Action  string `json:"action"`
-	PID     int    `json:"pid"`
-	Address string `json:"address"`
-	DBPath  string `json:"db_path,omitempty"`
-	WebURL  string `json:"web_url,omitempty"`
+	Action      string `json:"action"`
+	PID         int    `json:"pid"`
+	ReplacedPID int    `json:"replaced_pid,omitempty"`
+	Address     string `json:"address"`
+	DBPath      string `json:"db_path,omitempty"`
+	WebURL      string `json:"web_url,omitempty"`
 }
 
 type daemonLocateOutput struct {
@@ -168,8 +171,9 @@ func locateDaemon(ctx context.Context) (daemonLocateOutput, error) {
 }
 
 var (
-	startDetachedDaemon = defaultStartDetachedDaemon
-	runDaemonForeground = runDaemonWithListen
+	startDetachedDaemon  = defaultStartDetachedDaemon
+	runDaemonForeground  = runDaemonWithListen
+	launchDetachedDaemon = defaultLaunchDetachedDaemon
 )
 
 func daemonStartCmd() *cobra.Command {
@@ -204,6 +208,10 @@ func daemonStartCmd() *cobra.Command {
 			switch out.Action {
 			case "already_running":
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "daemon already running pid=%d address=%s\n", out.PID, out.Address)
+			case "replaced":
+				_, err = fmt.Fprintf(cmd.OutOrStdout(),
+					"replaced auto-started daemon pid=%d; started pid=%d address=%s\n",
+					out.ReplacedPID, out.PID, out.Address)
 			default:
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "started pid=%d address=%s\n", out.PID, out.Address)
 			}
@@ -237,14 +245,67 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 	if err != nil {
 		return daemonStartOutput{}, err
 	}
+	replacedPID := 0
 	if rec, ok := liveDaemonRecord(ns.DataDir, 0); ok {
 		address := rec.Endpoint().ConfigAddress()
 		if effectiveListen != "" && address != effectiveListen {
 			return daemonStartOutput{}, fmt.Errorf("daemon already running at %s; stop it before starting with listener %s", address, effectiveListen)
 		}
-		return daemonStartOutputFromRecord("already_running", rec), nil
+		// An explicit start means "keep a daemon resident". An auto-started
+		// daemon with idle shutdown armed would exit later, so replace it
+		// with an explicit process instead of reporting it as running.
+		if !daemonRecordAdvertisesIdleShutdown(ctx, rec) {
+			return daemonStartOutputFromRecord("already_running", rec), nil
+		}
+		if err := daemon.SignalDaemonStop(rec, ns.DBHash); err != nil {
+			return daemonStartOutput{}, fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
+		}
+		if err := waitForDaemonProcesses(ctx, []int{rec.PID}, daemonRestartProcessWaitTimeout); err != nil {
+			return daemonStartOutput{}, fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
+		}
+		replacedPID = rec.PID
 	}
+	out, err := launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly)
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	if replacedPID != 0 {
+		out.Action = "replaced"
+		out.ReplacedPID = replacedPID
+	}
+	return out, nil
+}
 
+// daemonRecordAdvertisesIdleShutdown reports whether the live daemon behind
+// rec is an owner-local process that will stop itself when idle. Remote
+// records are never idle-eligible, and an unreachable daemon is treated as
+// resident so an explicit start does not signal a process it cannot inspect.
+func daemonRecordAdvertisesIdleShutdown(ctx context.Context, rec kitdaemon.RuntimeRecord) bool {
+	endpoint := rec.Endpoint()
+	if !endpoint.IsUnix() {
+		host, _, err := net.SplitHostPort(endpoint.Address)
+		if err != nil {
+			return false
+		}
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			return false
+		}
+	}
+	httpClient, baseURL := client.LocalHTTPClient(endpoint.ConfigAddress())
+	status, body, err := httpDoJSON(ctx, httpClient, http.MethodGet, baseURL+"/api/v1/health", nil)
+	if err != nil || status >= http.StatusBadRequest {
+		return false
+	}
+	var health daemonAPIHealth
+	if err := json.Unmarshal(body, &health); err != nil {
+		return false
+	}
+	return health.IdleShutdown != nil
+}
+
+func defaultLaunchDetachedDaemon(
+	ctx context.Context, dataDir, listen string, insecureReadonly bool,
+) (daemonStartOutput, error) {
 	args := []string{"daemon", "start", "--foreground"}
 	if listen != "" {
 		args = append(args, "--listen", listen)
@@ -257,7 +318,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		Env:             os.Environ(),
 		RefuseEphemeral: true,
 	}
-	if logw := client.DaemonLogWriter(ns.DataDir); logw != nil {
+	if logw := client.DaemonLogWriter(dataDir); logw != nil {
 		opts.Stdout = logw
 		opts.Stderr = logw
 		defer func() { _ = logw.Close() }()
@@ -278,7 +339,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 	defer tick.Stop()
 
 	for {
-		if rec, ok := liveDaemonRecord(ns.DataDir, pid); ok {
+		if rec, ok := liveDaemonRecord(dataDir, pid); ok {
 			return daemonStartOutputFromRecord("started", rec), nil
 		}
 		select {
@@ -291,7 +352,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 			if childProcess != nil {
 				_ = childProcess.Kill()
 			}
-			return daemonStartOutput{}, daemonStartTimeoutError(ns.DataDir)
+			return daemonStartOutput{}, daemonStartTimeoutError(dataDir)
 		case <-tick.C:
 		}
 	}
@@ -815,7 +876,7 @@ func newAutostartIdleController(
 	autostart bool,
 	daemonEndpoint kitdaemon.Endpoint,
 	webEndpoint daemon.WebEndpoint,
-	cancel context.CancelFunc,
+	onIdle func(timeout time.Duration),
 ) (*daemon.IdleController, bool, error) {
 	timeout, err := dcfg.AutostartIdleTimeoutDuration()
 	if err != nil {
@@ -827,7 +888,14 @@ func newAutostartIdleController(
 	if !daemon.AutostartIdleShutdownEligible(daemonEndpoint, webEndpoint, dcfg) {
 		return nil, true, nil
 	}
-	return daemon.NewIdleController(timeout, cancel), false, nil
+	return daemon.NewIdleController(timeout, func() { onIdle(timeout) }), false, nil
+}
+
+// announceIdleShutdown records why an auto-started daemon is exiting. The
+// detached daemon's stderr is its daemon.log, so this is the only trace of an
+// idle exit an operator can find later.
+func announceIdleShutdown(w io.Writer, timeout time.Duration) {
+	_, _ = fmt.Fprintf(w, "kata daemon: idle shutdown after %s without client activity\n", timeout)
 }
 
 // runDaemonWithListen is the variant used by `kata daemon start --foreground --listen`.
@@ -901,7 +969,10 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		os.Getenv(daemon.AutoStartMarkerEnv) == "1",
 		runtimeEndpoint,
 		webEndpoint,
-		shutdownTrigger.Call,
+		func(timeout time.Duration) {
+			announceIdleShutdown(os.Stderr, timeout)
+			shutdownTrigger.Call()
+		},
 	)
 	if err != nil {
 		return err
@@ -911,12 +982,10 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 			"kata daemon: auto-start idle shutdown disabled because the daemon is not owner-local")
 	}
 	var acquireHookDrain hooks.AcquireActivity
-	var foregroundAdmission activity.Admission
 	var waitableDrainAdmission activity.WaitableAdmission
 	if idleController != nil {
 		acquireHookDrain = idleController.DrainAdmission()
 		waitableDrainAdmission = idleController.WaitableDrainAdmission()
-		foregroundAdmission = idleController.ForegroundAdmission()
 	}
 
 	disp, daemonLog, err := setupHooks(
@@ -1007,7 +1076,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	// daemon_signaling_{unix,windows}.go.
 	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
 	workers.Go(func() {
-		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog, foregroundAdmission)
+		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
 	})
 	federationWake := startFederationRunner(
 		ctx, workers, waitableDrainAdmission, store, broadcaster, disp, daemonLog,

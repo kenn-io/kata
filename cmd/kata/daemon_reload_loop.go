@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 
-	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/hooks"
 )
 
@@ -32,33 +31,18 @@ func runReloadLoop(
 	configPath string,
 	disp reloadable,
 	lg loopLogger,
-	foregroundAdmission activity.Admission,
 ) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-sigs:
-			var lease *activity.Lease
-			if foregroundAdmission != nil {
-				var admitted bool
-				lease, admitted = foregroundAdmission()
-				if !admitted {
-					<-ctx.Done()
-					return
-				}
+			loaded, err := hooks.LoadReload(configPath, disp.CurrentConfig())
+			if err != nil {
+				lg.Printf("hooks reload failed: %v (keeping previous config)", err)
+				continue
 			}
-			func() {
-				if lease != nil {
-					defer lease.Release()
-				}
-				loaded, err := hooks.LoadReload(configPath, disp.CurrentConfig())
-				if err != nil {
-					lg.Printf("hooks reload failed: %v (keeping previous config)", err)
-					return
-				}
-				disp.Reload(loaded)
-			}()
+			disp.Reload(loaded)
 		}
 	}
 }

@@ -26,6 +26,13 @@ scope is checked after configuration and command-line overrides are resolved,
 because a loopback socket alone does not prove that the effective service is
 private.
 
+Because the marker is read once at process start, residency cannot change
+under a running process. `kata daemon start` therefore inspects the live
+daemon's health: when it advertises `idle_shutdown`, the command stops that
+process and starts an explicit replacement rather than reporting it as already
+running. `kata daemon restart` always produces an explicit daemon. An idle exit
+writes one line to the daemon log so the disappearance is diagnosable.
+
 The auto-start marker is removed from hook subprocess environments. This keeps
 an explicitly launched daemon command from inheriting the parent daemon's
 auto-start provenance. An ordinary Kata client in a hook still uses normal
@@ -110,7 +117,10 @@ parent cancellation, and platform stop events converge on that coordinator.
 
 HTTP handlers and daemon workers finish as hook producers before the dispatcher
 stops accepting and drains hook jobs with the time remaining in the same
-bounded budget. Platform event pumps join concurrently. The runtime discovery
+bounded budget. The dispatcher cancels in-flight hooks two grace windows before
+that deadline so a hook slower than the budget is terminated, killed, and
+reaped while a clean join is still possible; only work that survives that is
+reported as unjoined. Platform event pumps join concurrently. The runtime discovery
 record is removed after listeners stop serving and the HTTP drain completes or
 times out, before waiting for any remaining background work. If any producer
 remains unjoined at the deadline, the dedicated daemon exits without sealing

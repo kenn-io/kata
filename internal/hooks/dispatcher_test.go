@@ -163,7 +163,7 @@ func TestDispatcherAttemptsAdmissionForEachMatchingHook(t *testing.T) {
 	hookB := newTestHook(t, "*", "exit", "0")
 	hookB.Index = 1
 	cfg := defaultConfig()
-	d, _, runsPath := mustNewDispatcher(t, []ResolvedHook{hookA, hookB}, cfg)
+	d, logBuf, runsPath := mustNewDispatcher(t, []ResolvedHook{hookA, hookB}, cfg)
 	var attempts atomic.Int32
 	d.deps.AcquireDrain = func() (*ActivityLease, bool) {
 		attempts.Add(1)
@@ -173,6 +173,8 @@ func TestDispatcherAttemptsAdmissionForEachMatchingHook(t *testing.T) {
 	d.Enqueue(db.Event{ID: 1, Type: "issue.created", ProjectID: 1})
 	require.Equal(t, int32(2), attempts.Load())
 	require.Zero(t, countJSONLLines(runsPath))
+	require.Equal(t, int64(2), d.dropped.Load(), "denied admission must count as a dropped job")
+	require.Contains(t, logBuf.String(), "hook_admission_denied")
 }
 
 func TestDispatcherReleasesActivityWhenHookExecutionPanics(t *testing.T) {
@@ -304,6 +306,30 @@ func TestDispatcher_Shutdown_DrainsQueued(t *testing.T) {
 	lines := countJSONLLines(runsPath)
 	require.Equal(t, 5, lines, "graceful shutdown must drain every accepted hook")
 	require.Equal(t, acquired.Load(), released.Load(), "shutdown must release in-flight and queued leases")
+}
+
+func TestDispatcher_Shutdown_CancelsInFlightBeforeDeadlineAndJoins(t *testing.T) {
+	slow := newTestHook(t, "*", "sleep", "10s")
+	slow.Timeout = 10 * time.Second
+	cfg := defaultConfig()
+	cfg.PoolSize = 1
+	cfg.QueueCap = 4
+	d, _, runsPath := mustNewDispatcher(t, []ResolvedHook{slow}, cfg)
+	enqueueEvents(d, "issue.created", 500, 1)
+	waitForInflight(t, d, 1, 5*time.Second)
+
+	const budget = 600 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	started := time.Now()
+	err := d.Shutdown(ctx)
+	elapsed := time.Since(started)
+
+	require.NoError(t, err, "in-flight hook must be cancelled inside the budget so workers join cleanly")
+	require.Less(t, elapsed, budget, "shutdown must finish before the budget expires")
+	data, readErr := os.ReadFile(runsPath) //nolint:gosec // G304: test-controlled path under t.TempDir()
+	require.NoError(t, readErr)
+	require.Contains(t, string(data), `"result":"daemon_shutdown"`)
 }
 
 func TestDispatcher_ProducerDrainAcceptsHandoffsAfterIdleAdmissionCloses(t *testing.T) {

@@ -219,10 +219,16 @@ func (d *Dispatcher) enqueue(evt db.Event, acquire AcquireActivity) {
 		}
 		var lease *ActivityLease
 		if acquire != nil {
+			// acquire may decide the daemon is idle and invoke the shutdown
+			// trigger while enqueueMu is read-locked. That trigger must not
+			// call Shutdown synchronously, because Shutdown takes the write
+			// lock; it only seals admission and cancels the root context.
 			var admitted bool
 			lease, admitted = acquire()
 			if !admitted {
 				if !d.producerDrain.Load() {
+					d.dropped.Add(1)
+					d.maybeLogAdmissionDenied()
 					continue
 				}
 				lease = nil
@@ -243,13 +249,23 @@ func (d *Dispatcher) enqueue(evt db.Event, acquire AcquireActivity) {
 }
 
 func (d *Dispatcher) maybeLogQueueFull() {
+	d.maybeLogDrop("hook_queue_full")
+}
+
+func (d *Dispatcher) maybeLogAdmissionDenied() {
+	d.maybeLogDrop("hook_admission_denied")
+}
+
+// maybeLogDrop prints one rate-limited line per QueueFullLogInterval for any
+// reason a matching hook job was not accepted.
+func (d *Dispatcher) maybeLogDrop(reason string) {
 	now := d.deps.Now().UnixNano()
 	last := d.lastFullLog.Load()
 	if now-last < int64(d.cfg.QueueFullLogInterval) {
 		return
 	}
 	if d.lastFullLog.CompareAndSwap(last, now) {
-		d.deps.DaemonLog.Printf("hooks: hook_queue_full (dropped=%d)", d.dropped.Load())
+		d.deps.DaemonLog.Printf("hooks: %s (dropped=%d)", reason, d.dropped.Load())
 	}
 }
 
@@ -284,13 +300,14 @@ func (d *Dispatcher) Reload(loaded LoadedConfig) {
 	d.deps.DaemonLog.Printf("hooks reload ok: %d hook(s) active", len(loaded.Snapshot.Hooks))
 }
 
-// Shutdown seals the queue, drains accepted jobs, and waits for workers up to
-// ctx before closing the runs appender. If ctx expires, it closes done to
-// cancel in-flight work and drops any queue remainder. Later calls share the
-// same `waited` channel
-// so a retry after the first call timed out blocks until completion
-// (or its own ctx expires) — never spuriously returns nil while
-// workers are still running.
+// Shutdown seals the queue, drains accepted jobs, and waits for workers
+// before closing the runs appender. When ctx carries a deadline, in-flight
+// work is cancelled early enough that killTreeWithGrace can finish inside the
+// budget, so a slow hook still yields a clean join. If workers are still
+// running when ctx expires, Shutdown returns an error and leaves the appender
+// open. Later calls share the same `waited` channel so a retry after the first
+// call timed out blocks until completion (or its own ctx expires) — never
+// spuriously returns nil while workers are still running.
 func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	if d.stopped.CompareAndSwap(false, true) {
 		d.enqueueMu.Lock()
@@ -301,20 +318,57 @@ func (d *Dispatcher) Shutdown(ctx context.Context) error {
 			close(d.waited)
 		}()
 	}
+	abort, stopAbort := d.inFlightAbortSignal(ctx)
+	defer stopAbort()
 	select {
 	case <-d.waited:
-		d.releaseQueued()
-		// Close appender once; appender.Close is itself idempotent.
-		_ = d.appender.Close()
-		return nil
+		return d.finishShutdown()
+	case <-abort:
+		d.abortInFlight("deadline approaching")
+		select {
+		case <-d.waited:
+			return d.finishShutdown()
+		case <-ctx.Done():
+		}
 	case <-ctx.Done():
-		d.abortOnce.Do(func() { close(d.done) })
-		d.releaseQueued()
-		d.deps.DaemonLog.Printf("hooks shutdown timed out: %d in-flight", d.inflight.Load())
-		// Drain best-effort: don't close appender — workers may still
-		// be writing. Caller proceeds with daemon shutdown anyway.
-		return fmt.Errorf("hooks shutdown timed out: %w", ctx.Err())
+		d.abortInFlight("budget exhausted")
 	}
+	d.deps.DaemonLog.Printf("hooks shutdown timed out: %d in-flight", d.inflight.Load())
+	// Drain best-effort: don't close appender — workers may still
+	// be writing. Caller proceeds with daemon shutdown anyway.
+	return fmt.Errorf("hooks shutdown timed out: %w", ctx.Err())
+}
+
+// inFlightAbortSignal fires far enough before ctx's deadline that a cancelled
+// hook can be terminated, killed after GraceWindow, and reaped inside the
+// remaining budget. Without a deadline it never fires.
+func (d *Dispatcher) inFlightAbortSignal(ctx context.Context) (<-chan time.Time, func()) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil, func() {}
+	}
+	delay := time.Until(deadline) - 2*d.deps.GraceWindow
+	if delay < 0 {
+		delay = 0
+	}
+	timer := time.NewTimer(delay)
+	return timer.C, func() { timer.Stop() }
+}
+
+func (d *Dispatcher) abortInFlight(reason string) {
+	d.abortOnce.Do(func() {
+		close(d.done)
+		d.deps.DaemonLog.Printf("hooks shutdown: cancelling %d in-flight, dropping %d queued (%s)",
+			d.inflight.Load(), len(d.queue), reason)
+	})
+	d.releaseQueued()
+}
+
+func (d *Dispatcher) finishShutdown() error {
+	d.releaseQueued()
+	// Close appender once; appender.Close is itself idempotent.
+	_ = d.appender.Close()
+	return nil
 }
 
 // worker pops one HookJob at a time and runs it. Graceful shutdown closes the

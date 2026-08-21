@@ -123,22 +123,21 @@ func probeAddress(ctx context.Context, address string) (string, PingInfo, bool) 
 }
 
 func probeAddressWithError(ctx context.Context, address string) (string, PingInfo, error) {
-	if strings.HasPrefix(address, "unix://") {
-		path := strings.TrimPrefix(address, "unix://")
-		client := &http.Client{Transport: UnixTransport(path), Timeout: 1 * time.Second}
-		info, err := Probe(ctx, client, UnixBase)
-		if err == nil {
-			return UnixBase, info, nil
-		}
+	client, base := LocalHTTPClient(address)
+	info, err := Probe(ctx, client, base)
+	if err != nil {
 		return "", PingInfo{}, err
 	}
-	url := "http://" + address
-	client := &http.Client{Timeout: 1 * time.Second}
-	info, err := Probe(ctx, client, url)
-	if err == nil {
-		return url, info, nil
+	return base, info, nil
+}
+
+// LocalHTTPClient returns a short-timeout client and request base for a local
+// daemon runtime address: a `unix://` socket path or a plain host:port.
+func LocalHTTPClient(address string) (*http.Client, string) {
+	if path, ok := strings.CutPrefix(address, "unix://"); ok {
+		return &http.Client{Transport: UnixTransport(path), Timeout: 1 * time.Second}, UnixBase
 	}
-	return "", PingInfo{}, err
+	return &http.Client{Timeout: 1 * time.Second}, "http://" + address
 }
 
 // Ping is true when GET base+/api/v1/ping returns 200.

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	internalclient "go.kenn.io/kata/internal/client"
@@ -450,7 +451,7 @@ func TestMCPServeRenewsAdvertisedAutostartDaemon(t *testing.T) {
 				daemon.APISchemaVersion,
 			)
 		case "/api/v1/ping":
-			require.Equal(t, "1", request.Header.Get(daemon.IdleKeepaliveHeader))
+			assert.Equal(t, "1", request.Header.Get(daemon.IdleKeepaliveHeader))
 			keepalive <- struct{}{}
 			_, _ = writer.Write([]byte(`{"ok":true}`))
 		default:

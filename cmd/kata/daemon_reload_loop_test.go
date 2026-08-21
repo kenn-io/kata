@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/hooks"
 )
 
@@ -56,7 +55,7 @@ command = "true"
 
 	done := make(chan struct{})
 	go func() {
-		runReloadLoop(ctx, sigs, path, rec, nopLogger{}, nil)
+		runReloadLoop(ctx, sigs, path, rec, nopLogger{})
 		close(done)
 	}()
 
@@ -73,29 +72,4 @@ command = "true"
 	defer rec.mu.Unlock()
 	require.Len(t, rec.reloadCalls, 1)
 	require.Len(t, rec.reloadCalls[0].Snapshot.Hooks, 1, "expected one hook in reloaded snapshot")
-}
-
-func TestRunReloadLoopSkipsReloadWhenForegroundAdmissionIsClosed(t *testing.T) {
-	rec := &recordingDispatcher{}
-	sigs := make(chan os.Signal, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	attempted := make(chan struct{}, 1)
-	done := make(chan struct{})
-	go func() {
-		runReloadLoop(ctx, sigs, "unused", rec, nopLogger{}, func() (*activity.Lease, bool) {
-			attempted <- struct{}{}
-			return nil, false
-		})
-		close(done)
-	}()
-
-	sigs <- os.Interrupt
-	select {
-	case <-attempted:
-	case <-time.After(time.Second):
-		t.Fatal("reload loop did not attempt foreground admission")
-	}
-	cancel()
-	<-done
-	require.Empty(t, rec.reloadCalls)
 }

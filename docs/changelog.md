@@ -14,7 +14,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Added opt-in idle shutdown for implicitly started owner-local daemons. Active
   requests and finite background work drain safely, while running stdio or
   streamable-HTTP MCP server processes renew the advertised timeout
-  automatically.
+  automatically. The daemon logs the idle exit, and `kata daemon start`
+  replaces an idle-eligible auto-started daemon with an explicit resident one.
+
+**Improvements**
+
+- Daemon stop now drains accepted hook jobs instead of dropping them, and
+  cancels in-flight hooks early enough to exit cleanly inside the 25-second
+  shutdown budget. `kata daemon restart` waits up to 30 seconds for the old
+  process to exit.
 
 ## 0.15.1
 <small>2026-08-20</small>
