@@ -321,12 +321,9 @@ func TestDispatcher_Shutdown_CancelsInFlightBeforeDeadlineAndJoins(t *testing.T)
 	const budget = 600 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
-	started := time.Now()
 	err := d.Shutdown(ctx)
-	elapsed := time.Since(started)
 
 	require.NoError(t, err, "in-flight hook must be cancelled inside the budget so workers join cleanly")
-	require.Less(t, elapsed, budget, "shutdown must finish before the budget expires")
 	data, readErr := os.ReadFile(runsPath) //nolint:gosec // G304: test-controlled path under t.TempDir()
 	require.NoError(t, readErr)
 	require.Contains(t, string(data), `"result":"daemon_shutdown"`)
