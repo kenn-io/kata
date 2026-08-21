@@ -18,6 +18,13 @@ const (
 	apiVersionMCPServer = "0.11.0"
 )
 
+type daemonAPIHealth struct {
+	APISchemaVersion string `json:"api_schema_version"`
+	IdleShutdown     *struct {
+		Timeout string `json:"timeout"`
+	} `json:"idle_shutdown,omitempty"`
+}
+
 // requireDaemonAPIVersion fails closed before a request that uses query
 // parameters older daemons silently ignored. The health endpoint predates the
 // filtered global queries, so it is safe to use as the capability handshake.
@@ -26,28 +33,35 @@ func requireDaemonAPIVersion(
 	client *http.Client,
 	baseURL, required, feature string,
 ) error {
+	_, err := requireDaemonAPIVersionHealth(ctx, client, baseURL, required, feature)
+	return err
+}
+
+func requireDaemonAPIVersionHealth(
+	ctx context.Context,
+	client *http.Client,
+	baseURL, required, feature string,
+) (daemonAPIHealth, error) {
 	status, body, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/health", nil)
 	if err != nil {
-		return err
+		return daemonAPIHealth{}, err
 	}
 	if status >= http.StatusBadRequest {
-		return apiErrFromBody(status, body)
+		return daemonAPIHealth{}, apiErrFromBody(status, body)
 	}
-	var health struct {
-		APISchemaVersion string `json:"api_schema_version"`
-	}
+	var health daemonAPIHealth
 	if err := json.Unmarshal(body, &health); err != nil {
-		return fmt.Errorf("decode daemon API version: %w", err)
+		return daemonAPIHealth{}, fmt.Errorf("decode daemon API version: %w", err)
 	}
 	reported := strings.TrimSpace(health.APISchemaVersion)
 	compatible, valid := apiVersionAtLeast(reported, required)
 	if valid && compatible {
-		return nil
+		return health, nil
 	}
 	if reported == "" {
 		reported = "no api_schema_version"
 	}
-	return &cliError{
+	return daemonAPIHealth{}, &cliError{
 		Message: fmt.Sprintf(
 			"%s requires daemon API %s or newer; this daemon reports %s; upgrade the daemon",
 			feature, required, reported),

@@ -53,6 +53,7 @@ nav = [
   {"Design" = [
     {"Design notes" = "design/index.md"},
     {"Architecture" = "design/architecture.md"},
+    {"Auto-start daemon idle shutdown" = "design/autostart-idle-shutdown.md"},
     {"Data model and durability" = "design/data-model.md"},
     {"Federation technical notes" = "design/federation.md"},
     {"Hosted mode technical notes" = "design/hosted-mode.md"},

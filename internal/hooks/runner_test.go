@@ -292,6 +292,23 @@ func TestRunner_EnvKataVars(t *testing.T) {
 	}
 }
 
+func TestBuildEnvUsesTheConfiguredDaemonChildEnvironment(t *testing.T) {
+	env := buildEnv(
+		[]string{"PATH=/example/bin", "KATA_HOME=/example/home"},
+		nil,
+		db.Event{ID: 1, Type: "issue.created"},
+		AliasSnapshot{},
+		false,
+	)
+
+	joined := strings.Join(env, "\n")
+	for _, want := range []string{"PATH=/example/bin", "KATA_HOME=/example/home"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("environment missing %q: %v", want, env)
+		}
+	}
+}
+
 func TestRunner_EnvUserOverridable_NotForKata(t *testing.T) {
 	rs := newRunnerSetup(t)
 	got := rs.runProbe(func(h *ResolvedHook) {

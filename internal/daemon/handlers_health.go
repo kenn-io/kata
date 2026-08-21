@@ -65,6 +65,20 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 			health := cfg.FederationConfigHealth()
 			out.Body.FederationConfig = &health
 		}
+		if cfg.IdleShutdownHealth != nil {
+			snapshot := cfg.IdleShutdownHealth()
+			if snapshot.Timeout > 0 && snapshot.State != IdleStateDisabled {
+				idle := api.IdleShutdownHealth{
+					Timeout: snapshot.Timeout.String(),
+					State:   string(snapshot.State),
+				}
+				if !snapshot.Deadline.IsZero() {
+					deadline := snapshot.Deadline
+					idle.Deadline = &deadline
+				}
+				out.Body.IdleShutdown = &idle
+			}
+		}
 		return out, nil
 	})
 }

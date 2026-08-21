@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -72,7 +73,11 @@ type ReconcilerConfig struct {
 	Clock            Clock
 	Wake             func()
 	ProjectEventSink func(db.Event)
-	Logger           *log.Logger
+	// ProjectEventSinkFrom takes precedence over ProjectEventSink when set.
+	// Its fork source is nil when the attempt has no parent activity lease.
+	ProjectEventSinkFrom func(db.Event, activity.Admission)
+	DrainAdmission       activity.WaitableAdmission
+	Logger               *log.Logger
 }
 
 // Health is the sanitized aggregate state of configured federation mappings.
@@ -100,14 +105,16 @@ type reconciliationState struct {
 // Reconciler serially reconciles due mappings while maintaining independent
 // retry state for each mapping.
 type Reconciler struct {
-	store            db.Storage
-	credentials      config.FederationCredentialStore
-	targets          []Target
-	hubFactory       HubFactory
-	clock            Clock
-	wake             func()
-	projectEventSink func(db.Event)
-	logger           *log.Logger
+	store                db.Storage
+	credentials          config.FederationCredentialStore
+	targets              []Target
+	hubFactory           HubFactory
+	clock                Clock
+	wake                 func()
+	projectEventSink     func(db.Event)
+	projectEventSinkFrom func(db.Event, activity.Admission)
+	drainAdmission       activity.WaitableAdmission
+	logger               *log.Logger
 
 	mu     sync.Mutex
 	states []reconciliationState
@@ -122,15 +129,17 @@ func NewReconciler(cfg ReconcilerConfig) *Reconciler {
 	}
 	targets := append([]Target(nil), cfg.Targets...)
 	return &Reconciler{
-		store:            cfg.Store,
-		credentials:      cfg.Credentials,
-		targets:          targets,
-		hubFactory:       cfg.HubFactory,
-		clock:            clock,
-		wake:             cfg.Wake,
-		projectEventSink: cfg.ProjectEventSink,
-		logger:           cfg.Logger,
-		states:           make([]reconciliationState, len(targets)),
+		store:                cfg.Store,
+		credentials:          cfg.Credentials,
+		targets:              targets,
+		hubFactory:           cfg.HubFactory,
+		clock:                clock,
+		wake:                 cfg.Wake,
+		projectEventSink:     cfg.ProjectEventSink,
+		projectEventSinkFrom: cfg.ProjectEventSinkFrom,
+		drainAdmission:       cfg.DrainAdmission,
+		logger:               cfg.Logger,
+		states:               make([]reconciliationState, len(targets)),
 	}
 }
 
@@ -139,6 +148,7 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	for {
 		now := r.clock.Now()
 		attempted := false
+		admissionReopened := false
 		for i := range r.targets {
 			if !r.due(i, now) {
 				continue
@@ -146,14 +156,37 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			var drain *activity.Lease
+			if r.drainAdmission != nil {
+				var admitted bool
+				var retry <-chan struct{}
+				drain, admitted, retry = r.drainAdmission()
+				if !admitted {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-retry:
+						admissionReopened = true
+					}
+					break
+				}
+			}
 			attempted = true
 			attemptAt := r.clock.Now()
 			r.markAttemptStarted(i, attemptAt)
-			err := r.reconcile(ctx, r.targets[i])
+			err := func() error {
+				if drain != nil {
+					defer drain.Release()
+				}
+				return r.reconcile(ctx, r.targets[i], drain)
+			}()
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
 			}
 			r.recordAttempt(i, attemptAt, err)
+		}
+		if admissionReopened {
+			continue
 		}
 		if attempted {
 			continue
@@ -208,7 +241,7 @@ func (r *Reconciler) Health() Health {
 	return health
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, target Target) error {
+func (r *Reconciler) reconcile(ctx context.Context, target Target, drain *activity.Lease) error {
 	if r.hubFactory == nil {
 		return reconcileError(ErrConfigurationConflict, "missing federation hub factory")
 	}
@@ -216,9 +249,19 @@ func (r *Reconciler) reconcile(ctx context.Context, target Target) error {
 	if err != nil {
 		return err
 	}
+	projectEventSink := r.projectEventSink
+	if r.projectEventSinkFrom != nil {
+		projectEventSink = func(event db.Event) {
+			var fork activity.Admission
+			if drain != nil {
+				fork = drain.Fork
+			}
+			r.projectEventSinkFrom(event, fork)
+		}
+	}
 	return reconcileMapping(
 		ctx, r.store, r.credentials, hub, target.Catalog, target.Mapping, r.wake,
-		r.projectEventSink,
+		projectEventSink,
 	)
 }
 

@@ -82,6 +82,25 @@ func (c CreateLinkRequestBodyType) Validate() error {
 	}
 }
 
+type IdleShutdownHealthState string
+
+const (
+	Armed      IdleShutdownHealthState = "armed"
+	Blocked    IdleShutdownHealthState = "blocked"
+	Foreground IdleShutdownHealthState = "foreground"
+	Stopping   IdleShutdownHealthState = "stopping"
+)
+
+// Validate checks if the IdleShutdownHealthState value is valid
+func (i IdleShutdownHealthState) Validate() error {
+	switch i {
+	case Armed, Blocked, Foreground, Stopping:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid IdleShutdownHealthState value, got: %v", i))
+	}
+}
+
 type ImportIssueInputClosedReason string
 
 const (

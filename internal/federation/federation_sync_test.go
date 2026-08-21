@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
@@ -157,6 +158,78 @@ func TestFederationRunnerUsesBindingEndpointWithStaleCredentialMetadata(t *testi
 	require.NoError(t, (&Runner{DB: spoke.DB}).RunOnce(ctx))
 	assert.Zero(t, oldHubRequests.Load(), "sync used the stale credential endpoint")
 	assert.Equal(t, int64(1), targetHubRequests.Load())
+}
+
+func TestFederationRunnerMakesParentDrainAvailableToPulledEventSink(t *testing.T) {
+	ctx := context.Background()
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", spoke.Home)
+	hubProject, err := hub.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	_, _, err = hub.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: hubProject.ID,
+		Title:     "from hub",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	var meta api.ProjectFederationBody
+	postJSON(t, hub.URL, "/api/v1/projects/"+strconv.FormatInt(hubProject.ID, 10)+"/federation/enable",
+		map[string]any{"actor": "tester"}, &meta)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token:            "runner-pull-token",
+		SpokeInstanceUID: spoke.DB.InstanceUID(),
+		ProjectID:        &hubProject.ID,
+		Capabilities:     "pull",
+		Actor:            "tester",
+	})
+	require.NoError(t, err)
+	spokeProject, err := spoke.DB.CreateProjectWithUID(ctx, "hub", hubProject.UID)
+	require.NoError(t, err)
+	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            spokeProject.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               hub.URL,
+		HubProjectID:         hubProject.ID,
+		HubProjectUID:        hubProject.UID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: hubProject.ID,
+		Token:        created.Token,
+	}))
+
+	var acquired atomic.Int32
+	var released atomic.Int32
+	var childReleased atomic.Int32
+	var delivered atomic.Bool
+	runner := &Runner{
+		DB: spoke.DB,
+		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+			acquired.Add(1)
+			return activity.NewLease(func() { released.Add(1) }, func() (*activity.Lease, bool) {
+				return activity.NewLease(func() { childReleased.Add(1) }, nil), true
+			}), true, nil
+		},
+		OnPulledEventsFrom: func(projectID int64, events []db.Event, fork activity.Admission) {
+			require.Equal(t, spokeProject.ID, projectID)
+			require.NotEmpty(t, events)
+			require.NotNil(t, fork)
+			child, admitted := fork()
+			require.True(t, admitted)
+			child.Release()
+			delivered.Store(true)
+		},
+	}
+
+	require.NoError(t, runner.RunOnce(ctx))
+	assert.True(t, delivered.Load())
+	assert.Equal(t, int32(2), acquired.Load(), "scan and spoke pass should each acquire a lease")
+	assert.Equal(t, acquired.Load(), released.Load())
+	assert.Equal(t, int32(1), childReleased.Load())
 }
 
 func TestSyncFederationOnceDuplicateOnlyPullMaterializesStaleProjection(t *testing.T) {
@@ -3024,6 +3097,110 @@ func TestFederationRunnerNoBindingsMakesNoRequests(t *testing.T) {
 	runner := &Runner{DB: store}
 
 	require.NoError(t, runner.RunOnce(context.Background()))
+}
+
+func TestFederationRunnerSkipsSpokeWhenDrainAdmissionIsClosed(t *testing.T) {
+	runner := &Runner{
+		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+			return nil, false, nil
+		},
+	}
+
+	// A denied scan must return before touching even a nil store.
+	require.NoError(t, runner.RunOnce(context.Background()))
+}
+
+func TestFederationRunnerRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.T) {
+	store, _ := openDaemonclientTestDB(t)
+	reopened := make(chan struct{})
+	completed := make(chan struct{})
+	var attempts atomic.Int32
+	runner := &Runner{
+		DB:       store,
+		Interval: time.Hour,
+		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+			if attempts.Add(1) == 1 {
+				return nil, false, reopened
+			}
+			return activity.NewLease(func() { close(completed) }, nil), true, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+	require.Eventually(t, func() bool { return attempts.Load() == 1 }, time.Second, time.Millisecond)
+
+	close(reopened)
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("federation scan did not complete after drain admission reopened")
+	}
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestFederationRunnerRetriesWhenSpokeAdmissionReopens(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "spoke")
+	require.NoError(t, err)
+	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+
+	reopened := make(chan struct{})
+	var attempts atomic.Int32
+	runner := &Runner{
+		DB:       spoke.DB,
+		Interval: time.Hour,
+		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+			switch attempts.Add(1) {
+			case 1, 3:
+				return activity.NewLease(func() {}, nil), true, nil // scans
+			case 2:
+				return nil, false, reopened // first spoke attempt
+			default:
+				return nil, false, nil // prove retry without making a request
+			}
+		},
+	}
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+	require.Eventually(t, func() bool { return attempts.Load() == 2 }, time.Second, time.Millisecond)
+
+	close(reopened)
+	require.Eventually(t, func() bool { return attempts.Load() == 4 }, time.Second, time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestFederationRunnerWaitsForCancellationAfterTerminalDrainDenial(t *testing.T) {
+	var attempts atomic.Int32
+	runner := &Runner{
+		Interval: 5 * time.Millisecond,
+		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+			attempts.Add(1)
+			return nil, false, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+	require.Eventually(t, func() bool { return attempts.Load() >= 1 }, time.Second, time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	require.Equal(t, int32(1), attempts.Load(), "terminal denial must not be polled")
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestFederationRunnerNoBindingsNoNetwork(t *testing.T) {

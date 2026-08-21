@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -28,6 +29,65 @@ const (
 	hubProjectUID       = "01HZNQ7VFPK1XGD8R5MABCD4EX"
 	recreatedProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EY"
 )
+
+func TestConfigReconcilerRetriesWhenDrainAdmissionReopens(t *testing.T) {
+	retry := make(chan struct{})
+	attempted := make(chan int, 2)
+	factoryCalled := make(chan struct{}, 1)
+	released := make(chan struct{})
+	calls := 0
+	reconciler := federation.NewReconciler(federation.ReconcilerConfig{
+		Targets: []federation.Target{{}},
+		HubFactory: func(context.Context, config.CatalogDaemonConfig) (federation.Hub, error) {
+			factoryCalled <- struct{}{}
+			return nil, errors.New("hub unavailable")
+		},
+		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+			calls++
+			attempted <- calls
+			if calls == 1 {
+				return nil, false, retry
+			}
+			return activity.NewLease(func() { close(released) }, nil), true, nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- reconciler.Run(ctx) }()
+
+	select {
+	case attempt := <-attempted:
+		require.Equal(t, 1, attempt)
+	case <-time.After(time.Second):
+		t.Fatal("reconciler did not attempt drain admission")
+	}
+	require.Nil(t, reconciler.Health().LastAttemptAt)
+	select {
+	case <-factoryCalled:
+		t.Fatal("reconciler contacted the hub before drain admission reopened")
+	default:
+	}
+
+	close(retry)
+	select {
+	case attempt := <-attempted:
+		require.Equal(t, 2, attempt)
+	case <-time.After(time.Second):
+		t.Fatal("reconciler did not retry after drain admission reopened")
+	}
+	select {
+	case <-factoryCalled:
+	case <-time.After(time.Second):
+		t.Fatal("reconciler did not attempt work after admission reopened")
+	}
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("reconciler did not release the admitted drain")
+	}
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
 
 type fakeHub struct {
 	mu                sync.Mutex
@@ -2193,9 +2253,12 @@ func TestFederationConfigReconcilerDeliversExactCreatedProjectEvent(t *testing.T
 	type delivery struct {
 		event     db.Event
 		persisted []db.Event
+		forked    bool
 		err       error
 	}
 	events := make(chan delivery, 1)
+	parentReleased := make(chan struct{})
+	childReleased := make(chan struct{})
 	reconciler := federation.NewReconciler(federation.ReconcilerConfig{
 		Store:       store,
 		Credentials: newFakeCredentialStore(),
@@ -2203,11 +2266,20 @@ func TestFederationConfigReconcilerDeliversExactCreatedProjectEvent(t *testing.T
 		HubFactory: func(context.Context, config.CatalogDaemonConfig) (federation.Hub, error) {
 			return newFakeHub(), nil
 		},
-		ProjectEventSink: func(event db.Event) {
+		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+			return activity.NewLease(func() { close(parentReleased) }, func() (*activity.Lease, bool) {
+				return activity.NewLease(func() { close(childReleased) }, nil), true
+			}), true, nil
+		},
+		ProjectEventSinkFrom: func(event db.Event, fork activity.Admission) {
+			require.NotNil(t, fork)
+			child, admitted := fork()
+			require.True(t, admitted)
+			child.Release()
 			persisted, err := store.EventsAfter(context.Background(), db.EventsAfterParams{
 				ProjectID: event.ProjectID, Limit: 10,
 			})
-			events <- delivery{event: event, persisted: persisted, err: err}
+			events <- delivery{event: event, persisted: persisted, forked: true, err: err}
 		},
 		Logger: ioDiscardLogger(),
 	})
@@ -2225,8 +2297,19 @@ func TestFederationConfigReconcilerDeliversExactCreatedProjectEvent(t *testing.T
 		require.NoError(t, delivered.err)
 		require.Len(t, delivered.persisted, 1)
 		assert.Equal(t, event, delivered.persisted[0])
+		assert.True(t, delivered.forked)
 	case <-time.After(time.Second):
 		t.Fatal("project creation event was not delivered")
+	}
+	select {
+	case <-childReleased:
+	case <-time.After(time.Second):
+		t.Fatal("child hook lease was not released")
+	}
+	select {
+	case <-parentReleased:
+	case <-time.After(time.Second):
+		t.Fatal("parent reconciliation lease was not released")
 	}
 
 	cancel()

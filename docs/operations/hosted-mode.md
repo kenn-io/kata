@@ -63,8 +63,9 @@ Both are unauthenticated.
 
 ## Shutdown
 
-The daemon handles `SIGTERM` gracefully, with up to 10 seconds for in-flight
-requests.
+The daemon handles `SIGTERM` gracefully. HTTP handlers receive up to 10 seconds
+to drain, within a shared 25-second budget for handlers, background workers, and
+hooks before the process exits.
 
 ## Single-instance assumption
 

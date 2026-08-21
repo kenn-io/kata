@@ -1944,6 +1944,7 @@ export interface components {
       db_path: string
       embeddings?: components['schemas']['EmbeddingsHealth']
       federation_config?: components['schemas']['FederationConfigHealth']
+      idle_shutdown?: components['schemas']['IdleShutdownHealth']
       ok: boolean
       /** Format: int64 */
       schema_version: number
@@ -1951,6 +1952,15 @@ export interface components {
       started_at: string
       uptime: string
       version: string
+    } & {
+      [key: string]: unknown
+    }
+    IdleShutdownHealth: {
+      /** Format: date-time */
+      deadline?: string
+      /** @enum {string} */
+      state: 'armed' | 'foreground' | 'blocked' | 'stopping'
+      timeout: string
     } & {
       [key: string]: unknown
     }

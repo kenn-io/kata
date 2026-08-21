@@ -1299,6 +1299,7 @@ type HealthResponseBody struct {
 	DBPath           string                  `json:"db_path" validate:"required"`
 	Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 	FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
+	IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
 	Ok               bool                    `json:"ok"`
 	SchemaVersion    int64                   `json:"schema_version"`
 	StartedAt        time.Time               `json:"started_at" validate:"required"`
@@ -1325,6 +1326,13 @@ func (h HealthResponseBody) Validate() error {
 			}
 		}
 	}
+	if h.IdleShutdown != nil {
+		if v, ok := any(h.IdleShutdown).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("IdleShutdown", err)
+			}
+		}
+	}
 	if err := typesValidator.Var(h.StartedAt, "required"); err != nil {
 		errors = errors.Append("StartedAt", err)
 	}
@@ -1333,6 +1341,28 @@ func (h HealthResponseBody) Validate() error {
 	}
 	if err := typesValidator.Var(h.Version, "required"); err != nil {
 		errors = errors.Append("Version", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type IdleShutdownHealth struct {
+	Deadline *time.Time              `json:"deadline,omitempty"`
+	State    IdleShutdownHealthState `json:"state" validate:"required"`
+	Timeout  string                  `json:"timeout" validate:"required"`
+}
+
+func (i IdleShutdownHealth) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(i.State).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("State", err)
+		}
+	}
+	if err := typesValidator.Var(i.Timeout, "required"); err != nil {
+		errors = errors.Append("Timeout", err)
 	}
 	if len(errors) == 0 {
 		return nil

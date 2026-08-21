@@ -29,6 +29,9 @@ type DaemonConfig struct {
 	// An empty value (or a missing file) means the platform default:
 	// Unix socket on Unix platforms, loopback TCP on Windows.
 	Listen string `toml:"listen"`
+	// AutostartIdleTimeout stops implicitly auto-started local daemons after
+	// foreground inactivity. Empty or zero disables idle shutdown.
+	AutostartIdleTimeout string `toml:"autostart_idle_timeout"`
 	// ActiveDaemon names the daemon catalog entry selected by default.
 	// Empty preserves the legacy implicit endpoint resolution.
 	ActiveDaemon string `toml:"active_daemon"`
@@ -57,6 +60,34 @@ type DaemonConfig struct {
 	// GitHubSync carries daemon-owned GitHub API credential settings for
 	// background synchronization.
 	GitHubSync GitHubSyncConfig `toml:"github_sync"`
+}
+
+// MinAutostartIdleTimeout leaves enough time for detached startup discovery
+// and avoids impractically tight keepalive loops.
+const MinAutostartIdleTimeout = 10 * time.Second
+
+// AutostartIdleTimeoutDuration parses the configured auto-start daemon idle
+// timeout. Empty and zero values disable idle shutdown.
+func (c DaemonConfig) AutostartIdleTimeoutDuration() (time.Duration, error) {
+	raw := strings.TrimSpace(c.AutostartIdleTimeout)
+	if raw == "" {
+		return 0, nil
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil || duration < 0 {
+		return 0, fmt.Errorf(
+			"autostart_idle_timeout must be a non-negative duration: %q",
+			c.AutostartIdleTimeout,
+		)
+	}
+	if duration > 0 && duration < MinAutostartIdleTimeout {
+		return 0, fmt.Errorf(
+			"autostart_idle_timeout must be 0 or at least %s: %q",
+			MinAutostartIdleTimeout,
+			c.AutostartIdleTimeout,
+		)
+	}
+	return duration, nil
 }
 
 // SearchConfig is the [search] block of <KATA_HOME>/config.toml. Today it only
@@ -326,6 +357,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		}
 		cfg.Timezone = strings.TrimSpace(cfg.Timezone)
 		cfg.Listen = strings.TrimSpace(cfg.Listen)
+		cfg.AutostartIdleTimeout = strings.TrimSpace(cfg.AutostartIdleTimeout)
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
 		cfg.Web.Listen = strings.TrimSpace(cfg.Web.Listen)
@@ -346,6 +378,9 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	applyDaemonConfigEnv(&cfg)
+	if _, err := cfg.AutostartIdleTimeoutDuration(); err != nil {
+		return nil, err
+	}
 	if cfg.Timezone != "" {
 		if _, err := time.LoadLocation(cfg.Timezone); err != nil {
 			return nil, fmt.Errorf("timezone %q is not a valid IANA timezone: %w", cfg.Timezone, err)
@@ -648,6 +683,9 @@ func validateEmbeddings(e EmbeddingsConfig) error {
 }
 
 func applyDaemonConfigEnv(cfg *DaemonConfig) {
+	if raw, ok := os.LookupEnv("KATA_AUTOSTART_IDLE_TIMEOUT"); ok {
+		cfg.AutostartIdleTimeout = strings.TrimSpace(raw)
+	}
 	if v := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")); v != "" &&
 		(!cfg.Auth.RequireTokenIdentity || !EnvTruthy("KATA_AUTOSTART")) {
 		cfg.Auth.Token = v

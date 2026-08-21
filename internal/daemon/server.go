@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -112,6 +113,13 @@ type ServerConfig struct {
 	// authenticates a project-scoped federation enrollment.
 	HostFederationAccess HostFederationAccessController
 
+	// IdleAdmission admits ordinary HTTP requests as foreground daemon work.
+	// Nil disables idle lifecycle handling.
+	IdleAdmission IdleForegroundAdmission
+	// IdleShutdownHealth snapshots effective idle state for /health. Nil omits the
+	// capability, including on explicit or remotely exposed daemons.
+	IdleShutdownHealth func() IdleSnapshot
+
 	// EmbeddingProfile removes native administrative routes when their
 	// lifecycle is owned by a mounting application. The standalone daemon uses
 	// the zero value and retains every route.
@@ -178,7 +186,13 @@ type Server struct {
 	baseHandler http.Handler
 	handler     http.Handler
 	api         huma.API
+
+	shutdownTimeout time.Duration
 }
+
+// ErrHTTPHandlersUnjoined means graceful HTTP shutdown exhausted its deadline
+// while one or more handlers could still be using daemon dependencies.
+var ErrHTTPHandlersUnjoined = errors.New("server: HTTP handlers did not drain")
 
 // ListenerBinding associates an owned listener with its request policy.
 type ListenerBinding struct {
@@ -234,10 +248,8 @@ func NewServer(cfg ServerConfig) *Server {
 	applyErrorEnvelopeResponses(humaAPI.OpenAPI())
 	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
 
-	s.baseHandler = withOwnerLocalTransport(withGzip(requireBearer(cfg.authPolicy(), cfg.DB)(
-		withTrustedProxyActor(cfg)(withFederationIngestPreauthorization(cfg, mux)),
-	)))
-	s.handler, _ = ApplyListenerPolicy(s.baseHandler, ListenerPolicy{Kind: ListenerSocket})
+	s.baseHandler = mux
+	s.handler, _ = s.HandlerFor(ListenerPolicy{Kind: ListenerSocket})
 	return s
 }
 
@@ -269,6 +281,13 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 	base := s.baseHandler
 	if base == nil {
 		base = s.handler
+	} else {
+		base = withIdleAdmission(s.cfg.IdleAdmission, base)
+		base = withFederationIngestPreauthorization(s.cfg, base)
+		base = withTrustedProxyActor(s.cfg)(base)
+		base = requireBearer(s.cfg.authPolicy(), s.cfg.DB)(base)
+		base = withGzip(base)
+		base = withOwnerLocalTransport(base)
 	}
 	if policy.RequireBrowserSession {
 		if s.cfg.WebSessions == nil {
@@ -276,7 +295,11 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 		}
 		base = requireBrowserSession(s.cfg.WebSessions, policy, base)
 	}
-	return ApplyListenerPolicy(base, policy)
+	handler, err := ApplyListenerPolicy(base, policy)
+	if err != nil {
+		return nil, err
+	}
+	return handler, nil
 }
 
 // API returns the underlying huma.API for handler registration in tests.
@@ -329,39 +352,99 @@ func (s *Server) Run(ctx context.Context) error {
 // Useful for tests that bind their own loopback listener (avoiding the
 // listener-close-then-reopen TOCTOU window).
 func (s *Server) Serve(ctx context.Context, l net.Listener) error {
-	return s.serve(ctx, l, s.handler)
+	return s.serve(ctx, l, s.handler, nil)
 }
 
-func (s *Server) serve(ctx context.Context, l net.Listener, handler http.Handler) error {
+func (s *Server) serve(
+	ctx context.Context,
+	l net.Listener,
+	handler http.Handler,
+	onExit func(error),
+) error {
+	serveCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	httpSrv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		// BaseContext roots every request in the daemon ctx so long-lived
 		// SSE handlers exit on Shutdown via r.Context().Done().
-		BaseContext: func(net.Listener) context.Context { return ctx },
+		BaseContext: func(net.Listener) context.Context { return serveCtx },
 	}
+	shutdownDone := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		_ = httpSrv.Shutdown(shutdownCtx)
+		<-serveCtx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(
+			context.WithoutCancel(serveCtx), s.httpShutdownTimeout(),
+		)
+		defer shutdownCancel()
+		shutdownDone <- httpSrv.Shutdown(shutdownCtx)
 	}()
-	if err := httpSrv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+	serveErr := httpSrv.Serve(l)
+	if errors.Is(serveErr, http.ErrServerClosed) {
+		serveErr = nil
 	}
-	return nil
+	if onExit != nil {
+		onExit(serveErr)
+	}
+	cancel()
+	shutdownErr := <-shutdownDone
+	// A sibling listener or the lifecycle coordinator may close this listener
+	// while Shutdown is doing the same work. The listener is already quiesced;
+	// net.ErrClosed does not mean handlers failed to drain.
+	if errors.Is(shutdownErr, net.ErrClosed) {
+		shutdownErr = nil
+	}
+	if shutdownErr != nil {
+		closeErr := httpSrv.Close()
+		return errors.Join(
+			serveErr,
+			fmt.Errorf("%w: %v", ErrHTTPHandlersUnjoined, shutdownErr),
+			closeErr,
+		)
+	}
+	return serveErr
+}
+
+func (s *Server) httpShutdownTimeout() time.Duration {
+	if s.shutdownTimeout > 0 {
+		return s.shutdownTimeout
+	}
+	return 10 * time.Second
 }
 
 // ServeListeners serves all listener bindings under one lifecycle. A failure
 // on either listener cancels and closes every sibling listener.
 func (s *Server) ServeListeners(ctx context.Context, bindings ...ListenerBinding) error {
+	return s.ServeListenersWithStop(ctx, nil, bindings...)
+}
+
+// ServeListenersWithStop is ServeListeners with an immediate notification
+// when any listener exits. The callback may cancel the daemon root while this
+// method continues joining HTTP handlers.
+func (s *Server) ServeListenersWithStop(
+	ctx context.Context,
+	onStopping func(),
+	bindings ...ListenerBinding,
+) error {
+	return s.ServeListenersWithLifecycle(ctx, nil, onStopping, bindings...)
+}
+
+// ServeListenersWithLifecycle is ServeListenersWithStop with a readiness
+// callback. Readiness is reported only after every listener binding has been
+// validated and its handler has been prepared, immediately before serving.
+func (s *Server) ServeListenersWithLifecycle(
+	ctx context.Context,
+	onReady func() error,
+	onStopping func(),
+	bindings ...ListenerBinding,
+) error {
 	if len(bindings) == 0 {
 		return errors.New("server: at least one listener is required")
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	results := make(chan error, len(bindings))
-	for _, binding := range bindings {
+	handlers := make([]http.Handler, len(bindings))
+	for i, binding := range bindings {
 		if binding.Listener == nil {
 			return errors.New("server: listener is required")
 		}
@@ -369,26 +452,49 @@ func (s *Server) ServeListeners(ctx context.Context, bindings ...ListenerBinding
 		if err != nil {
 			return err
 		}
+		handlers[i] = handler
+	}
+	if onReady != nil {
+		if err := onReady(); err != nil {
+			return err
+		}
+	}
+	var stopOnce sync.Once
+	var firstCause error
+	stopAll := func(cause error) {
+		stopOnce.Do(func() {
+			firstCause = cause
+			if onStopping != nil {
+				onStopping()
+			}
+			cancel()
+			for _, binding := range bindings {
+				_ = binding.Listener.Close()
+			}
+		})
+	}
+	results := make(chan error, len(bindings))
+	for i, binding := range bindings {
+		handler := handlers[i]
 		go func(binding ListenerBinding, handler http.Handler) {
-			results <- s.serve(runCtx, binding.Listener, handler)
+			results <- s.serve(runCtx, binding.Listener, handler, stopAll)
 		}(binding, handler)
 	}
 
-	firstErr := <-results
-	cancel()
-	for _, binding := range bindings {
-		_ = binding.Listener.Close()
-	}
-	for range len(bindings) - 1 {
-		err := <-results
-		if firstErr == nil && err != nil {
-			firstErr = err
+	var serveErrs []error
+	for range len(bindings) {
+		if err := <-results; err != nil {
+			serveErrs = append(serveErrs, err)
 		}
+	}
+	serveErr := errors.Join(serveErrs...)
+	if errors.Is(serveErr, ErrHTTPHandlersUnjoined) || firstCause != nil {
+		return serveErr
 	}
 	if ctx.Err() != nil {
 		return nil
 	}
-	return firstErr
+	return serveErr
 }
 
 // withCSRFGuards rejects browser-borne requests and enforces JSON content type

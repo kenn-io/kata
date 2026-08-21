@@ -139,6 +139,44 @@ func TestReadDaemonConfig_ReadsListen(t *testing.T) {
 	assert.Equal(t, "100.64.0.5:7777", cfg.Listen)
 }
 
+func TestReadDaemonConfigReadsAutostartIdleTimeout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("autostart_idle_timeout = \"15m\"\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	timeout, err := cfg.AutostartIdleTimeoutDuration()
+	require.NoError(t, err)
+	assert.Equal(t, 15*time.Minute, timeout)
+}
+
+func TestReadDaemonConfigAutostartIdleTimeoutEnvironmentOverridesFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTOSTART_IDLE_TIMEOUT", "45s")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("autostart_idle_timeout = \"15m\"\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	timeout, err := cfg.AutostartIdleTimeoutDuration()
+	require.NoError(t, err)
+	assert.Equal(t, 45*time.Second, timeout)
+}
+
+func TestReadDaemonConfigRejectsTooShortAutostartIdleTimeout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("autostart_idle_timeout = \"9s\"\n"), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least 10s")
+}
+
 func TestReadDaemonConfigReadsTimezone(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

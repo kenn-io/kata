@@ -45,6 +45,7 @@ type runDeps struct {
 	DaemonLog   *log.Logger
 	Now         func() time.Time
 	GraceWindow time.Duration
+	Environment []string
 	Project     projectResolver
 	Issue       issueResolver
 	Comment     commentResolver
@@ -283,7 +284,11 @@ func runJob(ctx context.Context, shutdown <-chan struct{}, job HookJob, deps run
 
 	cmd := exec.Command(job.Hook.Command, job.Hook.Args...) //nolint:gosec // G204: command validated at config load
 	cmd.Dir = job.Hook.WorkingDir
-	cmd.Env = buildEnv(job.Hook.UserEnv, job.Event, asnap, useAlias)
+	baseEnv := deps.Environment
+	if baseEnv == nil {
+		baseEnv = os.Environ()
+	}
+	cmd.Env = buildEnv(baseEnv, job.Hook.UserEnv, job.Event, asnap, useAlias)
 	cmd.Stdin = bytes.NewReader(stdinPayload)
 	cmd.Stdout = rc.outFile
 	cmd.Stderr = rc.errFile
@@ -309,12 +314,12 @@ func exitCodeOf(err error) int {
 	return -1
 }
 
-// buildEnv composes the child process's environment from os.Environ ⊕
+// buildEnv composes the child process's environment from baseEnv ⊕
 // the hook's user-defined env ⊕ the KATA_* contract vars. Alias-related
 // env is fed by the caller (runJob) which resolved it once for both
 // the stdin payload and this env slice.
-func buildEnv(userEnv []string, evt db.Event, asnap AliasSnapshot, hasAlias bool) []string {
-	env := append([]string{}, os.Environ()...)
+func buildEnv(baseEnv, userEnv []string, evt db.Event, asnap AliasSnapshot, hasAlias bool) []string {
+	env := append([]string{}, baseEnv...)
 	env = append(env, userEnv...)
 	env = append(env,
 		"KATA_HOOK_VERSION=1",

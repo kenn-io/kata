@@ -26,6 +26,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
 | `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
+| `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_GITHUB_TOKEN` | Default explicit token source for GitHub sync when no matching `[[github_sync.app]]` credential is configured. It is scoped to `github.com` unless `[github_sync].token_host` names a different host. `[github_sync].token_env` can name a different env var. |
 | `KATA_GITHUB_SYNC_ALLOWED_HOSTS` | Comma-separated exact GitHub Enterprise hostnames trusted for GitHub sync and git-remote inference. `github.com` is always trusted. |
 | `KATA_FEDERATION_PULL_INTERVAL_MS` | Federation runner poll interval for tests or latency-sensitive private deployments. |
@@ -221,6 +222,13 @@ installation_id = 67890
 private_key_path = "/var/lib/kata/github-app.pem"
 ```
 
+Idle shutdown is intended for the default owner-local daemon rather than the
+shared-daemon configuration above. Its minimal configuration is:
+
+```toml
+autostart_idle_timeout = "15m"
+```
+
 The `kata daemon start --listen <host:port>` flag wins over the config file.
 Plain `kata daemon start` starts the daemon in the background and returns after
 startup is confirmed; use `kata daemon start --foreground` for service-manager
@@ -228,6 +236,24 @@ and hosted deployments. Auto-started daemons also read the config-file listener
 value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
+
+`autostart_idle_timeout` lets an implicitly started, owner-local daemon exit
+after a period without client activity. It is off by default. The setting is
+ignored for explicit daemon starts and for daemons exposed through non-loopback
+listeners, a public web origin, trusted-proxy configuration, or shared-listener
+host aliases. `kata daemon start` replaces a running idle-eligible auto-started
+daemon with an explicit one so it stays resident, and `kata daemon restart`
+always starts an explicit daemon. The daemon writes one
+`kata daemon: idle shutdown after ...` line to its log when it exits for this
+reason. Active requests and already-admitted finite background work
+receive a bounded drain before process exit, so exit can occur after the
+configured interval. Ordinary health probes do not renew the timeout. A running
+`kata mcp serve` process discovers the effective timeout from `/health` and
+sends marked `GET /api/v1/ping` keepalives after applicable listener policy
+checks in both stdio and streamable-HTTP modes so the bridge remains usable for
+its full lifetime. Use an explicit daemon service when
+GitHub sync, federation, or timed-claim maintenance must remain continuously
+scheduled without a client present.
 
 The optional top-level `timezone` is the IANA timezone for date-only and local
 date-time `scheduled_on` values that do not have an issue-level `timezone`. If

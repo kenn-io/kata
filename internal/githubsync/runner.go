@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -31,15 +32,19 @@ type Runner struct {
 
 // RunnerConfig configures a GitHub sync runner.
 type RunnerConfig struct {
-	Store            db.Storage
-	Fetcher          Fetcher
-	Clock            func() time.Time
-	EventSink        func(context.Context, int64, []db.Event) error
+	Store     db.Storage
+	Fetcher   Fetcher
+	Clock     func() time.Time
+	EventSink func(context.Context, int64, []db.Event) error
+	// EventSinkFrom takes precedence over EventSink when set. Its fork source
+	// is nil when the pass has no parent activity lease.
+	EventSinkFrom    func(context.Context, int64, []db.Event, activity.Admission) error
 	Logger           *slog.Logger
 	Interval         time.Duration
 	Wake             <-chan struct{}
 	StaleLockTTL     time.Duration
 	InitialBatchSize int
+	DrainAdmission   activity.WaitableAdmission
 }
 
 // RunResult summarizes one completed sync attempt.
@@ -68,6 +73,14 @@ func NewRunner(config RunnerConfig) *Runner {
 
 // RunOnce syncs one binding if it can claim the binding lock.
 func (r *Runner) RunOnce(ctx context.Context, bindingID int64) (RunResult, error) {
+	return r.runOnce(ctx, bindingID, nil)
+}
+
+func (r *Runner) runOnce(
+	ctx context.Context,
+	bindingID int64,
+	eventFork activity.Admission,
+) (RunResult, error) {
 	if err := r.validate(); err != nil {
 		return RunResult{}, err
 	}
@@ -80,7 +93,7 @@ func (r *Runner) RunOnce(ctx context.Context, bindingID int64) (RunResult, error
 		return RunResult{Binding: binding}, db.ErrIssueSyncAlreadyRunning
 	}
 
-	result, err := r.runClaimed(ctx, binding, syncStartedAt)
+	result, err := r.runClaimed(ctx, binding, syncStartedAt, eventFork)
 	if err != nil {
 		return result, err
 	}
@@ -88,22 +101,45 @@ func (r *Runner) RunOnce(ctx context.Context, bindingID int64) (RunResult, error
 }
 
 // Run processes currently due bindings serially, then repeats on Interval when
-// configured. With Interval <= 0 it performs one due scan and returns.
+// configured. With Interval <= 0 it performs one admitted due scan and returns;
+// reversible admission denial waits for reopening before that one scan.
 func (r *Runner) Run(ctx context.Context) error {
 	if err := r.validate(); err != nil {
 		return err
 	}
-	if r.config.Interval <= 0 {
-		return r.runDue(ctx)
+	var ticker *time.Ticker
+	if r.config.Interval > 0 {
+		ticker = time.NewTicker(r.config.Interval)
+		defer ticker.Stop()
 	}
-	ticker := time.NewTicker(r.config.Interval)
-	defer ticker.Stop()
 	for {
-		if err := r.runDue(ctx); err != nil {
+		retry, denied, err := r.runDue(ctx)
+		if err != nil {
 			if isContextError(err) {
 				return err
 			}
+			if ticker == nil {
+				return err
+			}
 			r.config.Logger.Warn("github sync due pass failed", "error", err)
+		}
+		if denied && retry != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-retry:
+				continue
+			}
+		}
+		if denied {
+			if ticker == nil {
+				return nil
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		if ticker == nil {
+			return nil
 		}
 		select {
 		case <-ctx.Done():
@@ -114,34 +150,72 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Runner) runDue(ctx context.Context) error {
+func (r *Runner) runDue(ctx context.Context) (<-chan struct{}, bool, error) {
+	var scan *activity.Lease
+	if r.config.DrainAdmission != nil {
+		var admitted bool
+		var retry <-chan struct{}
+		scan, admitted, retry = r.config.DrainAdmission()
+		if !admitted {
+			return retry, true, nil
+		}
+	}
 	now := r.now()
-	bindings, err := r.config.Store.ListDueIssueSyncBindings(ctx, "github", now, now.Add(-r.staleLockTTL()), runnerDueLimit)
+	bindings, err := func() ([]db.IssueSyncBinding, error) {
+		if scan != nil {
+			defer scan.Release()
+		}
+		return r.config.Store.ListDueIssueSyncBindings(
+			ctx, "github", now, now.Add(-r.staleLockTTL()), runnerDueLimit,
+		)
+	}()
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	var errs []error
 	for _, binding := range bindings {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, false, ctx.Err()
 		default:
 		}
-		if _, err := r.RunOnce(ctx, binding.ID); err != nil {
+		var drain *activity.Lease
+		if r.config.DrainAdmission != nil {
+			var admitted bool
+			var retry <-chan struct{}
+			drain, admitted, retry = r.config.DrainAdmission()
+			if !admitted {
+				return retry, true, errors.Join(errs...)
+			}
+		}
+		_, runErr := func() (RunResult, error) {
+			if drain != nil {
+				defer drain.Release()
+				return r.runOnce(ctx, binding.ID, drain.Fork)
+			}
+			return r.runOnce(ctx, binding.ID, nil)
+		}()
+		if runErr != nil {
+			err := runErr
 			if errorsIsAlreadyRunning(err) {
 				continue
 			}
 			if isContextError(err) {
-				return err
+				return nil, false, err
 			}
 			r.config.Logger.Warn("github sync binding failed", "binding_id", binding.ID, "error", err)
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return nil, false, errors.Join(errs...)
 }
 
-func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, syncStartedAt time.Time) (RunResult, error) {
+func (r *Runner) runClaimed(
+	ctx context.Context,
+	binding db.IssueSyncBinding,
+	syncStartedAt time.Time,
+	eventFork activity.Admission,
+) (RunResult, error) {
 	if binding.Provider != "github" {
 		err := fmt.Errorf("github sync runner cannot run provider %q", binding.Provider)
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
@@ -217,7 +291,7 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 		Provider:  "github",
 		StartedAt: syncStartedAt,
 	}
-	importResult, err := r.importChunks(ctx, binding, batch)
+	importResult, err := r.importChunks(ctx, binding, batch, eventFork)
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, importResult)
 	}
@@ -440,7 +514,12 @@ func markParentLinkNonAuthoritative(item *db.ImportItem) {
 	item.LinkTypesAuthoritative["parent"] = false
 }
 
-func (r *Runner) importChunks(ctx context.Context, binding db.IssueSyncBinding, batch db.ImportBatchParams) (db.ImportBatchResult, error) {
+func (r *Runner) importChunks(
+	ctx context.Context,
+	binding db.IssueSyncBinding,
+	batch db.ImportBatchParams,
+	eventFork activity.Admission,
+) (db.ImportBatchResult, error) {
 	chunkSize := r.initialBatchSize()
 	aggregate := db.ImportBatchResult{Source: batch.Source, Errors: []string{}}
 	if len(batch.Items) == 0 {
@@ -449,7 +528,7 @@ func (r *Runner) importChunks(ctx context.Context, binding db.IssueSyncBinding, 
 			return aggregate, err
 		}
 		mergeImportResult(&aggregate, res)
-		r.emitEvents(ctx, binding.ProjectID, events)
+		r.emitEvents(ctx, binding.ProjectID, events, eventFork)
 		return aggregate, nil
 	}
 	for start := 0; start < len(batch.Items); start += chunkSize {
@@ -464,16 +543,27 @@ func (r *Runner) importChunks(ctx context.Context, binding db.IssueSyncBinding, 
 			return aggregate, err
 		}
 		mergeImportResult(&aggregate, res)
-		r.emitEvents(ctx, binding.ProjectID, events)
+		r.emitEvents(ctx, binding.ProjectID, events, eventFork)
 	}
 	return aggregate, nil
 }
 
-func (r *Runner) emitEvents(ctx context.Context, projectID int64, events []db.Event) {
-	if r.config.EventSink == nil || len(events) == 0 {
+func (r *Runner) emitEvents(
+	ctx context.Context,
+	projectID int64,
+	events []db.Event,
+	eventFork activity.Admission,
+) {
+	if len(events) == 0 {
 		return
 	}
-	if err := r.config.EventSink(ctx, projectID, events); err != nil {
+	var err error
+	if r.config.EventSinkFrom != nil {
+		err = r.config.EventSinkFrom(ctx, projectID, events, eventFork)
+	} else if r.config.EventSink != nil {
+		err = r.config.EventSink(ctx, projectID, events)
+	}
+	if err != nil {
 		r.config.Logger.Warn("github sync event sink failed", "error", err)
 	}
 }

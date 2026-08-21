@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -41,9 +44,14 @@ func newDaemonCmd() *cobra.Command {
 
 const daemonTelemetryHeartbeatInterval = 24 * time.Hour
 
-// daemonRestartShutdownTimeout covers the sequential 10-second HTTP and hook
-// shutdown budgets, plus a small allowance for the remaining process cleanup.
-const daemonRestartShutdownTimeout = 25 * time.Second
+const (
+	// daemonShutdownDrainTimeout is the shared budget for draining HTTP
+	// handlers, daemon workers, hooks, and platform cleanup.
+	daemonShutdownDrainTimeout = 25 * time.Second
+	// daemonRestartProcessWaitTimeout leaves time after the internal drain
+	// deadline for final cleanup and observable process exit.
+	daemonRestartProcessWaitTimeout = daemonShutdownDrainTimeout + 5*time.Second
+)
 
 var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 	return telemetry.NewReporterOrDisabled(opts)
@@ -59,6 +67,17 @@ var newGitHubSyncDaemonRunner = func(config githubsync.RunnerConfig) githubSyncD
 
 var newGitHubSyncHTTPFetcher = githubsync.NewHTTPFetcher
 
+var openEmbeddingVectorIndex = func(
+	ctx context.Context,
+	store db.Storage,
+	vectorsPath string,
+) (*vector.Index, error) {
+	if postgresStore, ok := store.(*pgstore.Store); ok {
+		return vector.OpenPostgres(ctx, postgresStore.DB)
+	}
+	return vector.Open(ctx, vectorsPath)
+}
+
 func newConfiguredGitHubSyncFetcher(cfg config.GitHubSyncConfig) githubsync.Fetcher {
 	return newGitHubSyncHTTPFetcher(githubsync.HTTPFetcherConfig{
 		CredentialResolver: githubsync.NewCredentialResolver(cfg, nil),
@@ -66,11 +85,12 @@ func newConfiguredGitHubSyncFetcher(cfg config.GitHubSyncConfig) githubsync.Fetc
 }
 
 type daemonStartOutput struct {
-	Action  string `json:"action"`
-	PID     int    `json:"pid"`
-	Address string `json:"address"`
-	DBPath  string `json:"db_path,omitempty"`
-	WebURL  string `json:"web_url,omitempty"`
+	Action      string `json:"action"`
+	PID         int    `json:"pid"`
+	ReplacedPID int    `json:"replaced_pid,omitempty"`
+	Address     string `json:"address"`
+	DBPath      string `json:"db_path,omitempty"`
+	WebURL      string `json:"web_url,omitempty"`
 }
 
 type daemonLocateOutput struct {
@@ -151,8 +171,9 @@ func locateDaemon(ctx context.Context) (daemonLocateOutput, error) {
 }
 
 var (
-	startDetachedDaemon = defaultStartDetachedDaemon
-	runDaemonForeground = runDaemonWithListen
+	startDetachedDaemon  = defaultStartDetachedDaemon
+	runDaemonForeground  = runDaemonWithListen
+	launchDetachedDaemon = defaultLaunchDetachedDaemon
 )
 
 func daemonStartCmd() *cobra.Command {
@@ -187,6 +208,10 @@ func daemonStartCmd() *cobra.Command {
 			switch out.Action {
 			case "already_running":
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "daemon already running pid=%d address=%s\n", out.PID, out.Address)
+			case "replaced":
+				_, err = fmt.Fprintf(cmd.OutOrStdout(),
+					"replaced auto-started daemon pid=%d; started pid=%d address=%s\n",
+					out.ReplacedPID, out.PID, out.Address)
 			default:
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "started pid=%d address=%s\n", out.PID, out.Address)
 			}
@@ -220,14 +245,67 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 	if err != nil {
 		return daemonStartOutput{}, err
 	}
+	replacedPID := 0
 	if rec, ok := liveDaemonRecord(ns.DataDir, 0); ok {
 		address := rec.Endpoint().ConfigAddress()
 		if effectiveListen != "" && address != effectiveListen {
 			return daemonStartOutput{}, fmt.Errorf("daemon already running at %s; stop it before starting with listener %s", address, effectiveListen)
 		}
-		return daemonStartOutputFromRecord("already_running", rec), nil
+		// An explicit start means "keep a daemon resident". An auto-started
+		// daemon with idle shutdown armed would exit later, so replace it
+		// with an explicit process instead of reporting it as running.
+		if !daemonRecordAdvertisesIdleShutdown(ctx, rec) {
+			return daemonStartOutputFromRecord("already_running", rec), nil
+		}
+		if err := daemon.SignalDaemonStop(rec, ns.DBHash); err != nil {
+			return daemonStartOutput{}, fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
+		}
+		if err := waitForDaemonProcesses(ctx, []int{rec.PID}, daemonRestartProcessWaitTimeout); err != nil {
+			return daemonStartOutput{}, fmt.Errorf("stop auto-started daemon pid %d: %w", rec.PID, err)
+		}
+		replacedPID = rec.PID
 	}
+	out, err := launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly)
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	if replacedPID != 0 {
+		out.Action = "replaced"
+		out.ReplacedPID = replacedPID
+	}
+	return out, nil
+}
 
+// daemonRecordAdvertisesIdleShutdown reports whether the live daemon behind
+// rec is an owner-local process that will stop itself when idle. Remote
+// records are never idle-eligible, and an unreachable daemon is treated as
+// resident so an explicit start does not signal a process it cannot inspect.
+func daemonRecordAdvertisesIdleShutdown(ctx context.Context, rec kitdaemon.RuntimeRecord) bool {
+	endpoint := rec.Endpoint()
+	if !endpoint.IsUnix() {
+		host, _, err := net.SplitHostPort(endpoint.Address)
+		if err != nil {
+			return false
+		}
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			return false
+		}
+	}
+	httpClient, baseURL := client.LocalHTTPClient(endpoint.ConfigAddress())
+	status, body, err := httpDoJSON(ctx, httpClient, http.MethodGet, baseURL+"/api/v1/health", nil)
+	if err != nil || status >= http.StatusBadRequest {
+		return false
+	}
+	var health daemonAPIHealth
+	if err := json.Unmarshal(body, &health); err != nil {
+		return false
+	}
+	return health.IdleShutdown != nil
+}
+
+func defaultLaunchDetachedDaemon(
+	ctx context.Context, dataDir, listen string, insecureReadonly bool,
+) (daemonStartOutput, error) {
 	args := []string{"daemon", "start", "--foreground"}
 	if listen != "" {
 		args = append(args, "--listen", listen)
@@ -240,7 +318,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		Env:             os.Environ(),
 		RefuseEphemeral: true,
 	}
-	if logw := client.DaemonLogWriter(ns.DataDir); logw != nil {
+	if logw := client.DaemonLogWriter(dataDir); logw != nil {
 		opts.Stdout = logw
 		opts.Stderr = logw
 		defer func() { _ = logw.Close() }()
@@ -261,7 +339,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 	defer tick.Stop()
 
 	for {
-		if rec, ok := liveDaemonRecord(ns.DataDir, pid); ok {
+		if rec, ok := liveDaemonRecord(dataDir, pid); ok {
 			return daemonStartOutputFromRecord("started", rec), nil
 		}
 		select {
@@ -274,7 +352,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 			if childProcess != nil {
 				_ = childProcess.Kill()
 			}
-			return daemonStartOutput{}, daemonStartTimeoutError(ns.DataDir)
+			return daemonStartOutput{}, daemonStartTimeoutError(dataDir)
 		case <-tick.C:
 		}
 	}
@@ -536,7 +614,7 @@ func daemonRestartCmd() *cobra.Command {
 				}
 				pids = append(pids, rec.PID)
 			}
-			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartShutdownTimeout); err != nil {
+			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
 				return err
 			}
 			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly)
@@ -793,12 +871,39 @@ func redactRuntimeDSN(dsn string) string {
 	return dsn
 }
 
+func newAutostartIdleController(
+	dcfg config.DaemonConfig,
+	autostart bool,
+	daemonEndpoint kitdaemon.Endpoint,
+	webEndpoint daemon.WebEndpoint,
+	onIdle func(timeout time.Duration),
+) (*daemon.IdleController, bool, error) {
+	timeout, err := dcfg.AutostartIdleTimeoutDuration()
+	if err != nil {
+		return nil, false, err
+	}
+	if !autostart || timeout == 0 {
+		return nil, false, nil
+	}
+	if !daemon.AutostartIdleShutdownEligible(daemonEndpoint, webEndpoint, dcfg) {
+		return nil, true, nil
+	}
+	return daemon.NewIdleController(timeout, func() { onIdle(timeout) }), false, nil
+}
+
+// announceIdleShutdown records why an auto-started daemon is exiting. The
+// detached daemon's stderr is its daemon.log, so this is the only trace of an
+// idle exit an operator can find later.
+func announceIdleShutdown(w io.Writer, timeout time.Duration) {
+	_, _ = fmt.Fprintf(w, "kata daemon: idle shutdown after %s without client activity\n", timeout)
+}
+
 // runDaemonWithListen is the variant used by `kata daemon start --foreground --listen`.
 // An empty listen string uses the platform default unless
 // <KATA_HOME>/config.toml has a `listen = "..."` entry, in which case the
 // config value is used. CLI flag always wins over config.
 // insecureReadonly is the dev escape hatch from --insecure-readonly.
-func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bool) error {
+func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bool) (returnErr error) {
 	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly)
 	if err != nil {
 		return err
@@ -823,64 +928,19 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	// process by main.go's signal.NotifyContext already cancels ctx.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stopCleanup := installStopWatcher(ns.DBHash, cancel)
-	defer stopCleanup()
+	shutdownTrigger := newDaemonShutdownTrigger(cancel)
+	workers := newDaemonWorkerGroup()
+	closeDependencies := true
+	hooksClosed := false
 
 	dbPath := startup.DBPath
 	store, err := storeopen.OpenWithConfig(ctx, dbPath, startup.StoreConfig, db.Serving())
 	if err != nil {
 		return err
 	}
-	defer func() { _ = store.Close() }()
-
-	disp, daemonLog, err := setupHooks(store, ns.DBHash, startup.KataHome, startup.HookConfig)
-	if err != nil {
-		return err
-	}
-	defer shutdownHooks(disp)
-	hookCfgPath := startup.HookConfigPath
-
-	telemetryReporter := newDaemonTelemetryReporter(store)
 	defer func() {
-		if err := telemetryReporter.Close(); err != nil {
-			daemonLog.Printf("telemetry: close: %v", err)
-		}
-	}()
-	captureDaemonStartedTelemetry(ctx, store, telemetryReporter)
-	startDaemonTelemetryHeartbeat(ctx, store, telemetryReporter)
-
-	// installReloadSource is platform-specific: SIGHUP delivery on Unix,
-	// a named reload event pumped onto the channel on Windows. See
-	// daemon_signaling_{unix,windows}.go.
-	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
-	defer reloadCleanup()
-	go runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
-	broadcaster := daemon.NewEventBroadcaster()
-	federationWake := startFederationRunner(ctx, store, broadcaster, disp, daemonLog)
-	federationConfigHealth := startFederationConfigReconciler(
-		ctx, dcfg, store, federationWake, func(event db.Event) {
-			broadcaster.Broadcast(daemon.StreamMsg{
-				Kind: "event", Event: &event, ProjectID: event.ProjectID,
-			})
-			disp.Enqueue(event)
-		}, daemonLog,
-	)
-	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
-	gitHubSyncWake := startGitHubSyncRunner(ctx, store, gitHubSyncFetcher, broadcaster, disp, daemonLog)
-	closeThrottleWindow, err := dcfg.Close.Throttle.ThrottleWindow()
-	if err != nil {
-		return err
-	}
-
-	embedder, vectorIndex, reconcilerHealth, err := startEmbeddingReconciler(
-		ctx, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog,
-	)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if vectorIndex != nil {
-			_ = vectorIndex.Close()
+		if closeDependencies {
+			_ = store.Close()
 		}
 	}()
 
@@ -904,6 +964,60 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	if webEndpoint.Listener != nil {
 		defer func() { _ = webEndpoint.Listener.Close() }()
 	}
+	idleController, idleIneligible, err := newAutostartIdleController(
+		*dcfg,
+		os.Getenv(daemon.AutoStartMarkerEnv) == "1",
+		runtimeEndpoint,
+		webEndpoint,
+		func(timeout time.Duration) {
+			announceIdleShutdown(os.Stderr, timeout)
+			shutdownTrigger.Call()
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if idleIneligible {
+		fmt.Fprintln(os.Stderr,
+			"kata daemon: auto-start idle shutdown disabled because the daemon is not owner-local")
+	}
+	var acquireHookDrain hooks.AcquireActivity
+	var waitableDrainAdmission activity.WaitableAdmission
+	if idleController != nil {
+		acquireHookDrain = idleController.DrainAdmission()
+		waitableDrainAdmission = idleController.WaitableDrainAdmission()
+	}
+
+	disp, daemonLog, err := setupHooks(
+		store, ns.DBHash, startup.KataHome, startup.HookConfig, acquireHookDrain,
+		withoutEnvironmentKey(os.Environ(), daemon.AutoStartMarkerEnv),
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeDependencies && !hooksClosed {
+			fallbackCtx, fallbackCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer fallbackCancel()
+			_ = disp.Shutdown(fallbackCtx)
+		}
+	}()
+	hookCfgPath := startup.HookConfigPath
+
+	telemetryReporter := newDaemonTelemetryReporter(store)
+	defer func() {
+		if !closeDependencies {
+			return
+		}
+		if err := telemetryReporter.Close(); err != nil {
+			daemonLog.Printf("telemetry: close: %v", err)
+		}
+	}()
+	closeThrottleWindow, err := dcfg.Close.Throttle.ThrottleWindow()
+	if err != nil {
+		return err
+	}
+
 	allowLocalSession := webEndpoint.AllowsLocalSession(dcfg.Auth)
 	allowTrustedProxySession := webEndpoint.AllowsTrustedProxySession(dcfg.Auth)
 	updates := "sse"
@@ -934,6 +1048,57 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	if err != nil {
 		return err
 	}
+	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpoint)
+	rec.Address = runtimeEndpoint.ConfigAddress()
+	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
+	for key, value := range webRuntime.Metadata() {
+		rec.Metadata[key] = value
+	}
+
+	broadcaster := daemon.NewEventBroadcaster()
+	embedder, vectorIndex, reconcilerHealth, err := startEmbeddingReconciler(
+		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog,
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeDependencies && vectorIndex != nil {
+			_ = vectorIndex.Close()
+		}
+	}()
+
+	captureDaemonStartedTelemetry(ctx, store, telemetryReporter)
+	startDaemonTelemetryHeartbeat(ctx, workers, store, telemetryReporter)
+	stopCleanup := installStopWatcher(ns.DBHash, shutdownTrigger.Call)
+	// installReloadSource is platform-specific: SIGHUP delivery on Unix,
+	// a named reload event pumped onto the channel on Windows. See
+	// daemon_signaling_{unix,windows}.go.
+	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
+	workers.Go(func() {
+		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
+	})
+	federationWake := startFederationRunner(
+		ctx, workers, waitableDrainAdmission, store, broadcaster, disp, daemonLog,
+	)
+	federationConfigHealth := startFederationConfigReconciler(
+		ctx, workers, waitableDrainAdmission, dcfg, store, federationWake, func(event db.Event, fork activity.Admission) {
+			broadcaster.Broadcast(daemon.StreamMsg{
+				Kind: "event", Event: &event, ProjectID: event.ProjectID,
+			})
+			hooks.EnqueueFrom(disp, event, fork)
+		}, daemonLog,
+	)
+	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
+	gitHubSyncWake := startGitHubSyncRunner(
+		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, broadcaster, disp, daemonLog,
+	)
+	var idleHealth func() daemon.IdleSnapshot
+	var idleAdmission daemon.IdleForegroundAdmission
+	if idleController != nil {
+		idleHealth = idleController.Snapshot
+		idleAdmission = idleController
+	}
 	srv := daemon.NewServer(daemon.ServerConfig{
 		DB:                store,
 		DefaultTimezone:   dcfg.Timezone,
@@ -959,23 +1124,37 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		VectorIndex:            vectorIndex,
 		ReconcilerHealth:       reconcilerHealth,
 		FederationConfigHealth: federationConfigHealth,
+		IdleAdmission:          idleAdmission,
+		IdleShutdownHealth:     idleHealth,
 	})
 	defer func() { _ = srv.Close() }()
-	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpoint)
-	rec.Address = runtimeEndpoint.ConfigAddress()
-	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
-	for key, value := range webRuntime.Metadata() {
-		rec.Metadata[key] = value
+	var stopAdmission func()
+	if idleController != nil {
+		stopAdmission = idleController.Stop
 	}
-	if _, err := runtimeStore.Write(rec); err != nil {
-		return err
-	}
-	runtimeFile := filepath.Join(ns.DataDir, fmt.Sprintf("daemon.%d.json", os.Getpid()))
-	defer func() { _ = os.Remove(runtimeFile) }()
-
-	if listen != "" {
-		fmt.Fprintf(os.Stderr, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
-	}
+	shutdown := startDaemonShutdownCoordinator(
+		ctx,
+		cancel,
+		workers,
+		disp,
+		stopAdmission,
+		daemonShutdownDrainTimeout,
+		stopCleanup,
+		reloadCleanup,
+	)
+	shutdownTrigger.Set(shutdown.Trigger)
+	httpHandlersJoined := true
+	defer func() {
+		shutdown.HTTPHandlersDone(httpHandlersJoined)
+		shutdown.Trigger()
+		result := shutdown.Wait()
+		if result.SafeToCloseDependencies() {
+			hooksClosed = true
+		} else {
+			closeDependencies = false
+		}
+		returnErr = errors.Join(returnErr, result.Err())
+	}()
 
 	mainPolicy := daemon.ListenerPolicy{Kind: daemon.ListenerSocket}
 	bindings := []daemon.ListenerBinding{{Listener: listener, Policy: mainPolicy}}
@@ -1001,7 +1180,43 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 			},
 		})
 	}
-	return srv.ServeListeners(ctx, bindings...)
+	var runtimeFile string
+	defer func() {
+		if runtimeFile != "" {
+			_ = os.Remove(runtimeFile)
+		}
+	}()
+	onReady := func() error {
+		return shutdown.PublishReady(ctx, func() error {
+			path, err := runtimeStore.Write(rec)
+			if err != nil {
+				return err
+			}
+			runtimeFile = path
+			if idleController != nil {
+				idleController.Start()
+			}
+			if listen != "" {
+				fmt.Fprintf(os.Stderr, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
+			}
+			return nil
+		})
+	}
+	httpHandlersJoined = false
+	serveErr := srv.ServeListenersWithLifecycle(ctx, onReady, shutdown.Trigger, bindings...)
+	httpHandlersJoined = !errors.Is(serveErr, daemon.ErrHTTPHandlersUnjoined)
+	shutdown.HTTPHandlersDone(httpHandlersJoined)
+	shutdown.Trigger()
+	if runtimeFile != "" {
+		_ = os.Remove(runtimeFile)
+	}
+	if errors.Is(serveErr, daemon.ErrHTTPHandlersUnjoined) {
+		closeDependencies = false
+	}
+	if errors.Is(serveErr, errDaemonStoppingBeforeReady) {
+		return nil
+	}
+	return serveErr
 }
 
 func webAuthenticationMode(
@@ -1036,15 +1251,20 @@ func captureDaemonStartedTelemetry(ctx context.Context, store db.Storage, report
 	captureDaemonTelemetryEvent(ctx, store, reporter, "daemon_started")
 }
 
-func startDaemonTelemetryHeartbeat(ctx context.Context, store db.Storage, reporter telemetry.Client) {
+func startDaemonTelemetryHeartbeat(
+	ctx context.Context,
+	workers *daemonWorkerGroup,
+	store db.Storage,
+	reporter telemetry.Client,
+) {
 	if reporter == nil || !reporter.Enabled() {
 		return
 	}
-	go func() {
+	workers.Go(func() {
 		runDaemonTelemetryHeartbeat(ctx, func(ctx context.Context) {
 			captureDaemonTelemetryEvent(ctx, store, reporter, "daemon_active")
 		})
-	}()
+	})
 }
 
 func runDaemonTelemetryHeartbeat(ctx context.Context, capture func(context.Context)) {
@@ -1088,6 +1308,8 @@ func captureDaemonTelemetryEvent(ctx context.Context, store db.Storage, reporter
 
 func startFederationRunner(
 	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
 	store db.Storage,
 	bcast *daemon.EventBroadcaster,
 	hookSink hooks.Sink,
@@ -1101,7 +1323,7 @@ func startFederationRunner(
 		}
 	}
 	sub := bcast.Subscribe(daemon.SubFilter{})
-	go func() {
+	workers.Go(func() {
 		defer sub.Unsub()
 		for {
 			select {
@@ -1117,36 +1339,38 @@ func startFederationRunner(
 				wakeRunner()
 			}
 		}
-	}()
+	})
 	runner := &federation.Runner{
-		DB:       store,
-		Interval: federationRunnerInterval(),
-		Wake:     wake,
+		DB:             store,
+		Interval:       federationRunnerInterval(),
+		Wake:           wake,
+		DrainAdmission: drainAdmission,
 		OnError: func(err error) {
 			daemonLog.Printf("federation: %v", err)
 		},
-		OnPulledEvents: func(projectID int64, events []db.Event) {
+		OnPulledEventsFrom: func(projectID int64, events []db.Event, fork activity.Admission) {
 			for i := range events {
 				event := events[i]
 				bcast.Broadcast(daemon.StreamMsg{Kind: "event", Event: &event, ProjectID: projectID})
-				hookSink.Enqueue(event)
+				hooks.EnqueueFrom(hookSink, event, fork)
 			}
 		},
 	}
-	go func() {
+	workers.Go(func() {
 		if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			daemonLog.Printf("federation: %v", err)
 		}
-	}()
+	})
 	sweeper := daemon.NewTimedClaimSweeper(store, bcast, hookSink)
+	sweeper.IdleAdmission = drainAdmission
 	sweeper.OnError = func(err error) {
 		daemonLog.Printf("claim sweeper: %v", err)
 	}
-	go func() {
+	workers.Go(func() {
 		if err := sweeper.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			daemonLog.Printf("claim sweeper: %v", err)
 		}
-	}()
+	})
 	return wakeRunner
 }
 
@@ -1210,6 +1434,8 @@ func preflightEmbeddingStartup(
 // lifetime and must close it on shutdown.
 func startEmbeddingReconciler(
 	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
 	ec config.EmbeddingsConfig,
 	embedder *embedding.Client,
 	vectorsPath string,
@@ -1220,23 +1446,20 @@ func startEmbeddingReconciler(
 	if embedder == nil {
 		return nil, nil, nil, nil
 	}
-	var idx *vector.Index
-	var err error
-	if postgresStore, ok := store.(*pgstore.Store); ok {
-		idx, err = vector.OpenPostgres(ctx, postgresStore.DB)
-	} else {
-		idx, err = vector.Open(ctx, vectorsPath)
-	}
+	idx, err := openEmbeddingVectorIndex(ctx, store, vectorsPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("embedding index: %w", err)
 	}
-	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{BatchSize: ec.BatchSize})
-	go func() {
+	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{
+		BatchSize:      ec.BatchSize,
+		DrainAdmission: drainAdmission,
+	})
+	workers.Go(func() {
 		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			daemonLog.Printf("reconciler: %v", err)
 		}
-	}()
-	startEmbeddingNudge(ctx, bcast, reconciler)
+	})
+	startEmbeddingNudge(ctx, workers, bcast, reconciler)
 	reconciler.Wake() // initial backfill sweep
 	return embedder, idx, reconciler.Health, nil
 }
@@ -1245,9 +1468,14 @@ func startEmbeddingReconciler(
 // every committed event so new/edited issues are embedded promptly. The
 // goroutine exits when ctx is cancelled or the subscription channel closes, and
 // always releases the subscription via Unsub.
-func startEmbeddingNudge(ctx context.Context, bcast *daemon.EventBroadcaster, r *daemon.Reconciler) {
+func startEmbeddingNudge(
+	ctx context.Context,
+	workers *daemonWorkerGroup,
+	bcast *daemon.EventBroadcaster,
+	r *daemon.Reconciler,
+) {
 	sub := bcast.Subscribe(daemon.SubFilter{})
-	go func() {
+	workers.Go(func() {
 		defer sub.Unsub()
 		for {
 			select {
@@ -1262,7 +1490,7 @@ func startEmbeddingNudge(ctx context.Context, bcast *daemon.EventBroadcaster, r 
 				}
 			}
 		}
-	}()
+	})
 }
 
 func federationRunnerInterval() time.Duration {
@@ -1279,6 +1507,8 @@ func federationRunnerInterval() time.Duration {
 
 func startGitHubSyncRunner(
 	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
 	store db.Storage,
 	fetcher githubsync.Fetcher,
 	bcast *daemon.EventBroadcaster,
@@ -1306,21 +1536,27 @@ func startGitHubSyncRunner(
 		logger = slog.New(slog.NewTextHandler(daemonLog.Writer(), nil))
 	}
 	runner := newGitHubSyncDaemonRunner(githubsync.RunnerConfig{
-		Store:    store,
-		Fetcher:  fetcher,
-		Logger:   logger,
-		Interval: githubSyncRunnerInterval(),
-		Wake:     wake,
-		EventSink: func(_ context.Context, projectID int64, events []db.Event) error {
+		Store:          store,
+		Fetcher:        fetcher,
+		Logger:         logger,
+		Interval:       githubSyncRunnerInterval(),
+		Wake:           wake,
+		DrainAdmission: drainAdmission,
+		EventSinkFrom: func(
+			_ context.Context,
+			projectID int64,
+			events []db.Event,
+			fork activity.Admission,
+		) error {
 			for i := range events {
 				event := events[i]
 				bcast.Broadcast(daemon.StreamMsg{Kind: "event", Event: &event, ProjectID: projectID})
-				hookSink.Enqueue(event)
+				hooks.EnqueueFrom(hookSink, event, fork)
 			}
 			return nil
 		},
 	})
-	go func() {
+	workers.Go(func() {
 		if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			if daemonLog != nil {
 				daemonLog.Printf("github sync: %v", err)
@@ -1328,7 +1564,7 @@ func startGitHubSyncRunner(
 				slog.Warn("github sync", "err", err)
 			}
 		}
-	}()
+	})
 	return wakeRunner
 }
 
@@ -1425,6 +1661,8 @@ func setupHooks(
 	dbHash string,
 	home string,
 	loaded hooks.LoadedConfig,
+	acquireDrain hooks.AcquireActivity,
+	environment []string,
 ) (*hooks.Dispatcher, *log.Logger, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, nil, err
@@ -1440,6 +1678,8 @@ func setupHooks(
 		ProjectResolver: makeProjectResolver(store),
 		Now:             time.Now,
 		GraceWindow:     5 * time.Second,
+		AcquireDrain:    acquireDrain,
+		Environment:     environment,
 	}
 	disp, err := hooks.New(loaded, deps)
 	if err != nil {
@@ -1448,12 +1688,14 @@ func setupHooks(
 	return disp, daemonLog, nil
 }
 
-// shutdownHooks drives the dispatcher's Shutdown with a 10s ceiling.
-// Errors (timeout, in-flight jobs) are not returned: the daemon exit
-// path proceeds either way, with the dispatcher's own log capturing
-// the timeout reason.
-func shutdownHooks(disp *hooks.Dispatcher) {
-	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = disp.Shutdown(sctx)
+func withoutEnvironmentKey(environment []string, key string) []string {
+	filtered := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		name, _, hasValue := strings.Cut(entry, "=")
+		if hasValue && strings.EqualFold(name, key) {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }

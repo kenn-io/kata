@@ -25,14 +25,14 @@ import (
 // installStopWatcher creates the stop event for this daemon process and
 // spawns a goroutine that waits on it. When the event fires (and we are
 // not already cleaning up) it cancels the daemon's context.
-func installStopWatcher(dbhash string, cancel context.CancelFunc) func() {
+func installStopWatcher(dbhash string, cancel context.CancelFunc) daemonPlatformCleanup {
 	namePtr, err := windows.UTF16PtrFromString(daemon.StopEventName(dbhash, os.Getpid()))
 	if err != nil {
-		return func() {}
+		return func(context.Context) bool { return true }
 	}
 	h, err := windows.CreateEvent(nil, 1, 0, namePtr) // manual reset, not signaled
 	if err != nil {
-		return func() {}
+		return func(context.Context) bool { return true }
 	}
 	closing := make(chan struct{})
 	done := make(chan struct{})
@@ -46,11 +46,16 @@ func installStopWatcher(dbhash string, cancel context.CancelFunc) func() {
 			cancel()
 		}
 	}()
-	return func() {
+	return func(ctx context.Context) bool {
 		close(closing)
 		_ = windows.SetEvent(h) // unblock the waiter so it can observe `closing`
-		<-done
-		_ = windows.CloseHandle(h)
+		select {
+		case <-done:
+			_ = windows.CloseHandle(h)
+			return true
+		case <-ctx.Done():
+			return false
+		}
 	}
 }
 
@@ -62,15 +67,15 @@ func (syntheticReloadSignal) Signal()        {}
 // installReloadSource creates the reload event and pumps a private synthetic
 // signal onto the returned channel each time it fires, so the existing
 // runReloadLoop machinery works unchanged.
-func installReloadSource(ctx context.Context, dbhash string) (<-chan os.Signal, func()) {
+func installReloadSource(ctx context.Context, dbhash string) (<-chan os.Signal, daemonPlatformCleanup) {
 	sigs := make(chan os.Signal, 1)
 	namePtr, err := windows.UTF16PtrFromString(daemon.ReloadEventName(dbhash, os.Getpid()))
 	if err != nil {
-		return sigs, func() {}
+		return sigs, func(context.Context) bool { return true }
 	}
 	h, err := windows.CreateEvent(nil, 1, 0, namePtr)
 	if err != nil {
-		return sigs, func() {}
+		return sigs, func(context.Context) bool { return true }
 	}
 	closing := make(chan struct{})
 	done := make(chan struct{})
@@ -95,10 +100,15 @@ func installReloadSource(ctx context.Context, dbhash string) (<-chan os.Signal, 
 			}
 		}
 	}()
-	return sigs, func() {
+	return sigs, func(cleanupCtx context.Context) bool {
 		close(closing)
 		_ = windows.SetEvent(h)
-		<-done
-		_ = windows.CloseHandle(h)
+		select {
+		case <-done:
+			_ = windows.CloseHandle(h)
+			return true
+		case <-cleanupCtx.Done():
+			return false
+		}
 	}
 }

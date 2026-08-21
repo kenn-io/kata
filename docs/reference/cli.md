@@ -643,7 +643,10 @@ the update client; upgrade through Homebrew or the owning system package
 manager instead. Ordinary archives retain the self-installing update behavior.
 
 Local commands auto-start the daemon when appropriate. `daemon start` starts a
-background daemon and returns after startup is confirmed. Use
+background daemon and returns after startup is confirmed. If the running local
+daemon was auto-started with `autostart_idle_timeout` in effect, `daemon start`
+stops it and starts an explicit daemon in its place, reporting the replaced
+PID; a resident daemon is reported as already running. Use
 `daemon start --foreground` for service managers, hosted deployments, and any
 setup where the daemon process should stay attached to the terminal. `daemon
 restart` gracefully stops any running local daemon, waits for it to exit, and
