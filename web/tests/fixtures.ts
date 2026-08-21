@@ -131,7 +131,7 @@ token = "example-remote-token"
       workspace,
       database: join(home, 'kata.db'),
     }),
-    KATA_AUTH_TOKEN: '',
+    KATA_AUTH_TOKEN: 'example-local-token',
     KATA_SERVER: '',
   }
   const remoteEnvironment = {
@@ -167,7 +167,7 @@ token = "example-remote-token"
     'version = 1\n\n[project]\nname = "example-project"\n',
   )
 
-  const project = await discoverProject(origin, home)
+  const project = await discoverProject(origin, home, 'example-local-token')
 
   const fixture: KataFixture = {
     origin,
@@ -331,12 +331,16 @@ async function runtimeRecords(root: string): Promise<string[]> {
   return found
 }
 
-async function discoverProject(origin: string, home: string): Promise<{ id: number; uid: string }> {
+async function discoverProject(
+  origin: string,
+  home: string,
+  token: string,
+): Promise<{ id: number; uid: string }> {
   await waitForRuntime(home, origin)
-  const sessionResponse = await fetch(`${origin}/api/v1/ui/session/local`, {
+  const sessionResponse = await fetch(`${origin}/api/v1/ui/session/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: origin },
-    body: JSON.stringify({ return_path: '/kata?view=all-open' }),
+    body: JSON.stringify({ token, return_path: '/kata?view=all-open' }),
   })
   const cookie = sessionResponse.headers.get('set-cookie')?.split(';', 1)[0]
   const credentials = (await sessionResponse.json()) as { session: string; csrf: string }

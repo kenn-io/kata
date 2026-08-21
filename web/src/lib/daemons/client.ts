@@ -30,7 +30,10 @@ export function createDaemonFetch(
     target.pathname = daemonProxyPrefix + target.pathname
     const headers = new Headers(request.headers)
     headers.set(daemonHeader, daemonID)
-    const body = request.body === null ? undefined : await request.arrayBuffer()
+    const body =
+      request.method === 'GET' || request.method === 'HEAD' || request.body === null
+        ? undefined
+        : await request.arrayBuffer()
     return upstream(target, {
       method: request.method,
       headers,

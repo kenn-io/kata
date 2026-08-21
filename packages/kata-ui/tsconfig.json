@@ -12,5 +12,5 @@
     "target": "ES2023",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "scripts/**/*.ts"]
 }

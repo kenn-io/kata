@@ -186,13 +186,14 @@ refreshes the snapshot instead of constructing a second authority from event
 payloads.
 
 The browser-session routes are deliberately outside the generated client
-contract. A fresh tab on a keyless direct-loopback origin uses
+contract. A fresh tab on a direct-loopback origin uses
 `POST /api/v1/ui/session/local`. Exact Host, peer address, forwarding-header,
-and daemon-auth policy gate that endpoint before it issues a local-web session.
-The mint normally requires the exact Origin; an embedded owner-local browser
-may omit or send an empty Origin only on this endpoint, while cross-site Fetch
-Metadata remains forbidden. Exact Host validation runs first and remains the
-DNS-rebinding boundary.
+and identity/proxy authentication policy gate that endpoint before it issues a
+local-web session. A static daemon token does not disable this owner-local path.
+The mint normally requires the exact Origin; an embedded owner-local browser may
+omit or send an empty Origin only on this endpoint, while cross-site Fetch Metadata
+remains forbidden. Exact Host validation runs first and remains the DNS-rebinding
+boundary.
 
 The URL reported by `kata daemon status` and local `kata ui` both open that
 loopback origin directly. Configured origins exchange a bearer or identity
@@ -201,7 +202,7 @@ token at `POST /api/v1/ui/session/login`. Logout is
 Session-authentication errors advertise the canonical browser origin in
 `X-Kata-Web-Origin` and its `loopback` or `login` mode in
 `X-Kata-Web-Authentication`, allowing `kata ui` to distinguish a configured
-keyless loopback URL from an authenticated deployment without carrying a
+direct loopback URL from a login-only deployment without carrying a
 launch credential.
 
 The launch-target URL is derived only from the daemon's configured canonical

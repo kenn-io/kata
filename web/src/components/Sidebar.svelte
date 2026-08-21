@@ -252,6 +252,7 @@
     --sidebar-row-padding: 6px 10px;
 
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
@@ -366,13 +367,5 @@
     outline: none;
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-blue) 18%, transparent);
-  }
-
-  @media (max-width: 900px) {
-    .kata-sidebar {
-      border-right: 0;
-      border-bottom: 1px solid var(--border-default);
-      max-height: 220px;
-    }
   }
 </style>

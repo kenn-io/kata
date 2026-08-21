@@ -11,6 +11,10 @@
   skill (including `roborev-fix` or `roborev-design-review-branch`) unless the
   user explicitly asks for that skill.
 - Test First: Write a failing test before the implementation, then make it pass, then refactor (red, green, refactor). Don't add production code without a failing test that requires it.
+- Evidence-Gated Regression Tests: Before writing a regression test, reproduce
+  the failure or name the explicit product contract it exercises. Do not encode
+  an inferred cause or hypothetical failure. Browser-specific coverage requires
+  a reproduced browser-specific failure; otherwise use the default test browser.
 - Explicit Database Change Consent: Do not add, remove, or modify a production
   database migration or persisted database schema without the user's explicit
   consent in the current conversation. This includes canonical/bootstrap DDL,
@@ -176,7 +180,8 @@ authorization service. Review browser changes against these boundaries:
   loopback browser listener. A direct tab on that listener creates its own
   local-web session only when the exact Host matches, the request arrives
   directly from loopback, no forwarding headers are present, and daemon
-  token/identity/proxy authentication is unconfigured. The mint normally
+  identity/proxy authentication is unconfigured. A static daemon token does
+  not disable this owner-local browser path. The mint normally
   requires the exact Origin. An embedded owner-local browser may omit or send
   an empty Origin only on this mint; exact Host validation remains the
   DNS-rebinding boundary, and cross-site Fetch Metadata remains forbidden.
@@ -209,7 +214,7 @@ authorization service. Review browser changes against these boundaries:
   owner filesystem paths or aliases. Configured logins retain their token principal;
   in identity mode the bootstrap principal remains non-writable. A browser 401
   clears tab-local credentials, fences accepted snapshots and drafts from
-  further writes. A keyless loopback tab attempts one transparent local-session
+  further writes. A direct loopback tab attempts one transparent local-session
   renewal; authenticated deployments return to their explicit token-login
   mechanism. An explicit login waits for token exchange before reading
   authority. Every mutation path, including project creation, uses that

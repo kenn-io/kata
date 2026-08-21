@@ -30,10 +30,10 @@ type WebEndpoint struct {
 	Shared       bool
 }
 
-// AllowsLocalSession reports whether this endpoint uses the direct, keyless
+// AllowsLocalSession reports whether this endpoint uses the direct, owner-local
 // loopback trust boundary for ordinary browser UI access.
 func (e WebEndpoint) AllowsLocalSession(auth config.AuthConfig) bool {
-	if strings.TrimSpace(auth.Token) != "" || auth.RequireTokenIdentity ||
+	if auth.RequireTokenIdentity ||
 		strings.TrimSpace(auth.Proxy.TrustedActorHeader) != "" || len(auth.Proxy.TrustedProxyListeners) != 0 {
 		return false
 	}
