@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { IconButton, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { DetailDrawer, IconButton, type TypeaheadOption } from '@kenn-io/kit-ui'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
   import LayoutPanelTopIcon from '@lucide/svelte/icons/layout-panel-top'
   import MonitorIcon from '@lucide/svelte/icons/monitor'
+  import MenuIcon from '@lucide/svelte/icons/menu'
   import MoonIcon from '@lucide/svelte/icons/moon'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SunIcon from '@lucide/svelte/icons/sun'
@@ -131,6 +132,7 @@
 
   let captureOpen = $state(false)
   let inboxChooserOpen = $state(false)
+  let mobileNavigationOpen = $state(false)
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
   let graphSelectedUID = $derived<string | null>(
@@ -167,6 +169,7 @@
   }
 
   function openView(name: KataTaskViewName): void {
+    mobileNavigationOpen = false
     navigate({
       kind: 'kata',
       view: systemViewName(name),
@@ -176,6 +179,7 @@
   }
 
   function openProject(projectUID: string): void {
+    mobileNavigationOpen = false
     navigate({
       kind: 'kata',
       projectUID,
@@ -341,6 +345,27 @@
   }
 </script>
 
+{#snippet navigationSidebar()}
+  <Sidebar
+    {areas}
+    projects={projection.projects}
+    currentView={{
+      name: currentView.view,
+      groups: currentView.groups,
+      fetched_at: currentView.fetched_at,
+    }}
+    {searchFilters}
+    projectCreationDisabled={!canMutate || mutationPending}
+    {draftFenceGeneration}
+    inboxProjectUID={inboxProject?.uid}
+    inboxDesignationDisabled={!canMutate || mutationPending}
+    onOpenView={openView}
+    onOpenProject={openProject}
+    {onCreateProject}
+    {onDesignateInbox}
+  />
+{/snippet}
+
 <section class="kata-feature" aria-label="Kata workspace">
   <header class="kata-header">
     <div class="kata-header-title">
@@ -366,6 +391,17 @@
       {/if}
     </div>
     <div class="kata-header-actions">
+      <span class="mobile-navigation-trigger">
+        <IconButton
+          ariaLabel="Open navigation"
+          title="Open navigation"
+          onclick={() => {
+            mobileNavigationOpen = true
+          }}
+        >
+          <MenuIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+        </IconButton>
+      </span>
       <IconButton ariaLabel={`Theme: ${themeLabel()}`} title="Change theme" onclick={cycleTheme}>
         {#if preferences.theme === 'light'}
           <SunIcon size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -414,24 +450,9 @@
     </aside>
   {/if}
   <div class="kata-layout" aria-busy={loading}>
-    <Sidebar
-      {areas}
-      projects={projection.projects}
-      currentView={{
-        name: currentView.view,
-        groups: currentView.groups,
-        fetched_at: currentView.fetched_at,
-      }}
-      {searchFilters}
-      projectCreationDisabled={!canMutate || mutationPending}
-      {draftFenceGeneration}
-      inboxProjectUID={inboxProject?.uid}
-      inboxDesignationDisabled={!canMutate || mutationPending}
-      onOpenView={openView}
-      onOpenProject={openProject}
-      {onCreateProject}
-      {onDesignateInbox}
-    />
+    <div class="desktop-navigation">
+      {@render navigationSidebar()}
+    </div>
 
     <div class="kata-main">
       {#if mutationMessage}
@@ -455,6 +476,18 @@
     </div>
   </div>
 </section>
+
+{#if mobileNavigationOpen}
+  <DetailDrawer
+    title="Kata navigation"
+    width="min(320px, calc(100vw - 40px))"
+    onclose={() => {
+      mobileNavigationOpen = false
+    }}
+  >
+    {@render navigationSidebar()}
+  </DetailDrawer>
+{/if}
 
 {#snippet listPane()}
   <div class="list-column kata-list">
@@ -672,6 +705,16 @@
     grid-template-columns: 240px minmax(0, 1fr);
   }
 
+  .desktop-navigation {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+  }
+
+  .mobile-navigation-trigger {
+    display: none;
+  }
+
   .kata-main {
     min-width: 0;
     min-height: 0;
@@ -725,7 +768,14 @@
   @media (max-width: 700px) {
     .kata-layout {
       grid-template-columns: 1fr;
-      grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .desktop-navigation {
+      display: none;
+    }
+
+    .mobile-navigation-trigger {
+      display: inline-flex;
     }
   }
 </style>

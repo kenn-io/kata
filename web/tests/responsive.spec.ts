@@ -19,21 +19,28 @@ test('system views stay beside the list until the mobile layout', async ({ page,
   expect(layout).toEqual({ sameRow: true, sidebarBeforeMain: true })
 })
 
-test('system views wrap into compact rows in the mobile layout', async ({ page, kata }) => {
+test('mobile navigation stays out of the task flow until opened', async ({ page, kata }) => {
   await page.setViewportSize({ width: 600, height: 684 })
   await kata.launch(page)
 
-  const layout = await page.getByRole('navigation', { name: 'System views' }).evaluate((nav) => {
-    const bounds = nav.getBoundingClientRect()
-    const buttons = Array.from(nav.querySelectorAll('button'), (button) =>
-      button.getBoundingClientRect(),
-    )
-    const rows = new Set(buttons.map((button) => Math.round(button.top)))
-    return { height: bounds.height, rows: rows.size }
+  const layout = await page.locator('.kata-feature').evaluate((element) => {
+    const header = element.querySelector('.kata-header')?.getBoundingClientRect()
+    const main = element.querySelector('.kata-main')?.getBoundingClientRect()
+    if (!header || !main) throw new Error('Kata header or main pane is missing')
+    return {
+      headerBottom: Math.round(header.bottom),
+      mainTop: Math.round(main.top),
+    }
   })
 
-  expect(layout.rows).toBe(2)
-  expect(layout.height).toBeLessThan(100)
+  expect(layout.mainTop).toBe(layout.headerBottom)
+
+  await page.getByRole('button', { name: 'Open navigation' }).click()
+  const navigation = page.getByRole('dialog', { name: 'Kata navigation' })
+  await expect(navigation).toBeVisible()
+  await navigation.getByRole('button', { name: 'Today' }).click()
+  await expect(navigation).toBeHidden()
+  await expect(page).toHaveURL(/view=today/)
 })
 
 test('task filters stay inside a narrow list pane without overlapping', async ({ page, kata }) => {
