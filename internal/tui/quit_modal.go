@@ -99,15 +99,9 @@ func overlayModal(background, modal string, width, height int) string {
 	}
 	modalLines := strings.Split(modal, "\n")
 	modalH := len(modalLines)
-	startLine := (height - modalH) / 2
-	if startLine < 0 {
-		startLine = 0
-	}
+	startLine := max((height-modalH)/2, 0)
 	modalW := lipgloss.Width(modal)
-	leftPad := (width - modalW) / 2
-	if leftPad < 0 {
-		leftPad = 0
-	}
+	leftPad := max((width-modalW)/2, 0)
 	for i, mLine := range modalLines {
 		idx := startLine + i
 		if idx >= len(bgLines) {
@@ -140,10 +134,7 @@ func ansiAwarePrefix(s string, w int) (string, int) {
 	i := 0
 	for i < len(s) {
 		if s[i] == 0x1b {
-			end := i + ansiEscapeLen(s[i:])
-			if end > len(s) {
-				end = len(s)
-			}
+			end := min(i+ansiEscapeLen(s[i:]), len(s))
 			b.WriteString(s[i:end])
 			i = end
 			continue
@@ -170,10 +161,7 @@ func ansiAwareSuffix(s string, skip int) string {
 	i := 0
 	for i < len(s) && used < skip {
 		if s[i] == 0x1b {
-			end := i + ansiEscapeLen(s[i:])
-			if end > len(s) {
-				end = len(s)
-			}
+			end := min(i+ansiEscapeLen(s[i:]), len(s))
 			carried.WriteString(s[i:end])
 			i = end
 			continue

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -358,7 +359,7 @@ func TestPollEvents_ResetRequiredAfterPurge(t *testing.T) {
 func TestPollEvents_LimitClampsAt1000(t *testing.T) {
 	env := testenv.New(t)
 	pid := mkProject(t, env, "github.com/test/a", "a")
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		mkIssue(t, env, pid, "x")
 	}
 	resp, _ := envGetRaw(t, env, "/api/v1/events?after_id=0&limit=99999")
@@ -528,9 +529,7 @@ func openSSE(t *testing.T, env *testenv.Env, query string, header http.Header) *
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		env.URL+"/api/v1/events/stream?"+query, nil)
 	require.NoError(t, err)
-	for k, vv := range header {
-		req.Header[k] = vv
-	}
+	maps.Copy(req.Header, header)
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "text/event-stream")
 	}

@@ -64,7 +64,7 @@ func TestBroadcaster_OverflowDisconnectsSlowSubscriberOnly(t *testing.T) {
 	// Don't Unsub slow — broadcast saturates its buffer (256) and we expect
 	// the broadcaster to close it.
 
-	for i := int64(0); i < 300; i++ {
+	for i := range int64(300) {
 		broadcastEvent(b, 1, i+1)
 	}
 
@@ -95,7 +95,7 @@ func TestBroadcaster_RaceFuzz(t *testing.T) {
 	b := daemon.NewEventBroadcaster()
 	var wg sync.WaitGroup
 	const N = 200
-	for i := 0; i < N; i++ {
+	for i := range N {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -111,7 +111,7 @@ func TestBroadcaster_RaceFuzz(t *testing.T) {
 			<-drain
 		}(i)
 	}
-	for i := 0; i < N; i++ {
+	for i := range N {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

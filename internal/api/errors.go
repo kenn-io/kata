@@ -79,7 +79,7 @@ func (e *APIError) MarshalJSON() ([]byte, error) {
 // layout instead of the {status, error:{code,message,...}} envelope clients
 // actually receive — a schema that lies about every error response.
 func (e *APIError) Schema(r huma.Registry) *huma.Schema {
-	return r.Schema(reflect.TypeOf(ErrorEnvelope{}), true, "ErrorEnvelope")
+	return r.Schema(reflect.TypeFor[ErrorEnvelope](), true, "ErrorEnvelope")
 }
 
 // WrapErrorAdapter keeps Huma's validation status normalization local to one

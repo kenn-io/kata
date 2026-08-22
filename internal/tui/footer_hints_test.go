@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -364,10 +365,8 @@ func flattenHelpRows(rows [][]helpItem) []helpItem {
 
 func assertHelpItemPresent(t *testing.T, rows []helpItem, want helpItem) {
 	t.Helper()
-	for _, row := range rows {
-		if row == want {
-			return
-		}
+	if slices.Contains(rows, want) {
+		return
 	}
 	t.Fatalf("help rows missing %+v in %+v", want, rows)
 }

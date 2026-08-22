@@ -481,10 +481,7 @@ func readUIIssues(
 		// #nosec G202 -- predicates are selected from fixed SQL fragments; relationship values are not interpolated.
 		statement += ` AND (` + strings.Join(predicates, " OR ") + `)`
 	}
-	limit := query.Limit
-	if limit > 1000 {
-		limit = 1000
-	}
+	limit := min(query.Limit, 1000)
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
 	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules {
 		statement += ` LIMIT ?`

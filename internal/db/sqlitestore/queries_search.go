@@ -63,7 +63,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	// phrase joins quoted tokens by mode (space → implicit AND, " OR " →
 	// explicit OR).
 	var quoted []string
-	for _, w := range strings.Fields(q) {
+	for w := range strings.FieldsSeq(q) {
 		quoted = append(quoted, `"`+strings.ReplaceAll(w, `"`, `""`)+`"`)
 	}
 	if len(quoted) == 0 {

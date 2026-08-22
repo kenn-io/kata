@@ -1457,7 +1457,7 @@ func normalizeFederationCapabilities(raw string) (internalCaps, displayCaps stri
 }
 
 func federationCapabilitiesContain(capabilities, want string) bool {
-	for _, part := range strings.Split(capabilities, ",") {
+	for part := range strings.SplitSeq(capabilities, ",") {
 		if strings.TrimSpace(part) == want {
 			return true
 		}

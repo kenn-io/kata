@@ -164,7 +164,7 @@ func safeRequestPath(value string) bool {
 	if cleaned != value && cleaned+"/" != value {
 		return false
 	}
-	for _, segment := range strings.Split(strings.TrimPrefix(value, "/"), "/") {
+	for segment := range strings.SplitSeq(strings.TrimPrefix(value, "/"), "/") {
 		if segment != "" && unsafePathSegment(segment) {
 			return false
 		}
@@ -173,7 +173,7 @@ func safeRequestPath(value string) bool {
 }
 
 func navigationRequest(r *http.Request) bool {
-	for _, value := range strings.Split(r.Header.Get("Accept"), ",") {
+	for value := range strings.SplitSeq(r.Header.Get("Accept"), ",") {
 		mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(value))
 		if err == nil && (mediaType == "text/html" || mediaType == "application/xhtml+xml") {
 			return true
@@ -183,7 +183,7 @@ func navigationRequest(r *http.Request) bool {
 }
 
 func dottedPath(name string) bool {
-	for _, segment := range strings.Split(name, "/") {
+	for segment := range strings.SplitSeq(name, "/") {
 		if strings.Contains(segment, ".") {
 			return true
 		}

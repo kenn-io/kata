@@ -149,7 +149,7 @@ func addTesterComment(ctx context.Context, t *testing.T, d *sqlitestore.Store, i
 // about event sequencing, not issue content.
 func createTesterIssues(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID int64, count int) {
 	t.Helper()
-	for i := 0; i < count; i++ {
+	for range count {
 		createTesterIssue(ctx, t, d, projectID, "x")
 	}
 }
@@ -240,10 +240,6 @@ func insertLegacyEvent(ctx context.Context, t *testing.T, d *sqlitestore.Store, 
 		eventUID, p.ID, p.Name, issue.ID, eventType, createdAt)
 	require.NoError(t, err)
 }
-
-// strPtr returns a pointer to s. Used by tests that need to pass an optional
-// string parameter (e.g. issue owner) by address.
-func strPtr(s string) *string { return &s }
 
 // seedIssueInProject creates an issue in projectID with the given title and
 // author, returning the created issue. Mirrors makeIssue but uses t as the

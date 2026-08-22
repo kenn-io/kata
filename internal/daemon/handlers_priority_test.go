@@ -77,7 +77,6 @@ func TestPriority_OutOfRangeIs400(t *testing.T) {
 	env := testenv.New(t)
 	pid, n := setupOneIssue(t, env)
 	for _, bad := range []int64{-1, 5, 99} {
-		bad := bad
 		resp, _ := postPriority(t, env, pid, n, "tester", &bad)
 		assert.Equal(t, 400, resp.StatusCode, "priority %d", bad)
 	}

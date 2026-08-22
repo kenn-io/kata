@@ -291,10 +291,10 @@ func TestSSE_NoConnectedStatusBeforeFirstFrame(t *testing.T) {
 // closes the response, and verifies the second connection request
 // carries Last-Event-ID matching the last frame seen on the first.
 func TestSSE_ReconnectSendsLastEventID(t *testing.T) {
-	var connects int32
+	var connects atomic.Int32
 	var secondHeader atomic.Value
 	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&connects, 1)
+		n := connects.Add(1)
 		if n >= 2 {
 			secondHeader.Store(r.Header.Get("Last-Event-ID"))
 			// Hold so the test has time to see the header.
@@ -336,7 +336,7 @@ Reconnect:
 		case <-deadline:
 			t.Fatal("second connect never arrived")
 		case <-time.After(50 * time.Millisecond):
-			if atomic.LoadInt32(&connects) >= 2 {
+			if connects.Load() >= 2 {
 				goto Done
 			}
 		}
@@ -359,9 +359,9 @@ Done:
 // default 1s initial backoff the reconnect lands well inside the 1.5s
 // grace window.
 func TestSSE_GracePeriod_FastReconnect_NoReconnectingBadge(t *testing.T) {
-	var connects int32
+	var connects atomic.Int32
 	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&connects, 1)
+		n := connects.Add(1)
 		writeSSEFrame(t, w, int64(n), "issue.created",
 			`{"type":"issue.created","project_id":7}`)
 		if n == 1 {
@@ -426,9 +426,9 @@ func TestSSE_GracePeriod_TimerVsConnectIsRaceFree(t *testing.T) {
 	// close immediately. Two consecutive cycles cover the full
 	// disconnect → grace-fires → reconnect-with-frame path.
 	const cycles = 3
-	var connects int32
+	var connects atomic.Int32
 	srv := newSSEMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		n := atomic.AddInt32(&connects, 1)
+		n := connects.Add(1)
 		if n%2 == 1 {
 			return
 		}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1834,7 +1835,7 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 	require.NoError(t, err)
 	metaOut, err := spoke.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID:  project.ID,
-		IfMatchRev: db.IfMatch(project.Revision),
+		IfMatchRev: new(project.Revision),
 		Actor:      "tester",
 		Patch: map[string]json.RawMessage{
 			"area": json.RawMessage(`"ops"`),
@@ -1943,7 +1944,7 @@ func TestSyncFederationOnceRecoveredResetDoesNotDeliverLocalProjectPushEcho(t *t
 
 	metaOut, err := spoke.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID:  project.ID,
-		IfMatchRev: db.IfMatch(project.Revision),
+		IfMatchRev: new(project.Revision),
 		Actor:      "tester",
 		Patch: map[string]json.RawMessage{
 			"area": json.RawMessage(`"ops"`),
@@ -2008,7 +2009,7 @@ func TestSyncFederationOncePendingResetDoesNotDeliverPostResetLocalProjectPushEc
 
 	metaOut, err := spoke.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID:  project.ID,
-		IfMatchRev: db.IfMatch(project.Revision),
+		IfMatchRev: new(project.Revision),
 		Actor:      "tester",
 		Patch: map[string]json.RawMessage{
 			"area": json.RawMessage(`"ops"`),
@@ -2650,9 +2651,7 @@ func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 		if forwardedIngest && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest {
-			for uid, author := range requestSnapshotAuthors {
-				snapshotAuthorsByUID[uid] = author
-			}
+			maps.Copy(snapshotAuthorsByUID, requestSnapshotAuthors)
 			if requestHadSnapshot {
 				snapshotRequestAccepted = true
 			}
@@ -2757,7 +2756,7 @@ func TestSyncFederationOncePushesLargeAdoptionMetadataWithHistoricalSnapshots(t 
 	require.NoError(t, err)
 	metadataOut, err := spoke.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID:  localProject.ID,
-		IfMatchRev: db.IfMatch(localProject.Revision),
+		IfMatchRev: new(localProject.Revision),
 		Actor:      "agent",
 		Patch: map[string]json.RawMessage{
 			"large": metadataValue,
@@ -2829,7 +2828,7 @@ func TestSyncFederationOnceConsumesAdoptionMarkerForMetadataOnlyProject(t *testi
 	require.NoError(t, err)
 	metadataOut, err := spoke.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID:  localProject.ID,
-		IfMatchRev: db.IfMatch(localProject.Revision),
+		IfMatchRev: new(localProject.Revision),
 		Actor:      "agent",
 		Patch: map[string]json.RawMessage{
 			"area": json.RawMessage(`"docs"`),

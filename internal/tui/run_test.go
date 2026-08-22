@@ -578,8 +578,8 @@ func TestBuildRunModel_SeedsViewProjectsCacheFromBoot(t *testing.T) {
 		scope: scope{},
 		projects: []ProjectSummaryWithStats{
 			{
-				ProjectSummary: ProjectSummary{ID: 7, Name: "kata"},
-				Stats:          &ProjectStatsSummary{Open: 3, Closed: 1, LastEventAt: &t1},
+				ID: 7, Name: "kata",
+				Stats: &ProjectStatsSummary{Open: 3, Closed: 1, LastEventAt: &t1},
 			},
 		},
 	}

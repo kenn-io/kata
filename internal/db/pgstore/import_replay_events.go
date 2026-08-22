@@ -303,10 +303,7 @@ func (s *Store) reconcileReplayIdentities(
 				return fmt.Errorf("max id for %s: %w", table, mapSQLError(err, nil))
 			}
 		}
-		floor := floors[table]
-		if maxID > floor {
-			floor = maxID
-		}
+		floor := max(maxID, floors[table])
 		if floor == 0 {
 			continue
 		}

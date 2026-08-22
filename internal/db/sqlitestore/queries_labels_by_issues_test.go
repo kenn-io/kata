@@ -82,7 +82,7 @@ func TestLabelsByIssues_LargeBatch_ChunksUnderSQLiteLimit(t *testing.T) {
 
 	const n = 1500
 	ids := make([]int64, 0, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		issue := makeIssueWithLabels(t, ctx, d, p.ID, "i", "tester", "bug")
 		ids = append(ids, issue.ID)
 	}

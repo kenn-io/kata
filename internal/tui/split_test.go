@@ -62,7 +62,7 @@ func TestSplit_CursorMoveRetargetsDetail(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	// Press j twice — the fixture has 3 rows so cursor lands on row 2.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		m, _ = updateModel(m, runeKey('j'))
 	}
 	if m.detail.issue == nil {
@@ -1433,7 +1433,7 @@ func TestSplit_DebounceCoalescesBursts(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	startGen := m.nextDetailFollowGen
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		m, _ = updateModel(m, runeKey('j'))
 	}
 	// Cursor caps at len-1 = 2 (3 rows), so two of the five j keys
@@ -1926,7 +1926,7 @@ func TestSplit_SuggestionMenuClampActuallyFires_AtMinSplit(t *testing.T) {
 	bg = strings.TrimRight(bg, "\n")
 	panel := "ABCDE\nFGHIJ"
 	got := overlayAtCorner(bg, panel, 40, 5, 0, -10)
-	firstLine := strings.SplitN(got, "\n", 2)[0]
+	firstLine, _, _ := strings.Cut(got, "\n")
 	if !strings.HasPrefix(firstLine, "ABCDE") {
 		t.Errorf("clamp did not pin panel to col=0: first line %q", firstLine)
 	}

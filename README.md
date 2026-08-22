@@ -60,7 +60,7 @@ kata version
 Release-archive builds update themselves with `kata update`. Homebrew installs
 use `brew upgrade kata`; Linux `.deb` and `.rpm` packages are published for
 `amd64` and `arm64` and remain owned by the system package manager. Prefer to
-build from source? kata needs **Go 1.26 or later**:
+build from source? kata needs **Go 1.27 or later**:
 
 ```sh
 go install go.kenn.io/kata/cmd/kata@latest

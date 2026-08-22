@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -368,12 +369,7 @@ func TestAuditCloses_ThrottledFlag_DifferentActorEndsCycle(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	hasThrottled := func(flags []string) bool {
-		for _, f := range flags {
-			if f == "throttled" {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(flags, "throttled")
 	}
 	var seenDifferentActor, seenSecondCycle bool
 	for _, r := range got.Rows {

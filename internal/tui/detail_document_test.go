@@ -11,7 +11,7 @@ import (
 func TestDetailDocumentPage80x50LayoutSignals(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailHierarchyFixture()
-	dm.issue.Owner = ptrString("alice")
+	dm.issue.Owner = new("alice")
 	dm.issue.Labels = []string{"prio-1", "bug", "needs-design"}
 	dm.issue.CreatedAt = time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
 	dm.issue.UpdatedAt = snapshotFixedNow.Add(-3 * time.Hour)
@@ -48,7 +48,7 @@ func TestDetailDocumentPage80x50LayoutSignals(t *testing.T) {
 func TestDetailCompactSheet_UsesDenseRhythmAndNoDecorativeRules(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
-	dm.issue.Owner = ptrString("alice")
+	dm.issue.Owner = new("alice")
 	dm.issue.Labels = []string{"improvement"}
 
 	got := stripANSI(dm.View(80, 40, viewChrome{}))
@@ -148,7 +148,7 @@ func TestDetailDocument_DoesNotPadBodyBeforeChildren(t *testing.T) {
 func TestDetailDocument_NarrowStacksMetadata(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
-	dm.issue.Owner = ptrString("alice")
+	dm.issue.Owner = new("alice")
 	dm.issue.Labels = []string{"bug", "prio-1"}
 	dm.parent = &IssueRef{ShortID: "12pp", Title: "workspace polish", Status: "open"}
 

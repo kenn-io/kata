@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -298,13 +299,7 @@ func appendUniqueInt64(values []int64, additional ...int64) []int64 {
 		if candidate <= 0 {
 			continue
 		}
-		found := false
-		for _, value := range values {
-			if value == candidate {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(values, candidate)
 		if !found {
 			values = append(values, candidate)
 		}
@@ -318,13 +313,7 @@ func appendUniqueString(values []string, additional ...string) []string {
 		if candidate == "" {
 			continue
 		}
-		found := false
-		for _, value := range values {
-			if value == candidate {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(values, candidate)
 		if !found {
 			values = append(values, candidate)
 		}
@@ -380,8 +369,7 @@ func writeHostAccessError(ctx huma.Context, status int, code, message string) {
 }
 
 func internalAPIError(err error) error {
-	var apiErr *api.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 		return apiErr
 	}
 	if errors.Is(err, ErrHostAccessDenied) {

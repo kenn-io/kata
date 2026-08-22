@@ -532,10 +532,7 @@ func (r *Runner) importChunks(
 		return aggregate, nil
 	}
 	for start := 0; start < len(batch.Items); start += chunkSize {
-		end := start + chunkSize
-		if end > len(batch.Items) {
-			end = len(batch.Items)
-		}
+		end := min(start+chunkSize, len(batch.Items))
 		chunk := batch
 		chunk.Items = append([]db.ImportItem(nil), batch.Items[start:end]...)
 		res, events, err := r.config.Store.ImportBatch(ctx, chunk)

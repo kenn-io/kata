@@ -72,8 +72,8 @@ func TestPatchRecurrence_BumpsRevisionAndEmitsDiff(t *testing.T) {
 	res, err := d.PatchRecurrence(ctx, db.PatchRecurrenceIn{
 		RecurrenceID: rec.ID, IfMatchRev: 1, Actor: "tester",
 		Update: db.RecurrenceUpdate{
-			Rule:          strPtr("FREQ=DAILY"),
-			TemplateTitle: strPtr("New"),
+			Rule:          new("FREQ=DAILY"),
+			TemplateTitle: new("New"),
 		},
 	})
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestPatchRecurrence_NoChangeIsNoOp(t *testing.T) {
 	// Patch with the same values → no change.
 	res, err := d.PatchRecurrence(ctx, db.PatchRecurrenceIn{
 		RecurrenceID: rec.ID, IfMatchRev: 1, Actor: "tester",
-		Update: db.RecurrenceUpdate{TemplateTitle: strPtr("Same")},
+		Update: db.RecurrenceUpdate{TemplateTitle: new("Same")},
 	})
 	require.NoError(t, err)
 	assert.False(t, res.Changed)
@@ -118,7 +118,7 @@ func TestPatchRecurrence_RevisionConflict(t *testing.T) {
 	})
 	_, err := d.PatchRecurrence(ctx, db.PatchRecurrenceIn{
 		RecurrenceID: rec.ID, IfMatchRev: 99, Actor: "tester",
-		Update: db.RecurrenceUpdate{TemplateTitle: strPtr("Y")},
+		Update: db.RecurrenceUpdate{TemplateTitle: new("Y")},
 	})
 	var rce *db.RevisionConflictError
 	require.ErrorAs(t, err, &rce)

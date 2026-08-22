@@ -895,7 +895,7 @@ func normalizedReplicaCapabilities(raw string) (string, error) {
 }
 
 func federationCapabilitiesContain(capabilities, want string) bool {
-	for _, part := range strings.Split(capabilities, ",") {
+	for part := range strings.SplitSeq(capabilities, ",") {
 		if strings.TrimSpace(part) == want {
 			return true
 		}
@@ -1305,10 +1305,7 @@ func ensureReplicaBinding(
 	partial := ensuredReplicaBinding{Project: project, CreatedEvent: createdEvent}
 
 	replayHorizon := p.ReplayHorizonEventID
-	cursor := replayHorizon - 1
-	if cursor < 0 {
-		cursor = 0
-	}
+	cursor := max(replayHorizon-1, 0)
 	pushEnabled := false
 	pushCursor := int64(0)
 	existing, err := store.FederationBindingByProject(ctx, project.ID)

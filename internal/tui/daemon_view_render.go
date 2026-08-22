@@ -20,10 +20,7 @@ func renderDaemons(m Model) string {
 	}
 	rowBudget := len(rows)
 	if m.height > 0 {
-		rowBudget = m.height - daemonsViewChromeRows
-		if rowBudget < 1 {
-			rowBudget = 1
-		}
+		rowBudget = max(m.height-daemonsViewChromeRows, 1)
 	}
 	visible := clipDaemonRows(rows, cursor, rowBudget)
 	body := []string{
@@ -95,10 +92,7 @@ func daemonRowLayout(name, endpoint, auth, state string, width int, highlight bo
 		gap    = 2
 	)
 	nameW := 22
-	endpointW := width - nameW - authW - stateW - 3*gap - 2
-	if endpointW < 12 {
-		endpointW = 12
-	}
+	endpointW := max(width-nameW-authW-stateW-3*gap-2, 12)
 	cursor := "  "
 	if highlight {
 		cursor = "▶ "

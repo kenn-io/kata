@@ -80,7 +80,7 @@ func TestReplayInvariant_ProjectProjectionMatchesDirectWrites(t *testing.T) {
 
 	metadataOut, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID:    a.ID,
-		IfMatchRev: db.IfMatch(1),
+		IfMatchRev: new(int64(1)),
 		Actor:      "agent",
 		Patch:      map[string]json.RawMessage{"area": json.RawMessage(`"api"`)},
 	})

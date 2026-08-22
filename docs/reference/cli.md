@@ -614,7 +614,7 @@ not require a workspace or a running daemon. The output is a single JSON object:
   "commit": "abcdef0",
   "built": "2026-07-12T12:00:00Z",
   "distribution": "homebrew",
-  "go": "go1.25.0",
+  "go": "go1.27.0",
   "os": "linux",
   "arch": "amd64",
   "agent_format": 1

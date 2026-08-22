@@ -47,8 +47,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Labels: in.Labels, ExcludeLabels: in.ExcludeLabels,
 		})
 		if err != nil {
-			var me *modeError
-			if errors.As(err, &me) {
+			if me, ok := errors.AsType[*modeError](err); ok {
 				kind := "validation"
 				if me.Status() == 503 {
 					kind = "unavailable"

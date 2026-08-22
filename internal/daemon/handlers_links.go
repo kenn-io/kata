@@ -260,7 +260,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 // before the old parent is unlinked.
 func parentReplaceWouldCycle(ctx context.Context, store db.Storage, childID, prospectiveParentID int64) (bool, error) {
 	cursor := prospectiveParentID
-	for hops := 0; hops < db.MaxParentDepth; hops++ {
+	for range db.MaxParentDepth {
 		if cursor == childID {
 			return true, nil
 		}

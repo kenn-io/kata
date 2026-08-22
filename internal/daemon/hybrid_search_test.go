@@ -411,7 +411,7 @@ func TestVectorLegDeepRetryBeatsCrossProjectStarvation(t *testing.T) {
 	}
 	// fetchCap+1 distractors in project B whose vectors score above the
 	// target for the query vector, so the first KNN batch holds only them.
-	for i := 0; i < fetchCap+1; i++ {
+	for i := range fetchCap + 1 {
 		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: projB.ID, Title: fmt.Sprintf("distractor %d", i), Body: "x", Author: "a",
 		}); err != nil {
@@ -699,7 +699,7 @@ func TestSemanticSearchHydratesLabelsOncePerCandidateBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		iss, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: proj.ID, Title: fmt.Sprintf("login race %d", i), Body: "x", Author: "a",
 		})
@@ -749,7 +749,7 @@ func TestVectorLegLabelFilterUsesDeepRetry(t *testing.T) {
 	}
 	// fetchCap+1 unlabeled issues whose vectors outscore the target, so the
 	// first batch holds only issues the label filter drops.
-	for i := 0; i < fetchCap+1; i++ {
+	for i := range fetchCap + 1 {
 		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: proj.ID, Title: fmt.Sprintf("distractor %d", i), Body: "x", Author: "a",
 		}); err != nil {
@@ -803,7 +803,7 @@ func TestVectorLegLabelFilterRetriesPastStaleInitialSQLiteWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < fetchCap-1; i++ {
+	for i := range fetchCap - 1 {
 		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: proj.ID, Title: fmt.Sprintf("distractor %d", i), Body: "x", Author: "a",
 		}); err != nil {
@@ -875,7 +875,7 @@ func TestSearchLabelCeilingRequiresRelevantProbeCandidate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for i := 0; i < ceilingSurvivors; i++ {
+			for i := range ceilingSurvivors {
 				iss, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 					ProjectID: proj.ID, Title: fmt.Sprintf("relevant candidate %d", i), Body: "x", Author: "a",
 				})
@@ -966,10 +966,10 @@ func seedLabelCeilingCorpus(ctx context.Context, t *testing.T, store db.Storage,
 		}
 		return iss
 	}
-	for i := 0; i < ceilingSurvivors; i++ {
+	for i := range ceilingSurvivors {
 		label(create(fmt.Sprintf("labeled login race %d", i)))
 	}
-	for i := 0; i < knnDeepLimit; i++ {
+	for i := range knnDeepLimit {
 		create(fmt.Sprintf("distractor %d", i))
 	}
 	beyond := create("target semantic-only candidate")

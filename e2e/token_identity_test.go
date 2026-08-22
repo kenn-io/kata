@@ -313,7 +313,7 @@ func createIdentityTokenCLI(t *testing.T, bin string, env []string, actor string
 	t.Helper()
 	out := runRemoteCmdOutput(t, bin, "", env,
 		"tokens", "create", "--actor", actor, "--name", "e2e")
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		token, ok := strings.CutPrefix(line, "token=")
 		if ok {
 			require.NotEmpty(t, token)
@@ -335,7 +335,7 @@ func runRemoteCmdOutputErr(t *testing.T, bin, workdir string, env []string, args
 
 func extractFederationJoinCommand(t *testing.T, out string) string {
 	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if cmd, ok := strings.CutPrefix(line, "join: "); ok {
 			require.NotEmpty(t, strings.TrimSpace(cmd), "empty join command in output:\n%s", out)
 			return strings.TrimSpace(cmd)

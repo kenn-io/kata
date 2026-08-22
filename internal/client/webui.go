@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
@@ -314,12 +315,7 @@ func isLoopbackWebOrigin(origin *url.URL) bool {
 }
 
 func runtimeHasCapability(runtimeInfo DiscoveredWebRuntime, wanted string) bool {
-	for _, capability := range runtimeInfo.Capabilities {
-		if capability == wanted {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(runtimeInfo.Capabilities, wanted)
 }
 
 func validateLocalWebRuntime(runtimeInfo DiscoveredWebRuntime) error {

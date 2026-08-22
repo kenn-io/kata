@@ -199,7 +199,7 @@ func extendedReplayRecords() []db.ImportRecord {
 			Title: "Restored recurring issue", Body: "durable state", Status: "open",
 			Author: "fixture-author", CreatedAt: created, UpdatedAt: created,
 			Metadata: json.RawMessage(`{"source":"snapshot"}`), Revision: 2, ContentRevision: 1,
-			RecurrenceID: &recurrenceID, RecurrenceUID: stringPointer(replayRecurrenceUID),
+			RecurrenceID: &recurrenceID, RecurrenceUID: new(replayRecurrenceUID),
 		}},
 		{Kind: db.ImportKindIssueEmbedding, IssueEmbedding: &db.IssueEmbeddingExport{
 			IssueUID: issueUID, EmbeddedContentRevision: 1, Fingerprint: "legacy-vector",
@@ -223,7 +223,7 @@ func extendedReplayRecords() []db.ImportRecord {
 			Actor: "sync-agent", Enabled: true, CreatedAt: created, UpdatedAt: created,
 		}},
 		{Kind: db.ImportKindFederationSyncStatus, FederationSyncStatus: &db.FederationSyncStatusExport{
-			ProjectID: projectID, LastErrorAt: &lastErrorAt, LastError: stringPointer("connection reset"),
+			ProjectID: projectID, LastErrorAt: &lastErrorAt, LastError: new("connection reset"),
 		}},
 		{Kind: db.ImportKindFederationQuarantine, FederationQuarantine: &db.FederationQuarantineExport{
 			ID: 91, ProjectID: projectID, Direction: "pull", FirstEventID: 20, LastEventID: 21,
@@ -247,17 +247,17 @@ func extendedReplayRecords() []db.ImportRecord {
 		}},
 		{Kind: db.ImportKindPurgeLog, PurgeLog: &db.PurgeLogExport{
 			ID: 161, UID: replayPurgeUID, OriginInstanceUID: replayInstanceUID,
-			ProjectID: projectID, PurgedIssueID: 160, IssueUID: stringPointer("01HZZZZZZZZZZZZZZZZZZZZZ1E"),
+			ProjectID: projectID, PurgedIssueID: 160, IssueUID: new("01HZZZZZZZZZZZZZZZZZZZZZ1E"),
 			ProjectUID: &projectUID, ProjectName: "extended-replay", ShortID: &purgeShortID,
 			IssueTitle: "Purged issue", IssueAuthor: "fixture-author", EventCount: 2,
-			PurgeResetAfterEventID: int64Pointer(100), Actor: "operator", Reason: &reason, PurgedAt: created,
+			PurgeResetAfterEventID: new(int64(100)), Actor: "operator", Reason: &reason, PurgedAt: created,
 		}},
 		{Kind: db.ImportKindProjectPurgeLog, ProjectPurgeLog: &db.ProjectPurgeLogExport{
 			ID: 151, UID: replayProjectPurge, OriginInstanceUID: replayInstanceUID,
 			ProjectID: projectPurgeID, ProjectUID: &projectPurgeUID, ProjectName: "retired-project",
 			IssueCount: 2, EventCount: 3, AliasCount: 1, CommentCount: 1, LinkCount: 1,
 			LabelCount: 1, ClaimCount: 1, PendingClaimRequestCount: 1,
-			PurgeResetAfterEventID: int64Pointer(101), Actor: "operator", Reason: &reason, PurgedAt: created,
+			PurgeResetAfterEventID: new(int64(101)), Actor: "operator", Reason: &reason, PurgedAt: created,
 		}},
 	}
 	for name, floor := range replaySequenceFloors() {
@@ -521,7 +521,7 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 		{Kind: db.ImportKindEvent, Event: &db.EventExport{
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
 			ProjectID: 5, ProjectUID: replayProjectUID, ProjectName: "hash-rejection",
-			IssueID: &issueID, IssueUID: stringPointer(replayIssueUID), Type: "issue.created",
+			IssueID: &issueID, IssueUID: new(replayIssueUID), Type: "issue.created",
 			Actor: "fixture-author", Payload: json.RawMessage(`{"title":"Hash rejection"}`),
 			HLCPhysicalMS: 1784102400000, ContentHash: strings.Repeat("0", 64), CreatedAt: created,
 		}},
@@ -554,10 +554,6 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 	assert.Equal(t, existing.Name, preserved.Name)
 	return nil
 }
-
-func stringPointer(value string) *string { return &value }
-
-func int64Pointer(value int64) *int64 { return &value }
 
 func checkSnapshotReplayProjectEnvelopes(
 	t *testing.T,

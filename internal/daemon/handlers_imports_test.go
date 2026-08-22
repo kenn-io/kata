@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -699,9 +700,7 @@ func importEndpointItem(overrides map[string]any) map[string]any {
 		"created_at":  "2026-05-01T10:00:00Z",
 		"updated_at":  "2026-05-01T10:00:00Z",
 	}
-	for k, v := range overrides {
-		item[k] = v
-	}
+	maps.Copy(item, overrides)
 	return item
 }
 

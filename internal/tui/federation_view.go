@@ -781,10 +781,7 @@ func (m Model) cursorMoveFederation(msg tea.KeyPressMsg, rows []FederationProjec
 		m.federationCursor = 0
 		return m, true
 	case "G", "end":
-		m.federationCursor = len(rows) - 1
-		if m.federationCursor < 0 {
-			m.federationCursor = 0
-		}
+		m.federationCursor = max(len(rows)-1, 0)
 		return m, true
 	}
 	return m, false
@@ -1481,10 +1478,7 @@ func (m Model) mouseFederationClick(y int) (Model, tea.Cmd) {
 	}
 	budget := len(rows)
 	if m.height > 0 {
-		budget = m.height - federationViewChromeRows
-		if budget < 1 {
-			budget = 1
-		}
+		budget = max(m.height-federationViewChromeRows, 1)
 	}
 	start, end := windowBounds(len(rows), m.federationCursor, budget)
 	idx := start + row

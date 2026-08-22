@@ -235,10 +235,7 @@ func syncFederationOnceWithFence(
 		if err != nil {
 			return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 		}
-		cursor := meta.ReplayHorizonEventID - 1
-		if cursor < 0 {
-			cursor = 0
-		}
+		cursor := max(meta.ReplayHorizonEventID-1, 0)
 		if binding.PushEnabled {
 			if err := store.ResetFederatedProjectIfNoPendingPush(
 				ctx, binding.ProjectID, meta.ReplayHorizonEventID, cursor, store.InstanceUID(), binding.PushCursorEventID); err != nil {
@@ -1074,8 +1071,7 @@ func retryPendingClaim(
 	}
 	now := time.Now().UTC()
 	if err != nil {
-		var statusErr *HubStatusError
-		if errors.As(err, &statusErr) {
+		if statusErr, ok := errors.AsType[*HubStatusError](err); ok {
 			if statusErr.StatusCode == http.StatusForbidden || statusErr.StatusCode == http.StatusConflict {
 				return store.RejectPendingClaim(ctx, pending.RequestUID, statusErr.Error(), now)
 			}
@@ -1096,7 +1092,7 @@ func retryPendingClaim(
 }
 
 func federationCredentialHasCapability(capabilities, capability string) bool {
-	for _, part := range strings.Split(capabilities, ",") {
+	for part := range strings.SplitSeq(capabilities, ",") {
 		if strings.TrimSpace(part) == capability {
 			return true
 		}

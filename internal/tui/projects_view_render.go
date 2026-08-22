@@ -30,10 +30,7 @@ func renderProjects(m Model) string {
 
 	rowBudget := len(rows)
 	if m.height > 0 {
-		rowBudget = m.height - projectsViewChromeRows(footerLines)
-		if rowBudget < 1 {
-			rowBudget = 1
-		}
+		rowBudget = max(m.height-projectsViewChromeRows(footerLines), 1)
 	}
 	visible := clipProjectsRows(rows, cursor, rowBudget)
 
@@ -116,10 +113,7 @@ func clipProjectsRows(rows []projectsRow, cursor, budget int) []projectsVisibleR
 	// Translate cursor to concrete-row index space (cursor==0 is the
 	// sentinel; clamp to the concrete window's top in that case so the
 	// user sees the head of the list).
-	concreteCursor := cursor - 1
-	if concreteCursor < 0 {
-		concreteCursor = 0
-	}
+	concreteCursor := max(cursor-1, 0)
 	start, end := windowBounds(concreteCount, concreteCursor, concreteSlots)
 	for i := start; i < end; i++ {
 		out = append(out, projectsVisibleRow{row: rows[i+1], index: i + 1})
@@ -157,10 +151,7 @@ func projectsRowLayout(project, open, closed, total, updated string, width int, 
 		updatedW = 12
 		gap      = 2
 	)
-	projectW := width - (openW + closedW + totalW + updatedW + 4*gap) - 2
-	if projectW < 8 {
-		projectW = 8
-	}
+	projectW := max(width-(openW+closedW+totalW+updatedW+4*gap)-2, 8)
 	cursor := "  "
 	if highlight {
 		cursor = "▶ "

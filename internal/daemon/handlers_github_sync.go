@@ -163,7 +163,7 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		return &api.RunIssueSyncOnceResponse{Body: api.RunIssueSyncOnceResponseBody{
-			Binding: ptr(bindingOut),
+			Binding: new(bindingOut),
 			Status:  issueSyncStatusOut(result.Status, result.Binding.Provider, result.Binding.Enabled),
 			Import:  result.Import,
 		}}, nil
@@ -381,7 +381,7 @@ func issueSyncBody(binding *db.IssueSyncBinding, status db.IssueSyncStatus) (api
 		return api.IssueSyncBody{}, err
 	}
 	return api.IssueSyncBody{
-		Binding: ptr(bindingOut),
+		Binding: new(bindingOut),
 		Status:  issueSyncStatusOut(status, binding.Provider, binding.Enabled),
 	}, nil
 }
@@ -428,8 +428,4 @@ func issueSyncStatusOut(status db.IssueSyncStatus, provider string, enabled bool
 		LastUnchanged: status.LastUnchanged,
 		LastComments:  status.LastComments,
 	}
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }

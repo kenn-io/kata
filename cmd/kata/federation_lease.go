@@ -458,12 +458,11 @@ func printClaimSteal(cmd *cobra.Command, ref string, releasedBS, claimedBS []byt
 func printClaimStealPartial(cmd *cobra.Command, releasedBS, claimedBS []byte, released claimMutationBody, cause error) error {
 	releasedHolder := holderFromClaimMutation(released)
 	if currentOutputMode() == outputJSON {
-		var cli *cliError
 		errorPayload := struct {
 			Code    string `json:"code,omitempty"`
 			Message string `json:"message"`
 		}{Message: cause.Error()}
-		if errors.As(cause, &cli) {
+		if cli, ok := errors.AsType[*cliError](cause); ok {
 			errorPayload.Code = cli.Code
 			errorPayload.Message = cli.Message
 		}
@@ -501,8 +500,7 @@ func claimStealPartialErr(cause error) error {
 	exit := ExitConflict
 	kind := kindConflict
 	code := "claim_steal_partial"
-	var cli *cliError
-	if errors.As(cause, &cli) {
+	if cli, ok := errors.AsType[*cliError](cause); ok {
 		exit = cli.ExitCode
 		kind = cli.Kind
 	}

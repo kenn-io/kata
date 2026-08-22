@@ -22,7 +22,8 @@ func (s *Store) ReadyIssues(
 	limit int,
 	filter db.ReadyIssuesFilter,
 ) ([]db.Issue, error) {
-	query := scheduledIssueSelect + `
+	var query strings.Builder
+	query.WriteString(scheduledIssueSelect + `
  WHERE i.project_id = $1
    AND i.status = 'open'
    AND i.deleted_at IS NULL
@@ -36,30 +37,30 @@ func (s *Store) ReadyIssues(
         AND blocker.status = 'open'
         AND blocker.deleted_at IS NULL
         AND blocker_project.deleted_at IS NULL
-   )`
+   )`)
 	args := []any{projectID}
 	addArg := func(value any) string {
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
-	query += ` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`
+	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
-		query += ` AND i.owner IS NULL`
+		query.WriteString(` AND i.owner IS NULL`)
 	} else if filter.Owner != "" {
-		query += ` AND i.owner = ` + addArg(filter.Owner)
+		query.WriteString(` AND i.owner = ` + addArg(filter.Owner))
 	}
 	for _, label := range filter.Labels {
-		query += ` AND EXISTS (
+		query.WriteString(` AND EXISTS (
           SELECT 1 FROM issue_labels il
-           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`
+           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
 	for _, label := range filter.ExcludeLabels {
-		query += ` AND NOT EXISTS (
+		query.WriteString(` AND NOT EXISTS (
           SELECT 1 FROM issue_labels il
-           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`
+           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
-	query += ` ORDER BY i.updated_at DESC, i.id DESC`
-	rows, err := s.QueryContext(ctx, query, args...)
+	query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	rows, err := s.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues: %w", mapSQLError(err, nil))
 	}
@@ -98,7 +99,8 @@ func (s *Store) ReadyIssues(
 // along with the project name needed to render a qualified reference. Filter
 // and parked-item semantics match ReadyIssues.
 func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
-	query := `SELECT ` + issueColumns + `, p.name, schedule_recurrence.timezone
+	var query strings.Builder
+	query.WriteString(`SELECT ` + issueColumns + `, p.name, schedule_recurrence.timezone
   FROM issues i
   JOIN projects p ON p.id = i.project_id
 	LEFT JOIN recurrences schedule_recurrence ON schedule_recurrence.id = i.recurrence_id
@@ -115,30 +117,30 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
         AND blocker.status = 'open'
         AND blocker.deleted_at IS NULL
         AND blocker_project.deleted_at IS NULL
-   )`
+   )`)
 	args := []any{}
 	addArg := func(value any) string {
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
-	query += ` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`
+	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
-		query += ` AND i.owner IS NULL`
+		query.WriteString(` AND i.owner IS NULL`)
 	} else if filter.Owner != "" {
-		query += ` AND i.owner = ` + addArg(filter.Owner)
+		query.WriteString(` AND i.owner = ` + addArg(filter.Owner))
 	}
 	for _, label := range filter.Labels {
-		query += ` AND EXISTS (
+		query.WriteString(` AND EXISTS (
           SELECT 1 FROM issue_labels il
-           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`
+           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
 	for _, label := range filter.ExcludeLabels {
-		query += ` AND NOT EXISTS (
+		query.WriteString(` AND NOT EXISTS (
           SELECT 1 FROM issue_labels il
-           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`
+           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
-	query += ` ORDER BY i.updated_at DESC, i.id DESC`
-	rows, err := s.QueryContext(ctx, query, args...)
+	query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	rows, err := s.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", mapSQLError(err, nil))
 	}

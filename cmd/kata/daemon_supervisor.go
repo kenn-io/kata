@@ -54,11 +54,9 @@ func (g *daemonWorkerGroup) Go(worker func()) bool {
 	if g.stopping {
 		return false
 	}
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
+	g.wg.Go(func() {
 		worker()
-	}()
+	})
 	return true
 }
 

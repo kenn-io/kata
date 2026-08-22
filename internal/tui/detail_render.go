@@ -45,10 +45,7 @@ func (dm detailModel) View(width, height int, chrome viewChrome) string {
 	titleBar := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
 	// Top chrome (title + blank) + bottom chrome (info + footer) frame
 	// the viewport. Whatever rows are left belong to the document.
-	visible := height - 2 - 1 - footerLines
-	if visible < 1 {
-		visible = 1
-	}
+	visible := max(height-2-1-footerLines, 1)
 	docLines, _ := dm.detailDocumentLines(width, chrome)
 	scroll := clampScroll(dm.scroll, len(docLines), visible)
 	windowed := windowDocLines(docLines, scroll, visible, width)
@@ -92,10 +89,7 @@ func clampScroll(scroll, total, visible int) int {
 // are emitted as-is (already gutter-prefixed during assembly).
 func windowDocLines(lines []string, scroll, visible, width int) []string {
 	out := make([]string, 0, visible)
-	end := scroll + visible
-	if end > len(lines) {
-		end = len(lines)
-	}
+	end := min(scroll+visible, len(lines))
 	for i := scroll; i < end; i++ {
 		out = append(out, padToWidth(lines[i], width))
 	}
@@ -128,10 +122,7 @@ func renderDocumentTitleStatus(width int, iss Issue) string {
 	statusW := runewidth.StringWidth(statusPlain)
 	prefix := subtleStyle.Render(fmt.Sprintf("#%s", iss.ShortID))
 	prefixW := runewidth.StringWidth(stripANSI(prefix)) + 2
-	titleBudget := width - prefixW - statusW - 2
-	if titleBudget < 1 {
-		titleBudget = 1
-	}
+	titleBudget := max(width-prefixW-statusW-2, 1)
 	title := prefix + "  " + titleStyle.Render(truncate(sanitizeForDisplay(iss.Title), titleBudget))
 	return padLeftRightInside(title, status, width)
 }
@@ -350,13 +341,7 @@ const documentSheetMaxWidth = 96
 // documentSheetMaxWidth so wide terminals do not blow out paragraph
 // measure.
 func documentSheetWidth(termWidth int) int {
-	w := termWidth - documentGutter
-	if w > documentSheetMaxWidth {
-		w = documentSheetMaxWidth
-	}
-	if w < 1 {
-		w = 1
-	}
+	w := max(min(termWidth-documentGutter, documentSheetMaxWidth), 1)
 	return w
 }
 
@@ -415,10 +400,7 @@ func documentScrollIndicator(total, scroll, visible int) string {
 		return ""
 	}
 	start := scroll + 1
-	end := scroll + visible
-	if end > total {
-		end = total
-	}
+	end := min(scroll+visible, total)
 	return fmt.Sprintf("[lines %d-%d of %d]", start, end, total)
 }
 
@@ -513,7 +495,7 @@ func (dm detailModel) detailDocumentLines(width int, chrome viewChrome) ([]strin
 		if dm.activeRowCount() > 0 && len(chunks) > 0 {
 			cursor := clampInt(dm.tabCursor, 0, len(chunks)-1)
 			offset := 0
-			for i := 0; i < cursor; i++ {
+			for i := range cursor {
 				offset += len(chunks[i].lines)
 			}
 			anchors.tabCursor = anchors.activity + offset
@@ -573,10 +555,7 @@ func renderHierarchySummary(width int, parent *IssueRef, children []Issue) strin
 	}
 	right := "Children: " + childrenCountSummary(children)
 	rightW := runewidth.StringWidth(right)
-	leftBudget := width - rightW - 1
-	if leftBudget < 1 {
-		leftBudget = 1
-	}
+	leftBudget := max(width-rightW-1, 1)
 	left = truncate(left, leftBudget)
 	return padLeftRightInside(left, right, width)
 }
@@ -640,10 +619,7 @@ func renderChildIssueRow(child Issue, selected bool, width int) string {
 		ownerW  = 12
 		updateW = 10
 	)
-	titleW := width - markerW - numW - statusW - ownerW - updateW
-	if titleW < 12 {
-		titleW = 12
-	}
+	titleW := max(width-markerW-numW-statusW-ownerW-updateW, 12)
 	marker := " "
 	if selected {
 		marker = ">"
@@ -668,7 +644,7 @@ func wrapBody(s string, width int) []string {
 		width = 1
 	}
 	out := []string{}
-	for _, raw := range strings.Split(s, "\n") {
+	for raw := range strings.SplitSeq(s, "\n") {
 		if raw == "" {
 			out = append(out, "")
 			continue

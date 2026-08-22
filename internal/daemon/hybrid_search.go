@@ -77,13 +77,7 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// is 503, not a silent degrade. auto-resolved hybrid is not strict.
 	strict := p.Requested == "hybrid" || p.Requested == "semantic"
 
-	fetch := p.Limit * 3
-	if fetch < fetchFloor {
-		fetch = fetchFloor
-	}
-	if fetch > fetchCap {
-		fetch = fetchCap
-	}
+	fetch := min(max(p.Limit*3, fetchFloor), fetchCap)
 
 	// Lexical leg (skip for explicit semantic). It runs in a goroutine so the
 	// vector leg's embed round-trip never blocks FTS.

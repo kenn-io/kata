@@ -106,7 +106,7 @@ func renderFilterForm(s inputState, innerW int) string {
 	statusLine := renderFormStatus(s)
 	footer := renderFilterFormFooter(s)
 	parts := []string{titleStyle.Render(s.title)}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		parts = append(parts, renderFilterField(s, i, innerW))
 	}
 	if statusLine != "" {
@@ -232,10 +232,7 @@ func renderNewIssueForm(s inputState, innerW, innerH int) string {
 	if statusLine != "" {
 		reserved++
 	}
-	bodyRows := innerH - reserved
-	if bodyRows < 3 {
-		bodyRows = 3
-	}
+	bodyRows := max(innerH-reserved, 3)
 	// Single-line field width = innerW; resize the body textarea so
 	// it fills the available width and bodyRows.
 	body := &s.fields[1]
@@ -324,25 +321,13 @@ func renderTinyFormFallback(s inputState) string {
 // terminal width, capped at 100 cells so a 200-cell window doesn't
 // produce a stretched-out modal that's hard to read.
 func formInnerWidth(width int) int {
-	w := width * 7 / 10
-	if w > 100 {
-		w = 100
-	}
-	if w < formMinWidth {
-		w = formMinWidth
-	}
+	w := max(min(width*7/10, 100), formMinWidth)
 	return w
 }
 
 // formInnerHeight picks the centered form's interior height. Caps
 // at 24 rows so the modal is roughly screen-sized, not full-screen.
 func formInnerHeight(height int) int {
-	h := height * 7 / 10
-	if h > 24 {
-		h = 24
-	}
-	if h < formMinHeight {
-		h = formMinHeight
-	}
+	h := max(min(height*7/10, 24), formMinHeight)
 	return h
 }

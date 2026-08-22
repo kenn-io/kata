@@ -292,7 +292,7 @@ func (r *Reconciler) nextDue() (time.Time, bool) {
 func (r *Reconciler) markAttemptStarted(index int, attemptAt time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.states[index].lastAttempt = timePointer(attemptAt)
+	r.states[index].lastAttempt = new(attemptAt)
 }
 
 func (r *Reconciler) recordAttempt(index int, attemptAt time.Time, err error) {
@@ -315,11 +315,11 @@ func (r *Reconciler) recordAttempt(index int, attemptAt time.Time, err error) {
 		state.lastErrorCategory != category ||
 		state.lastErrorStatus != status
 	state.state = stateName
-	state.lastAttempt = timePointer(attemptAt)
+	state.lastAttempt = new(attemptAt)
 	state.lastErrorCategory = category
 	state.lastErrorStatus = status
 	if err == nil {
-		state.lastSuccess = timePointer(completedAt)
+		state.lastSuccess = new(completedAt)
 		state.nextAttempt = time.Time{}
 		state.nextDelay = initialRetryDelay
 	} else {
@@ -374,7 +374,7 @@ func laterTime(current, candidate *time.Time) *time.Time {
 		return current
 	}
 	if current == nil || candidate.After(*current) {
-		return timePointer(*candidate)
+		return new(*candidate)
 	}
 	return current
 }
@@ -384,10 +384,6 @@ func doubledDelay(delay time.Duration) time.Duration {
 		return maxRetryDelay
 	}
 	return min(delay*2, maxRetryDelay)
-}
-
-func timePointer(value time.Time) *time.Time {
-	return &value
 }
 
 type wallClock struct{}

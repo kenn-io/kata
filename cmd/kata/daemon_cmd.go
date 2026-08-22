@@ -8,12 +8,14 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -773,13 +775,7 @@ func waitForDaemonProcesses(ctx context.Context, pids []int, timeout time.Durati
 	defer tick.Stop()
 
 	for {
-		allStopped := true
-		for _, pid := range pids {
-			if kitdaemon.ProcessAlive(pid) {
-				allStopped = false
-				break
-			}
-		}
+		allStopped := !slices.ContainsFunc(pids, kitdaemon.ProcessAlive)
 		if allStopped {
 			return nil
 		}
@@ -1051,9 +1047,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpoint)
 	rec.Address = runtimeEndpoint.ConfigAddress()
 	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
-	for key, value := range webRuntime.Metadata() {
-		rec.Metadata[key] = value
-	}
+	maps.Copy(rec.Metadata, webRuntime.Metadata())
 
 	broadcaster := daemon.NewEventBroadcaster()
 	embedder, vectorIndex, reconcilerHealth, err := startEmbeddingReconciler(

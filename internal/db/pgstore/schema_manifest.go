@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -173,12 +174,8 @@ func (s *Store) validateCanonicalColumns(ctx context.Context, vectorsInstalled b
 	expectedTables := canonicalTableColumns
 	if vectorsInstalled {
 		expectedTables = make(map[string]string, len(canonicalTableColumns)+len(optionalVectorTableColumns))
-		for table, columns := range canonicalTableColumns {
-			expectedTables[table] = columns
-		}
-		for table, columns := range optionalVectorTableColumns {
-			expectedTables[table] = columns
-		}
+		maps.Copy(expectedTables, canonicalTableColumns)
+		maps.Copy(expectedTables, optionalVectorTableColumns)
 	}
 	actual := make(map[string]map[string]struct{}, len(expectedTables))
 	var coreRecords, vectorRecords []string

@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -134,7 +134,7 @@ func validateExpectedLinkProjectUIDsTx(ctx context.Context, tx *sql.Tx, expected
 	for issueID := range expected {
 		ids = append(ids, issueID)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	for _, issueID := range ids {
 		var projectUID string
 		err := tx.QueryRowContext(ctx, `

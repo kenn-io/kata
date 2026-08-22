@@ -562,7 +562,7 @@ func TestEdge_ClearFilters_ClearsSelectedUID(t *testing.T) {
 	m := newTestModel()
 	m.list.filter = ListFilter{Status: "open", Owner: "alice"}
 	m.list.issues = []Issue{
-		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "alpha", Status: "open", Owner: ptrString("alice")},
+		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "alpha", Status: "open", Owner: new("alice")},
 	}
 	m.list.cursor = 0
 	m.list.selectedUID = "01TEST-aaa1"

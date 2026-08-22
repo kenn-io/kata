@@ -85,10 +85,7 @@ func (s *Store) AdoptProjectIntoFederation(
 			return fmt.Errorf("delete pre-adoption local events: %w", mapSQLError(err, nil))
 		}
 
-		pullCursor := params.ReplayHorizonEventID - 1
-		if pullCursor < 0 {
-			pullCursor = 0
-		}
+		pullCursor := max(params.ReplayHorizonEventID-1, 0)
 		allowInsecure := 0
 		if params.AllowInsecure {
 			allowInsecure = 1

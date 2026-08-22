@@ -55,7 +55,7 @@ func dbProjectToOut(p db.Project) api.ProjectOut {
 // names the given token. Whitespace is trimmed; matching is case-
 // insensitive on the token side. Spec §7.1.
 func includeContains(includeParam, token string) bool {
-	for _, part := range strings.Split(includeParam, ",") {
+	for part := range strings.SplitSeq(includeParam, ",") {
 		if strings.EqualFold(strings.TrimSpace(part), token) {
 			return true
 		}
@@ -205,8 +205,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		// project_merge_issue_number_collision is gone — short_id collisions
 		// auto-extend in the db layer (spec §9.4).
-		var mappingCollision *db.ProjectMergeImportMappingCollisionError
-		if errors.As(err, &mappingCollision) {
+		if mappingCollision, ok := errors.AsType[*db.ProjectMergeImportMappingCollisionError](err); ok {
 			return nil, api.NewError(409, "project_merge_import_mapping_collision",
 				"source and target have overlapping import mappings",
 				"resolve import mapping collisions before merging", map[string]any{"mappings": mappingCollision.Mappings})
@@ -275,8 +274,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "project_already_archived",
 				"project is already archived", "", nil)
 		}
-		var openErr *db.ProjectHasOpenIssuesError
-		if errors.As(err, &openErr) {
+		if openErr, ok := errors.AsType[*db.ProjectHasOpenIssuesError](err); ok {
 			return nil, api.NewError(409, "project_has_open_issues",
 				"project has open issues",
 				"close or purge the open issues first, or pass force=true",
@@ -330,8 +328,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"project is not archived",
 				"run `kata projects remove "+project.Name+"` first", nil)
 		}
-		var fedErr *db.ProjectFederatedError
-		if errors.As(err, &fedErr) {
+		if fedErr, ok := errors.AsType[*db.ProjectFederatedError](err); ok {
 			hint := "run `kata federation leave " + project.Name + "` first"
 			if fedErr.Role == db.FederationRoleHub {
 				hint = "remove federation before purging (hub teardown is not yet supported)"

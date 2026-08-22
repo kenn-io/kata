@@ -79,14 +79,13 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 	// info-line scroll indicator uses the actual budget. The
 	// table-overhead cost (header row) is baked into renderBodyArea,
 	// so bodyRows here is the full body region.
-	bodyRows := height - 2 /* header */ - 1 /* info */ - footerLines
-	if bodyRows < listBodyFloor {
-		bodyRows = listBodyFloor
-	}
-	dataBudget := bodyRows - 1 /* table header */
-	if dataBudget < 1 {
-		dataBudget = 1
-	}
+	bodyRows := max(
+		/* header */
+		/* info */
+		height-2-1-footerLines, listBodyFloor)
+	dataBudget := max(
+		/* table header */
+		bodyRows-1, 1)
 	infoLine := renderListInfoLine(width, chrome, lm, dataBudget)
 	body := lm.renderBodyArea(width, bodyRows, chrome)
 
@@ -212,10 +211,9 @@ func firstDaemonLabel(labels []string) string {
 // (1 cell each side) so padLeftRightInside fills exactly the
 // renderable area.
 func titleBarInnerWidth(width int) int {
-	w := width - 2 // padding
-	if w < 1 {
-		w = 1
-	}
+	w := max(
+		// padding
+		width-2, 1)
 	return w
 }
 
@@ -327,10 +325,7 @@ func footerPositionIndicator(cursor, totalRows int) string {
 	if totalRows == 0 {
 		return ""
 	}
-	pos := cursor + 1
-	if pos > totalRows {
-		pos = totalRows
-	}
+	pos := min(cursor+1, totalRows)
 	return fmt.Sprintf("[%d/%d]", pos, totalRows)
 }
 
@@ -358,10 +353,7 @@ func padLeftRightInside(left, right string, innerWidth int) string {
 		right = ansi.Truncate(right, availableForRight, "…")
 		rw = runewidth.StringWidth(stripANSI(right))
 	}
-	gap := innerWidth - lw - rw
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(innerWidth-lw-rw, 1)
 	return left + strings.Repeat(" ", gap) + right
 }
 
@@ -594,10 +586,7 @@ func listColumnWidths(termWidth int, narrow bool) listColWidths {
 	if !narrow {
 		fixed += c.owner
 	}
-	c.title = termWidth - fixed
-	if c.title < 20 {
-		c.title = 20
-	}
+	c.title = max(termWidth-fixed, 20)
 	return c
 }
 
@@ -625,10 +614,7 @@ func windowBoundsFromStart(n, cursor, budget, windowStart int) (int, int) {
 	if n <= budget {
 		return 0, n
 	}
-	start := windowStart
-	if start < 0 {
-		start = 0
-	}
+	start := max(windowStart, 0)
 	maxStart := n - budget
 	if start > maxStart {
 		start = maxStart
@@ -671,10 +657,7 @@ func windowBounds(n, cursor, budget int) (int, int) {
 		return 0, n
 	}
 	headroom := budget / 3
-	start := cursor - headroom
-	if start < 0 {
-		start = 0
-	}
+	start := max(cursor-headroom, 0)
 	end := start + budget
 	if end > n {
 		end = n

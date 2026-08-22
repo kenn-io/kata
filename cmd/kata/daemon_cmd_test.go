@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -2215,8 +2216,7 @@ func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
 	}
 	t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, nil, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
 
 	require.Eventually(t, func() bool {
@@ -2233,8 +2233,7 @@ func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing
 	fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
 	bcast := daemon.NewEventBroadcaster()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, bcast, hooks.NewNoop(), log.New(io.Discard, "", 0))
 
 	require.Eventually(t, func() bool {
@@ -2257,8 +2256,7 @@ func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
 	defer sub.Unsub()
 	hookSink := &recordingDaemonHookSink{}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, bcast, hookSink, log.New(io.Discard, "", 0))
 
 	var msg daemon.StreamMsg
@@ -2287,8 +2285,7 @@ func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testi
 	fetcher.blockRepository = make(chan struct{})
 	fetcher.releaseRepository = make(chan struct{})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	wake := startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
 
 	select {
@@ -2296,7 +2293,7 @@ func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testi
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for repository fetch")
 	}
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		wake()
 	}
 	require.Never(t, func() bool {
@@ -2488,9 +2485,7 @@ func (f *fakeTelemetryReporter) eventAt(i int) fakeTelemetryEvent {
 	defer f.mu.Unlock()
 	event := f.events[i]
 	props := make(map[string]any, len(event.properties))
-	for key, value := range event.properties {
-		props[key] = value
-	}
+	maps.Copy(props, event.properties)
 	event.properties = props
 	return event
 }

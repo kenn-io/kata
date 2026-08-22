@@ -948,10 +948,7 @@ func (d *Store) IssueQualifiersByUIDs(
 	}
 	const chunk = 500
 	for i := 0; i < len(uids); i += chunk {
-		end := i + chunk
-		if end > len(uids) {
-			end = len(uids)
-		}
+		end := min(i+chunk, len(uids))
 		slice := uids[i:end]
 		placeholders := make([]string, len(slice))
 		args := make([]any, 0, len(slice))
@@ -1015,35 +1012,36 @@ func (d *Store) IssueUIDPrefixMatch(ctx context.Context, prefix string, limit in
 
 // ListIssues returns issues in the given project, excluding soft-deleted rows.
 func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Issue, error) {
-	q := issueSelect + ` WHERE i.project_id = ? AND i.deleted_at IS NULL`
+	var q strings.Builder
+	q.WriteString(issueSelect + ` WHERE i.project_id = ? AND i.deleted_at IS NULL`)
 	args := []any{p.ProjectID}
 	if p.Status != "" {
-		q += ` AND i.status = ?`
+		q.WriteString(` AND i.status = ?`)
 		args = append(args, p.Status)
 	}
 	if p.Priority != nil {
-		q += ` AND i.priority = ?`
+		q.WriteString(` AND i.priority = ?`)
 		args = append(args, *p.Priority)
 	}
 	if p.MaxPriority != nil {
-		q += ` AND i.priority IS NOT NULL AND i.priority <= ?`
+		q.WriteString(` AND i.priority IS NOT NULL AND i.priority <= ?`)
 		args = append(args, *p.MaxPriority)
 	}
 	// Apply owner filters
 	if p.Unowned {
-		q += ` AND i.owner IS NULL`
+		q.WriteString(` AND i.owner IS NULL`)
 	} else if p.Owner != "" {
-		q += ` AND i.owner = ?`
+		q.WriteString(` AND i.owner = ?`)
 		args = append(args, p.Owner)
 	}
 	// Apply label filters (must have ALL these labels)
 	for _, label := range p.Labels {
-		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		q.WriteString(` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`)
 		args = append(args, strings.ToLower(label))
 	}
 	// Apply exclude label filters (must NOT have any of these labels)
 	for _, label := range p.ExcludeLabels {
-		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		q.WriteString(` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`)
 		args = append(args, strings.ToLower(label))
 	}
 	// Apply metadata filters (AND logic). Each predicate iterates only the
@@ -1056,18 +1054,18 @@ func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Iss
 	// bound value.
 	for _, mf := range p.Meta {
 		if mf.HasValue {
-			q += ` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ? AND je.value = ?)`
+			q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ? AND je.value = ?)`)
 			args = append(args, mf.Key, mf.Value)
 		} else {
-			q += ` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ?)`
+			q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ?)`)
 			args = append(args, mf.Key)
 		}
 	}
-	q += ` ORDER BY i.updated_at DESC, i.id DESC`
+	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	if p.Limit > 0 {
-		q += fmt.Sprintf(` LIMIT %d`, p.Limit)
+		fmt.Fprintf(&q, ` LIMIT %d`, p.Limit)
 	}
-	rows, err := d.QueryContext(ctx, q, args...)
+	rows, err := d.QueryContext(ctx, q.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list issues: %w", err)
 	}
@@ -1088,52 +1086,53 @@ func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Iss
 // stable "newest first" feed across projects, distinct from the per-project
 // endpoint's updated_at-DESC ordering which leads with recent activity.
 func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]db.Issue, error) {
-	q := issueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL`
+	var q strings.Builder
+	q.WriteString(issueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL`)
 	var args []any
 	if p.ProjectID > 0 {
-		q += ` AND i.project_id = ?`
+		q.WriteString(` AND i.project_id = ?`)
 		args = append(args, p.ProjectID)
 	}
 	if p.Status != "" {
-		q += ` AND i.status = ?`
+		q.WriteString(` AND i.status = ?`)
 		args = append(args, p.Status)
 	}
 	if p.Priority != nil {
-		q += ` AND i.priority = ?`
+		q.WriteString(` AND i.priority = ?`)
 		args = append(args, *p.Priority)
 	}
 	if p.MaxPriority != nil {
-		q += ` AND i.priority IS NOT NULL AND i.priority <= ?`
+		q.WriteString(` AND i.priority IS NOT NULL AND i.priority <= ?`)
 		args = append(args, *p.MaxPriority)
 	}
 	if p.Unowned {
-		q += ` AND i.owner IS NULL`
+		q.WriteString(` AND i.owner IS NULL`)
 	} else if p.Owner != "" {
-		q += ` AND i.owner = ?`
+		q.WriteString(` AND i.owner = ?`)
 		args = append(args, p.Owner)
 	}
 	for _, label := range p.Labels {
-		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		q.WriteString(` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`)
 		args = append(args, strings.ToLower(label))
 	}
 	for _, label := range p.ExcludeLabels {
-		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		q.WriteString(` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`)
 		args = append(args, strings.ToLower(label))
 	}
 	for _, mf := range p.Meta {
 		if mf.HasValue {
-			q += ` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ? AND je.value = ?)`
+			q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ? AND je.value = ?)`)
 			args = append(args, mf.Key, mf.Value)
 		} else {
-			q += ` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ?)`
+			q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ?)`)
 			args = append(args, mf.Key)
 		}
 	}
-	q += ` ORDER BY i.created_at DESC, i.id DESC`
+	q.WriteString(` ORDER BY i.created_at DESC, i.id DESC`)
 	if p.Limit > 0 {
-		q += fmt.Sprintf(` LIMIT %d`, p.Limit)
+		fmt.Fprintf(&q, ` LIMIT %d`, p.Limit)
 	}
-	rows, err := d.QueryContext(ctx, q, args...)
+	rows, err := d.QueryContext(ctx, q.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list all issues: %w", err)
 	}
@@ -1781,14 +1780,14 @@ func issueFieldUpdatePlan(issue db.Issue, title, body, owner *string, ts string)
 }
 
 func joinComma(parts []string) string {
-	out := ""
+	var out strings.Builder
 	for i, p := range parts {
 		if i > 0 {
-			out += ", "
+			out.WriteString(", ")
 		}
-		out += p
+		out.WriteString(p)
 	}
-	return out
+	return out.String()
 }
 
 // lookupIssueForEvent fetches the issue + its project's name for event
@@ -2079,7 +2078,8 @@ func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 // archived-project exclusion, so an active issue is not stranded behind hidden
 // archived work.
 func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, filter db.ReadyIssuesFilter) ([]db.Issue, error) {
-	q := scheduledIssueSelect + `
+	var q strings.Builder
+	q.WriteString(scheduledIssueSelect + `
 		WHERE i.project_id = ? AND i.status = 'open' AND i.deleted_at IS NULL
 		  AND COALESCE(json_extract(i.metadata, '$.someday'), 0) != 1
 		  AND NOT EXISTS (
@@ -2089,31 +2089,31 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 		    WHERE l.type = 'blocks' AND l.to_issue_id = i.id
 		      AND blocker.status = 'open' AND blocker.deleted_at IS NULL
 		      AND bp.deleted_at IS NULL
-		  )`
+		  )`)
 	args := []any{projectID}
 
 	// Apply owner filters
 	if filter.Unowned {
-		q += ` AND i.owner IS NULL`
+		q.WriteString(` AND i.owner IS NULL`)
 	} else if filter.Owner != "" {
-		q += ` AND i.owner = ?`
+		q.WriteString(` AND i.owner = ?`)
 		args = append(args, filter.Owner)
 	}
 
 	// Apply label filters (must have ALL these labels)
 	for _, label := range filter.Labels {
-		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		q.WriteString(` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`)
 		args = append(args, strings.ToLower(label))
 	}
 
 	// Apply exclude label filters (must NOT have any of these labels)
 	for _, label := range filter.ExcludeLabels {
-		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		q.WriteString(` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`)
 		args = append(args, strings.ToLower(label))
 	}
 
-	q += ` ORDER BY i.updated_at DESC, i.id DESC`
-	rows, err := d.QueryContext(ctx, q, args...)
+	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	rows, err := d.QueryContext(ctx, q.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues: %w", err)
 	}
@@ -2155,7 +2155,8 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
 	// The global row also carries the project name and linked recurrence
 	// timezone, so build this projection from the shared issue columns.
-	q := `SELECT ` + issueColumns + `, p.name AS project_name, schedule_recurrence.timezone
+	var q strings.Builder
+	q.WriteString(`SELECT ` + issueColumns + `, p.name AS project_name, schedule_recurrence.timezone
 		FROM issues i
 		JOIN projects p ON p.id = i.project_id
 		LEFT JOIN recurrences schedule_recurrence ON schedule_recurrence.id = i.recurrence_id
@@ -2169,31 +2170,31 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		    WHERE l.type = 'blocks' AND l.to_issue_id = i.id
 		      AND blocker.status = 'open' AND blocker.deleted_at IS NULL
 		      AND bp.deleted_at IS NULL
-		  )`
+		  )`)
 	args := []any{}
 
 	// Apply owner filters (same semantics as ReadyIssues)
 	if filter.Unowned {
-		q += ` AND i.owner IS NULL`
+		q.WriteString(` AND i.owner IS NULL`)
 	} else if filter.Owner != "" {
-		q += ` AND i.owner = ?`
+		q.WriteString(` AND i.owner = ?`)
 		args = append(args, filter.Owner)
 	}
 
 	// Apply label filters (must have ALL these labels)
 	for _, label := range filter.Labels {
-		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		q.WriteString(` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`)
 		args = append(args, strings.ToLower(label))
 	}
 
 	// Apply exclude label filters (must NOT have any of these labels)
 	for _, label := range filter.ExcludeLabels {
-		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		q.WriteString(` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`)
 		args = append(args, strings.ToLower(label))
 	}
 
-	q += ` ORDER BY i.updated_at DESC, i.id DESC`
-	rows, err := d.QueryContext(ctx, q, args...)
+	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	rows, err := d.QueryContext(ctx, q.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", err)
 	}

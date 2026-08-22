@@ -958,7 +958,7 @@ func TestListAndShowProject_SurfaceMetadata(t *testing.T) {
 	require.NoError(t, err)
 	_, err = h.db.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID:  p.ID,
-		IfMatchRev: db.IfMatch(p.Revision),
+		IfMatchRev: new(p.Revision),
 		Actor:      "tester",
 		Patch:      map[string]json.RawMessage{"area": json.RawMessage(`"Personal"`)},
 	})
@@ -1276,7 +1276,7 @@ func TestListProjects_WithStatsIncludesAggregates(t *testing.T) {
 	ctx := t.Context()
 	p, err := h.db.CreateProject(ctx, "x")
 	require.NoError(t, err)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, _, err := h.db.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: p.ID, Title: "i", Author: "tester",
 		})

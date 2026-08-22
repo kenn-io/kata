@@ -115,7 +115,7 @@ func TestSmoke_FederationFoundationV3(t *testing.T) {
 		jsonl.ExportOptions{IncludeDeleted: true}))
 
 	var sawInstanceMeta, sawEvent, sawPurgeLog bool
-	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(buf.String(), "\n"), "\n") {
 		var env struct {
 			Kind string          `json:"kind"`
 			Data json.RawMessage `json:"data"`

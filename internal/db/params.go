@@ -465,7 +465,9 @@ type MoveIssueProjectOut struct {
 
 // IfMatch wraps a revision for the optional IfMatchRev fields on the
 // metadata patch inputs (nil = unconditional last-write-wins).
-func IfMatch(rev int64) *int64 { return &rev }
+//
+//go:fix inline
+func IfMatch(rev int64) *int64 { return new(rev) }
 
 // PatchIssueMetadataIn carries inputs for PatchIssueMetadata.
 // IfMatchRev nil means unconditional: the patch applies regardless of the

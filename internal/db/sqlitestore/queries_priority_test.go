@@ -13,7 +13,6 @@ import (
 func TestCreateIssue_WithInitialPriority(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	for _, prio := range []int64{0, 1, 2, 3, 4} {
-		prio := prio
 		t.Run(fmt.Sprintf("%s_p%d", t.Name(), prio), func(t *testing.T) {
 			issue, evt, err := d.CreateIssue(ctx, db.CreateIssueParams{
 				ProjectID: p.ID, Title: "x", Author: "tester",
@@ -46,7 +45,6 @@ func TestCreateIssue_NoPriorityIsNullAndOmittedFromPayload(t *testing.T) {
 func TestCreateIssue_RejectsPriorityOutOfRange(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	for _, bad := range []int64{-1, 5, 99} {
-		bad := bad
 		_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: p.ID, Title: "x", Author: "tester",
 			Priority: &bad,
@@ -183,7 +181,6 @@ func TestUpdatePriority_RejectsOutOfRange(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, bad := range []int64{-1, 5, 99} {
-		bad := bad
 		_, _, _, err := d.UpdatePriority(ctx, created.ID, &bad, "tester")
 		require.Error(t, err, "priority %d should violate CHECK", bad)
 	}

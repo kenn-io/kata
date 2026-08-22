@@ -611,7 +611,7 @@ func ensureGitignoreEntry(dir, entry string) (bool, error) {
 	case err == nil:
 		// Walk lines so we don't false-match a substring inside a longer
 		// pattern (e.g. ".kata.local.toml.bak").
-		for _, line := range strings.Split(string(existing), "\n") {
+		for line := range strings.SplitSeq(string(existing), "\n") {
 			if strings.TrimSpace(line) == entry {
 				return false, nil
 			}

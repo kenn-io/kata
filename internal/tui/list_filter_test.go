@@ -624,10 +624,10 @@ func TestList_Cursor_MovesInFilteredSpace(t *testing.T) {
 	lm := listModel{
 		filter: ListFilter{Owner: "alice"},
 		issues: []Issue{
-			{UID: "01TEST-aaa1", ShortID: "aaa1", Owner: ptrString("alice"), Title: "a"},
-			{UID: "01TEST-bbb2", ShortID: "bbb2", Owner: ptrString("bob"), Title: "b"},
-			{UID: "01TEST-ccc3", ShortID: "ccc3", Owner: ptrString("alice"), Title: "c"},
-			{UID: "01TEST-ddd4", ShortID: "ddd4", Owner: ptrString("bob"), Title: "d"},
+			{UID: "01TEST-aaa1", ShortID: "aaa1", Owner: new("alice"), Title: "a"},
+			{UID: "01TEST-bbb2", ShortID: "bbb2", Owner: new("bob"), Title: "b"},
+			{UID: "01TEST-ccc3", ShortID: "ccc3", Owner: new("alice"), Title: "c"},
+			{UID: "01TEST-ddd4", ShortID: "ddd4", Owner: new("bob"), Title: "d"},
 		},
 	}
 	// Two filtered rows (aaa1 and ccc3). j once → cursor=1 (the second
@@ -1141,9 +1141,9 @@ func lmFromUpdate(
 // covered by TestList_NoFilter_PassThrough).
 func TestList_OwnerFilter_NarrowsDisplay(t *testing.T) {
 	issues := []Issue{
-		{UID: "01TEST-aaa1", ShortID: "aaa1", Owner: ptrString("alice"), Title: "a"},
-		{UID: "01TEST-bbb2", ShortID: "bbb2", Owner: ptrString("bob"), Title: "b"},
-		{UID: "01TEST-ccc3", ShortID: "ccc3", Owner: ptrString("alice"), Title: "c"},
+		{UID: "01TEST-aaa1", ShortID: "aaa1", Owner: new("alice"), Title: "a"},
+		{UID: "01TEST-bbb2", ShortID: "bbb2", Owner: new("bob"), Title: "b"},
+		{UID: "01TEST-ccc3", ShortID: "ccc3", Owner: new("alice"), Title: "c"},
 	}
 	out := filteredIssues(issues, ListFilter{Owner: "alice"})
 	if len(out) != 2 {
@@ -1161,7 +1161,7 @@ func TestList_OwnerFilter_NarrowsDisplay(t *testing.T) {
 func TestList_OwnerFilter_NilOwnerNeverMatches(t *testing.T) {
 	issues := []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "no owner"},
-		{UID: "01TEST-bbb2", ShortID: "bbb2", Owner: ptrString("alice"), Title: "owned"},
+		{UID: "01TEST-bbb2", ShortID: "bbb2", Owner: new("alice"), Title: "owned"},
 	}
 	out := filteredIssues(issues, ListFilter{Owner: "alice"})
 	if len(out) != 1 || out[0].ShortID != "bbb2" {
@@ -1187,7 +1187,7 @@ func TestList_SearchFilter_CaseInsensitive(t *testing.T) {
 // per-render allocation.
 func TestList_NoFilter_PassThrough(t *testing.T) {
 	issues := []Issue{
-		{UID: "01TEST-aaa1", ShortID: "aaa1", Owner: ptrString("alice"), Title: "a"},
+		{UID: "01TEST-aaa1", ShortID: "aaa1", Owner: new("alice"), Title: "a"},
 		{UID: "01TEST-bbb2", ShortID: "bbb2", Title: "b"},
 	}
 	out := filteredIssues(issues, ListFilter{})
@@ -1484,7 +1484,6 @@ func TestMatchesFilter_SearchAcrossIDs(t *testing.T) {
 		{"no match", "ZZZZ", false},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			f := ListFilter{Search: c.search}
 			got := matchesFilter(iss, f)

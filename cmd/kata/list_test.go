@@ -360,7 +360,7 @@ func TestList_HumanFooterAbsentOnZeroRows(t *testing.T) {
 // issue rows themselves, stopping before the footer's blank separator line.
 func rowLines(out string) []string {
 	var lines []string
-	for _, ln := range strings.Split(out, "\n") {
+	for ln := range strings.SplitSeq(out, "\n") {
 		if ln == "" {
 			break
 		}
@@ -374,7 +374,7 @@ func rowLines(out string) []string {
 func findLineContaining(t *testing.T, out, substr string) string {
 	t.Helper()
 	var matches []string
-	for _, ln := range strings.Split(out, "\n") {
+	for ln := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(ln, substr) {
 			matches = append(matches, ln)
 		}
@@ -419,8 +419,8 @@ func TestList_SanitizesAnsiAndNewlinesInTitle(t *testing.T) {
 	// The newline in the title must be escaped (\n literal) so the
 	// list row stays on one visual line. Only the row section (before
 	// the footer's intentional blank separator lines) is checked.
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	for _, ln := range lines {
+	lines := strings.SplitSeq(strings.TrimRight(out, "\n"), "\n")
+	for ln := range lines {
 		if ln == "" {
 			break // footer begins with a blank separator line
 		}

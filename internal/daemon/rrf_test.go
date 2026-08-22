@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -115,10 +116,5 @@ func TestResolveMode(t *testing.T) {
 }
 
 func contains(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, s)
 }

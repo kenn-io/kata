@@ -12,7 +12,7 @@ func federationFailpoint(name string) error {
 	if spec == "" {
 		return nil
 	}
-	for _, entry := range strings.Split(spec, ",") {
+	for entry := range strings.SplitSeq(spec, ",") {
 		key, action, ok := strings.Cut(strings.TrimSpace(entry), "=")
 		if !ok || strings.TrimSpace(key) != name {
 			continue

@@ -127,10 +127,7 @@ func (d *Store) ParentShortIDsByIssues(
 		return out, nil
 	}
 	for i := 0; i < len(issueIDs); i += relationshipChunkSize {
-		end := i + relationshipChunkSize
-		if end > len(issueIDs) {
-			end = len(issueIDs)
-		}
+		end := min(i+relationshipChunkSize, len(issueIDs))
 		placeholders, args := relationshipChunkPlaceholders(issueIDs[i:end])
 		query := `SELECT l.from_issue_id, parent.short_id
 		          FROM links l
@@ -175,10 +172,7 @@ func (d *Store) ParentNumbersByIssues(
 		return out, nil
 	}
 	for i := 0; i < len(issueIDs); i += relationshipChunkSize {
-		end := i + relationshipChunkSize
-		if end > len(issueIDs) {
-			end = len(issueIDs)
-		}
+		end := min(i+relationshipChunkSize, len(issueIDs))
 		if err := d.appendParentNumbersForChunk(ctx, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
@@ -228,10 +222,7 @@ func (d *Store) BlockNumbersByIssues(
 		return out, nil
 	}
 	for i := 0; i < len(issueIDs); i += relationshipChunkSize {
-		end := i + relationshipChunkSize
-		if end > len(issueIDs) {
-			end = len(issueIDs)
-		}
+		end := min(i+relationshipChunkSize, len(issueIDs))
 		if err := d.appendBlockNumbersForChunk(ctx, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
@@ -288,10 +279,7 @@ func (d *Store) BlockedByNumbersByIssues(
 		return out, nil
 	}
 	for i := 0; i < len(issueIDs); i += relationshipChunkSize {
-		end := i + relationshipChunkSize
-		if end > len(issueIDs) {
-			end = len(issueIDs)
-		}
+		end := min(i+relationshipChunkSize, len(issueIDs))
 		if err := d.appendBlockedByNumbersForChunk(ctx, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
@@ -346,10 +334,7 @@ func (d *Store) ActivelyBlockedIssueIDs(
 		return out, nil
 	}
 	for i := 0; i < len(issueIDs); i += relationshipChunkSize {
-		end := i + relationshipChunkSize
-		if end > len(issueIDs) {
-			end = len(issueIDs)
-		}
+		end := min(i+relationshipChunkSize, len(issueIDs))
 		if err := d.appendActivelyBlockedForChunk(ctx, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
@@ -405,10 +390,7 @@ func (d *Store) RelatedNumbersByIssues(
 		return out, nil
 	}
 	for i := 0; i < len(issueIDs); i += relationshipChunkSize {
-		end := i + relationshipChunkSize
-		if end > len(issueIDs) {
-			end = len(issueIDs)
-		}
+		end := min(i+relationshipChunkSize, len(issueIDs))
 		if err := d.appendRelatedNumbersForChunk(ctx, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
@@ -468,10 +450,7 @@ func (d *Store) ChildCountsByParents(
 		return out, nil
 	}
 	for i := 0; i < len(parentIssueIDs); i += relationshipChunkSize {
-		end := i + relationshipChunkSize
-		if end > len(parentIssueIDs) {
-			end = len(parentIssueIDs)
-		}
+		end := min(i+relationshipChunkSize, len(parentIssueIDs))
 		if err := d.appendChildCountsForChunk(ctx, parentIssueIDs[i:end], out); err != nil {
 			return nil, err
 		}

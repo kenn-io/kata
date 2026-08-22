@@ -253,7 +253,7 @@ func TestChildCountsByParents_ChunksLargeInputs(t *testing.T) {
 
 	const parentCount = 501
 	parentIDs := make([]int64, 0, parentCount)
-	for i := 0; i < parentCount; i++ {
+	for range parentCount {
 		parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 		parentIDs = append(parentIDs, parent.ID)
 	}

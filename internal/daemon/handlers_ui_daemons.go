@@ -111,7 +111,6 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	wg.Add(len(catalog))
 	for i := range catalog {
-		i := i
 		go func() {
 			defer wg.Done()
 			resolved[i] = resolveWebDaemon(catalog[i])

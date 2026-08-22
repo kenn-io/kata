@@ -628,11 +628,9 @@ func startAsyncCLI(t *testing.T, ctx context.Context, args ...string) *asyncCLI 
 	cmd.SetArgs(args)
 	cmd.SetContext(derived)
 	a := &asyncCLI{buf: buf, cancel: cancel}
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
+	a.wg.Go(func() {
 		_ = cmd.Execute()
-	}()
+	})
 	return a
 }
 

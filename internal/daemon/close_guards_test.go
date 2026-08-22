@@ -389,7 +389,7 @@ func TestParentCloseCompleteness_TruncatesLongChildList(t *testing.T) {
 	parent := createIssueViaHTTP(t, env, pid, "parent with many children")
 	// Create more children than the sample limit (10) so the suffix renders.
 	const totalChildren = 12
-	for i := 0; i < totalChildren; i++ {
+	for range totalChildren {
 		child := createIssueViaHTTP(t, env, pid, "child")
 		postLink(t, env, pid, child, "parent", parent)
 	}
@@ -486,7 +486,7 @@ func TestSiblingThrottle_DefaultAllowsBurstWithDistinctEvidence(t *testing.T) {
 	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
 		postLink(t, env, pid, c, "parent", parent)
 		children = append(children, c)
@@ -508,7 +508,7 @@ func TestSiblingThrottle_FourthCloseUnderSameParentRefusedWhenEnabled(t *testing
 	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
 		postLink(t, env, pid, c, "parent", parent)
 		children = append(children, c)
@@ -551,7 +551,7 @@ func TestSiblingThrottle_CountsCrossProjectSiblings(t *testing.T) {
 	require.NoError(t, err)
 
 	spokeRefs := make([]string, 0, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		c := createIssueViaHTTP(t, env, pidB, fmt.Sprintf("spoke child %d", i+1))
 		spokeRefs = append(spokeRefs, "spoke-project#"+refForIssue(t, env, c))
 		resp, _ := postLinkRaw(t, env, pidB, c, map[string]any{
@@ -668,7 +668,7 @@ func TestSiblingThrottle_AllowsFourthCloseWhenOldestSiblingIsOutsideDefaultWindo
 	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
 		postLink(t, env, pid, c, "parent", parent)
 		children = append(children, c)
@@ -716,7 +716,7 @@ func TestSiblingThrottle_UsesConfiguredWindowInRefusal(t *testing.T) {
 	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
 		postLink(t, env, pid, c, "parent", parent)
 		children = append(children, c)
@@ -743,7 +743,7 @@ func TestSiblingThrottle_DifferentActorNotThrottled(t *testing.T) {
 	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
 		postLink(t, env, pid, c, "parent", parent)
 		children = append(children, c)
@@ -774,7 +774,7 @@ func TestSiblingThrottle_UnparentedIssuesNotThrottled(t *testing.T) {
 	// Four issues with no parent link — the throttle only applies to siblings
 	// under a shared parent, so all four closes should succeed.
 	issues := make([]int64, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		issues = append(issues, createIssueViaHTTP(t, env, pid,
 			fmt.Sprintf("standalone %d", i+1)))
 	}
@@ -929,7 +929,7 @@ func TestSiblingThrottle_SkipsSelfAfterReopen(t *testing.T) {
 	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
 		postLink(t, env, pid, c, "parent", parent)
 		children = append(children, c)
@@ -1001,7 +1001,7 @@ func TestThrottle_EmitsCloseThrottledEvent_SiblingBurst(t *testing.T) {
 	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
 		postLink(t, env, pid, c, "parent", parent)
 		children = append(children, c)
@@ -1116,7 +1116,7 @@ func TestThrottle_DryRunDoesNotEmitEvent(t *testing.T) {
 	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
 		postLink(t, env, pid, c, "parent", parent)
 		children = append(children, c)

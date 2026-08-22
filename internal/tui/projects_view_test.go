@@ -87,7 +87,7 @@ func TestProjectsRows_StableTiebreakerOnEqualNamesAndTimes(t *testing.T) {
 		100: {LastEventAt: &t1},
 		50:  {LastEventAt: &t1},
 	}
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		rows := projectsRows(byID, idents, stats)
 		require.Len(t, rows, 3)
 		assert.Equal(t, int64(50), rows[1].projectID, "lower projectID first on tie")

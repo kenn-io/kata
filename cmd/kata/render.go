@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -179,12 +180,7 @@ func (r *rowRenderer) priorityField(p *int64) string {
 // everything else is not a recognized chip and is dropped.
 func (r *rowRenderer) chipsField(labels []string) string {
 	has := func(want string) bool {
-		for _, l := range labels {
-			if l == want {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(labels, want)
 	}
 	var b strings.Builder
 	if has("epic") {
