@@ -33,9 +33,10 @@ but don't remove the mattn dependency because release builds don't use it.
 
 ## Local checks
 
-Run:
+Install the pinned Go and lint tools, then run the checks:
 
 ```sh
+mise install
 make test
 make vet
 make lint

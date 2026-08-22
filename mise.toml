@@ -1,0 +1,3 @@
+[tools]
+"github:golangci/golangci-lint" = "2.13.1"
+go = "1.27.0"
