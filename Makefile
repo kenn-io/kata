@@ -3,6 +3,7 @@
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
 GOLANGCI_LINT_VERSION ?= v2.13.1
+GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CUSTOM_GCL := ./custom-gcl
 VERSION := $(shell v=$$(git describe --tags --always --dirty 2>/dev/null || printf dev); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
 COMMIT := $(shell v=$$(git rev-parse --short=7 HEAD 2>/dev/null || printf unknown); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
@@ -123,14 +124,10 @@ lint:
 vet:
 	go vet ./...
 
-nilaway-golangci-build:
-	@if ! command -v golangci-lint >/dev/null 2>&1; then \
-		echo "golangci-lint not found. Install with: make lint-tools" >&2; \
-		exit 1; \
-	fi
+nilaway-golangci-build: lint-tools
 	@unset_args=$$(git rev-parse --local-env-vars 2>/dev/null | sed 's/^/-u /' | tr '\n' ' '); \
 		env $$unset_args GOFLAGS=-buildvcs=false \
-			golangci-lint custom --version "$(GOLANGCI_LINT_VERSION)" --name custom-gcl
+			$(GOLANGCI_LINT) custom --version "$(GOLANGCI_LINT_VERSION)" --name custom-gcl
 
 nilaway: nilaway-golangci-build
 	$(CUSTOM_GCL) run --config .golangci.nilaway.yml ./...
