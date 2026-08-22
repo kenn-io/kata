@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -311,10 +312,7 @@ func retryAfterWait(value string, now time.Time) (time.Duration, bool) {
 	if err != nil {
 		return 0, false
 	}
-	wait := resetAt.Sub(now)
-	if wait < 0 {
-		wait = 0
-	}
+	wait := max(resetAt.Sub(now), 0)
 	return wait, true
 }
 
@@ -327,10 +325,7 @@ func rateLimitResetWait(value string, now time.Time) (time.Duration, bool) {
 	if err != nil {
 		return 0, false
 	}
-	wait := time.Unix(seconds, 0).Sub(now)
-	if wait < 0 {
-		wait = 0
-	}
+	wait := max(time.Unix(seconds, 0).Sub(now), 0)
 	return wait, true
 }
 
@@ -533,10 +528,8 @@ func graphQLErrorHasClass(e parentGraphQLError, classes ...string) bool {
 func graphQLErrorHasExactClass(e parentGraphQLError, classes ...string) bool {
 	for _, value := range e.classValues() {
 		normalized := normalizeGraphQLErrorClass(value)
-		for _, class := range classes {
-			if normalized == class {
-				return true
-			}
+		if slices.Contains(classes, normalized) {
+			return true
 		}
 	}
 	return false

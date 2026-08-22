@@ -174,10 +174,7 @@ func suggestMenuWidth(rows []string, _ bool) int {
 // menuH — the menu overlays tab content; see detail_render.go::View.
 func suggestMenuHeight(s inputState, suggestions []LabelCount, entry labelCacheEntry) int {
 	rows, _ := suggestMenuRows(s, suggestions, entry)
-	body := len(rows)
-	if body < 1 {
-		body = 1
-	}
+	body := max(len(rows), 1)
 	return body + 2 // top + bottom borders
 }
 

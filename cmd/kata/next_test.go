@@ -178,7 +178,7 @@ func TestNext_AllFullResolvesQualifiedProject(t *testing.T) {
 	peer := createIssue(t, env, pid, "local peer")
 	project, err := env.DB.CreateProject(context.Background(), "example-project")
 	require.NoError(t, err)
-	target := createNextTestIssue(t, env, project.ID, "global full candidate", ptrInt64(0))
+	target := createNextTestIssue(t, env, project.ID, "global full candidate", new(int64(0)))
 	postJSONOK(t, env.URL+"/api/v1/projects/"+itoa(project.ID)+"/issues/"+target+"/links",
 		map[string]any{"actor": "tester", "type": "related", "to_ref": "kata#" + peer})
 

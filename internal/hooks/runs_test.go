@@ -53,7 +53,7 @@ func TestRunsAppender_OneLinePerRun(t *testing.T) {
 func TestRunsAppender_RotatesAtThreshold(t *testing.T) {
 	// 1KB threshold; each runRecord is well over 100B, so a few writes rotate.
 	app, path := newTestRunsAppender(t, 1024, 3)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		app.Append(runRecord{Version: 1, EventID: int64(i), Result: "ok",
 			HookCommand: "/usr/local/bin/something/longer"})
 	}
@@ -67,7 +67,7 @@ func TestRunsAppender_RotatesAtThreshold(t *testing.T) {
 
 func TestRunsAppender_KeepsAtMostKeepFiles(t *testing.T) {
 	app, path := newTestRunsAppender(t, 256, 2) // keep .1 and .2
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		app.Append(runRecord{Version: 1, EventID: int64(i), Result: "ok",
 			HookCommand: "/usr/local/bin/notify"})
 	}
@@ -93,11 +93,11 @@ func TestRunsAppender_ConcurrentAppends_NoInterleave(t *testing.T) {
 	const totalRecords = 25
 	app, path := newTestRunsAppender(t, 16*1024, 5)
 	var wg sync.WaitGroup
-	for w := 0; w < 8; w++ {
+	for w := range 8 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < totalRecords; i++ {
+			for i := range totalRecords {
 				app.Append(runRecord{Version: 1, EventID: int64(id*1000 + i), Result: "ok",
 					HookCommand: "/usr/local/bin/something/longer"})
 			}

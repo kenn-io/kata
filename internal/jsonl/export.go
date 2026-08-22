@@ -2104,11 +2104,12 @@ func whereClause(clauses []string) string {
 }
 
 func joinClauses(clauses []string) string {
-	out := clauses[0]
+	var out strings.Builder
+	out.WriteString(clauses[0])
 	for _, clause := range clauses[1:] {
-		out += " AND " + clause
+		out.WriteString(" AND " + clause)
 	}
-	return out
+	return out.String()
 }
 
 func exportSQLiteSequence(ctx context.Context, d exportQuerier, enc *Encoder) error {

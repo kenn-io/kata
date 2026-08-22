@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -140,12 +141,7 @@ func isCanonicalSequence(name string) bool {
 	if name == optionalVectorSequenceName {
 		return true
 	}
-	for _, canonical := range canonicalSequenceNames {
-		if name == canonical {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(canonicalSequenceNames, name)
 }
 
 func (s *Store) validateRuntimeFunctionPrivileges(ctx context.Context) error {

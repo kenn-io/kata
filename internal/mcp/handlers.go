@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -65,7 +66,6 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	group, groupContext := errgroup.WithContext(ctx)
 	group.SetLimit(toolCallConcurrency)
 	for index := range projects {
-		index := index
 		group.Go(func() error {
 			limit64 := int64(limit + 1)
 			response, searchErr := h.options.Client.SearchIssues(groupContext, &generated.SearchIssuesRequestOptions{
@@ -1054,9 +1054,7 @@ func copyMetadata(source map[string]any) map[string]any {
 		return make(map[string]any)
 	}
 	result := make(map[string]any, len(source)+2)
-	for key, value := range source {
-		result[key] = value
-	}
+	maps.Copy(result, source)
 	return result
 }
 
@@ -1161,7 +1159,7 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 		Status:       issue.Status,
 		Owner:        issue.Owner,
 		Priority:     issue.Priority,
-		Labels:       stringSlicePointer(nonNilStrings(issue.Labels)),
+		Labels:       new(nonNilStrings(issue.Labels)),
 		Blocked:      issue.Blocked,
 		Revision:     issue.Revision,
 		UpdatedAt:    formatTime(issue.UpdatedAt),
@@ -1175,7 +1173,7 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 	return IssueSummary{
 		UID: issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
 		Title: issue.Title, Status: issue.Status, Owner: issue.Owner, Priority: issue.Priority,
-		Labels: stringSlicePointer(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
+		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
 		updatedAt: issue.UpdatedAt,
@@ -1186,7 +1184,7 @@ func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSumma
 	return IssueSummary{
 		UID: issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
 		Title: issue.Title, Status: issue.Status, Owner: issue.Owner, Priority: issue.Priority,
-		Labels: stringSlicePointer(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
+		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
 		updatedAt: issue.UpdatedAt,
@@ -1501,10 +1499,6 @@ func nonNilStrings(values []string) []string {
 		return []string{}
 	}
 	return values
-}
-
-func stringSlicePointer(values []string) *[]string {
-	return &values
 }
 
 func formatTime(value time.Time) string {

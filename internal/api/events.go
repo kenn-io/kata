@@ -24,7 +24,7 @@ type OptionalInt struct {
 // Schema implements huma.SchemaProvider so the OpenAPI schema is "integer"
 // rather than the default struct schema.
 func (OptionalInt) Schema(r huma.Registry) *huma.Schema {
-	return huma.SchemaFromType(r, reflect.TypeOf(0))
+	return huma.SchemaFromType(r, reflect.TypeFor[int]())
 }
 
 // Receiver returns the reflect.Value of the int field for Huma to parse into.

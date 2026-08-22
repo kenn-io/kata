@@ -112,7 +112,7 @@ func TestFingerprint_DiffersOnDifferentInputs(t *testing.T) {
 	}{
 		{"different_title", db.Fingerprint("aa", "b", nil, nil, nil, nil, nil)},
 		{"different_body", db.Fingerprint("a", "bb", nil, nil, nil, nil, nil)},
-		{"different_owner", db.Fingerprint("a", "b", strPtr("x"), nil, nil, nil, nil)},
+		{"different_owner", db.Fingerprint("a", "b", new("x"), nil, nil, nil, nil)},
 		{"different_labels", db.Fingerprint("a", "b", nil, []string{"bug"}, nil, nil, nil)},
 		{"different_links", db.Fingerprint("a", "b", nil, nil, []db.InitialLink{{Type: "blocks", ToNumber: 1}}, nil, nil)},
 		{"different_priority", db.Fingerprint("a", "b", nil, nil, nil, &priority, nil)},

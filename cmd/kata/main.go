@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -299,10 +300,8 @@ func childCommandByName(cmd *cobra.Command, name string) *cobra.Command {
 		if child.Name() == name {
 			return child
 		}
-		for _, alias := range child.Aliases {
-			if alias == name {
-				return child
-			}
+		if slices.Contains(child.Aliases, name) {
+			return child
 		}
 	}
 	return nil
@@ -310,7 +309,7 @@ func childCommandByName(cmd *cobra.Command, name string) *cobra.Command {
 
 func flagArgConsumesValue(cmd *cobra.Command, arg string) bool {
 	name := strings.TrimLeft(arg, "-")
-	if eq := strings.IndexByte(name, '='); eq >= 0 {
+	if found := strings.Contains(name, "="); found {
 		return false
 	}
 	if name == "" {
@@ -387,8 +386,7 @@ func cliErrorForErr(err error, runEReached bool) *cliError {
 // err is a *cliError, its ExitCode wins; otherwise exitCodeFor's
 // runE-reached heuristic decides.
 func exitCodeForErr(err error, runEReached bool) int {
-	var cli *cliError
-	if errors.As(err, &cli) {
+	if cli, ok := errors.AsType[*cliError](err); ok {
 		return cli.ExitCode
 	}
 	return exitCodeFor(err, runEReached)
@@ -410,11 +408,11 @@ func translateFlagError(_ *cobra.Command, err error) error {
 	}
 	msg := err.Error()
 	const prefix = "unknown shorthand flag: '"
-	idx := strings.Index(msg, prefix)
-	if idx < 0 {
+	_, after, ok := strings.Cut(msg, prefix)
+	if !ok {
 		return err
 	}
-	rest := msg[idx+len(prefix):]
+	rest := after
 	if rest == "" || !isDigit(rest[0]) {
 		return err
 	}

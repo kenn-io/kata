@@ -860,10 +860,7 @@ func (d *Store) enableProjectFederationTx(
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
-	pullCursor := enableEvent.ID - 1
-	if pullCursor < 0 {
-		pullCursor = 0
-	}
+	pullCursor := max(enableEvent.ID-1, 0)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO federation_bindings(
 			project_id, role, hub_url, hub_project_id, hub_project_uid,
@@ -2044,7 +2041,7 @@ func validateFederatedParentGraph(desired map[db.FoldLinkKey]federatedLinkRow) e
 	for childUID := range parents {
 		current := childUID
 		seen := map[string]struct{}{}
-		for depth := 0; depth < db.MaxParentDepth; depth++ {
+		for depth := range db.MaxParentDepth {
 			if _, ok := seen[current]; ok {
 				return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrParentCycle)
 			}
@@ -2541,10 +2538,7 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("delete pre-adoption local events: %w", err)
 	}
 
-	pullCursor := p.ReplayHorizonEventID - 1
-	if pullCursor < 0 {
-		pullCursor = 0
-	}
+	pullCursor := max(p.ReplayHorizonEventID-1, 0)
 	allowInsecure := 0
 	if p.AllowInsecure {
 		allowInsecure = 1

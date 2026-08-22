@@ -33,7 +33,7 @@ func TestShowIssueResponseHasShortIDAndNoNumber(t *testing.T) {
 // TestIssueRefHasShortIDAndQualifiedID covers the compact parent-context type
 // used inside ShowIssueResponse.Parent.
 func TestIssueRefHasShortIDAndQualifiedID(t *testing.T) {
-	typ := reflect.TypeOf(api.IssueRef{})
+	typ := reflect.TypeFor[api.IssueRef]()
 	requireFieldHasJSONTag(t, typ, "ShortID", "short_id")
 	requireFieldHasJSONTag(t, typ, "QualifiedID", "qualified_id")
 	_, hasNumber := typ.FieldByName("Number")
@@ -49,7 +49,7 @@ func TestIssueRefHasShortIDAndQualifiedID(t *testing.T) {
 // Number/ParentNumber stay as explicit absence checks — those are the v7
 // fields whose disappearance the cutover is meant to enforce.
 func TestIssueOutHasShortIDFamily(t *testing.T) {
-	typ := reflect.TypeOf(api.IssueOut{})
+	typ := reflect.TypeFor[api.IssueOut]()
 	// ShortID lives on the embedded db.Issue but reflect's FieldByName
 	// traverses anonymous fields, so the lookup still resolves.
 	requireFieldHasJSONTag(t, typ, "ShortID", "short_id")
@@ -58,7 +58,7 @@ func TestIssueOutHasShortIDFamily(t *testing.T) {
 		_, has := typ.FieldByName(f)
 		assert.Falsef(t, has, "IssueOut.%s must disappear", f)
 	}
-	peerSlice := reflect.SliceOf(reflect.TypeOf(api.LinkPeer{}))
+	peerSlice := reflect.SliceOf(reflect.TypeFor[api.LinkPeer]())
 	for _, f := range []string{"Blocks", "BlockedBy", "Related"} {
 		// The int64 link arrays are replaced by LinkPeer slices so
 		// consumers get UID + short_id together; a missing field would
@@ -77,7 +77,7 @@ func TestIssueOutHasShortIDFamily(t *testing.T) {
 // the projection as ProjectOut (embedded in ListProjectsResponse, ShowProject
 // Response, etc.).
 func TestProjectOutHasNoNextIssueNumber(t *testing.T) {
-	typ := reflect.TypeOf(api.ProjectOut{})
+	typ := reflect.TypeFor[api.ProjectOut]()
 	_, has := typ.FieldByName("NextIssueNumber")
 	assert.False(t, has, "ProjectOut.NextIssueNumber must be gone")
 }
@@ -85,7 +85,7 @@ func TestProjectOutHasNoNextIssueNumber(t *testing.T) {
 // TestLinkPeerShape pins the structured replacement for from_number/to_number
 // on link records. Project and QualifiedID are always populated (0.2.0).
 func TestLinkPeerShape(t *testing.T) {
-	typ := reflect.TypeOf(api.LinkPeer{})
+	typ := reflect.TypeFor[api.LinkPeer]()
 	requireFieldHasJSONTag(t, typ, "UID", "uid")
 	requireFieldHasJSONTag(t, typ, "ShortID", "short_id")
 	requireFieldHasJSONTag(t, typ, "Project", "project")
@@ -95,14 +95,14 @@ func TestLinkPeerShape(t *testing.T) {
 // TestIssueOutUsesLinkPeerForParent pins that IssueOut carries Parent *LinkPeer
 // (0.2.0) and no longer exposes the bare ParentShortID string.
 func TestIssueOutUsesLinkPeerForParent(t *testing.T) {
-	typ := reflect.TypeOf(api.IssueOut{})
+	typ := reflect.TypeFor[api.IssueOut]()
 	_, hasOld := typ.FieldByName("ParentShortID")
 	assert.False(t, hasOld, "IssueOut.ParentShortID must be removed (replaced by Parent *LinkPeer)")
 	f, ok := typ.FieldByName("Parent")
 	if !ok {
 		t.Fatal("IssueOut.Parent missing")
 	}
-	peerPtrType := reflect.TypeOf((*api.LinkPeer)(nil))
+	peerPtrType := reflect.TypeFor[*api.LinkPeer]()
 	assert.Equal(t, peerPtrType, f.Type, "IssueOut.Parent must be *LinkPeer")
 }
 
@@ -110,12 +110,12 @@ func TestIssueOutUsesLinkPeerForParent(t *testing.T) {
 // (0.9.0), so clients (e.g. `kata list` human output) can render a blocked
 // glyph without an extra lookup per blocked_by peer.
 func TestLinkPeerHasStatus(t *testing.T) {
-	typ := reflect.TypeOf(api.LinkPeer{})
+	typ := reflect.TypeFor[api.LinkPeer]()
 	f, ok := typ.FieldByName("Status")
 	if !ok {
 		t.Fatal("LinkPeer.Status missing")
 	}
-	assert.Equal(t, reflect.TypeOf(""), f.Type, "LinkPeer.Status must be string")
+	assert.Equal(t, reflect.TypeFor[string](), f.Type, "LinkPeer.Status must be string")
 	assert.Equal(t, "status", f.Tag.Get("json"), `LinkPeer.Status must be tagged json:"status"`)
 }
 
@@ -124,7 +124,7 @@ func TestLinkPeerHasStatus(t *testing.T) {
 // project_id field is gone now that links are project-independent edges
 // (storage v16 / API 0.2.0).
 func TestLinkOutUsesLinkPeer(t *testing.T) {
-	typ := reflect.TypeOf(api.LinkOut{})
+	typ := reflect.TypeFor[api.LinkOut]()
 	for _, field := range []string{"FromNumber", "FromIssueUID", "ToNumber", "ToIssueUID", "ProjectID"} {
 		_, has := typ.FieldByName(field)
 		assert.Falsef(t, has, "LinkOut.%s must not be on the wire", field)
@@ -134,7 +134,7 @@ func TestLinkOutUsesLinkPeer(t *testing.T) {
 		if !ok {
 			t.Fatalf("LinkOut.%s missing", field)
 		}
-		assert.Equalf(t, reflect.TypeOf(api.LinkPeer{}), f.Type,
+		assert.Equalf(t, reflect.TypeFor[api.LinkPeer](), f.Type,
 			"LinkOut.%s must be LinkPeer", field)
 	}
 }
@@ -177,7 +177,7 @@ func TestPathRequestsUseRef(t *testing.T) {
 // TestCreateInitialLinkBodyUsesRef pins the JSON input switch on the create
 // link body: to_number (int) becomes to_ref (string).
 func TestCreateInitialLinkBodyUsesRef(t *testing.T) {
-	typ := reflect.TypeOf(api.CreateInitialLinkBody{})
+	typ := reflect.TypeFor[api.CreateInitialLinkBody]()
 	_, hasOld := typ.FieldByName("ToNumber")
 	assert.False(t, hasOld, "CreateInitialLinkBody.ToNumber must be replaced by ToRef")
 	requireFieldHasJSONTag(t, typ, "ToRef", "to_ref")
@@ -195,7 +195,7 @@ func TestCreateLinkRequestBodyUsesRef(t *testing.T) {
 // TestLinksDeltaUsesRefStrings checks the bulk relationship payload swapped
 // every int64 link list for a []string of refs.
 func TestLinksDeltaUsesRefStrings(t *testing.T) {
-	typ := reflect.TypeOf(api.LinksDelta{})
+	typ := reflect.TypeFor[api.LinksDelta]()
 	stringPtrFields := []string{"SetParent", "RemoveParent"}
 	for _, name := range stringPtrFields {
 		f, ok := typ.FieldByName(name)
@@ -222,8 +222,8 @@ func TestLinksDeltaUsesRefStrings(t *testing.T) {
 // applied link change is reported as a LinkPeer (UID + short_id) so callers
 // know both forms without joining.
 func TestLinkChangesUsesLinkPeer(t *testing.T) {
-	typ := reflect.TypeOf(api.LinkChanges{})
-	peerType := reflect.TypeOf(api.LinkPeer{})
+	typ := reflect.TypeFor[api.LinkChanges]()
+	peerType := reflect.TypeFor[api.LinkPeer]()
 	peerPtrType := reflect.PointerTo(peerType)
 	peerSliceType := reflect.SliceOf(peerType)
 
@@ -254,7 +254,7 @@ func TestLinkChangesUsesLinkPeer(t *testing.T) {
 // TestEventEnvelopeUsesShortID pins the SSE/poll event payload: issue_number
 // disappears in favor of issue_short_id (UID stays as the stable reference).
 func TestEventEnvelopeUsesShortID(t *testing.T) {
-	typ := reflect.TypeOf(api.EventEnvelope{})
+	typ := reflect.TypeFor[api.EventEnvelope]()
 	_, hasOld := typ.FieldByName("IssueNumber")
 	assert.False(t, hasOld, "EventEnvelope.IssueNumber must be replaced by IssueShortID")
 	requireFieldHasJSONTag(t, typ, "IssueShortID", "issue_short_id")
@@ -263,7 +263,7 @@ func TestEventEnvelopeUsesShortID(t *testing.T) {
 // TestDigestIssueActionsUsesShortID pins the digest payload: issue_number is
 // replaced by issue_short_id (issue_uid is added as the stable reference).
 func TestDigestIssueActionsUsesShortID(t *testing.T) {
-	typ := reflect.TypeOf(api.DigestIssueActions{})
+	typ := reflect.TypeFor[api.DigestIssueActions]()
 	_, hasOld := typ.FieldByName("IssueNumber")
 	assert.False(t, hasOld, "DigestIssueActions.IssueNumber must disappear")
 	requireFieldHasJSONTag(t, typ, "IssueShortID", "issue_short_id")

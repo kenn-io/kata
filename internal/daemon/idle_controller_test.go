@@ -226,11 +226,9 @@ func TestIdleControllerConcurrentDuplicateReleaseIsHarmless(t *testing.T) {
 
 	var releases sync.WaitGroup
 	for range 16 {
-		releases.Add(1)
-		go func() {
-			defer releases.Done()
+		releases.Go(func() {
 			lease.Release()
-		}()
+		})
 	}
 	releases.Wait()
 	clock.Advance(time.Minute)

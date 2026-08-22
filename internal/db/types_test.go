@@ -9,7 +9,7 @@ import (
 )
 
 func TestIssue_HasShortIDFieldAndNoNumber(t *testing.T) {
-	typ := reflect.TypeOf(db.Issue{})
+	typ := reflect.TypeFor[db.Issue]()
 	_, hasShortID := typ.FieldByName("ShortID")
 	_, hasNumber := typ.FieldByName("Number")
 	assert.True(t, hasShortID, "Issue.ShortID should exist")

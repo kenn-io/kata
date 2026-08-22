@@ -135,8 +135,8 @@ func parseSinceUntil(s string, now time.Time) (time.Time, error) {
 		return t.UTC(), nil
 	}
 	expanded := s
-	if strings.HasSuffix(s, "d") {
-		num := strings.TrimSuffix(s, "d")
+	if before, ok := strings.CutSuffix(s, "d"); ok {
+		num := before
 		// Trust no integer-overflow wraparound here: a multi-year window is
 		// the user's call, and ParseDuration will reject pathological inputs
 		// (e.g. trailing "d" with non-numeric prefix).

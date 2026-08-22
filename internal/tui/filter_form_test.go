@@ -67,7 +67,7 @@ func typeString(m Model, s string) Model {
 // pressTabN sends Tab through Update n times so callers can advance the
 // focused field by a known number of steps in one expression.
 func pressTabN(m Model, n int) Model {
-	for i := 0; i < n; i++ {
+	for range n {
 		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	return m
@@ -525,7 +525,7 @@ func TestSnapshot_List_WithFilterChipsFromModal(t *testing.T) {
 		ShortID:   "42aa",
 		Title:     "fix login bug on Safari",
 		Status:    "open",
-		Owner:     ptrString("alice"),
+		Owner:     new("alice"),
 		Labels:    []string{"bug", "prio-1"},
 		UpdatedAt: snapshotFixedNow.Add(-30 * 60_000_000_000), // 30m
 	}}

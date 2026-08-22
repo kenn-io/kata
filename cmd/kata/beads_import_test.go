@@ -516,9 +516,9 @@ func TestMapBeadsPriority(t *testing.T) {
 		in   int
 		want *int64
 	}{
-		{"zero is highest", 0, ptrInt64(0)},
-		{"in range one", 1, ptrInt64(1)},
-		{"top of range", 4, ptrInt64(4)},
+		{"zero is highest", 0, new(int64(0))},
+		{"in range one", 1, new(int64(1))},
+		{"top of range", 4, new(int64(4))},
 		{"out of range above drops", 5, nil},
 		{"negative drops", -1, nil},
 	}
@@ -534,8 +534,6 @@ func TestMapBeadsPriority(t *testing.T) {
 		})
 	}
 }
-
-func ptrInt64(n int64) *int64 { return &n }
 
 func TestMapBeadsStatus(t *testing.T) {
 	cases := []struct {

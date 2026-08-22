@@ -42,10 +42,7 @@ func (d *Store) LabelsByIssues(
 		return out, nil
 	}
 	for i := 0; i < len(issueIDs); i += labelsByIssuesChunkSize {
-		end := i + labelsByIssuesChunkSize
-		if end > len(issueIDs) {
-			end = len(issueIDs)
-		}
+		end := min(i+labelsByIssuesChunkSize, len(issueIDs))
 		if err := d.appendLabelsForChunk(ctx, projectID, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
@@ -61,7 +58,7 @@ func (d *Store) appendLabelsForChunk(
 	ctx context.Context, projectID int64, chunk []int64, out map[int64][]string,
 ) error {
 	placeholders := make([]string, len(chunk))
-	args := make([]interface{}, 0, len(chunk)+1)
+	args := make([]any, 0, len(chunk)+1)
 	args = append(args, projectID)
 	for i, id := range chunk {
 		placeholders[i] = "?"

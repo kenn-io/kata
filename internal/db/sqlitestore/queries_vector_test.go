@@ -19,7 +19,7 @@ func TestListIssueContentPaginatesLiveIssues(t *testing.T) {
 	proj := createProject(ctx, t, d, "spoke-project")
 
 	var issues []db.Issue
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		iss, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: proj.ID, Title: fmt.Sprintf("t%d", i), Body: "b", Author: "x",
 		})

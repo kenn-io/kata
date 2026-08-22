@@ -49,7 +49,7 @@ func TestReady_FiltersBlocked(t *testing.T) {
 func TestReady_RespectsLimit(t *testing.T) {
 	env := testenv.New(t)
 	pid := initLocalWorkspace(t, env, "kata")
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		createIssueViaHTTP(t, env, pid, "x")
 	}
 
@@ -184,7 +184,7 @@ func TestReadyGlobal_LimitCapsTotalRows(t *testing.T) {
 	env := testenv.New(t)
 	pid1 := initLocalWorkspace(t, env, "kata")
 	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		createIssueViaHTTP(t, env, pid1, "p1")
 		createIssueViaHTTP(t, env, pid2, "p2")
 	}

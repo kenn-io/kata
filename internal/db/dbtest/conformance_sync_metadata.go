@@ -190,7 +190,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 		"custom":       json.RawMessage(`{"enabled":true}`),
 	}
 	patchedIssue, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-		IssueID: fixture.Issue.ID, IfMatchRev: db.IfMatch(fixture.Issue.Revision), Actor: "metadata-editor",
+		IssueID: fixture.Issue.ID, IfMatchRev: new(fixture.Issue.Revision), Actor: "metadata-editor",
 		Patch: issuePatch,
 	})
 	if err != nil {
@@ -216,7 +216,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	assert.JSONEq(t, `"2026-07-20"`, string(issuePayload.Diff["scheduled_on"].To))
 
 	noIssueChange, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-		IssueID: fixture.Issue.ID, IfMatchRev: db.IfMatch(patchedIssue.NewRevision), Actor: "metadata-editor",
+		IssueID: fixture.Issue.ID, IfMatchRev: new(patchedIssue.NewRevision), Actor: "metadata-editor",
 		Patch: issuePatch,
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	assert.Zero(t, noIssueChange.Event.ID)
 	assert.Equal(t, patchedIssue.NewRevision, noIssueChange.NewRevision)
 	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-		IssueID: fixture.Issue.ID, IfMatchRev: db.IfMatch(fixture.Issue.Revision), Actor: "metadata-editor",
+		IssueID: fixture.Issue.ID, IfMatchRev: new(fixture.Issue.Revision), Actor: "metadata-editor",
 		Patch: map[string]json.RawMessage{"custom": json.RawMessage(`null`)},
 	})
 	var issueConflict *db.RevisionConflictError
@@ -250,7 +250,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	assert.JSONEq(t, `{"scheduled_on":"2026-07-20"}`, string(clearedIssue.Issue.Metadata))
 
 	patchedProject, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
-		ProjectID: fixture.Project.ID, IfMatchRev: db.IfMatch(fixture.Project.Revision), Actor: "metadata-editor",
+		ProjectID: fixture.Project.ID, IfMatchRev: new(fixture.Project.Revision), Actor: "metadata-editor",
 		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"Platform"`)},
 	})
 	if err != nil {
@@ -261,7 +261,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	assert.Equal(t, "project.metadata_updated", patchedProject.Event.Type)
 	assert.JSONEq(t, `{"area":"Platform"}`, string(patchedProject.Project.Metadata))
 	noProjectChange, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
-		ProjectID: fixture.Project.ID, IfMatchRev: db.IfMatch(patchedProject.NewRevision), Actor: "metadata-editor",
+		ProjectID: fixture.Project.ID, IfMatchRev: new(patchedProject.NewRevision), Actor: "metadata-editor",
 		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"Platform"`)},
 	})
 	if err != nil {
@@ -270,7 +270,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	assert.False(t, noProjectChange.Changed)
 	assert.Zero(t, noProjectChange.Event.ID)
 	_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
-		ProjectID: fixture.Project.ID, IfMatchRev: db.IfMatch(fixture.Project.Revision), Actor: "metadata-editor",
+		ProjectID: fixture.Project.ID, IfMatchRev: new(fixture.Project.Revision), Actor: "metadata-editor",
 		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"Other"`)},
 	})
 	var projectConflict *db.RevisionConflictError
@@ -300,7 +300,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	}
 	designated, err := store.DesignateInboxProject(ctx, db.DesignateInboxProjectIn{
 		ProjectID:  targetInbox.ID,
-		IfMatchRev: db.IfMatch(targetInbox.Revision),
+		IfMatchRev: new(targetInbox.Revision),
 		Actor:      "metadata-editor",
 	})
 	if err != nil {

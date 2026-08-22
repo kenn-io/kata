@@ -26,7 +26,7 @@ func TestEvents_OneShotPlainOutput(t *testing.T) {
 	assert.Contains(t, out, "project.created")
 	assert.Contains(t, out, "issue.created")
 	lines := 0
-	for _, l := range strings.Split(out, "\n") {
+	for l := range strings.SplitSeq(out, "\n") {
 		if strings.TrimSpace(l) != "" {
 			lines++
 		}
@@ -154,7 +154,7 @@ func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 	}, 2*time.Second)
 
 	lines := []string{}
-	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if strings.TrimSpace(l) != "" {
 			lines = append(lines, l)
 		}
@@ -221,7 +221,7 @@ func TestEvents_TailEmitsNDJSON(t *testing.T) {
 	}, 2*time.Second)
 
 	lines := []string{}
-	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if strings.TrimSpace(l) != "" {
 			lines = append(lines, l)
 		}

@@ -218,7 +218,7 @@ func TestConcurrentExportsCannotReplaceUnconfirmedArtifact(t *testing.T) {
 	require.NoError(t, err)
 	project, err := store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	for index := 0; index < 200; index++ {
+	for range 200 {
 		_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Concurrent export fixture", Author: "example-agent",
 		})
@@ -233,13 +233,11 @@ func TestConcurrentExportsCannotReplaceUnconfirmedArtifact(t *testing.T) {
 	errors := make(chan error, 2)
 	var group sync.WaitGroup
 	for range 2 {
-		group.Add(1)
-		go func() {
-			defer group.Done()
+		group.Go(func() {
 			<-start
 			_, exportErr := admin.Export(t.Context(), ExportOptions{Artifact: "concurrent.jsonl"})
 			errors <- exportErr
-		}()
+		})
 	}
 	close(start)
 	group.Wait()

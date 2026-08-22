@@ -35,7 +35,7 @@ func TestDetailRedesign_StackedHasProjectBarOnFirstLine(t *testing.T) {
 func TestDetailRedesign_ContentHasLeftGutter(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
-	dm.issue.Owner = ptrString("alice")
+	dm.issue.Owner = new("alice")
 	got := stripANSI(dm.View(160, 32, viewChrome{
 		scope:   scope{projectID: 7, projectName: "kata"},
 		version: "dev",
@@ -249,7 +249,7 @@ func seedActivity(dm detailModel, comments []CommentEntry, events []EventLogEntr
 }
 
 func firstNonEmptyLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.TrimSpace(line) != "" {
 			return line
 		}
@@ -258,7 +258,7 @@ func firstNonEmptyLine(s string) string {
 }
 
 func lineContaining(s, needle string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.Contains(line, needle) {
 			return line
 		}

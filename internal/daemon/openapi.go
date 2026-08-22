@@ -198,7 +198,7 @@ func applyErrorEnvelopeResponses(doc *huma.OpenAPI) {
 	}
 
 	registry := doc.Components.Schemas
-	errorSchema := registry.Schema(reflect.TypeOf(api.ErrorEnvelope{}), true, "ErrorEnvelope")
+	errorSchema := registry.Schema(reflect.TypeFor[api.ErrorEnvelope](), true, "ErrorEnvelope")
 	for _, operation := range documentOperations(doc) {
 		for code, response := range operation.Responses {
 			status, err := strconv.Atoi(code)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -126,9 +127,7 @@ func runDestructive(cmd *cobra.Command, baseURL string, pid int64, pathRef, disp
 	// Build body from extraBody first so a future caller can't overwrite the
 	// resolved actor with a stray map key.
 	body := map[string]any{}
-	for k, v := range extraBody {
-		body[k] = v
-	}
+	maps.Copy(body, extraBody)
 	body["actor"] = actor
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {

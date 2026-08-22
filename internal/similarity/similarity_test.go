@@ -25,7 +25,7 @@ func runTokenizeTests(t *testing.T, cases []tokenizeTestCase) {
 	}
 }
 
-func assertScore(t *testing.T, want float64, titleA, bodyA, titleB, bodyB string, msgAndArgs ...interface{}) {
+func assertScore(t *testing.T, want float64, titleA, bodyA, titleB, bodyB string, msgAndArgs ...any) {
 	t.Helper()
 	got := similarity.Score(titleA, bodyA, titleB, bodyB)
 	assert.InDelta(t, want, got, epsilon, msgAndArgs...)

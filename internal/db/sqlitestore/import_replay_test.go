@@ -132,7 +132,7 @@ func TestImportReplayInsertsGitHubSyncState(t *testing.T) {
 				Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
 				Enabled:         true,
 				IntervalSeconds: 900,
-				LastCursorAt:    strPtr("2026-06-01T10:00:00.000Z"),
+				LastCursorAt:    new("2026-06-01T10:00:00.000Z"),
 				CreatedAt:       "2026-06-01T09:00:00.000Z",
 				UpdatedAt:       "2026-06-01T10:01:00.000Z",
 			},
@@ -142,11 +142,11 @@ func TestImportReplayInsertsGitHubSyncState(t *testing.T) {
 			IssueSyncStatus: &db.IssueSyncStatusExport{
 				BindingID:     7,
 				ProjectID:     1,
-				SyncStartedAt: strPtr("2026-06-01T09:58:00.000Z"),
-				LastAttemptAt: strPtr("2026-06-01T09:58:00.000Z"),
-				LastSuccessAt: strPtr("2026-06-01T10:00:00.000Z"),
-				LastErrorAt:   strPtr("2026-06-01T10:02:00.000Z"),
-				LastError:     strPtr("rate limited"),
+				SyncStartedAt: new("2026-06-01T09:58:00.000Z"),
+				LastAttemptAt: new("2026-06-01T09:58:00.000Z"),
+				LastSuccessAt: new("2026-06-01T10:00:00.000Z"),
+				LastErrorAt:   new("2026-06-01T10:02:00.000Z"),
+				LastError:     new("rate limited"),
 				LastCreated:   2,
 				LastUpdated:   3,
 				LastUnchanged: 4,
@@ -544,7 +544,7 @@ func TestImportReplayInstanceUID(t *testing.T) {
 func TestImportReplayReconcilesSequence(t *testing.T) {
 	ctx := context.Background()
 	src, _, p, _ := setupTestIssue(t)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "x", Author: "a"})
 		require.NoError(t, err)
 	}
@@ -852,7 +852,7 @@ func TestFKColumnResolverResolvesIssuesProjectID(t *testing.T) {
 	resolver := sqlitestore.NewFKColumnResolver(d)
 
 	var found string
-	for fkid := 0; fkid < 4; fkid++ {
+	for fkid := range 4 {
 		col, err := resolver.Resolve(ctx, "issues", fkid)
 		if err != nil {
 			t.Fatalf("Resolve(issues, %d): %v", fkid, err)

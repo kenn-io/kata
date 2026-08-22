@@ -401,11 +401,9 @@ func bootResolveScopeWith(
 			// must not wait on the async project-list fetch. The full fetch
 			// replaces these maps when it lands.
 			projects: []ProjectSummaryWithStats{{
-				ProjectSummary: ProjectSummary{
-					ID:   rr.Project.ID,
-					Name: rr.Project.Name,
-					UID:  rr.Project.UID,
-				},
+				ID:   rr.Project.ID,
+				Name: rr.Project.Name,
+				UID:  rr.Project.UID,
 			}},
 			view: viewList,
 		}, nil

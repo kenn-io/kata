@@ -37,7 +37,6 @@ func registerSectionLoaders(server *sdkmcp.Server, options Options) {
 	loaded := make(map[string]bool, len(sections))
 	var mutex sync.Mutex
 	for _, definition := range sections {
-		definition := definition
 		addTool(server, definition.loader, definition.title, definition.description,
 			toolHints(true, false, false),
 			func(_ context.Context, _ *sdkmcp.CallToolRequest, _ ToolSectionInput) (*sdkmcp.CallToolResult, ToolSectionOutput, error) {

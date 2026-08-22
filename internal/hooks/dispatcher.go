@@ -235,8 +235,8 @@ func (d *Dispatcher) enqueue(evt db.Event, acquire AcquireActivity) {
 			}
 		}
 		job := queuedHookJob{
-			HookJob: HookJob{Event: evt, Hook: h, EnqueuedAt: d.deps.Now()},
-			lease:   lease,
+			Event: evt, Hook: h, EnqueuedAt: d.deps.Now(),
+			lease: lease,
 		}
 		select {
 		case d.queue <- job:
@@ -347,10 +347,7 @@ func (d *Dispatcher) inFlightAbortSignal(ctx context.Context) (<-chan time.Time,
 	if !ok {
 		return nil, func() {}
 	}
-	delay := time.Until(deadline) - 2*d.deps.GraceWindow
-	if delay < 0 {
-		delay = 0
-	}
+	delay := max(time.Until(deadline)-2*d.deps.GraceWindow, 0)
 	timer := time.NewTimer(delay)
 	return timer.C, func() { timer.Stop() }
 }

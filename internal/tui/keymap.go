@@ -1,6 +1,10 @@
 package tui
 
-import tea "charm.land/bubbletea/v2"
+import (
+	"slices"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 // keymap is the single source of truth for keybindings. The help view
 // reads from this same value so rendered help stays in lockstep with
@@ -101,10 +105,5 @@ func newKeymap() keymap {
 // matches reports whether msg is one of k's bound keys.
 func (k key) matches(msg tea.KeyPressMsg) bool {
 	s := msg.String()
-	for _, b := range k.Keys {
-		if s == b {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(k.Keys, s)
 }

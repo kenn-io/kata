@@ -126,11 +126,11 @@ var pgOnlyQueryParams = []string{
 // after the first "?". The search is case-sensitive — libpq treats parameter
 // names as case-sensitive in URL form.
 func firstPGOnlyQueryParam(dsn string) (string, bool) {
-	q := strings.Index(dsn, "?")
-	if q < 0 {
+	_, after, ok := strings.Cut(dsn, "?")
+	if !ok {
 		return "", false
 	}
-	query := dsn[q+1:]
+	query := after
 	for _, p := range pgOnlyQueryParams {
 		if strings.Contains(query, p) {
 			// Strip the trailing "=" so the error names the parameter cleanly.

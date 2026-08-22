@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -184,7 +184,7 @@ func validateExpectedLinkProjectUIDsTx(ctx context.Context, tx *sql.Tx, expected
 	for issueID := range expected {
 		ids = append(ids, issueID)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	for _, issueID := range ids {
 		var projectUID string
 		err := tx.QueryRowContext(ctx, `
@@ -659,7 +659,7 @@ func lookupLinkByEndpointsTx(ctx context.Context, tx *sql.Tx, fromID, toID int64
 // the new parent, which would already be visible after that branch ran).
 func assertNoParentCycleTx(ctx context.Context, tx *sql.Tx, editingID, newParentID int64) error {
 	current := newParentID
-	for i := 0; i < db.MaxParentDepth; i++ {
+	for range db.MaxParentDepth {
 		if current == editingID {
 			return db.ErrParentCycle
 		}

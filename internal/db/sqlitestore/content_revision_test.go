@@ -132,7 +132,7 @@ func TestContentRevisionBumpsFromImport(t *testing.T) {
 		ProjectID: proj.ID, Source: "beads", Actor: "importer",
 		Items: []db.ImportItem{{
 			ExternalID: "a", Title: "second", Body: "b", Author: "alice",
-			Owner: strPtr("bob"), Status: "closed", ClosedReason: strPtr("done"),
+			Owner: new("bob"), Status: "closed", ClosedReason: new("done"),
 			CreatedAt: t1, UpdatedAt: t3, ClosedAt: &t3,
 		}},
 	})

@@ -413,7 +413,7 @@ func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) {
 		Now:       time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
-	for i := int64(0); i < 4; i++ {
+	for i := range int64(4) {
 		ingestCLIClaimViolation(t, env, pid, issue, "bob", "issue.updated", 20+i)
 	}
 
@@ -503,7 +503,7 @@ func TestShow_BareRefHonorsProjectFlagOutsideWorkspace(t *testing.T) {
 
 func leaseLines(out string) []string {
 	lines := []string{}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "lease: ") {
 			lines = append(lines, line)
@@ -514,7 +514,7 @@ func leaseLines(out string) []string {
 
 func claimViolationLines(out string) []string {
 	lines := []string{}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "lease violation: ") {
 			lines = append(lines, line)

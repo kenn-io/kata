@@ -146,21 +146,12 @@ func (m Model) mouseListClick(row int) (Model, tea.Cmd) {
 func (m Model) listDataBudget() int {
 	if m.layout == layoutSplit {
 		footerLines := helpLines(m.splitHelpRows(), m.width)
-		bodyHeight := m.height - 2 - footerLines
-		if bodyHeight < 4 {
-			bodyHeight = 4
-		}
-		innerH := bodyHeight - 2
-		if innerH < 2 {
-			innerH = 2
-		}
+		bodyHeight := max(m.height-2-footerLines, 4)
+		innerH := max(bodyHeight-2, 2)
 		return innerH - 2
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
-	bodyRows := m.height - 2 - 1 - footerLines
-	if bodyRows < listBodyFloor {
-		bodyRows = listBodyFloor
-	}
+	bodyRows := max(m.height-2-1-footerLines, listBodyFloor)
 	return bodyRows - 2
 }
 
@@ -173,10 +164,7 @@ func (m Model) mouseProjectsClick(y int) (Model, tea.Cmd) {
 	budget := len(rows)
 	if m.height > 0 {
 		footerLines := helpLines(projectsHelpRows(), m.width)
-		budget = m.height - projectsViewChromeRows(footerLines)
-		if budget < 1 {
-			budget = 1
-		}
+		budget = max(m.height-projectsViewChromeRows(footerLines), 1)
 	}
 	visible := clipProjectsRows(rows, m.projectsCursor, budget)
 	if row >= len(visible) {

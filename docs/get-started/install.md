@@ -5,7 +5,7 @@ daemon it starts itself, and it stores data locally in SQLite.
 
 ## Requirements
 
-The release installers below do not require Go. Install Go 1.26 or later from
+The release installers below do not require Go. Install Go 1.27 or later from
 <https://go.dev/dl/> only when using `go install` or building from a clone.
 
 GitHub release binaries are available starting with `v0.5.0`. Since v0.14.0,

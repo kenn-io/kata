@@ -202,10 +202,7 @@ func (e *APIError) Definitive() bool {
 func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	out := make([][]float32, 0, len(texts))
 	for start := 0; start < len(texts); start += c.batchSize {
-		end := start + c.batchSize
-		if end > len(texts) {
-			end = len(texts)
-		}
+		end := min(start+c.batchSize, len(texts))
 		vecs, err := c.embedBatch(ctx, texts[start:end])
 		if err != nil {
 			return nil, err

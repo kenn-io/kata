@@ -2358,8 +2358,8 @@ func TestFederationConfigReconcilerMaintainsIndependentBackoffAndQuietsSuccess(t
 	assert.Equal(t, federation.Health{
 		Configured:    2,
 		Reconciled:    2,
-		LastAttemptAt: timePointer(clock.start.Add(3 * time.Second)),
-		LastSuccessAt: timePointer(clock.start.Add(3 * time.Second)),
+		LastAttemptAt: new(clock.start.Add(3 * time.Second)),
+		LastSuccessAt: new(clock.start.Add(3 * time.Second)),
 	}, health)
 
 	clock.Advance(24 * time.Hour)
@@ -2865,10 +2865,6 @@ func repeatError(err error, count int) []error {
 
 func ioDiscardLogger() *log.Logger {
 	return log.New(io.Discard, "", 0)
-}
-
-func timePointer(value time.Time) *time.Time {
-	return &value
 }
 
 func newFakeHub() *fakeHub {

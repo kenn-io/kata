@@ -37,8 +37,7 @@ func registerAuthorRewriteHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
 		}
-		var federated *db.ProjectFederatedError
-		if errors.As(err, &federated) {
+		if _, ok := errors.AsType[*db.ProjectFederatedError](err); ok {
 			return nil, api.NewError(http.StatusConflict, "project_federated", err.Error(), "", nil)
 		}
 		if err != nil {

@@ -68,8 +68,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 			Actor:      actor,
 			Patch:      in.Body.Patch,
 		})
-		var conflict *db.RevisionConflictError
-		if errors.As(err, &conflict) {
+		if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 			return nil, api.NewError(412, "revision_conflict",
 				fmt.Sprintf("issue revision is %d", conflict.CurrentRevision), "", nil)
 		}
@@ -127,8 +126,7 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 			res, err := cfg.DB.DesignateInboxProject(ctx, db.DesignateInboxProjectIn{
 				ProjectID: in.ProjectID, IfMatchRev: rev, Actor: actor,
 			})
-			var conflict *db.RevisionConflictError
-			if errors.As(err, &conflict) {
+			if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 				return nil, api.NewError(412, "revision_conflict",
 					fmt.Sprintf("project revision is %d", conflict.CurrentRevision), "", nil)
 			}
@@ -160,8 +158,7 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 			Actor:      actor,
 			Patch:      in.Body.Patch,
 		})
-		var conflict *db.RevisionConflictError
-		if errors.As(err, &conflict) {
+		if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 			return nil, api.NewError(412, "revision_conflict",
 				fmt.Sprintf("project revision is %d", conflict.CurrentRevision), "", nil)
 		}

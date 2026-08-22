@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -70,12 +71,7 @@ func FederationEnrollmentAuthorizationMatches(
 		!federationEnrollmentProjectMatches(current.ProjectID, projectID) {
 		return false
 	}
-	for _, granted := range strings.Split(current.Capabilities, ",") {
-		if granted == capability {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(current.Capabilities, ","), capability)
 }
 
 func federationEnrollmentProjectMatches(enrollmentProjectID *int64, projectID int64) bool {

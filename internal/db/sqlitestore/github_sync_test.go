@@ -116,7 +116,7 @@ func TestGitHubSyncDisablePreservesStatusAndMappings(t *testing.T) {
 		Source:     binding.SourceKey,
 		ObjectType: "issue",
 		ExternalID: "issue:I_example_1",
-		IssueID:    ptrInt64(makeIssue(t, ctx, d, p.ID, "from github", "github-sync").ID),
+		IssueID:    new(makeIssue(t, ctx, d, p.ID, "from github", "github-sync").ID),
 	})
 	require.NoError(t, err)
 
@@ -652,8 +652,6 @@ func gitHubSyncBindingIDs(bindings []db.IssueSyncBinding) []int64 {
 	}
 	return out
 }
-
-func ptrInt64(v int64) *int64 { return &v }
 
 func TestGitHubSyncMissingBindingReturnsNotFound(t *testing.T) {
 	d := openTestDB(t)

@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -356,8 +355,7 @@ func TestServerListenerFailureStopsSibling(t *testing.T) {
 	server := &Server{handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	done := make(chan error, 1)
 	go func() {
 		done <- server.ServeListeners(ctx,

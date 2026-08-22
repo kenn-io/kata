@@ -227,9 +227,9 @@ func isFileNotExist(err error) bool {
 }
 
 func splitScheme(dsn string) (scheme, rest string, hasScheme bool) {
-	i := strings.Index(dsn, "://")
-	if i < 0 {
+	before, after, ok := strings.Cut(dsn, "://")
+	if !ok {
 		return "", dsn, false
 	}
-	return dsn[:i], dsn[i+len("://"):], true
+	return before, after, true
 }

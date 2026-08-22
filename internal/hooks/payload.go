@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"strings"
 	"time"
 
@@ -119,9 +120,7 @@ func buildPayloadBlock(ctx context.Context, evt db.Event, rc commentResolver, lo
 		if err := json.Unmarshal([]byte(evt.Payload), &raw); err != nil {
 			log("hooks: payload unmarshal: %v", err)
 		} else {
-			for k, v := range raw {
-				payload[k] = v
-			}
+			maps.Copy(payload, raw)
 		}
 	}
 	if evt.Type == "issue.commented" || evt.Type == "issue.comment_edited" {

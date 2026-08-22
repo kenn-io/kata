@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 
@@ -58,13 +60,7 @@ func reconcileFederationBindingTransitionLinks(
 		if err := reconcileFederatedLinkGroup(ctx, tx, remainingProjectIDs, 0, nil); err != nil {
 			return err
 		}
-		stillMember := false
-		for _, projectID := range remainingProjectIDs {
-			if projectID == previous.ProjectID {
-				stillMember = true
-				break
-			}
-		}
+		stillMember := slices.Contains(remainingProjectIDs, previous.ProjectID)
 		if !stillMember {
 			if err := removeFederatedBoundaryLinksBetweenProjectAndGroup(
 				ctx, tx, previous.ProjectID, remainingProjectIDs,
@@ -356,9 +352,7 @@ func federationGroupIssueIDs(
 	if err := rows.Err(); err != nil {
 		return nil, mapSQLError(err, nil)
 	}
-	for issueUID, issueID := range currentIssueIDs {
-		output[issueUID] = issueID
-	}
+	maps.Copy(output, currentIssueIDs)
 	return output, nil
 }
 
@@ -471,7 +465,7 @@ func validateFederatedParentGraph(desired map[db.FoldLinkKey]federatedLinkRow) e
 	for childUID := range parents {
 		current := childUID
 		seen := map[string]struct{}{}
-		for depth := 0; depth < db.MaxParentDepth; depth++ {
+		for depth := range db.MaxParentDepth {
 			if _, ok := seen[current]; ok {
 				return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrParentCycle)
 			}

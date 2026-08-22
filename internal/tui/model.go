@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -846,17 +847,11 @@ func (m Model) listRenderedDataRows() int {
 		return 0
 	}
 	if m.layout == layoutSplit {
-		innerH := splitBodyHeight(m) - 2
-		if innerH < 2 {
-			innerH = 2
-		}
+		innerH := max(splitBodyHeight(m)-2, 2)
 		return max(1, innerH-1)
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
-	bodyRows := m.height - 2 - 1 - footerLines
-	if bodyRows < listBodyFloor {
-		bodyRows = listBodyFloor
-	}
+	bodyRows := max(m.height-2-1-footerLines, listBodyFloor)
 	return max(1, bodyRows-1)
 }
 
@@ -868,14 +863,8 @@ func (m Model) cacheDetailViewport(dm detailModel) detailModel {
 		return dm
 	}
 	footerLines := helpLines(m.splitHelpRows(), m.width)
-	bodyHeight := m.height - 2 - footerLines
-	if bodyHeight < 4 {
-		bodyHeight = 4
-	}
-	detailW := m.width - splitListPaneWidth(m.width)
-	if detailW < 20 {
-		detailW = 20
-	}
+	bodyHeight := max(m.height-2-footerLines, 4)
+	detailW := max(m.width-splitListPaneWidth(m.width), 20)
 	innerW := detailW - 2
 	innerH := bodyHeight - 2
 	if innerW < 10 {
@@ -2365,10 +2354,8 @@ func (msg eventReceivedMsg) linksChangedMatches(ref, uid string) bool {
 		if lc.SetUID == uid || lc.RemovedUID == uid {
 			return true
 		}
-		for _, u := range lc.RefUIDs {
-			if u == uid {
-				return true
-			}
+		if slices.Contains(lc.RefUIDs, uid) {
+			return true
 		}
 	}
 	if lc.hasAnyUIDs() {
@@ -2380,12 +2367,7 @@ func (msg eventReceivedMsg) linksChangedMatches(ref, uid string) bool {
 	if lc.Set == ref || lc.Removed == ref {
 		return true
 	}
-	for _, r := range lc.Refs {
-		if r == ref {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(lc.Refs, ref)
 }
 
 // hasAnyUIDs reports whether the linksChanged payload carries any peer

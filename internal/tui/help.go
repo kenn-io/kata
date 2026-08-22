@@ -108,10 +108,7 @@ func chunkSections(s []helpSection, cols int) [][]helpSection {
 	if cols < 1 {
 		cols = 1
 	}
-	perCol := (len(s) + cols - 1) / cols
-	if perCol < 1 {
-		perCol = 1
-	}
+	perCol := max((len(s)+cols-1)/cols, 1)
 	out := [][]helpSection{}
 	for i := 0; i < len(s); i += perCol {
 		out = append(out, s[i:min(i+perCol, len(s))])

@@ -813,7 +813,7 @@ func TestProjectsView_DebouncesRefetch(t *testing.T) {
 	m.projectsByID = map[int64]string{7: "kata"}
 
 	var debounceCmds int
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		out, cmd := m.Update(eventReceivedMsg{eventType: "issue.created", projectID: 7})
 		m = out.(Model)
 		if cmd != nil {

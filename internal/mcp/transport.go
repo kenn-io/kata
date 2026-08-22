@@ -91,10 +91,7 @@ type requestIDKey struct {
 func (c *stdioConnection) scan(maxMessageBytes int) {
 	defer close(c.reads)
 	scanner := bufio.NewScanner(c.reader)
-	initialBufferBytes := 64 << 10
-	if maxMessageBytes < initialBufferBytes {
-		initialBufferBytes = maxMessageBytes
-	}
+	initialBufferBytes := min(maxMessageBytes, 64<<10)
 	scanner.Buffer(make([]byte, initialBufferBytes), maxMessageBytes)
 	for scanner.Scan() {
 		line := bytes.TrimSuffix(scanner.Bytes(), []byte{'\r'})

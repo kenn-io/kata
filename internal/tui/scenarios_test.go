@@ -137,7 +137,7 @@ func pressRune(t *testing.T, m Model, r rune) Model {
 // tests where one PgDn is not enough to reach the bottom.
 func pressN(t *testing.T, m Model, msg tea.KeyPressMsg, n int) Model {
 	t.Helper()
-	for i := 0; i < n; i++ {
+	for range n {
 		m = pressKey(t, m, msg)
 	}
 	return m

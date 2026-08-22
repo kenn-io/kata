@@ -10,17 +10,8 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// ptrString is a test-only helper for taking the address of a string
-// literal inline. The production model exposes pointer fields (Owner,
-// DeletedAt) and Go forbids &"literal" so the fixtures need this.
-func ptrString(s string) *string { return &s }
-
-// ptrTime is the time.Time companion to ptrString.
-func ptrTime(t time.Time) *time.Time { return &t }
-
 // ptrInt64 is the *int64 companion used by Priority fixtures.
-func ptrInt64(n int64) *int64 { return &n }
-
+//
 // listFixture is the on-screen seed for the list tests. Three rows cover
 // the open, closed, and soft-deleted statusChip branches without booting
 // a real daemon. The deleted row keeps statusChip's DeletedAt branch
@@ -30,17 +21,17 @@ func listFixture() []Issue {
 	return []Issue{
 		{
 			UID: "01TEST-aaa1", ShortID: "aaa1", Title: "fix login bug on Safari",
-			Status: "open", Owner: ptrString("claude-4.7"),
+			Status: "open", Owner: new("claude-4.7"),
 			UpdatedAt: time.Now().Add(-3 * time.Hour),
 		},
 		{
 			UID: "01TEST-bbb2", ShortID: "bbb2", Title: "rebuild search index",
-			Status: "closed", Owner: ptrString("wesm"),
+			Status: "closed", Owner: new("wesm"),
 			UpdatedAt: time.Now().Add(-1 * time.Hour),
 		},
 		{
 			UID: "01TEST-ccc3", ShortID: "ccc3", Title: "purge stale tokens",
-			Status: "open", DeletedAt: ptrTime(deleted),
+			Status: "open", DeletedAt: new(deleted),
 			UpdatedAt: deleted,
 		},
 	}
@@ -85,7 +76,7 @@ func TestList_Render_FitsAt80Cols(t *testing.T) {
 	lm := newListModel()
 	lm.loading = false
 	lm.issues = []Issue{
-		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "fits at the floor", Status: "open", Priority: ptrInt64(1)},
+		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "fits at the floor", Status: "open", Priority: new(int64(1))},
 	}
 	out := lm.View(80, 30, viewChrome{})
 	for i, line := range strings.Split(out, "\n") {
@@ -104,7 +95,7 @@ func TestList_Render_PriorityColumn(t *testing.T) {
 	lm := newListModel()
 	lm.loading = false
 	lm.issues = []Issue{
-		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "with priority", Status: "open", Priority: ptrInt64(1)},
+		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "with priority", Status: "open", Priority: new(int64(1))},
 		{UID: "01TEST-bbb2", ShortID: "bbb2", Title: "without priority", Status: "open"},
 	}
 	out := lm.View(140, 30, viewChrome{})
@@ -135,7 +126,7 @@ func TestList_Cursor_DownAndUp(t *testing.T) {
 	tm.Send(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	tm.Send(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
-		for _, line := range strings.Split(string(b), "\n") {
+		for line := range strings.SplitSeq(string(b), "\n") {
 			if strings.Contains(line, "▶") && strings.Contains(line, "#bbb2") {
 				return true
 			}

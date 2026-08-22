@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -42,9 +43,9 @@ ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 	}
 	if len(output) == limit && len(output) > 0 && output[len(output)-1].Type == "issue.snapshot" {
 		runStartAfterID := afterID
-		for index := len(output) - 1; index >= 0; index-- {
-			if output[index].Type != "issue.snapshot" {
-				runStartAfterID = output[index].ID
+		for _, o := range slices.Backward(output) {
+			if o.Type != "issue.snapshot" {
+				runStartAfterID = o.ID
 				break
 			}
 		}

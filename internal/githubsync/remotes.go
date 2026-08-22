@@ -94,7 +94,7 @@ func isGitHubHost(host string) bool {
 	if host == "github.com" {
 		return true
 	}
-	for _, allowed := range strings.Split(os.Getenv(githubSyncAllowedHostsEnv), ",") {
+	for allowed := range strings.SplitSeq(os.Getenv(githubSyncAllowedHostsEnv), ",") {
 		if host == strings.ToLower(strings.TrimSpace(allowed)) {
 			return host != ""
 		}

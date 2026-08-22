@@ -44,10 +44,7 @@ func renderFederation(m Model) string {
 	}
 	rowBudget := len(rows)
 	if m.height > 0 {
-		rowBudget = m.height - federationViewChromeRows
-		if rowBudget < 1 {
-			rowBudget = 1
-		}
+		rowBudget = max(m.height-federationViewChromeRows, 1)
 	}
 	visible := clipFederationRows(rows, cursor, rowBudget)
 	body := []string{
@@ -676,10 +673,7 @@ func federationRowLayout(project, hub, actor, push, pending, sync, badges string
 	if width >= 120 {
 		badgesW = 36
 	}
-	projectW := width - (hubW + actorW + pushW + pendingW + syncW + badgesW + 6*gap) - 2
-	if projectW < 10 {
-		projectW = 10
-	}
+	projectW := max(width-(hubW+actorW+pushW+pendingW+syncW+badgesW+6*gap)-2, 10)
 	cursor := "  "
 	if highlight {
 		cursor = "▶ "

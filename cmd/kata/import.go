@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -433,11 +434,11 @@ func moveSQLiteFileSet(from, to string) (bool, error) {
 		}
 		if err := os.Rename(src, dst); err != nil { //nolint:gosec // src/dst are SQLite files beside an explicit import target or temp DB.
 			var rollbackErr error
-			for i := len(moved) - 1; i >= 0; i-- {
-				oldSrc := to + moved[i]
-				oldDst := from + moved[i]
+			for _, m := range slices.Backward(moved) {
+				oldSrc := to + m
+				oldDst := from + m
 				if err := os.Rename(oldSrc, oldDst); err != nil { //nolint:gosec // rollback of the SQLite files just moved by this helper.
-					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback %s: %w", moved[i], err))
+					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback %s: %w", m, err))
 				}
 			}
 			return len(moved) > 0, errors.Join(fmt.Errorf("rename %s: %w", suffix, err), rollbackErr)

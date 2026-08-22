@@ -250,11 +250,11 @@ func hostPortString(host, port string) string {
 // splitScheme splits "scheme://rest". Reports hasScheme=false for inputs with
 // no "://" (bare filesystem paths, including Windows drive paths).
 func splitScheme(dsn string) (scheme, rest string, hasScheme bool) {
-	i := strings.Index(dsn, "://")
-	if i < 0 {
+	before, after, ok := strings.Cut(dsn, "://")
+	if !ok {
 		return "", dsn, false
 	}
-	return dsn[:i], dsn[i+len("://"):], true
+	return before, after, true
 }
 
 var libpqKeywordParams = map[string]struct{}{

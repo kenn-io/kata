@@ -315,10 +315,7 @@ func (c *IdleController) armLocked(deadline time.Time) {
 	if c.timer != nil {
 		c.timer.Stop()
 	}
-	delay := deadline.Sub(c.clock.Now())
-	if delay < 0 {
-		delay = 0
-	}
+	delay := max(deadline.Sub(c.clock.Now()), 0)
 	c.timer = c.clock.AfterFunc(delay, func() {
 		c.expire(generation)
 	})
