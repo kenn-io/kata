@@ -1,3 +1,4 @@
 [tools]
-"github:golangci/golangci-lint" = "2.13.1"
 go = "1.27.0"
+"github:golangci/golangci-lint" = "2.13.1"
+"go:go.uber.org/nilaway/cmd/nilaway" = { version = "0.0.0-20260515015210-fd187751154f", depends = "go" }
