@@ -23,7 +23,7 @@ func TestNewIsUniqueAndMonotonic(t *testing.T) {
 	const n = 100_000
 	seen := make(map[string]bool, n)
 	values := make([]string, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		got, err := uid.New()
 		require.NoError(t, err)
 		require.False(t, seen[got], "duplicate UID at %d: %s", i, got)

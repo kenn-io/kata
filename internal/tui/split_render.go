@@ -31,15 +31,11 @@ func renderSplit(m Model) string {
 	// two panes share that vertical budget; they're rendered
 	// side-by-side then joined column-wise with lipgloss.JoinHorizontal
 	// so each pane keeps its own border.
-	bodyHeight := height - 2 - footerLines // title + info + footer
-	if bodyHeight < 4 {
-		bodyHeight = 4
-	}
+	bodyHeight := max(
+		// title + info + footer
+		height-2-footerLines, 4)
 	listW := splitListPaneWidth(width)
-	detailW := width - listW
-	if detailW < 20 {
-		detailW = 20
-	}
+	detailW := max(width-listW, 20)
 	listPane := renderSplitListPane(m, listW, bodyHeight)
 	detailPane := renderSplitDetailPane(m, detailW, bodyHeight)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
@@ -181,10 +177,7 @@ func splitDetailScrollIndicator(m Model) string {
 	}
 	bodyHeight := splitBodyHeight(m)
 	listW := splitListPaneWidth(m.width)
-	detailW := m.width - listW
-	if detailW < 20 {
-		detailW = 20
-	}
+	detailW := max(m.width-listW, 20)
 	innerW := detailW - 2
 	innerH := bodyHeight - 2
 	if innerW < 10 {
@@ -202,10 +195,9 @@ func splitDetailScrollIndicator(m Model) string {
 // so the indicator math matches what's actually drawn.
 func splitBodyHeight(m Model) int {
 	footerLines := helpLines(m.splitHelpRows(), m.width)
-	bodyHeight := m.height - 2 - footerLines // title + info + footer
-	if bodyHeight < 4 {
-		bodyHeight = 4
-	}
+	bodyHeight := max(
+		// title + info + footer
+		m.height-2-footerLines, 4)
 	return bodyHeight
 }
 

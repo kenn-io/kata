@@ -65,10 +65,7 @@ func (s *Store) enableProjectFederationTx(
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
-	pullCursor := enableEvent.ID - 1
-	if pullCursor < 0 {
-		pullCursor = 0
-	}
+	pullCursor := max(enableEvent.ID-1, 0)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO federation_bindings(
 project_id,role,hub_url,hub_project_id,hub_project_uid,
 replay_horizon_event_id,pull_cursor_event_id,enabled

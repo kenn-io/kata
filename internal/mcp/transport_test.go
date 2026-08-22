@@ -330,12 +330,10 @@ func TestStdioConnectionSerializesConcurrentWrites(t *testing.T) {
 	const count = 32
 	var group sync.WaitGroup
 	for i := range count {
-		group.Add(1)
-		go func() {
-			defer group.Done()
+		group.Go(func() {
 			response := testResponse(t, i, map[string]any{"ok": true})
 			require.NoError(t, conn.Write(t.Context(), response))
-		}()
+		})
 	}
 	group.Wait()
 

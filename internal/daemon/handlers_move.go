@@ -75,13 +75,11 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			IfMatchRev:    rev,
 			Actor:         actor,
 		})
-		var conflict *db.RevisionConflictError
-		if errors.As(err, &conflict) {
+		if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 			return nil, api.NewError(412, "revision_conflict",
 				fmt.Sprintf("issue revision is %d", conflict.CurrentRevision), "", nil)
 		}
-		var rpErr *db.RecurrencePinnedError
-		if errors.As(err, &rpErr) {
+		if rpErr, ok := errors.AsType[*db.RecurrencePinnedError](err); ok {
 			return nil, api.NewError(409, "recurrence_pinned",
 				rpErr.Error(), "unpin the issue from its recurrence before moving", nil)
 		}

@@ -536,7 +536,7 @@ func acceptableForSSE(accept string) bool {
 	if accept == "" {
 		return false
 	}
-	for _, part := range strings.Split(accept, ",") {
+	for part := range strings.SplitSeq(accept, ",") {
 		mt := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
 		if mt == "text/event-stream" || mt == "*/*" {
 			return true

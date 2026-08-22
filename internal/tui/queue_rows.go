@@ -1,6 +1,9 @@
 package tui
 
-import "sort"
+import (
+	"maps"
+	"sort"
+)
 
 type childSortMode int
 
@@ -275,9 +278,7 @@ func (s *queueBuildState) appendNode(key issueKey, depth int, lastChild bool, se
 	childKeys := s.visibleChildKeys(key, isExpanded)
 	for i, childKey := range childKeys {
 		nextSeen := make(map[issueKey]bool, len(seenPath)+1)
-		for seenKey, seen := range seenPath {
-			nextSeen[seenKey] = seen
-		}
+		maps.Copy(nextSeen, seenPath)
 		s.appendNode(childKey, depth+1, i == len(childKeys)-1, nextSeen)
 	}
 }

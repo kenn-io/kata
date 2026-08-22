@@ -142,13 +142,13 @@ func TestRunner_WorkingDirMissing(t *testing.T) {
 // DB load.
 func TestRunner_AliasResolverInvokedOnce(t *testing.T) {
 	rs := newRunnerSetup(t)
-	var calls int32
+	var calls atomic.Int32
 	rs.deps.Alias = func(_ context.Context, _ db.Event) (AliasSnapshot, bool, error) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		return AliasSnapshot{Identity: "github.com/wesm/kata", Kind: "git"}, true, nil
 	}
 	rs.runProbe(func(h *ResolvedHook) { h.Args = []string{"exit", "0"} })
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("alias resolver invocations = %d, want 1", got)
 	}
 }

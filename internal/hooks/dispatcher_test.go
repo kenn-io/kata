@@ -86,7 +86,7 @@ func newTestHook(t *testing.T, event string, args ...string) ResolvedHook {
 // enqueueEvents pushes count events of the given type into d, with sequential
 // IDs starting at startID and ProjectID/ProjectName placeholders.
 func enqueueEvents(d *Dispatcher, eventType string, startID, count int) {
-	for i := 0; i < count; i++ {
+	for i := range count {
 		d.Enqueue(db.Event{
 			ID:          int64(startID + i),
 			Type:        eventType,
@@ -190,8 +190,8 @@ func TestDispatcherReleasesActivityWhenHookExecutionPanics(t *testing.T) {
 	var released atomic.Int32
 
 	d.runOne(rd, queuedHookJob{
-		HookJob: HookJob{Event: db.Event{ID: 1, Type: "issue.created"}, Hook: hook},
-		lease:   activity.NewLease(func() { released.Add(1) }, nil),
+		Event: db.Event{ID: 1, Type: "issue.created"}, Hook: hook,
+		lease: activity.NewLease(func() { released.Add(1) }, nil),
 	})
 
 	require.Equal(t, int32(1), released.Load())
@@ -355,12 +355,10 @@ func TestDispatcher_Reload_AtomicWithEnqueue(t *testing.T) {
 	cfg := defaultConfig()
 	d, _, _ := mustNewDispatcher(t, []ResolvedHook{first}, cfg)
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		enqueueEvents(d, "issue.created", 0, 200)
-	}()
-	for i := 0; i < 50; i++ {
+	})
+	for range 50 {
 		newHook := newTestHook(t, "issue.created", "exit", "0")
 		d.Reload(LoadedConfig{Snapshot: Snapshot{Hooks: []ResolvedHook{newHook}}, Config: cfg})
 		time.Sleep(2 * time.Millisecond)

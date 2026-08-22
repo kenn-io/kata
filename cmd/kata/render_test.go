@@ -41,7 +41,7 @@ func TestRenderRows_ColorOff(t *testing.T) {
 			ID:       "abc1",
 			Title:    "fix the thing",
 			Owner:    "alice",
-			Priority: ptrInt64(1),
+			Priority: new(int64(1)),
 			Status:   "open",
 			Labels:   []string{"epic"},
 		}}
@@ -143,7 +143,7 @@ func TestRenderRows_ColorOff(t *testing.T) {
 			ID:       "abc1",
 			Title:    "low priority",
 			Owner:    "eve",
-			Priority: ptrInt64(4),
+			Priority: new(int64(4)),
 			Status:   "open",
 		}}
 		require.NoError(t, r.renderRows(&buf, rows))
@@ -295,7 +295,7 @@ func TestRenderRows_ColorOn(t *testing.T) {
 		ID:       "abc1",
 		Title:    "fix the thing",
 		Owner:    "alice",
-		Priority: ptrInt64(1),
+		Priority: new(int64(1)),
 		Status:   "open",
 		Labels:   []string{"epic"},
 	}}

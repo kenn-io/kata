@@ -98,11 +98,10 @@ func resolveEnrollmentClaimPrincipal(
 	if err != nil {
 		return ctx, claimPrincipal{}, err
 	}
-	return authorizedCtx, claimPrincipal{ClaimPrincipal: db.ClaimPrincipal{
+	return authorizedCtx, claimPrincipal{
 		HolderInstanceUID: fed.SpokeInstanceUID,
 		Holder:            fed.Actor,
-		ClientKind:        strings.TrimSpace(body.ClientKind),
-	}}, nil
+		ClientKind:        strings.TrimSpace(body.ClientKind)}, nil
 }
 
 func authorizeClaimStatusRead(
@@ -192,11 +191,10 @@ func localClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody) claimPrinci
 }
 
 func localClaimPrincipalWithHolder(cfg ServerConfig, body api.ClaimActionBody, holder string) claimPrincipal {
-	return claimPrincipal{Local: true, ClaimPrincipal: db.ClaimPrincipal{
+	return claimPrincipal{Local: true,
 		HolderInstanceUID: cfg.DB.InstanceUID(),
 		Holder:            strings.TrimSpace(holder),
-		ClientKind:        strings.TrimSpace(body.ClientKind),
-	}}
+		ClientKind:        strings.TrimSpace(body.ClientKind)}
 }
 
 func hasBearerHeader(authz string) bool {

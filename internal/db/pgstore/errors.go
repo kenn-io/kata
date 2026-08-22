@@ -66,8 +66,7 @@ func mapSQLError(err error, constraintErrors map[string]error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.ErrNotFound
 	}
-	var safeErr *SQLError
-	if errors.As(err, &safeErr) {
+	if safeErr, ok := errors.AsType[*SQLError](err); ok {
 		if domain := constraintErrors[safeErr.Constraint]; domain != nil {
 			return &SQLError{
 				Code:       safeErr.Code,

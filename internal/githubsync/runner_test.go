@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -28,8 +29,8 @@ func TestRunnerFirstSyncFetchesAllImportsCommentsEmitsEventsAndAdvancesCursor(t 
 	h.fetcher.issues[0].Comments = 1
 	h.fetcher.issues[1].Comments = 1
 	h.fetcher.comments = map[int][]Comment{
-		1: {{ID: 1001, NodeID: "C_first_1", Body: "first comment", User: &User{Login: "commenter"}, CreatedAt: ptrTime(issueTime.Add(time.Minute))}},
-		2: {{ID: 1002, NodeID: "C_second_1", Body: "second comment", User: &User{Login: "commenter"}, CreatedAt: ptrTime(issueTime.Add(2 * time.Minute))}},
+		1: {{ID: 1001, NodeID: "C_first_1", Body: "first comment", User: &User{Login: "commenter"}, CreatedAt: new(issueTime.Add(time.Minute))}},
+		2: {{ID: 1002, NodeID: "C_second_1", Body: "second comment", User: &User{Login: "commenter"}, CreatedAt: new(issueTime.Add(2 * time.Minute))}},
 	}
 
 	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
@@ -625,7 +626,7 @@ func TestRunnerSkipsCommentFetchWhenGitHubIssueReportsZeroComments(t *testing.T)
 			NodeID:    "C_with_1",
 			Body:      "comment body",
 			User:      &User{Login: "commenter"},
-			CreatedAt: ptrTime(h.now.Add(-time.Minute)),
+			CreatedAt: new(h.now.Add(-time.Minute)),
 		}},
 	}
 
@@ -1393,21 +1394,15 @@ func cloneParentData(in ParentData) ParentData {
 	out := in
 	if in.ParentByChild != nil {
 		out.ParentByChild = make(map[int]int64, len(in.ParentByChild))
-		for k, v := range in.ParentByChild {
-			out.ParentByChild[k] = v
-		}
+		maps.Copy(out.ParentByChild, in.ParentByChild)
 	}
 	if in.ScannedChildren != nil {
 		out.ScannedChildren = make(map[int]struct{}, len(in.ScannedChildren))
-		for k, v := range in.ScannedChildren {
-			out.ScannedChildren[k] = v
-		}
+		maps.Copy(out.ScannedChildren, in.ScannedChildren)
 	}
 	if in.ChildIDByNumber != nil {
 		out.ChildIDByNumber = make(map[int]int64, len(in.ChildIDByNumber))
-		for k, v := range in.ChildIDByNumber {
-			out.ChildIDByNumber[k] = v
-		}
+		maps.Copy(out.ChildIDByNumber, in.ChildIDByNumber)
 	}
 	return out
 }
@@ -1494,8 +1489,8 @@ func testIssue(id int64, number int, title string, ts time.Time) Issue {
 		Body:      "body",
 		State:     "open",
 		User:      &User{Login: "author"},
-		CreatedAt: ptrTime(ts.Add(-time.Minute)),
-		UpdatedAt: ptrTime(ts),
+		CreatedAt: new(ts.Add(-time.Minute)),
+		UpdatedAt: new(ts),
 	}
 }
 
@@ -1534,10 +1529,6 @@ func issueTitleByID(ctx context.Context, t *testing.T, store *sqlitestore.Store,
 	var title string
 	require.NoError(t, store.QueryRowContext(ctx, `SELECT title FROM issues WHERE id = ?`, issueID).Scan(&title))
 	return title
-}
-
-func ptrTime(t time.Time) *time.Time {
-	return &t
 }
 
 type testDiscardWriter struct{}

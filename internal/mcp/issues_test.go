@@ -124,7 +124,7 @@ func TestSchedulingAndForceInputsAreFirstClass(t *testing.T) {
 		ScheduledOn: "2026-09-01T15:00", Timezone: "America/Los_Angeles", ForceNew: true,
 	}
 	edit := EditInput{
-		ScheduledOn: stringPointer("2026-09-01T15:00:30"), Timezone: stringPointer("America/Los_Angeles"),
+		ScheduledOn: new("2026-09-01T15:00:30"), Timezone: new("America/Los_Angeles"),
 		ClearScheduledOn: false, ClearTimezone: false,
 	}
 	claim := ClaimInput{Force: true}
@@ -255,8 +255,6 @@ func TestForceClaimReportsPreviousOwner(t *testing.T) {
 	require.False(t, result.IsError, "%s", mustJSON(t, result))
 	require.Equal(t, "other-agent", result.StructuredContent.(map[string]any)["previous_owner"])
 }
-
-func stringPointer(value string) *string { return &value }
 
 func connectMultiProjectServer(t *testing.T, override func(http.ResponseWriter, *http.Request) bool) (*sdkmcp.ClientSession, *[]string) {
 	t.Helper()

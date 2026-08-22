@@ -25,8 +25,8 @@ func TestHelpSections_AllBindingsCovered(t *testing.T) {
 	}
 	required := map[string]int{}
 	v := reflect.ValueOf(km)
-	for i := 0; i < v.NumField(); i++ {
-		k, ok := v.Field(i).Interface().(key)
+	for _, field := range v.Fields() {
+		k, ok := reflect.TypeAssert[key](field)
 		if !ok {
 			continue
 		}

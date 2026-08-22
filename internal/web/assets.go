@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -90,12 +91,7 @@ func safeAssetName(name string) bool {
 	if !fs.ValidPath(name) || path.Clean(name) != name || strings.Contains(name, `\`) {
 		return false
 	}
-	for _, segment := range strings.Split(name, "/") {
-		if unsafePathSegment(segment) {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(strings.Split(name, "/"), unsafePathSegment)
 }
 
 func unsafePathSegment(segment string) bool {

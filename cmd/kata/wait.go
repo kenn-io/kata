@@ -566,8 +566,7 @@ func waitFetchState(ctx context.Context, client *http.Client, baseURL string, t 
 // rather than aborting the whole wait, matching the poll loop's blip
 // tolerance; a persistent 5xx still surfaces once the retry budget is spent.
 func classifyFetchErr(err error) (permanent bool) {
-	var ce *cliError
-	if errors.As(err, &ce) {
+	if ce, ok := errors.AsType[*cliError](err); ok {
 		return ce.ExitCode != ExitInternal
 	}
 	return false

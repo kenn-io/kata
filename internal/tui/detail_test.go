@@ -176,7 +176,7 @@ func TestDetail_RenderHierarchySections(t *testing.T) {
 	dm := detailFixture()
 	dm.parent = &IssueRef{ShortID: "12pp", Title: "workspace polish parent", Status: "open"}
 	dm.children = []Issue{
-		{UID: "01TEST-43cc", ShortID: "43cc", Title: "detail hint bars incomplete", Status: "open", Owner: ptrString("alice")},
+		{UID: "01TEST-43cc", ShortID: "43cc", Title: "detail hint bars incomplete", Status: "open", Owner: new("alice")},
 		{UID: "01TEST-44dd", ShortID: "44dd", Title: "new issue form parent field", Status: "closed"},
 	}
 	// In the unified-viewport layout the children section sits below the
@@ -335,7 +335,7 @@ func TestDetail_Scroll_PageDownClampsPastEOFAndPageUpResponds(t *testing.T) {
 	// renderer's max start. Press PgDn 12 times — without a clamp,
 	// dm.scroll would be 96; with the clamp it stays at the body's
 	// approximate maxStart (<= a small number for short bodies).
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}, km, nil)
 	}
 	if dm.scroll > 24 {
@@ -366,7 +366,7 @@ func TestDetail_Scroll_PageDownClampsToDocument(t *testing.T) {
 	maxStart := viewportMaxStart(len(docLines), visible)
 
 	km := newKeymap()
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}, km, nil)
 	}
 	if dm.scroll > maxStart {
@@ -395,7 +395,7 @@ func TestDetail_Scroll_SplitViewportClamp(t *testing.T) {
 	maxStart := viewportMaxStart(len(docLines), height)
 
 	km := newKeymap()
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}, km, nil)
 	}
 	if dm.scroll != maxStart {

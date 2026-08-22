@@ -177,7 +177,7 @@ func TestSearchFTS_LimitCappedAt200(t *testing.T) {
 	// Create 250 matching issues. The cap must clamp the result set to 200
 	// regardless of how large a limit the caller passes; without the cap, this
 	// test would return 250 and fail.
-	for i := 0; i < 250; i++ {
+	for range 250 {
 		createTesterIssueWithBody(ctx, t, d, p.ID, "login bug", "")
 	}
 	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login", Limit: 1_000_000})

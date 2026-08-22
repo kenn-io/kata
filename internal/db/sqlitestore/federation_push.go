@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -34,9 +35,9 @@ func (d *Store) PendingFederationPushEvents(
 	}
 	if len(out) == limit && len(out) > 0 && out[len(out)-1].Type == "issue.snapshot" {
 		runStartAfterID := afterID
-		for i := len(out) - 1; i >= 0; i-- {
-			if out[i].Type != "issue.snapshot" {
-				runStartAfterID = out[i].ID
+		for _, o := range slices.Backward(out) {
+			if o.Type != "issue.snapshot" {
+				runStartAfterID = o.ID
 				break
 			}
 		}

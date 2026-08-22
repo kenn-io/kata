@@ -1,6 +1,7 @@
 version: "2"
 run:
   timeout: 3m
+  go: "1.27"
 linters:
   default: standard
   enable:
@@ -12,6 +13,7 @@ linters:
     - misspell
     - revive
     - gosec
+    - modernize
   exclusions:
     generated: lax
     paths:

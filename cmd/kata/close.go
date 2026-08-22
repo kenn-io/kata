@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -164,11 +165,11 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 	var reviewedPaths []string
 	seenReviewedPath := map[string]struct{}{}
 	for _, s := range raw {
-		colon := strings.Index(s, ":")
-		if colon < 0 {
+		before, after, ok := strings.Cut(s, ":")
+		if !ok {
 			return nil, fmt.Errorf("evidence %q: expected <type>:<value>", s)
 		}
-		kind, value := api.EvidenceType(s[:colon]), s[colon+1:]
+		kind, value := api.EvidenceType(before), after
 		switch kind {
 		case api.EvidenceCommit:
 			out = append(out, api.Evidence{Type: kind, SHA: value})
@@ -219,9 +220,7 @@ func runAction(cmd *cobra.Command, raw, action string, extra map[string]any) err
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	body := map[string]any{"actor": actor}
-	for k, v := range extra {
-		body[k] = v
-	}
+	maps.Copy(body, extra)
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return err

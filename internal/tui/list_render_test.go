@@ -506,7 +506,7 @@ func TestRenderListBody_HeaderBackgroundReplacesSeparatorRule(t *testing.T) {
 
 	lm := listModel{issues: []Issue{{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "row", Status: "open"}}}
 	got := stripANSI(lm.renderBody(80, 6, viewChrome{}))
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if strings.Trim(line, "─") == "" && strings.Contains(line, "─") {
 			t.Fatalf("renderBody still renders a separator rule:\n%s", got)
 		}
@@ -533,7 +533,7 @@ func TestRenderListBody_EmptyStateDoesNotRenderSeparatorRule(t *testing.T) {
 	applyColorMode(colorDark, true)
 	lm := listModel{}
 	got := stripANSI(lm.renderBody(80, 6, viewChrome{}))
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if strings.Trim(line, "─") == "" && strings.Contains(line, "─") {
 			t.Fatalf("empty renderBody still renders a separator rule:\n%s", got)
 		}

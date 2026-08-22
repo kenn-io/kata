@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -462,10 +463,5 @@ func resolveParentQualifiers(
 }
 
 func auditFlagsContain(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, s)
 }

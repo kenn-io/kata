@@ -478,10 +478,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		predicates := uiPostgresRelationshipPredicates(query.Relationships)
 		statement += ` AND (` + strings.Join(predicates, " OR ") + `)`
 	}
-	limit := query.Limit
-	if limit > 1000 {
-		limit = 1000
-	}
+	limit := min(query.Limit, 1000)
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
 	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules {
 		args = append(args, limit)

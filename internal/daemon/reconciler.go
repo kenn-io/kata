@@ -235,8 +235,7 @@ func (r *Reconciler) reconcileAdmitted(ctx context.Context) (bool, error) {
 }
 
 func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
-	var apiErr *embedding.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*embedding.APIError](err); ok {
 		if apiErr.Definitive() {
 			return r.cfg.MaxBackoff
 		}
@@ -244,10 +243,7 @@ func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
 			return apiErr.RetryAfter
 		}
 	}
-	next := cur * 2
-	if next > r.cfg.MaxBackoff {
-		next = r.cfg.MaxBackoff
-	}
+	next := min(cur*2, r.cfg.MaxBackoff)
 	return next
 }
 
@@ -337,8 +333,7 @@ func (r *Reconciler) markError(err error) {
 	defer r.mu.Unlock()
 	r.health.LastError = err.Error()
 	r.health.ETASeconds = nil
-	var apiErr *embedding.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*embedding.APIError](err); ok {
 		r.health.LastErrorStatus = apiErr.StatusCode
 	} else {
 		r.health.LastErrorStatus = 0

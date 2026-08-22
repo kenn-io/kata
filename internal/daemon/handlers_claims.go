@@ -520,8 +520,7 @@ func claimHubNow(claim *api.IssueClaimOut) time.Time {
 }
 
 func claimForwardError(err error) error {
-	var statusErr *claimHubStatusError
-	if errors.As(err, &statusErr) {
+	if statusErr, ok := errors.AsType[*claimHubStatusError](err); ok {
 		return api.NewError(statusErr.StatusCode, "hub_claim_failed", statusErr.Error(), "", nil)
 	}
 	return api.NewError(http.StatusServiceUnavailable, "federation_offline", err.Error(), "", nil)
@@ -860,8 +859,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	resp, err := remote.ClaimStatus(ctx, cred.HubProjectID, issue.ShortID)
 	if err != nil {
-		var statusErr *claimHubStatusError
-		if errors.As(err, &statusErr) {
+		if statusErr, ok := errors.AsType[*claimHubStatusError](err); ok {
 			return nil, markShowClaimStatusError(ctx, cfg.DB, issue, statusErr, now)
 		}
 		return nil, markShowClaimStatusRefreshFailure(ctx, cfg.DB, issue, 0,

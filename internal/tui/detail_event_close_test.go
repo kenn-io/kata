@@ -145,7 +145,6 @@ func TestEventChunkLines_CloseDetail(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			e := EventLogEntry{Type: "issue.closed", Payload: tc.payload}
 			// width=0 keeps the rows un-wrapped so these table cases

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -756,8 +757,8 @@ func moveSQLiteSetWithOps(from, to string, operations sqliteSetOps) error {
 	moved := make([]string, 0, len(sources))
 	rollback := func(cause error) error {
 		errorsOut := []error{cause}
-		for index := len(moved) - 1; index >= 0; index-- {
-			suffix := moved[index]
+		for _, suffix := range slices.Backward(moved) {
+
 			oldPath, newPath := from+suffix, to+suffix
 			if err := operations.link(newPath, oldPath); err != nil {
 				errorsOut = append(errorsOut, fmt.Errorf("restore SQLite source %s: %w", filepath.Base(oldPath), err))

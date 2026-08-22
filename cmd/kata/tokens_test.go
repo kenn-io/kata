@@ -104,7 +104,7 @@ func TestTokensCommands_JSONAndAgentOutput(t *testing.T) {
 
 func extractTokenPlaintext(t *testing.T, out string) string {
 	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if token, ok := strings.CutPrefix(line, "token="); ok {
 			require.NotEmpty(t, token)
 			require.True(t, strings.HasPrefix(token, "kata_"), "plaintext line %q", line)

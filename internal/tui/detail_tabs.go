@@ -189,10 +189,7 @@ func applyActivityCursor(line string, isCursor bool) string {
 func assembleTab(
 	headers []string, chunks []entryChunk, width, height, cursor int,
 ) string {
-	avail := height - len(headers)
-	if avail < 1 {
-		avail = 1
-	}
+	avail := max(height-len(headers), 1)
 	windowed := windowChunks(chunks, cursor, avail)
 	out := make([]string, 0, len(headers)+8)
 	out = append(out, headers...)

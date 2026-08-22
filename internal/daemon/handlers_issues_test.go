@@ -1413,7 +1413,7 @@ func TestEditIssue_AggregatedEvent_OnePerEdit(t *testing.T) {
 	h, ts, pid, src := bootstrapProjectWithIssue(t)
 	srcRef := issueRefByID(t, h, src)
 	refs := make([]string, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		resp, bs := postJSON(t, ts, issuesURL(pid),
 			map[string]any{"actor": "tester", "title": fmt.Sprintf("t%d", i)})
 		require.Equal(t, 200, resp.StatusCode)

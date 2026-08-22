@@ -23,7 +23,6 @@ func TestWalk_WeeklyDailyMonthly(t *testing.T) {
 		{"FREQ=WEEKLY;INTERVAL=2", "2026-05-15", "UTC", "2026-05-15", "2026-05-29"},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.rule, func(t *testing.T) {
 			next, err := Walk(c.rule, c.dtstart, c.tz, c.after)
 			require.NoError(t, err)

@@ -154,7 +154,7 @@ func TestReconcileOnceEmbedsAndActivates(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
 			t.Fatal(err)
 		}
@@ -267,7 +267,7 @@ func TestReconcileErrorReportsPendingBacklog(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
 			t.Fatal(err)
 		}
@@ -288,7 +288,7 @@ func TestReconcileReportsProgressDuringFill(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
 			t.Fatal(err)
 		}
@@ -327,7 +327,7 @@ func TestReconcileReportsSmoothedRateAndETA(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
 			t.Fatal(err)
 		}
@@ -430,7 +430,7 @@ func TestReconcileFillErrorRefreshesPartialBacklog(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
 			t.Fatal(err)
 		}
@@ -468,8 +468,7 @@ func TestReconcileDefinitiveErrorPinsHealth(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var apiErr *embedding.APIError
-	if !errors.As(err, &apiErr) {
+	if _, ok := errors.AsType[*embedding.APIError](err); !ok {
 		t.Fatalf("want APIError, got %v", err)
 	}
 	if h := r.Health(); h.LastError == "" {
@@ -576,7 +575,7 @@ func TestRunDrainsAfterTransientFailureThenExitsOnCancel(t *testing.T) {
 	defer cancel()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
 			t.Fatal(err)
 		}

@@ -251,10 +251,7 @@ func wrapDetailRow(prefix, value string, width int) []string {
 		return []string{prefix + value}
 	}
 	prefixW := runewidth.StringWidth(prefix)
-	budget := width - prefixW
-	if budget < 1 {
-		budget = 1
-	}
+	budget := max(width-prefixW, 1)
 	parts := hardWrap(value, budget)
 	if len(parts) == 0 {
 		return []string{prefix}

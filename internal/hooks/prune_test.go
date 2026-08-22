@@ -118,9 +118,8 @@ func TestPrune_ConcurrentSweep_TotalMatchesDisk(t *testing.T) {
 	}
 	p := setupSeededPruner(t, dir, 400)
 	var wg sync.WaitGroup
-	for w := 0; w < 4; w++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); p.MaybeSweep() }()
+	for range 4 {
+		wg.Go(func() { ; p.MaybeSweep() })
 	}
 	wg.Wait()
 

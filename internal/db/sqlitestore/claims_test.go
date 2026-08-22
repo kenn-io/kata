@@ -1371,13 +1371,13 @@ func TestApplyClaimStatusReplacesCachedHolderWithSingleLiveClaim(t *testing.T) {
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
 	require.NoError(t, d.ApplyClaimStatus(ctx, p.ID, issue.UID, db.ClaimStatus{
-		Held: true, Holder: alice, Claim: ptrClaim(cachedClaim(t, issue, alice, "hard", now, nil)), HubNow: now,
+		Held: true, Holder: alice, Claim: new(cachedClaim(t, issue, alice, "hard", now, nil)), HubNow: now,
 	}))
 	aliceClaimID := liveClaimID(t, d, issue.UID)
 	bob := claimPrincipal(t, "bob")
 
 	require.NoError(t, d.ApplyClaimStatus(ctx, p.ID, issue.UID, db.ClaimStatus{
-		Held: true, Holder: bob, Claim: ptrClaim(cachedClaim(t, issue, bob, "hard", now.Add(time.Minute), nil)), HubNow: now.Add(time.Minute),
+		Held: true, Holder: bob, Claim: new(cachedClaim(t, issue, bob, "hard", now.Add(time.Minute), nil)), HubNow: now.Add(time.Minute),
 	}))
 
 	assertLiveClaimCount(t, d, issue.UID, 1)
@@ -1390,7 +1390,7 @@ func TestApplyClaimStatusNoLiveClaimClearsCachedClaim(t *testing.T) {
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
 	require.NoError(t, d.ApplyClaimStatus(ctx, p.ID, issue.UID, db.ClaimStatus{
-		Held: true, Holder: alice, Claim: ptrClaim(cachedClaim(t, issue, alice, "hard", now, nil)), HubNow: now,
+		Held: true, Holder: alice, Claim: new(cachedClaim(t, issue, alice, "hard", now, nil)), HubNow: now,
 	}))
 	claimID := liveClaimID(t, d, issue.UID)
 
@@ -1642,15 +1642,12 @@ func TestAcquireClaimConcurrentAttemptsGrantExactlyOne(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make(chan error, attempts)
 	principals := make([]db.ClaimPrincipal, attempts)
-	for i := 0; i < attempts; i++ {
+	for i := range attempts {
 		principals[i] = claimPrincipal(t, "holder-"+strconv.Itoa(i))
 	}
 
-	for i := 0; i < attempts; i++ {
-		i := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range attempts {
+		wg.Go(func() {
 			<-start
 			_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
 				ProjectID: p.ID,
@@ -1660,7 +1657,7 @@ func TestAcquireClaimConcurrentAttemptsGrantExactlyOne(t *testing.T) {
 				Now:       now,
 			})
 			results <- err
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -1814,10 +1811,6 @@ func cachedClaim(
 		UpdatedAt:         acquiredAt,
 	}
 	return claim
-}
-
-func ptrClaim(claim db.IssueClaim) *db.IssueClaim {
-	return &claim
 }
 
 func latestClaimViolationPayload(t *testing.T, d *sqlitestore.Store) map[string]any {

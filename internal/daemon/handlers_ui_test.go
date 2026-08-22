@@ -181,7 +181,7 @@ func TestUISnapshotPreservesRelationshipIntentAndCollectionLinks(t *testing.T) {
 	store := &countingUIStore{
 		cursor: 41, snapshotCursor: 41,
 		snapshot: db.UISnapshotData{CollectionLinks: []db.UILink{{
-			Link: db.Link{FromIssueUID: "01J00000000000000000000001", ToIssueUID: "01J00000000000000000000002", Type: "parent"},
+			FromIssueUID: "01J00000000000000000000001", ToIssueUID: "01J00000000000000000000002", Type: "parent",
 		}}},
 	}
 	ts := newUISnapshotServer(t, store, true)
@@ -368,9 +368,9 @@ func TestUISnapshotReusesCollectionAuthorityAcrossSelection(t *testing.T) {
 		cursor: 5, snapshotCursor: 5,
 		snapshot: db.UISnapshotData{
 			Projects:      []db.UIProject{{Project: db.Project{UID: "01J00000000000000000000001", Name: "example-project"}}},
-			Issues:        []db.UIIssue{{Issue: db.Issue{UID: selectedUID, Title: "Selected issue"}}},
+			Issues:        []db.UIIssue{{UID: selectedUID, Title: "Selected issue"}},
 			SelectedState: "available",
-			SelectedIssue: &db.UIIssue{Issue: db.Issue{UID: selectedUID, Title: "Selected issue"}},
+			SelectedIssue: &db.UIIssue{UID: selectedUID, Title: "Selected issue"},
 		},
 	}
 	ts := newUISnapshotServer(t, store, true)
@@ -436,13 +436,12 @@ func TestUISnapshotDerivesProjectAuthorityFromCachedGlobalCollection(t *testing.
 				{Project: db.Project{ID: 2, UID: secondProjectUID, Name: "example-peer"}},
 			},
 			Issues: []db.UIIssue{
-				{Issue: db.Issue{ID: 3, UID: firstIssueUID, ProjectID: 1, ProjectUID: firstProjectUID}},
-				{Issue: db.Issue{ID: 4, UID: secondIssueUID, ProjectID: 2, ProjectUID: secondProjectUID}},
+				{ID: 3, UID: firstIssueUID, ProjectID: 1, ProjectUID: firstProjectUID},
+				{ID: 4, UID: secondIssueUID, ProjectID: 2, ProjectUID: secondProjectUID},
 			},
-			CollectionLinks: []db.UILink{{Link: db.Link{
+			CollectionLinks: []db.UILink{{
 				FromIssueID: 3, FromIssueUID: firstIssueUID,
-				ToIssueID: 4, ToIssueUID: secondIssueUID,
-			}}},
+				ToIssueID: 4, ToIssueUID: secondIssueUID}},
 		},
 		projectSnapshots: map[string]db.UISnapshotData{
 			firstProjectUID: {
@@ -451,12 +450,11 @@ func TestUISnapshotDerivesProjectAuthorityFromCachedGlobalCollection(t *testing.
 					{Project: db.Project{ID: 2, UID: secondProjectUID, Name: "example-peer"}},
 				},
 				Issues: []db.UIIssue{
-					{Issue: db.Issue{ID: 3, UID: firstIssueUID, ProjectID: 1, ProjectUID: firstProjectUID}},
+					{ID: 3, UID: firstIssueUID, ProjectID: 1, ProjectUID: firstProjectUID},
 				},
-				CollectionLinks: []db.UILink{{Link: db.Link{
+				CollectionLinks: []db.UILink{{
 					FromIssueID: 3, FromIssueUID: firstIssueUID,
-					ToIssueID: 4, ToIssueUID: secondIssueUID,
-				}}},
+					ToIssueID: 4, ToIssueUID: secondIssueUID}},
 			},
 		},
 	}
@@ -594,10 +592,8 @@ func (a *scopedUIReferencesHostAccess) Authorize(
 	request daemon.HostAccessRequest,
 ) (daemon.HostAccessDecision, error) {
 	a.requests = append(a.requests, request)
-	for _, projectID := range request.Operation.ProjectIDs {
-		if projectID == a.deniedProjectID {
-			return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
-		}
+	if slices.Contains(request.Operation.ProjectIDs, a.deniedProjectID) {
+		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
 	}
 	return daemon.HostAccessDecision{}, nil
 }

@@ -24,7 +24,7 @@ func TestImportBatch_CreatesIssueCommentsLabelsLinks(t *testing.T) {
 		Actor:     "importer",
 		Items: []db.ImportItem{
 			{ExternalID: "blocker", Title: "Blocker", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1, Labels: []string{"source:beads", "beads-id:blocker"}, Links: []db.ImportLink{{Type: "blocks", TargetExternalID: "blocked"}}},
-			{ExternalID: "blocked", Title: "Blocked", Body: "body", Author: "bob", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: t1, UpdatedAt: t2, ClosedAt: &t2, Labels: []string{"source:beads", "beads-id:blocked"}, Comments: []db.ImportComment{{ExternalID: "c1", Author: "bob", Body: "note", CreatedAt: t2}}},
+			{ExternalID: "blocked", Title: "Blocked", Body: "body", Author: "bob", Status: "closed", ClosedReason: new("done"), CreatedAt: t1, UpdatedAt: t2, ClosedAt: &t2, Labels: []string{"source:beads", "beads-id:blocked"}, Comments: []db.ImportComment{{ExternalID: "c1", Author: "bob", Body: "note", CreatedAt: t2}}},
 		},
 	})
 	require.NoError(t, err)
@@ -314,7 +314,7 @@ func TestImportBatch_ReimportSourceNewerUpdatesFieldsAndTimestamp(t *testing.T) 
 
 	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "old", Body: "old body", Author: "alice", Status: "open", CreatedAt: older, UpdatedAt: older}}})
 	require.NoError(t, err)
-	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "new", Body: "new body", Author: "alice", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: older, UpdatedAt: newer, ClosedAt: &newer}}})
+	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "new", Body: "new body", Author: "alice", Status: "closed", ClosedReason: new("done"), CreatedAt: older, UpdatedAt: newer, ClosedAt: &newer}}})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Updated)
 
@@ -743,7 +743,7 @@ func TestImportBatch_ReimportCorrectsStoredCreatedAtAheadOfClosedAt(t *testing.T
 	// A later sync recovers the real (earlier) created_at and a real
 	// closed_at that precedes the previously stored synthetic created_at.
 	res, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
-		{ExternalID: "issue-id:1", Title: "closed", Body: "body", Author: "alice", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: realCreated, UpdatedAt: newer, ClosedAt: &realClosed},
+		{ExternalID: "issue-id:1", Title: "closed", Body: "body", Author: "alice", Status: "closed", ClosedReason: new("done"), CreatedAt: realCreated, UpdatedAt: newer, ClosedAt: &realClosed},
 	}})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Updated)
@@ -812,7 +812,7 @@ func TestImportBatch_ReimportSameVersionHealsInvertedCreatedAt(t *testing.T) {
 	// path is skipped, but created_at must still heal earlier. Other fields from
 	// the stale source item (title) must not overwrite the stored row.
 	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
-		{ExternalID: "issue-id:1", Title: "stale-title", Body: "body", Author: "alice", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: realCreated, UpdatedAt: newer, ClosedAt: &realClosed},
+		{ExternalID: "issue-id:1", Title: "stale-title", Body: "body", Author: "alice", Status: "closed", ClosedReason: new("done"), CreatedAt: realCreated, UpdatedAt: newer, ClosedAt: &realClosed},
 	}})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Updated)
@@ -868,7 +868,7 @@ func TestImportBatch_NewerReimportCarriesCreatedAtInPayload(t *testing.T) {
 	require.NoError(t, err)
 
 	_, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
-		{ExternalID: "issue-id:1", Title: "closed", Body: "body", Author: "alice", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: realCreated, UpdatedAt: newer, ClosedAt: &realClosed},
+		{ExternalID: "issue-id:1", Title: "closed", Body: "body", Author: "alice", Status: "closed", ClosedReason: new("done"), CreatedAt: realCreated, UpdatedAt: newer, ClosedAt: &realClosed},
 	}})
 	require.NoError(t, err)
 	updated, err := d.IssueByID(ctx, *m.IssueID)
@@ -1002,11 +1002,11 @@ func TestImportBatch_ValidationErrors(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrImportValidation)
 	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "A", Author: "alice", Status: "bad", CreatedAt: ts, UpdatedAt: ts}}})
 	assert.ErrorIs(t, err, db.ErrImportValidation)
-	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "A", Author: "alice", Status: "closed", ClosedReason: strPtr(""), CreatedAt: ts, UpdatedAt: ts, ClosedAt: &ts}}})
+	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "A", Author: "alice", Status: "closed", ClosedReason: new(""), CreatedAt: ts, UpdatedAt: ts, ClosedAt: &ts}}})
 	assert.ErrorIs(t, err, db.ErrImportValidation)
-	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "A", Author: "alice", Status: "closed", ClosedReason: strPtr("obsolete"), CreatedAt: ts, UpdatedAt: ts, ClosedAt: &ts}}})
+	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "A", Author: "alice", Status: "closed", ClosedReason: new("obsolete"), CreatedAt: ts, UpdatedAt: ts, ClosedAt: &ts}}})
 	assert.ErrorIs(t, err, db.ErrImportValidation)
-	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "A", Author: "alice", Status: "closed", ClosedReason: strPtr(" done "), CreatedAt: ts, UpdatedAt: ts, ClosedAt: &ts}}})
+	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "A", Author: "alice", Status: "closed", ClosedReason: new(" done "), CreatedAt: ts, UpdatedAt: ts, ClosedAt: &ts}}})
 	assert.ErrorIs(t, err, db.ErrImportValidation)
 	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "A", Author: "alice", Status: "open", CreatedAt: ts, UpdatedAt: ts, Links: []db.ImportLink{{Type: "bad", TargetExternalID: "b"}}}}})
 	assert.ErrorIs(t, err, db.ErrImportValidation)
@@ -1033,7 +1033,7 @@ func TestImportBatch_AcceptsAllSchemaClosedReasons(t *testing.T) {
 					Title:        "Title",
 					Author:       "alice",
 					Status:       "closed",
-					ClosedReason: strPtr(reason),
+					ClosedReason: new(reason),
 					CreatedAt:    ts,
 					UpdatedAt:    ts,
 					ClosedAt:     &ts,

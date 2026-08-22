@@ -122,7 +122,7 @@ func TestIssueMutationsCarryUpdatedAt(t *testing.T) {
 	assertEventCarriesUpdatedAt(t, unlinkEvt, issueByID(ctx, t, d, a.ID))
 
 	metaOut, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-		IssueID: a.ID, IfMatchRev: db.IfMatch(1), Actor: "agent",
+		IssueID: a.ID, IfMatchRev: new(int64(1)), Actor: "agent",
 		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"api"`)},
 	})
 	require.NoError(t, err)

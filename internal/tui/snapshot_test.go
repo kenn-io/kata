@@ -126,19 +126,19 @@ func snapListFixture() []Issue {
 	return []Issue{
 		{
 			UID: "01TEST-aaa1", ShortID: "aaa1", Title: "fix login bug on Safari",
-			Status: "open", Owner: ptrString("claude-4.7"),
-			Priority:  ptrInt64(1),
+			Status: "open", Owner: new("claude-4.7"),
+			Priority:  new(int64(1)),
 			UpdatedAt: snapshotFixedNow.Add(-3 * time.Hour),
 		},
 		{
 			UID: "01TEST-bbb2", ShortID: "bbb2", Title: "rebuild search index",
-			Status: "closed", Owner: ptrString("wesm"),
+			Status: "closed", Owner: new("wesm"),
 			UpdatedAt: snapshotFixedNow.Add(-1 * time.Hour),
 		},
 		{
 			UID: "01TEST-ccc3", ShortID: "ccc3", Title: "purge stale tokens",
 			Status:    "open",
-			DeletedAt: ptrTime(snapshotFixedNow.Add(-2 * time.Hour)),
+			DeletedAt: new(snapshotFixedNow.Add(-2 * time.Hour)),
 			UpdatedAt: snapshotFixedNow.Add(-2 * time.Hour),
 		},
 	}
@@ -150,14 +150,14 @@ func snapTreeFixture() []Issue {
 	return []Issue{
 		{
 			ProjectID: 7, UID: "01TEST-p010", ShortID: parentSID, Title: "professional workspace polish",
-			Status: "open", Owner: ptrString("wesm"),
+			Status: "open", Owner: new("wesm"),
 			UpdatedAt:   snapshotFixedNow.Add(-30 * time.Minute),
 			ChildCounts: &ChildCounts{Open: 1, Total: 2},
 		},
 		{
 			ProjectID: 7, UID: "01TEST-c011", ShortID: childSID, Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID},
 			Title: "detail hint bars incomplete", Status: "open",
-			Owner:       ptrString("claude"),
+			Owner:       new("claude"),
 			UpdatedAt:   snapshotFixedNow.Add(-45 * time.Minute),
 			ChildCounts: &ChildCounts{Open: 1, Total: 1},
 		},
@@ -216,12 +216,12 @@ func snapDetailHierarchyFixture() detailModel {
 	dm.children = []Issue{
 		{
 			ProjectID: 7, UID: "01TEST-c043", ShortID: "c043", Title: "detail hint bars incomplete",
-			Status: "open", Owner: ptrString("alice"),
+			Status: "open", Owner: new("alice"),
 			UpdatedAt: snapshotFixedNow.Add(-1 * time.Hour),
 		},
 		{
 			ProjectID: 7, UID: "01TEST-c044", ShortID: "c044", Title: "new issue form parent field",
-			Status: "closed", Owner: ptrString("wesm"),
+			Status: "closed", Owner: new("wesm"),
 			UpdatedAt: snapshotFixedNow.Add(-2 * time.Hour),
 		},
 	}
@@ -371,7 +371,7 @@ func TestSnapshot_List_WithFilterChips(t *testing.T) {
 		ShortID:   "aaa1",
 		Title:     "narrowed by chips",
 		Status:    "open",
-		Owner:     ptrString("alice"),
+		Owner:     new("alice"),
 		UpdatedAt: snapshotFixedNow.Add(-30 * time.Minute),
 	}})
 	lm.filter = ListFilter{Status: "open", Owner: "alice"}
@@ -510,7 +510,7 @@ func TestSnapshot_Detail_LinksTab(t *testing.T) {
 func TestSnapshot_Detail_WithLabels(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
-	dm.issue.Owner = ptrString("alice")
+	dm.issue.Owner = new("alice")
 	dm.issue.Labels = []string{"prio-1", "bug", "needs-design"}
 	got := dm.View(120, 30, viewChrome{})
 	assertGolden(t, "detail-with-labels", got)
@@ -519,7 +519,7 @@ func TestSnapshot_Detail_WithLabels(t *testing.T) {
 func TestSnapshot_Detail_DocumentPage80x50(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailHierarchyFixture()
-	dm.issue.Owner = ptrString("alice")
+	dm.issue.Owner = new("alice")
 	dm.issue.Labels = []string{"prio-1", "bug", "needs-design"}
 	dm.issue.CreatedAt = time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
 	dm.issue.UpdatedAt = snapshotFixedNow.Add(-3 * time.Hour)
@@ -566,7 +566,7 @@ func TestSnapshot_Detail_DocumentWide160x32(t *testing.T) {
 func TestSnapshot_Detail_DocumentNarrow(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
-	dm.issue.Owner = ptrString("alice")
+	dm.issue.Owner = new("alice")
 	dm.issue.Labels = []string{"bug", "prio-1"}
 	dm.parent = &IssueRef{UID: "01TEST-c012", ShortID: "c012", Title: "workspace polish", Status: "open"}
 	got := dm.View(72, 40, viewChrome{})
@@ -615,7 +615,7 @@ func TestSnapshot_Detail_DocumentMarkdown(t *testing.T) {
 func TestSnapshot_Detail_LabelsNarrow_OverflowAndDegrade(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
-	dm.issue.Owner = ptrString("alice")
+	dm.issue.Owner = new("alice")
 	dm.issue.Labels = []string{
 		"alpha-pretty-long", "beta-pretty-long", "gamma-pretty-long",
 		"delta-pretty-long", "epsilon-pretty-long",

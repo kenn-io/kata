@@ -712,7 +712,7 @@ func localConfigTrackState(root string) (tracked, determined bool) {
 	if err != nil {
 		return false, false
 	}
-	for _, entry := range strings.Split(string(out), "\x00") {
+	for entry := range strings.SplitSeq(string(out), "\x00") {
 		if entry == "" {
 			continue
 		}

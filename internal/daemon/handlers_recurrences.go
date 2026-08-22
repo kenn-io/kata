@@ -158,7 +158,6 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 			return nil, internalAPIError(err)
 		}
 		for _, event := range events {
-			event := event
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
 			cfg.Hooks.Enqueue(event)
 		}
@@ -233,8 +232,7 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 			Actor:        actor,
 			Update:       update,
 		})
-		var rce *db.RevisionConflictError
-		if errors.As(err, &rce) {
+		if rce, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 			return nil, api.NewError(412, "revision_conflict",
 				fmt.Sprintf("recurrence revision is %d", rce.CurrentRevision), "", nil)
 		}
@@ -277,8 +275,7 @@ func deleteRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Delete
 		event, err := cfg.DB.SoftDeleteRecurrence(ctx, db.SoftDeleteRecurrenceIn{
 			RecurrenceID: rec.ID, IfMatchRev: rev, Actor: actor,
 		})
-		var rce *db.RevisionConflictError
-		if errors.As(err, &rce) {
+		if rce, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 			return nil, api.NewError(412, "revision_conflict",
 				fmt.Sprintf("recurrence revision is %d", rce.CurrentRevision), "", nil)
 		}

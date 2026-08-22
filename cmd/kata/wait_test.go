@@ -454,8 +454,7 @@ func TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout(t *testing.T) {
 		"wait", "kata#abcd", "--timeout", "5s", "--poll-interval", "50ms")
 
 	require.Error(t, err)
-	var ce *cliError
-	if errors.As(err, &ce) {
+	if ce, ok := errors.AsType[*cliError](err); ok {
 		assert.NotEqual(t, ExitWaitTimeout, ce.ExitCode,
 			"a parent-context deadline during resolution must not be reported as the wait's own --timeout")
 	}

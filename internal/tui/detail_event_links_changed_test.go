@@ -73,7 +73,6 @@ func TestLinksChangedDesc(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			e := EventLogEntry{Type: "issue.links_changed", Payload: tc.payload}
 			got := eventDescription(e)

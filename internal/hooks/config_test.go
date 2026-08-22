@@ -250,7 +250,7 @@ KATA_FOO = "x"
 
 func TestLoad_HookCountCap(t *testing.T) {
 	var b strings.Builder
-	for i := 0; i < 257; i++ {
+	for range 257 {
 		b.WriteString("[[hook]]\nevent = \"issue.created\"\ncommand = \"true\"\n")
 	}
 	assertLoadError(t, b.String(), "257 [[hook]] entries must be rejected (cap 256)")

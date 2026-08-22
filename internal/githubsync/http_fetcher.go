@@ -446,7 +446,7 @@ func canonicalGitHubPageURL(binding Binding, raw string) (string, error) {
 }
 
 func nextGitHubLink(linkHeader string) string {
-	for _, part := range strings.Split(linkHeader, ",") {
+	for part := range strings.SplitSeq(linkHeader, ",") {
 		part = strings.TrimSpace(part)
 		if !strings.HasPrefix(part, "<") {
 			continue
@@ -456,7 +456,7 @@ func nextGitHubLink(linkHeader string) string {
 			continue
 		}
 		candidate := part[1:end]
-		for _, param := range strings.Split(part[end+1:], ";") {
+		for param := range strings.SplitSeq(part[end+1:], ";") {
 			param = strings.TrimSpace(param)
 			if param == `rel="next"` || param == "rel=next" {
 				return candidate

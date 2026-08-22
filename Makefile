@@ -2,7 +2,6 @@
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
-NILAWAY_VERSION := v0.0.0-20260515015210-fd187751154f
 VERSION := $(shell v=$$(git describe --tags --always --dirty 2>/dev/null || printf dev); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
 COMMIT := $(shell v=$$(git rev-parse --short=7 HEAD 2>/dev/null || printf unknown); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
 BUILD_DATE := $(shell v=$$(git show -s --format=%cI HEAD 2>/dev/null || printf unknown); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
@@ -119,15 +118,7 @@ vet:
 	go vet ./...
 
 nilaway:
-	@if ! command -v nilaway >/dev/null 2>&1; then \
-		echo "nilaway not found. Install with:" >&2; \
-		echo "  go install go.uber.org/nilaway/cmd/nilaway@$(NILAWAY_VERSION)" >&2; \
-		exit 1; \
-	fi
-	@module_path="$$(go list -m)" || { \
-		echo "failed to determine module path" >&2; \
-		exit 1; \
-	}; \
+	@module_path="$$(go list -m)"; \
 		nilaway -include-pkgs="$$module_path" \
 			-exclude-pkgs="$$module_path/web/node_modules" -test=false ./...
 

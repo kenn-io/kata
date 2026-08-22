@@ -470,7 +470,7 @@ func TestPendingFederationPushEvents(t *testing.T) {
 		Body:    "local comment",
 	})
 	require.NoError(t, err)
-	_, ownerEvent, changed, err := d.UpdateOwner(ctx, localIssue.ID, strPtr("alice"), "tester")
+	_, ownerEvent, changed, err := d.UpdateOwner(ctx, localIssue.ID, new("alice"), "tester")
 	require.NoError(t, err)
 	require.True(t, changed)
 	priority := int64(2)
@@ -1421,7 +1421,7 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 	})
 	require.NoError(t, err)
 	metaOut, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-		IssueID: active.ID, IfMatchRev: db.IfMatch(active.Revision), Actor: "alice",
+		IssueID: active.ID, IfMatchRev: new(active.Revision), Actor: "alice",
 		Patch: map[string]json.RawMessage{
 			"definitely_not_a_key": json.RawMessage(`"yellow"`),
 		},
@@ -1430,7 +1430,7 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 	active = metaOut.Issue
 	projectMetaOut, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID:  p.ID,
-		IfMatchRev: db.IfMatch(p.Revision),
+		IfMatchRev: new(p.Revision),
 		Actor:      "alice",
 		Patch: map[string]json.RawMessage{
 			"area": json.RawMessage(`"federation"`),
@@ -4717,7 +4717,7 @@ func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *test
 		"issue metadata": func(ctx context.Context, d *sqlitestore.Store, _ db.Project, issue, _ db.Issue) error {
 			_, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 				IssueID:    issue.ID,
-				IfMatchRev: db.IfMatch(issue.Revision),
+				IfMatchRev: new(issue.Revision),
 				Actor:      "tester",
 				Patch: map[string]json.RawMessage{
 					"definitely_not_a_key": json.RawMessage(`"value"`),
@@ -4749,7 +4749,7 @@ func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *test
 		"project metadata": func(ctx context.Context, d *sqlitestore.Store, p db.Project, _ db.Issue, _ db.Issue) error {
 			_, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 				ProjectID:  p.ID,
-				IfMatchRev: db.IfMatch(p.Revision),
+				IfMatchRev: new(p.Revision),
 				Actor:      "tester",
 				Patch: map[string]json.RawMessage{
 					"definitely_not_a_key": json.RawMessage(`"value"`),

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -247,10 +248,8 @@ func (a scopedUILaunchHostAccess) Authorize(
 	_ context.Context,
 	request daemon.HostAccessRequest,
 ) (daemon.HostAccessDecision, error) {
-	for _, projectID := range request.Operation.ProjectIDs {
-		if projectID == a.deniedProjectID {
-			return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
-		}
+	if slices.Contains(request.Operation.ProjectIDs, a.deniedProjectID) {
+		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
 	}
 	return daemon.HostAccessDecision{}, nil
 }

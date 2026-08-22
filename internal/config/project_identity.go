@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -259,13 +260,7 @@ func readGitRemote(ctx context.Context, gitRoot string) (string, error) {
 		return "", nil
 	}
 	target := "origin"
-	hasOrigin := false
-	for _, r := range remotes {
-		if r == "origin" {
-			hasOrigin = true
-			break
-		}
-	}
+	hasOrigin := slices.Contains(remotes, "origin")
 	if !hasOrigin {
 		target = remotes[0]
 	}
