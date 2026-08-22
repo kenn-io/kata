@@ -119,7 +119,8 @@ vet:
 
 nilaway:
 	@module_path="$$(go list -m)"; \
-		nilaway -include-pkgs="$$module_path" -test=false ./...
+		nilaway -include-pkgs="$$module_path" \
+			-exclude-pkgs="$$module_path/web/node_modules" -test=false ./...
 
 fmt:
 	gofmt -w .
