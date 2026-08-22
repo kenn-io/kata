@@ -1,9 +1,7 @@
-.PHONY: build install test test-short test-stress test-federation-docker release-scripts-test lint vet clean fmt nilaway nilaway-golangci-build lint-tools openapi api-generate api-check tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
+.PHONY: build install test test-short test-stress test-federation-docker release-scripts-test lint vet clean fmt nilaway nilaway-golangci-build openapi api-generate api-check tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
-GOLANGCI_LINT_VERSION ?= v2.13.1
-GOLANGCI_LINT := $(GOBIN)/golangci-lint
 CUSTOM_GCL := ./custom-gcl
 VERSION := $(shell v=$$(git describe --tags --always --dirty 2>/dev/null || printf dev); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
 COMMIT := $(shell v=$$(git rev-parse --short=7 HEAD 2>/dev/null || printf unknown); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
@@ -115,25 +113,18 @@ docs-deploy:
 	vercel deploy --prebuilt --prod
 
 lint:
-	@if ! command -v golangci-lint >/dev/null 2>&1; then \
-		echo "golangci-lint not found. Install with: make lint-tools" >&2; \
-		exit 1; \
-	fi
 	GOLANGCI_LINT_CACHE="$(CURDIR)/.cache/golangci-lint" golangci-lint run --config .golangci.yml
 
 vet:
 	go vet ./...
 
-nilaway-golangci-build: lint-tools
+nilaway-golangci-build:
 	@unset_args=$$(git rev-parse --local-env-vars 2>/dev/null | sed 's/^/-u /' | tr '\n' ' '); \
 		env $$unset_args GOFLAGS=-buildvcs=false \
-			$(GOLANGCI_LINT) custom --version "$(GOLANGCI_LINT_VERSION)" --name custom-gcl
+			golangci-lint custom --name custom-gcl
 
 nilaway: nilaway-golangci-build
 	$(CUSTOM_GCL) run --config .golangci.nilaway.yml ./...
-
-lint-tools:
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 fmt:
 	gofmt -w .

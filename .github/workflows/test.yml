@@ -193,16 +193,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+      - name: Install mise tools
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac  # v2
         with:
-          go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
-
-      - name: Install lint tools
-        run: |
-          make lint-tools
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          cache: true
+          install: true
 
       - name: Run golangci-lint
         run: make lint
@@ -230,11 +225,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+      - name: Install mise tools
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac  # v2
         with:
-          go-version-file: go.mod
-          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+          cache: true
+          install: true
 
       - name: Run nilaway
         run: make nilaway
