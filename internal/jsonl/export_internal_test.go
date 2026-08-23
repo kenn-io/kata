@@ -87,3 +87,56 @@ func TestExportSnapshotCarriesExternalRootStateWithoutLiveClaim(t *testing.T) {
 	assert.NotContains(t, out.String(), claimToken)
 	assert.NotContains(t, out.String(), `"claim_token"`)
 }
+
+func TestExportSnapshotProjectIncludesActiveMappingBeforeStateExists(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := t.Context()
+	source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Portable root", Author: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = source.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "connector-one",
+		ExternalRootKey: "root-one", ExternalAccountKey: "account-one",
+		Actor: "tester", ReceiveCommentsAfter: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	_, err = source.UpsertExternalFieldMapping(ctx, db.ExternalFieldMappingParams{
+		ConnectorInstance: "connector-one", KataField: "scheduled_on",
+		ExternalFieldID: "field-one", ExternalFieldName: "Schedule",
+		AcceptedKinds: []string{"date"}, Nullable: true, Writable: true,
+		SchemaRevision: "revision-one",
+	})
+	require.NoError(t, err)
+	_, err = source.UpsertExternalFieldMapping(ctx, db.ExternalFieldMappingParams{
+		ConnectorInstance: "connector-unbound", KataField: "deadline_on",
+		ExternalFieldID: "field-unbound", ExternalFieldName: "Deadline",
+		AcceptedKinds: []string{"instant"}, Nullable: true, Writable: true,
+		SchemaRevision: "revision-unbound",
+	})
+	require.NoError(t, err)
+
+	var out bytes.Buffer
+	require.NoError(t, exportSnapshot(ctx, source, &out, ExportOptions{
+		ProjectID: project.ID, IncludeDeleted: true,
+	}))
+	envelopes, err := NewDecoder(bytes.NewReader(out.Bytes())).ReadAll(ctx)
+	require.NoError(t, err)
+	var mappings []db.ExternalFieldMappingExport
+	for _, envelope := range envelopes {
+		if envelope.Kind != KindExternalFieldMapping {
+			continue
+		}
+		var mapping db.ExternalFieldMappingExport
+		require.NoError(t, json.Unmarshal(envelope.Data, &mapping))
+		mappings = append(mappings, mapping)
+	}
+	require.Len(t, mappings, 1)
+	assert.Equal(t, "connector-one", mappings[0].ConnectorInstance)
+	assert.Equal(t, "field-one", mappings[0].ExternalFieldID)
+}

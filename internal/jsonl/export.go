@@ -1115,7 +1115,15 @@ func exportExternalFieldMappings(ctx context.Context, d exportQuerier, enc *Enco
 	          FROM external_field_mappings m`
 	var args []any
 	if opts.ProjectID > 0 {
-		query += ` WHERE EXISTS (
+		query += ` WHERE (m.active = 1 AND EXISTS (
+			SELECT 1 FROM external_root_bindings b
+			JOIN issues i ON i.id = b.issue_id
+			WHERE b.connector_instance = m.connector_instance AND b.project_id = ?`
+		args = append(args, opts.ProjectID)
+		if !opts.IncludeDeleted {
+			query += ` AND i.deleted_at IS NULL`
+		}
+		query += `)) OR EXISTS (
 			SELECT 1 FROM external_field_states s
 			JOIN external_root_bindings b ON b.id = s.binding_id
 			JOIN issues i ON i.id = b.issue_id
