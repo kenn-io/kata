@@ -441,7 +441,8 @@ func (d *Store) importComments(ctx context.Context, tx *sql.Tx, p db.ImportBatch
 		if err != nil {
 			return nil, 0, fmt.Errorf("generate imported comment uid: %w", err)
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO comments(uid, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?)`, commentUID, issue.ID, c.Author, c.Body, c.CreatedAt)
+		res, err := tx.ExecContext(ctx, `INSERT INTO comments(uid, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?)`,
+			commentUID, issue.ID, c.Author, c.Body, c.CreatedAt.UTC().Format(sqliteCommentTimeFormat))
 		if err != nil {
 			return nil, 0, fmt.Errorf("insert imported comment: %w", err)
 		}

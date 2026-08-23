@@ -46,6 +46,21 @@ func upsertImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingP
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return db.ImportMapping{}, fmt.Errorf("check external root mapping target: %w", err)
 		}
+		if p.IssueID != nil {
+			var bindingID int64
+			err = e.QueryRowContext(ctx, `SELECT b.id
+  FROM issue_sync_bindings s
+  JOIN external_root_bindings b
+    ON b.project_id = s.project_id AND b.issue_id = ? AND b.active = 1
+ WHERE s.project_id = ? AND s.source_key = ?
+ LIMIT 1`, *p.IssueID, p.ProjectID, p.Source).Scan(&bindingID)
+			if err == nil {
+				return db.ImportMapping{}, db.ErrExternalRootIssueSyncConflict
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return db.ImportMapping{}, fmt.Errorf("check import mapping external root ownership: %w", err)
+			}
+		}
 	}
 	_, err := e.ExecContext(ctx, `INSERT INTO import_mappings(
 		source, external_id, object_type, project_id, issue_id, comment_id, link_id, label, source_updated_at

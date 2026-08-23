@@ -81,6 +81,38 @@ func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend B
 		assert.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
 	})
 
+	t.Run("issue-sync mapping cannot target externally bound content", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "post-bound-issue-sync-root")
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Already externally bound", Author: "tester",
+		})
+		require.NoError(t, err)
+		_, _, err = store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+			ProjectID: project.ID, IssueID: issue.ID,
+			ConnectorInstance: "notes", ExternalRootKey: "post-bound-external-root",
+			ExternalAccountKey: "opaque-account-key", Actor: "tester",
+			ReceiveCommentsAfter: time.Date(2026, 8, 20, 7, 0, 0, 0, time.UTC),
+		})
+		require.NoError(t, err)
+		const source = "example-sync:post-bound-roots"
+		_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+			ProjectID: project.ID, Provider: "example-sync", SourceKey: source,
+			RemoteID: "post-bound-roots", DisplayName: "Post-bound roots",
+			Config: []byte(`{}`), IntervalSeconds: 300,
+		})
+		require.NoError(t, err)
+		issueID := issue.ID
+
+		_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{
+			Source: source, ExternalID: "managed-root-1", ObjectType: "issue",
+			ProjectID: project.ID, IssueID: &issueID,
+		})
+		assert.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
+		_, readErr := store.ImportMappingBySource(ctx, project.ID, source, "issue", "managed-root-1")
+		assert.ErrorIs(t, readErr, db.ErrNotFound)
+	})
+
 	t.Run("legacy import identity cannot rename a bound root mapping", func(t *testing.T) {
 		fixture := newExternalRootSafetyFixture(t, store, "legacy-root-rekey")
 		item := db.ImportItem{

@@ -1,11 +1,13 @@
 package sqlitestore
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -1392,10 +1394,7 @@ func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Com
 // (created_at, then id as a stable tiebreaker).
 func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
 	rows, err := d.QueryContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ?
- ORDER BY CASE WHEN length(created_at)=24 AND substr(created_at,-1)='Z'
-               THEN substr(created_at,1,23)||'000000Z'
-               ELSE created_at END ASC, id ASC`, issueID)
+		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ?`, issueID)
 	if err != nil {
 		return nil, err
 	}
@@ -1408,7 +1407,16 @@ func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.SortFunc(out, func(a, b db.Comment) int {
+		if order := a.CreatedAt.Compare(b.CreatedAt); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	return out, nil
 }
 
 // CloseIssue sets status=closed unless already closed. The message and

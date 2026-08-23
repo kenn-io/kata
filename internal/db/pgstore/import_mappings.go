@@ -46,6 +46,21 @@ func upsertImportMappingTx(
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return db.ImportMapping{}, mapSQLError(err, nil)
 		}
+		if params.IssueID != nil {
+			var bindingID int64
+			err = query.QueryRowContext(ctx, `SELECT b.id
+  FROM issue_sync_bindings s
+  JOIN external_root_bindings b
+    ON b.project_id = s.project_id AND b.issue_id = $1 AND b.active = 1
+ WHERE s.project_id = $2 AND s.source_key = $3
+ LIMIT 1`, *params.IssueID, params.ProjectID, params.Source).Scan(&bindingID)
+			if err == nil {
+				return db.ImportMapping{}, db.ErrExternalRootIssueSyncConflict
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return db.ImportMapping{}, mapSQLError(err, nil)
+			}
+		}
 	}
 	var sourceUpdatedAt any
 	if params.SourceUpdatedAt != nil {
