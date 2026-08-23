@@ -71,7 +71,7 @@ All handlers implement these methods:
 | `publish_comment` | Publish one comment and return its provider identity and timestamps. |
 | `list_fields` | Discover canonical external field descriptors. |
 | `read_fields` | Read selected canonical field values. |
-| `write_fields` | Write selected fields and return canonical readback. |
+| `write_fields` | Compare and set selected fields, then return canonical readback. |
 
 `publish_comment` is advertised with the `publish_comment` capability. The
 field methods are advertised with `fields`. A connector may return a structured
@@ -90,6 +90,11 @@ Timestamps use RFC 3339.
 Field values use the portable `date`, `local_datetime`, `instant`, and `null`
 kinds accepted by the conformance transcripts; a descriptor lists
 the exact kinds it accepts and whether it is nullable and writable.
+
+Protocol v1 `write_fields` requests contain `fields` and `expected` objects
+with identical field-ID keysets. The connector writes only when every current
+value equals its canonical `expected` value; otherwise it changes nothing and
+returns a `field_conflict` error.
 
 ## Go SDK
 
