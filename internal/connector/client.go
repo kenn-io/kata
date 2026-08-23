@@ -166,10 +166,8 @@ func (p *processClient) ReadFields(ctx context.Context, params protocol.ReadFiel
 }
 
 func (p *processClient) WriteFields(ctx context.Context, params protocol.WriteFieldsParams) (protocol.WriteFieldsResult, error) {
-	for _, value := range params.Fields {
-		if err := protocol.ValidateFieldValue(value); err != nil {
-			return protocol.WriteFieldsResult{}, err
-		}
+	if err := protocol.ValidateWriteFieldsParams(params); err != nil {
+		return protocol.WriteFieldsResult{}, err
 	}
 	return callResult(ctx, p, "write_fields", params, func(result protocol.WriteFieldsResult) error {
 		if result.Fields == nil {

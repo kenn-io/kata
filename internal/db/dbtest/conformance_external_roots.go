@@ -448,6 +448,7 @@ func checkExternalRootBindings(t *testing.T, store db.Storage, backend Backend) 
 	_, err = store.RecordExternalRootSuccess(ctx, db.ExternalRootSuccessParams{
 		BindingID: binding.ID, ClaimToken: "claim-c", At: nextPollAt,
 		NextAttemptAt: nextPollAt.Add(time.Minute),
+		ExternalState: "open", ExternalRevision: "revision-3",
 	})
 	assert.ErrorIs(t, err, db.ErrExternalRootClaimLost)
 	_, ok, err = store.ClaimExternalRootBinding(ctx, binding.ID, "claim-d", nextPollAt, retryAt)

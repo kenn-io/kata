@@ -96,7 +96,7 @@ func dispatch(ctx context.Context, handler Handler, request Request) (json.RawMe
 	case "read_fields":
 		return callValidated(request.Params, validateReadFieldsParams, func(params ReadFieldsParams) (ReadFieldsResult, *Error) { return handler.ReadFields(ctx, params) })
 	case "write_fields":
-		return callValidated(request.Params, validateWriteFieldsParams, func(params WriteFieldsParams) (WriteFieldsResult, *Error) { return handler.WriteFields(ctx, params) })
+		return callValidated(request.Params, ValidateWriteFieldsParams, func(params WriteFieldsParams) (WriteFieldsResult, *Error) { return handler.WriteFields(ctx, params) })
 	default:
 		return nil, nil, fmt.Errorf("unknown method %q", request.Method)
 	}
@@ -165,7 +165,8 @@ func validateReadFieldsParams(params ReadFieldsParams) error {
 	return nil
 }
 
-func validateWriteFieldsParams(params WriteFieldsParams) error {
+// ValidateWriteFieldsParams validates a complete compare-and-set field write.
+func ValidateWriteFieldsParams(params WriteFieldsParams) error {
 	if err := validateRootKey(params.RootKey); err != nil {
 		return err
 	}
@@ -189,6 +190,14 @@ func validateWriteFieldsParams(params WriteFieldsParams) error {
 		}
 		if err := ValidateFieldValue(value); err != nil {
 			return err
+		}
+	}
+	if len(params.Fields) != len(params.Expected) {
+		return errors.New("fields and expected must contain the same fields")
+	}
+	for fieldID := range params.Fields {
+		if _, ok := params.Expected[fieldID]; !ok {
+			return errors.New("fields and expected must contain the same fields")
 		}
 	}
 	return nil

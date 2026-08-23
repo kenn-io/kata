@@ -224,6 +224,53 @@ type ExternalRootErrorParams struct {
 	ExternalRevision string
 }
 
+// ValidateExternalRootSuccessParams validates a successful reconciliation checkpoint.
+func ValidateExternalRootSuccessParams(params ExternalRootSuccessParams) error {
+	if err := validateExternalRootCheckpointBase(
+		params.BindingID, params.ClaimToken, params.At, params.NextAttemptAt,
+	); err != nil {
+		return err
+	}
+	if !validExternalRootState(params.ExternalState) || strings.TrimSpace(params.ExternalRevision) == "" {
+		return fmt.Errorf("%w: external state and revision are required", ErrExternalRootValidation)
+	}
+	return nil
+}
+
+// ValidateExternalRootErrorParams validates a failed reconciliation checkpoint.
+func ValidateExternalRootErrorParams(params ExternalRootErrorParams) error {
+	if err := validateExternalRootCheckpointBase(
+		params.BindingID, params.ClaimToken, params.At, params.NextAttemptAt,
+	); err != nil {
+		return err
+	}
+	hasExternalState := strings.TrimSpace(params.ExternalState) != ""
+	hasExternalRevision := strings.TrimSpace(params.ExternalRevision) != ""
+	if hasExternalState != hasExternalRevision {
+		return fmt.Errorf("%w: external state and revision must be supplied together", ErrExternalRootValidation)
+	}
+	if hasExternalState && !validExternalRootState(params.ExternalState) {
+		return fmt.Errorf("%w: external state must be open or complete", ErrExternalRootValidation)
+	}
+	return nil
+}
+
+func validateExternalRootCheckpointBase(
+	bindingID int64,
+	claimToken string,
+	at time.Time,
+	nextAttemptAt time.Time,
+) error {
+	if bindingID <= 0 || strings.TrimSpace(claimToken) == "" || at.IsZero() || nextAttemptAt.IsZero() {
+		return fmt.Errorf("%w: binding, claim, and attempt times are required", ErrExternalRootValidation)
+	}
+	return nil
+}
+
+func validExternalRootState(state string) bool {
+	return state == "open" || state == "complete"
+}
+
 // ExternalRootActionParams applies one audited bridge lifecycle action.
 type ExternalRootActionParams struct {
 	BindingID int64

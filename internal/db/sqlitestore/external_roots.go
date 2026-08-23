@@ -633,9 +633,8 @@ func (d *Store) RecordExternalRootSuccess(
 	ctx context.Context,
 	params db.ExternalRootSuccessParams,
 ) (db.ExternalRootBinding, error) {
-	if params.BindingID <= 0 || strings.TrimSpace(params.ClaimToken) == "" ||
-		params.At.IsZero() || params.NextAttemptAt.IsZero() {
-		return db.ExternalRootBinding{}, fmt.Errorf("%w: binding, claim, and attempt times are required", db.ErrExternalRootValidation)
+	if err := db.ValidateExternalRootSuccessParams(params); err != nil {
+		return db.ExternalRootBinding{}, err
 	}
 	return d.updateClaimedExternalRoot(ctx, params.BindingID, params.ClaimToken, `
  last_attempt_at=?, last_success_at=?, last_error_at=NULL, last_error='',
@@ -649,15 +648,10 @@ func (d *Store) RecordExternalRootError(
 	ctx context.Context,
 	params db.ExternalRootErrorParams,
 ) (db.ExternalRootBinding, error) {
-	if params.BindingID <= 0 || strings.TrimSpace(params.ClaimToken) == "" ||
-		params.At.IsZero() || params.NextAttemptAt.IsZero() {
-		return db.ExternalRootBinding{}, fmt.Errorf("%w: binding, claim, and attempt times are required", db.ErrExternalRootValidation)
+	if err := db.ValidateExternalRootErrorParams(params); err != nil {
+		return db.ExternalRootBinding{}, err
 	}
 	hasExternalState := strings.TrimSpace(params.ExternalState) != ""
-	hasExternalRevision := strings.TrimSpace(params.ExternalRevision) != ""
-	if hasExternalState != hasExternalRevision {
-		return db.ExternalRootBinding{}, fmt.Errorf("%w: external state and revision must be supplied together", db.ErrExternalRootValidation)
-	}
 	if hasExternalState {
 		return d.updateClaimedExternalRoot(ctx, params.BindingID, params.ClaimToken, `
  last_attempt_at=?, last_error_at=?, last_error=?, consecutive_failures=consecutive_failures+1,

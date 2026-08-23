@@ -878,6 +878,74 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		assert.ErrorIs(t, err, db.ErrExternalRootValidation)
 	})
 
+	t.Run("checkpoint validation preserves the active claim", func(t *testing.T) {
+		for _, test := range []struct {
+			name   string
+			suffix string
+			run    func(externalRootSafetyFixture) error
+		}{
+			{
+				name:   "success requires external state",
+				suffix: "success-state",
+				run: func(fixture externalRootSafetyFixture) error {
+					_, err := store.RecordExternalRootSuccess(ctx, db.ExternalRootSuccessParams{
+						BindingID: fixture.binding.ID, ClaimToken: fixture.token,
+						At: fixture.now, NextAttemptAt: fixture.now.Add(time.Minute),
+						ExternalRevision: "revision-1",
+					})
+					return err
+				},
+			},
+			{
+				name:   "success requires external revision",
+				suffix: "success-revision",
+				run: func(fixture externalRootSafetyFixture) error {
+					_, err := store.RecordExternalRootSuccess(ctx, db.ExternalRootSuccessParams{
+						BindingID: fixture.binding.ID, ClaimToken: fixture.token,
+						At: fixture.now, NextAttemptAt: fixture.now.Add(time.Minute),
+						ExternalState: "open",
+					})
+					return err
+				},
+			},
+			{
+				name:   "success rejects unknown external state",
+				suffix: "success-state-enum",
+				run: func(fixture externalRootSafetyFixture) error {
+					_, err := store.RecordExternalRootSuccess(ctx, db.ExternalRootSuccessParams{
+						BindingID: fixture.binding.ID, ClaimToken: fixture.token,
+						At: fixture.now, NextAttemptAt: fixture.now.Add(time.Minute),
+						ExternalState: "pending", ExternalRevision: "revision-1",
+					})
+					return err
+				},
+			},
+			{
+				name:   "error rejects unknown external state",
+				suffix: "error-state-enum",
+				run: func(fixture externalRootSafetyFixture) error {
+					_, err := store.RecordExternalRootError(ctx, db.ExternalRootErrorParams{
+						BindingID: fixture.binding.ID, ClaimToken: fixture.token,
+						At: fixture.now, NextAttemptAt: fixture.now.Add(time.Minute), Error: "request failed",
+						ExternalState: "pending", ExternalRevision: "revision-1",
+					})
+					return err
+				},
+			},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				fixture := newExternalRootSafetyFixture(t, store, "checkpoint-"+test.suffix)
+				err := test.run(fixture)
+				assert.ErrorIs(t, err, db.ErrExternalRootValidation)
+				persisted, readErr := store.ExternalRootBindingByID(ctx, fixture.binding.ID)
+				require.NoError(t, readErr)
+				assert.Equal(t, fixture.token, persisted.ClaimToken)
+				assert.Empty(t, persisted.LastExternalState)
+				assert.Empty(t, persisted.LastExternalRevision)
+			})
+		}
+	})
+
 	t.Run("field projection is native idempotent and claim guarded", func(t *testing.T) {
 		mapping, err := store.UpsertExternalFieldMapping(ctx, db.ExternalFieldMappingParams{
 			ConnectorInstance: "notes", KataField: "scheduled_on",

@@ -173,6 +173,8 @@ func TestProcessClientRejectsMethodSpecificResponseViolations(t *testing.T) {
 		{name: "write field readback mismatch", result: `{"fields":{"field-1":{"kind":"date","value":"2026-08-21"}}}`, call: func(client Client) error {
 			_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{RootKey: "root-1", Fields: map[string]protocol.FieldValue{
 				"field-1": {Kind: "date", Value: "2026-08-20"},
+			}, Expected: map[string]protocol.FieldValue{
+				"field-1": {Kind: "date", Value: "2026-08-19"},
 			}})
 			return err
 		}},
@@ -240,21 +242,56 @@ func TestProcessClientRejectsInvalidPublicationOperationIDBeforeLaunch(t *testin
 }
 
 func TestProcessClientRejectsInvalidWriteFieldBeforeLaunch(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "launched")
-	t.Setenv("HELPER_MODE", "launch-marker")
-	t.Setenv("HELPER_SYNC", marker)
-	client := newHelperClient(t, config.ConnectorConfig{
-		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
-		Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
-	})
+	for _, test := range []struct {
+		name   string
+		params protocol.WriteFieldsParams
+	}{
+		{
+			name: "invalid field value",
+			params: protocol.WriteFieldsParams{
+				RootKey: "root-1",
+				Fields:  map[string]protocol.FieldValue{"field-1": {Kind: "date", Value: "tomorrow"}},
+				Expected: map[string]protocol.FieldValue{
+					"field-1": {Kind: "date", Value: "2026-08-20"},
+				},
+			},
+		},
+		{
+			name: "invalid expected value",
+			params: protocol.WriteFieldsParams{
+				RootKey: "root-1",
+				Fields:  map[string]protocol.FieldValue{"field-1": {Kind: "date", Value: "2026-08-21"}},
+				Expected: map[string]protocol.FieldValue{
+					"field-1": {Kind: "date", Value: "tomorrow"},
+				},
+			},
+		},
+		{
+			name: "mismatched field keys",
+			params: protocol.WriteFieldsParams{
+				RootKey: "root-1",
+				Fields:  map[string]protocol.FieldValue{"field-1": {Kind: "date", Value: "2026-08-21"}},
+				Expected: map[string]protocol.FieldValue{
+					"field-2": {Kind: "date", Value: "2026-08-20"},
+				},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "launched")
+			t.Setenv("HELPER_MODE", "launch-marker")
+			t.Setenv("HELPER_SYNC", marker)
+			client := newHelperClient(t, config.ConnectorConfig{
+				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+				Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
+			})
 
-	_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{
-		RootKey: "root-1",
-		Fields:  map[string]protocol.FieldValue{"field-1": {Kind: "date", Value: "tomorrow"}},
-	})
-	require.ErrorContains(t, err, "field value")
-	_, statErr := os.Stat(marker)
-	require.ErrorIs(t, statErr, fs.ErrNotExist)
+			_, err := client.WriteFields(t.Context(), test.params)
+			require.Error(t, err)
+			_, statErr := os.Stat(marker)
+			require.ErrorIs(t, statErr, fs.ErrNotExist)
+		})
+	}
 }
 
 func TestProcessClientRejectsMissingRequiredResultProperties(t *testing.T) {

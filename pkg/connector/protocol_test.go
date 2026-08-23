@@ -168,6 +168,38 @@ func TestProtocolServeOneRejectsInvalidFieldValuesBeforeHandler(t *testing.T) {
 	}
 }
 
+func TestProtocolServeOneRejectsMismatchedWriteFieldKeysBeforeHandler(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		params string
+	}{
+		{
+			name: "missing expected field",
+			params: `{"root_key":"root-1","fields":{"field-1":{"kind":"null"}},` +
+				`"expected":{"field-2":{"kind":"null"}}}`,
+		},
+		{
+			name: "extra expected field",
+			params: `{"root_key":"root-1","fields":{"field-1":{"kind":"null"}},` +
+				`"expected":{"field-1":{"kind":"null"},"field-2":{"kind":"null"}}}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := &writeFieldsCallHandler{}
+			var output bytes.Buffer
+			err := ServeOne(
+				t.Context(),
+				bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"write_fields","instance":"notes","settings":{},"params":`+test.params+`}`),
+				&output,
+				handler,
+			)
+			require.ErrorContains(t, err, "same fields")
+			assert.False(t, handler.called)
+			assert.Empty(t, output.String())
+		})
+	}
+}
+
 func TestProtocolServeOneRequiresCanonicalPublicationOperationID(t *testing.T) {
 	for _, test := range []struct {
 		name   string
