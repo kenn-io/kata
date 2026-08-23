@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -43,6 +44,10 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		if openIssues > 0 && !params.Force {
 			return &db.ProjectHasOpenIssuesError{OpenIssues: openIssues}
 		}
+		staleBefore := time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)
+		if err := lockAndRejectFreshExternalRootClaimsForProjectTx(ctx, tx, project.ID, staleBefore); err != nil {
+			return err
+		}
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM project_aliases WHERE project_id = $1`, project.ID).Scan(&aliasCount); err != nil {
 			return mapSQLError(err, nil)
@@ -53,6 +58,14 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET enabled = 0, updated_at = $1
           WHERE project_id = $2`, archivedAt, project.ID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE external_root_bindings
+		     SET enabled = 0,
+		         paused_reason = CASE WHEN enabled = 1 THEN 'project_archived' ELSE paused_reason END,
+		         claim_token = '',
+		         claim_started_at = NULL, updated_at = $1
+		   WHERE project_id = $2 AND active = 1`, archivedAt, project.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM project_aliases WHERE project_id = $1`, project.ID); err != nil {

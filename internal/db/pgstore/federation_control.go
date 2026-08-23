@@ -125,6 +125,17 @@ WHERE project_id=$1 AND enabled=1`, input.ProjectID).Scan(&issueSyncProjectID)
 			if !errors.Is(err, sql.ErrNoRows) {
 				return mapSQLError(err, nil)
 			}
+			if input.Enabled && !input.PushEnabled {
+				var externalRootBindingID int64
+				err = tx.QueryRowContext(ctx, `SELECT id FROM external_root_bindings
+WHERE project_id=$1 AND active=1 LIMIT 1`, input.ProjectID).Scan(&externalRootBindingID)
+				if err == nil {
+					return db.ErrExternalRootFederationConflict
+				}
+				if !errors.Is(err, sql.ErrNoRows) {
+					return mapSQLError(err, nil)
+				}
+			}
 		}
 		previous, err := federationBindingTransitionState(ctx, tx, input.ProjectID)
 		if err != nil {

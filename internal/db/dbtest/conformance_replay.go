@@ -305,6 +305,24 @@ func CollectImportRecords(
 			return nil, fmt.Errorf("export mappings for replay: %w", err)
 		}
 	}
+	for value, err := range store.ExportExternalFieldMappings(ctx, filter) {
+		v := value
+		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindExternalFieldMapping, ExternalFieldMapping: &v}, err); err != nil {
+			return nil, fmt.Errorf("export external field mappings for replay: %w", err)
+		}
+	}
+	for value, err := range store.ExportExternalRootBindings(ctx, filter) {
+		v := value
+		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindExternalRootBinding, ExternalRootBinding: &v}, err); err != nil {
+			return nil, fmt.Errorf("export external root bindings for replay: %w", err)
+		}
+	}
+	for value, err := range store.ExportExternalFieldStates(ctx, filter) {
+		v := value
+		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindExternalFieldState, ExternalFieldState: &v}, err); err != nil {
+			return nil, fmt.Errorf("export external field states for replay: %w", err)
+		}
+	}
 	for value, err := range store.ExportFederationBindings(ctx, filter) {
 		v := value
 		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindFederationBinding, FederationBinding: &v}, err); err != nil {

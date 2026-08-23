@@ -1233,7 +1233,9 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	if err != nil {
 		return 0, db.Event{}, fmt.Errorf("generate comment uid: %w", err)
 	}
-	createdAt := time.Now().UTC().Format(sqliteTimeFormat)
+	commentAt := time.Now().UTC()
+	createdAt := commentAt.Format(sqliteCommentTimeFormat)
+	mutationAt := commentAt.Format(sqliteTimeFormat)
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO comments(uid, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?)`,
 		commentUID, p.IssueID, p.Author, p.Body, createdAt)
@@ -1247,7 +1249,7 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues SET updated_at = ? WHERE id = ?`,
-		createdAt, p.IssueID); err != nil {
+		mutationAt, p.IssueID); err != nil {
 		return 0, db.Event{}, fmt.Errorf("touch issue: %w", err)
 	}
 
@@ -1328,6 +1330,20 @@ func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Com
 		}
 		return comment, nil, false, nil
 	}
+	var externalOwners int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
+		FROM import_mappings m
+		JOIN external_root_bindings b
+		  ON b.project_id = m.project_id
+		 AND m.source = 'connector:' || b.connector_instance || ':binding:' || b.uid
+		WHERE m.object_type = 'comment' AND m.comment_id = ? AND b.active = 1`,
+		comment.ID,
+	).Scan(&externalOwners); err != nil {
+		return db.Comment{}, nil, false, fmt.Errorf("check external comment ownership: %w", err)
+	}
+	if externalOwners > 0 {
+		return db.Comment{}, nil, false, db.ErrExternalCommentContentOwned
+	}
 
 	editedAt := nowTimestamp()
 	if _, err := tx.ExecContext(ctx,
@@ -1376,7 +1392,10 @@ func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Com
 // (created_at, then id as a stable tiebreaker).
 func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
 	rows, err := d.QueryContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ? ORDER BY created_at ASC, id ASC`, issueID)
+		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ?
+ ORDER BY CASE WHEN length(created_at)=24 AND substr(created_at,-1)='Z'
+               THEN substr(created_at,1,23)||'000000Z'
+               ELSE created_at END ASC, id ASC`, issueID)
 	if err != nil {
 		return nil, err
 	}
@@ -1633,6 +1652,9 @@ func (d *Store) reopenIssue(
 		}
 		return issue, nil, false, nil
 	}
+	if err := rejectReopenDuringExternalRootClaimTx(ctx, tx, issue.ID); err != nil {
+		return db.Issue{}, nil, false, err
+	}
 	reopenedAt := time.Now().UTC().Format(sqliteTimeFormat)
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
@@ -1696,6 +1718,9 @@ func (d *Store) editIssue(ctx context.Context, p db.EditIssueParams) (db.Issue, 
 	ts := nowTimestamp()
 	sets, args, payload, changed, err := issueFieldUpdatePlan(issue, p.Title, p.Body, p.Owner, ts)
 	if err != nil {
+		return db.Issue{}, nil, false, err
+	}
+	if err := rejectExternalRootContentMutationTx(ctx, tx, issue.ID, contentFieldsChanged(issue, p.Title, p.Body)); err != nil {
 		return db.Issue{}, nil, false, err
 	}
 	if !changed {
@@ -1802,7 +1827,7 @@ func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Iss
 		       i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name
 		FROM issues i
 		JOIN projects p ON p.id = i.project_id
-		WHERE i.id = ? AND i.deleted_at IS NULL`
+		WHERE i.id = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL`
 	var i db.Issue
 	var projectName string
 	err := tx.QueryRowContext(ctx, q, issueID).

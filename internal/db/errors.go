@@ -108,8 +108,8 @@ var (
 	// same project row.
 	ErrProjectMergeSameProject = errors.New("cannot merge a project into itself")
 
-	// ErrProjectMergeImportMappingCollision is returned when moving source import
-	// mappings would violate the target's source identity uniqueness.
+	// ErrProjectMergeImportMappingCollision is returned when a project move or
+	// merge would violate the target's source identity uniqueness.
 	ErrProjectMergeImportMappingCollision = errors.New("project merge import mapping collision")
 
 	// ErrProjectMergeArchivedSource is returned when MergeProjects is asked
@@ -167,6 +167,30 @@ var (
 	ErrClaimExpired = errors.New("claim expired")
 	// ErrClaimValidation reports an invalid claim request or state transition.
 	ErrClaimValidation = errors.New("claim validation")
+	// ErrExternalRootValidation reports an invalid root-binding state transition.
+	ErrExternalRootValidation = errors.New("external root validation")
+	// ErrExternalRootIssueAlreadyBound reports an existing active binding for an issue.
+	ErrExternalRootIssueAlreadyBound = errors.New("issue already has an external root binding")
+	// ErrExternalRootAlreadyBound reports an existing active binding for an external root.
+	ErrExternalRootAlreadyBound = errors.New("external root already bound")
+	// ErrExternalRootClaimLost refuses a mutation by a missing or stale claim token.
+	ErrExternalRootClaimLost = errors.New("external root claim lost")
+	// ErrExternalRootClaimActive refuses an operator mutation that would race a live bridge worker.
+	ErrExternalRootClaimActive = errors.New("external root claim is active")
+	// ErrExternalRootIssueSyncConflict refuses binding content managed by project issue sync.
+	ErrExternalRootIssueSyncConflict = errors.New("issue sync owns issue content")
+	// ErrExternalRootFederationConflict refuses a read-only federation transition that would strand an active binding.
+	ErrExternalRootFederationConflict = errors.New("active external root binding prevents read-only federation")
+	// ErrExternalRootContentOwned refuses a local title/body mutation while an active external-root binding owns that content.
+	ErrExternalRootContentOwned = errors.New("external root owns issue title and body")
+	// ErrExternalCommentContentOwned refuses a local edit to a comment projected by an active external-root binding.
+	ErrExternalCommentContentOwned = errors.New("external root owns comment body")
+	// ErrExternalCommentPending reports that another uncertain outbound comment is unresolved.
+	ErrExternalCommentPending = errors.New("external comment resolution pending")
+	// ErrExternalFieldMappingValidation reports an unusable bidirectional field descriptor.
+	ErrExternalFieldMappingValidation = errors.New("external field mapping validation")
+	// ErrExternalFieldNotConflicted reports resolution of a field without a current conflict.
+	ErrExternalFieldNotConflicted = errors.New("external field is not conflicted")
 	// ErrPendingClaimNotAuthoritative reports that a pending claim cannot authorize work.
 	ErrPendingClaimNotAuthoritative = errors.New("pending claim not authoritative")
 )
@@ -208,6 +232,9 @@ var (
 	// ErrFederationResetBlockedByQuarantine is returned when a federation reset
 	// cannot proceed due to an active quarantine.
 	ErrFederationResetBlockedByQuarantine = errors.New("federation reset blocked by quarantine")
+
+	// ErrFederationResetBlockedByExternalRoot is returned when reset would destroy external-root binding history.
+	ErrFederationResetBlockedByExternalRoot = errors.New("federation reset blocked by external root history")
 
 	// ErrFederationQuarantineRetryUnsupportedDirection is returned when retry is
 	// requested for a non-push quarantine. Retry replays local outbound events
@@ -290,7 +317,7 @@ type ProjectMergeImportMappingCollision struct {
 }
 
 // ProjectMergeImportMappingCollisionError carries the import mapping
-// identities that blocked a merge.
+// identities that blocked a project move or merge.
 type ProjectMergeImportMappingCollisionError struct {
 	Mappings []ProjectMergeImportMappingCollision
 }

@@ -1,8 +1,10 @@
 package db
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -426,4 +428,49 @@ func TestPrepareProjectMergeRecordsRejectsLinkBetweenExistingProjects(t *testing
 	}, func(string) (int64, bool, error) { return 77, true, nil })
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "link must include an issue from the imported project")
+}
+
+func TestPrepareProjectMergeRecordsPreservesExternalRootRecords(t *testing.T) {
+	createdAt := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	projectUID := "01H00000000000000000000000"
+	issueUID := "01H00000000000000000000001"
+	bindingUID := "01H00000000000000000000002"
+	records := []ImportRecord{
+		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: projectUID, Name: "spoke-project"}},
+		{Kind: ImportKindIssue, Issue: &IssueExport{ID: 5, UID: issueUID, ProjectID: 2}},
+		{Kind: ImportKindExternalFieldMapping, ExternalFieldMapping: &ExternalFieldMappingExport{
+			ConnectorInstance: "connector-one", KataField: "scheduled_on",
+			ExternalFieldID: "schedule-one", ExternalFieldName: "Schedule",
+			AcceptedKinds: []string{"date"}, Nullable: true, Writable: true,
+			SchemaRevision: "schema-one", Active: true,
+			CreatedAt: createdAt, UpdatedAt: createdAt,
+		}},
+		{Kind: ImportKindExternalRootBinding, ExternalRootBinding: &ExternalRootBindingExport{
+			UID: bindingUID, ProjectUID: projectUID, IssueUID: issueUID,
+			RootMappingSource: "connector:connector-one", RootMappingExternalID: "root-one",
+			ConnectorInstance: "connector-one", ExternalRootKey: "root-one",
+			ExternalAccountKey: "account-one", Active: true, Enabled: true,
+			ReceiveComments: true, ReceiveCommentsAfter: &createdAt,
+			CreatedAt: createdAt, UpdatedAt: createdAt,
+		}},
+		{Kind: ImportKindExternalFieldState, ExternalFieldState: &ExternalFieldStateExport{
+			BindingUID: bindingUID, MappingConnectorInstance: "connector-one",
+			MappingKataField: "scheduled_on", MappingExternalFieldID: "schedule-one",
+			MappingSchemaRevision: "schema-one", MappingCreatedAt: createdAt,
+			Baseline: json.RawMessage(`"2026-08-20"`), UpdatedAt: createdAt,
+		}},
+	}
+
+	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
+		TargetProjectID: 4, Issue: 10,
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, prepared, len(records))
+	require.NotNil(t, prepared[2].ExternalFieldMapping)
+	require.NotNil(t, prepared[3].ExternalRootBinding)
+	require.NotNil(t, prepared[4].ExternalFieldState)
+	assert.Equal(t, records[2].ExternalFieldMapping, prepared[2].ExternalFieldMapping)
+	assert.Equal(t, records[3].ExternalRootBinding, prepared[3].ExternalRootBinding)
+	assert.Equal(t, records[4].ExternalFieldState, prepared[4].ExternalFieldState)
+	assert.Equal(t, int64(2), records[1].Issue.ProjectID, "source records must not be mutated")
 }

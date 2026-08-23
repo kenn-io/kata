@@ -239,10 +239,12 @@ type ReadFieldsResult struct {
 	Fields map[string]FieldValue `json:"fields"`
 }
 
-// WriteFieldsParams applies canonical field values to an external root.
+// WriteFieldsParams applies canonical field values only when the provider's
+// current values still equal Expected.
 type WriteFieldsParams struct {
-	RootKey string                `json:"root_key"`
-	Fields  map[string]FieldValue `json:"fields"`
+	RootKey  string                `json:"root_key"`
+	Fields   map[string]FieldValue `json:"fields"`
+	Expected map[string]FieldValue `json:"expected"`
 }
 
 // WriteFieldsResult contains the connector's canonical readback after writing.

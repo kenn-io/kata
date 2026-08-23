@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -21,6 +22,9 @@ func TestStorageConformance(t *testing.T) {
 			store, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
 			require.NoError(t, err)
 			return store
+		},
+		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
+			return sqlitestore.InstallExternalRootClockForTest(store.(*sqlitestore.Store), now)
 		},
 		SeedLegacyPendingClaim: func(ctx context.Context, store db.Storage, requestUID string) error {
 			sqlStore := store.(*sqlitestore.Store)
@@ -78,6 +82,33 @@ hlc_physical_ms,hlc_counter,content_hash
 				store.(*sqlitestore.Store),
 				stage,
 			)
+		},
+	})
+}
+
+func TestExternalRootConformance(t *testing.T) {
+	dbtest.RunExternalRootConformance(t, dbtest.Backend{
+		Name: "sqlite",
+		Open: func(t *testing.T) db.Storage {
+			t.Helper()
+			store, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+			require.NoError(t, err)
+			return store
+		},
+		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
+			return sqlitestore.InstallExternalRootClockForTest(store.(*sqlitestore.Store), now)
+		},
+	})
+}
+
+func TestExternalRootContentOwned(t *testing.T) {
+	dbtest.RunExternalRootContentOwnershipConformance(t, dbtest.Backend{
+		Name: "sqlite",
+		Open: func(t *testing.T) db.Storage {
+			t.Helper()
+			store, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+			require.NoError(t, err)
+			return store
 		},
 	})
 }

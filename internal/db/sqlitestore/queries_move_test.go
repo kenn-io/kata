@@ -178,7 +178,7 @@ func TestMoveIssueProject_RehomesImportMappings(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestMoveIssueProject_RehomesImportMappings_SkipsCollisions(t *testing.T) {
+func TestMoveIssueProject_RejectsImportMappingCollisionsAtomically(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
 	src, _ := d.CreateProject(ctx, "src")
@@ -209,19 +209,22 @@ func TestMoveIssueProject_RehomesImportMappings_SkipsCollisions(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Move should succeed — the colliding src row is dropped, tgt mapping is kept.
+	// The opaque source identity is ambiguous, so the whole move is rejected.
 	_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: iss.ID, FromProjectID: src.ID, ToProjectID: tgt.ID,
 		IfMatchRev: 1, Actor: "tester",
 	})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, db.ErrProjectMergeImportMappingCollision)
 
-	// Target mapping is untouched (still points at tgtIss).
+	// The issue and both mappings remain untouched.
+	retainedIssue, err := d.IssueByID(ctx, iss.ID)
+	require.NoError(t, err)
+	assert.Equal(t, src.ID, retainedIssue.ProjectID)
+	assert.Equal(t, int64(1), retainedIssue.Revision)
 	got, err := d.ImportMappingBySource(ctx, tgt.ID, "gh", "issue", "ext-99")
 	require.NoError(t, err)
 	assert.Equal(t, &tgtIssID, got.IssueID)
-
-	// Source mapping is gone (was the colliding row we dropped).
-	_, err = d.ImportMappingBySource(ctx, src.ID, "gh", "issue", "ext-99")
-	assert.ErrorIs(t, err, db.ErrNotFound)
+	sourceMapping, err := d.ImportMappingBySource(ctx, src.ID, "gh", "issue", "ext-99")
+	require.NoError(t, err)
+	assert.Equal(t, &issID, sourceMapping.IssueID)
 }

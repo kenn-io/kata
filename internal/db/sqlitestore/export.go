@@ -375,6 +375,152 @@ func (d *Store) ExportImportMappings(ctx context.Context, f db.ExportFilter) ite
 		})
 }
 
+// ExportExternalFieldMappings streams global mapping revisions. A project
+// export carries active mappings for connector instances bound in that project
+// plus historical mappings referenced by its field state; a full export retains
+// all mapping history.
+func (d *Store) ExportExternalFieldMappings(ctx context.Context, f db.ExportFilter) iter.Seq2[db.ExternalFieldMappingExport, error] {
+	query := `SELECT m.connector_instance, m.kata_field, m.external_field_id,
+	                 m.external_field_name, m.accepted_kinds_json, m.nullable,
+	                 m.writable, m.schema_revision, m.active,
+	                 m.created_at, m.updated_at
+	          FROM external_field_mappings m`
+	var args []any
+	if f.ProjectID != nil {
+		query += ` WHERE (m.active = 1 AND EXISTS (
+			SELECT 1 FROM external_root_bindings b
+			JOIN issues i ON i.id = b.issue_id
+			WHERE b.connector_instance = m.connector_instance AND b.project_id = ?`
+		args = append(args, *f.ProjectID)
+		if !f.IncludeDeleted {
+			query += ` AND i.deleted_at IS NULL`
+		}
+		query += `)) OR EXISTS (
+			SELECT 1 FROM external_field_states s
+			JOIN external_root_bindings b ON b.id = s.binding_id
+			JOIN issues i ON i.id = b.issue_id
+			WHERE s.mapping_id = m.id AND b.project_id = ?`
+		args = append(args, *f.ProjectID)
+		if !f.IncludeDeleted {
+			query += ` AND i.deleted_at IS NULL`
+		}
+		query += `)`
+	}
+	query += ` ORDER BY m.id ASC`
+	return streamRows(ctx, d.readQ, "external_field_mappings", query, args,
+		func(rows *sql.Rows) (db.ExternalFieldMappingExport, error) {
+			var rec db.ExternalFieldMappingExport
+			var accepted string
+			var nullable, writable, active int
+			if err := rows.Scan(&rec.ConnectorInstance, &rec.KataField, &rec.ExternalFieldID,
+				&rec.ExternalFieldName, &accepted, &nullable, &writable,
+				&rec.SchemaRevision, &active, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
+				return db.ExternalFieldMappingExport{}, scanError("external_field_mapping", err)
+			}
+			if err := json.Unmarshal([]byte(accepted), &rec.AcceptedKinds); err != nil {
+				return db.ExternalFieldMappingExport{}, fmt.Errorf("external field mapping accepted kinds: %w", err)
+			}
+			rec.Nullable, rec.Writable, rec.Active = nullable != 0, writable != 0, active != 0
+			return rec, nil
+		})
+}
+
+// ExportExternalRootBindings streams portable binding state without live
+// claim coordination or connector process configuration.
+func (d *Store) ExportExternalRootBindings(ctx context.Context, f db.ExportFilter) iter.Seq2[db.ExternalRootBindingExport, error] {
+	query := `SELECT b.uid, p.uid, i.uid, rm.source, rm.external_id,
+	                 b.connector_instance, b.external_root_key, b.external_account_key,
+	                 b.active, b.enabled, b.receive_comments, b.publish_comments,
+	                 b.complete_external, b.paused_reason, b.last_external_state,
+	                 b.last_external_revision, b.receive_comments_after,
+	                 b.publish_comments_after, b.pending_comment_uid,
+	                 b.pending_comment_started_at, b.last_attempt_at, b.last_success_at,
+	                 b.last_error_at, b.last_error, b.consecutive_failures,
+	                 b.next_attempt_at, b.created_at, b.updated_at, b.unbound_at
+	          FROM external_root_bindings b
+	          JOIN projects p ON p.id = b.project_id
+	          JOIN issues i ON i.id = b.issue_id
+	          JOIN import_mappings rm ON rm.id = b.root_mapping_id`
+	var clauses []string
+	var args []any
+	if f.ProjectID != nil {
+		clauses = append(clauses, `b.project_id = ?`)
+		args = append(args, *f.ProjectID)
+	}
+	if !f.IncludeDeleted {
+		clauses = append(clauses, `i.deleted_at IS NULL`)
+	}
+	query += joinClauses(clauses) + ` ORDER BY b.id ASC`
+	return streamRows(ctx, d.readQ, "external_root_bindings", query, args,
+		func(rows *sql.Rows) (db.ExternalRootBindingExport, error) {
+			var rec db.ExternalRootBindingExport
+			var active, enabled, receive, publish, complete int
+			if err := rows.Scan(&rec.UID, &rec.ProjectUID, &rec.IssueUID,
+				&rec.RootMappingSource, &rec.RootMappingExternalID,
+				&rec.ConnectorInstance, &rec.ExternalRootKey, &rec.ExternalAccountKey,
+				&active, &enabled, &receive, &publish, &complete, &rec.PausedReason,
+				&rec.LastExternalState, &rec.LastExternalRevision,
+				&rec.ReceiveCommentsAfter, &rec.PublishCommentsAfter,
+				&rec.PendingCommentUID, &rec.PendingCommentStartedAt,
+				&rec.LastAttemptAt, &rec.LastSuccessAt, &rec.LastErrorAt, &rec.LastError,
+				&rec.ConsecutiveFailures, &rec.NextAttemptAt, &rec.CreatedAt,
+				&rec.UpdatedAt, &rec.UnboundAt); err != nil {
+				return db.ExternalRootBindingExport{}, scanError("external_root_binding", err)
+			}
+			rec.Active, rec.Enabled = active != 0, enabled != 0
+			rec.ReceiveComments, rec.PublishComments = receive != 0, publish != 0
+			rec.CompleteExternal = complete != 0
+			return rec, nil
+		})
+}
+
+// ExportExternalFieldStates streams merge baselines and conflicts using the
+// stable binding UID and mapping descriptor identity.
+func (d *Store) ExportExternalFieldStates(ctx context.Context, f db.ExportFilter) iter.Seq2[db.ExternalFieldStateExport, error] {
+	query := `SELECT b.uid, m.connector_instance, m.kata_field,
+	                 m.external_field_id, m.schema_revision, m.created_at,
+	                 s.baseline_json, s.conflict_kata, s.conflict_external,
+	                 s.conflicted, s.conflict_at, s.updated_at
+	          FROM external_field_states s
+	          JOIN external_root_bindings b ON b.id = s.binding_id
+	          JOIN external_field_mappings m ON m.id = s.mapping_id
+	          JOIN issues i ON i.id = b.issue_id`
+	var clauses []string
+	var args []any
+	if f.ProjectID != nil {
+		clauses = append(clauses, `b.project_id = ?`)
+		args = append(args, *f.ProjectID)
+	}
+	if !f.IncludeDeleted {
+		clauses = append(clauses, `i.deleted_at IS NULL`)
+	}
+	query += joinClauses(clauses) + ` ORDER BY b.id ASC, m.id ASC`
+	return streamRows(ctx, d.readQ, "external_field_states", query, args,
+		func(rows *sql.Rows) (db.ExternalFieldStateExport, error) {
+			var rec db.ExternalFieldStateExport
+			var baseline, conflictKata, conflictExternal sql.NullString
+			var conflicted int
+			if err := rows.Scan(&rec.BindingUID, &rec.MappingConnectorInstance,
+				&rec.MappingKataField, &rec.MappingExternalFieldID,
+				&rec.MappingSchemaRevision, &rec.MappingCreatedAt,
+				&baseline, &conflictKata, &conflictExternal, &conflicted,
+				&rec.ConflictAt, &rec.UpdatedAt); err != nil {
+				return db.ExternalFieldStateExport{}, scanError("external_field_state", err)
+			}
+			if baseline.Valid {
+				rec.Baseline = json.RawMessage(baseline.String)
+			}
+			if conflictKata.Valid {
+				rec.ConflictKata = json.RawMessage(conflictKata.String)
+			}
+			if conflictExternal.Valid {
+				rec.ConflictExternal = json.RawMessage(conflictExternal.String)
+			}
+			rec.Conflicted = conflicted != 0
+			return rec, nil
+		})
+}
+
 // ExportFederationBindings streams federation_bindings ordered by project_id,
 // scoped to f.ProjectID when set.
 func (d *Store) ExportFederationBindings(ctx context.Context, f db.ExportFilter) iter.Seq2[db.FederationBindingExport, error] {

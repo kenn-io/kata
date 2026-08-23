@@ -1,6 +1,9 @@
 package sqlitestore
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // LinksChangedPayloadForTest exposes linksChangedPayload to external tests so
 // they can pin the exact wire bytes without making the function public.
@@ -17,4 +20,12 @@ func InstallEnrollmentRotationStageForTest(
 	return func() {
 		store.rotationStage = previous
 	}
+}
+
+// InstallExternalRootClockForTest freezes the binding transaction clock and
+// returns a restore function for deterministic millisecond-boundary tests.
+func InstallExternalRootClockForTest(store *Store, now func() time.Time) func() {
+	previous := store.externalRootNow
+	store.externalRootNow = now
+	return func() { store.externalRootNow = previous }
 }

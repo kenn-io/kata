@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"go.kenn.io/kata/internal/config"
@@ -29,12 +30,14 @@ import (
 const (
 	maxResponseBytes             = 4 << 20
 	connectorProcessCleanupGrace = 100 * time.Millisecond
+	redactedProtocolErrorCode    = "connector_error"
 )
 
 var (
 	errResponseTooLarge      = errors.New("connector response exceeds 4 MiB")
 	errConnectorChildTimeout = errors.New("connector child timeout")
 	errConnectorCleanupWait  = errors.New("connector process cleanup timed out")
+	protocolErrorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 	// ErrProcessFailure marks connector executable startup, transport, or exit
 	// failure without rendering child paths, stderr, or configuration.
@@ -402,7 +405,11 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	if contextCause != nil {
 		_ = processTree.Close()
 		closed = true
-		return connectorContextError(ctx, contextCause)
+		contextErr := connectorContextError(ctx, contextCause)
+		if runErr != nil {
+			return newCallFailure(contextErr, runErr)
+		}
+		return contextErr
 	}
 	if runErr != nil {
 		_ = processTree.Close()
@@ -420,7 +427,6 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	if !utf8.Valid(stdout.Bytes()) {
 		return newCallFailure(ErrProtocolFailure, errors.New("connector response is not valid UTF-8"))
 	}
-
 	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
 	var response protocol.Response
 	if err := decoder.Decode(&response); err != nil {
@@ -443,15 +449,206 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 		return newCallFailure(ErrProtocolFailure, errors.New("connector response must contain exactly one of result or error"))
 	}
 	if response.Error != nil {
+		if !validProtocolError(response.Error) {
+			return newCallFailure(ErrProtocolFailure, errors.New("connector response has invalid error"))
+		}
 		return redactError(response.Error, redactions)
 	}
-	if bytes.Equal(bytes.TrimSpace(response.Result), []byte("null")) {
-		return newCallFailure(ErrProtocolFailure, errors.New("connector response result must not be null"))
+	trimmedResult := bytes.TrimSpace(response.Result)
+	if len(trimmedResult) < 2 || trimmedResult[0] != '{' || trimmedResult[len(trimmedResult)-1] != '}' {
+		return newCallFailure(ErrProtocolFailure, errors.New("connector result must be a JSON object"))
 	}
 	if err := json.Unmarshal(response.Result, result); err != nil {
 		return newCallFailure(ErrProtocolFailure, err)
 	}
+	if err := validateDecodedResult(method, result); err != nil {
+		return newCallFailure(ErrProtocolFailure, err)
+	}
 	return nil
+}
+
+func validateDecodedResult(method string, result any) error {
+	var valid bool
+	switch method {
+	case "describe":
+		value, ok := result.(*protocol.Description)
+		valid = ok && validDescription(*value)
+	case "resolve_root", "read_root", "complete_root":
+		value, ok := result.(*protocol.Root)
+		valid = ok && validRoot(*value)
+	case "list_comments":
+		value, ok := result.(*protocol.ListCommentsResult)
+		valid = ok && validComments(value.Comments)
+	case "publish_comment":
+		value, ok := result.(*protocol.Comment)
+		valid = ok && validComment(*value)
+	case "list_fields":
+		value, ok := result.(*protocol.ListFieldsResult)
+		valid = ok && validFieldDescriptors(value.Fields)
+	case "read_fields":
+		value, ok := result.(*protocol.ReadFieldsResult)
+		valid = ok && validFieldValues(value.Fields)
+	case "write_fields":
+		value, ok := result.(*protocol.WriteFieldsResult)
+		valid = ok && validFieldValues(value.Fields)
+	}
+	if !valid {
+		return fmt.Errorf("connector %s result is invalid", method)
+	}
+	return nil
+}
+
+func validDescription(value protocol.Description) bool {
+	if !canonicalConnectorValue(value.ConnectorID) || !canonicalConnectorValue(value.DisplayName) ||
+		value.Protocol != protocol.ProtocolVersion || !canonicalConnectorValue(value.AccountIdentity) ||
+		value.Capabilities == nil {
+		return false
+	}
+	seen := make(map[protocol.Capability]struct{}, len(value.Capabilities))
+	for _, capability := range value.Capabilities {
+		if !canonicalConnectorValue(string(capability)) {
+			return false
+		}
+		if _, ok := seen[capability]; ok {
+			return false
+		}
+		seen[capability] = struct{}{}
+	}
+	if _, publishes := seen[protocol.CapabilityPublishComment]; publishes && !canonicalConnectorValue(value.SelfActorID) {
+		return false
+	}
+	return true
+}
+
+func validRoot(value protocol.Root) bool {
+	if !canonicalConnectorValue(value.Key) || !canonicalConnectorValue(value.IdentityKey) ||
+		!canonicalConnectorValue(value.Revision) || (value.State != "open" && value.State != "complete") ||
+		value.UpdatedAt.IsZero() || value.ObservedAt.IsZero() || value.ObservedAt.Before(value.UpdatedAt) {
+		return false
+	}
+	if strings.ContainsRune(value.Title, '\x00') || strings.ContainsRune(value.Body, '\x00') {
+		return false
+	}
+	if value.Actor != nil &&
+		(!canonicalConnectorValue(value.Actor.ID) || !canonicalConnectorValue(value.Actor.DisplayName)) {
+		return false
+	}
+	if value.Fields != nil && !validFieldValues(value.Fields) {
+		return false
+	}
+	return true
+}
+
+func validComment(value protocol.Comment) bool {
+	return canonicalConnectorValue(value.ID) && canonicalConnectorValue(value.Revision) &&
+		canonicalConnectorValue(value.Author.ID) && canonicalConnectorValue(value.Author.DisplayName) &&
+		!strings.ContainsRune(value.Body, '\x00') && !value.CreatedAt.IsZero() &&
+		!value.UpdatedAt.IsZero() && !value.UpdatedAt.Before(value.CreatedAt)
+}
+
+func validComments(values []protocol.Comment) bool {
+	if values == nil {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for index, value := range values {
+		if !validComment(value) {
+			return false
+		}
+		if _, exists := seen[value.ID]; exists {
+			return false
+		}
+		seen[value.ID] = struct{}{}
+		if index == 0 {
+			continue
+		}
+		previous := values[index-1]
+		if value.CreatedAt.Before(previous.CreatedAt) ||
+			(value.CreatedAt.Equal(previous.CreatedAt) && value.ID <= previous.ID) {
+			return false
+		}
+	}
+	return true
+}
+
+func validFieldDescriptor(value protocol.FieldDescriptor) bool {
+	if !canonicalConnectorValue(value.ID) || !canonicalConnectorValue(value.DisplayName) ||
+		!canonicalConnectorValue(value.SchemaRevision) || value.AcceptedKinds == nil {
+		return false
+	}
+	for _, kind := range value.AcceptedKinds {
+		if kind != "date" && kind != "local_datetime" && kind != "instant" {
+			return false
+		}
+	}
+	return true
+}
+
+func validFieldDescriptors(values []protocol.FieldDescriptor) bool {
+	if values == nil {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !validFieldDescriptor(value) {
+			return false
+		}
+		if _, exists := seen[value.ID]; exists {
+			return false
+		}
+		seen[value.ID] = struct{}{}
+	}
+	return true
+}
+
+func validFieldValues(values map[string]protocol.FieldValue) bool {
+	if values == nil {
+		return false
+	}
+	for id, value := range values {
+		if !canonicalConnectorValue(id) || !validFieldValue(value) {
+			return false
+		}
+	}
+	return true
+}
+
+func validFieldValue(value protocol.FieldValue) bool {
+	switch value.Kind {
+	case "null":
+		return value.Value == "" && value.Timezone == ""
+	case "date":
+		if value.Timezone != "" {
+			return false
+		}
+		parsed, err := time.Parse(time.DateOnly, value.Value)
+		return err == nil && parsed.Format(time.DateOnly) == value.Value
+	case "local_datetime":
+		if !canonicalConnectorValue(value.Timezone) {
+			return false
+		}
+		if _, err := time.LoadLocation(value.Timezone); err != nil {
+			return false
+		}
+		for _, layout := range []string{"2006-01-02T15:04", "2006-01-02T15:04:05"} {
+			if parsed, err := time.Parse(layout, value.Value); err == nil && parsed.Format(layout) == value.Value {
+				return true
+			}
+		}
+		return false
+	case "instant":
+		if value.Timezone != "" || !strings.HasSuffix(value.Value, "Z") {
+			return false
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value.Value)
+		return err == nil && parsed.UTC().Format(time.RFC3339Nano) == value.Value
+	default:
+		return false
+	}
+}
+
+func canonicalConnectorValue(value string) bool {
+	return value != "" && strings.TrimSpace(value) == value && !strings.ContainsRune(value, '\x00')
 }
 
 func awaitCommandOutcome(
@@ -474,16 +671,17 @@ func awaitCommandOutcome(
 		default:
 		}
 		terminationErr := kill()
+		contextCause := context.Cause(ctx)
 		timer := time.NewTimer(connectorProcessCleanupGrace)
 		defer timer.Stop()
 		select {
 		case <-waitResult:
 			if terminationErr != nil {
-				return terminationErr, nil
+				return terminationErr, contextCause
 			}
-			return nil, context.Cause(ctx)
+			return nil, contextCause
 		case <-timer.C:
-			return errors.Join(terminationErr, errConnectorCleanupWait), nil
+			return errors.Join(terminationErr, errConnectorCleanupWait), contextCause
 		}
 	}
 }
@@ -505,14 +703,22 @@ func redactError(response *protocol.Error, redactions []string) error {
 	safe := *response
 	normalized := normalizeRedactions(redactions)
 	safe.Code = redactErrorField(safe.Code, normalized)
+	if safe.Code != response.Code {
+		safe.Code = redactedProtocolErrorCode
+	}
 	safe.Message = redactErrorField(safe.Message, normalized)
+	if !validProtocolError(&safe) {
+		return newCallFailure(ErrProtocolFailure, errors.New("connector response has invalid decoded error"))
+	}
 	return &safe
 }
 
 func redactErrorField(field string, redactions []string) string {
-	var decoded string
-	if err := json.Unmarshal([]byte(field), &decoded); err == nil {
-		return replaceRedactions(decoded, redactions)
+	if len(field) >= 2 && field[0] == '"' && field[len(field)-1] == '"' {
+		var decoded string
+		if err := json.Unmarshal([]byte(field), &decoded); err == nil {
+			return replaceRedactions(decoded, redactions)
+		}
 	}
 	return replaceRedactions(field, redactions)
 }
@@ -619,7 +825,7 @@ func normalizeRedactions(values []string) []string {
 	return normalized
 }
 
-func (p *processClient) environment(_ json.RawMessage) ([]string, []string, error) {
+func (p *processClient) environment(settings json.RawMessage) ([]string, []string, error) {
 	env := minimalRuntimeEnv(runtime.GOOS)
 	redactions := make([]string, 0, len(p.config.Env))
 	for target, source := range p.config.Env {
@@ -630,7 +836,57 @@ func (p *processClient) environment(_ json.RawMessage) ([]string, []string, erro
 		env = append(env, target+"="+value)
 		redactions = append(redactions, value)
 	}
+	redactions = append(redactions, stringValues(settings)...)
 	return env, normalizeRedactions(redactions), nil
+}
+
+func stringValues(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return nil
+	}
+	var values []string
+	var collect func(any)
+	collect = func(current any) {
+		switch typed := current.(type) {
+		case string:
+			values = append(values, typed)
+		case []any:
+			for _, item := range typed {
+				collect(item)
+			}
+		case map[string]any:
+			keys := make([]string, 0, len(typed))
+			for key := range typed {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				collect(typed[key])
+			}
+		}
+	}
+	collect(value)
+	return values
+}
+
+func validProtocolError(response *protocol.Error) bool {
+	if response == nil || !protocolErrorCodePattern.MatchString(response.Code) {
+		return false
+	}
+	if response.Message == "" || strings.TrimSpace(response.Message) != response.Message ||
+		len(response.Message) > 512 || !utf8.ValidString(response.Message) {
+		return false
+	}
+	for _, char := range response.Message {
+		if unicode.IsControl(char) {
+			return false
+		}
+	}
+	return true
 }
 
 func minimalRuntimeEnv(goos string) []string {

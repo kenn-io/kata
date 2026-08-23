@@ -81,6 +81,13 @@ func (p *FoldProjection) apply(e FoldEvent) {
 	case "claim.acquired", "claim.released", "claim.expired", "claim.force_released", "claim.violated":
 		// Claim events are federation audit records, not issue projection state.
 		return
+	case "issue.external_root_bound", "issue.external_root_paused",
+		"issue.external_root_resumed", "issue.external_root_unbound",
+		"issue.external_comment_resolved", "issue.external_field_conflicted",
+		"issue.external_field_resolved":
+		// Bridge events are issue-scoped audit records. The receiving side keeps
+		// its own connector state and must not project these onto native content.
+		return
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -44,6 +45,9 @@ func TestStorageConformance(t *testing.T) {
 			})
 			require.NoError(t, err)
 			return store
+		},
+		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
+			return pgstore.InstallExternalRootClockForTest(store.(*pgstore.Store), now)
 		},
 		SeedLegacyPendingClaim: func(ctx context.Context, store db.Storage, requestUID string) error {
 			postgresStore := store.(*pgstore.Store)
@@ -116,5 +120,69 @@ hlc_physical_ms,hlc_counter,content_hash
 			)
 		},
 		ExpectedFailures: pgstore.ExpectedConformanceFailures(),
+	})
+}
+
+func TestExternalRootConformance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	var schemaNumber int
+	dbtest.RunExternalRootConformance(t, dbtest.Backend{
+		Name: "postgres",
+		Open: func(t *testing.T) db.Storage {
+			t.Helper()
+			schemaNumber++
+			schema := fmt.Sprintf("external_root_conformance_%d", schemaNumber)
+			t.Cleanup(func() {
+				_, _ = admin.ExecContext(context.Background(), `DROP SCHEMA `+schema+` CASCADE`)
+			})
+			store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+				Schema:     schema,
+				SchemaMode: pgstore.SchemaModeBootstrap,
+			})
+			require.NoError(t, err)
+			return store
+		},
+		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
+			return pgstore.InstallExternalRootClockForTest(store.(*pgstore.Store), now)
+		},
+	})
+}
+
+func TestExternalRootContentOwned(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var schemaNumber int
+	dbtest.RunExternalRootContentOwnershipConformance(t, dbtest.Backend{
+		Name: "postgres",
+		Open: func(t *testing.T) db.Storage {
+			t.Helper()
+			schemaNumber++
+			schema := fmt.Sprintf("external_root_content_owned_%d", schemaNumber)
+			t.Cleanup(func() {
+				_, _ = admin.ExecContext(context.Background(), `DROP SCHEMA `+schema+` CASCADE`)
+			})
+			store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+				Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+			})
+			require.NoError(t, err)
+			return store
+		},
 	})
 }

@@ -111,6 +111,20 @@ func (s *Store) editComment(
 		if comment.Body == params.Body {
 			return nil
 		}
+		var externallyOwned bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1
+			FROM import_mappings m
+			JOIN external_root_bindings b
+			  ON b.project_id = m.project_id
+			 AND m.source = 'connector:' || b.connector_instance || ':binding:' || b.uid
+			WHERE m.object_type = 'comment' AND m.comment_id = $1 AND b.active = 1
+		)`, comment.ID).Scan(&externallyOwned); err != nil {
+			return fmt.Errorf("check external comment ownership: %w", mapSQLError(err, nil))
+		}
+		if externallyOwned {
+			return db.ErrExternalCommentContentOwned
+		}
 		editedAt := nowStoredTimestamp()
 		comment, err = scanComment(tx.QueryRowContext(ctx,
 			`UPDATE comments SET body = $1 WHERE id = $2
@@ -254,7 +268,7 @@ func (s *Store) CommentBodyByID(ctx context.Context, id int64) (string, error) {
 // CommentsByIssue returns comments in stable chronological order.
 func (s *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
 	rows, err := s.QueryContext(ctx,
-		commentSelect+` WHERE issue_id = $1 ORDER BY created_at ASC, id ASC`, issueID)
+		commentSelect+` WHERE issue_id = $1 ORDER BY created_at::timestamptz ASC, id ASC`, issueID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}

@@ -180,6 +180,17 @@ func validateWriteFieldsParams(params WriteFieldsParams) error {
 			return err
 		}
 	}
+	if params.Expected == nil {
+		return errors.New("expected must be present")
+	}
+	for fieldID, value := range params.Expected {
+		if err := validateCanonicalIdentifier("field_id", fieldID); err != nil {
+			return err
+		}
+		if err := ValidateFieldValue(value); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

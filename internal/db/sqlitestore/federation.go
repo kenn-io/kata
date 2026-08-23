@@ -485,6 +485,11 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		if err := rejectIssueSyncedFederationProject(ctx, tx, b.ProjectID); err != nil {
 			return db.FederationBinding{}, err
 		}
+		if b.Enabled && !b.PushEnabled {
+			if err := rejectExternalRootFederationProject(ctx, tx, b.ProjectID); err != nil {
+				return db.FederationBinding{}, err
+			}
+		}
 	}
 	previous, err := federationBindingTransitionState(ctx, tx, b.ProjectID)
 	if err != nil {
@@ -531,6 +536,19 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		return db.FederationBinding{}, err
 	}
 	return binding, nil
+}
+
+func rejectExternalRootFederationProject(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	var bindingID int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM external_root_bindings
+WHERE project_id=? AND active=1 LIMIT 1`, projectID).Scan(&bindingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check external root federation ownership: %w", err)
+	}
+	return db.ErrExternalRootFederationConflict
 }
 
 // LeaveFederationReplica detaches a spoke project: it deletes the binding,
@@ -1105,6 +1123,9 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 		return fmt.Errorf("begin federated reset: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := rejectFederationResetExternalRootHistory(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, projectID); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
@@ -1132,6 +1153,19 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 		return fmt.Errorf("commit federated reset: %w", err)
 	}
 	return nil
+}
+
+func rejectFederationResetExternalRootHistory(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	var bindingID int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT id FROM external_root_bindings WHERE project_id = ? LIMIT 1`, projectID).Scan(&bindingID)
+	if err == nil {
+		return db.ErrFederationResetBlockedByExternalRoot
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return fmt.Errorf("check federation reset external root history: %w", err)
 }
 
 func ensureProjectWritableTx(ctx context.Context, q sqlReader, projectID int64) error {
@@ -1463,7 +1497,7 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 			return nil, fmt.Errorf("scan federation snapshot comment: %w", err)
 		}
 		if createdAt.Valid {
-			comment.CreatedAt = createdAt.Time.UTC().Format(sqliteTimeFormat)
+			comment.CreatedAt = createdAt.Time.UTC().Format(sqliteCommentTimeFormat)
 		}
 		out = append(out, comment)
 	}
@@ -1622,6 +1656,15 @@ func reconcileFederatedIssues(
 			updatedAt = issue.CreatedAt
 		}
 		if row, ok := existing[uid]; ok {
+			if err := rejectExternalRootContentMutationTx(
+				ctx, tx, row.id,
+				issue.Title != row.title || issue.Body != row.body || (issue.DeletedAt != nil) != row.deleted,
+			); err != nil {
+				if errors.Is(err, db.ErrExternalRootContentOwned) {
+					return nil, fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, err)
+				}
+				return nil, err
+			}
 			issueValues := []any{
 				shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status),
 				issue.ClosedReason, issue.Owner, issue.Priority, nonEmptyAuthor(issue.Author),
@@ -1739,11 +1782,14 @@ func resolveFederatedIssueShortID(
 type federatedIssueRow struct {
 	id      int64
 	shortID string
+	title   string
+	body    string
+	deleted bool
 }
 
 func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]federatedIssueRow, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT uid, id, short_id FROM issues WHERE project_id = ?`, projectID)
+		`SELECT uid, id, short_id, title, body, deleted_at IS NOT NULL FROM issues WHERE project_id = ?`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list federated issue rows: %w", err)
 	}
@@ -1752,7 +1798,7 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (
 	for rows.Next() {
 		var uid string
 		var row federatedIssueRow
-		if err := rows.Scan(&uid, &row.id, &row.shortID); err != nil {
+		if err := rows.Scan(&uid, &row.id, &row.shortID, &row.title, &row.body, &row.deleted); err != nil {
 			return nil, fmt.Errorf("scan federated issue row: %w", err)
 		}
 		out[uid] = row
@@ -1763,7 +1809,7 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (
 func reconcileFederatedComments(
 	ctx context.Context, tx *sql.Tx, projectID int64, issueIDs map[string]int64, projection db.FoldProjection,
 ) error {
-	existing, err := federatedCommentIDsByUID(ctx, tx, projectID)
+	existing, err := federatedCommentRowsByUID(ctx, tx, projectID)
 	if err != nil {
 		return err
 	}
@@ -1774,11 +1820,18 @@ func reconcileFederatedComments(
 		desired[uid] = struct{}{}
 	}
 	sort.Strings(uids)
-	for uid, id := range existing {
+	for uid, row := range existing {
 		if _, ok := desired[uid]; ok {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM comments WHERE id = ?`, id); err != nil {
+		owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
+		if err != nil {
+			return err
+		}
+		if owned {
+			return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM comments WHERE id = ?`, row.id); err != nil {
 			return fmt.Errorf("delete stale federated comment %s: %w", uid, err)
 		}
 	}
@@ -1788,10 +1841,20 @@ func reconcileFederatedComments(
 		if !ok {
 			return fmt.Errorf("federated comment %s references unknown issue %s", uid, comment.IssueUID)
 		}
-		if id, ok := existing[uid]; ok {
+		if row, ok := existing[uid]; ok {
+			owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
+			if err != nil {
+				return err
+			}
+			if owned {
+				if comment.Body != row.body {
+					return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
+				}
+				continue
+			}
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE comments SET issue_id = ?, author = ?, body = ?, created_at = ? WHERE id = ?`,
-				issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), id); err != nil {
+				issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), row.id); err != nil {
 				return fmt.Errorf("update federated comment %s: %w", uid, err)
 			}
 			continue
@@ -1805,9 +1868,29 @@ func reconcileFederatedComments(
 	return nil
 }
 
-func federatedCommentIDsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]int64, error) {
+type federatedCommentRow struct {
+	id   int64
+	body string
+}
+
+func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
+	var owners int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
+		FROM import_mappings m
+		JOIN external_root_bindings b
+		  ON b.project_id = m.project_id
+		 AND m.source = 'connector:' || b.connector_instance || ':binding:' || b.uid
+		WHERE m.object_type = 'comment' AND m.comment_id = ? AND b.active = 1`,
+		commentID,
+	).Scan(&owners); err != nil {
+		return false, fmt.Errorf("check federated external comment ownership: %w", err)
+	}
+	return owners > 0, nil
+}
+
+func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]federatedCommentRow, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT c.uid, c.id
+		SELECT c.uid, c.id, c.body
 		  FROM comments c
 		  JOIN issues i ON i.id = c.issue_id
 		 WHERE i.project_id = ?`, projectID)
@@ -1815,14 +1898,14 @@ func federatedCommentIDsByUID(ctx context.Context, tx *sql.Tx, projectID int64) 
 		return nil, fmt.Errorf("list federated comments: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	out := map[string]int64{}
+	out := map[string]federatedCommentRow{}
 	for rows.Next() {
 		var uid string
-		var id int64
-		if err := rows.Scan(&uid, &id); err != nil {
+		var row federatedCommentRow
+		if err := rows.Scan(&uid, &row.id, &row.body); err != nil {
 			return nil, fmt.Errorf("scan federated comment: %w", err)
 		}
-		out[uid] = id
+		out[uid] = row
 	}
 	return out, rows.Err()
 }

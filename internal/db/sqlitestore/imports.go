@@ -337,6 +337,9 @@ func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 }
 
 func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, existing db.Issue, projectName string) (db.Issue, db.Event, error) {
+	if err := rejectExternalRootContentMutationTx(ctx, tx, existing.ID, item.Title != existing.Title || item.Body != existing.Body); err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
 	// created_at only ever moves earlier. A corrected source timestamp heals
 	// rows whose stored created_at was synthesized late by an older sync (and
 	// could otherwise outrun a freshly written closed_at); a later synthetic
@@ -374,6 +377,9 @@ func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 }
 
 func (d *Store) updateImportedPresentationTitle(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, existing db.Issue, projectName string) (db.Issue, db.Event, error) {
+	if err := rejectExternalRootContentMutationTx(ctx, tx, existing.ID, item.Title != existing.Title); err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
 	_, err := tx.ExecContext(ctx, `UPDATE issues SET title = ?, content_revision = content_revision + 1 WHERE id = ?`, item.Title, existing.ID)
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported title: %w", err)

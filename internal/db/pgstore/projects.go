@@ -14,6 +14,7 @@ import (
 
 const projectSelect = `SELECT id, uid, name, metadata, revision, created_at, deleted_at FROM projects`
 const storedTimeFormat = "2006-01-02T15:04:05.000Z"
+const externalObservationTimeFormat = "2006-01-02T15:04:05.000000000Z"
 
 type rowScanner interface {
 	Scan(...any) error
@@ -271,5 +272,9 @@ func parseStoredTime(value string) (time.Time, error) {
 }
 
 func formatStoredTime(value time.Time) string { return value.UTC().Format(storedTimeFormat) }
+
+func formatExternalObservationTime(value time.Time) string {
+	return value.UTC().Format(externalObservationTimeFormat)
+}
 
 func nowStoredTimestamp() string { return formatStoredTime(time.Now()) }

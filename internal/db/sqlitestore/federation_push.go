@@ -133,7 +133,11 @@ func federationPushEventTypeCondition(column string) string {
 		'issue.soft_deleted', 'issue.restored', 'issue.commented', 'issue.comment_edited',
 		'issue.assigned', 'issue.unassigned', 'issue.priority_set', 'issue.priority_cleared',
 		'issue.labeled', 'issue.unlabeled',
-		'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated'
+		'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated',
+		'issue.external_root_bound', 'issue.external_root_paused',
+		'issue.external_root_resumed', 'issue.external_root_unbound',
+		'issue.external_comment_resolved', 'issue.external_field_conflicted',
+		'issue.external_field_resolved'
 	)`
 }
 
@@ -252,6 +256,9 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		return fmt.Errorf("begin guarded federated reset: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := rejectFederationResetExternalRootHistory(ctx, tx, projectID); err != nil {
+		return err
+	}
 
 	res, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
@@ -271,7 +278,11 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		            'issue.soft_deleted', 'issue.restored', 'issue.commented', 'issue.comment_edited',
 		            'issue.assigned', 'issue.unassigned', 'issue.priority_set', 'issue.priority_cleared',
 		            'issue.labeled', 'issue.unlabeled',
-		            'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated'
+		            'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated',
+		            'issue.external_root_bound', 'issue.external_root_paused',
+		            'issue.external_root_resumed', 'issue.external_root_unbound',
+		            'issue.external_comment_resolved', 'issue.external_field_conflicted',
+		            'issue.external_field_resolved'
 		          )
 		   )
 		   AND NOT EXISTS (

@@ -144,6 +144,10 @@ func refusePGProjectMergeUIDCollisions(ctx context.Context, tx *sql.Tx, records 
 			checks = append(checks, uidCheck{"events", "uid", "event", record.Event.UID})
 		case record.PurgeLog != nil:
 			checks = append(checks, uidCheck{"purge_log", "uid", "purge log", record.PurgeLog.UID})
+		case record.ExternalRootBinding != nil:
+			checks = append(checks, uidCheck{
+				"external_root_bindings", "uid", "external root binding", record.ExternalRootBinding.UID,
+			})
 		}
 	}
 	for _, check := range checks {

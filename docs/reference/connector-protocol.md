@@ -77,12 +77,6 @@ All handlers implement these methods:
 field methods are advertised with `fields`. A connector may return a structured
 unsupported error for optional methods whose capability it does not advertise.
 
-Each `publish_comment` request includes a nonempty, canonical `operation_id`.
-The caller persists this ID for the logical publication and reuses it when a
-connector process exits after publishing but before returning a response. A
-connector must return the original comment for that retry without creating a
-second provider comment.
-
 Root keys, account identities, connector IDs, actor IDs, comment IDs, field IDs,
 and schema revisions are opaque stable identities. Do not encode Kata issue
 UIDs, refs, project IDs, binding IDs, branches, or other Kata-owned identity
@@ -147,7 +141,6 @@ subsequent unchanged reads.
 - The external root owns title and body while a binding is active.
 - Kata planning-field mappings are limited to `scheduled_on` and `deadline_on`
   in protocol v1.
-- Kata deliberately uses one process per RPC for isolation and bounded cleanup;
-  a long-lived transport is deferred.
+- Kata uses one process per RPC for isolation and bounded cleanup.
 - The browser UI has no bridge indicator yet. Connector and bridge
   administration through the daemon API and CLI is also deferred.

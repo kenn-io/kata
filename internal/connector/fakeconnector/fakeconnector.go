@@ -276,6 +276,9 @@ func (h *handler) WriteFields(_ context.Context, params connector.WriteFieldsPar
 		if !ok {
 			return notFound("root")
 		}
+		if len(params.Expected) != len(params.Fields) {
+			return &connector.Error{Code: "invalid_field_value", Message: "expected field values are required"}
+		}
 		for id, value := range params.Fields {
 			descriptor, exists := findField(current.Fields, id)
 			if !exists {
@@ -283,6 +286,10 @@ func (h *handler) WriteFields(_ context.Context, params connector.WriteFieldsPar
 			}
 			if !descriptor.Writable || !acceptedValue(descriptor, value) {
 				return &connector.Error{Code: "invalid_field_value", Message: "field value is not accepted"}
+			}
+			expected, exists := params.Expected[id]
+			if !exists || root.Fields[id] != expected {
+				return &connector.Error{Code: "field_conflict", Message: "field changed before write"}
 			}
 		}
 		if root.Fields == nil {

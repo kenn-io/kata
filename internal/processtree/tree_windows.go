@@ -131,7 +131,31 @@ func (t *platformTree) kill(cmd *exec.Cmd) error {
 }
 
 func (t *platformTree) alive(_ *exec.Cmd) bool {
-	return t.job != 0
+	if t.job == 0 {
+		return false
+	}
+	var info jobObjectBasicAccountingInformation
+	if err := windows.QueryInformationJobObject(
+		t.job,
+		windows.JobObjectBasicAccountingInformation,
+		uintptr(unsafe.Pointer(&info)), // #nosec G103 -- Windows requires a pointer to the documented job accounting structure.
+		uint32(unsafe.Sizeof(info)),
+		nil,
+	); err != nil {
+		return true
+	}
+	return info.ActiveProcesses > 0
+}
+
+type jobObjectBasicAccountingInformation struct {
+	TotalUserTime             int64
+	TotalKernelTime           int64
+	ThisPeriodTotalUserTime   int64
+	ThisPeriodTotalKernelTime int64
+	TotalPageFaultCount       uint32
+	TotalProcesses            uint32
+	ActiveProcesses           uint32
+	TotalTerminatedProcesses  uint32
 }
 
 func prepare(_ *exec.Cmd) {}

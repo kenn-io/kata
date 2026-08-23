@@ -226,12 +226,12 @@ func TestProtocolServeOneAttachesImmutableInvocation(t *testing.T) {
 	assert.True(t, handler.immutable)
 }
 
-func TestInvocationFromContextRejectsSpoofedPublicInvocation(t *testing.T) {
-	ctx := spoofedInvocationContext{
+func TestInvocationFromContextRejectsForgedPublicInvocation(t *testing.T) {
+	ctx := forgedInvocationContext{
 		Context: t.Context(),
 		invocation: Invocation{
-			Instance: "spoofed",
-			Settings: json.RawMessage(`{"spoofed":true}`),
+			Instance: "forged",
+			Settings: json.RawMessage(`{"forged":true}`),
 		},
 	}
 
@@ -329,12 +329,12 @@ func (h *publicationOperationHandler) PublishComment(_ context.Context, params P
 	return Comment{}, nil
 }
 
-type spoofedInvocationContext struct {
+type forgedInvocationContext struct {
 	context.Context
 	invocation Invocation
 }
 
-func (ctx spoofedInvocationContext) Value(any) any {
+func (ctx forgedInvocationContext) Value(any) any {
 	return ctx.invocation
 }
 

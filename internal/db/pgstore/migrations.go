@@ -11,6 +11,9 @@ var canonicalSchemaSQL string
 //go:embed vector_schema.sql
 var vectorSchemaSQL string
 
+//go:embed migrations/000026_external_root_bridges.up.sql
+var externalRootBridgesMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -24,7 +27,14 @@ type Migration struct {
 // migrationAssets begins at the first schema version released with Postgres
 // support. The first release installs canonicalSchemaSQL directly, so there
 // is no historical Postgres database to upgrade in this branch.
-var migrationAssets = []Migration{}
+var migrationAssets = []Migration{
+	{
+		FromVersion: 25,
+		ToVersion:   26,
+		Name:        "000026_external_root_bridges.up.sql",
+		SQL:         externalRootBridgesMigrationSQL,
+	},
+}
 
 // Migrations returns forward migrations from previously released Postgres
 // schema versions. The returned slice is detached from the package registry.

@@ -21,6 +21,11 @@ import (
 // SQLite's lexicographic string comparison on created_at to be correct.
 const sqliteTimeFormat = "2006-01-02T15:04:05.000Z"
 
+// sqliteCommentTimeFormat preserves provider precision in a fixed-width UTC
+// representation. Comment ordering normalizes millisecond local timestamps to
+// this width before comparing them.
+const sqliteCommentTimeFormat = "2006-01-02T15:04:05.000000000Z"
+
 // Fingerprint returns the lowercase hex SHA-256 of the canonical concatenation
 // of (title, body, owner, sorted labels, sorted links, priority) per spec §3.6.
 // The fingerprint is order-independent for labels and links: both are sorted

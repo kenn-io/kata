@@ -678,7 +678,7 @@ func readUILabelStrings(ctx context.Context, tx *sql.Tx, issueID int64) ([]strin
 }
 
 func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Comment, error) {
-	rows, err := tx.QueryContext(ctx, commentSelect+` WHERE issue_id = $1 ORDER BY created_at ASC, id ASC`, issueID)
+	rows, err := tx.QueryContext(ctx, commentSelect+` WHERE issue_id = $1 ORDER BY created_at::timestamptz ASC, id ASC`, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("read UI comments: %w", mapSQLError(err, nil))
 	}

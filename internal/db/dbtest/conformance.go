@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,6 +21,7 @@ import (
 type Backend struct {
 	Name                           string
 	Open                           func(t *testing.T) db.Storage
+	InstallExternalRootClock       func(db.Storage, func() time.Time) func()
 	SeedLegacyPendingClaim         func(context.Context, db.Storage, string) error
 	SeedClaimViolation             func(context.Context, db.Storage, db.Project, db.Issue, string, json.RawMessage) error
 	SeedUnsupportedFederationEvent func(context.Context, db.Storage, db.Project, string) error
@@ -223,21 +225,61 @@ var storageScenarios = []scenario{
 		run: checkImportMappings,
 	},
 	{
+		name: "external root durable state",
+		methods: []string{
+			"ClaimExternalRootBinding", "ClaimExternalRootBindingForManualAction", "ClaimExternalRootBindingForManualReconcile",
+			"ClearPendingExternalComment", "CreateExternalRootBinding",
+			"CreateComment", "CreateIssue", "CreateProject", "CreateProjectWithUID", "EnableProjectFederation",
+			"ExternalFieldStates", "ExternalRootBindingByExternalKey", "ExternalRootBindingByID",
+			"ExternalRootBindingByIssue", "ImportCommentMappingsByIssue", "ImportMappingBySource", "IngestFederationEvents",
+			"IssueByUID", "ListDueExternalRootBindings", "ListExternalFieldMappings",
+			"PauseExternalRootBinding", "PendingFederationPushEvents", "RecordExternalRootError",
+			"RecordExternalRootSuccess", "ReleaseExternalRootClaim", "RenewExternalRootClaim", "ResolveExternalFieldConflict",
+			"ResumeExternalRootBinding", "SetPendingExternalComment", "UnbindExternalRootBinding",
+			"UnmapExternalField", "UpsertExternalFieldMapping", "UpsertExternalFieldState",
+		},
+		runWithBackend: checkExternalRootBindings,
+	},
+	{
+		name: "external root safety invariants",
+		methods: []string{
+			"ApplyExternalFieldProjection", "ApplyExternalRootProjection", "ClaimExternalRootBinding", "ClearPendingExternalComment", "CreateComment",
+			"CreateExternalRootBinding", "CreateIssue", "CreateProject", "ExportExternalRootBindings", "ExportImportMappings", "ExportIssues", "ExternalFieldStates",
+			"CloseIssue", "ExternalRootBindingByID", "EnsureExternalRootLifecycleRequest", "HasLabel", "ImportMappingBySource", "IssueByID",
+			"ListDueExternalRootBindings", "ListExternalFieldMappings", "PauseExternalRootBinding", "ReleaseExternalRootClaim", "RemoveLabelAndEvent", "RemoveProject",
+			"ImportReplay", "ReopenIssue", "ResolveExternalFieldConflict", "RestoreProject", "ResumeExternalRootBinding", "SetPendingExternalComment", "UpsertExternalCommentProjection",
+			"SoftDeleteIssue", "UnbindExternalRootBinding", "UnmapExternalField", "UpsertExternalFieldMapping", "UpsertExternalFieldState", "UpsertFederationBinding", "UpsertImportMapping",
+		},
+		runWithBackend: checkExternalRootSafetyInvariants,
+	},
+	{
+		name: "external root content ownership",
+		methods: []string{
+			"CreateExternalRootBinding", "CreateIssue", "CreateProject", "CreateProjectWithUID",
+			"EditIssue", "EditIssueAtomic", "EnableProjectFederation", "ImportBatch",
+			"ImportMappingBySource", "IngestFederationEvents", "IssueByID", "MaxEventID",
+			"PauseExternalRootBinding", "UnbindExternalRootBinding", "UpsertImportMapping", "UpsertIssueSyncBinding",
+		},
+		runWithBackend: checkExternalRootContentOwnership,
+	},
+	{
 		name: "project relocation",
 		methods: []string{
 			"AcquireClaim", "ClaimStatusReadOnly", "CountLiveClaims", "CountPendingClaims", "CreateIssue",
-			"CreateLink", "CreateProject", "CreateRecurrence", "EnqueuePendingClaim", "EventsAfter",
-			"ImportMappingBySource", "IssueByID", "LinkByEndpoints", "ListPendingClaimRequestsForIssue",
-			"MaterializeNext", "MoveIssueProject", "UpsertImportMapping",
+			"ClaimExternalRootBinding", "CreateExternalRootBinding", "CreateLink", "CreateProject", "CreateRecurrence", "EnqueuePendingClaim",
+			"EventsAfter", "ExternalRootBindingByID", "ImportMappingBySource", "IssueByID", "LinkByEndpoints",
+			"ListPendingClaimRequestsForIssue", "MaterializeNext", "MoveIssueProject", "UnbindExternalRootBinding",
+			"ReleaseExternalRootClaim", "UpsertImportMapping", "UpsertIssueSyncBinding",
 		},
 		run: checkProjectRelocation,
 	},
 	{
 		name: "project merge",
 		methods: []string{
-			"AttachAlias", "CreateIssue", "CreateLink", "CreateProject", "CreateRecurrence", "EventsAfter",
-			"ImportMappingBySource", "IssueByShortID", "LinksByIssue", "MergeProjects", "ProjectAliases",
-			"ListRecurrencesByProject", "ProjectByID", "PurgeIssue", "RemoveProject", "SystemProject",
+			"AttachAlias", "ClaimExternalRootBinding", "CreateExternalRootBinding", "CreateIssue", "CreateLink", "CreateProject",
+			"CreateRecurrence", "EventsAfter", "ExternalRootBindingByID", "ImportMappingBySource",
+			"IssueByID", "IssueByShortID", "LinksByIssue", "MergeProjects", "ProjectAliases",
+			"ListRecurrencesByProject", "ProjectByID", "PurgeIssue", "ReleaseExternalRootClaim", "RemoveProject", "SystemProject",
 			"UpsertImportMapping", "UpsertIssueSyncBinding",
 		},
 		run: checkProjectMerge,
@@ -332,10 +374,10 @@ var storageScenarios = []scenario{
 	{
 		name: "federation reset lifecycle",
 		methods: []string{
-			"AcquireClaim", "CountLiveClaims", "CountPendingClaims", "CreateIssue", "CreateProject",
-			"EnqueuePendingClaim", "EventsAfter", "FederationBindingByProject", "IssueByUID",
+			"AcquireClaim", "CountLiveClaims", "CountPendingClaims", "CreateExternalRootBinding", "CreateIssue", "CreateProject",
+			"EnqueuePendingClaim", "EventsAfter", "ExternalRootBindingByID", "FederationBindingByProject", "IssueByUID", "MaxEventID",
 			"RecordFederationQuarantine", "ResetFederatedProject", "ResetFederatedProjectIfNoPendingPush",
-			"UpsertFederationBinding",
+			"UnbindExternalRootBinding", "UpsertFederationBinding",
 		},
 		runWithBackend: checkFederationResetLifecycle,
 	},
@@ -415,13 +457,19 @@ var storageScenarios = []scenario{
 	{
 		name: "snapshot replay extended state",
 		methods: []string{
-			"ActiveFederationQuarantine", "CommentsByIssue", "ExportImportMappings",
+			"ActiveFederationQuarantine", "CommentsByIssue", "ExportExternalFieldMappings",
+			"ExportExternalFieldStates", "ExportExternalRootBindings", "ExportImportMappings",
 			"ExportProjectPurgeLog", "ExportPurgeLog", "ExportSequences", "FederationBindingByProject",
 			"FederationSyncStatusByProject", "GetRecurrenceByUID", "ImportReplay", "IssueByUID",
 			"IssueSyncBindingByProject", "IssueSyncStatusByProject", "LabelsByIssue",
 			"ListFederationEnrollments", "ListPendingClaimRequests", "ProjectAliases", "ProjectByUID",
 		},
 		run: checkSnapshotReplayExtendedState,
+	},
+	{
+		name:    "snapshot replay rejects invalid external root frontiers",
+		methods: []string{"ImportReplay", "ProjectByUID"},
+		run:     checkSnapshotReplayRejectsInvalidExternalRootFrontiers,
 	},
 	{
 		name: "snapshot replay compatibility options",
@@ -460,6 +508,21 @@ var storageScenarios = []scenario{
 			"ImportReplay", "LinkByEndpoints", "LinkByID", "UpsertImportMapping",
 		},
 		runWithBackend: checkSnapshotReplayProjectEnvelopes,
+	},
+	{
+		name: "snapshot merge external roots",
+		methods: []string{
+			"CreateExternalRootBinding", "CreateIssue", "CreateProject", "ExportComments", "ExportEvents", "ExportExternalFieldMappings",
+			"ExportExternalFieldStates", "ExportExternalRootBindings", "ExportFederationBindings",
+			"ExportFederationEnrollments", "ExportFederationQuarantine", "ExportFederationSyncStatus",
+			"ExportImportMappings", "ExportIssueClaims", "ExportIssueLabels", "ExportIssueSyncBindings",
+			"ExportIssueSyncStatus", "ExportIssues", "ExportLinks", "ExportMeta", "ExportPendingClaimRequests",
+			"ExportProjectAliases", "ExportProjectPurgeLog", "ExportProjects", "ExportPurgeLog",
+			"ExportRecurrences", "ExportSequences", "ExternalFieldStates", "ExternalRootBindingByIssue",
+			"ImportReplay", "IssueByUID", "ListExternalFieldMappings", "PauseExternalRootBinding", "ProjectByUID",
+			"UpsertExternalFieldMapping", "UpsertImportMapping",
+		},
+		runWithBackend: checkSnapshotMergeExternalRoots,
 	},
 }
 
@@ -527,4 +590,50 @@ func RunStorageConformance(t *testing.T, backend Backend) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+// RunExternalRootConformance exercises only the external-root durable-state
+// scenario. It keeps the focused backend command fast while using the exact
+// same checks as the complete storage conformance suite.
+func RunExternalRootConformance(t *testing.T, backend Backend) {
+	t.Helper()
+	require.NotEmpty(t, backend.Name)
+	require.NotNil(t, backend.Open)
+
+	checks := []struct {
+		name string
+		run  func(*testing.T, db.Storage) error
+	}{
+		{name: "durable state", run: func(t *testing.T, store db.Storage) error {
+			return checkExternalRootBindings(t, store, backend)
+		}},
+		{name: "safety invariants", run: func(t *testing.T, store db.Storage) error {
+			return checkExternalRootSafetyInvariants(t, store, backend)
+		}},
+		{name: "content ownership", run: func(t *testing.T, store db.Storage) error {
+			return checkExternalRootContentOwnership(t, store, backend)
+		}},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			store := backend.Open(t)
+			require.NotNil(t, store)
+			t.Cleanup(func() {
+				require.NoError(t, store.Close())
+			})
+			require.NoError(t, check.run(t, store))
+		})
+	}
+}
+
+// RunExternalRootContentOwnershipConformance exercises the native mutation
+// boundaries that must preserve externally owned title/body content.
+func RunExternalRootContentOwnershipConformance(t *testing.T, backend Backend) {
+	t.Helper()
+	require.NotEmpty(t, backend.Name)
+	require.NotNil(t, backend.Open)
+	store := backend.Open(t)
+	require.NotNil(t, store)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	require.NoError(t, checkExternalRootContentOwnership(t, store, backend))
 }

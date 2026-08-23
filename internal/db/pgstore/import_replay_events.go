@@ -281,6 +281,8 @@ var replayIdentityTables = []string{
 	"issue_claims",
 	"pending_claim_requests",
 	"import_mappings",
+	"external_root_bindings",
+	"external_field_mappings",
 }
 
 func (s *Store) reconcileReplayIdentities(

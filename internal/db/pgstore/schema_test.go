@@ -70,6 +70,9 @@ var expectedTables = []string{
 	"api_tokens",
 	"comments",
 	"events",
+	"external_field_mappings",
+	"external_field_states",
+	"external_root_bindings",
 	"federation_bindings",
 	"federation_enrollments",
 	"federation_quarantine",
@@ -126,6 +129,8 @@ var expectedFKCounts = map[string]int{
 	"pending_claim_requests": 2, // -> projects, -> issues
 	"issues_search":          1, // -> issues (CASCADE)
 	"import_mappings":        4, // -> projects, issues, comments, links
+	"external_root_bindings": 3, // -> projects, issues, import_mappings
+	"external_field_states":  2, // -> external_root_bindings, external_field_mappings
 }
 
 // TestSchema_BaselineMatchesExpectedSurface opens a real PG and asserts the

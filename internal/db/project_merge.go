@@ -1,8 +1,10 @@
 package db
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"time"
 )
 
 // Keep imported rows in the lower half of the signed ID range. This leaves
@@ -52,8 +54,11 @@ func PrepareProjectMergeRecords(
 	}
 	var project *ProjectExport
 	importedIssues := make(map[int64]string)
+	importedIssueUIDs := make(map[string]struct{})
 	importedRecurrencesByID := make(map[int64]string)
 	importedRecurrencesByUID := make(map[string]int64)
+	importedExternalBindings := make(map[string]struct{})
+	importedExternalMappings := make(map[externalFieldMappingIdentity]struct{})
 	for _, rec := range recs {
 		if rec.Project != nil {
 			if rec.Project.UID == SystemProjectUID || rec.Project.Name == SystemProjectName {
@@ -67,10 +72,17 @@ func PrepareProjectMergeRecords(
 		}
 		if rec.Issue != nil {
 			importedIssues[rec.Issue.ID] = rec.Issue.UID
+			importedIssueUIDs[rec.Issue.UID] = struct{}{}
 		}
 		if rec.Recurrence != nil {
 			importedRecurrencesByID[rec.Recurrence.ID] = rec.Recurrence.UID
 			importedRecurrencesByUID[rec.Recurrence.UID] = rec.Recurrence.ID
+		}
+		if rec.ExternalRootBinding != nil {
+			importedExternalBindings[rec.ExternalRootBinding.UID] = struct{}{}
+		}
+		if rec.ExternalFieldMapping != nil {
+			importedExternalMappings[externalFieldMappingExportIdentity(rec.ExternalFieldMapping)] = struct{}{}
 		}
 	}
 	if project == nil {
@@ -209,6 +221,25 @@ func PrepareProjectMergeRecords(
 				if err == nil && cloned.ImportMapping.LinkID != nil {
 					*cloned.ImportMapping.LinkID, err = addMergeOffset(*cloned.ImportMapping.LinkID, offsets.Link, cloned.Kind+" link")
 				}
+			}
+		case ImportKindExternalFieldMapping:
+			// Field mappings are global portable descriptor revisions. Preserve
+			// their identity; backend replay either reuses an exact existing
+			// revision or atomically rejects a conflicting target revision.
+		case ImportKindExternalRootBinding:
+			if cloned.ExternalRootBinding.ProjectUID != project.UID {
+				err = fmt.Errorf("project merge external root binding references project UID %q, want %q",
+					cloned.ExternalRootBinding.ProjectUID, project.UID)
+			} else if _, ok := importedIssueUIDs[cloned.ExternalRootBinding.IssueUID]; !ok {
+				err = fmt.Errorf("project merge external root binding issue UID %q is not part of the imported project",
+					cloned.ExternalRootBinding.IssueUID)
+			}
+		case ImportKindExternalFieldState:
+			if _, ok := importedExternalBindings[cloned.ExternalFieldState.BindingUID]; !ok {
+				err = fmt.Errorf("project merge external field state binding UID %q is not part of the imported project",
+					cloned.ExternalFieldState.BindingUID)
+			} else if _, ok := importedExternalMappings[externalFieldStateMappingIdentity(cloned.ExternalFieldState)]; !ok {
+				err = fmt.Errorf("project merge external field state mapping is not part of the imported project envelope")
 			}
 		case ImportKindFederationBinding, ImportKindFederationSyncStatus,
 			ImportKindFederationQuarantine, ImportKindFederationEnrollment:
@@ -404,6 +435,31 @@ func cloneImportRecord(rec ImportRecord) ImportRecord {
 		out.ImportMapping.CommentID = cloneInt64Ptr(v.CommentID)
 		out.ImportMapping.LinkID = cloneInt64Ptr(v.LinkID)
 	}
+	if rec.ExternalFieldMapping != nil {
+		v := *rec.ExternalFieldMapping
+		v.AcceptedKinds = append([]string(nil), v.AcceptedKinds...)
+		out.ExternalFieldMapping = &v
+	}
+	if rec.ExternalRootBinding != nil {
+		v := *rec.ExternalRootBinding
+		v.ReceiveCommentsAfter = cloneTimePtr(v.ReceiveCommentsAfter)
+		v.PublishCommentsAfter = cloneTimePtr(v.PublishCommentsAfter)
+		v.PendingCommentStartedAt = cloneTimePtr(v.PendingCommentStartedAt)
+		v.LastAttemptAt = cloneTimePtr(v.LastAttemptAt)
+		v.LastSuccessAt = cloneTimePtr(v.LastSuccessAt)
+		v.LastErrorAt = cloneTimePtr(v.LastErrorAt)
+		v.NextAttemptAt = cloneTimePtr(v.NextAttemptAt)
+		v.UnboundAt = cloneTimePtr(v.UnboundAt)
+		out.ExternalRootBinding = &v
+	}
+	if rec.ExternalFieldState != nil {
+		v := *rec.ExternalFieldState
+		v.Baseline = append(json.RawMessage(nil), v.Baseline...)
+		v.ConflictKata = append(json.RawMessage(nil), v.ConflictKata...)
+		v.ConflictExternal = append(json.RawMessage(nil), v.ConflictExternal...)
+		v.ConflictAt = cloneTimePtr(v.ConflictAt)
+		out.ExternalFieldState = &v
+	}
 	if rec.FederationBinding != nil {
 		v := *rec.FederationBinding
 		out.FederationBinding = &v
@@ -451,6 +507,42 @@ func cloneImportRecord(rec ImportRecord) ImportRecord {
 		out.Sequence = &v
 	}
 	return out
+}
+
+type externalFieldMappingIdentity struct {
+	connectorInstance string
+	kataField         string
+	externalFieldID   string
+	schemaRevision    string
+	createdAt         time.Time
+}
+
+func externalFieldMappingExportIdentity(mapping *ExternalFieldMappingExport) externalFieldMappingIdentity {
+	return externalFieldMappingIdentity{
+		connectorInstance: mapping.ConnectorInstance,
+		kataField:         mapping.KataField,
+		externalFieldID:   mapping.ExternalFieldID,
+		schemaRevision:    mapping.SchemaRevision,
+		createdAt:         mapping.CreatedAt,
+	}
+}
+
+func externalFieldStateMappingIdentity(state *ExternalFieldStateExport) externalFieldMappingIdentity {
+	return externalFieldMappingIdentity{
+		connectorInstance: state.MappingConnectorInstance,
+		kataField:         state.MappingKataField,
+		externalFieldID:   state.MappingExternalFieldID,
+		schemaRevision:    state.MappingSchemaRevision,
+		createdAt:         state.MappingCreatedAt,
+	}
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func mergeStringValue(value *string) string {

@@ -20,7 +20,7 @@ import (
 func TestFederationSchemaVersionAndTable(t *testing.T) {
 	d := openTestDB(t)
 
-	assert.Equal(t, 25, db.CurrentSchemaVersion())
+	assert.Equal(t, 26, db.CurrentSchemaVersion())
 	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 	assertSchemaObject(t, d, "federation_bindings")
 	assertSchemaObject(t, d, "idx_federation_bindings_role_enabled")
@@ -807,6 +807,115 @@ func TestAdoptProjectIntoFederationPreservesSnapshotPayloadAuthors(t *testing.T)
 	require.Len(t, payload.Comments, 1)
 	assert.Equal(t, comment.UID, payload.Comments[0].CommentUID)
 	assert.Equal(t, "bob", payload.Comments[0].Author)
+}
+
+func TestFederationRoundTripPreservesSubMillisecondCommentCreatedAt(t *testing.T) {
+	t.Run("comment event", func(t *testing.T) {
+		source, ctx, project := setupTestProject(t)
+		_, err := source.EnableProjectFederation(ctx, project.ID, "source-agent")
+		require.NoError(t, err)
+		issue, created, err := source.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID,
+			Title:     "source issue",
+			Author:    "source-agent",
+		})
+		require.NoError(t, err)
+
+		var comment db.Comment
+		var commented db.Event
+		for attempt := range 10 {
+			comment, commented, err = source.CreateComment(ctx, db.CreateCommentParams{
+				IssueID: issue.ID,
+				Author:  "source-agent",
+				Body:    fmt.Sprintf("sub-millisecond comment %d", attempt),
+			})
+			require.NoError(t, err)
+			if comment.CreatedAt.Nanosecond()%int(time.Millisecond) != 0 {
+				break
+			}
+		}
+		require.NotZero(t, comment.CreatedAt.Nanosecond()%int(time.Millisecond),
+			"test requires a comment timestamp with sub-millisecond precision")
+
+		target := openTestDB(t)
+		targetProject, err := target.CreateProjectWithUID(ctx, project.Name, project.UID)
+		require.NoError(t, err)
+		_, err = target.EnableProjectFederation(ctx, targetProject.ID, "target-agent")
+		require.NoError(t, err)
+		_, err = target.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        targetProject.ID,
+			SpokeInstanceUID: source.InstanceUID(),
+			Events: []db.FederationIngestEvent{
+				{SourceEventID: created.ID, Event: remoteEventFromStored(created)},
+				{SourceEventID: commented.ID, Event: remoteEventFromStored(commented)},
+			},
+		})
+		require.NoError(t, err)
+
+		targetIssue, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		comments, err := target.CommentsByIssue(ctx, targetIssue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		assert.Equal(t, comment.CreatedAt, comments[0].CreatedAt)
+	})
+
+	t.Run("adoption snapshot", func(t *testing.T) {
+		source, ctx, project := setupTestProject(t)
+		issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID,
+			Title:     "snapshot source issue",
+			Author:    "source-agent",
+		})
+		require.NoError(t, err)
+		comment, _, err := source.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: issue.ID,
+			Author:  "source-agent",
+			Body:    "snapshot comment",
+		})
+		require.NoError(t, err)
+		want := time.Date(2026, 8, 23, 12, 0, 0, 123456789, time.UTC)
+		_, err = source.ExecContext(ctx,
+			`UPDATE comments SET created_at = ? WHERE id = ?`,
+			want.Format("2006-01-02T15:04:05.000000000Z"), comment.ID,
+		)
+		require.NoError(t, err)
+
+		_, err = source.EnableProjectFederation(ctx, project.ID, "source-agent")
+		require.NoError(t, err)
+		events, err := source.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 10})
+		require.NoError(t, err)
+		var snapshot db.Event
+		for _, event := range events {
+			if event.Type == "issue.snapshot" {
+				snapshot = event
+				break
+			}
+		}
+		require.NotZero(t, snapshot.ID)
+
+		target := openTestDB(t)
+		targetProject, err := target.CreateProjectWithUID(ctx, project.Name, project.UID)
+		require.NoError(t, err)
+		_, err = target.EnableProjectFederation(ctx, targetProject.ID, "target-agent")
+		require.NoError(t, err)
+		_, err = target.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        targetProject.ID,
+			SpokeInstanceUID: source.InstanceUID(),
+			Events: []db.FederationIngestEvent{{
+				SourceEventID: snapshot.ID,
+				Event:         remoteEventFromStored(snapshot),
+			}},
+		})
+		require.NoError(t, err)
+
+		targetIssue, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		comments, err := target.CommentsByIssue(ctx, targetIssue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		assert.Equal(t, want, comments[0].CreatedAt)
+	})
 }
 
 func TestAdoptProjectIntoFederationSnapshotsEditedCommentWithoutLeakedBody(t *testing.T) {
@@ -5594,4 +5703,22 @@ func TestIngestWithoutLinkAffectingEventsPreservesMaterializedLinks(t *testing.T
 	assertRowCount(ctx, t, d, 1, "comment-only ingest still rebuilds the rest of the projection",
 		`SELECT count(*) FROM comments WHERE issue_id = ? AND body = 'follow-up'`,
 		firstIssue.ID)
+}
+
+func remoteEventFromStored(event db.Event) db.RemoteEvent {
+	return db.RemoteEvent{
+		EventUID:          event.UID,
+		OriginInstanceUID: event.OriginInstanceUID,
+		ProjectUID:        event.ProjectUID,
+		ProjectName:       event.ProjectName,
+		IssueUID:          event.IssueUID,
+		RelatedIssueUID:   event.RelatedIssueUID,
+		Type:              event.Type,
+		Actor:             event.Actor,
+		HLCPhysicalMS:     event.HLCPhysicalMS,
+		HLCCounter:        event.HLCCounter,
+		ContentHash:       event.ContentHash,
+		Payload:           json.RawMessage(event.Payload),
+		CreatedAt:         event.CreatedAt,
+	}
 }

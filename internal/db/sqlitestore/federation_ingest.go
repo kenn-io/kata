@@ -902,7 +902,11 @@ func validateFederationProjectEvent(
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
 		"issue.commented", "issue.comment_edited", "issue.labeled", "issue.unlabeled",
-		"issue.linked", "issue.unlinked", "issue.links_changed", "issue.metadata_updated":
+		"issue.linked", "issue.unlinked", "issue.links_changed", "issue.metadata_updated",
+		"issue.external_root_bound", "issue.external_root_paused",
+		"issue.external_root_resumed", "issue.external_root_unbound",
+		"issue.external_comment_resolved", "issue.external_field_conflicted",
+		"issue.external_field_resolved":
 		if issueUID == "" {
 			return fmt.Errorf("%w: %s missing issue uid", db.ErrFederationIngestValidation, ev.Type)
 		}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -46,6 +47,10 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 	if openIssues > 0 && !p.Force {
 		return db.Project{}, nil, &db.ProjectHasOpenIssuesError{OpenIssues: openIssues}
 	}
+	staleBefore := time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)
+	if err := lockAndRejectFreshExternalRootClaimsForProjectTx(ctx, tx, project.ID, staleBefore); err != nil {
+		return db.Project{}, nil, err
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE projects SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
@@ -59,6 +64,16 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		 WHERE project_id = ?`,
 		project.ID); err != nil {
 		return db.Project{}, nil, fmt.Errorf("disable issue sync for archived project: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE external_root_bindings
+		   SET enabled = 0,
+		       paused_reason = CASE WHEN enabled = 1 THEN 'project_archived' ELSE paused_reason END,
+		       claim_token = '',
+		       claim_started_at = NULL,
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE project_id = ? AND active = 1`, project.ID); err != nil {
+		return db.Project{}, nil, fmt.Errorf("pause external roots for archived project: %w", err)
 	}
 
 	aliasCount, err := deleteAllAliasesForProject(ctx, tx, project.ID)

@@ -22,56 +22,65 @@ func TestRun(t *testing.T) {
 	Run(t, newFixture())
 }
 
+func TestRunAcceptsFieldBaselineEqualToSamples(t *testing.T) {
+	fixture := newFixture()
+	fixture.fieldBaselineMatchesSamples = true
+	Run(t, fixture)
+}
+
 type memoryFixture struct {
-	description             connector.Description
-	root                    connector.Root
-	comments                []connector.Comment
-	providerComments        []connector.Comment
-	descriptors             []connector.FieldDescriptor
-	mutations               []Mutation
-	exchange                func(context.Context, []byte) ([]byte, error)
-	providerFields          map[string]connector.FieldValue
-	discardProviderComment  bool
-	discardProviderFields   bool
-	advanceObservation      bool
-	futureObservation       bool
-	omitPrefrontierComment  bool
-	errorMode               string
-	errorMethod             string
-	errorMessage            string
-	forbiddenMutationKey    string
-	forbiddenFieldValueKey  string
-	wrongMutationType       bool
-	trailingMutation        bool
-	dateOnlyFields          bool
-	unstableDescription     bool
-	unstableResetIdentity   bool
-	describeCalls           int
-	resetCalls              int
-	rootLocator             string
-	invocation              connector.Invocation
-	requireInvocation       bool
-	publications            map[string]connector.Comment
-	noEditedComment         bool
-	noDeletedComment        bool
-	missingCommentTime      bool
-	missingCommentRevision  bool
-	constantCommentRevision bool
-	reverseComments         bool
-	nonIdempotentComplete   bool
-	unchangedCompletionRev  bool
-	rejectFieldKind         string
-	noActionableField       bool
-	paddedFieldID           bool
-	paddedSchemaRevision    bool
-	unreadableReadOnlyField bool
-	fabricatedRootRead      bool
-	fabricatedComments      bool
-	duplicateAfterCrash     bool
-	crashAfterMutation      bool
-	publicationCrashed      bool
-	staleCompletionTime     bool
-	stalePublicationTime    bool
+	description                 connector.Description
+	root                        connector.Root
+	comments                    []connector.Comment
+	providerComments            []connector.Comment
+	descriptors                 []connector.FieldDescriptor
+	mutations                   []Mutation
+	exchange                    func(context.Context, []byte) ([]byte, error)
+	providerFields              map[string]connector.FieldValue
+	discardProviderComment      bool
+	discardProviderFields       bool
+	advanceObservation          bool
+	futureObservation           bool
+	omitPrefrontierComment      bool
+	errorMode                   string
+	errorMethod                 string
+	errorMessage                string
+	forbiddenMutationKey        string
+	forbiddenFieldValueKey      string
+	wrongMutationType           bool
+	trailingMutation            bool
+	dateOnlyFields              bool
+	unstableDescription         bool
+	unstableResetIdentity       bool
+	describeCalls               int
+	resetCalls                  int
+	rootLocator                 string
+	invocation                  connector.Invocation
+	requireInvocation           bool
+	publications                map[string]connector.Comment
+	noEditedComment             bool
+	noDeletedComment            bool
+	missingCommentTime          bool
+	missingCommentRevision      bool
+	constantCommentRevision     bool
+	reverseComments             bool
+	nonIdempotentComplete       bool
+	unchangedCompletionRev      bool
+	rejectFieldKind             string
+	noActionableField           bool
+	paddedFieldID               bool
+	paddedSchemaRevision        bool
+	fabricatedRootRead          bool
+	fabricatedComments          bool
+	duplicateAfterCrash         bool
+	crashAfterMutation          bool
+	publicationCrashed          bool
+	staleCompletionTime         bool
+	stalePublicationTime        bool
+	nonIdempotentPublish        bool
+	brokenReadOnlyField         bool
+	fieldsWithoutCapability     bool
+	fieldBaselineMatchesSamples bool
 }
 
 func newFixture() *memoryFixture {
@@ -174,6 +183,7 @@ func TestRunRejectsBrokenWireExchanges(t *testing.T) {
 		{name: "trailing response JSON", mode: "trailing-response", subtest: "language-neutral_protocol_transcripts"},
 		{name: "result and error response", mode: "result-and-error", subtest: "language-neutral_protocol_transcripts"},
 		{name: "committed transcript response ID", mode: "wrong-transcript-id", subtest: "language-neutral_protocol_transcripts"},
+		{name: "invalid UTF-8 success response", mode: "invalid-utf8-success", subtest: "language-neutral_protocol_transcripts"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestBrokenWireExchangeProbe$") // #nosec G204,G702 -- the current test executable is fixed by the Go test runner.
@@ -238,6 +248,14 @@ func TestBrokenWireExchangeProbe(t *testing.T) {
 			decoded.ID = "wrong-transcript-response-id"
 			response, _ = json.Marshal(decoded)
 			response = append(response, '\n')
+		}
+		if mode == "invalid-utf8-success" && err == nil {
+			response = bytes.Replace(
+				response,
+				[]byte(`"display_name":"Example Connector"`),
+				[]byte("\"display_name\":\"Example \xff Connector\""),
+				1,
+			)
 		}
 		return response, err
 	}
@@ -349,12 +367,15 @@ func TestProtocolV1TranscriptsRejectEveryRunBehavior(t *testing.T) {
 		"reverse-comments",
 		"non-idempotent-completion",
 		"unchanged-completion-revision",
+		"non-idempotent-publication",
+		"broken-read-only-field",
 		"reject-local-datetime",
 		"reject-null",
 		"no-actionable-field",
 		"padded-field-id",
 		"padded-schema-revision",
 		"unreadable-read-only-field",
+		"fields-without-capability",
 	} {
 		for _, runner := range []string{"run", "transcripts"} {
 			command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestBrokenDeclarativeContractProbe$") // #nosec G204,G702 -- the current test executable is fixed by the Go test runner.
@@ -393,6 +414,10 @@ func TestBrokenDeclarativeContractProbe(t *testing.T) {
 		fixture.nonIdempotentComplete = true
 	case "unchanged-completion-revision":
 		fixture.unchangedCompletionRev = true
+	case "non-idempotent-publication":
+		fixture.nonIdempotentPublish = true
+	case "broken-read-only-field":
+		fixture.brokenReadOnlyField = true
 	case "reject-local-datetime":
 		fixture.rejectFieldKind = "local_datetime"
 	case "reject-null":
@@ -404,7 +429,9 @@ func TestBrokenDeclarativeContractProbe(t *testing.T) {
 	case "padded-schema-revision":
 		fixture.paddedSchemaRevision = true
 	case "unreadable-read-only-field":
-		fixture.unreadableReadOnlyField = true
+		fixture.brokenReadOnlyField = true
+	case "fields-without-capability":
+		fixture.fieldsWithoutCapability = true
 	default:
 		t.Fatal("unknown declarative contract probe")
 	}
@@ -551,7 +578,7 @@ func TestRunAllowsDateOnlyFieldsFixture(t *testing.T) {
 }
 
 func TestMutationAuditTreatsFieldIDsAsOpaque(t *testing.T) {
-	raw := json.RawMessage(`{"root_key":"root-example","fields":{"issueId":{"kind":"date","value":"2026-08-26"},"katakana_start":{"kind":"null"},"kata_uid":{"kind":"null"}}}`)
+	raw := json.RawMessage(`{"root_key":"root-example","fields":{"issueId":{"kind":"date","value":"2026-08-26"},"katakana_start":{"kind":"null"},"kata_uid":{"kind":"null"}},"expected":{"issueId":{"kind":"null"},"katakana_start":{"kind":"null"},"kata_uid":{"kind":"null"}}}`)
 	if err := auditMutationParams("write_fields", raw, "root-example"); err != nil {
 		t.Fatalf("opaque external field IDs were treated as structural identity channels: %v", err)
 	}
@@ -664,15 +691,18 @@ func (f *memoryFixture) Reset(context.Context) error {
 		SelfActorID:     "actor-self",
 		AccountIdentity: "account-example",
 	}
+	if f.fieldsWithoutCapability {
+		f.description.Capabilities = []connector.Capability{connector.CapabilityPublishComment}
+	}
 	f.root = connector.Root{
 		Key: "root-example", IdentityKey: "account-example", Title: "Example root", Body: "Example body",
 		State: "open", Revision: "revision-1", UpdatedAt: base, ObservedAt: observed,
 		Fields: map[string]connector.FieldValue{
-			"katakana_start": {Kind: "date", Value: "2026-08-20"},
-			"field-local":    {Kind: "local_datetime", Value: "2026-08-20T11:30:00", Timezone: "Europe/Paris"},
-			"field-instant":  {Kind: "instant", Value: "2026-08-20T09:30:00Z"},
-			"field-null":     {Kind: "null"},
-			"field-readonly": {Kind: "date", Value: "2026-08-20"},
+			"katakana_start":  {Kind: "date", Value: "2026-08-20"},
+			"field-read-only": {Kind: "date", Value: "2026-08-19"},
+			"field-local":     {Kind: "local_datetime", Value: "2026-08-20T11:30:00", Timezone: "Europe/Paris"},
+			"field-instant":   {Kind: "instant", Value: "2026-08-20T09:30:00Z"},
+			"field-null":      {Kind: "null"},
 		},
 	}
 	if f.unstableResetIdentity {
@@ -682,6 +712,11 @@ func (f *memoryFixture) Reset(context.Context) error {
 		f.description.AccountIdentity += suffix
 		f.root.Key += suffix
 		f.root.IdentityKey = f.description.AccountIdentity
+	}
+	if f.fieldBaselineMatchesSamples {
+		f.root.Fields["katakana_start"] = connector.FieldValue{Kind: "date", Value: "2026-08-21"}
+		f.root.Fields["field-local"] = connector.FieldValue{Kind: "local_datetime", Value: "2026-08-21T14:45:00", Timezone: "Asia/Tokyo"}
+		f.root.Fields["field-instant"] = connector.FieldValue{Kind: "instant", Value: "2026-08-21T05:45:00Z"}
 	}
 	f.comments = []connector.Comment{
 		{ID: "comment-before-frontier", Revision: "comment-revision-1", Body: "Existing comment", Author: connector.Actor{ID: "actor-history", DisplayName: "Historical Reviewer"}, CreatedAt: base.Add(-time.Minute), UpdatedAt: base.Add(-time.Minute)},
@@ -733,10 +768,10 @@ func (f *memoryFixture) Reset(context.Context) error {
 	maps.Copy(f.providerFields, f.root.Fields)
 	f.descriptors = []connector.FieldDescriptor{
 		{ID: "katakana_start", DisplayName: "Date", AcceptedKinds: []string{"date"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
+		{ID: "field-read-only", DisplayName: "Read only date", AcceptedKinds: []string{"date"}, Nullable: false, Writable: false, SchemaRevision: "schema-1"},
 		{ID: "field-local", DisplayName: "Local", AcceptedKinds: []string{"local_datetime"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 		{ID: "field-instant", DisplayName: "Instant", AcceptedKinds: []string{"instant"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 		{ID: "field-null", DisplayName: "Nullable", AcceptedKinds: []string{"date", "local_datetime", "instant"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
-		{ID: "field-readonly", DisplayName: "Read only", AcceptedKinds: []string{"date"}, Writable: false, SchemaRevision: "schema-1"},
 	}
 	if f.noActionableField {
 		f.descriptors = []connector.FieldDescriptor{{
@@ -756,10 +791,10 @@ func (f *memoryFixture) Reset(context.Context) error {
 		f.descriptors[0].SchemaRevision = " " + f.descriptors[0].SchemaRevision + " "
 	}
 	f.mutations = nil
-	f.publications = make(map[string]connector.Comment)
 	f.describeCalls = 0
 	f.crashAfterMutation = false
 	f.publicationCrashed = false
+	f.publications = make(map[string]connector.Comment)
 	return nil
 }
 
@@ -873,8 +908,10 @@ func (f *memoryFixture) PublishComment(_ context.Context, params connector.Publi
 	if params.RootKey != f.root.Key {
 		return connector.Comment{}, f.fixtureError("publish_comment")
 	}
-	if published, ok := f.publications[params.OperationID]; ok && (!f.duplicateAfterCrash || !f.publicationCrashed) {
-		return published, nil
+	if !f.nonIdempotentPublish {
+		if published, ok := f.publications[params.OperationID]; ok && (!f.duplicateAfterCrash || !f.publicationCrashed) {
+			return published, nil
+		}
 	}
 	f.publicationCrashed = false
 	stamp := nextMutationTime(f.root.UpdatedAt, f.root.ObservedAt)
@@ -891,10 +928,10 @@ func (f *memoryFixture) PublishComment(_ context.Context, params connector.Publi
 		created.UpdatedAt = created.CreatedAt
 	}
 	f.comments = append(f.comments, created)
-	f.publications[params.OperationID] = created
 	if !f.discardProviderComment {
 		f.providerComments = append(f.providerComments, created)
 	}
+	f.publications[params.OperationID] = created
 	f.recordMutation("publish_comment", params)
 	if f.wrongMutationType {
 		f.mutations = append(f.mutations, Mutation{
@@ -925,8 +962,8 @@ func (f *memoryFixture) ReadFields(_ context.Context, params connector.ReadField
 	}
 	values := make(map[string]connector.FieldValue, len(params.FieldIDs))
 	for _, id := range params.FieldIDs {
-		if f.unreadableReadOnlyField && id == "field-readonly" {
-			return connector.ReadFieldsResult{}, &connector.Error{Code: "field_unreadable", Message: "field cannot be read"}
+		if f.brokenReadOnlyField && id == "field-read-only" {
+			return connector.ReadFieldsResult{}, &connector.Error{Code: "field_not_found", Message: "field was not found"}
 		}
 		value, ok := f.root.Fields[id]
 		if !ok {
@@ -944,6 +981,15 @@ func (f *memoryFixture) WriteFields(_ context.Context, params connector.WriteFie
 	for _, value := range params.Fields {
 		if value.Kind == f.rejectFieldKind {
 			return connector.WriteFieldsResult{}, &connector.Error{Code: "unsupported_field", Message: "field kind is unsupported"}
+		}
+	}
+	if len(params.Expected) != len(params.Fields) {
+		return connector.WriteFieldsResult{}, &connector.Error{Code: "invalid_field_value", Message: "expected field values are required"}
+	}
+	for id := range params.Fields {
+		expected, ok := params.Expected[id]
+		if !ok || f.root.Fields[id] != expected {
+			return connector.WriteFieldsResult{}, &connector.Error{Code: "field_conflict", Message: "field changed before write"}
 		}
 	}
 	for id, value := range params.Fields {

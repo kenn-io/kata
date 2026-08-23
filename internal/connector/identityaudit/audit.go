@@ -179,22 +179,24 @@ func validateParameterTypes(method string, raw json.RawMessage, params map[strin
 		if err := requireString("root_key"); err != nil {
 			return err
 		}
-		fields, ok := params["fields"].(map[string]any)
-		if !ok {
-			return invalid("params.fields")
-		}
-		for fieldID, value := range fields {
-			field, ok := value.(map[string]any)
+		for _, collection := range []string{"fields", "expected"} {
+			fields, ok := params[collection].(map[string]any)
 			if !ok {
-				return invalid("params.fields." + fieldID)
+				return invalid("params." + collection)
 			}
-			if _, ok := field["kind"].(string); !ok {
-				return invalid("params.fields." + fieldID + ".kind")
-			}
-			for _, optional := range []string{"value", "timezone"} {
-				if rawValue, present := field[optional]; present {
-					if _, ok := rawValue.(string); !ok {
-						return invalid("params.fields." + fieldID + "." + optional)
+			for fieldID, value := range fields {
+				field, ok := value.(map[string]any)
+				if !ok {
+					return invalid("params." + collection + "." + fieldID)
+				}
+				if _, ok := field["kind"].(string); !ok {
+					return invalid("params." + collection + "." + fieldID + ".kind")
+				}
+				for _, optional := range []string{"value", "timezone"} {
+					if rawValue, present := field[optional]; present {
+						if _, ok := rawValue.(string); !ok {
+							return invalid("params." + collection + "." + fieldID + "." + optional)
+						}
 					}
 				}
 			}
@@ -212,17 +214,17 @@ var methodParameters = map[string]map[string]bool{
 	"complete_root":   {"root_key": true},
 	"list_fields":     {},
 	"read_fields":     {"root_key": true, "field_ids": true},
-	"write_fields":    {"root_key": true, "fields": true},
+	"write_fields":    {"root_key": true, "fields": true, "expected": true},
 }
 
 func forbiddenPath(value any, path, method string) (string, bool) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
-			if method == "write_fields" && path == "params" && key == "fields" {
+			if method == "write_fields" && path == "params" && (key == "fields" || key == "expected") {
 				if fields, ok := child.(map[string]any); ok {
 					for fieldID, fieldValue := range fields {
-						if found, ok := forbiddenPath(fieldValue, path+".fields."+fieldID, method); ok {
+						if found, ok := forbiddenPath(fieldValue, path+"."+key+"."+fieldID, method); ok {
 							return found, true
 						}
 					}

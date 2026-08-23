@@ -172,7 +172,37 @@ type Storage interface {
 	UpsertImportMapping(ctx context.Context, p ImportMappingParams) (ImportMapping, error)
 	ImportMappingBySource(ctx context.Context, projectID int64, source, objectType, externalID string) (ImportMapping, error)
 	ImportMappingsByProjectSource(ctx context.Context, projectID int64, source string) ([]ImportMapping, error)
+	ImportCommentMappingsByIssue(ctx context.Context, issueID int64) ([]ImportMapping, error)
 	ImportReplay(ctx context.Context, recs []ImportRecord, opts ImportOptions) error
+
+	// external root bridges
+	CreateExternalRootBinding(ctx context.Context, p CreateExternalRootBindingParams) (ExternalRootBinding, Event, error)
+	ExternalRootBindingByIssue(ctx context.Context, issueID int64) (ExternalRootBinding, error)
+	ExternalRootBindingByID(ctx context.Context, bindingID int64) (ExternalRootBinding, error)
+	ExternalRootBindingByExternalKey(ctx context.Context, connectorInstance, externalRootKey string) (ExternalRootBinding, error)
+	ListDueExternalRootBindings(ctx context.Context, now, staleBefore time.Time, limit int) ([]ExternalRootBinding, error)
+	ClaimExternalRootBinding(ctx context.Context, bindingID int64, token string, now, staleBefore time.Time) (ExternalRootBinding, bool, error)
+	ClaimExternalRootBindingForManualReconcile(ctx context.Context, bindingID int64, token string, now, staleBefore time.Time) (ExternalRootBinding, bool, error)
+	ClaimExternalRootBindingForManualAction(ctx context.Context, bindingID int64, token string, now, staleBefore time.Time) (ExternalRootBinding, bool, error)
+	RenewExternalRootClaim(ctx context.Context, bindingID int64, token string, at time.Time) (ExternalRootBinding, error)
+	ReleaseExternalRootClaim(ctx context.Context, bindingID int64, token string) (ExternalRootBinding, error)
+	RecordExternalRootSuccess(ctx context.Context, p ExternalRootSuccessParams) (ExternalRootBinding, error)
+	RecordExternalRootError(ctx context.Context, p ExternalRootErrorParams) (ExternalRootBinding, error)
+	ApplyExternalRootProjection(ctx context.Context, p ExternalRootProjectionParams) (Issue, *Event, bool, error)
+	ApplyExternalFieldProjection(ctx context.Context, p ExternalFieldProjectionParams) (Issue, *Event, bool, error)
+	UpsertExternalCommentProjection(ctx context.Context, p ExternalCommentProjectionParams) (Comment, *Event, bool, error)
+	EnsureExternalRootLifecycleRequest(ctx context.Context, p ExternalCommentProjectionParams) (Comment, []Event, bool, error)
+	PauseExternalRootBinding(ctx context.Context, p ExternalRootActionParams) (ExternalRootBinding, Event, error)
+	ResumeExternalRootBinding(ctx context.Context, p ExternalRootActionParams) (ExternalRootBinding, Event, error)
+	UnbindExternalRootBinding(ctx context.Context, p ExternalRootActionParams) (ExternalRootBinding, Event, error)
+	SetPendingExternalComment(ctx context.Context, p SetPendingExternalCommentParams) (ExternalRootBinding, error)
+	ClearPendingExternalComment(ctx context.Context, p ClearPendingExternalCommentParams) (ExternalRootBinding, Event, error)
+	ListExternalFieldMappings(ctx context.Context, connectorInstance string) ([]ExternalFieldMapping, error)
+	UpsertExternalFieldMapping(ctx context.Context, p ExternalFieldMappingParams) (ExternalFieldMapping, error)
+	UnmapExternalField(ctx context.Context, connectorInstance, kataField string) (ExternalFieldMapping, error)
+	ExternalFieldStates(ctx context.Context, bindingID int64) ([]ExternalFieldState, error)
+	UpsertExternalFieldState(ctx context.Context, p ExternalFieldStateParams) (ExternalFieldState, *Event, error)
+	ResolveExternalFieldConflict(ctx context.Context, p ResolveExternalFieldConflictParams) (ExternalFieldState, Event, error)
 
 	// GitHub sync
 	UpsertIssueSyncBinding(ctx context.Context, p UpsertIssueSyncBindingParams) (IssueSyncBinding, error)
@@ -271,6 +301,9 @@ type Storage interface {
 	ExportIssueLabels(ctx context.Context, f ExportFilter) iter.Seq2[IssueLabelExport, error]
 	ExportLinks(ctx context.Context, f ExportFilter) iter.Seq2[LinkExport, error]
 	ExportImportMappings(ctx context.Context, f ExportFilter) iter.Seq2[ImportMappingExport, error]
+	ExportExternalFieldMappings(ctx context.Context, f ExportFilter) iter.Seq2[ExternalFieldMappingExport, error]
+	ExportExternalRootBindings(ctx context.Context, f ExportFilter) iter.Seq2[ExternalRootBindingExport, error]
+	ExportExternalFieldStates(ctx context.Context, f ExportFilter) iter.Seq2[ExternalFieldStateExport, error]
 	ExportFederationBindings(ctx context.Context, f ExportFilter) iter.Seq2[FederationBindingExport, error]
 	ExportFederationSyncStatus(ctx context.Context, f ExportFilter) iter.Seq2[FederationSyncStatusExport, error]
 	ExportFederationQuarantine(ctx context.Context, f ExportFilter) iter.Seq2[FederationQuarantineExport, error]

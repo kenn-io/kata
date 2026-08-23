@@ -1503,6 +1503,54 @@ func checkFederationResetLifecycle(t *testing.T, store db.Storage, backend Backe
 	assert.Equal(t, int64(20), binding.ReplayHorizonEventID)
 	assert.Equal(t, int64(19), binding.PullCursorEventID)
 
+	externalProject, err := store.CreateProject(ctx, "federation-reset-external-history")
+	if err != nil {
+		return err
+	}
+	externalIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: externalProject.ID, Title: "external history", Author: "worker",
+	})
+	if err != nil {
+		return err
+	}
+	externalBinding, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: externalProject.ID, IssueID: externalIssue.ID,
+		ConnectorInstance: "notes", ExternalRootKey: "reset-history-root",
+		ExternalAccountKey: "opaque-account-key", Actor: "worker",
+		ReceiveCommentsAfter: time.Date(2026, 8, 23, 1, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		return err
+	}
+	_, _, err = store.UnbindExternalRootBinding(ctx, db.ExternalRootActionParams{
+		BindingID: externalBinding.ID, Actor: "worker",
+	})
+	if err != nil {
+		return err
+	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: externalProject.ID, Role: db.FederationRoleSpoke,
+		HubURL: "https://reset-hub.example", HubProjectID: 46, HubProjectUID: externalProject.UID,
+		Enabled: true,
+	})
+	if err != nil {
+		return err
+	}
+	pushCursor, err := store.MaxEventID(ctx)
+	if err != nil {
+		return err
+	}
+	err = store.ResetFederatedProjectIfNoPendingPush(ctx, externalProject.ID, 60, 59,
+		store.InstanceUID(), pushCursor)
+	assert.ErrorIs(t, err, db.ErrFederationResetBlockedByExternalRoot)
+	err = store.ResetFederatedProject(ctx, externalProject.ID, 60, 59)
+	assert.ErrorIs(t, err, db.ErrFederationResetBlockedByExternalRoot)
+	preservedBinding, err := store.ExternalRootBindingByID(ctx, externalBinding.ID)
+	if err != nil {
+		return err
+	}
+	assert.False(t, preservedBinding.Active)
+
 	quarantineProject, err := store.CreateProject(ctx, "federation-reset-quarantine")
 	if err != nil {
 		return err

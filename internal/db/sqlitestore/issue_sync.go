@@ -31,6 +31,9 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 		if err := rejectFederationSpokeIssueSyncProject(ctx, tx, p.ProjectID); err != nil {
 			return db.IssueSyncBinding{}, err
 		}
+		if err := rejectExternalRootIssueSyncSourceTx(ctx, tx, p.ProjectID, p.SourceKey); err != nil {
+			return db.IssueSyncBinding{}, err
+		}
 
 		existing, err := issueSyncBindingByProject(ctx, tx, p.ProjectID)
 		if err == nil {
@@ -101,6 +104,30 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 		}
 		return binding, nil
 	})
+}
+
+func rejectExternalRootIssueSyncSourceTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	sourceKey string,
+) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE projects SET id=id WHERE id=?`, projectID); err != nil {
+		return fmt.Errorf("lock issue sync project: %w", err)
+	}
+	var bindingID int64
+	err := tx.QueryRowContext(ctx, `SELECT b.id
+		FROM import_mappings m
+		JOIN external_root_bindings b ON b.issue_id=m.issue_id AND b.active=1
+		WHERE m.project_id=? AND m.source=? AND m.object_type='issue'
+		LIMIT 1`, projectID, strings.TrimSpace(sourceKey)).Scan(&bindingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check issue sync external root ownership: %w", err)
+	}
+	return db.ErrExternalRootIssueSyncConflict
 }
 
 // DisableIssueSyncBinding marks a project's binding disabled without

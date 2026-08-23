@@ -65,14 +65,20 @@ func importReplayRank(kind string) int {
 	case ImportKindImportMapping, ImportKindFederationSyncStatus,
 		ImportKindFederationQuarantine:
 		return 5
-	case ImportKindEvent:
+	case ImportKindExternalFieldMapping:
 		return 6
-	case ImportKindPurgeLog, ImportKindProjectPurgeLog:
+	case ImportKindExternalRootBinding:
 		return 7
-	case ImportKindIssueEmbedding:
+	case ImportKindExternalFieldState:
 		return 8
-	case ImportKindSQLiteSequence:
+	case ImportKindEvent:
 		return 9
+	case ImportKindPurgeLog, ImportKindProjectPurgeLog:
+		return 10
+	case ImportKindIssueEmbedding:
+		return 11
+	case ImportKindSQLiteSequence:
+		return 12
 	default:
 		return 10
 	}

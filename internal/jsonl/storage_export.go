@@ -88,6 +88,15 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 	if err := streamExport(enc, KindImportMapping, store.ExportImportMappings(ctx, f)); err != nil {
 		return err
 	}
+	if err := streamExport(enc, KindExternalFieldMapping, store.ExportExternalFieldMappings(ctx, f)); err != nil {
+		return err
+	}
+	if err := streamExport(enc, KindExternalRootBinding, store.ExportExternalRootBindings(ctx, f)); err != nil {
+		return err
+	}
+	if err := streamExport(enc, KindExternalFieldState, store.ExportExternalFieldStates(ctx, f)); err != nil {
+		return err
+	}
 	if err := streamExport(enc, KindFederationBinding, store.ExportFederationBindings(ctx, f)); err != nil {
 		return err
 	}

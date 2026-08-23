@@ -39,6 +39,10 @@ type ImportOptions struct {
 	// MergeProject adds one project-scoped snapshot to an existing database
 	// without replacing unrelated state.
 	MergeProject bool
+
+	// PreserveExternalRootBindingsEnabled is for trusted local schema cutover.
+	// Normal restores pause active bindings until an operator reconfirms them.
+	PreserveExternalRootBindingsEnabled bool
 }
 
 // Import reads JSONL records from r and inserts them into store.
@@ -92,12 +96,13 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		recs = append(recs, rec)
 	}
 	return store.ImportReplay(ctx, recs, db.ImportOptions{
-		RequireFreshTarget:              opts.RequireFreshTarget,
-		NewInstance:                     opts.NewInstance,
-		DedupeLegacyActivePendingClaims: exportVersion < 12,
-		RecomputeEventContentHash:       exportVersion < eventReplayFieldsSchemaVersion,
-		PreserveIssueSyncBindingEnabled: opts.PreserveIssueSyncBindingEnabled,
-		MergeProject:                    opts.MergeProject,
+		RequireFreshTarget:                  opts.RequireFreshTarget,
+		NewInstance:                         opts.NewInstance,
+		DedupeLegacyActivePendingClaims:     exportVersion < 12,
+		RecomputeEventContentHash:           exportVersion < eventReplayFieldsSchemaVersion,
+		PreserveIssueSyncBindingEnabled:     opts.PreserveIssueSyncBindingEnabled,
+		PreserveExternalRootBindingsEnabled: opts.PreserveExternalRootBindingsEnabled,
+		MergeProject:                        opts.MergeProject,
 	})
 }
 
@@ -321,6 +326,24 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return db.ImportRecord{}, err
 		}
 		return db.ImportRecord{Kind: string(KindImportMapping), ImportMapping: &rec}, nil
+	case KindExternalFieldMapping:
+		var rec db.ExternalFieldMappingExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindExternalFieldMapping), ExternalFieldMapping: &rec}, nil
+	case KindExternalRootBinding:
+		var rec db.ExternalRootBindingExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindExternalRootBinding), ExternalRootBinding: &rec}, nil
+	case KindExternalFieldState:
+		var rec db.ExternalFieldStateExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindExternalFieldState), ExternalFieldState: &rec}, nil
 	case KindFederationBinding:
 		var rec db.FederationBindingExport
 		if err := decodeData(env, &rec); err != nil {
@@ -724,6 +747,10 @@ func parseExportTime(s string) (time.Time, error) {
 // with millisecond precision and a literal "Z" zone.
 const rfc3339MilliLayout = "2006-01-02T15:04:05.000Z"
 
+// rfc3339NanoFixedLayout is the canonical precision-preserving wire format
+// for comments observed from external systems.
+const rfc3339NanoFixedLayout = "2006-01-02T15:04:05.000000000Z"
+
 // normalizeImportTime rewrites *p to the canonical RFC3339-millis form in
 // place. Pre-v8 exports may carry timestamps in Go's default time.Time
 // stringification (e.g. "2026-05-04 00:21:07 +0000 UTC"); since these strings
@@ -800,7 +827,20 @@ func normalizeIssueTimes(rec *db.IssueExport) error {
 }
 
 func normalizeCommentTimes(rec *db.CommentExport) error {
-	return normalizeImportTime("comment.created_at", &rec.CreatedAt)
+	if rec.CreatedAt == "" {
+		return nil
+	}
+	t, err := parseExportTime(rec.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("normalize comment.created_at: %w", err)
+	}
+	utc := t.UTC()
+	if rec.CreatedAt == utc.Format(rfc3339MilliLayout) ||
+		rec.CreatedAt == utc.Format(rfc3339NanoFixedLayout) {
+		return nil
+	}
+	rec.CreatedAt = utc.Format(rfc3339MilliLayout)
+	return nil
 }
 
 func normalizeIssueLabelTimes(rec *db.IssueLabelExport) error {

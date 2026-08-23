@@ -25,6 +25,7 @@ func TestAllSchemaTablesExist(t *testing.T) {
 		"issue_sync_bindings", "issue_sync_status",
 		"issue_claims", "pending_claim_requests",
 		"meta", "issues_fts", "import_mappings", "recurrences",
+		"external_root_bindings", "external_field_mappings", "external_field_states",
 	}
 	for _, name := range wanted {
 		assertSchemaObject(t, d, name)
@@ -84,6 +85,10 @@ func TestSchemaUIDColumnsIndexesAndTriggers(t *testing.T) {
 		"idx_import_mappings_issue",
 		"idx_import_mappings_comment",
 		"idx_import_mappings_link",
+		"idx_external_root_bindings_active_issue",
+		"idx_external_root_bindings_active_root",
+		"idx_external_root_bindings_due",
+		"idx_external_field_mappings_active",
 		"trg_links_uid_consistency_insert",
 		"trg_links_uid_consistency_update",
 		"trg_projects_uid_immutable",

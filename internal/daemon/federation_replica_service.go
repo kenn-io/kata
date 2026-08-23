@@ -37,10 +37,11 @@ var (
 	errFederationReplicaCapabilityMismatch = fmt.Errorf(
 		"%w: capability mismatch", ErrFederationReplicaInvalidInput,
 	)
-	errFederationReplicaProjectCollision   = errors.New("federation replica project collision")
-	errFederationReplicaProjectNotFound    = errors.New("federation replica project not found")
-	errFederationReplicaRejoinNameMismatch = errors.New("federation replica rejoin name mismatch")
-	errFederationReplicaIssueSyncConflict  = errors.New("federation replica issue-sync conflict")
+	errFederationReplicaProjectCollision     = errors.New("federation replica project collision")
+	errFederationReplicaProjectNotFound      = errors.New("federation replica project not found")
+	errFederationReplicaRejoinNameMismatch   = errors.New("federation replica rejoin name mismatch")
+	errFederationReplicaIssueSyncConflict    = errors.New("federation replica issue-sync conflict")
+	errFederationReplicaExternalRootConflict = errors.New("federation replica external-root conflict")
 )
 
 // ensureFederationReplicaMu serializes replica ensure, reservation, and leave
@@ -1245,6 +1246,9 @@ func adoptExistingReplica(
 				"",
 			)
 		}
+		if errors.Is(err, db.ErrExternalRootFederationConflict) {
+			return db.AdoptProjectIntoFederationResult{}, true, externalRootFederationReplicaError()
+		}
 		return db.AdoptProjectIntoFederationResult{}, true,
 			fmt.Errorf("adopt federation replica: %w", err)
 	}
@@ -1380,10 +1384,21 @@ func ensureReplicaBinding(
 				"",
 			)
 		}
+		if errors.Is(err, db.ErrExternalRootFederationConflict) {
+			return partial, externalRootFederationReplicaError()
+		}
 		return partial,
 			fmt.Errorf("upsert federation replica binding: %w", err)
 	}
 	return ensuredReplicaBinding{Project: project, Binding: binding, CreatedEvent: createdEvent}, nil
+}
+
+func externalRootFederationReplicaError() *FederationReplicaError {
+	return federationReplicaError(
+		errFederationReplicaExternalRootConflict,
+		"project has an active external root binding; unbind it before joining this project as a read-only spoke",
+		"",
+	)
 }
 
 func enableReplicaPush(

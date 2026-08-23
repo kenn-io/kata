@@ -48,6 +48,7 @@ type Store struct {
 	uiReadStage        func(context.Context) error
 	uiProjectStatsRead func()
 	uiLinkDetailRead   func()
+	externalRootNow    func() time.Time
 }
 
 // readQuerier is the read-only query surface shared between *sql.DB and *sql.Tx.

@@ -702,7 +702,10 @@ func readUILabelStrings(ctx context.Context, tx *sql.Tx, issueID int64) ([]strin
 func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Comment, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, uid, issue_id, author, body, created_at
-		FROM comments WHERE issue_id = ? ORDER BY created_at ASC, id ASC`, issueID)
+		FROM comments WHERE issue_id = ?
+		ORDER BY CASE WHEN length(created_at)=24 AND substr(created_at,-1)='Z'
+		              THEN substr(created_at,1,23)||'000000Z'
+		              ELSE created_at END ASC, id ASC`, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("read UI comments: %w", err)
 	}

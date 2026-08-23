@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,6 +37,248 @@ func TestRoundtripRichDatabaseIsByteEquivalent(t *testing.T) {
 	assertSearchResultsMatch(t, src, dst, fixture.Project.ID, "orchid")
 	assertSearchResultsMatch(t, src, dst, fixture.Project.ID, "watermelon")
 	assertSearchResultsMatch(t, src, dst, fixture.Project.ID, "soft")
+}
+
+func TestExternalRootRestorePausesBindingAndExcludesRuntimeSecrets(t *testing.T) {
+	fixture := exportExternalRootFixture(t, "restore", "connector-one")
+
+	assertExternalRootRecordOrder(t, fixture.exported)
+	assertExternalRootRecordsExcludeRuntimeSecrets(t, fixture.exported, fixture.claimToken)
+
+	restored := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(t.Context(), bytes.NewReader(fixture.exported), restored))
+	binding, err := restored.ExternalRootBindingByIssue(t.Context(), fixture.issue.ID)
+	require.NoError(t, err)
+	assert.False(t, binding.Enabled)
+	assert.Equal(t, "restore_reconfirmation_required", binding.PausedReason)
+	assert.Empty(t, binding.ClaimToken)
+	assert.Nil(t, binding.ClaimStartedAt)
+	assert.Equal(t, fixture.pendingCommentUID, binding.PendingCommentUID)
+	assertTimePtrEqual(t, fixture.pendingStartedAt, binding.PendingCommentStartedAt)
+
+	mappings, err := restored.ListExternalFieldMappings(t.Context(), fixture.connectorInstance)
+	require.NoError(t, err)
+	require.Len(t, mappings, 1)
+	states, err := restored.ExternalFieldStates(t.Context(), binding.ID)
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	assert.Equal(t, mappings[0].ID, states[0].MappingID)
+	assert.True(t, states[0].Conflicted)
+	assert.JSONEq(t, `"2026-08-20"`, string(states[0].Baseline))
+	assert.JSONEq(t, `"2026-08-21"`, string(states[0].ConflictKata))
+	assert.JSONEq(t, `"2026-08-22"`, string(states[0].ConflictExternal))
+}
+
+func TestExternalRootTrustedCutoverPreservesEnabledAndPendingUncertainty(t *testing.T) {
+	fixture := exportExternalRootFixture(t, "cutover", "connector-cutover")
+
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.ImportWithOptions(
+		t.Context(), bytes.NewReader(fixture.exported), target,
+		jsonl.ImportOptions{PreserveExternalRootBindingsEnabled: true},
+	))
+	binding, err := target.ExternalRootBindingByIssue(t.Context(), fixture.issue.ID)
+	require.NoError(t, err)
+	assert.True(t, binding.Enabled)
+	assert.Empty(t, binding.PausedReason)
+	assert.Empty(t, binding.ClaimToken)
+	assert.Nil(t, binding.ClaimStartedAt)
+	assert.Equal(t, fixture.pendingCommentUID, binding.PendingCommentUID)
+	assertTimePtrEqual(t, fixture.pendingStartedAt, binding.PendingCommentStartedAt)
+}
+
+func TestExternalRootProjectFilteredExportIncludesActiveAndReferencedMappings(t *testing.T) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	first := seedExternalRootFixture(t, source, "first", "connector-first")
+	seedExternalRootFixture(t, source, "second", "connector-second")
+	_, err := source.UpsertExternalFieldMapping(ctx, db.ExternalFieldMappingParams{
+		ConnectorInstance: "connector-first", KataField: "scheduled_on",
+		ExternalFieldID: "field-first-v2", ExternalFieldName: "Schedule v2",
+		AcceptedKinds: []string{"date"}, Nullable: true, Writable: true,
+		SchemaRevision: "schema-first-v2",
+	})
+	require.NoError(t, err)
+	_, err = source.UpsertExternalFieldMapping(ctx, db.ExternalFieldMappingParams{
+		ConnectorInstance: "connector-first", KataField: "deadline_on",
+		ExternalFieldID: "field-first-due", ExternalFieldName: "Deadline",
+		AcceptedKinds: []string{"instant"}, Nullable: true, Writable: true,
+		SchemaRevision: "schema-first-due",
+	})
+	require.NoError(t, err)
+	_, err = source.UpsertExternalFieldMapping(ctx, db.ExternalFieldMappingParams{
+		ConnectorInstance: "connector-unreferenced", KataField: "deadline_on",
+		ExternalFieldID: "field-unreferenced", ExternalFieldName: "Unreferenced",
+		AcceptedKinds: []string{"instant"}, Nullable: true, Writable: true,
+		SchemaRevision: "schema-unreferenced",
+	})
+	require.NoError(t, err)
+
+	var output bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &output, jsonl.ExportOptions{
+		ProjectID: first.project.ID, IncludeDeleted: true,
+	}))
+	records := externalRootRecordsByKind(t, output.Bytes())
+	require.Len(t, records["external_field_mapping"], 3)
+	require.Len(t, records["external_root_binding"], 1)
+	require.Len(t, records["external_field_state"], 1)
+	for _, record := range records["external_field_mapping"] {
+		assert.JSONEq(t, `"connector-first"`, string(record["connector_instance"]))
+	}
+	assert.Contains(t, output.String(), "field-first-v2")
+	assert.Contains(t, output.String(), "field-first-due")
+	assert.JSONEq(t, `"root-first"`, string(records["external_root_binding"][0]["external_root_key"]))
+	assert.NotContains(t, output.String(), "connector-second")
+	assert.NotContains(t, output.String(), "connector-unreferenced")
+}
+
+type externalRootExportFixture struct {
+	exported          []byte
+	project           db.Project
+	issue             db.Issue
+	connectorInstance string
+	claimToken        string
+	pendingCommentUID string
+	pendingStartedAt  time.Time
+}
+
+func exportExternalRootFixture(t *testing.T, suffix, connectorInstance string) externalRootExportFixture {
+	t.Helper()
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	fixture := seedExternalRootFixture(t, source, suffix, connectorInstance)
+
+	t.Setenv("CONNECTOR_RUNTIME_SECRET", "runtime-environment-value-must-not-export")
+	var output bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &output, jsonl.ExportOptions{IncludeDeleted: true}))
+	fixture.exported = output.Bytes()
+	return fixture
+}
+
+func seedExternalRootFixture(
+	t *testing.T,
+	source *sqlitestore.Store,
+	suffix string,
+	connectorInstance string,
+) externalRootExportFixture {
+	t.Helper()
+	ctx := t.Context()
+	project, err := source.CreateProject(ctx, "bridge-"+suffix)
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Portable external root", Author: "fixture-author",
+	})
+	require.NoError(t, err)
+	receiveAfter := mustParseTime(t, "2026-08-20T09:00:00Z")
+	publishAfter := mustParseTime(t, "2026-08-20T09:05:00Z")
+	binding, _, err := source.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: connectorInstance,
+		ExternalRootKey: "root-" + suffix, ExternalAccountKey: "opaque-account-" + suffix,
+		Actor: "fixture-author", ReceiveCommentsAfter: receiveAfter,
+		PublishComments: true, PublishCommentsAfter: &publishAfter,
+	})
+	require.NoError(t, err)
+	mapping, err := source.UpsertExternalFieldMapping(ctx, db.ExternalFieldMappingParams{
+		ConnectorInstance: connectorInstance, KataField: "scheduled_on",
+		ExternalFieldID: "field-" + suffix, ExternalFieldName: "Schedule",
+		AcceptedKinds: []string{"date"}, Nullable: true, Writable: true,
+		SchemaRevision: "schema-" + suffix,
+	})
+	require.NoError(t, err)
+	claimToken := "live-claim-" + suffix + "-must-not-export"
+	claimStartedAt := mustParseTime(t, "2026-08-20T10:00:00Z")
+	binding, claimed, err := source.ClaimExternalRootBinding(
+		ctx, binding.ID, claimToken, claimStartedAt, claimStartedAt.Add(-time.Minute),
+	)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	conflictAt := mustParseTime(t, "2026-08-20T10:01:00Z")
+	_, _, err = source.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
+		BindingID: binding.ID, MappingID: mapping.ID, ClaimToken: claimToken,
+		Baseline:         json.RawMessage(`"2026-08-20"`),
+		ConflictKata:     json.RawMessage(`"2026-08-21"`),
+		ConflictExternal: json.RawMessage(`"2026-08-22"`),
+		Conflicted:       true, At: conflictAt, Actor: "fixture-author",
+	})
+	require.NoError(t, err)
+	comment, _, err := source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "fixture-author", Body: "Pending publication",
+	})
+	require.NoError(t, err)
+	pendingStartedAt := mustParseTime(t, "2026-08-20T10:02:00Z")
+	_, err = source.SetPendingExternalComment(ctx, db.SetPendingExternalCommentParams{
+		BindingID: binding.ID, ClaimToken: claimToken, CommentUID: comment.UID,
+		At: pendingStartedAt,
+	})
+	require.NoError(t, err)
+
+	return externalRootExportFixture{
+		project: project, issue: issue, connectorInstance: connectorInstance,
+		claimToken: claimToken, pendingCommentUID: comment.UID,
+		pendingStartedAt: pendingStartedAt,
+	}
+}
+
+func externalRootRecordsByKind(t *testing.T, exported []byte) map[string][]map[string]json.RawMessage {
+	t.Helper()
+	records := make(map[string][]map[string]json.RawMessage)
+	for line := range bytes.SplitSeq(bytes.TrimSpace(exported), []byte{'\n'}) {
+		var envelope struct {
+			Kind string                     `json:"kind"`
+			Data map[string]json.RawMessage `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(line, &envelope))
+		if strings.HasPrefix(envelope.Kind, "external_") {
+			records[envelope.Kind] = append(records[envelope.Kind], envelope.Data)
+		}
+	}
+	return records
+}
+
+func assertExternalRootRecordOrder(t *testing.T, exported []byte) {
+	t.Helper()
+	kindIndex := map[string]int{}
+	kindCount := map[string]int{}
+	for index, line := range bytes.Split(bytes.TrimSpace(exported), []byte{'\n'}) {
+		var envelope struct {
+			Kind string `json:"kind"`
+		}
+		require.NoError(t, json.Unmarshal(line, &envelope))
+		kindCount[envelope.Kind]++
+		if _, seen := kindIndex[envelope.Kind]; !seen {
+			kindIndex[envelope.Kind] = index
+		}
+	}
+	for _, kind := range []string{"external_field_mapping", "external_root_binding", "external_field_state"} {
+		assert.Equal(t, 1, kindCount[kind], kind)
+	}
+	assert.Less(t, kindIndex["import_mapping"], kindIndex["external_root_binding"])
+	assert.Less(t, kindIndex["external_field_mapping"], kindIndex["external_field_state"])
+	assert.Less(t, kindIndex["external_root_binding"], kindIndex["external_field_state"])
+}
+
+func assertExternalRootRecordsExcludeRuntimeSecrets(t *testing.T, exported []byte, claimToken string) {
+	t.Helper()
+	for line := range bytes.SplitSeq(bytes.TrimSpace(exported), []byte{'\n'}) {
+		var envelope struct {
+			Kind string                     `json:"kind"`
+			Data map[string]json.RawMessage `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(line, &envelope))
+		if !strings.HasPrefix(envelope.Kind, "external_") {
+			continue
+		}
+		for _, key := range []string{
+			"settings", "environment", "environment_name", "environment_value",
+			"command", "executable", "credential", "claim_token", "claim_started_at",
+		} {
+			assert.NotContains(t, envelope.Data, key)
+		}
+	}
+	assert.NotContains(t, string(exported), claimToken)
+	assert.NotContains(t, string(exported), "runtime-environment-value-must-not-export")
+	assert.NotContains(t, string(exported), "/runtime/connector/executable")
+	assert.NotContains(t, string(exported), "credential-value-must-not-export")
 }
 
 func TestRoundtrip_ReplaysAPITokensFromTokenEvents(t *testing.T) {

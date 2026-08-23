@@ -65,6 +65,9 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 	if err != nil {
 		return db.EditIssueAtomicResult{}, err
 	}
+	if err := rejectExternalRootContentMutationTx(ctx, tx, issue.ID, contentFieldsChanged(issue, p.Title, p.Body)); err != nil {
+		return db.EditIssueAtomicResult{}, err
+	}
 	if fieldsChanged {
 		sets = append([]string{`updated_at = ?`}, sets...)
 		args = append([]any{ts}, args...)

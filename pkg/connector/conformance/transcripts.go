@@ -415,7 +415,9 @@ func (runtime *transcriptRuntime) runSteps(ctx context.Context, t *testing.T, st
 					t.Fatalf("assertion %d %q: %v", index, assertion.Op, err)
 				}
 				if !matches {
-					t.Fatalf("assertion %d %q did not match", index, assertion.Op)
+					actual, _ := runtime.resolve(assertion.Actual)
+					expected, _ := runtime.resolve(assertion.Expected)
+					t.Fatalf("assertion %d %q did not match: actual=%#v expected=%#v", index, assertion.Op, actual, expected)
 				}
 			}
 			captures := runtime.root["captures"].(map[string]any)
@@ -538,7 +540,13 @@ func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protoco
 	if exchangeErr != nil {
 		exchange["error_message"] = exchangeErr.Error()
 	}
-	documents, decodeErr := decodeTranscriptJSONDocuments(output)
+	var documents []any
+	var decodeErr error
+	if !utf8.Valid(output) {
+		decodeErr = errors.New("connector response is not valid UTF-8")
+	} else {
+		documents, decodeErr = decodeTranscriptJSONDocuments(output)
+	}
 	exchange["response_count"] = json.Number(strconv.Itoa(len(documents)))
 	exchange["decode_error"] = decodeErr != nil
 	if decodeErr != nil {

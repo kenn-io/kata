@@ -81,11 +81,10 @@ func (f *conformanceFixture) Reset(context.Context) error {
 				Key: "root-example", IdentityKey: "account-example", Title: "Example root", Body: "Example body",
 				State: "open", Revision: "revision-1", UpdatedAt: updated, ObservedAt: observed,
 				Fields: map[string]connector.FieldValue{
-					"field-date":     {Kind: "date", Value: "2026-08-20"},
-					"field-local":    {Kind: "local_datetime", Value: "2026-08-20T11:30:00", Timezone: "Europe/Paris"},
-					"field-instant":  {Kind: "instant", Value: "2026-08-20T09:30:00Z"},
-					"field-null":     {Kind: "null"},
-					"field-readonly": {Kind: "date", Value: "2026-08-20"},
+					"field-date":    {Kind: "date", Value: "2026-08-20"},
+					"field-local":   {Kind: "local_datetime", Value: "2026-08-20T11:30:00", Timezone: "Europe/Paris"},
+					"field-instant": {Kind: "instant", Value: "2026-08-20T09:30:00Z"},
+					"field-null":    {Kind: "null"},
 				},
 			},
 			Comments: []connector.Comment{
@@ -95,11 +94,10 @@ func (f *conformanceFixture) Reset(context.Context) error {
 				{ID: "comment-deleted", Revision: "comment-revision-4", Author: connector.Actor{ID: "actor-c", DisplayName: "Reviewer C"}, CreatedAt: updated.Add(4 * time.Minute), UpdatedAt: updated.Add(5 * time.Minute), Deleted: true},
 			},
 			Fields: map[string]connector.FieldValue{
-				"field-date":     {Kind: "date", Value: "2026-08-20"},
-				"field-local":    {Kind: "local_datetime", Value: "2026-08-20T11:30:00", Timezone: "Europe/Paris"},
-				"field-instant":  {Kind: "instant", Value: "2026-08-20T09:30:00Z"},
-				"field-null":     {Kind: "null"},
-				"field-readonly": {Kind: "date", Value: "2026-08-20"},
+				"field-date":    {Kind: "date", Value: "2026-08-20"},
+				"field-local":   {Kind: "local_datetime", Value: "2026-08-20T11:30:00", Timezone: "Europe/Paris"},
+				"field-instant": {Kind: "instant", Value: "2026-08-20T09:30:00Z"},
+				"field-null":    {Kind: "null"},
 			},
 		}},
 		Fields: []connector.FieldDescriptor{
@@ -107,7 +105,6 @@ func (f *conformanceFixture) Reset(context.Context) error {
 			{ID: "field-local", DisplayName: "Local", AcceptedKinds: []string{"local_datetime"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 			{ID: "field-instant", DisplayName: "Instant", AcceptedKinds: []string{"instant"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
 			{ID: "field-null", DisplayName: "Nullable", AcceptedKinds: []string{"date", "local_datetime", "instant"}, Nullable: true, Writable: true, SchemaRevision: "schema-1"},
-			{ID: "field-readonly", DisplayName: "Read only", AcceptedKinds: []string{"date"}, Writable: false, SchemaRevision: "schema-1"},
 		},
 		Behavior: Behavior{CrashBeforeReply: map[string]int{}, CrashAfterMutation: map[string]int{}, Errors: map[string]connector.Error{}},
 	})
