@@ -1,0 +1,380 @@
+{
+  "schema": "kata.connector.conformance/v1",
+  "protocol": "kata.connector.v1",
+  "name": "optional-capabilities",
+  "field_samples": [
+    {"kind": "date", "value": "2026-08-21"},
+    {"kind": "local_datetime", "value": "2026-08-21T14:45:00", "timezone": "Asia/Tokyo"},
+    {"kind": "instant", "value": "2026-08-21T05:45:00Z"}
+  ],
+  "steps": [
+    {
+      "name": "provider-baseline",
+      "observe": "provider_state",
+      "assert": [
+        {"op": "empty", "actual": {"path": "/steps/provider-baseline/provider/mutations"}}
+      ],
+      "capture": [
+        {"name": "mutation-log", "value": {"path": "/steps/provider-baseline/provider/mutations"}},
+        {"name": "provider-comments", "value": {"path": "/steps/provider-baseline/provider/comments"}},
+        {"name": "provider-field-baseline", "value": {"path": "/steps/provider-baseline/provider/fields"}}
+      ]
+    },
+    {
+      "name": "describe",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-describe", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/describe/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/describe/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/describe/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/describe/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/describe/response/id"}, "expected": {"path": "/steps/describe/request/id"}},
+        {"op": "present", "actual": {"path": "/steps/describe/response/result"}},
+        {"op": "absent", "actual": {"path": "/steps/describe/response/error"}}
+      ],
+      "capture": [
+        {"name": "description", "value": {"path": "/steps/describe/response/result"}}
+      ]
+    },
+    {
+      "name": "resolve-root",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-resolve", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": {"$ref": "/fixture/root_locator"}}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/resolve-root/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/resolve-root/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/resolve-root/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/resolve-root/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/resolve-root/response/id"}, "expected": {"path": "/steps/resolve-root/request/id"}},
+        {"op": "present", "actual": {"path": "/steps/resolve-root/response/result"}},
+        {"op": "absent", "actual": {"path": "/steps/resolve-root/response/error"}},
+        {"op": "equal", "actual": {"path": "/steps/resolve-root/response/result/identity_key"}, "expected": {"path": "/captures/description/account_identity"}}
+      ],
+      "capture": [
+        {"name": "root", "value": {"path": "/steps/resolve-root/response/result"}}
+      ]
+    },
+    {
+      "name": "arm-publication-crash",
+      "fault": "publish_comment_crash_after_mutation",
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/arm-publication-crash/fault"}, "expected": {"literal": "publish_comment_crash_after_mutation"}}
+      ]
+    },
+    {
+      "name": "publish-comment-crash",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-publish-crash", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "body": "connector conformance publication", "operation_id": "conformance-publication-1"}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-crash/exchange/error"}, "expected": {"literal": true}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-crash/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-crash/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "provider-after-publication-crash",
+      "observe": "provider_state",
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
+      ],
+      "assert": [
+        {"op": "array_appended", "actual": {"path": "/steps/provider-after-publication-crash/provider/comments"}, "expected": {"path": "/captures/provider-comments"}},
+        {"op": "array_appended", "actual": {"path": "/steps/provider-after-publication-crash/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
+        {"op": "entry_equal", "actual": {"path": "/steps/provider-after-publication-crash/provider/mutations", "last": true}, "key": {"literal": "method"}, "expected": {"literal": "publish_comment"}},
+        {"op": "entry_equal", "actual": {"path": "/steps/provider-after-publication-crash/provider/mutations", "last": true}, "key": {"literal": "params"}, "expected": {"path": "/steps/publish-comment-crash/request/params"}},
+        {"op": "nonempty", "actual": {"path": "/steps/provider-after-publication-crash/provider/comments", "last": true}},
+        {"op": "entry_equal", "actual": {"path": "/steps/provider-after-publication-crash/provider/comments", "last": true}, "key": {"literal": "body"}, "expected": {"path": "/steps/publish-comment-crash/request/params/body"}},
+        {"op": "one", "actual": {"path": "/steps/provider-after-publication-crash/provider/comments"}, "as": "comment", "assert": [
+          {"op": "equal", "actual": {"path": "/vars/comment/body"}, "expected": {"path": "/steps/publish-comment-crash/request/params/body"}},
+          {"op": "nonempty", "actual": {"path": "/vars/comment/revision"}},
+          {"op": "trimmed", "actual": {"path": "/vars/comment/revision"}},
+          {"op": "equal", "actual": {"path": "/vars/comment/author/id"}, "expected": {"path": "/captures/description/self_actor_id"}},
+          {"op": "timestamp", "actual": {"path": "/vars/comment/created_at"}},
+          {"op": "timestamp", "actual": {"path": "/vars/comment/updated_at"}},
+          {"op": "time_gt", "actual": {"path": "/vars/comment/created_at"}, "expected": {"path": "/captures/root/observed_at"}},
+          {"op": "time_gte", "actual": {"path": "/vars/comment/updated_at"}, "expected": {"path": "/vars/comment/created_at"}},
+          {"op": "time_between", "actual": {"path": "/vars/comment/created_at"}, "start": {"path": "/steps/publish-comment-crash/exchange/started_at"}, "end": {"path": "/steps/publish-comment-crash/exchange/finished_at"}, "tolerance_seconds": 120},
+          {"op": "time_between", "actual": {"path": "/vars/comment/updated_at"}, "start": {"path": "/steps/publish-comment-crash/exchange/started_at"}, "end": {"path": "/steps/publish-comment-crash/exchange/finished_at"}, "tolerance_seconds": 120}
+        ]}
+      ],
+      "capture": [
+        {"name": "mutation-log", "value": {"path": "/steps/provider-after-publication-crash/provider/mutations"}},
+        {"name": "published-comments", "value": {"path": "/steps/provider-after-publication-crash/provider/comments"}},
+        {"name": "published-comment", "value": {"path": "/steps/provider-after-publication-crash/provider/comments", "last": true}}
+      ]
+    },
+    {
+      "name": "publish-comment-retry",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-publish-retry", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "body": "connector conformance publication", "operation_id": "conformance-publication-1"}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-retry/request/params"}, "expected": {"path": "/steps/publish-comment-crash/request/params"}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-retry/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-retry/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-retry/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-retry/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-retry/response/id"}, "expected": {"path": "/steps/publish-comment-retry/request/id"}},
+        {"op": "present", "actual": {"path": "/steps/publish-comment-retry/response/result"}},
+        {"op": "absent", "actual": {"path": "/steps/publish-comment-retry/response/error"}},
+        {"op": "nonempty", "actual": {"path": "/steps/publish-comment-retry/response/result/id"}},
+        {"op": "nonempty", "actual": {"path": "/steps/publish-comment-retry/response/result/revision"}},
+        {"op": "trimmed", "actual": {"path": "/steps/publish-comment-retry/response/result/revision"}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-retry/response/result/body"}, "expected": {"path": "/steps/publish-comment-retry/request/params/body"}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-retry/response/result/author/id"}, "expected": {"path": "/captures/description/self_actor_id"}},
+        {"op": "timestamp", "actual": {"path": "/steps/publish-comment-retry/response/result/created_at"}},
+        {"op": "timestamp", "actual": {"path": "/steps/publish-comment-retry/response/result/updated_at"}},
+        {"op": "not_equal", "actual": {"path": "/steps/publish-comment-retry/response/result/created_at"}, "expected": {"literal": "0001-01-01T00:00:00Z"}},
+        {"op": "not_equal", "actual": {"path": "/steps/publish-comment-retry/response/result/updated_at"}, "expected": {"literal": "0001-01-01T00:00:00Z"}},
+        {"op": "time_gte", "actual": {"path": "/steps/publish-comment-retry/response/result/updated_at"}, "expected": {"path": "/steps/publish-comment-retry/response/result/created_at"}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-retry/response/result"}, "expected": {"path": "/captures/published-comment"}}
+      ]
+    },
+    {
+      "name": "provider-after-publication-retry",
+      "observe": "provider_state",
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/provider-after-publication-retry/provider/comments"}, "expected": {"path": "/captures/published-comments"}},
+        {"op": "equal", "actual": {"path": "/steps/provider-after-publication-retry/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}}
+      ]
+    },
+    {
+      "name": "list-published-comment",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-comment-readback", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/list-published-comment/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/list-published-comment/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/list-published-comment/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/list-published-comment/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/list-published-comment/response/id"}, "expected": {"path": "/steps/list-published-comment/request/id"}},
+        {"op": "present", "actual": {"path": "/steps/list-published-comment/response/result"}},
+        {"op": "absent", "actual": {"path": "/steps/list-published-comment/response/error"}},
+        {"op": "one", "actual": {"path": "/steps/list-published-comment/response/result/comments"}, "as": "comment", "assert": [
+          {"op": "equal", "actual": {"path": "/vars/comment"}, "expected": {"path": "/captures/published-comment"}}
+        ]}
+      ]
+    },
+    {
+      "name": "publish-without-capability",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-publish-unsupported", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "body": "connector conformance publication", "operation_id": "conformance-publication-unsupported"}},
+      "when": [
+        {"op": "not_contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/publish-without-capability/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/publish-without-capability/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/publish-without-capability/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/publish-without-capability/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/publish-without-capability/response/id"}, "expected": {"path": "/steps/publish-without-capability/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/publish-without-capability/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/publish-without-capability/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/publish-without-capability/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/publish-without-capability/response/error/message"}}
+      ]
+    },
+    {
+      "name": "list-fields",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-fields", "method": "list_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/list-fields/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/list-fields/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/list-fields/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/list-fields/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/list-fields/response/id"}, "expected": {"path": "/steps/list-fields/request/id"}},
+        {"op": "present", "actual": {"path": "/steps/list-fields/response/result"}},
+        {"op": "absent", "actual": {"path": "/steps/list-fields/response/error"}},
+        {"op": "nonempty", "actual": {"path": "/steps/list-fields/response/result/fields"}},
+        {"op": "unique", "actual": {"path": "/steps/list-fields/response/result/fields"}, "by": ["/id"]},
+        {"op": "all", "actual": {"path": "/steps/list-fields/response/result/fields"}, "as": "descriptor", "assert": [
+          {"op": "nonempty", "actual": {"path": "/vars/descriptor/id"}},
+          {"op": "trimmed", "actual": {"path": "/vars/descriptor/id"}},
+          {"op": "nonempty", "actual": {"path": "/vars/descriptor/display_name"}},
+          {"op": "nonempty", "actual": {"path": "/vars/descriptor/schema_revision"}},
+          {"op": "trimmed", "actual": {"path": "/vars/descriptor/schema_revision"}},
+          {"op": "subset", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": ["date", "local_datetime", "instant"]}}
+        ]},
+        {"op": "any", "actual": {"path": "/steps/list-fields/response/result/fields"}, "as": "descriptor", "assert": [
+          {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+          {"op": "or", "assert": [
+            {"op": "nonempty", "actual": {"path": "/vars/descriptor/accepted_kinds"}},
+            {"op": "equal", "actual": {"path": "/vars/descriptor/nullable"}, "expected": {"literal": true}}
+          ]}
+        ]}
+      ],
+      "capture": [
+        {"name": "field-descriptors", "value": {"path": "/steps/list-fields/response/result/fields"}}
+      ]
+    },
+    {
+      "name": "field-round-trips",
+      "repeat": {"over": {"path": "/captures/field-descriptors"}, "as": "descriptor", "steps": [
+        {
+          "name": "read-read-only-field",
+          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-only", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+          "when": [
+            {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": false}}
+          ],
+          "assert": [
+            {"op": "equal", "actual": {"path": "/steps/read-read-only-field/exchange/error"}, "expected": {"literal": false}},
+            {"op": "equal", "actual": {"path": "/steps/read-read-only-field/exchange/decode_error"}, "expected": {"literal": false}},
+            {"op": "equal", "actual": {"path": "/steps/read-read-only-field/exchange/response_count"}, "expected": {"literal": 1}},
+            {"op": "equal", "actual": {"path": "/steps/read-read-only-field/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+            {"op": "equal", "actual": {"path": "/steps/read-read-only-field/response/id"}, "expected": {"path": "/steps/read-read-only-field/request/id"}},
+            {"op": "present", "actual": {"path": "/steps/read-read-only-field/response/result"}},
+            {"op": "absent", "actual": {"path": "/steps/read-read-only-field/response/error"}},
+            {"op": "count", "actual": {"path": "/steps/read-read-only-field/response/result/fields"}, "expected": {"literal": 1}},
+            {"op": "entries_equal", "actual": {"path": "/steps/read-read-only-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/captures/provider-field-baseline"}}
+          ]
+        },
+        {
+          "name": "advertised-kind-round-trips",
+          "repeat": {"over": {"path": "/contract/field_samples"}, "as": "sample", "steps": [
+            {
+              "name": "write-field",
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+              ],
+              "assert": [
+                {"op": "equal", "actual": {"path": "/steps/write-field/exchange/error"}, "expected": {"literal": false}},
+                {"op": "equal", "actual": {"path": "/steps/write-field/exchange/decode_error"}, "expected": {"literal": false}},
+                {"op": "equal", "actual": {"path": "/steps/write-field/exchange/response_count"}, "expected": {"literal": 1}},
+                {"op": "equal", "actual": {"path": "/steps/write-field/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+                {"op": "equal", "actual": {"path": "/steps/write-field/response/id"}, "expected": {"path": "/steps/write-field/request/id"}},
+                {"op": "present", "actual": {"path": "/steps/write-field/response/result"}},
+                {"op": "absent", "actual": {"path": "/steps/write-field/response/error"}},
+                {"op": "entry_equal", "actual": {"path": "/steps/write-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample"}}
+              ]
+            },
+            {
+              "name": "provider-after-field",
+              "observe": "provider_state",
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+              ],
+              "assert": [
+                {"op": "array_appended", "actual": {"path": "/steps/provider-after-field/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
+                {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field/provider/mutations", "last": true}, "key": {"literal": "method"}, "expected": {"literal": "write_fields"}},
+                {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field/provider/mutations", "last": true}, "key": {"literal": "params"}, "expected": {"path": "/steps/write-field/request/params"}},
+                {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field/provider/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample"}}
+              ],
+              "capture": [
+                {"name": "mutation-log", "value": {"path": "/steps/provider-after-field/provider/mutations"}}
+              ]
+            },
+            {
+              "name": "read-field",
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+              ],
+              "assert": [
+                {"op": "equal", "actual": {"path": "/steps/read-field/exchange/error"}, "expected": {"literal": false}},
+                {"op": "equal", "actual": {"path": "/steps/read-field/exchange/decode_error"}, "expected": {"literal": false}},
+                {"op": "equal", "actual": {"path": "/steps/read-field/exchange/response_count"}, "expected": {"literal": 1}},
+                {"op": "equal", "actual": {"path": "/steps/read-field/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+                {"op": "equal", "actual": {"path": "/steps/read-field/response/id"}, "expected": {"path": "/steps/read-field/request/id"}},
+                {"op": "present", "actual": {"path": "/steps/read-field/response/result"}},
+                {"op": "absent", "actual": {"path": "/steps/read-field/response/error"}},
+                {"op": "count", "actual": {"path": "/steps/read-field/response/result/fields"}, "expected": {"literal": 1}},
+                {"op": "entry_equal", "actual": {"path": "/steps/read-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample"}}
+              ]
+            }
+          ]},
+          "assert": [
+            {"op": "nonempty", "actual": {"path": "/contract/field_samples"}}
+          ]
+        },
+        {
+          "name": "write-null-field",
+          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-null", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "null"}}]}}},
+          "when": [
+            {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+            {"op": "equal", "actual": {"path": "/vars/descriptor/nullable"}, "expected": {"literal": true}}
+          ],
+          "assert": [
+            {"op": "equal", "actual": {"path": "/steps/write-null-field/exchange/error"}, "expected": {"literal": false}},
+            {"op": "equal", "actual": {"path": "/steps/write-null-field/exchange/decode_error"}, "expected": {"literal": false}},
+            {"op": "equal", "actual": {"path": "/steps/write-null-field/exchange/response_count"}, "expected": {"literal": 1}},
+            {"op": "equal", "actual": {"path": "/steps/write-null-field/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+            {"op": "equal", "actual": {"path": "/steps/write-null-field/response/id"}, "expected": {"path": "/steps/write-null-field/request/id"}},
+            {"op": "present", "actual": {"path": "/steps/write-null-field/response/result"}},
+            {"op": "absent", "actual": {"path": "/steps/write-null-field/response/error"}},
+            {"op": "entry_equal", "actual": {"path": "/steps/write-null-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"literal": {"kind": "null"}}}
+          ]
+        },
+        {
+          "name": "provider-after-null-field",
+          "observe": "provider_state",
+          "when": [
+            {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+            {"op": "equal", "actual": {"path": "/vars/descriptor/nullable"}, "expected": {"literal": true}}
+          ],
+          "assert": [
+            {"op": "array_appended", "actual": {"path": "/steps/provider-after-null-field/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
+            {"op": "entry_equal", "actual": {"path": "/steps/provider-after-null-field/provider/mutations", "last": true}, "key": {"literal": "method"}, "expected": {"literal": "write_fields"}},
+            {"op": "entry_equal", "actual": {"path": "/steps/provider-after-null-field/provider/mutations", "last": true}, "key": {"literal": "params"}, "expected": {"path": "/steps/write-null-field/request/params"}},
+            {"op": "entry_equal", "actual": {"path": "/steps/provider-after-null-field/provider/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"literal": {"kind": "null"}}}
+          ],
+          "capture": [
+            {"name": "mutation-log", "value": {"path": "/steps/provider-after-null-field/provider/mutations"}}
+          ]
+        },
+        {
+          "name": "read-null-field",
+          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-null", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+          "when": [
+            {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+            {"op": "equal", "actual": {"path": "/vars/descriptor/nullable"}, "expected": {"literal": true}}
+          ],
+          "assert": [
+            {"op": "equal", "actual": {"path": "/steps/read-null-field/exchange/error"}, "expected": {"literal": false}},
+            {"op": "equal", "actual": {"path": "/steps/read-null-field/exchange/decode_error"}, "expected": {"literal": false}},
+            {"op": "equal", "actual": {"path": "/steps/read-null-field/exchange/response_count"}, "expected": {"literal": 1}},
+            {"op": "equal", "actual": {"path": "/steps/read-null-field/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+            {"op": "equal", "actual": {"path": "/steps/read-null-field/response/id"}, "expected": {"path": "/steps/read-null-field/request/id"}},
+            {"op": "present", "actual": {"path": "/steps/read-null-field/response/result"}},
+            {"op": "absent", "actual": {"path": "/steps/read-null-field/response/error"}},
+            {"op": "count", "actual": {"path": "/steps/read-null-field/response/result/fields"}, "expected": {"literal": 1}},
+            {"op": "entry_equal", "actual": {"path": "/steps/read-null-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"literal": {"kind": "null"}}}
+          ]
+        }
+      ]},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/contract/field_samples"}, "expected": {"literal": [
+          {"kind": "date", "value": "2026-08-21"},
+          {"kind": "local_datetime", "value": "2026-08-21T14:45:00", "timezone": "Asia/Tokyo"},
+          {"kind": "instant", "value": "2026-08-21T05:45:00Z"}
+        ]}},
+        {"op": "nonempty", "actual": {"path": "/captures/field-descriptors"}}
+      ]
+    },
+    {
+      "name": "provider-final",
+      "observe": "provider_state",
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/provider-final/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}}
+      ]
+    }
+  ]
+}

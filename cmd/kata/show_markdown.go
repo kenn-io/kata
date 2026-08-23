@@ -96,13 +96,20 @@ func (r *externalShowMarkdownRenderer) Render(
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = io.Discard
-	processtree.Prepare(cmd)
+	tree, err := processtree.New(cmd)
+	if err != nil {
+		return "", rendererError(r.argv[0], kind, err)
+	}
+	defer func() { _ = tree.Close() }()
 	cmd.WaitDelay = r.grace
 	cmd.Cancel = func() error {
-		return processtree.TerminateWithGrace(cmd, r.grace)
+		return tree.TerminateWithGrace(r.grace)
 	}
 
-	if err := cmd.Run(); err != nil {
+	if err := tree.Start(); err != nil {
+		return "", rendererError(r.argv[0], kind, err)
+	}
+	if err := tree.Wait(); err != nil {
 		// Prefer the context cause: a killed renderer reports the timeout or
 		// cancellation rather than its incidental exit status.
 		if cause := renderCtx.Err(); cause != nil {

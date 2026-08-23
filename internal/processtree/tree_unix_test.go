@@ -10,18 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTerminateWithGraceExitedProcess(t *testing.T) {
+func TestTreeTerminateWithGraceExitedProcess(t *testing.T) {
 	cmd := exec.Command("true")
-	Prepare(cmd)
-	require.NoError(t, cmd.Start())
-	require.NoError(t, cmd.Wait())
+	tree, err := New(cmd)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tree.Close()) })
+	require.NoError(t, tree.Start())
+	require.NoError(t, tree.Wait())
 
-	require.NoError(t, TerminateWithGrace(cmd, time.Millisecond))
+	require.NoError(t, tree.TerminateWithGrace(time.Millisecond))
 }
 
 func TestExitedProcessSignalsAreSuccessful(t *testing.T) {
 	cmd := exec.Command("true")
-	Prepare(cmd)
+	prepare(cmd)
 	require.NoError(t, cmd.Start())
 	require.NoError(t, cmd.Wait())
 

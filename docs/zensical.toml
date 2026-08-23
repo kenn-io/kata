@@ -33,6 +33,7 @@ nav = [
     {"Daemon discovery" = "reference/daemon-discovery.md"},
     {"Model Context Protocol" = "reference/mcp.md"},
     {"Configuration" = "reference/configuration.md"},
+    {"Connector author contract" = "reference/connector-protocol.md"},
     {"Metadata" = "reference/metadata.md"},
     {"Agent output format" = "reference/agent-output.md"},
     {"HTTP API schema" = "reference/http-api.md"},

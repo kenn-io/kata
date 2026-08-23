@@ -1,0 +1,208 @@
+{
+  "schema": "kata.connector.conformance/v1",
+  "protocol": "kata.connector.v1",
+  "name": "framing-and-errors",
+  "steps": [
+    {
+      "name": "describe",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-describe", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/describe/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/describe/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/describe/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/describe/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/describe/response/id"}, "expected": {"path": "/steps/describe/request/id"}},
+        {"op": "present", "actual": {"path": "/steps/describe/response/result"}},
+        {"op": "absent", "actual": {"path": "/steps/describe/response/error"}}
+      ],
+      "capture": [
+        {"name": "description", "value": {"path": "/steps/describe/response/result"}}
+      ]
+    },
+    {
+      "name": "resolve-root-error",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-resolve", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": "missing-external-root"}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/resolve-root-error/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/resolve-root-error/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/resolve-root-error/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/resolve-root-error/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/resolve-root-error/response/id"}, "expected": {"path": "/steps/resolve-root-error/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/resolve-root-error/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/resolve-root-error/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/resolve-root-error/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/resolve-root-error/response/error/message"}},
+        {"op": "trimmed", "actual": {"path": "/steps/resolve-root-error/response/error/message"}},
+        {"op": "max_length", "actual": {"path": "/steps/resolve-root-error/response/error/message"}, "expected": {"literal": 512}},
+        {"op": "no_control", "actual": {"path": "/steps/resolve-root-error/response/error/message"}},
+        {"op": "valid_utf8", "actual": {"path": "/steps/resolve-root-error/exchange/output"}},
+        {"op": "not_matches", "actual": {"path": "/steps/resolve-root-error/response/error/message"}, "pattern": "(?i)(panic:|stack trace|goroutine |stdout\\s*[:=]|stderr\\s*[:=]|command\\s*[:=]|exec(?:\\s+|\\s*[:=])|exit[\\s_.-]*status|config(?:uration)?\\s+path\\s*[:=]|config(?:uration)?\\s*[:=]\\s*[\\[{])"},
+        {"op": "not_matches", "actual": {"path": "/steps/resolve-root-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/resolve-root-error/response/error/message"}, "pattern": "(?i)(?:^|[\\s(\"'=\\[{])[a-z]:[\\\\/][^\\s:]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/resolve-root-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])(?:\\\\\\\\)[A-Za-z0-9._-]+\\\\[A-Za-z0-9.$_-]+"}
+      ]
+    },
+    {
+      "name": "read-root-error",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-read", "method": "read_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root"}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/read-root-error/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/read-root-error/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/read-root-error/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/read-root-error/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/read-root-error/response/id"}, "expected": {"path": "/steps/read-root-error/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/read-root-error/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/read-root-error/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/read-root-error/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/read-root-error/response/error/message"}},
+        {"op": "trimmed", "actual": {"path": "/steps/read-root-error/response/error/message"}},
+        {"op": "max_length", "actual": {"path": "/steps/read-root-error/response/error/message"}, "expected": {"literal": 512}},
+        {"op": "no_control", "actual": {"path": "/steps/read-root-error/response/error/message"}},
+        {"op": "valid_utf8", "actual": {"path": "/steps/read-root-error/exchange/output"}},
+        {"op": "not_matches", "actual": {"path": "/steps/read-root-error/response/error/message"}, "pattern": "(?i)(panic:|stack trace|goroutine |stdout\\s*[:=]|stderr\\s*[:=]|command\\s*[:=]|exec(?:\\s+|\\s*[:=])|exit[\\s_.-]*status|config(?:uration)?\\s+path\\s*[:=]|config(?:uration)?\\s*[:=]\\s*[\\[{])"},
+        {"op": "not_matches", "actual": {"path": "/steps/read-root-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/read-root-error/response/error/message"}, "pattern": "(?i)(?:^|[\\s(\"'=\\[{])[a-z]:[\\\\/][^\\s:]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/read-root-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])(?:\\\\\\\\)[A-Za-z0-9._-]+\\\\[A-Za-z0-9.$_-]+"}
+      ]
+    },
+    {
+      "name": "list-comments-error",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-comments", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root"}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/list-comments-error/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/list-comments-error/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/list-comments-error/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/list-comments-error/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/list-comments-error/response/id"}, "expected": {"path": "/steps/list-comments-error/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/list-comments-error/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/list-comments-error/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/list-comments-error/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/list-comments-error/response/error/message"}},
+        {"op": "trimmed", "actual": {"path": "/steps/list-comments-error/response/error/message"}},
+        {"op": "max_length", "actual": {"path": "/steps/list-comments-error/response/error/message"}, "expected": {"literal": 512}},
+        {"op": "no_control", "actual": {"path": "/steps/list-comments-error/response/error/message"}},
+        {"op": "valid_utf8", "actual": {"path": "/steps/list-comments-error/exchange/output"}},
+        {"op": "not_matches", "actual": {"path": "/steps/list-comments-error/response/error/message"}, "pattern": "(?i)(panic:|stack trace|goroutine |stdout\\s*[:=]|stderr\\s*[:=]|command\\s*[:=]|exec(?:\\s+|\\s*[:=])|exit[\\s_.-]*status|config(?:uration)?\\s+path\\s*[:=]|config(?:uration)?\\s*[:=]\\s*[\\[{])"},
+        {"op": "not_matches", "actual": {"path": "/steps/list-comments-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/list-comments-error/response/error/message"}, "pattern": "(?i)(?:^|[\\s(\"'=\\[{])[a-z]:[\\\\/][^\\s:]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/list-comments-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])(?:\\\\\\\\)[A-Za-z0-9._-]+\\\\[A-Za-z0-9.$_-]+"}
+      ]
+    },
+    {
+      "name": "publish-comment-error",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-publish", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "body": "Example body", "operation_id": "conformance-publication-error"}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-error/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-error/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-error/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-error/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/publish-comment-error/response/id"}, "expected": {"path": "/steps/publish-comment-error/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/publish-comment-error/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/publish-comment-error/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/publish-comment-error/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/publish-comment-error/response/error/message"}},
+        {"op": "trimmed", "actual": {"path": "/steps/publish-comment-error/response/error/message"}},
+        {"op": "max_length", "actual": {"path": "/steps/publish-comment-error/response/error/message"}, "expected": {"literal": 512}},
+        {"op": "no_control", "actual": {"path": "/steps/publish-comment-error/response/error/message"}},
+        {"op": "valid_utf8", "actual": {"path": "/steps/publish-comment-error/exchange/output"}},
+        {"op": "not_matches", "actual": {"path": "/steps/publish-comment-error/response/error/message"}, "pattern": "(?i)(panic:|stack trace|goroutine |stdout\\s*[:=]|stderr\\s*[:=]|command\\s*[:=]|exec(?:\\s+|\\s*[:=])|exit[\\s_.-]*status|config(?:uration)?\\s+path\\s*[:=]|config(?:uration)?\\s*[:=]\\s*[\\[{])"},
+        {"op": "not_matches", "actual": {"path": "/steps/publish-comment-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/publish-comment-error/response/error/message"}, "pattern": "(?i)(?:^|[\\s(\"'=\\[{])[a-z]:[\\\\/][^\\s:]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/publish-comment-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])(?:\\\\\\\\)[A-Za-z0-9._-]+\\\\[A-Za-z0-9.$_-]+"}
+      ]
+    },
+    {
+      "name": "complete-root-error",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-complete", "method": "complete_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root"}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/complete-root-error/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/complete-root-error/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/complete-root-error/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/complete-root-error/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/complete-root-error/response/id"}, "expected": {"path": "/steps/complete-root-error/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/complete-root-error/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/complete-root-error/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/complete-root-error/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/complete-root-error/response/error/message"}},
+        {"op": "trimmed", "actual": {"path": "/steps/complete-root-error/response/error/message"}},
+        {"op": "max_length", "actual": {"path": "/steps/complete-root-error/response/error/message"}, "expected": {"literal": 512}},
+        {"op": "no_control", "actual": {"path": "/steps/complete-root-error/response/error/message"}},
+        {"op": "valid_utf8", "actual": {"path": "/steps/complete-root-error/exchange/output"}},
+        {"op": "not_matches", "actual": {"path": "/steps/complete-root-error/response/error/message"}, "pattern": "(?i)(panic:|stack trace|goroutine |stdout\\s*[:=]|stderr\\s*[:=]|command\\s*[:=]|exec(?:\\s+|\\s*[:=])|exit[\\s_.-]*status|config(?:uration)?\\s+path\\s*[:=]|config(?:uration)?\\s*[:=]\\s*[\\[{])"},
+        {"op": "not_matches", "actual": {"path": "/steps/complete-root-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/complete-root-error/response/error/message"}, "pattern": "(?i)(?:^|[\\s(\"'=\\[{])[a-z]:[\\\\/][^\\s:]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/complete-root-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])(?:\\\\\\\\)[A-Za-z0-9._-]+\\\\[A-Za-z0-9.$_-]+"}
+      ]
+    },
+    {
+      "name": "read-fields-error",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-read-fields", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "field_ids": ["missing-field"]}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/read-fields-error/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/read-fields-error/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/read-fields-error/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/read-fields-error/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/read-fields-error/response/id"}, "expected": {"path": "/steps/read-fields-error/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/read-fields-error/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/read-fields-error/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/read-fields-error/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/read-fields-error/response/error/message"}},
+        {"op": "trimmed", "actual": {"path": "/steps/read-fields-error/response/error/message"}},
+        {"op": "max_length", "actual": {"path": "/steps/read-fields-error/response/error/message"}, "expected": {"literal": 512}},
+        {"op": "no_control", "actual": {"path": "/steps/read-fields-error/response/error/message"}},
+        {"op": "valid_utf8", "actual": {"path": "/steps/read-fields-error/exchange/output"}},
+        {"op": "not_matches", "actual": {"path": "/steps/read-fields-error/response/error/message"}, "pattern": "(?i)(panic:|stack trace|goroutine |stdout\\s*[:=]|stderr\\s*[:=]|command\\s*[:=]|exec(?:\\s+|\\s*[:=])|exit[\\s_.-]*status|config(?:uration)?\\s+path\\s*[:=]|config(?:uration)?\\s*[:=]\\s*[\\[{])"},
+        {"op": "not_matches", "actual": {"path": "/steps/read-fields-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/read-fields-error/response/error/message"}, "pattern": "(?i)(?:^|[\\s(\"'=\\[{])[a-z]:[\\\\/][^\\s:]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/read-fields-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])(?:\\\\\\\\)[A-Za-z0-9._-]+\\\\[A-Za-z0-9.$_-]+"}
+      ]
+    },
+    {
+      "name": "write-fields-error",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-write-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"missing-field": {"kind": "null"}}}},
+      "when": [
+        {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/write-fields-error/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/write-fields-error/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/write-fields-error/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/write-fields-error/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/write-fields-error/response/id"}, "expected": {"path": "/steps/write-fields-error/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/write-fields-error/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/write-fields-error/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/write-fields-error/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/write-fields-error/response/error/message"}},
+        {"op": "trimmed", "actual": {"path": "/steps/write-fields-error/response/error/message"}},
+        {"op": "max_length", "actual": {"path": "/steps/write-fields-error/response/error/message"}, "expected": {"literal": 512}},
+        {"op": "no_control", "actual": {"path": "/steps/write-fields-error/response/error/message"}},
+        {"op": "valid_utf8", "actual": {"path": "/steps/write-fields-error/exchange/output"}},
+        {"op": "not_matches", "actual": {"path": "/steps/write-fields-error/response/error/message"}, "pattern": "(?i)(panic:|stack trace|goroutine |stdout\\s*[:=]|stderr\\s*[:=]|command\\s*[:=]|exec(?:\\s+|\\s*[:=])|exit[\\s_.-]*status|config(?:uration)?\\s+path\\s*[:=]|config(?:uration)?\\s*[:=]\\s*[\\[{])"},
+        {"op": "not_matches", "actual": {"path": "/steps/write-fields-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/write-fields-error/response/error/message"}, "pattern": "(?i)(?:^|[\\s(\"'=\\[{])[a-z]:[\\\\/][^\\s:]+"},
+        {"op": "not_matches", "actual": {"path": "/steps/write-fields-error/response/error/message"}, "pattern": "(?:^|[\\s(\"'=\\[{])(?:\\\\\\\\)[A-Za-z0-9._-]+\\\\[A-Za-z0-9.$_-]+"}
+      ]
+    },
+    {
+      "name": "unsupported-protocol",
+      "request": {"protocol": "unsupported.connector.protocol", "id": "transcript-error-version", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/unsupported-protocol/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/unsupported-protocol/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/unsupported-protocol/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    },
+    {
+      "name": "malformed-json",
+      "raw_request": "{malformed protocol request\n",
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/malformed-json/exchange/error"}, "expected": {"literal": true}},
+        {"op": "empty", "actual": {"path": "/steps/malformed-json/exchange/output"}},
+        {"op": "equal", "actual": {"path": "/steps/malformed-json/exchange/response_count"}, "expected": {"literal": 0}}
+      ]
+    }
+  ]
+}

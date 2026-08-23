@@ -71,3 +71,35 @@ func TestKillProcessExitedWithStillActiveCode(t *testing.T) {
 	require.ErrorAs(t, waitErr, &exitErr)
 	require.Equal(t, 259, exitErr.ExitCode())
 }
+
+func TestTreeAttachFailureKillsAndReapsSuspendedProcess(t *testing.T) {
+	cmd := exec.Command("cmd", "/c", "exit", "0")
+	tree, err := New(cmd)
+	require.NoError(t, err)
+	require.NoError(t, tree.Close())
+
+	require.Error(t, tree.Start())
+	require.NotNil(t, cmd.ProcessState)
+	require.True(t, cmd.ProcessState.Exited())
+	require.NoError(t, tree.Close())
+}
+
+func TestTreeResumeFailureKillsAndReapsAssignedProcess(t *testing.T) {
+	cmd := exec.Command("cmd", "/c", "exit", "0")
+	tree, err := New(cmd)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tree.Close()) })
+	require.NoError(t, cmd.Start())
+	var assignErr error
+	require.NoError(t, cmd.Process.WithHandle(func(handle uintptr) {
+		assignErr = windows.AssignProcessToJobObject(tree.platform.job, windows.Handle(handle))
+	}))
+	require.NoError(t, assignErr)
+	resumeErr := errors.New("synthetic resume failure")
+
+	err = tree.platform.failStart(cmd, resumeErr)
+
+	require.ErrorIs(t, err, resumeErr)
+	require.NotNil(t, cmd.ProcessState)
+	require.True(t, cmd.ProcessState.Exited())
+}
