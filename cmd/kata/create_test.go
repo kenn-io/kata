@@ -204,6 +204,7 @@ func TestCreate_ForceNewBypassesLookalike(t *testing.T) {
 // the actual "broken .kata.toml" the user can fix. The fix-it error
 // must surface client-side without ever calling the daemon.
 func TestResolveProjectID_PropagatesParseError(t *testing.T) {
+	resetFlags(t)
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"), //nolint:gosec // test fixture mode matches production
 		[]byte("not = valid = toml ==="), 0o644))
@@ -224,6 +225,7 @@ func TestResolveProjectID_PropagatesParseError(t *testing.T) {
 // through with start_path so the daemon can resolve via its own
 // filesystem walk (local-mode behavior).
 func TestResolveProjectID_FallsBackOnMissingConfig(t *testing.T) {
+	resetFlags(t)
 	dir := t.TempDir() // no .kata.toml
 
 	var got map[string]any
@@ -251,6 +253,7 @@ func TestResolveProjectID_FallsBackOnMissingConfig(t *testing.T) {
 // remote clients (the bug 12ced3a introduced by collapsing the
 // project_identity branch into the always-start_path fallthrough).
 func TestResolveProjectID_SendsNameAndAliasForWorkspaceConfig(t *testing.T) {
+	resetFlags(t)
 	dir := testfix.InitGitRepo(t)
 	require.NoError(t, config.WriteProjectConfig(dir, "project-name"))
 
@@ -281,6 +284,7 @@ func TestResolveProjectID_SendsNameAndAliasForWorkspaceConfig(t *testing.T) {
 // not derive a project name from the git remote and create-by-
 // convention (resolve is strict; init owns that path).
 func TestResolveProjectID_SendsAliasOnlyForGitWorkspaceWithoutKataToml(t *testing.T) {
+	resetFlags(t)
 	dir := testfix.InitGitRepo(t)
 
 	var got map[string]any
@@ -308,11 +312,10 @@ func TestResolveProjectID_SendsAliasOnlyForGitWorkspaceWithoutKataToml(t *testin
 // alias-first repair must not run (it could redirect away from the
 // caller's chosen project). Name-only is the strict-target contract.
 func TestResolveProjectID_ExplicitProjectFlagSendsNameOnly(t *testing.T) {
+	resetFlags(t)
 	dir := testfix.InitGitRepo(t)
 	require.NoError(t, config.WriteProjectConfig(dir, "in-toml"))
 
-	prev := flags.Project
-	t.Cleanup(func() { flags.Project = prev })
 	flags.Project = "explicit"
 
 	var got map[string]any
@@ -386,6 +389,7 @@ func TestCreate_CrossProjectLinkViaQualifiedRef(t *testing.T) {
 // In remote-client mode the daemon cannot reach the client's
 // filesystem, so this repair must happen on the client.
 func TestResolveProjectID_RewritesStaleKataToml(t *testing.T) {
+	resetFlags(t)
 	dir := testfix.InitGitRepo(t)
 	require.NoError(t, config.WriteProjectConfig(dir, "stale-name"))
 

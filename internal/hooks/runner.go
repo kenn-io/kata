@@ -196,9 +196,9 @@ const (
 	completionShutdown
 )
 
-func waitForCompletion(cmd *exec.Cmd, timeout time.Duration, shutdown <-chan struct{}, deps runDeps) (result string, exitCode int) {
+func waitForCompletion(tree *processtree.Tree, timeout time.Duration, shutdown <-chan struct{}, deps runDeps) (result string, exitCode int) {
 	doneCh := make(chan error, 1)
-	go func() { doneCh <- cmd.Wait() }()
+	go func() { doneCh <- tree.Wait() }()
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -208,11 +208,11 @@ func waitForCompletion(cmd *exec.Cmd, timeout time.Duration, shutdown <-chan str
 	case completionDone:
 		return result, exitCode
 	case completionTimeout:
-		killTreeWithGrace(cmd, deps.GraceWindow, deps.DaemonLog)
+		killTreeWithGrace(tree, deps.GraceWindow, deps.DaemonLog)
 		w := <-doneCh
 		return "timed_out", exitCodeOf(w)
 	case completionShutdown:
-		killTreeWithGrace(cmd, deps.GraceWindow, deps.DaemonLog)
+		killTreeWithGrace(tree, deps.GraceWindow, deps.DaemonLog)
 		w := <-doneCh
 		return "daemon_shutdown", exitCodeOf(w)
 	default:
@@ -292,14 +292,19 @@ func runJob(ctx context.Context, shutdown <-chan struct{}, job HookJob, deps run
 	cmd.Stdin = bytes.NewReader(stdinPayload)
 	cmd.Stdout = rc.outFile
 	cmd.Stderr = rc.errFile
-	processtree.Prepare(cmd)
+	tree, err := processtree.New(cmd)
+	if err != nil {
+		rc.finalize("spawn_failed", err.Error(), -1, payloadTruncated)
+		return
+	}
+	defer func() { _ = tree.Close() }()
 
-	if err := cmd.Start(); err != nil {
+	if err := tree.Start(); err != nil {
 		rc.finalize("spawn_failed", err.Error(), -1, payloadTruncated)
 		return
 	}
 
-	result, exitCode := waitForCompletion(cmd, job.Hook.Timeout, shutdown, deps)
+	result, exitCode := waitForCompletion(tree, job.Hook.Timeout, shutdown, deps)
 	rc.finalize(result, "", exitCode, payloadTruncated)
 }
 
@@ -340,8 +345,8 @@ func buildEnv(baseEnv, userEnv []string, evt db.Event, asnap AliasSnapshot, hasA
 	return env
 }
 
-func killTreeWithGrace(cmd *exec.Cmd, grace time.Duration, daemonLog *log.Logger) {
-	if err := processtree.TerminateWithGrace(cmd, grace); err != nil {
+func killTreeWithGrace(tree *processtree.Tree, grace time.Duration, daemonLog *log.Logger) {
+	if err := tree.TerminateWithGrace(grace); err != nil {
 		daemonLog.Printf("hooks: terminate process tree: %v", err)
 	}
 }
