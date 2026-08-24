@@ -59,6 +59,9 @@ web-test-browser:
 web-e2e:
 	cd web && bun run test:e2e
 
+web-e2e-firefox:
+	cd web && bun run test:e2e:firefox
+
 web-build:
 	cd web && bun run build
 

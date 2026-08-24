@@ -16,7 +16,8 @@
     "audit": "bun audit --audit-level high",
     "test": "vitest run",
     "test:browser": "vitest run --project browser",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --grep-invert @firefox",
+    "test:e2e:firefox": "playwright test --grep @firefox",
     "build": "vite build",
     "dev": "vite"
   },

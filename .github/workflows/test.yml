@@ -61,10 +61,10 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - name: Install frozen web dependencies and Chromium
+      - name: Install frozen web dependencies and browsers
         run: |
           make web-install
-          cd web && bun x playwright install --with-deps chromium
+          cd web && bun x playwright install --with-deps chromium firefox
 
       - name: Run isolated browser tests
         env:
@@ -73,7 +73,7 @@ jobs:
           KATA_WORKSPACE: ${{ runner.temp }}/kata-web-browser/workspace
         run: |
           mkdir -p "$KATA_HOME" "$KATA_WORKSPACE"
-          make web-test-browser web-e2e
+          make web-test-browser web-e2e web-e2e-firefox
 
       - name: Upload browser failure artifacts
         if: failure()
