@@ -432,6 +432,9 @@ func ValidateExternalRootProjectionParams(params ExternalRootProjectionParams) e
 	if params.ExternalUpdatedAt.IsZero() || params.ExternalObservedAt.IsZero() {
 		return fmt.Errorf("%w: external update and observation timestamps are required", ErrExternalRootValidation)
 	}
+	if params.ExternalObservedAt.Before(params.ExternalUpdatedAt) {
+		return fmt.Errorf("%w: external observation must not precede the external update", ErrExternalRootValidation)
+	}
 	if strings.TrimSpace(params.Title) == "" || strings.ContainsRune(params.Title, '\x00') {
 		return fmt.Errorf("%w: external root title is invalid", ErrExternalRootValidation)
 	}
@@ -451,6 +454,9 @@ func ValidateExternalCommentProjectionParams(params ExternalCommentProjectionPar
 	}
 	if params.ExternalCreatedAt.IsZero() || params.ExternalUpdatedAt.IsZero() {
 		return fmt.Errorf("%w: external comment timestamps are required", ErrExternalRootValidation)
+	}
+	if params.ExternalUpdatedAt.Before(params.ExternalCreatedAt) {
+		return fmt.Errorf("%w: external comment update must not precede its creation", ErrExternalRootValidation)
 	}
 	return nil
 }

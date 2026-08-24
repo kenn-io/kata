@@ -119,6 +119,41 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		}
 	})
 
+	t.Run("external root storage rejects impossible projection timestamps", func(t *testing.T) {
+		fixture := newExternalRootSafetyFixture(t, store, "timestamp-ordering")
+		_, _, _, err := store.ApplyExternalRootProjection(ctx, db.ExternalRootProjectionParams{
+			BindingID: fixture.binding.ID, ClaimToken: fixture.token,
+			Title: "Original projection", Body: "Body", ExternalRevision: "revision-one",
+			ExternalUpdatedAt: fixture.now, ExternalObservedAt: fixture.now,
+			IntegrationActor: "connector:notes",
+		})
+		require.NoError(t, err)
+
+		_, _, _, err = store.ApplyExternalRootProjection(ctx, db.ExternalRootProjectionParams{
+			BindingID: fixture.binding.ID, ClaimToken: fixture.token,
+			Title: "Rewritten projection", Body: "Body", ExternalRevision: "revision-two",
+			ExternalUpdatedAt: fixture.now.Add(time.Minute), ExternalObservedAt: fixture.now,
+			IntegrationActor: "connector:notes",
+		})
+		assert.ErrorIs(t, err, db.ErrExternalRootValidation)
+		projected, readErr := store.IssueByID(ctx, fixture.issue.ID)
+		require.NoError(t, readErr)
+		assert.Equal(t, "Original projection", projected.Title,
+			"rejected root projection must not mutate the projected issue")
+
+		_, _, _, err = store.UpsertExternalCommentProjection(ctx, db.ExternalCommentProjectionParams{
+			BindingID: fixture.binding.ID, ClaimToken: fixture.token,
+			ExternalID: "comment-one", ExternalRevision: "comment-revision", Body: "Body",
+			ExternalActorID: "actor", ExternalActorName: "Contributor",
+			ExternalCreatedAt: fixture.now, ExternalUpdatedAt: fixture.now.Add(-time.Minute),
+			IntegrationActor: "connector:notes",
+		})
+		assert.ErrorIs(t, err, db.ErrExternalRootValidation)
+		comments, readErr := store.CommentsByIssue(ctx, fixture.issue.ID)
+		require.NoError(t, readErr)
+		assert.Empty(t, comments, "rejected comment projection must not insert a comment")
+	})
+
 	t.Run("live claims fence field mappings and operator lifecycle actions", func(t *testing.T) {
 		project, err := store.CreateProject(ctx, "external-root-live-claim-fence")
 		require.NoError(t, err)
@@ -1295,11 +1330,12 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		require.NoError(t, readErr)
 		assert.Equal(t, "Newer root", root.Title)
 
+		commentCreated := newer.Add(-100 * time.Microsecond)
 		commentParams := db.ExternalCommentProjectionParams{
 			BindingID: fixture.binding.ID, ClaimToken: fixture.token,
 			ExternalID: "sub-millisecond-comment", ExternalRevision: "comment-newer",
 			Body: "Newer comment", ExternalActorID: "actor", ExternalActorName: "Contributor",
-			ExternalCreatedAt: newer, ExternalUpdatedAt: newer,
+			ExternalCreatedAt: commentCreated, ExternalUpdatedAt: newer,
 			IntegrationActor: integrationActor,
 		}
 		_, _, created, err := store.UpsertExternalCommentProjection(ctx, commentParams)
@@ -1307,7 +1343,7 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		require.True(t, created)
 		commentParams.Body = "Older comment"
 		commentParams.ExternalRevision = "comment-older"
-		commentParams.ExternalUpdatedAt = older
+		commentParams.ExternalUpdatedAt = newer.Add(-50 * time.Microsecond)
 		_, staleEvent, staleChanged, err := store.UpsertExternalCommentProjection(ctx, commentParams)
 		require.NoError(t, err)
 		assert.False(t, staleChanged)
