@@ -73,7 +73,7 @@ jobs:
           KATA_WORKSPACE: ${{ runner.temp }}/kata-web-browser/workspace
         run: |
           mkdir -p "$KATA_HOME" "$KATA_WORKSPACE"
-          make web-test-browser web-e2e
+          make web-test-browser web-e2e web-e2e-firefox
 
       - name: Upload browser failure artifacts
         if: failure()
