@@ -83,13 +83,17 @@ func Validate(method string, raw json.RawMessage, options Options) error {
 	if !ok {
 		return &Error{Code: CodeUnsupportedMethod, Method: method}
 	}
+	optional := methodOptionalParameters[method]
 	for required := range allowed {
+		if optional[required] {
+			continue
+		}
 		if _, present := params[required]; !present {
 			return &Error{Code: CodeMissingParameter, Method: method, Path: "params." + required}
 		}
 	}
 	for key := range params {
-		if !allowed[key] {
+		if !allowed[key] && !optional[key] {
 			return &Error{Code: CodeUnknownParameter, Method: method, Path: "params." + key}
 		}
 	}
@@ -182,6 +186,9 @@ func validateParameterTypes(method string, raw json.RawMessage, params map[strin
 		for _, collection := range []string{"fields", "expected"} {
 			fields, ok := params[collection].(map[string]any)
 			if !ok {
+				if _, present := params[collection]; !present && collection == "expected" {
+					continue
+				}
 				return invalid("params." + collection)
 			}
 			for fieldID, value := range fields {
@@ -214,7 +221,13 @@ var methodParameters = map[string]map[string]bool{
 	"complete_root":   {"root_key": true},
 	"list_fields":     {},
 	"read_fields":     {"root_key": true, "field_ids": true},
-	"write_fields":    {"root_key": true, "fields": true, "expected": true},
+	"write_fields":    {"root_key": true, "fields": true},
+}
+
+// methodOptionalParameters lists accepted-but-optional parameter keys per
+// method; they extend methodParameters without becoming required.
+var methodOptionalParameters = map[string]map[string]bool{
+	"write_fields": {"expected": true},
 }
 
 func forbiddenPath(value any, path, method string) (string, bool) {

@@ -20,6 +20,8 @@ func TestPublicConformance(t *testing.T) {
 
 type conformanceFixture struct{ path string }
 
+func (f *conformanceFixture) SupportsConditionalFields() bool { return true }
+
 func (f *conformanceFixture) RootLocator() string { return "fixture-root" }
 
 func (f *conformanceFixture) Invocation() connector.Invocation {

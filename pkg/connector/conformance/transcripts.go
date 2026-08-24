@@ -510,6 +510,20 @@ func (runtime *transcriptRuntime) performStep(ctx context.Context, step protocol
 	}
 }
 
+// ConditionalFieldsFixture opts a conformance fixture into the conditional
+// write_fields contract. Transcripts carry expected values so CAS behavior
+// stays covered; before sending them to a fixture that does not advertise
+// conditional field support, the runtime strips the parameter so plain
+// protocol-v1 connectors never observe an unknown field.
+type ConditionalFieldsFixture interface {
+	SupportsConditionalFields() bool
+}
+
+func fixtureSupportsConditionalFields(fixture Fixture) bool {
+	supporter, ok := fixture.(ConditionalFieldsFixture)
+	return ok && supporter.SupportsConditionalFields()
+}
+
 func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protocolTranscriptStep, stepDocument map[string]any) error {
 	raw := []byte(step.RawRequest)
 	if len(step.Request) != 0 {
@@ -520,6 +534,9 @@ func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protoco
 		request, err = runtime.expandTemplate(request)
 		if err != nil {
 			return fmt.Errorf("expand request template: %w", err)
+		}
+		if !fixtureSupportsConditionalFields(runtime.fixture) {
+			stripConditionalExpected(request)
 		}
 		stepDocument["request"] = request
 		encoded, err := json.Marshal(request)
@@ -1219,4 +1236,16 @@ func compareTranscriptItems(left, right any, paths []string) (int, error) {
 		}
 	}
 	return 0, nil
+}
+
+func stripConditionalExpected(request any) {
+	object, ok := request.(map[string]any)
+	if !ok || object["method"] != "write_fields" {
+		return
+	}
+	params, ok := object["params"].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(params, "expected")
 }

@@ -28,6 +28,8 @@ func TestRunAcceptsFieldBaselineEqualToSamples(t *testing.T) {
 	Run(t, fixture)
 }
 
+func (f *memoryFixture) SupportsConditionalFields() bool { return true }
+
 type memoryFixture struct {
 	description                 connector.Description
 	root                        connector.Root
