@@ -71,10 +71,13 @@ All handlers implement these methods:
 | `publish_comment` | Publish one comment and return its provider identity and timestamps. |
 | `list_fields` | Discover canonical external field descriptors. |
 | `read_fields` | Read selected canonical field values. |
-| `write_fields` | Compare and set selected fields, then return canonical readback. |
+| `write_fields` | Write selected fields, optionally with compare-and-set preconditions, then return canonical readback. |
 
 `publish_comment` is advertised with the `publish_comment` capability. The
-field methods are advertised with `fields`. A connector may return a structured
+field methods are advertised with `fields`. Compare-and-set field writes are
+advertised separately with `conditional_fields`. Kata rejects a conditional
+write when the connector does not advertise that capability; it does not retry
+the write without its preconditions. A connector may return a structured
 unsupported error for optional methods whose capability it does not advertise.
 
 Root keys, account identities, connector IDs, actor IDs, comment IDs, field IDs,
@@ -91,10 +94,12 @@ Field values use the portable `date`, `local_datetime`, `instant`, and `null`
 kinds accepted by the conformance transcripts; a descriptor lists
 the exact kinds it accepts and whether it is nullable and writable.
 
-Protocol v1 `write_fields` requests contain `fields` and `expected` objects
-with identical field-ID keysets. The connector writes only when every current
-value equals its canonical `expected` value; otherwise it changes nothing and
-returns a `field_conflict` error.
+Protocol v1 `write_fields` requests always contain `fields`. Connectors that
+advertise `conditional_fields` may also receive `expected`; when present, the
+two objects have identical field-ID keysets. The connector writes only when
+every current value equals its canonical `expected` value. Otherwise it changes
+nothing and returns a `field_conflict` error. A request without `expected` is
+an unconditional write.
 
 ## Go SDK
 

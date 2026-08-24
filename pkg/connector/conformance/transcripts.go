@@ -510,20 +510,6 @@ func (runtime *transcriptRuntime) performStep(ctx context.Context, step protocol
 	}
 }
 
-// ConditionalFieldsFixture opts a conformance fixture into the conditional
-// write_fields contract. Transcripts carry expected values so CAS behavior
-// stays covered; before sending them to a fixture that does not advertise
-// conditional field support, the runtime strips the parameter so plain
-// protocol-v1 connectors never observe an unknown field.
-type ConditionalFieldsFixture interface {
-	SupportsConditionalFields() bool
-}
-
-func fixtureSupportsConditionalFields(fixture Fixture) bool {
-	supporter, ok := fixture.(ConditionalFieldsFixture)
-	return ok && supporter.SupportsConditionalFields()
-}
-
 func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protocolTranscriptStep, stepDocument map[string]any) error {
 	raw := []byte(step.RawRequest)
 	if len(step.Request) != 0 {
@@ -535,8 +521,8 @@ func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protoco
 		if err != nil {
 			return fmt.Errorf("expand request template: %w", err)
 		}
-		if !fixtureSupportsConditionalFields(runtime.fixture) {
-			stripConditionalExpected(request)
+		if err := runtime.stripUnadvertisedConditionalExpected(request); err != nil {
+			return err
 		}
 		stepDocument["request"] = request
 		encoded, err := json.Marshal(request)
@@ -1238,14 +1224,31 @@ func compareTranscriptItems(left, right any, paths []string) (int, error) {
 	return 0, nil
 }
 
-func stripConditionalExpected(request any) {
+func (runtime *transcriptRuntime) stripUnadvertisedConditionalExpected(request any) error {
 	object, ok := request.(map[string]any)
 	if !ok || object["method"] != "write_fields" {
-		return
+		return nil
 	}
 	params, ok := object["params"].(map[string]any)
 	if !ok {
-		return
+		return nil
+	}
+	if _, conditional := params["expected"]; !conditional {
+		return nil
+	}
+	value, found, err := resolveJSONPointer(runtime.root, "/captures/description/capabilities")
+	if err != nil {
+		return fmt.Errorf("resolve advertised connector capabilities: %w", err)
+	}
+	capabilities, ok := value.([]any)
+	if !found || !ok {
+		return errors.New("captured connector description is missing capabilities")
+	}
+	for _, capability := range capabilities {
+		if capability == string(connector.CapabilityConditionalFields) {
+			return nil
+		}
 	}
 	delete(params, "expected")
+	return nil
 }

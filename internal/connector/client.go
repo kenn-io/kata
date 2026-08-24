@@ -169,6 +169,15 @@ func (p *processClient) WriteFields(ctx context.Context, params protocol.WriteFi
 	if err := protocol.ValidateWriteFieldsParams(params); err != nil {
 		return protocol.WriteFieldsResult{}, err
 	}
+	if params.Expected != nil {
+		description, err := p.Describe(ctx)
+		if err != nil {
+			return protocol.WriteFieldsResult{}, err
+		}
+		if !slices.Contains(description.Capabilities, protocol.CapabilityConditionalFields) {
+			return protocol.WriteFieldsResult{}, invalidResult(errors.New("connector does not advertise conditional field writes"))
+		}
+	}
 	return callResult(ctx, p, "write_fields", params, func(result protocol.WriteFieldsResult) error {
 		if result.Fields == nil {
 			return errors.New("write_fields result is missing fields")

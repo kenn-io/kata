@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/connector"
 )
 
@@ -28,7 +30,43 @@ func TestRunAcceptsFieldBaselineEqualToSamples(t *testing.T) {
 	Run(t, fixture)
 }
 
-func (f *memoryFixture) SupportsConditionalFields() bool { return true }
+func TestTranscriptConditionalWritesFollowAdvertisedCapabilities(t *testing.T) {
+	fixture := newFixture()
+	var exchanged map[string]any
+	fixture.exchange = func(_ context.Context, request []byte) ([]byte, error) {
+		if err := json.Unmarshal(request, &exchanged); err != nil {
+			return nil, err
+		}
+		response, err := json.Marshal(connector.Response{
+			Protocol: connector.ProtocolVersion,
+			ID:       "conditional-write",
+			Result:   json.RawMessage(`{"fields":{"field-1":{"kind":"date","value":"2026-08-21"}}}`),
+		})
+		return append(response, '\n'), err
+	}
+	runtime := &transcriptRuntime{fixture: fixture, root: map[string]any{
+		"captures": map[string]any{"description": map[string]any{
+			"capabilities": []any{string(connector.CapabilityFields)},
+		}},
+		"steps": map[string]any{},
+	}}
+	step := protocolTranscriptStep{Request: json.RawMessage(`{
+		"protocol":"kata.connector.v1",
+		"id":"conditional-write",
+		"method":"write_fields",
+		"instance":"example-instance",
+		"params":{
+			"root_key":"root-1",
+			"fields":{"field-1":{"kind":"date","value":"2026-08-21"}},
+			"expected":{"field-1":{"kind":"date","value":"2026-08-20"}}
+		}
+	}`)}
+
+	require.NoError(t, runtime.exchangeStep(t.Context(), step, map[string]any{}))
+	params, ok := exchanged["params"].(map[string]any)
+	require.True(t, ok)
+	assert.NotContains(t, params, "expected")
+}
 
 type memoryFixture struct {
 	description                 connector.Description
@@ -687,7 +725,7 @@ func (f *memoryFixture) Reset(context.Context) error {
 		ConnectorID: "example.connector", DisplayName: "Example Connector",
 		Protocol: connector.ProtocolVersion,
 		Capabilities: []connector.Capability{
-			connector.CapabilityFields, connector.CapabilityPublishComment,
+			connector.CapabilityConditionalFields, connector.CapabilityFields, connector.CapabilityPublishComment,
 		},
 		ConfigSchema:    []byte(`{"type":"object","additionalProperties":false}`),
 		SelfActorID:     "actor-self",

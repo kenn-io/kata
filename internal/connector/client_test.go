@@ -103,6 +103,7 @@ func TestProcessClientRejectsMethodSpecificResponseViolations(t *testing.T) {
 	validOpenRoot := `{"key":"root-1","identity_key":"account-1","state":"open","revision":"revision-1","updated_at":"2026-08-20T10:00:00Z","observed_at":"2026-08-20T10:01:00Z"}`
 	for _, tt := range []struct {
 		name   string
+		mode   string
 		result string
 		call   func(Client) error
 	}{
@@ -170,7 +171,7 @@ func TestProcessClientRejectsMethodSpecificResponseViolations(t *testing.T) {
 			_, err := client.ReadFields(t.Context(), protocol.ReadFieldsParams{RootKey: "root-1", FieldIDs: []string{"field-1"}})
 			return err
 		}},
-		{name: "write field readback mismatch", result: `{"fields":{"field-1":{"kind":"date","value":"2026-08-21"}}}`, call: func(client Client) error {
+		{name: "write field readback mismatch", mode: "write-raw-result", result: `{"fields":{"field-1":{"kind":"date","value":"2026-08-21"}}}`, call: func(client Client) error {
 			_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{RootKey: "root-1", Fields: map[string]protocol.FieldValue{
 				"field-1": {Kind: "date", Value: "2026-08-20"},
 			}, Expected: map[string]protocol.FieldValue{
@@ -180,7 +181,11 @@ func TestProcessClientRejectsMethodSpecificResponseViolations(t *testing.T) {
 		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HELPER_MODE", "raw-result")
+			mode := tt.mode
+			if mode == "" {
+				mode = "raw-result"
+			}
+			t.Setenv("HELPER_MODE", mode)
 			t.Setenv("HELPER_RESULT", tt.result)
 			client := newHelperClient(t, config.ConnectorConfig{
 				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
@@ -294,9 +299,61 @@ func TestProcessClientRejectsInvalidWriteFieldBeforeLaunch(t *testing.T) {
 	}
 }
 
+func TestProcessClientRejectsConditionalWriteWithoutCapability(t *testing.T) {
+	methodsPath := filepath.Join(t.TempDir(), "methods")
+	t.Setenv("HELPER_MODE", "conditional-fields-unsupported")
+	t.Setenv("HELPER_SYNC", methodsPath)
+	client := newHelperClient(t, config.ConnectorConfig{
+		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+		Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
+	})
+
+	_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{
+		RootKey: "root-1",
+		Fields: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-21"},
+		},
+		Expected: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-20"},
+		},
+	})
+
+	require.ErrorIs(t, err, ErrProtocolFailure)
+	methods, readErr := os.ReadFile(methodsPath) // #nosec G304 -- test-owned temporary path.
+	require.NoError(t, readErr)
+	assert.Equal(t, "describe\n", string(methods))
+}
+
+func TestProcessClientSendsConditionalWriteWithAdvertisedCapability(t *testing.T) {
+	methodsPath := filepath.Join(t.TempDir(), "methods")
+	t.Setenv("HELPER_MODE", "conditional-fields-supported")
+	t.Setenv("HELPER_SYNC", methodsPath)
+	client := newHelperClient(t, config.ConnectorConfig{
+		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+		Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
+	})
+
+	result, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{
+		RootKey: "root-1",
+		Fields: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-21"},
+		},
+		Expected: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-20"},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, protocol.FieldValue{Kind: "date", Value: "2026-08-21"}, result.Fields["field-1"])
+	methods, readErr := os.ReadFile(methodsPath) // #nosec G304 -- test-owned temporary path.
+	require.NoError(t, readErr)
+	assert.Equal(t, "describe\nwrite_fields\n", string(methods))
+}
+
 func TestProcessClientRejectsMissingRequiredResultProperties(t *testing.T) {
 	tests := []struct {
 		name string
+		mode string
 		call func(*processClient) error
 	}{
 		{name: "describe", call: func(client *processClient) error { _, err := client.Describe(t.Context()); return err }},
@@ -325,14 +382,18 @@ func TestProcessClientRejectsMissingRequiredResultProperties(t *testing.T) {
 			_, err := client.ReadFields(t.Context(), protocol.ReadFieldsParams{RootKey: "root", FieldIDs: []string{"field"}})
 			return err
 		}},
-		{name: "write fields", call: func(client *processClient) error {
+		{name: "write fields", mode: "write-empty-result", call: func(client *processClient) error {
 			_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{RootKey: "root", Fields: map[string]protocol.FieldValue{"field": {Kind: "date", Value: "2026-08-22"}}, Expected: map[string]protocol.FieldValue{"field": {Kind: "date", Value: "2026-08-21"}}})
 			return err
 		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			t.Setenv("HELPER_MODE", "empty-result")
+			mode := test.mode
+			if mode == "" {
+				mode = "empty-result"
+			}
+			t.Setenv("HELPER_MODE", mode)
 			client := newHelperClient(t, config.ConnectorConfig{
 				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
 				Env: map[string]string{"MODE": "HELPER_MODE"},
@@ -1154,6 +1215,19 @@ func serveProcessClientHelper() {
 	if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
 		os.Exit(2)
 	}
+	if os.Getenv("MODE") == "conditional-fields-unsupported" || os.Getenv("MODE") == "conditional-fields-supported" {
+		file, err := os.OpenFile(os.Getenv("SYNC"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G703 -- test-owned temporary path.
+		if err != nil {
+			os.Exit(15)
+		}
+		if _, err := fmt.Fprintln(file, request.Method); err != nil {
+			_ = file.Close()
+			os.Exit(16)
+		}
+		if err := file.Close(); err != nil {
+			os.Exit(17)
+		}
+	}
 	if os.Getenv("MODE") == "sleep" {
 		time.Sleep(time.Second)
 		return
@@ -1194,7 +1268,36 @@ func serveProcessClientHelper() {
 		_ = json.NewEncoder(os.Stdout).Encode(response)
 		return
 	}
+	if request.Method == "describe" {
+		switch os.Getenv("MODE") {
+		case "write-raw-result", "write-empty-result", "missing-field-readback", "mismatched-write-field", "conditional-fields-supported":
+			response.Result = conditionalDescriptionResult()
+			_ = json.NewEncoder(os.Stdout).Encode(response)
+			return
+		}
+	}
 	switch os.Getenv("MODE") {
+	case "conditional-fields-unsupported":
+		if request.Method == "describe" {
+			response.Result = describeResult()
+		} else {
+			response.Result = mustJSON(protocol.WriteFieldsResult{Fields: map[string]protocol.FieldValue{
+				"field-1": {Kind: "date", Value: "2026-08-21"},
+			}})
+		}
+	case "conditional-fields-supported":
+		var params protocol.WriteFieldsParams
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			os.Exit(18)
+		}
+		if params.Expected == nil {
+			response.Error = &protocol.Error{Code: "missing_expected", Message: "conditional write is missing expected values"}
+		} else {
+			response.Result = mustJSON(protocol.WriteFieldsResult{Fields: params.Fields})
+		}
+	case "write-raw-result":
+		response.Result = json.RawMessage(os.Getenv("RESULT"))
+	case "write-empty-result":
 	case "wrong-id":
 		response.ID = "other"
 	case "unsupported-version":
@@ -1405,10 +1508,10 @@ func expectedEnvironment(mode string) []string {
 	if mode == "delayed-structured-secret" {
 		return []string{"TOKEN", "MODE", "SYNC"}
 	}
-	if mode == "raw-result" || mode == "publication-result" {
+	if mode == "raw-result" || mode == "publication-result" || mode == "write-raw-result" {
 		return []string{"MODE", "RESULT"}
 	}
-	if mode == "spawn-stdout-holder" || mode == "spawn-stdout-holder-and-exit" || mode == "spawn-background-holder" || mode == "launch-marker" {
+	if mode == "spawn-stdout-holder" || mode == "spawn-stdout-holder-and-exit" || mode == "spawn-background-holder" || mode == "launch-marker" || mode == "conditional-fields-unsupported" || mode == "conditional-fields-supported" {
 		return []string{"MODE", "SYNC"}
 	}
 	if mode != "" {
@@ -1464,6 +1567,18 @@ func describeResult() json.RawMessage {
 	b, err := json.Marshal(protocol.Description{
 		ConnectorID: "fake.connector", DisplayName: "Fake", Protocol: protocol.ProtocolVersion,
 		Capabilities: []protocol.Capability{}, AccountIdentity: "account-1", ConfigSchema: mustJSON(map[string]any{"type": "object"}),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func conditionalDescriptionResult() json.RawMessage {
+	b, err := json.Marshal(protocol.Description{
+		ConnectorID: "fake.connector", DisplayName: "Fake", Protocol: protocol.ProtocolVersion,
+		Capabilities:    []protocol.Capability{protocol.CapabilityConditionalFields, protocol.CapabilityFields},
+		AccountIdentity: "account-1", ConfigSchema: mustJSON(map[string]any{"type": "object"}),
 	})
 	if err != nil {
 		panic(err)

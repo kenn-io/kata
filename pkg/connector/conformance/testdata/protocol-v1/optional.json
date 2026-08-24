@@ -434,6 +434,7 @@
               "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-stale", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
               ],
               "assert": [
@@ -447,6 +448,7 @@
               "observe": "provider_state",
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
               ],
               "assert": [

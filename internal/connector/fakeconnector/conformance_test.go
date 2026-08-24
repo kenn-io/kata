@@ -20,8 +20,6 @@ func TestPublicConformance(t *testing.T) {
 
 type conformanceFixture struct{ path string }
 
-func (f *conformanceFixture) SupportsConditionalFields() bool { return true }
-
 func (f *conformanceFixture) RootLocator() string { return "fixture-root" }
 
 func (f *conformanceFixture) Invocation() connector.Invocation {
@@ -73,7 +71,9 @@ func (f *conformanceFixture) Reset(context.Context) error {
 	return Write(f.path, State{
 		Description: connector.Description{
 			ConnectorID: "example.connector", DisplayName: "Example Connector", Protocol: connector.ProtocolVersion,
-			Capabilities: []connector.Capability{connector.CapabilityFields, connector.CapabilityPublishComment},
+			Capabilities: []connector.Capability{
+				connector.CapabilityConditionalFields, connector.CapabilityFields, connector.CapabilityPublishComment,
+			},
 			ConfigSchema: []byte(`{"type":"object","additionalProperties":false}`), SelfActorID: "actor-self",
 			AccountIdentity: "account-example",
 		},
