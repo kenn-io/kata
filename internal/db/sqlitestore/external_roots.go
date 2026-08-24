@@ -210,33 +210,58 @@ func rejectExternalRootAccountIdentityChange(
 	return fmt.Errorf("%w: connector instance account identity changed", db.ErrExternalRootValidation)
 }
 
-func localPublishFrontierTx(
+// markPreBindingCommentsTx durably marks every local comment that exists
+// when a publishing binding is created, using the skipped-comment mapping
+// namespace. Outbound publication then trusts these markers instead of a
+// timestamp frontier, so a comment committed after the binding transaction —
+// even with an earlier timestamp caused by truncation or a clock rollback —
+// is still published, while pre-binding comments never are. The binding
+// records the zero time as its publish frontier, which no comment timestamp
+// can precede.
+func markPreBindingCommentsTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	issueID int64,
-	stamp time.Time,
-) (time.Time, error) {
-	frontier := stamp.UTC()
-	var latest sql.NullString
-	if err := tx.QueryRowContext(ctx,
-		`SELECT MAX(c.created_at)
-		   FROM comments c
+	params db.CreateExternalRootBindingParams,
+) error {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT c.id, c.uid FROM comments c
 		  WHERE c.issue_id=?
-		    AND NOT EXISTS (SELECT 1 FROM import_mappings m WHERE m.comment_id=c.id)`, issueID,
-	).Scan(&latest); err != nil {
-		return time.Time{}, fmt.Errorf("read latest local comment timestamp: %w", err)
+		    AND NOT EXISTS (SELECT 1 FROM import_mappings m WHERE m.comment_id=c.id)`, params.IssueID,
+	)
+	if err != nil {
+		return fmt.Errorf("read pre-binding local comments: %w", err)
 	}
-	if latest.Valid {
-		latestComment, err := parseSQLiteTimestamp(latest.String)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("parse latest local comment timestamp: %w", err)
+	type preBindingComment struct {
+		id  int64
+		uid string
+	}
+	var comments []preBindingComment
+	for rows.Next() {
+		var comment preBindingComment
+		if err := rows.Scan(&comment.id, &comment.uid); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan pre-binding local comment: %w", err)
 		}
-		latestComment = latestComment.UTC()
-		if !frontier.After(latestComment) {
-			frontier = latestComment.Add(time.Millisecond)
+		comments = append(comments, comment)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("read pre-binding local comments: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close pre-binding local comments: %w", err)
+	}
+	issueID := params.IssueID
+	for _, comment := range comments {
+		if err := upsertPendingExternalCommentMapping(ctx, tx, db.ImportMappingParams{
+			Source:     db.ExternalRootSkippedCommentMappingSource(params.ConnectorInstance),
+			ExternalID: comment.uid, ObjectType: "comment",
+			ProjectID: params.ProjectID, IssueID: &issueID, CommentID: &comment.id,
+		}); err != nil {
+			return fmt.Errorf("mark pre-binding local comment %s: %w", comment.uid, err)
 		}
 	}
-	return frontier, nil
+	return nil
 }
 
 func (d *Store) CreateExternalRootBinding(
@@ -312,12 +337,10 @@ func (d *Store) CreateExternalRootBinding(
 		}
 		var publishAfter any
 		if params.UseLocalPublishFrontier {
-			var frontier time.Time
-			frontier, err = localPublishFrontierTx(ctx, tx, params.IssueID, stamp)
-			if err != nil {
+			if err := markPreBindingCommentsTx(ctx, tx, params); err != nil {
 				return db.ExternalRootBinding{}, db.Event{}, err
 			}
-			publishAfter = frontier.UTC().Format(sqliteCommentTimeFormat)
+			publishAfter = time.Time{}.UTC().Format(sqliteCommentTimeFormat)
 		} else if params.PublishCommentsAfter != nil {
 			publishAfter = params.PublishCommentsAfter.UTC().Format(sqliteCommentTimeFormat)
 		}

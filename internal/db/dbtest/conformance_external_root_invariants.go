@@ -569,7 +569,6 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		project, err := store.CreateProject(ctx, "external-root-safety-frontiers")
 		require.NoError(t, err)
 		inbound := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
-		zero := time.Time{}
 		cases := []struct {
 			name            string
 			receiveAfter    time.Time
@@ -582,7 +581,6 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		}{
 			{name: "missing inbound", externalRootKey: "root-missing-inbound"},
 			{name: "missing outbound", receiveAfter: inbound, publish: true, externalRootKey: "root-missing-outbound"},
-			{name: "zero outbound", receiveAfter: inbound, publish: true, publishAfter: &zero, externalRootKey: "root-zero-outbound"},
 			{name: "ambiguous outbound", receiveAfter: inbound, publish: true, publishAfter: &inbound, localFrontier: true, externalRootKey: "root-ambiguous-outbound"},
 			{name: "local frontier without publishing", receiveAfter: inbound, localFrontier: true, externalRootKey: "root-disabled-local-outbound"},
 			{name: "claim token without timestamp", receiveAfter: inbound, initialClaim: "reserved-claim", externalRootKey: "root-claim-without-time"},
@@ -646,9 +644,35 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		})
 		require.NoError(t, err)
 		require.NotNil(t, localBinding.PublishCommentsAfter)
-		assert.True(t, localBinding.PublishCommentsAfter.After(oldComment.CreatedAt))
-		assert.Equal(t, oldComment.CreatedAt.Add(time.Millisecond), *localBinding.PublishCommentsAfter)
-		assert.False(t, localBinding.PublishCommentsAfter.Before(localBinding.CreatedAt))
+		assert.True(t, localBinding.PublishCommentsAfter.IsZero(),
+			"local publish frontier is marker-governed and records the zero time")
+		markers, err := store.ImportCommentMappingsByIssue(ctx, localIssue.ID)
+		require.NoError(t, err)
+		marked := false
+		for _, mapping := range markers {
+			if mapping.CommentID != nil && *mapping.CommentID == oldComment.ID &&
+				mapping.Source == db.ExternalRootSkippedCommentMappingSource("notes") {
+				marked = true
+			}
+		}
+		assert.True(t, marked, "pre-binding local comment must carry a durable skip marker")
+
+		// A comment committed after the binding must carry no skip marker even
+		// when its timestamp does not exceed the pre-binding comment's, so it
+		// stays eligible for outbound publication.
+		require.NotNil(t, backend.BackdateCommentCreated)
+		postBinding, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: localIssue.ID, Author: "tester", Body: "Committed after binding",
+		})
+		require.NoError(t, err)
+		require.NoError(t, backend.BackdateCommentCreated(ctx, store, postBinding.ID, oldComment.CreatedAt.Add(-time.Hour)))
+		markers, err = store.ImportCommentMappingsByIssue(ctx, localIssue.ID)
+		require.NoError(t, err)
+		for _, mapping := range markers {
+			if mapping.CommentID != nil && *mapping.CommentID == postBinding.ID {
+				t.Fatalf("post-binding comment %d must not be marked skipped: %+v", postBinding.ID, mapping)
+			}
+		}
 	})
 
 	t.Run("creation reserves an initial claim atomically", func(t *testing.T) {

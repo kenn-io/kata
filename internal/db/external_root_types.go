@@ -97,6 +97,13 @@ func ExternalRootRevisionMappingSource(binding ExternalRootBinding) string {
 	return ExternalRootCommentMappingSource(binding) + ":root-revisions"
 }
 
+// ExternalRootSkippedCommentMappingSource scopes durable skip markers for
+// local comments that must never publish outbound: comments that existed
+// when a publishing binding was created.
+func ExternalRootSkippedCommentMappingSource(connectorInstance string) string {
+	return "connector-skip:" + connectorInstance
+}
+
 const (
 	// ExternalRevisionAnchorObjectType anchors binding-specific revision records
 	// to their owning issue without requiring a synthetic local comment.
@@ -624,7 +631,10 @@ func ValidateCreateExternalRootBindingParams(params CreateExternalRootBindingPar
 			if params.PublishCommentsAfter != nil {
 				return fmt.Errorf("%w: publish-comments frontier is ambiguous", ErrExternalRootValidation)
 			}
-		} else if params.PublishCommentsAfter == nil || params.PublishCommentsAfter.IsZero() {
+		} else if params.PublishCommentsAfter == nil {
+			// The zero time is valid here: it records a marker-governed
+			// frontier restored from an export, under which outbound
+			// publication is decided by durable comment mappings alone.
 			return fmt.Errorf("%w: publish-comments frontier is required when publishing is enabled", ErrExternalRootValidation)
 		}
 	}

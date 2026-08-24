@@ -49,6 +49,7 @@ func TestStorageConformance(t *testing.T) {
 		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
 			return pgstore.InstallExternalRootClockForTest(store.(*pgstore.Store), now)
 		},
+		BackdateCommentCreated: backdateCommentCreated,
 		SeedLegacyPendingClaim: func(ctx context.Context, store db.Storage, requestUID string) error {
 			postgresStore := store.(*pgstore.Store)
 			_, err := postgresStore.ExecContext(ctx,
@@ -155,6 +156,7 @@ func TestExternalRootConformance(t *testing.T) {
 		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
 			return pgstore.InstallExternalRootClockForTest(store.(*pgstore.Store), now)
 		},
+		BackdateCommentCreated: backdateCommentCreated,
 	})
 }
 
@@ -185,4 +187,12 @@ func TestExternalRootContentOwned(t *testing.T) {
 			return store
 		},
 	})
+}
+
+func backdateCommentCreated(ctx context.Context, store db.Storage, commentID int64, createdAt time.Time) error {
+	postgresStore := store.(*pgstore.Store)
+	_, err := postgresStore.ExecContext(ctx,
+		`UPDATE comments SET created_at=$1 WHERE id=$2`,
+		createdAt.UTC(), commentID)
+	return err
 }
