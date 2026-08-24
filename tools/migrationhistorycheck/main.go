@@ -91,12 +91,12 @@ func writef(w io.Writer, format string, args ...any) {
 
 func invalidMigrationNameViolations(diff, migrationDir string) []string {
 	var violations []string
-	for _, path := range stagedPaths(diff, migrationDir) {
-		if filepath.Ext(path) != ".sql" {
+	for _, change := range parseNameStatus(diff, migrationDir) {
+		if change.dst == "" {
 			continue
 		}
-		if _, _, ok := migrationIdentityFromPath(path); !ok {
-			violations = append(violations, path)
+		if _, _, ok := migrationIdentityFromPath(change.dst); !ok {
+			violations = append(violations, change.dst)
 		}
 	}
 	slices.Sort(violations)
@@ -104,28 +104,25 @@ func invalidMigrationNameViolations(diff, migrationDir string) []string {
 }
 
 func changedMainBranchMigrations(ctx context.Context, baseRef, migrationDir, diff string) []string {
-	var violations []string
-	for line := range strings.SplitSeq(diff, "\n") {
-		if line == "" {
-			continue
+	violations := map[string]struct{}{}
+	for _, change := range parseNameStatus(diff, migrationDir) {
+		paths := []string{change.baseRefPath()}
+		if change.status == 'R' && change.dst != "" && change.dst != change.src {
+			paths = append(paths, change.dst)
 		}
-		fields := strings.Split(line, "\t")
-		if len(fields) < 2 {
-			continue
-		}
-		for _, path := range changedPaths(fields) {
-			if !strings.HasPrefix(path, migrationDir+"/") || filepath.Ext(path) != ".sql" {
+		for _, path := range paths {
+			if path == "" {
 				continue
 			}
 			if _, err := git(ctx, "cat-file", "-e", baseRef+":"+path); err == nil {
 				if stagedPathMatchesBase(ctx, baseRef, path) {
 					continue
 				}
-				violations = append(violations, path)
+				violations[path] = struct{}{}
 			}
 		}
 	}
-	return violations
+	return slices.Sorted(maps.Keys(violations))
 }
 
 func stagedPathMatchesBase(ctx context.Context, baseRef, path string) bool {
@@ -138,21 +135,6 @@ func stagedPathMatchesBase(ctx context.Context, baseRef, path string) bool {
 		return false
 	}
 	return stagedContent == baseContent
-}
-
-func changedPaths(fields []string) []string {
-	status := fields[0]
-	paths := fields[1:]
-	if strings.HasPrefix(status, "R") {
-		return paths
-	}
-	if len(paths) == 0 {
-		return nil
-	}
-	if strings.HasPrefix(status, "C") && len(paths) > 1 {
-		return paths[1:]
-	}
-	return paths[:1]
 }
 
 type duplicateVersionViolation struct {
@@ -225,35 +207,59 @@ func migrationNamesByVersion(output string) map[string]map[string]struct{} {
 	return byVersion
 }
 
-func stagedPaths(diff, migrationDir string) []string {
-	var paths []string
+type stagedChange struct {
+	status byte
+	src    string
+	dst    string
+}
+
+// baseRefPath chooses the path that can exist on the base revision. Copies
+// deliberately use the destination: checking the untouched source would make
+// copying a released migration look like a history edit.
+func (change stagedChange) baseRefPath() string {
+	if change.status == 'C' {
+		return change.dst
+	}
+	if change.src != "" {
+		return change.src
+	}
+	return change.dst
+}
+
+func parseNameStatus(diff, migrationDir string) []stagedChange {
+	var changes []stagedChange
+	prefix := migrationDir + "/"
 	for line := range strings.SplitSeq(diff, "\n") {
 		if line == "" {
 			continue
 		}
 		fields := strings.Split(line, "\t")
-		if len(fields) < 2 {
+		if len(fields) < 2 || fields[0] == "" {
 			continue
 		}
-		path, ok := stagedPath(fields)
-		if !ok || !strings.HasPrefix(path, migrationDir+"/") {
-			continue
+		status := fields[0][0]
+		filtered := make([]string, len(fields)-1)
+		for i, path := range fields[1:] {
+			if strings.HasPrefix(path, prefix) && filepath.Ext(path) == ".sql" {
+				filtered[i] = path
+			}
 		}
-		paths = append(paths, path)
+		change := stagedChange{status: status}
+		switch status {
+		case 'R', 'C':
+			if len(filtered) >= 2 {
+				change.src, change.dst = filtered[0], filtered[1]
+			}
+		case 'D':
+			change.src = filtered[0]
+		default:
+			change.dst = filtered[0]
+		}
+		if change.src != "" || change.dst != "" {
+			changes = append(changes, change)
+		}
 	}
-	return paths
-}
-
-func stagedPath(fields []string) (string, bool) {
-	status := fields[0]
-	paths := fields[1:]
-	if len(paths) == 0 || strings.HasPrefix(status, "D") {
-		return "", false
-	}
-	if strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C") {
-		return paths[len(paths)-1], true
-	}
-	return paths[0], true
+	return changes
 }
 
 func migrationIdentityFromPath(path string) (string, string, bool) {

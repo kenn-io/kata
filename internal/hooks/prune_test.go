@@ -56,9 +56,9 @@ func TestPrune_AddAfterRun_TriggersSweep(t *testing.T) {
 	dir := t.TempDir()
 	p := setupSeededPruner(t, dir, 100)
 	writeHookLogs(t, dir, 1, 0, 80, 0)
-	p.AddRun(1, 0, 80, 0)
+	p.AddRun(80, 0)
 	writeHookLogs(t, dir, 2, 0, 80, 0)
-	p.AddRun(2, 0, 80, 0)
+	p.AddRun(80, 0)
 	// Total now 160 over cap 100 -> after second AddRun, sweep should run
 	// and delete oldest (1.0) leaving 80.
 	assertPruned(t, filepath.Join(dir, "1.0.out"))
@@ -95,13 +95,41 @@ func TestPrune_StaleScan_NoDoubleDecrement(t *testing.T) {
 	stale := groupInfo{
 		key:     groupKey{eventID: 999, hookIndex: 0},
 		outPath: filepath.Join(dir, "999.0.out"),
-		outSize: 1234,
 	}
 	p.mu.Lock()
-	p.removeStreamLocked(stale.outPath, stale.outSize)
+	p.removeStreamLocked(stale.outPath)
 	p.mu.Unlock()
 	if got := p.Total(); got != startTotal {
 		t.Fatalf("stale missing-file delete decremented total: %d -> %d", startTotal, got)
+	}
+}
+
+// TestPrune_GrownStream_DecrementsFinalOnDiskSize pins that the size a
+// deletion subtracts is the one read under p.mu, not the one observed during
+// the scan. A worker that is still writing when scanGroups runs must not
+// leave p.total permanently above the bytes actually on disk.
+func TestPrune_GrownStream_DecrementsFinalOnDiskSize(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "1.0.out"), 100)
+	p := setupSeededPruner(t, dir, 1024)
+
+	groups, err := scanGroups(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("scanGroups returned %d groups, want 1", len(groups))
+	}
+	mustWrite(t, filepath.Join(dir, "1.0.out"), 250)
+
+	p.mu.Lock()
+	p.total = 250
+	p.deleteGroupLocked(groups[0])
+	total := p.total
+	p.mu.Unlock()
+
+	if total != 0 {
+		t.Fatalf("total after deleting a grown stream = %d, want 0", total)
 	}
 }
 

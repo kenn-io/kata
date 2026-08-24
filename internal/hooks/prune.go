@@ -78,7 +78,7 @@ func (p *pruner) Total() int64 {
 
 // AddRun adds the byte counts produced by one finished run to the
 // running total and, if over cap, triggers MaybeSweep.
-func (p *pruner) AddRun(_ int64, _ int, outBytes, errBytes int64) {
+func (p *pruner) AddRun(outBytes, errBytes int64) {
 	p.mu.Lock()
 	p.total += outBytes + errBytes
 	over := p.total > p.capBytes
@@ -97,8 +97,6 @@ type groupInfo struct {
 	key     groupKey
 	outPath string
 	errPath string
-	outSize int64
-	errSize int64
 }
 
 // MaybeSweep is a no-op if total <= cap. Otherwise it rescans the dir,
@@ -143,8 +141,8 @@ func (p *pruner) MaybeSweep() {
 // holds p.mu so total accounting stays consistent. Missing files are
 // silent (already gone is fine); other errors are logged.
 func (p *pruner) deleteGroupLocked(g groupInfo) {
-	p.removeStreamLocked(g.outPath, g.outSize)
-	p.removeStreamLocked(g.errPath, g.errSize)
+	p.removeStreamLocked(g.outPath)
+	p.removeStreamLocked(g.errPath)
 }
 
 // removeStreamLocked removes one captured stream file and decrements
@@ -153,7 +151,7 @@ func (p *pruner) deleteGroupLocked(g groupInfo) {
 // double-subtract bytes already removed by a concurrent sweep:
 // ErrNotExist short-circuits with no decrement, and a successful
 // remove subtracts whatever the file weighed at the moment we owned it.
-func (p *pruner) removeStreamLocked(path string, _ int64) {
+func (p *pruner) removeStreamLocked(path string) {
 	if path == "" {
 		return
 	}
@@ -230,11 +228,7 @@ func scanGroups(dir string) ([]groupInfo, error) {
 		if !ok {
 			continue
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		recordEntry(byKey, dir, e.Name(), key, stream, info.Size())
+		recordEntry(byKey, dir, e.Name(), key, stream)
 	}
 	out := make([]groupInfo, 0, len(byKey))
 	for _, g := range byKey {
@@ -243,7 +237,7 @@ func scanGroups(dir string) ([]groupInfo, error) {
 	return out, nil
 }
 
-func recordEntry(byKey map[groupKey]*groupInfo, dir, name string, k groupKey, stream string, size int64) {
+func recordEntry(byKey map[groupKey]*groupInfo, dir, name string, k groupKey, stream string) {
 	g := byKey[k]
 	if g == nil {
 		g = &groupInfo{key: k}
@@ -252,9 +246,7 @@ func recordEntry(byKey map[groupKey]*groupInfo, dir, name string, k groupKey, st
 	full := filepath.Join(dir, name)
 	if stream == "out" {
 		g.outPath = full
-		g.outSize = size
 	} else {
 		g.errPath = full
-		g.errSize = size
 	}
 }

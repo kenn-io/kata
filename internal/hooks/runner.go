@@ -203,10 +203,10 @@ func waitForCompletion(tree *processtree.Tree, timeout time.Duration, shutdown <
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
-	result, exitCode, action := selectCompletion(doneCh, timer.C, shutdown)
+	action, waitErr := selectCompletion(doneCh, timer.C, shutdown)
 	switch action {
 	case completionDone:
-		return result, exitCode
+		return "ok", exitCodeOf(waitErr)
 	case completionTimeout:
 		killTreeWithGrace(tree, deps.GraceWindow, deps.DaemonLog)
 		w := <-doneCh
@@ -224,32 +224,29 @@ func selectCompletion(
 	doneCh <-chan error,
 	timeout <-chan time.Time,
 	shutdown <-chan struct{},
-) (result string, exitCode int, action completionAction) {
-	if result, exitCode, ok := pollCompletion(doneCh); ok {
-		return result, exitCode, completionDone
-	}
+) (completionAction, error) {
 	select {
 	case e := <-doneCh:
-		return "ok", exitCodeOf(e), completionDone
+		return completionDone, e
 	case <-timeout:
-		if result, exitCode, ok := pollCompletion(doneCh); ok {
-			return result, exitCode, completionDone
+		if done, waitErr := pollCompletion(doneCh); done {
+			return completionDone, waitErr
 		}
-		return "timed_out", -1, completionTimeout
+		return completionTimeout, nil
 	case <-shutdown:
-		if result, exitCode, ok := pollCompletion(doneCh); ok {
-			return result, exitCode, completionDone
+		if done, waitErr := pollCompletion(doneCh); done {
+			return completionDone, waitErr
 		}
-		return "daemon_shutdown", -1, completionShutdown
+		return completionShutdown, nil
 	}
 }
 
-func pollCompletion(doneCh <-chan error) (result string, exitCode int, ok bool) {
+func pollCompletion(doneCh <-chan error) (done bool, waitErr error) {
 	select {
 	case e := <-doneCh:
-		return "ok", exitCodeOf(e), true
+		return true, e
 	default:
-		return "", 0, false
+		return false, nil
 	}
 }
 

@@ -104,7 +104,7 @@ func newEditCmd() *cobra.Command {
 		}
 
 		// --parent and --remove-parent are at-most-one but accept any of
-		// short_id, qualified ("other#abc4"), or ULID. resolveSingletonRefToWire
+		// short_id, qualified ("other#abc4"), or ULID. singletonRefToWire
 		// rejects only when distinct refs resolve to *different* issues, so
 		// equivalent forms (e.g. `--parent abc4 --parent kata#abc4`) succeed.
 		// issue.ProjectName is the URL issue's canonical project. Bare refs resolve
@@ -112,13 +112,13 @@ func newEditCmd() *cobra.Command {
 		// resolve globally. The daemon enforces archived/existence rules.
 		var parentRef, removeParentRef string
 		if cmd.Flags().Changed("parent") {
-			parentRef, err = resolveSingletonRefToWire(ctx, baseURL, issue.ProjectName, pid, parentRefSlice, "--parent", false)
+			parentRef, err = singletonRefToWire(parentRefSlice, "--parent", issue.ProjectName)
 			if err != nil {
 				return err
 			}
 		}
 		if cmd.Flags().Changed("remove-parent") {
-			removeParentRef, err = resolveSingletonRefToWire(ctx, baseURL, issue.ProjectName, pid, removeParentRefSlice, "--remove-parent", true)
+			removeParentRef, err = singletonRefToWire(removeParentRefSlice, "--remove-parent", issue.ProjectName)
 			if err != nil {
 				return err
 			}
@@ -131,42 +131,6 @@ func newEditCmd() *cobra.Command {
 		}
 		if linksDelta != nil {
 			payload["links_delta"] = linksDelta
-		}
-
-		// Pure idempotent-remove of refs that resolved to "no such issue"
-		// would arrive here with payload == {} (no field flags, no link
-		// delta). Treat that as a successful no-op locally rather than
-		// sending an empty PATCH the daemon would reject. Examples:
-		//   kata edit 1 --remove-blocks <missing-uid-prefix>
-		//   kata edit 1 --remove-related 99
-		// Both are documented as idempotent; producing a synthetic
-		// no-op response keeps that contract for non-numeric refs too.
-		// Numeric refs that resolved to nothing also benefit (they
-		// previously short-circuited at the daemon).
-		anyLinkFlagSet := cmd.Flags().Changed("parent") || cmd.Flags().Changed("blocks") ||
-			cmd.Flags().Changed("blocked-by") || cmd.Flags().Changed("related") ||
-			cmd.Flags().Changed("remove-parent") || cmd.Flags().Changed("remove-blocks") ||
-			cmd.Flags().Changed("remove-blocked-by") || cmd.Flags().Changed("remove-related")
-		if len(payload) == 0 && anyLinkFlagSet {
-			// Fetch the issue so the "no changes applied" line can echo
-			// the issue's title/status — printMutation reads those off
-			// the response body. One extra GET avoids a wasted PATCH the
-			// daemon would 400 on as an empty mutation.
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			_, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-				fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, pid, url.PathEscape(issue.RefForAPI)),
-				nil)
-			if err != nil {
-				return err
-			}
-			actor, _ := resolveActor(ctx, flags.As, nil)
-			if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
-				return err
-			}
-			return printMutationWithApplied(cmd, syntheticNoopFromShow(bs), nil, issue.ProjectName)
 		}
 
 		// At least one mutation must be present, mirroring the daemon's check
@@ -250,26 +214,24 @@ func buildLinksDelta(
 		removeBlocksRefs, removeBlockedByRefs, removeRelatedRefs []string
 		err                                                      error
 	)
-	if blocksRefs, err = resolveRefSliceToWire(ctx, baseURL, currentProject, projectID, blocks, "--blocks"); err != nil {
+	if blocksRefs, err = refsToWire(blocks, "--blocks", currentProject); err != nil {
 		return nil, err
 	}
-	if blockedByRefs, err = resolveRefSliceToWire(ctx, baseURL, currentProject, projectID, blockedBy, "--blocked-by"); err != nil {
+	if blockedByRefs, err = refsToWire(blockedBy, "--blocked-by", currentProject); err != nil {
 		return nil, err
 	}
-	if relatedRefs, err = resolveRefSliceToWire(ctx, baseURL, currentProject, projectID, related, "--related"); err != nil {
+	if relatedRefs, err = refsToWire(related, "--related", currentProject); err != nil {
 		return nil, err
 	}
-	// Remove flags are idempotent at the contract level: removing a link
-	// that doesn't exist is a no-op. The daemon's resolver tolerates
-	// soft-deleted peers (the link row is real); idempotent remove of a
-	// completely-missing peer is handled daemon-side too.
-	if removeBlocksRefs, err = resolveRefSliceToWireIdempotentRemove(ctx, baseURL, currentProject, projectID, removeBlocks, "--remove-blocks"); err != nil {
+	// Add and remove flags share pure ref parsing. The daemon owns existence,
+	// soft-delete tolerance, and the idempotent-remove contract.
+	if removeBlocksRefs, err = refsToWire(removeBlocks, "--remove-blocks", currentProject); err != nil {
 		return nil, err
 	}
-	if removeBlockedByRefs, err = resolveRefSliceToWireIdempotentRemove(ctx, baseURL, currentProject, projectID, removeBlockedBy, "--remove-blocked-by"); err != nil {
+	if removeBlockedByRefs, err = refsToWire(removeBlockedBy, "--remove-blocked-by", currentProject); err != nil {
 		return nil, err
 	}
-	if removeRelatedRefs, err = resolveRefSliceToWireIdempotentRemove(ctx, baseURL, currentProject, projectID, removeRelated, "--remove-related"); err != nil {
+	if removeRelatedRefs, err = refsToWire(removeRelated, "--remove-related", currentProject); err != nil {
 		return nil, err
 	}
 
@@ -338,30 +300,6 @@ func buildLinksDelta(
 		return nil, nil
 	}
 	return delta, nil
-}
-
-// syntheticNoopFromShow extracts the issue subobject from a show
-// response body and wraps it in a MutationResponse-shaped envelope
-// with changed=false plus an empty `changes` block. summarizeChanges
-// requires the changes key to be present-but-empty AND changed=false
-// to render the "(no changes applied)" tail; absent changes prints
-// no tail at all, which would look identical to a normal field edit.
-// Used when every requested link mutation resolved to a no-op locally
-// (idempotent --remove-* against missing peers) so we honor the
-// idempotent contract without sending an empty PATCH the daemon
-// would reject.
-func syntheticNoopFromShow(showBody []byte) []byte {
-	var src struct {
-		Issue json.RawMessage `json:"issue"`
-	}
-	_ = json.Unmarshal(showBody, &src)
-	resp := map[string]any{
-		"issue":   src.Issue,
-		"changed": false,
-		"changes": map[string]any{},
-	}
-	bs, _ := json.Marshal(resp)
-	return bs
 }
 
 // firstResolvedOverlap canonicalizes every ref in adds and removes to its

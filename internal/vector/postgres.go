@@ -70,6 +70,17 @@ func (p *postgresIndex) validate(ctx context.Context) error {
 	return nil
 }
 
+// mirrorContent reads one mirrored document's text from the canonical
+// pgvector mirror table.
+func (p *postgresIndex) mirrorContent(ctx context.Context, doc string) (string, error) {
+	var content string
+	if err := p.db.QueryRowContext(ctx,
+		`SELECT content FROM issue_vector_mirror WHERE issue_uid = $1`, doc).Scan(&content); err != nil {
+		return "", err
+	}
+	return content, nil
+}
+
 func (p *postgresIndex) PendingForGeneration(ctx context.Context, gen string, limit int) ([]kitvec.Pending[string], error) {
 	if limit <= 0 {
 		limit = 1

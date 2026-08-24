@@ -530,6 +530,7 @@ func (s *Service) Run(ctx context.Context) error {
 				s.broadcaster.Broadcast(daemon.StreamMsg{
 					Kind: "event", Event: &event, ProjectID: projectID,
 				})
+				s.hookSink.Enqueue(event)
 			}
 		},
 	}

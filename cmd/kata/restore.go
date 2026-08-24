@@ -22,7 +22,7 @@ func newRestoreCmd() *cobra.Command {
 		Short: "restore a soft-deleted issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, baseURL, pid, issue, err := resolveIssueRefForCommandWithOptions(cmd, args[0], true)
+			ctx, baseURL, pid, issue, err := resolveIssueRefForCommand(cmd, args[0])
 			if err != nil {
 				return err
 			}

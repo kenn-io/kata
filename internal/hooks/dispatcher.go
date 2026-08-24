@@ -474,7 +474,7 @@ func (d *Dispatcher) runDeps() runDeps {
 			// paths that bypass AppendRun.
 			d.active.Delete(groupKey{eventID: r.EventID, hookIndex: r.HookIndex})
 			d.appender.Append(r)
-			d.pruner.AddRun(r.EventID, r.HookIndex, r.StdoutBytes, r.StderrBytes)
+			d.pruner.AddRun(r.StdoutBytes, r.StderrBytes)
 		},
 		LogWorkingDirMissing: d.maybeLogWorkingDirMissing,
 	}

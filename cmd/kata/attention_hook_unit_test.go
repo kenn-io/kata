@@ -52,7 +52,7 @@ func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, 
 
 func TestAttnStart_ConditionallySetsOnlyAttentionOKForOpenIssue(t *testing.T) {
 	d := &fakeAttnDaemon{lookups: map[string]attnLookup{
-		"abc4": {kind: lookupOpen, hasAttn: true, attention: attnValueNeedsHuman, revision: 13},
+		"abc4": {kind: lookupOpen, attention: attnValueNeedsHuman, revision: 13},
 	}}
 
 	attnStart(d, "  abc4  ")
@@ -102,7 +102,7 @@ func TestAttnStart_RetriesOnceAfterRevisionConflict(t *testing.T) {
 
 func TestAttnEnd_AtomicallySetsHandoffForOpenOKIssue(t *testing.T) {
 	d := &fakeAttnDaemon{lookups: map[string]attnLookup{
-		"abc4": {kind: lookupOpen, hasAttn: true, attention: attnValueOK, revision: 17},
+		"abc4": {kind: lookupOpen, attention: attnValueOK, revision: 17},
 	}}
 
 	attnEnd(d, " abc4 ")
@@ -126,8 +126,8 @@ func TestAttnEnd_SkipsNonActionableIssues(t *testing.T) {
 		{name: "missing", lookup: attnLookup{kind: lookupGone}},
 		{name: "transient", lookup: attnLookup{kind: lookupTransient}},
 		{name: "attention absent", lookup: attnLookup{kind: lookupOpen}},
-		{name: "attention non-ok", lookup: attnLookup{kind: lookupOpen, hasAttn: true, attention: attnValueNeedsHuman}},
-		{name: "attention empty", lookup: attnLookup{kind: lookupOpen, hasAttn: true}},
+		{name: "attention non-ok", lookup: attnLookup{kind: lookupOpen, attention: attnValueNeedsHuman}},
+		{name: "attention empty", lookup: attnLookup{kind: lookupOpen}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := &fakeAttnDaemon{lookups: map[string]attnLookup{"abc4": tc.lookup}}
@@ -143,8 +143,8 @@ func TestAttnEnd_SkipsNonActionableIssues(t *testing.T) {
 func TestAttnEnd_RechecksAttentionAfterRevisionConflict(t *testing.T) {
 	d := &fakeAttnDaemon{
 		lookupSequence: []attnLookup{
-			{kind: lookupOpen, hasAttn: true, attention: attnValueOK, revision: 17},
-			{kind: lookupOpen, hasAttn: true, attention: attnValueNeedsHuman, revision: 18},
+			{kind: lookupOpen, attention: attnValueOK, revision: 17},
+			{kind: lookupOpen, attention: attnValueNeedsHuman, revision: 18},
 		},
 		conditionalResults: []attnWriteResult{attnWriteConflict},
 	}
@@ -224,7 +224,7 @@ func TestAttentionHookCommand_InvalidInvocationsExitZeroWithoutDaemonActivity(t 
 func TestAttnEnd_WriteFailureDoesNotRetry(t *testing.T) {
 	d := &fakeAttnDaemon{
 		lookups: map[string]attnLookup{
-			"abc4": {kind: lookupOpen, hasAttn: true, attention: attnValueOK, revision: 23},
+			"abc4": {kind: lookupOpen, attention: attnValueOK, revision: 23},
 		},
 		conditionalResults: []attnWriteResult{attnWriteFailed},
 	}
@@ -233,6 +233,55 @@ func TestAttnEnd_WriteFailureDoesNotRetry(t *testing.T) {
 
 	assert.Equal(t, []string{"abc4"}, d.lookupRefs)
 	assert.Len(t, d.conditionalWrites, 1)
+}
+
+func TestLiveAttnDaemon_LookupTreatsNonStringAttentionAsAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{name: "number", raw: json.RawMessage(`7`)},
+		{name: "null", raw: json.RawMessage(`null`)},
+		{name: "object", raw: json.RawMessage(`{"state":"ok"}`)},
+		{name: "array", raw: json.RawMessage(`["ok"]`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/v1/projects/resolve":
+					require.Equal(t, http.MethodPost, r.Method)
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+						"project": map[string]any{"id": 42, "name": "example-project"},
+					}))
+				case "/api/v1/projects/42/issues/abc4":
+					require.Equal(t, http.MethodGet, r.Method)
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+						"issue": map[string]any{
+							"short_id": "abc4",
+							"status":   "open",
+							"metadata": map[string]json.RawMessage{attentionKey: tc.raw},
+							"revision": int64(17),
+						},
+					}))
+				default:
+					t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			cmd := newRootCmd()
+			cmd.SetContext(contextWithBaseURL(context.Background(), server.URL))
+			flags.Project = "example-project"
+
+			lookup := (&liveAttnDaemon{cmd: cmd}).lookup("abc4")
+
+			assert.Equal(t, lookupOpen, lookup.kind)
+			assert.Equal(t, int64(17), lookup.revision)
+			assert.Empty(t, lookup.attention)
+		})
+	}
 }
 
 func TestLiveAttnDaemon_ConditionalSetSendsOnlyActorPatchAndIfMatch(t *testing.T) {

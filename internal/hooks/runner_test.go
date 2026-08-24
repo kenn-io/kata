@@ -260,10 +260,23 @@ func TestCompletionSelectPrefersDoneOverExpiredTimeout(t *testing.T) {
 	expired := make(chan time.Time, 1)
 	expired <- time.Now()
 
-	result, exitCode, action := selectCompletion(done, expired, make(chan struct{}))
+	action, waitErr := selectCompletion(done, expired, make(chan struct{}))
 
-	if result != "ok" || exitCode != 0 || action != completionDone {
-		t.Fatalf("got result=%q exit=%d action=%v, want ok/0/done", result, exitCode, action)
+	if action != completionDone || waitErr != nil {
+		t.Fatalf("got action=%v waitErr=%v, want done/nil", action, waitErr)
+	}
+}
+
+func TestCompletionSelectPrefersDoneOverClosedShutdown(t *testing.T) {
+	done := make(chan error, 1)
+	done <- nil
+	shutdown := make(chan struct{})
+	close(shutdown)
+
+	action, waitErr := selectCompletion(done, make(chan time.Time), shutdown)
+
+	if action != completionDone || waitErr != nil {
+		t.Fatalf("got action=%v waitErr=%v, want done/nil", action, waitErr)
 	}
 }
 

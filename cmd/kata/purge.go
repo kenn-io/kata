@@ -28,7 +28,7 @@ func newPurgeCmd() *cobra.Command {
 					Kind:    kindValidation, ExitCode: ExitValidation,
 				}
 			}
-			ctx, baseURL, pid, issue, err := resolveIssueRefForCommandWithOptions(cmd, args[0], true)
+			ctx, baseURL, pid, issue, err := resolveIssueRefForCommand(cmd, args[0])
 			if err != nil {
 				return err
 			}
@@ -40,7 +40,7 @@ func newPurgeCmd() *cobra.Command {
 			}
 			expected := fmt.Sprintf("PURGE %s", issue.QualifiedID)
 			confirm, err = resolveConfirm(cmd, confirm, expected,
-				fmt.Sprintf("Type %q to confirm: ", expected), confirmPromptFull)
+				fmt.Sprintf("Type %q to confirm: ", expected))
 			if err != nil {
 				return err
 			}

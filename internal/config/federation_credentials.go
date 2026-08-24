@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -489,6 +490,7 @@ func ReplaceFederationCredential(replacement FederationCredentialReplacement) er
 	if err != nil {
 		return err
 	}
+	before := maps.Clone(creds.Projects)
 	current, found := creds.Projects[projectUID]
 	if found && current == replacement.Replacement {
 		return nil
@@ -500,6 +502,9 @@ func ReplaceFederationCredential(replacement FederationCredentialReplacement) er
 		)
 	}
 	creds.Projects[projectUID] = replacement.Replacement
+	if err := federationCredentialLeaveConflict(before, creds); err != nil {
+		return err
+	}
 	return writeFederationCredentials(creds)
 }
 
@@ -552,6 +557,29 @@ func RekeyFederationCredential(rekey FederationCredentialRekey) error {
 	})
 }
 
+// federationCredentialLeaveConflict rejects persisting a credential that names
+// a hub enrollment to revoke while recording no leave in progress. Entries this
+// update did not change are left alone so a contradictory pair from an older
+// build cannot block an unrelated write.
+func federationCredentialLeaveConflict(
+	before map[string]FederationCredential,
+	after *FederationCredentials,
+) error {
+	for projectUID, credential := range after.Projects {
+		if credential.PendingEnrollmentID == 0 || credential.LeavePending {
+			continue
+		}
+		if previous, found := before[projectUID]; found && previous == credential {
+			continue
+		}
+		return fmt.Errorf(
+			"%w: %s records pending enrollment %d without a pending leave",
+			ErrFederationCredentialConflict, projectUID, credential.PendingEnrollmentID,
+		)
+	}
+	return nil
+}
+
 func updateFederationCredentials(update func(*FederationCredentials) error) error {
 	federationCredentialsMu.Lock()
 	defer federationCredentialsMu.Unlock()
@@ -560,7 +588,11 @@ func updateFederationCredentials(update func(*FederationCredentials) error) erro
 	if err != nil {
 		return err
 	}
+	before := maps.Clone(creds.Projects)
 	if err := update(creds); err != nil {
+		return err
+	}
+	if err := federationCredentialLeaveConflict(before, creds); err != nil {
 		return err
 	}
 	return writeFederationCredentials(creds)

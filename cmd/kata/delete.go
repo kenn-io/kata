@@ -50,7 +50,7 @@ func newDeleteCmd() *cobra.Command {
 			}
 			expected := fmt.Sprintf("DELETE %s", issue.QualifiedID)
 			confirm, err = resolveConfirm(cmd, confirm, expected,
-				fmt.Sprintf("Type %q to confirm: ", expected), confirmPromptFull)
+				fmt.Sprintf("Type %q to confirm: ", expected))
 			if err != nil {
 				return err
 			}
@@ -62,25 +62,12 @@ func newDeleteCmd() *cobra.Command {
 	return cmd
 }
 
-// confirmMatcher decides whether the user's TTY input satisfies the prompt.
-// Both delete and purge now use confirmPromptFull (the full
-// "VERB <project>#<short_id>" string) so the X-Kata-Confirm header — which
-// must match that exact form — works whether the user typed in interactively
-// or passed it noninteractively via --confirm.
-type confirmMatcher func(line, expected string) bool
-
-// confirmPromptFull accepts only the exact expected string.
-func confirmPromptFull(line, expected string) bool {
-	return line == expected
-}
-
 // resolveConfirm returns the X-Kata-Confirm value the daemon expects:
 //   - if --confirm was passed, use it as-is (the daemon validates exact match);
-//   - otherwise, if stdin is a TTY, prompt with `prompt` and accept input that
-//     `match` says satisfies the verb's friction rule;
+//   - otherwise, if stdin is a TTY, prompt with `prompt` and require the exact
+//     expected confirmation string;
 //   - otherwise, exit 6 confirm_required.
-func resolveConfirm(cmd *cobra.Command, flagVal, expected, prompt string,
-	match confirmMatcher) (string, error) {
+func resolveConfirm(cmd *cobra.Command, flagVal, expected, prompt string) (string, error) {
 	if flagVal != "" {
 		return flagVal, nil
 	}
@@ -99,7 +86,7 @@ func resolveConfirm(cmd *cobra.Command, flagVal, expected, prompt string,
 	// just means the user closed stdin, which we treat as an empty mismatch.
 	line, _ := r.ReadString('\n')
 	line = strings.TrimSpace(line)
-	if !match(line, expected) {
+	if line != expected {
 		return "", &cliError{
 			Message: "confirmation input did not match",
 			Code:    "confirm_mismatch",

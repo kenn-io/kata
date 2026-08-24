@@ -36,6 +36,46 @@ func openTestIndex(t *testing.T) *Index {
 	return ix
 }
 
+func TestMirrorContentReadsTheSeededDocument(t *testing.T) {
+	ctx := context.Background()
+	ix := openTestIndex(t)
+	seedMirror(t, ix, "u1", 1)
+
+	got, err := ix.mirrorContent(ctx, "u1")
+	if err != nil {
+		t.Fatalf("mirrorContent: %v", err)
+	}
+	if got != "text" {
+		t.Fatalf("mirrorContent = %q, want %q", got, "text")
+	}
+}
+
+func TestMirrorContentErrorsForAnUnknownDocument(t *testing.T) {
+	ctx := context.Background()
+	ix := openTestIndex(t)
+
+	if _, err := ix.mirrorContent(ctx, "missing"); err == nil {
+		t.Fatal("mirrorContent for an unmirrored document must error so the fill aborts " +
+			"instead of stamping the document as skipped")
+	}
+}
+
+// TestClosePostgresIndexLeavesTheCallersPoolOpen pins that a Postgres-backed
+// Index does not close a handle it does not own. The sidecar handle stands in
+// for the caller's pool here so the test needs no database container.
+func TestClosePostgresIndexLeavesTheCallersPoolOpen(t *testing.T) {
+	ctx := context.Background()
+	owner := openTestIndex(t)
+	borrowed := &Index{db: owner.db, pg: &postgresIndex{db: owner.db}}
+
+	if err := borrowed.Close(); err != nil {
+		t.Fatalf("Close on a Postgres-backed index: %v", err)
+	}
+	if err := owner.db.PingContext(ctx); err != nil {
+		t.Fatalf("caller's pool was closed by Index.Close: %v", err)
+	}
+}
+
 func TestRefreshMirrorUpdatesProjectMoveWithoutRevisionBump(t *testing.T) {
 	ctx := context.Background()
 	ix := openTestIndex(t)
