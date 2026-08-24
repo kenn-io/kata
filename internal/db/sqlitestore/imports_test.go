@@ -116,7 +116,7 @@ func TestImportBatch_CreatesIssueCommentsLabelsLinks(t *testing.T) {
 	assert.Equal(t, comments[0].UID, commentPayload.CommentUID)
 	assert.Equal(t, "bob", commentPayload.Author)
 	assert.Equal(t, "note", commentPayload.Body)
-	assert.Equal(t, "2026-05-01T11:00:00.000Z", commentPayload.CreatedAt)
+	assert.Equal(t, "2026-05-01T11:00:00.000000000Z", commentPayload.CreatedAt)
 	assert.Equal(t, "beads", commentPayload.Source)
 	assert.Equal(t, "blocked", commentPayload.ExternalID)
 	assert.Equal(t, "c1", commentPayload.CommentExternalID)

@@ -46,7 +46,7 @@ func (s *Store) importComments(
 		var commentID int64
 		err = tx.QueryRowContext(ctx, `INSERT INTO comments(uid,issue_id,author,body,created_at)
 VALUES($1,$2,$3,$4,$5) RETURNING id`, commentUID, issue.ID, commentInput.Author,
-			commentInput.Body, formatStoredTime(commentInput.CreatedAt)).Scan(&commentID)
+			commentInput.Body, formatImportedCommentTime(commentInput.CreatedAt)).Scan(&commentID)
 		if err != nil {
 			return nil, 0, fmt.Errorf("insert imported comment: %w", mapSQLError(err, nil))
 		}
@@ -58,7 +58,7 @@ VALUES($1,$2,$3,$4,$5) RETURNING id`, commentUID, issue.ID, commentInput.Author,
 		}
 		payload, err := json.Marshal(map[string]any{
 			"comment_uid": commentUID, "author": commentInput.Author, "body": commentInput.Body,
-			"created_at": formatStoredTime(commentInput.CreatedAt), "source": params.Source,
+			"created_at": formatImportedCommentTime(commentInput.CreatedAt), "source": params.Source,
 			"external_id": item.ExternalID, "comment_external_id": commentInput.ExternalID,
 		})
 		if err != nil {

@@ -458,7 +458,7 @@ func (d *Store) importComments(ctx context.Context, tx *sql.Tx, p db.ImportBatch
 			"comment_uid":         commentUID,
 			"author":              c.Author,
 			"body":                c.Body,
-			"created_at":          c.CreatedAt.UTC().Format(sqliteTimeFormat),
+			"created_at":          c.CreatedAt.UTC().Format(sqliteCommentTimeFormat),
 			"source":              p.Source,
 			"external_id":         item.ExternalID,
 			"comment_external_id": c.ExternalID,

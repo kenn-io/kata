@@ -244,7 +244,6 @@ var storageScenarios = []scenario{
 		name: "external root safety invariants",
 		methods: []string{
 			"ApplyExternalFieldProjection", "ApplyExternalRootProjection", "ClaimExternalRootBinding", "ClearPendingExternalComment", "CreateComment",
-			"CreateExternalRootBinding", "CreateIssue", "CreateProject", "ExportExternalRootBindings", "ExportImportMappings", "ExportIssues", "ExternalFieldStates",
 			"CloseIssue", "ExternalRootBindingByID", "EnsureExternalRootLifecycleRequest", "HasLabel", "ImportMappingBySource", "IssueByID",
 			"ListDueExternalRootBindings", "ListExternalFieldMappings", "PauseExternalRootBinding", "ReleaseExternalRootClaim", "RemoveLabelAndEvent", "RemoveProject",
 			"ImportReplay", "ReopenIssue", "ResolveExternalFieldConflict", "RestoreProject", "ResumeExternalRootBinding", "SetPendingExternalComment", "UpsertExternalCommentProjection",
@@ -437,6 +436,14 @@ var storageScenarios = []scenario{
 			"UpsertFederationBinding",
 		},
 		run: checkExternalImportEdgeCases,
+	},
+	{
+		name: "external import comment timestamp precision",
+		methods: []string{
+			"CommentsByIssue", "CreateProject", "EventsAfter", "ImportBatch",
+			"ImportMappingBySource",
+		},
+		run: checkImportCommentTimestampPrecision,
 	},
 	{
 		name: "snapshot replay core",
