@@ -61,10 +61,10 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - name: Install frozen web dependencies and Chromium
+      - name: Install frozen web dependencies and browsers
         run: |
           make web-install
-          cd web && bun x playwright install --with-deps chromium
+          cd web && bun x playwright install --with-deps chromium firefox
 
       - name: Run isolated browser tests
         env:
