@@ -1770,13 +1770,14 @@ func validateExternalCommentMapping(
 	mapping db.ImportMappingParams,
 ) error {
 	if mapping.ProjectID != binding.ProjectID || mapping.IssueID == nil || *mapping.IssueID != binding.IssueID ||
-		strings.TrimSpace(mapping.ExternalID) == "" || mapping.CommentID == nil || *mapping.CommentID != comment.ID {
+		strings.TrimSpace(mapping.ExternalID) == "" || mapping.CommentID == nil || *mapping.CommentID != comment.ID ||
+		mapping.LinkID != nil || mapping.Label != nil {
 		return fmt.Errorf("%w: pending comment mapping does not match binding", db.ErrExternalRootValidation)
 	}
 	wantSource := db.ExternalRootPublishedCommentMappingSource(binding)
 	if action == "skip" {
-		wantSource = "connector-skip:" + binding.ConnectorInstance
-		if mapping.ExternalID != comment.UID || mapping.LinkID != nil || mapping.Label != nil || mapping.SourceUpdatedAt != nil {
+		wantSource = db.ExternalRootSkippedCommentMappingSource(binding.ConnectorInstance)
+		if mapping.ExternalID != comment.UID || mapping.SourceUpdatedAt != nil {
 			return fmt.Errorf("%w: pending comment mapping does not match binding", db.ErrExternalRootValidation)
 		}
 	}

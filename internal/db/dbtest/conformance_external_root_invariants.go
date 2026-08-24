@@ -722,6 +722,10 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 			IssueID: otherIssue.ID, Author: "tester", Body: "Wrong issue comment",
 		})
 		require.NoError(t, err)
+		unrelatedLink, err := store.CreateLink(ctx, db.CreateLinkParams{
+			FromIssueID: fixture.issue.ID, ToIssueID: otherIssue.ID, Type: "related", Author: "tester",
+		})
+		require.NoError(t, err)
 
 		setPending := func(commentUID string) error {
 			_, err := store.SetPendingExternalComment(ctx, db.SetPendingExternalCommentParams{
@@ -787,6 +791,22 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		wrongMapping := exactMapping("wrong-comment")
 		wrongMapping.CommentID = &otherCommentID
 		assertRejectedClear("published", wrongMapping)
+		linkedMapping := exactMapping("linked-comment")
+		linkedMapping.LinkID = &unrelatedLink.ID
+		assertRejectedClear("published", linkedMapping)
+		_, err = store.ImportMappingBySource(
+			ctx, fixture.project.ID, linkedMapping.Source, linkedMapping.ObjectType, linkedMapping.ExternalID,
+		)
+		assert.ErrorIs(t, err, db.ErrNotFound)
+		require.NoError(t, store.DeleteLinkByID(ctx, unrelatedLink.ID))
+		label := "unrelated-label"
+		labeledMapping := exactMapping("labeled-comment")
+		labeledMapping.Label = &label
+		assertRejectedClear("adopt", labeledMapping)
+		_, err = store.ImportMappingBySource(
+			ctx, fixture.project.ID, labeledMapping.Source, labeledMapping.ObjectType, labeledMapping.ExternalID,
+		)
+		assert.ErrorIs(t, err, db.ErrNotFound)
 		retryAt := fixture.now.Add(2 * time.Minute)
 		retried, event, err := store.ClearPendingExternalComment(ctx, db.ClearPendingExternalCommentParams{
 			BindingID: fixture.binding.ID, ClaimToken: fixture.token, CommentUID: comment.UID,

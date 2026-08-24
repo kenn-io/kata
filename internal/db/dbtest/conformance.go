@@ -244,11 +244,11 @@ var storageScenarios = []scenario{
 	{
 		name: "external root safety invariants",
 		methods: []string{
-			"ApplyExternalFieldProjection", "ApplyExternalRootProjection", "ClaimExternalRootBinding", "ClearPendingExternalComment", "CreateComment",
+			"ApplyExternalFieldProjection", "ApplyExternalRootProjection", "ClaimExternalRootBinding", "ClearPendingExternalComment", "CreateComment", "CreateLink",
 			"CloseIssue", "ExternalRootBindingByID", "EnsureExternalRootLifecycleRequest", "HasLabel", "ImportMappingBySource", "IssueByID",
 			"ListDueExternalRootBindings", "ListExternalFieldMappings", "PauseExternalRootBinding", "ReleaseExternalRootClaim", "RemoveLabelAndEvent", "RemoveProject",
 			"ImportReplay", "ReopenIssue", "ResolveExternalFieldConflict", "RestoreProject", "ResumeExternalRootBinding", "SetPendingExternalComment", "UpsertExternalCommentProjection",
-			"SoftDeleteIssue", "UnbindExternalRootBinding", "UnmapExternalField", "UpsertExternalFieldMapping", "UpsertExternalFieldState", "UpsertFederationBinding", "UpsertImportMapping",
+			"DeleteLinkByID", "SoftDeleteIssue", "UnbindExternalRootBinding", "UnmapExternalField", "UpsertExternalFieldMapping", "UpsertExternalFieldState", "UpsertFederationBinding", "UpsertImportMapping",
 		},
 		runWithBackend: checkExternalRootSafetyInvariants,
 	},

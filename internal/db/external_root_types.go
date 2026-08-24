@@ -188,9 +188,9 @@ type CreateExternalRootBindingParams struct {
 	ReceiveCommentsAfter time.Time
 	PublishComments      bool
 	PublishCommentsAfter *time.Time
-	// UseLocalPublishFrontier asks storage to set PublishCommentsAfter from
-	// the binding transaction after it has locked the issue. This serializes
-	// the enable boundary with local comment creation.
+	// UseLocalPublishFrontier asks storage to suppress existing local comments
+	// and set a lower-bound PublishCommentsAfter in the binding transaction.
+	// This serializes the enable boundary with local comment creation.
 	UseLocalPublishFrontier bool
 	// UseCommentIdentityFrontier records the comment identities returned by the
 	// bind-time list operation atomically with the binding. An empty list is a
