@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -249,6 +250,94 @@ func TestMoveIssue_RecurrencePinned_409(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &env409))
 	assert.Equal(t, "recurrence_pinned", env409.Error.Code)
+}
+
+func TestMoveIssue_StorageConflicts_409(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		seed func(*testing.T, *testenv.Env, db.Project, db.Project, db.Issue)
+	}{
+		{
+			name: "import mapping collision",
+			code: "issue_move_import_mapping_collision",
+			seed: func(t *testing.T, env *testenv.Env, src, tgt db.Project, issue db.Issue) {
+				peer, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+					ProjectID: tgt.ID, Title: "Target issue", Author: "tester",
+				})
+				require.NoError(t, err)
+				for projectID, issueID := range map[int64]int64{src.ID: issue.ID, tgt.ID: peer.ID} {
+					_, err = env.DB.UpsertImportMapping(t.Context(), db.ImportMappingParams{
+						Source: "example-import", ExternalID: "same-issue", ObjectType: "issue",
+						ProjectID: projectID, IssueID: &issueID,
+					})
+					require.NoError(t, err)
+				}
+			},
+		},
+		{
+			name: "active external root claim",
+			code: "external_root_claim_active",
+			seed: func(t *testing.T, env *testenv.Env, _, _ db.Project, issue db.Issue) {
+				now := time.Now().UTC()
+				binding, _, err := env.DB.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+					ProjectID: issue.ProjectID, IssueID: issue.ID, ConnectorInstance: "notes",
+					ExternalRootKey: "claimed-root", ExternalAccountKey: "example-account",
+					Actor: "tester", ReceiveCommentsAfter: now,
+				})
+				require.NoError(t, err)
+				_, claimed, err := env.DB.ClaimExternalRootBinding(
+					t.Context(), binding.ID, "move-claim", now, now.Add(-time.Minute),
+				)
+				require.NoError(t, err)
+				require.True(t, claimed)
+			},
+		},
+		{
+			name: "external root issue sync conflict",
+			code: "external_root_issue_sync_conflict",
+			seed: func(t *testing.T, env *testenv.Env, _, tgt db.Project, issue db.Issue) {
+				_, _, err := env.DB.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+					ProjectID: issue.ProjectID, IssueID: issue.ID, ConnectorInstance: "notes",
+					ExternalRootKey: "synced-root", ExternalAccountKey: "example-account",
+					Actor: "tester", ReceiveCommentsAfter: time.Now().UTC(),
+				})
+				require.NoError(t, err)
+				_, err = env.DB.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{
+					ProjectID: tgt.ID, Provider: "example", SourceKey: "connector:notes",
+					RemoteID: "target", DisplayName: "Target sync", Config: []byte(`{}`), IntervalSeconds: 300,
+				})
+				require.NoError(t, err)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			src, tgt, issue := seedMovePair(t, env)
+			test.seed(t, env, src, tgt, issue)
+
+			body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, tgt.UID)
+			ifMatch := fmt.Sprintf(`"rev-%d"`, issue.Revision)
+			resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, issue.ShortID), body, ifMatch)
+			raw := readClose(t, resp)
+			assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, test.code)
+
+			if test.code == "issue_move_import_mapping_collision" {
+				var envelope struct {
+					Error struct {
+						Data struct {
+							Mappings []db.ProjectMergeImportMappingCollision `json:"mappings"`
+						} `json:"data"`
+					} `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &envelope))
+				assert.Equal(t, []db.ProjectMergeImportMappingCollision{{
+					Source: "example-import", ExternalID: "same-issue", ObjectType: "issue",
+				}}, envelope.Error.Data.Mappings)
+			}
+		})
+	}
 }
 
 // TestEditIssue_CrossProjectLinkTargets pins link-target resolution forms via
