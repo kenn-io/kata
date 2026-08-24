@@ -751,6 +751,11 @@ const rfc3339MilliLayout = "2006-01-02T15:04:05.000Z"
 // for comments observed from external systems.
 const rfc3339NanoFixedLayout = "2006-01-02T15:04:05.000000000Z"
 
+// rfc3339MicroFixedLayout is the canonical precision-preserving wire format
+// for comments stored on PostgreSQL, whose timestamptz resolution truncates
+// to microseconds.
+const rfc3339MicroFixedLayout = "2006-01-02T15:04:05.000000Z"
+
 // normalizeImportTime rewrites *p to the canonical RFC3339-millis form in
 // place. Pre-v8 exports may carry timestamps in Go's default time.Time
 // stringification (e.g. "2026-05-04 00:21:07 +0000 UTC"); since these strings
@@ -836,6 +841,7 @@ func normalizeCommentTimes(rec *db.CommentExport) error {
 	}
 	utc := t.UTC()
 	if rec.CreatedAt == utc.Format(rfc3339MilliLayout) ||
+		rec.CreatedAt == utc.Format(rfc3339MicroFixedLayout) ||
 		rec.CreatedAt == utc.Format(rfc3339NanoFixedLayout) {
 		return nil
 	}
