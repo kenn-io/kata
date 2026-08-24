@@ -845,7 +845,18 @@ func normalizeCommentTimes(rec *db.CommentExport) error {
 		rec.CreatedAt == utc.Format(rfc3339NanoFixedLayout) {
 		return nil
 	}
-	rec.CreatedAt = utc.Format(rfc3339MilliLayout)
+	// Canonicalize from the parsed instant, preserving whatever sub-millisecond
+	// precision the source actually carried: offset zones, variable-length
+	// fractions, and legacy space-separated stamps must not collapse distinct
+	// comments onto one millisecond.
+	switch nanos := utc.Nanosecond(); {
+	case nanos%1e3 != 0:
+		rec.CreatedAt = utc.Format(rfc3339NanoFixedLayout)
+	case nanos%1e6 != 0:
+		rec.CreatedAt = utc.Format(rfc3339MicroFixedLayout)
+	default:
+		rec.CreatedAt = utc.Format(rfc3339MilliLayout)
+	}
 	return nil
 }
 
