@@ -30,6 +30,9 @@ func (d *Store) UpsertImportMapping(ctx context.Context, p db.ImportMappingParam
 }
 
 func upsertImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingParams) (db.ImportMapping, error) {
+	if err := validateBindingScopedCommentMapping(ctx, e, p); err != nil {
+		return db.ImportMapping{}, err
+	}
 	if p.ObjectType == "issue" {
 		var boundIssueID int64
 		err := e.QueryRowContext(ctx, `SELECT b.issue_id
@@ -77,6 +80,38 @@ func upsertImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingP
 		return db.ImportMapping{}, fmt.Errorf("upsert import mapping: %w", err)
 	}
 	return importMappingBySource(ctx, e, p.ProjectID, p.Source, p.ObjectType, p.ExternalID)
+}
+
+func validateBindingScopedCommentMapping(ctx context.Context, e execQuerier, p db.ImportMappingParams) error {
+	if p.ObjectType != "comment" {
+		return nil
+	}
+	var bindingIssueID int64
+	err := e.QueryRowContext(ctx, `SELECT issue_id
+		FROM external_root_bindings
+		WHERE project_id = ?
+		  AND ? = 'connector:' || connector_instance || ':binding:' || uid
+		LIMIT 1`, p.ProjectID, p.Source).Scan(&bindingIssueID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check external comment mapping binding: %w", err)
+	}
+	if p.IssueID == nil || p.CommentID == nil || *p.IssueID != bindingIssueID {
+		return fmt.Errorf("%w: external comment mapping must target its binding issue", db.ErrExternalRootValidation)
+	}
+	var commentIssueID int64
+	if err := e.QueryRowContext(ctx, `SELECT issue_id FROM comments WHERE id = ?`, *p.CommentID).Scan(&commentIssueID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: external comment mapping must target a comment on its binding issue", db.ErrExternalRootValidation)
+		}
+		return fmt.Errorf("check external comment mapping comment: %w", err)
+	}
+	if commentIssueID != bindingIssueID {
+		return fmt.Errorf("%w: external comment mapping must target a comment on its binding issue", db.ErrExternalRootValidation)
+	}
+	return nil
 }
 
 // adoptImportMapping resolves the mapping for externalID, adopting a mapping

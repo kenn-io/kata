@@ -1335,8 +1335,10 @@ func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Com
 	var externalOwners int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
 		FROM import_mappings m
+		JOIN comments c ON c.id = m.comment_id AND c.issue_id = m.issue_id
 		JOIN external_root_bindings b
 		  ON b.project_id = m.project_id
+		 AND b.issue_id = m.issue_id
 		 AND m.source = 'connector:' || b.connector_instance || ':binding:' || b.uid
 		WHERE m.object_type = 'comment' AND m.comment_id = ? AND b.active = 1`,
 		comment.ID,

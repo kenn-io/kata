@@ -1428,6 +1428,10 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 					ExternalID: test.externalID, ObjectType: "comment",
 					ProjectID: fixture.project.ID, IssueID: &issueID, CommentID: &commentID,
 				})
+				if !test.lifecycle {
+					assert.ErrorIs(t, err, db.ErrExternalRootValidation)
+					return
+				}
 				require.NoError(t, err)
 				params := db.ExternalCommentProjectionParams{
 					BindingID: fixture.binding.ID, ClaimToken: fixture.token,

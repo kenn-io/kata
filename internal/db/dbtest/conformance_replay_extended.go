@@ -402,6 +402,37 @@ func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store 
 			},
 			wantErr: db.ErrExternalRootValidation,
 		},
+		{
+			name: "binding-scoped comment mapping belongs to another issue",
+			mutate: func(records []db.ImportRecord) {
+				projectID, otherIssueID, otherCommentID := int64(41), int64(62), int64(122)
+				replacements := map[string]db.ImportRecord{
+					db.ImportKindProjectAlias: {Kind: db.ImportKindIssue, Issue: &db.IssueExport{
+						ID: otherIssueID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2A", ProjectID: projectID,
+						ShortID: "zz2a", Title: "Other replay issue", Status: "open",
+						Author: "fixture-author", CreatedAt: "2026-07-15T12:00:00.000Z",
+						UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+					}},
+					db.ImportKindIssueEmbedding: {Kind: db.ImportKindComment, Comment: &db.CommentExport{
+						ID: otherCommentID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2B", IssueID: otherIssueID,
+						Author: "fixture-author", Body: "Other replay comment", CreatedAt: "2026-07-15T12:00:00.000Z",
+					}},
+					db.ImportKindIssueSyncStatus: {Kind: db.ImportKindImportMapping, ImportMapping: &db.ImportMappingExport{
+						ID: 132, Source: "connector:connector-one:binding:" + replayBindingUID,
+						ExternalID: "cross-binding-comment", ObjectType: "comment", ProjectID: projectID,
+						IssueID: &otherIssueID, CommentID: &otherCommentID, ImportedAt: "2026-07-15T12:00:00.000Z",
+					}},
+				}
+				for index := range records {
+					originalKind := records[index].Kind
+					if replacement, ok := replacements[originalKind]; ok {
+						records[index] = replacement
+						delete(replacements, originalKind)
+					}
+				}
+			},
+			wantErr: db.ErrExternalRootValidation,
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

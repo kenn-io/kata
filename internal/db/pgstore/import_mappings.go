@@ -30,6 +30,9 @@ func upsertImportMappingTx(
 	query rowQueryer,
 	params db.ImportMappingParams,
 ) (db.ImportMapping, error) {
+	if err := validateBindingScopedCommentMappingTx(ctx, query, params); err != nil {
+		return db.ImportMapping{}, err
+	}
 	if params.ObjectType == "issue" {
 		var boundIssueID int64
 		err := query.QueryRowContext(ctx, `SELECT b.issue_id
@@ -82,6 +85,42 @@ RETURNING id, source, external_id, object_type, project_id,
 		params.Source, params.ExternalID, params.ObjectType, params.ProjectID,
 		params.IssueID, params.CommentID, params.LinkID, params.Label, sourceUpdatedAt))
 	return mapping, mapSQLError(err, nil)
+}
+
+func validateBindingScopedCommentMappingTx(
+	ctx context.Context,
+	query rowQueryer,
+	params db.ImportMappingParams,
+) error {
+	if params.ObjectType != "comment" {
+		return nil
+	}
+	var bindingIssueID int64
+	err := query.QueryRowContext(ctx, `SELECT issue_id
+  FROM external_root_bindings
+ WHERE project_id = $1
+   AND $2 = 'connector:' || connector_instance || ':binding:' || uid
+ LIMIT 1`, params.ProjectID, params.Source).Scan(&bindingIssueID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return mapSQLError(err, nil)
+	}
+	if params.IssueID == nil || params.CommentID == nil || *params.IssueID != bindingIssueID {
+		return fmt.Errorf("%w: external comment mapping must target its binding issue", db.ErrExternalRootValidation)
+	}
+	var commentIssueID int64
+	if err := query.QueryRowContext(ctx, `SELECT issue_id FROM comments WHERE id = $1`, *params.CommentID).Scan(&commentIssueID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: external comment mapping must target a comment on its binding issue", db.ErrExternalRootValidation)
+		}
+		return mapSQLError(err, nil)
+	}
+	if commentIssueID != bindingIssueID {
+		return fmt.Errorf("%w: external comment mapping must target a comment on its binding issue", db.ErrExternalRootValidation)
+	}
+	return nil
 }
 
 // ImportMappingBySource resolves one external identity in a project.

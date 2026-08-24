@@ -757,6 +757,23 @@ func importExternalRootBinding(
 	if err != nil {
 		return wrapImportErr(db.ImportKindExternalRootBinding, err)
 	}
+	var invalidCommentMappings int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
+		FROM import_mappings m
+		LEFT JOIN comments c ON c.id = m.comment_id
+		WHERE m.project_id = ? AND m.object_type = 'comment'
+		  AND m.source = 'connector:' || ? || ':binding:' || ?
+		  AND (m.issue_id IS NULL OR m.comment_id IS NULL OR m.issue_id != ?
+		       OR c.issue_id IS NULL OR c.issue_id != m.issue_id)`,
+		projectID, b.ConnectorInstance, b.UID, issueID,
+	).Scan(&invalidCommentMappings); err != nil {
+		return wrapImportErr(db.ImportKindExternalRootBinding, err)
+	}
+	if invalidCommentMappings != 0 {
+		return wrapImportErr(db.ImportKindExternalRootBinding, fmt.Errorf(
+			"%w: external comment mapping does not belong to its binding issue", db.ErrExternalRootValidation,
+		))
+	}
 	if b.Active {
 		var readOnlySpoke int
 		err := tx.QueryRowContext(ctx, `SELECT 1 FROM federation_bindings

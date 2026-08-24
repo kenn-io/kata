@@ -238,6 +238,30 @@ func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend B
 		assert.Equal(t, projection.Body, reconciled.Body)
 	})
 
+	t.Run("binding-scoped comment mappings stay on the bound issue", func(t *testing.T) {
+		fixture := newExternalRootSafetyFixture(t, store, "comment-mapping-ownership")
+		other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: fixture.project.ID, Title: "Other issue", Author: "tester",
+		})
+		require.NoError(t, err)
+		comment, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: other.ID, Author: "tester", Body: "Locally owned comment",
+		})
+		require.NoError(t, err)
+		issueID, commentID := other.ID, comment.ID
+
+		_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{
+			Source: db.ExternalRootCommentMappingSource(fixture.binding), ExternalID: "wrong-issue-comment",
+			ObjectType: "comment", ProjectID: fixture.project.ID, IssueID: &issueID, CommentID: &commentID,
+		})
+		require.ErrorIs(t, err, db.ErrExternalRootValidation)
+		_, readErr := store.ImportMappingBySource(
+			ctx, fixture.project.ID, db.ExternalRootCommentMappingSource(fixture.binding),
+			"comment", "wrong-issue-comment",
+		)
+		assert.ErrorIs(t, readErr, db.ErrNotFound)
+	})
+
 	t.Run("import content overwrite rejects the whole batch", func(t *testing.T) {
 		project, err := store.CreateProject(ctx, "external-root-import-ownership")
 		require.NoError(t, err)
