@@ -15,7 +15,6 @@ import (
 
 type claimPrincipal struct {
 	db.ClaimPrincipal
-	Local         bool
 	IdentityToken bool
 }
 
@@ -29,7 +28,6 @@ func resolveClaimPrincipal(
 	body api.ClaimActionBody,
 	operation HostFederationOperation,
 	allowEnrollment bool,
-	requireMutationLocal bool,
 ) (context.Context, claimPrincipal, error) {
 	if cfg.HostAccess != nil {
 		if requestPrincipal, ok := PrincipalFromContext(ctx); ok {
@@ -67,7 +65,7 @@ func resolveClaimPrincipal(
 		}
 	}
 
-	if requireMutationLocal && cfg.InsecureReadonly {
+	if cfg.InsecureReadonly {
 		return ctx, claimPrincipal{}, localAuthError(cfg, authz)
 	}
 	return ctx, localClaimPrincipal(cfg, body), nil
@@ -120,7 +118,7 @@ func authorizeClaimStatusRead(
 		}
 		if hasBearerHeader(authz) {
 			authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
-				HostFederationOperation{ID: "getIssueLeaseStatus", Mutation: true})
+				federationTransportOperation("getIssueLeaseStatus"))
 			return authorizedCtx, err
 		}
 		return ctx, api.NewError(http.StatusUnauthorized, "auth_required",
@@ -129,7 +127,7 @@ func authorizeClaimStatusRead(
 	if cfg.Auth.Token == "" {
 		if hasBearerHeader(authz) {
 			authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
-				HostFederationOperation{ID: "getIssueLeaseStatus", Mutation: true})
+				federationTransportOperation("getIssueLeaseStatus"))
 			return authorizedCtx, err
 		}
 		if cfg.InsecureReadonly {
@@ -141,7 +139,7 @@ func authorizeClaimStatusRead(
 		return ctx, err
 	}
 	authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
-		HostFederationOperation{ID: "getIssueLeaseStatus", Mutation: true})
+		federationTransportOperation("getIssueLeaseStatus"))
 	return authorizedCtx, err
 }
 
@@ -191,10 +189,11 @@ func localClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody) claimPrinci
 }
 
 func localClaimPrincipalWithHolder(cfg ServerConfig, body api.ClaimActionBody, holder string) claimPrincipal {
-	return claimPrincipal{Local: true,
+	return claimPrincipal{
 		HolderInstanceUID: cfg.DB.InstanceUID(),
 		Holder:            strings.TrimSpace(holder),
-		ClientKind:        strings.TrimSpace(body.ClientKind)}
+		ClientKind:        strings.TrimSpace(body.ClientKind),
+	}
 }
 
 func hasBearerHeader(authz string) bool {

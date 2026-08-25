@@ -103,6 +103,7 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 				"access_unavailable", "access decision unavailable")
 			return
 		}
+		rule := hostAccessRuleFor(operation.OperationID)
 		principal, ok := PrincipalFromContext(ctx.Context())
 		if ok && !validHostPrincipal(principal) {
 			writeHostAccessError(ctx, http.StatusUnauthorized,
@@ -110,8 +111,7 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 			return
 		}
 		if !ok {
-			if hostSelfAuthenticatedOperation(operation.OperationID) &&
-				hasBearerHeader(ctx.Header(authHeader)) {
+			if rule.AcceptsFederationBearer && hasBearerHeader(ctx.Header(authHeader)) {
 				next(ctx)
 				return
 			}
@@ -144,15 +144,15 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 		if projectID, ok := positiveProjectID(pathParams["project_id"]); ok {
 			request.Operation.ProjectIDs = []int64{projectID}
 		}
-		if hostAccessRequiresAllProjects(operation.OperationID) {
+		if rule.RequiresAllProjects {
 			request.Operation.AllProjects = true
 		}
 		state := &hostAccessState{controller: controller, request: request}
-		if hostAccessResolvedByHandler(operation.OperationID) {
+		if rule.ResolvedByHandler {
 			next(withHostAccessState(ctx, state))
 			return
 		}
-		if len(request.Operation.ProjectIDs) == 0 && !hostAccessOperationWithoutProjectData(operation.OperationID) {
+		if len(request.Operation.ProjectIDs) == 0 && !rule.NoProjectData {
 			request.Operation.AllProjects = true
 			state.request.Operation.AllProjects = true
 		}
@@ -192,61 +192,6 @@ func withHostAccessState(ctx huma.Context, state *hostAccessState) huma.Context 
 		return nil
 	})
 	return huma.WithContext(ctx, fenced)
-}
-
-func hostSelfAuthenticatedOperation(operationID string) bool {
-	switch operationID {
-	case "getFederationProjectMetadata",
-		"pollFederationProjectEvents",
-		"ingestFederationProjectEvents",
-		"acquireIssueLease",
-		"renewIssueLease",
-		"releaseIssueLease",
-		"getIssueLeaseStatus":
-		return true
-	default:
-		return false
-	}
-}
-
-func hostAccessResolvedByHandler(operationID string) bool {
-	switch operationID {
-	case "mergeProject",
-		"moveIssue",
-		"listAllIssues",
-		"readUIReferences",
-		"readUILaunchTarget",
-		"patchProjectMetadata",
-		"createFederationEnrollment",
-		"rotateFederationEnrollment":
-		return true
-	default:
-		return false
-	}
-}
-
-// hostAccessRequiresAllProjects identifies operations whose result or side
-// effects can depend on relationships outside the project named in the URL.
-// Requiring complete authority before dispatch keeps denials from becoming
-// project-existence or relationship-state oracles.
-func hostAccessRequiresAllProjects(operationID string) bool {
-	switch operationID {
-	case "purgeIssue", "purgeProject", "closeIssue", "readyIssues", "showIssueByUID",
-		"importIssues", "pollProjectEvents", "streamEvents", "auditCloses", "digestProject",
-		"deleteLink", "rewriteAuthorIdentity":
-		return true
-	default:
-		return false
-	}
-}
-
-func hostAccessOperationWithoutProjectData(operationID string) bool {
-	switch operationID {
-	case "ping", "health", "instance":
-		return true
-	default:
-		return false
-	}
 }
 
 func positiveProjectID(raw string) (int64, bool) {

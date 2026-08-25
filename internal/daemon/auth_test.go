@@ -277,7 +277,10 @@ func TestAuthMiddleware_UnauthenticatedPathsAlwaysPass(t *testing.T) {
 }
 
 func TestAuthMiddleware_FederationTransportPathsBypassAdminBearer(t *testing.T) {
-	mw := requireBearer(authPolicy{Token: "expected-token"})
+	mw := requireBearer(authPolicy{
+		Token:                   "expected-token",
+		SelfAuthenticatedRoutes: selfAuthenticatedRoutesForTest(t),
+	})
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	}))
@@ -297,7 +300,10 @@ func TestAuthMiddleware_FederationTransportPathsBypassAdminBearer(t *testing.T) 
 }
 
 func TestAuthMiddleware_FederationTransportBypassRequiresExactRouteAndMethod(t *testing.T) {
-	mw := requireBearer(authPolicy{Token: "expected-token"})
+	mw := requireBearer(authPolicy{
+		Token:                   "expected-token",
+		SelfAuthenticatedRoutes: selfAuthenticatedRoutesForTest(t),
+	})
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	}))
@@ -351,4 +357,13 @@ func openAuthTestDB(t *testing.T) *sqlitestore.Store {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d
+}
+
+// selfAuthenticatedRoutesForTest builds the bypass matcher the daemon
+// generates at startup, so middleware-level tests exercise the real route set.
+func selfAuthenticatedRoutesForTest(t *testing.T) selfAuthenticatedRouteMatcher {
+	t.Helper()
+	srv := NewServer(ServerConfig{})
+	t.Cleanup(func() { _ = srv.Close() })
+	return newSelfAuthenticatedRouteMatcher(selfAuthenticatedRoutes(srv.API().OpenAPI()))
 }

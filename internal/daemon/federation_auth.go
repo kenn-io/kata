@@ -80,6 +80,9 @@ func federationAuthorizationFromContext(
 	operation HostFederationOperation,
 ) (federationAuthorization, bool) {
 	cached, ok := ctx.Value(federationAuthorizationContextKey{}).(cachedFederationAuthorization)
+	// The whole operation is compared, not just its ID: a cached authorization
+	// for a non-mutating call carries no transaction fence, so it must never be
+	// reused by a mutating call for the same route.
 	if !ok || cached.authHeader != authHeader || cached.projectID != projectID ||
 		cached.capability != capability || cached.operation != operation {
 		return federationAuthorization{}, false

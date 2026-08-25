@@ -186,6 +186,7 @@ type Server struct {
 	baseHandler http.Handler
 	handler     http.Handler
 	api         huma.API
+	authPolicy  authPolicy
 
 	shutdownTimeout time.Duration
 }
@@ -247,6 +248,10 @@ func NewServer(cfg ServerConfig) *Server {
 	mux.Handle("/", webHandler)
 	applyErrorEnvelopeResponses(humaAPI.OpenAPI())
 	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
+	policy := cfg.authPolicy()
+	policy.SelfAuthenticatedRoutes = newSelfAuthenticatedRouteMatcher(
+		selfAuthenticatedRoutes(humaAPI.OpenAPI()))
+	s.authPolicy = policy
 
 	s.baseHandler = mux
 	s.handler, _ = s.HandlerFor(ListenerPolicy{Kind: ListenerSocket})
@@ -285,7 +290,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 		base = withIdleAdmission(s.cfg.IdleAdmission, base)
 		base = withFederationIngestPreauthorization(s.cfg, base)
 		base = withTrustedProxyActor(s.cfg)(base)
-		base = requireBearer(s.cfg.authPolicy(), s.cfg.DB)(base)
+		base = requireBearer(s.authPolicy, s.cfg.DB)(base)
 		base = withGzip(base)
 		base = withOwnerLocalTransport(base)
 	}

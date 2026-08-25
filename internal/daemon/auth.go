@@ -34,6 +34,13 @@ type authPolicy struct {
 	AllowUnauthenticatedPrivateNetworkWrites bool
 	InsecureReadonly                         bool
 	RequireTokenIdentity                     bool
+
+	// SelfAuthenticatedRoutes is the set of routes whose handler owns
+	// authentication; the middleware must not pre-empt them with a daemon-token
+	// check. NewServer generates it from the registered routes. The zero value
+	// matches nothing, so a caller that does not set it gets bearer enforcement
+	// on every route.
+	SelfAuthenticatedRoutes selfAuthenticatedRouteMatcher
 }
 
 // requireBearer returns an HTTP middleware that enforces bearer-token auth
@@ -67,8 +74,7 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				next.ServeHTTP(w, r)
 				return
 			}
-			if isFederationTransportRoute(r.Method, r.URL.Path) ||
-				isClaimActionRoute(r.Method, r.URL.Path) {
+			if p.SelfAuthenticatedRoutes.matches(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -148,72 +154,6 @@ func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Han
 
 func isTokenAdminPath(path string) bool {
 	return path == "/api/v1/tokens" || strings.HasPrefix(path, "/api/v1/tokens/")
-}
-
-func isClaimActionRoute(method, path string) bool {
-	rest, ok := strings.CutPrefix(path, "/api/v1/projects/")
-	if !ok {
-		return false
-	}
-	projectID, rest, ok := strings.Cut(rest, "/issues/")
-	if !ok || projectID == "" {
-		return false
-	}
-	for _, r := range projectID {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	_, suffix, ok := strings.Cut(rest, "/")
-	if !ok {
-		return false
-	}
-	if method == http.MethodGet {
-		return suffix == "lease"
-	}
-	if method != http.MethodPost {
-		return false
-	}
-	switch suffix {
-	case "lease/actions/acquire", "lease/actions/renew", "lease/actions/release", "lease/actions/force_release":
-		return true
-	default:
-		return false
-	}
-}
-
-func isFederationTransportRoute(method, path string) bool {
-	var suffix string
-	switch method {
-	case http.MethodGet:
-		if strings.HasSuffix(path, "/federation/events") {
-			suffix = "/federation/events"
-		} else {
-			suffix = "/federation/metadata"
-		}
-	case http.MethodPost:
-		suffix = "/federation/events:ingest"
-	default:
-		return false
-	}
-
-	rest, ok := strings.CutPrefix(path, "/api/v1/projects/")
-	if !ok {
-		return false
-	}
-	projectID, ok := strings.CutSuffix(rest, suffix)
-	if !ok {
-		return false
-	}
-	if projectID == "" {
-		return false
-	}
-	for _, r := range projectID {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 // checkAuthStartup refuses startup when the listen address would expose

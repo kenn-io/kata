@@ -143,7 +143,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *api.FederationProjectMetadataRequest) (*api.ProjectFederationResponse, error) {
 		var err error
 		ctx, _, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
-			HostFederationOperation{ID: "getFederationProjectMetadata", Mutation: true})
+			federationTransportOperation("getFederationProjectMetadata"))
 		if err != nil {
 			return nil, err
 		}
@@ -587,7 +587,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *api.FederationPollEventsRequest) (*api.PollEventsResponse, error) {
 		var err error
 		ctx, _, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
-			HostFederationOperation{ID: "pollFederationProjectEvents"})
+			federationTransportOperation("pollFederationProjectEvents"))
 		if err != nil {
 			return nil, err
 		}
@@ -607,7 +607,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		MaxBodyBytes: 64 << 20,
 	}, func(ctx context.Context, in *api.FederationIngestEventsRequest) (*api.FederationIngestEventsResponse, error) {
 		ctx, principal, err := authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "push",
-			HostFederationOperation{ID: "ingestFederationProjectEvents", Mutation: true})
+			federationTransportOperation("ingestFederationProjectEvents"))
 		if err != nil {
 			return nil, err
 		}
