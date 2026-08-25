@@ -559,7 +559,10 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	// Sampled here, next to the stop it qualifies: a Close that lands later
 	// must not retroactively change what an already-recorded error means.
-	callerShuttingDown := ctx.Err() != nil || s.isClosed()
+	callerStop := ctx.Err()
+	if callerStop == nil && s.isClosed() {
+		callerStop = context.Canceled
+	}
 	fence.beginUnwind()
 	for len(workerResults) < len(workers) {
 		workerResults = append(workerResults, <-workerErrs)
@@ -569,7 +572,7 @@ func (s *Service) Run(ctx context.Context) error {
 	if fenceErr := fence.first(); fenceErr != nil {
 		stop = runStop{reason: stopFenceFailure, err: fenceErr}
 	}
-	return runResult(stop, workerResults, callerShuttingDown)
+	return runResult(stop, workerResults, callerStop)
 }
 
 // publishWorkerEvents fans a background worker's events out to both event
@@ -698,14 +701,14 @@ type runStop struct {
 // so the shutdown policy is stated once, in one place, instead of emerging
 // from the order of four probes of state that has already moved on.
 //
-// Policy (design decision D1): genuine non-cancellation worker failures reach
-// the caller even when a shutdown was in flight. Only context.Canceled is
-// suppressed — including a fence rejected by the very shutdown it is
-// unwinding. workerResults have already been normalized by namedWorker.result.
-func runResult(stop runStop, workerResults []error, callerShuttingDown bool) error {
+// Policy (design decision D1): genuine worker failures reach the caller even
+// when shutdown was in flight. A fence error composed only of the caller's
+// terminal error is clean; mixed failures still surface. workerResults have
+// already been normalized by namedWorker.result.
+func runResult(stop runStop, workerResults []error, callerStop error) error {
 	switch stop.reason {
 	case stopFenceFailure:
-		if callerShuttingDown && isCancellationOnly(stop.err) {
+		if isOnlyError(stop.err, callerStop) {
 			// The fence was rejected *by* the shutdown it is unwinding; the
 			// workers still report their own outcomes below.
 			break

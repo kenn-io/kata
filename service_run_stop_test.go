@@ -35,27 +35,27 @@ func TestRunResultAppliesShutdownPolicy(t *testing.T) {
 	fenceRejection := errors.New("worker transaction rejected")
 
 	for _, testCase := range []struct {
-		name               string
-		stop               runStop
-		workerResults      []error
-		callerShuttingDown bool
-		check              func(t *testing.T, err error)
+		name          string
+		stop          runStop
+		workerResults []error
+		callerStop    error
+		check         func(t *testing.T, err error)
 	}{
 		{
-			name:               "worker failure during shutdown reaches the caller",
-			stop:               runStop{reason: stopContextDone, err: context.Canceled},
-			workerResults:      []error{nil, workerFailure, nil},
-			callerShuttingDown: true,
+			name:          "worker failure during shutdown reaches the caller",
+			stop:          runStop{reason: stopContextDone, err: context.Canceled},
+			workerResults: []error{nil, workerFailure, nil},
+			callerStop:    context.Canceled,
 			check: func(t *testing.T, err error) {
 				require.ErrorIs(t, err, workerFailure)
 			},
 		},
 		{
-			name:               "cancellation during shutdown is a clean stop",
-			stop:               runStop{reason: stopContextDone, err: context.Canceled},
-			workerResults:      []error{nil, nil, nil},
-			callerShuttingDown: true,
-			check:              func(t *testing.T, err error) { assert.NoError(t, err) },
+			name:          "cancellation during shutdown is a clean stop",
+			stop:          runStop{reason: stopContextDone, err: context.Canceled},
+			workerResults: []error{nil, nil, nil},
+			callerStop:    context.Canceled,
+			check:         func(t *testing.T, err error) { assert.NoError(t, err) },
 		},
 		{
 			name:          "worker failure with no shutdown reaches the caller",
@@ -83,26 +83,37 @@ func TestRunResultAppliesShutdownPolicy(t *testing.T) {
 			},
 		},
 		{
-			name:               "a fence canceled by the shutdown it unwinds is not a failure",
-			stop:               runStop{reason: stopFenceFailure, err: context.Canceled},
-			workerResults:      []error{nil, nil, nil},
-			callerShuttingDown: true,
-			check:              func(t *testing.T, err error) { assert.NoError(t, err) },
+			name:          "a fence canceled by the shutdown it unwinds is not a failure",
+			stop:          runStop{reason: stopFenceFailure, err: context.Canceled},
+			workerResults: []error{nil, nil, nil},
+			callerStop:    context.Canceled,
+			check:         func(t *testing.T, err error) { assert.NoError(t, err) },
 		},
 		{
 			name: "only cancellation causes from a fence are a clean shutdown",
 			stop: runStop{reason: stopFenceFailure, err: errors.Join(
 				context.Canceled, fmt.Errorf("stopping: %w", context.Canceled))},
-			workerResults:      []error{nil, nil, nil},
-			callerShuttingDown: true,
-			check:              func(t *testing.T, err error) { assert.NoError(t, err) },
+			workerResults: []error{nil, nil, nil},
+			callerStop:    context.Canceled,
+			check:         func(t *testing.T, err error) { assert.NoError(t, err) },
 		},
 		{
 			name: "a fence cancellation joined with a rejection still surfaces during shutdown",
 			stop: runStop{reason: stopFenceFailure, err: errors.Join(
 				context.Canceled, fenceRejection)},
-			workerResults:      []error{nil, nil, nil},
-			callerShuttingDown: true,
+			workerResults: []error{nil, nil, nil},
+			callerStop:    context.Canceled,
+			check: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, fenceRejection)
+				assert.ErrorContains(t, err, "worker transaction fence")
+			},
+		},
+		{
+			name: "a fence deadline joined with a rejection still surfaces during shutdown",
+			stop: runStop{reason: stopFenceFailure, err: errors.Join(
+				context.DeadlineExceeded, fenceRejection)},
+			workerResults: []error{nil, nil, nil},
+			callerStop:    context.DeadlineExceeded,
 			check: func(t *testing.T, err error) {
 				require.ErrorIs(t, err, fenceRejection)
 				assert.ErrorContains(t, err, "worker transaction fence")
@@ -120,7 +131,7 @@ func TestRunResultAppliesShutdownPolicy(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			testCase.check(t, runResult(
-				testCase.stop, testCase.workerResults, testCase.callerShuttingDown))
+				testCase.stop, testCase.workerResults, testCase.callerStop))
 		})
 	}
 }
@@ -159,7 +170,7 @@ func TestFenceRecorderPreservesStopPriorityAcrossInternalUnwind(t *testing.T) {
 		if fenceErr := fence.first(); fenceErr != nil {
 			stop = runStop{reason: stopFenceFailure, err: fenceErr}
 		}
-		return runResult(stop, workerResults, false)
+		return runResult(stop, workerResults, nil)
 	}
 
 	t.Run("cancellation caused by internal unwind preserves the worker failure", func(t *testing.T) {
