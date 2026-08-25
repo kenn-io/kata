@@ -709,9 +709,11 @@ func connectorContextError(parent context.Context, cause error) error {
 func redactError(response *protocol.Error, redactions []string) error {
 	safe := *response
 	normalized := normalizeRedactions(redactions)
-	safe.Code = redactErrorField(safe.Code, normalized)
-	if safe.Code != response.Code {
-		safe.Code = redactedProtocolErrorCode
+	if safe.Code != protocol.ErrorCodeFieldConflict {
+		safe.Code = redactErrorField(safe.Code, normalized)
+		if safe.Code != response.Code {
+			safe.Code = redactedProtocolErrorCode
+		}
 	}
 	safe.Message = redactErrorField(safe.Message, normalized)
 	if !validProtocolError(&safe) {

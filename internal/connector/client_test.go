@@ -1093,7 +1093,7 @@ func TestRedactErrorPreservesLiteralJSONScalars(t *testing.T) {
 	}
 }
 
-func TestRedactErrorUsesGenericCodeWhenOriginalCodeContainsSecret(t *testing.T) {
+func TestRedactErrorUsesGenericCodeWhenUnknownCodeContainsSecret(t *testing.T) {
 	err := redactError(
 		&protocol.Error{Code: "product_not_found", Message: "missing prod"},
 		[]string{"prod"},
@@ -1101,8 +1101,21 @@ func TestRedactErrorUsesGenericCodeWhenOriginalCodeContainsSecret(t *testing.T) 
 
 	var connectorErr *protocol.Error
 	require.ErrorAs(t, err, &connectorErr)
-	assert.Equal(t, "connector_error", connectorErr.Code)
+	assert.Equal(t, redactedProtocolErrorCode, connectorErr.Code)
 	assert.Equal(t, "missing [redacted]", connectorErr.Message)
+	assert.NotErrorIs(t, err, ErrProtocolFailure)
+}
+
+func TestRedactErrorPreservesFieldConflictCodeWhenConfiguredValueOverlaps(t *testing.T) {
+	err := redactError(
+		&protocol.Error{Code: protocol.ErrorCodeFieldConflict, Message: "field changed before write"},
+		[]string{"field"},
+	)
+
+	var connectorErr *protocol.Error
+	require.ErrorAs(t, err, &connectorErr)
+	assert.Equal(t, protocol.ErrorCodeFieldConflict, connectorErr.Code)
+	assert.Equal(t, "[redacted] changed before write", connectorErr.Message)
 	assert.NotErrorIs(t, err, ErrProtocolFailure)
 }
 

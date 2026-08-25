@@ -559,6 +559,61 @@ func checkSnapshotReplayRejectsDuplicateFieldMappingIdentities(t *testing.T, sto
 	return nil
 }
 
+func checkSnapshotReplayPreservesSubmicrosecondFieldMappingIdentities(
+	t *testing.T,
+	store db.Storage,
+) error {
+	t.Helper()
+	ctx := context.Background()
+	records := extendedReplayRecords()
+	original := externalRootReplayMapping(records)
+	adjacent := *original
+	adjacent.Active = false
+	adjacent.CreatedAt = original.CreatedAt.Add(time.Nanosecond)
+
+	for index := range records {
+		if records[index].Kind == db.ImportKindProjectAlias {
+			records[index] = db.ImportRecord{
+				Kind:                 db.ImportKindExternalFieldMapping,
+				ExternalFieldMapping: &adjacent,
+			}
+			break
+		}
+	}
+	externalRootReplayState(records).MappingCreatedAt = original.CreatedAt
+
+	if err := store.ImportReplay(ctx, records, db.ImportOptions{}); err != nil {
+		return fmt.Errorf("import submicrosecond field mapping identities: %w", err)
+	}
+	issue, err := store.IssueByUID(ctx, replayIssueUID, db.IncludeDeletedNo)
+	if err != nil {
+		return err
+	}
+	binding, err := store.ExternalRootBindingByIssue(ctx, issue.ID)
+	if err != nil {
+		return err
+	}
+	mappings, err := store.ListExternalFieldMappings(ctx, original.ConnectorInstance)
+	if err != nil {
+		return err
+	}
+	require.Len(t, mappings, 2)
+	var originalMappingID int64
+	for _, mapping := range mappings {
+		if mapping.CreatedAt.Equal(original.CreatedAt) {
+			originalMappingID = mapping.ID
+		}
+	}
+	require.NotZero(t, originalMappingID)
+	states, err := store.ExternalFieldStates(ctx, binding.ID)
+	if err != nil {
+		return err
+	}
+	require.Len(t, states, 1)
+	assert.Equal(t, originalMappingID, states[0].MappingID)
+	return nil
+}
+
 func installBindingMapping(
 	records []db.ImportRecord,
 	source string,
@@ -1312,6 +1367,63 @@ func checkSnapshotMergeExternalRoots(
 	require.Len(t, states, 1)
 	assert.Equal(t, mappings[0].ID, states[0].MappingID)
 	assert.JSONEq(t, `"2026-08-20"`, string(states[0].Baseline))
+
+	precisionTarget := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, precisionTarget.Close()) })
+	precisionMapping, err := precisionTarget.UpsertExternalFieldMapping(ctx, db.ExternalFieldMappingParams{
+		ConnectorInstance: "connector-one", KataField: "scheduled_on",
+		ExternalFieldID: "schedule-one", ExternalFieldName: "Schedule",
+		AcceptedKinds: []string{"date"}, Nullable: true, Writable: true,
+		SchemaRevision: "schema-one",
+	})
+	if err != nil {
+		return err
+	}
+	precisionRecords, err := CollectImportRecords(ctx, source, db.ExportFilter{
+		ProjectID: &sourceProject.ID, IncludeDeleted: true,
+	})
+	if err != nil {
+		return err
+	}
+	incomingCreatedAt := precisionMapping.CreatedAt.Add(time.Nanosecond)
+	for i := range precisionRecords {
+		if precisionRecords[i].ExternalFieldMapping != nil {
+			precisionRecords[i].ExternalFieldMapping.CreatedAt = incomingCreatedAt
+			precisionRecords[i].ExternalFieldMapping.UpdatedAt = incomingCreatedAt
+		}
+		if precisionRecords[i].ExternalFieldState != nil {
+			precisionRecords[i].ExternalFieldState.MappingCreatedAt = incomingCreatedAt
+		}
+	}
+	if err := precisionTarget.ImportReplay(ctx, precisionRecords, db.ImportOptions{MergeProject: true}); err != nil {
+		return fmt.Errorf("merge adjacent submicrosecond field mapping identity: %w", err)
+	}
+	precisionMappings, err := precisionTarget.ListExternalFieldMappings(ctx, "connector-one")
+	if err != nil {
+		return err
+	}
+	require.Len(t, precisionMappings, 2)
+	var incomingMappingID int64
+	for _, mapping := range precisionMappings {
+		if mapping.CreatedAt.Equal(incomingCreatedAt) {
+			incomingMappingID = mapping.ID
+		}
+	}
+	require.NotZero(t, incomingMappingID)
+	precisionIssue, err := precisionTarget.IssueByUID(ctx, replayIssueUID, db.IncludeDeletedNo)
+	if err != nil {
+		return err
+	}
+	precisionBinding, err := precisionTarget.ExternalRootBindingByIssue(ctx, precisionIssue.ID)
+	if err != nil {
+		return err
+	}
+	precisionStates, err := precisionTarget.ExternalFieldStates(ctx, precisionBinding.ID)
+	if err != nil {
+		return err
+	}
+	require.Len(t, precisionStates, 1)
+	assert.Equal(t, incomingMappingID, precisionStates[0].MappingID)
 
 	deactivatedTarget := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, deactivatedTarget.Close()) })

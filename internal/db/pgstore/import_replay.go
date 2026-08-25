@@ -299,40 +299,97 @@ func pgReuseProjectMergeExternalFieldMapping(
 	acceptedKinds string,
 ) (bool, error) {
 	queryer := externalRootTxQueryer{tx}
-	var mappingID int64
-	var externalFieldName, storedKinds, updatedAt string
-	var nullable, writable int
-	err := queryer.QueryRowContext(ctx, `SELECT id, external_field_name, accepted_kinds_json,
-		       nullable, writable, updated_at
-		FROM external_field_mappings
-		WHERE connector_instance = ? AND kata_field = ? AND external_field_id = ?
-		  AND schema_revision = ? AND created_at::timestamptz = ?::timestamptz`,
+	candidate, found, err := pgReplayExternalFieldMappingByIdentity(ctx, queryer,
 		mapping.ConnectorInstance, mapping.KataField, mapping.ExternalFieldID,
 		mapping.SchemaRevision, formatExternalObservationTime(mapping.CreatedAt),
-	).Scan(&mappingID, &externalFieldName, &storedKinds, &nullable, &writable, &updatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
+	)
 	if err != nil {
 		return false, pgReplayError(db.ImportKindExternalFieldMapping, err)
 	}
-	if externalFieldName != mapping.ExternalFieldName || storedKinds != acceptedKinds ||
-		nullable != boolInt(mapping.Nullable) || writable != boolInt(mapping.Writable) {
+	if !found {
+		return false, nil
+	}
+	if candidate.externalFieldName != mapping.ExternalFieldName || candidate.acceptedKinds != acceptedKinds ||
+		candidate.nullable != boolInt(mapping.Nullable) || candidate.writable != boolInt(mapping.Writable) {
 		return false, fmt.Errorf("import %s: project merge mapping identity conflicts with target descriptor",
 			db.ImportKindExternalFieldMapping)
 	}
-	storedUpdatedAt, err := parseStoredTime(updatedAt)
+	storedUpdatedAt, err := parseStoredTime(candidate.updatedAt)
 	if err != nil {
 		return false, pgReplayError(db.ImportKindExternalFieldMapping, err)
 	}
 	if mapping.UpdatedAt.After(storedUpdatedAt) {
 		if _, err := queryer.ExecContext(ctx,
 			`UPDATE external_field_mappings SET updated_at=? WHERE id=?`,
-			formatExternalObservationTime(mapping.UpdatedAt), mappingID); err != nil {
+			formatExternalObservationTime(mapping.UpdatedAt), candidate.id); err != nil {
 			return false, pgReplayError(db.ImportKindExternalFieldMapping, err)
 		}
 	}
 	return true, nil
+}
+
+type pgReplayExternalFieldMappingCandidate struct {
+	id                int64
+	externalFieldName string
+	acceptedKinds     string
+	nullable          int
+	writable          int
+	updatedAt         string
+}
+
+func pgReplayExternalFieldMappingByIdentity(
+	ctx context.Context,
+	queryer externalRootTxQueryer,
+	connectorInstance string,
+	kataField string,
+	externalFieldID string,
+	schemaRevision string,
+	createdAt string,
+) (pgReplayExternalFieldMappingCandidate, bool, error) {
+	wantCreatedAt, err := parseStoredTime(createdAt)
+	if err != nil {
+		return pgReplayExternalFieldMappingCandidate{}, false, err
+	}
+	rows, err := queryer.QueryContext(ctx, `SELECT id, external_field_name, accepted_kinds_json,
+		       nullable, writable, created_at, updated_at
+		FROM external_field_mappings
+		WHERE connector_instance = $1 AND kata_field = $2 AND external_field_id = $3
+		  AND schema_revision = $4`,
+		connectorInstance, kataField, externalFieldID, schemaRevision,
+	)
+	if err != nil {
+		return pgReplayExternalFieldMappingCandidate{}, false, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var match pgReplayExternalFieldMappingCandidate
+	found := false
+	for rows.Next() {
+		var candidate pgReplayExternalFieldMappingCandidate
+		var storedCreatedAt string
+		if err := rows.Scan(&candidate.id, &candidate.externalFieldName, &candidate.acceptedKinds,
+			&candidate.nullable, &candidate.writable, &storedCreatedAt, &candidate.updatedAt); err != nil {
+			return pgReplayExternalFieldMappingCandidate{}, false, err
+		}
+		parsedCreatedAt, err := parseStoredTime(storedCreatedAt)
+		if err != nil {
+			return pgReplayExternalFieldMappingCandidate{}, false, err
+		}
+		if !parsedCreatedAt.Equal(wantCreatedAt) {
+			continue
+		}
+		if found {
+			return pgReplayExternalFieldMappingCandidate{}, false, fmt.Errorf(
+				"%w: multiple rows match portable identity", db.ErrExternalFieldMappingValidation,
+			)
+		}
+		match = candidate
+		found = true
+	}
+	if err := rows.Err(); err != nil {
+		return pgReplayExternalFieldMappingCandidate{}, false, err
+	}
+	return match, found, nil
 }
 
 func pgReplayExternalRootBinding(
@@ -469,19 +526,11 @@ func pgReplayExternalFieldState(ctx context.Context, tx *sql.Tx, state *db.Exter
 		return pgReplayError(db.ImportKindExternalFieldState, err)
 	}
 	queryer := externalRootTxQueryer{tx}
-	var bindingID, mappingID int64
+	var bindingID int64
 	var bindingConnector string
-	if err := queryer.QueryRowContext(ctx, `SELECT b.id, m.id, b.connector_instance
-		FROM external_root_bindings b
-		JOIN external_field_mappings m
-		  ON m.connector_instance = ? AND m.kata_field = ?
-		 AND m.external_field_id = ? AND m.schema_revision = ?
-		 AND m.created_at::timestamptz = ?::timestamptz
-		WHERE b.uid = ?`,
-		state.MappingConnectorInstance, state.MappingKataField,
-		state.MappingExternalFieldID, state.MappingSchemaRevision,
-		formatExternalObservationTime(state.MappingCreatedAt), state.BindingUID,
-	).Scan(&bindingID, &mappingID, &bindingConnector); err != nil {
+	if err := queryer.QueryRowContext(ctx, `SELECT id, connector_instance
+		FROM external_root_bindings WHERE uid = ?`, state.BindingUID,
+	).Scan(&bindingID, &bindingConnector); err != nil {
 		return pgReplayError(db.ImportKindExternalFieldState, err)
 	}
 	if bindingConnector != state.MappingConnectorInstance {
@@ -489,11 +538,22 @@ func pgReplayExternalFieldState(ctx context.Context, tx *sql.Tx, state *db.Exter
 			"%w: field state mapping connector does not match binding", db.ErrExternalRootValidation,
 		))
 	}
-	_, err := queryer.ExecContext(ctx, `INSERT INTO external_field_states(
+	mapping, found, err := pgReplayExternalFieldMappingByIdentity(ctx, queryer,
+		state.MappingConnectorInstance, state.MappingKataField,
+		state.MappingExternalFieldID, state.MappingSchemaRevision,
+		formatExternalObservationTime(state.MappingCreatedAt),
+	)
+	if err != nil {
+		return pgReplayError(db.ImportKindExternalFieldState, err)
+	}
+	if !found {
+		return pgReplayError(db.ImportKindExternalFieldState, sql.ErrNoRows)
+	}
+	_, err = queryer.ExecContext(ctx, `INSERT INTO external_field_states(
 		binding_id, mapping_id, baseline_json, conflicted, conflict_kata,
 		conflict_external, conflict_at, updated_at
 	) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-		bindingID, mappingID, pgNullableRawJSON(state.Baseline), boolInt(state.Conflicted),
+		bindingID, mapping.id, pgNullableRawJSON(state.Baseline), boolInt(state.Conflicted),
 		pgNullableRawJSON(state.ConflictKata), pgNullableRawJSON(state.ConflictExternal),
 		nullableStoredTime(state.ConflictAt), formatStoredTime(state.UpdatedAt))
 	return pgReplayError(db.ImportKindExternalFieldState, err)

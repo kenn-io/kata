@@ -490,6 +490,14 @@ var storageScenarios = []scenario{
 		run:     checkSnapshotReplayRejectsDuplicateFieldMappingIdentities,
 	},
 	{
+		name: "snapshot replay preserves submicrosecond field mapping identities",
+		methods: []string{
+			"ExternalFieldStates", "ExternalRootBindingByIssue", "ImportReplay", "IssueByUID",
+			"ListExternalFieldMappings",
+		},
+		run: checkSnapshotReplayPreservesSubmicrosecondFieldMappingIdentities,
+	},
+	{
 		name: "snapshot replay compatibility options",
 		methods: []string{
 			"EventsByUIDs", "ImportReplay", "IssueSyncBindingByProject",
