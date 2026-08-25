@@ -46,6 +46,23 @@ func TestPublishCommentRetryAfterCrashCreatesOneComment(t *testing.T) {
 	assert.Equal(t, 2, len(state.Calls))
 }
 
+func TestAdvanceRootDoesNotRegressProviderTimestamp(t *testing.T) {
+	future := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)
+	stored := &StoredRoot{Root: connector.Root{Revision: "before", UpdatedAt: future, ObservedAt: future}}
+
+	advanceRoot(&stored.Root, 1, nextProviderTime(stored))
+
+	if stored.Root.Revision != "revision-0001" {
+		t.Fatalf("revision = %q, want revision-0001", stored.Root.Revision)
+	}
+	if !stored.Root.UpdatedAt.After(future) {
+		t.Fatalf("updated_at = %v, want after %v", stored.Root.UpdatedAt, future)
+	}
+	if !stored.Root.ObservedAt.Equal(stored.Root.UpdatedAt) {
+		t.Fatalf("observed_at = %v, want %v", stored.Root.ObservedAt, stored.Root.UpdatedAt)
+	}
+}
+
 func TestStateLockHonorsContextWhileOwnerIsLive(t *testing.T) {
 	lockPath := filepath.Join(t.TempDir(), "state.lock")
 	release, err := lockContext(context.Background(), lockPath)

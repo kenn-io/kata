@@ -3,6 +3,16 @@ display_name = "kata"
 review_guidelines = """
 Latest stable Go. Be pragmatic — theoretical findings produce churn.
 
+## Stacked delivery boundaries
+
+Kata may land a cumulative delivery sequence as separate protocol, storage,
+reconciliation, and runtime-integration pull requests. Review each pull request
+against the scope and dependency boundary stated in its description. Missing
+later-layer daemon or CLI wiring is not a finding when the current pull request
+is an internally usable lower layer and explicitly assigns that wiring to a
+subsequent pull request. Still flag missing wiring when the current pull request
+claims production availability or leaves its own declared layer unusable.
+
 ## Module path
 
 The Go module path is `go.kenn.io/kata`, not `github.com/wesm/kata`.

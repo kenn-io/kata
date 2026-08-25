@@ -38,7 +38,7 @@ func (s *Store) AdoptProjectIntoFederation(
 		if project.DeletedAt != nil {
 			return fmt.Errorf("adopt project into federation: project %d is archived", params.ProjectID)
 		}
-		if err := rejectIssueSyncedFederationProject(ctx, tx, params.ProjectID); err != nil {
+		if err := rejectFederationSpokeProjectConflicts(ctx, tx, params.ProjectID); err != nil {
 			return err
 		}
 
@@ -202,4 +202,20 @@ WHERE project_id=$1 AND enabled=1 FOR UPDATE`, projectID).Scan(&id)
 		return nil
 	}
 	return fmt.Errorf("check federation issue sync binding: %w", mapSQLError(err, nil))
+}
+
+func rejectFederationSpokeProjectConflicts(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := rejectIssueSyncedFederationProject(ctx, tx, projectID); err != nil {
+		return err
+	}
+	var id int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM external_root_bindings
+WHERE project_id=$1 AND active=1 LIMIT 1 FOR UPDATE`, projectID).Scan(&id)
+	if err == nil {
+		return db.ErrExternalRootFederationConflict
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return fmt.Errorf("check federation external root binding: %w", mapSQLError(err, nil))
 }
