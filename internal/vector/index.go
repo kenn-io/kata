@@ -35,8 +35,6 @@ type Index struct {
 	store     *sqlitevec.Store[string, string]
 	flowStore kitvec.Store[string, string]
 	pg        *postgresIndex
-	path      string
-	ownsDB    bool
 }
 
 // Open opens (or creates) the sidecar at path. A mirror schema version
@@ -77,7 +75,7 @@ func Open(ctx context.Context, path string) (*Index, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("vector: init kit store: %w", err)
 	}
-	return &Index{db: db, store: store, flowStore: store, path: path, ownsDB: true}, nil
+	return &Index{db: db, store: store, flowStore: store}, nil
 }
 
 // OpenPostgres binds the semantic index to canonical pgvector tables on an
@@ -90,9 +88,10 @@ func OpenPostgres(ctx context.Context, db *sql.DB) (*Index, error) {
 	return &Index{db: db, flowStore: pg, pg: pg}, nil
 }
 
-// Close releases the sidecar handle.
+// Close releases the sidecar handle. A Postgres-backed index runs on the
+// caller's pool and must not close it.
 func (ix *Index) Close() error {
-	if !ix.ownsDB {
+	if ix.pg != nil {
 		return nil
 	}
 	return ix.db.Close()

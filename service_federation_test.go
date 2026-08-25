@@ -240,3 +240,112 @@ func (s *serviceFederationCredentialStore) DeleteFederationCredential(
 	delete(s.entries, projectUID)
 	return nil
 }
+
+// recordingHookSink is a hooks.Sink that keeps every enqueued event so a test
+// can assert which events reached webhook delivery.
+type recordingHookSink struct {
+	mu     sync.Mutex
+	events []db.Event
+}
+
+func (s *recordingHookSink) Enqueue(evt db.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, evt)
+}
+
+func (s *recordingHookSink) snapshot() []db.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]db.Event(nil), s.events...)
+}
+
+// TestServiceRunEnqueuesHooksForFederationPulledEvents pins that a mounted
+// service delivers hooks for events it pulled from a hub, matching the
+// standalone daemon's federation callback. Before the fix the mounted service
+// only broadcast pulled events over SSE, so webhooks never fired for them.
+func TestServiceRunEnqueuesHooksForFederationPulledEvents(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	hubService, err := New(ctx, Config{
+		DSN:  filepath.Join(t.TempDir(), "hub.db"),
+		Auth: AuthConfig{TrustCallerAuthentication: true},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, hubService.Close()) })
+	hubServer := httptest.NewServer(hubService.Handler())
+	t.Cleanup(hubServer.Close)
+
+	hubProject, err := hubService.store.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	hubBinding, err := hubService.store.EnableProjectFederation(ctx, hubProject.ID, "example-user")
+	require.NoError(t, err)
+
+	credentials := newServiceFederationCredentialStore()
+	spokeService, err := New(ctx, Config{
+		DSN:                   filepath.Join(t.TempDir(), "spoke.db"),
+		Auth:                  AuthConfig{TrustCallerAuthentication: true},
+		FederationCredentials: credentials,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spokeService.Close()) })
+	sink := &recordingHookSink{}
+	spokeService.hookSink = sink
+
+	spokeProject, err := spokeService.store.CreateProjectWithUID(ctx, "spoke-project", hubProject.UID)
+	require.NoError(t, err)
+	enrollment, err := hubService.store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: spokeService.store.InstanceUID(),
+		ProjectID:        &hubProject.ID,
+		Capabilities:     "pull,push",
+		Actor:            "example-user",
+	})
+	require.NoError(t, err)
+	_, err = spokeService.store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            spokeProject.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               hubServer.URL,
+		HubProjectID:         hubProject.ID,
+		HubProjectUID:        hubProject.UID,
+		ReplayHorizonEventID: hubBinding.ReplayHorizonEventID,
+		PushEnabled:          true,
+		Actor:                "example-user",
+		AllowInsecure:        true,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, credentials.StoreFederationCredential(ctx, spokeProject.UID, FederationCredential{
+		HubURL: hubServer.URL, HubProjectID: hubProject.ID,
+		Token: enrollment.Token, AllowInsecure: true,
+	}))
+
+	// Create the hub-side issue before Run starts: the runner syncs once
+	// immediately, so the first pull carries this issue's events.
+	hubIssue, _, err := hubService.store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: hubProject.ID, Title: "pulled to spoke", Author: "example-user",
+	})
+	require.NoError(t, err)
+
+	runCtx, cancelRun := context.WithCancel(ctx)
+	runDone := make(chan error, 1)
+	go func() { runDone <- spokeService.Run(runCtx) }()
+	t.Cleanup(func() {
+		cancelRun()
+		require.NoError(t, <-runDone)
+	})
+
+	require.Eventually(t, func() bool {
+		_, issueErr := spokeService.store.IssueByUID(ctx, hubIssue.UID, db.IncludeDeletedNo)
+		return issueErr == nil
+	}, 5*time.Second, 20*time.Millisecond, "spoke should pull the hub issue")
+
+	require.Eventually(t, func() bool {
+		for _, evt := range sink.snapshot() {
+			if evt.Type == "issue.created" && evt.IssueUID != nil && *evt.IssueUID == hubIssue.UID {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 20*time.Millisecond,
+		"federation-pulled events must reach the hook sink, not only the SSE broadcaster")
+}

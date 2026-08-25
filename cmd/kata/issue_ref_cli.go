@@ -23,11 +23,11 @@ import (
 // inherits the workspace's bound project. When neither source supplies a
 // project name, the daemon is asked to resolve from the workspace's
 // .kata.toml binding via start_path.
+//
+// Destructive verbs that operate on soft-deleted issues get that tolerance
+// from their subsequent hydrateRefWithQualified call with includeDeleted=true;
+// resolving the positional ref itself needs no destructive-command option.
 func resolveIssueRefForCommand(cmd *cobra.Command, ref string) (context.Context, string, int64, resolvedIssueRef, error) {
-	return resolveIssueRefForCommandWithOptions(cmd, ref, false)
-}
-
-func resolveIssueRefForCommandWithOptions(cmd *cobra.Command, ref string, _ bool) (context.Context, string, int64, resolvedIssueRef, error) {
 	ctx := cmd.Context()
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
@@ -128,29 +128,12 @@ func workspaceProjectName(startPath string) string {
 	return cfg.Project.Name
 }
 
-// resolveRefToWireOpts resolves one link-flag ref string to the wire value the
-// daemon expects. Used by relationship flags on `kata edit` and `kata create`
-// so they accept the same shapes as positional issue-ref args.
+// refToWire purely parses one link-flag ref into the wire value the daemon
+// expects. The daemon owns existence, soft-delete, and idempotent-remove checks.
 //
-// flagName is folded into validation errors so the user knows which flag failed.
-//
-// currentProject is the canonical name of the project the surrounding command
-// targets (i.e. the URL issue's project for `kata edit`, the create-time project
-// for `kata create`). A qualified ref whose project segment differs from
-// currentProject is forwarded verbatim as "project#short_id" — the daemon
-// resolves link targets in the named project (storage v16, cross-project links).
-// Bare refs and same-project qualified refs are forwarded as plain short_ids or
-// ULIDs so the daemon resolves them against the URL issue's project. Pass "" to
-// skip the qualified-forward path (intended for callers that can't yet plumb the
-// canonical name).
-//
-// includeDeleted=true matches the soft-delete-tolerant lookup the daemon's
-// remove paths use. The remove flags pass true; the add flags pass false.
-func resolveRefToWireOpts(ctx context.Context, baseURL, currentProject string, projectID int64, ref, flagName string, includeDeleted bool) (string, error) {
-	_ = ctx
-	_ = baseURL
-	_ = projectID
-	_ = includeDeleted
+// When currentProject is known, a qualified ref for another project stays
+// qualified; otherwise refs use the bare wire shape.
+func refToWire(ref, flagName, currentProject string) (string, error) {
 	if strings.TrimSpace(ref) == "" {
 		return "", &cliError{
 			Message:  fmt.Sprintf("%s must not be empty", flagName),
@@ -158,64 +141,33 @@ func resolveRefToWireOpts(ctx context.Context, baseURL, currentProject string, p
 			ExitCode: ExitValidation,
 		}
 	}
-	// Pre-flight: surface a legacy numeric ref with the documented error so
-	// users see "use a short_id" instead of a daemon-side "issue not found".
-	// Pass currentProject (when known) as the workspace fallback so bare
-	// refs validate without requiring callers to plumb their own.
 	fallbackProject := currentProject
 	if fallbackProject == "" {
-		// ResolveRef rejects numerics before consulting workspaceProject,
-		// so a placeholder is safe when the caller doesn't yet plumb
-		// the canonical name.
 		fallbackProject = "anything"
 	}
 	parsed, err := ResolveRef(ref, fallbackProject)
 	if err != nil {
-		// Surface validation errors from ResolveRef (legacy numbers, bad
-		// shortid syntax) with a flag-name prefix so the user can tell
-		// which flag was malformed.
 		return "", &cliError{
 			Message:  fmt.Sprintf("%s: %s", flagName, err.Error()),
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
 		}
 	}
-	// A qualified ref ("other#abc4") names a project explicitly. Links may
-	// span projects (storage v16), and the daemon resolves link-target refs
-	// in the named project — forward the qualified form verbatim so the
-	// daemon can. Bare refs and same-project qualified refs keep the bare
-	// wire shape the daemon resolves against the URL issue's project.
-	// For ULID refs, ResolveRef sets ProjectName to the workspace fallback
-	// (same as currentProject), so parsed.ProjectName == currentProject and
-	// the condition below is false; ULID refs are forwarded bare in RefForAPI.
 	if currentProject != "" && parsed.ProjectName != "" && parsed.ProjectName != currentProject {
 		return parsed.ProjectName + "#" + parsed.RefForAPI, nil
 	}
 	return parsed.RefForAPI, nil
 }
 
-// resolveRefSliceToWire maps every entry of refs through resolveRefToWireOpts.
-// Returns the slice in the original order. Empty refs is OK (nil out, nil err).
-func resolveRefSliceToWire(ctx context.Context, baseURL, currentProject string, projectID int64, refs []string, flagName string) ([]string, error) {
-	return resolveRefSliceToWireOpts(ctx, baseURL, currentProject, projectID, refs, flagName, false, false)
-}
-
-// resolveRefSliceToWireIdempotentRemove is the variant the
-// idempotent --remove-blocks / --remove-blocked-by / --remove-related
-// flags use. In addition to soft-delete tolerance, it drops refs that
-// resolve to "issue not found" entirely.
-func resolveRefSliceToWireIdempotentRemove(ctx context.Context, baseURL, currentProject string, projectID int64, refs []string, flagName string) ([]string, error) {
-	return resolveRefSliceToWireOpts(ctx, baseURL, currentProject, projectID, refs, flagName, true, true)
-}
-
-func resolveRefSliceToWireOpts(ctx context.Context, baseURL, currentProject string, projectID int64, refs []string, flagName string, includeDeleted, tolerateNotFound bool) ([]string, error) {
-	_ = tolerateNotFound // refs are validated locally; daemon does the existence check
+// refsToWire preserves the input order and rejects the whole slice when any
+// entry is invalid.
+func refsToWire(refs []string, flagName, currentProject string) ([]string, error) {
 	if len(refs) == 0 {
 		return nil, nil
 	}
 	out := make([]string, 0, len(refs))
 	for _, r := range refs {
-		s, err := resolveRefToWireOpts(ctx, baseURL, currentProject, projectID, r, flagName, includeDeleted)
+		s, err := refToWire(r, flagName, currentProject)
 		if err != nil {
 			return nil, err
 		}
@@ -224,17 +176,14 @@ func resolveRefSliceToWireOpts(ctx context.Context, baseURL, currentProject stri
 	return out, nil
 }
 
-// resolveSingletonRefToWire resolves the StringSliceVar storage for an
-// at-most-one flag (--parent, --remove-parent) and returns the ref string
-// every entry resolves to. Rejects only when entries resolve to *different*
-// refs (after normalization), so equivalent forms — `abc4` and `kata#abc4`,
-// the same string twice — succeed.
-func resolveSingletonRefToWire(ctx context.Context, baseURL, currentProject string, projectID int64, values []string, flagName string, includeDeleted bool) (string, error) {
+// singletonRefToWire normalizes an at-most-one flag's StringSliceVar storage.
+// Equivalent repeated forms are accepted; distinct refs are rejected.
+func singletonRefToWire(values []string, flagName, currentProject string) (string, error) {
 	if len(values) == 0 {
 		return "", nil
 	}
 	first := strings.TrimSpace(values[0])
-	firstResolved, err := resolveRefToWireOpts(ctx, baseURL, currentProject, projectID, first, flagName, includeDeleted)
+	firstResolved, err := refToWire(first, flagName, currentProject)
 	if err != nil {
 		return "", err
 	}
@@ -243,7 +192,7 @@ func resolveSingletonRefToWire(ctx context.Context, baseURL, currentProject stri
 		if trimmed == first {
 			continue
 		}
-		resolved, err := resolveRefToWireOpts(ctx, baseURL, currentProject, projectID, trimmed, flagName, includeDeleted)
+		resolved, err := refToWire(trimmed, flagName, currentProject)
 		if err != nil {
 			return "", err
 		}

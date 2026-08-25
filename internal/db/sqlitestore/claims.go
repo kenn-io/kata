@@ -39,32 +39,33 @@ func (d *Store) AcquireClaim(ctx context.Context, p db.AcquireClaimParams) (db.L
 		expiresAt = &expires
 	}
 
-	var out db.LeaseResult
-	err := d.withImmediateClaimTx(ctx, func(conn *sql.Conn) error {
+	return d.withLeaseTx(ctx, func(conn *sql.Conn) (leaseOutcome, error) {
+		var out leaseOutcome
 		issue, projectName, err := resolveClaimIssueTx(ctx, conn, p.ProjectID, p.IssueRef)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
 		expiredEvents, err := d.expireTimedClaimsTx(ctx, conn, now, 0)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out.Events = append(out.Events, expiredEvents...)
+		out.Result.Events = append(out.Result.Events, expiredEvents...)
 		live, err := liveClaimForIssueTx(ctx, conn, issue.UID)
 		if err == nil {
-			out = resultForClaimWithEvents(live, sameClaimPrincipal(live, p.Principal), out.Events)
-			if sameClaimPrincipal(live, p.Principal) {
-				return nil
+			same := sameClaimPrincipal(live, p.Principal)
+			out.Result = resultForClaimWithEvents(live, same, out.Result.Events)
+			if same {
+				return out, nil
 			}
-			return db.ErrClaimDenied
+			return out, db.ErrClaimDenied
 		}
 		if !errors.Is(err, db.ErrNotFound) {
-			return err
+			return leaseOutcome{}, err
 		}
 
 		claimUID, err := katauid.New()
 		if err != nil {
-			return fmt.Errorf("generate claim uid: %w", err)
+			return leaseOutcome{}, fmt.Errorf("generate claim uid: %w", err)
 		}
 		acquiredAt := now.UTC().Format(sqliteTimeFormat)
 		var expiresValue any
@@ -81,28 +82,27 @@ func (d *Store) AcquireClaim(ctx context.Context, p db.AcquireClaimParams) (db.L
 			p.Principal.HolderInstanceUID, p.Principal.ClientKind, p.Purpose,
 			p.ClaimKind, acquiredAt, expiresValue, acquiredAt)
 		if err != nil {
-			return fmt.Errorf("insert issue claim: %w", err)
+			return leaseOutcome{}, fmt.Errorf("insert issue claim: %w", err)
 		}
 		id, err := res.LastInsertId()
 		if err != nil {
-			return fmt.Errorf("issue claim last id: %w", err)
+			return leaseOutcome{}, fmt.Errorf("issue claim last id: %w", err)
 		}
 		claim, err := claimByIDTx(ctx, conn, id)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
 		evt, err := d.insertClaimEventTx(ctx, conn, claimEventInput{
 			ProjectID: issue.ProjectID, ProjectName: projectName, IssueID: issue.ID,
 			Type: "claim.acquired", Actor: p.Principal.Holder, Claim: claim,
 		})
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out = resultForClaimWithEvents(claim, true, out.Events)
-		out.Event = &evt
-		return nil
+		out.Result = resultForClaimWithEvents(claim, true, out.Result.Events)
+		out.Result.Event = &evt
+		return out, nil
 	})
-	return out, err
 }
 
 // RenewClaim extends a live timed claim held by the same principal.
@@ -115,44 +115,43 @@ func (d *Store) RenewClaim(ctx context.Context, p db.RenewClaimParams) (db.Lease
 		return db.LeaseResult{}, err
 	}
 
-	var out db.LeaseResult
-	expiredOutcome := false
-	err := d.withImmediateClaimTx(ctx, func(conn *sql.Conn) error {
+	return d.withLeaseTx(ctx, func(conn *sql.Conn) (leaseOutcome, error) {
+		var out leaseOutcome
 		issue, _, err := resolveClaimIssueTx(ctx, conn, p.ProjectID, p.IssueRef)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
 		liveBefore, err := liveClaimForIssueTx(ctx, conn, issue.UID)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return err
+			return leaseOutcome{}, err
 		}
 		expiredEvents, err := d.expireTimedClaimsTx(ctx, conn, now, 0)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out.Events = append(out.Events, expiredEvents...)
+		out.Result.Events = append(out.Result.Events, expiredEvents...)
 		live, err := liveClaimForIssueTx(ctx, conn, issue.UID)
 		if errors.Is(err, db.ErrNotFound) {
 			if claimExpiredThisPass(liveBefore, p.Principal, now) {
 				expired, expiredErr := claimByIDTx(ctx, conn, liveBefore.ID)
 				if expiredErr != nil {
-					return expiredErr
+					return leaseOutcome{}, expiredErr
 				}
-				out = resultForClaimWithEvents(expired, false, out.Events)
-				expiredOutcome = true
-				return nil
+				out.Result = resultForClaimWithEvents(expired, false, out.Result.Events)
+				out.CommitErr = db.ErrClaimExpired
+				return out, nil
 			}
-			return db.ErrClaimNotHeld
+			return out, db.ErrClaimNotHeld
 		}
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out = resultForClaimWithEvents(live, sameClaimPrincipal(live, p.Principal), out.Events)
+		out.Result = resultForClaimWithEvents(live, sameClaimPrincipal(live, p.Principal), out.Result.Events)
 		if !sameClaimPrincipal(live, p.Principal) {
-			return db.ErrClaimNotHeld
+			return out, db.ErrClaimNotHeld
 		}
 		if live.ClaimKind != "timed" {
-			return fmt.Errorf("%w: hard claims cannot be renewed", db.ErrClaimValidation)
+			return out, fmt.Errorf("%w: hard claims cannot be renewed", db.ErrClaimValidation)
 		}
 		expiresAt := now.Add(p.TTL).UTC().Format(sqliteTimeFormat)
 		if _, err := conn.ExecContext(ctx, `
@@ -160,19 +159,15 @@ func (d *Store) RenewClaim(ctx context.Context, p db.RenewClaimParams) (db.Lease
 			   SET expires_at = ?, revision = revision + 1, updated_at = ?
 			 WHERE id = ?`,
 			expiresAt, now.UTC().Format(sqliteTimeFormat), live.ID); err != nil {
-			return fmt.Errorf("renew issue claim: %w", err)
+			return leaseOutcome{}, fmt.Errorf("renew issue claim: %w", err)
 		}
 		renewed, err := claimByIDTx(ctx, conn, live.ID)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out = resultForClaimWithEvents(renewed, true, out.Events)
-		return nil
+		out.Result = resultForClaimWithEvents(renewed, true, out.Result.Events)
+		return out, nil
 	})
-	if err == nil && expiredOutcome {
-		err = db.ErrClaimExpired
-	}
-	return out, err
 }
 
 // ReleaseClaim releases a live claim only when the requester is the holder.
@@ -182,55 +177,50 @@ func (d *Store) ReleaseClaim(ctx context.Context, p db.ReleaseClaimParams) (db.L
 		return db.LeaseResult{}, err
 	}
 
-	var out db.LeaseResult
-	expiredOutcome := false
-	err := d.withImmediateClaimTx(ctx, func(conn *sql.Conn) error {
+	return d.withLeaseTx(ctx, func(conn *sql.Conn) (leaseOutcome, error) {
+		var out leaseOutcome
 		issue, projectName, err := resolveClaimIssueTx(ctx, conn, p.ProjectID, p.IssueRef)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
 		liveBefore, err := liveClaimForIssueTx(ctx, conn, issue.UID)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return err
+			return leaseOutcome{}, err
 		}
 		expiredEvents, err := d.expireTimedClaimsTx(ctx, conn, now, 0)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out.Events = append(out.Events, expiredEvents...)
+		out.Result.Events = append(out.Result.Events, expiredEvents...)
 		live, err := liveClaimForIssueTx(ctx, conn, issue.UID)
 		if errors.Is(err, db.ErrNotFound) {
 			if claimExpiredThisPass(liveBefore, p.Principal, now) {
 				expired, expiredErr := claimByIDTx(ctx, conn, liveBefore.ID)
 				if expiredErr != nil {
-					return expiredErr
+					return leaseOutcome{}, expiredErr
 				}
-				out = resultForClaimWithEvents(expired, false, out.Events)
-				expiredOutcome = true
-				return nil
+				out.Result = resultForClaimWithEvents(expired, false, out.Result.Events)
+				out.CommitErr = db.ErrClaimExpired
+				return out, nil
 			}
-			return db.ErrClaimNotHeld
+			return out, db.ErrClaimNotHeld
 		}
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out = resultForClaimWithEvents(live, sameClaimPrincipal(live, p.Principal), out.Events)
+		out.Result = resultForClaimWithEvents(live, sameClaimPrincipal(live, p.Principal), out.Result.Events)
 		if !sameClaimPrincipal(live, p.Principal) {
-			return db.ErrClaimNotHeld
+			return out, db.ErrClaimNotHeld
 		}
 		released, evt, err := d.releaseClaimTx(ctx, conn, live, issue.ID, projectName,
 			"claim.released", p.Principal.Holder, p.Reason, now)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out = resultForClaimWithEvents(released, true, out.Events)
-		out.Event = &evt
-		return nil
+		out.Result = resultForClaimWithEvents(released, true, out.Result.Events)
+		out.Result.Event = &evt
+		return out, nil
 	})
-	if err == nil && expiredOutcome {
-		err = db.ErrClaimExpired
-	}
-	return out, err
 }
 
 // ForceReleaseClaim releases any live claim for the issue. Authorization is
@@ -241,51 +231,46 @@ func (d *Store) ForceReleaseClaim(ctx context.Context, p db.ForceReleaseClaimPar
 		return db.LeaseResult{}, fmt.Errorf("%w: actor is required", db.ErrClaimValidation)
 	}
 
-	var out db.LeaseResult
-	expiredOutcome := false
-	err := d.withImmediateClaimTx(ctx, func(conn *sql.Conn) error {
+	return d.withLeaseTx(ctx, func(conn *sql.Conn) (leaseOutcome, error) {
+		var out leaseOutcome
 		issue, projectName, err := resolveClaimIssueTx(ctx, conn, p.ProjectID, p.IssueRef)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
 		liveBefore, err := liveClaimForIssueTx(ctx, conn, issue.UID)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return err
+			return leaseOutcome{}, err
 		}
 		expiredEvents, err := d.expireTimedClaimsTx(ctx, conn, now, 0)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out.Events = append(out.Events, expiredEvents...)
+		out.Result.Events = append(out.Result.Events, expiredEvents...)
 		live, err := liveClaimForIssueTx(ctx, conn, issue.UID)
 		if errors.Is(err, db.ErrNotFound) {
 			if claimTimedExpiredThisPass(liveBefore, now) {
 				expired, expiredErr := claimByIDTx(ctx, conn, liveBefore.ID)
 				if expiredErr != nil {
-					return expiredErr
+					return leaseOutcome{}, expiredErr
 				}
-				out = resultForClaimWithEvents(expired, false, out.Events)
-				expiredOutcome = true
-				return nil
+				out.Result = resultForClaimWithEvents(expired, false, out.Result.Events)
+				out.CommitErr = db.ErrClaimExpired
+				return out, nil
 			}
-			return db.ErrClaimNotHeld
+			return out, db.ErrClaimNotHeld
 		}
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
 		released, evt, err := d.releaseClaimTx(ctx, conn, live, issue.ID, projectName,
 			"claim.force_released", p.Actor, p.Reason, now)
 		if err != nil {
-			return err
+			return leaseOutcome{}, err
 		}
-		out = resultForClaimWithEvents(released, true, out.Events)
-		out.Event = &evt
-		return nil
+		out.Result = resultForClaimWithEvents(released, true, out.Result.Events)
+		out.Result.Event = &evt
+		return out, nil
 	})
-	if err == nil && expiredOutcome {
-		err = db.ErrClaimExpired
-	}
-	return out, err
 }
 
 // ClaimStatus returns the live claim after expiring stale timed claims.
@@ -993,33 +978,80 @@ func assertSingleLiveClaimTx(ctx context.Context, tx claimStore, issueUID string
 	return nil
 }
 
-func (d *Store) withImmediateClaimTx(ctx context.Context, fn func(*sql.Conn) error) error {
-	return d.RetryTransient(ctx, func() error {
-		conn, err := d.Conn(ctx)
-		if err != nil {
-			return fmt.Errorf("acquire conn: %w", err)
-		}
-		defer func() { _ = conn.Close() }()
+// commitClaimTx is a package-local test seam for forcing a transient failure
+// at the claim transaction's commit point; production commits directly.
+var commitClaimTx = func(ctx context.Context, conn *sql.Conn) error {
+	_, err := conn.ExecContext(ctx, "COMMIT")
+	return err
+}
 
-		if err := d.beginImmediateTransaction(ctx, conn); err != nil {
-			return fmt.Errorf("begin immediate: %w", err)
-		}
-		committed := false
-		defer func() {
-			if !committed {
-				_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
-			}
-		}()
+// leaseOutcome is one lease attempt's result. A non-nil CommitErr is returned
+// to the caller after the transaction commits: the expired-during-this-pass
+// paths must persist their expiry writes while still failing the request.
+// Because each attempt produces a fresh value, a rolled-back attempt can
+// neither contribute events to nor stick an error onto the attempt that wins.
+type leaseOutcome struct {
+	Result    db.LeaseResult
+	CommitErr error
+}
 
-		if err := fn(conn); err != nil {
-			return err
-		}
-		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-			return fmt.Errorf("commit: %w", err)
-		}
-		committed = true
-		return nil
+// withLeaseTx runs fn under the same RetryTransient + BEGIN IMMEDIATE
+// discipline as withImmediateClaimTx, taking the whole outcome as fn's return
+// value instead of letting fn write to captured state. fn's outcome is kept
+// even when fn returns an error, so the denied/not-held paths can report the
+// current holder alongside their sentinel error.
+func (d *Store) withLeaseTx(
+	ctx context.Context,
+	fn func(*sql.Conn) (leaseOutcome, error),
+) (db.LeaseResult, error) {
+	var out leaseOutcome
+	err := d.RetryTransient(ctx, func() error {
+		attempt, attemptErr := d.leaseAttempt(ctx, fn)
+		out = attempt
+		return attemptErr
 	})
+	if err != nil {
+		return out.Result, err
+	}
+	return out.Result, out.CommitErr
+}
+
+func (d *Store) leaseAttempt(
+	ctx context.Context,
+	fn func(*sql.Conn) (leaseOutcome, error),
+) (leaseOutcome, error) {
+	conn, err := d.Conn(ctx)
+	if err != nil {
+		return leaseOutcome{}, fmt.Errorf("acquire conn: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if err := d.beginImmediateTransaction(ctx, conn); err != nil {
+		return leaseOutcome{}, fmt.Errorf("begin immediate: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		}
+	}()
+
+	out, err := fn(conn)
+	if err != nil {
+		return out, err
+	}
+	if err := commitClaimTx(ctx, conn); err != nil {
+		return out, fmt.Errorf("commit: %w", err)
+	}
+	committed = true
+	return out, nil
+}
+
+func (d *Store) withImmediateClaimTx(ctx context.Context, fn func(*sql.Conn) error) error {
+	_, err := d.withLeaseTx(ctx, func(conn *sql.Conn) (leaseOutcome, error) {
+		return leaseOutcome{}, fn(conn)
+	})
+	return err
 }
 
 func (d *Store) releaseClaimTx(

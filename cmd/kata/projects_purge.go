@@ -45,7 +45,7 @@ func projectsPurgeCmd() *cobra.Command {
 			}
 			expected := fmt.Sprintf("PURGE %s", project.Name)
 			confirm, err = resolveConfirm(cmd, confirm, expected,
-				fmt.Sprintf("Type %q to confirm: ", expected), confirmPromptFull)
+				fmt.Sprintf("Type %q to confirm: ", expected))
 			if err != nil {
 				return err
 			}

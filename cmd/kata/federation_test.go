@@ -247,6 +247,19 @@ func TestFederationQuarantineSkipCLI(t *testing.T) {
 	assert.Equal(t, q.LastEventID, binding.PushCursorEventID)
 }
 
+func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	ctx := context.Background()
+	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "--agent", "federation", "quarantine", "skip", strconv.FormatInt(q.ID, 10),
+		"--confirm", "SKIP FEDERATION BATCH "+strconv.FormatInt(q.ID, 10),
+		"--reason", "operator accepted skip")
+
+	assert.Equal(t, fmt.Sprintf("OK federation-quarantine-skip id=%d\n", q.ID), out)
+}
+
 func TestFederationQuarantineRetryCLI(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
 	ctx := context.Background()
@@ -270,6 +283,19 @@ func TestFederationQuarantineRetryCLI(t *testing.T) {
 		 WHERE id = ?`,
 		q.ID).Scan(&skipReason))
 	assert.Equal(t, "retry: hub upgraded", skipReason)
+}
+
+func TestFederationQuarantineRetryCLIAgentMode(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	ctx := context.Background()
+	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "--agent", "federation", "quarantine", "retry", strconv.FormatInt(q.ID, 10),
+		"--confirm", "RETRY FEDERATION BATCH "+strconv.FormatInt(q.ID, 10),
+		"--reason", "hub upgraded")
+
+	assert.Equal(t, fmt.Sprintf("OK federation-quarantine-retry id=%d\n", q.ID), out)
 }
 
 func TestFederationHelpIsVisible(t *testing.T) {

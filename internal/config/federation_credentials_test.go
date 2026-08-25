@@ -90,6 +90,106 @@ func TestWriteFederationCredentialRoundTrips(t *testing.T) {
 	assert.True(t, got.AllowInsecure)
 }
 
+func TestWriteFederationCredentialRejectsPendingEnrollmentWithoutPendingLeave(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	const projectUID = "01EXAMPLEPROJECT0000000000"
+	settled := config.FederationCredential{
+		HubURL: "https://daemon.example", HubProjectID: 42, Token: "settled-token",
+	}
+	require.NoError(t, config.WriteFederationCredential(projectUID, settled))
+
+	contradictory := settled
+	contradictory.PendingEnrollmentID = 7
+	err := config.WriteFederationCredential(projectUID, contradictory)
+
+	require.ErrorIs(t, err, config.ErrFederationCredentialConflict)
+	assert.ErrorContains(t, err, projectUID)
+	assert.ErrorContains(t, err, "7")
+	credentials, readErr := config.ReadFederationCredentials()
+	require.NoError(t, readErr)
+	assert.Equal(t, settled, credentials.Projects[projectUID])
+}
+
+func TestWriteFederationCredentialAcceptsPendingEnrollmentWithPendingLeave(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	const projectUID = "01EXAMPLEPROJECT0000000000"
+	want := config.FederationCredential{
+		HubURL: "https://daemon.example", HubProjectID: 42, Token: "pending-token",
+		LeavePending: true, PendingEnrollmentID: 7,
+	}
+
+	require.NoError(t, config.WriteFederationCredential(projectUID, want))
+
+	credentials, err := config.ReadFederationCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, want, credentials.Projects[projectUID])
+}
+
+func TestWriteFederationCredentialAllowsUnchangedLegacyConflictDuringUnrelatedWrite(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	const (
+		legacyUID = "01LEGACYPROJECT00000000000"
+		otherUID  = "01OTHERPROJECT000000000000"
+	)
+	path := filepath.Join(home, "credentials.toml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+[projects."01LEGACYPROJECT00000000000"]
+hub_url = "https://legacy-daemon.example"
+hub_project_id = 41
+token = "legacy-token"
+pending_enrollment_id = 7
+`), 0o600))
+	legacy := config.FederationCredential{
+		HubURL: "https://legacy-daemon.example", HubProjectID: 41,
+		Token: "legacy-token", PendingEnrollmentID: 7,
+	}
+	other := config.FederationCredential{
+		HubURL: "https://daemon.example", HubProjectID: 42, Token: "other-token",
+	}
+
+	require.NoError(t, config.WriteFederationCredential(otherUID, other))
+
+	credentials, err := config.ReadFederationCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, legacy, credentials.Projects[legacyUID])
+	assert.Equal(t, other, credentials.Projects[otherUID])
+}
+
+func TestReplaceFederationCredentialRejectsChangedLegacyLeaveConflict(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	const projectUID = "01LEGACYPROJECT00000000000"
+	path := filepath.Join(home, "credentials.toml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+[projects."01LEGACYPROJECT00000000000"]
+hub_url = "https://old-daemon.example"
+hub_project_id = 42
+token = "legacy-token"
+pending_enrollment_id = 7
+`), 0o600))
+	current := config.FederationCredential{
+		HubURL: "https://old-daemon.example", HubProjectID: 42,
+		Token: "legacy-token", PendingEnrollmentID: 7,
+	}
+	replacement := current
+	replacement.HubURL = "http://new-daemon.example"
+	replacement.AllowInsecure = true
+
+	err := config.ReplaceFederationCredential(config.FederationCredentialReplacement{
+		ProjectUID:  projectUID,
+		Expected:    current,
+		Replacement: replacement,
+	})
+
+	require.ErrorIs(t, err, config.ErrFederationCredentialConflict)
+	assert.ErrorContains(t, err, projectUID)
+	assert.ErrorContains(t, err, "7")
+	credentials, readErr := config.ReadFederationCredentials()
+	require.NoError(t, readErr)
+	assert.Equal(t, current, credentials.Projects[projectUID])
+}
+
 func TestReadFederationCredentialWithoutCapabilitiesDefaultsEmpty(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

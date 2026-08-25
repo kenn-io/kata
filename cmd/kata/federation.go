@@ -1795,11 +1795,11 @@ func federationQuarantineSkipCmd() *cobra.Command {
 			}
 			expected := fmt.Sprintf("SKIP FEDERATION BATCH %d", id)
 			confirm, err := resolveConfirm(cmd, confirm, expected,
-				fmt.Sprintf("Type %q to skip this federation batch: ", expected), confirmPromptFull)
+				fmt.Sprintf("Type %q to skip this federation batch: ", expected))
 			if err != nil {
 				return err
 			}
-			return runFederationQuarantineSkip(cmd.Context(), cmd, id, confirm, reason)
+			return runFederationQuarantineAction(cmd.Context(), cmd, id, "skip", confirm, reason)
 		},
 	}
 	cmd.Flags().StringVar(&confirm, "confirm", "", "exact confirmation string")
@@ -1825,11 +1825,11 @@ func federationQuarantineRetryCmd() *cobra.Command {
 			}
 			expected := fmt.Sprintf("RETRY FEDERATION BATCH %d", id)
 			confirm, err := resolveConfirm(cmd, confirm, expected,
-				fmt.Sprintf("Type %q to retry this federation batch: ", expected), confirmPromptFull)
+				fmt.Sprintf("Type %q to retry this federation batch: ", expected))
 			if err != nil {
 				return err
 			}
-			return runFederationQuarantineRetry(cmd.Context(), cmd, id, confirm, reason)
+			return runFederationQuarantineAction(cmd.Context(), cmd, id, "retry", confirm, reason)
 		},
 	}
 	cmd.Flags().StringVar(&confirm, "confirm", "", "exact confirmation string")
@@ -1837,7 +1837,11 @@ func federationQuarantineRetryCmd() *cobra.Command {
 	return cmd
 }
 
-func runFederationQuarantineSkip(ctx context.Context, cmd *cobra.Command, id int64, confirm, reason string) error {
+// runFederationQuarantineAction applies one of the two operator decisions for
+// an active push quarantine. Skip advances past the rejected batch; retry
+// releases the batch without advancing the cursor so the events can be sent
+// again on the next sync.
+func runFederationQuarantineAction(ctx context.Context, cmd *cobra.Command, id int64, action, confirm, reason string) error {
 	baseURL, err := ensureDaemon(ctx)
 	if err != nil {
 		return err
@@ -1863,7 +1867,7 @@ func runFederationQuarantineSkip(ctx context.Context, cmd *cobra.Command, id int
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	status, bs, err = httpDoJSONWithHeader(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/federation/quarantine/%d/skip", baseURL, projectID, id),
+		fmt.Sprintf("%s/api/v1/projects/%d/federation/quarantine/%d/%s", baseURL, projectID, id, action),
 		map[string]string{"X-Kata-Confirm": confirm},
 		map[string]any{"actor": actor, "reason": reason})
 	if err != nil {
@@ -1885,66 +1889,18 @@ func runFederationQuarantineSkip(ctx context.Context, cmd *cobra.Command, id int
 		return nil
 	}
 	if mode == outputAgent {
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK federation-quarantine-skip id=%d\n", id)
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK federation-quarantine-%s id=%d\n", action, id)
 		return err
 	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "quarantine #%d skipped\n", id)
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "quarantine #%d %s\n", id, federationQuarantineActionResult(action))
 	return err
 }
 
-func runFederationQuarantineRetry(ctx context.Context, cmd *cobra.Command, id int64, confirm, reason string) error {
-	baseURL, err := ensureDaemon(ctx)
-	if err != nil {
-		return err
+func federationQuarantineActionResult(action string) string {
+	if action == "retry" {
+		return "released for retry"
 	}
-	client, err := httpClientFor(ctx, baseURL)
-	if err != nil {
-		return err
-	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status", nil)
-	if err != nil {
-		return err
-	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
-	}
-	var body api.FederationStatusBody
-	if err := json.Unmarshal(bs, &body); err != nil {
-		return err
-	}
-	projectID, err := federationProjectForQuarantine(body, id)
-	if err != nil {
-		return err
-	}
-	actor, _ := resolveActor(ctx, flags.As, nil)
-	status, bs, err = httpDoJSONWithHeader(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/federation/quarantine/%d/retry", baseURL, projectID, id),
-		map[string]string{"X-Kata-Confirm": confirm},
-		map[string]any{"actor": actor, "reason": reason})
-	if err != nil {
-		return err
-	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
-	}
-	mode := currentOutputMode()
-	if mode == outputJSON {
-		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-			return err
-		}
-		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
-		return err
-	}
-	if flags.Quiet {
-		return nil
-	}
-	if mode == outputAgent {
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK federation-quarantine-retry id=%d\n", id)
-		return err
-	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "quarantine #%d released for retry\n", id)
-	return err
+	return "skipped"
 }
 
 func federationProjectForQuarantine(body api.FederationStatusBody, id int64) (int64, error) {

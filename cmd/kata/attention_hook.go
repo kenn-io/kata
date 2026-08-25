@@ -64,10 +64,7 @@ func parseAttentionHookArgs(args []string) (string, bool) {
 }
 
 func runAttentionHook(cmd *cobra.Command, mode string) {
-	if mode != "start" && mode != "end" {
-		return
-	}
-
+	// parseAttentionHookArgs is the sole caller, so mode is already validated.
 	// Claude Code exposes the workspace it launched from even when hook cwd
 	// differs. Prefer it as the normal project-resolution anchor when present.
 	if projectDir := strings.TrimSpace(os.Getenv("CLAUDE_PROJECT_DIR")); projectDir != "" {
@@ -93,10 +90,10 @@ const (
 	lookupOpen
 )
 
+// attnLookup uses empty attention for absent, null, and non-string metadata.
 type attnLookup struct {
 	kind      attnLookupKind
 	attention string
-	hasAttn   bool
 	revision  int64
 }
 
@@ -146,7 +143,7 @@ func attnEnd(d attnDaemon, kataRef string) {
 	}
 	for range attnWriteAttempts {
 		lookup := d.lookup(ref)
-		if lookup.kind != lookupOpen || !lookup.hasAttn || lookup.attention != attnValueOK {
+		if lookup.kind != lookupOpen || lookup.attention != attnValueOK {
 			return
 		}
 		if d.setMetaIfRevision(ref, map[string]string{
@@ -184,13 +181,7 @@ func (l *liveAttnDaemon) lookup(ref string) attnLookup {
 	if status >= http.StatusBadRequest {
 		return attnLookup{kind: lookupTransient}
 	}
-	var response struct {
-		Issue struct {
-			Status   string                     `json:"status"`
-			Metadata map[string]json.RawMessage `json:"metadata"`
-			Revision int64                      `json:"revision"`
-		} `json:"issue"`
-	}
+	var response metaShowResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return attnLookup{kind: lookupTransient}
 	}
@@ -200,12 +191,11 @@ func (l *liveAttnDaemon) lookup(ref string) attnLookup {
 	if response.Issue.Revision <= 0 {
 		return attnLookup{kind: lookupTransient}
 	}
-	lookup := attnLookup{kind: lookupOpen, revision: response.Issue.Revision}
-	if raw, ok := response.Issue.Metadata[attentionKey]; ok {
-		lookup.hasAttn = true
-		_ = json.Unmarshal(raw, &lookup.attention)
+	return attnLookup{
+		kind:      lookupOpen,
+		attention: decodeJSONString(response.Issue.Metadata[attentionKey]),
+		revision:  response.Issue.Revision,
 	}
-	return lookup
 }
 
 func (l *liveAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, revision int64) attnWriteResult {

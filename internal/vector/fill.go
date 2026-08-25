@@ -71,18 +71,14 @@ func (s progressStore) SaveVectors(ctx context.Context, gen, doc string, revisio
 // failure (shape-level 400, transient error, missing mirror row) keeps the
 // document pending by aborting the fill.
 func (ix *Index) contentSpecific400(ctx context.Context, doc string, enc kitvec.EncodeFunc, split kitvec.SplitOptions, batch kitvec.BatchOptions) bool {
-	var content string
-	query := `SELECT content FROM issue_mirror WHERE issue_uid = ?`
-	if ix.pg != nil {
-		query = `SELECT content FROM issue_vector_mirror WHERE issue_uid = $1`
-	}
-	if err := ix.db.QueryRowContext(ctx, query, doc).Scan(&content); err != nil {
+	content, err := ix.mirrorContent(ctx, doc)
+	if err != nil {
 		return false
 	}
 	chunks := kitvec.Split(content, split)
 	for i := range chunks {
 		chunks[i].Text = strings.Repeat("a", utf8.RuneCountInString(chunks[i].Text))
 	}
-	_, err := kitvec.EncodeBatched(ctx, enc, chunks, batch)
+	_, err = kitvec.EncodeBatched(ctx, enc, chunks, batch)
 	return err == nil
 }

@@ -129,28 +129,28 @@ func newCreateCmd() *cobra.Command {
 		var links []map[string]any
 		var parentRef string
 		if cmd.Flags().Changed("parent") {
-			r, err := resolveSingletonRefToWire(ctx, baseURL, projectName, projectID, parentRefSlice, "--parent", false)
+			r, err := singletonRefToWire(parentRefSlice, "--parent", projectName)
 			if err != nil {
 				return err
 			}
 			parentRef = r
 			links = append(links, map[string]any{"type": "parent", "to_ref": r})
 		}
-		blocksRefs, err := resolveRefSliceToWire(ctx, baseURL, projectName, projectID, blocks, "--blocks")
+		blocksRefs, err := refsToWire(blocks, "--blocks", projectName)
 		if err != nil {
 			return err
 		}
 		for _, r := range blocksRefs {
 			links = append(links, map[string]any{"type": "blocks", "to_ref": r})
 		}
-		blockedByRefs, err := resolveRefSliceToWire(ctx, baseURL, projectName, projectID, blockedBy, "--blocked-by")
+		blockedByRefs, err := refsToWire(blockedBy, "--blocked-by", projectName)
 		if err != nil {
 			return err
 		}
 		for _, r := range blockedByRefs {
 			links = append(links, map[string]any{"type": "blocks", "to_ref": r, "incoming": true})
 		}
-		relatedRefs, err := resolveRefSliceToWire(ctx, baseURL, projectName, projectID, related, "--related")
+		relatedRefs, err := refsToWire(related, "--related", projectName)
 		if err != nil {
 			return err
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -129,6 +130,34 @@ func TestBlocksReleasedPostgresMigrationRename(t *testing.T) {
 	var stderr bytes.Buffer
 	assert.Equal(t, 1, run(t.Context(), &stderr))
 	assert.Contains(t, stderr.String(), "internal/db/pgstore/migrations/000001_init.up.sql")
+}
+
+func TestBlocksRenameOntoMigrationReleasedAfterFeatureFork(t *testing.T) {
+	isolateGitEnvironment(t)
+	repo := initRepoWithMainMigration(t)
+	t.Chdir(repo)
+	t.Setenv("KATA_MIGRATION_BASE_REF", "main")
+
+	source := "internal/db/pgstore/migrations/000002_draft.up.sql"
+	destination := "internal/db/pgstore/migrations/000002_released.up.sql"
+	content := strings.Repeat("SELECT 1;\n", 20)
+	writeFile(t, repo, source, content)
+	gitCommand(t, "add", source)
+	gitCommand(t, "commit", "-qm", "draft migration")
+
+	gitCommand(t, "checkout", "main")
+	writeFile(t, repo, destination, content)
+	gitCommand(t, "add", destination)
+	gitCommand(t, "commit", "-qm", "release migration")
+	gitCommand(t, "checkout", "feature")
+
+	gitCommand(t, "mv", source, destination)
+	writeFile(t, repo, destination, "SELECT 2;\n"+strings.Repeat("SELECT 1;\n", 19))
+	gitCommand(t, "add", destination)
+
+	var stderr bytes.Buffer
+	assert.Equal(t, 1, run(t.Context(), &stderr))
+	assert.Contains(t, stderr.String(), "internal/db/pgstore/migrations/000002_released.up.sql")
 }
 
 func TestUsesHookGitIndexFile(t *testing.T) {

@@ -10,6 +10,25 @@ import (
 
 const mirrorPageSize = 500
 
+// mirrorContent reads one mirrored document's text. Each backend owns its own
+// table name and placeholder style, so the caller never has to know which is
+// in play.
+func (ix *Index) mirrorContent(ctx context.Context, doc string) (string, error) {
+	if ix.pg != nil {
+		return ix.pg.mirrorContent(ctx, doc)
+	}
+	return ix.sqliteMirrorContent(ctx, doc)
+}
+
+func (ix *Index) sqliteMirrorContent(ctx context.Context, doc string) (string, error) {
+	var content string
+	if err := ix.db.QueryRowContext(ctx,
+		`SELECT content FROM issue_mirror WHERE issue_uid = ?`, doc).Scan(&content); err != nil {
+		return "", err
+	}
+	return content, nil
+}
+
 // RefreshMirror synchronizes issue_mirror with the canonical store: it
 // upserts new/edited issues (rendering the embed recipe) and removes rows —
 // plus their vectors in every generation — for issues that left the feed
