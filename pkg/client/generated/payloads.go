@@ -2,6 +2,10 @@
 
 package generated
 
+type ReconcileExternalRootByKeyBody = ReconcileExternalRootByKeyRequestBody
+
+type MapConnectorFieldBody = MapConnectorFieldRequestBody
+
 type CreateFederationEnrollmentBody = CreateFederationEnrollmentRequestBody
 
 type RotateFederationEnrollmentBody = RotateFederationEnrollmentRequestBody
@@ -59,6 +63,18 @@ type ReopenIssueBody = ActionRequestBody
 type RestoreIssueBody = RestoreRequestBody
 
 type UnassignIssueBody = UnassignRequestBody
+
+type BindExternalRootBody = BindExternalRootRequestBody
+
+type PauseExternalRootBridgeBody = ExternalRootActionRequestBody
+
+type ReconcileExternalRootBridgeBody = ExternalRootActionRequestBody
+
+type ResolveExternalCommentBody = ResolveExternalCommentRequestBody
+
+type ResolveExternalFieldBody = ResolveExternalFieldRequestBody
+
+type ResumeExternalRootBridgeBody = ExternalRootActionRequestBody
 
 type CreateCommentBody = CommentRequestBody
 

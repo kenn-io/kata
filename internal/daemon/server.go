@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/vector"
 	kataweb "go.kenn.io/kata/internal/web"
 )
@@ -59,6 +60,10 @@ type ServerConfig struct {
 	GitHubSyncRunnerFactory  GitHubSyncRunnerFactory
 	GitHubSyncWake           func()
 	Hooks                    hooks.Sink
+	ExternalRootRegistry     *rootbridge.Registry
+	ExternalRootService      *rootbridge.Service
+	ExternalRootReconciler   *rootbridge.Reconciler
+	ExternalRootWake         func(int64)
 	// CloseThrottle controls whether the opt-in sibling-burst and repeated-
 	// message guards run on close. Zero-value means "guards off".
 	CloseThrottle CloseThrottlePolicy
@@ -239,6 +244,7 @@ func NewServer(cfg ServerConfig) *Server {
 	humaAPI := huma.NewAPI(humaConfig, api.WrapErrorAdapter(humago.NewAdapter(mux, "")))
 	withEmbeddingProfile(humaAPI, cfg.EmbeddingProfile)
 	withHostAccess(humaAPI, cfg.HostAccess)
+	withExternalRootAdministration(humaAPI)
 
 	s := &Server{cfg: cfg, api: humaAPI}
 	registerRoutes(humaAPI, mux, cfg)
@@ -576,6 +582,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerEventsHandlers(humaAPI, mux, cfg)
 	registerFederationHandlers(humaAPI, cfg)
 	registerIssueSyncHandlers(humaAPI, cfg)
+	registerExternalRootHandlers(humaAPI, cfg)
 	registerClaimHandlers(humaAPI, cfg)
 	registerDigestHandlers(humaAPI, cfg)
 	registerAuditHandlers(humaAPI, cfg)

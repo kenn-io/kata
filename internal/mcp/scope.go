@@ -195,6 +195,26 @@ func (s *Scope) Project(ctx context.Context, client *kataclient.Client, name str
 
 // IssueTarget resolves a qualified issue reference and enforces scope.
 func (s *Scope) IssueTarget(ctx context.Context, client *kataclient.Client, raw string, write bool) (ProjectIdentity, string, error) {
+	return s.issueTarget(ctx, client, raw, write, false)
+}
+
+// IssueTargetIncludingArchived resolves an issue reference within the startup
+// boundary while retaining archived projects for lifecycle cleanup operations.
+func (s *Scope) IssueTargetIncludingArchived(
+	ctx context.Context,
+	client *kataclient.Client,
+	raw string,
+	write bool,
+) (ProjectIdentity, string, error) {
+	return s.issueTarget(ctx, client, raw, write, true)
+}
+
+func (s *Scope) issueTarget(
+	ctx context.Context,
+	client *kataclient.Client,
+	raw string,
+	write, includeArchived bool,
+) (ProjectIdentity, string, error) {
 	ref := strings.TrimSpace(raw)
 	if ref == "" {
 		return ProjectIdentity{}, "", errors.New("issue reference must not be empty")
@@ -211,14 +231,14 @@ func (s *Scope) IssueTarget(ctx context.Context, client *kataclient.Client, raw 
 	}
 	projectName := parsed.Project
 	if s.mode == ScopeBound && projectName == "" {
-		projects, projectErr := s.Projects(ctx, client, false)
+		projects, projectErr := s.Projects(ctx, client, includeArchived)
 		if projectErr != nil {
 			return ProjectIdentity{}, "", projectErr
 		}
 		project := projects[0]
 		return project, ref, nil
 	}
-	project, err := s.Project(ctx, client, projectName, false)
+	project, err := s.Project(ctx, client, projectName, includeArchived)
 	if err != nil {
 		return ProjectIdentity{}, "", err
 	}

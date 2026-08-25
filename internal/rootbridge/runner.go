@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -31,7 +32,11 @@ type Runner struct {
 	MaxConcurrent int
 	Now           func() time.Time
 	EventSink     func(db.Event)
-	ErrorSink     func(error)
+	// EventSinkFrom takes precedence over EventSink and receives the admitted
+	// binding lease's fork source for hook work caused by reconciliation.
+	EventSinkFrom  func(db.Event, activity.Admission)
+	ErrorSink      func(error)
+	DrainAdmission activity.WaitableAdmission
 
 	reconcileFn func(context.Context, int64) (RunResult, error)
 
@@ -90,32 +95,63 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	sem := make(chan struct{}, concurrency)
 	var workers sync.WaitGroup
-	launch := func(bindingID int64) {
+	launch := func(bindingID int64) (<-chan struct{}, bool) {
 		select {
 		case sem <- struct{}{}:
-			workers.Go(func() {
-				defer func() {
-					if recover() != nil {
-						r.reportReconcileError(ctx, bindingID, errors.New("external root reconciliation panicked"))
-					}
-					<-sem
-					r.finished(bindingID)
-				}()
-				result, deliveredInline, err := r.reconcile(ctx, bindingID)
-				if !deliveredInline && r.EventSink != nil {
-					for _, event := range result.Events {
-						r.EventSink(event)
-					}
-				}
-				r.reportReconcileError(ctx, bindingID, err)
-			})
 		case <-ctx.Done():
 			r.finished(bindingID)
+			return nil, false
 		}
+		var drain *activity.Lease
+		if r.DrainAdmission != nil {
+			var admitted bool
+			var retry <-chan struct{}
+			drain, admitted, retry = r.DrainAdmission()
+			if !admitted {
+				<-sem
+				return retry, true
+			}
+		}
+		workers.Go(func() {
+			defer func() {
+				if recover() != nil {
+					r.reportReconcileError(ctx, bindingID, errors.New("external root reconciliation panicked"))
+				}
+				if drain != nil {
+					drain.Release()
+				}
+				<-sem
+				r.finished(bindingID)
+			}()
+			var eventFork activity.Admission
+			if drain != nil {
+				eventFork = drain.Fork
+			}
+			result, deliveredInline, err := r.reconcile(ctx, bindingID, eventFork)
+			if !deliveredInline {
+				for _, event := range result.Events {
+					r.emitEvent(event, eventFork)
+				}
+			}
+			r.reportReconcileError(ctx, bindingID, err)
+		})
+		return nil, false
 	}
-	scan := func() error {
+	scan := func() (<-chan struct{}, bool, error) {
 		if r.Store == nil {
-			return nil
+			return nil, false, nil
+		}
+		var drain *activity.Lease
+		if r.DrainAdmission != nil {
+			var admitted bool
+			var retry <-chan struct{}
+			drain, admitted, retry = r.DrainAdmission()
+			if !admitted {
+				return retry, true, nil
+			}
+		}
+		if drain != nil {
+			defer drain.Release()
 		}
 		now := time.Now().UTC()
 		if r.Now != nil {
@@ -127,19 +163,57 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		bindings, err := r.Store.ListDueExternalRootBindings(ctx, now, now.Add(-staleAfter), defaultExternalRootBatchLimit)
 		if err != nil {
-			return err
+			return nil, false, err
 		}
 		for _, binding := range bindings {
 			r.Wake(binding.ID)
 		}
-		return nil
+		return nil, false, nil
 	}
 	reportScanError := func(err error) {
 		if ctx.Err() == nil && r.ErrorSink != nil {
 			r.ErrorSink(fmt.Errorf("scan due external root bindings: %w", err))
 		}
 	}
-	if err := scan(); err != nil {
+	waitForAdmission := func(retry <-chan struct{}) bool {
+		if retry == nil {
+			<-ctx.Done()
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-retry:
+			return true
+		}
+	}
+	runScan := func() error {
+		for {
+			retry, denied, err := scan()
+			if !denied {
+				return err
+			}
+			if !waitForAdmission(retry) {
+				return ctx.Err()
+			}
+		}
+	}
+	launchWhenAdmitted := func(bindingID int64) error {
+		for {
+			retry, denied := launch(bindingID)
+			if !denied {
+				return nil
+			}
+			if !waitForAdmission(retry) {
+				r.finished(bindingID)
+				return ctx.Err()
+			}
+		}
+	}
+	if err := runScan(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		reportScanError(err)
 	}
 	ticker := time.NewTicker(interval)
@@ -150,22 +224,45 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case bindingID := <-r.WakeCh:
-			launch(bindingID)
+			if err := launchWhenAdmitted(bindingID); err != nil {
+				return err
+			}
 		case <-ticker.C:
-			if err := scan(); err != nil {
+			if err := runScan(); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				reportScanError(err)
 			}
 		}
 	}
 }
 
-func (r *Runner) reconcile(ctx context.Context, bindingID int64) (RunResult, bool, error) {
+func (r *Runner) reconcile(
+	ctx context.Context,
+	bindingID int64,
+	eventFork activity.Admission,
+) (RunResult, bool, error) {
 	if r.reconcileFn != nil {
 		result, err := r.reconcileFn(ctx, bindingID)
 		return result, false, err
 	}
-	result, err := r.Reconciler.Run(ctx, bindingID, RunOptions{EventSink: r.EventSink})
+	eventSink := r.EventSink
+	if r.EventSinkFrom != nil {
+		eventSink = func(event db.Event) { r.EventSinkFrom(event, eventFork) }
+	}
+	result, err := r.Reconciler.Run(ctx, bindingID, RunOptions{EventSink: eventSink})
 	return result, true, err
+}
+
+func (r *Runner) emitEvent(event db.Event, fork activity.Admission) {
+	if r.EventSinkFrom != nil {
+		r.EventSinkFrom(event, fork)
+		return
+	}
+	if r.EventSink != nil {
+		r.EventSink(event)
+	}
 }
 
 func (r *Runner) reportReconcileError(ctx context.Context, bindingID int64, err error) {

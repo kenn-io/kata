@@ -31,13 +31,22 @@ type FieldCodec interface {
 	ValidateExternalDescriptor(connector.FieldDescriptor) error
 }
 
-var fieldCodecs = map[string]FieldCodec{
-	"scheduled_on": scheduleCodec{key: "scheduled_on"},
-	"deadline_on":  scheduleCodec{key: "deadline_on"},
+var fieldCodecs = fieldCodecsForTimezone("")
+
+func fieldCodecsForTimezone(defaultTimezone string) map[string]FieldCodec {
+	defaultTimezone = strings.TrimSpace(defaultTimezone)
+	if defaultTimezone == "" {
+		defaultTimezone = "UTC"
+	}
+	return map[string]FieldCodec{
+		"scheduled_on": scheduleCodec{key: "scheduled_on", defaultTimezone: defaultTimezone},
+		"deadline_on":  scheduleCodec{key: "deadline_on", defaultTimezone: defaultTimezone},
+	}
 }
 
 type scheduleCodec struct {
-	key string
+	key             string
+	defaultTimezone string
 }
 
 func (c scheduleCodec) KataField() string {
@@ -61,7 +70,7 @@ func (c scheduleCodec) ReadKata(issue db.Issue) (connector.FieldValue, error) {
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", c.key, err)
 	}
-	field, err := kataScheduleFieldValue(value, values)
+	field, err := kataScheduleFieldValue(value, values, c.defaultTimezone)
 	if err != nil {
 		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", c.key, err)
 	}
@@ -94,7 +103,7 @@ func (c scheduleCodec) kataPatch(
 	if c.key == otherKey {
 		otherKey = "deadline_on"
 	}
-	if other, err := kataScheduleFieldValueFromMetadata(otherKey, values); err != nil {
+	if other, err := kataScheduleFieldValueFromMetadata(otherKey, values, c.defaultTimezone); err != nil {
 		return nil, err
 	} else if other.Kind == fieldKindLocalDateTime {
 		if other.Timezone != canonical.Timezone && coordinatedTimezone != canonical.Timezone {
@@ -169,7 +178,11 @@ func metadataObject(raw db.JSONBlob) (map[string]json.RawMessage, error) {
 	return values, nil
 }
 
-func kataScheduleFieldValue(value string, metadataValues map[string]json.RawMessage) (connector.FieldValue, error) {
+func kataScheduleFieldValue(
+	value string,
+	metadataValues map[string]json.RawMessage,
+	defaultTimezone string,
+) (connector.FieldValue, error) {
 	field := connector.FieldValue{Value: value}
 	switch scheduleKind(value) {
 	case fieldKindDate:
@@ -177,7 +190,7 @@ func kataScheduleFieldValue(value string, metadataValues map[string]json.RawMess
 	case fieldKindInstant:
 		field.Kind = fieldKindInstant
 	case fieldKindLocalDateTime:
-		timezone, err := metadataTimezone(metadataValues)
+		timezone, err := metadataTimezone(metadataValues, defaultTimezone)
 		if err != nil {
 			return connector.FieldValue{}, err
 		}
@@ -189,7 +202,11 @@ func kataScheduleFieldValue(value string, metadataValues map[string]json.RawMess
 	return canonicalFieldValue(field)
 }
 
-func kataScheduleFieldValueFromMetadata(key string, values map[string]json.RawMessage) (connector.FieldValue, error) {
+func kataScheduleFieldValueFromMetadata(
+	key string,
+	values map[string]json.RawMessage,
+	defaultTimezone string,
+) (connector.FieldValue, error) {
 	raw, ok := values[key]
 	if !ok || string(raw) == "null" {
 		return nullFieldValue(), nil
@@ -201,16 +218,20 @@ func kataScheduleFieldValueFromMetadata(key string, values map[string]json.RawMe
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", key, err)
 	}
-	return kataScheduleFieldValue(value, values)
+	return kataScheduleFieldValue(value, values, defaultTimezone)
 }
 
-func metadataTimezone(values map[string]json.RawMessage) (string, error) {
+func metadataTimezone(values map[string]json.RawMessage, defaultTimezone string) (string, error) {
 	timezone, present, err := optionalMetadataTimezone(values)
 	if err != nil {
 		return "", err
 	}
 	if !present {
-		return "", fmt.Errorf("local date-time requires issue timezone")
+		defaultTimezone = strings.TrimSpace(defaultTimezone)
+		if defaultTimezone == "" {
+			return "UTC", nil
+		}
+		return defaultTimezone, nil
 	}
 	return timezone, nil
 }

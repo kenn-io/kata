@@ -32,6 +32,9 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 		if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
 			return err
 		}
+		if err := rejectActiveExternalRootIssuePurge(ctx, tx, issue.ID); err != nil {
+			return err
+		}
 
 		var minEventID, maxEventID sql.NullInt64
 		if err := tx.QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM events
@@ -131,6 +134,36 @@ WHERE id = $1 AND last_materialized_uid = $4`,
 		return err
 	})
 	return result, err
+}
+
+func rejectActiveExternalRootIssuePurge(ctx context.Context, tx *sql.Tx, issueID int64) error {
+	var active int
+	err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM external_root_bindings WHERE issue_id = $1 AND active = 1 LIMIT 1`,
+		issueID,
+	).Scan(&active)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return mapSQLError(err, nil)
+	}
+	return db.ErrExternalRootContentOwned
+}
+
+func rejectActiveExternalRootProjectPurge(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	var active int
+	err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM external_root_bindings WHERE project_id = $1 AND active = 1 LIMIT 1`,
+		projectID,
+	).Scan(&active)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return mapSQLError(err, nil)
+	}
+	return db.ErrExternalRootContentOwned
 }
 
 // PurgeResetCheck reports the newest reserved cursor beyond afterID.

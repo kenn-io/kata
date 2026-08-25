@@ -89,6 +89,9 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 					return
 				}
 				if !p.InsecureReadonly {
+					if p.AllowUnauthenticatedPrivateNetworkWrites {
+						r = r.WithContext(withUnauthenticatedPrivateNetworkRequest(r.Context()))
+					}
 					next.ServeHTTP(w, r)
 					return
 				}

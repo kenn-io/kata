@@ -6,6 +6,48 @@ import (
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
 
+type GetConnectorStatusPath struct {
+	Instance string `json:"instance" validate:"required"`
+}
+
+func (g GetConnectorStatusPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
+type ReconcileExternalRootByKeyPath struct {
+	Instance string `json:"instance" validate:"required"`
+}
+
+func (r ReconcileExternalRootByKeyPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ListConnectorFieldsPath struct {
+	Instance string `json:"instance" validate:"required"`
+}
+
+func (l ListConnectorFieldsPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type UnmapConnectorFieldPath struct {
+	Instance  string `json:"instance" validate:"required"`
+	KataField string `json:"kata_field" validate:"required"`
+}
+
+func (u UnmapConnectorFieldPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type MapConnectorFieldPath struct {
+	Instance  string `json:"instance" validate:"required"`
+	KataField string `json:"kata_field" validate:"required"`
+}
+
+func (m MapConnectorFieldPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
+}
+
 type RevokeFederationEnrollmentPath struct {
 	EnrollmentID int64 `json:"enrollment_id"`
 }
@@ -247,6 +289,78 @@ type UnassignIssuePath struct {
 
 func (u UnassignIssuePath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type UnbindExternalRootPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (u UnbindExternalRootPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type GetExternalRootBridgePath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (g GetExternalRootBridgePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
+type BindExternalRootPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (b BindExternalRootPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(b))
+}
+
+type PauseExternalRootBridgePath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (p PauseExternalRootBridgePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
+type ReconcileExternalRootBridgePath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (r ReconcileExternalRootBridgePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ResolveExternalCommentPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (r ResolveExternalCommentPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ResolveExternalFieldPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (r ResolveExternalFieldPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ResumeExternalRootBridgePath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (r ResumeExternalRootBridgePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
 type CreateCommentPath struct {

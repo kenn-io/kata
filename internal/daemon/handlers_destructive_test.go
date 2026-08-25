@@ -58,6 +58,31 @@ func TestDelete_AcceptsCorrectConfirmAndSoftDeletes(t *testing.T) {
 	require.Equal(t, 404, respShow.StatusCode, string(bs))
 }
 
+func TestDelete_RequiresAdministratorToUnbindExternalRootFirst(t *testing.T) {
+	h, ts, pid, num := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(t.Context(), num)
+	require.NoError(t, err)
+	binding, _, err := h.DB().CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+		ProjectID: pid, IssueID: issue.ID,
+		ConnectorInstance: "example", ExternalRootKey: "root-delete-guard",
+		ExternalAccountKey: "example-account", Actor: "integration-admin",
+		ReceiveCommentsAfter: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	resp := postWithHeader(t, ts, issueURL(pid, num, "actions/delete"),
+		map[string]string{"X-Kata-Confirm": confirmHeader(t, h, pid, num, "DELETE")},
+		map[string]any{"actor": "agent"})
+
+	assertAPIError(t, resp.status, resp.body, 409, "external_root_content_owned")
+	retainedIssue, err := h.DB().IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Nil(t, retainedIssue.DeletedAt)
+	retainedBinding, err := h.DB().ExternalRootBindingByID(t.Context(), binding.ID)
+	require.NoError(t, err)
+	assert.True(t, retainedBinding.Active)
+}
+
 func TestDelete_AlreadyDeletedIsNoOp(t *testing.T) {
 	h, ts, pid, num := bootstrapProjectWithIssue(t)
 	hdr := confirmHeader(t, h, pid, num, "DELETE")
@@ -121,6 +146,30 @@ func TestPurge_RequiresConfirmHeaderAndRemovesAllRows(t *testing.T) {
 	// Subsequent show 404s — issue is gone.
 	respShow, _ := getStatusBody(t, ts, issueURL(pid, num, "")+"?include_deleted=true")
 	assert.Equal(t, 404, respShow.StatusCode)
+}
+
+func TestPurge_RequiresAdministratorToUnbindExternalRootFirst(t *testing.T) {
+	h, ts, pid, num := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(t.Context(), num)
+	require.NoError(t, err)
+	binding, _, err := h.DB().CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+		ProjectID: pid, IssueID: issue.ID,
+		ConnectorInstance: "example", ExternalRootKey: "root-purge-guard",
+		ExternalAccountKey: "example-account", Actor: "integration-admin",
+		ReceiveCommentsAfter: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	resp := postWithHeader(t, ts, issueURL(pid, num, "actions/purge"),
+		map[string]string{"X-Kata-Confirm": confirmHeader(t, h, pid, num, "PURGE")},
+		map[string]any{"actor": "agent"})
+
+	assertAPIError(t, resp.status, resp.body, 409, "external_root_content_owned")
+	_, err = h.DB().IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	retainedBinding, err := h.DB().ExternalRootBindingByID(t.Context(), binding.ID)
+	require.NoError(t, err)
+	assert.True(t, retainedBinding.Active)
 }
 
 func TestPurge_FederatedSpokeRequiresHubAdmin(t *testing.T) {

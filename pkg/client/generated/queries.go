@@ -164,6 +164,14 @@ type ShowIssueQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
 }
 
+type UnbindExternalRootQuery struct {
+	Actor *string `json:"actor,omitempty"`
+}
+
+type GetExternalRootBridgeQuery struct {
+	Actor *string `json:"actor,omitempty"`
+}
+
 type ReachableIssueGraphQuery struct {
 	// Depth full or a bounded hop count such as 1, 2, or 3
 	Depth    *string `json:"depth,omitempty"`

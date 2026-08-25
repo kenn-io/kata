@@ -45,6 +45,35 @@ func TestScheduleCodecReadKataRejectsInvalidTimezone(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestScheduleCodecReadKataUsesConfiguredAndUTCFallbacks(t *testing.T) {
+	issue := db.Issue{Metadata: db.JSONBlob(`{"scheduled_on":"2026-08-20T09:30"}`)}
+
+	configured, err := (scheduleCodec{
+		key: "scheduled_on", defaultTimezone: "America/Chicago",
+	}).ReadKata(issue)
+	require.NoError(t, err)
+	assert.Equal(t, connector.FieldValue{
+		Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Chicago",
+	}, configured)
+
+	utc, err := fieldCodecs["scheduled_on"].ReadKata(issue)
+	require.NoError(t, err)
+	assert.Equal(t, "UTC", utc.Timezone)
+}
+
+func TestBridgeConstructorsCarryConfiguredTimezoneToCodecs(t *testing.T) {
+	issue := db.Issue{Metadata: db.JSONBlob(`{"scheduled_on":"2026-08-20T09:30"}`)}
+	reconciler := NewReconciler(nil, nil, ReconcilerConfig{DefaultTimezone: "Europe/Paris"})
+	service := NewServiceWithEventSinkAndDefaultTimezone(nil, nil, nil, nil, "Europe/Paris")
+
+	reconciled, err := reconciler.fieldCodecs["scheduled_on"].ReadKata(issue)
+	require.NoError(t, err)
+	resolved, err := service.fieldCodecs["scheduled_on"].ReadKata(issue)
+	require.NoError(t, err)
+	assert.Equal(t, "Europe/Paris", reconciled.Timezone)
+	assert.Equal(t, "Europe/Paris", resolved.Timezone)
+}
+
 func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 	codec := fieldCodecs["scheduled_on"]
 	for _, value := range []connector.FieldValue{

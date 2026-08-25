@@ -118,6 +118,11 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "comment_not_found", "comment not found", "", nil)
 		}
+		if errors.Is(err, db.ErrExternalCommentContentOwned) {
+			return nil, api.NewError(409, "external_comment_content_owned",
+				"the comment body is owned by an active external root binding",
+				"edit the comment at its external source or unbind the external root before editing it locally", nil)
+		}
 		if err != nil {
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr

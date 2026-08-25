@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 func TestCommentEndpoint_AppendsAndEmitsEvent(t *testing.T) {
@@ -88,6 +90,35 @@ func TestCommentEndpoint_EditsCommentAndEmitsEvent(t *testing.T) {
 	assert.Contains(t, string(editBS), `"body":"[redacted]"`)
 	assert.Contains(t, string(editBS), `"type":"issue.comment_edited"`)
 	assert.NotContains(t, string(editBS), "token=leaked")
+}
+
+func TestCommentEndpoint_RejectsEditingExternallyOwnedComment(t *testing.T) {
+	h, ts, pid, issueID := bootstrapProjectWithIssue(t)
+	observedAt := time.Date(2026, 8, 23, 9, 0, 0, 0, time.UTC)
+	binding, _, err := h.DB().CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+		ProjectID: pid, IssueID: issueID, ConnectorInstance: "example-connector",
+		ExternalRootKey: "external-root", ExternalAccountKey: "external-account",
+		Actor: "connector:example-connector", ReceiveCommentsAfter: observedAt,
+	})
+	require.NoError(t, err)
+	claimed, acquired, err := h.DB().ClaimExternalRootBinding(
+		t.Context(), binding.ID, "projection-claim", observedAt, observedAt.Add(-time.Minute),
+	)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	comment, _, _, err := h.DB().UpsertExternalCommentProjection(t.Context(), db.ExternalCommentProjectionParams{
+		BindingID: claimed.ID, ClaimToken: claimed.ClaimToken,
+		ExternalID: "external-comment", ExternalRevision: "revision-1",
+		Body: "Provider-owned comment", ExternalActorID: "external-actor",
+		ExternalActorName: "External author", ExternalCreatedAt: observedAt,
+		ExternalUpdatedAt: observedAt, IntegrationActor: "connector:example-connector",
+	})
+	require.NoError(t, err)
+
+	resp, body := patchJSON(t, ts, issueURL(pid, issueID, "comments/"+comment.UID),
+		map[string]any{"actor": "redactor", "body": "local replacement"})
+
+	assertAPIError(t, resp.StatusCode, body, 409, "external_comment_content_owned")
 }
 
 func TestActionsClose_ReopenRoundtrip(t *testing.T) {

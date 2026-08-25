@@ -8,6 +8,30 @@ type AuditClosesResponse = AuditClosesResponseBody
 
 type AuditClosesErrorResponse = ErrorEnvelope
 
+type ListConnectorsResponse = ConnectorListResponseBody
+
+type ListConnectorsErrorResponse = ErrorEnvelope
+
+type GetConnectorStatusResponse = ConnectorOut
+
+type GetConnectorStatusErrorResponse = ErrorEnvelope
+
+type ReconcileExternalRootByKeyResponse = ExternalRootRunOut
+
+type ReconcileExternalRootByKeyErrorResponse = ErrorEnvelope
+
+type ListConnectorFieldsResponse = ConnectorFieldsResponseBody
+
+type ListConnectorFieldsErrorResponse = ErrorEnvelope
+
+type UnmapConnectorFieldResponse = ExternalFieldMappingOut
+
+type UnmapConnectorFieldErrorResponse = ErrorEnvelope
+
+type MapConnectorFieldResponse = ExternalFieldMappingOut
+
+type MapConnectorFieldErrorResponse = ErrorEnvelope
+
 type DigestGlobalResponse = DigestResponseBody
 
 type DigestGlobalErrorResponse = ErrorEnvelope
@@ -225,6 +249,38 @@ type UnassignIssueResponse = MutationResponseBody
 
 type UnassignIssueErrorResponse = ErrorEnvelope
 
+type UnbindExternalRootResponse = ExternalRootBridgeOut
+
+type UnbindExternalRootErrorResponse = ErrorEnvelope
+
+type GetExternalRootBridgeResponse = ExternalRootBridgeOut
+
+type GetExternalRootBridgeErrorResponse = ErrorEnvelope
+
+type BindExternalRootResponse = ExternalRootBridgeOut
+
+type BindExternalRootErrorResponse = ErrorEnvelope
+
+type PauseExternalRootBridgeResponse = ExternalRootBridgeOut
+
+type PauseExternalRootBridgeErrorResponse = ErrorEnvelope
+
+type ReconcileExternalRootBridgeResponse = ExternalRootRunOut
+
+type ReconcileExternalRootBridgeErrorResponse = ErrorEnvelope
+
+type ResolveExternalCommentResponse = ExternalRootBridgeOut
+
+type ResolveExternalCommentErrorResponse = ErrorEnvelope
+
+type ResolveExternalFieldResponse = ExternalRootBridgeOut
+
+type ResolveExternalFieldErrorResponse = ErrorEnvelope
+
+type ResumeExternalRootBridgeResponse = ExternalRootBridgeOut
+
+type ResumeExternalRootBridgeErrorResponse = ErrorEnvelope
+
 type CreateCommentResponse = CommentResponseBody
 
 type CreateCommentErrorResponse = ErrorEnvelope
@@ -352,6 +408,48 @@ type AuditClosesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AuditClosesResponse
+}
+
+type ListConnectorsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListConnectorsResponse
+}
+
+type GetConnectorStatusResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetConnectorStatusResponse
+}
+
+type ReconcileExternalRootByKeyResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReconcileExternalRootByKeyResponse
+}
+
+type ListConnectorFieldsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListConnectorFieldsResponse
+}
+
+type UnmapConnectorFieldResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *UnmapConnectorFieldResponse
+}
+
+type MapConnectorFieldResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *MapConnectorFieldResponse
 }
 
 type DigestGlobalResp struct {
@@ -734,6 +832,62 @@ type UnassignIssueResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *UnassignIssueResponse
+}
+
+type UnbindExternalRootResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *UnbindExternalRootResponse
+}
+
+type GetExternalRootBridgeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetExternalRootBridgeResponse
+}
+
+type BindExternalRootResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *BindExternalRootResponse
+}
+
+type PauseExternalRootBridgeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PauseExternalRootBridgeResponse
+}
+
+type ReconcileExternalRootBridgeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReconcileExternalRootBridgeResponse
+}
+
+type ResolveExternalCommentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ResolveExternalCommentResponse
+}
+
+type ResolveExternalFieldResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ResolveExternalFieldResponse
+}
+
+type ResumeExternalRootBridgeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ResumeExternalRootBridgeResponse
 }
 
 type CreateCommentResp struct {

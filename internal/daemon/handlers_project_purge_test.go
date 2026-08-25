@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/rootbridge"
 )
 
 func purgeProjectPath(projectID int64) string {
@@ -117,6 +119,47 @@ func TestPurgeProjectHandler_PurgesArchived(t *testing.T) {
 		require.NoError(t, json.Unmarshal(resp.body, &envelope), string(resp.body))
 		assert.Equal(t, "hub", envelope.Error.Data["role"])
 	})
+}
+
+func TestPurgeProjectHandler_RequiresExternalRootsToBeUnboundFirst(t *testing.T) {
+	h, pid := bootstrapProject(t, func(cfg *daemon.ServerConfig) {
+		cfg.ExternalRootService = rootbridge.NewService(cfg.DB, nil, nil)
+	})
+	ts := h.ts.(*httptest.Server)
+	issue, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: pid, Title: "Bound issue", Author: "tester",
+	})
+	require.NoError(t, err)
+	binding, _, err := h.DB().CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+		ProjectID: pid, IssueID: issue.ID,
+		ConnectorInstance: "example", ExternalRootKey: "root-project-purge-guard",
+		ExternalAccountKey: "example-account", Actor: "integration-admin",
+		ReceiveCommentsAfter: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	archiveProject(t, h, pid, true)
+
+	resp := postWithHeader(t, ts, purgeProjectPath(pid),
+		map[string]string{"X-Kata-Confirm": "PURGE kata"},
+		map[string]any{"actor": "tester"})
+
+	assertAPIError(t, resp.status, resp.body, 409, "external_root_content_owned")
+	_, err = h.DB().ProjectByID(t.Context(), pid)
+	require.NoError(t, err)
+	retainedBinding, err := h.DB().ExternalRootBindingByID(t.Context(), binding.ID)
+	require.NoError(t, err)
+	assert.True(t, retainedBinding.Active)
+
+	bridgePath := fmt.Sprintf("/api/v1/projects/%d/issues/%s/bridge?actor=tester", pid, issue.ShortID)
+	unbindStatus, unbindBody := requestExternalRootJSON(t, ts.URL, http.MethodDelete, bridgePath, nil)
+	require.Equal(t, http.StatusOK, unbindStatus, string(unbindBody))
+
+	resp = postWithHeader(t, ts, purgeProjectPath(pid),
+		map[string]string{"X-Kata-Confirm": "PURGE kata"},
+		map[string]any{"actor": "tester"})
+	require.Equal(t, http.StatusOK, resp.status, string(resp.body))
+	_, err = h.DB().ProjectByID(t.Context(), pid)
+	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 // TestPurgeProjectHandler_BroadcastsResetToScopedSubscribers locks in the

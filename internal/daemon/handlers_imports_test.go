@@ -171,6 +171,64 @@ func TestImportEndpoint_SourceNewerUpdatesIssue(t *testing.T) {
 	assert.Equal(t, "done", *issue.ClosedReason)
 }
 
+func TestImportEndpoint_ExternalRootContentOwnedReturnsNeutralConflict(t *testing.T) {
+	env := testenv.New(t)
+	project := createImportTestProject(t, env, "", "example-project")
+	initial := map[string]any{
+		"actor":  "importer",
+		"source": "example-import",
+		"items": []map[string]any{importEndpointItem(map[string]any{
+			"external_id": "bound-root",
+			"title":       "External root",
+			"body":        "External body",
+		})},
+	}
+	envPostJSON(t, env, importEndpointPath(project.ID), initial, &struct{}{})
+	mapping, err := env.DB.ImportMappingBySource(
+		context.Background(), project.ID, "example-import", "issue", "bound-root",
+	)
+	require.NoError(t, err)
+	require.NotNil(t, mapping.IssueID)
+	issue, err := env.DB.IssueByID(context.Background(), *mapping.IssueID)
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateExternalRootBinding(context.Background(), db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
+		ExternalRootKey: "opaque-root-key", ExternalAccountKey: "opaque-account-key",
+		Actor: "tester", ReceiveCommentsAfter: time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	beforeEventID, err := env.DB.MaxEventID(context.Background())
+	require.NoError(t, err)
+
+	priority := int64(2)
+	changed := map[string]any{
+		"actor":  "importer",
+		"source": "example-import",
+		"items": []map[string]any{importEndpointItem(map[string]any{
+			"external_id": "bound-root",
+			"title":       "Forbidden imported title",
+			"body":        "Forbidden imported body",
+			"priority":    priority,
+			"updated_at":  "2026-05-01T11:00:00Z",
+		})},
+	}
+	resp, raw := envDoRaw(t, env, http.MethodPost, importEndpointPath(project.ID), changed, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "external_root_content_owned")
+	assert.Contains(t, string(raw), "kata bridge unbind")
+	assert.NotContains(t, string(raw), "example-connector")
+	assert.NotContains(t, string(raw), "opaque-root-key")
+	after, readErr := env.DB.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, readErr)
+	assert.Equal(t, issue.Title, after.Title)
+	assert.Equal(t, issue.Body, after.Body)
+	assert.Equal(t, issue.Priority, after.Priority)
+	assert.Equal(t, issue.Revision, after.Revision)
+	afterEventID, readErr := env.DB.MaxEventID(context.Background())
+	require.NoError(t, readErr)
+	assert.Equal(t, beforeEventID, afterEventID)
+}
+
 func TestImportEndpoint_FederatedExistingIssueAllowsUnclaimedUpdate(t *testing.T) {
 	ctx := context.Background()
 	env := testenv.New(t)

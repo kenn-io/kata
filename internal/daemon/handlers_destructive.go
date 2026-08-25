@@ -47,6 +47,9 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if errors.Is(err, db.ErrFederatedReadOnly) {
 			return nil, federationReadOnlyError(err)
 		}
+		if errors.Is(err, db.ErrExternalRootContentOwned) {
+			return nil, externalRootContentOwnedAPIError()
+		}
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
@@ -136,6 +139,9 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(409, "federated_admin_required", err.Error(), "", nil)
 			}
 			return nil, federationReadOnlyError(err)
+		}
+		if errors.Is(err, db.ErrExternalRootContentOwned) {
+			return nil, externalRootContentOwnedAPIError()
 		}
 		if err != nil {
 			return nil, internalAPIError(err)

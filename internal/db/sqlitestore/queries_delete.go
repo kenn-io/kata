@@ -227,6 +227,9 @@ func (d *Store) purgeIssue(ctx context.Context, issueID int64, actor string, rea
 	if err := ensureFederatedSpokeUnsupportedTx(ctx, conn, issue.ProjectID); err != nil {
 		return db.PurgeLog{}, err
 	}
+	if err := rejectActiveExternalRootIssuePurge(ctx, conn, issue.ID); err != nil {
+		return db.PurgeLog{}, err
+	}
 
 	purgeLogID, err := purgeCascade(ctx, conn, issue, projectName, actor, reason, d.instanceUID)
 	if err != nil {
@@ -250,6 +253,36 @@ func (d *Store) purgeIssue(ctx context.Context, issueID int64, actor string, rea
 type connExec interface {
 	sqlReader
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func rejectActiveExternalRootIssuePurge(ctx context.Context, q sqlReader, issueID int64) error {
+	var active int
+	err := q.QueryRowContext(ctx,
+		`SELECT 1 FROM external_root_bindings WHERE issue_id = ? AND active = 1 LIMIT 1`,
+		issueID,
+	).Scan(&active)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check active external root binding: %w", err)
+	}
+	return db.ErrExternalRootContentOwned
+}
+
+func rejectActiveExternalRootProjectPurge(ctx context.Context, q sqlReader, projectID int64) error {
+	var active int
+	err := q.QueryRowContext(ctx,
+		`SELECT 1 FROM external_root_bindings WHERE project_id = ? AND active = 1 LIMIT 1`,
+		projectID,
+	).Scan(&active)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check active external root binding: %w", err)
+	}
+	return db.ErrExternalRootContentOwned
 }
 
 // purgeCascade is steps 2-7 of PurgeIssue. It runs inside the BEGIN IMMEDIATE

@@ -333,6 +333,11 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "project_federated",
 				fedErr.Error(), hint, map[string]any{"role": string(fedErr.Role)})
 		}
+		if errors.Is(err, db.ErrExternalRootContentOwned) {
+			return nil, api.NewError(409, "external_root_content_owned",
+				"the project contains an active external root binding",
+				"run `kata bridge unbind <issue-ref>` for every bound issue before purging the project", nil)
+		}
 		if err != nil {
 			return nil, internalAPIError(err)
 		}

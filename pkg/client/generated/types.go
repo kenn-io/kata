@@ -153,6 +153,17 @@ func (a AuthInfoOut) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
+type BindExternalRootRequestBody struct {
+	Actor           *string `json:"actor,omitempty"`
+	Connector       string  `json:"connector" validate:"required"`
+	External        string  `json:"external" validate:"required"`
+	PublishComments *bool   `json:"publish_comments,omitempty"`
+}
+
+func (b BindExternalRootRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(b))
+}
+
 type ChildCounts struct {
 	Open  int64 `json:"open"`
 	Total int64 `json:"total"`
@@ -499,6 +510,59 @@ func (c CommentResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type ConnectorFieldsResponseBody struct {
+	Fields []FieldDescriptor `json:"fields,omitempty" validate:"required"`
+}
+
+func (c ConnectorFieldsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range c.Fields {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Fields[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type ConnectorListResponseBody struct {
+	Connectors []ConnectorOut `json:"connectors,omitempty" validate:"required"`
+}
+
+func (c ConnectorListResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range c.Connectors {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Connectors[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type ConnectorOut struct {
+	AccountIdentity *string  `json:"account_identity,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
+	ConnectorID     *string  `json:"connector_id,omitempty"`
+	DisplayName     *string  `json:"display_name,omitempty"`
+	HealthError     *string  `json:"health_error,omitempty"`
+	Healthy         bool     `json:"healthy"`
+	InstanceID      string   `json:"instance_id" validate:"required"`
+	Protocol        *string  `json:"protocol,omitempty"`
+}
+
+func (c ConnectorOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
 type CreateFederationEnrollmentRequestBody struct {
@@ -1068,6 +1132,136 @@ func (e Evidence) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(e))
 }
 
+type ExternalFieldCandidateOut struct {
+	Kind     string  `json:"kind" validate:"required"`
+	Timezone *string `json:"timezone,omitempty"`
+	Value    *string `json:"value,omitempty"`
+}
+
+func (e ExternalFieldCandidateOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(e))
+}
+
+type ExternalFieldConflictOut struct {
+	ConflictAt        *time.Time                 `json:"conflict_at,omitempty"`
+	ExternalCandidate *ExternalFieldCandidateOut `json:"external_candidate,omitempty"`
+	KataCandidate     *ExternalFieldCandidateOut `json:"kata_candidate,omitempty"`
+	KataField         string                     `json:"kata_field" validate:"required"`
+}
+
+func (e ExternalFieldConflictOut) Validate() error {
+	var errors runtime.ValidationErrors
+	if e.ExternalCandidate != nil {
+		if v, ok := any(e.ExternalCandidate).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ExternalCandidate", err)
+			}
+		}
+	}
+	if e.KataCandidate != nil {
+		if v, ok := any(e.KataCandidate).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("KataCandidate", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(e.KataField, "required"); err != nil {
+		errors = errors.Append("KataField", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type ExternalFieldMappingOut struct {
+	AcceptedKinds     []string `json:"accepted_kinds,omitempty" validate:"required"`
+	Active            bool     `json:"active"`
+	ExternalFieldID   string   `json:"external_field_id" validate:"required"`
+	ExternalFieldName string   `json:"external_field_name" validate:"required"`
+	KataField         string   `json:"kata_field" validate:"required"`
+	Nullable          bool     `json:"nullable"`
+	SchemaRevision    string   `json:"schema_revision" validate:"required"`
+	Writable          bool     `json:"writable"`
+}
+
+func (e ExternalFieldMappingOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(e))
+}
+
+type ExternalRootActionRequestBody struct {
+	Actor  *string `json:"actor,omitempty"`
+	Reason *string `json:"reason,omitempty"`
+}
+
+type ExternalRootBridgeOut struct {
+	Active              bool                       `json:"active"`
+	CompleteExternal    bool                       `json:"complete_external"`
+	ConnectorInstance   string                     `json:"connector_instance" validate:"required"`
+	ConsecutiveFailures int64                      `json:"consecutive_failures"`
+	Enabled             bool                       `json:"enabled"`
+	FieldConflicts      []ExternalFieldConflictOut `json:"field_conflicts,omitempty"`
+	ID                  int64                      `json:"id"`
+	IssueID             int64                      `json:"issue_id"`
+	LastAttemptAt       *time.Time                 `json:"last_attempt_at,omitempty"`
+	LastError           *string                    `json:"last_error,omitempty"`
+	LastErrorAt         *time.Time                 `json:"last_error_at,omitempty"`
+	LastExternalState   *string                    `json:"last_external_state,omitempty"`
+	LastSuccessAt       *time.Time                 `json:"last_success_at,omitempty"`
+	NextAttemptAt       *time.Time                 `json:"next_attempt_at,omitempty"`
+	PausedReason        *string                    `json:"paused_reason,omitempty"`
+	PendingCommentUID   *string                    `json:"pending_comment_uid,omitempty"`
+	ProjectID           int64                      `json:"project_id"`
+	PublishComments     bool                       `json:"publish_comments"`
+	ReceiveComments     bool                       `json:"receive_comments"`
+	UID                 string                     `json:"uid" validate:"required"`
+}
+
+func (e ExternalRootBridgeOut) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(e.ConnectorInstance, "required"); err != nil {
+		errors = errors.Append("ConnectorInstance", err)
+	}
+	for i, item := range e.FieldConflicts {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("FieldConflicts[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(e.UID, "required"); err != nil {
+		errors = errors.Append("UID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type ExternalRootRunOut struct {
+	Bridge             ExternalRootBridgeOut `json:"bridge"`
+	CommentsCreated    int64                 `json:"comments_created"`
+	CommentsEdited     int64                 `json:"comments_edited"`
+	CompletionRequests int64                 `json:"completion_requests"`
+	FieldConflicts     int64                 `json:"field_conflicts"`
+	Paused             bool                  `json:"paused"`
+	ReopenRequests     int64                 `json:"reopen_requests"`
+	RootUpdated        bool                  `json:"root_updated"`
+}
+
+func (e ExternalRootRunOut) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(e.Bridge).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Bridge", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type FederationBindingOut struct {
 	Actor                *string    `json:"actor,omitempty"`
 	CreatedAt            time.Time  `json:"created_at" validate:"required"`
@@ -1291,6 +1485,19 @@ type FederationViolationSummary struct {
 }
 
 func (f FederationViolationSummary) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type FieldDescriptor struct {
+	AcceptedKinds  []string `json:"accepted_kinds,omitempty" validate:"required"`
+	DisplayName    string   `json:"display_name" validate:"required"`
+	ID             string   `json:"id" validate:"required"`
+	Nullable       bool     `json:"nullable"`
+	SchemaRevision string   `json:"schema_revision" validate:"required"`
+	Writable       bool     `json:"writable"`
+}
+
+func (f FieldDescriptor) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
@@ -2291,6 +2498,14 @@ func (l ListTokensResponseBody) Validate() error {
 	return errors
 }
 
+type MapConnectorFieldRequestBody struct {
+	ExternalField string `json:"external_field" validate:"required"`
+}
+
+func (m MapConnectorFieldRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
+}
+
 type MergeProjectRequestBody struct {
 	Actor           *string `json:"actor,omitempty"`
 	SourceProjectID int64   `json:"source_project_id"`
@@ -3104,6 +3319,14 @@ func (r RebindFederationReplicaResponseBody) Validate() error {
 	return errors
 }
 
+type ReconcileExternalRootByKeyRequestBody struct {
+	RootKey string `json:"root_key" validate:"required"`
+}
+
+func (r ReconcileExternalRootByKeyRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type Recurrence struct {
 	Author              string         `json:"author" validate:"required"`
 	CreatedAt           time.Time      `json:"created_at" validate:"required"`
@@ -3183,6 +3406,26 @@ type RenameProjectRequestBody struct {
 }
 
 func (r RenameProjectRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ResolveExternalCommentRequestBody struct {
+	Action            string  `json:"action" validate:"required"`
+	Actor             *string `json:"actor,omitempty"`
+	ExternalCommentID *string `json:"external_comment_id,omitempty"`
+}
+
+func (r ResolveExternalCommentRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ResolveExternalFieldRequestBody struct {
+	Actor     *string `json:"actor,omitempty"`
+	KataField string  `json:"kata_field" validate:"required"`
+	Use       string  `json:"use" validate:"required"`
+}
+
+func (r ResolveExternalFieldRequestBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 

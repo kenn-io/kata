@@ -35,6 +35,7 @@ import (
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/vector"
@@ -2762,4 +2763,362 @@ func writeReusedRuntimePID(t *testing.T, home string, pid int) {
 		StartedAt:         time.Now().UTC(),
 	})
 	require.NoError(t, err)
+}
+
+func TestExternalRootEventWakeUsesActualNativeEventsAndSkipsProjectionLoops(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "External root", Author: "tester",
+	})
+	require.NoError(t, err)
+	binding, _, err := store.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
+		ExternalRootKey: "root-1", ExternalAccountKey: "account-1", Actor: "tester",
+		ReceiveCommentsAfter: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	broadcaster := daemon.NewEventBroadcaster()
+	wakes := make(chan int64, 10)
+	ctx, cancel := context.WithCancel(t.Context())
+	workers := newDaemonWorkerGroup()
+	t.Cleanup(func() {
+		cancel()
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+		defer waitCancel()
+		require.True(t, workers.Wait(waitCtx))
+	})
+	startExternalRootEventWake(ctx, workers, store, broadcaster, func(id int64) { wakes <- id })
+	for _, eventType := range []string{
+		"issue.commented", "issue.comment_edited", "issue.updated",
+		"issue.metadata_updated", "issue.closed", "issue.reopened",
+	} {
+		issueID := issue.ID
+		broadcaster.Broadcast(daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
+			Type: eventType, IssueID: &issueID, Actor: "operator",
+		}})
+	}
+	issueID := issue.ID
+	broadcaster.Broadcast(daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
+		Type: "issue.metadata_changed", IssueID: &issueID, Actor: "operator",
+	}})
+	broadcaster.Broadcast(daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
+		Type: "issue.updated", IssueID: &issueID, Actor: "connector:local-operator",
+	}})
+	broadcaster.Broadcast(daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
+		Type: "issue.updated", IssueID: &issueID, Actor: "connector:example-connector",
+		Payload: `{"source":{"connector_instance":"example-connector"}}`,
+	}})
+
+	for range 7 {
+		select {
+		case got := <-wakes:
+			assert.Equal(t, binding.ID, got)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for external root wake")
+		}
+	}
+	select {
+	case extra := <-wakes:
+		t.Fatalf("unexpected wake %d", extra)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestExternalRootEventWakeReconnectsAfterBroadcasterOverflow(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "External root", Author: "tester",
+	})
+	require.NoError(t, err)
+	binding, _, err := store.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
+		ExternalRootKey: "root-1", ExternalAccountKey: "account-1", Actor: "tester",
+		ReceiveCommentsAfter: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	broadcaster := daemon.NewEventBroadcaster()
+	firstWake := make(chan struct{})
+	release := make(chan struct{})
+	var wakeCount atomic.Int64
+	ctx, cancel := context.WithCancel(t.Context())
+	workers := newDaemonWorkerGroup()
+	t.Cleanup(func() {
+		cancel()
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+		defer waitCancel()
+		require.True(t, workers.Wait(waitCtx))
+	})
+	startExternalRootEventWake(ctx, workers, store, broadcaster, func(id int64) {
+		if id != binding.ID {
+			return
+		}
+		if wakeCount.Add(1) == 1 {
+			close(firstWake)
+			<-release
+		}
+	})
+	issueID := issue.ID
+	msg := daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
+		Type: "issue.updated", IssueID: &issueID, Actor: "operator",
+	}}
+	broadcaster.Broadcast(msg)
+	select {
+	case <-firstWake:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocked external root wake")
+	}
+	for range 300 {
+		broadcaster.Broadcast(msg)
+	}
+	close(release)
+	require.Eventually(t, func() bool { return wakeCount.Load() >= 257 }, 5*time.Second, time.Millisecond)
+
+	before := wakeCount.Load()
+	require.Eventually(t, func() bool {
+		broadcaster.Broadcast(msg)
+		return wakeCount.Load() > before
+	}, time.Second, time.Millisecond, "event wake subscriber did not reconnect after overflow")
+}
+
+func TestExternalRootEventWakeReconnectsAndDiscardsQueuedEventsAfterReset(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "External root", Author: "tester",
+	})
+	require.NoError(t, err)
+	binding, _, err := store.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
+		ExternalRootKey: "root-1", ExternalAccountKey: "account-1", Actor: "tester",
+		ReceiveCommentsAfter: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	broadcaster := daemon.NewEventBroadcaster()
+	firstWake := make(chan struct{})
+	release := make(chan struct{})
+	var wakeCount atomic.Int64
+	ctx, cancel := context.WithCancel(t.Context())
+	workers := newDaemonWorkerGroup()
+	t.Cleanup(func() {
+		cancel()
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+		defer waitCancel()
+		require.True(t, workers.Wait(waitCtx))
+	})
+	startExternalRootEventWake(ctx, workers, store, broadcaster, func(id int64) {
+		if id != binding.ID {
+			return
+		}
+		if wakeCount.Add(1) == 1 {
+			close(firstWake)
+			<-release
+		}
+	})
+	issueID := issue.ID
+	msg := daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
+		Type: "issue.updated", IssueID: &issueID, Actor: "operator",
+	}}
+	broadcaster.Broadcast(msg)
+	select {
+	case <-firstWake:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocked external root wake")
+	}
+	broadcaster.Broadcast(daemon.StreamMsg{Kind: "reset", ResetID: 101, ProjectID: project.ID})
+	broadcaster.Broadcast(msg)
+	close(release)
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, int64(1), wakeCount.Load(), "queued pre-reset event must not cross the reset boundary")
+
+	require.Eventually(t, func() bool {
+		broadcaster.Broadcast(msg)
+		return wakeCount.Load() == 2
+	}, time.Second, time.Millisecond, "event wake subscriber did not reconnect after reset")
+}
+
+func TestDaemonStartupFailureStopsExternalRootRunnerBeforeReturning(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, occupied.Close()) })
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+
+	started := time.Now()
+	err = runDaemonWithListen(context.Background(), occupied.Addr().String(), false)
+	require.Error(t, err)
+	assert.Less(t, time.Since(started), 3*time.Second,
+		"runner shutdown must cancel before waiting when startup returns with a live parent context")
+}
+
+func TestDaemonAutoStartWiresExternalRootRunnerDrainAdmission(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	t.Setenv("KATA_AUTOSTART_IDLE_TIMEOUT", "10s")
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+
+	originalRun := runExternalRootRunner
+	captured := make(chan *rootbridge.Runner, 1)
+	runExternalRootRunner = func(ctx context.Context, runner *rootbridge.Runner) error {
+		captured <- runner
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { runExternalRootRunner = originalRun })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false) }()
+
+	select {
+	case runner := <-captured:
+		require.NotNil(t, runner.DrainAdmission)
+		require.NotNil(t, runner.EventSinkFrom)
+	case <-time.After(3 * time.Second):
+		cancel()
+		t.Fatal("external root runner was not started")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			require.ErrorIs(t, err, context.Canceled)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not stop after context cancellation")
+	}
+}
+
+func TestDaemonWithoutConnectorsStartsExternalRootRunnerForDurableBindings(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_REQUIRE_TOKEN_IDENTITY", "")
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+
+	dbPath := filepath.Join(home, "kata.db")
+	seed := openKataTestDB(t, dbPath)
+	project, err := seed.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := seed.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Durable external root", Author: "tester",
+	})
+	require.NoError(t, err)
+	binding, _, err := seed.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
+		ExternalRootKey: "root-1", ExternalAccountKey: "account-1", Actor: "tester",
+		ReceiveCommentsAfter: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, seed.Close())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case runErr := <-done:
+			if runErr != nil && !errors.Is(runErr, context.Canceled) {
+				t.Errorf("daemon did not stop cleanly: %v", runErr)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop after context cancellation")
+		}
+	})
+
+	namespace, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		_, statErr := os.Stat(runtimePath)
+		return statErr == nil
+	}, 3*time.Second, 10*time.Millisecond)
+
+	inspect := openKataTestDB(t, dbPath)
+	t.Cleanup(func() { require.NoError(t, inspect.Close()) })
+	require.Eventually(t, func() bool {
+		stored, readErr := inspect.ExternalRootBindingByID(t.Context(), binding.ID)
+		return readErr == nil && stored.Active && !stored.Enabled &&
+			stored.PausedReason == "external_connector_missing"
+	}, 3*time.Second, 10*time.Millisecond,
+		"durable binding was not paused when its connector configuration was absent")
+}
+
+func TestDaemonStartsWithUnavailableConnectorAndServesRedactedStatus(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_REQUIRE_TOKEN_IDENTITY", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	missingCommand := filepath.Join(t.TempDir(), "example-missing-connector")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`
+[[connector]]
+id = "example-connector"
+command = %q
+`, missingCommand)), 0o600))
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case runErr := <-done:
+			if runErr != nil && !errors.Is(runErr, context.Canceled) {
+				t.Errorf("daemon did not stop cleanly: %v", runErr)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop after context cancellation")
+		}
+	})
+
+	namespace, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	var record daemonRuntimeRecordJSON
+	require.Eventually(t, func() bool {
+		body, readErr := os.ReadFile(runtimePath) //nolint:gosec // test-owned KATA_HOME
+		return readErr == nil && json.Unmarshal(body, &record) == nil && record.Address != ""
+	}, 3*time.Second, 10*time.Millisecond)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+record.Address+"/api/v1/connectors/example-connector", nil)
+	require.NoError(t, err)
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, response.Body.Close()) }()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+	assert.Contains(t, string(body), `"healthy":false`)
+	assert.NotContains(t, string(body), "example-missing-connector")
 }

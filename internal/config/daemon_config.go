@@ -60,6 +60,8 @@ type DaemonConfig struct {
 	// GitHubSync carries daemon-owned GitHub API credential settings for
 	// background synchronization.
 	GitHubSync GitHubSyncConfig `toml:"github_sync"`
+	// Connectors declares operator-controlled external root connector processes.
+	Connectors []ConnectorConfig `toml:"connector"`
 }
 
 // MinAutostartIdleTimeout leaves enough time for detached startup discovery
@@ -401,6 +403,11 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	if err := validateGitHubSync(cfg.GitHubSync); err != nil {
 		return nil, err
 	}
+	connectors, err := NormalizeConnectorConfigs(cfg.Connectors)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Connectors = connectors
 	if err := normalizeDaemonCatalog(&cfg); err != nil {
 		return nil, err
 	}

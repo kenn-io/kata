@@ -75,6 +75,8 @@ func registerImportsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Items:     items,
 		})
 		switch {
+		case errors.Is(err, db.ErrExternalRootContentOwned):
+			return nil, externalRootContentOwnedAPIError()
 		case errors.Is(err, db.ErrImportValidation):
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		case errors.Is(err, db.ErrFederatedReadOnly):

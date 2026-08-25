@@ -106,6 +106,8 @@ func newRootCmd() *cobra.Command {
 
 	subs := []*cobra.Command{
 		newDaemonCmd(),
+		newConnectorCmd(),
+		newBridgeCmd(),
 		newMCPCmd(),
 		newStorageCmd(),
 		newInitCmd(),
