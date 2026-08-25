@@ -480,6 +480,16 @@ var storageScenarios = []scenario{
 		run:     checkSnapshotReplayRejectsInvalidExternalRootFrontiers,
 	},
 	{
+		name:    "snapshot replay rejects invalid binding mappings",
+		methods: []string{"ImportReplay", "ProjectByUID"},
+		run:     checkSnapshotReplayRejectsInvalidBindingMappings,
+	},
+	{
+		name:    "snapshot replay rejects duplicate field mapping identities",
+		methods: []string{"ImportReplay", "ProjectByUID"},
+		run:     checkSnapshotReplayRejectsDuplicateFieldMappingIdentities,
+	},
+	{
 		name: "snapshot replay compatibility options",
 		methods: []string{
 			"EventsByUIDs", "ImportReplay", "IssueSyncBindingByProject",

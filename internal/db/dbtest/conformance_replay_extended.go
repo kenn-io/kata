@@ -448,6 +448,167 @@ func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store 
 	return nil
 }
 
+// checkSnapshotReplayRejectsInvalidBindingMappings verifies that every mapping
+// namespace derived from a binding UID remains attached to that binding's
+// issue. These records are portable replay input, so the envelope must be
+// rejected before a malformed namespace can poison revision or ownership
+// lookups.
+func checkSnapshotReplayRejectsInvalidBindingMappings(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+
+	cases := []struct {
+		name       string
+		source     string
+		objectType string
+		comment    bool
+		crossIssue bool
+	}{
+		{
+			name:       "inbound comment",
+			source:     "connector:connector-one:binding:" + replayBindingUID,
+			objectType: "comment",
+			comment:    true,
+			crossIssue: true,
+		},
+		{
+			name:       "lifecycle comment",
+			source:     "connector:connector-one:binding:" + replayBindingUID + ":lifecycle",
+			objectType: "comment",
+			comment:    true,
+			crossIssue: true,
+		},
+		{
+			name:       "published comment",
+			source:     "connector:connector-one:binding:" + replayBindingUID + ":published",
+			objectType: "comment",
+			comment:    true,
+			crossIssue: true,
+		},
+		{
+			name:       "comment revision",
+			source:     "connector:connector-one:binding:" + replayBindingUID + ":revisions",
+			objectType: "issue",
+			crossIssue: true,
+		},
+		{
+			name:       "root revision",
+			source:     "connector:connector-one:binding:" + replayBindingUID + ":root-revisions",
+			objectType: "issue",
+			crossIssue: true,
+		},
+		{
+			name:       "lifecycle comment has issue shape",
+			source:     "connector:connector-one:binding:" + replayBindingUID + ":lifecycle",
+			objectType: "issue",
+		},
+		{
+			name:       "published comment has issue shape",
+			source:     "connector:connector-one:binding:" + replayBindingUID + ":published",
+			objectType: "issue",
+		},
+		{
+			name:       "comment revision has comment shape",
+			source:     "connector:connector-one:binding:" + replayBindingUID + ":revisions",
+			objectType: "comment",
+			comment:    true,
+		},
+		{
+			name:       "root revision has comment shape",
+			source:     "connector:connector-one:binding:" + replayBindingUID + ":root-revisions",
+			objectType: "comment",
+			comment:    true,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			records := extendedReplayRecords()
+			installBindingMapping(records, test.source, test.objectType, test.comment, test.crossIssue)
+
+			err := store.ImportReplay(ctx, records, db.ImportOptions{})
+			require.ErrorIs(t, err, db.ErrExternalRootValidation)
+			_, err = store.ProjectByUID(ctx, replayProjectUID)
+			require.True(t, errors.Is(err, db.ErrNotFound), "invalid replay must not mutate the target")
+		})
+	}
+	return nil
+}
+
+func checkSnapshotReplayRejectsDuplicateFieldMappingIdentities(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	records := extendedReplayRecords()
+	original := *externalRootReplayMapping(records)
+	duplicate := original
+	duplicate.Active = false
+
+	for index := range records {
+		if records[index].Kind == db.ImportKindProjectAlias {
+			records[index] = db.ImportRecord{
+				Kind:                 db.ImportKindExternalFieldMapping,
+				ExternalFieldMapping: &duplicate,
+			}
+			break
+		}
+	}
+
+	err := store.ImportReplay(ctx, records, db.ImportOptions{})
+	require.ErrorIs(t, err, db.ErrExternalFieldMappingValidation)
+	_, err = store.ProjectByUID(ctx, replayProjectUID)
+	require.True(t, errors.Is(err, db.ErrNotFound), "ambiguous replay must not mutate the target")
+	return nil
+}
+
+func installBindingMapping(
+	records []db.ImportRecord,
+	source string,
+	objectType string,
+	withComment bool,
+	crossIssue bool,
+) {
+	const (
+		projectID      = int64(41)
+		bindingIssue   = int64(61)
+		bindingComment = int64(121)
+		otherIssueID   = int64(62)
+		otherComment   = int64(122)
+	)
+	issueID := bindingIssue
+	commentID := bindingComment
+	replacements := map[string]db.ImportRecord{
+		db.ImportKindIssueSyncStatus: {Kind: db.ImportKindImportMapping, ImportMapping: &db.ImportMappingExport{
+			ID: 132, Source: source, ExternalID: "cross-binding-object", ObjectType: objectType,
+			ProjectID: projectID, IssueID: &issueID, ImportedAt: "2026-07-15T12:00:00.000Z",
+		}},
+	}
+	if crossIssue {
+		issueID = otherIssueID
+		commentID = otherComment
+		replacements[db.ImportKindProjectAlias] = db.ImportRecord{Kind: db.ImportKindIssue, Issue: &db.IssueExport{
+			ID: otherIssueID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2A", ProjectID: projectID,
+			ShortID: "zz2a", Title: "Other replay issue", Status: "open",
+			Author: "fixture-author", CreatedAt: "2026-07-15T12:00:00.000Z",
+			UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+		}}
+	}
+	if withComment {
+		if crossIssue {
+			replacements[db.ImportKindIssueEmbedding] = db.ImportRecord{Kind: db.ImportKindComment, Comment: &db.CommentExport{
+				ID: otherComment, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2B", IssueID: otherIssueID,
+				Author: "fixture-author", Body: "Other replay comment", CreatedAt: "2026-07-15T12:00:00.000Z",
+			}}
+		}
+		replacements[db.ImportKindIssueSyncStatus].ImportMapping.CommentID = &commentID
+	}
+	for index := range records {
+		originalKind := records[index].Kind
+		if replacement, ok := replacements[originalKind]; ok {
+			records[index] = replacement
+			delete(replacements, originalKind)
+		}
+	}
+}
+
 func externalRootReplayBinding(records []db.ImportRecord) *db.ExternalRootBindingExport {
 	for _, record := range records {
 		if record.Kind == db.ImportKindExternalRootBinding {

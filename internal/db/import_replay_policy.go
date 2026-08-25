@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"go.kenn.io/kata/internal/config"
 )
@@ -31,6 +32,122 @@ func ValidateImportRecords(records []ImportRecord) error {
 	for i, record := range records {
 		if err := record.Validate(); err != nil {
 			return fmt.Errorf("import record %d: %w", i, err)
+		}
+	}
+	if err := validateReplayExternalFieldMappingIdentities(records); err != nil {
+		return err
+	}
+	return validateReplayBindingScopedMappings(records)
+}
+
+func validateReplayExternalFieldMappingIdentities(records []ImportRecord) error {
+	type portableIdentity struct {
+		connectorInstance string
+		kataField         string
+		externalFieldID   string
+		schemaRevision    string
+		createdAt         string
+	}
+	seen := make(map[portableIdentity]int)
+	for index, record := range records {
+		if record.ExternalFieldMapping == nil {
+			continue
+		}
+		normalized, err := NormalizeExternalFieldMappingExport(*record.ExternalFieldMapping)
+		if err != nil {
+			return fmt.Errorf("import record %d: %w", index, err)
+		}
+		identity := portableIdentity{
+			connectorInstance: normalized.ConnectorInstance,
+			kataField:         normalized.KataField,
+			externalFieldID:   normalized.ExternalFieldID,
+			schemaRevision:    normalized.SchemaRevision,
+			createdAt:         normalized.CreatedAt.UTC().Format(time.RFC3339Nano),
+		}
+		if first, duplicate := seen[identity]; duplicate {
+			return fmt.Errorf(
+				"import record %d: %w: duplicate portable identity from record %d",
+				index, ErrExternalFieldMappingValidation, first,
+			)
+		}
+		seen[identity] = index
+	}
+	return nil
+}
+
+type replayBindingMappingShape struct {
+	projectID       int64
+	issueID         int64
+	objectType      string
+	requiresComment bool
+}
+
+func validateReplayBindingScopedMappings(records []ImportRecord) error {
+	projectIDs := make(map[string]int64)
+	issues := make(map[string]IssueExport)
+	commentIssueIDs := make(map[int64]int64)
+	for _, record := range records {
+		switch {
+		case record.Project != nil:
+			projectIDs[record.Project.UID] = record.Project.ID
+		case record.Issue != nil:
+			issues[record.Issue.UID] = *record.Issue
+		case record.Comment != nil:
+			commentIssueIDs[record.Comment.ID] = record.Comment.IssueID
+		}
+	}
+
+	shapes := make(map[string]replayBindingMappingShape)
+	for _, record := range records {
+		binding := record.ExternalRootBinding
+		if binding == nil {
+			continue
+		}
+		projectID, projectFound := projectIDs[binding.ProjectUID]
+		issue, issueFound := issues[binding.IssueUID]
+		if !projectFound || !issueFound || issue.ProjectID != projectID {
+			continue
+		}
+		bindingIdentity := ExternalRootBinding{
+			UID: binding.UID, ConnectorInstance: binding.ConnectorInstance,
+		}
+		commentShape := replayBindingMappingShape{
+			projectID: projectID, issueID: issue.ID, objectType: "comment", requiresComment: true,
+		}
+		issueShape := replayBindingMappingShape{
+			projectID: projectID, issueID: issue.ID, objectType: ExternalRevisionAnchorObjectType,
+		}
+		shapes[ExternalRootCommentMappingSource(bindingIdentity)] = commentShape
+		shapes[ExternalRootLifecycleMappingSource(bindingIdentity)] = commentShape
+		shapes[ExternalRootPublishedCommentMappingSource(bindingIdentity)] = commentShape
+		shapes[ExternalRootCommentRevisionMappingSource(bindingIdentity)] = issueShape
+		shapes[ExternalRootRevisionMappingSource(bindingIdentity)] = issueShape
+	}
+
+	for index, record := range records {
+		mapping := record.ImportMapping
+		if mapping == nil {
+			continue
+		}
+		shape, bindingScoped := shapes[mapping.Source]
+		if !bindingScoped {
+			continue
+		}
+		valid := mapping.ProjectID == shape.projectID &&
+			mapping.IssueID != nil && *mapping.IssueID == shape.issueID &&
+			mapping.ObjectType == shape.objectType &&
+			mapping.LinkID == nil && mapping.Label == nil
+		if shape.requiresComment {
+			valid = valid && mapping.CommentID != nil &&
+				commentIssueIDs[*mapping.CommentID] == shape.issueID
+		} else {
+			valid = valid && mapping.CommentID == nil
+		}
+		if !valid {
+			return fmt.Errorf(
+				"import record %d: %w: binding-scoped mapping does not match its binding issue",
+				index, ErrExternalRootValidation,
+			)
 		}
 	}
 	return nil
