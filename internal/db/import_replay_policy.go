@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -27,10 +28,14 @@ func ReplayEventProjectName(event *EventExport, currentName string, recomputeHas
 
 // ValidateImportRecords checks the normalized replay union before a backend
 // opens a transaction. A malformed envelope therefore cannot partially mutate
-// either storage implementation.
+// either storage implementation. The interface makes kind/payload
+// disagreement unrepresentable, so only two failures remain: a missing
+// payload, and a type outside the replay union (the interface is exported, so
+// an out-of-tree type could implement it and reach a backend's default arm
+// inside the transaction).
 func ValidateImportRecords(records []ImportRecord) error {
 	for i, record := range records {
-		if err := record.Validate(); err != nil {
+		if err := validateImportRecord(record); err != nil {
 			return fmt.Errorf("import record %d: %w", i, err)
 		}
 	}
@@ -50,10 +55,11 @@ func validateReplayExternalFieldMappingIdentities(records []ImportRecord) error 
 	}
 	seen := make(map[portableIdentity]int)
 	for index, record := range records {
-		if record.ExternalFieldMapping == nil {
+		mapping, ok := record.(*ExternalFieldMappingExport)
+		if !ok {
 			continue
 		}
-		normalized, err := NormalizeExternalFieldMappingExport(*record.ExternalFieldMapping)
+		normalized, err := NormalizeExternalFieldMappingExport(*mapping)
 		if err != nil {
 			return fmt.Errorf("import record %d: %w", index, err)
 		}
@@ -87,20 +93,20 @@ func validateReplayBindingScopedMappings(records []ImportRecord) error {
 	issues := make(map[string]IssueExport)
 	commentIssueIDs := make(map[int64]int64)
 	for _, record := range records {
-		switch {
-		case record.Project != nil:
-			projectIDs[record.Project.UID] = record.Project.ID
-		case record.Issue != nil:
-			issues[record.Issue.UID] = *record.Issue
-		case record.Comment != nil:
-			commentIssueIDs[record.Comment.ID] = record.Comment.IssueID
+		switch record := record.(type) {
+		case *ProjectExport:
+			projectIDs[record.UID] = record.ID
+		case *IssueExport:
+			issues[record.UID] = *record
+		case *CommentExport:
+			commentIssueIDs[record.ID] = record.IssueID
 		}
 	}
 
 	shapes := make(map[string]replayBindingMappingShape)
 	for _, record := range records {
-		binding := record.ExternalRootBinding
-		if binding == nil {
+		binding, ok := record.(*ExternalRootBindingExport)
+		if !ok {
 			continue
 		}
 		projectID, projectFound := projectIDs[binding.ProjectUID]
@@ -125,8 +131,8 @@ func validateReplayBindingScopedMappings(records []ImportRecord) error {
 	}
 
 	for index, record := range records {
-		mapping := record.ImportMapping
-		if mapping == nil {
+		mapping, ok := record.(*ImportMappingExport)
+		if !ok {
 			continue
 		}
 		shape, bindingScoped := shapes[mapping.Source]
@@ -153,6 +159,74 @@ func validateReplayBindingScopedMappings(records []ImportRecord) error {
 	return nil
 }
 
+func validateImportRecord(record ImportRecord) error {
+	switch rec := record.(type) {
+	case nil:
+		return errors.New("nil record")
+	case *MetaKV:
+		return requireImportPayload(rec, ImportKindMeta)
+	case *ProjectExport:
+		return requireImportPayload(rec, ImportKindProject)
+	case *AliasExport:
+		return requireImportPayload(rec, ImportKindProjectAlias)
+	case *IssueSyncBindingExport:
+		return requireImportPayload(rec, ImportKindIssueSyncBinding)
+	case *IssueSyncStatusExport:
+		return requireImportPayload(rec, ImportKindIssueSyncStatus)
+	case *RecurrenceExport:
+		return requireImportPayload(rec, ImportKindRecurrence)
+	case *IssueExport:
+		return requireImportPayload(rec, ImportKindIssue)
+	case *IssueEmbeddingExport:
+		return requireImportPayload(rec, ImportKindIssueEmbedding)
+	case *CommentExport:
+		return requireImportPayload(rec, ImportKindComment)
+	case *IssueLabelExport:
+		return requireImportPayload(rec, ImportKindIssueLabel)
+	case *LinkExport:
+		return requireImportPayload(rec, ImportKindLink)
+	case *ImportMappingExport:
+		return requireImportPayload(rec, ImportKindImportMapping)
+	case *ExternalFieldMappingExport:
+		return requireImportPayload(rec, ImportKindExternalFieldMapping)
+	case *ExternalRootBindingExport:
+		return requireImportPayload(rec, ImportKindExternalRootBinding)
+	case *ExternalFieldStateExport:
+		return requireImportPayload(rec, ImportKindExternalFieldState)
+	case *FederationBindingExport:
+		return requireImportPayload(rec, ImportKindFederationBinding)
+	case *FederationSyncStatusExport:
+		return requireImportPayload(rec, ImportKindFederationSyncStatus)
+	case *FederationQuarantineExport:
+		return requireImportPayload(rec, ImportKindFederationQuarantine)
+	case *FederationEnrollmentExport:
+		return requireImportPayload(rec, ImportKindFederationEnrollment)
+	case *IssueClaimExport:
+		return requireImportPayload(rec, ImportKindIssueClaim)
+	case *PendingClaimRequestExport:
+		return requireImportPayload(rec, ImportKindPendingClaimRequest)
+	case *EventExport:
+		return requireImportPayload(rec, ImportKindEvent)
+	case *PurgeLogExport:
+		return requireImportPayload(rec, ImportKindPurgeLog)
+	case *ProjectPurgeLogExport:
+		return requireImportPayload(rec, ImportKindProjectPurgeLog)
+	case *SequenceExport:
+		return requireImportPayload(rec, ImportKindSQLiteSequence)
+	default:
+		return fmt.Errorf("unknown record type %T", record)
+	}
+}
+
+// requireImportPayload rejects a typed-nil payload pointer, which satisfies
+// the interface but would nil-deref inside a backend's replay arm.
+func requireImportPayload[T any](payload *T, kind string) error {
+	if payload == nil {
+		return fmt.Errorf("kind %q: nil payload", kind)
+	}
+	return nil
+}
+
 // OrderImportRecords returns a stable dependency order for replay. JSONL
 // exports already use this order, but accepting normalized records in any
 // order keeps the Storage contract backend-neutral without requiring every
@@ -160,7 +234,7 @@ func validateReplayBindingScopedMappings(records []ImportRecord) error {
 func OrderImportRecords(records []ImportRecord) []ImportRecord {
 	ordered := append([]ImportRecord(nil), records...)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		return importReplayRank(ordered[i].Kind) < importReplayRank(ordered[j].Kind)
+		return importReplayRank(ordered[i].ImportKind()) < importReplayRank(ordered[j].ImportKind())
 	})
 	return ordered
 }

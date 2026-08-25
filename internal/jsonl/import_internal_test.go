@@ -30,9 +30,9 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindProject,
 			data: `{"id":1,"uid":"` + projectUID + `","name":"kata","created_at":"` + legacy + `","deleted_at":"` + legacy + `","metadata":{},"revision":1}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Project)
-				assert.Equal(t, canonical, rec.Project.CreatedAt)
-				assert.Equal(t, canonical, *rec.Project.DeletedAt)
+				project := recordAs[db.ProjectExport](t, rec)
+				assert.Equal(t, canonical, project.CreatedAt)
+				assert.Equal(t, canonical, *project.DeletedAt)
 			},
 		},
 		{
@@ -40,8 +40,8 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindProjectAlias,
 			data: `{"id":1,"project_id":1,"alias_identity":"repo","alias_kind":"git","root_path":"/tmp/repo","created_at":"` + legacy + `","last_seen_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Alias)
-				assert.Equal(t, canonical, rec.Alias.CreatedAt)
+				alias := recordAs[db.AliasExport](t, rec)
+				assert.Equal(t, canonical, alias.CreatedAt)
 			},
 		},
 		{
@@ -49,10 +49,10 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindRecurrence,
 			data: `{"id":1,"uid":"` + otherUID + `","project_id":1,"rrule":"FREQ=DAILY","dtstart":"2026-05-04T00:00:00.000Z","timezone":"UTC","template_title":"todo","template_body":"","template_labels":[],"template_metadata":{},"author":"tester","revision":1,"created_at":"` + legacy + `","updated_at":"` + legacy + `","deleted_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Recurrence)
-				assert.Equal(t, canonical, rec.Recurrence.CreatedAt)
-				assert.Equal(t, canonical, rec.Recurrence.UpdatedAt)
-				assert.Equal(t, canonical, *rec.Recurrence.DeletedAt)
+				recurrence := recordAs[db.RecurrenceExport](t, rec)
+				assert.Equal(t, canonical, recurrence.CreatedAt)
+				assert.Equal(t, canonical, recurrence.UpdatedAt)
+				assert.Equal(t, canonical, *recurrence.DeletedAt)
 			},
 		},
 		{
@@ -60,8 +60,8 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindIssueLabel,
 			data: `{"issue_id":1,"label":"bug","author":"tester","created_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Label)
-				assert.Equal(t, canonical, rec.Label.CreatedAt)
+				label := recordAs[db.IssueLabelExport](t, rec)
+				assert.Equal(t, canonical, label.CreatedAt)
 			},
 		},
 		{
@@ -69,8 +69,8 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindComment,
 			data: `{"id":1,"uid":"` + otherUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04T00:21:07.000500Z"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Comment)
-				assert.Equal(t, "2026-05-04T00:21:07.000500Z", rec.Comment.CreatedAt)
+				comment := recordAs[db.CommentExport](t, rec)
+				assert.Equal(t, "2026-05-04T00:21:07.000500Z", comment.CreatedAt)
 			},
 		},
 		{
@@ -78,8 +78,8 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindComment,
 			data: `{"id":2,"uid":"` + projectUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04T00:21:07.000500900Z"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Comment)
-				assert.Equal(t, "2026-05-04T00:21:07.000500900Z", rec.Comment.CreatedAt)
+				comment := recordAs[db.CommentExport](t, rec)
+				assert.Equal(t, "2026-05-04T00:21:07.000500900Z", comment.CreatedAt)
 			},
 		},
 		{
@@ -87,8 +87,8 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindComment,
 			data: `{"id":3,"uid":"` + issueUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04T02:21:07.000500+02:00"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Comment)
-				assert.Equal(t, "2026-05-04T00:21:07.000500Z", rec.Comment.CreatedAt)
+				comment := recordAs[db.CommentExport](t, rec)
+				assert.Equal(t, "2026-05-04T00:21:07.000500Z", comment.CreatedAt)
 			},
 		},
 		{
@@ -96,8 +96,8 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindComment,
 			data: `{"id":4,"uid":"` + otherUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04T00:21:07.0005Z"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Comment)
-				assert.Equal(t, "2026-05-04T00:21:07.000500Z", rec.Comment.CreatedAt)
+				comment := recordAs[db.CommentExport](t, rec)
+				assert.Equal(t, "2026-05-04T00:21:07.000500Z", comment.CreatedAt)
 			},
 		},
 		{
@@ -105,8 +105,8 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindComment,
 			data: `{"id":5,"uid":"` + projectUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04 00:21:07.0005009 +0000 UTC"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Comment)
-				assert.Equal(t, "2026-05-04T00:21:07.000500900Z", rec.Comment.CreatedAt)
+				comment := recordAs[db.CommentExport](t, rec)
+				assert.Equal(t, "2026-05-04T00:21:07.000500900Z", comment.CreatedAt)
 			},
 		},
 		{
@@ -114,8 +114,8 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindLink,
 			data: `{"id":1,"project_id":1,"from_issue_id":1,"from_issue_uid":"` + issueUID + `","to_issue_id":2,"to_issue_uid":"` + otherUID + `","type":"blocks","author":"tester","created_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.Link)
-				assert.Equal(t, canonical, rec.Link.CreatedAt)
+				link := recordAs[db.LinkExport](t, rec)
+				assert.Equal(t, canonical, link.CreatedAt)
 			},
 		},
 		{
@@ -123,9 +123,9 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindImportMapping,
 			data: `{"id":1,"source":"gh","external_id":"1","object_type":"issue","project_id":1,"issue_id":1,"source_updated_at":"` + legacy + `","imported_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.ImportMapping)
-				assert.Equal(t, canonical, *rec.ImportMapping.SourceUpdatedAt)
-				assert.Equal(t, canonical, rec.ImportMapping.ImportedAt)
+				mapping := recordAs[db.ImportMappingExport](t, rec)
+				assert.Equal(t, canonical, *mapping.SourceUpdatedAt)
+				assert.Equal(t, canonical, mapping.ImportedAt)
 			},
 		},
 		{
@@ -133,10 +133,10 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindFederationBinding,
 			data: `{"project_id":1,"role":"hub","hub_url":"","hub_project_id":0,"hub_project_uid":"` + projectUID + `","replay_horizon_event_id":0,"pull_cursor_event_id":0,"push_enabled":false,"push_cursor_event_id":0,"enabled":true,"created_at":"` + legacy + `","updated_at":"` + legacy + `","last_sync_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.FederationBinding)
-				assert.Equal(t, canonical, rec.FederationBinding.CreatedAt)
-				assert.Equal(t, canonical, rec.FederationBinding.UpdatedAt)
-				assert.Equal(t, canonical, *rec.FederationBinding.LastSyncAt)
+				binding := recordAs[db.FederationBindingExport](t, rec)
+				assert.Equal(t, canonical, binding.CreatedAt)
+				assert.Equal(t, canonical, binding.UpdatedAt)
+				assert.Equal(t, canonical, *binding.LastSyncAt)
 			},
 		},
 		{
@@ -144,13 +144,13 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindFederationSyncStatus,
 			data: `{"project_id":1,"last_pull_started_at":"` + legacy + `","last_pull_success_at":"` + legacy + `","last_push_started_at":"` + legacy + `","last_push_success_at":"` + legacy + `","last_error_at":"` + legacy + `","last_reset_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.FederationSyncStatus)
-				assert.Equal(t, canonical, *rec.FederationSyncStatus.LastPullStartedAt)
-				assert.Equal(t, canonical, *rec.FederationSyncStatus.LastPullSuccessAt)
-				assert.Equal(t, canonical, *rec.FederationSyncStatus.LastPushStartedAt)
-				assert.Equal(t, canonical, *rec.FederationSyncStatus.LastPushSuccessAt)
-				assert.Equal(t, canonical, *rec.FederationSyncStatus.LastErrorAt)
-				assert.Equal(t, canonical, *rec.FederationSyncStatus.LastResetAt)
+				status := recordAs[db.FederationSyncStatusExport](t, rec)
+				assert.Equal(t, canonical, *status.LastPullStartedAt)
+				assert.Equal(t, canonical, *status.LastPullSuccessAt)
+				assert.Equal(t, canonical, *status.LastPushStartedAt)
+				assert.Equal(t, canonical, *status.LastPushSuccessAt)
+				assert.Equal(t, canonical, *status.LastErrorAt)
+				assert.Equal(t, canonical, *status.LastResetAt)
 			},
 		},
 		{
@@ -158,10 +158,10 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindIssueSyncBinding,
 			data: `{"id":1,"project_id":1,"source_key":"github:repo-node-example","host":"github.com","owner":"example-org","repo":"example-repo","repo_node_id":"repo-node-example","repo_id":42,"enabled":false,"interval_seconds":900,"last_cursor_at":"` + legacy + `","created_at":"` + legacy + `","updated_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.IssueSyncBinding)
-				assert.Equal(t, canonical, *rec.IssueSyncBinding.LastCursorAt)
-				assert.Equal(t, canonical, rec.IssueSyncBinding.CreatedAt)
-				assert.Equal(t, canonical, rec.IssueSyncBinding.UpdatedAt)
+				binding := recordAs[db.IssueSyncBindingExport](t, rec)
+				assert.Equal(t, canonical, *binding.LastCursorAt)
+				assert.Equal(t, canonical, binding.CreatedAt)
+				assert.Equal(t, canonical, binding.UpdatedAt)
 			},
 		},
 		{
@@ -169,17 +169,17 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindIssueSyncStatus,
 			data: `{"binding_id":1,"project_id":1,"sync_started_at":"` + legacy + `","last_attempt_at":"` + legacy + `","last_success_at":"` + legacy + `","last_error_at":"` + legacy + `","last_error":"rate limited","last_created":2,"last_updated":3,"last_unchanged":4,"last_comments":5}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.IssueSyncStatus)
-				assert.Equal(t, canonical, *rec.IssueSyncStatus.SyncStartedAt)
-				assert.Equal(t, canonical, *rec.IssueSyncStatus.LastAttemptAt)
-				assert.Equal(t, canonical, *rec.IssueSyncStatus.LastSuccessAt)
-				assert.Equal(t, canonical, *rec.IssueSyncStatus.LastErrorAt)
-				require.NotNil(t, rec.IssueSyncStatus.LastError)
-				assert.Equal(t, "rate limited", *rec.IssueSyncStatus.LastError)
-				assert.Equal(t, 2, rec.IssueSyncStatus.LastCreated)
-				assert.Equal(t, 3, rec.IssueSyncStatus.LastUpdated)
-				assert.Equal(t, 4, rec.IssueSyncStatus.LastUnchanged)
-				assert.Equal(t, 5, rec.IssueSyncStatus.LastComments)
+				status := recordAs[db.IssueSyncStatusExport](t, rec)
+				assert.Equal(t, canonical, *status.SyncStartedAt)
+				assert.Equal(t, canonical, *status.LastAttemptAt)
+				assert.Equal(t, canonical, *status.LastSuccessAt)
+				assert.Equal(t, canonical, *status.LastErrorAt)
+				require.NotNil(t, status.LastError)
+				assert.Equal(t, "rate limited", *status.LastError)
+				assert.Equal(t, 2, status.LastCreated)
+				assert.Equal(t, 3, status.LastUpdated)
+				assert.Equal(t, 4, status.LastUnchanged)
+				assert.Equal(t, 5, status.LastComments)
 			},
 		},
 		{
@@ -187,9 +187,9 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindFederationQuarantine,
 			data: `{"id":1,"project_id":1,"direction":"pull","first_event_id":1,"last_event_id":1,"event_uids":[],"error":"bad","created_at":"` + legacy + `","skipped_at":"` + legacy + `","skipped_by":"tester","skip_reason":"done"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.FederationQuarantine)
-				assert.Equal(t, canonical, rec.FederationQuarantine.CreatedAt)
-				assert.Equal(t, canonical, *rec.FederationQuarantine.SkippedAt)
+				quarantine := recordAs[db.FederationQuarantineExport](t, rec)
+				assert.Equal(t, canonical, quarantine.CreatedAt)
+				assert.Equal(t, canonical, *quarantine.SkippedAt)
 			},
 		},
 		{
@@ -197,10 +197,10 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindFederationEnrollment,
 			data: `{"id":1,"token_hash":"` + stringOf("a", 64) + `","spoke_instance_uid":"` + otherUID + `","project_id":1,"capabilities":"pull","created_at":"` + legacy + `","updated_at":"` + legacy + `","revoked_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.FederationEnrollment)
-				assert.Equal(t, canonical, rec.FederationEnrollment.CreatedAt)
-				assert.Equal(t, canonical, rec.FederationEnrollment.UpdatedAt)
-				assert.Equal(t, canonical, *rec.FederationEnrollment.RevokedAt)
+				enrollment := recordAs[db.FederationEnrollmentExport](t, rec)
+				assert.Equal(t, canonical, enrollment.CreatedAt)
+				assert.Equal(t, canonical, enrollment.UpdatedAt)
+				assert.Equal(t, canonical, *enrollment.RevokedAt)
 			},
 		},
 		{
@@ -208,11 +208,11 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindIssueClaim,
 			data: `{"id":1,"claim_uid":"` + otherUID + `","project_id":1,"issue_id":1,"issue_uid":"` + issueUID + `","holder":"tester","holder_instance_uid":"` + projectUID + `","client_kind":"cli","purpose":"edit","claim_kind":"timed","acquired_at":"` + legacy + `","expires_at":"` + legacy + `","released_at":"` + legacy + `","release_reason":"done","revision":1,"updated_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.IssueClaim)
-				assert.Equal(t, canonical, rec.IssueClaim.AcquiredAt)
-				assert.Equal(t, canonical, *rec.IssueClaim.ExpiresAt)
-				assert.Equal(t, canonical, *rec.IssueClaim.ReleasedAt)
-				assert.Equal(t, canonical, rec.IssueClaim.UpdatedAt)
+				claim := recordAs[db.IssueClaimExport](t, rec)
+				assert.Equal(t, canonical, claim.AcquiredAt)
+				assert.Equal(t, canonical, *claim.ExpiresAt)
+				assert.Equal(t, canonical, *claim.ReleasedAt)
+				assert.Equal(t, canonical, claim.UpdatedAt)
 			},
 		},
 		{
@@ -220,11 +220,11 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindPendingClaimRequest,
 			data: `{"id":1,"request_uid":"` + otherUID + `","project_id":1,"issue_id":1,"issue_uid":"` + issueUID + `","holder":"tester","holder_instance_uid":"` + projectUID + `","client_kind":"cli","claim_kind":"timed","ttl_seconds":60,"purpose":"edit","requested_at":"` + legacy + `","last_attempt_at":"` + legacy + `","last_error":"bad","rejected_at":"` + legacy + `","resolved_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.PendingClaimRequest)
-				assert.Equal(t, canonical, rec.PendingClaimRequest.RequestedAt)
-				assert.Equal(t, canonical, *rec.PendingClaimRequest.LastAttemptAt)
-				assert.Equal(t, canonical, *rec.PendingClaimRequest.RejectedAt)
-				assert.Equal(t, canonical, *rec.PendingClaimRequest.ResolvedAt)
+				request := recordAs[db.PendingClaimRequestExport](t, rec)
+				assert.Equal(t, canonical, request.RequestedAt)
+				assert.Equal(t, canonical, *request.LastAttemptAt)
+				assert.Equal(t, canonical, *request.RejectedAt)
+				assert.Equal(t, canonical, *request.ResolvedAt)
 			},
 		},
 		{
@@ -232,8 +232,8 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			kind: KindPurgeLog,
 			data: `{"id":1,"uid":"` + otherUID + `","origin_instance_uid":"` + projectUID + `","project_id":1,"purged_issue_id":1,"issue_uid":"` + issueUID + `","project_uid":"` + projectUID + `","project_name":"kata","short_id":"abc1","issue_title":"done","issue_author":"tester","comment_count":0,"link_count":0,"label_count":0,"event_count":0,"actor":"tester","reason":"done","purged_at":"` + legacy + `"}`,
 			assert: func(t *testing.T, rec db.ImportRecord) {
-				require.NotNil(t, rec.PurgeLog)
-				assert.Equal(t, canonical, rec.PurgeLog.PurgedAt)
+				purgeLog := recordAs[db.PurgeLogExport](t, rec)
+				assert.Equal(t, canonical, purgeLog.PurgedAt)
 			},
 		},
 	}
@@ -265,4 +265,15 @@ func stringOf(s string, n int) string {
 		out += s
 	}
 	return out
+}
+
+// recordAs asserts the mapped record's payload type and returns it, replacing
+// the old `require.NotNil(t, rec.Field)` guard now that the discriminator is
+// the type itself.
+func recordAs[T any](t *testing.T, rec db.ImportRecord) *T {
+	t.Helper()
+	got, ok := any(rec).(*T)
+	require.True(t, ok, "record is %T, want *%T", rec, *new(T))
+	require.NotNil(t, got)
+	return got
 }

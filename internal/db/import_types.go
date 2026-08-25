@@ -1,8 +1,6 @@
 package db
 
 import (
-	"fmt"
-	"strings"
 	"time"
 )
 
@@ -51,37 +49,16 @@ type ImportOptions struct {
 	PreserveExternalRootBindingsEnabled bool
 }
 
-// ImportRecord is one normalized, current-shape import row: a Kind discriminator
-// plus exactly one payload pointer reusing the 1c-export row structs. jsonl
-// normalizes every source version to the current shape before building these,
-// so ImportReplay never sees a source export_version.
-type ImportRecord struct {
-	Kind                 string
-	Meta                 *MetaKV
-	Project              *ProjectExport
-	Alias                *AliasExport
-	IssueSyncBinding     *IssueSyncBindingExport
-	IssueSyncStatus      *IssueSyncStatusExport
-	Recurrence           *RecurrenceExport
-	Issue                *IssueExport
-	IssueEmbedding       *IssueEmbeddingExport
-	Comment              *CommentExport
-	Label                *IssueLabelExport
-	Link                 *LinkExport
-	ImportMapping        *ImportMappingExport
-	ExternalFieldMapping *ExternalFieldMappingExport
-	ExternalRootBinding  *ExternalRootBindingExport
-	ExternalFieldState   *ExternalFieldStateExport
-	FederationBinding    *FederationBindingExport
-	FederationSyncStatus *FederationSyncStatusExport
-	FederationQuarantine *FederationQuarantineExport
-	FederationEnrollment *FederationEnrollmentExport
-	IssueClaim           *IssueClaimExport
-	PendingClaimRequest  *PendingClaimRequestExport
-	Event                *EventExport
-	PurgeLog             *PurgeLogExport
-	ProjectPurgeLog      *ProjectPurgeLogExport
-	Sequence             *SequenceExport
+// ImportRecord is one normalized, current-shape import row. Its
+// implementations are the export row structs on pointer receivers (see
+// export_types.go), so the discriminator is the record's dynamic type: a
+// record cannot disagree with its payload, carry two payloads, or carry
+// none. ImportKind returns the frozen NDJSON kind string that internal/jsonl
+// writes on the wire. jsonl normalizes every source version to the current
+// shape before building these, so ImportReplay never sees a source
+// export_version.
+type ImportRecord interface {
+	ImportKind() string
 }
 
 // Import kind discriminators. These mirror the wire Kind strings produced by
@@ -115,65 +92,6 @@ const (
 	ImportKindProjectPurgeLog      = "project_purge_log"
 	ImportKindSQLiteSequence       = "sqlite_sequence"
 )
-
-// Validate enforces the tagged-union invariant: Kind is recognized and exactly
-// the one matching payload pointer is set. It returns a clear error naming the
-// offending Kind; ImportReplay adds the slice ordinal.
-func (r ImportRecord) Validate() error {
-	payloads := []struct {
-		kind string
-		set  bool
-	}{
-		{ImportKindMeta, r.Meta != nil},
-		{ImportKindProject, r.Project != nil},
-		{ImportKindProjectAlias, r.Alias != nil},
-		{ImportKindIssueSyncBinding, r.IssueSyncBinding != nil},
-		{ImportKindIssueSyncStatus, r.IssueSyncStatus != nil},
-		{ImportKindRecurrence, r.Recurrence != nil},
-		{ImportKindIssue, r.Issue != nil},
-		{ImportKindIssueEmbedding, r.IssueEmbedding != nil},
-		{ImportKindComment, r.Comment != nil},
-		{ImportKindIssueLabel, r.Label != nil},
-		{ImportKindLink, r.Link != nil},
-		{ImportKindImportMapping, r.ImportMapping != nil},
-		{ImportKindExternalFieldMapping, r.ExternalFieldMapping != nil},
-		{ImportKindExternalRootBinding, r.ExternalRootBinding != nil},
-		{ImportKindExternalFieldState, r.ExternalFieldState != nil},
-		{ImportKindFederationBinding, r.FederationBinding != nil},
-		{ImportKindFederationSyncStatus, r.FederationSyncStatus != nil},
-		{ImportKindFederationQuarantine, r.FederationQuarantine != nil},
-		{ImportKindFederationEnrollment, r.FederationEnrollment != nil},
-		{ImportKindIssueClaim, r.IssueClaim != nil},
-		{ImportKindPendingClaimRequest, r.PendingClaimRequest != nil},
-		{ImportKindEvent, r.Event != nil},
-		{ImportKindPurgeLog, r.PurgeLog != nil},
-		{ImportKindProjectPurgeLog, r.ProjectPurgeLog != nil},
-		{ImportKindSQLiteSequence, r.Sequence != nil},
-	}
-	known := false
-	var set []string
-	for _, p := range payloads {
-		if p.kind == r.Kind {
-			known = true
-		}
-		if p.set {
-			set = append(set, p.kind)
-		}
-	}
-	if !known {
-		return fmt.Errorf("unknown kind %q", r.Kind)
-	}
-	if len(set) == 0 {
-		return fmt.Errorf("kind %q: no payload set", r.Kind)
-	}
-	if len(set) > 1 {
-		return fmt.Errorf("kind %q: multiple payloads set (%s)", r.Kind, strings.Join(set, ", "))
-	}
-	if set[0] != r.Kind {
-		return fmt.Errorf("kind %q: payload does not match (got %s)", r.Kind, set[0])
-	}
-	return nil
-}
 
 // ImportBatchParams is the input to ImportBatch: the project receiving the
 // import, the source identifier (e.g. "beads"), the actor recorded on emitted

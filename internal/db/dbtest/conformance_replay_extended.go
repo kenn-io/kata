@@ -297,8 +297,8 @@ func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store 
 			name: "active binding belongs to a read-only federated spoke",
 			mutate: func(records []db.ImportRecord) {
 				for index := range records {
-					if records[index].FederationBinding != nil {
-						records[index].FederationBinding.PushEnabled = false
+					if binding, ok := records[index].(*db.FederationBindingExport); ok {
+						binding.PushEnabled = false
 						return
 					}
 				}
@@ -310,8 +310,8 @@ func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store 
 			name: "active binding targets issue-sync-managed content",
 			mutate: func(records []db.ImportRecord) {
 				for index := range records {
-					if records[index].IssueSyncBinding != nil {
-						records[index].IssueSyncBinding.SourceKey = "connector:connector-one"
+					if binding, ok := records[index].(*db.IssueSyncBindingExport); ok {
+						binding.SourceKey = "connector:connector-one"
 						return
 					}
 				}
@@ -376,24 +376,24 @@ func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store 
 			mutate: func(records []db.ImportRecord) {
 				projectID, issueID, otherIssueID, otherCommentID := int64(41), int64(61), int64(62), int64(122)
 				replacements := map[string]db.ImportRecord{
-					db.ImportKindProjectAlias: {Kind: db.ImportKindIssue, Issue: &db.IssueExport{
+					db.ImportKindProjectAlias: &db.IssueExport{
 						ID: otherIssueID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2A", ProjectID: projectID,
 						ShortID: "zz2a", Title: "Other replay issue", Status: "open",
 						Author: "fixture-author", CreatedAt: "2026-07-15T12:00:00.000Z",
 						UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
-					}},
-					db.ImportKindIssueEmbedding: {Kind: db.ImportKindComment, Comment: &db.CommentExport{
+					},
+					db.ImportKindIssueEmbedding: &db.CommentExport{
 						ID: otherCommentID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2B", IssueID: otherIssueID,
 						Author: "fixture-author", Body: "Other replay comment", CreatedAt: "2026-07-15T12:00:00.000Z",
-					}},
-					db.ImportKindIssueSyncStatus: {Kind: db.ImportKindImportMapping, ImportMapping: &db.ImportMappingExport{
+					},
+					db.ImportKindIssueSyncStatus: &db.ImportMappingExport{
 						ID: 132, Source: "connector:connector-one:comments:external-42",
 						ExternalID: "cross-issue-comment", ObjectType: "comment", ProjectID: projectID,
 						IssueID: &issueID, CommentID: &otherCommentID, ImportedAt: "2026-07-15T12:00:00.000Z",
-					}},
+					},
 				}
 				for index := range records {
-					originalKind := records[index].Kind
+					originalKind := records[index].ImportKind()
 					if replacement, ok := replacements[originalKind]; ok {
 						records[index] = replacement
 						delete(replacements, originalKind)
@@ -407,24 +407,24 @@ func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store 
 			mutate: func(records []db.ImportRecord) {
 				projectID, otherIssueID, otherCommentID := int64(41), int64(62), int64(122)
 				replacements := map[string]db.ImportRecord{
-					db.ImportKindProjectAlias: {Kind: db.ImportKindIssue, Issue: &db.IssueExport{
+					db.ImportKindProjectAlias: &db.IssueExport{
 						ID: otherIssueID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2A", ProjectID: projectID,
 						ShortID: "zz2a", Title: "Other replay issue", Status: "open",
 						Author: "fixture-author", CreatedAt: "2026-07-15T12:00:00.000Z",
 						UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
-					}},
-					db.ImportKindIssueEmbedding: {Kind: db.ImportKindComment, Comment: &db.CommentExport{
+					},
+					db.ImportKindIssueEmbedding: &db.CommentExport{
 						ID: otherCommentID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2B", IssueID: otherIssueID,
 						Author: "fixture-author", Body: "Other replay comment", CreatedAt: "2026-07-15T12:00:00.000Z",
-					}},
-					db.ImportKindIssueSyncStatus: {Kind: db.ImportKindImportMapping, ImportMapping: &db.ImportMappingExport{
+					},
+					db.ImportKindIssueSyncStatus: &db.ImportMappingExport{
 						ID: 132, Source: "connector:connector-one:binding:" + replayBindingUID,
 						ExternalID: "cross-binding-comment", ObjectType: "comment", ProjectID: projectID,
 						IssueID: &otherIssueID, CommentID: &otherCommentID, ImportedAt: "2026-07-15T12:00:00.000Z",
-					}},
+					},
 				}
 				for index := range records {
-					originalKind := records[index].Kind
+					originalKind := records[index].ImportKind()
 					if replacement, ok := replacements[originalKind]; ok {
 						records[index] = replacement
 						delete(replacements, originalKind)
@@ -543,11 +543,8 @@ func checkSnapshotReplayRejectsDuplicateFieldMappingIdentities(t *testing.T, sto
 	duplicate.Active = false
 
 	for index := range records {
-		if records[index].Kind == db.ImportKindProjectAlias {
-			records[index] = db.ImportRecord{
-				Kind:                 db.ImportKindExternalFieldMapping,
-				ExternalFieldMapping: &duplicate,
-			}
+		if records[index].ImportKind() == db.ImportKindProjectAlias {
+			records[index] = &duplicate
 			break
 		}
 	}
@@ -572,11 +569,8 @@ func checkSnapshotReplayPreservesSubmicrosecondFieldMappingIdentities(
 	adjacent.CreatedAt = original.CreatedAt.Add(time.Nanosecond)
 
 	for index := range records {
-		if records[index].Kind == db.ImportKindProjectAlias {
-			records[index] = db.ImportRecord{
-				Kind:                 db.ImportKindExternalFieldMapping,
-				ExternalFieldMapping: &adjacent,
-			}
+		if records[index].ImportKind() == db.ImportKindProjectAlias {
+			records[index] = &adjacent
 			break
 		}
 	}
@@ -631,32 +625,32 @@ func installBindingMapping(
 	issueID := bindingIssue
 	commentID := bindingComment
 	replacements := map[string]db.ImportRecord{
-		db.ImportKindIssueSyncStatus: {Kind: db.ImportKindImportMapping, ImportMapping: &db.ImportMappingExport{
+		db.ImportKindIssueSyncStatus: &db.ImportMappingExport{
 			ID: 132, Source: source, ExternalID: "cross-binding-object", ObjectType: objectType,
 			ProjectID: projectID, IssueID: &issueID, ImportedAt: "2026-07-15T12:00:00.000Z",
-		}},
+		},
 	}
 	if crossIssue {
 		issueID = otherIssueID
 		commentID = otherComment
-		replacements[db.ImportKindProjectAlias] = db.ImportRecord{Kind: db.ImportKindIssue, Issue: &db.IssueExport{
+		replacements[db.ImportKindProjectAlias] = &db.IssueExport{
 			ID: otherIssueID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2A", ProjectID: projectID,
 			ShortID: "zz2a", Title: "Other replay issue", Status: "open",
 			Author: "fixture-author", CreatedAt: "2026-07-15T12:00:00.000Z",
 			UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
-		}}
+		}
 	}
 	if withComment {
 		if crossIssue {
-			replacements[db.ImportKindIssueEmbedding] = db.ImportRecord{Kind: db.ImportKindComment, Comment: &db.CommentExport{
+			replacements[db.ImportKindIssueEmbedding] = &db.CommentExport{
 				ID: otherComment, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2B", IssueID: otherIssueID,
 				Author: "fixture-author", Body: "Other replay comment", CreatedAt: "2026-07-15T12:00:00.000Z",
-			}}
+			}
 		}
-		replacements[db.ImportKindIssueSyncStatus].ImportMapping.CommentID = &commentID
+		replacements[db.ImportKindIssueSyncStatus].(*db.ImportMappingExport).CommentID = &commentID
 	}
 	for index := range records {
-		originalKind := records[index].Kind
+		originalKind := records[index].ImportKind()
 		if replacement, ok := replacements[originalKind]; ok {
 			records[index] = replacement
 			delete(replacements, originalKind)
@@ -666,8 +660,8 @@ func installBindingMapping(
 
 func externalRootReplayBinding(records []db.ImportRecord) *db.ExternalRootBindingExport {
 	for _, record := range records {
-		if record.Kind == db.ImportKindExternalRootBinding {
-			return record.ExternalRootBinding
+		if binding, ok := record.(*db.ExternalRootBindingExport); ok {
+			return binding
 		}
 	}
 	panic("external root replay fixture has no binding")
@@ -675,8 +669,8 @@ func externalRootReplayBinding(records []db.ImportRecord) *db.ExternalRootBindin
 
 func externalRootReplayMapping(records []db.ImportRecord) *db.ExternalFieldMappingExport {
 	for _, record := range records {
-		if record.Kind == db.ImportKindExternalFieldMapping {
-			return record.ExternalFieldMapping
+		if mapping, ok := record.(*db.ExternalFieldMappingExport); ok {
+			return mapping
 		}
 	}
 	panic("external root replay fixture has no field mapping")
@@ -684,8 +678,8 @@ func externalRootReplayMapping(records []db.ImportRecord) *db.ExternalFieldMappi
 
 func externalRootReplayState(records []db.ImportRecord) *db.ExternalFieldStateExport {
 	for _, record := range records {
-		if record.Kind == db.ImportKindExternalFieldState {
-			return record.ExternalFieldState
+		if state, ok := record.(*db.ExternalFieldStateExport); ok {
+			return state
 		}
 	}
 	panic("external root replay fixture has no field state")
@@ -717,60 +711,60 @@ func extendedReplayRecords() []db.ImportRecord {
 	projectPurgeUID := "01HZZZZZZZZZZZZZZZZZZZZZ1D"
 	projectPurgeID := int64(90)
 	records := []db.ImportRecord{
-		{Kind: db.ImportKindMeta, Meta: &db.MetaKV{Key: "instance_uid", Value: replayInstanceUID}},
-		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
+		&db.ProjectExport{
 			ID: projectID, UID: projectUID, Name: "extended-replay", CreatedAt: created,
 			Metadata: json.RawMessage(`{"team":"example"}`), Revision: 3,
-		}},
-		{Kind: db.ImportKindProjectAlias, Alias: &db.AliasExport{
+		},
+		&db.AliasExport{
 			ID: 141, ProjectID: projectID, AliasIdentity: "example/extended", AliasKind: "git", CreatedAt: created,
-		}},
-		{Kind: db.ImportKindIssueSyncBinding, IssueSyncBinding: &db.IssueSyncBindingExport{
+		},
+		&db.IssueSyncBindingExport{
 			ID: 71, ProjectID: projectID, Provider: "example", SourceKey: "example:42",
 			RemoteID: "42", DisplayName: "Example tracker", Config: json.RawMessage(`{"mode":"mirror"}`),
 			Enabled: true, IntervalSeconds: 300, CreatedAt: created, UpdatedAt: created,
-		}},
-		{Kind: db.ImportKindIssueSyncStatus, IssueSyncStatus: &db.IssueSyncStatusExport{
+		},
+		&db.IssueSyncStatusExport{
 			BindingID: 71, ProjectID: projectID, LastErrorAt: &issueSyncLastErrorAt, LastError: &lastError,
 			LastCreated: 2, LastUpdated: 3, LastUnchanged: 4, LastComments: 5,
-		}},
-		{Kind: db.ImportKindRecurrence, Recurrence: &db.RecurrenceExport{
+		},
+		&db.RecurrenceExport{
 			ID: recurrenceID, UID: replayRecurrenceUID, ProjectID: projectID,
 			RRule: "FREQ=WEEKLY;BYDAY=MO", DTStart: "2026-07-20", Timezone: "UTC",
 			TemplateTitle: "Weekly review", TemplateBody: "Review progress",
 			TemplateLabels: json.RawMessage(`["weekly"]`), TemplateMetadata: json.RawMessage(`{"cadence":"weekly"}`),
 			Author: "scheduler", Revision: 1, CreatedAt: created, UpdatedAt: created,
-		}},
-		{Kind: db.ImportKindIssue, Issue: &db.IssueExport{
+		},
+		&db.IssueExport{
 			ID: issueID, UID: issueUID, ProjectID: projectID, ShortID: shortID,
 			Title: "Restored recurring issue", Body: "durable state", Status: "open",
 			Author: "fixture-author", CreatedAt: created, UpdatedAt: created,
 			Metadata: json.RawMessage(`{"source":"snapshot"}`), Revision: 2, ContentRevision: 1,
 			RecurrenceID: &recurrenceID, RecurrenceUID: new(replayRecurrenceUID),
-		}},
-		{Kind: db.ImportKindIssueEmbedding, IssueEmbedding: &db.IssueEmbeddingExport{
+		},
+		&db.IssueEmbeddingExport{
 			IssueUID: issueUID, EmbeddedContentRevision: 1, Fingerprint: "legacy-vector",
 			Dims: 2, VectorB64: "AAAAAAAAgD8=",
-		}},
-		{Kind: db.ImportKindComment, Comment: &db.CommentExport{
+		},
+		&db.CommentExport{
 			ID: commentID, UID: replayCommentUID, IssueID: issueID, Author: "reviewer",
 			Body: "restored comment", CreatedAt: created,
-		}},
-		{Kind: db.ImportKindIssueLabel, Label: &db.IssueLabelExport{
+		},
+		&db.IssueLabelExport{
 			IssueID: issueID, Label: "restored", Author: "fixture-author", CreatedAt: created,
-		}},
-		{Kind: db.ImportKindImportMapping, ImportMapping: &db.ImportMappingExport{
+		},
+		&db.ImportMappingExport{
 			ID: 131, Source: "connector:connector-one", ExternalID: "external-42", ObjectType: "issue",
 			ProjectID: projectID, IssueID: &issueID, ImportedAt: created,
-		}},
-		{Kind: db.ImportKindExternalFieldMapping, ExternalFieldMapping: &db.ExternalFieldMappingExport{
+		},
+		&db.ExternalFieldMappingExport{
 			ConnectorInstance: "connector-one", KataField: "scheduled_on",
 			ExternalFieldID: "schedule-one", ExternalFieldName: "Schedule",
 			AcceptedKinds: []string{"date"}, Nullable: true, Writable: true,
 			SchemaRevision: "schema-one", Active: true,
 			CreatedAt: mappingCreatedAt, UpdatedAt: mappingCreatedAt,
-		}},
-		{Kind: db.ImportKindExternalRootBinding, ExternalRootBinding: &db.ExternalRootBindingExport{
+		},
+		&db.ExternalRootBindingExport{
 			UID: replayBindingUID, ProjectUID: projectUID, IssueUID: issueUID,
 			RootMappingSource: "connector:connector-one", RootMappingExternalID: "external-42",
 			ConnectorInstance: "connector-one", ExternalRootKey: "external-42",
@@ -781,8 +775,8 @@ func extendedReplayRecords() []db.ImportRecord {
 			LastAttemptAt: &lastAttempt, LastSuccessAt: &lastSuccess, LastErrorAt: &externalLastErrorAt,
 			LastError: "temporary connector failure", ConsecutiveFailures: 1,
 			NextAttemptAt: &nextAttempt, CreatedAt: createdTime, UpdatedAt: externalLastErrorAt,
-		}},
-		{Kind: db.ImportKindExternalFieldState, ExternalFieldState: &db.ExternalFieldStateExport{
+		},
+		&db.ExternalFieldStateExport{
 			BindingUID: replayBindingUID, MappingConnectorInstance: "connector-one",
 			MappingKataField: "scheduled_on", MappingExternalFieldID: "schedule-one",
 			MappingSchemaRevision: "schema-one", MappingCreatedAt: mappingCreatedAt,
@@ -790,54 +784,54 @@ func extendedReplayRecords() []db.ImportRecord {
 			ConflictKata:     json.RawMessage(`"2026-08-21"`),
 			ConflictExternal: json.RawMessage(`"2026-08-22"`),
 			Conflicted:       true, ConflictAt: &conflictAt, UpdatedAt: conflictAt,
-		}},
-		{Kind: db.ImportKindFederationBinding, FederationBinding: &db.FederationBindingExport{
+		},
+		&db.FederationBindingExport{
 			ProjectID: projectID, Role: "spoke", HubURL: "https://hub.example",
 			HubProjectID: 7, HubProjectUID: replayHubProjectUID, ReplayHorizonEventID: 10,
 			PullCursorEventID: 11, PushEnabled: true, PushCursorEventID: 12,
 			Actor: "sync-agent", Enabled: true, CreatedAt: created, UpdatedAt: created,
-		}},
-		{Kind: db.ImportKindFederationSyncStatus, FederationSyncStatus: &db.FederationSyncStatusExport{
+		},
+		&db.FederationSyncStatusExport{
 			ProjectID: projectID, LastErrorAt: &issueSyncLastErrorAt, LastError: new("connection reset"),
-		}},
-		{Kind: db.ImportKindFederationQuarantine, FederationQuarantine: &db.FederationQuarantineExport{
+		},
+		&db.FederationQuarantineExport{
 			ID: 91, ProjectID: projectID, Direction: "pull", FirstEventID: 20, LastEventID: 21,
 			EventUIDs: json.RawMessage(`["event-one","event-two"]`), Error: "invalid remote event", CreatedAt: created,
-		}},
-		{Kind: db.ImportKindFederationEnrollment, FederationEnrollment: &db.FederationEnrollmentExport{
+		},
+		&db.FederationEnrollmentExport{
 			ID: 81, TokenHash: strings.Repeat("a", 64), SpokeInstanceUID: replaySpokeUID,
 			ProjectID: &projectID, Capabilities: "pull,push", Actor: "sync-agent",
 			CreatedAt: created, UpdatedAt: created,
-		}},
-		{Kind: db.ImportKindIssueClaim, IssueClaim: &db.IssueClaimExport{
+		},
+		&db.IssueClaimExport{
 			ID: 101, ClaimUID: replayClaimUID, ProjectID: projectID, IssueID: issueID,
 			IssueUID: issueUID, Holder: "worker", HolderInstanceUID: replaySpokeUID,
 			ClientKind: "agent", Purpose: "implementation", ClaimKind: "hard",
 			AcquiredAt: created, Revision: 1, UpdatedAt: created,
-		}},
-		{Kind: db.ImportKindPendingClaimRequest, PendingClaimRequest: &db.PendingClaimRequestExport{
+		},
+		&db.PendingClaimRequestExport{
 			ID: 111, RequestUID: replayPendingUID, ProjectID: projectID, IssueID: issueID,
 			IssueUID: issueUID, Holder: "reviewer", HolderInstanceUID: replayInstanceUID,
 			ClientKind: "cli", ClaimKind: "hard", Purpose: "review", RequestedAt: created,
-		}},
-		{Kind: db.ImportKindPurgeLog, PurgeLog: &db.PurgeLogExport{
+		},
+		&db.PurgeLogExport{
 			ID: 161, UID: replayPurgeUID, OriginInstanceUID: replayInstanceUID,
 			ProjectID: projectID, PurgedIssueID: 160, IssueUID: new("01HZZZZZZZZZZZZZZZZZZZZZ1E"),
 			ProjectUID: &projectUID, ProjectName: "extended-replay", ShortID: &purgeShortID,
 			IssueTitle: "Purged issue", IssueAuthor: "fixture-author", EventCount: 2,
 			PurgeResetAfterEventID: new(int64(100)), Actor: "operator", Reason: &reason, PurgedAt: created,
-		}},
-		{Kind: db.ImportKindProjectPurgeLog, ProjectPurgeLog: &db.ProjectPurgeLogExport{
+		},
+		&db.ProjectPurgeLogExport{
 			ID: 151, UID: replayProjectPurge, OriginInstanceUID: replayInstanceUID,
 			ProjectID: projectPurgeID, ProjectUID: &projectPurgeUID, ProjectName: "retired-project",
 			IssueCount: 2, EventCount: 3, AliasCount: 1, CommentCount: 1, LinkCount: 1,
 			LabelCount: 1, ClaimCount: 1, PendingClaimRequestCount: 1,
 			PurgeResetAfterEventID: new(int64(101)), Actor: "operator", Reason: &reason, PurgedAt: created,
-		}},
+		},
 	}
 	for name, floor := range replaySequenceFloors() {
 		sequence := db.SequenceExport{Name: name, Seq: floor}
-		records = append(records, db.ImportRecord{Kind: db.ImportKindSQLiteSequence, Sequence: &sequence})
+		records = append(records, &sequence)
 	}
 	return records
 }
@@ -875,30 +869,30 @@ func checkSnapshotReplayCompatibilityOptions(t *testing.T, store db.Storage) err
 	projectID := int64(5)
 	issueID := int64(6)
 	recurrenceRecords := []db.ImportRecord{
-		{Kind: db.ImportKindMeta, Meta: &db.MetaKV{Key: "instance_uid", Value: replayInstanceUID}},
-		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
+		&db.ProjectExport{
 			ID: projectID, UID: replayProjectUID, Name: "compatibility-replay", CreatedAt: created,
 			Metadata: json.RawMessage(`{}`), Revision: 1,
-		}},
-		{Kind: db.ImportKindIssueSyncBinding, IssueSyncBinding: &db.IssueSyncBindingExport{
+		},
+		&db.IssueSyncBindingExport{
 			ID: 7, ProjectID: projectID, Provider: "example", SourceKey: "example:compat",
 			RemoteID: "compat", DisplayName: "Compatibility source", Config: json.RawMessage(`{}`),
 			Enabled: true, IntervalSeconds: 60, CreatedAt: created, UpdatedAt: created,
-		}},
-		{Kind: db.ImportKindIssue, Issue: &db.IssueExport{
+		},
+		&db.IssueExport{
 			ID: issueID, UID: replayIssueUID, ProjectID: projectID, ShortID: "zz12",
 			Title: "Legacy replay issue", Status: "open", Author: "fixture-author",
 			CreatedAt: created, UpdatedAt: created, Metadata: json.RawMessage(`{}`), Revision: 1,
-		}},
-		{Kind: db.ImportKindComment, Comment: &db.CommentExport{
+		},
+		&db.CommentExport{
 			ID: 10, UID: replayCommentUID, IssueID: issueID, Author: "fixture-author",
 			Body: "pending external comment", CreatedAt: created,
-		}},
-		{Kind: db.ImportKindImportMapping, ImportMapping: &db.ImportMappingExport{
+		},
+		&db.ImportMappingExport{
 			ID: 11, Source: "connector:connector-cutover", ExternalID: "root-cutover",
 			ObjectType: "issue", ProjectID: projectID, IssueID: &issueID, ImportedAt: created,
-		}},
-		{Kind: db.ImportKindExternalRootBinding, ExternalRootBinding: &db.ExternalRootBindingExport{
+		},
+		&db.ExternalRootBindingExport{
 			UID: replayBindingUID, ProjectUID: replayProjectUID, IssueUID: replayIssueUID,
 			RootMappingSource: "connector:connector-cutover", RootMappingExternalID: "root-cutover",
 			ConnectorInstance: "connector-cutover", ExternalRootKey: "root-cutover",
@@ -906,25 +900,25 @@ func checkSnapshotReplayCompatibilityOptions(t *testing.T, store db.Storage) err
 			ReceiveComments: true, CompleteExternal: true, ReceiveCommentsAfter: &receiveAfter,
 			PendingCommentUID: replayCommentUID, PendingCommentStartedAt: &pendingStarted,
 			CreatedAt: createdTime, UpdatedAt: pendingStarted,
-		}},
-		{Kind: db.ImportKindPendingClaimRequest, PendingClaimRequest: &db.PendingClaimRequestExport{
+		},
+		&db.PendingClaimRequestExport{
 			ID: 8, RequestUID: replayPendingUID, ProjectID: projectID, IssueID: issueID,
 			IssueUID: replayIssueUID, Holder: "worker", HolderInstanceUID: replaySpokeUID,
 			ClientKind: "agent", ClaimKind: "hard", RequestedAt: created,
-		}},
-		{Kind: db.ImportKindPendingClaimRequest, PendingClaimRequest: &db.PendingClaimRequestExport{
+		},
+		&db.PendingClaimRequestExport{
 			ID: 9, RequestUID: "01HZZZZZZZZZZZZZZZZZZZZZ1F", ProjectID: projectID, IssueID: issueID,
 			IssueUID: replayIssueUID, Holder: "worker", HolderInstanceUID: replaySpokeUID,
 			ClientKind: "agent", ClaimKind: "hard", RequestedAt: "2026-07-15T12:01:00.000Z",
-		}},
-		{Kind: db.ImportKindEvent, Event: &db.EventExport{
+		},
+		&db.EventExport{
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
 			ProjectID: projectID, ProjectUID: replayProjectUID, ProjectName: "compatibility-replay",
 			IssueID: &issueID, Type: "issue.created", Actor: "fixture-author",
 			Payload:       json.RawMessage(`{"title":"Imported replay event"}`),
 			HLCPhysicalMS: 1784102400000, HLCCounter: 0, ContentHash: "legacy-hash",
 			CreatedAt: created,
-		}},
+		},
 	}
 	if err := store.ImportReplay(ctx, recurrenceRecords, db.ImportOptions{
 		NewInstance:                         true,
@@ -991,16 +985,16 @@ func checkSnapshotReplayHistoricalProjectName(t *testing.T, store db.Storage) er
 		return err
 	}
 	err = store.ImportReplay(ctx, []db.ImportRecord{
-		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+		&db.ProjectExport{
 			ID: 5, UID: replayProjectUID, Name: currentName, CreatedAt: created,
 			Metadata: json.RawMessage(`{}`), Revision: 1,
-		}},
-		{Kind: db.ImportKindEvent, Event: &db.EventExport{
+		},
+		&db.EventExport{
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
 			ProjectID: 5, ProjectUID: replayProjectUID, ProjectName: historicalName,
 			Type: "project.created", Actor: "fixture-author", Payload: payload,
 			HLCPhysicalMS: 1784102400000, ContentHash: hash, CreatedAt: created,
-		}},
+		},
 	}, db.ImportOptions{})
 	if err != nil {
 		return err
@@ -1038,16 +1032,16 @@ func checkSnapshotReplayUnsafeHistoricalProjectName(t *testing.T, store db.Stora
 		return err
 	}
 	err = store.ImportReplay(ctx, []db.ImportRecord{
-		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+		&db.ProjectExport{
 			ID: 5, UID: replayProjectUID, Name: "safe-current-name", CreatedAt: created,
 			Metadata: json.RawMessage(`{}`), Revision: 1,
-		}},
-		{Kind: db.ImportKindEvent, Event: &db.EventExport{
+		},
+		&db.EventExport{
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
 			ProjectID: 5, ProjectUID: replayProjectUID, ProjectName: unsafeName,
 			Type: "project.created", Actor: "fixture-author", Payload: payload,
 			HLCPhysicalMS: 1784102400000, ContentHash: hash, CreatedAt: created,
-		}},
+		},
 	}, db.ImportOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "non-printable")
@@ -1065,15 +1059,15 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 	localInstanceUID := store.InstanceUID()
 	created := "2026-07-15T12:00:00.000Z"
 	records := []db.ImportRecord{
-		{Kind: db.ImportKindMeta, Meta: &db.MetaKV{Key: "instance_uid", Value: replayInstanceUID}},
-		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
+		&db.ProjectExport{
 			ID: 2, UID: replayProjectUID, Name: "first-project", CreatedAt: created,
 			Metadata: json.RawMessage(`{}`), Revision: 1,
-		}},
-		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+		},
+		&db.ProjectExport{
 			ID: 3, UID: replayProjectUID, Name: "duplicate-project", CreatedAt: created,
 			Metadata: json.RawMessage(`{}`), Revision: 1,
-		}},
+		},
 	}
 	err := store.ImportReplay(ctx, records, db.ImportOptions{})
 	require.Error(t, err)
@@ -1088,25 +1082,45 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 	}
 
 	err = store.ImportReplay(ctx, []db.ImportRecord{
-		{Kind: db.ImportKindMeta, Meta: &db.MetaKV{Key: "instance_uid", Value: replayInstanceUID}},
-		{Kind: db.ImportKindProject},
+		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
+		(*db.ProjectExport)(nil),
 	}, db.ImportOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "import record 1")
-	assert.Contains(t, err.Error(), "no payload set")
+	assert.Contains(t, err.Error(), "nil payload")
 	projects, listErr = store.ListProjects(ctx)
 	if listErr != nil {
 		return listErr
 	}
 	assert.Empty(t, projects)
 
-	err = store.ImportReplay(ctx, []db.ImportRecord{{
-		Kind: db.ImportKindProject,
-		Project: &db.ProjectExport{
+	// The union check must refuse a malformed batch BEFORE any transaction
+	// opens, so a hostile or corrupt stream cannot partially mutate either
+	// backend. A canceled context makes the ordering observable: the
+	// pre-transaction check reports the malformed record, while a check moved
+	// inside the transaction would report the canceled BeginTx.
+	canceled, cancelReplay := context.WithCancel(ctx)
+	cancelReplay()
+	err = store.ImportReplay(canceled, []db.ImportRecord{
+		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
+		(*db.ProjectExport)(nil),
+	}, db.ImportOptions{})
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, context.Canceled,
+		"a malformed batch must be refused before the replay transaction opens")
+	assert.Contains(t, err.Error(), "import record 1")
+	projects, listErr = store.ListProjects(ctx)
+	if listErr != nil {
+		return listErr
+	}
+	assert.Empty(t, projects, "refused batch must not write any row")
+
+	err = store.ImportReplay(ctx, []db.ImportRecord{
+		&db.ProjectExport{
 			ID: 4, UID: replayProjectUID, Name: "unsafe\nproject", CreatedAt: created,
 			Metadata: json.RawMessage(`{}`), Revision: 1,
 		},
-	}}, db.ImportOptions{})
+	}, db.ImportOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "non-printable")
 	projects, listErr = store.ListProjects(ctx)
@@ -1117,22 +1131,22 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 
 	issueID := int64(6)
 	err = store.ImportReplay(ctx, []db.ImportRecord{
-		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+		&db.ProjectExport{
 			ID: 5, UID: replayProjectUID, Name: "hash-rejection", CreatedAt: created,
 			Metadata: json.RawMessage(`{}`), Revision: 1,
-		}},
-		{Kind: db.ImportKindIssue, Issue: &db.IssueExport{
+		},
+		&db.IssueExport{
 			ID: issueID, UID: replayIssueUID, ProjectID: 5, ShortID: "zz12",
 			Title: "Hash rejection", Status: "open", Author: "fixture-author",
 			CreatedAt: created, UpdatedAt: created, Metadata: json.RawMessage(`{}`), Revision: 1,
-		}},
-		{Kind: db.ImportKindEvent, Event: &db.EventExport{
+		},
+		&db.EventExport{
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
 			ProjectID: 5, ProjectUID: replayProjectUID, ProjectName: "hash-rejection",
 			IssueID: &issueID, IssueUID: new(replayIssueUID), Type: "issue.created",
 			Actor: "fixture-author", Payload: json.RawMessage(`{"title":"Hash rejection"}`),
 			HLCPhysicalMS: 1784102400000, ContentHash: strings.Repeat("0", 64), CreatedAt: created,
-		}},
+		},
 	}, db.ImportOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "content_hash mismatch")
@@ -1146,13 +1160,12 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 	if createErr != nil {
 		return createErr
 	}
-	err = store.ImportReplay(ctx, []db.ImportRecord{{
-		Kind: db.ImportKindProject,
-		Project: &db.ProjectExport{
+	err = store.ImportReplay(ctx, []db.ImportRecord{
+		&db.ProjectExport{
 			ID: 8, UID: replayProjectUID, Name: "fresh-only", CreatedAt: created,
 			Metadata: json.RawMessage(`{}`), Revision: 1,
 		},
-	}}, db.ImportOptions{RequireFreshTarget: true})
+	}, db.ImportOptions{RequireFreshTarget: true})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fresh")
 	preserved, preserveErr := store.ProjectByUID(ctx, existing.UID)
@@ -1229,9 +1242,9 @@ func checkSnapshotReplayProjectEnvelopes(
 		return err
 	}
 	for _, record := range full {
-		if record.Link != nil && record.Link.ID == link.ID {
-			duplicate := *record.Link
-			full = append(full, db.ImportRecord{Kind: db.ImportKindLink, Link: &duplicate})
+		if replayLink, ok := record.(*db.LinkExport); ok && replayLink.ID == link.ID {
+			duplicate := *replayLink
+			full = append(full, &duplicate)
 			break
 		}
 	}
@@ -1309,12 +1322,12 @@ func checkSnapshotMergeExternalRoots(
 		return err
 	}
 	for i := range records {
-		if records[i].ExternalFieldMapping != nil {
-			records[i].ExternalFieldMapping.CreatedAt = targetMapping.CreatedAt
-			records[i].ExternalFieldMapping.UpdatedAt = targetMapping.UpdatedAt
+		if mapping, ok := records[i].(*db.ExternalFieldMappingExport); ok {
+			mapping.CreatedAt = targetMapping.CreatedAt
+			mapping.UpdatedAt = targetMapping.UpdatedAt
 		}
-		if records[i].ExternalFieldState != nil {
-			records[i].ExternalFieldState.MappingCreatedAt = targetMapping.CreatedAt
+		if state, ok := records[i].(*db.ExternalFieldStateExport); ok {
+			state.MappingCreatedAt = targetMapping.CreatedAt
 		}
 	}
 	existing, err := target.CreateProject(ctx, "existing-project")
@@ -1387,12 +1400,12 @@ func checkSnapshotMergeExternalRoots(
 	}
 	incomingCreatedAt := precisionMapping.CreatedAt.Add(time.Nanosecond)
 	for i := range precisionRecords {
-		if precisionRecords[i].ExternalFieldMapping != nil {
-			precisionRecords[i].ExternalFieldMapping.CreatedAt = incomingCreatedAt
-			precisionRecords[i].ExternalFieldMapping.UpdatedAt = incomingCreatedAt
+		if mapping, ok := precisionRecords[i].(*db.ExternalFieldMappingExport); ok {
+			mapping.CreatedAt = incomingCreatedAt
+			mapping.UpdatedAt = incomingCreatedAt
 		}
-		if precisionRecords[i].ExternalFieldState != nil {
-			precisionRecords[i].ExternalFieldState.MappingCreatedAt = incomingCreatedAt
+		if state, ok := precisionRecords[i].(*db.ExternalFieldStateExport); ok {
+			state.MappingCreatedAt = incomingCreatedAt
 		}
 	}
 	if err := precisionTarget.ImportReplay(ctx, precisionRecords, db.ImportOptions{MergeProject: true}); err != nil {
@@ -1443,12 +1456,12 @@ func checkSnapshotMergeExternalRoots(
 		return err
 	}
 	for i := range beforeDeactivation {
-		if beforeDeactivation[i].ExternalFieldMapping != nil {
-			beforeDeactivation[i].ExternalFieldMapping.CreatedAt = deactivatedMapping.CreatedAt
-			beforeDeactivation[i].ExternalFieldMapping.UpdatedAt = deactivatedMapping.UpdatedAt
+		if mapping, ok := beforeDeactivation[i].(*db.ExternalFieldMappingExport); ok {
+			mapping.CreatedAt = deactivatedMapping.CreatedAt
+			mapping.UpdatedAt = deactivatedMapping.UpdatedAt
 		}
-		if beforeDeactivation[i].ExternalFieldState != nil {
-			beforeDeactivation[i].ExternalFieldState.MappingCreatedAt = deactivatedMapping.CreatedAt
+		if state, ok := beforeDeactivation[i].(*db.ExternalFieldStateExport); ok {
+			state.MappingCreatedAt = deactivatedMapping.CreatedAt
 		}
 	}
 	time.Sleep(2 * time.Millisecond)
@@ -1489,13 +1502,13 @@ func checkSnapshotMergeExternalRoots(
 	}
 	incomingUpdatedAt := advancedMapping.UpdatedAt.Add(time.Minute)
 	for i := range afterDeactivation {
-		if afterDeactivation[i].ExternalFieldMapping != nil {
-			afterDeactivation[i].ExternalFieldMapping.CreatedAt = advancedMapping.CreatedAt
-			afterDeactivation[i].ExternalFieldMapping.UpdatedAt = incomingUpdatedAt
-			afterDeactivation[i].ExternalFieldMapping.Active = false
+		if mapping, ok := afterDeactivation[i].(*db.ExternalFieldMappingExport); ok {
+			mapping.CreatedAt = advancedMapping.CreatedAt
+			mapping.UpdatedAt = incomingUpdatedAt
+			mapping.Active = false
 		}
-		if afterDeactivation[i].ExternalFieldState != nil {
-			afterDeactivation[i].ExternalFieldState.MappingCreatedAt = advancedMapping.CreatedAt
+		if state, ok := afterDeactivation[i].(*db.ExternalFieldStateExport); ok {
+			state.MappingCreatedAt = advancedMapping.CreatedAt
 		}
 	}
 	if err := advancedTarget.ImportReplay(ctx, afterDeactivation, db.ImportOptions{MergeProject: true}); err != nil {
@@ -1540,12 +1553,12 @@ func checkSnapshotMergeExternalRoots(
 		return err
 	}
 	for i := range conflictingRecords {
-		if conflictingRecords[i].ExternalFieldMapping != nil {
-			conflictingRecords[i].ExternalFieldMapping.CreatedAt = conflictingMapping.CreatedAt
-			conflictingRecords[i].ExternalFieldMapping.UpdatedAt = conflictingMapping.UpdatedAt
+		if mapping, ok := conflictingRecords[i].(*db.ExternalFieldMappingExport); ok {
+			mapping.CreatedAt = conflictingMapping.CreatedAt
+			mapping.UpdatedAt = conflictingMapping.UpdatedAt
 		}
-		if conflictingRecords[i].ExternalFieldState != nil {
-			conflictingRecords[i].ExternalFieldState.MappingCreatedAt = conflictingMapping.CreatedAt
+		if state, ok := conflictingRecords[i].(*db.ExternalFieldStateExport); ok {
+			state.MappingCreatedAt = conflictingMapping.CreatedAt
 		}
 	}
 	err = conflictTarget.ImportReplay(ctx, conflictingRecords, db.ImportOptions{MergeProject: true})
@@ -1588,11 +1601,11 @@ func checkSnapshotMergeExternalRoots(
 		return err
 	}
 	for i := range uidCollisionRecords {
-		if uidCollisionRecords[i].ExternalRootBinding != nil {
-			uidCollisionRecords[i].ExternalRootBinding.UID = existingBinding.UID
+		if binding, ok := uidCollisionRecords[i].(*db.ExternalRootBindingExport); ok {
+			binding.UID = existingBinding.UID
 		}
-		if uidCollisionRecords[i].ExternalFieldState != nil {
-			uidCollisionRecords[i].ExternalFieldState.BindingUID = existingBinding.UID
+		if state, ok := uidCollisionRecords[i].(*db.ExternalFieldStateExport); ok {
+			state.BindingUID = existingBinding.UID
 		}
 	}
 	err = uidTarget.ImportReplay(ctx, uidCollisionRecords, db.ImportOptions{MergeProject: true})

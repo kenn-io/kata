@@ -197,211 +197,211 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 	case KindMeta:
 		var rec metaRecord
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		m := db.MetaKV{Key: rec.Key, Value: rec.Value}
-		return db.ImportRecord{Kind: string(KindMeta), Meta: &m}, nil
+		return &m, nil
 	case KindProject:
 		var rec projectImport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeProjectTimes(&rec.ProjectExport); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := fillProjectUID(&rec, exportVersion); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		p := rec.ProjectExport
-		return db.ImportRecord{Kind: string(KindProject), Project: &p}, nil
+		return &p, nil
 	case KindProjectAlias:
 		var rec db.AliasExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeAliasTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindProjectAlias), Alias: &rec}, nil
+		return &rec, nil
 	case KindIssueSyncBinding:
 		var rec db.IssueSyncBindingExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeIssueSyncBindingTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindIssueSyncBinding), IssueSyncBinding: &rec}, nil
+		return &rec, nil
 	case KindGitHubSyncBinding:
 		rec, err := decodeLegacyGitHubSyncBinding(env)
 		if err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeIssueSyncBindingTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindIssueSyncBinding), IssueSyncBinding: &rec}, nil
+		return &rec, nil
 	case KindIssueSyncStatus:
 		var rec db.IssueSyncStatusExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeIssueSyncStatusTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindIssueSyncStatus), IssueSyncStatus: &rec}, nil
+		return &rec, nil
 	case KindGitHubSyncStatus:
 		var rec db.IssueSyncStatusExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeIssueSyncStatusTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindIssueSyncStatus), IssueSyncStatus: &rec}, nil
+		return &rec, nil
 	case KindRecurrence:
 		var rec db.RecurrenceExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeRecurrenceTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindRecurrence), Recurrence: &rec}, nil
+		return &rec, nil
 	case KindIssue:
 		var rec issueImport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeIssueTimes(&rec.IssueExport); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := fillIssueUID(&rec, exportVersion); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		i := rec.IssueExport
-		return db.ImportRecord{Kind: string(KindIssue), Issue: &i}, nil
+		return &i, nil
 	case KindIssueEmbedding:
 		var rec db.IssueEmbeddingExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindIssueEmbedding), IssueEmbedding: &rec}, nil
+		return &rec, nil
 	case KindComment:
 		var rec db.CommentExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeCommentTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := fillCommentUID(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindComment), Comment: &rec}, nil
+		return &rec, nil
 	case KindIssueLabel:
 		var rec db.IssueLabelExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeIssueLabelTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindIssueLabel), Label: &rec}, nil
+		return &rec, nil
 	case KindLink:
 		var rec db.LinkExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeLinkTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindLink), Link: &rec}, nil
+		return &rec, nil
 	case KindImportMapping:
 		var rec db.ImportMappingExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeImportMappingTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindImportMapping), ImportMapping: &rec}, nil
+		return &rec, nil
 	case KindExternalFieldMapping:
 		var rec db.ExternalFieldMappingExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindExternalFieldMapping), ExternalFieldMapping: &rec}, nil
+		return &rec, nil
 	case KindExternalRootBinding:
 		var rec db.ExternalRootBindingExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindExternalRootBinding), ExternalRootBinding: &rec}, nil
+		return &rec, nil
 	case KindExternalFieldState:
 		var rec db.ExternalFieldStateExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindExternalFieldState), ExternalFieldState: &rec}, nil
+		return &rec, nil
 	case KindFederationBinding:
 		var rec db.FederationBindingExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeFederationBindingTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindFederationBinding), FederationBinding: &rec}, nil
+		return &rec, nil
 	case KindFederationSyncStatus:
 		var rec db.FederationSyncStatusExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeFederationSyncStatusTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindFederationSyncStatus), FederationSyncStatus: &rec}, nil
+		return &rec, nil
 	case KindFederationQuarantine:
 		var rec db.FederationQuarantineExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeFederationQuarantineTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindFederationQuarantine), FederationQuarantine: &rec}, nil
+		return &rec, nil
 	case KindFederationEnrollment:
 		var rec db.FederationEnrollmentExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeFederationEnrollmentTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindFederationEnrollment), FederationEnrollment: &rec}, nil
+		return &rec, nil
 	case KindIssueClaim:
 		var rec db.IssueClaimExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeIssueClaimTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindIssueClaim), IssueClaim: &rec}, nil
+		return &rec, nil
 	case KindPendingClaimRequest:
 		var rec db.PendingClaimRequestExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizePendingClaimRequestTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindPendingClaimRequest), PendingClaimRequest: &rec}, nil
+		return &rec, nil
 	case KindEvent:
 		var rec eventImport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if rec.ProjectName == "" && rec.LegacyProjectName != "" {
 			rec.ProjectName = rec.LegacyProjectName
@@ -413,52 +413,52 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		// will mismatch the recomputed one and be rejected with a
 		// content_hash error.
 		if err := normalizeEventTimes(&rec.EventExport); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := fillEventV3Identity(&rec.EventExport, exportVersion, localInstanceUID); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := fillEventV11ReplayFields(&rec.EventExport, exportVersion, projectUIDByID); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if rec.ProjectUID == "" {
 			rec.ProjectUID = projectUIDByID[rec.ProjectID]
 		}
 		e := rec.EventExport
-		return db.ImportRecord{Kind: string(KindEvent), Event: &e}, nil
+		return &e, nil
 	case KindPurgeLog:
 		var rec purgeLogImport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if rec.ProjectName == "" && rec.LegacyProjectName != "" {
 			rec.ProjectName = rec.LegacyProjectName
 		}
 		if err := normalizePurgeLogTimes(&rec.PurgeLogExport); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := fillPurgeLogV3Identity(&rec.PurgeLogExport, exportVersion, localInstanceUID); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		pl := rec.PurgeLogExport
-		return db.ImportRecord{Kind: string(KindPurgeLog), PurgeLog: &pl}, nil
+		return &pl, nil
 	case KindProjectPurgeLog:
 		var rec db.ProjectPurgeLogExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
 		if err := normalizeProjectPurgeLogTimes(&rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindProjectPurgeLog), ProjectPurgeLog: &rec}, nil
+		return &rec, nil
 	case KindSQLiteSequence:
 		var rec db.SequenceExport
 		if err := decodeData(env, &rec); err != nil {
-			return db.ImportRecord{}, err
+			return nil, err
 		}
-		return db.ImportRecord{Kind: string(KindSQLiteSequence), Sequence: &rec}, nil
+		return &rec, nil
 	default:
-		return db.ImportRecord{}, fmt.Errorf("import %s: unsupported kind", env.Kind)
+		return nil, fmt.Errorf("import %s: unsupported kind", env.Kind)
 	}
 }
 

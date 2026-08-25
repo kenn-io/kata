@@ -529,6 +529,71 @@ func TestAutoCutover_DropsAllKnownOrphanClasses(t *testing.T) {
 	assertNoCutoverTemps(t, path)
 }
 
+// TestAutoCutover_V2ScrubsOrphanRelatedEvent mirrors
+// TestAutoCutover_DropsAllKnownOrphanClasses on a v2 source, whose events
+// projection is a separate copy of the kata#1 peer-scrub rule. A non-
+// aggregated event whose related_issue_id points at a missing issue must
+// survive with both related columns NULL, not be dropped and not dangle.
+func TestAutoCutover_V2ScrubsOrphanRelatedEvent(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	seedV2DBWithOrphanRelatedEvent(t, path)
+
+	_, restore := captureStderr(t)
+	defer restore()
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+	assertCurrentSchemaVersion(t, path)
+
+	var relatedID, relatedUID sql.NullString
+	require.NoError(t, d.QueryRowContext(ctx,
+		`SELECT related_issue_id, related_issue_uid FROM events WHERE type = 'issue.linked'`).
+		Scan(&relatedID, &relatedUID),
+		"the orphan-related event must survive the v2 export")
+	assert.False(t, relatedID.Valid, "related_issue_id must be NULL after scrub")
+	assert.False(t, relatedUID.Valid, "related_issue_uid must be NULL after scrub")
+
+	var issueCount int
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues`).Scan(&issueCount))
+	assert.Equal(t, 1, issueCount, "the seeded valid issue must survive cutover")
+
+	assertNoCutoverTemps(t, path)
+}
+
+// TestAutoCutover_V1ScrubsOrphanRelatedEvent covers the one band whose
+// projection genuinely differs: the v1 events table has no
+// related_issue_uid column, so the scrub rule must NULL related_issue_id
+// alone without referencing a column that does not exist.
+func TestAutoCutover_V1ScrubsOrphanRelatedEvent(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	seedV1DBWithOrphanRelatedEvent(t, path)
+
+	_, restore := captureStderr(t)
+	defer restore()
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+	assertCurrentSchemaVersion(t, path)
+
+	var relatedID sql.NullString
+	require.NoError(t, d.QueryRowContext(ctx,
+		`SELECT related_issue_id FROM events WHERE type = 'issue.linked'`).Scan(&relatedID),
+		"the orphan-related event must survive the v1 export")
+	assert.False(t, relatedID.Valid, "related_issue_id must be NULL after scrub")
+
+	var issueCount int
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues`).Scan(&issueCount))
+	assert.Equal(t, 1, issueCount, "the seeded valid issue must survive cutover")
+
+	assertNoCutoverTemps(t, path)
+}
+
 // --- v3 → v4 ---
 
 // TestV3ToV4CutoverPreservesProjects exercises the user-facing upgrade

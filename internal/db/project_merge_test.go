@@ -18,8 +18,8 @@ func TestPrepareProjectMergeRecordsPreservesEventIdentityAndPayload(t *testing.T
 		Payload: payload, HLCPhysicalMS: 1, ContentHash: "source-hash", CreatedAt: "2026-08-19T00:00:00.000Z",
 	}
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindEvent, Event: event},
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		event,
 	}
 
 	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -28,20 +28,20 @@ func TestPrepareProjectMergeRecordsPreservesEventIdentityAndPayload(t *testing.T
 	require.NoError(t, err)
 	require.Len(t, prepared, 2)
 
-	assert.Equal(t, event.UID, prepared[1].Event.UID)
-	assert.Equal(t, event.ContentHash, prepared[1].Event.ContentHash)
-	assert.JSONEq(t, string(payload), string(prepared[1].Event.Payload))
+	assert.Equal(t, event.UID, recordPayloadAs[EventExport](t, prepared[1]).UID)
+	assert.Equal(t, event.ContentHash, recordPayloadAs[EventExport](t, prepared[1]).ContentHash)
+	assert.JSONEq(t, string(payload), string(recordPayloadAs[EventExport](t, prepared[1]).Payload))
 	assert.JSONEq(t, string(payload), string(event.Payload), "source event payload must not be mutated")
 	assert.Equal(t, "source-hash", event.ContentHash, "source event hash must not be mutated")
 }
 
 func TestPrepareProjectMergeRecordsDropsSequenceFloors(t *testing.T) {
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "projects", Seq: 9}},
-		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "issues", Seq: math.MaxInt64}},
-		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "events", Seq: 50}},
-		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "api_tokens", Seq: 99}},
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&SequenceExport{Name: "projects", Seq: 9},
+		&SequenceExport{Name: "issues", Seq: math.MaxInt64},
+		&SequenceExport{Name: "events", Seq: 50},
+		&SequenceExport{Name: "api_tokens", Seq: 99},
 	}
 
 	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -49,18 +49,18 @@ func TestPrepareProjectMergeRecordsDropsSequenceFloors(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	require.Len(t, prepared, 1)
-	assert.Equal(t, int64(4), prepared[0].Project.ID)
-	assert.Equal(t, int64(9), records[1].Sequence.Seq, "source sequence must not be mutated")
+	assert.Equal(t, int64(4), recordPayloadAs[ProjectExport](t, prepared[0]).ID)
+	assert.Equal(t, int64(9), recordPayloadAs[SequenceExport](t, records[1]).Seq, "source sequence must not be mutated")
 }
 
 func TestPrepareProjectMergeRecordsDerivesSequenceFloorsFromPurgeTombstone(t *testing.T) {
 	resetCursor := int64(50)
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindPurgeLog, PurgeLog: &PurgeLogExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&PurgeLogExport{
 			ID: 1, ProjectID: 2, PurgedIssueID: 3, PurgeResetAfterEventID: &resetCursor,
-		}},
-		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "events", Seq: math.MaxInt64}},
+		},
+		&SequenceExport{Name: "events", Seq: math.MaxInt64},
 	}
 
 	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -68,38 +68,38 @@ func TestPrepareProjectMergeRecordsDerivesSequenceFloorsFromPurgeTombstone(t *te
 	}, nil)
 	require.NoError(t, err)
 	require.Len(t, prepared, 4)
-	assert.Equal(t, int64(103), prepared[1].PurgeLog.PurgedIssueID)
-	require.NotNil(t, prepared[1].PurgeLog.PurgeResetAfterEventID)
-	assert.Equal(t, int64(250), *prepared[1].PurgeLog.PurgeResetAfterEventID)
-	require.NotNil(t, prepared[2].Sequence)
-	assert.Equal(t, "issues", prepared[2].Sequence.Name)
-	assert.Equal(t, int64(103), prepared[2].Sequence.Seq)
-	require.NotNil(t, prepared[3].Sequence)
-	assert.Equal(t, "events", prepared[3].Sequence.Name)
-	assert.Equal(t, int64(250), prepared[3].Sequence.Seq)
-	assert.Equal(t, int64(3), records[1].PurgeLog.PurgedIssueID, "source issue ID must not be mutated")
-	assert.Equal(t, int64(50), *records[1].PurgeLog.PurgeResetAfterEventID, "source cursor must not be mutated")
+	assert.Equal(t, int64(103), recordPayloadAs[PurgeLogExport](t, prepared[1]).PurgedIssueID)
+	require.NotNil(t, recordPayloadAs[PurgeLogExport](t, prepared[1]).PurgeResetAfterEventID)
+	assert.Equal(t, int64(250), *recordPayloadAs[PurgeLogExport](t, prepared[1]).PurgeResetAfterEventID)
+	require.NotNil(t, recordPayloadAs[SequenceExport](t, prepared[2]))
+	assert.Equal(t, "issues", recordPayloadAs[SequenceExport](t, prepared[2]).Name)
+	assert.Equal(t, int64(103), recordPayloadAs[SequenceExport](t, prepared[2]).Seq)
+	require.NotNil(t, recordPayloadAs[SequenceExport](t, prepared[3]))
+	assert.Equal(t, "events", recordPayloadAs[SequenceExport](t, prepared[3]).Name)
+	assert.Equal(t, int64(250), recordPayloadAs[SequenceExport](t, prepared[3]).Seq)
+	assert.Equal(t, int64(3), recordPayloadAs[PurgeLogExport](t, records[1]).PurgedIssueID, "source issue ID must not be mutated")
+	assert.Equal(t, int64(50), *recordPayloadAs[PurgeLogExport](t, records[1]).PurgeResetAfterEventID, "source cursor must not be mutated")
 }
 
 func TestPrepareProjectMergeRecordsRejectsIDsWithoutSequenceHeadroom(t *testing.T) {
-	project := ImportRecord{Kind: ImportKindProject, Project: &ProjectExport{
+	project := &ProjectExport{
 		ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project",
-	}}
+	}
 	tests := []struct {
 		name   string
 		record ImportRecord
 	}{
 		{
 			name: "issue",
-			record: ImportRecord{Kind: ImportKindIssue, Issue: &IssueExport{
+			record: &IssueExport{
 				ID: math.MaxInt64, UID: "01H00000000000000000000001", ProjectID: 2,
-			}},
+			},
 		},
 		{
 			name: "event",
-			record: ImportRecord{Kind: ImportKindEvent, Event: &EventExport{
+			record: &EventExport{
 				ID: math.MaxInt64, UID: "01H00000000000000000000002", ProjectID: 2,
-			}},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -116,11 +116,11 @@ func TestPrepareProjectMergeRecordsRejectsIDsWithoutSequenceHeadroom(t *testing.
 
 func TestPrepareProjectMergeRecordsRejectsHLCPhysicalValueWithoutHeadroom(t *testing.T) {
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindEvent, Event: &EventExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&EventExport{
 			ID: 7, UID: "01H00000000000000000000001", ProjectID: 2,
 			HLCPhysicalMS: maxProjectMergeHLCValue + 1,
-		}},
+		},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -132,11 +132,11 @@ func TestPrepareProjectMergeRecordsRejectsHLCPhysicalValueWithoutHeadroom(t *tes
 
 func TestPrepareProjectMergeRecordsRejectsHLCCounterWithoutHeadroom(t *testing.T) {
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindEvent, Event: &EventExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&EventExport{
 			ID: 7, UID: "01H00000000000000000000001", ProjectID: 2,
 			HLCPhysicalMS: 1, HLCCounter: maxProjectMergeHLCValue + 1,
-		}},
+		},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -150,15 +150,15 @@ func TestPrepareProjectMergeRecordsRemapsIDs(t *testing.T) {
 	issueID := int64(5)
 	peerID := int64(9)
 	records := []ImportRecord{
-		{Kind: ImportKindMeta, Meta: &MetaKV{Key: "instance_uid", Value: "source"}},
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{ID: issueID, UID: "01H00000000000000000000001", ProjectID: 2}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{ID: peerID, UID: "01H00000000000000000000002", ProjectID: 2}},
-		{Kind: ImportKindLink, Link: &LinkExport{
+		&MetaKV{Key: "instance_uid", Value: "source"},
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&IssueExport{ID: issueID, UID: "01H00000000000000000000001", ProjectID: 2},
+		&IssueExport{ID: peerID, UID: "01H00000000000000000000002", ProjectID: 2},
+		&LinkExport{
 			ID: 3, FromIssueID: issueID, FromIssueUID: "01H00000000000000000000001",
 			ToIssueID: peerID, ToIssueUID: "01H00000000000000000000002", Type: "blocks",
-		}},
-		{Kind: ImportKindSQLiteSequence, Sequence: &SequenceExport{Name: "issues", Seq: 99}},
+		},
+		&SequenceExport{Name: "issues", Seq: 99},
 	}
 
 	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -166,27 +166,27 @@ func TestPrepareProjectMergeRecordsRemapsIDs(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	require.Len(t, prepared, 4)
-	assert.Equal(t, int64(20), prepared[0].Project.ID)
-	assert.Equal(t, int64(105), prepared[1].Issue.ID)
-	assert.Equal(t, int64(20), prepared[1].Issue.ProjectID)
-	assert.Equal(t, int64(109), prepared[2].Issue.ID)
-	assert.Equal(t, int64(203), prepared[3].Link.ID)
-	assert.Equal(t, int64(105), prepared[3].Link.FromIssueID)
-	assert.Equal(t, int64(109), prepared[3].Link.ToIssueID)
+	assert.Equal(t, int64(20), recordPayloadAs[ProjectExport](t, prepared[0]).ID)
+	assert.Equal(t, int64(105), recordPayloadAs[IssueExport](t, prepared[1]).ID)
+	assert.Equal(t, int64(20), recordPayloadAs[IssueExport](t, prepared[1]).ProjectID)
+	assert.Equal(t, int64(109), recordPayloadAs[IssueExport](t, prepared[2]).ID)
+	assert.Equal(t, int64(203), recordPayloadAs[LinkExport](t, prepared[3]).ID)
+	assert.Equal(t, int64(105), recordPayloadAs[LinkExport](t, prepared[3]).FromIssueID)
+	assert.Equal(t, int64(109), recordPayloadAs[LinkExport](t, prepared[3]).ToIssueID)
 
-	assert.Equal(t, issueID, records[2].Issue.ID, "source records must not be mutated")
-	assert.Equal(t, peerID, records[4].Link.ToIssueID, "source link must not be mutated")
+	assert.Equal(t, issueID, recordPayloadAs[IssueExport](t, records[2]).ID, "source records must not be mutated")
+	assert.Equal(t, peerID, recordPayloadAs[LinkExport](t, records[4]).ToIssueID, "source link must not be mutated")
 }
 
 func TestPrepareProjectMergeRecordsRejectsRecurrenceUIDOutsideImport(t *testing.T) {
 	recurrenceUID := "01H00000000000000000000002"
 	occurrenceKey := "2026-08-20"
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&IssueExport{
 			ID: 5, UID: "01H00000000000000000000001", ProjectID: 2,
 			RecurrenceUID: &recurrenceUID, OccurrenceKey: &occurrenceKey,
-		}},
+		},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -200,13 +200,13 @@ func TestPrepareProjectMergeRecordsRejectsRecurrenceIdentityMismatch(t *testing.
 	recurrenceID := int64(3)
 	recurrenceUID := "01H00000000000000000000004"
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindRecurrence, Recurrence: &RecurrenceExport{ID: 3, UID: "01H00000000000000000000002", ProjectID: 2}},
-		{Kind: ImportKindRecurrence, Recurrence: &RecurrenceExport{ID: 4, UID: recurrenceUID, ProjectID: 2}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&RecurrenceExport{ID: 3, UID: "01H00000000000000000000002", ProjectID: 2},
+		&RecurrenceExport{ID: 4, UID: recurrenceUID, ProjectID: 2},
+		&IssueExport{
 			ID: 5, UID: "01H00000000000000000000001", ProjectID: 2,
 			RecurrenceID: &recurrenceID, RecurrenceUID: &recurrenceUID,
-		}},
+		},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -219,11 +219,11 @@ func TestPrepareProjectMergeRecordsRejectsRecurrenceIdentityMismatch(t *testing.
 func TestPrepareProjectMergeRecordsRejectsRecurrenceIDOutsideImport(t *testing.T) {
 	recurrenceID := int64(3)
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&IssueExport{
 			ID: 5, UID: "01H00000000000000000000001", ProjectID: 2,
 			RecurrenceID: &recurrenceID,
-		}},
+		},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -236,31 +236,31 @@ func TestPrepareProjectMergeRecordsRejectsRecurrenceIDOutsideImport(t *testing.T
 func TestPrepareProjectMergeRecordsRemapsRecurrenceUIDWithinImport(t *testing.T) {
 	recurrenceUID := "01H00000000000000000000002"
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindRecurrence, Recurrence: &RecurrenceExport{ID: 3, UID: recurrenceUID, ProjectID: 2}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&RecurrenceExport{ID: 3, UID: recurrenceUID, ProjectID: 2},
+		&IssueExport{
 			ID: 5, UID: "01H00000000000000000000001", ProjectID: 2,
 			RecurrenceUID: &recurrenceUID,
-		}},
+		},
 	}
 
 	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
 		TargetProjectID: 4, Issue: 10, Recurrence: 20,
 	}, nil)
 	require.NoError(t, err)
-	require.NotNil(t, prepared[2].Issue.RecurrenceID)
-	assert.Equal(t, int64(23), *prepared[2].Issue.RecurrenceID)
-	assert.Nil(t, records[2].Issue.RecurrenceID, "source issue must not be mutated")
+	require.NotNil(t, recordPayloadAs[IssueExport](t, prepared[2]).RecurrenceID)
+	assert.Equal(t, int64(23), *recordPayloadAs[IssueExport](t, prepared[2]).RecurrenceID)
+	assert.Nil(t, recordPayloadAs[IssueExport](t, records[2]).RecurrenceID, "source issue must not be mutated")
 }
 
 func TestPrepareProjectMergeRecordsDoesNotResolveExternalLinkPeer(t *testing.T) {
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2}},
-		{Kind: ImportKindLink, Link: &LinkExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2},
+		&LinkExport{
 			ID: 3, FromIssueID: 5, FromIssueUID: "01H00000000000000000000001",
 			ToIssueID: 9, ToIssueUID: "01H00000000000000000000002", Type: "blocks",
-		}},
+		},
 	}
 	lookupCalled := false
 
@@ -272,8 +272,8 @@ func TestPrepareProjectMergeRecordsDoesNotResolveExternalLinkPeer(t *testing.T) 
 	})
 	require.NoError(t, err)
 	require.Len(t, prepared, 3)
-	assert.Equal(t, int64(15), prepared[2].Link.FromIssueID)
-	assert.Zero(t, prepared[2].Link.ToIssueID)
+	assert.Equal(t, int64(15), recordPayloadAs[LinkExport](t, prepared[2]).FromIssueID)
+	assert.Zero(t, recordPayloadAs[LinkExport](t, prepared[2]).ToIssueID)
 	assert.False(t, lookupCalled)
 }
 
@@ -281,11 +281,11 @@ func TestPrepareProjectMergeRecordsClearsUnresolvedEventRelatedIssueID(t *testin
 	relatedIssueID := int64(9)
 	relatedIssueUID := "01H00000000000000000000002"
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindEvent, Event: &EventExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&EventExport{
 			ID: 7, UID: "01H00000000000000000000001", ProjectID: 2,
 			RelatedIssueID: &relatedIssueID, RelatedIssueUID: &relatedIssueUID,
-		}},
+		},
 	}
 
 	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -293,23 +293,23 @@ func TestPrepareProjectMergeRecordsClearsUnresolvedEventRelatedIssueID(t *testin
 	}, func(string) (int64, bool, error) { return 0, false, nil })
 	require.NoError(t, err)
 	require.Len(t, prepared, 2)
-	assert.Nil(t, prepared[1].Event.RelatedIssueID)
-	require.NotNil(t, prepared[1].Event.RelatedIssueUID)
-	assert.Equal(t, relatedIssueUID, *prepared[1].Event.RelatedIssueUID)
-	assert.Equal(t, int64(9), *records[1].Event.RelatedIssueID, "source event must not be mutated")
+	assert.Nil(t, recordPayloadAs[EventExport](t, prepared[1]).RelatedIssueID)
+	require.NotNil(t, recordPayloadAs[EventExport](t, prepared[1]).RelatedIssueUID)
+	assert.Equal(t, relatedIssueUID, *recordPayloadAs[EventExport](t, prepared[1]).RelatedIssueUID)
+	assert.Equal(t, int64(9), *recordPayloadAs[EventExport](t, records[1]).RelatedIssueID, "source event must not be mutated")
 }
 
 func TestPrepareProjectMergeRecordsRejectsEventRelatedIssueUIDMismatch(t *testing.T) {
 	relatedIssueID := int64(5)
 	relatedIssueUID := "01H00000000000000000000002"
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{ID: 6, UID: relatedIssueUID, ProjectID: 2}},
-		{Kind: ImportKindEvent, Event: &EventExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2},
+		&IssueExport{ID: 6, UID: relatedIssueUID, ProjectID: 2},
+		&EventExport{
 			ID: 7, UID: "01H00000000000000000000003", ProjectID: 2,
 			RelatedIssueID: &relatedIssueID, RelatedIssueUID: &relatedIssueUID,
-		}},
+		},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -323,18 +323,18 @@ func TestPrepareProjectMergeRecordsRejectsEventRelatedIssueUIDMismatch(t *testin
 func TestPrepareProjectMergeRecordsDropsFederationState(t *testing.T) {
 	projectID := int64(2)
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: projectID, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindFederationBinding, FederationBinding: &FederationBindingExport{
+		&ProjectExport{ID: projectID, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&FederationBindingExport{
 			ProjectID: projectID, Role: "spoke", Enabled: true, PushEnabled: true,
 			ReplayHorizonEventID: 40, PullCursorEventID: 50, PushCursorEventID: 60,
-		}},
-		{Kind: ImportKindFederationSyncStatus, FederationSyncStatus: &FederationSyncStatusExport{ProjectID: projectID}},
-		{Kind: ImportKindFederationQuarantine, FederationQuarantine: &FederationQuarantineExport{
+		},
+		&FederationSyncStatusExport{ProjectID: projectID},
+		&FederationQuarantineExport{
 			ID: 3, ProjectID: projectID, Direction: "pull", FirstEventID: 40, LastEventID: 50,
-		}},
-		{Kind: ImportKindFederationEnrollment, FederationEnrollment: &FederationEnrollmentExport{
+		},
+		&FederationEnrollmentExport{
 			ID: 4, ProjectID: &projectID, TokenHash: "attacker-controlled", Capabilities: "pull,push",
-		}},
+		},
 	}
 
 	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -342,20 +342,14 @@ func TestPrepareProjectMergeRecordsDropsFederationState(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	require.Len(t, prepared, 1)
-	assert.NotNil(t, prepared[0].Project)
-	for _, record := range prepared {
-		assert.Nil(t, record.FederationBinding)
-		assert.Nil(t, record.FederationSyncStatus)
-		assert.Nil(t, record.FederationQuarantine)
-		assert.Nil(t, record.FederationEnrollment)
-	}
-	assert.True(t, records[1].FederationBinding.Enabled, "source binding must not be mutated")
+	assert.NotNil(t, recordPayloadAs[ProjectExport](t, prepared[0]))
+	assert.True(t, recordPayloadAs[FederationBindingExport](t, records[1]).Enabled, "source binding must not be mutated")
 }
 
 func TestPrepareProjectMergeRecordsRejectsMultipleProjects(t *testing.T) {
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 3, UID: "01H00000000000000000000001", Name: "hub-project"}},
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&ProjectExport{ID: 3, UID: "01H00000000000000000000001", Name: "hub-project"},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{TargetProjectID: 4}, nil)
@@ -365,10 +359,10 @@ func TestPrepareProjectMergeRecordsRejectsMultipleProjects(t *testing.T) {
 
 func TestPrepareProjectMergeRecordsDropsWildcardFederationEnrollment(t *testing.T) {
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindFederationEnrollment, FederationEnrollment: &FederationEnrollmentExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&FederationEnrollmentExport{
 			ID: 4, ProjectID: nil,
-		}},
+		},
 	}
 
 	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -376,17 +370,17 @@ func TestPrepareProjectMergeRecordsDropsWildcardFederationEnrollment(t *testing.
 	}, nil)
 	require.NoError(t, err)
 	require.Len(t, prepared, 1)
-	assert.NotNil(t, prepared[0].Project)
+	assert.NotNil(t, recordPayloadAs[ProjectExport](t, prepared[0]))
 }
 
 func TestPrepareProjectMergeRecordsRejectsClaimOutsideImportedProject(t *testing.T) {
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2}},
-		{Kind: ImportKindIssueClaim, IssueClaim: &IssueClaimExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2},
+		&IssueClaimExport{
 			ID: 6, ClaimUID: "01H00000000000000000000002", ProjectID: 2,
 			IssueID: 99, IssueUID: "01H00000000000000000000003",
-		}},
+		},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -398,12 +392,12 @@ func TestPrepareProjectMergeRecordsRejectsClaimOutsideImportedProject(t *testing
 
 func TestPrepareProjectMergeRecordsRejectsClaimIssueUIDMismatch(t *testing.T) {
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2}},
-		{Kind: ImportKindIssueClaim, IssueClaim: &IssueClaimExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&IssueExport{ID: 5, UID: "01H00000000000000000000001", ProjectID: 2},
+		&IssueClaimExport{
 			ID: 6, ClaimUID: "01H00000000000000000000002", ProjectID: 2,
 			IssueID: 5, IssueUID: "01H00000000000000000000003",
-		}},
+		},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -416,11 +410,11 @@ func TestPrepareProjectMergeRecordsRejectsClaimIssueUIDMismatch(t *testing.T) {
 
 func TestPrepareProjectMergeRecordsRejectsLinkBetweenExistingProjects(t *testing.T) {
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"}},
-		{Kind: ImportKindLink, Link: &LinkExport{
+		&ProjectExport{ID: 2, UID: "01H00000000000000000000000", Name: "spoke-project"},
+		&LinkExport{
 			ID: 3, FromIssueID: 8, FromIssueUID: "01H00000000000000000000001",
 			ToIssueID: 9, ToIssueUID: "01H00000000000000000000002", Type: "blocks",
-		}},
+		},
 	}
 
 	_, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -429,36 +423,35 @@ func TestPrepareProjectMergeRecordsRejectsLinkBetweenExistingProjects(t *testing
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "link must include an issue from the imported project")
 }
-
 func TestPrepareProjectMergeRecordsPreservesExternalRootRecords(t *testing.T) {
 	createdAt := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
 	projectUID := "01H00000000000000000000000"
 	issueUID := "01H00000000000000000000001"
 	bindingUID := "01H00000000000000000000002"
 	records := []ImportRecord{
-		{Kind: ImportKindProject, Project: &ProjectExport{ID: 2, UID: projectUID, Name: "spoke-project"}},
-		{Kind: ImportKindIssue, Issue: &IssueExport{ID: 5, UID: issueUID, ProjectID: 2}},
-		{Kind: ImportKindExternalFieldMapping, ExternalFieldMapping: &ExternalFieldMappingExport{
+		&ProjectExport{ID: 2, UID: projectUID, Name: "spoke-project"},
+		&IssueExport{ID: 5, UID: issueUID, ProjectID: 2},
+		&ExternalFieldMappingExport{
 			ConnectorInstance: "connector-one", KataField: "scheduled_on",
 			ExternalFieldID: "schedule-one", ExternalFieldName: "Schedule",
 			AcceptedKinds: []string{"date"}, Nullable: true, Writable: true,
 			SchemaRevision: "schema-one", Active: true,
 			CreatedAt: createdAt, UpdatedAt: createdAt,
-		}},
-		{Kind: ImportKindExternalRootBinding, ExternalRootBinding: &ExternalRootBindingExport{
+		},
+		&ExternalRootBindingExport{
 			UID: bindingUID, ProjectUID: projectUID, IssueUID: issueUID,
 			RootMappingSource: "connector:connector-one", RootMappingExternalID: "root-one",
 			ConnectorInstance: "connector-one", ExternalRootKey: "root-one",
 			ExternalAccountKey: "account-one", Active: true, Enabled: true,
 			ReceiveComments: true, ReceiveCommentsAfter: &createdAt,
 			CreatedAt: createdAt, UpdatedAt: createdAt,
-		}},
-		{Kind: ImportKindExternalFieldState, ExternalFieldState: &ExternalFieldStateExport{
+		},
+		&ExternalFieldStateExport{
 			BindingUID: bindingUID, MappingConnectorInstance: "connector-one",
 			MappingKataField: "scheduled_on", MappingExternalFieldID: "schedule-one",
 			MappingSchemaRevision: "schema-one", MappingCreatedAt: createdAt,
 			Baseline: json.RawMessage(`"2026-08-20"`), UpdatedAt: createdAt,
-		}},
+		},
 	}
 
 	prepared, err := PrepareProjectMergeRecords(records, ProjectMergeOffsets{
@@ -466,11 +459,20 @@ func TestPrepareProjectMergeRecordsPreservesExternalRootRecords(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	require.Len(t, prepared, len(records))
-	require.NotNil(t, prepared[2].ExternalFieldMapping)
-	require.NotNil(t, prepared[3].ExternalRootBinding)
-	require.NotNil(t, prepared[4].ExternalFieldState)
-	assert.Equal(t, records[2].ExternalFieldMapping, prepared[2].ExternalFieldMapping)
-	assert.Equal(t, records[3].ExternalRootBinding, prepared[3].ExternalRootBinding)
-	assert.Equal(t, records[4].ExternalFieldState, prepared[4].ExternalFieldState)
-	assert.Equal(t, int64(2), records[1].Issue.ProjectID, "source records must not be mutated")
+	assert.Equal(t, recordPayloadAs[ExternalFieldMappingExport](t, records[2]),
+		recordPayloadAs[ExternalFieldMappingExport](t, prepared[2]))
+	assert.Equal(t, recordPayloadAs[ExternalRootBindingExport](t, records[3]),
+		recordPayloadAs[ExternalRootBindingExport](t, prepared[3]))
+	assert.Equal(t, recordPayloadAs[ExternalFieldStateExport](t, records[4]),
+		recordPayloadAs[ExternalFieldStateExport](t, prepared[4]))
+	assert.Equal(t, int64(2), recordPayloadAs[IssueExport](t, records[1]).ProjectID,
+		"source records must not be mutated")
+}
+
+func recordPayloadAs[T any](t *testing.T, record ImportRecord) *T {
+	t.Helper()
+	payload, ok := any(record).(*T)
+	require.True(t, ok, "record is %T, want *%T", record, *new(T))
+	require.NotNil(t, payload)
+	return payload
 }

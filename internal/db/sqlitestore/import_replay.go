@@ -86,8 +86,8 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		switch skip {
 		case linkSkipMissingPeer:
 			skippedMissingPeer++
-			if r.Link != nil {
-				skippedLinkIDs[r.Link.ID] = struct{}{}
+			if link, ok := r.(*db.LinkExport); ok {
+				skippedLinkIDs[link.ID] = struct{}{}
 			}
 		case linkSkipDuplicate:
 			skippedDup++
@@ -174,26 +174,26 @@ func refuseProjectMergeUIDCollisions(ctx context.Context, tx *sql.Tx, recs []db.
 	type uidCheck struct{ table, column, kind, uid string }
 	checks := make([]uidCheck, 0, len(recs))
 	for _, rec := range recs {
-		switch {
-		case rec.Project != nil:
-			checks = append(checks, uidCheck{"projects", "uid", "project", rec.Project.UID})
-		case rec.Issue != nil:
-			checks = append(checks, uidCheck{"issues", "uid", "issue", rec.Issue.UID})
-		case rec.Comment != nil:
-			checks = append(checks, uidCheck{"comments", "uid", "comment", rec.Comment.UID})
-		case rec.Recurrence != nil:
-			checks = append(checks, uidCheck{"recurrences", "uid", "recurrence", rec.Recurrence.UID})
-		case rec.IssueClaim != nil:
-			checks = append(checks, uidCheck{"issue_claims", "claim_uid", "claim", rec.IssueClaim.ClaimUID})
-		case rec.PendingClaimRequest != nil:
-			checks = append(checks, uidCheck{"pending_claim_requests", "request_uid", "pending claim", rec.PendingClaimRequest.RequestUID})
-		case rec.Event != nil:
-			checks = append(checks, uidCheck{"events", "uid", "event", rec.Event.UID})
-		case rec.PurgeLog != nil:
-			checks = append(checks, uidCheck{"purge_log", "uid", "purge log", rec.PurgeLog.UID})
-		case rec.ExternalRootBinding != nil:
+		switch rec := rec.(type) {
+		case *db.ProjectExport:
+			checks = append(checks, uidCheck{"projects", "uid", "project", rec.UID})
+		case *db.IssueExport:
+			checks = append(checks, uidCheck{"issues", "uid", "issue", rec.UID})
+		case *db.CommentExport:
+			checks = append(checks, uidCheck{"comments", "uid", "comment", rec.UID})
+		case *db.RecurrenceExport:
+			checks = append(checks, uidCheck{"recurrences", "uid", "recurrence", rec.UID})
+		case *db.IssueClaimExport:
+			checks = append(checks, uidCheck{"issue_claims", "claim_uid", "claim", rec.ClaimUID})
+		case *db.PendingClaimRequestExport:
+			checks = append(checks, uidCheck{"pending_claim_requests", "request_uid", "pending claim", rec.RequestUID})
+		case *db.EventExport:
+			checks = append(checks, uidCheck{"events", "uid", "event", rec.UID})
+		case *db.PurgeLogExport:
+			checks = append(checks, uidCheck{"purge_log", "uid", "purge log", rec.UID})
+		case *db.ExternalRootBindingExport:
 			checks = append(checks, uidCheck{
-				"external_root_bindings", "uid", "external root binding", rec.ExternalRootBinding.UID,
+				"external_root_bindings", "uid", "external root binding", rec.UID,
 			})
 		}
 	}
@@ -337,60 +337,64 @@ const (
 // linkSkipNone. The replay loop counts each reason separately and emits
 // per-reason aggregate notes.
 func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.ImportOptions, skippedLinkIDs map[int64]struct{}) (linkSkip, error) {
-	switch r.Kind {
-	case db.ImportKindMeta:
-		return linkSkipNone, importMeta(ctx, tx, r.Meta, opts)
-	case db.ImportKindProject:
-		return linkSkipNone, importProject(ctx, tx, r.Project)
-	case db.ImportKindProjectAlias:
-		return linkSkipNone, importAlias(ctx, tx, r.Alias)
-	case db.ImportKindIssueSyncBinding:
-		return linkSkipNone, importIssueSyncBinding(ctx, tx, r.IssueSyncBinding, opts.PreserveIssueSyncBindingEnabled)
-	case db.ImportKindIssueSyncStatus:
-		return linkSkipNone, importIssueSyncStatus(ctx, tx, r.IssueSyncStatus)
-	case db.ImportKindRecurrence:
-		return linkSkipNone, importRecurrence(ctx, tx, r.Recurrence)
-	case db.ImportKindIssue:
-		return linkSkipNone, importIssue(ctx, tx, r.Issue)
-	case db.ImportKindIssueEmbedding:
-		return linkSkipNone, importIssueEmbedding(ctx, tx, r.IssueEmbedding)
-	case db.ImportKindComment:
-		return linkSkipNone, importComment(ctx, tx, r.Comment)
-	case db.ImportKindIssueLabel:
-		return linkSkipNone, importLabel(ctx, tx, r.Label)
-	case db.ImportKindLink:
-		return importLink(ctx, tx, r.Link)
-	case db.ImportKindImportMapping:
-		return importMapping(ctx, tx, r.ImportMapping, skippedLinkIDs)
-	case db.ImportKindExternalFieldMapping:
-		return linkSkipNone, importExternalFieldMapping(ctx, tx, r.ExternalFieldMapping, opts.MergeProject)
-	case db.ImportKindExternalRootBinding:
-		return linkSkipNone, importExternalRootBinding(ctx, tx, r.ExternalRootBinding, opts.PreserveExternalRootBindingsEnabled)
-	case db.ImportKindExternalFieldState:
-		return linkSkipNone, importExternalFieldState(ctx, tx, r.ExternalFieldState)
-	case db.ImportKindFederationBinding:
-		return linkSkipNone, importFederationBinding(ctx, tx, r.FederationBinding)
-	case db.ImportKindFederationSyncStatus:
-		return linkSkipNone, importFederationSyncStatus(ctx, tx, r.FederationSyncStatus)
-	case db.ImportKindFederationQuarantine:
-		return linkSkipNone, importFederationQuarantine(ctx, tx, r.FederationQuarantine)
-	case db.ImportKindFederationEnrollment:
-		return linkSkipNone, importFederationEnrollment(ctx, tx, r.FederationEnrollment)
-	case db.ImportKindIssueClaim:
-		return linkSkipNone, importIssueClaim(ctx, tx, r.IssueClaim)
-	case db.ImportKindPendingClaimRequest:
-		return linkSkipNone, importPendingClaimRequest(ctx, tx, r.PendingClaimRequest, opts)
-	case db.ImportKindEvent:
-		return linkSkipNone, importEvent(ctx, tx, r.Event, opts)
-	case db.ImportKindPurgeLog:
-		return linkSkipNone, importPurgeLog(ctx, tx, r.PurgeLog)
-	case db.ImportKindProjectPurgeLog:
-		return linkSkipNone, importProjectPurgeLog(ctx, tx, r.ProjectPurgeLog)
-	case db.ImportKindSQLiteSequence:
-		return linkSkipNone, upsertSequence(ctx, tx, r.Sequence.Name, r.Sequence.Seq)
+	switch rec := r.(type) {
+	case *db.MetaKV:
+		return linkSkipNone, importMeta(ctx, tx, rec, opts)
+	case *db.ProjectExport:
+		return linkSkipNone, importProject(ctx, tx, rec)
+	case *db.AliasExport:
+		return linkSkipNone, importAlias(ctx, tx, rec)
+	case *db.IssueSyncBindingExport:
+		return linkSkipNone, importIssueSyncBinding(ctx, tx, rec, opts.PreserveIssueSyncBindingEnabled)
+	case *db.IssueSyncStatusExport:
+		return linkSkipNone, importIssueSyncStatus(ctx, tx, rec)
+	case *db.RecurrenceExport:
+		return linkSkipNone, importRecurrence(ctx, tx, rec)
+	case *db.IssueExport:
+		return linkSkipNone, importIssue(ctx, tx, rec)
+	case *db.IssueEmbeddingExport:
+		return linkSkipNone, importIssueEmbedding(ctx, tx, rec)
+	case *db.CommentExport:
+		return linkSkipNone, importComment(ctx, tx, rec)
+	case *db.IssueLabelExport:
+		return linkSkipNone, importLabel(ctx, tx, rec)
+	case *db.LinkExport:
+		return importLink(ctx, tx, rec)
+	case *db.ImportMappingExport:
+		return importMapping(ctx, tx, rec, skippedLinkIDs)
+	case *db.ExternalFieldMappingExport:
+		return linkSkipNone, importExternalFieldMapping(ctx, tx, rec, opts.MergeProject)
+	case *db.ExternalRootBindingExport:
+		return linkSkipNone, importExternalRootBinding(
+			ctx, tx, rec, opts.PreserveExternalRootBindingsEnabled,
+		)
+	case *db.ExternalFieldStateExport:
+		return linkSkipNone, importExternalFieldState(ctx, tx, rec)
+	case *db.FederationBindingExport:
+		return linkSkipNone, importFederationBinding(ctx, tx, rec)
+	case *db.FederationSyncStatusExport:
+		return linkSkipNone, importFederationSyncStatus(ctx, tx, rec)
+	case *db.FederationQuarantineExport:
+		return linkSkipNone, importFederationQuarantine(ctx, tx, rec)
+	case *db.FederationEnrollmentExport:
+		return linkSkipNone, importFederationEnrollment(ctx, tx, rec)
+	case *db.IssueClaimExport:
+		return linkSkipNone, importIssueClaim(ctx, tx, rec)
+	case *db.PendingClaimRequestExport:
+		return linkSkipNone, importPendingClaimRequest(ctx, tx, rec, opts)
+	case *db.EventExport:
+		return linkSkipNone, importEvent(ctx, tx, rec, opts)
+	case *db.PurgeLogExport:
+		return linkSkipNone, importPurgeLog(ctx, tx, rec)
+	case *db.ProjectPurgeLogExport:
+		return linkSkipNone, importProjectPurgeLog(ctx, tx, rec)
+	case *db.SequenceExport:
+		return linkSkipNone, upsertSequence(ctx, tx, rec.Name, rec.Seq)
 	default:
-		// Unreachable: validate() already rejected unknown kinds.
-		return linkSkipNone, fmt.Errorf("import: unsupported kind %q", r.Kind)
+		// ValidateImportRecords rejects unknown types before the transaction
+		// opens; this arm exists so a future payload type cannot be replayed
+		// silently.
+		return linkSkipNone, fmt.Errorf("import: unsupported record type %T", r)
 	}
 }
 
