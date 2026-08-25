@@ -231,10 +231,8 @@ func PrepareFederationReplicaLeave(
 	key := federationReplicaTransitionKey(store, project.Name)
 
 	ensureFederationReplicaMu.Lock()
-	federationReplicaTransitions.markLeavePending(key)
 	match, found, err := managed.FindManagedFederationCredential(ctx, project.Name)
 	if err != nil {
-		federationReplicaTransitions.clearLeave(key)
 		ensureFederationReplicaMu.Unlock()
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
 			return PrepareFederationReplicaLeaveResult{}, err
@@ -248,7 +246,6 @@ func PrepareFederationReplicaLeave(
 		replacement.Credential.LeavePending = true
 		replacement.Credential.PendingEnrollmentID = 0
 		if err := managed.ReplaceManagedFederationCredential(ctx, match, replacement); err != nil {
-			federationReplicaTransitions.clearLeave(key)
 			ensureFederationReplicaMu.Unlock()
 			if errors.Is(err, config.ErrFederationCredentialConflict) {
 				return PrepareFederationReplicaLeaveResult{}, err
@@ -259,6 +256,12 @@ func PrepareFederationReplicaLeave(
 		}
 		match = replacement
 	}
+	// Publish the in-memory leave state only after the durable mark succeeded.
+	// Suppression reads are lock-free, so an earlier publish would let a
+	// concurrent reconciler record success for a leave that then fails to
+	// prepare, and rolling the publish back would erase a completed leave's
+	// suppression when a retried prepare fails.
+	federationReplicaTransitions.markLeavePending(key)
 	ensureFederationReplicaMu.Unlock()
 
 	for {
