@@ -482,18 +482,13 @@ func reconcileMapping(
 		return reconcileError(ErrCredentialIO, "finish federation hub operation")
 	}
 	if leavePending {
-		if err != nil {
-			return nil
-		}
-		if revokeErr := hub.RevokeEnrollment(ctx, enrollment.id); revokeErr != nil {
-			return safeHubError(revokeErr)
-		}
-		if confirmErr := confirmPendingEnrollmentCleanup(
-			ctx, managed, mapping.SpokeProject, enrollment.id,
-		); confirmErr != nil {
-			return confirmErr
-		}
-		return nil
+		// The finish closure already confirmed the leave, so its observation
+		// result is irrelevant here: the leave wins over an enrollment error,
+		// and enrollmentID is zero when the hub call failed.
+		_, compensateErr := compensateEnrollment(
+			ctx, store, credentials, managed, hub, mapping, enrollmentID,
+		)
+		return compensateErr
 	}
 	if err != nil {
 		return err
@@ -502,47 +497,81 @@ func reconcileMapping(
 		ctx, store, credentials, wake, mapping, preflight, enrollment.credential,
 		projectEventSink,
 	)
-	if err == nil || enrollment.id == 0 || !reservationChanged {
+	if !reservationChanged || err == nil {
 		return err
 	}
-	pending, pendingFound, pendingErr := managed.FindManagedFederationCredential(
-		ctx, mapping.SpokeProject,
+	leaveObserved, compensateErr := compensateEnrollment(
+		ctx, store, credentials, managed, hub, mapping, enrollment.id,
 	)
-	if pendingErr != nil {
-		return reconcileError(ErrCredentialIO, "read pending federation leave")
+	if compensateErr != nil {
+		return compensateErr
 	}
-	if pendingFound && pending.Credential.LeavePending {
-		replacement := pending
-		replacement.Credential.PendingEnrollmentID = enrollment.id
-		if replaceErr := managed.ReplaceManagedFederationCredential(
-			ctx, pending, replacement,
-		); replaceErr != nil {
-			return reconcileError(ErrCredentialIO, "record pending enrollment cleanup")
-		}
-		pending = replacement
-	}
-	if daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) &&
-		!pendingFound {
-		// A completed local-only leave deliberately skips hub cleanup. The
-		// process-local suppression still prevents this mapping from being
-		// recreated until restart.
+	if leaveObserved {
+		// The leave wins over the convergence failure, so err is discarded.
 		return nil
 	}
-	if revokeErr := hub.RevokeEnrollment(ctx, enrollment.id); revokeErr != nil {
-		if daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) {
-			return nil
-		}
-		return safeHubError(revokeErr)
+	// No leave explains the reservation change, so the convergence conflict
+	// must keep failing: the controller stops retrying a mapping whose
+	// reconciliation reports success.
+	return err
+}
+
+// compensateEnrollment revokes a hub enrollment whose local reservation went
+// away. It serves both mid-flight leave windows: the daemon observed the leave
+// before the hub operation finished, or a leave landed while local convergence
+// ran. The returned bool reports whether an explicit leave was observed — a
+// leave-pending reservation stamp or in-process leave state — so the
+// convergence caller can tell a leave, which wins over its conflict, from an
+// unrelated reservation change, which must keep failing.
+//
+// Suppression policy (design decision D3): a mapping whose leave was prepared
+// or completed in this process never fails reconciliation for hub cleanup it
+// deliberately skips, so a missing reservation short-circuits and a failed
+// revoke or confirmation is tolerated. An unsuppressed mapping must retry.
+func compensateEnrollment(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	managed config.FederationManagedCredentialStore,
+	hub Hub,
+	mapping config.FederationProjectConfig,
+	enrollmentID int64,
+) (bool, error) {
+	suppressed := func() bool {
+		return daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject)
 	}
-	if pendingFound && pending.Credential.LeavePending {
-		if confirmErr := confirmPendingEnrollmentCleanup(
-			ctx, managed, mapping.SpokeProject, enrollment.id,
-		); confirmErr != nil &&
-			!daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) {
-			return confirmErr
-		}
+	if enrollmentID <= 0 {
+		return suppressed(), nil
 	}
-	return nil
+	pendingFound, err := daemon.RecordFederationReplicaPendingEnrollment(
+		ctx, credentials, mapping.SpokeProject, enrollmentID,
+	)
+	if err != nil {
+		return false, reconcileError(ErrCredentialIO, "record pending enrollment after hub operation")
+	}
+	if !pendingFound && suppressed() {
+		// A prepared or completed local-only leave with no reservation
+		// deliberately skips hub cleanup. The process-local suppression still
+		// prevents this mapping from being recreated until restart.
+		return true, nil
+	}
+	if revokeErr := hub.RevokeEnrollment(ctx, enrollmentID); revokeErr != nil {
+		if suppressed() {
+			return true, nil
+		}
+		return pendingFound, safeHubError(revokeErr)
+	}
+	if !pendingFound {
+		// A leave can land while the revocation is in flight; re-check so it
+		// still wins over the caller's convergence conflict.
+		return suppressed(), nil
+	}
+	if confirmErr := confirmPendingEnrollmentCleanup(
+		ctx, managed, mapping.SpokeProject, enrollmentID,
+	); confirmErr != nil && !suppressed() {
+		return true, confirmErr
+	}
+	return true, nil
 }
 
 func confirmPendingEnrollmentCleanup(

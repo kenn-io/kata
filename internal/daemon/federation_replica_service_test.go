@@ -25,18 +25,19 @@ const (
 )
 
 type replicaCredentialStore struct {
-	mu           sync.Mutex
-	credentials  map[string]config.FederationCredential
-	readErr      error
-	storeErr     error
-	deleteErr    error
-	rekeyErr     error
-	replaceErr   error
-	readCalls    int
-	storeCalls   int
-	deleteCalls  int
-	rekeyCalls   int
-	replaceCalls int
+	mu                  sync.Mutex
+	credentials         map[string]config.FederationCredential
+	readErr             error
+	storeErr            error
+	deleteErr           error
+	rekeyErr            error
+	replaceErr          error
+	readCalls           int
+	storeCalls          int
+	deleteCalls         int
+	rekeyCalls          int
+	replaceCalls        int
+	managedReplaceCalls int
 }
 
 // baseCredentialStore deliberately exposes only the public credential CRUD
@@ -191,6 +192,7 @@ func (s *replicaCredentialStore) ReplaceManagedFederationCredential(
 ) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.managedReplaceCalls++
 	current, found := s.credentials[expected.ProjectUID]
 	if !found || current != expected.Credential ||
 		replacement.ProjectUID != expected.ProjectUID {
@@ -231,6 +233,12 @@ func (s *replicaCredentialStore) storeCallCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.storeCalls
+}
+
+func (s *replicaCredentialStore) managedReplaces() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.managedReplaceCalls
 }
 
 func (s *replicaCredentialStore) setDeleteError(err error) {
@@ -275,6 +283,33 @@ func (s *replicaCredentialStoreBarrier) StoreFederationCredential(
 
 func (s *replicaCredentialStoreBarrier) releaseStore() {
 	s.releaseOnce.Do(func() { close(s.storeRelease) })
+}
+
+type leavePendingBarrierCredentialStore struct {
+	*replicaCredentialStore
+	leavePending chan struct{}
+	pendingOnce  sync.Once
+}
+
+func newLeavePendingBarrierCredentialStore() *leavePendingBarrierCredentialStore {
+	return &leavePendingBarrierCredentialStore{
+		replicaCredentialStore: newReplicaCredentialStore(),
+		leavePending:           make(chan struct{}),
+	}
+}
+
+func (s *leavePendingBarrierCredentialStore) ReplaceManagedFederationCredential(
+	ctx context.Context,
+	expected config.FederationManagedCredentialReservation,
+	replacement config.FederationManagedCredentialReservation,
+) error {
+	err := s.replicaCredentialStore.ReplaceManagedFederationCredential(
+		ctx, expected, replacement,
+	)
+	if err == nil && replacement.Credential.LeavePending {
+		s.pendingOnce.Do(func() { close(s.leavePending) })
+	}
+	return err
 }
 
 type managedCleanupConflictCredentialStore struct {
@@ -624,6 +659,128 @@ func TestReserveFederationReplicaCredentialRejectsBindingThatAppearedAfterPrefli
 	_, found, readErr := credentials.FederationCredential(ctx, params.HubProjectUID)
 	require.NoError(t, readErr)
 	assert.False(t, found)
+}
+
+// prepareLeaveFailureCredentialStore injects managed lookup and replacement
+// failures into leave preparation, with hooks that observe suppression while
+// each store call is in flight. FederationReplicaMappingSuppressed is a
+// lock-free read, so the hooks see exactly what a concurrent reconciler sees.
+type prepareLeaveFailureCredentialStore struct {
+	*replicaCredentialStore
+	findErr    error
+	managedErr error
+	onFind     func()
+	onReplace  func()
+}
+
+func (s *prepareLeaveFailureCredentialStore) FindManagedFederationCredential(
+	ctx context.Context, projectName string,
+) (config.FederationManagedCredentialReservation, bool, error) {
+	if s.onFind != nil {
+		s.onFind()
+	}
+	if s.findErr != nil {
+		return config.FederationManagedCredentialReservation{}, false, s.findErr
+	}
+	return s.replicaCredentialStore.FindManagedFederationCredential(ctx, projectName)
+}
+
+func (s *prepareLeaveFailureCredentialStore) ReplaceManagedFederationCredential(
+	ctx context.Context,
+	expected config.FederationManagedCredentialReservation,
+	replacement config.FederationManagedCredentialReservation,
+) error {
+	if s.onReplace != nil {
+		s.onReplace()
+	}
+	if s.managedErr != nil {
+		return s.managedErr
+	}
+	return s.replicaCredentialStore.ReplaceManagedFederationCredential(
+		ctx, expected, replacement,
+	)
+}
+
+func TestPrepareFederationReplicaLeaveFailurePublishesNoLeaveState(t *testing.T) {
+	newBoundStore := func(t *testing.T) (
+		*sqlitestore.Store, db.Project, *prepareLeaveFailureCredentialStore,
+	) {
+		t.Helper()
+		store := openReplicaServiceStore(t)
+		project, err := store.CreateProjectWithUID(
+			context.Background(), "spoke-project", replicaLocalProjectUID,
+		)
+		require.NoError(t, err)
+		credentials := &prepareLeaveFailureCredentialStore{
+			replicaCredentialStore: newReplicaCredentialStore(),
+		}
+		reservation := replicaServiceParams().Credential
+		reservation.ManagedByConfig = true
+		reservation.SpokeProjectName = project.Name
+		require.NoError(t, credentials.ReserveManagedFederationCredential(
+			context.Background(), config.FederationManagedCredentialReservation{
+				ProjectUID: replicaHubProjectUID,
+				Credential: reservation,
+			},
+		))
+		return store, project, credentials
+	}
+
+	t.Run("failed lookup never suppresses reconciliation", func(t *testing.T) {
+		ctx := context.Background()
+		store, project, credentials := newBoundStore(t)
+		suppressedDuringFind := false
+		credentials.onFind = func() {
+			suppressedDuringFind = suppressedDuringFind ||
+				daemon.FederationReplicaMappingSuppressed(store, project.Name)
+		}
+		credentials.findErr = errors.New("injected lookup failure")
+
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+
+		require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
+		assert.False(t, suppressedDuringFind,
+			"suppression must not be observable before the durable leave mark succeeds")
+		assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+	})
+
+	t.Run("failed durable mark never suppresses reconciliation", func(t *testing.T) {
+		ctx := context.Background()
+		store, project, credentials := newBoundStore(t)
+		suppressedDuringReplace := false
+		credentials.onReplace = func() {
+			suppressedDuringReplace = suppressedDuringReplace ||
+				daemon.FederationReplicaMappingSuppressed(store, project.Name)
+		}
+		credentials.managedErr = errors.New("injected replacement failure")
+
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+
+		require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
+		assert.False(t, suppressedDuringReplace,
+			"suppression must not be observable before the durable leave mark succeeds")
+		assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+		current, found, readErr := credentials.FederationCredential(ctx, replicaHubProjectUID)
+		require.NoError(t, readErr)
+		require.True(t, found)
+		assert.False(t, current.LeavePending,
+			"a failed replacement must leave the reservation unmarked")
+	})
+
+	t.Run("failed retry preserves a completed leave", func(t *testing.T) {
+		ctx := context.Background()
+		store, project, credentials := newBoundStore(t)
+		_, err := daemon.LeaveFederationReplica(ctx, store, credentials, nil, project.ID)
+		require.NoError(t, err)
+		require.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+		credentials.findErr = errors.New("injected lookup failure")
+
+		_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+
+		require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
+		assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
+			"a failed leave retry must not erase the completed leave's suppression")
+	})
 }
 
 func TestPrepareFederationReplicaLeaveDrainsAndBlocksHubOperations(t *testing.T) {
@@ -1941,6 +2098,285 @@ func TestEnsureFederationReplicaRejectsInvalidCanonicalOriginsBeforeMutation(t *
 		assert.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
 		assert.Equal(t, original, credentials.credentials[replicaHubProjectUID])
 		assert.Zero(t, credentials.storeCallCount())
+	})
+}
+
+func TestEnsureFederationReplicaClearsLeaveStateAndRepermitsHubOperations(t *testing.T) {
+	ctx := context.Background()
+	store := openReplicaServiceStore(t)
+	params := replicaServiceParams()
+	project, err := store.CreateProjectWithUID(ctx, params.ProjectName, replicaHubProjectUID)
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	reservation := params.Credential
+	reservation.ManagedByConfig = true
+	reservation.SpokeProjectName = project.Name
+	baseline := config.FederationManagedCredentialReservation{
+		ProjectUID: replicaHubProjectUID,
+		Credential: reservation,
+	}
+	require.NoError(t, credentials.ReserveManagedFederationCredential(ctx, baseline))
+
+	_, err = daemon.LeaveFederationReplica(ctx, store, credentials, nil, project.ID)
+	require.NoError(t, err)
+	require.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
+		"a completed leave suppresses config-driven reconciliation")
+	_, err = daemon.BeginFederationReplicaHubOperation(
+		ctx, store, credentials, project.Name, baseline,
+	)
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaLeavePending)
+	assert.EqualError(t, err, "federation mapping was explicitly left")
+
+	rejoined := params.Credential
+	rejoined.ManagedByConfig = true
+	rejoined.SpokeProjectName = project.Name
+	rejoined.Capabilities = "pull,push"
+	params.Credential = rejoined
+	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
+	require.NoError(t, err)
+
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
+		"a successful ensure re-permits reconciliation for the mapping")
+	finish, err := daemon.BeginFederationReplicaHubOperation(
+		ctx, store, credentials, project.Name,
+		config.FederationManagedCredentialReservation{
+			ProjectUID: replicaHubProjectUID, Credential: rejoined,
+		},
+	)
+	require.NoError(t, err)
+	leavePending, finishErr := finish(ctx, 0)
+	require.NoError(t, finishErr)
+	assert.False(t, leavePending)
+}
+
+func TestFederationReplicaHubOperationsRaceWithLeavePreparation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
+	require.NoError(t, err)
+	credentials := newLeavePendingBarrierCredentialStore()
+	reservation := replicaServiceParams().Credential
+	reservation.ManagedByConfig = true
+	reservation.SpokeProjectName = project.Name
+	baseline := config.FederationManagedCredentialReservation{
+		ProjectUID: replicaHubProjectUID,
+		Credential: reservation,
+	}
+	require.NoError(t, credentials.ReserveManagedFederationCredential(ctx, baseline))
+
+	// Hold one operation open so leave preparation is guaranteed to reach its
+	// drain wait while other operations are still registering and finishing.
+	held, err := daemon.BeginFederationReplicaHubOperation(
+		ctx, store, credentials, project.Name, baseline,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, cleanupErr := held(cleanupCtx, 0)
+		assert.NoError(t, cleanupErr)
+	})
+
+	const readerCount = 4
+	readersReady := make(chan struct{}, readerCount)
+	stopReader := make(chan struct{})
+	readerDone := make(chan struct{}, readerCount)
+	var stopReadersOnce sync.Once
+	stopReaders := func() {
+		stopReadersOnce.Do(func() { close(stopReader) })
+	}
+	t.Cleanup(func() {
+		stopReaders()
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		for range readerCount {
+			select {
+			case <-readerDone:
+			case <-cleanupCtx.Done():
+				t.Errorf("wait for suppression reader cleanup: %v", cleanupCtx.Err())
+				return
+			}
+		}
+	})
+	for range readerCount {
+		go func() {
+			defer func() { readerDone <- struct{}{} }()
+			// Complete one real read before declaring this worker ready.
+			_ = daemon.FederationReplicaMappingSuppressed(store, project.Name)
+			readersReady <- struct{}{}
+			for {
+				select {
+				case <-stopReader:
+					return
+				default:
+				}
+				// The reconciler calls this without ensureFederationReplicaMu.
+				_ = daemon.FederationReplicaMappingSuppressed(store, project.Name)
+			}
+		}()
+	}
+	for range readerCount {
+		select {
+		case <-readersReady:
+		case <-ctx.Done():
+			t.Fatalf("wait for suppression reader readiness: %v", ctx.Err())
+		}
+	}
+
+	type hubOperationResult struct {
+		beginErr  error
+		finishErr error
+	}
+	const churnCount = 8
+	churnResults := make(chan hubOperationResult, churnCount)
+	for range churnCount {
+		go func() {
+			finish, beginErr := daemon.BeginFederationReplicaHubOperation(
+				ctx, store, credentials, project.Name, baseline,
+			)
+			if beginErr != nil {
+				churnResults <- hubOperationResult{beginErr: beginErr}
+				return
+			}
+			_, finishErr := finish(ctx, 0)
+			churnResults <- hubOperationResult{finishErr: finishErr}
+		}()
+	}
+
+	type prepareResult struct {
+		result daemon.PrepareFederationReplicaLeaveResult
+		err    error
+	}
+	prepared := make(chan prepareResult, 1)
+	go func() {
+		result, prepareErr := daemon.PrepareFederationReplicaLeave(
+			ctx, store, credentials, project.ID,
+		)
+		prepared <- prepareResult{result: result, err: prepareErr}
+	}()
+
+	select {
+	case <-credentials.leavePending:
+	case <-ctx.Done():
+		t.Fatalf("wait for durable leave-pending marker: %v", ctx.Err())
+	}
+
+	// The held operation keeps preparation in its drain wait. Without that
+	// wait, the prepared result becomes observable before this timer fires.
+	select {
+	case call := <-prepared:
+		t.Fatalf("prepare returned before the held hub operation drained: %v", call.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	for range churnCount {
+		select {
+		case result := <-churnResults:
+			if result.beginErr != nil {
+				assert.ErrorIs(t, result.beginErr, daemon.ErrFederationReplicaLeavePending)
+			}
+			assert.NoError(t, result.finishErr)
+		case <-ctx.Done():
+			t.Fatalf("wait for hub-operation churn: %v", ctx.Err())
+		}
+	}
+
+	_, finishErr := held(ctx, 91)
+	require.NoError(t, finishErr)
+
+	var call prepareResult
+	select {
+	case call = <-prepared:
+	case <-ctx.Done():
+		t.Fatalf("leave preparation never drained: %v", ctx.Err())
+	}
+	require.NoError(t, call.err)
+	require.True(t, call.result.ManagedReservationFound)
+	assert.True(t, call.result.ManagedReservation.Credential.LeavePending)
+	assert.Equal(t, int64(91), call.result.ManagedReservation.Credential.PendingEnrollmentID)
+	stopReaders()
+
+	assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
+	_, err = daemon.BeginFederationReplicaHubOperation(
+		ctx, store, credentials, project.Name, baseline,
+	)
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaLeavePending)
+}
+
+func TestRecordFederationReplicaPendingEnrollment(t *testing.T) {
+	ctx := context.Background()
+	newLeavePreparedStore := func(t *testing.T) (*sqlitestore.Store, *replicaCredentialStore, db.Project) {
+		t.Helper()
+		store := openReplicaServiceStore(t)
+		project, err := store.CreateProjectWithUID(
+			ctx, "spoke-project", replicaLocalProjectUID,
+		)
+		require.NoError(t, err)
+		credentials := newReplicaCredentialStore()
+		reservation := replicaServiceParams().Credential
+		reservation.ManagedByConfig = true
+		reservation.SpokeProjectName = project.Name
+		require.NoError(t, credentials.ReserveManagedFederationCredential(
+			ctx,
+			config.FederationManagedCredentialReservation{
+				ProjectUID: replicaHubProjectUID, Credential: reservation,
+			},
+		))
+		return store, credentials, project
+	}
+
+	t.Run("stamps a prepared leave", func(t *testing.T) {
+		store, credentials, project := newLeavePreparedStore(t)
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		require.NoError(t, err)
+
+		pendingFound, err := daemon.RecordFederationReplicaPendingEnrollment(
+			ctx, credentials, project.Name, 71,
+		)
+		require.NoError(t, err)
+		assert.True(t, pendingFound)
+		stamped, found, err := credentials.FederationCredential(ctx, replicaHubProjectUID)
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.True(t, stamped.LeavePending)
+		assert.Equal(t, int64(71), stamped.PendingEnrollmentID)
+	})
+
+	t.Run("restamping the same enrollment does not rewrite", func(t *testing.T) {
+		store, credentials, project := newLeavePreparedStore(t)
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID)
+		require.NoError(t, err)
+		_, err = daemon.RecordFederationReplicaPendingEnrollment(
+			ctx, credentials, project.Name, 71,
+		)
+		require.NoError(t, err)
+		writes := credentials.managedReplaces()
+
+		pendingFound, err := daemon.RecordFederationReplicaPendingEnrollment(
+			ctx, credentials, project.Name, 71,
+		)
+		require.NoError(t, err)
+		assert.True(t, pendingFound)
+		assert.Equal(t, writes, credentials.managedReplaces(),
+			"an unchanged stamp must not rewrite the credential store")
+	})
+
+	t.Run("never stamps a reservation that is not leaving", func(t *testing.T) {
+		_, credentials, project := newLeavePreparedStore(t)
+
+		pendingFound, err := daemon.RecordFederationReplicaPendingEnrollment(
+			ctx, credentials, project.Name, 71,
+		)
+		require.NoError(t, err)
+		assert.False(t, pendingFound)
+		assert.Zero(t, credentials.managedReplaces())
+		current, found, err := credentials.FederationCredential(ctx, replicaHubProjectUID)
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.False(t, current.LeavePending)
+		assert.Zero(t, current.PendingEnrollmentID,
+			"a pending enrollment without a pending leave is a rejected credential state")
 	})
 }
 

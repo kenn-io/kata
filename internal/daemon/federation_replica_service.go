@@ -52,18 +52,6 @@ var (
 // has no reverse edge.
 var ensureFederationReplicaMu sync.Mutex
 
-type federationReplicaHubOperationState struct {
-	count int
-	done  chan struct{}
-}
-
-var (
-	federationReplicaHubOperations = make(map[string]*federationReplicaHubOperationState)
-	federationReplicaLeaveIntents  = make(map[string]struct{})
-	federationReplicaSuppressionMu sync.RWMutex
-	federationReplicaSuppressed    = make(map[string]struct{})
-)
-
 // FederationReplicaError is a classified application error returned by
 // EnsureFederationReplica. HTTP handlers translate it into the public wire
 // status and error code at the transport boundary.
@@ -179,19 +167,8 @@ func beginFederationReplicaHubOperation(
 	defer ensureFederationReplicaMu.Unlock()
 
 	key := federationReplicaTransitionKey(store, projectName)
-	if _, pending := federationReplicaLeaveIntents[key]; pending {
-		return nil, federationReplicaError(
-			ErrFederationReplicaLeavePending,
-			"explicit federation leave is pending",
-			"",
-		)
-	}
-	if federationReplicaIsSuppressed(key) {
-		return nil, federationReplicaError(
-			ErrFederationReplicaLeavePending,
-			"federation mapping was explicitly left",
-			"",
-		)
+	if err := federationReplicaTransitions.leaveBlockedError(key); err != nil {
+		return nil, err
 	}
 	current, found, err := credentials.FederationCredential(ctx, baseline.ProjectUID)
 	if err != nil {
@@ -209,12 +186,7 @@ func beginFederationReplicaHubOperation(
 			"",
 		)
 	}
-	state := federationReplicaHubOperations[key]
-	if state == nil {
-		state = &federationReplicaHubOperationState{done: make(chan struct{})}
-		federationReplicaHubOperations[key] = state
-	}
-	state.count++
+	finishOperation := federationReplicaTransitions.registerHubOperationLocked(key)
 	var once sync.Once
 	var (
 		leavePending bool
@@ -224,38 +196,16 @@ func beginFederationReplicaHubOperation(
 		once.Do(func() {
 			ensureFederationReplicaMu.Lock()
 			defer ensureFederationReplicaMu.Unlock()
-			match, found, err := managed.FindManagedFederationCredential(
-				finishCtx, projectName,
+			pendingFound, recordErr := recordFederationReplicaPendingEnrollmentLocked(
+				finishCtx, managed, projectName, enrollmentID,
 			)
-			if err != nil {
-				finishErr = credentialIOError(
-					"read managed reservation after hub operation",
-				)
-			} else if found && match.Credential.LeavePending {
-				leavePending = true
-				if enrollmentID > 0 {
-					replacement := match
-					replacement.Credential.PendingEnrollmentID = enrollmentID
-					if err := managed.ReplaceManagedFederationCredential(
-						finishCtx, match, replacement,
-					); err != nil {
-						finishErr = credentialIOError(
-							"record pending enrollment after hub operation",
-						)
-					}
-				}
-			} else {
-				_, leavePending = federationReplicaLeaveIntents[key]
+			leavePending = pendingFound
+			finishErr = recordErr
+			if !pendingFound && recordErr == nil {
+				leavePending = federationReplicaTransitions.state(key) ==
+					federationReplicaLeavePending
 			}
-			state := federationReplicaHubOperations[key]
-			if state == nil {
-				return
-			}
-			state.count--
-			if state.count == 0 {
-				delete(federationReplicaHubOperations, key)
-				close(state.done)
-			}
+			finishOperation()
 		})
 		return leavePending, finishErr
 	}, nil
@@ -282,12 +232,8 @@ func PrepareFederationReplicaLeave(
 	key := federationReplicaTransitionKey(store, project.Name)
 
 	ensureFederationReplicaMu.Lock()
-	federationReplicaLeaveIntents[key] = struct{}{}
-	setFederationReplicaSuppressed(key, true)
 	match, found, err := managed.FindManagedFederationCredential(ctx, project.Name)
 	if err != nil {
-		delete(federationReplicaLeaveIntents, key)
-		setFederationReplicaSuppressed(key, false)
 		ensureFederationReplicaMu.Unlock()
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
 			return PrepareFederationReplicaLeaveResult{}, err
@@ -301,8 +247,6 @@ func PrepareFederationReplicaLeave(
 		replacement.Credential.LeavePending = true
 		replacement.Credential.PendingEnrollmentID = 0
 		if err := managed.ReplaceManagedFederationCredential(ctx, match, replacement); err != nil {
-			delete(federationReplicaLeaveIntents, key)
-			setFederationReplicaSuppressed(key, false)
 			ensureFederationReplicaMu.Unlock()
 			if errors.Is(err, config.ErrFederationCredentialConflict) {
 				return PrepareFederationReplicaLeaveResult{}, err
@@ -313,12 +257,18 @@ func PrepareFederationReplicaLeave(
 		}
 		match = replacement
 	}
+	// Publish the in-memory leave state only after the durable mark succeeded.
+	// Suppression reads are lock-free, so an earlier publish would let a
+	// concurrent reconciler record success for a leave that then fails to
+	// prepare, and rolling the publish back would erase a completed leave's
+	// suppression when a retried prepare fails.
+	federationReplicaTransitions.markLeavePending(key)
 	ensureFederationReplicaMu.Unlock()
 
 	for {
 		ensureFederationReplicaMu.Lock()
-		state := federationReplicaHubOperations[key]
-		if state == nil {
+		drained, waiting := federationReplicaTransitions.drainSignal(key)
+		if !waiting {
 			match, found, err = managed.FindManagedFederationCredential(ctx, project.Name)
 			ensureFederationReplicaMu.Unlock()
 			if err != nil {
@@ -334,41 +284,79 @@ func PrepareFederationReplicaLeave(
 				ManagedReservationFound: found,
 			}, nil
 		}
-		done := state.done
 		ensureFederationReplicaMu.Unlock()
 		select {
 		case <-ctx.Done():
 			return PrepareFederationReplicaLeaveResult{}, ctx.Err()
-		case <-done:
+		case <-drained:
 		}
 	}
+}
+
+// RecordFederationReplicaPendingEnrollment stamps a completed hub enrollment
+// onto a managed reservation that is already marked for leave, so durable
+// leave cleanup can revoke it after a crash. It reports whether a leave-pending
+// reservation was found, and serializes with EnsureFederationReplica and
+// PrepareFederationReplicaLeave.
+//
+// The config reconciler needs this after its hub operation has already
+// finished, so it cannot go through the finish closure, which fires once.
+func RecordFederationReplicaPendingEnrollment(
+	ctx context.Context,
+	credentials config.FederationCredentialStore,
+	projectName string,
+	enrollmentID int64,
+) (bool, error) {
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return false, err
+	}
+	ensureFederationReplicaMu.Lock()
+	defer ensureFederationReplicaMu.Unlock()
+	return recordFederationReplicaPendingEnrollmentLocked(
+		ctx, managed, projectName, enrollmentID,
+	)
+}
+
+// recordFederationReplicaPendingEnrollmentLocked is the single implementation
+// of the stamp. The caller must hold ensureFederationReplicaMu, which is what
+// keeps this read-modify-write atomic against PrepareFederationReplicaLeave.
+// PendingEnrollmentID is only ever written on a credential that is already
+// LeavePending, which the credential store's write-path guard requires.
+func recordFederationReplicaPendingEnrollmentLocked(
+	ctx context.Context,
+	managed config.FederationManagedCredentialStore,
+	projectName string,
+	enrollmentID int64,
+) (bool, error) {
+	match, found, err := managed.FindManagedFederationCredential(ctx, projectName)
+	if err != nil {
+		return false, credentialIOError("read managed reservation after hub operation")
+	}
+	if !found || !match.Credential.LeavePending {
+		return false, nil
+	}
+	if enrollmentID <= 0 || match.Credential.PendingEnrollmentID == enrollmentID {
+		return true, nil
+	}
+	replacement := match
+	replacement.Credential.PendingEnrollmentID = enrollmentID
+	if err := managed.ReplaceManagedFederationCredential(ctx, match, replacement); err != nil {
+		return true, credentialIOError("record pending enrollment after hub operation")
+	}
+	return true, nil
 }
 
 func federationReplicaTransitionKey(store db.Storage, projectName string) string {
 	return store.InstanceUID() + "\x00" + strings.TrimSpace(projectName)
 }
 
-// FederationReplicaMappingSuppressed reports whether explicit leave completed
-// for this mapping in the current daemon process.
+// FederationReplicaMappingSuppressed reports whether explicit leave was
+// prepared or completed for this mapping in the current daemon process.
 func FederationReplicaMappingSuppressed(store db.Storage, projectName string) bool {
-	return federationReplicaIsSuppressed(federationReplicaTransitionKey(store, projectName))
-}
-
-func federationReplicaIsSuppressed(key string) bool {
-	federationReplicaSuppressionMu.RLock()
-	defer federationReplicaSuppressionMu.RUnlock()
-	_, suppressed := federationReplicaSuppressed[key]
-	return suppressed
-}
-
-func setFederationReplicaSuppressed(key string, suppressed bool) {
-	federationReplicaSuppressionMu.Lock()
-	defer federationReplicaSuppressionMu.Unlock()
-	if suppressed {
-		federationReplicaSuppressed[key] = struct{}{}
-		return
-	}
-	delete(federationReplicaSuppressed, key)
+	return federationReplicaTransitions.state(
+		federationReplicaTransitionKey(store, projectName),
+	) != federationReplicaIdle
 }
 
 // LeaveFederationReplica detaches a spoke replica and removes its local
@@ -459,9 +447,7 @@ func leaveFederationReplicaState(
 			)
 		}
 	}
-	key := federationReplicaTransitionKey(store, project.Name)
-	setFederationReplicaSuppressed(key, true)
-	delete(federationReplicaLeaveIntents, key)
+	federationReplicaTransitions.markLeft(federationReplicaTransitionKey(store, project.Name))
 	return result, nil
 }
 
@@ -668,9 +654,9 @@ func ensureFederationReplicaState(
 			return result, err
 		}
 	}
-	key := federationReplicaTransitionKey(store, p.ProjectName)
-	setFederationReplicaSuppressed(key, false)
-	delete(federationReplicaLeaveIntents, key)
+	federationReplicaTransitions.clearLeave(
+		federationReplicaTransitionKey(store, p.ProjectName),
+	)
 	return result, nil
 }
 
