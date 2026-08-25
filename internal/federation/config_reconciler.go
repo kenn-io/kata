@@ -498,6 +498,16 @@ func reconcileMapping(
 	if !reservationChanged || err == nil {
 		return err
 	}
+	if enrollment.id <= 0 {
+		// With no enrollment to compensate, only a leave prepared or completed
+		// in this process justifies discarding the convergence conflict; an
+		// unrelated reservation change must keep failing so the controller
+		// retries.
+		if daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) {
+			return nil
+		}
+		return err
+	}
 	// The leave wins over the convergence failure, so err is discarded here.
 	return compensateEnrollment(
 		ctx, store, credentials, managed, hub, mapping, enrollment.id,

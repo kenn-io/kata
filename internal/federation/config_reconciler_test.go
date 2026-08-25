@@ -537,6 +537,62 @@ func newLeaveAfterHubOperationStore() *leaveAfterHubOperationStore {
 	return &leaveAfterHubOperationStore{fakeCredentialStore: newFakeCredentialStore()}
 }
 
+// tokenRotatedDuringConvergenceStore replaces the managed reservation token in
+// the window between the daemon's finish closure and EnsureFederationReplica's
+// revalidation. Unlike leaveAfterHubOperationStore, the change is not an
+// explicit leave: nothing marks leave state in the daemon process, so the
+// reconciler must surface the convergence conflict instead of recording
+// success.
+type tokenRotatedDuringConvergenceStore struct {
+	*fakeCredentialStore
+	armMu     sync.Mutex
+	armed     bool
+	skipFinds int
+}
+
+func (s *tokenRotatedDuringConvergenceStore) armAfterFinds(skipFinds int) {
+	s.armMu.Lock()
+	defer s.armMu.Unlock()
+	s.armed = true
+	s.skipFinds = skipFinds
+}
+
+func (s *tokenRotatedDuringConvergenceStore) FindManagedFederationCredential(
+	ctx context.Context, projectName string,
+) (config.FederationManagedCredentialReservation, bool, error) {
+	s.armMu.Lock()
+	rotate := false
+	if s.armed {
+		if s.skipFinds > 0 {
+			s.skipFinds--
+		} else {
+			s.armed = false
+			rotate = true
+		}
+	}
+	s.armMu.Unlock()
+	if rotate {
+		s.rotateToken(projectName)
+	}
+	return s.fakeCredentialStore.FindManagedFederationCredential(ctx, projectName)
+}
+
+func (s *tokenRotatedDuringConvergenceStore) rotateToken(projectName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for projectUID, credential := range s.credentials {
+		if !credential.ManagedByConfig || credential.SpokeProjectName != projectName {
+			continue
+		}
+		credential.Token = "rotated-" + credential.Token
+		s.credentials[projectUID] = credential
+	}
+}
+
+func newTokenRotatedDuringConvergenceStore() *tokenRotatedDuringConvergenceStore {
+	return &tokenRotatedDuringConvergenceStore{fakeCredentialStore: newFakeCredentialStore()}
+}
+
 func TestReconcileMappingCreatesEnrollsAdoptsPushesAndWakes(t *testing.T) {
 	store := openReconcileStore(t)
 	credentials := newFakeCredentialStore()
@@ -783,6 +839,40 @@ func TestReconcileMappingUnsuppressedLeaveSurfacesFailedRevocation(t *testing.T)
 	stamped, found := credentials.get(hubProjectUID)
 	require.True(t, found)
 	assert.Equal(t, hub.enrollment.ID, stamped.PendingEnrollmentID)
+}
+
+func TestReconcileMappingUnsuppressedReservationChangeSurfacesConvergenceConflict(
+	t *testing.T,
+) {
+	store := openReconcileStore(t)
+	project := createMatchingBoundProject(t, store)
+	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	require.NoError(t, err)
+	binding.PushEnabled = false
+	_, err = store.UpsertFederationBinding(context.Background(), binding)
+	require.NoError(t, err)
+
+	credentials := newTokenRotatedDuringConvergenceStore()
+	credentials.credentials[project.UID] = managedCredential()
+	// The reconciled binding reuses its enrollment, so no hub enrollment call
+	// exists to arm on. The managed lookups before EnsureFederationReplica's
+	// revalidation are the pending-leave probe, the preflight reservation
+	// read, and the daemon finish closure's stamp lookup; the rotation lands
+	// on the revalidation lookup that follows them.
+	credentials.armAfterFinds(3)
+	hub := newFakeHub()
+
+	err = federation.ReconcileMapping(
+		context.Background(), store, credentials, hub,
+		testCatalog(), testMapping(), nil,
+	)
+
+	require.ErrorIs(t, err, federation.ErrConfigurationConflict,
+		"a reservation change with no in-process leave must surface the convergence conflict")
+	assert.Empty(t, hub.enrollmentCalls,
+		"an operational credential with a bound project reuses its enrollment")
+	assert.Empty(t, hub.revokeCalls,
+		"no enrollment was created, so nothing may be revoked")
 }
 
 func TestReconcileMappingManagedCleanupLookupRequiresManagedStore(t *testing.T) {
