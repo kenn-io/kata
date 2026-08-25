@@ -774,7 +774,7 @@ func TestProjectMergeBroadcastsLiveEvent(t *testing.T) {
 	assert.Equal(t, "user-a", message.Event.Actor)
 
 	reset := receiveMsg(t, sourceSub.Ch, 2*time.Second, "source project reset")
-	assert.Equal(t, "reset", reset.Kind)
+	assert.Equal(t, daemon.StreamKindReset, reset.Kind)
 	assert.Equal(t, message.Event.ID, reset.ResetID)
 	assert.Equal(t, sourceID, reset.ProjectID)
 }
@@ -836,7 +836,7 @@ func TestSSE_LivePhaseOmitsTokenEvents(t *testing.T) {
 		AdminActor:     db.BootstrapActor,
 	})
 	require.NoError(t, err)
-	env.Broadcaster.Broadcast(daemon.StreamMsg{Kind: "event", Event: &tokenEvt, ProjectID: sys.ID})
+	env.Broadcaster.Broadcast(daemon.NewEventMsg(sys.ID, tokenEvt))
 	_, ok := framer.Next(t, 150*time.Millisecond)
 	assert.False(t, ok, "token.created must not be emitted as a live frame")
 

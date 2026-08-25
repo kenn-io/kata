@@ -325,11 +325,7 @@ func githubSyncRunner(cfg ServerConfig) GitHubSyncRunner {
 
 func githubSyncEventSink(cfg ServerConfig) func(context.Context, int64, []db.Event) error {
 	return func(_ context.Context, projectID int64, events []db.Event) error {
-		for i := range events {
-			evt := events[i]
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: projectID})
-			cfg.Hooks.Enqueue(evt)
-		}
+		cfg.Publish().Events(projectID, events)
 		return nil
 	}
 }

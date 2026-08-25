@@ -157,10 +157,7 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		for _, event := range events {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(event)
-		}
+		cfg.Publish().Events(in.ProjectID, events)
 		out := &api.CreateRecurrenceResponse{}
 		out.Body.Recurrence = rec
 		return out, nil
@@ -250,9 +247,7 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 		out.Body.Recurrence = res.Recurrence
 		out.Body.Changed = res.Changed
 		if res.Changed {
-			event := res.Event
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(event)
+			cfg.Publish().Event(in.ProjectID, res.Event)
 		}
 		return out, nil
 	}
@@ -285,8 +280,7 @@ func deleteRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Delete
 			}
 			return nil, internalAPIError(err)
 		}
-		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
-		cfg.Hooks.Enqueue(event)
+		cfg.Publish().Event(in.ProjectID, event)
 		return &api.DeleteRecurrenceResponse{}, nil
 	}
 }

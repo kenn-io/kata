@@ -233,9 +233,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		deliverProjectMutation(cfg, &merged.Event)
-		cfg.Broadcaster.Broadcast(StreamMsg{
-			Kind: "reset", ResetID: merged.Event.ID, ProjectID: in.Body.SourceProjectID,
-		})
+		cfg.Publish().Reset(in.Body.SourceProjectID, merged.Event.ID)
 		extensions := make([]api.MergeShortIDExtension, 0, len(merged.ShortIDExtensions))
 		for _, ext := range merged.ShortIDExtensions {
 			extensions = append(extensions, api.MergeShortIDExtension{
@@ -283,8 +281,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
-		cfg.Hooks.Enqueue(*evt)
+		cfg.Publish().Event(project.ID, *evt)
 		out := &api.RemoveProjectResponse{}
 		out.Body.Project = dbProjectToOut(project)
 		out.Body.Event = evt
@@ -340,11 +337,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if pl.PurgeResetAfterEventID != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{
-				Kind:      "reset",
-				ResetID:   *pl.PurgeResetAfterEventID,
-				ProjectID: in.ProjectID,
-			})
+			cfg.Publish().Reset(in.ProjectID, *pl.PurgeResetAfterEventID)
 		}
 		out := &api.ProjectPurgeResponse{}
 		out.Body.ProjectPurgeLog = pl
@@ -368,8 +361,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
-			cfg.Hooks.Enqueue(*evt)
+			cfg.Publish().Event(project.ID, *evt)
 		}
 		out := &api.RestoreProjectResponse{}
 		out.Body.Project = dbProjectToOut(project)
@@ -405,8 +397,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: alias.ProjectID})
-		cfg.Hooks.Enqueue(*evt)
+		cfg.Publish().Event(alias.ProjectID, *evt)
 		out := &api.DetachProjectAliasResponse{}
 		out.Body.Alias = alias
 		out.Body.Event = evt
@@ -467,8 +458,7 @@ func webProjectInitFieldsAllowed(in *api.InitProjectRequest) bool {
 }
 
 func deliverProjectMutation(cfg ServerConfig, event *db.Event) {
-	cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: event, ProjectID: event.ProjectID})
-	cfg.Hooks.Enqueue(*event)
+	cfg.Publish().Event(event.ProjectID, *event)
 }
 
 type projectInitMutation struct {
@@ -482,9 +472,7 @@ type projectConfigWrite func() error
 
 func deliverProjectInitMutation(cfg ServerConfig, mutation projectInitMutation) {
 	if mutation.ResetID != 0 {
-		cfg.Broadcaster.Broadcast(StreamMsg{
-			Kind: "reset", ResetID: mutation.ResetID, ProjectID: mutation.ProjectID,
-		})
+		cfg.Publish().Reset(mutation.ProjectID, mutation.ResetID)
 		return
 	}
 	if mutation.Event != nil {

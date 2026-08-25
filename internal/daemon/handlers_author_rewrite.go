@@ -44,8 +44,7 @@ func registerAuthorRewriteHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if result.Event != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: result.Event, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(*result.Event)
+			cfg.Publish().Event(in.ProjectID, *result.Event)
 		}
 		return &api.RewriteAuthorIdentityResponse{Body: result}, nil
 	})

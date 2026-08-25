@@ -25,7 +25,7 @@ func TestFinishProjectInitDeliversBeforeConfigPersistence(t *testing.T) {
 		configWriteCalled = true
 		select {
 		case message := <-subscription.Ch:
-			require.Equal(t, "event", message.Kind)
+			require.Equal(t, StreamKindEvent, message.Kind)
 			assert.Equal(t, event, message.Event)
 		default:
 			t.Fatal("project event was not delivered before config persistence")

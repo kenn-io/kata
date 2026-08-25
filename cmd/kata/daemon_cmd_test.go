@@ -2186,7 +2186,7 @@ func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *te
 	t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	wake := startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, bcast, hooks.NewNoop(), log.New(io.Discard, "", 0))
+	wake := startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0))
 	defer cancel()
 
 	require.Eventually(t, func() bool {
@@ -2217,7 +2217,7 @@ func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
 	t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
 
 	ctx := t.Context()
-	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, nil, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
+	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, nil, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0))
 
 	require.Eventually(t, func() bool {
 		return runner.wasRun()
@@ -2234,7 +2234,7 @@ func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing
 	bcast := daemon.NewEventBroadcaster()
 
 	ctx := t.Context()
-	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, bcast, hooks.NewNoop(), log.New(io.Discard, "", 0))
+	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0))
 
 	require.Eventually(t, func() bool {
 		got, err := store.IssueSyncBindingByID(context.Background(), binding.ID)
@@ -2257,7 +2257,7 @@ func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
 	hookSink := &recordingDaemonHookSink{}
 
 	ctx := t.Context()
-	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, bcast, hookSink, log.New(io.Discard, "", 0))
+	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventPublisher(bcast, hookSink), log.New(io.Discard, "", 0))
 
 	var msg daemon.StreamMsg
 	select {
@@ -2265,10 +2265,12 @@ func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for GitHub sync import event")
 	}
-	require.Equal(t, "event", msg.Kind)
+	require.Equal(t, daemon.StreamKindEvent, msg.Kind)
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, project.ID, msg.ProjectID)
-	assert.Equal(t, []int64{msg.Event.ID}, hookSink.eventIDs())
+	require.Eventually(t, func() bool {
+		return assert.ObjectsAreEqual([]int64{msg.Event.ID}, hookSink.eventIDs())
+	}, time.Second, time.Millisecond, "GitHub sync import event was not enqueued")
 
 	select {
 	case extra := <-sub.Ch:
@@ -2286,7 +2288,7 @@ func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testi
 	fetcher.releaseRepository = make(chan struct{})
 
 	ctx := t.Context()
-	wake := startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
+	wake := startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0))
 
 	select {
 	case <-fetcher.blockRepository:

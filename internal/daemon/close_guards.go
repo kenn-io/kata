@@ -285,9 +285,6 @@ func emitThrottledEvent(
 	if err != nil {
 		return fmt.Errorf("emit close.throttled: %w", err)
 	}
-	cfg.Broadcaster.Broadcast(StreamMsg{
-		Kind: "event", Event: &evt, ProjectID: issue.ProjectID,
-	})
-	cfg.Hooks.Enqueue(evt)
+	cfg.Publish().Event(issue.ProjectID, evt)
 	return nil
 }

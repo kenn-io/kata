@@ -184,8 +184,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 					}
 					return nil, internalAPIError(err)
 				}
-				cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &unlinkEvt, ProjectID: in.ProjectID})
-				cfg.Hooks.Enqueue(unlinkEvt)
+				cfg.Publish().Event(in.ProjectID, unlinkEvt)
 			} else if !errors.Is(perr, db.ErrNotFound) {
 				return nil, internalAPIError(perr)
 			}
@@ -241,8 +240,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
-		cfg.Hooks.Enqueue(evt)
+		cfg.Publish().Event(in.ProjectID, evt)
 		return mutationLinkResponse(updatedIssue, link, canonicalFromPeer, canonicalToPeer, &evt, true), nil
 	}
 }
@@ -360,8 +358,7 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
-		cfg.Hooks.Enqueue(evt)
+		cfg.Publish().Event(in.ProjectID, evt)
 		out := &api.MutationResponse{}
 		out.Body.Issue = updatedIssue
 		out.Body.Event = &evt

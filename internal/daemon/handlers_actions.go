@@ -164,11 +164,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed {
-			for i := range events {
-				event := events[i]
-				cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
-				cfg.Hooks.Enqueue(event)
-			}
+			cfg.Publish().Events(in.ProjectID, events)
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
@@ -213,8 +209,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(*evt)
+			cfg.Publish().Event(in.ProjectID, *evt)
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated

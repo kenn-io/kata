@@ -535,8 +535,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			case err != nil:
 				return nil, internalAPIError(err)
 			default:
-				cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
-				cfg.Hooks.Enqueue(*evt)
+				cfg.Publish().Event(project.ID, *evt)
 				body.Project = dbProjectToOut(project)
 				body.Archived = true
 			}
@@ -643,10 +642,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		for _, evt := range inserted {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(evt)
-		}
+		cfg.Publish().Events(in.ProjectID, inserted)
 		return &api.FederationIngestEventsResponse{Body: api.FederationIngestEventsBody{
 			Accepted:          result.Accepted,
 			Duplicates:        result.Duplicates,

@@ -29,12 +29,8 @@ func TestSSE_OutOfOrderBroadcastsEmitInIDOrder(t *testing.T) {
 	_, evt2 := mkIssueWithEvent(t, env, pid, "second")
 
 	// Inverted: evt2 first, then evt1.
-	env.Broadcaster.Broadcast(daemon.StreamMsg{
-		Kind: "event", Event: &evt2, ProjectID: pid,
-	})
-	env.Broadcaster.Broadcast(daemon.StreamMsg{
-		Kind: "event", Event: &evt1, ProjectID: pid,
-	})
+	env.Broadcaster.Broadcast(daemon.NewEventMsg(pid, evt2))
+	env.Broadcaster.Broadcast(daemon.NewEventMsg(pid, evt1))
 
 	first, ok := framer.Next(t, 2*time.Second)
 	require.True(t, ok)
@@ -63,9 +59,7 @@ func TestSSE_LivePhaseChecksPurgeResetBeforeReplay(t *testing.T) {
 	_, err := env.DB.PurgeIssue(context.Background(), sentinelIssue.ID, "tester", nil)
 	require.NoError(t, err)
 
-	env.Broadcaster.Broadcast(daemon.StreamMsg{
-		Kind: "event", Event: &evt2, ProjectID: pid,
-	})
+	env.Broadcaster.Broadcast(daemon.NewEventMsg(pid, evt2))
 
 	frame, ok := framer.Next(t, 2*time.Second)
 	require.True(t, ok)
@@ -100,10 +94,8 @@ func TestBroadcaster_ConcurrentSubscribeBroadcastUnsub(_ *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			evt := &db.Event{ID: int64(i + 1), ProjectID: int64(i % 3), Type: "issue.created"}
-			b.Broadcast(daemon.StreamMsg{
-				Kind: "event", Event: evt, ProjectID: evt.ProjectID,
-			})
+			evt := db.Event{ID: int64(i + 1), ProjectID: int64(i % 3), Type: "issue.created"}
+			b.Broadcast(daemon.NewEventMsg(evt.ProjectID, evt))
 		}(i)
 	}
 	wg.Wait()

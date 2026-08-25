@@ -148,12 +148,12 @@ func TestPurgeProjectHandler_BroadcastsResetToScopedSubscribers(t *testing.T) {
 	require.Equalf(t, 200, purge.status, "purge status: %s", string(purge.body))
 
 	globalMsg := receiveMsg(t, globalSub.Ch, time.Second, "global reset")
-	assert.Equal(t, "reset", globalMsg.Kind)
+	assert.Equal(t, daemon.StreamKindReset, globalMsg.Kind)
 	assert.Equal(t, pid, globalMsg.ProjectID)
 	assert.NotZero(t, globalMsg.ResetID)
 
 	purgedMsg := receiveMsg(t, purgedSub.Ch, time.Second, "purged-project reset")
-	assert.Equal(t, "reset", purgedMsg.Kind)
+	assert.Equal(t, daemon.StreamKindReset, purgedMsg.Kind)
 	assert.Equal(t, pid, purgedMsg.ProjectID)
 	assert.NotZero(t, purgedMsg.ResetID)
 

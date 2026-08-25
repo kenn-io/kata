@@ -41,8 +41,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(*evt)
+			cfg.Publish().Event(in.ProjectID, *evt)
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
@@ -75,8 +74,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(*evt)
+			cfg.Publish().Event(in.ProjectID, *evt)
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
@@ -123,8 +121,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 
 		if result.Changed && result.Event != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: result.Event, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(*result.Event)
+			cfg.Publish().Event(in.ProjectID, *result.Event)
 		}
 
 		out := &api.ClaimResponse{}

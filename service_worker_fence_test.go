@@ -120,6 +120,41 @@ func TestServiceRunTreatsCanceledInFlightWorkerFenceAsCleanShutdown(t *testing.T
 	}
 }
 
+func TestServiceRunTreatsDeadlineInFlightWorkerFenceAsCleanShutdown(t *testing.T) {
+	ctx := t.Context()
+	fenceStarted := make(chan struct{})
+	var startOnce sync.Once
+	service, err := New(ctx, Config{
+		DSN:    filepath.Join(t.TempDir(), "service.db"),
+		Access: allowWorkerFenceAccess{},
+		WorkerTransactionFence: func(ctx context.Context, _ Transaction) error {
+			startOnce.Do(func() { close(fenceStarted) })
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	seedExpiredWorkerClaim(ctx, t, service)
+
+	runCtx, cancelRun := context.WithTimeout(ctx, time.Second)
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() { runDone <- service.Run(runCtx) }()
+
+	select {
+	case <-fenceStarted:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "worker did not enter transaction fence")
+	}
+	select {
+	case runErr := <-runDone:
+		require.NoError(t, runErr)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "Run did not stop after deadline")
+	}
+}
+
 func TestServiceRunReportsWorkerInitiatedContextCancellation(t *testing.T) {
 	ctx := context.Background()
 	service, err := New(ctx, Config{

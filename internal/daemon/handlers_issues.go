@@ -196,8 +196,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case err != nil:
 			return nil, internalAPIError(err)
 		}
-		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
-		cfg.Hooks.Enqueue(evt)
+		cfg.Publish().Event(in.ProjectID, evt)
 		out := &api.MutationResponse{}
 		out.Body.Issue = issue
 		out.Body.Event = &evt
@@ -485,11 +484,7 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		}
 		// Broadcast all events post-commit. Order matches DB.EditIssueAtomic's
 		// emission order: issue.updated → priority → links_changed.
-		for i := range result.Events {
-			ev := result.Events[i]
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &ev, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(ev)
-		}
+		cfg.Publish().Events(in.ProjectID, result.Events)
 
 		out := &api.EditIssueResponse{}
 		out.Body.Issue = result.Issue

@@ -135,7 +135,7 @@ type Service struct {
 	store                  db.Storage
 	server                 *daemon.Server
 	broadcaster            *daemon.EventBroadcaster
-	hookSink               hooks.Sink
+	publish                daemon.EventPublisher
 	federationWake         chan struct{}
 	gitHubSyncWake         chan struct{}
 	gitHubSyncFetcher      githubsync.Fetcher
@@ -218,6 +218,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	broadcaster := daemon.NewEventBroadcaster()
 	hookSink := hooks.NewNoop()
+	publisher := daemon.NewEventPublisher(broadcaster, hookSink)
 	federationWake := make(chan struct{}, 1)
 	wakeFederation := func() {
 		select {
@@ -277,7 +278,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		store:                  store,
 		server:                 server,
 		broadcaster:            broadcaster,
-		hookSink:               hookSink,
+		publish:                publisher,
 		federationWake:         federationWake,
 		gitHubSyncWake:         gitHubSyncWake,
 		gitHubSyncFetcher:      gitHubSyncFetcher,
@@ -460,21 +461,13 @@ func (s *Service) Run(ctx context.Context) error {
 		return errors.New("kata: service is already running")
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	workerFenceFailures := make(chan error, 1)
-	var reportWorkerFenceFailure sync.Once
+	fence := &fenceRecorder{cancel: cancel}
 	if s.workerTransactionFence != nil {
 		runCtx = db.WithTransactionFence(runCtx, func(
 			fenceCtx context.Context,
 			transaction db.Transaction,
 		) error {
-			err := s.workerTransactionFence(fenceCtx, transaction)
-			if err != nil {
-				reportWorkerFenceFailure.Do(func() {
-					workerFenceFailures <- err
-					cancel()
-				})
-			}
-			return err
+			return fence.record(s.workerTransactionFence(fenceCtx, transaction))
 		})
 	}
 	done := make(chan struct{})
@@ -503,7 +496,7 @@ func (s *Service) Run(ctx context.Context) error {
 				if !ok {
 					return
 				}
-				if msg.Kind == "event" {
+				if msg.Kind == daemon.StreamKindEvent {
 					signalWake(s.federationWake)
 				}
 			}
@@ -515,7 +508,6 @@ func (s *Service) Run(ctx context.Context) error {
 		federationSub.Unsub()
 	}()
 
-	workerErrs := make(chan error, 3)
 	runner := &federation.Runner{
 		DB:          s.store,
 		Credentials: s.federationCredentials,
@@ -525,13 +517,7 @@ func (s *Service) Run(ctx context.Context) error {
 			s.logger.Error("kata federation worker", "err", err)
 		},
 		OnPulledEvents: func(projectID int64, events []db.Event) {
-			for i := range events {
-				event := events[i]
-				s.broadcaster.Broadcast(daemon.StreamMsg{
-					Kind: "event", Event: &event, ProjectID: projectID,
-				})
-				s.hookSink.Enqueue(event)
-			}
+			s.publishWorkerEvents(projectID, events)
 		},
 	}
 	gitHubSyncRunner := githubsync.NewRunner(githubsync.RunnerConfig{
@@ -541,56 +527,59 @@ func (s *Service) Run(ctx context.Context) error {
 		Interval: 5 * time.Minute,
 		Wake:     s.gitHubSyncWake,
 		EventSink: func(_ context.Context, projectID int64, events []db.Event) error {
-			for i := range events {
-				event := events[i]
-				s.broadcaster.Broadcast(daemon.StreamMsg{
-					Kind: "event", Event: &event, ProjectID: projectID,
-				})
-				s.hookSink.Enqueue(event)
-			}
+			s.publishWorkerEvents(projectID, events)
 			return nil
 		},
 	})
-	sweeper := daemon.NewTimedClaimSweeper(s.store, s.broadcaster, s.hookSink)
+	sweeper := daemon.NewTimedClaimSweeper(s.store, s.publish)
 	sweeper.OnError = func(err error) {
 		s.logger.Error("kata timed-claim worker", "err", err)
 	}
-	go func() { workerErrs <- runner.Run(runCtx) }()
-	go func() { workerErrs <- gitHubSyncRunner.Run(runCtx) }()
-	go func() { workerErrs <- sweeper.Run(runCtx) }()
+	workers := []namedWorker{
+		{name: "federation", run: runner.Run},
+		{name: "github-sync", run: gitHubSyncRunner.Run},
+		{name: "timed-claim", run: sweeper.Run},
+	}
+	workerErrs := make(chan error, len(workers))
+	for _, worker := range workers {
+		go func() {
+			err := worker.run(runCtx)
+			workerErrs <- worker.result(err, runCtx.Err())
+		}()
+	}
 
-	workerResults := make([]error, 0, 3)
-	var workerFenceFailure error
+	var stop runStop
+	workerResults := make([]error, 0, len(workers))
 	select {
 	case <-runCtx.Done():
-	case workerFenceFailure = <-workerFenceFailures:
+		stop = runStop{reason: stopContextDone, err: runCtx.Err()}
 	case err := <-workerErrs:
+		stop = runStop{reason: stopWorkerExit, err: err}
 		workerResults = append(workerResults, err)
 	}
-	cancel()
-	for len(workerResults) < 3 {
+	// Sampled here, next to the stop it qualifies: a Close that lands later
+	// must not retroactively change what an already-recorded error means.
+	callerStop := ctx.Err()
+	if callerStop == nil && s.isClosed() {
+		callerStop = context.Canceled
+	}
+	fence.beginUnwind()
+	for len(workerResults) < len(workers) {
 		workerResults = append(workerResults, <-workerErrs)
 	}
-	if workerFenceFailure == nil {
-		select {
-		case workerFenceFailure = <-workerFenceFailures:
-		default:
-		}
+	// A fence rejection cancels the run, so the select above sees it as
+	// stopContextDone. The recorder holds the real reason.
+	if fenceErr := fence.first(); fenceErr != nil {
+		stop = runStop{reason: stopFenceFailure, err: fenceErr}
 	}
-	shuttingDown := ctx.Err() != nil || s.isClosed()
-	if shuttingDown && errors.Is(workerFenceFailure, context.Canceled) {
-		return nil
-	}
-	if workerFenceFailure != nil {
-		return fmt.Errorf("kata: worker transaction fence: %w", workerFenceFailure)
-	}
-	if runCtx.Err() != nil && shuttingDown {
-		return nil
-	}
-	for i := range workerResults {
-		workerResults[i] = normalizeWorkerError(workerResults[i])
-	}
-	return errors.Join(workerResults...)
+	return runResult(stop, workerResults, callerStop)
+}
+
+// publishWorkerEvents fans a background worker's events out to both event
+// surfaces. Both workers route through here so neither can grow its own
+// half-wired copy of the pairing again.
+func (s *Service) publishWorkerEvents(projectID int64, events []db.Event) {
+	s.publish.Events(projectID, events)
 }
 
 func signalWake(ch chan<- struct{}) {
@@ -600,11 +589,135 @@ func signalWake(ch chan<- struct{}) {
 	}
 }
 
-func normalizeWorkerError(err error) error {
-	if errors.Is(err, context.Canceled) {
+// fenceRecorder keeps the first worker-transaction-fence rejection and cancels
+// the run so the remaining workers stop — the cancel is load-bearing, it is
+// what unwinds the other two workers. Once Run begins its own unwind,
+// cancellation-only fence results caused by that cancel are ignored; genuine
+// failures still take priority over the stop that began the unwind.
+//
+// Recording replaces the old report channel plus its non-blocking re-drain:
+// every worker's exit is received after its fence callback has returned, so
+// reading first() once the drain is complete cannot race a record.
+type fenceRecorder struct {
+	mu        sync.Mutex
+	cancel    context.CancelFunc
+	err       error
+	unwinding bool
+}
+
+func (f *fenceRecorder) record(err error) error {
+	if err == nil {
 		return nil
 	}
+	cancellationOnly := isCancellationOnly(err)
+	f.mu.Lock()
+	if f.err == nil && (!f.unwinding || !cancellationOnly) {
+		f.err = err
+	}
+	f.mu.Unlock()
+	f.cancel()
 	return err
+}
+
+// beginUnwind marks Run's internal cancellation boundary before firing the
+// cancel that can cause in-flight fence callbacks to return context.Canceled.
+func (f *fenceRecorder) beginUnwind() {
+	f.mu.Lock()
+	f.unwinding = true
+	f.mu.Unlock()
+	f.cancel()
+}
+
+func (f *fenceRecorder) first() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.err
+}
+
+// namedWorker pairs a background worker's run function with the name Run uses
+// to attribute its failure.
+type namedWorker struct {
+	name string
+	run  func(context.Context) error
+}
+
+// result normalizes a worker's exit: the run context's terminal error is how a
+// worker reports a clean stop, anything else is a failure attributed to it.
+func (w namedWorker) result(err, terminal error) error {
+	if err == nil || isOnlyError(err, terminal) {
+		return nil
+	}
+	return fmt.Errorf("kata: %s worker: %w", w.name, err)
+}
+
+// isOnlyError reports whether every non-nil leaf in err's causal graph matches
+// target. errors.Is alone also matches joins that contain a genuine failure.
+func isOnlyError(err, target error) bool {
+	if err == nil || target == nil {
+		return false
+	}
+	switch err := err.(type) {
+	case interface{ Unwrap() []error }:
+		found := false
+		for _, cause := range err.Unwrap() {
+			if cause == nil {
+				continue
+			}
+			found = true
+			if !isOnlyError(cause, target) {
+				return false
+			}
+		}
+		return found
+	case interface{ Unwrap() error }:
+		if cause := err.Unwrap(); cause != nil {
+			return isOnlyError(cause, target)
+		}
+	}
+	return errors.Is(err, target)
+}
+
+func isCancellationOnly(err error) bool {
+	return isOnlyError(err, context.Canceled)
+}
+
+// stopReason is why Run began unwinding, recorded when it happens rather than
+// inferred afterwards from state that has since moved on.
+type stopReason int
+
+const (
+	stopContextDone stopReason = iota
+	stopFenceFailure
+	stopWorkerExit
+)
+
+// runStop is the recorded stop decision and the error that carried the news.
+type runStop struct {
+	reason stopReason
+	err    error
+}
+
+// runResult turns the recorded stop into Run's return value. It is a function
+// so the shutdown policy is stated once, in one place, instead of emerging
+// from the order of four probes of state that has already moved on.
+//
+// Policy (design decision D1): genuine worker failures reach the caller even
+// when shutdown was in flight. A fence error composed only of the caller's
+// terminal error is clean; mixed failures still surface. workerResults have
+// already been normalized by namedWorker.result.
+func runResult(stop runStop, workerResults []error, callerStop error) error {
+	switch stop.reason {
+	case stopFenceFailure:
+		if isOnlyError(stop.err, callerStop) {
+			// The fence was rejected *by* the shutdown it is unwinding; the
+			// workers still report their own outcomes below.
+			break
+		}
+		return fmt.Errorf("kata: worker transaction fence: %w", stop.err)
+	case stopContextDone, stopWorkerExit:
+		// The caller learns what the workers reported.
+	}
+	return errors.Join(workerResults...)
 }
 
 func (s *Service) isClosed() bool {

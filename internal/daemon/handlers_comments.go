@@ -77,8 +77,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return nil, internalAPIError(err)
 		}
-		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
-		cfg.Hooks.Enqueue(evt)
+		cfg.Publish().Event(in.ProjectID, evt)
 		updated, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -126,8 +125,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(*evt)
+			cfg.Publish().Event(in.ProjectID, *evt)
 		}
 		updated, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
