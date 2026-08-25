@@ -25,6 +25,31 @@ func TestExternalRootOwnershipAndClaimConflictsReturn409(t *testing.T) {
 		assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "external_root_content_owned")
 	})
 
+	t.Run("edit externally owned comment content", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken(token))
+		project, issue := createExternalRootConflictIssue(t, env, "comment-edit-conflict")
+		binding := createExternalRootConflictBinding(t, env, project, issue, false)
+		now := time.Now().UTC()
+		binding, acquired, err := env.DB.ClaimExternalRootBinding(
+			t.Context(), binding.ID, "comment-claim", now, now.Add(-time.Minute),
+		)
+		require.NoError(t, err)
+		require.True(t, acquired)
+		comment, _, _, err := env.DB.UpsertExternalCommentProjection(t.Context(), db.ExternalCommentProjectionParams{
+			BindingID: binding.ID, ClaimToken: binding.ClaimToken,
+			ExternalID: "provider-comment", ExternalRevision: "revision-one",
+			Body: "Provider-authored comment", ExternalActorID: "provider-actor",
+			ExternalActorName: "Contributor", ExternalCreatedAt: now,
+			ExternalUpdatedAt: now, IntegrationActor: "connector:notes",
+		})
+		require.NoError(t, err)
+
+		resp, raw := envDoRaw(t, env, http.MethodPatch,
+			issuePathRef(project.ID, issue.ShortID, "comments/"+comment.UID),
+			map[string]any{"actor": "tester", "body": "Local replacement"}, headers)
+		assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "external_comment_content_owned")
+	})
+
 	t.Run("reopen issue during reconciliation", func(t *testing.T) {
 		env := testenv.New(t, testenv.WithAuthToken(token))
 		project, issue := createExternalRootConflictIssue(t, env, "reopen-conflict")

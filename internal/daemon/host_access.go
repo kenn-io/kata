@@ -391,6 +391,10 @@ func externalRootConflictError(err error) error {
 		return api.NewError(http.StatusConflict, "external_root_content_owned",
 			"external root owns issue title and body",
 			"unbind the external root before changing owned content", nil)
+	case errors.Is(err, db.ErrExternalCommentContentOwned):
+		return api.NewError(http.StatusConflict, "external_comment_content_owned",
+			"external root owns comment body",
+			"unbind the external root before changing owned comment content", nil)
 	case errors.Is(err, db.ErrExternalRootClaimActive):
 		return api.NewError(http.StatusConflict, "external_root_claim_active",
 			"external root reconciliation is active",
