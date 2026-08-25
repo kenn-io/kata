@@ -43,6 +43,7 @@ type Service struct {
 	immediateClaimedReconcile ImmediateClaimedReconcileFunc
 	claimStaleAfter           time.Duration
 	eventSink                 func(db.Event)
+	fieldCodecs               map[string]FieldCodec
 }
 
 // NewService constructs the external-root lifecycle service.
@@ -58,9 +59,26 @@ func NewServiceWithEventSink(
 	reconcile ImmediateClaimedReconcileFunc,
 	eventSink func(db.Event),
 ) *Service {
+	return NewServiceWithEventSinkAndDefaultTimezone(store, registry, reconcile, eventSink, "")
+}
+
+// NewServiceWithEventSinkAndDefaultTimezone constructs the lifecycle service
+// with the daemon's civil-time fallback for planning-field synchronization.
+func NewServiceWithEventSinkAndDefaultTimezone(
+	store db.Storage,
+	registry *Registry,
+	reconcile ImmediateClaimedReconcileFunc,
+	eventSink func(db.Event),
+	defaultTimezone string,
+) *Service {
+	codecs := fieldCodecs
+	if strings.TrimSpace(defaultTimezone) != "" {
+		codecs = fieldCodecsForTimezone(defaultTimezone)
+	}
 	return &Service{
 		store: store, registry: registry, immediateClaimedReconcile: reconcile,
 		claimStaleAfter: defaultExternalRootClaimStaleAfter, eventSink: eventSink,
+		fieldCodecs: codecs,
 	}
 }
 
@@ -423,7 +441,7 @@ func (s *Service) MapField(ctx context.Context, params MapFieldParams) (db.Exter
 	params.ConnectorInstance = strings.TrimSpace(params.ConnectorInstance)
 	params.KataField = strings.TrimSpace(params.KataField)
 	params.ExternalField = strings.TrimSpace(params.ExternalField)
-	codec, ok := fieldCodecs[params.KataField]
+	codec, ok := s.fieldCodecs[params.KataField]
 	if !ok {
 		return db.ExternalFieldMapping{}, fmt.Errorf("%w: unsupported Kata field", db.ErrExternalFieldMappingValidation)
 	}
@@ -462,7 +480,7 @@ func (s *Service) MapField(ctx context.Context, params MapFieldParams) (db.Exter
 func (s *Service) UnmapField(ctx context.Context, connectorInstance, kataField string) (db.ExternalFieldMapping, error) {
 	connectorInstance = strings.TrimSpace(connectorInstance)
 	kataField = strings.TrimSpace(kataField)
-	if _, ok := fieldCodecs[kataField]; !ok {
+	if _, ok := s.fieldCodecs[kataField]; !ok {
 		return db.ExternalFieldMapping{}, fmt.Errorf("%w: unsupported Kata field", db.ErrExternalFieldMappingValidation)
 	}
 	if _, err := s.requireInstance(connectorInstance); err != nil {
@@ -482,7 +500,7 @@ func (s *Service) ResolveFieldConflict(
 	kataField = strings.TrimSpace(kataField)
 	use = strings.TrimSpace(use)
 	actor = strings.TrimSpace(actor)
-	codec, ok := fieldCodecs[kataField]
+	codec, ok := s.fieldCodecs[kataField]
 	if issueID <= 0 || !ok || actor == "" {
 		return resolved, events, fmt.Errorf("%w: issue, supported Kata field, and actor are required", db.ErrExternalRootValidation)
 	}
@@ -655,13 +673,13 @@ func (s *Service) ResolveFieldConflict(
 	if use == "external" {
 		selected = storedExternal
 		coordinatedTimezone = coordinatedConflictTimezone(
-			issue, mapping, claimedMappings, claimedStates, selected,
+			s.fieldCodecs, issue, mapping, claimedMappings, claimedStates, selected,
 		)
 	}
 	kataCandidateStable := fieldValuesEqual(kataValue, storedKata)
 	if use == "external" && !kataCandidateStable {
 		kataCandidateStable = fieldValuesEqual(kataValue, selected) || coordinatedConflictKataDriftAllowed(
-			issue, mapping, claimedMappings, claimedStates, storedKata, kataValue, storedExternal,
+			s.fieldCodecs, issue, mapping, claimedMappings, claimedStates, storedKata, kataValue, storedExternal,
 		)
 	}
 	externalCandidateStable := fieldValuesEqual(externalValue, storedExternal)
@@ -746,6 +764,7 @@ func (s *Service) ResolveFieldConflict(
 }
 
 func coordinatedConflictTimezone(
+	codecs map[string]FieldCodec,
 	issue db.Issue,
 	mapping db.ExternalFieldMapping,
 	mappings []db.ExternalFieldMapping,
@@ -755,7 +774,7 @@ func coordinatedConflictTimezone(
 	if selected.Kind != fieldKindLocalDateTime || selected.Timezone == "" {
 		return ""
 	}
-	codec, ok := fieldCodecs[mapping.KataField]
+	codec, ok := codecs[mapping.KataField]
 	if !ok {
 		return ""
 	}
@@ -772,7 +791,7 @@ func coordinatedConflictTimezone(
 		if !sibling.Active || sibling.ID == mapping.ID {
 			continue
 		}
-		siblingCodec, ok := fieldCodecs[sibling.KataField]
+		siblingCodec, ok := codecs[sibling.KataField]
 		if !ok {
 			return ""
 		}
@@ -797,6 +816,7 @@ func coordinatedConflictTimezone(
 }
 
 func coordinatedConflictKataDriftAllowed(
+	codecs map[string]FieldCodec,
 	issue db.Issue,
 	mapping db.ExternalFieldMapping,
 	mappings []db.ExternalFieldMapping,
@@ -819,7 +839,7 @@ func coordinatedConflictKataDriftAllowed(
 		if !sibling.Active || sibling.ID == mapping.ID {
 			continue
 		}
-		siblingCodec, ok := fieldCodecs[sibling.KataField]
+		siblingCodec, ok := codecs[sibling.KataField]
 		if !ok {
 			return false
 		}

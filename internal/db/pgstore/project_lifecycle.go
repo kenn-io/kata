@@ -254,6 +254,9 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 		if !errors.Is(err, sql.ErrNoRows) {
 			return mapSQLError(err, nil)
 		}
+		if err := rejectActiveExternalRootProjectPurge(ctx, tx, project.ID); err != nil {
+			return err
+		}
 
 		counts, err := countProjectPurgeTx(ctx, tx, project.ID)
 		if err != nil {

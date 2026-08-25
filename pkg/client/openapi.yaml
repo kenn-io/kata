@@ -133,6 +133,21 @@ components:
       required:
         - kind
       type: object
+    BindExternalRootRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        connector:
+          type: string
+        external:
+          type: string
+        publish_comments:
+          type: boolean
+      required:
+        - connector
+        - external
+      type: object
     ChildCounts:
       properties:
         open:
@@ -319,6 +334,51 @@ components:
         - comment
         - event
         - changed
+      type: object
+    ConnectorFieldsResponseBody:
+      properties:
+        fields:
+          items:
+            $ref: "#/components/schemas/FieldDescriptor"
+          nullable: true
+          type: array
+      required:
+        - fields
+      type: object
+    ConnectorListResponseBody:
+      properties:
+        connectors:
+          items:
+            $ref: "#/components/schemas/ConnectorOut"
+          nullable: true
+          type: array
+      required:
+        - connectors
+      type: object
+    ConnectorOut:
+      properties:
+        account_identity:
+          type: string
+        capabilities:
+          items:
+            type: string
+          nullable: true
+          type: array
+        connector_id:
+          type: string
+        display_name:
+          type: string
+        health_error:
+          type: string
+        healthy:
+          type: boolean
+        instance_id:
+          type: string
+        protocol:
+          type: string
+      required:
+        - instance_id
+        - healthy
       type: object
     CreateFederationEnrollmentRequestBody:
       additionalProperties: false
@@ -967,6 +1027,169 @@ components:
       required:
         - type
       type: object
+    ExternalFieldCandidateOut:
+      properties:
+        kind:
+          type: string
+        timezone:
+          type: string
+        value:
+          type: string
+      required:
+        - kind
+      type: object
+    ExternalFieldConflictOut:
+      properties:
+        conflict_at:
+          format: date-time
+          type: string
+        external_candidate:
+          $ref: "#/components/schemas/ExternalFieldCandidateOut"
+        kata_candidate:
+          $ref: "#/components/schemas/ExternalFieldCandidateOut"
+        kata_field:
+          type: string
+      required:
+        - kata_field
+      type: object
+    ExternalFieldMappingOut:
+      properties:
+        accepted_kinds:
+          items:
+            type: string
+          nullable: true
+          type: array
+        active:
+          type: boolean
+        external_field_id:
+          type: string
+        external_field_name:
+          type: string
+        kata_field:
+          type: string
+        nullable:
+          type: boolean
+        schema_revision:
+          type: string
+        writable:
+          type: boolean
+      required:
+        - kata_field
+        - external_field_id
+        - external_field_name
+        - accepted_kinds
+        - nullable
+        - writable
+        - schema_revision
+        - active
+      type: object
+    ExternalRootActionRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        reason:
+          type: string
+      type: object
+    ExternalRootBridgeOut:
+      properties:
+        active:
+          type: boolean
+        complete_external:
+          type: boolean
+        connector_instance:
+          type: string
+        consecutive_failures:
+          format: int64
+          type: integer
+        enabled:
+          type: boolean
+        field_conflicts:
+          items:
+            $ref: "#/components/schemas/ExternalFieldConflictOut"
+          nullable: true
+          type: array
+        id:
+          format: int64
+          type: integer
+        issue_id:
+          format: int64
+          type: integer
+        last_attempt_at:
+          format: date-time
+          type: string
+        last_error:
+          type: string
+        last_error_at:
+          format: date-time
+          type: string
+        last_external_state:
+          type: string
+        last_success_at:
+          format: date-time
+          type: string
+        next_attempt_at:
+          format: date-time
+          type: string
+        paused_reason:
+          type: string
+        pending_comment_uid:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        publish_comments:
+          type: boolean
+        receive_comments:
+          type: boolean
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - project_id
+        - issue_id
+        - connector_instance
+        - active
+        - enabled
+        - receive_comments
+        - publish_comments
+        - complete_external
+        - consecutive_failures
+      type: object
+    ExternalRootRunOut:
+      properties:
+        bridge:
+          $ref: "#/components/schemas/ExternalRootBridgeOut"
+        comments_created:
+          format: int64
+          type: integer
+        comments_edited:
+          format: int64
+          type: integer
+        completion_requests:
+          format: int64
+          type: integer
+        field_conflicts:
+          format: int64
+          type: integer
+        paused:
+          type: boolean
+        reopen_requests:
+          format: int64
+          type: integer
+        root_updated:
+          type: boolean
+      required:
+        - bridge
+        - root_updated
+        - comments_created
+        - comments_edited
+        - field_conflicts
+        - completion_requests
+        - reopen_requests
+        - paused
+      type: object
     FederationBindingOut:
       properties:
         actor:
@@ -1370,6 +1593,31 @@ components:
         - event_uid
         - issue_uid
         - at
+      type: object
+    FieldDescriptor:
+      properties:
+        accepted_kinds:
+          items:
+            type: string
+          nullable: true
+          type: array
+        display_name:
+          type: string
+        id:
+          type: string
+        nullable:
+          type: boolean
+        schema_revision:
+          type: string
+        writable:
+          type: boolean
+      required:
+        - id
+        - display_name
+        - accepted_kinds
+        - nullable
+        - writable
+        - schema_revision
       type: object
     HealthResponseBody:
       properties:
@@ -2337,6 +2585,14 @@ components:
       required:
         - tokens
       type: object
+    MapConnectorFieldRequestBody:
+      additionalProperties: false
+      properties:
+        external_field:
+          type: string
+      required:
+        - external_field
+      type: object
     MergeProjectRequestBody:
       additionalProperties: false
       properties:
@@ -3206,6 +3462,14 @@ components:
         - new_origin
         - state
       type: object
+    ReconcileExternalRootByKeyRequestBody:
+      additionalProperties: false
+      properties:
+        root_key:
+          type: string
+      required:
+        - root_key
+      type: object
     Recurrence:
       properties:
         author:
@@ -3339,6 +3603,31 @@ components:
           type: string
       required:
         - name
+      type: object
+    ResolveExternalCommentRequestBody:
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+        actor:
+          type: string
+        external_comment_id:
+          type: string
+      required:
+        - action
+      type: object
+    ResolveExternalFieldRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        kata_field:
+          type: string
+        use:
+          type: string
+      required:
+        - kata_field
+        - use
       type: object
     ResolveProjectRequestBody:
       additionalProperties: false
@@ -4097,6 +4386,153 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditClosesResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/connectors:
+    get:
+      operationId: listConnectors
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectorListResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/connectors/{instance}:
+    get:
+      operationId: getConnectorStatus
+      parameters:
+        - in: path
+          name: instance
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectorOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/connectors/{instance}/actions/reconcile-root:
+    post:
+      operationId: reconcileExternalRootByKey
+      parameters:
+        - in: path
+          name: instance
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReconcileExternalRootByKeyRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalRootRunOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/connectors/{instance}/fields:
+    get:
+      operationId: listConnectorFields
+      parameters:
+        - in: path
+          name: instance
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectorFieldsResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/connectors/{instance}/fields/{kata_field}:
+    delete:
+      operationId: unmapConnectorField
+      parameters:
+        - in: path
+          name: instance
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: kata_field
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalFieldMappingOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    put:
+      operationId: mapConnectorField
+      parameters:
+        - in: path
+          name: instance
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: kata_field
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MapConnectorFieldRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalFieldMappingOut"
           description: OK
         default:
           content:
@@ -5832,6 +6268,274 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/bridge:
+    delete:
+      operationId: unbindExternalRoot
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: actor
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalRootBridgeOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    get:
+      operationId: getExternalRootBridge
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: actor
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalRootBridgeOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    post:
+      operationId: bindExternalRoot
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BindExternalRootRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalRootBridgeOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/bridge/actions/pause:
+    post:
+      operationId: pauseExternalRootBridge
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExternalRootActionRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalRootBridgeOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/bridge/actions/reconcile:
+    post:
+      operationId: reconcileExternalRootBridge
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExternalRootActionRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalRootRunOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/bridge/actions/resolve-comment:
+    post:
+      operationId: resolveExternalComment
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveExternalCommentRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalRootBridgeOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/bridge/actions/resolve-field:
+    post:
+      operationId: resolveExternalField
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveExternalFieldRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalRootBridgeOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/bridge/actions/resume:
+    post:
+      operationId: resumeExternalRootBridge
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExternalRootActionRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalRootBridgeOut"
           description: OK
         default:
           content:

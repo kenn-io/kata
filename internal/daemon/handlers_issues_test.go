@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -439,6 +440,46 @@ func TestIssues_PatchEditTitleAndBody(t *testing.T) {
 		map[string]any{"actor": "x", "title": "new"})
 	require.Equal(t, 200, resp.StatusCode, string(bs))
 	assert.Contains(t, string(bs), `"title":"new"`)
+}
+
+func TestEditIssueExternalRootContentOwnedReturnsNeutralConflict(t *testing.T) {
+	env := testenv.New(t)
+	projectID := mkProject(t, env, "https://daemon.example/example-project", "example-project")
+	issue, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: projectID, Title: "External root", Body: "External body", Author: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateExternalRootBinding(context.Background(), db.CreateExternalRootBindingParams{
+		ProjectID: projectID, IssueID: issue.ID, ConnectorInstance: "example-connector",
+		ExternalRootKey: "opaque-root-key", ExternalAccountKey: "opaque-account-key",
+		Actor: "tester", ReceiveCommentsAfter: time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch,
+		projectPath(projectID)+"/issues/"+issue.ShortID,
+		map[string]any{"actor": "tester", "title": "Local replacement", "set_priority": 2}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "external_root_content_owned")
+	var envelope struct {
+		Error struct {
+			Hint string `json:"hint"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &envelope))
+	assert.Contains(t, envelope.Error.Hint, "kata bridge unbind <issue-ref>")
+	assert.NotContains(t, string(raw), "example-connector")
+	assert.NotContains(t, string(raw), "opaque-root-key")
+	stored, readErr := env.DB.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, readErr)
+	assert.Equal(t, issue.Title, stored.Title)
+	assert.Nil(t, stored.Priority)
+	assert.Equal(t, issue.Revision, stored.Revision)
+
+	resp, raw = envDoRaw(t, env, http.MethodPatch,
+		projectPath(projectID)+"/issues/"+issue.ShortID,
+		map[string]any{"actor": "tester", "set_priority": 2}, nil)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "priority edit: %s", string(raw))
 }
 
 // TestEditIssue_FieldOnlyResponseOmitsChanges pins the wire contract that

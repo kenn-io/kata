@@ -28,4 +28,15 @@ func registerProjectOperationPolicies(policies map[string]HostOperationPolicy) {
 		Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage,
 		Mutation: true, restricted: true,
 	}, "enableIssueSync", "disableIssueSync", "runIssueSyncOnce")
+
+	registerHostOperations(policies, HostOperationPolicy{
+		Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage,
+		restricted: true,
+	}, "listConnectors", "getConnectorStatus", "listConnectorFields", "getExternalRootBridge")
+	registerHostOperations(policies, HostOperationPolicy{
+		Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage,
+		Mutation: true, restricted: true,
+	}, "mapConnectorField", "unmapConnectorField", "bindExternalRoot", "reconcileExternalRootBridge",
+		"reconcileExternalRootByKey", "pauseExternalRootBridge", "resumeExternalRootBridge",
+		"resolveExternalField", "resolveExternalComment", "unbindExternalRoot")
 }

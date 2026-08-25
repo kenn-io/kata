@@ -32,6 +32,7 @@ import (
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
@@ -57,6 +58,10 @@ const (
 
 var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 	return telemetry.NewReporterOrDisabled(opts)
+}
+
+var runExternalRootRunner = func(ctx context.Context, runner *rootbridge.Runner) error {
+	return runner.Run(ctx)
 }
 
 type githubSyncDaemonRunner interface {
@@ -1085,6 +1090,47 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	gitHubSyncWake := startGitHubSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, publisher, daemonLog,
 	)
+	externalRootRegistry, err := rootbridge.NewRegistry(ctx, dcfg.Connectors, nil)
+	if err != nil {
+		return err
+	}
+	externalRootReconciler := rootbridge.NewReconciler(store, externalRootRegistry, rootbridge.ReconcilerConfig{
+		RetryAt:         rootbridge.ExternalRootRetryAt(nil),
+		DefaultTimezone: dcfg.Timezone,
+	})
+	externalRootEventSinkFrom := func(event db.Event, fork activity.Admission) {
+		broadcaster.Broadcast(daemon.StreamMsg{Kind: "event", Event: &event, ProjectID: event.ProjectID})
+		hooks.EnqueueFrom(disp, event, fork)
+	}
+	externalRootEventSink := func(event db.Event) { externalRootEventSinkFrom(event, nil) }
+	externalRootService := rootbridge.NewServiceWithEventSinkAndDefaultTimezone(
+		store,
+		externalRootRegistry,
+		func(ctx context.Context, bindingID int64, claimToken string) ([]db.Event, error) {
+			result, err := externalRootReconciler.Run(ctx, bindingID, rootbridge.RunOptions{
+				ClaimToken: claimToken,
+				EventSink:  externalRootEventSink,
+			})
+			return result.Events, err
+		},
+		externalRootEventSink,
+		dcfg.Timezone,
+	)
+	externalRootRunner := &rootbridge.Runner{
+		Store: store, Reconciler: externalRootReconciler,
+		EventSinkFrom:  externalRootEventSinkFrom,
+		DrainAdmission: waitableDrainAdmission,
+		ErrorSink: func(err error) {
+			daemonLog.Printf("external roots: %s", db.SafeExternalRootError(err.Error()))
+		},
+	}
+	externalRootWake := externalRootRunner.Wake
+	workers.Go(func() {
+		if err := runExternalRootRunner(ctx, externalRootRunner); err != nil && !errors.Is(err, context.Canceled) {
+			daemonLog.Printf("external roots: %s", db.SafeExternalRootError(err.Error()))
+		}
+	})
+	startExternalRootEventWake(ctx, workers, store, broadcaster, externalRootWake)
 	var idleHealth func() daemon.IdleSnapshot
 	var idleAdmission daemon.IdleForegroundAdmission
 	if idleController != nil {
@@ -1092,19 +1138,23 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		idleAdmission = idleController
 	}
 	srv := daemon.NewServer(daemon.ServerConfig{
-		DB:                store,
-		DefaultTimezone:   dcfg.Timezone,
-		StartedAt:         time.Now().UTC(),
-		Endpoint:          &endpoint,
-		Hooks:             disp,
-		Broadcaster:       broadcaster,
-		FederationWake:    federationWake,
-		FederationCatalog: append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		WebDaemons:        append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
-		ActiveWebDaemon:   dcfg.ActiveDaemon,
-		GitHubSyncFetcher: gitHubSyncFetcher,
-		GitHubSyncConfig:  dcfg.GitHubSync,
-		GitHubSyncWake:    gitHubSyncWake,
+		DB:                     store,
+		DefaultTimezone:        dcfg.Timezone,
+		StartedAt:              time.Now().UTC(),
+		Endpoint:               &endpoint,
+		Hooks:                  disp,
+		Broadcaster:            broadcaster,
+		FederationWake:         federationWake,
+		FederationCatalog:      append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		WebDaemons:             append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		ActiveWebDaemon:        dcfg.ActiveDaemon,
+		GitHubSyncFetcher:      gitHubSyncFetcher,
+		GitHubSyncConfig:       dcfg.GitHubSync,
+		GitHubSyncWake:         gitHubSyncWake,
+		ExternalRootRegistry:   externalRootRegistry,
+		ExternalRootService:    externalRootService,
+		ExternalRootReconciler: externalRootReconciler,
+		ExternalRootWake:       externalRootWake,
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
 			SiblingBurstWindow:  closeThrottleWindow,
@@ -1209,6 +1259,70 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		return nil
 	}
 	return serveErr
+}
+
+func startExternalRootEventWake(
+	ctx context.Context,
+	workers *daemonWorkerGroup,
+	store db.Storage,
+	bcast *daemon.EventBroadcaster,
+	wake func(int64),
+) {
+	if workers == nil || store == nil || bcast == nil || wake == nil {
+		return
+	}
+	wakeTypes := map[string]bool{
+		"issue.commented": true, "issue.comment_edited": true, "issue.updated": true,
+		"issue.metadata_updated": true, "issue.closed": true, "issue.reopened": true,
+	}
+	sub := bcast.Subscribe(daemon.SubFilter{})
+	workers.Go(func() {
+		defer sub.Unsub()
+		for ctx.Err() == nil {
+			closed := false
+			for !closed {
+				select {
+				case <-ctx.Done():
+					sub.Unsub()
+					return
+				case msg, ok := <-sub.Ch:
+					if !ok {
+						closed = true
+						continue
+					}
+					if msg.Kind == "reset" {
+						closed = true
+						continue
+					}
+					if msg.Kind != "event" || msg.Event == nil || msg.Event.IssueID == nil ||
+						!wakeTypes[msg.Event.Type] {
+						continue
+					}
+					binding, err := store.ExternalRootBindingByIssue(ctx, *msg.Event.IssueID)
+					if err == nil && binding.Active && binding.Enabled &&
+						!isExternalRootProjectionEvent(*msg.Event, binding) {
+						wake(binding.ID)
+					}
+				}
+			}
+			sub.Unsub()
+			if ctx.Err() == nil {
+				sub = bcast.Subscribe(daemon.SubFilter{})
+			}
+		}
+	})
+}
+
+func isExternalRootProjectionEvent(event db.Event, binding db.ExternalRootBinding) bool {
+	var payload struct {
+		Source struct {
+			ConnectorInstance string `json:"connector_instance"`
+		} `json:"source"`
+	}
+	if json.Unmarshal([]byte(event.Payload), &payload) != nil {
+		return false
+	}
+	return payload.Source.ConnectorInstance == binding.ConnectorInstance
 }
 
 func webAuthenticationMode(

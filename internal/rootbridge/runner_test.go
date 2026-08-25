@@ -10,11 +10,103 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 )
 
+type observedDueScanStore struct {
+	db.Storage
+	calls atomic.Int64
+}
+
+func (s *observedDueScanStore) ListDueExternalRootBindings(
+	ctx context.Context,
+	now, staleBefore time.Time,
+	limit int,
+) ([]db.ExternalRootBinding, error) {
+	s.calls.Add(1)
+	return s.Storage.ListDueExternalRootBindings(ctx, now, staleBefore, limit)
+}
+
+func TestRunnerRetriesDueScanWhenDrainAdmissionReopens(t *testing.T) {
+	h := newReconcileHarness(t)
+	store := &observedDueScanStore{Storage: h.store}
+	retry := make(chan struct{})
+	var admissions atomic.Int64
+	runner := &Runner{
+		Store: store, Reconciler: h.reconciler, Interval: time.Hour,
+		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+			if admissions.Add(1) == 1 {
+				return nil, false, retry
+			}
+			return activity.NewLease(nil, nil), true, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+
+	time.Sleep(30 * time.Millisecond)
+	assert.Zero(t, store.calls.Load(), "denied scans must not read durable work")
+	close(retry)
+	require.Eventually(t, func() bool { return store.calls.Load() == 1 }, time.Second, time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestRunnerBindingDrainProtectsReconcileAndForksEventDelivery(t *testing.T) {
+	h := newReconcileHarness(t)
+	want := db.Event{ID: 101, Type: "issue.updated", Actor: "connector:example-connector"}
+	var admissions atomic.Int64
+	var scanReleased atomic.Bool
+	var bindingReleased atomic.Bool
+	var forkAdmitted atomic.Bool
+	delivered := make(chan db.Event, 1)
+	runner := &Runner{
+		Store: h.store, Interval: time.Hour,
+		reconcileFn: func(context.Context, int64) (RunResult, error) {
+			assert.False(t, bindingReleased.Load(), "binding lease released during reconciliation")
+			return RunResult{Events: []db.Event{want}}, nil
+		},
+		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+			if admissions.Add(1) == 1 {
+				return activity.NewLease(func() { scanReleased.Store(true) }, nil), true, nil
+			}
+			fork := func() (*activity.Lease, bool) {
+				forkAdmitted.Store(true)
+				return activity.NewLease(nil, nil), true
+			}
+			return activity.NewLease(func() { bindingReleased.Store(true) }, fork), true, nil
+		},
+		EventSinkFrom: func(event db.Event, fork activity.Admission) {
+			assert.False(t, bindingReleased.Load(), "binding lease released before event delivery")
+			child, admitted := fork()
+			forkAdmitted.Store(admitted)
+			if child != nil {
+				child.Release()
+			}
+			delivered <- event
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+
+	select {
+	case got := <-delivered:
+		assert.Equal(t, want, got)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for drain-aware event delivery")
+	}
+	require.Eventually(t, bindingReleased.Load, time.Second, time.Millisecond)
+	assert.True(t, scanReleased.Load())
+	assert.True(t, forkAdmitted.Load())
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
 func TestRunnerDeliversRetainedEventsExactlyOnceWhenReconcileReturnsError(t *testing.T) {
-	want := db.Event{ID: 101, Type: "issue.updated", Actor: "connector:notes"}
+	want := db.Event{ID: 101, Type: "issue.updated", Actor: "connector:example-connector"}
 	delivered := make(chan db.Event, 2)
 	runner := &Runner{
 		Interval: time.Hour,
@@ -442,7 +534,7 @@ func createRunnerBinding(t *testing.T, h *reconcileHarness, index int) db.Extern
 	})
 	require.NoError(t, err)
 	binding, _, err := h.store.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
-		ProjectID: h.project.ID, IssueID: issue.ID, ConnectorInstance: "notes",
+		ProjectID: h.project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
 		ExternalRootKey: fmt.Sprintf("root-%d", index), ExternalAccountKey: "account-1",
 		Actor: "tester", ReceiveCommentsAfter: h.boundAt,
 	})

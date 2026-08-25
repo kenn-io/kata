@@ -25,6 +25,7 @@ type ReconcilerConfig struct {
 	Now             func() time.Time
 	ClaimStaleAfter time.Duration
 	RetryAt         func(db.ExternalRootBinding, time.Time) time.Time
+	DefaultTimezone string
 }
 
 // Reconciler synchronizes one durable external-root binding at a time.
@@ -34,6 +35,7 @@ type Reconciler struct {
 	now             func() time.Time
 	claimStaleAfter time.Duration
 	retryAt         func(db.ExternalRootBinding, time.Time) time.Time
+	fieldCodecs     map[string]FieldCodec
 }
 
 type externalRootClaimLease struct {
@@ -122,7 +124,14 @@ func NewReconciler(store db.Storage, registry *Registry, config ReconcilerConfig
 	if retryAt == nil {
 		retryAt = func(_ db.ExternalRootBinding, now time.Time) time.Time { return now }
 	}
-	return &Reconciler{store: store, registry: registry, now: now, claimStaleAfter: claimStaleAfter, retryAt: retryAt}
+	codecs := fieldCodecs
+	if strings.TrimSpace(config.DefaultTimezone) != "" {
+		codecs = fieldCodecsForTimezone(config.DefaultTimezone)
+	}
+	return &Reconciler{
+		store: store, registry: registry, now: now, claimStaleAfter: claimStaleAfter,
+		retryAt: retryAt, fieldCodecs: codecs,
+	}
 }
 
 // RunOptions selects the claim path and optional immediate event delivery for
@@ -515,7 +524,7 @@ func (r *Reconciler) reconcileField(
 		hasBaseline = false
 		baseline = nullFieldValue()
 	}
-	codec, ok := fieldCodecs[mapping.KataField]
+	codec, ok := r.fieldCodecs[mapping.KataField]
 	if !ok {
 		return r.storeFieldConflict(ctx, snapshot, mapping, state, hasBaseline, nullFieldValue(), nullFieldValue(), claimToken, result)
 	}
@@ -654,7 +663,7 @@ func (r *Reconciler) coordinatedTimezoneForField(
 	if decision.Action != MergeWriteKata || external.Kind != fieldKindLocalDateTime || external.Timezone == "" {
 		return ""
 	}
-	currentCodec, ok := fieldCodecs[mapping.KataField]
+	currentCodec, ok := r.fieldCodecs[mapping.KataField]
 	if !ok {
 		return ""
 	}
@@ -671,7 +680,7 @@ func (r *Reconciler) coordinatedTimezoneForField(
 		if !sibling.Active || sibling.ID == mapping.ID {
 			continue
 		}
-		codec, ok := fieldCodecs[sibling.KataField]
+		codec, ok := r.fieldCodecs[sibling.KataField]
 		if !ok {
 			return ""
 		}

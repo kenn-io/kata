@@ -1353,7 +1353,13 @@ func (d *Store) externalRootAction(
 			(current.ClaimToken != params.ClaimToken || !current.Active || !current.Enabled) {
 			return db.ExternalRootBinding{}, db.Event{}, db.ErrExternalRootClaimLost
 		}
-		issue, projectName, err := lookupIssueForEvent(ctx, tx, current.IssueID)
+		var issue db.Issue
+		var projectName string
+		if action == "unbound" {
+			issue, projectName, err = externalRootIssueForCleanupEvent(ctx, tx, current.IssueID)
+		} else {
+			issue, projectName, err = lookupIssueForEvent(ctx, tx, current.IssueID)
+		}
 		if err != nil {
 			return db.ExternalRootBinding{}, db.Event{}, err
 		}
@@ -1607,7 +1613,7 @@ func (d *Store) ClearPendingExternalComment(
 		if err != nil {
 			return db.ExternalRootBinding{}, db.Event{}, err
 		}
-		issue, projectName, err := lookupIssueForEvent(ctx, tx, binding.IssueID)
+		issue, projectName, err := externalRootIssueForCleanupEvent(ctx, tx, binding.IssueID)
 		if err != nil {
 			return db.ExternalRootBinding{}, db.Event{}, err
 		}
@@ -1631,6 +1637,30 @@ func (d *Store) ClearPendingExternalComment(
 		}
 		return binding, event, nil
 	})
+}
+
+func externalRootIssueForCleanupEvent(
+	ctx context.Context,
+	tx *sql.Tx,
+	issueID int64,
+) (db.Issue, string, error) {
+	issue, err := scanIssue(tx.QueryRowContext(ctx,
+		issueSelect+` WHERE i.id = ? AND i.deleted_at IS NULL`, issueID))
+	if err != nil {
+		return db.Issue{}, "", err
+	}
+	var projectName string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT name FROM projects WHERE id = ?`, issue.ProjectID).Scan(&projectName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.Issue{}, "", db.ErrNotFound
+		}
+		return db.Issue{}, "", fmt.Errorf("lookup external root cleanup project: %w", err)
+	}
+	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
+		return db.Issue{}, "", err
+	}
+	return issue, projectName, nil
 }
 
 func upsertPendingExternalCommentMapping(

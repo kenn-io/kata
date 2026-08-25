@@ -239,6 +239,48 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 	}
 
 	switch toolName {
+	case "kata.connectors":
+		setStringBounds("instance", 1, 128)
+	case "kata.connector_fields":
+		setStringBounds("instance", 1, 128)
+	case "kata.connector_field_map":
+		setStringBounds("instance", 1, 128)
+		setStringBounds("kata_field", 1, 64)
+		setStringBounds("external_field", 1, 256)
+		setEnum("kata_field", "scheduled_on", "deadline_on")
+	case "kata.connector_field_unmap":
+		setStringBounds("instance", 1, 128)
+		setStringBounds("kata_field", 1, 64)
+		setEnum("kata_field", "scheduled_on", "deadline_on")
+	case "kata.bridge_show", "kata.bridge_reconcile", "kata.bridge_resume", "kata.bridge_unbind":
+		setStringBounds("ref", 1, 256)
+	case "kata.bridge_bind":
+		setStringBounds("ref", 1, 256)
+		setStringBounds("connector", 1, 128)
+		setStringBounds("external", 1, 4096)
+	case "kata.bridge_pause":
+		setStringBounds("ref", 1, 256)
+		setStringBounds("reason", 1, 4096)
+	case "kata.bridge_resolve_field":
+		setStringBounds("ref", 1, 256)
+		setStringBounds("kata_field", 1, 64)
+		setEnum("kata_field", "scheduled_on", "deadline_on")
+		setEnum("use", "kata", "external")
+	case "kata.bridge_resolve_comment":
+		setStringBounds("ref", 1, 256)
+		setEnum("action", "adopt", "retry", "skip")
+		setStringBounds("external_comment_id", 1, 4096)
+		adopt := any("adopt")
+		schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
+			If: &jsonschema.Schema{
+				Required: []string{"action"},
+				Properties: map[string]*jsonschema.Schema{
+					"action": {Const: &adopt},
+				},
+			},
+			Then: &jsonschema.Schema{Required: []string{"external_comment_id"}},
+			Else: &jsonschema.Schema{Not: &jsonschema.Schema{Required: []string{"external_comment_id"}}},
+		})
 	case "kata.search":
 		setStringBounds("query", 1, 4096)
 		setNumberBounds("limit", 1, maximumResultLimit)

@@ -20,6 +20,86 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/connectors': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get: operations['listConnectors']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/connectors/{instance}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get: operations['getConnectorStatus']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/connectors/{instance}/actions/reconcile-root': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post: operations['reconcileExternalRootByKey']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/connectors/{instance}/fields': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get: operations['listConnectorFields']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/connectors/{instance}/fields/{kata_field}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put: operations['mapConnectorField']
+    post?: never
+    delete: operations['unmapConnectorField']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/digest': {
     parameters: {
       query?: never
@@ -800,6 +880,102 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/projects/{project_id}/issues/{ref}/bridge': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get: operations['getExternalRootBridge']
+    put?: never
+    post: operations['bindExternalRoot']
+    delete: operations['unbindExternalRoot']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/projects/{project_id}/issues/{ref}/bridge/actions/pause': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post: operations['pauseExternalRootBridge']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/projects/{project_id}/issues/{ref}/bridge/actions/reconcile': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post: operations['reconcileExternalRootBridge']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/projects/{project_id}/issues/{ref}/bridge/actions/resolve-comment': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post: operations['resolveExternalComment']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/projects/{project_id}/issues/{ref}/bridge/actions/resolve-field': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post: operations['resolveExternalField']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/projects/{project_id}/issues/{ref}/bridge/actions/resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post: operations['resumeExternalRootBridge']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/projects/{project_id}/issues/{ref}/comments': {
     parameters: {
       query?: never
@@ -1317,6 +1493,12 @@ export interface components {
     } & {
       [key: string]: unknown
     }
+    BindExternalRootRequestBody: {
+      actor?: string
+      connector: string
+      external: string
+      publish_comments?: boolean
+    }
     ChildCounts: {
       /** Format: int64 */
       open: number
@@ -1415,6 +1597,28 @@ export interface components {
       comment: components['schemas']['Comment']
       event: components['schemas']['Event']
       issue: components['schemas']['Issue']
+    } & {
+      [key: string]: unknown
+    }
+    ConnectorFieldsResponseBody: {
+      fields: components['schemas']['FieldDescriptor'][] | null
+    } & {
+      [key: string]: unknown
+    }
+    ConnectorListResponseBody: {
+      connectors: components['schemas']['ConnectorOut'][] | null
+    } & {
+      [key: string]: unknown
+    }
+    ConnectorOut: {
+      account_identity?: string
+      capabilities?: string[] | null
+      connector_id?: string
+      display_name?: string
+      health_error?: string
+      healthy: boolean
+      instance_id: string
+      protocol?: string
     } & {
       [key: string]: unknown
     }
@@ -1735,6 +1939,87 @@ export interface components {
       type: string
       url?: string
     }
+    ExternalFieldCandidateOut: {
+      kind: string
+      timezone?: string
+      value?: string
+    } & {
+      [key: string]: unknown
+    }
+    ExternalFieldConflictOut: {
+      /** Format: date-time */
+      conflict_at?: string
+      external_candidate?: components['schemas']['ExternalFieldCandidateOut']
+      kata_candidate?: components['schemas']['ExternalFieldCandidateOut']
+      kata_field: string
+    } & {
+      [key: string]: unknown
+    }
+    ExternalFieldMappingOut: {
+      accepted_kinds: string[] | null
+      active: boolean
+      external_field_id: string
+      external_field_name: string
+      kata_field: string
+      nullable: boolean
+      schema_revision: string
+      writable: boolean
+    } & {
+      [key: string]: unknown
+    }
+    ExternalRootActionRequestBody: {
+      actor?: string
+      reason?: string
+    }
+    ExternalRootBridgeOut: {
+      active: boolean
+      complete_external: boolean
+      connector_instance: string
+      /** Format: int64 */
+      consecutive_failures: number
+      enabled: boolean
+      field_conflicts?: components['schemas']['ExternalFieldConflictOut'][] | null
+      /** Format: int64 */
+      id: number
+      /** Format: int64 */
+      issue_id: number
+      /** Format: date-time */
+      last_attempt_at?: string
+      last_error?: string
+      /** Format: date-time */
+      last_error_at?: string
+      last_external_state?: string
+      /** Format: date-time */
+      last_success_at?: string
+      /** Format: date-time */
+      next_attempt_at?: string
+      paused_reason?: string
+      pending_comment_uid?: string
+      /** Format: int64 */
+      project_id: number
+      publish_comments: boolean
+      receive_comments: boolean
+      uid: string
+    } & {
+      [key: string]: unknown
+    }
+    ExternalRootRunOut: {
+      bridge: components['schemas']['ExternalRootBridgeOut']
+      /** Format: int64 */
+      comments_created: number
+      /** Format: int64 */
+      comments_edited: number
+      /** Format: int64 */
+      completion_requests: number
+      /** Format: int64 */
+      field_conflicts: number
+      paused: boolean
+      /** Format: int64 */
+      reopen_requests: number
+      root_updated: boolean
+    } & {
+      [key: string]: unknown
+    }
     FederationBindingOut: {
       actor?: string
       /** Format: date-time */
@@ -1936,6 +2221,16 @@ export interface components {
       offending_origin_instance_uid?: string
       reason?: string
       short_id?: string
+    } & {
+      [key: string]: unknown
+    }
+    FieldDescriptor: {
+      accepted_kinds: string[] | null
+      display_name: string
+      id: string
+      nullable: boolean
+      schema_revision: string
+      writable: boolean
     } & {
       [key: string]: unknown
     }
@@ -2391,6 +2686,9 @@ export interface components {
     } & {
       [key: string]: unknown
     }
+    MapConnectorFieldRequestBody: {
+      external_field: string
+    }
     MergeProjectRequestBody: {
       actor?: string
       /** Format: int64 */
@@ -2834,6 +3132,9 @@ export interface components {
     } & {
       [key: string]: unknown
     }
+    ReconcileExternalRootByKeyRequestBody: {
+      root_key: string
+    }
     Recurrence: {
       author: string
       /** Format: date-time */
@@ -2899,6 +3200,16 @@ export interface components {
     RenameProjectRequestBody: {
       actor?: string
       name: string
+    }
+    ResolveExternalCommentRequestBody: {
+      action: string
+      actor?: string
+      external_comment_id?: string
+    }
+    ResolveExternalFieldRequestBody: {
+      actor?: string
+      kata_field: string
+      use: string
     }
     ResolveProjectRequestBody: {
       /** @description client-derived alias metadata; daemon resolves alias first, then falls back to name */
@@ -3245,6 +3556,200 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AuditClosesResponseBody']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  listConnectors: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectorListResponseBody']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  getConnectorStatus: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        instance: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectorOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  reconcileExternalRootByKey: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        instance: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReconcileExternalRootByKeyRequestBody']
+      }
+    }
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalRootRunOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  listConnectorFields: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        instance: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectorFieldsResponseBody']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  mapConnectorField: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        instance: string
+        kata_field: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MapConnectorFieldRequestBody']
+      }
+    }
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalFieldMappingOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  unmapConnectorField: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        instance: string
+        kata_field: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalFieldMappingOut']
         }
       }
       /** @description Error */
@@ -5115,6 +5620,290 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['MutationResponseBody']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  getExternalRootBridge: {
+    parameters: {
+      query?: {
+        actor?: string
+      }
+      header?: never
+      path: {
+        project_id: number
+        ref: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalRootBridgeOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  bindExternalRoot: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        project_id: number
+        ref: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BindExternalRootRequestBody']
+      }
+    }
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalRootBridgeOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  unbindExternalRoot: {
+    parameters: {
+      query?: {
+        actor?: string
+      }
+      header?: never
+      path: {
+        project_id: number
+        ref: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalRootBridgeOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  pauseExternalRootBridge: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        project_id: number
+        ref: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExternalRootActionRequestBody']
+      }
+    }
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalRootBridgeOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  reconcileExternalRootBridge: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        project_id: number
+        ref: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExternalRootActionRequestBody']
+      }
+    }
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalRootRunOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  resolveExternalComment: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        project_id: number
+        ref: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ResolveExternalCommentRequestBody']
+      }
+    }
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalRootBridgeOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  resolveExternalField: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        project_id: number
+        ref: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ResolveExternalFieldRequestBody']
+      }
+    }
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalRootBridgeOut']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  resumeExternalRootBridge: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        project_id: number
+        ref: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExternalRootActionRequestBody']
+      }
+    }
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExternalRootBridgeOut']
         }
       }
       /** @description Error */

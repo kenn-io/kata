@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -28,6 +29,14 @@ import (
 // from their subsequent hydrateRefWithQualified call with includeDeleted=true;
 // resolving the positional ref itself needs no destructive-command option.
 func resolveIssueRefForCommand(cmd *cobra.Command, ref string) (context.Context, string, int64, resolvedIssueRef, error) {
+	return resolveIssueRefForCommandWithOptions(cmd, ref, false)
+}
+
+func resolveIssueRefForCommandWithOptions(
+	cmd *cobra.Command,
+	ref string,
+	includeArchivedProject bool,
+) (context.Context, string, int64, resolvedIssueRef, error) {
 	ctx := cmd.Context()
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
@@ -54,7 +63,9 @@ func resolveIssueRefForCommand(cmd *cobra.Command, ref string) (context.Context,
 			ExitCode: ExitValidation,
 		}
 	}
-	pid, projectName, err := resolveProjectIDAndNameForRef(ctx, baseURL, start, parsed.ProjectName)
+	pid, projectName, err := resolveProjectIDAndNameForRef(
+		ctx, baseURL, start, parsed.ProjectName, includeArchivedProject,
+	)
 	if err != nil {
 		return nil, "", 0, resolvedIssueRef{}, err
 	}
@@ -69,14 +80,34 @@ func resolveIssueRefForCommand(cmd *cobra.Command, ref string) (context.Context,
 // pins the project name; a bare ref / ULID inherits the workspace binding.
 // The canonical name is used by destructive verbs to format the
 // X-Kata-Confirm header value ("DELETE <project>#<short_id>").
-func resolveProjectIDAndNameForRef(ctx context.Context, baseURL, startPath, refProjectName string) (int64, string, error) {
+func resolveProjectIDAndNameForRef(
+	ctx context.Context,
+	baseURL, startPath, refProjectName string,
+	includeArchived bool,
+) (int64, string, error) {
 	if strings.TrimSpace(refProjectName) == "" {
 		return resolveProjectIDAndName(ctx, baseURL, startPath)
 	}
 	saved := flags.Project
 	flags.Project = refProjectName
 	defer func() { flags.Project = saved }()
-	return resolveProjectIDAndName(ctx, baseURL, startPath)
+	projectID, projectName, err := resolveProjectIDAndName(ctx, baseURL, startPath)
+	if err == nil || !includeArchived {
+		return projectID, projectName, err
+	}
+	var cliErr *cliError
+	if !errors.As(err, &cliErr) || cliErr.Kind != kindNotFound {
+		return 0, "", err
+	}
+	client, err := httpClientFor(ctx, baseURL)
+	if err != nil {
+		return 0, "", err
+	}
+	project, err := resolveProjectSelectorIncludingArchived(ctx, client, baseURL, refProjectName)
+	if err != nil {
+		return 0, "", err
+	}
+	return project.ID, project.Name, nil
 }
 
 // hydrateRefWithQualified does a daemon GET to resolve the issue's short_id

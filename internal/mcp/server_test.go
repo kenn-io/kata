@@ -29,6 +29,7 @@ import (
 
 var sectionLoaderNames = []string{
 	"kata.load_activity",
+	"kata.load_external_roots",
 	"kata.load_federation",
 	"kata.load_import",
 	"kata.load_issue_discovery",
@@ -141,9 +142,21 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 
 	wantNames := []string{
 		"kata.audit_closes",
+		"kata.bridge_bind",
+		"kata.bridge_pause",
+		"kata.bridge_reconcile",
+		"kata.bridge_resolve_comment",
+		"kata.bridge_resolve_field",
+		"kata.bridge_resume",
+		"kata.bridge_show",
+		"kata.bridge_unbind",
 		"kata.claim",
 		"kata.close",
 		"kata.comment",
+		"kata.connector_field_map",
+		"kata.connector_field_unmap",
+		"kata.connector_fields",
+		"kata.connectors",
 		"kata.create",
 		"kata.delete",
 		"kata.digest",
@@ -208,6 +221,15 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.search": true, "kata.sync_once": true, "kata.sync_status": true, "kata.sync_update": true,
 	}
 	openWorld := map[string]bool{
+		"kata.bridge_bind":                  true,
+		"kata.bridge_reconcile":             true,
+		"kata.bridge_resolve_comment":       true,
+		"kata.bridge_resolve_field":         true,
+		"kata.bridge_resume":                true,
+		"kata.connector_field_map":          true,
+		"kata.connector_field_unmap":        true,
+		"kata.connector_fields":             true,
+		"kata.connectors":                   true,
 		"kata.federation_enrollment_revoke": true,
 		"kata.federation_leave":             true, "kata.federation_quarantine": true,
 		"kata.federation_rebind": true, "kata.federation_status": true, "kata.import_issues": true,
@@ -250,6 +272,9 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 
 	readOnly := map[string]bool{
 		"kata.audit_closes":      true,
+		"kata.bridge_show":       true,
+		"kata.connector_fields":  true,
+		"kata.connectors":        true,
 		"kata.digest":            true,
 		"kata.events":            true,
 		"kata.federation_status": true,
@@ -285,8 +310,9 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 		"kata.recurrence_update": true,
 		// Identical retries produce additional effects: renew extends the
 		// lease expiry again and a sync pass re-imports from the provider.
-		"kata.lease":     true,
-		"kata.sync_once": true,
+		"kata.lease":            true,
+		"kata.bridge_reconcile": true,
+		"kata.sync_once":        true,
 	}
 	for _, tool := range result.Tools {
 		annotations := tool.Annotations

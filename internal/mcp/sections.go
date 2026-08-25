@@ -62,6 +62,17 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 			tools:       []string{"kata.digest", "kata.events"}, available: true, register: registerActivityTools,
 		},
 		{
+			loader: "kata.load_external_roots", section: "external_roots", title: "Load external-root tools",
+			description: "Load typed connector discovery, field mapping, and issue bridge tools, then refresh the MCP tool list.",
+			tools: []string{
+				"kata.bridge_bind", "kata.bridge_pause", "kata.bridge_reconcile",
+				"kata.bridge_resolve_comment", "kata.bridge_resolve_field", "kata.bridge_resume",
+				"kata.bridge_show", "kata.bridge_unbind", "kata.connector_field_map",
+				"kata.connector_field_unmap", "kata.connector_fields", "kata.connectors",
+			},
+			available: true, register: registerExternalRootTools,
+		},
+		{
 			loader: "kata.load_federation", section: "federation", title: "Load federation tools",
 			description: "Load typed federation status, enrollment revocation, rebind, leave, and quarantine tools, then refresh the MCP tool list.",
 			tools:       []string{"kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_status"},

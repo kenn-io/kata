@@ -51,6 +51,7 @@ type Principal struct {
 
 type principalContextKey struct{}
 type insecureReadonlyContextKey struct{}
+type unauthenticatedPrivateNetworkContextKey struct{}
 
 // WithPrincipal attaches an authenticated request principal to ctx.
 func WithPrincipal(ctx context.Context, p Principal) context.Context {
@@ -75,6 +76,15 @@ func withInsecureReadonlyRequest(ctx context.Context) context.Context {
 
 func insecureReadonlyRequest(ctx context.Context) bool {
 	v, _ := ctx.Value(insecureReadonlyContextKey{}).(bool)
+	return v
+}
+
+func withUnauthenticatedPrivateNetworkRequest(ctx context.Context) context.Context {
+	return context.WithValue(ctx, unauthenticatedPrivateNetworkContextKey{}, true)
+}
+
+func unauthenticatedPrivateNetworkRequest(ctx context.Context) bool {
+	v, _ := ctx.Value(unauthenticatedPrivateNetworkContextKey{}).(bool)
 	return v
 }
 

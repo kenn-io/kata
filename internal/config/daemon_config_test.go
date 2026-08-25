@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,30 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 )
+
+func TestReadDaemonConfigNormalizesConnectors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	absoluteCommand := filepath.Join(t.TempDir(), "example-connector-connector")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`
+[[connector]]
+id = " Example-Connector "
+command = %q
+args = ["--quiet"]
+timeout_seconds = 5
+
+[connector.env]
+TOKEN = "CONNECTOR_TOKEN"
+
+[connector.settings]
+enabled = true
+`, absoluteCommand)), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.Connectors, 1)
+	assert.Equal(t, "example-connector", cfg.Connectors[0].ID)
+}
 
 func TestReadDisplayConfigPreservesRendererArgv(t *testing.T) {
 	home := t.TempDir()

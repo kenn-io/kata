@@ -579,11 +579,19 @@ func mapAtomicEditError(err error, issueShortID string, delta *api.LinksDelta) e
 		// Should not surface from the atomic path (set_parent replaces),
 		// but map cleanly if it ever does.
 		return api.NewError(409, "parent_already_set", err.Error(), "", nil)
+	case errors.Is(err, db.ErrExternalRootContentOwned):
+		return externalRootContentOwnedAPIError()
 	case errors.Is(err, db.ErrFederatedReadOnly):
 		return federationReadOnlyError(err)
 	default:
 		return internalAPIError(err)
 	}
+}
+
+func externalRootContentOwnedAPIError() error {
+	return api.NewError(409, "external_root_content_owned",
+		"the issue title and body are owned by an active external root binding",
+		"edit the external root or run kata bridge unbind <issue-ref> before editing title or body", nil)
 }
 
 // validateLinksDelta rejects deltas that are internally contradictory before

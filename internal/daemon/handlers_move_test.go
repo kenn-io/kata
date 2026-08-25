@@ -69,6 +69,54 @@ func TestMoveIssue_HappyPath(t *testing.T) {
 	assert.Equal(t, out.NewShortID, stored.ShortID)
 }
 
+// TestMoveIssue_ImportMappingCollisionReturns409 returns a move-specific
+// conflict that identifies the colliding source identity.
+func TestMoveIssue_ImportMappingCollisionReturns409(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	src, tgt, iss := seedMovePair(t, env)
+	tgtIssue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "existing mapped issue", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	_, err = env.DB.UpsertImportMapping(t.Context(), db.ImportMappingParams{
+		Source: "connector", ExternalID: "same", ObjectType: "issue", ProjectID: src.ID, IssueID: &iss.ID,
+	})
+	require.NoError(t, err)
+	_, err = env.DB.UpsertImportMapping(t.Context(), db.ImportMappingParams{
+		Source: "connector", ExternalID: "same", ObjectType: "issue", ProjectID: tgt.ID, IssueID: &tgtIssue.ID,
+	})
+	require.NoError(t, err)
+
+	body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, tgt.UID)
+	ifMatch := fmt.Sprintf(`"rev-%d"`, iss.Revision)
+	resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, iss.ShortID), body, ifMatch)
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	var envelope struct {
+		Status int `json:"status"`
+		Error  struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Hint    string `json:"hint"`
+			Data    struct {
+				Mappings []db.ProjectMergeImportMappingCollision `json:"mappings"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &envelope))
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Equal(t, http.StatusConflict, envelope.Status)
+	require.Equal(t, "issue_move_import_mapping_collision", envelope.Error.Code)
+	require.Equal(t, "issue has import mappings that already exist in the target project", envelope.Error.Message)
+	require.Equal(t, "resolve import mapping collisions before moving", envelope.Error.Hint)
+	require.Equal(t, []db.ProjectMergeImportMappingCollision{{
+		Source: "connector", ExternalID: "same", ObjectType: "issue",
+	}}, envelope.Error.Data.Mappings)
+}
+
 func TestMoveIssue_StaleIfMatch_412(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	src, tgt, iss := seedMovePair(t, env)
