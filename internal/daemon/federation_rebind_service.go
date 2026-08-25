@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"go.kenn.io/kata/internal/api"
@@ -135,7 +134,10 @@ func RebindFederationReplica(
 		)
 	}
 	key := federationReplicaTransitionKey(store, project.Name)
-	if _, pending := federationReplicaLeaveIntents[key]; pending || federationReplicaIsSuppressed(key) {
+	// Rebind reports one message for both leave states; it does not use
+	// leaveBlockedError, whose wording distinguishes them for config-driven
+	// hub operations.
+	if federationReplicaTransitions.state(key) != federationReplicaIdle {
 		ensureFederationReplicaMu.Unlock()
 		return RebindFederationReplicaResult{}, federationReplicaError(
 			ErrFederationReplicaLeavePending,
@@ -195,7 +197,7 @@ func RebindFederationReplica(
 	targetCredential := credential
 	targetCredential.HubURL = targetURL
 	targetCredential.AllowInsecure = false
-	finishOperation := registerFederationReplicaHubOperationLocked(key)
+	finishOperation := federationReplicaTransitions.registerHubOperation(key)
 	ensureFederationReplicaMu.Unlock()
 	defer finishOperation()
 
@@ -231,7 +233,7 @@ func RebindFederationReplica(
 	defer finishSyncDrain()
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
-	if _, pending := federationReplicaLeaveIntents[key]; pending || federationReplicaIsSuppressed(key) {
+	if federationReplicaTransitions.state(key) != federationReplicaIdle {
 		return RebindFederationReplicaResult{}, federationReplicaError(
 			ErrFederationReplicaLeavePending,
 			"explicit federation leave began during rebind validation",
@@ -486,31 +488,6 @@ func validateFederationRebindBindingState(
 
 func canonicalFederationRebindBaseURL(raw string) (string, error) {
 	return config.CanonicalHTTPBaseURL(raw)
-}
-
-func registerFederationReplicaHubOperationLocked(key string) func() {
-	state := federationReplicaHubOperations[key]
-	if state == nil {
-		state = &federationReplicaHubOperationState{done: make(chan struct{})}
-		federationReplicaHubOperations[key] = state
-	}
-	state.count++
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			ensureFederationReplicaMu.Lock()
-			defer ensureFederationReplicaMu.Unlock()
-			state := federationReplicaHubOperations[key]
-			if state == nil {
-				return
-			}
-			state.count--
-			if state.count == 0 {
-				delete(federationReplicaHubOperations, key)
-				close(state.done)
-			}
-		})
-	}
 }
 
 func fetchFederationRebindMetadata(
