@@ -875,6 +875,30 @@ func TestReconcileMappingUnsuppressedReservationChangeSurfacesConvergenceConflic
 		"no enrollment was created, so nothing may be revoked")
 }
 
+func TestReconcileMappingUnsuppressedReservationChangeAfterEnrollmentSurfacesConflict(
+	t *testing.T,
+) {
+	store := openReconcileStore(t)
+	credentials := newTokenRotatedDuringConvergenceStore()
+	hub := newFakeHub()
+	hub.onEnrollment = func(federation.EnrollmentRequest) {
+		// The next managed lookup is the daemon finish closure's; the one after
+		// it is EnsureFederationReplica's revalidation, where the rotation
+		// becomes visible.
+		credentials.armAfterFinds(1)
+	}
+
+	err := federation.ReconcileMapping(
+		context.Background(), store, credentials, hub,
+		testCatalog(), testMapping(), nil,
+	)
+
+	require.ErrorIs(t, err, federation.ErrConfigurationConflict,
+		"a reservation change with no observed leave must surface the convergence conflict")
+	assert.Equal(t, []int64{hub.enrollment.ID}, hub.revokeCalls,
+		"the enrollment whose reservation went away must still be revoked")
+}
+
 func TestReconcileMappingManagedCleanupLookupRequiresManagedStore(t *testing.T) {
 	ctx := t.Context()
 	store := openReconcileStore(t)
