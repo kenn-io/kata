@@ -11,6 +11,31 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
+type metadataKeyDiffPayload struct {
+	From json.RawMessage `json:"from"`
+	To   json.RawMessage `json:"to"`
+}
+
+type issueMetadataUpdatePayload struct {
+	Diff        map[string]metadataKeyDiffPayload `json:"diff"`
+	RevisionNew int64                             `json:"revision_new"`
+	UpdatedAt   string                            `json:"updated_at"`
+}
+
+func marshalIssueMetadataUpdatePayload(
+	diff map[string]metadata.KeyDiff,
+	revision int64,
+	updatedAt string,
+) ([]byte, error) {
+	payloadDiff := make(map[string]metadataKeyDiffPayload, len(diff))
+	for key, value := range diff {
+		payloadDiff[key] = metadataKeyDiffPayload{From: value.From, To: value.To}
+	}
+	return json.Marshal(issueMetadataUpdatePayload{
+		Diff: payloadDiff, RevisionNew: revision, UpdatedAt: updatedAt,
+	})
+}
+
 // PatchIssueMetadata applies a per-key patch to issues.metadata inside a single
 // transaction. It validates all patch keys against metadata.IssueRegistry before
 // opening a transaction, enforces If-Match (revision gate), and emits an
@@ -107,20 +132,7 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 		return out, fmt.Errorf("update issue metadata: %w", err)
 	}
 
-	// Build a serializable diff for the event payload: {key: {from, to}}.
-	type keyDiffPayload struct {
-		From json.RawMessage `json:"from"`
-		To   json.RawMessage `json:"to"`
-	}
-	diffPayload := make(map[string]keyDiffPayload, len(diff))
-	for k, kd := range diff {
-		diffPayload[k] = keyDiffPayload{From: kd.From, To: kd.To}
-	}
-	payload, err := json.Marshal(struct {
-		Diff        map[string]keyDiffPayload `json:"diff"`
-		RevisionNew int64                     `json:"revision_new"`
-		UpdatedAt   string                    `json:"updated_at"`
-	}{diffPayload, newRev, ts})
+	payload, err := marshalIssueMetadataUpdatePayload(diff, newRev, ts)
 	if err != nil {
 		return out, fmt.Errorf("marshal event payload: %w", err)
 	}

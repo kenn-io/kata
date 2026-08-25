@@ -38,6 +38,9 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 		if err != nil {
 			return err
 		}
+		if err := rejectExternalRootContentMutationTx(ctx, tx, current.ID, fieldPlan.ContentChanged()); err != nil {
+			return err
+		}
 		if fieldPlan.Changed() {
 			sets := make([]string, 0, 5)
 			args := make([]any, 0, 6)

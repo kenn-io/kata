@@ -449,6 +449,37 @@ func TestMatch_IssueMetadataUpdatedRecognized(t *testing.T) {
 	}
 }
 
+func TestMatch_ExternalRootEventsRecognized(t *testing.T) {
+	eventTypes := []string{
+		"issue.external_root_bound",
+		"issue.external_root_paused",
+		"issue.external_root_resumed",
+		"issue.external_root_unbound",
+		"issue.external_comment_resolved",
+		"issue.external_field_conflicted",
+		"issue.external_field_resolved",
+	}
+	_, issueStar, err := compileEventMatcher("issue.*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, allStar, err := compileEventMatcher("*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventType := range eventTypes {
+		t.Run(eventType, func(t *testing.T) {
+			_, exact, err := compileEventMatcher(eventType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !exact(eventType) || !issueStar(eventType) || !allStar(eventType) {
+				t.Fatalf("exact, issue.*, and * must match %s", eventType)
+			}
+		})
+	}
+}
+
 // TestMatch_ProjectMetadataUpdatedRecognized pins that
 // project.metadata_updated is in knownEventTypes: explicit subscription must
 // validate, and the `*` wildcard must match. project.metadata_updated lives

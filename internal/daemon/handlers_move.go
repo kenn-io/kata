@@ -83,6 +83,14 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			return nil, api.NewError(409, "recurrence_pinned",
 				rpErr.Error(), "unpin the issue from its recurrence before moving", nil)
 		}
+		if collision, ok := errors.AsType[*db.ProjectMergeImportMappingCollisionError](err); ok {
+			return nil, api.NewError(409, "issue_move_import_mapping_collision",
+				"issue has import mappings that already exist in the target project",
+				"resolve import mapping collisions before moving", map[string]any{"mappings": collision.Mappings})
+		}
+		if apiErr := externalRootConflictError(err); apiErr != nil {
+			return nil, apiErr
+		}
 		if apiErr := federationReadOnlyError(err); apiErr != nil {
 			return nil, apiErr
 		}

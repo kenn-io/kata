@@ -44,6 +44,11 @@ type ImportOptions struct {
 	// MergeProject remaps a single project-scoped replay onto fresh numeric IDs
 	// and inserts it without clearing existing domain state.
 	MergeProject bool
+
+	// PreserveExternalRootBindingsEnabled keeps imported active external-root
+	// bindings in their source enabled/paused state. This is only for trusted
+	// local schema cutover; normal restore requires local reconfirmation.
+	PreserveExternalRootBindingsEnabled bool
 }
 
 // ImportRecord is one normalized, current-shape import row: a Kind discriminator
@@ -64,6 +69,9 @@ type ImportRecord struct {
 	Label                *IssueLabelExport
 	Link                 *LinkExport
 	ImportMapping        *ImportMappingExport
+	ExternalFieldMapping *ExternalFieldMappingExport
+	ExternalRootBinding  *ExternalRootBindingExport
+	ExternalFieldState   *ExternalFieldStateExport
 	FederationBinding    *FederationBindingExport
 	FederationSyncStatus *FederationSyncStatusExport
 	FederationQuarantine *FederationQuarantineExport
@@ -93,6 +101,9 @@ const (
 	ImportKindIssueLabel           = "issue_label"
 	ImportKindLink                 = "link"
 	ImportKindImportMapping        = "import_mapping"
+	ImportKindExternalFieldMapping = "external_field_mapping"
+	ImportKindExternalRootBinding  = "external_root_binding"
+	ImportKindExternalFieldState   = "external_field_state"
 	ImportKindFederationBinding    = "federation_binding"
 	ImportKindFederationSyncStatus = "federation_sync_status"
 	ImportKindFederationQuarantine = "federation_quarantine"
@@ -125,6 +136,9 @@ func (r ImportRecord) Validate() error {
 		{ImportKindIssueLabel, r.Label != nil},
 		{ImportKindLink, r.Link != nil},
 		{ImportKindImportMapping, r.ImportMapping != nil},
+		{ImportKindExternalFieldMapping, r.ExternalFieldMapping != nil},
+		{ImportKindExternalRootBinding, r.ExternalRootBinding != nil},
+		{ImportKindExternalFieldState, r.ExternalFieldState != nil},
 		{ImportKindFederationBinding, r.FederationBinding != nil},
 		{ImportKindFederationSyncStatus, r.FederationSyncStatus != nil},
 		{ImportKindFederationQuarantine, r.FederationQuarantine != nil},

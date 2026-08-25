@@ -417,6 +417,9 @@ WHERE id=$2 AND metadata IS DISTINCT FROM $1`, string(metadata), projectID)
 type federatedIssueRow struct {
 	id      int64
 	shortID string
+	title   string
+	body    string
+	deleted bool
 }
 
 func (s *Store) reconcileFederatedIssues(
@@ -451,6 +454,15 @@ func (s *Store) reconcileFederatedIssues(
 			updatedAt = issue.CreatedAt
 		}
 		if exists {
+			if err := rejectExternalRootContentMutationTx(
+				ctx, tx, row.id,
+				issue.Title != row.title || issue.Body != row.body || (issue.DeletedAt != nil) != row.deleted,
+			); err != nil {
+				if errors.Is(err, db.ErrExternalRootContentOwned) {
+					return nil, fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, err)
+				}
+				return nil, err
+			}
 			_, err := tx.ExecContext(ctx, `UPDATE issues SET short_id=$1,title=$2,body=$3,status=$4,
 closed_reason=$5,owner=$6,priority=$7,author=$8,created_at=$9,updated_at=$10,
 closed_at=$11,deleted_at=$12,metadata=$13,
@@ -536,7 +548,7 @@ func federatedIssueRowsByUID(
 	projectID int64,
 ) (map[string]federatedIssueRow, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT uid,id,short_id FROM issues WHERE project_id=$1`, projectID)
+		`SELECT uid,id,short_id,title,body,deleted_at IS NOT NULL FROM issues WHERE project_id=$1`, projectID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -545,7 +557,7 @@ func federatedIssueRowsByUID(
 	for rows.Next() {
 		var issueUID string
 		var row federatedIssueRow
-		if err := rows.Scan(&issueUID, &row.id, &row.shortID); err != nil {
+		if err := rows.Scan(&issueUID, &row.id, &row.shortID, &row.title, &row.body, &row.deleted); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		output[issueUID] = row
@@ -560,7 +572,7 @@ func reconcileFederatedComments(
 	issueIDs map[string]int64,
 	projection db.FoldProjection,
 ) error {
-	existing, err := federatedCommentIDsByUID(ctx, tx, projectID)
+	existing, err := federatedCommentRowsByUID(ctx, tx, projectID)
 	if err != nil {
 		return err
 	}
@@ -571,11 +583,18 @@ func reconcileFederatedComments(
 		commentUIDs = append(commentUIDs, commentUID)
 	}
 	sort.Strings(commentUIDs)
-	for commentUID, commentID := range existing {
+	for commentUID, row := range existing {
 		if _, ok := desired[commentUID]; ok {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM comments WHERE id=$1`, commentID); err != nil {
+		owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
+		if err != nil {
+			return err
+		}
+		if owned {
+			return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM comments WHERE id=$1`, row.id); err != nil {
 			return mapSQLError(err, nil)
 		}
 	}
@@ -585,10 +604,20 @@ func reconcileFederatedComments(
 		if !ok {
 			return fmt.Errorf("federated comment %s references unknown issue %s", commentUID, comment.IssueUID)
 		}
-		if commentID, ok := existing[commentUID]; ok {
-			_, err := tx.ExecContext(ctx, `UPDATE comments SET issue_id=$1,author=$2,body=$3,created_at=$4
+		if row, ok := existing[commentUID]; ok {
+			owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
+			if err != nil {
+				return err
+			}
+			if owned {
+				if comment.Body != row.body {
+					return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
+				}
+				continue
+			}
+			_, err = tx.ExecContext(ctx, `UPDATE comments SET issue_id=$1,author=$2,body=$3,created_at=$4
 WHERE id=$5`, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
-				nonEmptyFederationTime(comment.CreatedAt), commentID)
+				nonEmptyFederationTime(comment.CreatedAt), row.id)
 			if err != nil {
 				return mapSQLError(err, nil)
 			}
@@ -605,25 +634,47 @@ WHERE id=$5`, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
 	return nil
 }
 
-func federatedCommentIDsByUID(
+type federatedCommentRow struct {
+	id   int64
+	body string
+}
+
+func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
+	var owned bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1
+		FROM import_mappings m
+		JOIN comments c ON c.id = m.comment_id AND c.issue_id = m.issue_id
+		JOIN external_root_bindings b
+		  ON b.project_id = m.project_id
+		 AND b.issue_id = m.issue_id
+		 AND m.source = 'connector:' || b.connector_instance || ':binding:' || b.uid
+		WHERE m.object_type = 'comment' AND m.comment_id = $1 AND b.active = 1
+	)`, commentID).Scan(&owned); err != nil {
+		return false, fmt.Errorf("check federated external comment ownership: %w", mapSQLError(err, nil))
+	}
+	return owned, nil
+}
+
+func federatedCommentRowsByUID(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
-) (map[string]int64, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id FROM comments c
+) (map[string]federatedCommentRow, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id,c.body FROM comments c
 JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
 	defer func() { _ = rows.Close() }()
-	output := map[string]int64{}
+	output := map[string]federatedCommentRow{}
 	for rows.Next() {
 		var commentUID string
-		var commentID int64
-		if err := rows.Scan(&commentUID, &commentID); err != nil {
+		var row federatedCommentRow
+		if err := rows.Scan(&commentUID, &row.id, &row.body); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
-		output[commentUID] = commentID
+		output[commentUID] = row
 	}
 	return output, mapSQLError(rows.Err(), nil)
 }

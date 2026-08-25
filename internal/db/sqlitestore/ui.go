@@ -1,6 +1,7 @@
 package sqlitestore
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -702,7 +703,7 @@ func readUILabelStrings(ctx context.Context, tx *sql.Tx, issueID int64) ([]strin
 func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Comment, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, uid, issue_id, author, body, created_at
-		FROM comments WHERE issue_id = ? ORDER BY created_at ASC, id ASC`, issueID)
+		FROM comments WHERE issue_id = ?`, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("read UI comments: %w", err)
 	}
@@ -716,7 +717,20 @@ func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Commen
 		}
 		comments = append(comments, comment)
 	}
-	return comments, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Order by the parsed instant, exactly like CommentsByIssue. SQL-side
+	// lexical ordering only normalizes fixed-width canonical stamps, so
+	// legacy space-separated rows would otherwise sort by text layout
+	// instead of chronology within the same day.
+	slices.SortFunc(comments, func(a, b db.Comment) int {
+		if order := a.CreatedAt.Compare(b.CreatedAt); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	return comments, nil
 }
 
 func readUIIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueLabel, error) {

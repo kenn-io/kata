@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/shortid"
@@ -55,6 +56,11 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		if err := rejectProjectMergeBindingsTx(ctx, tx, source.ID, target.ID); err != nil {
 			return err
 		}
+		if err := lockAndRejectFreshExternalRootClaimsForProjectTx(
+			ctx, tx, source.ID, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter),
+		); err != nil {
+			return err
+		}
 		collisions, err := projectMergeMappingCollisionsTx(ctx, tx, source.ID, target.ID)
 		if err != nil {
 			return err
@@ -92,6 +98,7 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 			{`UPDATE pending_claim_requests SET project_id = $1 WHERE project_id = $2`, []any{target.ID, source.ID}},
 			{`UPDATE purge_log SET project_id = $1, project_uid = $2, project_name = $3 WHERE project_id = $4`, []any{target.ID, target.UID, target.Name, source.ID}},
 			{`UPDATE import_mappings SET project_id = $1 WHERE project_id = $2`, []any{target.ID, source.ID}},
+			{`UPDATE external_root_bindings SET project_id = $1 WHERE project_id = $2`, []any{target.ID, source.ID}},
 			{`UPDATE project_aliases SET project_id = $1 WHERE project_id = $2`, []any{target.ID, source.ID}},
 		}
 		for _, statement := range statements {

@@ -121,7 +121,10 @@ func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string) error {
 		return fmt.Errorf("open cutover jsonl: %w", err)
 	}
 	defer func() { _ = in.Close() }()
-	if err := ImportWithOptions(ctx, in, target, ImportOptions{PreserveIssueSyncBindingEnabled: true}); err != nil {
+	if err := ImportWithOptions(ctx, in, target, ImportOptions{
+		PreserveIssueSyncBindingEnabled:     true,
+		PreserveExternalRootBindingsEnabled: true,
+	}); err != nil {
 		return err
 	}
 	return nil

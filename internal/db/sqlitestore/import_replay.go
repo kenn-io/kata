@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -190,6 +191,10 @@ func refuseProjectMergeUIDCollisions(ctx context.Context, tx *sql.Tx, recs []db.
 			checks = append(checks, uidCheck{"events", "uid", "event", rec.Event.UID})
 		case rec.PurgeLog != nil:
 			checks = append(checks, uidCheck{"purge_log", "uid", "purge log", rec.PurgeLog.UID})
+		case rec.ExternalRootBinding != nil:
+			checks = append(checks, uidCheck{
+				"external_root_bindings", "uid", "external root binding", rec.ExternalRootBinding.UID,
+			})
 		}
 	}
 	for _, check := range checks {
@@ -357,6 +362,12 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 		return importLink(ctx, tx, r.Link)
 	case db.ImportKindImportMapping:
 		return importMapping(ctx, tx, r.ImportMapping, skippedLinkIDs)
+	case db.ImportKindExternalFieldMapping:
+		return linkSkipNone, importExternalFieldMapping(ctx, tx, r.ExternalFieldMapping, opts.MergeProject)
+	case db.ImportKindExternalRootBinding:
+		return linkSkipNone, importExternalRootBinding(ctx, tx, r.ExternalRootBinding, opts.PreserveExternalRootBindingsEnabled)
+	case db.ImportKindExternalFieldState:
+		return linkSkipNone, importExternalFieldState(ctx, tx, r.ExternalFieldState)
 	case db.ImportKindFederationBinding:
 		return linkSkipNone, importFederationBinding(ctx, tx, r.FederationBinding)
 	case db.ImportKindFederationSyncStatus:
@@ -627,12 +638,272 @@ func importMapping(ctx context.Context, tx *sql.Tx, m *db.ImportMappingExport, s
 			return linkSkipMapping, nil
 		}
 	}
+	if m.ObjectType == "comment" && m.IssueID != nil && m.CommentID != nil {
+		var commentIssueID int64
+		if err := tx.QueryRowContext(ctx, `SELECT issue_id FROM comments WHERE id=?`, *m.CommentID).Scan(&commentIssueID); err != nil {
+			return linkSkipNone, wrapImportErr(db.ImportKindImportMapping, err)
+		}
+		if commentIssueID != *m.IssueID {
+			return linkSkipNone, wrapImportErr(db.ImportKindImportMapping, fmt.Errorf(
+				"%w: comment mapping issue does not own comment", db.ErrExternalRootValidation,
+			))
+		}
+	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO import_mappings(id, source, external_id, object_type, project_id, issue_id, comment_id, link_id, label, source_updated_at, imported_at)
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.Source, m.ExternalID, m.ObjectType, m.ProjectID, m.IssueID, m.CommentID,
 		m.LinkID, m.Label, m.SourceUpdatedAt, m.ImportedAt)
 	return linkSkipNone, wrapImportErr(db.ImportKindImportMapping, err)
+}
+
+func importExternalFieldMapping(
+	ctx context.Context,
+	tx *sql.Tx,
+	m *db.ExternalFieldMappingExport,
+	mergeProject bool,
+) error {
+	normalized, err := db.NormalizeExternalFieldMappingExport(*m)
+	if err != nil {
+		return wrapImportErr(db.ImportKindExternalFieldMapping, err)
+	}
+	m = &normalized
+	acceptedKinds, err := json.Marshal(m.AcceptedKinds)
+	if err != nil {
+		return wrapImportErr(db.ImportKindExternalFieldMapping, err)
+	}
+	if mergeProject {
+		reused, err := reuseProjectMergeExternalFieldMapping(ctx, tx, m, string(acceptedKinds))
+		if err != nil {
+			return err
+		}
+		if reused {
+			return nil
+		}
+	}
+	active := m.Active
+	if mergeProject {
+		active = false
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO external_field_mappings(
+		connector_instance, kata_field, external_field_id, external_field_name,
+		accepted_kinds_json, nullable, writable, schema_revision, active,
+		created_at, updated_at
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ConnectorInstance, m.KataField, m.ExternalFieldID, m.ExternalFieldName,
+		string(acceptedKinds), boolInt(m.Nullable), boolInt(m.Writable),
+		m.SchemaRevision, boolInt(active), m.CreatedAt, m.UpdatedAt)
+	return wrapImportErr(db.ImportKindExternalFieldMapping, err)
+}
+
+func reuseProjectMergeExternalFieldMapping(
+	ctx context.Context,
+	tx *sql.Tx,
+	m *db.ExternalFieldMappingExport,
+	acceptedKinds string,
+) (bool, error) {
+	var mappingID int64
+	var externalFieldName, storedKinds, updatedAt string
+	var nullable, writable int
+	err := tx.QueryRowContext(ctx, `SELECT id, external_field_name, accepted_kinds_json,
+		       nullable, writable, updated_at
+		FROM external_field_mappings
+		WHERE connector_instance = ? AND kata_field = ? AND external_field_id = ?
+		  AND schema_revision = ? AND created_at = ?`,
+		m.ConnectorInstance, m.KataField, m.ExternalFieldID, m.SchemaRevision, m.CreatedAt,
+	).Scan(&mappingID, &externalFieldName, &storedKinds, &nullable, &writable, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, wrapImportErr(db.ImportKindExternalFieldMapping, err)
+	}
+	if externalFieldName != m.ExternalFieldName || storedKinds != acceptedKinds ||
+		nullable != boolInt(m.Nullable) || writable != boolInt(m.Writable) {
+		return false, fmt.Errorf("import %s: project merge mapping identity conflicts with target descriptor",
+			db.ImportKindExternalFieldMapping)
+	}
+	storedUpdatedAt, err := parseSQLiteTimestamp(updatedAt)
+	if err != nil {
+		return false, wrapImportErr(db.ImportKindExternalFieldMapping, err)
+	}
+	if m.UpdatedAt.After(storedUpdatedAt) {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE external_field_mappings SET updated_at=? WHERE id=?`, m.UpdatedAt, mappingID); err != nil {
+			return false, wrapImportErr(db.ImportKindExternalFieldMapping, err)
+		}
+	}
+	return true, nil
+}
+
+func importExternalRootBinding(
+	ctx context.Context,
+	tx *sql.Tx,
+	b *db.ExternalRootBindingExport,
+	preserveEnabled bool,
+) error {
+	if err := db.ValidateExternalRootBindingReplayIdentity(*b); err != nil {
+		return wrapImportErr(db.ImportKindExternalRootBinding, err)
+	}
+	var projectID, issueID, rootMappingID int64
+	err := tx.QueryRowContext(ctx, `SELECT p.id, i.id, rm.id
+		FROM projects p
+		JOIN issues i ON i.project_id = p.id
+		JOIN import_mappings rm
+		  ON rm.project_id = p.id AND rm.issue_id = i.id AND rm.object_type = 'issue'
+		WHERE p.uid = ? AND i.uid = ? AND rm.source = ? AND rm.external_id = ?`,
+		b.ProjectUID, b.IssueUID, b.RootMappingSource, b.RootMappingExternalID,
+	).Scan(&projectID, &issueID, &rootMappingID)
+	if err != nil {
+		return wrapImportErr(db.ImportKindExternalRootBinding, err)
+	}
+	var invalidCommentMappings int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
+		FROM import_mappings m
+		LEFT JOIN comments c ON c.id = m.comment_id
+		WHERE m.project_id = ? AND m.object_type = 'comment'
+		  AND m.source = 'connector:' || ? || ':binding:' || ?
+		  AND (m.issue_id IS NULL OR m.comment_id IS NULL OR m.issue_id != ?
+		       OR c.issue_id IS NULL OR c.issue_id != m.issue_id)`,
+		projectID, b.ConnectorInstance, b.UID, issueID,
+	).Scan(&invalidCommentMappings); err != nil {
+		return wrapImportErr(db.ImportKindExternalRootBinding, err)
+	}
+	if invalidCommentMappings != 0 {
+		return wrapImportErr(db.ImportKindExternalRootBinding, fmt.Errorf(
+			"%w: external comment mapping does not belong to its binding issue", db.ErrExternalRootValidation,
+		))
+	}
+	if b.Active {
+		var readOnlySpoke int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM federation_bindings
+			WHERE project_id = ? AND role = ? AND enabled = 1 AND push_enabled = 0 LIMIT 1`,
+			projectID, db.FederationRoleSpoke).Scan(&readOnlySpoke)
+		if err == nil {
+			return wrapImportErr(db.ImportKindExternalRootBinding, db.ErrExternalRootFederationConflict)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return wrapImportErr(db.ImportKindExternalRootBinding, err)
+		}
+		if err := rejectIssueSyncManagedExternalRootTx(ctx, tx, projectID, issueID); err != nil {
+			return wrapImportErr(db.ImportKindExternalRootBinding, err)
+		}
+	}
+	receiveCommentsAfter := time.Time{}
+	if b.ReceiveCommentsAfter != nil {
+		receiveCommentsAfter = *b.ReceiveCommentsAfter
+	}
+	if err := db.ValidateCreateExternalRootBindingParams(db.CreateExternalRootBindingParams{
+		ProjectID: projectID, IssueID: issueID, ConnectorInstance: b.ConnectorInstance,
+		ExternalRootKey: b.ExternalRootKey, ExternalAccountKey: b.ExternalAccountKey,
+		Actor: "import-replay", ReceiveCommentsAfter: receiveCommentsAfter,
+		PublishComments: b.PublishComments, PublishCommentsAfter: b.PublishCommentsAfter,
+	}); err != nil {
+		return wrapImportErr(db.ImportKindExternalRootBinding, err)
+	}
+	if err := rejectExternalRootAccountIdentityChange(
+		ctx, tx, b.ConnectorInstance, b.ExternalAccountKey,
+	); err != nil {
+		return wrapImportErr(db.ImportKindExternalRootBinding, err)
+	}
+	// Replay has already acquired SQLite's writer boundary while inserting the
+	// project envelope. Check all retained history before inserting so merge
+	// cannot assign a connector root to a different issue.
+	var historicalIssueID int64
+	historyErr := tx.QueryRowContext(ctx, `SELECT issue_id FROM external_root_bindings
+		WHERE connector_instance = ? AND external_root_key = ? ORDER BY id LIMIT 1`,
+		b.ConnectorInstance, b.ExternalRootKey).Scan(&historicalIssueID)
+	if historyErr == nil && historicalIssueID != issueID {
+		return wrapImportErr(db.ImportKindExternalRootBinding, db.ErrExternalRootAlreadyBound)
+	}
+	if historyErr != nil && !errors.Is(historyErr, sql.ErrNoRows) {
+		return wrapImportErr(db.ImportKindExternalRootBinding, historyErr)
+	}
+	if b.PendingCommentUID != "" {
+		var count int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM comments WHERE uid = ? AND issue_id = ?`,
+			b.PendingCommentUID, issueID).Scan(&count); err != nil {
+			return wrapImportErr(db.ImportKindExternalRootBinding, err)
+		}
+		if count != 1 {
+			return fmt.Errorf("import %s: pending comment %q not found for issue %q",
+				db.ImportKindExternalRootBinding, b.PendingCommentUID, b.IssueUID)
+		}
+	}
+	enabled := b.Enabled
+	pausedReason := b.PausedReason
+	if b.Active && !preserveEnabled {
+		enabled = false
+		if b.Enabled {
+			pausedReason = "restore_reconfirmation_required"
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO external_root_bindings(
+		uid, project_id, issue_id, root_mapping_id, connector_instance,
+		external_root_key, external_account_key, active, enabled, paused_reason,
+		receive_comments, receive_comments_after, publish_comments,
+		publish_comments_after, complete_external, claim_token, claim_started_at,
+		last_external_state, last_external_revision, pending_comment_uid,
+		pending_comment_started_at, last_attempt_at, last_success_at, last_error_at,
+		last_error, consecutive_failures, next_attempt_at, created_at, updated_at,
+		unbound_at
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		b.UID, projectID, issueID, rootMappingID, b.ConnectorInstance,
+		b.ExternalRootKey, b.ExternalAccountKey, boolInt(b.Active), boolInt(enabled),
+		pausedReason, boolInt(b.ReceiveComments), sqliteExternalRootFrontier(b.ReceiveCommentsAfter),
+		boolInt(b.PublishComments), sqliteExternalRootFrontier(b.PublishCommentsAfter), boolInt(b.CompleteExternal),
+		b.LastExternalState, b.LastExternalRevision, b.PendingCommentUID,
+		b.PendingCommentStartedAt, b.LastAttemptAt, b.LastSuccessAt, b.LastErrorAt,
+		b.LastError, b.ConsecutiveFailures, b.NextAttemptAt, b.CreatedAt, b.UpdatedAt,
+		b.UnboundAt)
+	return wrapImportErr(db.ImportKindExternalRootBinding, err)
+}
+
+func sqliteExternalRootFrontier(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return value.UTC().Format(sqliteCommentTimeFormat)
+}
+
+func importExternalFieldState(ctx context.Context, tx *sql.Tx, s *db.ExternalFieldStateExport) error {
+	if err := db.ValidateExternalFieldStateExport(*s); err != nil {
+		return wrapImportErr(db.ImportKindExternalFieldState, err)
+	}
+	var bindingID, mappingID int64
+	var bindingConnector string
+	if err := tx.QueryRowContext(ctx, `SELECT b.id, m.id, b.connector_instance
+		FROM external_root_bindings b
+		JOIN external_field_mappings m
+		  ON m.connector_instance = ? AND m.kata_field = ?
+		 AND m.external_field_id = ? AND m.schema_revision = ? AND m.created_at = ?
+		WHERE b.uid = ?`,
+		s.MappingConnectorInstance, s.MappingKataField, s.MappingExternalFieldID,
+		s.MappingSchemaRevision, s.MappingCreatedAt, s.BindingUID,
+	).Scan(&bindingID, &mappingID, &bindingConnector); err != nil {
+		return wrapImportErr(db.ImportKindExternalFieldState, err)
+	}
+	if bindingConnector != s.MappingConnectorInstance {
+		return wrapImportErr(db.ImportKindExternalFieldState, fmt.Errorf(
+			"%w: field state mapping connector does not match binding", db.ErrExternalRootValidation,
+		))
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO external_field_states(
+		binding_id, mapping_id, baseline_json, conflicted, conflict_kata,
+		conflict_external, conflict_at, updated_at
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+		bindingID, mappingID, nullableRawJSON(s.Baseline), boolInt(s.Conflicted),
+		nullableRawJSON(s.ConflictKata), nullableRawJSON(s.ConflictExternal),
+		s.ConflictAt, s.UpdatedAt)
+	return wrapImportErr(db.ImportKindExternalFieldState, err)
+}
+
+func nullableRawJSON(value json.RawMessage) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return string(value)
 }
 
 func importFederationBinding(ctx context.Context, tx *sql.Tx, b *db.FederationBindingExport) error {

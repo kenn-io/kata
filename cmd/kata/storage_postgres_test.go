@@ -63,9 +63,10 @@ func TestStoragePostgresMigrateAndStatusWithSeparatedRoles(t *testing.T) {
 	runtimeDSN := postgresDSNForCLIUser(t, dsn, runtimeRole, "runtime-password")
 	t.Setenv("KATA_DSN", runtimeDSN)
 	out = executeRoot(t, newRootCmd(), "--agent", "storage", "postgres", "status")
-	assert.Equal(t,
-		"OK postgres_schema action=status backend=postgres schema=operator_store schema_version=25 status=ready\n",
-		string(out))
+	assert.Equal(t, fmt.Sprintf(
+		"OK postgres_schema action=status backend=postgres schema=operator_store schema_version=%d status=ready\n",
+		db.CurrentSchemaVersion(),
+	), string(out))
 	assert.NotContains(t, string(out), "runtime-password")
 
 	_, err = admin.ExecContext(ctx,
@@ -109,6 +110,8 @@ func TestStoragePostgresStatusRejectsIncompleteRuntimePrivileges(t *testing.T) {
 		{name: "schema usage", revoke: `REVOKE USAGE ON SCHEMA privilege_store FROM %s`, want: `USAGE privilege on schema "privilege_store"`},
 		{name: "table insert", revoke: `REVOKE INSERT ON privilege_store.projects FROM %s`, want: `INSERT privilege on table "privilege_store.projects"`},
 		{name: "sequence update", revoke: `REVOKE UPDATE ON SEQUENCE privilege_store.projects_id_seq FROM %s`, want: `UPDATE privilege on sequence "privilege_store.projects_id_seq"`},
+		{name: "external root binding sequence", revoke: `REVOKE USAGE ON SEQUENCE privilege_store.external_root_bindings_id_seq FROM %s`, want: `USAGE privilege on sequence "privilege_store.external_root_bindings_id_seq"`},
+		{name: "external field mapping sequence", revoke: `REVOKE USAGE ON SEQUENCE privilege_store.external_field_mappings_id_seq FROM %s`, want: `USAGE privilege on sequence "privilege_store.external_field_mappings_id_seq"`},
 		{name: "adoption function execute", revoke: `REVOKE EXECUTE ON FUNCTION privilege_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) FROM %s`, want: `EXECUTE privilege on function "privilege_store.rewrite_project_uid_for_adoption(bigint,text)"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {

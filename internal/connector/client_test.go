@@ -71,7 +71,16 @@ func TestProcessClientRejectsUnsafeResponses(t *testing.T) {
 		{name: "malformed JSON", mode: "malformed", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
 		{name: "invalid UTF-8", mode: "invalid-utf8", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
 		{name: "trailing JSON", mode: "trailing", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
+		{name: "null result", mode: "null-result", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
+		{name: "non-object result", mode: "non-object-result", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
+		{name: "invalid UTF-8 result", mode: "invalid-utf8-result", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
 		{name: "oversized response", mode: "oversized", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
+		{name: "invalid error code", mode: "invalid-error-code", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
+		{name: "empty error message", mode: "empty-error-message", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
+		{name: "padded error message", mode: "padded-error-message", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
+		{name: "oversized error message", mode: "oversized-error-message", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
+		{name: "control character in error message", mode: "control-error-message", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
+		{name: "escaped control character in error message", mode: "escaped-control-error-message", wantKind: ErrProtocolFailure, want: "external connector protocol failed"},
 		{name: "nonzero exit hides stderr", mode: "exit", wantKind: ErrProcessFailure, want: "external connector process failed"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,6 +103,7 @@ func TestProcessClientRejectsMethodSpecificResponseViolations(t *testing.T) {
 	validOpenRoot := `{"key":"root-1","identity_key":"account-1","state":"open","revision":"revision-1","updated_at":"2026-08-20T10:00:00Z","observed_at":"2026-08-20T10:01:00Z"}`
 	for _, tt := range []struct {
 		name   string
+		mode   string
 		result string
 		call   func(Client) error
 	}{
@@ -161,15 +171,21 @@ func TestProcessClientRejectsMethodSpecificResponseViolations(t *testing.T) {
 			_, err := client.ReadFields(t.Context(), protocol.ReadFieldsParams{RootKey: "root-1", FieldIDs: []string{"field-1"}})
 			return err
 		}},
-		{name: "write field readback mismatch", result: `{"fields":{"field-1":{"kind":"date","value":"2026-08-21"}}}`, call: func(client Client) error {
+		{name: "write field readback mismatch", mode: "write-raw-result", result: `{"fields":{"field-1":{"kind":"date","value":"2026-08-21"}}}`, call: func(client Client) error {
 			_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{RootKey: "root-1", Fields: map[string]protocol.FieldValue{
 				"field-1": {Kind: "date", Value: "2026-08-20"},
+			}, Expected: map[string]protocol.FieldValue{
+				"field-1": {Kind: "date", Value: "2026-08-19"},
 			}})
 			return err
 		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HELPER_MODE", "raw-result")
+			mode := tt.mode
+			if mode == "" {
+				mode = "raw-result"
+			}
+			t.Setenv("HELPER_MODE", mode)
 			t.Setenv("HELPER_RESULT", tt.result)
 			client := newHelperClient(t, config.ConnectorConfig{
 				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
@@ -231,9 +247,62 @@ func TestProcessClientRejectsInvalidPublicationOperationIDBeforeLaunch(t *testin
 }
 
 func TestProcessClientRejectsInvalidWriteFieldBeforeLaunch(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "launched")
-	t.Setenv("HELPER_MODE", "launch-marker")
-	t.Setenv("HELPER_SYNC", marker)
+	for _, test := range []struct {
+		name   string
+		params protocol.WriteFieldsParams
+	}{
+		{
+			name: "invalid field value",
+			params: protocol.WriteFieldsParams{
+				RootKey: "root-1",
+				Fields:  map[string]protocol.FieldValue{"field-1": {Kind: "date", Value: "tomorrow"}},
+				Expected: map[string]protocol.FieldValue{
+					"field-1": {Kind: "date", Value: "2026-08-20"},
+				},
+			},
+		},
+		{
+			name: "invalid expected value",
+			params: protocol.WriteFieldsParams{
+				RootKey: "root-1",
+				Fields:  map[string]protocol.FieldValue{"field-1": {Kind: "date", Value: "2026-08-21"}},
+				Expected: map[string]protocol.FieldValue{
+					"field-1": {Kind: "date", Value: "tomorrow"},
+				},
+			},
+		},
+		{
+			name: "mismatched field keys",
+			params: protocol.WriteFieldsParams{
+				RootKey: "root-1",
+				Fields:  map[string]protocol.FieldValue{"field-1": {Kind: "date", Value: "2026-08-21"}},
+				Expected: map[string]protocol.FieldValue{
+					"field-2": {Kind: "date", Value: "2026-08-20"},
+				},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "launched")
+			t.Setenv("HELPER_MODE", "launch-marker")
+			t.Setenv("HELPER_SYNC", marker)
+			client := newHelperClient(t, config.ConnectorConfig{
+				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+				Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
+			})
+
+			_, err := client.WriteFields(t.Context(), test.params)
+			require.Error(t, err)
+			_, statErr := os.Stat(marker)
+			require.ErrorIs(t, statErr, fs.ErrNotExist)
+		})
+	}
+}
+
+func TestProcessClientRejectsConditionalWriteWithoutCapability(t *testing.T) {
+	methodsPath := filepath.Join(t.TempDir(), "methods")
+	t.Setenv("HELPER_MODE", "conditional-fields-unsupported")
+	t.Setenv("HELPER_SYNC", methodsPath)
 	client := newHelperClient(t, config.ConnectorConfig{
 		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
 		Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
@@ -241,11 +310,337 @@ func TestProcessClientRejectsInvalidWriteFieldBeforeLaunch(t *testing.T) {
 
 	_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{
 		RootKey: "root-1",
-		Fields:  map[string]protocol.FieldValue{"field-1": {Kind: "date", Value: "tomorrow"}},
+		Fields: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-21"},
+		},
+		Expected: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-20"},
+		},
 	})
-	require.ErrorContains(t, err, "field value")
-	_, statErr := os.Stat(marker)
-	require.ErrorIs(t, statErr, fs.ErrNotExist)
+
+	require.ErrorIs(t, err, ErrProtocolFailure)
+	methods, readErr := os.ReadFile(methodsPath) // #nosec G304 -- test-owned temporary path.
+	require.NoError(t, readErr)
+	assert.Equal(t, "describe\n", string(methods))
+}
+
+func TestProcessClientSendsConditionalWriteWithAdvertisedCapability(t *testing.T) {
+	methodsPath := filepath.Join(t.TempDir(), "methods")
+	t.Setenv("HELPER_MODE", "conditional-fields-supported")
+	t.Setenv("HELPER_SYNC", methodsPath)
+	client := newHelperClient(t, config.ConnectorConfig{
+		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+		Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
+	})
+
+	result, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{
+		RootKey: "root-1",
+		Fields: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-21"},
+		},
+		Expected: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-20"},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, protocol.FieldValue{Kind: "date", Value: "2026-08-21"}, result.Fields["field-1"])
+	methods, readErr := os.ReadFile(methodsPath) // #nosec G304 -- test-owned temporary path.
+	require.NoError(t, readErr)
+	assert.Equal(t, "describe\nwrite_fields\n", string(methods))
+}
+
+func TestProcessClientRejectsMissingRequiredResultProperties(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		call func(*processClient) error
+	}{
+		{name: "describe", call: func(client *processClient) error { _, err := client.Describe(t.Context()); return err }},
+		{name: "resolve root", call: func(client *processClient) error {
+			_, err := client.ResolveRoot(t.Context(), protocol.ResolveRootParams{Locator: "root"})
+			return err
+		}},
+		{name: "read root", call: func(client *processClient) error {
+			_, err := client.ReadRoot(t.Context(), protocol.ReadRootParams{RootKey: "root"})
+			return err
+		}},
+		{name: "list comments", call: func(client *processClient) error {
+			_, err := client.ListComments(t.Context(), protocol.ListCommentsParams{RootKey: "root"})
+			return err
+		}},
+		{name: "complete root", call: func(client *processClient) error {
+			_, err := client.CompleteRoot(t.Context(), protocol.CompleteRootParams{RootKey: "root"})
+			return err
+		}},
+		{name: "publish comment", call: func(client *processClient) error {
+			_, err := client.PublishComment(t.Context(), protocol.PublishCommentParams{RootKey: "root", Body: "body", OperationID: "operation"})
+			return err
+		}},
+		{name: "list fields", call: func(client *processClient) error { _, err := client.ListFields(t.Context()); return err }},
+		{name: "read fields", call: func(client *processClient) error {
+			_, err := client.ReadFields(t.Context(), protocol.ReadFieldsParams{RootKey: "root", FieldIDs: []string{"field"}})
+			return err
+		}},
+		{name: "write fields", mode: "write-empty-result", call: func(client *processClient) error {
+			_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{RootKey: "root", Fields: map[string]protocol.FieldValue{"field": {Kind: "date", Value: "2026-08-22"}}, Expected: map[string]protocol.FieldValue{"field": {Kind: "date", Value: "2026-08-21"}}})
+			return err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mode := test.mode
+			if mode == "" {
+				mode = "empty-result"
+			}
+			t.Setenv("HELPER_MODE", mode)
+			client := newHelperClient(t, config.ConnectorConfig{
+				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+				Env: map[string]string{"MODE": "HELPER_MODE"},
+			})
+
+			err := test.call(client)
+
+			require.ErrorIs(t, err, ErrProtocolFailure)
+			assert.EqualError(t, err, "external connector protocol failed")
+		})
+	}
+}
+
+func TestProcessClientRejectsInvalidNestedRootValues(t *testing.T) {
+	for _, mode := range []string{"invalid-root-actor", "invalid-root-field", "nul-root-identity", "nul-root-body"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("HELPER_MODE", mode)
+			client := newHelperClient(t, config.ConnectorConfig{
+				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+				Env: map[string]string{"MODE": "HELPER_MODE"},
+			})
+
+			_, err := client.ReadRoot(t.Context(), protocol.ReadRootParams{RootKey: "root"})
+
+			require.ErrorIs(t, err, ErrProtocolFailure)
+			assert.EqualError(t, err, "external connector protocol failed")
+		})
+	}
+}
+
+func TestProcessClientRejectsMismatchedRootKeys(t *testing.T) {
+	t.Setenv("HELPER_MODE", "mismatched-root")
+	client := newHelperClient(t, config.ConnectorConfig{
+		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+		Env: map[string]string{"MODE": "HELPER_MODE"},
+	})
+	for _, call := range []struct {
+		name string
+		run  func() error
+	}{
+		{name: "read root", run: func() error {
+			_, err := client.ReadRoot(t.Context(), protocol.ReadRootParams{RootKey: "requested-root"})
+			return err
+		}},
+		{name: "complete root", run: func() error {
+			_, err := client.CompleteRoot(t.Context(), protocol.CompleteRootParams{RootKey: "requested-root"})
+			return err
+		}},
+	} {
+		t.Run(call.name, func(t *testing.T) {
+			err := call.run()
+			require.ErrorIs(t, err, ErrProtocolFailure)
+			assert.EqualError(t, err, "external connector protocol failed")
+		})
+	}
+}
+
+func TestProcessClientRejectsContractInvalidMutationReadbacks(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		call func(*processClient) error
+	}{
+		{
+			name: "completion remains open",
+			mode: "incomplete-root",
+			call: func(client *processClient) error {
+				_, err := client.CompleteRoot(t.Context(), protocol.CompleteRootParams{RootKey: "root"})
+				return err
+			},
+		},
+		{
+			name: "published comment body differs",
+			mode: "mismatched-comment-body",
+			call: func(client *processClient) error {
+				_, err := client.PublishComment(t.Context(), protocol.PublishCommentParams{
+					RootKey: "root", Body: "submitted body", OperationID: "operation-1",
+				})
+				return err
+			},
+		},
+		{
+			name: "read omits requested field",
+			mode: "missing-field-readback",
+			call: func(client *processClient) error {
+				_, err := client.ReadFields(t.Context(), protocol.ReadFieldsParams{
+					RootKey: "root", FieldIDs: []string{"field-1", "field-2"},
+				})
+				return err
+			},
+		},
+		{
+			name: "write omits requested field",
+			mode: "missing-field-readback",
+			call: func(client *processClient) error {
+				_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{
+					RootKey: "root",
+					Fields: map[string]protocol.FieldValue{
+						"field-1": {Kind: "date", Value: "2026-08-22"},
+						"field-2": {Kind: "null"},
+					},
+					Expected: map[string]protocol.FieldValue{
+						"field-1": {Kind: "date", Value: "2026-08-21"},
+						"field-2": {Kind: "date", Value: "2026-08-21"},
+					},
+				})
+				return err
+			},
+		},
+		{
+			name: "write readback differs",
+			mode: "mismatched-write-field",
+			call: func(client *processClient) error {
+				_, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{
+					RootKey: "root",
+					Fields: map[string]protocol.FieldValue{
+						"field-1": {Kind: "date", Value: "2026-08-22"},
+					},
+					Expected: map[string]protocol.FieldValue{
+						"field-1": {Kind: "date", Value: "2026-08-21"},
+					},
+				})
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("HELPER_MODE", test.mode)
+			client := newHelperClient(t, config.ConnectorConfig{
+				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+				Env: map[string]string{"MODE": "HELPER_MODE"},
+			})
+
+			err := test.call(client)
+
+			require.ErrorIs(t, err, ErrProtocolFailure)
+			assert.EqualError(t, err, "external connector protocol failed")
+		})
+	}
+}
+
+func TestProcessClientRejectsNULCommentValues(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		call func(*processClient) error
+	}{
+		{
+			name: "identity",
+			call: func(client *processClient) error {
+				_, err := client.ListComments(t.Context(), protocol.ListCommentsParams{RootKey: "root"})
+				return err
+			},
+		},
+		{
+			name: "body",
+			call: func(client *processClient) error {
+				_, err := client.PublishComment(t.Context(), protocol.PublishCommentParams{
+					RootKey: "root", Body: "comment", OperationID: "operation-1",
+				})
+				return err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("HELPER_MODE", "nul-comment-"+test.name)
+			client := newHelperClient(t, config.ConnectorConfig{
+				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+				Env: map[string]string{"MODE": "HELPER_MODE"},
+			})
+
+			err := test.call(client)
+
+			require.ErrorIs(t, err, ErrProtocolFailure)
+			assert.EqualError(t, err, "external connector protocol failed")
+		})
+	}
+}
+
+func TestValidateDecodedResultRejectsDuplicateOrUnorderedCollections(t *testing.T) {
+	base := time.Date(2026, 8, 23, 7, 0, 0, 0, time.UTC)
+	comment := func(id string, createdAt time.Time) protocol.Comment {
+		return protocol.Comment{
+			ID: id, Revision: "revision-" + id, Body: "Comment " + id,
+			Author:    protocol.Actor{ID: "actor", DisplayName: "Contributor"},
+			CreatedAt: createdAt, UpdatedAt: createdAt,
+		}
+	}
+	field := func(id string) protocol.FieldDescriptor {
+		return protocol.FieldDescriptor{
+			ID: id, DisplayName: "Field " + id, AcceptedKinds: []string{"date"}, SchemaRevision: "schema-1",
+		}
+	}
+
+	for _, test := range []struct {
+		name   string
+		method string
+		result any
+	}{
+		{name: "duplicate comment IDs", method: "list_comments", result: &protocol.ListCommentsResult{Comments: []protocol.Comment{
+			comment("comment-1", base), comment("comment-1", base.Add(time.Second)),
+		}}},
+		{name: "comments out of created-at order", method: "list_comments", result: &protocol.ListCommentsResult{Comments: []protocol.Comment{
+			comment("comment-2", base.Add(time.Second)), comment("comment-1", base),
+		}}},
+		{name: "comments out of ID order at the same time", method: "list_comments", result: &protocol.ListCommentsResult{Comments: []protocol.Comment{
+			comment("comment-2", base), comment("comment-1", base),
+		}}},
+		{name: "duplicate field IDs", method: "list_fields", result: &protocol.ListFieldsResult{Fields: []protocol.FieldDescriptor{
+			field("field-1"), field("field-1"),
+		}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateDecodedResult(test.method, test.result)
+			require.Error(t, err)
+			assert.EqualError(t, err, "connector "+test.method+" result is invalid")
+		})
+	}
+}
+
+func TestValidFieldValuesRejectsMalformedCanonicalValues(t *testing.T) {
+	valid := []protocol.FieldValue{
+		{Kind: "null"},
+		{Kind: "date", Value: "2026-08-23"},
+		{Kind: "local_datetime", Value: "2026-08-23T09:30", Timezone: "Europe/Paris"},
+		{Kind: "local_datetime", Value: "2026-08-23T09:30:45", Timezone: "UTC"},
+		{Kind: "instant", Value: "2026-08-23T07:30:45.123456Z"},
+	}
+	for _, value := range valid {
+		assert.True(t, validFieldValues(map[string]protocol.FieldValue{"field": value}), value)
+	}
+
+	invalid := []protocol.FieldValue{
+		{Kind: "null", Value: "unexpected"},
+		{Kind: "date", Value: "2026-02-30"},
+		{Kind: "date", Value: "2026-08-23", Timezone: "UTC"},
+		{Kind: "local_datetime", Value: "2026-08-23T09:30"},
+		{Kind: "local_datetime", Value: "2026-08-23T09:30:45", Timezone: "Invalid/Zone"},
+		{Kind: "local_datetime", Value: "2026-08-23T25:00", Timezone: "UTC"},
+		{Kind: "instant", Value: "2026-08-23T07:30:45"},
+		{Kind: "instant", Value: "2026-08-23T07:30:45+00:00"},
+		{Kind: "instant", Value: "2026-08-23T07:30:45.000Z"},
+		{Kind: "instant", Value: "not-an-instant"},
+	}
+	for _, value := range invalid {
+		assert.False(t, validFieldValues(map[string]protocol.FieldValue{"field": value}), value)
+	}
 }
 
 func TestProcessClientExecutableFailureDoesNotExposePath(t *testing.T) {
@@ -352,7 +747,7 @@ func TestAwaitCommandOutcomeTerminationFailureIsBounded(t *testing.T) {
 	select {
 	case result := <-finished:
 		assert.ErrorIs(t, result.runErr, terminationErr)
-		assert.NoError(t, result.contextCause)
+		assert.ErrorIs(t, result.contextCause, context.Canceled)
 	case <-time.After(3 * connectorProcessCleanupGrace):
 		waitResult <- errors.New("cleanup after failed bounded assertion")
 		t.Fatal("termination failure left connector cleanup waiting indefinitely")
@@ -377,8 +772,8 @@ func TestAwaitCommandOutcomeReapWaitIsBounded(t *testing.T) {
 
 	select {
 	case result := <-finished:
-		require.Error(t, result.runErr)
-		assert.NoError(t, result.contextCause)
+		require.ErrorIs(t, result.runErr, errConnectorCleanupWait)
+		assert.ErrorIs(t, result.contextCause, context.Canceled)
 	case <-time.After(3 * connectorProcessCleanupGrace):
 		waitResult <- errors.New("cleanup after failed bounded assertion")
 		t.Fatal("connector cleanup waited indefinitely for process reap")
@@ -690,6 +1085,40 @@ func TestRedactErrorRedactsEmbeddedJSONEncodedAstralSecret(t *testing.T) {
 	assert.EqualError(t, err, "bad: prefix [redacted] suffix")
 }
 
+func TestRedactErrorPreservesLiteralJSONScalars(t *testing.T) {
+	for _, message := range []string{"null", "true", "42"} {
+		err := redactError(&protocol.Error{Code: "provider_error", Message: message}, []string{"unrelated"})
+		assert.EqualError(t, err, "provider_error: "+message)
+		assert.NotErrorIs(t, err, ErrProtocolFailure)
+	}
+}
+
+func TestRedactErrorUsesGenericCodeWhenUnknownCodeContainsSecret(t *testing.T) {
+	err := redactError(
+		&protocol.Error{Code: "product_not_found", Message: "missing prod"},
+		[]string{"prod"},
+	)
+
+	var connectorErr *protocol.Error
+	require.ErrorAs(t, err, &connectorErr)
+	assert.Equal(t, redactedProtocolErrorCode, connectorErr.Code)
+	assert.Equal(t, "missing [redacted]", connectorErr.Message)
+	assert.NotErrorIs(t, err, ErrProtocolFailure)
+}
+
+func TestRedactErrorPreservesFieldConflictCodeWhenConfiguredValueOverlaps(t *testing.T) {
+	err := redactError(
+		&protocol.Error{Code: protocol.ErrorCodeFieldConflict, Message: "field changed before write"},
+		[]string{"field"},
+	)
+
+	var connectorErr *protocol.Error
+	require.ErrorAs(t, err, &connectorErr)
+	assert.Equal(t, protocol.ErrorCodeFieldConflict, connectorErr.Code)
+	assert.Equal(t, "[redacted] changed before write", connectorErr.Message)
+	assert.NotErrorIs(t, err, ErrProtocolFailure)
+}
+
 func TestProcessClientRedactsEnvironmentSnapshotAfterParentRotation(t *testing.T) {
 	syncPath := filepath.Join(t.TempDir(), "connector-ready")
 	t.Setenv("CONNECTOR_SECRET", "initial-secret")
@@ -725,6 +1154,39 @@ func TestProcessClientPreservesNonSecretSettingsScalarsInStructuredErrors(t *tes
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `"enabled":true`)
 	assert.Contains(t, err.Error(), `"retries":7`)
+}
+
+func TestProcessClientRedactsStringSettingsInStructuredErrors(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		mode     string
+		settings map[string]any
+		secret   string
+	}{
+		{
+			name: "plain nested value", mode: "settings-secret",
+			settings: map[string]any{"nested": map[string]any{"label": "setting-private-value"}},
+			secret:   "setting-private-value",
+		},
+		{
+			name: "JSON escaped value", mode: "solidus-escaped-settings-secret",
+			settings: map[string]any{"token": "a/b"}, secret: `a\/b`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("HELPER_MODE", test.mode)
+			client := newHelperClient(t, config.ConnectorConfig{
+				ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+				Env: map[string]string{"MODE": "HELPER_MODE"}, Settings: test.settings,
+			})
+
+			_, err := client.Describe(t.Context())
+
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), test.secret)
+			assert.Contains(t, err.Error(), "[redacted]")
+		})
+	}
 }
 
 func newHelperClient(t *testing.T, cfg config.ConnectorConfig) *processClient {
@@ -766,6 +1228,19 @@ func serveProcessClientHelper() {
 	if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
 		os.Exit(2)
 	}
+	if os.Getenv("MODE") == "conditional-fields-unsupported" || os.Getenv("MODE") == "conditional-fields-supported" {
+		file, err := os.OpenFile(os.Getenv("SYNC"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G703 -- test-owned temporary path.
+		if err != nil {
+			os.Exit(15)
+		}
+		if _, err := fmt.Fprintln(file, request.Method); err != nil {
+			_ = file.Close()
+			os.Exit(16)
+		}
+		if err := file.Close(); err != nil {
+			os.Exit(17)
+		}
+	}
 	if os.Getenv("MODE") == "sleep" {
 		time.Sleep(time.Second)
 		return
@@ -806,7 +1281,36 @@ func serveProcessClientHelper() {
 		_ = json.NewEncoder(os.Stdout).Encode(response)
 		return
 	}
+	if request.Method == "describe" {
+		switch os.Getenv("MODE") {
+		case "write-raw-result", "write-empty-result", "missing-field-readback", "mismatched-write-field", "conditional-fields-supported":
+			response.Result = conditionalDescriptionResult()
+			_ = json.NewEncoder(os.Stdout).Encode(response)
+			return
+		}
+	}
 	switch os.Getenv("MODE") {
+	case "conditional-fields-unsupported":
+		if request.Method == "describe" {
+			response.Result = describeResult()
+		} else {
+			response.Result = mustJSON(protocol.WriteFieldsResult{Fields: map[string]protocol.FieldValue{
+				"field-1": {Kind: "date", Value: "2026-08-21"},
+			}})
+		}
+	case "conditional-fields-supported":
+		var params protocol.WriteFieldsParams
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			os.Exit(18)
+		}
+		if params.Expected == nil {
+			response.Error = &protocol.Error{Code: "missing_expected", Message: "conditional write is missing expected values"}
+		} else {
+			response.Result = mustJSON(protocol.WriteFieldsResult{Fields: params.Fields})
+		}
+	case "write-raw-result":
+		response.Result = json.RawMessage(os.Getenv("RESULT"))
+	case "write-empty-result":
 	case "wrong-id":
 		response.ID = "other"
 	case "unsupported-version":
@@ -854,13 +1358,93 @@ func serveProcessClientHelper() {
 			break
 		}
 		response.Result = describeResult()
+	case "invalid-utf8-result":
+		_, _ = os.Stdout.Write([]byte("{\"protocol\":\"kata.connector.v1\",\"id\":\"" + request.ID + "\",\"result\":{\"display_name\":\""))
+		_, _ = os.Stdout.Write([]byte{0xff})
+		_, _ = os.Stdout.WriteString("\"}}")
+		return
 	case "trailing":
 		response.Result = describeResult()
 		_ = json.NewEncoder(os.Stdout).Encode(response)
 		_, _ = os.Stdout.WriteString("{}")
 		return
+	case "non-object-result":
+		response.Result = json.RawMessage(`[]`)
+	case "empty-result":
+		response.Result = json.RawMessage(`{}`)
+	case "invalid-root-actor":
+		response.Result = rootResult(protocol.Actor{})
+	case "invalid-root-field":
+		response.Result = rootResult(protocol.Actor{ID: "actor", DisplayName: "Actor"})
+	case "nul-root-identity":
+		root := protocol.Root{
+			Key: "root\x00identity", IdentityKey: "account", Title: "Title", State: "open", Revision: "revision",
+			UpdatedAt:  time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+			ObservedAt: time.Date(2026, 8, 22, 12, 0, 1, 0, time.UTC),
+		}
+		response.Result = mustJSON(root)
+	case "nul-root-body":
+		root := protocol.Root{
+			Key: "root", IdentityKey: "account", Title: "Title", Body: "body\x00value", State: "open", Revision: "revision",
+			UpdatedAt:  time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+			ObservedAt: time.Date(2026, 8, 22, 12, 0, 1, 0, time.UTC),
+		}
+		response.Result = mustJSON(root)
+	case "mismatched-root":
+		response.Result = mustJSON(protocol.Root{
+			Key: "other-root", IdentityKey: "account", Title: "Title", State: "open", Revision: "revision",
+			UpdatedAt:  time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+			ObservedAt: time.Date(2026, 8, 22, 12, 0, 1, 0, time.UTC),
+		})
+	case "incomplete-root":
+		response.Result = mustJSON(protocol.Root{
+			Key: "root", IdentityKey: "account", Title: "Title", State: "open", Revision: "revision",
+			UpdatedAt:  time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+			ObservedAt: time.Date(2026, 8, 22, 12, 0, 1, 0, time.UTC),
+		})
+	case "mismatched-comment-body":
+		response.Result = mustJSON(protocol.Comment{
+			ID: "comment", Revision: "revision", Body: "different body",
+			Author:    protocol.Actor{ID: "actor", DisplayName: "Contributor"},
+			CreatedAt: time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+		})
+	case "missing-field-readback":
+		response.Result = mustJSON(protocol.ReadFieldsResult{Fields: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-22"},
+		}})
+	case "mismatched-write-field":
+		response.Result = mustJSON(protocol.WriteFieldsResult{Fields: map[string]protocol.FieldValue{
+			"field-1": {Kind: "date", Value: "2026-08-23"},
+		}})
+	case "nul-comment-identity":
+		response.Result = mustJSON(protocol.ListCommentsResult{Comments: []protocol.Comment{{
+			ID: "comment\x00identity", Revision: "revision", Body: "body",
+			Author:    protocol.Actor{ID: "actor", DisplayName: "Contributor"},
+			CreatedAt: time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+		}}})
+	case "nul-comment-body":
+		response.Result = mustJSON(protocol.Comment{
+			ID: "comment", Revision: "revision", Body: "body\x00value",
+			Author:    protocol.Actor{ID: "actor", DisplayName: "Contributor"},
+			CreatedAt: time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+		})
 	case "oversized":
 		response.Result = json.RawMessage(`"` + strings.Repeat("x", 4<<20) + `"`)
+	case "invalid-error-code":
+		response.Error = &protocol.Error{Code: "Bad Code", Message: "connector unavailable"}
+	case "empty-error-message":
+		response.Error = &protocol.Error{Code: "connector_unavailable"}
+	case "padded-error-message":
+		response.Error = &protocol.Error{Code: "connector_unavailable", Message: " connector unavailable "}
+	case "oversized-error-message":
+		response.Error = &protocol.Error{Code: "connector_unavailable", Message: strings.Repeat("x", 513)}
+	case "control-error-message":
+		response.Error = &protocol.Error{Code: "connector_unavailable", Message: "connector\nunavailable"}
+	case "escaped-control-error-message":
+		response.Error = &protocol.Error{Code: "connector_unavailable", Message: `"\u001b[31m"`}
 	case "structured-secret":
 		response.Error = &protocol.Error{Code: "bad", Message: os.Getenv("TOKEN")}
 	case "argument-secret":
@@ -889,10 +1473,11 @@ func serveProcessClientHelper() {
 			os.Exit(2)
 		}
 		response.Error = &protocol.Error{
-			Code: `prefix line\n\"quote\"\\\u003c\u003e\u0026\u002ftail middle ` +
+			Code: "bad",
+			Message: `prefix line\n\"quote\"\\\u003c\u003e\u0026\u002ftail middle ` +
 				`line\n\"quote\"\\\u003c\u003e\u0026\u002Ftail middle ` +
-				`line\n\"quote\"\\\u003C\u003e\u0026\/tail suffix`,
-			Message: `prefix line\n\"quote\"\\\u003c\u003e\u0026\/tail middle ` +
+				`line\n\"quote\"\\\u003C\u003e\u0026\/tail middle ` +
+				`line\n\"quote\"\\\u003c\u003e\u0026\/tail middle ` +
 				`line\n\"quote\"\\\u003c>&\/tail middle ` +
 				`line\n\"quote\"\\<>&\/tail suffix`,
 		}
@@ -900,7 +1485,7 @@ func serveProcessClientHelper() {
 		if os.Getenv("TOKEN") != "a/b" {
 			os.Exit(2)
 		}
-		response.Error = &protocol.Error{Code: `"a\u002fb"`, Message: `"a\u002Fb"`}
+		response.Error = &protocol.Error{Code: "bad", Message: `lower "a\u002fb" upper "a\u002Fb"`}
 	case "delayed-structured-secret":
 		_ = os.WriteFile(os.Getenv("SYNC"), []byte("ready"), 0o600) // #nosec G703 -- the test supplies a private temporary path.
 		time.Sleep(100 * time.Millisecond)
@@ -936,10 +1521,10 @@ func expectedEnvironment(mode string) []string {
 	if mode == "delayed-structured-secret" {
 		return []string{"TOKEN", "MODE", "SYNC"}
 	}
-	if mode == "raw-result" || mode == "publication-result" {
+	if mode == "raw-result" || mode == "publication-result" || mode == "write-raw-result" {
 		return []string{"MODE", "RESULT"}
 	}
-	if mode == "spawn-stdout-holder" || mode == "spawn-stdout-holder-and-exit" || mode == "spawn-background-holder" || mode == "launch-marker" {
+	if mode == "spawn-stdout-holder" || mode == "spawn-stdout-holder-and-exit" || mode == "spawn-background-holder" || mode == "launch-marker" || mode == "conditional-fields-unsupported" || mode == "conditional-fields-supported" {
 		return []string{"MODE", "SYNC"}
 	}
 	if mode != "" {
@@ -1002,6 +1587,18 @@ func describeResult() json.RawMessage {
 	return b
 }
 
+func conditionalDescriptionResult() json.RawMessage {
+	b, err := json.Marshal(protocol.Description{
+		ConnectorID: "fake.connector", DisplayName: "Fake", Protocol: protocol.ProtocolVersion,
+		Capabilities:    []protocol.Capability{protocol.CapabilityConditionalFields, protocol.CapabilityFields},
+		AccountIdentity: "account-1", ConfigSchema: mustJSON(map[string]any{"type": "object"}),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 func publicationDescriptionResult() json.RawMessage {
 	b, err := json.Marshal(protocol.Description{
 		ConnectorID: "fake.connector", DisplayName: "Fake", Protocol: protocol.ProtocolVersion,
@@ -1012,6 +1609,24 @@ func publicationDescriptionResult() json.RawMessage {
 		panic(err)
 	}
 	return b
+}
+
+func rootResult(actor protocol.Actor) json.RawMessage {
+	root := protocol.Root{
+		Key: "root", IdentityKey: "account", Title: "Title", State: "open", Revision: "revision",
+		UpdatedAt:  time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
+		ObservedAt: time.Date(2026, 8, 22, 12, 0, 1, 0, time.UTC),
+		Actor:      &actor,
+		Fields:     map[string]protocol.FieldValue{"field": {Kind: "unsupported"}},
+	}
+	if actor.ID == "" {
+		root.Fields = nil
+	}
+	encoded, err := json.Marshal(root)
+	if err != nil {
+		panic(err)
+	}
+	return encoded
 }
 
 func mustJSON(v any) json.RawMessage {

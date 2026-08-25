@@ -415,7 +415,9 @@ func (runtime *transcriptRuntime) runSteps(ctx context.Context, t *testing.T, st
 					t.Fatalf("assertion %d %q: %v", index, assertion.Op, err)
 				}
 				if !matches {
-					t.Fatalf("assertion %d %q did not match", index, assertion.Op)
+					actual, _ := runtime.resolve(assertion.Actual)
+					expected, _ := runtime.resolve(assertion.Expected)
+					t.Fatalf("assertion %d %q did not match: actual=%#v expected=%#v", index, assertion.Op, actual, expected)
 				}
 			}
 			captures := runtime.root["captures"].(map[string]any)
@@ -519,6 +521,9 @@ func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protoco
 		if err != nil {
 			return fmt.Errorf("expand request template: %w", err)
 		}
+		if err := runtime.stripUnadvertisedConditionalExpected(request); err != nil {
+			return err
+		}
 		stepDocument["request"] = request
 		encoded, err := json.Marshal(request)
 		if err != nil {
@@ -538,7 +543,13 @@ func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protoco
 	if exchangeErr != nil {
 		exchange["error_message"] = exchangeErr.Error()
 	}
-	documents, decodeErr := decodeTranscriptJSONDocuments(output)
+	var documents []any
+	var decodeErr error
+	if !utf8.Valid(output) {
+		decodeErr = errors.New("connector response is not valid UTF-8")
+	} else {
+		documents, decodeErr = decodeTranscriptJSONDocuments(output)
+	}
 	exchange["response_count"] = json.Number(strconv.Itoa(len(documents)))
 	exchange["decode_error"] = decodeErr != nil
 	if decodeErr != nil {
@@ -1211,4 +1222,33 @@ func compareTranscriptItems(left, right any, paths []string) (int, error) {
 		}
 	}
 	return 0, nil
+}
+
+func (runtime *transcriptRuntime) stripUnadvertisedConditionalExpected(request any) error {
+	object, ok := request.(map[string]any)
+	if !ok || object["method"] != "write_fields" {
+		return nil
+	}
+	params, ok := object["params"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	if _, conditional := params["expected"]; !conditional {
+		return nil
+	}
+	value, found, err := resolveJSONPointer(runtime.root, "/captures/description/capabilities")
+	if err != nil {
+		return fmt.Errorf("resolve advertised connector capabilities: %w", err)
+	}
+	capabilities, ok := value.([]any)
+	if !found || !ok {
+		return errors.New("captured connector description is missing capabilities")
+	}
+	for _, capability := range capabilities {
+		if capability == string(connector.CapabilityConditionalFields) {
+			return nil
+		}
+	}
+	delete(params, "expected")
+	return nil
 }

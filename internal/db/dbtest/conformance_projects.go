@@ -3,6 +3,7 @@ package dbtest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -48,18 +49,33 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("create move-surviving link: %w", err)
 	}
 	movingID := moving.ID
-	targetID := targetCollision.ID
 	_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{
-		Source: "tracker", ExternalID: "collision", ObjectType: "issue", ProjectID: source.ID, IssueID: &movingID,
+		Source: "tracker", ExternalID: "source-only", ObjectType: "issue", ProjectID: source.ID, IssueID: &movingID,
 	})
 	if err != nil {
 		return fmt.Errorf("create source move mapping: %w", err)
 	}
-	_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{
-		Source: "tracker", ExternalID: "collision", ObjectType: "issue", ProjectID: target.ID, IssueID: &targetID,
+	moveFrontier := time.Date(2026, 7, 15, 20, 0, 0, 0, time.UTC)
+	historicalBinding, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: source.ID, IssueID: moving.ID, ConnectorInstance: "notes",
+		ExternalRootKey: "root-move-history", ExternalAccountKey: "opaque-account-key", Actor: "mover",
+		ReceiveCommentsAfter: moveFrontier,
 	})
 	if err != nil {
-		return fmt.Errorf("create target move mapping: %w", err)
+		return fmt.Errorf("create historical move binding: %w", err)
+	}
+	if _, _, err := store.UnbindExternalRootBinding(ctx, db.ExternalRootActionParams{
+		BindingID: historicalBinding.ID, Actor: "mover",
+	}); err != nil {
+		return fmt.Errorf("unbind historical move binding: %w", err)
+	}
+	activeBinding, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: source.ID, IssueID: moving.ID, ConnectorInstance: "notes",
+		ExternalRootKey: "root-move-active", ExternalAccountKey: "opaque-account-key", Actor: "mover",
+		ReceiveCommentsAfter: moveFrontier,
+	})
+	if err != nil {
+		return fmt.Errorf("create active move binding: %w", err)
 	}
 	now := time.Date(2026, 7, 15, 21, 0, 0, 0, time.UTC)
 	claimPrincipal := db.ClaimPrincipal{
@@ -114,6 +130,35 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	})
 	var pinned *db.RecurrencePinnedError
 	assert.ErrorAs(t, err, &pinned)
+	bridgeNow := time.Now().UTC()
+	_, claimed, err := store.ClaimExternalRootBinding(
+		ctx, activeBinding.ID, "move-bridge-worker", bridgeNow, bridgeNow.Add(-db.ExternalRootClaimStaleAfter),
+	)
+	if err != nil {
+		return fmt.Errorf("claim moving external root binding: %w", err)
+	}
+	if !claimed {
+		return errors.New("claim moving external root binding: claim not acquired")
+	}
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: moving.Revision, Actor: "mover",
+	})
+	assert.ErrorIs(t, err, db.ErrExternalRootClaimActive)
+	if _, err := store.ReleaseExternalRootClaim(ctx, activeBinding.ID, "move-bridge-worker"); err != nil {
+		return fmt.Errorf("release moving external root binding: %w", err)
+	}
+	staleClaimAt := bridgeNow.Add(-2 * db.ExternalRootClaimStaleAfter)
+	_, claimed, err = store.ClaimExternalRootBinding(
+		ctx, activeBinding.ID, "stale-move-worker", staleClaimAt,
+		staleClaimAt.Add(-db.ExternalRootClaimStaleAfter),
+	)
+	if err != nil {
+		return fmt.Errorf("claim stale moving external root binding: %w", err)
+	}
+	if !claimed {
+		return errors.New("claim stale moving external root binding: claim not acquired")
+	}
 
 	moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: target.ID,
@@ -127,18 +172,43 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	assert.Equal(t, moving.Revision+1, moved.NewRevision)
 	assert.Equal(t, moved.NewShortID, moved.Issue.ShortID)
 	assert.NotZero(t, moved.EventID)
+	_, err = store.RenewExternalRootClaim(ctx, activeBinding.ID, "stale-move-worker", bridgeNow)
+	assert.ErrorIs(t, err, db.ErrExternalRootClaimLost)
 	preservedLink, err := store.LinkByEndpoints(ctx, moving.ID, peer.ID, "blocks")
 	if err != nil {
 		return fmt.Errorf("load link after move: %w", err)
 	}
 	assert.Equal(t, link.ID, preservedLink.ID)
-	targetMapping, err := store.ImportMappingBySource(ctx, target.ID, "tracker", "issue", "collision")
+	targetMapping, err := store.ImportMappingBySource(ctx, target.ID, "tracker", "issue", "source-only")
 	if err != nil {
-		return fmt.Errorf("load target collision mapping after move: %w", err)
+		return fmt.Errorf("load moved mapping after move: %w", err)
 	}
-	assert.Equal(t, &targetID, targetMapping.IssueID)
-	_, err = store.ImportMappingBySource(ctx, source.ID, "tracker", "issue", "collision")
+	assert.Equal(t, &movingID, targetMapping.IssueID)
+	_, err = store.ImportMappingBySource(ctx, source.ID, "tracker", "issue", "source-only")
 	assert.ErrorIs(t, err, db.ErrNotFound)
+	for _, expected := range []struct {
+		binding db.ExternalRootBinding
+		rootKey string
+	}{
+		{binding: historicalBinding, rootKey: "root-move-history"},
+		{binding: activeBinding, rootKey: "root-move-active"},
+	} {
+		movedBinding, err := store.ExternalRootBindingByID(ctx, expected.binding.ID)
+		if err != nil {
+			return fmt.Errorf("load moved external root binding: %w", err)
+		}
+		assert.Equal(t, target.ID, movedBinding.ProjectID)
+		assert.Equal(t, moving.ID, movedBinding.IssueID)
+		rootMapping, err := store.ImportMappingBySource(
+			ctx, target.ID, "connector:notes", "issue", expected.rootKey,
+		)
+		if err != nil {
+			return fmt.Errorf("load moved external root mapping: %w", err)
+		}
+		assert.Equal(t, movedBinding.RootMappingID, rootMapping.ID)
+		_, err = store.ImportMappingBySource(ctx, source.ID, "connector:notes", "issue", expected.rootKey)
+		assert.ErrorIs(t, err, db.ErrNotFound)
+	}
 	sourceLiveClaims, err := store.CountLiveClaims(ctx, source.ID)
 	if err != nil {
 		return err
@@ -170,6 +240,119 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, pending, 1)
 	assert.Equal(t, target.ID, pending[0].ProjectID)
+
+	collisionSource, err := store.CreateProject(ctx, "move-binding-collision-source")
+	if err != nil {
+		return err
+	}
+	collisionTarget, err := store.CreateProject(ctx, "move-binding-collision-target")
+	if err != nil {
+		return err
+	}
+	collisionMoving, err := createFixtureIssue(ctx, store, collisionSource.ID, "collision moving", "mover", nil)
+	if err != nil {
+		return err
+	}
+	collisionTargetIssue, err := createFixtureIssue(ctx, store, collisionTarget.ID, "collision target", "mover", nil)
+	if err != nil {
+		return err
+	}
+	collisionBinding, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: collisionSource.ID, IssueID: collisionMoving.ID, ConnectorInstance: "notes",
+		ExternalRootKey: "root-move-collision", ExternalAccountKey: "opaque-account-key", Actor: "mover",
+		ReceiveCommentsAfter: moveFrontier,
+	})
+	if err != nil {
+		return fmt.Errorf("create collision move binding: %w", err)
+	}
+	collisionTargetIssueID := collisionTargetIssue.ID
+	targetRootMapping, err := store.UpsertImportMapping(ctx, db.ImportMappingParams{
+		Source: "connector:notes", ExternalID: "root-move-collision", ObjectType: "issue",
+		ProjectID: collisionTarget.ID, IssueID: &collisionTargetIssueID,
+	})
+	if err != nil {
+		return fmt.Errorf("create target root collision mapping: %w", err)
+	}
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: collisionMoving.ID, FromProjectID: collisionSource.ID, ToProjectID: collisionTarget.ID,
+		IfMatchRev: collisionMoving.Revision, Actor: "mover",
+	})
+	assert.ErrorIs(t, err, db.ErrProjectMergeImportMappingCollision)
+	retainedIssue, err := store.IssueByID(ctx, collisionMoving.ID)
+	if err != nil {
+		return fmt.Errorf("load issue after rejected collision move: %w", err)
+	}
+	assert.Equal(t, collisionSource.ID, retainedIssue.ProjectID)
+	assert.Equal(t, collisionMoving.Revision, retainedIssue.Revision)
+	retainedBinding, err := store.ExternalRootBindingByID(ctx, collisionBinding.ID)
+	if err != nil {
+		return fmt.Errorf("load binding after rejected collision move: %w", err)
+	}
+	assert.Equal(t, collisionSource.ID, retainedBinding.ProjectID)
+	assert.True(t, retainedBinding.Active)
+	sourceRootMapping, err := store.ImportMappingBySource(
+		ctx, collisionSource.ID, "connector:notes", "issue", "root-move-collision",
+	)
+	if err != nil {
+		return fmt.Errorf("load source mapping after rejected collision move: %w", err)
+	}
+	assert.Equal(t, collisionBinding.RootMappingID, sourceRootMapping.ID)
+	preservedTargetMapping, err := store.ImportMappingBySource(
+		ctx, collisionTarget.ID, "connector:notes", "issue", "root-move-collision",
+	)
+	if err != nil {
+		return fmt.Errorf("load target mapping after rejected collision move: %w", err)
+	}
+	assert.Equal(t, targetRootMapping.ID, preservedTargetMapping.ID)
+	assert.Equal(t, &collisionTargetIssueID, preservedTargetMapping.IssueID)
+
+	syncMoveSource, err := store.CreateProject(ctx, "move-sync-source")
+	if err != nil {
+		return err
+	}
+	syncMoveTarget, err := store.CreateProject(ctx, "move-sync-target")
+	if err != nil {
+		return err
+	}
+	const syncMoveSourceKey = "example-sync:move-target"
+	_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID: syncMoveTarget.ID, Provider: "example-sync", SourceKey: syncMoveSourceKey,
+		RemoteID: "move-target", DisplayName: "Move target", Config: json.RawMessage(`{}`), IntervalSeconds: 300,
+	})
+	if err != nil {
+		return err
+	}
+	syncMoving, err := createFixtureIssue(ctx, store, syncMoveSource.ID, "sync-owned move", "mover", nil)
+	if err != nil {
+		return err
+	}
+	syncMovingID := syncMoving.ID
+	_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{
+		Source: syncMoveSourceKey, ExternalID: "sync-owned-move", ObjectType: "issue",
+		ProjectID: syncMoveSource.ID, IssueID: &syncMovingID,
+	})
+	if err != nil {
+		return err
+	}
+	syncMoveBinding, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: syncMoveSource.ID, IssueID: syncMoving.ID, ConnectorInstance: "notes",
+		ExternalRootKey: "root-move-issue-sync", ExternalAccountKey: "opaque-account-key",
+		Actor: "mover", ReceiveCommentsAfter: moveFrontier,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: syncMoving.ID, FromProjectID: syncMoveSource.ID, ToProjectID: syncMoveTarget.ID,
+		IfMatchRev: syncMoving.Revision, Actor: "mover",
+	})
+	assert.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
+	retainedSyncMoving, readErr := store.IssueByID(ctx, syncMoving.ID)
+	require.NoError(t, readErr)
+	assert.Equal(t, syncMoveSource.ID, retainedSyncMoving.ProjectID)
+	retainedSyncBinding, readErr := store.ExternalRootBindingByID(ctx, syncMoveBinding.ID)
+	require.NoError(t, readErr)
+	assert.Equal(t, syncMoveSource.ID, retainedSyncBinding.ProjectID)
 
 	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: target.ID, Limit: 100})
 	if err != nil {
@@ -267,6 +450,43 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create merge import mapping: %w", err)
 	}
+	mergeFrontier := time.Date(2026, 7, 15, 20, 0, 0, 0, time.UTC)
+	sourceBinding, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: source.ID, IssueID: sourceIssue.ID, ConnectorInstance: "notes",
+		ExternalRootKey: "root-merge", ExternalAccountKey: "opaque-account-key", Actor: "merger",
+		ReceiveCommentsAfter: mergeFrontier,
+	})
+	if err != nil {
+		return fmt.Errorf("create merge external root binding: %w", err)
+	}
+	bridgeNow := time.Now().UTC()
+	_, claimed, err := store.ClaimExternalRootBinding(
+		ctx, sourceBinding.ID, "merge-bridge-worker", bridgeNow, bridgeNow.Add(-db.ExternalRootClaimStaleAfter),
+	)
+	if err != nil {
+		return fmt.Errorf("claim merged external root binding: %w", err)
+	}
+	if !claimed {
+		return errors.New("claim merged external root binding: claim not acquired")
+	}
+	_, err = store.MergeProjects(ctx, db.MergeProjectsParams{
+		SourceProjectID: source.ID, TargetProjectID: target.ID, Actor: "user-a",
+	})
+	assert.ErrorIs(t, err, db.ErrExternalRootClaimActive)
+	if _, err := store.ReleaseExternalRootClaim(ctx, sourceBinding.ID, "merge-bridge-worker"); err != nil {
+		return fmt.Errorf("release merged external root binding: %w", err)
+	}
+	staleClaimAt := bridgeNow.Add(-2 * db.ExternalRootClaimStaleAfter)
+	_, claimed, err = store.ClaimExternalRootBinding(
+		ctx, sourceBinding.ID, "stale-merge-worker", staleClaimAt,
+		staleClaimAt.Add(-db.ExternalRootClaimStaleAfter),
+	)
+	if err != nil {
+		return fmt.Errorf("claim stale merged external root binding: %w", err)
+	}
+	if !claimed {
+		return errors.New("claim stale merged external root binding: claim not acquired")
+	}
 
 	mergedName := "merged-project"
 	merged, err := store.MergeProjects(ctx, db.MergeProjectsParams{
@@ -280,10 +500,12 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 	assert.Equal(t, mergedName, merged.Target.Name)
 	assert.Equal(t, int64(2), merged.IssuesMoved)
 	assert.Equal(t, int64(1), merged.AliasesMoved)
-	assert.Equal(t, int64(4), merged.EventsMoved)
+	assert.Equal(t, int64(5), merged.EventsMoved)
 	assert.Equal(t, int64(1), merged.PurgeLogsMoved)
 	assert.Equal(t, "project.merged", merged.Event.Type)
 	assert.Equal(t, "user-a", merged.Event.Actor)
+	_, err = store.RenewExternalRootClaim(ctx, sourceBinding.ID, "stale-merge-worker", bridgeNow)
+	assert.ErrorIs(t, err, db.ErrExternalRootClaimLost)
 	require.Len(t, merged.ShortIDExtensions, 1)
 	assert.Equal(t, sourceIssue.UID, merged.ShortIDExtensions[0].UID)
 	assert.Equal(t, "d4ex", merged.ShortIDExtensions[0].PreMergeShortID)
@@ -298,6 +520,20 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("load extended source issue after merge: %w", err)
 	}
 	assert.Equal(t, sourceIssue.UID, moved.UID)
+	movedBinding, err := store.ExternalRootBindingByID(ctx, sourceBinding.ID)
+	if err != nil {
+		return fmt.Errorf("load external root binding after project merge: %w", err)
+	}
+	assert.Equal(t, target.ID, movedBinding.ProjectID)
+	assert.Equal(t, sourceIssue.ID, movedBinding.IssueID)
+	assert.True(t, movedBinding.Active)
+	movedRootMapping, err := store.ImportMappingBySource(ctx, target.ID, "connector:notes", "issue", "root-merge")
+	if err != nil {
+		return fmt.Errorf("load external root mapping after project merge: %w", err)
+	}
+	assert.Equal(t, movedBinding.RootMappingID, movedRootMapping.ID)
+	_, err = store.ImportMappingBySource(ctx, source.ID, "connector:notes", "issue", "root-merge")
+	assert.ErrorIs(t, err, db.ErrNotFound)
 	preservedLinks, err := store.LinksByIssue(ctx, sourceIssue.ID)
 	if err != nil {
 		return fmt.Errorf("list links after project merge: %w", err)
@@ -329,7 +565,7 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("list events after project merge: %w", err)
 	}
-	require.Len(t, events, 7)
+	require.Len(t, events, 8)
 	assert.Equal(t, "project.merged", events[len(events)-1].Type)
 	for _, event := range events {
 		if _, _, err := db.ValidateRemoteEventContentHash(remoteEventFromStored(event)); err != nil {
@@ -353,16 +589,18 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{
-		Source: "tracker", ExternalID: "same", ObjectType: "issue",
-		ProjectID: collisionSource.ID, IssueID: &collisionSourceIssue.ID,
+	collisionBinding, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: collisionSource.ID, IssueID: collisionSourceIssue.ID, ConnectorInstance: "notes",
+		ExternalRootKey: "root-merge-collision", ExternalAccountKey: "opaque-account-key", Actor: "merger",
+		ReceiveCommentsAfter: mergeFrontier,
 	})
 	if err != nil {
 		return err
 	}
-	_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{
-		Source: "tracker", ExternalID: "same", ObjectType: "issue",
-		ProjectID: collisionTarget.ID, IssueID: &collisionTargetIssue.ID,
+	collisionTargetIssueID := collisionTargetIssue.ID
+	targetCollisionMapping, err := store.UpsertImportMapping(ctx, db.ImportMappingParams{
+		Source: "connector:notes", ExternalID: "root-merge-collision", ObjectType: "issue",
+		ProjectID: collisionTarget.ID, IssueID: &collisionTargetIssueID,
 	})
 	if err != nil {
 		return err
@@ -373,6 +611,31 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 	assert.ErrorIs(t, err, db.ErrProjectMergeImportMappingCollision)
 	_, err = store.ProjectByID(ctx, collisionSource.ID)
 	assert.NoError(t, err)
+	retainedCollisionIssue, err := store.IssueByID(ctx, collisionSourceIssue.ID)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, collisionSource.ID, retainedCollisionIssue.ProjectID)
+	retainedCollisionBinding, err := store.ExternalRootBindingByID(ctx, collisionBinding.ID)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, collisionSource.ID, retainedCollisionBinding.ProjectID)
+	retainedSourceMapping, err := store.ImportMappingBySource(
+		ctx, collisionSource.ID, "connector:notes", "issue", "root-merge-collision",
+	)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, collisionBinding.RootMappingID, retainedSourceMapping.ID)
+	retainedTargetMapping, err := store.ImportMappingBySource(
+		ctx, collisionTarget.ID, "connector:notes", "issue", "root-merge-collision",
+	)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, targetCollisionMapping.ID, retainedTargetMapping.ID)
+	assert.Equal(t, &collisionTargetIssueID, retainedTargetMapping.IssueID)
 
 	archivedSource, err := store.CreateProject(ctx, "merge-archived-source")
 	if err != nil {

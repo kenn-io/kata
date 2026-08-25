@@ -7,32 +7,37 @@ import (
 )
 
 func TestValidateRejectsForbiddenKeyVariantsInsideFieldValues(t *testing.T) {
-	for _, key := range []string{
-		"kata_uid", "kataUid", "kata-uid", "kata.uid",
-		"kata_ref", "kataRef", "kata-ref", "kata.ref",
-		"kata_project_id", "kataProjectId", "kata-project-id", "kata.project.id",
-		"kata_binding_id", "kataBindingId", "kata-binding-id", "kata.binding.id",
-		"kata_work_branch", "kataWorkBranch", "kata-work-branch", "kata.work.branch",
-	} {
-		raw, err := json.Marshal(map[string]any{
-			"root_key": "root-example",
-			"fields": map[string]any{
-				"kata_uid": map[string]any{"kind": "date", "value": "2026-08-20", key: "neutral-forbidden"},
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = Validate("write_fields", raw, Options{ExternalRootKey: "root-example"})
-		var auditErr *Error
-		if !errors.As(err, &auditErr) || auditErr.Code != CodeForbiddenKey {
-			t.Fatalf("key %q error = %#v, want forbidden-key error", key, err)
+	for _, collection := range []string{"fields", "expected"} {
+		for _, key := range []string{
+			"kata_uid", "kataUid", "kata-uid", "kata.uid",
+			"kata_ref", "kataRef", "kata-ref", "kata.ref",
+			"kata_project_id", "kataProjectId", "kata-project-id", "kata.project.id",
+			"kata_binding_id", "kataBindingId", "kata-binding-id", "kata.binding.id",
+			"kata_work_branch", "kataWorkBranch", "kata-work-branch", "kata.work.branch",
+		} {
+			params := map[string]any{
+				"root_key": "root-example",
+				"fields":   map[string]any{"kata_uid": map[string]any{"kind": "null"}},
+				"expected": map[string]any{"kata_uid": map[string]any{"kind": "null"}},
+			}
+			params[collection].(map[string]any)["kata_uid"] = map[string]any{
+				"kind": "date", "value": "2026-08-20", key: "neutral-forbidden",
+			}
+			raw, err := json.Marshal(params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = Validate("write_fields", raw, Options{ExternalRootKey: "root-example"})
+			var auditErr *Error
+			if !errors.As(err, &auditErr) || auditErr.Code != CodeForbiddenKey {
+				t.Fatalf("%s key %q error = %#v, want forbidden-key error", collection, key, err)
+			}
 		}
 	}
 }
 
 func TestValidateAllowsOpaqueFieldIDs(t *testing.T) {
-	raw := json.RawMessage(`{"root_key":"root-example","fields":{"kata_uid":{"kind":"date","value":"2026-08-20"},"katakana_start":{"kind":"null"}}}`)
+	raw := json.RawMessage(`{"root_key":"root-example","fields":{"kata_uid":{"kind":"date","value":"2026-08-20"},"katakana_start":{"kind":"null"}},"expected":{"kata_uid":{"kind":"null"},"katakana_start":{"kind":"date","value":"2026-08-19"}}}`)
 	if err := Validate("write_fields", raw, Options{ExternalRootKey: "root-example"}); err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +50,7 @@ func TestValidateRejectsArbitraryStructuralKataKeys(t *testing.T) {
 			"fields": map[string]any{
 				"katakana_start": map[string]any{"kind": "date", "value": "2026-08-20", key: "neutral-forbidden"},
 			},
+			"expected": map[string]any{"katakana_start": map[string]any{"kind": "null"}},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -56,7 +62,7 @@ func TestValidateRejectsArbitraryStructuralKataKeys(t *testing.T) {
 		}
 	}
 
-	raw := json.RawMessage(`{"root_key":"root-example","fields":{"katakana_start":{"kind":"null"}}}`)
+	raw := json.RawMessage(`{"root_key":"root-example","fields":{"katakana_start":{"kind":"null"}},"expected":{"katakana_start":{"kind":"date","value":"2026-08-20"}}}`)
 	if err := Validate("write_fields", raw, Options{ExternalRootKey: "root-example"}); err != nil {
 		t.Fatalf("katakana field rejected: %v", err)
 	}
@@ -77,14 +83,14 @@ func TestValidateRejectsWrongParameterTypes(t *testing.T) {
 		{method: "read_fields", raw: json.RawMessage(`{"root_key":{},"field_ids":[]}`)},
 		{method: "read_fields", raw: json.RawMessage(`{"root_key":"root-example","field_ids":"field-example"}`)},
 		{method: "read_fields", raw: json.RawMessage(`{"root_key":"root-example","field_ids":[3]}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":true,"fields":{}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":"field-example"}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":null}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{}}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":4}}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"date","value":{}}}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"instant","timezone":[]}}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"null","metadata":"unexpected"}}}`)},
+		{method: "write_fields", raw: json.RawMessage(`{"root_key":true,"fields":{},"expected":{}}`)},
+		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":"field-example","expected":{}}`)},
+		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":null},"expected":{}}`)},
+		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{}},"expected":{}}`)},
+		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":4}},"expected":{}}`)},
+		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"date","value":{}}},"expected":{}}`)},
+		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"instant","timezone":[]}},"expected":{}}`)},
+		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"null","metadata":"unexpected"}},"expected":{}}`)},
 	}
 	for _, test := range tests {
 		err := Validate(test.method, test.raw, Options{ExternalRootKey: "root-example"})
@@ -151,7 +157,7 @@ func TestValidateAllMethodShapesAndExactEOF(t *testing.T) {
 		"complete_root":   json.RawMessage(`{"root_key":"root-example"}`),
 		"list_fields":     json.RawMessage(`{}`),
 		"read_fields":     json.RawMessage(`{"root_key":"root-example","field_ids":["field-example"]}`),
-		"write_fields":    json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"null"}}}`),
+		"write_fields":    json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"null"}},"expected":{"field-example":{"kind":"date","value":"2026-08-20"}}}`),
 	}
 	for method, raw := range valid {
 		if err := Validate(method, raw, Options{ExternalRootKey: "root-example"}); err != nil {

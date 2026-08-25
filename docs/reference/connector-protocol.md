@@ -71,17 +71,14 @@ All handlers implement these methods:
 | `publish_comment` | Publish one comment and return its provider identity and timestamps. |
 | `list_fields` | Discover canonical external field descriptors. |
 | `read_fields` | Read selected canonical field values. |
-| `write_fields` | Write selected fields and return canonical readback. |
+| `write_fields` | Write selected fields, optionally with compare-and-set preconditions, then return canonical readback. |
 
 `publish_comment` is advertised with the `publish_comment` capability. The
-field methods are advertised with `fields`. A connector may return a structured
+field methods are advertised with `fields`. Compare-and-set field writes are
+advertised separately with `conditional_fields`. Kata rejects a conditional
+write when the connector does not advertise that capability; it does not retry
+the write without its preconditions. A connector may return a structured
 unsupported error for optional methods whose capability it does not advertise.
-
-Each `publish_comment` request includes a nonempty, canonical `operation_id`.
-The caller persists this ID for the logical publication and reuses it when a
-connector process exits after publishing but before returning a response. A
-connector must return the original comment for that retry without creating a
-second provider comment.
 
 Root keys, account identities, connector IDs, actor IDs, comment IDs, field IDs,
 and schema revisions are opaque stable identities. Do not encode Kata issue
@@ -96,6 +93,13 @@ Timestamps use RFC 3339.
 Field values use the portable `date`, `local_datetime`, `instant`, and `null`
 kinds accepted by the conformance transcripts; a descriptor lists
 the exact kinds it accepts and whether it is nullable and writable.
+
+Protocol v1 `write_fields` requests always contain `fields`. Connectors that
+advertise `conditional_fields` may also receive `expected`; when present, the
+two objects have identical field-ID keysets. The connector writes only when
+every current value equals its canonical `expected` value. Otherwise it changes
+nothing and returns a `field_conflict` error. A request without `expected` is
+an unconditional write.
 
 ## Go SDK
 
@@ -147,7 +151,6 @@ subsequent unchanged reads.
 - The external root owns title and body while a binding is active.
 - Kata planning-field mappings are limited to `scheduled_on` and `deadline_on`
   in protocol v1.
-- Kata deliberately uses one process per RPC for isolation and bounded cleanup;
-  a long-lived transport is deferred.
+- Kata uses one process per RPC for isolation and bounded cleanup.
 - The browser UI has no bridge indicator yet. Connector and bridge
   administration through the daemon API and CLI is also deferred.

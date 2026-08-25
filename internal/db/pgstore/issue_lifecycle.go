@@ -25,6 +25,11 @@ func (s *Store) EditIssue(ctx context.Context, params db.EditIssueParams) (db.Is
 		if err != nil {
 			return err
 		}
+		contentChanged := params.Title != nil && *params.Title != current.Title ||
+			params.Body != nil && *params.Body != current.Body
+		if err := rejectExternalRootContentMutationTx(ctx, tx, current.ID, contentChanged); err != nil {
+			return err
+		}
 		sets := make([]string, 0, 5)
 		args := make([]any, 0, 6)
 		payload := make(map[string]any)
@@ -406,6 +411,16 @@ func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string
 		if deleteIssue && current.DeletedAt != nil || !deleteIssue && current.Status == "open" {
 			issue = current
 			return nil
+		}
+		if !deleteIssue {
+			if err := rejectReopenDuringExternalRootClaimTx(ctx, tx, current.ID); err != nil {
+				return err
+			}
+		}
+		if deleteIssue {
+			if err := rejectExternalRootContentMutationTx(ctx, tx, current.ID, true); err != nil {
+				return err
+			}
 		}
 		at := mutationTimestamp()
 		eventType := "issue.reopened"

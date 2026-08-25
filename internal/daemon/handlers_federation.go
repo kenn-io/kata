@@ -785,6 +785,11 @@ func federationReplicaAPIError(err error) error {
 			http.StatusConflict, "issue_sync_federation_conflict",
 			serviceErr.message, serviceErr.hint, nil,
 		)
+	case errors.Is(err, errFederationReplicaExternalRootConflict):
+		return api.NewError(
+			http.StatusConflict, "external_root_federation_conflict",
+			serviceErr.message, serviceErr.hint, nil,
+		)
 	default:
 		return internalAPIError(err)
 	}

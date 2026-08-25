@@ -40,6 +40,9 @@ func (d *Store) softDeleteIssue(ctx context.Context, issueID int64, actor string
 		}
 		return issue, nil, false, nil
 	}
+	if err := rejectExternalRootContentMutationTx(ctx, tx, issue.ID, true); err != nil {
+		return db.Issue{}, nil, false, err
+	}
 	// Conditional UPDATE — gated on deleted_at IS NULL — closes the
 	// read-then-write race: a concurrent SoftDeleteIssue between our lookup
 	// and our UPDATE would otherwise let both transactions emit events.

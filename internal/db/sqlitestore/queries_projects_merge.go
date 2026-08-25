@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -54,6 +55,11 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 		return db.ProjectMergeResult{}, err
 	}
 	if err := rejectIssueSyncProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
+	if err := lockAndRejectFreshExternalRootClaimsForProjectTx(
+		ctx, tx, source.ID, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter),
+	); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
 
@@ -131,6 +137,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE import_mappings SET project_id = ? WHERE project_id = ?`, target.ID, source.ID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("move import mappings: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE external_root_bindings SET project_id = ? WHERE project_id = ?`, target.ID, source.ID); err != nil {
+		return db.ProjectMergeResult{}, fmt.Errorf("move external root bindings: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE project_aliases SET project_id = ? WHERE project_id = ?`, target.ID, source.ID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("move aliases: %w", err)

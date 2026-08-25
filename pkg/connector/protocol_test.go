@@ -168,6 +168,38 @@ func TestProtocolServeOneRejectsInvalidFieldValuesBeforeHandler(t *testing.T) {
 	}
 }
 
+func TestProtocolServeOneRejectsMismatchedWriteFieldKeysBeforeHandler(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		params string
+	}{
+		{
+			name: "missing expected field",
+			params: `{"root_key":"root-1","fields":{"field-1":{"kind":"null"}},` +
+				`"expected":{"field-2":{"kind":"null"}}}`,
+		},
+		{
+			name: "extra expected field",
+			params: `{"root_key":"root-1","fields":{"field-1":{"kind":"null"}},` +
+				`"expected":{"field-1":{"kind":"null"},"field-2":{"kind":"null"}}}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := &writeFieldsCallHandler{}
+			var output bytes.Buffer
+			err := ServeOne(
+				t.Context(),
+				bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"write_fields","instance":"notes","settings":{},"params":`+test.params+`}`),
+				&output,
+				handler,
+			)
+			require.ErrorContains(t, err, "same fields")
+			assert.False(t, handler.called)
+			assert.Empty(t, output.String())
+		})
+	}
+}
+
 func TestProtocolServeOneRequiresCanonicalPublicationOperationID(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -226,12 +258,12 @@ func TestProtocolServeOneAttachesImmutableInvocation(t *testing.T) {
 	assert.True(t, handler.immutable)
 }
 
-func TestInvocationFromContextRejectsSpoofedPublicInvocation(t *testing.T) {
-	ctx := spoofedInvocationContext{
+func TestInvocationFromContextRejectsForgedPublicInvocation(t *testing.T) {
+	ctx := forgedInvocationContext{
 		Context: t.Context(),
 		invocation: Invocation{
-			Instance: "spoofed",
-			Settings: json.RawMessage(`{"spoofed":true}`),
+			Instance: "forged",
+			Settings: json.RawMessage(`{"forged":true}`),
 		},
 	}
 
@@ -329,12 +361,12 @@ func (h *publicationOperationHandler) PublishComment(_ context.Context, params P
 	return Comment{}, nil
 }
 
-type spoofedInvocationContext struct {
+type forgedInvocationContext struct {
 	context.Context
 	invocation Invocation
 }
 
-func (ctx spoofedInvocationContext) Value(any) any {
+func (ctx forgedInvocationContext) Value(any) any {
 	return ctx.invocation
 }
 

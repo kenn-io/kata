@@ -83,13 +83,17 @@ func Validate(method string, raw json.RawMessage, options Options) error {
 	if !ok {
 		return &Error{Code: CodeUnsupportedMethod, Method: method}
 	}
+	optional := methodOptionalParameters[method]
 	for required := range allowed {
+		if optional[required] {
+			continue
+		}
 		if _, present := params[required]; !present {
 			return &Error{Code: CodeMissingParameter, Method: method, Path: "params." + required}
 		}
 	}
 	for key := range params {
-		if !allowed[key] {
+		if !allowed[key] && !optional[key] {
 			return &Error{Code: CodeUnknownParameter, Method: method, Path: "params." + key}
 		}
 	}
@@ -179,22 +183,27 @@ func validateParameterTypes(method string, raw json.RawMessage, params map[strin
 		if err := requireString("root_key"); err != nil {
 			return err
 		}
-		fields, ok := params["fields"].(map[string]any)
-		if !ok {
-			return invalid("params.fields")
-		}
-		for fieldID, value := range fields {
-			field, ok := value.(map[string]any)
+		for _, collection := range []string{"fields", "expected"} {
+			fields, ok := params[collection].(map[string]any)
 			if !ok {
-				return invalid("params.fields." + fieldID)
+				if _, present := params[collection]; !present && collection == "expected" {
+					continue
+				}
+				return invalid("params." + collection)
 			}
-			if _, ok := field["kind"].(string); !ok {
-				return invalid("params.fields." + fieldID + ".kind")
-			}
-			for _, optional := range []string{"value", "timezone"} {
-				if rawValue, present := field[optional]; present {
-					if _, ok := rawValue.(string); !ok {
-						return invalid("params.fields." + fieldID + "." + optional)
+			for fieldID, value := range fields {
+				field, ok := value.(map[string]any)
+				if !ok {
+					return invalid("params." + collection + "." + fieldID)
+				}
+				if _, ok := field["kind"].(string); !ok {
+					return invalid("params." + collection + "." + fieldID + ".kind")
+				}
+				for _, optional := range []string{"value", "timezone"} {
+					if rawValue, present := field[optional]; present {
+						if _, ok := rawValue.(string); !ok {
+							return invalid("params." + collection + "." + fieldID + "." + optional)
+						}
 					}
 				}
 			}
@@ -215,14 +224,20 @@ var methodParameters = map[string]map[string]bool{
 	"write_fields":    {"root_key": true, "fields": true},
 }
 
+// methodOptionalParameters lists accepted-but-optional parameter keys per
+// method; they extend methodParameters without becoming required.
+var methodOptionalParameters = map[string]map[string]bool{
+	"write_fields": {"expected": true},
+}
+
 func forbiddenPath(value any, path, method string) (string, bool) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
-			if method == "write_fields" && path == "params" && key == "fields" {
+			if method == "write_fields" && path == "params" && (key == "fields" || key == "expected") {
 				if fields, ok := child.(map[string]any); ok {
 					for fieldID, fieldValue := range fields {
-						if found, ok := forbiddenPath(fieldValue, path+".fields."+fieldID, method); ok {
+						if found, ok := forbiddenPath(fieldValue, path+"."+key+"."+fieldID, method); ok {
 							return found, true
 						}
 					}

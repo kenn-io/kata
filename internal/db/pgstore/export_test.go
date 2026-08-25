@@ -1,6 +1,9 @@
 package pgstore
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // NewStoreForTesting builds a Store with the given dsn but no live *sql.DB.
 // EXPORTED FOR TESTS ONLY — production callers cannot reach this. Used by
@@ -20,4 +23,12 @@ func InstallEnrollmentRotationStageForTest(
 	return func() {
 		store.rotationStage = previous
 	}
+}
+
+// InstallExternalRootClockForTest freezes the binding transaction clock and
+// returns a restore function for deterministic millisecond-boundary tests.
+func InstallExternalRootClockForTest(store *Store, now func() time.Time) func() {
+	previous := store.externalRootNow
+	store.externalRootNow = now
+	return func() { store.externalRootNow = previous }
 }

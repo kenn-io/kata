@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -387,4 +388,41 @@ func createUIProject(t *testing.T, store *Store, name string) db.Project {
 	project, err := store.CreateProject(context.Background(), name)
 	require.NoError(t, err)
 	return project
+}
+
+// TestReadUISnapshotOrdersLegacyCommentTimestamps verifies the selected-issue
+// comment list orders rows by their parsed instants. Legacy rows written in
+// Go's space-separated time.String() layout sort lexically before canonical
+// RFC 3339 stamps for the same day regardless of wall-clock order, so the
+// read must parse timestamps the way CommentsByIssue does instead of
+// normalizing only fixed-width canonical layouts in SQL.
+func TestReadUISnapshotOrdersLegacyCommentTimestamps(t *testing.T) {
+	ctx := context.Background()
+	store := openUIStore(t)
+	project := createUIProject(t, store, "ui-legacy-comment-order")
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Legacy comment ordering", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	canonicalAt := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
+	legacyAt := canonicalAt.Add(time.Hour)
+	_, err = store.ExecContext(ctx,
+		`INSERT INTO comments(uid, issue_id, author, body, created_at) VALUES(?,?,?,?,?)`,
+		"01CANONICALCOMMENT00000000", issue.ID, "tester", "canonical",
+		canonicalAt.Format(sqliteCommentTimeFormat))
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx,
+		`INSERT INTO comments(uid, issue_id, author, body, created_at) VALUES(?,?,?,?,?)`,
+		"01LEGACYCOMMENT00000000000", issue.ID, "tester", "legacy", legacyAt.String())
+	require.NoError(t, err)
+
+	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{SelectedIssueUID: issue.UID})
+	require.NoError(t, err)
+	require.NotNil(t, snapshot.SelectedIssue)
+	bodies := make([]string, 0, len(snapshot.Comments))
+	for _, comment := range snapshot.Comments {
+		bodies = append(bodies, comment.Body)
+	}
+	assert.Equal(t, []string{"canonical", "legacy"}, bodies)
 }

@@ -39,6 +39,10 @@ type ImportOptions struct {
 	// MergeProject adds one project-scoped snapshot to an existing database
 	// without replacing unrelated state.
 	MergeProject bool
+
+	// PreserveExternalRootBindingsEnabled is for trusted local schema cutover.
+	// Normal restores pause active bindings until an operator reconfirms them.
+	PreserveExternalRootBindingsEnabled bool
 }
 
 // Import reads JSONL records from r and inserts them into store.
@@ -92,12 +96,13 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		recs = append(recs, rec)
 	}
 	return store.ImportReplay(ctx, recs, db.ImportOptions{
-		RequireFreshTarget:              opts.RequireFreshTarget,
-		NewInstance:                     opts.NewInstance,
-		DedupeLegacyActivePendingClaims: exportVersion < 12,
-		RecomputeEventContentHash:       exportVersion < eventReplayFieldsSchemaVersion,
-		PreserveIssueSyncBindingEnabled: opts.PreserveIssueSyncBindingEnabled,
-		MergeProject:                    opts.MergeProject,
+		RequireFreshTarget:                  opts.RequireFreshTarget,
+		NewInstance:                         opts.NewInstance,
+		DedupeLegacyActivePendingClaims:     exportVersion < 12,
+		RecomputeEventContentHash:           exportVersion < eventReplayFieldsSchemaVersion,
+		PreserveIssueSyncBindingEnabled:     opts.PreserveIssueSyncBindingEnabled,
+		PreserveExternalRootBindingsEnabled: opts.PreserveExternalRootBindingsEnabled,
+		MergeProject:                        opts.MergeProject,
 	})
 }
 
@@ -321,6 +326,24 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return db.ImportRecord{}, err
 		}
 		return db.ImportRecord{Kind: string(KindImportMapping), ImportMapping: &rec}, nil
+	case KindExternalFieldMapping:
+		var rec db.ExternalFieldMappingExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindExternalFieldMapping), ExternalFieldMapping: &rec}, nil
+	case KindExternalRootBinding:
+		var rec db.ExternalRootBindingExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindExternalRootBinding), ExternalRootBinding: &rec}, nil
+	case KindExternalFieldState:
+		var rec db.ExternalFieldStateExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindExternalFieldState), ExternalFieldState: &rec}, nil
 	case KindFederationBinding:
 		var rec db.FederationBindingExport
 		if err := decodeData(env, &rec); err != nil {
@@ -724,6 +747,14 @@ func parseExportTime(s string) (time.Time, error) {
 // with millisecond precision and a literal "Z" zone.
 const rfc3339MilliLayout = "2006-01-02T15:04:05.000Z"
 
+// rfc3339NanoFixedLayout is the canonical precision-preserving wire format
+// for timestamps observed from external systems.
+const rfc3339NanoFixedLayout = "2006-01-02T15:04:05.000000000Z"
+
+// rfc3339MicroFixedLayout is the canonical precision-preserving wire format
+// for external timestamps that carry microsecond precision.
+const rfc3339MicroFixedLayout = "2006-01-02T15:04:05.000000Z"
+
 // normalizeImportTime rewrites *p to the canonical RFC3339-millis form in
 // place. Pre-v8 exports may carry timestamps in Go's default time.Time
 // stringification (e.g. "2026-05-04 00:21:07 +0000 UTC"); since these strings
@@ -739,6 +770,31 @@ func normalizeImportTime(field string, p *string) error {
 		return fmt.Errorf("normalize %s: %w", field, err)
 	}
 	*p = t.UTC().Format(rfc3339MilliLayout)
+	return nil
+}
+
+func normalizePrecisionImportTime(field string, p *string) error {
+	if p == nil || *p == "" {
+		return nil
+	}
+	t, err := parseExportTime(*p)
+	if err != nil {
+		return fmt.Errorf("normalize %s: %w", field, err)
+	}
+	utc := t.UTC()
+	if *p == utc.Format(rfc3339MilliLayout) ||
+		*p == utc.Format(rfc3339MicroFixedLayout) ||
+		*p == utc.Format(rfc3339NanoFixedLayout) {
+		return nil
+	}
+	switch nanos := utc.Nanosecond(); {
+	case nanos%1e3 != 0:
+		*p = utc.Format(rfc3339NanoFixedLayout)
+	case nanos%1e6 != 0:
+		*p = utc.Format(rfc3339MicroFixedLayout)
+	default:
+		*p = utc.Format(rfc3339MilliLayout)
+	}
 	return nil
 }
 
@@ -800,7 +856,7 @@ func normalizeIssueTimes(rec *db.IssueExport) error {
 }
 
 func normalizeCommentTimes(rec *db.CommentExport) error {
-	return normalizeImportTime("comment.created_at", &rec.CreatedAt)
+	return normalizePrecisionImportTime("comment.created_at", &rec.CreatedAt)
 }
 
 func normalizeIssueLabelTimes(rec *db.IssueLabelExport) error {
@@ -812,7 +868,7 @@ func normalizeLinkTimes(rec *db.LinkExport) error {
 }
 
 func normalizeImportMappingTimes(rec *db.ImportMappingExport) error {
-	if err := normalizeImportTime("import_mapping.source_updated_at", rec.SourceUpdatedAt); err != nil {
+	if err := normalizePrecisionImportTime("import_mapping.source_updated_at", rec.SourceUpdatedAt); err != nil {
 		return err
 	}
 	return normalizeImportTime("import_mapping.imported_at", &rec.ImportedAt)

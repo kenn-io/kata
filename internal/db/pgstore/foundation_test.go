@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
@@ -82,11 +83,114 @@ func TestValidationModeRequiresConfiguredSchemaOwnerBeforeConnecting(t *testing.
 	assert.Contains(t, err.Error(), "postgres schema owner is required in validation mode")
 }
 
-func TestFirstPostgresReleaseHasNoHistoricalMigrationAssets(t *testing.T) {
+func TestPostgresMigrationRegistryIncludesExternalRootBridges(t *testing.T) {
 	t.Parallel()
 
-	assert.Empty(t, pgstore.Migrations(),
-		"Postgres has not shipped yet, so its first canonical schema is the migration floor")
+	migrations := pgstore.Migrations()
+	require.Len(t, migrations, 1)
+	assert.Equal(t, 25, migrations[0].FromVersion)
+	assert.Equal(t, 26, migrations[0].ToVersion)
+	assert.Equal(t, "000026_external_root_bridges.up.sql", migrations[0].Name)
+}
+
+func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	const schema = "external_root_upgrade"
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	setExternalRootMigrationSource(ctx, t, admin, schema)
+
+	migrated, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = migrated.Close() })
+	version, err := migrated.SchemaVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 26, version)
+
+	project, err := migrated.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := migrated.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "External root", Author: "tester",
+	})
+	require.NoError(t, err)
+	binding, event, err := migrated.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "notes",
+		ExternalRootKey: "root-1", ExternalAccountKey: "opaque-account-key", Actor: "tester",
+		ReceiveCommentsAfter: time.Date(2026, 8, 20, 1, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	assert.True(t, binding.Active)
+	assert.Equal(t, "issue.external_root_bound", event.Type)
+}
+
+func TestExternalRootMigrationRollsBackSchemaAndVersionTogether(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	const schema = "external_root_rollback"
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	setExternalRootMigrationSource(ctx, t, admin, schema)
+	_, err = admin.ExecContext(ctx,
+		`CREATE TABLE external_root_rollback.external_field_mappings (blocker INTEGER)`)
+	require.NoError(t, err)
+
+	failed, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	assert.Nil(t, failed)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "apply postgres migration 000026_external_root_bridges.up.sql")
+
+	var version string
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT value FROM external_root_rollback.meta WHERE key='schema_version'`).Scan(&version))
+	assert.Equal(t, "25", version)
+	var rootTableExists bool
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT to_regclass('external_root_rollback.external_root_bindings') IS NOT NULL`).Scan(&rootTableExists))
+	assert.False(t, rootTableExists, "failed migration must roll back earlier DDL")
+}
+
+func setExternalRootMigrationSource(
+	ctx context.Context,
+	t *testing.T,
+	admin *sql.DB,
+	schema string,
+) {
+	t.Helper()
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
+DROP TABLE %s.external_field_states;
+DROP TABLE %s.external_field_mappings;
+DROP TABLE %s.external_root_bindings;
+UPDATE %s.meta SET value='25' WHERE key='schema_version'`, schema, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
+	require.NoError(t, err)
 }
 
 func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {

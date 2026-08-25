@@ -1,6 +1,9 @@
 package db
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // ExportFilter scopes a JSONL export. The zero value exports every project's
 // live (non-deleted) rows.
@@ -161,6 +164,75 @@ type ImportMappingExport struct {
 	Label           *string `json:"label,omitempty"`
 	SourceUpdatedAt *string `json:"source_updated_at,omitempty"`
 	ImportedAt      string  `json:"imported_at"`
+}
+
+// ExternalRootBindingExport is one portable external-root binding. All
+// references use durable identities; process settings, credentials, and live
+// claim coordination never belong in this record.
+type ExternalRootBindingExport struct {
+	UID                     string     `json:"uid"`
+	ProjectUID              string     `json:"project_uid"`
+	IssueUID                string     `json:"issue_uid"`
+	RootMappingSource       string     `json:"root_mapping_source"`
+	RootMappingExternalID   string     `json:"root_mapping_external_id"`
+	ConnectorInstance       string     `json:"connector_instance"`
+	ExternalRootKey         string     `json:"external_root_key"`
+	ExternalAccountKey      string     `json:"external_account_key"`
+	Active                  bool       `json:"active"`
+	Enabled                 bool       `json:"enabled"`
+	ReceiveComments         bool       `json:"receive_comments"`
+	PublishComments         bool       `json:"publish_comments"`
+	CompleteExternal        bool       `json:"complete_external"`
+	PausedReason            string     `json:"paused_reason"`
+	LastExternalState       string     `json:"last_external_state"`
+	LastExternalRevision    string     `json:"last_external_revision"`
+	ReceiveCommentsAfter    *time.Time `json:"receive_comments_after,omitempty"`
+	PublishCommentsAfter    *time.Time `json:"publish_comments_after,omitempty"`
+	PendingCommentUID       string     `json:"pending_comment_uid"`
+	PendingCommentStartedAt *time.Time `json:"pending_comment_started_at,omitempty"`
+	LastAttemptAt           *time.Time `json:"last_attempt_at,omitempty"`
+	LastSuccessAt           *time.Time `json:"last_success_at,omitempty"`
+	LastErrorAt             *time.Time `json:"last_error_at,omitempty"`
+	LastError               string     `json:"last_error"`
+	ConsecutiveFailures     int        `json:"consecutive_failures"`
+	NextAttemptAt           *time.Time `json:"next_attempt_at,omitempty"`
+	CreatedAt               time.Time  `json:"created_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
+	UnboundAt               *time.Time `json:"unbound_at,omitempty"`
+}
+
+// ExternalFieldMappingExport is one portable global mapping revision. CreatedAt
+// participates in the stable identity used by field-state records so repeated
+// descriptor revisions remain distinct without exporting local integer IDs.
+type ExternalFieldMappingExport struct {
+	ConnectorInstance string    `json:"connector_instance"`
+	KataField         string    `json:"kata_field"`
+	ExternalFieldID   string    `json:"external_field_id"`
+	ExternalFieldName string    `json:"external_field_name"`
+	AcceptedKinds     []string  `json:"accepted_kinds"`
+	Nullable          bool      `json:"nullable"`
+	Writable          bool      `json:"writable"`
+	SchemaRevision    string    `json:"schema_revision"`
+	Active            bool      `json:"active"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+// ExternalFieldStateExport identifies its binding and mapping by portable
+// keys. MappingCreatedAt disambiguates repeated identical descriptor revisions.
+type ExternalFieldStateExport struct {
+	BindingUID               string          `json:"binding_uid"`
+	MappingConnectorInstance string          `json:"mapping_connector_instance"`
+	MappingKataField         string          `json:"mapping_kata_field"`
+	MappingExternalFieldID   string          `json:"mapping_external_field_id"`
+	MappingSchemaRevision    string          `json:"mapping_schema_revision"`
+	MappingCreatedAt         time.Time       `json:"mapping_created_at"`
+	Baseline                 json.RawMessage `json:"baseline,omitempty"`
+	ConflictKata             json.RawMessage `json:"conflict_kata,omitempty"`
+	ConflictExternal         json.RawMessage `json:"conflict_external,omitempty"`
+	Conflicted               bool            `json:"conflicted"`
+	ConflictAt               *time.Time      `json:"conflict_at,omitempty"`
+	UpdatedAt                time.Time       `json:"updated_at"`
 }
 
 // FederationBindingExport is one federation_bindings row in export shape.

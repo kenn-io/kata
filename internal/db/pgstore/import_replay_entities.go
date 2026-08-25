@@ -246,6 +246,17 @@ func pgReplayImportMapping(
 			return replayLinkMapping, nil
 		}
 	}
+	if mapping.ObjectType == "comment" && mapping.IssueID != nil && mapping.CommentID != nil {
+		var commentIssueID int64
+		if err := tx.QueryRowContext(ctx, `SELECT issue_id FROM comments WHERE id=$1`, *mapping.CommentID).Scan(&commentIssueID); err != nil {
+			return replayLinkInserted, pgReplayError(db.ImportKindImportMapping, err)
+		}
+		if commentIssueID != *mapping.IssueID {
+			return replayLinkInserted, pgReplayError(db.ImportKindImportMapping, fmt.Errorf(
+				"%w: comment mapping issue does not own comment", db.ErrExternalRootValidation,
+			))
+		}
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO import_mappings(
 id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at
 ) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,

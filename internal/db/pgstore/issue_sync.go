@@ -33,11 +33,17 @@ func (s *Store) UpsertIssueSyncBinding(
 	}
 	var binding db.IssueSyncBinding
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, params.ProjectID); err != nil {
+			return mapSQLError(err, nil)
+		}
 		if _, err := scanProject(tx.QueryRowContext(ctx,
 			projectSelect+` WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, params.ProjectID)); err != nil {
 			return err
 		}
 		if err := rejectFederationSpokeIssueSyncProject(ctx, tx, params.ProjectID); err != nil {
+			return err
+		}
+		if err := rejectExternalRootIssueSyncSourceTx(ctx, tx, params.ProjectID, params.SourceKey); err != nil {
 			return err
 		}
 		existing, err := scanIssueSyncBinding(tx.QueryRowContext(ctx,
@@ -90,6 +96,28 @@ VALUES($1,$2) ON CONFLICT(binding_id) DO NOTHING`, existing.ID, existing.Project
 		return err
 	})
 	return binding, err
+}
+
+func rejectExternalRootIssueSyncSourceTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	sourceKey string,
+) error {
+	var bindingID int64
+	err := tx.QueryRowContext(ctx, `SELECT b.id
+		FROM import_mappings m
+		JOIN issues i ON i.id=m.issue_id
+		JOIN external_root_bindings b ON b.issue_id=i.id AND b.active=1
+		WHERE m.project_id=$1 AND m.source=$2 AND m.object_type='issue'
+		LIMIT 1 FOR UPDATE OF i`, projectID, strings.TrimSpace(sourceKey)).Scan(&bindingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return mapSQLError(err, nil)
+	}
+	return db.ErrExternalRootIssueSyncConflict
 }
 
 // DisableIssueSyncBinding disables one project binding and releases its claim.

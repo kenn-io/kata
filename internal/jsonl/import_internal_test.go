@@ -65,6 +65,51 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			},
 		},
 		{
+			name: "comment keeps microsecond precision",
+			kind: KindComment,
+			data: `{"id":1,"uid":"` + otherUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04T00:21:07.000500Z"}`,
+			assert: func(t *testing.T, rec db.ImportRecord) {
+				require.NotNil(t, rec.Comment)
+				assert.Equal(t, "2026-05-04T00:21:07.000500Z", rec.Comment.CreatedAt)
+			},
+		},
+		{
+			name: "comment keeps nanosecond precision",
+			kind: KindComment,
+			data: `{"id":2,"uid":"` + projectUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04T00:21:07.000500900Z"}`,
+			assert: func(t *testing.T, rec db.ImportRecord) {
+				require.NotNil(t, rec.Comment)
+				assert.Equal(t, "2026-05-04T00:21:07.000500900Z", rec.Comment.CreatedAt)
+			},
+		},
+		{
+			name: "comment canonicalizes offset microsecond stamps",
+			kind: KindComment,
+			data: `{"id":3,"uid":"` + issueUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04T02:21:07.000500+02:00"}`,
+			assert: func(t *testing.T, rec db.ImportRecord) {
+				require.NotNil(t, rec.Comment)
+				assert.Equal(t, "2026-05-04T00:21:07.000500Z", rec.Comment.CreatedAt)
+			},
+		},
+		{
+			name: "comment canonicalizes variable-length fractions",
+			kind: KindComment,
+			data: `{"id":4,"uid":"` + otherUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04T00:21:07.0005Z"}`,
+			assert: func(t *testing.T, rec db.ImportRecord) {
+				require.NotNil(t, rec.Comment)
+				assert.Equal(t, "2026-05-04T00:21:07.000500Z", rec.Comment.CreatedAt)
+			},
+		},
+		{
+			name: "comment canonicalizes legacy nanosecond stamps",
+			kind: KindComment,
+			data: `{"id":5,"uid":"` + projectUID + `","issue_id":1,"author":"tester","body":"note","created_at":"2026-05-04 00:21:07.0005009 +0000 UTC"}`,
+			assert: func(t *testing.T, rec db.ImportRecord) {
+				require.NotNil(t, rec.Comment)
+				assert.Equal(t, "2026-05-04T00:21:07.000500900Z", rec.Comment.CreatedAt)
+			},
+		},
+		{
 			name: "link",
 			kind: KindLink,
 			data: `{"id":1,"project_id":1,"from_issue_id":1,"from_issue_uid":"` + issueUID + `","to_issue_id":2,"to_issue_uid":"` + otherUID + `","type":"blocks","author":"tester","created_at":"` + legacy + `"}`,

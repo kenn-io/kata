@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "a4f8495a566414a64a548b74a392f01f61afa9ff672484bde860fbba8f6e252b"
-	canonicalConstraintFingerprint = "53c7c7e43564e661f8b4c7fdda2a38c4588c0dbfc0371794ce5c800270dcf3ab"
-	canonicalIndexFingerprint      = "24c22eafa4d407a9567a592de7b437525d4f42a6efaf995581f551451f487ab8"
+	canonicalColumnFingerprint     = "ac18204f243ce27534e2dc584392492ff0deb4f9bad259b4eb40dc2db2131bd3"
+	canonicalConstraintFingerprint = "622da4ed2d6779e3f627ef3e4c8287ef6d1b4876a139ca9b6f7d8fa11a8192f4"
+	canonicalIndexFingerprint      = "e128126dddd2ce0bc37ac07a4cc98352f556f0e986c34e0e83b73d06594e848b"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -23,28 +23,31 @@ const (
 )
 
 var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
-	"api_tokens":             "id,token_hash,actor,name,created_at,last_used_at,revoked_at",
-	"comments":               "id,uid,issue_id,author,body,created_at",
-	"events":                 "id,uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,related_issue_id,related_issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at",
-	"federation_bindings":    "project_id,role,hub_url,hub_project_id,hub_project_uid,replay_horizon_event_id,pull_cursor_event_id,push_enabled,push_cursor_event_id,bound_actor,allow_insecure,enabled,created_at,updated_at,last_sync_at",
-	"federation_enrollments": "id,token_hash,spoke_instance_uid,project_id,capabilities,bound_actor,allow_adoption_snapshot_authors,adoption_baseline_open,adoption_baseline_next_source_event_id,adoption_baseline_end_source_event_id,created_at,updated_at,revoked_at",
-	"federation_quarantine":  "id,project_id,direction,first_event_id,last_event_id,event_uids,error,created_at,skipped_at,skipped_by,skip_reason",
-	"federation_sync_status": "project_id,last_pull_started_at,last_pull_success_at,last_push_started_at,last_push_success_at,last_error_at,last_error,last_reset_at",
-	"import_mappings":        "id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at",
-	"issue_claims":           "id,claim_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,purpose,claim_kind,acquired_at,expires_at,released_at,release_reason,revision,updated_at",
-	"issue_labels":           "issue_id,label,author,created_at",
-	"issue_sync_bindings":    "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at",
-	"issue_sync_status":      "binding_id,project_id,sync_started_at,last_attempt_at,last_success_at,last_error_at,last_error,last_created,last_updated,last_unchanged,last_comments",
-	"issues":                 "id,uid,project_id,short_id,title,body,status,closed_reason,owner,priority,author,created_at,updated_at,closed_at,deleted_at,metadata,revision,content_revision,recurrence_id,occurrence_key",
-	"issues_search":          "issue_id,tsv",
-	"links":                  "id,from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at",
-	"meta":                   "key,value",
-	"pending_claim_requests": "id,request_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,claim_kind,ttl_seconds,purpose,requested_at,last_attempt_at,last_error,rejected_at,resolved_at",
-	"project_aliases":        "id,project_id,alias_identity,alias_kind,created_at",
-	"project_purge_log":      "id,uid,origin_instance_uid,project_id,project_uid,project_name,issue_count,event_count,alias_count,comment_count,link_count,label_count,claim_count,pending_claim_request_count,events_deleted_min_id,events_deleted_max_id,purge_reset_after_event_id,actor,reason,purged_at",
-	"projects":               "id,uid,name,created_at,deleted_at,metadata,revision",
-	"purge_log":              "id,uid,origin_instance_uid,project_id,purged_issue_id,issue_uid,project_uid,project_name,issue_title,issue_author,comment_count,link_count,label_count,event_count,events_deleted_min_id,events_deleted_max_id,purge_reset_after_event_id,short_id,actor,reason,purged_at",
-	"recurrences":            "id,uid,project_id,rrule,dtstart,timezone,template_title,template_body,template_owner,template_priority,template_labels,template_metadata,next_occurrence_key,last_materialized_uid,author,revision,created_at,updated_at,deleted_at",
+	"api_tokens":              "id,token_hash,actor,name,created_at,last_used_at,revoked_at",
+	"comments":                "id,uid,issue_id,author,body,created_at",
+	"events":                  "id,uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,related_issue_id,related_issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at",
+	"external_field_mappings": "id,connector_instance,kata_field,external_field_id,external_field_name,accepted_kinds_json,nullable,writable,schema_revision,active,created_at,updated_at",
+	"external_field_states":   "binding_id,mapping_id,baseline_json,conflicted,conflict_kata,conflict_external,conflict_at,updated_at",
+	"external_root_bindings":  "id,uid,project_id,issue_id,root_mapping_id,connector_instance,external_root_key,external_account_key,active,enabled,paused_reason,receive_comments,receive_comments_after,publish_comments,publish_comments_after,complete_external,claim_token,claim_started_at,last_external_state,last_external_revision,pending_comment_uid,pending_comment_started_at,last_attempt_at,last_success_at,last_error_at,last_error,consecutive_failures,next_attempt_at,created_at,updated_at,unbound_at",
+	"federation_bindings":     "project_id,role,hub_url,hub_project_id,hub_project_uid,replay_horizon_event_id,pull_cursor_event_id,push_enabled,push_cursor_event_id,bound_actor,allow_insecure,enabled,created_at,updated_at,last_sync_at",
+	"federation_enrollments":  "id,token_hash,spoke_instance_uid,project_id,capabilities,bound_actor,allow_adoption_snapshot_authors,adoption_baseline_open,adoption_baseline_next_source_event_id,adoption_baseline_end_source_event_id,created_at,updated_at,revoked_at",
+	"federation_quarantine":   "id,project_id,direction,first_event_id,last_event_id,event_uids,error,created_at,skipped_at,skipped_by,skip_reason",
+	"federation_sync_status":  "project_id,last_pull_started_at,last_pull_success_at,last_push_started_at,last_push_success_at,last_error_at,last_error,last_reset_at",
+	"import_mappings":         "id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at",
+	"issue_claims":            "id,claim_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,purpose,claim_kind,acquired_at,expires_at,released_at,release_reason,revision,updated_at",
+	"issue_labels":            "issue_id,label,author,created_at",
+	"issue_sync_bindings":     "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at",
+	"issue_sync_status":       "binding_id,project_id,sync_started_at,last_attempt_at,last_success_at,last_error_at,last_error,last_created,last_updated,last_unchanged,last_comments",
+	"issues":                  "id,uid,project_id,short_id,title,body,status,closed_reason,owner,priority,author,created_at,updated_at,closed_at,deleted_at,metadata,revision,content_revision,recurrence_id,occurrence_key",
+	"issues_search":           "issue_id,tsv",
+	"links":                   "id,from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at",
+	"meta":                    "key,value",
+	"pending_claim_requests":  "id,request_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,claim_kind,ttl_seconds,purpose,requested_at,last_attempt_at,last_error,rejected_at,resolved_at",
+	"project_aliases":         "id,project_id,alias_identity,alias_kind,created_at",
+	"project_purge_log":       "id,uid,origin_instance_uid,project_id,project_uid,project_name,issue_count,event_count,alias_count,comment_count,link_count,label_count,claim_count,pending_claim_request_count,events_deleted_min_id,events_deleted_max_id,purge_reset_after_event_id,actor,reason,purged_at",
+	"projects":                "id,uid,name,created_at,deleted_at,metadata,revision",
+	"purge_log":               "id,uid,origin_instance_uid,project_id,purged_issue_id,issue_uid,project_uid,project_name,issue_title,issue_author,comment_count,link_count,label_count,event_count,events_deleted_min_id,events_deleted_max_id,purge_reset_after_event_id,short_id,actor,reason,purged_at",
+	"recurrences":             "id,uid,project_id,rrule,dtstart,timezone,template_title,template_body,template_owner,template_priority,template_labels,template_metadata,next_occurrence_key,last_materialized_uid,author,revision,created_at,updated_at,deleted_at",
 }
 
 var optionalVectorTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
@@ -65,6 +68,8 @@ idx_events_origin_project_id idx_events_hlc idx_events_content_hash idx_events_i
 idx_purge_log_reset idx_purge_log_project_reset idx_purge_log_issue idx_purge_log_issue_uid
 idx_purge_log_project_uid idx_purge_log_origin_instance idx_purge_log_short_id
 idx_project_purge_log_reset idx_project_purge_log_project_reset idx_federation_bindings_role_enabled
+idx_external_root_bindings_active_issue idx_external_root_bindings_active_root idx_external_root_bindings_due
+idx_external_field_mappings_active
 idx_issue_sync_bindings_due idx_issue_sync_status_project idx_issue_sync_status_due
 uniq_federation_quarantine_active idx_federation_enrollments_scope idx_federation_enrollments_spoke
 uniq_issue_claims_live_issue idx_issue_claims_project_issue idx_issue_claims_timed_expiry

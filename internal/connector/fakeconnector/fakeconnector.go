@@ -269,6 +269,26 @@ func (h *handler) ReadFields(_ context.Context, params connector.ReadFieldsParam
 	return connector.ReadFieldsResult{Fields: fields}, nil
 }
 
+// fieldValueEquivalent compares two field values semantically so canonical
+// formatting differences do not fail conditional writes.
+func fieldValueEquivalent(a, b connector.FieldValue) bool {
+	if a.Kind != b.Kind {
+		return false
+	}
+	switch a.Kind {
+	case "null":
+		return true
+	case "date", "local_datetime":
+		return a.Value == b.Value && a.Timezone == b.Timezone
+	case "instant":
+		left, leftErr := time.Parse(time.RFC3339Nano, a.Value)
+		right, rightErr := time.Parse(time.RFC3339Nano, b.Value)
+		return leftErr == nil && rightErr == nil && left.Equal(right)
+	default:
+		return a == b
+	}
+}
+
 func (h *handler) WriteFields(_ context.Context, params connector.WriteFieldsParams) (connector.WriteFieldsResult, *connector.Error) {
 	result := connector.WriteFieldsResult{Fields: make(map[string]connector.FieldValue, len(params.Fields))}
 	callErr := h.mutate("write_fields", func(current *State) *connector.Error {
@@ -283,6 +303,16 @@ func (h *handler) WriteFields(_ context.Context, params connector.WriteFieldsPar
 			}
 			if !descriptor.Writable || !acceptedValue(descriptor, value) {
 				return &connector.Error{Code: "invalid_field_value", Message: "field value is not accepted"}
+			}
+			// Compare-and-set applies only when expected values were sent.
+			if expected, sent := params.Expected[id]; sent {
+				current := connector.FieldValue{Kind: "null"}
+				if value, ok := root.Fields[id]; ok {
+					current = value
+				}
+				if !fieldValueEquivalent(current, expected) {
+					return &connector.Error{Code: connector.ErrorCodeFieldConflict, Message: "field " + id + " changed since it was read"}
+				}
 			}
 		}
 		if root.Fields == nil {

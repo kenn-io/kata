@@ -483,7 +483,8 @@ func (s *Store) validateSchema(ctx context.Context) error {
 }
 
 var canonicalTableNames = map[string]struct{}{
-	"api_tokens": {}, "comments": {}, "events": {}, "federation_bindings": {},
+	"api_tokens": {}, "comments": {}, "events": {}, "external_field_mappings": {},
+	"external_field_states": {}, "external_root_bindings": {}, "federation_bindings": {},
 	"federation_enrollments": {}, "federation_quarantine": {}, "federation_sync_status": {},
 	"import_mappings": {}, "issue_claims": {}, "issue_labels": {}, "issue_sync_bindings": {},
 	"issue_sync_status": {}, "issues": {}, "issues_search": {},

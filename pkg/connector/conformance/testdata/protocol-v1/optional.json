@@ -184,6 +184,71 @@
       ]
     },
     {
+      "name": "list-fields-without-capability",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-list-fields-unsupported", "method": "list_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "when": [
+        {"op": "not_contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/list-fields-without-capability/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/list-fields-without-capability/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/list-fields-without-capability/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/list-fields-without-capability/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/list-fields-without-capability/response/id"}, "expected": {"path": "/steps/list-fields-without-capability/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/list-fields-without-capability/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/list-fields-without-capability/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/list-fields-without-capability/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/list-fields-without-capability/response/error/message"}}
+      ]
+    },
+    {
+      "name": "read-fields-without-capability",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-fields-unsupported", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": []}},
+      "when": [
+        {"op": "not_contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/read-fields-without-capability/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/read-fields-without-capability/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/read-fields-without-capability/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/read-fields-without-capability/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/read-fields-without-capability/response/id"}, "expected": {"path": "/steps/read-fields-without-capability/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/read-fields-without-capability/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/read-fields-without-capability/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/read-fields-without-capability/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/read-fields-without-capability/response/error/message"}}
+      ]
+    },
+    {
+      "name": "write-fields-without-capability",
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-fields-unsupported", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {}, "expected": {}}},
+      "when": [
+        {"op": "not_contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/write-fields-without-capability/exchange/error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/write-fields-without-capability/exchange/decode_error"}, "expected": {"literal": false}},
+        {"op": "equal", "actual": {"path": "/steps/write-fields-without-capability/exchange/response_count"}, "expected": {"literal": 1}},
+        {"op": "equal", "actual": {"path": "/steps/write-fields-without-capability/response/protocol"}, "expected": {"path": "/contract/protocol"}},
+        {"op": "equal", "actual": {"path": "/steps/write-fields-without-capability/response/id"}, "expected": {"path": "/steps/write-fields-without-capability/request/id"}},
+        {"op": "absent", "actual": {"path": "/steps/write-fields-without-capability/response/result"}},
+        {"op": "present", "actual": {"path": "/steps/write-fields-without-capability/response/error"}},
+        {"op": "matches", "actual": {"path": "/steps/write-fields-without-capability/response/error/code"}, "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        {"op": "nonempty", "actual": {"path": "/steps/write-fields-without-capability/response/error/message"}}
+      ]
+    },
+    {
+      "name": "provider-after-unsupported-fields",
+      "observe": "provider_state",
+      "when": [
+        {"op": "not_contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
+      ],
+      "assert": [
+        {"op": "equal", "actual": {"path": "/steps/provider-after-unsupported-fields/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
+        {"op": "equal", "actual": {"path": "/steps/provider-after-unsupported-fields/provider/fields"}, "expected": {"path": "/captures/provider-field-baseline"}}
+      ]
+    },
+    {
       "name": "list-fields",
       "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-fields", "method": "list_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
       "when": [
@@ -244,8 +309,20 @@
           "name": "advertised-kind-round-trips",
           "repeat": {"over": {"path": "/contract/field_samples"}, "as": "sample", "steps": [
             {
+              "name": "read-field-before-write",
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-before-write", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+              ],
+              "assert": [
+                {"op": "absent", "actual": {"path": "/steps/read-field-before-write/response/error"}},
+                {"op": "count", "actual": {"path": "/steps/read-field-before-write/response/result/fields"}, "expected": {"literal": 1}}
+              ]
+            },
+            {
               "name": "write-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}, "expected": {"$ref": "/steps/read-field-before-write/response/result/fields"}}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
                 {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
@@ -296,6 +373,88 @@
                 {"op": "count", "actual": {"path": "/steps/read-field/response/result/fields"}, "expected": {"literal": 1}},
                 {"op": "entry_equal", "actual": {"path": "/steps/read-field/response/result/fields"}, "key": {"path": "/vars/descriptor/id"}, "expected": {"path": "/vars/sample"}}
               ]
+            },
+            {
+              "name": "advance-date-field",
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-date", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "date", "value": "2099-12-31"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "equal", "actual": {"path": "/vars/sample/kind"}, "expected": {"literal": "date"}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": "date"}}
+              ],
+              "assert": [
+                {"op": "present", "actual": {"path": "/steps/advance-date-field/response/result"}},
+                {"op": "absent", "actual": {"path": "/steps/advance-date-field/response/error"}}
+              ]
+            },
+            {
+              "name": "advance-local-datetime-field",
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-local", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "local_datetime", "value": "2099-12-31T23:59:59", "timezone": "UTC"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "equal", "actual": {"path": "/vars/sample/kind"}, "expected": {"literal": "local_datetime"}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": "local_datetime"}}
+              ],
+              "assert": [
+                {"op": "present", "actual": {"path": "/steps/advance-local-datetime-field/response/result"}},
+                {"op": "absent", "actual": {"path": "/steps/advance-local-datetime-field/response/error"}}
+              ]
+            },
+            {
+              "name": "advance-instant-field",
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-instant", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "instant", "value": "2099-12-31T23:59:59Z"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "equal", "actual": {"path": "/vars/sample/kind"}, "expected": {"literal": "instant"}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"literal": "instant"}}
+              ],
+              "assert": [
+                {"op": "present", "actual": {"path": "/steps/advance-instant-field/response/result"}},
+                {"op": "absent", "actual": {"path": "/steps/advance-instant-field/response/error"}}
+              ]
+            },
+            {
+              "name": "provider-after-field-advance",
+              "observe": "provider_state",
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+              ],
+              "assert": [
+                {"op": "array_appended", "actual": {"path": "/steps/provider-after-field-advance/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
+                {"op": "entry_equal", "actual": {"path": "/steps/provider-after-field-advance/provider/mutations", "last": true}, "key": {"literal": "method"}, "expected": {"literal": "write_fields"}}
+              ],
+              "capture": [
+                {"name": "mutation-log", "value": {"path": "/steps/provider-after-field-advance/provider/mutations"}},
+                {"name": "advanced-field-state", "value": {"path": "/steps/provider-after-field-advance/provider/fields"}}
+              ]
+            },
+            {
+              "name": "reject-stale-field-write",
+              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-stale", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample"}}]}}},
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+              ],
+              "assert": [
+                {"op": "present", "actual": {"path": "/steps/reject-stale-field-write/response/error"}},
+                {"op": "equal", "actual": {"path": "/steps/reject-stale-field-write/response/error/code"}, "expected": {"literal": "field_conflict"}},
+                {"op": "absent", "actual": {"path": "/steps/reject-stale-field-write/response/result"}}
+              ]
+            },
+            {
+              "name": "provider-after-stale-field-write",
+              "observe": "provider_state",
+              "when": [
+                {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+                {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
+                {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/kind"}}
+              ],
+              "assert": [
+                {"op": "equal", "actual": {"path": "/steps/provider-after-stale-field-write/provider/mutations"}, "expected": {"path": "/captures/mutation-log"}},
+                {"op": "equal", "actual": {"path": "/steps/provider-after-stale-field-write/provider/fields"}, "expected": {"path": "/captures/advanced-field-state"}}
+              ]
             }
           ]},
           "assert": [
@@ -303,8 +462,20 @@
           ]
         },
         {
+          "name": "read-field-before-null",
+          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-before-null", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+          "when": [
+            {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
+            {"op": "equal", "actual": {"path": "/vars/descriptor/nullable"}, "expected": {"literal": true}}
+          ],
+          "assert": [
+            {"op": "absent", "actual": {"path": "/steps/read-field-before-null/response/error"}},
+            {"op": "count", "actual": {"path": "/steps/read-field-before-null/response/result/fields"}, "expected": {"literal": 1}}
+          ]
+        },
+        {
           "name": "write-null-field",
-          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-null", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "null"}}]}}},
+          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-null", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "null"}}]}, "expected": {"$ref": "/steps/read-field-before-null/response/result/fields"}}},
           "when": [
             {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
             {"op": "equal", "actual": {"path": "/vars/descriptor/nullable"}, "expected": {"literal": true}}

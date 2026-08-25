@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/shortid"
@@ -65,6 +66,11 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	if recurrenceID != nil {
 		return out, &db.RecurrencePinnedError{}
 	}
+	if err := lockAndRejectFreshExternalRootClaimsForIssueTx(
+		ctx, tx, in.IssueID, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter),
+	); err != nil {
+		return out, err
+	}
 
 	var (
 		toProjectUID  string
@@ -81,6 +87,20 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	}
 	if err := ensureProjectWritableTx(ctx, tx, in.ToProjectID); err != nil {
 		return out, err
+	}
+	if err := rejectIssueMoveExternalRootIssueSyncTx(
+		ctx, tx, in.IssueID, in.FromProjectID, in.ToProjectID,
+	); err != nil {
+		return out, err
+	}
+	mappingCollisions, err := issueMoveImportMappingCollisions(
+		ctx, tx, in.IssueID, in.FromProjectID, in.ToProjectID,
+	)
+	if err != nil {
+		return out, err
+	}
+	if len(mappingCollisions) > 0 {
+		return out, &db.ProjectMergeImportMappingCollisionError{Mappings: mappingCollisions}
 	}
 
 	newShortID, err := assignShortIDIn(ctx, tx,
@@ -112,51 +132,6 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		return out, fmt.Errorf("rehome pending claim requests: %w", err)
 	}
 
-	// Rehome import_mappings rows for the moved issue. The UNIQUE constraint on
-	// import_mappings is (source, external_id, object_type, project_id). If the
-	// target project already has a row for the same (source, external_id,
-	// object_type), the UPDATE would violate UNIQUE — collect the colliding IDs
-	// and delete them first (the target mapping is already authoritative).
-	type collisionKey struct {
-		source, externalID, objectType string
-	}
-	collisionRows, err := tx.QueryContext(ctx, `
-		SELECT m.id, m.source, m.external_id, m.object_type
-		  FROM import_mappings m
-		 WHERE m.issue_id = ? AND m.project_id = ?
-		   AND EXISTS (
-		       SELECT 1 FROM import_mappings t
-		        WHERE t.project_id  = ?
-		          AND t.source      = m.source
-		          AND t.external_id = m.external_id
-		          AND t.object_type = m.object_type
-		   )`,
-		in.IssueID, in.FromProjectID, in.ToProjectID,
-	)
-	if err != nil {
-		return out, fmt.Errorf("find colliding import_mappings: %w", err)
-	}
-	var collidingIDs []int64
-	for collisionRows.Next() {
-		var id int64
-		var k collisionKey
-		if err := collisionRows.Scan(&id, &k.source, &k.externalID, &k.objectType); err != nil {
-			_ = collisionRows.Close()
-			return out, fmt.Errorf("scan colliding import_mappings: %w", err)
-		}
-		collidingIDs = append(collidingIDs, id)
-	}
-	if err := collisionRows.Close(); err != nil {
-		return out, fmt.Errorf("close collision rows: %w", err)
-	}
-	if err := collisionRows.Err(); err != nil {
-		return out, fmt.Errorf("iterate collision rows: %w", err)
-	}
-	for _, id := range collidingIDs {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM import_mappings WHERE id = ?`, id); err != nil {
-			return out, fmt.Errorf("drop colliding import_mapping %d: %w", id, err)
-		}
-	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE import_mappings
 		   SET project_id = ?
@@ -164,6 +139,14 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		in.ToProjectID, in.IssueID, in.FromProjectID,
 	); err != nil {
 		return out, fmt.Errorf("rehome import_mappings: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE external_root_bindings
+		   SET project_id = ?
+		 WHERE issue_id = ?`,
+		in.ToProjectID, in.IssueID,
+	); err != nil {
+		return out, fmt.Errorf("rehome external root bindings: %w", err)
 	}
 
 	payload, _ := json.Marshal(map[string]string{
@@ -199,4 +182,67 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	out.NewShortID = newShortID
 	out.NewRevision = newRev
 	return out, nil
+}
+
+func rejectIssueMoveExternalRootIssueSyncTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	issueID int64,
+	sourceProjectID int64,
+	targetProjectID int64,
+) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE projects SET id=id WHERE id=?`, targetProjectID); err != nil {
+		return fmt.Errorf("lock issue move target project: %w", err)
+	}
+	var bindingID int64
+	err := tx.QueryRowContext(ctx, `SELECT b.id
+		FROM external_root_bindings b
+		JOIN import_mappings m ON m.issue_id=b.issue_id
+		JOIN issue_sync_bindings s ON s.project_id=? AND s.source_key=m.source
+		WHERE b.issue_id=? AND b.active=1
+		  AND m.project_id=? AND m.object_type='issue'
+		LIMIT 1`, targetProjectID, issueID, sourceProjectID).Scan(&bindingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check issue move external root ownership: %w", err)
+	}
+	return db.ErrExternalRootIssueSyncConflict
+}
+
+func issueMoveImportMappingCollisions(
+	ctx context.Context,
+	tx *sql.Tx,
+	issueID int64,
+	sourceProjectID int64,
+	targetProjectID int64,
+) ([]db.ProjectMergeImportMappingCollision, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT source.source, source.external_id, source.object_type
+		  FROM import_mappings source
+		  JOIN import_mappings target
+		    ON target.project_id = ?
+		   AND target.source = source.source
+		   AND target.external_id = source.external_id
+		   AND target.object_type = source.object_type
+		 WHERE source.issue_id = ? AND source.project_id = ?
+		 ORDER BY source.source, source.object_type, source.external_id
+		 LIMIT 20`, targetProjectID, issueID, sourceProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("check issue move import mapping collisions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var collisions []db.ProjectMergeImportMappingCollision
+	for rows.Next() {
+		var collision db.ProjectMergeImportMappingCollision
+		if err := rows.Scan(&collision.Source, &collision.ExternalID, &collision.ObjectType); err != nil {
+			return nil, fmt.Errorf("scan issue move import mapping collision: %w", err)
+		}
+		collisions = append(collisions, collision)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate issue move import mapping collisions: %w", err)
+	}
+	return collisions, nil
 }

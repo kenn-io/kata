@@ -16,7 +16,11 @@ const federationPushEventTypeList = `(
   'issue.soft_deleted', 'issue.restored', 'issue.commented', 'issue.comment_edited',
   'issue.assigned', 'issue.unassigned', 'issue.priority_set', 'issue.priority_cleared',
   'issue.labeled', 'issue.unlabeled',
-  'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated'
+  'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated',
+  'issue.external_root_bound', 'issue.external_root_paused',
+  'issue.external_root_resumed', 'issue.external_root_unbound',
+  'issue.external_comment_resolved', 'issue.external_field_conflicted',
+  'issue.external_field_resolved'
 )`
 
 func pgFederationPushEventTypeCondition(column string) string {

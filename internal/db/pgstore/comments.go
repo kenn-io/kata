@@ -1,11 +1,13 @@
 package pgstore
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -110,6 +112,22 @@ func (s *Store) editComment(
 		}
 		if comment.Body == params.Body {
 			return nil
+		}
+		var externallyOwned bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1
+			FROM import_mappings m
+			JOIN comments c ON c.id = m.comment_id AND c.issue_id = m.issue_id
+			JOIN external_root_bindings b
+			  ON b.project_id = m.project_id
+			 AND b.issue_id = m.issue_id
+			 AND m.source = 'connector:' || b.connector_instance || ':binding:' || b.uid
+			WHERE m.object_type = 'comment' AND m.comment_id = $1 AND b.active = 1
+		)`, comment.ID).Scan(&externallyOwned); err != nil {
+			return fmt.Errorf("check external comment ownership: %w", mapSQLError(err, nil))
+		}
+		if externallyOwned {
+			return db.ErrExternalCommentContentOwned
 		}
 		editedAt := nowStoredTimestamp()
 		comment, err = scanComment(tx.QueryRowContext(ctx,
@@ -254,7 +272,7 @@ func (s *Store) CommentBodyByID(ctx context.Context, id int64) (string, error) {
 // CommentsByIssue returns comments in stable chronological order.
 func (s *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
 	rows, err := s.QueryContext(ctx,
-		commentSelect+` WHERE issue_id = $1 ORDER BY created_at ASC, id ASC`, issueID)
+		commentSelect+` WHERE issue_id = $1`, issueID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -267,7 +285,20 @@ func (s *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 		}
 		comments = append(comments, comment)
 	}
-	return comments, mapSQLError(rows.Err(), nil)
+	if err := rows.Err(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	sortCommentsByCreatedAt(comments)
+	return comments, nil
+}
+
+func sortCommentsByCreatedAt(comments []db.Comment) {
+	slices.SortFunc(comments, func(a, b db.Comment) int {
+		if order := a.CreatedAt.Compare(b.CreatedAt); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
 }
 
 func scanComment(row rowScanner) (db.Comment, error) {

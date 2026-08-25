@@ -14,6 +14,17 @@ import (
 
 const projectSelect = `SELECT id, uid, name, metadata, revision, created_at, deleted_at FROM projects`
 const storedTimeFormat = "2006-01-02T15:04:05.000Z"
+const externalObservationTimeFormat = "2006-01-02T15:04:05.000000000Z"
+
+// importedCommentTimeFormat preserves sub-millisecond comment ordering at
+// PostgreSQL's timestamptz resolution. Imported comment storage and their
+// issue.commented payloads must use the same formatter so replay and
+// federation consumers reconstruct the stored instant exactly.
+const importedCommentTimeFormat = "2006-01-02T15:04:05.000000Z"
+
+func formatImportedCommentTime(value time.Time) string {
+	return value.UTC().Truncate(time.Microsecond).Format(importedCommentTimeFormat)
+}
 
 type rowScanner interface {
 	Scan(...any) error
@@ -271,5 +282,9 @@ func parseStoredTime(value string) (time.Time, error) {
 }
 
 func formatStoredTime(value time.Time) string { return value.UTC().Format(storedTimeFormat) }
+
+func formatExternalObservationTime(value time.Time) string {
+	return value.UTC().Format(externalObservationTimeFormat)
+}
 
 func nowStoredTimestamp() string { return formatStoredTime(time.Now()) }

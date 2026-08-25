@@ -353,6 +353,9 @@ func (s *Store) updateImportedIssue(
 	existing db.Issue,
 	project db.Project,
 ) (db.Issue, db.Event, error) {
+	if err := rejectExternalRootContentMutationTx(ctx, tx, existing.ID, item.Title != existing.Title || item.Body != existing.Body); err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
 	createdAt := existing.CreatedAt
 	if item.CreatedAt.Before(createdAt) {
 		createdAt = item.CreatedAt
@@ -397,6 +400,9 @@ func (s *Store) updateImportedPresentationTitle(
 	existing db.Issue,
 	project db.Project,
 ) (db.Issue, db.Event, error) {
+	if err := rejectExternalRootContentMutationTx(ctx, tx, existing.ID, item.Title != existing.Title); err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues SET title=$1,content_revision=content_revision+1 WHERE id=$2`, item.Title, existing.ID); err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported title: %w", mapSQLError(err, nil))

@@ -703,6 +703,85 @@ func checkImportFederationActor(ctx context.Context, t *testing.T, store db.Stor
 	return nil
 }
 
+// checkImportCommentTimestampPrecision verifies that imported comments keep
+// sub-millisecond precision in storage and in their issue.commented event
+// payloads so replay and federation consumers reconstruct the exact instants
+// and ordering. Both comments share one millisecond; backends may round to
+// microsecond storage but must never collapse to the millisecond.
+func checkImportCommentTimestampPrecision(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "external-import-precision")
+	if err != nil {
+		return err
+	}
+	base := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
+	firstAt := base.Add(500 * time.Microsecond)
+	secondAt := base.Add(900 * time.Microsecond)
+	if _, _, err := store.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: project.ID, Source: "tracker", Actor: "import-agent",
+		Items: []db.ImportItem{{
+			ExternalID: "precision-issue", Title: "Precision", Body: "body", Author: "alice",
+			Status: "open", CreatedAt: base, UpdatedAt: secondAt,
+			Comments: []db.ImportComment{
+				{ExternalID: "precision-comment-first", Author: "bob", Body: "first", CreatedAt: firstAt},
+				{ExternalID: "precision-comment-second", Author: "bob", Body: "second", CreatedAt: secondAt},
+			},
+		}},
+	}); err != nil {
+		return err
+	}
+	mapping, err := store.ImportMappingBySource(ctx, project.ID, "tracker", "issue", "precision-issue")
+	if err != nil {
+		return err
+	}
+	require.NotNil(t, mapping.IssueID)
+	comments, err := store.CommentsByIssue(ctx, *mapping.IssueID)
+	if err != nil {
+		return err
+	}
+	require.Len(t, comments, 2)
+	assert.Equal(t, "first", comments[0].Body)
+	assert.Equal(t, "second", comments[1].Body)
+	assert.True(t, comments[0].CreatedAt.Equal(firstAt),
+		"stored first comment time %v must keep sub-millisecond precision %v", comments[0].CreatedAt, firstAt)
+	assert.True(t, comments[1].CreatedAt.Equal(secondAt),
+		"stored second comment time %v must keep sub-millisecond precision %v", comments[1].CreatedAt, secondAt)
+
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{
+		AfterID: 0, ProjectID: project.ID, Limit: 100,
+	})
+	if err != nil {
+		return err
+	}
+	foldEvents := make([]db.FoldEvent, 0, len(events))
+	for _, event := range events {
+		foldEvents = append(foldEvents, db.FoldEvent{
+			UID:               event.UID,
+			OriginInstanceUID: event.OriginInstanceUID,
+			ProjectUID:        event.ProjectUID,
+			IssueUID:          pointerString(event.IssueUID),
+			RelatedIssueUID:   pointerString(event.RelatedIssueUID),
+			Type:              event.Type,
+			Actor:             event.Actor,
+			HLCPhysicalMS:     event.HLCPhysicalMS,
+			HLCCounter:        event.HLCCounter,
+			CreatedAt:         event.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+			Payload:           json.RawMessage(event.Payload),
+		})
+	}
+	folded := db.FoldEvents(foldEvents)
+	for _, comment := range comments {
+		foldedComment, ok := folded.Comments[comment.UID]
+		require.True(t, ok, "comment %s must replay from its events", comment.UID)
+		replayedAt, err := time.Parse(time.RFC3339Nano, foldedComment.CreatedAt)
+		require.NoError(t, err)
+		assert.True(t, replayedAt.Equal(comment.CreatedAt),
+			"replayed comment %s time %v must equal stored time %v", comment.UID, replayedAt, comment.CreatedAt)
+	}
+	return nil
+}
+
 func importLabelNames(labels []db.IssueLabel) []string {
 	output := make([]string, len(labels))
 	for index := range labels {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -87,7 +88,8 @@ func (s *Store) ExportSequences(ctx context.Context) iter.Seq2[db.SequenceExport
 ('projects'),('project_aliases'),('recurrences'),('issue_sync_bindings'),('issues'),
 ('comments'),('links'),('import_mappings'),('events'),('purge_log'),
 ('project_purge_log'),('api_tokens'),('federation_quarantine'),
-('federation_enrollments'),('issue_claims'),('pending_claim_requests')
+('federation_enrollments'),('issue_claims'),('pending_claim_requests'),
+('external_root_bindings'),('external_field_mappings')
 )
 SELECT t.name, COALESCE(s.last_value,0)
 FROM identity_tables t
@@ -376,6 +378,200 @@ WHERE links.id = import_mappings.link_id
 				&record.SourceUpdatedAt, &record.ImportedAt); err != nil {
 				return db.ImportMappingExport{}, pgExportScanError("import_mapping", err)
 			}
+			return record, nil
+		})
+}
+
+// ExportExternalFieldMappings streams mapping history using portable
+// descriptor identities. Project-filtered exports retain active mappings for
+// bound connector instances plus historical mappings referenced by field state.
+func (s *Store) ExportExternalFieldMappings(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.ExternalFieldMappingExport, error] {
+	query := `SELECT m.connector_instance, m.kata_field, m.external_field_id,
+       m.external_field_name, m.accepted_kinds_json, m.nullable, m.writable,
+       m.schema_revision, m.active, m.created_at, m.updated_at
+  FROM external_field_mappings m`
+	var args []any
+	if filter.ProjectID != nil {
+		query += ` WHERE (m.active = 1 AND EXISTS (
+	SELECT 1 FROM external_root_bindings b
+	JOIN issues i ON i.id = b.issue_id
+	WHERE b.connector_instance = m.connector_instance AND b.project_id = $1`
+		if !filter.IncludeDeleted {
+			query += ` AND i.deleted_at IS NULL`
+		}
+		query += `)) OR EXISTS (
+	SELECT 1 FROM external_field_states s
+	JOIN external_root_bindings b ON b.id = s.binding_id
+JOIN issues i ON i.id = b.issue_id
+WHERE s.mapping_id = m.id AND b.project_id = $1`
+		args = append(args, *filter.ProjectID)
+		if !filter.IncludeDeleted {
+			query += ` AND i.deleted_at IS NULL`
+		}
+		query += `)`
+	}
+	query += ` ORDER BY m.id ASC`
+	return streamExportRows(ctx, s, "external_field_mappings", query, args,
+		func(rows *sql.Rows) (db.ExternalFieldMappingExport, error) {
+			var record db.ExternalFieldMappingExport
+			var acceptedKinds, createdAt, updatedAt string
+			var nullable, writable, active int
+			if err := rows.Scan(&record.ConnectorInstance, &record.KataField,
+				&record.ExternalFieldID, &record.ExternalFieldName, &acceptedKinds,
+				&nullable, &writable, &record.SchemaRevision, &active,
+				&createdAt, &updatedAt); err != nil {
+				return db.ExternalFieldMappingExport{}, pgExportScanError("external_field_mapping", err)
+			}
+			if err := json.Unmarshal([]byte(acceptedKinds), &record.AcceptedKinds); err != nil {
+				return db.ExternalFieldMappingExport{}, fmt.Errorf("external field mapping accepted kinds: %w", err)
+			}
+			var err error
+			if record.CreatedAt, err = parseStoredTime(createdAt); err != nil {
+				return db.ExternalFieldMappingExport{}, pgExportScanError("external_field_mapping created_at", err)
+			}
+			if record.UpdatedAt, err = parseStoredTime(updatedAt); err != nil {
+				return db.ExternalFieldMappingExport{}, pgExportScanError("external_field_mapping updated_at", err)
+			}
+			record.Nullable, record.Writable, record.Active = nullable != 0, writable != 0, active != 0
+			return record, nil
+		})
+}
+
+// ExportExternalRootBindings omits live claims and all connector runtime
+// configuration while retaining durable delivery and uncertainty state.
+func (s *Store) ExportExternalRootBindings(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.ExternalRootBindingExport, error] {
+	query := `SELECT b.uid, p.uid, i.uid, rm.source, rm.external_id,
+       b.connector_instance, b.external_root_key, b.external_account_key,
+       b.active, b.enabled, b.receive_comments, b.publish_comments,
+       b.complete_external, b.paused_reason, b.last_external_state,
+       b.last_external_revision, b.receive_comments_after,
+       b.publish_comments_after, b.pending_comment_uid,
+       b.pending_comment_started_at, b.last_attempt_at, b.last_success_at,
+       b.last_error_at, b.last_error, b.consecutive_failures,
+       b.next_attempt_at, b.created_at, b.updated_at, b.unbound_at
+  FROM external_root_bindings b
+  JOIN projects p ON p.id = b.project_id
+  JOIN issues i ON i.id = b.issue_id
+  JOIN import_mappings rm ON rm.id = b.root_mapping_id`
+	var clauses []string
+	var args []any
+	if filter.ProjectID != nil {
+		clauses = append(clauses, `b.project_id = $1`)
+		args = append(args, *filter.ProjectID)
+	}
+	if !filter.IncludeDeleted {
+		clauses = append(clauses, `i.deleted_at IS NULL`)
+	}
+	query += pgJoinClauses(clauses) + ` ORDER BY b.id ASC`
+	return streamExportRows(ctx, s, "external_root_bindings", query, args,
+		func(rows *sql.Rows) (db.ExternalRootBindingExport, error) {
+			var record db.ExternalRootBindingExport
+			var active, enabled, receive, publish, complete int
+			var receiveAfter, publishAfter, pendingStarted sql.NullString
+			var lastAttempt, lastSuccess, lastErrorAt, nextAttempt, unboundAt sql.NullString
+			var createdAt, updatedAt string
+			if err := rows.Scan(&record.UID, &record.ProjectUID, &record.IssueUID,
+				&record.RootMappingSource, &record.RootMappingExternalID,
+				&record.ConnectorInstance, &record.ExternalRootKey, &record.ExternalAccountKey,
+				&active, &enabled, &receive, &publish, &complete, &record.PausedReason,
+				&record.LastExternalState, &record.LastExternalRevision,
+				&receiveAfter, &publishAfter, &record.PendingCommentUID, &pendingStarted,
+				&lastAttempt, &lastSuccess, &lastErrorAt, &record.LastError,
+				&record.ConsecutiveFailures, &nextAttempt, &createdAt, &updatedAt,
+				&unboundAt); err != nil {
+				return db.ExternalRootBindingExport{}, pgExportScanError("external_root_binding", err)
+			}
+			var err error
+			if record.CreatedAt, err = parseStoredTime(createdAt); err != nil {
+				return db.ExternalRootBindingExport{}, pgExportScanError("external_root_binding created_at", err)
+			}
+			if record.UpdatedAt, err = parseStoredTime(updatedAt); err != nil {
+				return db.ExternalRootBindingExport{}, pgExportScanError("external_root_binding updated_at", err)
+			}
+			optionalTimes := []struct {
+				source sql.NullString
+				target **time.Time
+			}{
+				{receiveAfter, &record.ReceiveCommentsAfter}, {publishAfter, &record.PublishCommentsAfter},
+				{pendingStarted, &record.PendingCommentStartedAt}, {lastAttempt, &record.LastAttemptAt},
+				{lastSuccess, &record.LastSuccessAt}, {lastErrorAt, &record.LastErrorAt},
+				{nextAttempt, &record.NextAttemptAt}, {unboundAt, &record.UnboundAt},
+			}
+			for _, optional := range optionalTimes {
+				if !optional.source.Valid {
+					continue
+				}
+				parsed, parseErr := parseStoredTime(optional.source.String)
+				if parseErr != nil {
+					return db.ExternalRootBindingExport{}, pgExportScanError("external_root_binding timestamp", parseErr)
+				}
+				*optional.target = &parsed
+			}
+			record.Active, record.Enabled = active != 0, enabled != 0
+			record.ReceiveComments, record.PublishComments = receive != 0, publish != 0
+			record.CompleteExternal = complete != 0
+			return record, nil
+		})
+}
+
+// ExportExternalFieldStates retains JSON values byte-for-byte while replacing
+// local integer references with stable identities.
+func (s *Store) ExportExternalFieldStates(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.ExternalFieldStateExport, error] {
+	query := `SELECT b.uid, m.connector_instance, m.kata_field,
+       m.external_field_id, m.schema_revision, m.created_at,
+       s.baseline_json, s.conflict_kata, s.conflict_external,
+       s.conflicted, s.conflict_at, s.updated_at
+  FROM external_field_states s
+  JOIN external_root_bindings b ON b.id = s.binding_id
+  JOIN external_field_mappings m ON m.id = s.mapping_id
+  JOIN issues i ON i.id = b.issue_id`
+	var clauses []string
+	var args []any
+	if filter.ProjectID != nil {
+		clauses = append(clauses, `b.project_id = $1`)
+		args = append(args, *filter.ProjectID)
+	}
+	if !filter.IncludeDeleted {
+		clauses = append(clauses, `i.deleted_at IS NULL`)
+	}
+	query += pgJoinClauses(clauses) + ` ORDER BY b.id ASC, m.id ASC`
+	return streamExportRows(ctx, s, "external_field_states", query, args,
+		func(rows *sql.Rows) (db.ExternalFieldStateExport, error) {
+			var record db.ExternalFieldStateExport
+			var mappingCreatedAt, updatedAt string
+			var baseline, conflictKata, conflictExternal, conflictAt sql.NullString
+			var conflicted int
+			if err := rows.Scan(&record.BindingUID, &record.MappingConnectorInstance,
+				&record.MappingKataField, &record.MappingExternalFieldID,
+				&record.MappingSchemaRevision, &mappingCreatedAt, &baseline,
+				&conflictKata, &conflictExternal, &conflicted, &conflictAt,
+				&updatedAt); err != nil {
+				return db.ExternalFieldStateExport{}, pgExportScanError("external_field_state", err)
+			}
+			var err error
+			if record.MappingCreatedAt, err = parseStoredTime(mappingCreatedAt); err != nil {
+				return db.ExternalFieldStateExport{}, pgExportScanError("external_field_state mapping_created_at", err)
+			}
+			if record.UpdatedAt, err = parseStoredTime(updatedAt); err != nil {
+				return db.ExternalFieldStateExport{}, pgExportScanError("external_field_state updated_at", err)
+			}
+			if conflictAt.Valid {
+				parsed, parseErr := parseStoredTime(conflictAt.String)
+				if parseErr != nil {
+					return db.ExternalFieldStateExport{}, pgExportScanError("external_field_state conflict_at", parseErr)
+				}
+				record.ConflictAt = &parsed
+			}
+			if baseline.Valid {
+				record.Baseline = json.RawMessage(baseline.String)
+			}
+			if conflictKata.Valid {
+				record.ConflictKata = json.RawMessage(conflictKata.String)
+			}
+			if conflictExternal.Valid {
+				record.ConflictExternal = json.RawMessage(conflictExternal.String)
+			}
+			record.Conflicted = conflicted != 0
 			return record, nil
 		})
 }

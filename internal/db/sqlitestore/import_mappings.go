@@ -30,6 +30,57 @@ func (d *Store) UpsertImportMapping(ctx context.Context, p db.ImportMappingParam
 }
 
 func upsertImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingParams) (db.ImportMapping, error) {
+	return upsertImportMappingWithExternalRootAccess(ctx, e, p, false)
+}
+
+func upsertExternalRootImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingParams) (db.ImportMapping, error) {
+	return upsertImportMappingWithExternalRootAccess(ctx, e, p, true)
+}
+
+func upsertImportMappingWithExternalRootAccess(
+	ctx context.Context,
+	e execQuerier,
+	p db.ImportMappingParams,
+	allowExternalRootUpdate bool,
+) (db.ImportMapping, error) {
+	if err := validateBindingScopedCommentMapping(ctx, e, p); err != nil {
+		return db.ImportMapping{}, err
+	}
+	if p.ObjectType == "issue" {
+		var boundIssueID int64
+		err := e.QueryRowContext(ctx, `SELECT b.issue_id
+  FROM external_root_bindings b
+  JOIN import_mappings m ON m.id = b.root_mapping_id
+ WHERE m.source = ? AND m.external_id = ? AND m.object_type = ? AND m.project_id = ?
+ LIMIT 1`, p.Source, p.ExternalID, p.ObjectType, p.ProjectID).Scan(&boundIssueID)
+		if err == nil && (p.IssueID == nil || boundIssueID != *p.IssueID) {
+			return db.ImportMapping{}, fmt.Errorf("%w: external root mapping cannot be retargeted", db.ErrExternalRootAlreadyBound)
+		}
+		if err == nil && (p.CommentID != nil || p.LinkID != nil || p.Label != nil) {
+			return db.ImportMapping{}, fmt.Errorf("%w: external root mapping target must be its bound issue", db.ErrExternalRootValidation)
+		}
+		if err == nil && !allowExternalRootUpdate {
+			return db.ImportMapping{}, fmt.Errorf("%w: external root mapping can only be updated by its connector", db.ErrExternalRootAlreadyBound)
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return db.ImportMapping{}, fmt.Errorf("check external root mapping target: %w", err)
+		}
+		if p.IssueID != nil {
+			var bindingID int64
+			err = e.QueryRowContext(ctx, `SELECT b.id
+  FROM issue_sync_bindings s
+  JOIN external_root_bindings b
+    ON b.project_id = s.project_id AND b.issue_id = ? AND b.active = 1
+ WHERE s.project_id = ? AND s.source_key = ?
+ LIMIT 1`, *p.IssueID, p.ProjectID, p.Source).Scan(&bindingID)
+			if err == nil {
+				return db.ImportMapping{}, db.ErrExternalRootIssueSyncConflict
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return db.ImportMapping{}, fmt.Errorf("check import mapping external root ownership: %w", err)
+			}
+		}
+	}
 	_, err := e.ExecContext(ctx, `INSERT INTO import_mappings(
 		source, external_id, object_type, project_id, issue_id, comment_id, link_id, label, source_updated_at
 	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -45,6 +96,38 @@ func upsertImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingP
 		return db.ImportMapping{}, fmt.Errorf("upsert import mapping: %w", err)
 	}
 	return importMappingBySource(ctx, e, p.ProjectID, p.Source, p.ObjectType, p.ExternalID)
+}
+
+func validateBindingScopedCommentMapping(ctx context.Context, e execQuerier, p db.ImportMappingParams) error {
+	if p.ObjectType != "comment" {
+		return nil
+	}
+	var bindingIssueID int64
+	err := e.QueryRowContext(ctx, `SELECT issue_id
+		FROM external_root_bindings
+		WHERE project_id = ?
+		  AND ? = 'connector:' || connector_instance || ':binding:' || uid
+		LIMIT 1`, p.ProjectID, p.Source).Scan(&bindingIssueID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check external comment mapping binding: %w", err)
+	}
+	if p.IssueID == nil || p.CommentID == nil || *p.IssueID != bindingIssueID {
+		return fmt.Errorf("%w: external comment mapping must target its binding issue", db.ErrExternalRootValidation)
+	}
+	var commentIssueID int64
+	if err := e.QueryRowContext(ctx, `SELECT issue_id FROM comments WHERE id = ?`, *p.CommentID).Scan(&commentIssueID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: external comment mapping must target a comment on its binding issue", db.ErrExternalRootValidation)
+		}
+		return fmt.Errorf("check external comment mapping comment: %w", err)
+	}
+	if commentIssueID != bindingIssueID {
+		return fmt.Errorf("%w: external comment mapping must target a comment on its binding issue", db.ErrExternalRootValidation)
+	}
+	return nil
 }
 
 // adoptImportMapping resolves the mapping for externalID, adopting a mapping
@@ -72,6 +155,22 @@ func adoptImportMapping(ctx context.Context, e execQuerier, projectID int64, sou
 		}
 		if err != nil {
 			return db.ImportMapping{}, false, err
+		}
+		if _, err := e.ExecContext(ctx, `UPDATE import_mappings SET id = id WHERE id = ?`, legacyMapping.ID); err != nil {
+			return db.ImportMapping{}, false, fmt.Errorf("lock legacy import mapping: %w", err)
+		}
+		var bindingID int64
+		bindingErr := e.QueryRowContext(ctx,
+			`SELECT id FROM external_root_bindings WHERE root_mapping_id = ? LIMIT 1`,
+			legacyMapping.ID,
+		).Scan(&bindingID)
+		if bindingErr == nil {
+			return db.ImportMapping{}, false, fmt.Errorf(
+				"%w: external root mapping identity cannot be changed", db.ErrExternalRootAlreadyBound,
+			)
+		}
+		if !errors.Is(bindingErr, sql.ErrNoRows) {
+			return db.ImportMapping{}, false, fmt.Errorf("check external root binding: %w", bindingErr)
 		}
 		if _, err := e.ExecContext(ctx, `UPDATE import_mappings SET external_id = ? WHERE id = ?`, externalID, legacyMapping.ID); err != nil {
 			return db.ImportMapping{}, false, fmt.Errorf("adopt legacy import mapping: %w", err)
@@ -107,6 +206,25 @@ func (d *Store) ImportMappingsByProjectSource(ctx context.Context, projectID int
 			return nil, err
 		}
 		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ImportCommentMappingsByIssue lists comment mappings for one issue.
+func (d *Store) ImportCommentMappingsByIssue(ctx context.Context, issueID int64) ([]db.ImportMapping, error) {
+	rows, err := d.QueryContext(ctx, importMappingSelect+`
+ WHERE issue_id = ? AND object_type = 'comment' AND comment_id IS NOT NULL ORDER BY id ASC`, issueID)
+	if err != nil {
+		return nil, fmt.Errorf("list issue comment import mappings: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []db.ImportMapping
+	for rows.Next() {
+		mapping, err := scanImportMapping(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, mapping)
 	}
 	return out, rows.Err()
 }

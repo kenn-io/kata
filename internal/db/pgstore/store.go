@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // register pgx as the "pgx" sql driver
 
@@ -45,6 +46,7 @@ type Store struct {
 	uiReadStage          func(context.Context) error
 	uiProjectStatsRead   func()
 	uiLinkDetailRead     func()
+	externalRootNow      func() time.Time
 }
 
 // Close releases a process-lifetime serving lease before closing the pool.

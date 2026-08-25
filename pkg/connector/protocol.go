@@ -20,6 +20,12 @@ const (
 	CapabilityPublishComment Capability = "publish_comment"
 	// CapabilityFields permits reading and writing external fields.
 	CapabilityFields Capability = "fields"
+
+	// CapabilityConditionalFields advertises compare-and-set field writes.
+	// Kata sends write_fields expected values only to connectors that
+	// advertise this capability; plain v1 connectors never observe the
+	// parameter.
+	CapabilityConditionalFields Capability = "conditional_fields"
 )
 
 // Request is one versioned connector invocation.
@@ -79,6 +85,11 @@ type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+// ErrorCodeFieldConflict reports a conditional write whose expected
+// values no longer match the connector's current state. The connector must
+// not mutate any field when returning this code.
+const ErrorCodeFieldConflict = "field_conflict"
 
 func (e *Error) Error() string {
 	if e == nil {
@@ -239,10 +250,21 @@ type ReadFieldsResult struct {
 	Fields map[string]FieldValue `json:"fields"`
 }
 
-// WriteFieldsParams applies canonical field values to an external root.
+// WriteFieldsParams applies canonical field values to an external root,
+// optionally as a compare-and-set when Expected carries last-read values.
 type WriteFieldsParams struct {
 	RootKey string                `json:"root_key"`
 	Fields  map[string]FieldValue `json:"fields"`
+	// Expected optionally carries the caller's last-read values for a
+	// compare-and-set write; it is sent only to connectors advertising
+	// CapabilityConditionalFields. For every field present in both maps, the
+	// connector applies the write atomically only when the field's current
+	// value equals the expected value after each side is canonicalized for
+	// its kind; on any mismatch it returns an Error with
+	// ErrorCodeFieldConflict and must not mutate any field. Absent
+	// entries and an absent map mean the write is unconditional, which keeps
+	// protocol-v1 clients and connectors without the capability compatible.
+	Expected map[string]FieldValue `json:"expected,omitempty"`
 }
 
 // WriteFieldsResult contains the connector's canonical readback after writing.

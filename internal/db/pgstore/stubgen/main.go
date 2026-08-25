@@ -43,6 +43,7 @@ const (
 // *sql.DB. Each method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
+	"ApplyExternalFieldProjection":         true, // external_roots.go
 	"ActiveFederationQuarantine":           true, // federation_quarantine.go
 	"ActiveFederationQuarantinesByProject": true, // federation_quarantine.go
 	"AdoptProjectIntoFederation":           true, // federation_adoption.go
@@ -89,6 +90,7 @@ var alreadyImplemented = map[string]bool{
 	"AcquireClaim":                         true, // claims_core.go
 	"AcquireIdempotencyLock":               true, // idempotency_lock.go
 	"ApplyClaimStatus":                     true, // claims_pending.go
+	"ApplyExternalRootProjection":          true, // external_roots.go
 	"AttachAlias":                          true, // aliases.go
 	"BatchProjectStats":                    true, // project_lifecycle.go
 	"BlockNumbersByIssues":                 true, // relationship_queries.go
@@ -96,12 +98,14 @@ var alreadyImplemented = map[string]bool{
 	"ChildCountsByParents":                 true, // relationship_queries.go
 	"ChildrenOfIssue":                      true, // relationship_queries.go
 	"ClaimIssueSyncBinding":                true, // issue_sync.go
+	"ClaimExternalRootBinding":             true, // external_roots.go
 	"ClaimOwner":                           true, // issue_lifecycle.go
 	"ClaimStatus":                          true, // claims_core.go
 	"ClaimStatusReadOnly":                  true, // claims_core.go
 	"ClaimStatusRefreshError":              true, // claims_pending.go
 	"CheckClaimGate":                       true, // claims_pending.go
 	"ClearClaimStatusRefreshError":         true, // claims_pending.go
+	"ClearPendingExternalComment":          true, // external_roots.go
 	"Close":                                true, // inherited from embedded *sql.DB
 	"CloseIssue":                           true, // issue_lifecycle.go
 	"CloseIssueWithEvents":                 true, // issue_lifecycle.go
@@ -112,6 +116,7 @@ var alreadyImplemented = map[string]bool{
 	"CountPendingClaims":                   true, // claims_core.go
 	"CreateAPIToken":                       true, // tokens.go
 	"CreateComment":                        true, // comments.go
+	"CreateExternalRootBinding":            true, // external_roots.go
 	"CreateIssue":                          true, // issues.go
 	"CreateLink":                           true, // links.go
 	"CreateLinkAndEvent":                   true, // links.go
@@ -130,14 +135,22 @@ var alreadyImplemented = map[string]bool{
 	"EditIssue":                            true, // issue_lifecycle.go
 	"EditIssueAtomic":                      true, // atomic_edit.go
 	"EnsureSystemProject":                  true, // tokens.go
+	"EnsureExternalRootLifecycleRequest":   true, // external_roots.go
 	"EnqueuePendingClaim":                  true, // claims_pending.go
 	"EventsAfter":                          true, // events.go
 	"EventsByUIDs":                         true, // events.go
 	"EventsInWindow":                       true, // events.go
 	"ExpireTimedClaims":                    true, // claims_core.go
 	"ExpireTimedClaimsForProject":          true, // claims_core.go
+	"ExternalFieldStates":                  true, // external_roots.go
+	"ExternalRootBindingByExternalKey":     true, // external_roots.go
+	"ExternalRootBindingByID":              true, // external_roots.go
+	"ExternalRootBindingByIssue":           true, // external_roots.go
 	"ExportComments":                       true, // export.go
 	"ExportEvents":                         true, // export.go
+	"ExportExternalFieldMappings":          true, // export.go
+	"ExportExternalFieldStates":            true, // export.go
+	"ExportExternalRootBindings":           true, // export.go
 	"ExportImportMappings":                 true, // export.go
 	"ExportIssueClaims":                    true, // export.go
 	"ExportIssueLabels":                    true, // export.go
@@ -183,6 +196,8 @@ var alreadyImplemented = map[string]bool{
 	"ListAPITokens":                        true, // tokens.go
 	"ListAllIssues":                        true, // issues.go
 	"ListDueIssueSyncBindings":             true, // issue_sync.go
+	"ListDueExternalRootBindings":          true, // external_roots.go
+	"ListExternalFieldMappings":            true, // external_roots.go
 	"ListIssueContent":                     true, // discovery.go
 	"ListIssues":                           true, // issues.go
 	"ListPendingClaimRequests":             true, // claims_pending.go
@@ -208,6 +223,7 @@ var alreadyImplemented = map[string]bool{
 	"ParentNumbersByIssues":                true, // relationship_queries.go
 	"ParentOf":                             true, // links.go
 	"ParentShortIDsByIssues":               true, // relationship_queries.go
+	"PauseExternalRootBinding":             true, // external_roots.go
 	"PatchIssueMetadata":                   true, // metadata.go
 	"PatchProjectMetadata":                 true, // metadata.go
 	"PatchRecurrence":                      true, // recurrences.go
@@ -228,6 +244,8 @@ var alreadyImplemented = map[string]bool{
 	"ReconcileLocalFederationEcho":         true, // federation_events.go
 	"RecordIssueSyncError":                 true, // issue_sync.go
 	"RecordIssueSyncSuccess":               true, // issue_sync.go
+	"RecordExternalRootError":              true, // external_roots.go
+	"RecordExternalRootSuccess":            true, // external_roots.go
 	"RefreshInstanceUID":                   true, // store.go
 	"RefreshIssueSyncBinding":              true, // issue_sync.go
 	"RejectPendingClaim":                   true, // claims_pending.go
@@ -236,18 +254,22 @@ var alreadyImplemented = map[string]bool{
 	"RemoveLabelAndEvent":                  true, // labels.go
 	"RemoveProject":                        true, // project_lifecycle.go
 	"ReleaseClaim":                         true, // claims_core.go
+	"ReleaseExternalRootClaim":             true, // external_roots.go
+	"RenewExternalRootClaim":               true, // external_roots.go
 	"RenewClaim":                           true, // claims_core.go
 	"RenameProject":                        true, // projects.go
 	"RenameProjectAndEvent":                true, // projects.go
 	"RelatedNumbersByIssues":               true, // relationship_queries.go
 	"ReopenIssue":                          true, // issue_lifecycle.go
 	"ResolveAPIToken":                      true, // tokens.go
+	"ResolveExternalFieldConflict":         true, // external_roots.go
 	"ResolvePendingClaim":                  true, // claims_pending.go
 	"ResetFederatedProject":                true, // federation_reset.go
 	"ResetFederatedProjectIfNoPendingPush": true, // federation_reset.go
 	"RewriteAuthorIdentity":                true, // comments.go
 	"RestoreIssue":                         true, // issue_lifecycle.go
 	"RestoreProject":                       true, // project_lifecycle.go
+	"ResumeExternalRootBinding":            true, // external_roots.go
 	"RetryTransient":                       true, // store.go
 	"RevokeAPIToken":                       true, // tokens.go
 	"SchemaVersion":                        true, // store.go
@@ -256,13 +278,25 @@ var alreadyImplemented = map[string]bool{
 	"SoftDeleteIssue":                      true, // issue_lifecycle.go
 	"SoftDeleteRecurrence":                 true, // recurrences.go
 	"SystemProject":                        true, // tokens.go
+	"SetPendingExternalComment":            true, // external_roots.go
+	"UnbindExternalRootBinding":            true, // external_roots.go
+	"UnmapExternalField":                   true, // external_roots.go
+	"UpsertExternalFieldMapping":           true, // external_roots.go
+	"UpsertExternalFieldState":             true, // external_roots.go
 	"UnresolvedClaimViolationsForIssue":    true, // claim_violations.go
 	"UnresolvedClaimViolationsForProject":  true, // claim_violations.go
 	"UpdateOwner":                          true, // issue_lifecycle.go
 	"UpdatePriority":                       true, // issue_lifecycle.go
 	"UpsertClaimCache":                     true, // claims_pending.go
 	"UpsertImportMapping":                  true, // import_mappings.go
+	"UpsertExternalCommentProjection":      true, // external_roots.go
 	"UpsertIssueSyncBinding":               true, // issue_sync.go
+}
+
+func init() {
+	alreadyImplemented["ClaimExternalRootBindingForManualAction"] = true
+	alreadyImplemented["ClaimExternalRootBindingForManualReconcile"] = true
+	alreadyImplemented["ImportCommentMappingsByIssue"] = true
 }
 
 func main() {

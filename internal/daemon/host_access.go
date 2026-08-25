@@ -372,6 +372,9 @@ func internalAPIError(err error) error {
 	if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 		return apiErr
 	}
+	if apiErr := externalRootConflictError(err); apiErr != nil {
+		return apiErr
+	}
 	if errors.Is(err, ErrHostAccessDenied) {
 		return federationCredentialDenied()
 	}
@@ -380,4 +383,31 @@ func internalAPIError(err error) error {
 			"federation credential authorization is unavailable", "", nil)
 	}
 	return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+}
+
+func externalRootConflictError(err error) error {
+	switch {
+	case errors.Is(err, db.ErrExternalRootContentOwned):
+		return api.NewError(http.StatusConflict, "external_root_content_owned",
+			"external root owns issue title and body",
+			"unbind the external root before changing owned content", nil)
+	case errors.Is(err, db.ErrExternalCommentContentOwned):
+		return api.NewError(http.StatusConflict, "external_comment_content_owned",
+			"external root owns comment body",
+			"unbind the external root before changing owned comment content", nil)
+	case errors.Is(err, db.ErrExternalRootClaimActive):
+		return api.NewError(http.StatusConflict, "external_root_claim_active",
+			"external root reconciliation is active",
+			"retry after the external root claim is released", nil)
+	case errors.Is(err, db.ErrExternalRootClaimLost):
+		return api.NewError(http.StatusConflict, "external_root_claim_lost",
+			"external root claim is no longer held",
+			"claim the external root again before retrying", nil)
+	case errors.Is(err, db.ErrExternalRootIssueSyncConflict):
+		return api.NewError(http.StatusConflict, "external_root_issue_sync_conflict",
+			"issue sync conflicts with external root ownership",
+			"remove the conflicting issue sync or external root binding", nil)
+	default:
+		return nil
+	}
 }

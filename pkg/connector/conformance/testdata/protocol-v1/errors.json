@@ -162,7 +162,7 @@
     },
     {
       "name": "write-fields-error",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-write-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"missing-field": {"kind": "null"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-write-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"missing-field": {"kind": "null"}}, "expected": {"missing-field": {"kind": "null"}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
       ],
