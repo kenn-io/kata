@@ -31,7 +31,7 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/acquire",
 	}, func(ctx context.Context, in *api.ClaimActionRequest) (*api.ClaimActionResponse, error) {
 		ctx, principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body,
-			HostFederationOperation{ID: "acquireIssueLease", Mutation: true}, true, true)
+			federationTransportOperation("acquireIssueLease"), true)
 		if err != nil {
 			return nil, err
 		}
@@ -48,7 +48,7 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/renew",
 	}, func(ctx context.Context, in *api.ClaimActionRequest) (*api.ClaimActionResponse, error) {
 		ctx, principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body,
-			HostFederationOperation{ID: "renewIssueLease", Mutation: true}, true, true)
+			federationTransportOperation("renewIssueLease"), true)
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +65,7 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/release",
 	}, func(ctx context.Context, in *api.ClaimActionRequest) (*api.ClaimActionResponse, error) {
 		ctx, principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body,
-			HostFederationOperation{ID: "releaseIssueLease", Mutation: true}, true, true)
+			federationTransportOperation("releaseIssueLease"), true)
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +82,7 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/force_release",
 	}, func(ctx context.Context, in *api.ClaimActionRequest) (*api.ClaimActionResponse, error) {
 		ctx, principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body,
-			HostFederationOperation{ID: "forceReleaseIssueLease", Mutation: true}, false, true)
+			federationTransportOperation("forceReleaseIssueLease"), false)
 		if err != nil {
 			return nil, err
 		}

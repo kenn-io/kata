@@ -51,6 +51,22 @@ func TestClaimAuthLocalDaemonMissingBearerRedactsPlaceholder(t *testing.T) {
 	assert.NotContains(t, string(raw), "Bearer <token>")
 }
 
+// TestInsecureReadonlyRejectsLeaseMutation pins the rule the
+// requireMutationLocal parameter encodes. The lease routes bypass the bearer
+// middleware, so this 401 can only come from the claim principal resolver's own
+// insecure-readonly guard.
+func TestInsecureReadonlyRejectsLeaseMutation(t *testing.T) {
+	env := testenv.New(t, testenv.WithInsecureReadonly())
+	project, issue := createClaimHubIssue(t, env)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		issuePath(project.ID, issue.ID, "lease/actions/acquire"),
+		map[string]any{"holder": "tester"}, nil)
+
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "acquire response: %s", raw)
+	assert.Contains(t, string(raw), "insecure-readonly")
+}
+
 func TestClaimRoutesRejectArchivedFederatedProject(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
 	project, issue := createClaimHubIssue(t, env)

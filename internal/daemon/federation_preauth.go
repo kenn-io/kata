@@ -25,7 +25,7 @@ func withFederationIngestPreauthorization(cfg ServerConfig, next http.Handler) h
 			api.WriteEnvelope(w, http.StatusBadRequest, "validation", "project_id must be a positive integer")
 			return
 		}
-		operation := HostFederationOperation{ID: "ingestFederationProjectEvents", Mutation: true}
+		operation := federationTransportOperation("ingestFederationProjectEvents")
 		ctx, err := preauthorizeHostFederationIngest(r.Context(), cfg.HostAccess, projectID)
 		if err != nil {
 			writeFederationPreauthorizationError(w, err)
@@ -92,6 +92,13 @@ func preauthorizeHostFederationIngest(
 	return context.WithValue(ctx, hostAccessStateContextKey{}, state), nil
 }
 
+// federationIngestProjectID is a deliberate exception to the route matcher in
+// auth_routes.go, not drift. It runs ahead of the huma mux so credential and
+// path validation happen before Huma may read a 64 MiB body, and it needs two
+// things the matcher collapses: the parsed project id, and the "matched the
+// route but the id is unusable" case that answers 400 rather than falling
+// through. TestFederationIngestPreauthParserMatchesRegisteredRoute pins it
+// against the registered ingest route so a path rename fails a test.
 func federationIngestProjectID(method, path string) (projectID int64, matched, valid bool) {
 	if method != http.MethodPost {
 		return 0, false, false
