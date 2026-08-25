@@ -1198,6 +1198,16 @@ func (d *Store) EnsureExternalRootLifecycleRequest(
 		if !errors.Is(mappingErr, db.ErrNotFound) {
 			return db.Comment{}, nil, false, mappingErr
 		}
+		frontier, err := latestExternalRootLifecycleObservationTx(ctx, tx, binding.ProjectID, source)
+		if err != nil {
+			return db.Comment{}, nil, false, err
+		}
+		if !frontier.IsZero() && params.ExternalUpdatedAt.Before(frontier) {
+			if err := tx.Commit(); err != nil {
+				return db.Comment{}, nil, false, err
+			}
+			return db.Comment{}, nil, false, nil
+		}
 		mutationAt := nowStoredTimestamp()
 		if _, err := tx.ExecContext(ctx, `UPDATE external_root_bindings
 		   SET last_external_state=$1, last_external_revision=$2, updated_at=$3
@@ -1271,6 +1281,35 @@ func (d *Store) EnsureExternalRootLifecycleRequest(
 		}
 		return comment, events, true, nil
 	})
+}
+
+func latestExternalRootLifecycleObservationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	source string,
+) (time.Time, error) {
+	rows, err := tx.QueryContext(ctx, importMappingSelect+`
+WHERE project_id = $1 AND source = $2 AND object_type = 'comment' AND source_updated_at IS NOT NULL`,
+		projectID, source)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read external lifecycle frontier: %w", mapSQLError(err, nil))
+	}
+	defer func() { _ = rows.Close() }()
+	frontier := time.Time{}
+	for rows.Next() {
+		mapping, err := scanImportMapping(rows)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if mapping.SourceUpdatedAt != nil && mapping.SourceUpdatedAt.After(frontier) {
+			frontier = *mapping.SourceUpdatedAt
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return time.Time{}, fmt.Errorf("read external lifecycle frontier: %w", mapSQLError(err, nil))
+	}
+	return frontier, nil
 }
 
 func externalRootProjectionContext(

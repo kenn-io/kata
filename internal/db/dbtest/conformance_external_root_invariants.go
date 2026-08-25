@@ -1780,6 +1780,36 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		_, _, newerCreated, err := store.EnsureExternalRootLifecycleRequest(ctx, newer)
 		require.NoError(t, err)
 		require.True(t, newerCreated)
+		_, err = store.RemoveLabelAndEvent(ctx, fixture.issue.ID, db.LabelEventParams{
+			EventType: "issue.unlabeled", Label: "needs-review", Actor: "verifier",
+		})
+		require.NoError(t, err)
+		beforeStaleEventID, err := store.MaxEventID(ctx)
+		require.NoError(t, err)
+		beforeStaleComments, err := store.CommentsByIssue(ctx, fixture.issue.ID)
+		require.NoError(t, err)
+		distinctStale := params
+		distinctStale.ExternalID = "lifecycle:complete:revision-stale"
+		distinctStale.ExternalRevision = "revision-stale"
+		_, distinctStaleEvents, distinctStaleCreated, err := store.EnsureExternalRootLifecycleRequest(ctx, distinctStale)
+		require.NoError(t, err)
+		assert.False(t, distinctStaleCreated)
+		assert.Empty(t, distinctStaleEvents)
+		afterStaleEventID, err := store.MaxEventID(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, beforeStaleEventID, afterStaleEventID)
+		afterStaleComments, err := store.CommentsByIssue(ctx, fixture.issue.ID)
+		require.NoError(t, err)
+		assert.Len(t, afterStaleComments, len(beforeStaleComments))
+		hasReview, err = store.HasLabel(ctx, fixture.issue.ID, "needs-review")
+		require.NoError(t, err)
+		assert.False(t, hasReview)
+		_, err = store.ImportMappingBySource(
+			ctx, fixture.project.ID, db.ExternalRootLifecycleMappingSource(fixture.binding),
+			"comment", distinctStale.ExternalID,
+		)
+		assert.ErrorIs(t, err, db.ErrNotFound)
+
 		_, staleEvents, staleCreated, err := store.EnsureExternalRootLifecycleRequest(ctx, params)
 		require.NoError(t, err)
 		assert.False(t, staleCreated)
