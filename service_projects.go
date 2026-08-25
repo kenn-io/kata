@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -89,10 +88,7 @@ func (s *Service) EnsureProject(ctx context.Context, spec ProjectSpec) (EnsurePr
 		callCtx, spec.Name, spec.UID, db.SystemActor,
 	)
 	if createErr == nil {
-		s.broadcaster.Broadcast(daemon.StreamMsg{
-			Kind: "event", Event: &event, ProjectID: created.ID,
-		})
-		s.hookSink.Enqueue(event)
+		s.publish.Event(created.ID, event)
 		return EnsureProjectResult{Project: publicProject(created), Created: true}, nil
 	}
 
@@ -162,10 +158,7 @@ func (s *Service) ArchiveProject(
 		return ProjectMutationResult{}, fmt.Errorf("kata: archive project: %w", err)
 	}
 	if event != nil {
-		s.broadcaster.Broadcast(daemon.StreamMsg{
-			Kind: "event", Event: event, ProjectID: archived.ID,
-		})
-		s.hookSink.Enqueue(*event)
+		s.publish.Event(archived.ID, *event)
 	}
 	return ProjectMutationResult{Project: publicProject(archived), Changed: true}, nil
 }

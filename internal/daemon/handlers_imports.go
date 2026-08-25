@@ -85,11 +85,7 @@ func registerImportsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 
-		for i := range events {
-			evt := events[i]
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(evt)
-		}
+		cfg.Publish().Events(in.ProjectID, events)
 
 		out := &api.ImportResponse{}
 		out.Body = result

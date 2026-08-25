@@ -470,14 +470,17 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 				return // overflow disconnect
 			}
 			switch msg.Kind {
-			case "reset":
+			case StreamKindReset:
 				if revalidateSSEAuthority(ctx) != nil {
 					return
 				}
 				writeResetFrame(deps.w, msg.ResetID)
 				deps.flusher.Flush()
 				return
-			case "event":
+			case StreamKindEvent:
+				// StreamMsg is exported with exported fields, so "constructed only
+				// via NewEventMsg" is repo discipline, not a language guarantee.
+				// A hand-built envelope with a nil Event stays droppable here.
 				if msg.Event == nil {
 					continue
 				}

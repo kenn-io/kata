@@ -109,12 +109,14 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		})
 		if err != nil {
 			if errors.Is(err, db.ErrClaimExpired) {
-				emitClaimEvents(cfg, result.Events)
+				cfg.Publish().EventsByProject(result.Events)
 			}
 			return nil, claimAPIError(err)
 		}
-		emitClaimEvents(cfg, result.Events)
-		emitClaimEvent(cfg, in.ProjectID, result.Event)
+		cfg.Publish().EventsByProject(result.Events)
+		if result.Event != nil {
+			cfg.Publish().Event(in.ProjectID, *result.Event)
+		}
 		return &api.ClaimActionResponse{Body: claimResultBody(result)}, nil
 	})
 
@@ -171,8 +173,10 @@ func handleClaimAcquire(
 			}
 			return api.ClaimActionResponseBody{}, claimAPIError(err)
 		}
-		emitClaimEvents(cfg, result.Events)
-		emitClaimEvent(cfg, projectID, result.Event)
+		cfg.Publish().EventsByProject(result.Events)
+		if result.Event != nil {
+			cfg.Publish().Event(projectID, *result.Event)
+		}
 		if err := federationFailpoint("after_claim_grant_commit_before_response"); err != nil {
 			return api.ClaimActionResponseBody{}, api.NewError(http.StatusInternalServerError, "federation_failpoint", err.Error(), "", nil)
 		}
@@ -240,11 +244,11 @@ func handleClaimRenew(
 		})
 		if err != nil {
 			if errors.Is(err, db.ErrClaimExpired) {
-				emitClaimEvents(cfg, result.Events)
+				cfg.Publish().EventsByProject(result.Events)
 			}
 			return api.ClaimActionResponseBody{}, claimAPIError(err)
 		}
-		emitClaimEvents(cfg, result.Events)
+		cfg.Publish().EventsByProject(result.Events)
 		return claimResultBody(result), nil
 	}
 	remote, cred, err := claimForwardClient(ctx, cfg, binding)
@@ -290,12 +294,14 @@ func handleClaimRelease(
 		})
 		if err != nil {
 			if errors.Is(err, db.ErrClaimExpired) {
-				emitClaimEvents(cfg, result.Events)
+				cfg.Publish().EventsByProject(result.Events)
 			}
 			return api.ClaimActionResponseBody{}, claimAPIError(err)
 		}
-		emitClaimEvents(cfg, result.Events)
-		emitClaimEvent(cfg, projectID, result.Event)
+		cfg.Publish().EventsByProject(result.Events)
+		if result.Event != nil {
+			cfg.Publish().Event(projectID, *result.Event)
+		}
 		return claimResultBody(result), nil
 	}
 	remote, cred, err := claimForwardClient(ctx, cfg, binding)
@@ -328,7 +334,7 @@ func handleClaimStatus(ctx context.Context, cfg ServerConfig, projectID int64, r
 		if err != nil {
 			return api.ClaimStatusBody{}, claimAPIError(err)
 		}
-		emitClaimEvents(cfg, status.Events)
+		cfg.Publish().EventsByProject(status.Events)
 		return claimStatusBody(status), nil
 	}
 	remote, cred, err := claimForwardClient(ctx, cfg, binding)
@@ -835,7 +841,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 			if err != nil {
 				return nil, claimAPIError(err)
 			}
-			emitClaimEvents(cfg, status.Events)
+			cfg.Publish().EventsByProject(status.Events)
 			hubNow := status.HubNow
 			if hubNow.IsZero() {
 				return nil, nil
@@ -1009,19 +1015,5 @@ func issueClaimOut(claim *db.IssueClaim) *api.IssueClaimOut {
 		ReleaseReason:     claim.ReleaseReason,
 		Revision:          claim.Revision,
 		UpdatedAt:         claim.UpdatedAt,
-	}
-}
-
-func emitClaimEvent(cfg ServerConfig, projectID int64, event *db.Event) {
-	if event == nil {
-		return
-	}
-	cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: event, ProjectID: projectID})
-	cfg.Hooks.Enqueue(*event)
-}
-
-func emitClaimEvents(cfg ServerConfig, events []db.Event) {
-	for i := range events {
-		emitClaimEvent(cfg, events[i].ProjectID, &events[i])
 	}
 }

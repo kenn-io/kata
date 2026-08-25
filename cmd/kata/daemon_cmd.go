@@ -1050,6 +1050,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 
 	broadcaster := daemon.NewEventBroadcaster()
+	publisher := daemon.NewEventPublisher(broadcaster, disp)
 	embedder, vectorIndex, reconcilerHealth, err := startEmbeddingReconciler(
 		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog,
 	)
@@ -1073,19 +1074,16 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
 	})
 	federationWake := startFederationRunner(
-		ctx, workers, waitableDrainAdmission, store, broadcaster, disp, daemonLog,
+		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog,
 	)
 	federationConfigHealth := startFederationConfigReconciler(
 		ctx, workers, waitableDrainAdmission, dcfg, store, federationWake, func(event db.Event, fork activity.Admission) {
-			broadcaster.Broadcast(daemon.StreamMsg{
-				Kind: "event", Event: &event, ProjectID: event.ProjectID,
-			})
-			hooks.EnqueueFrom(disp, event, fork)
+			publisher.EventFrom(event.ProjectID, event, fork)
 		}, daemonLog,
 	)
 	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
 	gitHubSyncWake := startGitHubSyncRunner(
-		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, broadcaster, disp, daemonLog,
+		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, publisher, daemonLog,
 	)
 	var idleHealth func() daemon.IdleSnapshot
 	var idleAdmission daemon.IdleForegroundAdmission
@@ -1305,8 +1303,7 @@ func startFederationRunner(
 	workers *daemonWorkerGroup,
 	drainAdmission activity.WaitableAdmission,
 	store db.Storage,
-	bcast *daemon.EventBroadcaster,
-	hookSink hooks.Sink,
+	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
 ) func() {
 	wake := make(chan struct{}, 1)
@@ -1316,7 +1313,7 @@ func startFederationRunner(
 		default:
 		}
 	}
-	sub := bcast.Subscribe(daemon.SubFilter{})
+	sub := publisher.Broadcaster.Subscribe(daemon.SubFilter{})
 	workers.Go(func() {
 		defer sub.Unsub()
 		for {
@@ -1327,7 +1324,7 @@ func startFederationRunner(
 				if !ok {
 					return
 				}
-				if msg.Kind != "event" {
+				if msg.Kind != daemon.StreamKindEvent {
 					continue
 				}
 				wakeRunner()
@@ -1343,11 +1340,7 @@ func startFederationRunner(
 			daemonLog.Printf("federation: %v", err)
 		},
 		OnPulledEventsFrom: func(projectID int64, events []db.Event, fork activity.Admission) {
-			for i := range events {
-				event := events[i]
-				bcast.Broadcast(daemon.StreamMsg{Kind: "event", Event: &event, ProjectID: projectID})
-				hooks.EnqueueFrom(hookSink, event, fork)
-			}
+			publisher.EventsFrom(projectID, events, fork)
 		},
 	}
 	workers.Go(func() {
@@ -1355,7 +1348,7 @@ func startFederationRunner(
 			daemonLog.Printf("federation: %v", err)
 		}
 	})
-	sweeper := daemon.NewTimedClaimSweeper(store, bcast, hookSink)
+	sweeper := daemon.NewTimedClaimSweeper(store, publisher)
 	sweeper.IdleAdmission = drainAdmission
 	sweeper.OnError = func(err error) {
 		daemonLog.Printf("claim sweeper: %v", err)
@@ -1505,8 +1498,7 @@ func startGitHubSyncRunner(
 	drainAdmission activity.WaitableAdmission,
 	store db.Storage,
 	fetcher githubsync.Fetcher,
-	bcast *daemon.EventBroadcaster,
-	hookSink hooks.Sink,
+	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
 ) func() {
 	wake := make(chan struct{}, 1)
@@ -1518,12 +1510,6 @@ func startGitHubSyncRunner(
 	}
 	if fetcher == nil {
 		fetcher = newConfiguredGitHubSyncFetcher(config.GitHubSyncConfig{})
-	}
-	if bcast == nil {
-		bcast = daemon.NewEventBroadcaster()
-	}
-	if hookSink == nil {
-		hookSink = hooks.NewNoop()
 	}
 	logger := slog.Default()
 	if daemonLog != nil {
@@ -1542,11 +1528,7 @@ func startGitHubSyncRunner(
 			events []db.Event,
 			fork activity.Admission,
 		) error {
-			for i := range events {
-				event := events[i]
-				bcast.Broadcast(daemon.StreamMsg{Kind: "event", Event: &event, ProjectID: projectID})
-				hooks.EnqueueFrom(hookSink, event, fork)
-			}
+			publisher.EventsFrom(projectID, events, fork)
 			return nil
 		},
 	})

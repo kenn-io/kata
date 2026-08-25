@@ -31,7 +31,7 @@ func TestBroadcaster_BroadcastFansToMatchingFiltersOnly(t *testing.T) {
 	broadcastEvent(b, 1, 100)
 
 	gotAll := receiveMsg(t, all.Ch, time.Second, "cross-project subscriber")
-	assert.Equal(t, "event", gotAll.Kind)
+	assert.Equal(t, daemon.StreamKindEvent, gotAll.Kind)
 	assert.Equal(t, int64(100), gotAll.Event.ID)
 
 	gotA := receiveMsg(t, a.Ch, time.Second, "project-1 subscriber")
@@ -47,11 +47,11 @@ func TestBroadcaster_ResetFansToAllMatchingFilters(t *testing.T) {
 	defer all.Unsub()
 	defer a.Unsub()
 
-	b.Broadcast(daemon.StreamMsg{Kind: "reset", ResetID: 999, ProjectID: 1})
+	b.Broadcast(daemon.NewResetMsg(1, 999))
 
 	for i, ch := range []<-chan daemon.StreamMsg{all.Ch, a.Ch} {
 		got := receiveMsg(t, ch, time.Second, "reset subscriber")
-		assert.Equalf(t, "reset", got.Kind, "subscriber %d", i)
+		assert.Equalf(t, daemon.StreamKindReset, got.Kind, "subscriber %d", i)
 		assert.Equalf(t, int64(999), got.ResetID, "subscriber %d", i)
 	}
 }
@@ -116,7 +116,7 @@ func TestBroadcaster_RaceFuzz(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			evt := &db.Event{ID: int64(i + 1), ProjectID: int64(i % 5), Type: "issue.created"}
-			b.Broadcast(daemon.StreamMsg{Kind: "event", Event: evt, ProjectID: evt.ProjectID})
+			b.Broadcast(daemon.NewEventMsg(evt.ProjectID, *evt))
 		}(i)
 	}
 	done := make(chan struct{})

@@ -43,9 +43,7 @@ func TestServiceCloseTerminatesActiveEventStream(t *testing.T) {
 		Author:    "example-user",
 	})
 	require.NoError(t, err)
-	service.broadcaster.Broadcast(daemon.StreamMsg{
-		Kind: "event", Event: &event, ProjectID: project.ID,
-	})
+	service.broadcaster.Broadcast(daemon.NewEventMsg(project.ID, event))
 
 	reader := bufio.NewReader(response.Body)
 	eventSeen := make(chan error, 1)
@@ -105,7 +103,7 @@ func TestServiceEnsureProjectBroadcastsAndEnqueuesExactCreatedEvent(t *testing.T
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 
 	sink := &serviceRecordingSink{}
-	service.hookSink = sink
+	service.publish = daemon.NewEventPublisher(service.broadcaster, sink)
 	subscription := service.broadcaster.Subscribe(daemon.SubFilter{})
 	defer subscription.Unsub()
 
@@ -121,7 +119,7 @@ func TestServiceEnsureProjectBroadcastsAndEnqueuesExactCreatedEvent(t *testing.T
 	case <-time.After(time.Second):
 		t.Fatal("project creation event was not broadcast")
 	}
-	require.Equal(t, "event", msg.Kind)
+	require.Equal(t, daemon.StreamKindEvent, msg.Kind)
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, "project.created", msg.Event.Type)
 	assert.Equal(t, db.SystemActor, msg.Event.Actor)

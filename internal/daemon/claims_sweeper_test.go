@@ -70,7 +70,7 @@ func TestTimedClaimSweeperExpiresOnlyHubClaimsAndFansOutEvents(t *testing.T) {
 	sub := broadcaster.Subscribe(daemon.SubFilter{})
 	defer sub.Unsub()
 	hookSink := &captureHookSink{}
-	sweeper := daemon.NewTimedClaimSweeper(env.DB, broadcaster, hookSink)
+	sweeper := daemon.NewTimedClaimSweeper(env.DB, daemon.NewEventPublisher(broadcaster, hookSink))
 
 	require.NoError(t, sweeper.RunOnce(ctx, now))
 
@@ -78,8 +78,10 @@ func TestTimedClaimSweeperExpiresOnlyHubClaimsAndFansOutEvents(t *testing.T) {
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, "claim.expired", msg.Event.Type)
 	assert.Equal(t, hubProject.ID, msg.ProjectID)
+	assert.Equal(t, hubProject.ID, msg.Event.ProjectID)
 	require.Len(t, hookSink.events, 1)
 	assert.Equal(t, "claim.expired", hookSink.events[0].Type)
+	assert.Equal(t, hubProject.ID, hookSink.events[0].ProjectID)
 
 	var hubReleased, spokeReleased int
 	require.NoError(t, env.DB.QueryRowContext(ctx,
@@ -119,7 +121,7 @@ func TestTimedClaimSweeperSkipsArchivedHubBindings(t *testing.T) {
 	sub := broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	defer sub.Unsub()
 	hookSink := &captureHookSink{}
-	sweeper := daemon.NewTimedClaimSweeper(env.DB, broadcaster, hookSink)
+	sweeper := daemon.NewTimedClaimSweeper(env.DB, daemon.NewEventPublisher(broadcaster, hookSink))
 
 	require.NoError(t, sweeper.RunOnce(ctx, now))
 	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "archived project should not broadcast claim expiry")
@@ -139,7 +141,7 @@ func TestTimedClaimSweeperRunReportsPassErrorsToOnError(t *testing.T) {
 	require.NoError(t, store.Close())
 	errCh := make(chan error, 1)
 	observed := make(chan error, 1)
-	sweeper := daemon.NewTimedClaimSweeper(store, nil, nil)
+	sweeper := daemon.NewTimedClaimSweeper(store, daemon.NewEventPublisher(nil, nil))
 	sweeper.Interval = time.Hour
 	sweeper.OnError = func(err error) {
 		observed <- err

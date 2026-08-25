@@ -102,9 +102,7 @@ func TestServiceRunWakesFederationOnCommittedEvent(t *testing.T) {
 		ProjectID: spokeProject.ID, Title: "wake federation", Author: "example-user",
 	})
 	require.NoError(t, err)
-	spokeService.broadcaster.Broadcast(daemon.StreamMsg{
-		Kind: "event", Event: &event, ProjectID: spokeProject.ID,
-	})
+	spokeService.broadcaster.Broadcast(daemon.NewEventMsg(spokeProject.ID, event))
 
 	require.Eventually(t, func() bool {
 		_, issueErr := hubService.store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
@@ -290,7 +288,7 @@ func TestServiceRunEnqueuesHooksForFederationPulledEvents(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spokeService.Close()) })
 	sink := &recordingHookSink{}
-	spokeService.hookSink = sink
+	spokeService.publish = daemon.NewEventPublisher(spokeService.broadcaster, sink)
 
 	spokeProject, err := spokeService.store.CreateProjectWithUID(ctx, "spoke-project", hubProject.UID)
 	require.NoError(t, err)

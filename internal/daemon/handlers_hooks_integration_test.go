@@ -91,7 +91,7 @@ func TestInitProjectDeliversCommittedEventWhenConfigWriteFails(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, response.StatusCode, string(body))
 
 	msg := receiveMsg(t, subscription.Ch, time.Second, "project create before config failure")
-	require.Equal(t, "event", msg.Kind)
+	require.Equal(t, daemon.StreamKindEvent, msg.Kind)
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, "project.created", msg.Event.Type)
 	assert.Equal(t, "user-a", msg.Event.Actor)
@@ -127,7 +127,7 @@ func TestInitProjectBroadcastsResetWhenAliasFailureCleansUpCreatedProject(t *tes
 	require.Equal(t, http.StatusInternalServerError, response.StatusCode, string(body))
 
 	msg := receiveMsg(t, subscription.Ch, time.Second, "project cleanup reset")
-	assert.Equal(t, "reset", msg.Kind)
+	assert.Equal(t, daemon.StreamKindReset, msg.Kind)
 	assert.Positive(t, msg.ResetID)
 	assert.Empty(t, sink.snapshot())
 	_, err := database.db.ProjectByName(t.Context(), "example-project")
@@ -156,7 +156,7 @@ func TestRenameProjectDeliversCommittedEventWhenAliasReadFails(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, response.StatusCode, string(body))
 
 	msg := receiveMsg(t, subscription.Ch, time.Second, "project rename before alias read failure")
-	require.Equal(t, "event", msg.Kind)
+	require.Equal(t, daemon.StreamKindEvent, msg.Kind)
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, "project.renamed", msg.Event.Type)
 	assert.Equal(t, "user-a", msg.Event.Actor)
@@ -194,7 +194,7 @@ func TestFederationReplicaDeliversCreatedEventWhenCredentialWriteFails(t *testin
 	require.Equal(t, http.StatusInternalServerError, response.StatusCode, string(body))
 
 	msg := receiveMsg(t, subscription.Ch, time.Second, "replica create before credential failure")
-	require.Equal(t, "event", msg.Kind)
+	require.Equal(t, daemon.StreamKindEvent, msg.Kind)
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, "project.created", msg.Event.Type)
 	assert.Equal(t, "user-a", msg.Event.Actor)

@@ -93,8 +93,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 			// the persisted issue.metadata_updated event. Only broadcast when
 			// the patch actually changed something — a no-op patch persists no
 			// event and must not spuriously wake subscribers.
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &ev, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(ev)
+			cfg.Publish().Event(in.ProjectID, ev)
 		}
 		return out, nil
 	}
@@ -140,15 +139,12 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 			out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)
 			out.Body.Project = res.Project
 			out.Body.Changed = res.Changed
-			for _, event := range res.Events {
-				ev := event
+			for i := range res.Events {
+				event := res.Events[i]
 				if event.ProjectID == in.ProjectID {
-					out.Body.Event = &ev
+					out.Body.Event = &event
 				}
-				cfg.Broadcaster.Broadcast(StreamMsg{
-					Kind: "event", Event: &ev, ProjectID: event.ProjectID,
-				})
-				cfg.Hooks.Enqueue(ev)
+				cfg.Publish().Event(event.ProjectID, event)
 			}
 			return out, nil
 		}
@@ -180,8 +176,7 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 			out.Body.Event = &ev
 			// Wake SSE followers and hook consumers on the persisted
 			// project.metadata_updated event. No broadcast on a no-op patch.
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &ev, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(ev)
+			cfg.Publish().Event(in.ProjectID, ev)
 		}
 		return out, nil
 	}

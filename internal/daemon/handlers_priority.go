@@ -38,8 +38,7 @@ func registerPriorityHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(*evt)
+			cfg.Publish().Event(in.ProjectID, *evt)
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated

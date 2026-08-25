@@ -191,7 +191,7 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 	}, &out)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	msg := receiveMsg(t, sub.Ch, time.Second, "federation replica project broadcast")
-	require.Equal(t, "event", msg.Kind)
+	require.Equal(t, daemon.StreamKindEvent, msg.Kind)
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, "project.created", msg.Event.Type)
 	assert.Equal(t, out.Project.ID, msg.ProjectID)
@@ -2648,7 +2648,7 @@ func TestFederationIngestPersistsBroadcastsAndReturnsAck(t *testing.T) {
 	assert.Equal(t, beforeEvents+1, countEvents(t, env.DB))
 
 	msg := receiveMsg(t, sub.Ch, time.Second, "federation ingest broadcast")
-	require.Equal(t, "event", msg.Kind)
+	require.Equal(t, daemon.StreamKindEvent, msg.Kind)
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, project.ID, msg.ProjectID)
 	assert.Equal(t, ev.EventUID, msg.Event.UID)

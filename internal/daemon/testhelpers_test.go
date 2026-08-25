@@ -482,11 +482,11 @@ func assertChannelClosed(t *testing.T, ch <-chan daemon.StreamMsg, timeout time.
 }
 
 // broadcastEvent constructs a synthetic issue.created event with the given
-// IDs and broadcasts it through b. Saves callers the StreamMsg{Kind:"event"}
-// boilerplate when the specific event payload doesn't matter.
+// IDs and broadcasts it through b.
 func broadcastEvent(b *daemon.EventBroadcaster, projectID, eventID int64) {
-	evt := &db.Event{ID: eventID, ProjectID: projectID, Type: "issue.created"}
-	b.Broadcast(daemon.StreamMsg{Kind: "event", Event: evt, ProjectID: projectID})
+	b.Broadcast(daemon.NewEventMsg(projectID, db.Event{
+		ID: eventID, ProjectID: projectID, Type: "issue.created",
+	}))
 }
 
 // doReqEnv is the workhorse for testenv-based HTTP helpers. It sets the

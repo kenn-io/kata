@@ -7,7 +7,6 @@ import (
 
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/hooks"
 )
 
 const (
@@ -19,23 +18,17 @@ const (
 // claim.expired events out through the daemon's normal event surfaces.
 type TimedClaimSweeper struct {
 	DB            db.Storage
-	Broadcaster   *EventBroadcaster
-	Hooks         hooks.Sink
+	Publish       EventPublisher
 	Interval      time.Duration
 	Limit         int
 	OnError       func(error)
 	IdleAdmission activity.WaitableAdmission
 }
 
-// NewTimedClaimSweeper creates a timed-claim sweeper with default event sinks.
-func NewTimedClaimSweeper(store db.Storage, broadcaster *EventBroadcaster, sink hooks.Sink) *TimedClaimSweeper {
-	if broadcaster == nil {
-		broadcaster = NewEventBroadcaster()
-	}
-	if sink == nil {
-		sink = hooks.NewNoop()
-	}
-	return &TimedClaimSweeper{DB: store, Broadcaster: broadcaster, Hooks: sink}
+// NewTimedClaimSweeper creates a timed-claim sweeper that fans expiry events
+// out through publisher.
+func NewTimedClaimSweeper(store db.Storage, publisher EventPublisher) *TimedClaimSweeper {
+	return &TimedClaimSweeper{DB: store, Publish: publisher}
 }
 
 // RunOnce expires timed claims for all enabled hub bindings once.
@@ -54,6 +47,10 @@ func (s *TimedClaimSweeper) runOnce(ctx context.Context, now time.Time) (<-chan 
 			return retry, true, nil
 		}
 		defer idleLease.Release()
+	}
+	var fork activity.Admission
+	if idleLease != nil {
+		fork = idleLease.Fork
 	}
 	bindings, err := s.DB.ListFederationBindings(ctx)
 	if err != nil {
@@ -81,10 +78,7 @@ func (s *TimedClaimSweeper) runOnce(ctx context.Context, now time.Time) (<-chan 
 			errs = append(errs, err)
 			continue
 		}
-		for _, event := range events {
-			s.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: event.ProjectID})
-			enqueueHookWithDrain(s.Hooks, event, idleLease)
-		}
+		s.Publish.EventsFrom(binding.ProjectID, events, fork)
 	}
 	return nil, false, errors.Join(errs...)
 }

@@ -146,6 +146,13 @@ func (c ServerConfig) federationCredentialStore() config.FederationCredentialSto
 	return config.DefaultFederationCredentialStore()
 }
 
+// Publish returns the event publisher for this config. It is derived rather
+// than stored so it can never disagree with the Broadcaster and Hooks fields
+// the SSE handler and tests wire directly.
+func (c ServerConfig) Publish() EventPublisher {
+	return NewEventPublisher(c.Broadcaster, c.Hooks)
+}
+
 // CloseThrottlePolicy is the runtime form of [close.throttle] in
 // <KATA_HOME>/config.toml.
 type CloseThrottlePolicy struct {
