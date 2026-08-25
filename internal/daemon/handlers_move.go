@@ -88,15 +88,8 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				"issue has import mappings that already exist in the target project",
 				"resolve import mapping collisions before moving", map[string]any{"mappings": collision.Mappings})
 		}
-		if errors.Is(err, db.ErrExternalRootClaimActive) {
-			return nil, api.NewError(409, "external_root_claim_active",
-				"external root reconciliation is active for this issue",
-				"retry after the external root claim is released", nil)
-		}
-		if errors.Is(err, db.ErrExternalRootIssueSyncConflict) {
-			return nil, api.NewError(409, "external_root_issue_sync_conflict",
-				"target issue sync conflicts with the issue's external root binding",
-				"remove the conflicting issue sync binding before moving", nil)
+		if apiErr := externalRootConflictError(err); apiErr != nil {
+			return nil, apiErr
 		}
 		if apiErr := federationReadOnlyError(err); apiErr != nil {
 			return nil, apiErr
