@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 )
 
 func TestExternalShowMarkdownRendererTimeoutBoundsInheritedDescendantStdout(t *testing.T) {
@@ -77,7 +79,9 @@ func waitForWindowsHelperPID(t *testing.T, readyPath string) int {
 			require.NoError(t, err)
 			return pid
 		}
-		require.ErrorIs(t, err, fs.ErrNotExist)
+		if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+			require.NoError(t, err)
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("renderer helper did not signal readiness")

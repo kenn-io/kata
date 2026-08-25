@@ -2538,10 +2538,6 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("adopt project into federation: project %d is archived", p.ProjectID)
 	}
 
-	if err := rejectIssueSyncedFederationProject(ctx, tx, p.ProjectID); err != nil {
-		return db.AdoptProjectIntoFederationResult{}, err
-	}
-
 	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, p.ProjectID))
 	if err == nil {
@@ -2557,6 +2553,12 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("project %d already has %q federation binding", p.ProjectID, existing.Role)
 	}
 	if !errors.Is(err, db.ErrNotFound) {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
+	if err := rejectIssueSyncedFederationProject(ctx, tx, p.ProjectID); err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
+	if err := rejectExternalRootFederationProject(ctx, tx, p.ProjectID); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 

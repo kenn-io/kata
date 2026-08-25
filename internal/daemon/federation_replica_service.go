@@ -1149,6 +1149,9 @@ func adoptExistingReplica(
 							"",
 						)
 					}
+					if errors.Is(err, db.ErrExternalRootFederationConflict) {
+						return db.AdoptProjectIntoFederationResult{}, false, externalRootFederationReplicaError()
+					}
 					return db.AdoptProjectIntoFederationResult{}, false,
 						fmt.Errorf("adopt existing federation replica: %w", err)
 				}

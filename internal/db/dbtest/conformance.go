@@ -428,7 +428,7 @@ var storageScenarios = []scenario{
 		name: "federation project adoption",
 		methods: []string{
 			"AcquireClaim", "AdoptProjectIntoFederation", "CountLiveClaims", "CountPendingClaims",
-			"CreateComment", "CreateIssue", "CreateProject", "EnqueuePendingClaim", "EventsAfter",
+			"CreateComment", "CreateExternalRootBinding", "CreateIssue", "CreateProject", "EnqueuePendingClaim", "EventsAfter",
 			"FederationBindingByProject", "IssueByUID", "PatchProjectMetadata",
 			"PendingFederationPushStats", "ProjectByID", "RemoveProject",
 		},

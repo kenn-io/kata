@@ -438,40 +438,56 @@ func TestFederationReplicaRejectsIssueSyncedLocalProject(t *testing.T) {
 }
 
 func TestFederationReplicaRejectsExternalRootLocalProject(t *testing.T) {
-	env := testenv.New(t)
-	ctx := context.Background()
-	project, err := env.DB.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: project.ID, Title: "Externally rooted issue", Author: "tester",
-	})
-	require.NoError(t, err)
-	issueID := issue.ID
-	_, err = env.DB.UpsertImportMapping(ctx, db.ImportMappingParams{
-		Source: "connector:notes", ExternalID: "root-one", ObjectType: "issue",
-		ProjectID: project.ID, IssueID: &issueID,
-	})
-	require.NoError(t, err)
-	_, _, err = env.DB.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
-		ProjectID: project.ID, IssueID: issue.ID,
-		ConnectorInstance: "notes", ExternalRootKey: "root-one",
-		ExternalAccountKey: "opaque-account", Actor: "tester",
-		ReceiveCommentsAfter: time.Now().UTC(),
-	})
-	require.NoError(t, err)
+	for _, test := range []struct {
+		name          string
+		adoptExisting bool
+	}{
+		{name: "binding"},
+		{name: "adoption", adoptExisting: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env := testenv.New(t)
+			ctx := context.Background()
+			project, err := env.DB.CreateProject(ctx, "spoke-project")
+			require.NoError(t, err)
+			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID, Title: "Externally rooted issue", Author: "tester",
+			})
+			require.NoError(t, err)
+			issueID := issue.ID
+			_, err = env.DB.UpsertImportMapping(ctx, db.ImportMappingParams{
+				Source: "connector:notes", ExternalID: "root-one", ObjectType: "issue",
+				ProjectID: project.ID, IssueID: &issueID,
+			})
+			require.NoError(t, err)
+			_, _, err = env.DB.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+				ProjectID: project.ID, IssueID: issue.ID,
+				ConnectorInstance: "notes", ExternalRootKey: "root-one",
+				ExternalAccountKey: "opaque-account", Actor: "tester",
+				ReceiveCommentsAfter: time.Now().UTC(),
+			})
+			require.NoError(t, err)
 
-	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
-		"hub_url":                 "http://127.0.0.1:7373",
-		"hub_project_id":          42,
-		"hub_project_uid":         project.UID,
-		"project_name":            project.Name,
-		"replay_horizon_event_id": 9,
-		"actor":                   "tester",
-	}, nil)
+			body := map[string]any{
+				"hub_url":                 "http://127.0.0.1:7373",
+				"hub_project_id":          42,
+				"hub_project_uid":         project.UID,
+				"project_name":            project.Name,
+				"replay_horizon_event_id": 9,
+				"actor":                   "tester",
+				"adopt_existing":          test.adoptExisting,
+			}
+			if test.adoptExisting {
+				body["push_enabled"] = true
+				body["capabilities"] = "pull,push"
+			}
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", body, nil)
 
-	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "external_root_federation_conflict")
-	assert.Contains(t, string(raw), "external root")
-	assert.Contains(t, string(raw), "read-only spoke")
+			assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "external_root_federation_conflict")
+			assert.Contains(t, string(raw), "external root")
+			assert.Contains(t, string(raw), "read-only spoke")
+		})
+	}
 }
 
 func TestFederationReplicaSetupIsIdempotentAndUsesJSONTags(t *testing.T) {
