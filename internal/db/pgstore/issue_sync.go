@@ -52,7 +52,7 @@ func (s *Store) UpsertIssueSyncBinding(
 			if existing.Provider != params.Provider || existing.RemoteID != params.RemoteID {
 				return db.ErrIssueSyncProjectAlreadyBound
 			}
-			updatedAt := nowStoredTimestamp()
+			updatedAt := storedTime(time.Now())
 			if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET
  display_name=$1, last_cursor_at=CASE WHEN config_json <> $2 THEN NULL ELSE last_cursor_at END,
  config_json=$2, enabled=1, interval_seconds=$3, updated_at=$4 WHERE id=$5`,
@@ -133,7 +133,7 @@ func (s *Store) DisableIssueSyncBinding(ctx context.Context, projectID int64) (d
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings
-SET enabled=0, updated_at=$1 WHERE id=$2`, nowStoredTimestamp(), current.ID); err != nil {
+SET enabled=0, updated_at=$1 WHERE id=$2`, storedTime(time.Now()), current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -187,7 +187,7 @@ func (s *Store) ListDueIssueSyncBindings(
    AND (status.last_attempt_at IS NULL OR
         status.last_attempt_at::timestamptz + make_interval(secs => b.interval_seconds) <= $3::timestamptz)
  ORDER BY COALESCE(status.last_attempt_at, ''), b.id
- LIMIT $4`, provider, formatStoredTime(staleBefore), formatStoredTime(now), limit)
+ LIMIT $4`, provider, storedTime(staleBefore), storedTime(now), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list due issue sync bindings: %w", mapSQLError(err, nil))
 	}
@@ -237,7 +237,7 @@ WHERE binding_id=$2
     WHERE candidate.id=issue_sync_status.binding_id AND candidate.provider=$3
       AND candidate.enabled=1 AND project.deleted_at IS NULL)
   AND (sync_started_at IS NULL OR sync_started_at < $4)`,
-			formatStoredTime(now), binding.ID, provider, formatStoredTime(staleBefore))
+			storedTime(now), binding.ID, provider, storedTime(staleBefore))
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -266,8 +266,8 @@ func (s *Store) RecordIssueSyncSuccess(
  sync_started_at=NULL, last_success_at=$1, last_error_at=NULL, last_error=NULL,
  last_created=$2, last_updated=$3, last_unchanged=$4, last_comments=$5
 WHERE binding_id=$6 AND sync_started_at=$7`,
-			formatStoredTime(params.At), params.LastCreated, params.LastUpdated,
-			params.LastUnchanged, params.LastComments, params.BindingID, formatStoredTime(params.StartedAt))
+			storedTime(params.At), params.LastCreated, params.LastUpdated,
+			params.LastUnchanged, params.LastComments, params.BindingID, storedTime(params.StartedAt))
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -280,7 +280,7 @@ WHERE binding_id=$6 AND sync_started_at=$7`,
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings
 SET last_cursor_at=$1, updated_at=$2 WHERE id=$3`,
-			formatStoredTime(params.CursorAt), nowStoredTimestamp(), params.BindingID,
+			storedTime(params.CursorAt), storedTime(time.Now()), params.BindingID,
 		); err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -305,7 +305,7 @@ func (s *Store) RecordIssueSyncError(
 		result, err := tx.ExecContext(ctx, `UPDATE issue_sync_status SET
  sync_started_at=NULL, last_error_at=$1, last_error=$2
 WHERE binding_id=$3 AND sync_started_at=$4`,
-			formatStoredTime(params.At), params.Error, params.BindingID, formatStoredTime(params.StartedAt))
+			storedTime(params.At), params.Error, params.BindingID, storedTime(params.StartedAt))
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -337,7 +337,7 @@ func (s *Store) RefreshIssueSyncBinding(
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET
 display_name=$1, config_json=$2, updated_at=$3 WHERE id=$4`,
-			params.DisplayName, string(params.Config), nowStoredTimestamp(), params.BindingID)
+			params.DisplayName, string(params.Config), storedTime(time.Now()), params.BindingID)
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -379,13 +379,13 @@ WHERE project_id=$1 AND role=$2 AND enabled=1`, projectID, string(db.FederationR
 
 func scanIssueSyncBinding(row rowScanner) (db.IssueSyncBinding, error) {
 	var binding db.IssueSyncBinding
-	var config, createdAt, updatedAt string
-	var enabled int
-	var lastCursorAt sql.NullString
+	var config string
+	var lastCursorAt storedNullTime
 	err := row.Scan(
 		&binding.ID, &binding.ProjectID, &binding.Provider, &binding.SourceKey,
-		&binding.RemoteID, &binding.DisplayName, &config, &enabled, &binding.IntervalSeconds,
-		&lastCursorAt, &createdAt, &updatedAt,
+		&binding.RemoteID, &binding.DisplayName, &config,
+		(*storedBool)(&binding.Enabled), &binding.IntervalSeconds,
+		&lastCursorAt, (*storedTime)(&binding.CreatedAt), (*storedTime)(&binding.UpdatedAt),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.IssueSyncBinding{}, db.ErrNotFound
@@ -394,28 +394,13 @@ func scanIssueSyncBinding(row rowScanner) (db.IssueSyncBinding, error) {
 		return db.IssueSyncBinding{}, fmt.Errorf("scan issue sync binding: %w", mapSQLError(err, nil))
 	}
 	binding.Config = json.RawMessage(config)
-	binding.Enabled = enabled == 1
-	binding.CreatedAt, err = parseStoredTime(createdAt)
-	if err != nil {
-		return db.IssueSyncBinding{}, fmt.Errorf("parse issue sync created_at: %w", err)
-	}
-	binding.UpdatedAt, err = parseStoredTime(updatedAt)
-	if err != nil {
-		return db.IssueSyncBinding{}, fmt.Errorf("parse issue sync updated_at: %w", err)
-	}
-	if lastCursorAt.Valid {
-		value, err := parseStoredTime(lastCursorAt.String)
-		if err != nil {
-			return db.IssueSyncBinding{}, fmt.Errorf("parse issue sync last_cursor_at: %w", err)
-		}
-		binding.LastCursorAt = &value
-	}
+	binding.LastCursorAt = lastCursorAt.Time
 	return binding, nil
 }
 
 func scanIssueSyncStatus(row rowScanner) (db.IssueSyncStatus, error) {
 	var status db.IssueSyncStatus
-	var syncStarted, lastAttempt, lastSuccess, lastErrorAt sql.NullString
+	var syncStarted, lastAttempt, lastSuccess, lastErrorAt storedNullTime
 	var lastError sql.NullString
 	err := row.Scan(
 		&status.BindingID, &status.ProjectID, &syncStarted, &lastAttempt,
@@ -428,22 +413,10 @@ func scanIssueSyncStatus(row rowScanner) (db.IssueSyncStatus, error) {
 	if err != nil {
 		return db.IssueSyncStatus{}, fmt.Errorf("scan issue sync status: %w", mapSQLError(err, nil))
 	}
-	status.SyncStartedAt, err = parseNullableStoredTime(syncStarted)
-	if err != nil {
-		return db.IssueSyncStatus{}, fmt.Errorf("parse issue sync started_at: %w", err)
-	}
-	status.LastAttemptAt, err = parseNullableStoredTime(lastAttempt)
-	if err != nil {
-		return db.IssueSyncStatus{}, fmt.Errorf("parse issue sync last_attempt_at: %w", err)
-	}
-	status.LastSuccessAt, err = parseNullableStoredTime(lastSuccess)
-	if err != nil {
-		return db.IssueSyncStatus{}, fmt.Errorf("parse issue sync last_success_at: %w", err)
-	}
-	status.LastErrorAt, err = parseNullableStoredTime(lastErrorAt)
-	if err != nil {
-		return db.IssueSyncStatus{}, fmt.Errorf("parse issue sync last_error_at: %w", err)
-	}
+	status.SyncStartedAt = syncStarted.Time
+	status.LastAttemptAt = lastAttempt.Time
+	status.LastSuccessAt = lastSuccess.Time
+	status.LastErrorAt = lastErrorAt.Time
 	if lastError.Valid {
 		status.LastError = lastError.String
 	}

@@ -161,9 +161,10 @@ func TestRunnerInitialSyncReconcilesParentLinksAfterAllChunksImport(t *testing.T
 	parentMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:102")
 	require.NoError(t, err)
 	require.NotNil(t, parentMapping.IssueID)
-	parents, err := h.db.ParentNumbersByIssues(h.ctx, []int64{*childMapping.IssueID})
+	relationships, err := h.db.RelationshipsByIssues(h.ctx, []int64{*childMapping.IssueID})
 	require.NoError(t, err)
-	assert.Equal(t, *parentMapping.IssueID, parents[*childMapping.IssueID])
+	require.NotNil(t, relationships[*childMapping.IssueID].ParentIssueID)
+	assert.Equal(t, *parentMapping.IssueID, *relationships[*childMapping.IssueID].ParentIssueID)
 	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
 }
 
@@ -243,9 +244,9 @@ func TestRunnerBackfillReconcilesParentLinksForUnchangedExistingIssues(t *testin
 	childMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:101")
 	require.NoError(t, err)
 	require.NotNil(t, childMapping.IssueID)
-	parents, err := h.db.ParentNumbersByIssues(h.ctx, []int64{*childMapping.IssueID})
+	relationships, err := h.db.RelationshipsByIssues(h.ctx, []int64{*childMapping.IssueID})
 	require.NoError(t, err)
-	assert.NotContains(t, parents, *childMapping.IssueID)
+	assert.Nil(t, relationships[*childMapping.IssueID].ParentIssueID)
 	lastCursor := h.now.Add(-10 * time.Minute)
 	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
 	h.fetcher.issues = []Issue{
@@ -1447,9 +1448,10 @@ func assertSourceParent(t *testing.T, h *runnerHarness, childExternalID, parentE
 	parentMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", parentExternalID)
 	require.NoError(t, err)
 	require.NotNil(t, parentMapping.IssueID)
-	parents, err := h.db.ParentNumbersByIssues(h.ctx, []int64{*childMapping.IssueID})
+	relationships, err := h.db.RelationshipsByIssues(h.ctx, []int64{*childMapping.IssueID})
 	require.NoError(t, err)
-	assert.Equal(t, *parentMapping.IssueID, parents[*childMapping.IssueID])
+	require.NotNil(t, relationships[*childMapping.IssueID].ParentIssueID)
+	assert.Equal(t, *parentMapping.IssueID, *relationships[*childMapping.IssueID].ParentIssueID)
 }
 
 func assertNoParent(t *testing.T, h *runnerHarness, childExternalID string) {
@@ -1457,9 +1459,9 @@ func assertNoParent(t *testing.T, h *runnerHarness, childExternalID string) {
 	childMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", childExternalID)
 	require.NoError(t, err)
 	require.NotNil(t, childMapping.IssueID)
-	parents, err := h.db.ParentNumbersByIssues(h.ctx, []int64{*childMapping.IssueID})
+	relationships, err := h.db.RelationshipsByIssues(h.ctx, []int64{*childMapping.IssueID})
 	require.NoError(t, err)
-	assert.NotContains(t, parents, *childMapping.IssueID)
+	assert.Nil(t, relationships[*childMapping.IssueID].ParentIssueID)
 }
 
 func (f *fakeRunnerFetcher) repoCallCount() int {

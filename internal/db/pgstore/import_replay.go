@@ -513,11 +513,11 @@ func pgReplayExternalRootBinding(
 		nullableExternalObservationTime(binding.ReceiveCommentsAfter), boolInt(binding.PublishComments),
 		nullableExternalObservationTime(binding.PublishCommentsAfter), boolInt(binding.CompleteExternal),
 		binding.LastExternalState, binding.LastExternalRevision, binding.PendingCommentUID,
-		nullableStoredTime(binding.PendingCommentStartedAt), nullableStoredTime(binding.LastAttemptAt),
-		nullableStoredTime(binding.LastSuccessAt), nullableStoredTime(binding.LastErrorAt),
-		binding.LastError, binding.ConsecutiveFailures, nullableStoredTime(binding.NextAttemptAt),
-		formatStoredTime(binding.CreatedAt), formatStoredTime(binding.UpdatedAt),
-		nullableStoredTime(binding.UnboundAt))
+		storedNullTime{Time: binding.PendingCommentStartedAt}, storedNullTime{Time: binding.LastAttemptAt},
+		storedNullTime{Time: binding.LastSuccessAt}, storedNullTime{Time: binding.LastErrorAt},
+		binding.LastError, binding.ConsecutiveFailures, storedNullTime{Time: binding.NextAttemptAt},
+		storedTime(binding.CreatedAt), storedTime(binding.UpdatedAt),
+		storedNullTime{Time: binding.UnboundAt})
 	return pgReplayError(db.ImportKindExternalRootBinding, err)
 }
 
@@ -555,7 +555,7 @@ func pgReplayExternalFieldState(ctx context.Context, tx *sql.Tx, state *db.Exter
 	) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
 		bindingID, mapping.id, pgNullableRawJSON(state.Baseline), boolInt(state.Conflicted),
 		pgNullableRawJSON(state.ConflictKata), pgNullableRawJSON(state.ConflictExternal),
-		nullableStoredTime(state.ConflictAt), formatStoredTime(state.UpdatedAt))
+		storedNullTime{Time: state.ConflictAt}, storedTime(state.UpdatedAt))
 	return pgReplayError(db.ImportKindExternalFieldState, err)
 }
 

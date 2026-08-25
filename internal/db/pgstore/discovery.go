@@ -152,17 +152,16 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		at = time.Now()
 	}
 	for rows.Next() {
-		var buffer issueScanBuffer
+		var issue db.Issue
+		var closedAt, deletedAt storedNullTime
 		var projectName string
 		var recurrenceTimezone sql.NullString
-		destinations := append(buffer.destinations(), &projectName, &recurrenceTimezone)
+		destinations := append(issueDestinations(&issue, &closedAt, &deletedAt), &projectName, &recurrenceTimezone)
 		if err := rows.Scan(destinations...); err != nil {
 			return nil, fmt.Errorf("scan ready global issue: %w", mapSQLError(err, nil))
 		}
-		issue, err := buffer.value()
-		if err != nil {
-			return nil, err
-		}
+		issue.ClosedAt = closedAt.Time
+		issue.DeletedAt = deletedAt.Time
 		due, err := metadata.ScheduledOnDue(
 			string(issue.Metadata), at,
 			scheduleDefaultTimezone(recurrenceTimezone.String, filter.DefaultTimezone),

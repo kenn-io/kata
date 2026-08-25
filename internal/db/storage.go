@@ -120,13 +120,8 @@ type Storage interface {
 	LinkByEndpoints(ctx context.Context, fromIssueID, toIssueID int64, linkType string) (Link, error)
 	LinksByIssue(ctx context.Context, issueID int64) ([]Link, error)
 	ParentOf(ctx context.Context, childIssueID int64) (Link, error)
-	ChildCountsByParents(ctx context.Context, parentIssueIDs []int64) (map[int64]ChildCounts, error)
-	ParentNumbersByIssues(ctx context.Context, issueIDs []int64) (map[int64]int64, error)
+	RelationshipsByIssues(ctx context.Context, issueIDs []int64) (map[int64]IssueRelationships, error)
 	ParentShortIDsByIssues(ctx context.Context, issueIDs []int64) (map[int64]string, error)
-	BlockNumbersByIssues(ctx context.Context, issueIDs []int64) (map[int64][]int64, error)
-	BlockedByNumbersByIssues(ctx context.Context, issueIDs []int64) (map[int64][]int64, error)
-	ActivelyBlockedIssueIDs(ctx context.Context, issueIDs []int64) (map[int64]bool, error)
-	RelatedNumbersByIssues(ctx context.Context, issueIDs []int64) (map[int64][]int64, error)
 
 	// recurrences
 	CreateRecurrence(ctx context.Context, in CreateRecurrenceIn) (Recurrence, Event, error)
@@ -285,6 +280,7 @@ type Storage interface {
 	FindActiveFederationEnrollment(ctx context.Context, p ActiveFederationEnrollmentParams) (FederationEnrollment, error)
 	RotateFederationEnrollment(ctx context.Context, p CreateFederationEnrollmentParams) (CreatedFederationEnrollment, error)
 	ListFederationEnrollments(ctx context.Context) ([]FederationEnrollment, error)
+	ListProjectFederationEnrollments(ctx context.Context, projectID int64) ([]FederationEnrollment, error)
 	RevokeFederationEnrollment(ctx context.Context, id int64) error
 	AuthorizeFederationToken(ctx context.Context, token string, projectID int64, capability string) (FederationEnrollment, error)
 	FederationEnrollmentTransactionFence(enrollment FederationEnrollment, projectID int64, capability string) TransactionFence

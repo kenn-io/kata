@@ -512,22 +512,39 @@ func validateInitialLabels(labels []string) error {
 	return nil
 }
 
+// issueDestinations returns the twenty issueSelect destinations in SELECT
+// order. The two nullable timestamps need caller-owned buffers because
+// storedNullTime cannot be a conversion over *time.Time.
+func issueDestinations(issue *db.Issue, closedAt, deletedAt *storedNullTime) []any {
+	return []any{
+		&issue.ID, &issue.UID, &issue.ProjectID, &issue.ProjectUID, &issue.ShortID,
+		&issue.Title, &issue.Body, &issue.Status, &issue.ClosedReason, &issue.Owner,
+		&issue.Priority, &issue.Author, &issue.Metadata, &issue.Revision, &issue.RecurrenceID,
+		&issue.OccurrenceKey, (*storedTime)(&issue.CreatedAt), (*storedTime)(&issue.UpdatedAt),
+		closedAt, deletedAt,
+	}
+}
+
 func scanIssue(row rowScanner) (db.Issue, error) {
-	var buffer issueScanBuffer
-	err := row.Scan(buffer.destinations()...)
+	var issue db.Issue
+	var closedAt, deletedAt storedNullTime
+	err := row.Scan(issueDestinations(&issue, &closedAt, &deletedAt)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, db.ErrNotFound
 	}
 	if err != nil {
 		return db.Issue{}, mapSQLError(err, nil)
 	}
-	return buffer.value()
+	issue.ClosedAt = closedAt.Time
+	issue.DeletedAt = deletedAt.Time
+	return issue, nil
 }
 
 func scanScheduledIssue(row rowScanner) (db.Issue, string, error) {
-	var buffer issueScanBuffer
+	var issue db.Issue
+	var closedAt, deletedAt storedNullTime
 	var recurrenceTimezone sql.NullString
-	destinations := append(buffer.destinations(), &recurrenceTimezone)
+	destinations := append(issueDestinations(&issue, &closedAt, &deletedAt), &recurrenceTimezone)
 	err := row.Scan(destinations...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
@@ -535,49 +552,7 @@ func scanScheduledIssue(row rowScanner) (db.Issue, string, error) {
 	if err != nil {
 		return db.Issue{}, "", mapSQLError(err, nil)
 	}
-	issue, err := buffer.value()
-	return issue, recurrenceTimezone.String, err
-}
-
-type issueScanBuffer struct {
-	issue                              db.Issue
-	metadataBlob, createdAt, updatedAt string
-	closedAt, deletedAt                sql.NullString
-}
-
-func (b *issueScanBuffer) destinations() []any {
-	return []any{
-		&b.issue.ID, &b.issue.UID, &b.issue.ProjectID, &b.issue.ProjectUID, &b.issue.ShortID,
-		&b.issue.Title, &b.issue.Body, &b.issue.Status, &b.issue.ClosedReason, &b.issue.Owner,
-		&b.issue.Priority, &b.issue.Author, &b.metadataBlob, &b.issue.Revision, &b.issue.RecurrenceID,
-		&b.issue.OccurrenceKey, &b.createdAt, &b.updatedAt, &b.closedAt, &b.deletedAt,
-	}
-}
-
-func (b *issueScanBuffer) value() (db.Issue, error) {
-	var err error
-	b.issue.Metadata = db.JSONBlob(b.metadataBlob)
-	b.issue.CreatedAt, err = parseStoredTime(b.createdAt)
-	if err != nil {
-		return db.Issue{}, fmt.Errorf("parse issue created_at: %w", err)
-	}
-	b.issue.UpdatedAt, err = parseStoredTime(b.updatedAt)
-	if err != nil {
-		return db.Issue{}, fmt.Errorf("parse issue updated_at: %w", err)
-	}
-	if b.closedAt.Valid {
-		value, err := parseStoredTime(b.closedAt.String)
-		if err != nil {
-			return db.Issue{}, fmt.Errorf("parse issue closed_at: %w", err)
-		}
-		b.issue.ClosedAt = &value
-	}
-	if b.deletedAt.Valid {
-		value, err := parseStoredTime(b.deletedAt.String)
-		if err != nil {
-			return db.Issue{}, fmt.Errorf("parse issue deleted_at: %w", err)
-		}
-		b.issue.DeletedAt = &value
-	}
-	return b.issue, nil
+	issue.ClosedAt = closedAt.Time
+	issue.DeletedAt = deletedAt.Time
+	return issue, recurrenceTimezone.String, nil
 }

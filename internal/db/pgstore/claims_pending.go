@@ -63,7 +63,7 @@ ON CONFLICT (issue_uid, holder_instance_uid, holder, client_kind)
   WHERE rejected_at IS NULL AND resolved_at IS NULL
 DO NOTHING RETURNING id`, requestUID, issue.ProjectID, issue.ID, issue.UID,
 			input.Principal.Holder, input.Principal.HolderInstanceUID, input.Principal.ClientKind,
-			input.ClaimKind, ttlSeconds, input.Purpose, formatStoredTime(now)).Scan(&id)
+			input.ClaimKind, ttlSeconds, input.Purpose, storedTime(now)).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			output, err = activePendingClaimRequestTx(ctx, tx, issue.UID, input.Principal, true)
 			return err
@@ -117,7 +117,7 @@ func (s *Store) ResolvePendingClaim(ctx context.Context, requestUID string, clai
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE pending_claim_requests
-SET resolved_at=$1, last_error=NULL WHERE request_uid=$2`, formatStoredTime(now), requestUID)
+SET resolved_at=$1, last_error=NULL WHERE request_uid=$2`, storedTime(now), requestUID)
 		return mapSQLError(err, nil)
 	})
 }
@@ -128,7 +128,7 @@ func (s *Store) RejectPendingClaim(ctx context.Context, requestUID, reason strin
 	if requestUID == "" {
 		return db.ErrNotFound
 	}
-	stamp := formatStoredTime(db.ClaimNow(nowInput))
+	stamp := storedTime(db.ClaimNow(nowInput))
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, `UPDATE pending_claim_requests
 SET rejected_at=$1, last_attempt_at=$1, last_error=$2
@@ -199,7 +199,7 @@ func (s *Store) MarkPendingClaimAttempt(ctx context.Context, requestUID, lastErr
 	if requestUID == "" {
 		return db.ErrNotFound
 	}
-	stamp := formatStoredTime(db.ClaimNow(nowInput))
+	stamp := storedTime(db.ClaimNow(nowInput))
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx, `UPDATE pending_claim_requests
 SET last_attempt_at=$1, last_error=$2
@@ -451,11 +451,12 @@ func pendingClaimRequestByUIDTx(
 func scanPendingClaimRequest(row rowScanner) (db.PendingClaimRequest, error) {
 	var pending db.PendingClaimRequest
 	var ttlSeconds sql.NullInt64
-	var requestedAt string
-	var lastAttemptAt, lastError, rejectedAt, resolvedAt sql.NullString
+	var lastAttemptAt, rejectedAt, resolvedAt storedNullTime
+	var lastError sql.NullString
 	err := row.Scan(&pending.ID, &pending.RequestUID, &pending.ProjectID, &pending.IssueID,
 		&pending.IssueUID, &pending.Holder, &pending.HolderInstanceUID, &pending.ClientKind,
-		&pending.ClaimKind, &ttlSeconds, &pending.Purpose, &requestedAt, &lastAttemptAt,
+		&pending.ClaimKind, &ttlSeconds, &pending.Purpose,
+		(*storedTime)(&pending.RequestedAt), &lastAttemptAt,
 		&lastError, &rejectedAt, &resolvedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.PendingClaimRequest{}, db.ErrNotFound
@@ -463,30 +464,20 @@ func scanPendingClaimRequest(row rowScanner) (db.PendingClaimRequest, error) {
 	if err != nil {
 		return db.PendingClaimRequest{}, mapSQLError(err, nil)
 	}
-	pending.RequestedAt, err = parseStoredTime(requestedAt)
-	if err != nil {
-		return db.PendingClaimRequest{}, fmt.Errorf("parse pending requested_at: %w", err)
-	}
 	if ttlSeconds.Valid {
 		pending.TTLSeconds = &ttlSeconds.Int64
 	}
 	if lastError.Valid {
 		pending.LastError = &lastError.String
 	}
-	if pending.LastAttemptAt, err = parseNullableStoredTime(lastAttemptAt); err != nil {
-		return db.PendingClaimRequest{}, fmt.Errorf("parse pending last_attempt_at: %w", err)
-	}
-	if pending.RejectedAt, err = parseNullableStoredTime(rejectedAt); err != nil {
-		return db.PendingClaimRequest{}, fmt.Errorf("parse pending rejected_at: %w", err)
-	}
-	if pending.ResolvedAt, err = parseNullableStoredTime(resolvedAt); err != nil {
-		return db.PendingClaimRequest{}, fmt.Errorf("parse pending resolved_at: %w", err)
-	}
+	pending.LastAttemptAt = lastAttemptAt.Time
+	pending.RejectedAt = rejectedAt.Time
+	pending.ResolvedAt = resolvedAt.Time
 	return pending, nil
 }
 
 func latestClaimUpdatedAtTx(ctx context.Context, tx *sql.Tx, issueUID string) (time.Time, bool, error) {
-	var stored string
+	var stored storedTime
 	err := tx.QueryRowContext(ctx, `SELECT updated_at FROM issue_claims
 WHERE issue_uid=$1 ORDER BY updated_at DESC, id DESC LIMIT 1`, issueUID).Scan(&stored)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -495,8 +486,7 @@ WHERE issue_uid=$1 ORDER BY updated_at DESC, id DESC LIMIT 1`, issueUID).Scan(&s
 	if err != nil {
 		return time.Time{}, false, mapSQLError(err, nil)
 	}
-	parsed, err := parseStoredTime(stored)
-	return parsed, err == nil, err
+	return time.Time(stored), true, nil
 }
 
 func insertCachedClaimTx(ctx context.Context, tx *sql.Tx, claim db.IssueClaim) error {
@@ -505,8 +495,8 @@ func insertCachedClaimTx(ctx context.Context, tx *sql.Tx, claim db.IssueClaim) e
   client_kind, purpose, claim_kind, acquired_at, expires_at, revision, updated_at
 ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, claim.ClaimUID,
 		claim.ProjectID, claim.IssueID, claim.IssueUID, claim.Holder, claim.HolderInstanceUID,
-		claim.ClientKind, claim.Purpose, claim.ClaimKind, formatStoredTime(claim.AcquiredAt),
-		nullableStoredTime(claim.ExpiresAt), claim.Revision, formatStoredTime(claim.UpdatedAt))
+		claim.ClientKind, claim.Purpose, claim.ClaimKind, storedTime(claim.AcquiredAt),
+		storedNullTime{Time: claim.ExpiresAt}, claim.Revision, storedTime(claim.UpdatedAt))
 	return mapSQLError(err, nil)
 }
 
@@ -515,13 +505,13 @@ func updateCachedClaimTx(ctx context.Context, tx *sql.Tx, id int64, claim db.Iss
 client_kind=$3, purpose=$4, claim_kind=$5, acquired_at=$6, expires_at=$7,
 revision=$8, updated_at=$9 WHERE id=$10 AND released_at IS NULL`, claim.Holder,
 		claim.HolderInstanceUID, claim.ClientKind, claim.Purpose, claim.ClaimKind,
-		formatStoredTime(claim.AcquiredAt), nullableStoredTime(claim.ExpiresAt), claim.Revision,
-		formatStoredTime(claim.UpdatedAt), id)
+		storedTime(claim.AcquiredAt), storedNullTime{Time: claim.ExpiresAt}, claim.Revision,
+		storedTime(claim.UpdatedAt), id)
 	return mapSQLError(err, nil)
 }
 
 func releaseCachedClaimTx(ctx context.Context, tx *sql.Tx, id int64, reason string, now time.Time) error {
-	stamp := formatStoredTime(now)
+	stamp := storedTime(now)
 	_, err := tx.ExecContext(ctx, `UPDATE issue_claims SET released_at=$1, release_reason=$2,
 revision=revision+1, updated_at=$1 WHERE id=$3 AND released_at IS NULL`, stamp, reason, id)
 	return mapSQLError(err, nil)

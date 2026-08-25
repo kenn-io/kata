@@ -52,6 +52,109 @@ func createFixtureIssue(
 	return issue, nil
 }
 
+// checkIssueRelationships pins the one typed relationship record against the
+// two places the per-kind predicates deliberately diverge: a blocker in an
+// archived project hydrates into BlockedBy but must not set ActivelyBlocked,
+// and a soft-deleted parent is still a parent.
+func checkIssueRelationships(t *testing.T, store db.Storage) error {
+	ctx := context.Background()
+	home, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		return fmt.Errorf("create home project: %w", err)
+	}
+	away, err := store.CreateProject(ctx, "hub-project")
+	if err != nil {
+		return fmt.Errorf("create away project: %w", err)
+	}
+
+	newIssue := func(projectID int64, title string) (db.Issue, error) {
+		issue, _, createErr := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: projectID, Title: title, Author: "relationship-author",
+		})
+		return issue, createErr
+	}
+	subject, err := newIssue(home.ID, "subject")
+	if err != nil {
+		return fmt.Errorf("create subject: %w", err)
+	}
+	parent, err := newIssue(home.ID, "parent")
+	if err != nil {
+		return fmt.Errorf("create parent: %w", err)
+	}
+	peer, err := newIssue(home.ID, "peer")
+	if err != nil {
+		return fmt.Errorf("create peer: %w", err)
+	}
+	downstream, err := newIssue(home.ID, "downstream")
+	if err != nil {
+		return fmt.Errorf("create downstream: %w", err)
+	}
+	archivedBlocker, err := newIssue(away.ID, "archived blocker")
+	if err != nil {
+		return fmt.Errorf("create archived blocker: %w", err)
+	}
+
+	for _, link := range []db.CreateLinkParams{
+		{FromIssueID: subject.ID, ToIssueID: parent.ID, Type: "parent", Author: "relationship-author"},
+		{FromIssueID: subject.ID, ToIssueID: peer.ID, Type: "related", Author: "relationship-author"},
+		{FromIssueID: subject.ID, ToIssueID: downstream.ID, Type: "blocks", Author: "relationship-author"},
+		{FromIssueID: archivedBlocker.ID, ToIssueID: subject.ID, Type: "blocks", Author: "relationship-author"},
+	} {
+		if _, linkErr := store.CreateLink(ctx, link); linkErr != nil {
+			return fmt.Errorf("create %s link: %w", link.Type, linkErr)
+		}
+	}
+
+	// Archive the blocker's project: relationship hydration keeps the edge,
+	// display policy drops it.
+	if _, _, removeErr := store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: away.ID, Actor: "relationship-author", Force: true,
+	}); removeErr != nil {
+		return fmt.Errorf("archive away project: %w", removeErr)
+	}
+
+	byID, err := store.RelationshipsByIssues(ctx, []int64{subject.ID, parent.ID})
+	if err != nil {
+		return fmt.Errorf("relationships by issues: %w", err)
+	}
+	subjectRel := byID[subject.ID]
+	require.NotNil(t, subjectRel.ParentIssueID)
+	assert.Equal(t, parent.ID, *subjectRel.ParentIssueID)
+	assert.Equal(t, []int64{downstream.ID}, subjectRel.Blocks)
+	assert.Equal(t, []int64{archivedBlocker.ID}, subjectRel.BlockedBy,
+		"a blocker in an archived project is still a relationship edge")
+	assert.False(t, subjectRel.ActivelyBlocked,
+		"display policy excludes blockers whose project is archived")
+	assert.Equal(t, []int64{peer.ID}, subjectRel.Related)
+	assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, byID[parent.ID].Children)
+
+	// A soft-deleted parent is still a parent: the parent query deliberately
+	// has no deleted_at filter on the peer, unlike blocks and related.
+	if _, _, _, deleteErr := store.SoftDeleteIssue(ctx, parent.ID, "relationship-author"); deleteErr != nil {
+		return fmt.Errorf("soft delete parent: %w", deleteErr)
+	}
+	if _, _, _, deleteErr := store.SoftDeleteIssue(ctx, peer.ID, "relationship-author"); deleteErr != nil {
+		return fmt.Errorf("soft delete peer: %w", deleteErr)
+	}
+	byID, err = store.RelationshipsByIssues(ctx, []int64{subject.ID})
+	if err != nil {
+		return fmt.Errorf("relationships after soft delete: %w", err)
+	}
+	subjectRel = byID[subject.ID]
+	require.NotNil(t, subjectRel.ParentIssueID,
+		"a soft-deleted parent is still the parent edge")
+	assert.Equal(t, parent.ID, *subjectRel.ParentIssueID)
+	assert.Empty(t, subjectRel.Related,
+		"related hydration filters soft-deleted peers")
+
+	empty, err := store.RelationshipsByIssues(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("relationships for empty input: %w", err)
+	}
+	assert.Empty(t, empty)
+	return nil
+}
+
 func checkComments(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := context.Background()
@@ -463,14 +566,15 @@ func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error 
 		return fmt.Errorf("parent of child: %w", err)
 	}
 	assert.Equal(t, other.Issue.ID, parent.ToIssueID)
-	parentNumbers, err := store.ParentNumbersByIssues(ctx, []int64{primary.Issue.ID, closedChild.ID, blocker.ID})
+	relationships, err := store.RelationshipsByIssues(ctx, []int64{primary.Issue.ID, closedChild.ID, blocker.ID})
 	if err != nil {
-		return fmt.Errorf("parent numbers: %w", err)
+		return fmt.Errorf("relationships by issues: %w", err)
 	}
-	assert.Equal(t, map[int64]int64{
-		primary.Issue.ID: other.Issue.ID,
-		closedChild.ID:   other.Issue.ID,
-	}, parentNumbers)
+	require.NotNil(t, relationships[primary.Issue.ID].ParentIssueID)
+	assert.Equal(t, other.Issue.ID, *relationships[primary.Issue.ID].ParentIssueID)
+	require.NotNil(t, relationships[closedChild.ID].ParentIssueID)
+	assert.Equal(t, other.Issue.ID, *relationships[closedChild.ID].ParentIssueID)
+	assert.Nil(t, relationships[blocker.ID].ParentIssueID)
 	parentShortIDs, err := store.ParentShortIDsByIssues(ctx, []int64{primary.Issue.ID, closedChild.ID})
 	if err != nil {
 		return fmt.Errorf("parent short IDs: %w", err)
@@ -484,11 +588,11 @@ func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error 
 	if err != nil {
 		return fmt.Errorf("close child: %w", err)
 	}
-	childCounts, err := store.ChildCountsByParents(ctx, []int64{other.Issue.ID})
+	relationships, err = store.RelationshipsByIssues(ctx, []int64{other.Issue.ID})
 	if err != nil {
-		return fmt.Errorf("child counts: %w", err)
+		return fmt.Errorf("child relationships: %w", err)
 	}
-	assert.Equal(t, db.ChildCounts{Open: 1, Total: 2}, childCounts[other.Issue.ID])
+	assert.Equal(t, db.ChildCounts{Open: 1, Total: 2}, relationships[other.Issue.ID].Children)
 	children, err := store.ChildrenOfIssue(ctx, other.Issue.ID)
 	if err != nil {
 		return fmt.Errorf("children of issue: %w", err)
@@ -515,30 +619,22 @@ func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error 
 		return fmt.Errorf("create blocks link: %w", err)
 	}
 	assert.NotZero(t, blockLink.ID)
-	blocks, err := store.BlockNumbersByIssues(ctx, []int64{blocker.ID})
+	relationships, err = store.RelationshipsByIssues(ctx, []int64{blocker.ID, blocked.ID})
 	if err != nil {
-		return fmt.Errorf("block numbers: %w", err)
+		return fmt.Errorf("block relationships: %w", err)
 	}
-	assert.Equal(t, map[int64][]int64{blocker.ID: {blocked.ID}}, blocks)
-	blockedBy, err := store.BlockedByNumbersByIssues(ctx, []int64{blocked.ID})
-	if err != nil {
-		return fmt.Errorf("blocked-by numbers: %w", err)
-	}
-	assert.Equal(t, map[int64][]int64{blocked.ID: {blocker.ID}}, blockedBy)
-	activelyBlocked, err := store.ActivelyBlockedIssueIDs(ctx, []int64{blocked.ID})
-	if err != nil {
-		return fmt.Errorf("active blocked projection: %w", err)
-	}
-	assert.Equal(t, map[int64]bool{blocked.ID: true}, activelyBlocked)
+	assert.Equal(t, []int64{blocked.ID}, relationships[blocker.ID].Blocks)
+	assert.Equal(t, []int64{blocker.ID}, relationships[blocked.ID].BlockedBy)
+	assert.True(t, relationships[blocked.ID].ActivelyBlocked)
 	_, _, _, err = store.CloseIssue(ctx, blocker.ID, "done", "link-author", "", nil)
 	if err != nil {
 		return fmt.Errorf("close blocker: %w", err)
 	}
-	activelyBlocked, err = store.ActivelyBlockedIssueIDs(ctx, []int64{blocked.ID})
+	relationships, err = store.RelationshipsByIssues(ctx, []int64{blocked.ID})
 	if err != nil {
-		return fmt.Errorf("active blocked projection after close: %w", err)
+		return fmt.Errorf("relationships after blocker close: %w", err)
 	}
-	assert.Empty(t, activelyBlocked)
+	assert.False(t, relationships[blocked.ID].ActivelyBlocked)
 
 	relatedLink, err := store.CreateLink(ctx, db.CreateLinkParams{
 		FromIssueID: relatedA.ID, ToIssueID: relatedB.ID, Type: "related", Author: "link-author",
@@ -547,14 +643,12 @@ func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error 
 		return fmt.Errorf("create related link: %w", err)
 	}
 	assert.NotZero(t, relatedLink.ID)
-	related, err := store.RelatedNumbersByIssues(ctx, []int64{relatedA.ID, relatedB.ID})
+	relationships, err = store.RelationshipsByIssues(ctx, []int64{relatedA.ID, relatedB.ID})
 	if err != nil {
-		return fmt.Errorf("related numbers: %w", err)
+		return fmt.Errorf("related relationships: %w", err)
 	}
-	assert.Equal(t, map[int64][]int64{
-		relatedA.ID: {relatedB.ID},
-		relatedB.ID: {relatedA.ID},
-	}, related)
+	assert.Equal(t, []int64{relatedB.ID}, relationships[relatedA.ID].Related)
+	assert.Equal(t, []int64{relatedA.ID}, relationships[relatedB.ID].Related)
 
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{
 		FromIssueID: other.Issue.ID,
@@ -634,11 +728,11 @@ func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error 
 	_, err = store.ParentOf(ctx, closedChild.ID)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 
-	emptyParents, err := store.ParentNumbersByIssues(ctx, nil)
+	emptyRelationships, err := store.RelationshipsByIssues(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("empty parent projection: %w", err)
+		return fmt.Errorf("empty relationship projection: %w", err)
 	}
-	assert.Empty(t, emptyParents)
+	assert.Empty(t, emptyRelationships)
 	return nil
 }
 

@@ -948,7 +948,7 @@ func loadParentRef(ctx context.Context, store db.Storage, issue db.Issue) (*api.
 
 // hydrateIssueOutsCrossProject hydrates labels/parent/child-counts for issues
 // that may span multiple projects. Per-project hydration helpers
-// (LabelsByIssues, ParentNumbersByIssues, ChildCountsByParents) all scope by
+// (LabelsByIssues, RelationshipsByIssues) all scope by
 // project_id, so we group by ProjectID and run them per group, then assemble
 // the IssueOut slice in the input order. Realistic project counts are tiny
 // (≤10) so the per-group cost is bounded.
@@ -1019,14 +1019,13 @@ func linkPeerFor(ctx context.Context, names *projectNames, iss db.Issue) (api.Li
 	}, nil
 }
 
-// collectLinkPeers resolves all peer issue IDs referenced by the three
-// relationship families and the parent map into a single id→LinkPeer cache.
+// collectLinkPeers resolves all peer issue IDs referenced by the relationship
+// records into a single id→LinkPeer cache.
 func collectLinkPeers(
 	ctx context.Context,
 	store db.Storage,
 	names *projectNames,
-	parents map[int64]int64,
-	families ...map[int64][]int64,
+	relationships map[int64]db.IssueRelationships,
 ) (map[int64]api.LinkPeer, error) {
 	cache := map[int64]api.LinkPeer{}
 	collect := func(id int64) error {
@@ -1044,18 +1043,18 @@ func collectLinkPeers(
 		cache[id] = lp
 		return nil
 	}
-	for _, family := range families {
-		for _, ids := range family {
-			for _, id := range ids {
+	for _, rel := range relationships {
+		for _, family := range [][]int64{rel.Blocks, rel.BlockedBy, rel.Related} {
+			for _, id := range family {
 				if err := collect(id); err != nil {
 					return nil, err
 				}
 			}
 		}
-	}
-	for _, id := range parents {
-		if err := collect(id); err != nil {
-			return nil, err
+		if rel.ParentIssueID != nil {
+			if err := collect(*rel.ParentIssueID); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return cache, nil
@@ -1078,60 +1077,41 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 	if err != nil {
 		return nil, err
 	}
-	parentNumbers, err := store.ParentNumbersByIssues(ctx, ids)
+	relationships, err := store.RelationshipsByIssues(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	childCounts, err := store.ChildCountsByParents(ctx, ids)
-	if err != nil {
+	if err := authorizeHostChildProjects(ctx, store, issues, relationships); err != nil {
 		return nil, err
 	}
-	if err := authorizeHostChildProjects(ctx, store, issues, childCounts); err != nil {
-		return nil, err
-	}
-	blocks, err := store.BlockNumbersByIssues(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	blockedBy, err := store.BlockedByNumbersByIssues(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	related, err := store.RelatedNumbersByIssues(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	// Blocked is server-computed display state (ready predicate), kept
-	// separate from the full blocked_by relationship hydration above.
-	activelyBlocked, err := store.ActivelyBlockedIssueIDs(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	// Gather peer ids referenced by any relationship slice so we can resolve
-	// each to a fully-populated LinkPeer in one pass.
+	// Gather peer ids referenced by any relationship so we can resolve each
+	// to a fully-populated LinkPeer in one pass.
 	names := &projectNames{store: store, byID: map[int64]string{project.ID: project.Name}}
-	peerCache, err := collectLinkPeers(ctx, store, names, parentNumbers, blocks, blockedBy, related)
+	peerCache, err := collectLinkPeers(ctx, store, names, relationships)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]api.IssueOut, len(issues))
 	for i, iss := range issues {
+		rel := relationships[iss.ID]
 		row := api.IssueOut{
 			Issue:       iss,
 			QualifiedID: qualifiedID(project.Name, iss.ShortID),
 			Labels:      labelsByID[iss.ID],
-			Blocks:      peerSlice(peerCache, blocks[iss.ID]),
-			BlockedBy:   peerSlice(peerCache, blockedBy[iss.ID]),
-			Related:     peerSlice(peerCache, related[iss.ID]),
-			Blocked:     activelyBlocked[iss.ID],
+			Blocks:      peerSlice(peerCache, rel.Blocks),
+			BlockedBy:   peerSlice(peerCache, rel.BlockedBy),
+			Related:     peerSlice(peerCache, rel.Related),
+			// Blocked is server-computed display state (ready predicate),
+			// kept separate from the full blocked_by hydration above.
+			Blocked: rel.ActivelyBlocked,
 		}
-		if parentID, ok := parentNumbers[iss.ID]; ok {
-			if peer, ok := peerCache[parentID]; ok {
+		if rel.ParentIssueID != nil {
+			if peer, ok := peerCache[*rel.ParentIssueID]; ok {
 				p := peer
 				row.Parent = &p
 			}
 		}
-		if counts := childCounts[iss.ID]; counts.Total > 0 {
+		if counts := rel.Children; counts.Total > 0 {
 			row.ChildCounts = &counts
 		}
 		out[i] = row
@@ -1146,11 +1126,11 @@ func authorizeHostChildProjects(
 	ctx context.Context,
 	store db.Storage,
 	issues []db.Issue,
-	counts map[int64]db.ChildCounts,
+	relationships map[int64]db.IssueRelationships,
 ) error {
 	projectIDs := make([]int64, 0)
 	for _, issue := range issues {
-		if counts[issue.ID].Total == 0 {
+		if relationships[issue.ID].Children.Total == 0 {
 			continue
 		}
 		children, err := store.ChildrenOfIssue(ctx, issue.ID)

@@ -169,35 +169,21 @@ func TestParentOf_ReturnsErrNotFoundWhenAbsent(t *testing.T) {
 	assert.True(t, errors.Is(err, db.ErrNotFound))
 }
 
-func TestParentNumbersByIssues_EmptyInput(t *testing.T) {
+func TestRelationshipsByIssues_EmptyInput(t *testing.T) {
 	d, ctx, _ := setupTestProject(t)
 
-	got, err := d.ParentNumbersByIssues(ctx, nil)
+	got, err := d.RelationshipsByIssues(ctx, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, got)
 	assert.Empty(t, got)
 
-	got, err = d.ParentNumbersByIssues(ctx, []int64{})
+	got, err = d.RelationshipsByIssues(ctx, []int64{})
 	require.NoError(t, err)
 	assert.NotNil(t, got)
 	assert.Empty(t, got)
 }
 
-func TestChildCountsByParents_EmptyInput(t *testing.T) {
-	d, ctx, _ := setupTestProject(t)
-
-	got, err := d.ChildCountsByParents(ctx, nil)
-	require.NoError(t, err)
-	assert.NotNil(t, got)
-	assert.Empty(t, got)
-
-	got, err = d.ChildCountsByParents(ctx, []int64{})
-	require.NoError(t, err)
-	assert.NotNil(t, got)
-	assert.Empty(t, got)
-}
-
-func TestParentNumbersByIssues_ReturnsImmediateParents(t *testing.T) {
+func TestRelationshipsByIssues_ReturnsImmediateParents(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 	child1 := makeIssue(t, ctx, d, p.ID, "child 1", "tester")
@@ -207,14 +193,16 @@ func TestParentNumbersByIssues_ReturnsImmediateParents(t *testing.T) {
 	makeLink(ctx, t, d, child1.ID, parent.ID, "parent")
 	makeLink(ctx, t, d, child2.ID, parent.ID, "parent")
 
-	got, err := d.ParentNumbersByIssues(ctx, []int64{child1.ID, child2.ID, unrelated.ID})
+	got, err := d.RelationshipsByIssues(ctx, []int64{child1.ID, child2.ID, unrelated.ID})
 	require.NoError(t, err)
-	assert.Equal(t, parent.ID, got[child1.ID])
-	assert.Equal(t, parent.ID, got[child2.ID])
-	assert.NotContains(t, got, unrelated.ID)
+	require.NotNil(t, got[child1.ID].ParentIssueID)
+	assert.Equal(t, parent.ID, *got[child1.ID].ParentIssueID)
+	require.NotNil(t, got[child2.ID].ParentIssueID)
+	assert.Equal(t, parent.ID, *got[child2.ID].ParentIssueID)
+	assert.Nil(t, got[unrelated.ID].ParentIssueID)
 }
 
-func TestChildCountsByParents_ReturnsOpenAndTotalDirectChildren(t *testing.T) {
+func TestRelationshipsByIssues_ReturnsOpenAndTotalDirectChildren(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 	child1 := makeIssue(t, ctx, d, p.ID, "child 1", "tester")
@@ -226,9 +214,9 @@ func TestChildCountsByParents_ReturnsOpenAndTotalDirectChildren(t *testing.T) {
 	_, _, _, err := d.CloseIssue(ctx, child2.ID, "done", "tester", "", nil)
 	require.NoError(t, err)
 
-	got, err := d.ChildCountsByParents(ctx, []int64{parent.ID})
+	got, err := d.RelationshipsByIssues(ctx, []int64{parent.ID})
 	require.NoError(t, err)
-	assert.Equal(t, db.ChildCounts{Open: 2, Total: 3}, got[parent.ID])
+	assert.Equal(t, db.ChildCounts{Open: 2, Total: 3}, got[parent.ID].Children)
 }
 
 func TestChildrenOfIssue_ReturnsDirectChildrenOnly(t *testing.T) {
@@ -248,7 +236,7 @@ func TestChildrenOfIssue_ReturnsDirectChildrenOnly(t *testing.T) {
 	assert.Equal(t, child1.ID, got[1].ID)
 }
 
-func TestChildCountsByParents_ChunksLargeInputs(t *testing.T) {
+func TestRelationshipsByIssues_ChunksLargeInputs(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 
 	const parentCount = 501
@@ -260,10 +248,10 @@ func TestChildCountsByParents_ChunksLargeInputs(t *testing.T) {
 	child := makeIssue(t, ctx, d, p.ID, "child", "tester")
 	makeLink(ctx, t, d, child.ID, parentIDs[parentCount-1], "parent")
 
-	got, err := d.ChildCountsByParents(ctx, parentIDs)
+	got, err := d.RelationshipsByIssues(ctx, parentIDs)
 	require.NoError(t, err, "large parent batches must be chunked under SQLite parameter limits")
-	assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parentIDs[parentCount-1]])
-	assert.NotContains(t, got, parentIDs[0])
+	assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parentIDs[parentCount-1]].Children)
+	assert.Equal(t, db.ChildCounts{}, got[parentIDs[0]].Children)
 }
 
 func TestDeleteLinkByID_RemovesRow(t *testing.T) {
@@ -323,53 +311,54 @@ func TestRelationshipQueries_CrossProjectPeersVisible(t *testing.T) {
 			"child's parent short_id must resolve across project boundary")
 	})
 
-	t.Run("ParentNumbersByIssues", func(t *testing.T) {
-		got, err := d.ParentNumbersByIssues(ctx, []int64{child.ID})
+	t.Run("RelationshipsByIssues parent", func(t *testing.T) {
+		got, err := d.RelationshipsByIssues(ctx, []int64{child.ID})
 		require.NoError(t, err)
-		assert.Equal(t, parent.ID, got[child.ID],
+		require.NotNil(t, got[child.ID].ParentIssueID)
+		assert.Equal(t, parent.ID, *got[child.ID].ParentIssueID,
 			"child's parent id must resolve across project boundary")
 	})
 
-	t.Run("BlockNumbersByIssues", func(t *testing.T) {
-		got, err := d.BlockNumbersByIssues(ctx, []int64{child.ID})
+	t.Run("RelationshipsByIssues blocks", func(t *testing.T) {
+		got, err := d.RelationshipsByIssues(ctx, []int64{child.ID})
 		require.NoError(t, err)
 		require.Contains(t, got, child.ID,
 			"blocker must have an entry in the map")
-		assert.Equal(t, []int64{blocked.ID}, got[child.ID],
+		assert.Equal(t, []int64{blocked.ID}, got[child.ID].Blocks,
 			"blocked issue id must be visible from the blocker across project boundary")
 	})
 
-	t.Run("BlockedByNumbersByIssues", func(t *testing.T) {
-		got, err := d.BlockedByNumbersByIssues(ctx, []int64{blocked.ID})
+	t.Run("RelationshipsByIssues blocked by", func(t *testing.T) {
+		got, err := d.RelationshipsByIssues(ctx, []int64{blocked.ID})
 		require.NoError(t, err)
 		require.Contains(t, got, blocked.ID,
 			"blocked issue must have an entry in the map")
-		assert.Equal(t, []int64{child.ID}, got[blocked.ID],
+		assert.Equal(t, []int64{child.ID}, got[blocked.ID].BlockedBy,
 			"blocker id must be visible from the blocked issue across project boundary")
 	})
 
-	t.Run("RelatedNumbersByIssues_fromSide", func(t *testing.T) {
-		got, err := d.RelatedNumbersByIssues(ctx, []int64{relA.ID})
+	t.Run("RelationshipsByIssues related from side", func(t *testing.T) {
+		got, err := d.RelationshipsByIssues(ctx, []int64{relA.ID})
 		require.NoError(t, err)
 		require.Contains(t, got, relA.ID,
 			"relA must appear in the map")
-		assert.Equal(t, []int64{relB.ID}, got[relA.ID],
+		assert.Equal(t, []int64{relB.ID}, got[relA.ID].Related,
 			"relB id must be visible from relA across project boundary")
 	})
 
-	t.Run("RelatedNumbersByIssues_toSide", func(t *testing.T) {
-		got, err := d.RelatedNumbersByIssues(ctx, []int64{relB.ID})
+	t.Run("RelationshipsByIssues related to side", func(t *testing.T) {
+		got, err := d.RelationshipsByIssues(ctx, []int64{relB.ID})
 		require.NoError(t, err)
 		require.Contains(t, got, relB.ID,
 			"relB must appear in the map")
-		assert.Equal(t, []int64{relA.ID}, got[relB.ID],
+		assert.Equal(t, []int64{relA.ID}, got[relB.ID].Related,
 			"relA id must be visible from relB across project boundary (UNION handles canonical direction)")
 	})
 
-	t.Run("ChildCountsByParents", func(t *testing.T) {
-		got, err := d.ChildCountsByParents(ctx, []int64{parent.ID})
+	t.Run("RelationshipsByIssues children", func(t *testing.T) {
+		got, err := d.RelationshipsByIssues(ctx, []int64{parent.ID})
 		require.NoError(t, err)
-		assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parent.ID],
+		assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parent.ID].Children,
 			"alpha-child must be counted under beta-parent across project boundary")
 	})
 
@@ -449,9 +438,9 @@ func TestChildrenOfIssue_ExcludesArchivedProjectChildren(t *testing.T) {
 	assert.Equal(t, liveChild.ID, got[0].ID)
 }
 
-// TestChildCountsByParents_ExcludesArchivedProjectChildren: child counts on
+// TestRelationshipsByIssues_ExcludesArchivedProjectChildren: child counts on
 // queue/detail rows must not include children in archived projects.
-func TestChildCountsByParents_ExcludesArchivedProjectChildren(t *testing.T) {
+func TestRelationshipsByIssues_ExcludesArchivedProjectChildren(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
 	pa := createProject(ctx, t, d, "alpha")
@@ -463,19 +452,19 @@ func TestChildCountsByParents_ExcludesArchivedProjectChildren(t *testing.T) {
 	makeLink(ctx, t, d, archivedChild.ID, parent.ID, "parent")
 	archiveProjectByID(ctx, t, d, pb.ID)
 
-	got, err := d.ChildCountsByParents(ctx, []int64{parent.ID})
+	got, err := d.RelationshipsByIssues(ctx, []int64{parent.ID})
 	require.NoError(t, err)
-	assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parent.ID],
+	assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parent.ID].Children,
 		"archived-project child must not count toward open or total")
 }
 
-// TestBlockedByNumbersByIssues_IncludesBlockerInArchivedProject pins that
+// TestRelationshipsByIssues_IncludesBlockerInArchivedProject pins that
 // blocked_by hydration carries the FULL relationship set: a blocker whose
 // project is archived is still returned, because this is relationship data on
 // the wire, not display policy. `kata show` exposes the same link via
 // LinksByIssue, so `kata list --json` must not silently drop it. "Actively
-// blocked" display state is a separate concern (ActivelyBlockedIssueIDs).
-func TestBlockedByNumbersByIssues_IncludesBlockerInArchivedProject(t *testing.T) {
+// blocked" display state is a separate concern (ActivelyBlocked).
+func TestRelationshipsByIssues_IncludesBlockerInArchivedProject(t *testing.T) {
 	d, ctx, p1 := setupTestProject(t)
 	p2, err := d.CreateProject(ctx, "blocker-project")
 	require.NoError(t, err)
@@ -484,18 +473,18 @@ func TestBlockedByNumbersByIssues_IncludesBlockerInArchivedProject(t *testing.T)
 	makeLink(ctx, t, d, blocker.ID, blocked.ID, "blocks")
 	archiveProjectByID(ctx, t, d, p2.ID)
 
-	got, err := d.BlockedByNumbersByIssues(ctx, []int64{blocked.ID})
+	got, err := d.RelationshipsByIssues(ctx, []int64{blocked.ID})
 	require.NoError(t, err)
-	assert.Contains(t, got[blocked.ID], blocker.ID,
+	assert.Contains(t, got[blocked.ID].BlockedBy, blocker.ID,
 		"archived-project blocker is still a relationship edge and must hydrate")
 }
 
-// TestActivelyBlockedIssueIDs pins the display-policy predicate that mirrors
+// TestRelationshipsByIssues_ActivelyBlocked pins the display-policy predicate that mirrors
 // ReadyIssues: true iff the target issue is itself open and live AND an
 // incoming blocker is open, live, and in a non-archived project. Closed
 // blockers, archived-project blockers, issues with no blocker, and closed
-// target issues are all not actively blocked (absent from the map).
-func TestActivelyBlockedIssueIDs(t *testing.T) {
+// target issues all have ActivelyBlocked set to false.
+func TestRelationshipsByIssues_ActivelyBlocked(t *testing.T) {
 	d, ctx, p1 := setupTestProject(t)
 	p2, err := d.CreateProject(ctx, "blocker-project")
 	require.NoError(t, err)
@@ -527,16 +516,16 @@ func TestActivelyBlockedIssueIDs(t *testing.T) {
 	_, _, _, err = d.CloseIssue(ctx, closedTarget.ID, "done", "tester", "", nil)
 	require.NoError(t, err)
 
-	got, err := d.ActivelyBlockedIssueIDs(ctx, []int64{
+	got, err := d.RelationshipsByIssues(ctx, []int64{
 		openBlocked.ID, closedBlocked.ID, archivedBlocked.ID, unblocked.ID,
 		closedTarget.ID,
 	})
 	require.NoError(t, err)
-	assert.True(t, got[openBlocked.ID], "open blocker must mark issue actively blocked")
-	assert.False(t, got[closedBlocked.ID], "closed blocker must not mark issue blocked")
-	assert.False(t, got[archivedBlocked.ID],
+	assert.True(t, got[openBlocked.ID].ActivelyBlocked, "open blocker must mark issue actively blocked")
+	assert.False(t, got[closedBlocked.ID].ActivelyBlocked, "closed blocker must not mark issue blocked")
+	assert.False(t, got[archivedBlocked.ID].ActivelyBlocked,
 		"blocker in an archived project must not mark issue blocked")
-	assert.False(t, got[unblocked.ID], "issue with no blocker must not be blocked")
-	assert.False(t, got[closedTarget.ID],
+	assert.False(t, got[unblocked.ID].ActivelyBlocked, "issue with no blocker must not be blocked")
+	assert.False(t, got[closedTarget.ID].ActivelyBlocked,
 		"closed target with an open blocker must not be actively blocked")
 }

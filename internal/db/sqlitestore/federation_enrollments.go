@@ -231,6 +231,30 @@ func (d *Store) ListFederationEnrollments(ctx context.Context) ([]db.FederationE
 	return out, rows.Err()
 }
 
+// ListProjectFederationEnrollments returns one project's enrollment rows in
+// the same id order the global list emits, revoked rows included. The
+// project_id predicate already excludes instance-scoped (NULL) enrollments;
+// revoked_at stays out of the WHERE clause so retained history is visible.
+func (d *Store) ListProjectFederationEnrollments(
+	ctx context.Context, projectID int64,
+) ([]db.FederationEnrollment, error) {
+	rows, err := d.QueryContext(ctx,
+		federationEnrollmentSelect+` WHERE project_id = ? ORDER BY id ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list project federation enrollments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []db.FederationEnrollment{}
+	for rows.Next() {
+		enrollment, err := scanFederationEnrollment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, enrollment)
+	}
+	return out, rows.Err()
+}
+
 // FindActiveFederationEnrollment returns the newest active enrollment whose
 // public correlation fields exactly match the request.
 func (d *Store) FindActiveFederationEnrollment(

@@ -67,6 +67,7 @@ var alreadyImplemented = map[string]bool{
 	"FindActiveFederationEnrollment":       true, // federation_control.go
 	"ListFederationBindings":               true, // federation_control.go
 	"ListFederationEnrollments":            true, // federation_control.go
+	"ListProjectFederationEnrollments":     true, // federation_control.go
 	"LeaveFederationReplica":               true, // federation_projection.go
 	"MaterializeFederatedProject":          true, // federation_projection.go
 	"RecordFederationQuarantine":           true, // federation_quarantine.go
@@ -86,16 +87,12 @@ var alreadyImplemented = map[string]bool{
 	"AliasByIdentity":                      true, // aliases.go
 	"AddLabel":                             true, // labels.go
 	"AddLabelAndEvent":                     true, // labels.go
-	"ActivelyBlockedIssueIDs":              true, // relationship_queries.go
 	"AcquireClaim":                         true, // claims_core.go
 	"AcquireIdempotencyLock":               true, // idempotency_lock.go
 	"ApplyClaimStatus":                     true, // claims_pending.go
 	"ApplyExternalRootProjection":          true, // external_roots.go
 	"AttachAlias":                          true, // aliases.go
 	"BatchProjectStats":                    true, // project_lifecycle.go
-	"BlockNumbersByIssues":                 true, // relationship_queries.go
-	"BlockedByNumbersByIssues":             true, // relationship_queries.go
-	"ChildCountsByParents":                 true, // relationship_queries.go
 	"ChildrenOfIssue":                      true, // relationship_queries.go
 	"ClaimIssueSyncBinding":                true, // issue_sync.go
 	"ClaimExternalRootBinding":             true, // external_roots.go
@@ -220,7 +217,6 @@ var alreadyImplemented = map[string]bool{
 	"MergeProjects":                        true, // project_merge.go
 	"MoveIssueProject":                     true, // project_move.go
 	"OpenChildrenOf":                       true, // relationship_queries.go
-	"ParentNumbersByIssues":                true, // relationship_queries.go
 	"ParentOf":                             true, // links.go
 	"ParentShortIDsByIssues":               true, // relationship_queries.go
 	"PauseExternalRootBinding":             true, // external_roots.go
@@ -259,7 +255,7 @@ var alreadyImplemented = map[string]bool{
 	"RenewClaim":                           true, // claims_core.go
 	"RenameProject":                        true, // projects.go
 	"RenameProjectAndEvent":                true, // projects.go
-	"RelatedNumbersByIssues":               true, // relationship_queries.go
+	"RelationshipsByIssues":                true, // relationship_queries.go
 	"ReopenIssue":                          true, // issue_lifecycle.go
 	"ResolveAPIToken":                      true, // tokens.go
 	"ResolveExternalFieldConflict":         true, // external_roots.go

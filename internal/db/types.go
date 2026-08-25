@@ -477,6 +477,20 @@ type ChildCounts struct {
 	Total int `json:"total"`
 }
 
+// IssueRelationships is every link-derived fact one issue row needs. The six
+// per-kind queries behind it keep their distinct predicates: BlockedBy is
+// full relationship hydration (it includes blockers in archived projects)
+// while ActivelyBlocked is display policy mirroring the ready predicate, and
+// ParentIssueID has no soft-delete filter on the peer.
+type IssueRelationships struct {
+	ParentIssueID   *int64
+	Blocks          []int64
+	BlockedBy       []int64
+	Related         []int64
+	Children        ChildCounts
+	ActivelyBlocked bool
+}
+
 // SearchCandidate is one row from SearchFTS: an issue, a backend-native
 // lexical relevance score normalized so higher is better, and the columns
 // where the query matched. MatchedIn is the basis for the wire response's
