@@ -30,6 +30,23 @@ func upsertImportMappingTx(
 	query rowQueryer,
 	params db.ImportMappingParams,
 ) (db.ImportMapping, error) {
+	return upsertImportMappingTxWithExternalRootAccess(ctx, query, params, false)
+}
+
+func upsertExternalRootImportMappingTx(
+	ctx context.Context,
+	query rowQueryer,
+	params db.ImportMappingParams,
+) (db.ImportMapping, error) {
+	return upsertImportMappingTxWithExternalRootAccess(ctx, query, params, true)
+}
+
+func upsertImportMappingTxWithExternalRootAccess(
+	ctx context.Context,
+	query rowQueryer,
+	params db.ImportMappingParams,
+	allowExternalRootUpdate bool,
+) (db.ImportMapping, error) {
 	if err := validateBindingScopedCommentMappingTx(ctx, query, params); err != nil {
 		return db.ImportMapping{}, err
 	}
@@ -45,6 +62,9 @@ func upsertImportMappingTx(
 		}
 		if err == nil && (params.CommentID != nil || params.LinkID != nil || params.Label != nil) {
 			return db.ImportMapping{}, fmt.Errorf("%w: external root mapping target must be its bound issue", db.ErrExternalRootValidation)
+		}
+		if err == nil && !allowExternalRootUpdate {
+			return db.ImportMapping{}, fmt.Errorf("%w: external root mapping can only be updated by its connector", db.ErrExternalRootAlreadyBound)
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return db.ImportMapping{}, mapSQLError(err, nil)

@@ -136,6 +136,56 @@ func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend B
 		assert.ErrorIs(t, readErr, db.ErrNotFound)
 	})
 
+	t.Run("generic imports cannot update a bridge-owned root mapping", func(t *testing.T) {
+		fixture := newExternalRootSafetyFixture(t, store, "root-mapping-frontier")
+		projected, _, changed, err := store.ApplyExternalRootProjection(ctx, db.ExternalRootProjectionParams{
+			BindingID: fixture.binding.ID, ClaimToken: fixture.token,
+			Title: "Projected root", Body: "Projected body", ExternalRevision: "revision-one",
+			ExternalActorID: "provider-actor", ExternalActorName: "Contributor",
+			ExternalUpdatedAt: fixture.now, ExternalObservedAt: fixture.now,
+			IntegrationActor: "connector:notes",
+		})
+		require.NoError(t, err)
+		require.True(t, changed)
+		before, err := store.ImportMappingBySource(
+			ctx, fixture.project.ID, "connector:notes", "issue", fixture.binding.ExternalRootKey,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, before.SourceUpdatedAt)
+		assert.Equal(t, fixture.now, *before.SourceUpdatedAt)
+
+		issueID := fixture.issue.ID
+		for _, attemptedAt := range []time.Time{fixture.now.Add(-time.Hour), fixture.now.Add(time.Hour)} {
+			_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{
+				Source: before.Source, ExternalID: before.ExternalID, ObjectType: before.ObjectType,
+				ProjectID: before.ProjectID, IssueID: &issueID, SourceUpdatedAt: &attemptedAt,
+			})
+			assert.ErrorIs(t, err, db.ErrExternalRootAlreadyBound)
+			after, readErr := store.ImportMappingBySource(
+				ctx, fixture.project.ID, before.Source, before.ObjectType, before.ExternalID,
+			)
+			require.NoError(t, readErr)
+			require.NotNil(t, after.SourceUpdatedAt)
+			assert.Equal(t, *before.SourceUpdatedAt, *after.SourceUpdatedAt)
+		}
+
+		_, _, err = store.ImportBatch(ctx, db.ImportBatchParams{
+			ProjectID: fixture.project.ID, Source: before.Source, Actor: "import-agent",
+			Items: []db.ImportItem{{
+				ExternalID: before.ExternalID, Title: projected.Title, Body: projected.Body,
+				Author: projected.Author, Status: projected.Status,
+				CreatedAt: projected.CreatedAt, UpdatedAt: projected.UpdatedAt,
+			}},
+		})
+		assert.ErrorIs(t, err, db.ErrExternalRootAlreadyBound)
+		afterBatch, err := store.ImportMappingBySource(
+			ctx, fixture.project.ID, before.Source, before.ObjectType, before.ExternalID,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, afterBatch.SourceUpdatedAt)
+		assert.Equal(t, *before.SourceUpdatedAt, *afterBatch.SourceUpdatedAt)
+	})
+
 	t.Run("local content is externally owned until unbind", func(t *testing.T) {
 		fixture := newExternalRootSafetyFixture(t, store, "content-ownership")
 		before, err := store.IssueByID(ctx, fixture.issue.ID)

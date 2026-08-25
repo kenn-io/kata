@@ -255,7 +255,7 @@ var storageScenarios = []scenario{
 	{
 		name: "external root content ownership",
 		methods: []string{
-			"CreateExternalRootBinding", "CreateIssue", "CreateProject", "CreateProjectWithUID",
+			"ApplyExternalRootProjection", "CreateExternalRootBinding", "CreateIssue", "CreateProject", "CreateProjectWithUID",
 			"EditIssue", "EditIssueAtomic", "EnableProjectFederation", "ImportBatch",
 			"ImportMappingBySource", "IngestFederationEvents", "IssueByID", "MaxEventID",
 			"PauseExternalRootBinding", "UnbindExternalRootBinding", "UpsertImportMapping", "UpsertIssueSyncBinding",

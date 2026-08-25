@@ -30,6 +30,19 @@ func (d *Store) UpsertImportMapping(ctx context.Context, p db.ImportMappingParam
 }
 
 func upsertImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingParams) (db.ImportMapping, error) {
+	return upsertImportMappingWithExternalRootAccess(ctx, e, p, false)
+}
+
+func upsertExternalRootImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingParams) (db.ImportMapping, error) {
+	return upsertImportMappingWithExternalRootAccess(ctx, e, p, true)
+}
+
+func upsertImportMappingWithExternalRootAccess(
+	ctx context.Context,
+	e execQuerier,
+	p db.ImportMappingParams,
+	allowExternalRootUpdate bool,
+) (db.ImportMapping, error) {
 	if err := validateBindingScopedCommentMapping(ctx, e, p); err != nil {
 		return db.ImportMapping{}, err
 	}
@@ -45,6 +58,9 @@ func upsertImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingP
 		}
 		if err == nil && (p.CommentID != nil || p.LinkID != nil || p.Label != nil) {
 			return db.ImportMapping{}, fmt.Errorf("%w: external root mapping target must be its bound issue", db.ErrExternalRootValidation)
+		}
+		if err == nil && !allowExternalRootUpdate {
+			return db.ImportMapping{}, fmt.Errorf("%w: external root mapping can only be updated by its connector", db.ErrExternalRootAlreadyBound)
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return db.ImportMapping{}, fmt.Errorf("check external root mapping target: %w", err)

@@ -323,7 +323,7 @@ func (d *Store) CreateExternalRootBinding(
 		if mappingErr != nil && !errors.Is(mappingErr, db.ErrNotFound) {
 			return db.ExternalRootBinding{}, db.Event{}, mappingErr
 		}
-		mapping, err := upsertImportMapping(ctx, tx, db.ImportMappingParams{
+		mapping, err := upsertExternalRootImportMapping(ctx, tx, db.ImportMappingParams{
 			Source: "connector:" + params.ConnectorInstance, ExternalID: params.ExternalRootKey,
 			ObjectType: "issue", ProjectID: params.ProjectID, IssueID: &issueID,
 		})
@@ -404,14 +404,14 @@ func seedExternalCommentIdentityFrontier(
 ) error {
 	issueID := binding.IssueID
 	source := db.ExternalRootCommentRevisionMappingSource(binding)
-	if _, err := upsertImportMapping(ctx, tx, db.ImportMappingParams{
+	if _, err := upsertExternalRootImportMapping(ctx, tx, db.ImportMappingParams{
 		Source: source, ExternalID: db.ExternalCommentFrontierExternalID,
 		ObjectType: db.ExternalRevisionAnchorObjectType, ProjectID: binding.ProjectID, IssueID: &issueID,
 	}); err != nil {
 		return fmt.Errorf("record external comment identity frontier: %w", err)
 	}
 	for _, comment := range comments {
-		if _, err := upsertImportMapping(ctx, tx, db.ImportMappingParams{
+		if _, err := upsertExternalRootImportMapping(ctx, tx, db.ImportMappingParams{
 			Source:     source,
 			ExternalID: db.ExternalCommentRevisionMappingExternalID(comment.ExternalID, comment.Revision),
 			ObjectType: db.ExternalRevisionAnchorObjectType,
@@ -738,7 +738,7 @@ func (d *Store) ApplyExternalRootProjection(
 		}
 		issueID := issue.ID
 		sourceUpdatedAt := params.ExternalUpdatedAt.UTC()
-		if _, err := upsertImportMapping(ctx, tx, db.ImportMappingParams{
+		if _, err := upsertExternalRootImportMapping(ctx, tx, db.ImportMappingParams{
 			Source: source, ExternalID: binding.ExternalRootKey,
 			ObjectType: "issue", ProjectID: binding.ProjectID, IssueID: &issueID,
 			SourceUpdatedAt: &sourceUpdatedAt,
@@ -813,7 +813,7 @@ func recordExternalRootRevision(
 	revision string,
 ) error {
 	issueID := binding.IssueID
-	_, err := upsertImportMapping(ctx, query, db.ImportMappingParams{
+	_, err := upsertExternalRootImportMapping(ctx, query, db.ImportMappingParams{
 		Source:     db.ExternalRootRevisionMappingSource(binding),
 		ExternalID: db.ExternalRootRevisionMappingExternalID(binding.ExternalRootKey, revision),
 		ObjectType: db.ExternalRevisionAnchorObjectType,
@@ -893,7 +893,7 @@ func (d *Store) UpsertExternalCommentProjection(
 			commentID := comment.ID
 			issueID := issue.ID
 			sourceUpdatedAt := params.ExternalUpdatedAt.UTC()
-			if _, err := upsertImportMapping(ctx, tx, db.ImportMappingParams{
+			if _, err := upsertExternalRootImportMapping(ctx, tx, db.ImportMappingParams{
 				Source: source, ExternalID: params.ExternalID, ObjectType: "comment",
 				ProjectID: binding.ProjectID, IssueID: &issueID, CommentID: &commentID,
 				SourceUpdatedAt: &sourceUpdatedAt,
@@ -958,7 +958,7 @@ func (d *Store) UpsertExternalCommentProjection(
 		}
 		issueID := issue.ID
 		sourceUpdatedAt := params.ExternalUpdatedAt.UTC()
-		if _, err := upsertImportMapping(ctx, tx, db.ImportMappingParams{
+		if _, err := upsertExternalRootImportMapping(ctx, tx, db.ImportMappingParams{
 			Source: source, ExternalID: params.ExternalID, ObjectType: "comment",
 			ProjectID: binding.ProjectID, IssueID: &issueID, CommentID: &commentID,
 			SourceUpdatedAt: &sourceUpdatedAt,
@@ -1019,7 +1019,7 @@ func recordExternalCommentRevision(
 	revision string,
 ) error {
 	issueID := binding.IssueID
-	_, err := upsertImportMapping(ctx, query, db.ImportMappingParams{
+	_, err := upsertExternalRootImportMapping(ctx, query, db.ImportMappingParams{
 		Source:     db.ExternalRootCommentRevisionMappingSource(binding),
 		ExternalID: db.ExternalCommentRevisionMappingExternalID(externalID, revision),
 		ObjectType: db.ExternalRevisionAnchorObjectType,
@@ -1116,7 +1116,7 @@ func (d *Store) EnsureExternalRootLifecycleRequest(
 		}
 		issueID := issue.ID
 		sourceUpdatedAt := params.ExternalUpdatedAt.UTC()
-		if _, err := upsertImportMapping(ctx, tx, db.ImportMappingParams{
+		if _, err := upsertExternalRootImportMapping(ctx, tx, db.ImportMappingParams{
 			Source: source, ExternalID: params.ExternalID, ObjectType: "comment",
 			ProjectID: binding.ProjectID, IssueID: &issueID, CommentID: &commentID,
 			SourceUpdatedAt: &sourceUpdatedAt,
