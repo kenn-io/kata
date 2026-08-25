@@ -542,7 +542,10 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	workerErrs := make(chan error, len(workers))
 	for _, worker := range workers {
-		go func() { workerErrs <- worker.result(worker.run(runCtx)) }()
+		go func() {
+			err := worker.run(runCtx)
+			workerErrs <- worker.result(err, runCtx.Err())
+		}()
 	}
 
 	var stop runStop
@@ -635,20 +638,19 @@ type namedWorker struct {
 	run  func(context.Context) error
 }
 
-// result normalizes a worker's exit: cancellation is how a worker reports a
-// clean stop, anything else is a failure attributed to its worker.
-func (w namedWorker) result(err error) error {
-	if err == nil || isCancellationOnly(err) {
+// result normalizes a worker's exit: the run context's terminal error is how a
+// worker reports a clean stop, anything else is a failure attributed to it.
+func (w namedWorker) result(err, terminal error) error {
+	if err == nil || isOnlyError(err, terminal) {
 		return nil
 	}
 	return fmt.Errorf("kata: %s worker: %w", w.name, err)
 }
 
-// isCancellationOnly reports whether every non-nil leaf in err's causal graph
-// is context.Canceled. errors.Is alone is insufficient here because it also
-// matches composites that join cancellation with a genuine failure.
-func isCancellationOnly(err error) bool {
-	if err == nil {
+// isOnlyError reports whether every non-nil leaf in err's causal graph matches
+// target. errors.Is alone also matches joins that contain a genuine failure.
+func isOnlyError(err, target error) bool {
+	if err == nil || target == nil {
 		return false
 	}
 	switch err := err.(type) {
@@ -659,17 +661,21 @@ func isCancellationOnly(err error) bool {
 				continue
 			}
 			found = true
-			if !isCancellationOnly(cause) {
+			if !isOnlyError(cause, target) {
 				return false
 			}
 		}
 		return found
 	case interface{ Unwrap() error }:
 		if cause := err.Unwrap(); cause != nil {
-			return isCancellationOnly(cause)
+			return isOnlyError(cause, target)
 		}
 	}
-	return errors.Is(err, context.Canceled)
+	return errors.Is(err, target)
+}
+
+func isCancellationOnly(err error) bool {
+	return isOnlyError(err, context.Canceled)
 }
 
 // stopReason is why Run began unwinding, recorded when it happens rather than

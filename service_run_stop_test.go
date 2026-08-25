@@ -4,11 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestServiceRunTreatsCallerDeadlineAsCleanShutdown(t *testing.T) {
+	service, err := New(t.Context(), Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: AuthConfig{TrustCallerAuthentication: true},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	runCtx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+
+	require.NoError(t, service.Run(runCtx))
+}
 
 // TestRunResultAppliesShutdownPolicy pins decision D1. The first case is the
 // one the old Run got wrong: a worker that failed for a real reason was
@@ -115,18 +131,20 @@ func TestRunResultAppliesShutdownPolicy(t *testing.T) {
 func TestNamedWorkerResultAttributesOnlyRealFailures(t *testing.T) {
 	worker := namedWorker{name: "github-sync"}
 
-	assert.NoError(t, worker.result(nil))
-	assert.NoError(t, worker.result(context.Canceled))
-	assert.NoError(t, worker.result(fmt.Errorf("stopping: %w", context.Canceled)))
+	assert.NoError(t, worker.result(nil, nil))
+	assert.NoError(t, worker.result(context.Canceled, context.Canceled))
+	assert.NoError(t, worker.result(
+		fmt.Errorf("stopping: %w", context.Canceled), context.Canceled))
 	assert.NoError(t, worker.result(errors.Join(
-		context.Canceled, fmt.Errorf("stopping: %w", context.Canceled))))
+		context.Canceled, fmt.Errorf("stopping: %w", context.Canceled)), context.Canceled))
+	assert.NoError(t, worker.result(context.DeadlineExceeded, context.DeadlineExceeded))
 
 	failure := errors.New("boom")
-	err := worker.result(failure)
+	err := worker.result(failure, nil)
 	require.ErrorIs(t, err, failure)
 	assert.ErrorContains(t, err, "github-sync worker")
 
-	joinedErr := worker.result(errors.Join(context.Canceled, failure))
+	joinedErr := worker.result(errors.Join(context.DeadlineExceeded, failure), context.DeadlineExceeded)
 	require.ErrorIs(t, joinedErr, failure)
 	assert.ErrorContains(t, joinedErr, "github-sync worker")
 }
