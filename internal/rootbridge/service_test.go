@@ -378,6 +378,52 @@ func TestBindRejectsNoncanonicalResolvedIdentityWithoutChangingState(t *testing.
 	}
 }
 
+func TestBindRejectsUnreconcilableConnectorDataWithoutChangingState(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		mutate    func(*fakeConnectorClient)
+		wantError error
+	}{
+		{
+			name: "blank root title",
+			mutate: func(client *fakeConnectorClient) {
+				client.resolved.Title = " \t "
+			},
+			wantError: db.ErrExternalRootValidation,
+		},
+		{
+			name: "blank live comment body",
+			mutate: func(client *fakeConnectorClient) {
+				client.comments = []connector.Comment{{
+					ID: "comment-1", Revision: "revision-1", Body: " \t ",
+					Author:    connector.Actor{ID: "reviewer", DisplayName: "Reviewer"},
+					CreatedAt: testObservedAt, UpdatedAt: testObservedAt,
+				}}
+			},
+			wantError: connectorclient.ErrProtocolFailure,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newServiceHarness(t)
+			test.mutate(h.client)
+			before, err := h.store.MaxEventID(t.Context())
+			require.NoError(t, err)
+
+			_, _, err = h.service.Bind(t.Context(), BindParams{
+				ProjectID: h.project.ID, IssueID: h.issue.ID, ConnectorInstance: "notes",
+				Locator: "root-1", Actor: "tester",
+			})
+
+			assert.ErrorIs(t, err, test.wantError)
+			_, bindingErr := h.store.ExternalRootBindingByIssue(t.Context(), h.issue.ID)
+			assert.ErrorIs(t, bindingErr, db.ErrNotFound)
+			after, eventErr := h.store.MaxEventID(t.Context())
+			require.NoError(t, eventErr)
+			assert.Equal(t, before, after)
+		})
+	}
+}
+
 func TestBindMissingInstanceDoesNotChangeState(t *testing.T) {
 	h := newServiceHarness(t)
 	_, _, err := h.service.Bind(t.Context(), BindParams{

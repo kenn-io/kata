@@ -38,10 +38,6 @@ func (s *Store) AdoptProjectIntoFederation(
 		if project.DeletedAt != nil {
 			return fmt.Errorf("adopt project into federation: project %d is archived", params.ProjectID)
 		}
-		if err := rejectFederationSpokeProjectConflicts(ctx, tx, params.ProjectID); err != nil {
-			return err
-		}
-
 		existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, params.ProjectID))
 		if err == nil {
@@ -52,6 +48,9 @@ func (s *Store) AdoptProjectIntoFederation(
 			return fmt.Errorf("project %d already has %q federation binding", params.ProjectID, existing.Role)
 		}
 		if !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		if err := rejectFederationSpokeProjectConflicts(ctx, tx, params.ProjectID); err != nil {
 			return err
 		}
 

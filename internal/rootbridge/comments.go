@@ -46,11 +46,8 @@ func (r *Reconciler) applyInboundComments(
 		if pendingCommentsToWithhold[comment.ID] {
 			continue
 		}
-		if !comment.Deleted && strings.TrimSpace(comment.Body) == "" {
-			return result, connectorProtocolFailure()
-		}
-		if strings.TrimSpace(comment.Revision) == "" || strings.TrimSpace(comment.Revision) != comment.Revision {
-			return result, connectorProtocolFailure()
+		if err := validateInboundComment(comment); err != nil {
+			return result, err
 		}
 		revisionID := db.ExternalCommentRevisionMappingExternalID(comment.ID, comment.Revision)
 		if snapshot.seenCommentRevisions[revisionID] && !mapped[comment.ID] {
@@ -94,6 +91,16 @@ func (r *Reconciler) applyInboundComments(
 		}
 	}
 	return result, nil
+}
+
+func validateInboundComment(comment connector.Comment) error {
+	if !comment.Deleted && strings.TrimSpace(comment.Body) == "" {
+		return connectorProtocolFailure()
+	}
+	if strings.TrimSpace(comment.Revision) == "" || strings.TrimSpace(comment.Revision) != comment.Revision {
+		return connectorProtocolFailure()
+	}
+	return nil
 }
 
 func (r *Reconciler) applyOutboundComments(

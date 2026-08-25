@@ -284,6 +284,9 @@ func (s *Service) Bind(ctx context.Context, params BindParams) (db.ExternalRootB
 	}
 	initialCommentRevisions := make([]db.ExternalCommentRevision, 0, len(listedComments.Comments))
 	for _, comment := range listedComments.Comments {
+		if err := validateInboundComment(comment); err != nil {
+			return db.ExternalRootBinding{}, nil, err
+		}
 		initialCommentRevisions = append(initialCommentRevisions, db.ExternalCommentRevision{
 			ExternalID: comment.ID, Revision: comment.Revision,
 		})
@@ -867,6 +870,9 @@ func validateResolvedRoot(root connector.Root) error {
 	if strings.TrimSpace(root.Key) == "" || strings.TrimSpace(root.Key) != root.Key ||
 		strings.TrimSpace(root.IdentityKey) == "" || strings.TrimSpace(root.IdentityKey) != root.IdentityKey {
 		return fmt.Errorf("%w: root and account identities must be nonempty and canonical", db.ErrExternalRootValidation)
+	}
+	if strings.TrimSpace(root.Title) == "" {
+		return fmt.Errorf("%w: root title is required", db.ErrExternalRootValidation)
 	}
 	if root.ObservedAt.IsZero() {
 		return fmt.Errorf("%w: root observation time is required", db.ErrExternalRootValidation)

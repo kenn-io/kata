@@ -2338,16 +2338,30 @@ func checkFederationProjectAdoption(t *testing.T, store db.Storage) error {
 	assert.Equal(t, "bob", comments[0].Author)
 	assert.Equal(t, "current historical comment", comments[0].Body)
 
+	_, _, err = store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: first.ID,
+		ConnectorInstance: "notes", ExternalRootKey: "root-after-adoption",
+		ExternalAccountKey: "account-adoption-conflict", Actor: "adoption-agent",
+		ReceiveCommentsAfter: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		return err
+	}
+	beforeRepeatedAdoption, err := store.MaxEventID(ctx)
+	if err != nil {
+		return err
+	}
+
 	repeated, err := store.AdoptProjectIntoFederation(ctx, params)
 	if err != nil {
 		return err
 	}
 	assert.Zero(t, repeated.AdoptionSnapshotCount)
-	repeatedEvents, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+	afterRepeatedAdoption, err := store.MaxEventID(ctx)
 	if err != nil {
 		return err
 	}
-	assert.Len(t, repeatedEvents, 3)
+	assert.Equal(t, beforeRepeatedAdoption, afterRepeatedAdoption)
 	binding, err := store.FederationBindingByProject(ctx, project.ID)
 	if err != nil {
 		return err
