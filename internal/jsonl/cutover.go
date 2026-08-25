@@ -134,9 +134,8 @@ func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string) error {
 // Returns "" when no orphans were dropped, so callers can skip
 // the println entirely on clean DBs. Only nonzero classes are
 // listed, in the fixed order events / comments / links /
-// issue_labels. ScrubbedRowsByTable is intentionally not
-// included — scrubs preserve the row, so reporting them as
-// "discarded" would mislead.
+// issue_labels. Scrubbed rows are intentionally not included — scrubs
+// preserve the row, so reporting them as "discarded" would mislead.
 func formatOrphanSummary(report OrphanReport) string {
 	// classes is sourced from preflight.go's knownOrphanClasses so the
 	// cutover summary stays in sync with the preflight classifier.
@@ -144,7 +143,7 @@ func formatOrphanSummary(report OrphanReport) string {
 	var parts []string
 	total := 0
 	for _, c := range classes {
-		n := len(report.DroppedRowsByTable[c])
+		n := report.DropCount(c)
 		if n == 0 {
 			continue
 		}

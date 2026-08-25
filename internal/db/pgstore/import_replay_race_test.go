@@ -40,13 +40,12 @@ func TestImportReplayFreshTargetRejectsConcurrentWriter(t *testing.T) {
 
 	result := make(chan error, 1)
 	go func() {
-		result <- store.ImportReplay(ctx, []db.ImportRecord{{
-			Kind: db.ImportKindProject,
-			Project: &db.ProjectExport{
+		result <- store.ImportReplay(ctx, []db.ImportRecord{
+			&db.ProjectExport{
 				ID: 3, UID: "01KATA00000000000000000002", Name: "restored-project",
 				CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
 			},
-		}}, db.ImportOptions{RequireFreshTarget: true})
+		}, db.ImportOptions{RequireFreshTarget: true})
 	}()
 
 	require.Eventually(t, func() bool {
@@ -107,13 +106,12 @@ func TestImportReplayWaitsForConcurrentSchemaMigration(t *testing.T) {
 
 	result := make(chan error, 1)
 	go func() {
-		result <- store.ImportReplay(ctx, []db.ImportRecord{{
-			Kind: db.ImportKindProject,
-			Project: &db.ProjectExport{
+		result <- store.ImportReplay(ctx, []db.ImportRecord{
+			&db.ProjectExport{
 				ID: 2, UID: "01KATA00000000000000000003", Name: "restored-project",
 				CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
 			},
-		}}, db.ImportOptions{})
+		}, db.ImportOptions{})
 	}()
 
 	require.Eventually(t, func() bool {
@@ -155,10 +153,9 @@ func TestImportReplayWaitsForServingDaemonAcrossConnections(t *testing.T) {
 
 	result := make(chan error, 1)
 	go func() {
-		result <- restore.ImportReplay(ctx, []db.ImportRecord{{
-			Kind: db.ImportKindMeta,
-			Meta: &db.MetaKV{Key: "instance_uid", Value: "01KATA00000000000000000044"},
-		}}, db.ImportOptions{})
+		result <- restore.ImportReplay(ctx, []db.ImportRecord{
+			&db.MetaKV{Key: "instance_uid", Value: "01KATA00000000000000000044"},
+		}, db.ImportOptions{})
 	}()
 
 	require.Eventually(t, func() bool {
@@ -208,13 +205,12 @@ func TestImportReplayRefusesCrossSchemaCascade(t *testing.T) {
 		`INSERT INTO unrelated.project_refs(project_id,note) VALUES($1,'must survive')`, project.ID)
 	require.NoError(t, err)
 
-	err = store.ImportReplay(ctx, []db.ImportRecord{{
-		Kind: db.ImportKindProject,
-		Project: &db.ProjectExport{
+	err = store.ImportReplay(ctx, []db.ImportRecord{
+		&db.ProjectExport{
 			ID: 9, UID: "01KATA00000000000000000009", Name: "replacement",
 			CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
 		},
-	}}, db.ImportOptions{})
+	}, db.ImportOptions{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "clear import target")
 
@@ -240,10 +236,9 @@ func TestImportReplayClearsTargetOnlyMetadata(t *testing.T) {
 		`INSERT INTO meta(key,value) VALUES('claim_status_refresh_error:old','stale')`)
 	require.NoError(t, err)
 
-	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{{
-		Kind: db.ImportKindMeta,
-		Meta: &db.MetaKV{Key: "instance_uid", Value: "01KATA00000000000000000010"},
-	}}, db.ImportOptions{}))
+	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{
+		&db.MetaKV{Key: "instance_uid", Value: "01KATA00000000000000000010"},
+	}, db.ImportOptions{}))
 	var stale string
 	err = store.QueryRowContext(ctx,
 		`SELECT value FROM meta WHERE key='claim_status_refresh_error:old'`).Scan(&stale)
@@ -251,10 +246,9 @@ func TestImportReplayClearsTargetOnlyMetadata(t *testing.T) {
 	assert.Equal(t, "01KATA00000000000000000010", store.InstanceUID())
 
 	localUID := store.InstanceUID()
-	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{{
-		Kind: db.ImportKindMeta,
-		Meta: &db.MetaKV{Key: "instance_uid", Value: "01KATA00000000000000000011"},
-	}}, db.ImportOptions{NewInstance: true}))
+	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{
+		&db.MetaKV{Key: "instance_uid", Value: "01KATA00000000000000000011"},
+	}, db.ImportOptions{NewInstance: true}))
 	assert.Equal(t, localUID, store.InstanceUID())
 }
 
@@ -282,17 +276,17 @@ func TestImportReplayPreservesHistoricalEventProjectName(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{
-		{Kind: db.ImportKindMeta, Meta: &db.MetaKV{Key: "instance_uid", Value: instanceUID}},
-		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+		&db.MetaKV{Key: "instance_uid", Value: instanceUID},
+		&db.ProjectExport{
 			ID: 12, UID: projectUID, Name: "new-name", CreatedAt: createdAt,
 			Metadata: json.RawMessage(`{}`), Revision: 1,
-		}},
-		{Kind: db.ImportKindEvent, Event: &db.EventExport{
+		},
+		&db.EventExport{
 			ID: 13, UID: eventUID, OriginInstanceUID: instanceUID, ProjectID: 12,
 			ProjectUID: projectUID, ProjectName: "old-name", Type: "project.created",
 			Actor: "operator", Payload: payload, HLCPhysicalMS: 1784116800000,
 			ContentHash: hash, CreatedAt: createdAt,
-		}},
+		},
 	}, db.ImportOptions{}))
 	var storedName string
 	require.NoError(t, store.QueryRowContext(ctx,

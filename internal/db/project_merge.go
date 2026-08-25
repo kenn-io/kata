@@ -60,29 +60,26 @@ func PrepareProjectMergeRecords(
 	importedExternalBindings := make(map[string]struct{})
 	importedExternalMappings := make(map[externalFieldMappingIdentity]struct{})
 	for _, rec := range recs {
-		if rec.Project != nil {
-			if rec.Project.UID == SystemProjectUID || rec.Project.Name == SystemProjectName {
+		switch rec := rec.(type) {
+		case *ProjectExport:
+			if rec.UID == SystemProjectUID || rec.Name == SystemProjectName {
 				return nil, fmt.Errorf("project merge requires one non-system project")
 			}
 			if project != nil {
 				return nil, fmt.Errorf("project merge requires exactly one project record")
 			}
-			p := *rec.Project
+			p := *rec
 			project = &p
-		}
-		if rec.Issue != nil {
-			importedIssues[rec.Issue.ID] = rec.Issue.UID
-			importedIssueUIDs[rec.Issue.UID] = struct{}{}
-		}
-		if rec.Recurrence != nil {
-			importedRecurrencesByID[rec.Recurrence.ID] = rec.Recurrence.UID
-			importedRecurrencesByUID[rec.Recurrence.UID] = rec.Recurrence.ID
-		}
-		if rec.ExternalRootBinding != nil {
-			importedExternalBindings[rec.ExternalRootBinding.UID] = struct{}{}
-		}
-		if rec.ExternalFieldMapping != nil {
-			importedExternalMappings[externalFieldMappingExportIdentity(rec.ExternalFieldMapping)] = struct{}{}
+		case *IssueExport:
+			importedIssues[rec.ID] = rec.UID
+			importedIssueUIDs[rec.UID] = struct{}{}
+		case *RecurrenceExport:
+			importedRecurrencesByID[rec.ID] = rec.UID
+			importedRecurrencesByUID[rec.UID] = rec.ID
+		case *ExternalRootBindingExport:
+			importedExternalBindings[rec.UID] = struct{}{}
+		case *ExternalFieldMappingExport:
+			importedExternalMappings[externalFieldMappingExportIdentity(rec)] = struct{}{}
 		}
 	}
 	if project == nil {
@@ -132,193 +129,193 @@ func PrepareProjectMergeRecords(
 	out := make([]ImportRecord, 0, len(recs)-2)
 	var issueSequenceFloor, eventSequenceFloor int64
 	for _, rec := range recs {
-		if rec.Kind == ImportKindMeta {
+		if _, ok := rec.(*MetaKV); ok {
 			continue
 		}
 		cloned := cloneImportRecord(rec)
 		var err error
-		switch cloned.Kind {
-		case ImportKindProject:
-			cloned.Project.ID = offsets.TargetProjectID
-		case ImportKindProjectAlias:
-			if err = requireMergeProjectID(cloned.Alias.ProjectID, projectID, cloned.Kind); err == nil {
-				cloned.Alias.ID, err = addMergeOffset(cloned.Alias.ID, offsets.Alias, cloned.Kind)
-				cloned.Alias.ProjectID = offsets.TargetProjectID
+		switch payload := cloned.(type) {
+		case *ProjectExport:
+			payload.ID = offsets.TargetProjectID
+		case *AliasExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				payload.ID, err = addMergeOffset(payload.ID, offsets.Alias, payload.ImportKind())
+				payload.ProjectID = offsets.TargetProjectID
 			}
-		case ImportKindIssueSyncBinding:
-			if err = requireMergeProjectID(cloned.IssueSyncBinding.ProjectID, projectID, cloned.Kind); err == nil {
-				cloned.IssueSyncBinding.ID, err = addMergeOffset(cloned.IssueSyncBinding.ID, offsets.SyncBinding, cloned.Kind)
-				cloned.IssueSyncBinding.ProjectID = offsets.TargetProjectID
+		case *IssueSyncBindingExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				payload.ID, err = addMergeOffset(payload.ID, offsets.SyncBinding, payload.ImportKind())
+				payload.ProjectID = offsets.TargetProjectID
 			}
-		case ImportKindIssueSyncStatus:
-			if err = requireMergeProjectID(cloned.IssueSyncStatus.ProjectID, projectID, cloned.Kind); err == nil {
-				cloned.IssueSyncStatus.BindingID, err = addMergeOffset(cloned.IssueSyncStatus.BindingID, offsets.SyncBinding, cloned.Kind)
-				cloned.IssueSyncStatus.ProjectID = offsets.TargetProjectID
+		case *IssueSyncStatusExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				payload.BindingID, err = addMergeOffset(payload.BindingID, offsets.SyncBinding, payload.ImportKind())
+				payload.ProjectID = offsets.TargetProjectID
 			}
-		case ImportKindRecurrence:
-			if err = requireMergeProjectID(cloned.Recurrence.ProjectID, projectID, cloned.Kind); err == nil {
-				cloned.Recurrence.ID, err = addMergeOffset(cloned.Recurrence.ID, offsets.Recurrence, cloned.Kind)
-				cloned.Recurrence.ProjectID = offsets.TargetProjectID
+		case *RecurrenceExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				payload.ID, err = addMergeOffset(payload.ID, offsets.Recurrence, payload.ImportKind())
+				payload.ProjectID = offsets.TargetProjectID
 			}
-		case ImportKindIssue:
-			if err = requireMergeProjectID(cloned.Issue.ProjectID, projectID, cloned.Kind); err == nil {
-				cloned.Issue.ID, err = addMergeOffset(cloned.Issue.ID, offsets.Issue, cloned.Kind)
-				cloned.Issue.ProjectID = offsets.TargetProjectID
-				if err == nil && cloned.Issue.RecurrenceUID != nil {
-					sourceRecurrenceID, ok := importedRecurrencesByUID[*cloned.Issue.RecurrenceUID]
+		case *IssueExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				payload.ID, err = addMergeOffset(payload.ID, offsets.Issue, payload.ImportKind())
+				payload.ProjectID = offsets.TargetProjectID
+				if err == nil && payload.RecurrenceUID != nil {
+					sourceRecurrenceID, ok := importedRecurrencesByUID[*payload.RecurrenceUID]
 					if !ok {
 						err = fmt.Errorf("project merge issue recurrence UID %q is not part of the imported project",
-							*cloned.Issue.RecurrenceUID)
-					} else if cloned.Issue.RecurrenceID == nil {
-						cloned.Issue.RecurrenceID = &sourceRecurrenceID
-					} else if *cloned.Issue.RecurrenceID != sourceRecurrenceID {
+							*payload.RecurrenceUID)
+					} else if payload.RecurrenceID == nil {
+						payload.RecurrenceID = &sourceRecurrenceID
+					} else if *payload.RecurrenceID != sourceRecurrenceID {
 						err = fmt.Errorf("project merge issue recurrence ID %d does not match recurrence UID %q",
-							*cloned.Issue.RecurrenceID, *cloned.Issue.RecurrenceUID)
+							*payload.RecurrenceID, *payload.RecurrenceUID)
 					}
 				}
-				if err == nil && cloned.Issue.RecurrenceID != nil {
-					if _, ok := importedRecurrencesByID[*cloned.Issue.RecurrenceID]; !ok {
+				if err == nil && payload.RecurrenceID != nil {
+					if _, ok := importedRecurrencesByID[*payload.RecurrenceID]; !ok {
 						err = fmt.Errorf("project merge issue recurrence ID %d is not part of the imported project",
-							*cloned.Issue.RecurrenceID)
+							*payload.RecurrenceID)
 					}
 				}
-				if err == nil && cloned.Issue.RecurrenceID != nil {
-					*cloned.Issue.RecurrenceID, err = addMergeOffset(*cloned.Issue.RecurrenceID, offsets.Recurrence, cloned.Kind+" recurrence")
+				if err == nil && payload.RecurrenceID != nil {
+					*payload.RecurrenceID, err = addMergeOffset(*payload.RecurrenceID, offsets.Recurrence, payload.ImportKind()+" recurrence")
 				}
 			}
-		case ImportKindComment:
-			cloned.Comment.ID, err = addMergeOffset(cloned.Comment.ID, offsets.Comment, cloned.Kind)
+		case *CommentExport:
+			payload.ID, err = addMergeOffset(payload.ID, offsets.Comment, payload.ImportKind())
 			if err == nil {
-				cloned.Comment.IssueID, err = resolveImportedIssue(cloned.Comment.IssueID, "", "comment")
+				payload.IssueID, err = resolveImportedIssue(payload.IssueID, "", "comment")
 			}
-		case ImportKindIssueLabel:
-			cloned.Label.IssueID, err = resolveImportedIssue(cloned.Label.IssueID, "", "label")
-		case ImportKindLink:
-			_, fromImported := importedIssues[cloned.Link.FromIssueID]
-			_, toImported := importedIssues[cloned.Link.ToIssueID]
+		case *IssueLabelExport:
+			payload.IssueID, err = resolveImportedIssue(payload.IssueID, "", "label")
+		case *LinkExport:
+			_, fromImported := importedIssues[payload.FromIssueID]
+			_, toImported := importedIssues[payload.ToIssueID]
 			if !fromImported && !toImported {
 				err = fmt.Errorf("project merge link must include an issue from the imported project")
 			}
 			if err == nil {
-				cloned.Link.ID, err = addMergeOffset(cloned.Link.ID, offsets.Link, cloned.Kind)
+				payload.ID, err = addMergeOffset(payload.ID, offsets.Link, payload.ImportKind())
 			}
 			if err == nil {
-				cloned.Link.FromIssueID, err = resolveLinkIssue(cloned.Link.FromIssueID)
+				payload.FromIssueID, err = resolveLinkIssue(payload.FromIssueID)
 			}
 			if err == nil {
-				cloned.Link.ToIssueID, err = resolveLinkIssue(cloned.Link.ToIssueID)
+				payload.ToIssueID, err = resolveLinkIssue(payload.ToIssueID)
 			}
-		case ImportKindImportMapping:
-			if err = requireMergeProjectID(cloned.ImportMapping.ProjectID, projectID, cloned.Kind); err == nil {
-				cloned.ImportMapping.ID, err = addMergeOffset(cloned.ImportMapping.ID, offsets.ImportMapping, cloned.Kind)
-				cloned.ImportMapping.ProjectID = offsets.TargetProjectID
-				if err == nil && cloned.ImportMapping.IssueID != nil {
-					*cloned.ImportMapping.IssueID, err = addMergeOffset(*cloned.ImportMapping.IssueID, offsets.Issue, cloned.Kind+" issue")
+		case *ImportMappingExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				payload.ID, err = addMergeOffset(payload.ID, offsets.ImportMapping, payload.ImportKind())
+				payload.ProjectID = offsets.TargetProjectID
+				if err == nil && payload.IssueID != nil {
+					*payload.IssueID, err = addMergeOffset(*payload.IssueID, offsets.Issue, payload.ImportKind()+" issue")
 				}
-				if err == nil && cloned.ImportMapping.CommentID != nil {
-					*cloned.ImportMapping.CommentID, err = addMergeOffset(*cloned.ImportMapping.CommentID, offsets.Comment, cloned.Kind+" comment")
+				if err == nil && payload.CommentID != nil {
+					*payload.CommentID, err = addMergeOffset(*payload.CommentID, offsets.Comment, payload.ImportKind()+" comment")
 				}
-				if err == nil && cloned.ImportMapping.LinkID != nil {
-					*cloned.ImportMapping.LinkID, err = addMergeOffset(*cloned.ImportMapping.LinkID, offsets.Link, cloned.Kind+" link")
+				if err == nil && payload.LinkID != nil {
+					*payload.LinkID, err = addMergeOffset(*payload.LinkID, offsets.Link, payload.ImportKind()+" link")
 				}
 			}
-		case ImportKindExternalFieldMapping:
+		case *ExternalFieldMappingExport:
 			// Field mappings are global portable descriptor revisions. Preserve
 			// their identity; backend replay either reuses an exact existing
 			// revision or atomically rejects a conflicting target revision.
-		case ImportKindExternalRootBinding:
-			if cloned.ExternalRootBinding.ProjectUID != project.UID {
+		case *ExternalRootBindingExport:
+			if payload.ProjectUID != project.UID {
 				err = fmt.Errorf("project merge external root binding references project UID %q, want %q",
-					cloned.ExternalRootBinding.ProjectUID, project.UID)
-			} else if _, ok := importedIssueUIDs[cloned.ExternalRootBinding.IssueUID]; !ok {
+					payload.ProjectUID, project.UID)
+			} else if _, ok := importedIssueUIDs[payload.IssueUID]; !ok {
 				err = fmt.Errorf("project merge external root binding issue UID %q is not part of the imported project",
-					cloned.ExternalRootBinding.IssueUID)
+					payload.IssueUID)
 			}
-		case ImportKindExternalFieldState:
-			if _, ok := importedExternalBindings[cloned.ExternalFieldState.BindingUID]; !ok {
+		case *ExternalFieldStateExport:
+			if _, ok := importedExternalBindings[payload.BindingUID]; !ok {
 				err = fmt.Errorf("project merge external field state binding UID %q is not part of the imported project",
-					cloned.ExternalFieldState.BindingUID)
-			} else if _, ok := importedExternalMappings[externalFieldStateMappingIdentity(cloned.ExternalFieldState)]; !ok {
+					payload.BindingUID)
+			} else if _, ok := importedExternalMappings[externalFieldStateMappingIdentity(payload)]; !ok {
 				err = fmt.Errorf("project merge external field state mapping is not part of the imported project envelope")
 			}
-		case ImportKindFederationBinding, ImportKindFederationSyncStatus,
-			ImportKindFederationQuarantine, ImportKindFederationEnrollment:
+		case *FederationBindingExport, *FederationSyncStatusExport,
+			*FederationQuarantineExport, *FederationEnrollmentExport:
 			// Federation cursors are split between local and remote event ID
 			// spaces, while enrollment token hashes are live credentials. Drop
 			// all federation state so the imported project must rejoin cleanly.
 			continue
-		case ImportKindIssueClaim:
-			if err = requireMergeProjectID(cloned.IssueClaim.ProjectID, projectID, cloned.Kind); err == nil {
-				cloned.IssueClaim.ID, err = addMergeOffset(cloned.IssueClaim.ID, offsets.Claim, cloned.Kind)
-				cloned.IssueClaim.ProjectID = offsets.TargetProjectID
+		case *IssueClaimExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				payload.ID, err = addMergeOffset(payload.ID, offsets.Claim, payload.ImportKind())
+				payload.ProjectID = offsets.TargetProjectID
 				if err == nil {
-					cloned.IssueClaim.IssueID, err = resolveImportedIssue(
-						cloned.IssueClaim.IssueID, cloned.IssueClaim.IssueUID, "claim",
+					payload.IssueID, err = resolveImportedIssue(
+						payload.IssueID, payload.IssueUID, "claim",
 					)
 				}
 			}
-		case ImportKindPendingClaimRequest:
-			if err = requireMergeProjectID(cloned.PendingClaimRequest.ProjectID, projectID, cloned.Kind); err == nil {
-				cloned.PendingClaimRequest.ID, err = addMergeOffset(cloned.PendingClaimRequest.ID, offsets.PendingClaim, cloned.Kind)
-				cloned.PendingClaimRequest.ProjectID = offsets.TargetProjectID
+		case *PendingClaimRequestExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				payload.ID, err = addMergeOffset(payload.ID, offsets.PendingClaim, payload.ImportKind())
+				payload.ProjectID = offsets.TargetProjectID
 				if err == nil {
-					cloned.PendingClaimRequest.IssueID, err = resolveImportedIssue(
-						cloned.PendingClaimRequest.IssueID, cloned.PendingClaimRequest.IssueUID, "pending claim",
+					payload.IssueID, err = resolveImportedIssue(
+						payload.IssueID, payload.IssueUID, "pending claim",
 					)
 				}
 			}
-		case ImportKindEvent:
-			if err = requireMergeProjectID(cloned.Event.ProjectID, projectID, cloned.Kind); err == nil {
-				if cloned.Event.HLCPhysicalMS > maxProjectMergeHLCValue || cloned.Event.HLCCounter > maxProjectMergeHLCValue {
+		case *EventExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				if payload.HLCPhysicalMS > maxProjectMergeHLCValue || payload.HLCCounter > maxProjectMergeHLCValue {
 					err = fmt.Errorf("project merge event HLC exceeds safe range")
 				}
 				// UID, content hash, and payload form the event's portable
 				// identity. Only target-local numeric columns are remapped.
 				if err == nil {
-					cloned.Event.ID, err = addMergeOffset(cloned.Event.ID, offsets.Event, cloned.Kind)
+					payload.ID, err = addMergeOffset(payload.ID, offsets.Event, payload.ImportKind())
 				}
-				cloned.Event.ProjectID = offsets.TargetProjectID
-				if err == nil && cloned.Event.IssueID != nil {
-					*cloned.Event.IssueID, err = resolveImportedIssue(
-						*cloned.Event.IssueID, mergeStringValue(cloned.Event.IssueUID), "event",
+				payload.ProjectID = offsets.TargetProjectID
+				if err == nil && payload.IssueID != nil {
+					*payload.IssueID, err = resolveImportedIssue(
+						*payload.IssueID, mergeStringValue(payload.IssueUID), "event",
 					)
 				}
-				if err == nil && cloned.Event.RelatedIssueID != nil {
+				if err == nil && payload.RelatedIssueID != nil {
 					var resolvedID int64
-					resolvedID, err = resolveIssue(*cloned.Event.RelatedIssueID, mergeStringValue(cloned.Event.RelatedIssueUID))
+					resolvedID, err = resolveIssue(*payload.RelatedIssueID, mergeStringValue(payload.RelatedIssueUID))
 					if err == nil && resolvedID == 0 {
-						cloned.Event.RelatedIssueID = nil
+						payload.RelatedIssueID = nil
 					} else if err == nil {
-						*cloned.Event.RelatedIssueID = resolvedID
+						*payload.RelatedIssueID = resolvedID
 					}
 				}
 			}
-		case ImportKindPurgeLog:
-			if err = requireMergeProjectID(cloned.PurgeLog.ProjectID, projectID, cloned.Kind); err == nil {
-				cloned.PurgeLog.ID, err = addMergeOffset(cloned.PurgeLog.ID, offsets.PurgeLog, cloned.Kind)
-				cloned.PurgeLog.ProjectID = offsets.TargetProjectID
+		case *PurgeLogExport:
+			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
+				payload.ID, err = addMergeOffset(payload.ID, offsets.PurgeLog, payload.ImportKind())
+				payload.ProjectID = offsets.TargetProjectID
 				if err == nil {
-					cloned.PurgeLog.PurgedIssueID, err = addMergeOffset(cloned.PurgeLog.PurgedIssueID, offsets.Issue, cloned.Kind+" issue")
+					payload.PurgedIssueID, err = addMergeOffset(payload.PurgedIssueID, offsets.Issue, payload.ImportKind()+" issue")
 				}
-				if err == nil && cloned.PurgeLog.PurgedIssueID > issueSequenceFloor {
-					issueSequenceFloor = cloned.PurgeLog.PurgedIssueID
+				if err == nil && payload.PurgedIssueID > issueSequenceFloor {
+					issueSequenceFloor = payload.PurgedIssueID
 				}
 				if err == nil {
 					err = shiftEventPointers(
-						cloned.PurgeLog.EventsDeletedMinID,
-						cloned.PurgeLog.EventsDeletedMaxID,
-						cloned.PurgeLog.PurgeResetAfterEventID,
+						payload.EventsDeletedMinID,
+						payload.EventsDeletedMaxID,
+						payload.PurgeResetAfterEventID,
 						offsets.Event,
 					)
 				}
-				if err == nil && cloned.PurgeLog.PurgeResetAfterEventID != nil &&
-					*cloned.PurgeLog.PurgeResetAfterEventID > eventSequenceFloor {
-					eventSequenceFloor = *cloned.PurgeLog.PurgeResetAfterEventID
+				if err == nil && payload.PurgeResetAfterEventID != nil &&
+					*payload.PurgeResetAfterEventID > eventSequenceFloor {
+					eventSequenceFloor = *payload.PurgeResetAfterEventID
 				}
 			}
-		case ImportKindProjectPurgeLog:
+		case *ProjectPurgeLogExport:
 			return nil, fmt.Errorf("project merge does not accept project_purge_log records")
-		case ImportKindSQLiteSequence:
+		case *SequenceExport:
 			// Scoped exports carry whole-database sequence floors. They do not
 			// describe this project. Live imported IDs and the derived tombstone
 			// floors below advance target sequences during replay.
@@ -330,21 +327,15 @@ func PrepareProjectMergeRecords(
 		out = append(out, cloned)
 	}
 	if issueSequenceFloor > 0 {
-		out = append(out, ImportRecord{
-			Kind: ImportKindSQLiteSequence,
-			Sequence: &SequenceExport{
-				Name: "issues",
-				Seq:  issueSequenceFloor,
-			},
+		out = append(out, &SequenceExport{
+			Name: "issues",
+			Seq:  issueSequenceFloor,
 		})
 	}
 	if eventSequenceFloor > 0 {
-		out = append(out, ImportRecord{
-			Kind: ImportKindSQLiteSequence,
-			Sequence: &SequenceExport{
-				Name: "events",
-				Seq:  eventSequenceFloor,
-			},
+		out = append(out, &SequenceExport{
+			Name: "events",
+			Seq:  eventSequenceFloor,
 		})
 	}
 	return out, nil
@@ -382,131 +373,108 @@ func shiftEventPointers(first, last, reset *int64, offset int64) error {
 }
 
 func cloneImportRecord(rec ImportRecord) ImportRecord {
-	out := ImportRecord{Kind: rec.Kind}
-	if rec.Meta != nil {
-		v := *rec.Meta
-		out.Meta = &v
+	switch rec := rec.(type) {
+	case *MetaKV:
+		v := *rec
+		return &v
+	case *ProjectExport:
+		v := *rec
+		return &v
+	case *AliasExport:
+		v := *rec
+		return &v
+	case *IssueSyncBindingExport:
+		v := *rec
+		return &v
+	case *IssueSyncStatusExport:
+		v := *rec
+		return &v
+	case *RecurrenceExport:
+		v := *rec
+		return &v
+	case *IssueExport:
+		v := *rec
+		v.RecurrenceID = cloneInt64Ptr(rec.RecurrenceID)
+		return &v
+	case *IssueEmbeddingExport:
+		v := *rec
+		return &v
+	case *CommentExport:
+		v := *rec
+		return &v
+	case *IssueLabelExport:
+		v := *rec
+		return &v
+	case *LinkExport:
+		v := *rec
+		return &v
+	case *ImportMappingExport:
+		v := *rec
+		v.IssueID = cloneInt64Ptr(rec.IssueID)
+		v.CommentID = cloneInt64Ptr(rec.CommentID)
+		v.LinkID = cloneInt64Ptr(rec.LinkID)
+		return &v
+	case *ExternalFieldMappingExport:
+		v := *rec
+		v.AcceptedKinds = append([]string(nil), rec.AcceptedKinds...)
+		return &v
+	case *ExternalRootBindingExport:
+		v := *rec
+		v.ReceiveCommentsAfter = cloneTimePtr(rec.ReceiveCommentsAfter)
+		v.PublishCommentsAfter = cloneTimePtr(rec.PublishCommentsAfter)
+		v.PendingCommentStartedAt = cloneTimePtr(rec.PendingCommentStartedAt)
+		v.LastAttemptAt = cloneTimePtr(rec.LastAttemptAt)
+		v.LastSuccessAt = cloneTimePtr(rec.LastSuccessAt)
+		v.LastErrorAt = cloneTimePtr(rec.LastErrorAt)
+		v.NextAttemptAt = cloneTimePtr(rec.NextAttemptAt)
+		v.UnboundAt = cloneTimePtr(rec.UnboundAt)
+		return &v
+	case *ExternalFieldStateExport:
+		v := *rec
+		v.Baseline = append(json.RawMessage(nil), rec.Baseline...)
+		v.ConflictKata = append(json.RawMessage(nil), rec.ConflictKata...)
+		v.ConflictExternal = append(json.RawMessage(nil), rec.ConflictExternal...)
+		v.ConflictAt = cloneTimePtr(rec.ConflictAt)
+		return &v
+	case *FederationBindingExport:
+		v := *rec
+		return &v
+	case *FederationSyncStatusExport:
+		v := *rec
+		return &v
+	case *FederationQuarantineExport:
+		v := *rec
+		return &v
+	case *FederationEnrollmentExport:
+		v := *rec
+		v.ProjectID = cloneInt64Ptr(rec.ProjectID)
+		return &v
+	case *IssueClaimExport:
+		v := *rec
+		return &v
+	case *PendingClaimRequestExport:
+		v := *rec
+		return &v
+	case *EventExport:
+		v := *rec
+		v.IssueID = cloneInt64Ptr(rec.IssueID)
+		v.RelatedIssueID = cloneInt64Ptr(rec.RelatedIssueID)
+		return &v
+	case *PurgeLogExport:
+		v := *rec
+		v.EventsDeletedMinID = cloneInt64Ptr(rec.EventsDeletedMinID)
+		v.EventsDeletedMaxID = cloneInt64Ptr(rec.EventsDeletedMaxID)
+		v.PurgeResetAfterEventID = cloneInt64Ptr(rec.PurgeResetAfterEventID)
+		return &v
+	case *ProjectPurgeLogExport:
+		v := *rec
+		return &v
+	case *SequenceExport:
+		v := *rec
+		return &v
+	default:
+		return rec
 	}
-	if rec.Project != nil {
-		v := *rec.Project
-		out.Project = &v
-	}
-	if rec.Alias != nil {
-		v := *rec.Alias
-		out.Alias = &v
-	}
-	if rec.IssueSyncBinding != nil {
-		v := *rec.IssueSyncBinding
-		out.IssueSyncBinding = &v
-	}
-	if rec.IssueSyncStatus != nil {
-		v := *rec.IssueSyncStatus
-		out.IssueSyncStatus = &v
-	}
-	if rec.Recurrence != nil {
-		v := *rec.Recurrence
-		out.Recurrence = &v
-	}
-	if rec.Issue != nil {
-		v := *rec.Issue
-		out.Issue = &v
-		out.Issue.RecurrenceID = cloneInt64Ptr(v.RecurrenceID)
-	}
-	if rec.IssueEmbedding != nil {
-		v := *rec.IssueEmbedding
-		out.IssueEmbedding = &v
-	}
-	if rec.Comment != nil {
-		v := *rec.Comment
-		out.Comment = &v
-	}
-	if rec.Label != nil {
-		v := *rec.Label
-		out.Label = &v
-	}
-	if rec.Link != nil {
-		v := *rec.Link
-		out.Link = &v
-	}
-	if rec.ImportMapping != nil {
-		v := *rec.ImportMapping
-		out.ImportMapping = &v
-		out.ImportMapping.IssueID = cloneInt64Ptr(v.IssueID)
-		out.ImportMapping.CommentID = cloneInt64Ptr(v.CommentID)
-		out.ImportMapping.LinkID = cloneInt64Ptr(v.LinkID)
-	}
-	if rec.ExternalFieldMapping != nil {
-		v := *rec.ExternalFieldMapping
-		v.AcceptedKinds = append([]string(nil), v.AcceptedKinds...)
-		out.ExternalFieldMapping = &v
-	}
-	if rec.ExternalRootBinding != nil {
-		v := *rec.ExternalRootBinding
-		v.ReceiveCommentsAfter = cloneTimePtr(v.ReceiveCommentsAfter)
-		v.PublishCommentsAfter = cloneTimePtr(v.PublishCommentsAfter)
-		v.PendingCommentStartedAt = cloneTimePtr(v.PendingCommentStartedAt)
-		v.LastAttemptAt = cloneTimePtr(v.LastAttemptAt)
-		v.LastSuccessAt = cloneTimePtr(v.LastSuccessAt)
-		v.LastErrorAt = cloneTimePtr(v.LastErrorAt)
-		v.NextAttemptAt = cloneTimePtr(v.NextAttemptAt)
-		v.UnboundAt = cloneTimePtr(v.UnboundAt)
-		out.ExternalRootBinding = &v
-	}
-	if rec.ExternalFieldState != nil {
-		v := *rec.ExternalFieldState
-		v.Baseline = append(json.RawMessage(nil), v.Baseline...)
-		v.ConflictKata = append(json.RawMessage(nil), v.ConflictKata...)
-		v.ConflictExternal = append(json.RawMessage(nil), v.ConflictExternal...)
-		v.ConflictAt = cloneTimePtr(v.ConflictAt)
-		out.ExternalFieldState = &v
-	}
-	if rec.FederationBinding != nil {
-		v := *rec.FederationBinding
-		out.FederationBinding = &v
-	}
-	if rec.FederationSyncStatus != nil {
-		v := *rec.FederationSyncStatus
-		out.FederationSyncStatus = &v
-	}
-	if rec.FederationQuarantine != nil {
-		v := *rec.FederationQuarantine
-		out.FederationQuarantine = &v
-	}
-	if rec.FederationEnrollment != nil {
-		v := *rec.FederationEnrollment
-		out.FederationEnrollment = &v
-		out.FederationEnrollment.ProjectID = cloneInt64Ptr(v.ProjectID)
-	}
-	if rec.IssueClaim != nil {
-		v := *rec.IssueClaim
-		out.IssueClaim = &v
-	}
-	if rec.PendingClaimRequest != nil {
-		v := *rec.PendingClaimRequest
-		out.PendingClaimRequest = &v
-	}
-	if rec.Event != nil {
-		v := *rec.Event
-		out.Event = &v
-		out.Event.IssueID = cloneInt64Ptr(v.IssueID)
-		out.Event.RelatedIssueID = cloneInt64Ptr(v.RelatedIssueID)
-	}
-	if rec.PurgeLog != nil {
-		v := *rec.PurgeLog
-		out.PurgeLog = &v
-		out.PurgeLog.EventsDeletedMinID = cloneInt64Ptr(v.EventsDeletedMinID)
-		out.PurgeLog.EventsDeletedMaxID = cloneInt64Ptr(v.EventsDeletedMaxID)
-		out.PurgeLog.PurgeResetAfterEventID = cloneInt64Ptr(v.PurgeResetAfterEventID)
-	}
-	if rec.ProjectPurgeLog != nil {
-		v := *rec.ProjectPurgeLog
-		out.ProjectPurgeLog = &v
-	}
-	if rec.Sequence != nil {
-		v := *rec.Sequence
-		out.Sequence = &v
-	}
-	return out
 }
 
 type externalFieldMappingIdentity struct {

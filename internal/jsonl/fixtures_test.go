@@ -451,6 +451,52 @@ func seedV3DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	require.NoError(t, err)
 }
 
+// seedV2DBWithOrphanRelatedEvent writes a v2-schema DB carrying the fixture's
+// project and issue #1 plus one non-aggregated issue.linked event whose
+// related_issue_id points at issue 999, which is never inserted. PRAGMA
+// foreign_keys=OFF lets the insert land; preflight then classifies it as a
+// scrub and the v2 events projection NULLs the peer columns on export.
+func seedV2DBWithOrphanRelatedEvent(t *testing.T, path string) {
+	t.Helper()
+	writeLegacyV2DB(t, path)
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+
+	_, err = raw.Exec(`PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+	_, err = raw.Exec(
+		`INSERT INTO events (project_id, project_identity, issue_id, issue_uid, issue_number,
+		                     related_issue_id, related_issue_uid, type, actor, payload, created_at)
+		 VALUES (1, 'spoke-project', 1, '01HZZZZZZZZZZZZZZZZZZZZZZ1', 1,
+		         999, '01HZZZZZZZZZZZZZZZZZZZZA99', 'issue.linked', 'tester', '{}',
+		         '2026-05-03T00:00:03.000Z')`)
+	require.NoError(t, err)
+	_, err = raw.Exec(`PRAGMA foreign_keys = ON`)
+	require.NoError(t, err)
+}
+
+// seedV1DBWithOrphanRelatedEvent is seedV2DBWithOrphanRelatedEvent for the v1
+// schema, whose events table has neither issue_uid nor related_issue_uid.
+func seedV1DBWithOrphanRelatedEvent(t *testing.T, path string) {
+	t.Helper()
+	writeLegacyV1DB(t, path)
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+
+	_, err = raw.Exec(`PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+	_, err = raw.Exec(
+		`INSERT INTO events (project_id, project_identity, issue_id, issue_number,
+		                     related_issue_id, type, actor, payload, created_at)
+		 VALUES (1, 'spoke-project', 1, 1, 999, 'issue.linked', 'tester', '{}',
+		         '2026-05-03T00:00:03.000Z')`)
+	require.NoError(t, err)
+	_, err = raw.Exec(`PRAGMA foreign_keys = ON`)
+	require.NoError(t, err)
+}
+
 // dropV10Additions trims a freshly-bootstrapped current-schema DB back to
 // the v8/v9 column shape: removes the recurrences table, the issues
 // recurrence linkage, and metadata + revision on both issues and projects.

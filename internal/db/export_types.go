@@ -18,6 +18,9 @@ type MetaKV struct {
 	Value string `json:"value"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*MetaKV) ImportKind() string { return ImportKindMeta }
+
 // IssueExport is one issue row in export shape (recurrence_uid resolved via join).
 type IssueExport struct {
 	ID              int64           `json:"id"`
@@ -43,6 +46,9 @@ type IssueExport struct {
 	OccurrenceKey   *string         `json:"occurrence_key,omitempty"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*IssueExport) ImportKind() string { return ImportKindIssue }
+
 // IssueEmbeddingExport is one issue_embeddings row in export shape, keyed by
 // issue UID so import resolves identity independent of local numeric ids. The
 // vector is base64-encoded (dims x float32 little-endian, L2-normalized).
@@ -55,6 +61,9 @@ type IssueEmbeddingExport struct {
 	Dims                    int    `json:"dims"`
 	VectorB64               string `json:"vector_b64"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*IssueEmbeddingExport) ImportKind() string { return ImportKindIssueEmbedding }
 
 // RecurrenceExport is one recurrence row in export shape.
 type RecurrenceExport struct {
@@ -79,6 +88,9 @@ type RecurrenceExport struct {
 	DeletedAt           *string         `json:"deleted_at,omitempty"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*RecurrenceExport) ImportKind() string { return ImportKindRecurrence }
+
 // LinkExport is one link row in export shape, with both endpoint UIDs resolved
 // via the standard FROM links JOIN issues AS from_issues JOIN issues AS
 // to_issues query.
@@ -93,6 +105,9 @@ type LinkExport struct {
 	CreatedAt    string `json:"created_at"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*LinkExport) ImportKind() string { return ImportKindLink }
+
 // AliasExport is one project_aliases row in export shape.
 type AliasExport struct {
 	ID            int64  `json:"id"`
@@ -101,6 +116,9 @@ type AliasExport struct {
 	AliasKind     string `json:"alias_kind"`
 	CreatedAt     string `json:"created_at"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*AliasExport) ImportKind() string { return ImportKindProjectAlias }
 
 // IssueSyncBindingExport is one issue_sync_bindings row in export shape.
 type IssueSyncBindingExport struct {
@@ -118,6 +136,9 @@ type IssueSyncBindingExport struct {
 	UpdatedAt       string          `json:"updated_at"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*IssueSyncBindingExport) ImportKind() string { return ImportKindIssueSyncBinding }
+
 // IssueSyncStatusExport is one issue_sync_status row in export shape.
 type IssueSyncStatusExport struct {
 	BindingID     int64   `json:"binding_id"`
@@ -133,6 +154,9 @@ type IssueSyncStatusExport struct {
 	LastComments  int     `json:"last_comments"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*IssueSyncStatusExport) ImportKind() string { return ImportKindIssueSyncStatus }
+
 // CommentExport is one comment row in export shape.
 type CommentExport struct {
 	ID        int64  `json:"id"`
@@ -143,6 +167,9 @@ type CommentExport struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*CommentExport) ImportKind() string { return ImportKindComment }
+
 // IssueLabelExport is one issue_labels row in export shape.
 type IssueLabelExport struct {
 	IssueID   int64  `json:"issue_id"`
@@ -150,6 +177,9 @@ type IssueLabelExport struct {
 	Author    string `json:"author"`
 	CreatedAt string `json:"created_at"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*IssueLabelExport) ImportKind() string { return ImportKindIssueLabel }
 
 // ImportMappingExport is one import_mappings row in export shape.
 type ImportMappingExport struct {
@@ -165,6 +195,9 @@ type ImportMappingExport struct {
 	SourceUpdatedAt *string `json:"source_updated_at,omitempty"`
 	ImportedAt      string  `json:"imported_at"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*ImportMappingExport) ImportKind() string { return ImportKindImportMapping }
 
 // ExternalRootBindingExport is one portable external-root binding. All
 // references use durable identities; process settings, credentials, and live
@@ -235,6 +268,15 @@ type ExternalFieldStateExport struct {
 	UpdatedAt                time.Time       `json:"updated_at"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*ExternalRootBindingExport) ImportKind() string { return ImportKindExternalRootBinding }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*ExternalFieldMappingExport) ImportKind() string { return ImportKindExternalFieldMapping }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*ExternalFieldStateExport) ImportKind() string { return ImportKindExternalFieldState }
+
 // FederationBindingExport is one federation_bindings row in export shape.
 type FederationBindingExport struct {
 	ProjectID            int64   `json:"project_id"`
@@ -254,6 +296,9 @@ type FederationBindingExport struct {
 	LastSyncAt           *string `json:"last_sync_at,omitempty"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*FederationBindingExport) ImportKind() string { return ImportKindFederationBinding }
+
 // FederationSyncStatusExport is one federation_sync_status row in export shape.
 type FederationSyncStatusExport struct {
 	ProjectID         int64   `json:"project_id"`
@@ -265,6 +310,9 @@ type FederationSyncStatusExport struct {
 	LastError         *string `json:"last_error,omitempty"`
 	LastResetAt       *string `json:"last_reset_at,omitempty"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*FederationSyncStatusExport) ImportKind() string { return ImportKindFederationSyncStatus }
 
 // FederationQuarantineExport is one federation_quarantine row in export shape.
 type FederationQuarantineExport struct {
@@ -280,6 +328,9 @@ type FederationQuarantineExport struct {
 	SkippedBy    *string         `json:"skipped_by,omitempty"`
 	SkipReason   *string         `json:"skip_reason,omitempty"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*FederationQuarantineExport) ImportKind() string { return ImportKindFederationQuarantine }
 
 // FederationEnrollmentExport is one federation_enrollments row in export shape.
 type FederationEnrollmentExport struct {
@@ -297,6 +348,9 @@ type FederationEnrollmentExport struct {
 	UpdatedAt                         string  `json:"updated_at"`
 	RevokedAt                         *string `json:"revoked_at,omitempty"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*FederationEnrollmentExport) ImportKind() string { return ImportKindFederationEnrollment }
 
 // IssueClaimExport is one issue_claims row in export shape.
 type IssueClaimExport struct {
@@ -318,6 +372,9 @@ type IssueClaimExport struct {
 	UpdatedAt         string  `json:"updated_at"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*IssueClaimExport) ImportKind() string { return ImportKindIssueClaim }
+
 // PendingClaimRequestExport is one pending_claim_requests row in export shape.
 type PendingClaimRequestExport struct {
 	ID                int64   `json:"id"`
@@ -338,12 +395,18 @@ type PendingClaimRequestExport struct {
 	ResolvedAt        *string `json:"resolved_at,omitempty"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*PendingClaimRequestExport) ImportKind() string { return ImportKindPendingClaimRequest }
+
 // SequenceExport is one backend identity high-water mark using SQLite table
 // names as the portable wire vocabulary.
 type SequenceExport struct {
 	Name string `json:"name"`
 	Seq  int64  `json:"seq"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*SequenceExport) ImportKind() string { return ImportKindSQLiteSequence }
 
 // PurgeLogExport is one purge_log row in export shape. project_name is the
 // denormalized purge_log.project_name column at v10+ (no join).
@@ -371,6 +434,9 @@ type PurgeLogExport struct {
 	PurgedAt               string  `json:"purged_at"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*PurgeLogExport) ImportKind() string { return ImportKindPurgeLog }
+
 // ProjectPurgeLogExport is one project_purge_log row in export shape.
 type ProjectPurgeLogExport struct {
 	ID                       int64   `json:"id"`
@@ -394,6 +460,9 @@ type ProjectPurgeLogExport struct {
 	Reason                   *string `json:"reason"`
 	PurgedAt                 string  `json:"purged_at"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*ProjectPurgeLogExport) ImportKind() string { return ImportKindProjectPurgeLog }
 
 // EventExport is one event row in export shape. ProjectUID is marshaled as
 // `json:"-"` because it is used only to compute the content hash and is not
@@ -421,6 +490,9 @@ type EventExport struct {
 	CreatedAt         string          `json:"created_at"`
 }
 
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*EventExport) ImportKind() string { return ImportKindEvent }
+
 // ProjectExport is one project row in export shape.
 type ProjectExport struct {
 	ID        int64           `json:"id"`
@@ -431,3 +503,6 @@ type ProjectExport struct {
 	Metadata  json.RawMessage `json:"metadata"`
 	Revision  int64           `json:"revision"`
 }
+
+// ImportKind reports the NDJSON kind this payload replays as.
+func (*ProjectExport) ImportKind() string { return ImportKindProject }

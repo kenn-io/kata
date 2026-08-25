@@ -258,18 +258,18 @@ func checkExternalRootBindings(t *testing.T, store db.Storage, backend Backend) 
 	earlier := time.Date(2026, 8, 20, 11, 0, 0, 0, time.UTC)
 	later := earlier.Add(900 * time.Millisecond)
 	require.NoError(t, orderingStore.ImportReplay(ctx, []db.ImportRecord{
-		{Kind: db.ImportKindExternalFieldMapping, ExternalFieldMapping: &db.ExternalFieldMappingExport{
+		&db.ExternalFieldMappingExport{
 			ConnectorInstance: "timestamp-order", KataField: "scheduled_on",
 			ExternalFieldID: "start-earlier", ExternalFieldName: "Start earlier",
 			AcceptedKinds: []string{"date"}, Nullable: true, Writable: true,
 			SchemaRevision: "schema-earlier", CreatedAt: earlier, UpdatedAt: earlier,
-		}},
-		{Kind: db.ImportKindExternalFieldMapping, ExternalFieldMapping: &db.ExternalFieldMappingExport{
+		},
+		&db.ExternalFieldMappingExport{
 			ConnectorInstance: "timestamp-order", KataField: "scheduled_on",
 			ExternalFieldID: "start-later", ExternalFieldName: "Start later",
 			AcceptedKinds: []string{"date"}, Nullable: true, Writable: true,
 			SchemaRevision: "schema-later", CreatedAt: later, UpdatedAt: later,
-		}},
+		},
 	}, db.ImportOptions{}))
 	restoreOrderingClock := backend.InstallExternalRootClock(orderingStore, func() time.Time { return later })
 	orderedMapping, err := orderingStore.UpsertExternalFieldMapping(ctx, db.ExternalFieldMappingParams{

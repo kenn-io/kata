@@ -27,11 +27,11 @@ func TestPreflightSourceFKs_DeduplicatesPerRow(t *testing.T) {
 
 		report, err := jsonl.PreflightSourceFKs(ctx, path)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(report.DroppedRowsByTable["links"]),
+		assert.Equal(t, 1, report.DropCount("links"),
 			"links row with two violated FKs should count once")
-		assert.Equal(t, 1, len(report.DroppedRowsByTable["events"]),
+		assert.Equal(t, 1, report.DropCount("events"),
 			"events row with both columns orphaned should count as one drop")
-		assert.Equal(t, 0, len(report.ScrubbedRowsByTable["events"]),
+		assert.Equal(t, 0, report.ScrubCount("events"),
 			"drop precedence: same events rowid must NOT also appear in scrub bucket")
 		assert.Empty(t, report.UnknownViolations)
 	})
@@ -44,9 +44,9 @@ func TestPreflightSourceFKs_DeduplicatesPerRow(t *testing.T) {
 
 		report, err := jsonl.PreflightSourceFKs(ctx, path)
 		require.NoError(t, err)
-		assert.Equal(t, 0, len(report.DroppedRowsByTable["events"]),
+		assert.Equal(t, 0, report.DropCount("events"),
 			"events with valid issue_id but orphan related must NOT be dropped")
-		assert.Equal(t, 1, len(report.ScrubbedRowsByTable["events"]),
+		assert.Equal(t, 1, report.ScrubCount("events"),
 			"events with orphan related_issue_id should be scrubbed (preserved with NULL related)")
 		assert.Empty(t, report.UnknownViolations)
 	})
@@ -71,8 +71,7 @@ func TestPreflightSourceFKs_DeduplicatesPerRow(t *testing.T) {
 
 		report, err := jsonl.PreflightSourceFKs(ctx, path)
 		require.NoError(t, err)
-		assert.Empty(t, report.DroppedRowsByTable)
-		assert.Empty(t, report.ScrubbedRowsByTable)
+		assert.Empty(t, report.Rows, "a clean DB files no row under any disposition")
 		assert.Empty(t, report.UnknownViolations)
 	})
 

@@ -216,9 +216,11 @@ func checkSnapshotReplayCore(t *testing.T, target db.Storage, backend Backend) e
 func replayEventUIDs(records []db.ImportRecord, projectID int64) []string {
 	uids := make([]string, 0)
 	for _, record := range records {
-		if record.Event != nil && record.Event.ProjectID == projectID {
-			uids = append(uids, record.Event.UID)
+		event, ok := record.(*db.EventExport)
+		if !ok || event.ProjectID != projectID {
+			continue
 		}
+		uids = append(uids, event.UID)
 	}
 	return uids
 }
@@ -241,145 +243,145 @@ func CollectImportRecords(
 	}
 	for value, err := range store.ExportMeta(ctx) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindMeta, Meta: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export meta for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportProjects(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindProject, Project: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export projects for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportProjectAliases(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindProjectAlias, Alias: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export project aliases for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportIssueSyncBindings(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindIssueSyncBinding, IssueSyncBinding: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export issue sync bindings for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportIssueSyncStatus(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindIssueSyncStatus, IssueSyncStatus: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export issue sync status for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportRecurrences(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindRecurrence, Recurrence: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export recurrences for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportIssues(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindIssue, Issue: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export issues for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportComments(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindComment, Comment: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export comments for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportIssueLabels(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindIssueLabel, Label: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export labels for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportLinks(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindLink, Link: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export links for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportImportMappings(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindImportMapping, ImportMapping: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export mappings for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportExternalFieldMappings(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindExternalFieldMapping, ExternalFieldMapping: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export external field mappings for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportExternalRootBindings(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindExternalRootBinding, ExternalRootBinding: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export external root bindings for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportExternalFieldStates(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindExternalFieldState, ExternalFieldState: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export external field states for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportFederationBindings(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindFederationBinding, FederationBinding: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export federation bindings for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportFederationSyncStatus(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindFederationSyncStatus, FederationSyncStatus: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export federation sync status for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportFederationQuarantine(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindFederationQuarantine, FederationQuarantine: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export federation quarantine for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportFederationEnrollments(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindFederationEnrollment, FederationEnrollment: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export federation enrollments for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportIssueClaims(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindIssueClaim, IssueClaim: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export issue claims for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportPendingClaimRequests(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindPendingClaimRequest, PendingClaimRequest: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export pending claims for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportEvents(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindEvent, Event: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export events for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportPurgeLog(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindPurgeLog, PurgeLog: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export purge log for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportProjectPurgeLog(ctx, filter) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindProjectPurgeLog, ProjectPurgeLog: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export project purge log for replay: %w", err)
 		}
 	}
 	for value, err := range store.ExportSequences(ctx) {
 		v := value
-		if err := appendRecord(db.ImportRecord{Kind: db.ImportKindSQLiteSequence, Sequence: &v}, err); err != nil {
+		if err := appendRecord(&v, err); err != nil {
 			return nil, fmt.Errorf("export sequences for replay: %w", err)
 		}
 	}

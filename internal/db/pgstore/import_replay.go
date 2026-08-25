@@ -78,8 +78,8 @@ func (s *Store) importReplayTx(
 		switch skip {
 		case replayLinkMissingPeer:
 			missingPeers++
-			if record.Link != nil {
-				skippedLinkIDs[record.Link.ID] = struct{}{}
+			if link, ok := record.(*db.LinkExport); ok {
+				skippedLinkIDs[link.ID] = struct{}{}
 			}
 		case replayLinkDuplicate:
 			duplicates++
@@ -180,68 +180,69 @@ func (s *Store) importReplayRecord(
 	skippedLinkIDs map[int64]struct{},
 	sequenceFloors map[string]int64,
 ) (replayLinkSkip, error) {
-	switch record.Kind {
-	case db.ImportKindMeta:
-		return replayLinkInserted, pgReplayMeta(ctx, tx, record.Meta, opts)
-	case db.ImportKindProject:
-		return replayLinkInserted, pgReplayProject(ctx, tx, record.Project)
-	case db.ImportKindProjectAlias:
-		return replayLinkInserted, pgReplayAlias(ctx, tx, record.Alias)
-	case db.ImportKindIssueSyncBinding:
+	switch rec := record.(type) {
+	case *db.MetaKV:
+		return replayLinkInserted, pgReplayMeta(ctx, tx, rec, opts)
+	case *db.ProjectExport:
+		return replayLinkInserted, pgReplayProject(ctx, tx, rec)
+	case *db.AliasExport:
+		return replayLinkInserted, pgReplayAlias(ctx, tx, rec)
+	case *db.IssueSyncBindingExport:
 		return replayLinkInserted, pgReplayIssueSyncBinding(
-			ctx, tx, record.IssueSyncBinding, opts.PreserveIssueSyncBindingEnabled,
+			ctx, tx, rec, opts.PreserveIssueSyncBindingEnabled,
 		)
-	case db.ImportKindIssueSyncStatus:
-		return replayLinkInserted, pgReplayIssueSyncStatus(ctx, tx, record.IssueSyncStatus)
-	case db.ImportKindRecurrence:
-		return replayLinkInserted, pgReplayRecurrence(ctx, tx, record.Recurrence)
-	case db.ImportKindIssue:
-		return replayLinkInserted, pgReplayIssue(ctx, tx, record.Issue)
-	case db.ImportKindIssueEmbedding:
+	case *db.IssueSyncStatusExport:
+		return replayLinkInserted, pgReplayIssueSyncStatus(ctx, tx, rec)
+	case *db.RecurrenceExport:
+		return replayLinkInserted, pgReplayRecurrence(ctx, tx, rec)
+	case *db.IssueExport:
+		return replayLinkInserted, pgReplayIssue(ctx, tx, rec)
+	case *db.IssueEmbeddingExport:
 		return replayLinkInserted, nil
-	case db.ImportKindComment:
-		return replayLinkInserted, pgReplayComment(ctx, tx, record.Comment)
-	case db.ImportKindIssueLabel:
-		return replayLinkInserted, pgReplayLabel(ctx, tx, record.Label)
-	case db.ImportKindLink:
-		return pgReplayLink(ctx, tx, record.Link)
-	case db.ImportKindImportMapping:
-		return pgReplayImportMapping(ctx, tx, record.ImportMapping, skippedLinkIDs)
-	case db.ImportKindExternalFieldMapping:
-		return replayLinkInserted, pgReplayExternalFieldMapping(
-			ctx, tx, record.ExternalFieldMapping, opts.MergeProject,
-		)
-	case db.ImportKindExternalRootBinding:
+	case *db.CommentExport:
+		return replayLinkInserted, pgReplayComment(ctx, tx, rec)
+	case *db.IssueLabelExport:
+		return replayLinkInserted, pgReplayLabel(ctx, tx, rec)
+	case *db.LinkExport:
+		return pgReplayLink(ctx, tx, rec)
+	case *db.ImportMappingExport:
+		return pgReplayImportMapping(ctx, tx, rec, skippedLinkIDs)
+	case *db.ExternalFieldMappingExport:
+		return replayLinkInserted, pgReplayExternalFieldMapping(ctx, tx, rec, opts.MergeProject)
+	case *db.ExternalRootBindingExport:
 		return replayLinkInserted, pgReplayExternalRootBinding(
-			ctx, tx, record.ExternalRootBinding, opts.PreserveExternalRootBindingsEnabled,
+			ctx, tx, rec, opts.PreserveExternalRootBindingsEnabled,
 		)
-	case db.ImportKindExternalFieldState:
-		return replayLinkInserted, pgReplayExternalFieldState(ctx, tx, record.ExternalFieldState)
-	case db.ImportKindFederationBinding:
-		return replayLinkInserted, pgReplayFederationBinding(ctx, tx, record.FederationBinding)
-	case db.ImportKindFederationSyncStatus:
-		return replayLinkInserted, pgReplayFederationSyncStatus(ctx, tx, record.FederationSyncStatus)
-	case db.ImportKindFederationQuarantine:
-		return replayLinkInserted, pgReplayFederationQuarantine(ctx, tx, record.FederationQuarantine)
-	case db.ImportKindFederationEnrollment:
-		return replayLinkInserted, pgReplayFederationEnrollment(ctx, tx, record.FederationEnrollment)
-	case db.ImportKindIssueClaim:
-		return replayLinkInserted, pgReplayIssueClaim(ctx, tx, record.IssueClaim)
-	case db.ImportKindPendingClaimRequest:
-		return replayLinkInserted, pgReplayPendingClaim(ctx, tx, record.PendingClaimRequest, opts)
-	case db.ImportKindEvent:
-		return replayLinkInserted, pgReplayEvent(ctx, tx, record.Event, opts)
-	case db.ImportKindPurgeLog:
-		return replayLinkInserted, pgReplayPurgeLog(ctx, tx, record.PurgeLog)
-	case db.ImportKindProjectPurgeLog:
-		return replayLinkInserted, pgReplayProjectPurgeLog(ctx, tx, record.ProjectPurgeLog)
-	case db.ImportKindSQLiteSequence:
-		if record.Sequence.Seq > sequenceFloors[record.Sequence.Name] {
-			sequenceFloors[record.Sequence.Name] = record.Sequence.Seq
+	case *db.ExternalFieldStateExport:
+		return replayLinkInserted, pgReplayExternalFieldState(ctx, tx, rec)
+	case *db.FederationBindingExport:
+		return replayLinkInserted, pgReplayFederationBinding(ctx, tx, rec)
+	case *db.FederationSyncStatusExport:
+		return replayLinkInserted, pgReplayFederationSyncStatus(ctx, tx, rec)
+	case *db.FederationQuarantineExport:
+		return replayLinkInserted, pgReplayFederationQuarantine(ctx, tx, rec)
+	case *db.FederationEnrollmentExport:
+		return replayLinkInserted, pgReplayFederationEnrollment(ctx, tx, rec)
+	case *db.IssueClaimExport:
+		return replayLinkInserted, pgReplayIssueClaim(ctx, tx, rec)
+	case *db.PendingClaimRequestExport:
+		return replayLinkInserted, pgReplayPendingClaim(ctx, tx, rec, opts)
+	case *db.EventExport:
+		return replayLinkInserted, pgReplayEvent(ctx, tx, rec, opts)
+	case *db.PurgeLogExport:
+		return replayLinkInserted, pgReplayPurgeLog(ctx, tx, rec)
+	case *db.ProjectPurgeLogExport:
+		return replayLinkInserted, pgReplayProjectPurgeLog(ctx, tx, rec)
+	case *db.SequenceExport:
+		if rec.Seq > sequenceFloors[rec.Name] {
+			sequenceFloors[rec.Name] = rec.Seq
 		}
 		return replayLinkInserted, nil
 	default:
-		return replayLinkInserted, fmt.Errorf("import: unsupported kind %q", record.Kind)
+		// ValidateImportRecords rejects unknown types before the transaction
+		// opens; this arm exists so a future payload type cannot be replayed
+		// silently.
+		return replayLinkInserted, fmt.Errorf("import: unsupported record type %T", record)
 	}
 }
 

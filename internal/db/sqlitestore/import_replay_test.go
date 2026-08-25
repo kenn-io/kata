@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 
@@ -16,142 +15,44 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
-// TestImportRecordValidate pins the tagged-union contract of ImportRecord
-// directly. The end-to-end path runs through ImportReplay in later tests, but
-// this table exercises Validate directly so unknown kinds, no-payload,
-// multi-payload, and kind/payload mismatches each surface a clear error.
-func TestImportRecordValidate(t *testing.T) {
-	id := int64(1)
-	cases := []struct {
-		name    string
-		rec     db.ImportRecord
-		wantErr string
-	}{
-		{
-			name:    "unknown kind",
-			rec:     db.ImportRecord{Kind: "bogus", Meta: &db.MetaKV{Key: "k", Value: "v"}},
-			wantErr: "unknown kind",
-		},
-		{
-			name:    "no payload",
-			rec:     db.ImportRecord{Kind: "meta"},
-			wantErr: "no payload set",
-		},
-		{
-			name: "multiple payloads",
-			rec: db.ImportRecord{
-				Kind:    "meta",
-				Meta:    &db.MetaKV{Key: "k", Value: "v"},
-				Project: &db.ProjectExport{ID: id},
-			},
-			wantErr: "multiple payloads set",
-		},
-		{
-			name:    "kind/payload mismatch",
-			rec:     db.ImportRecord{Kind: "project", Meta: &db.MetaKV{Key: "k", Value: "v"}},
-			wantErr: "does not match",
-		},
-		{
-			name:    "valid",
-			rec:     db.ImportRecord{Kind: "meta", Meta: &db.MetaKV{Key: "k", Value: "v"}},
-			wantErr: "",
-		},
-		{
-			name: "valid federation_binding",
-			rec: db.ImportRecord{
-				Kind:              "federation_binding",
-				FederationBinding: &db.FederationBindingExport{ProjectID: 1},
-			},
-			wantErr: "",
-		},
-		{
-			name: "valid issue_claim",
-			rec: db.ImportRecord{
-				Kind:       "issue_claim",
-				IssueClaim: &db.IssueClaimExport{ID: 1},
-			},
-			wantErr: "",
-		},
-		{
-			name: "valid issue_sync_binding",
-			rec: db.ImportRecord{
-				Kind:             db.ImportKindIssueSyncBinding,
-				IssueSyncBinding: &db.IssueSyncBindingExport{ID: 1},
-			},
-			wantErr: "",
-		},
-		{
-			name: "valid issue_sync_status",
-			rec: db.ImportRecord{
-				Kind:            db.ImportKindIssueSyncStatus,
-				IssueSyncStatus: &db.IssueSyncStatusExport{BindingID: 1},
-			},
-			wantErr: "",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.rec.Validate()
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("want nil, got %v", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("want error containing %q, got %v", tc.wantErr, err)
-			}
-		})
-	}
-}
-
 func TestImportReplayInsertsGitHubSyncState(t *testing.T) {
 	ctx := context.Background()
 	target := openTestDB(t)
 	recs := []db.ImportRecord{
-		{
-			Kind: db.ImportKindProject,
-			Project: &db.ProjectExport{
-				ID:        1,
-				UID:       "01HZZZZZZZZZZZZZZZZZZZZZ11",
-				Name:      "example-project",
-				CreatedAt: "2026-06-01T09:00:00.000Z",
-				Metadata:  []byte(`{}`),
-				Revision:  1,
-			},
+		&db.ProjectExport{
+			ID:        1,
+			UID:       "01HZZZZZZZZZZZZZZZZZZZZZ11",
+			Name:      "example-project",
+			CreatedAt: "2026-06-01T09:00:00.000Z",
+			Metadata:  []byte(`{}`),
+			Revision:  1,
 		},
-		{
-			Kind: db.ImportKindIssueSyncBinding,
-			IssueSyncBinding: &db.IssueSyncBindingExport{
-				ID:              7,
-				ProjectID:       1,
-				Provider:        "github",
-				SourceKey:       "github:repo-node-example",
-				RemoteID:        "repo-node-example",
-				DisplayName:     "example-org/example-repo",
-				Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
-				Enabled:         true,
-				IntervalSeconds: 900,
-				LastCursorAt:    new("2026-06-01T10:00:00.000Z"),
-				CreatedAt:       "2026-06-01T09:00:00.000Z",
-				UpdatedAt:       "2026-06-01T10:01:00.000Z",
-			},
+		&db.IssueSyncBindingExport{
+			ID:              7,
+			ProjectID:       1,
+			Provider:        "github",
+			SourceKey:       "github:repo-node-example",
+			RemoteID:        "repo-node-example",
+			DisplayName:     "example-org/example-repo",
+			Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
+			Enabled:         true,
+			IntervalSeconds: 900,
+			LastCursorAt:    new("2026-06-01T10:00:00.000Z"),
+			CreatedAt:       "2026-06-01T09:00:00.000Z",
+			UpdatedAt:       "2026-06-01T10:01:00.000Z",
 		},
-		{
-			Kind: db.ImportKindIssueSyncStatus,
-			IssueSyncStatus: &db.IssueSyncStatusExport{
-				BindingID:     7,
-				ProjectID:     1,
-				SyncStartedAt: new("2026-06-01T09:58:00.000Z"),
-				LastAttemptAt: new("2026-06-01T09:58:00.000Z"),
-				LastSuccessAt: new("2026-06-01T10:00:00.000Z"),
-				LastErrorAt:   new("2026-06-01T10:02:00.000Z"),
-				LastError:     new("rate limited"),
-				LastCreated:   2,
-				LastUpdated:   3,
-				LastUnchanged: 4,
-				LastComments:  5,
-			},
+		&db.IssueSyncStatusExport{
+			BindingID:     7,
+			ProjectID:     1,
+			SyncStartedAt: new("2026-06-01T09:58:00.000Z"),
+			LastAttemptAt: new("2026-06-01T09:58:00.000Z"),
+			LastSuccessAt: new("2026-06-01T10:00:00.000Z"),
+			LastErrorAt:   new("2026-06-01T10:02:00.000Z"),
+			LastError:     new("rate limited"),
+			LastCreated:   2,
+			LastUpdated:   3,
+			LastUnchanged: 4,
+			LastComments:  5,
 		},
 	}
 	require.NoError(t, target.ImportReplay(ctx, recs, db.ImportOptions{}))
@@ -184,32 +85,26 @@ func TestImportReplayCanPreserveIssueSyncBindingEnabledForTrustedCutover(t *test
 	ctx := context.Background()
 	target := openTestDB(t)
 	recs := []db.ImportRecord{
-		{
-			Kind: db.ImportKindProject,
-			Project: &db.ProjectExport{
-				ID:        1,
-				UID:       "01HZZZZZZZZZZZZZZZZZZZZZ11",
-				Name:      "example-project",
-				CreatedAt: "2026-06-01T09:00:00.000Z",
-				Metadata:  []byte(`{}`),
-				Revision:  1,
-			},
+		&db.ProjectExport{
+			ID:        1,
+			UID:       "01HZZZZZZZZZZZZZZZZZZZZZ11",
+			Name:      "example-project",
+			CreatedAt: "2026-06-01T09:00:00.000Z",
+			Metadata:  []byte(`{}`),
+			Revision:  1,
 		},
-		{
-			Kind: db.ImportKindIssueSyncBinding,
-			IssueSyncBinding: &db.IssueSyncBindingExport{
-				ID:              7,
-				ProjectID:       1,
-				Provider:        "github",
-				SourceKey:       "github:repo-node-example",
-				RemoteID:        "repo-node-example",
-				DisplayName:     "example-org/example-repo",
-				Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
-				Enabled:         true,
-				IntervalSeconds: 900,
-				CreatedAt:       "2026-06-01T09:00:00.000Z",
-				UpdatedAt:       "2026-06-01T10:01:00.000Z",
-			},
+		&db.IssueSyncBindingExport{
+			ID:              7,
+			ProjectID:       1,
+			Provider:        "github",
+			SourceKey:       "github:repo-node-example",
+			RemoteID:        "repo-node-example",
+			DisplayName:     "example-org/example-repo",
+			Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
+			Enabled:         true,
+			IntervalSeconds: 900,
+			CreatedAt:       "2026-06-01T09:00:00.000Z",
+			UpdatedAt:       "2026-06-01T10:01:00.000Z",
 		},
 	}
 	require.NoError(t, target.ImportReplay(ctx, recs, db.ImportOptions{PreserveIssueSyncBindingEnabled: true}))
@@ -388,13 +283,13 @@ func TestImportReplay_DedupesRepeatedCrossProjectLink(t *testing.T) {
 	recs := collectImportRecords(t, ctx, src)
 	var dupLink db.LinkExport
 	for _, r := range recs {
-		if r.Kind == db.ImportKindLink {
-			dupLink = *r.Link
+		if link, ok := r.(*db.LinkExport); ok {
+			dupLink = *link
 			break
 		}
 	}
 	require.NotZero(t, dupLink.ID, "fixture must export a link record")
-	recs = append(recs, db.ImportRecord{Kind: db.ImportKindLink, Link: &dupLink})
+	recs = append(recs, &dupLink)
 
 	dst := openTestDB(t)
 	require.NoError(t, dst.ImportReplay(ctx, recs, db.ImportOptions{}),
@@ -461,10 +356,10 @@ func collectImportRecordsForProject(t *testing.T, ctx context.Context, d *sqlite
 func makeFirstIssueEventHashStale(t *testing.T, recs []db.ImportRecord) (eventID int64, finalHash string, issueUID string) {
 	t.Helper()
 	for _, r := range recs {
-		if r.Kind != db.ImportKindEvent || r.Event == nil || r.Event.IssueID == nil || r.Event.IssueUID == nil {
+		e, ok := r.(*db.EventExport)
+		if !ok || e.IssueID == nil || e.IssueUID == nil {
 			continue
 		}
-		e := r.Event
 		issueUID = *e.IssueUID
 		e.IssueUID = nil
 		staleHash, err := db.EventContentHash(db.EventHashInput{
@@ -565,8 +460,8 @@ func TestImportReplayReconcilesSequence(t *testing.T) {
 // in place, failing the test if no such record exists.
 func setSequenceRecord(recs []db.ImportRecord, name string, seq int64) {
 	for _, r := range recs {
-		if r.Kind == "sqlite_sequence" && r.Sequence != nil && r.Sequence.Name == name {
-			r.Sequence.Seq = seq
+		if sequence, ok := r.(*db.SequenceExport); ok && sequence.Name == name {
+			sequence.Seq = seq
 			return
 		}
 	}
@@ -603,15 +498,17 @@ func TestImportReplayIsAtomic(t *testing.T) {
 
 	var dup db.ProjectExport
 	for _, r := range recs {
-		if r.Kind == "project" && r.Project.UID != db.SystemProjectUID {
-			dup = *r.Project
-			break
+		project, ok := r.(*db.ProjectExport)
+		if !ok || project.UID == db.SystemProjectUID {
+			continue
 		}
+		dup = *project
+		break
 	}
 	require.NotEmpty(t, dup.UID, "fixture must contain a non-system project")
 	dup.ID += 1000
 	dup.Name += "-dup"
-	recs = append(recs, db.ImportRecord{Kind: "project", Project: &dup})
+	recs = append(recs, &dup)
 
 	dst := openTestDB(t)
 	err := dst.ImportReplay(ctx, recs, db.ImportOptions{})
@@ -632,13 +529,13 @@ func TestImportReplayRejectsMalformedRecord(t *testing.T) {
 	ctx := context.Background()
 	dst := openTestDB(t)
 	recs := []db.ImportRecord{
-		{Kind: "meta", Meta: &db.MetaKV{Key: "instance_uid", Value: "x"}},
-		{Kind: "project"}, // malformed: no payload
+		&db.MetaKV{Key: "instance_uid", Value: "x"},
+		(*db.ProjectExport)(nil), // malformed: nil payload
 	}
 	err := dst.ImportReplay(ctx, recs, db.ImportOptions{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "import record 1", "error names the slice ordinal")
-	require.Contains(t, err.Error(), "no payload set")
+	require.Contains(t, err.Error(), "nil payload")
 	var n int
 	require.NoError(t, dst.QueryRowContext(ctx, `SELECT COUNT(*) FROM meta WHERE value = 'x'`).Scan(&n))
 	require.Equal(t, 0, n, "no mutation on a malformed batch")
@@ -772,13 +669,13 @@ func TestImportReplay_StderrNotesDuplicateOnly(t *testing.T) {
 	recs := collectImportRecords(t, ctx, src)
 	var dupLink db.LinkExport
 	for _, r := range recs {
-		if r.Kind == db.ImportKindLink {
-			dupLink = *r.Link
+		if link, ok := r.(*db.LinkExport); ok {
+			dupLink = *link
 			break
 		}
 	}
 	require.NotZero(t, dupLink.ID, "fixture must export a link record")
-	recs = append(recs, db.ImportRecord{Kind: db.ImportKindLink, Link: &dupLink})
+	recs = append(recs, &dupLink)
 
 	dst := openTestDB(t)
 	stderr, restore := captureStderr(t)
@@ -814,8 +711,8 @@ func TestImportReplay_StderrNotesMixed(t *testing.T) {
 	wholeRecs := collectImportRecords(t, ctx, src)
 	var realLink db.LinkExport
 	for _, r := range wholeRecs {
-		if r.Kind == db.ImportKindLink {
-			realLink = *r.Link
+		if link, ok := r.(*db.LinkExport); ok {
+			realLink = *link
 			break
 		}
 	}
@@ -827,9 +724,9 @@ func TestImportReplay_StderrNotesMixed(t *testing.T) {
 	ghost2 := db.LinkExport{ID: 901, FromIssueID: aIssue.ID, FromIssueUID: aIssue.UID, ToIssueID: 9902, ToIssueUID: "ghost-2", Type: "related", Author: "a", CreatedAt: realLink.CreatedAt}
 
 	mixed := append(wholeRecs,
-		db.ImportRecord{Kind: db.ImportKindLink, Link: &realLink}, // duplicate
-		db.ImportRecord{Kind: db.ImportKindLink, Link: &ghost1},   // missing peer
-		db.ImportRecord{Kind: db.ImportKindLink, Link: &ghost2},   // missing peer
+		&realLink, // duplicate
+		&ghost1,   // missing peer
+		&ghost2,   // missing peer
 	)
 
 	dst := openTestDB(t)

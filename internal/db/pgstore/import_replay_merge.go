@@ -127,26 +127,26 @@ func refusePGProjectMergeUIDCollisions(ctx context.Context, tx *sql.Tx, records 
 	type uidCheck struct{ table, column, kind, uid string }
 	checks := make([]uidCheck, 0, len(records))
 	for _, record := range records {
-		switch {
-		case record.Project != nil:
-			checks = append(checks, uidCheck{"projects", "uid", "project", record.Project.UID})
-		case record.Issue != nil:
-			checks = append(checks, uidCheck{"issues", "uid", "issue", record.Issue.UID})
-		case record.Comment != nil:
-			checks = append(checks, uidCheck{"comments", "uid", "comment", record.Comment.UID})
-		case record.Recurrence != nil:
-			checks = append(checks, uidCheck{"recurrences", "uid", "recurrence", record.Recurrence.UID})
-		case record.IssueClaim != nil:
-			checks = append(checks, uidCheck{"issue_claims", "claim_uid", "claim", record.IssueClaim.ClaimUID})
-		case record.PendingClaimRequest != nil:
-			checks = append(checks, uidCheck{"pending_claim_requests", "request_uid", "pending claim", record.PendingClaimRequest.RequestUID})
-		case record.Event != nil:
-			checks = append(checks, uidCheck{"events", "uid", "event", record.Event.UID})
-		case record.PurgeLog != nil:
-			checks = append(checks, uidCheck{"purge_log", "uid", "purge log", record.PurgeLog.UID})
-		case record.ExternalRootBinding != nil:
+		switch record := record.(type) {
+		case *db.ProjectExport:
+			checks = append(checks, uidCheck{"projects", "uid", "project", record.UID})
+		case *db.IssueExport:
+			checks = append(checks, uidCheck{"issues", "uid", "issue", record.UID})
+		case *db.CommentExport:
+			checks = append(checks, uidCheck{"comments", "uid", "comment", record.UID})
+		case *db.RecurrenceExport:
+			checks = append(checks, uidCheck{"recurrences", "uid", "recurrence", record.UID})
+		case *db.IssueClaimExport:
+			checks = append(checks, uidCheck{"issue_claims", "claim_uid", "claim", record.ClaimUID})
+		case *db.PendingClaimRequestExport:
+			checks = append(checks, uidCheck{"pending_claim_requests", "request_uid", "pending claim", record.RequestUID})
+		case *db.EventExport:
+			checks = append(checks, uidCheck{"events", "uid", "event", record.UID})
+		case *db.PurgeLogExport:
+			checks = append(checks, uidCheck{"purge_log", "uid", "purge log", record.UID})
+		case *db.ExternalRootBindingExport:
 			checks = append(checks, uidCheck{
-				"external_root_bindings", "uid", "external root binding", record.ExternalRootBinding.UID,
+				"external_root_bindings", "uid", "external root binding", record.UID,
 			})
 		}
 	}

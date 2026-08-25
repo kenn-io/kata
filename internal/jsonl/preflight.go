@@ -17,15 +17,56 @@ import (
 // here. The order is the order classes are listed in the summary line.
 var knownOrphanClasses = []string{"events", "comments", "links", "issue_labels"}
 
-// OrphanReport is the result of preflighting a source DB before
-// cutover. DroppedRowsByTable and ScrubbedRowsByTable are keyed by
-// child-table name; values are the set of rowids in each
-// disposition. UnknownViolations is everything that doesn't match
-// a known orphan class — a non-empty list halts the cutover.
+// OrphanReport is the result of preflighting a source DB before cutover.
+// Rows holds exactly one disposition per (child table, rowid): a row that is
+// classified twice — an events row with both issue_id and related_issue_id
+// orphaned produces two PRAGMA foreign_key_check rows — keeps the
+// higher-precedence disposition, so it can never be both dropped and
+// scrubbed. UnknownViolations is everything that doesn't match a known
+// orphan class; a non-empty list halts the cutover.
 type OrphanReport struct {
-	DroppedRowsByTable  map[string]map[int64]struct{}
-	ScrubbedRowsByTable map[string]map[int64]struct{}
-	UnknownViolations   []FKViolation
+	Rows              map[orphanRow]orphanDisposition
+	UnknownViolations []FKViolation
+}
+
+// orphanRow identifies one source row by child table and rowid.
+type orphanRow struct {
+	Table string
+	RowID int64
+}
+
+func newOrphanReport() OrphanReport {
+	return OrphanReport{Rows: map[orphanRow]orphanDisposition{}}
+}
+
+// record files disp against key, keeping the higher-precedence disposition
+// when the same row is classified more than once.
+func (r OrphanReport) record(key orphanRow, disp orphanDisposition) {
+	if existing, ok := r.Rows[key]; ok && existing.rank() >= disp.rank() {
+		return
+	}
+	r.Rows[key] = disp
+}
+
+// DropCount reports how many rows of table the export discards.
+func (r OrphanReport) DropCount(table string) int {
+	return r.countByDisposition(table, dispositionDrop)
+}
+
+// ScrubCount reports how many rows of table survive the export with their
+// orphan peer columns NULLed.
+func (r OrphanReport) ScrubCount(table string) int {
+	return r.countByDisposition(table, dispositionScrub)
+}
+
+func (r OrphanReport) countByDisposition(table string, want orphanDisposition) int {
+	n := 0
+	for row, disp := range r.Rows {
+		if row.Table == table && disp == want {
+			n++
+		}
+	}
+	return n
 }
 
 // FKViolation is a single PRAGMA foreign_key_check row with the
@@ -48,6 +89,22 @@ const (
 	dispositionDrop
 	dispositionScrub
 )
+
+// rank orders dispositions by precedence: when one row is classified twice,
+// the higher rank wins. Dropping the row makes scrubbing it moot, so drop
+// outranks scrub. This is deliberately independent of the iota order above,
+// which lists drop before scrub — comparing the constants directly would
+// invert the rule.
+func (d orphanDisposition) rank() int {
+	switch d {
+	case dispositionDrop:
+		return 2
+	case dispositionScrub:
+		return 1
+	default:
+		return 0
+	}
+}
 
 // classifyKnownOrphan returns dispositionDrop or dispositionScrub
 // for known issue-child orphan classes, or dispositionUnknown
@@ -85,10 +142,9 @@ func classifyKnownOrphan(table, parent, column string) orphanDisposition {
 // PreflightSourceFKs opens path read-only, runs PRAGMA
 // foreign_key_check, classifies each violation against the
 // known-orphan-class table, and returns a structured report.
-// Drop precedence: when the same rowid appears in both buckets
-// during the scan, drop wins (the scrub entry is removed and any
-// later scrub entry for that rowid is skipped). The source DB is
-// not modified.
+// Drop precedence: when the same rowid is classified twice during the
+// scan, the drop disposition wins regardless of arrival order. The source
+// DB is not modified.
 func PreflightSourceFKs(ctx context.Context, path string) (OrphanReport, error) {
 	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
 	if err != nil {
@@ -121,10 +177,7 @@ func PreflightSourceFKs(ctx context.Context, path string) (OrphanReport, error) 
 	}
 	_ = rows.Close()
 
-	report := OrphanReport{
-		DroppedRowsByTable:  map[string]map[int64]struct{}{},
-		ScrubbedRowsByTable: map[string]map[int64]struct{}{},
-	}
+	report := newOrphanReport()
 	resolver := sqlitestore.NewFKColumnResolver(source)
 	for _, r := range raws {
 		// Classification depends on the column name -- if we can't resolve
@@ -139,60 +192,21 @@ func PreflightSourceFKs(ctx context.Context, path string) (OrphanReport, error) 
 			return OrphanReport{}, fmt.Errorf("preflight resolve %s: %w", r.Table, err)
 		}
 		disp := classifyKnownOrphan(r.Table, r.ParentTable, col)
-		// A NULL rowid (WITHOUT ROWID source table) leaves us with no
-		// stable identifier to dedupe drop/scrub buckets by, so we
-		// can't safely include it in either. The four known orphan
-		// classes are all rowid tables, so this should never fire on
-		// real data, but if it ever does we surface the violation
-		// rather than silently coalesce or skip it.
-		if !r.RowID.Valid {
-			disp = dispositionUnknown
-		}
-		switch disp {
-		case dispositionDrop:
-			ensureRowSet(report.DroppedRowsByTable, r.Table)[r.RowID.Int64] = struct{}{}
-			// Drop precedence: remove any earlier scrub entry for
-			// this rowid in the same table.
-			if scrubs, ok := report.ScrubbedRowsByTable[r.Table]; ok {
-				delete(scrubs, r.RowID.Int64)
-			}
-		case dispositionScrub:
-			// Drop precedence: skip if this rowid is already in
-			// the drop bucket for the same table.
-			if drops, ok := report.DroppedRowsByTable[r.Table]; ok {
-				if _, present := drops[r.RowID.Int64]; present {
-					continue
-				}
-			}
-			ensureRowSet(report.ScrubbedRowsByTable, r.Table)[r.RowID.Int64] = struct{}{}
-		default:
+		// A NULL rowid (WITHOUT ROWID source table) gives us no stable row
+		// identity, so the row cannot be filed under a disposition without
+		// risking coalescing two distinct rows. The four known orphan
+		// classes are all rowid tables, so this should never fire on real
+		// data; when it does, surface the violation rather than guess.
+		if disp == dispositionUnknown || !r.RowID.Valid {
 			report.UnknownViolations = append(report.UnknownViolations, FKViolation{
 				Table:       r.Table,
 				RowID:       r.RowID,
 				ParentTable: r.ParentTable,
 				Column:      col,
 			})
+			continue
 		}
-	}
-	// Trim empty per-table maps so callers can use len() to gate.
-	for tbl, set := range report.DroppedRowsByTable {
-		if len(set) == 0 {
-			delete(report.DroppedRowsByTable, tbl)
-		}
-	}
-	for tbl, set := range report.ScrubbedRowsByTable {
-		if len(set) == 0 {
-			delete(report.ScrubbedRowsByTable, tbl)
-		}
+		report.record(orphanRow{Table: r.Table, RowID: r.RowID.Int64}, disp)
 	}
 	return report, nil
-}
-
-func ensureRowSet(m map[string]map[int64]struct{}, key string) map[int64]struct{} {
-	if existing, ok := m[key]; ok {
-		return existing
-	}
-	fresh := map[int64]struct{}{}
-	m[key] = fresh
-	return fresh
 }
