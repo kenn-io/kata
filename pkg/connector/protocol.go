@@ -179,9 +179,16 @@ func ValidateFieldValue(value FieldValue) error {
 			return errors.New("field value is not a canonical UTC instant")
 		}
 	case "local_datetime":
-		parsed, err := time.Parse("2006-01-02T15:04:05", value.Value)
+		canonical := false
+		for _, layout := range []string{"2006-01-02T15:04", "2006-01-02T15:04:05"} {
+			parsed, err := time.Parse(layout, value.Value)
+			if err == nil && parsed.Format(layout) == value.Value {
+				canonical = true
+				break
+			}
+		}
 		location, zoneErr := time.LoadLocation(value.Timezone)
-		if err != nil || parsed.Format("2006-01-02T15:04:05") != value.Value ||
+		if !canonical ||
 			zoneErr != nil || value.Timezone == "Local" || location.String() != value.Timezone {
 			return errors.New("local datetime field value is incomplete")
 		}

@@ -2161,6 +2161,35 @@ func federationEnrollmentByID(
 func checkFederationProjectAdoption(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := context.Background()
+	conflictedProject, err := store.CreateProject(ctx, "federation-adoption-external-root")
+	if err != nil {
+		return err
+	}
+	conflictedIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: conflictedProject.ID, Title: "Externally owned", Author: "alice",
+	})
+	if err != nil {
+		return err
+	}
+	_, _, err = store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: conflictedProject.ID, IssueID: conflictedIssue.ID,
+		ConnectorInstance: "notes", ExternalRootKey: "root-adoption-conflict",
+		ExternalAccountKey: "account-adoption-conflict", Actor: "alice",
+		ReceiveCommentsAfter: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		return err
+	}
+	conflictHubUID, err := uid.New()
+	if err != nil {
+		return err
+	}
+	_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID: conflictedProject.ID, HubURL: "https://hub.example", HubProjectID: 41,
+		HubProjectUID: conflictHubUID, ReplayHorizonEventID: 1, Actor: "adoption-agent",
+	})
+	assert.ErrorIs(t, err, db.ErrExternalRootFederationConflict)
+
 	project, err := store.CreateProject(ctx, "federation-adoption-project")
 	if err != nil {
 		return err

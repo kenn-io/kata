@@ -2576,6 +2576,9 @@ func (d *Store) adoptProjectIntoFederation(
 	if err := rejectIssueSyncedFederationProject(ctx, tx, p.ProjectID); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
+	if err := rejectExternalRootFederationProject(ctx, tx, p.ProjectID); err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
 
 	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, p.ProjectID))

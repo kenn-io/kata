@@ -350,6 +350,30 @@ func TestProcessClientSendsConditionalWriteWithAdvertisedCapability(t *testing.T
 	assert.Equal(t, "describe\nwrite_fields\n", string(methods))
 }
 
+func TestProcessClientSendsMinutePrecisionLocalDateTime(t *testing.T) {
+	methodsPath := filepath.Join(t.TempDir(), "methods")
+	t.Setenv("HELPER_MODE", "conditional-fields-supported")
+	t.Setenv("HELPER_SYNC", methodsPath)
+	client := newHelperClient(t, config.ConnectorConfig{
+		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"},
+		Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
+	})
+	value := protocol.FieldValue{
+		Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "Europe/Paris",
+	}
+
+	result, err := client.WriteFields(t.Context(), protocol.WriteFieldsParams{
+		RootKey: "root-1",
+		Fields:  map[string]protocol.FieldValue{"field-1": value},
+		Expected: map[string]protocol.FieldValue{
+			"field-1": {Kind: "local_datetime", Value: "2026-08-20T09:15", Timezone: "Europe/Paris"},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, value, result.Fields["field-1"])
+}
+
 func TestProcessClientRejectsMissingRequiredResultProperties(t *testing.T) {
 	tests := []struct {
 		name string
