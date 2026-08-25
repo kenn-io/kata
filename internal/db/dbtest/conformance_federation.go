@@ -2158,6 +2158,90 @@ func federationEnrollmentByID(
 	return db.FederationEnrollment{}, db.ErrNotFound
 }
 
+// checkProjectFederationEnrollmentScope pins the three properties the
+// project-scoped accessor must share with the global list: same order,
+// revoked rows retained, instance-scoped (NULL project_id) rows excluded.
+func checkProjectFederationEnrollmentScope(t *testing.T, store db.Storage) error {
+	ctx := context.Background()
+	subject, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		return fmt.Errorf("create subject project: %w", err)
+	}
+	other, err := store.CreateProject(ctx, "hub-project")
+	if err != nil {
+		return fmt.Errorf("create other project: %w", err)
+	}
+	spokeUID, err := uid.New()
+	if err != nil {
+		return fmt.Errorf("generate spoke uid: %w", err)
+	}
+
+	newEnrollment := func(projectID *int64, actor string) (db.CreatedFederationEnrollment, error) {
+		return store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			SpokeInstanceUID: spokeUID, ProjectID: projectID,
+			Capabilities: "pull", Actor: actor,
+		})
+	}
+	first, err := newEnrollment(&subject.ID, "member-one")
+	if err != nil {
+		return fmt.Errorf("create first enrollment: %w", err)
+	}
+	second, err := newEnrollment(&subject.ID, "member-two")
+	if err != nil {
+		return fmt.Errorf("create second enrollment: %w", err)
+	}
+	if _, err := newEnrollment(&other.ID, "member-three"); err != nil {
+		return fmt.Errorf("create other-project enrollment: %w", err)
+	}
+	if _, err := newEnrollment(nil, "member-wildcard"); err != nil {
+		return fmt.Errorf("create instance-scoped enrollment: %w", err)
+	}
+	if err := store.RevokeFederationEnrollment(ctx, first.Enrollment.ID); err != nil {
+		return fmt.Errorf("revoke first enrollment: %w", err)
+	}
+
+	scoped, err := store.ListProjectFederationEnrollments(ctx, subject.ID)
+	if err != nil {
+		return fmt.Errorf("list project federation enrollments: %w", err)
+	}
+	require.Len(t, scoped, 2)
+	assert.Equal(t, []int64{first.Enrollment.ID, second.Enrollment.ID},
+		[]int64{scoped[0].ID, scoped[1].ID},
+		"scoped list must emit the global list's id ASC order")
+	assert.NotNil(t, scoped[0].RevokedAt,
+		"retained history includes revoked rows; revoked_at is not a filter")
+	for _, enrollment := range scoped {
+		require.NotNil(t, enrollment.ProjectID,
+			"instance-scoped enrollments must not be admitted")
+		assert.Equal(t, subject.ID, *enrollment.ProjectID)
+	}
+
+	// The same rows, in the same order, as filtering the global list.
+	global, err := store.ListFederationEnrollments(ctx)
+	if err != nil {
+		return fmt.Errorf("list federation enrollments: %w", err)
+	}
+	var wantIDs []int64
+	for _, enrollment := range global {
+		if enrollment.ProjectID != nil && *enrollment.ProjectID == subject.ID {
+			wantIDs = append(wantIDs, enrollment.ID)
+		}
+	}
+	var gotIDs []int64
+	for _, enrollment := range scoped {
+		gotIDs = append(gotIDs, enrollment.ID)
+	}
+	assert.Equal(t, wantIDs, gotIDs)
+
+	absent, err := store.ListProjectFederationEnrollments(ctx, subject.ID+100000)
+	if err != nil {
+		return fmt.Errorf("list enrollments for unknown project: %w", err)
+	}
+	assert.NotNil(t, absent)
+	assert.Empty(t, absent)
+	return nil
+}
+
 func checkFederationProjectAdoption(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := context.Background()

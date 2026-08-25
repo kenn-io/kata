@@ -84,3 +84,11 @@ type FoldElementState struct {
 	Clock   FoldClock
 	Author  string
 }
+
+// FoldLinkEdge pairs one link key with its tombstone state. It is the element
+// type of FoldProjection.PresentLinks, which the backends consume when they
+// materialize link rows.
+type FoldLinkEdge struct {
+	Key   FoldLinkKey
+	State FoldElementState
+}

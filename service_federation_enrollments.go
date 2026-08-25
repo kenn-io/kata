@@ -111,15 +111,13 @@ func (s *Service) ListFederationEnrollments(
 	if !found {
 		return nil, ErrProjectNotFound
 	}
-	enrollments, err := s.store.ListFederationEnrollments(callCtx)
+	enrollments, err := s.store.ListProjectFederationEnrollments(callCtx, project.ID)
 	if err != nil {
 		return nil, fmt.Errorf("kata: list federation enrollments: %w", err)
 	}
-	result := make([]FederationEnrollment, 0)
+	result := make([]FederationEnrollment, 0, len(enrollments))
 	for _, enrollment := range enrollments {
-		if enrollment.ProjectID != nil && *enrollment.ProjectID == project.ID {
-			result = append(result, publicFederationEnrollment(enrollment, project.UID))
-		}
+		result = append(result, publicFederationEnrollment(enrollment, project.UID))
 	}
 	return result, nil
 }
@@ -193,27 +191,25 @@ func (s *Service) RevokeFederationEnrollment(
 	if !found {
 		return ErrProjectNotFound
 	}
-	enrollments, err := s.store.ListFederationEnrollments(callCtx)
+	enrollment, found, err := s.projectFederationEnrollment(callCtx, project.ID, enrollmentID)
 	if err != nil {
 		return fmt.Errorf("kata: find federation enrollment: %w", err)
 	}
-	for _, enrollment := range enrollments {
-		if enrollment.ID != enrollmentID || enrollment.ProjectID == nil ||
-			*enrollment.ProjectID != project.ID {
-			continue
-		}
-		if enrollment.RevokedAt != nil {
-			return nil
-		}
-		if err := s.store.RevokeFederationEnrollment(callCtx, enrollmentID); err != nil {
-			if errors.Is(err, db.ErrNotFound) {
-				return ErrFederationEnrollmentNotFound
-			}
-			return fmt.Errorf("kata: revoke federation enrollment: %w", err)
-		}
+	if !found {
+		// Absent, or owned by a different project: the same answer either
+		// way, so a caller cannot probe another project's enrollment IDs.
+		return ErrFederationEnrollmentNotFound
+	}
+	if enrollment.RevokedAt != nil {
 		return nil
 	}
-	return ErrFederationEnrollmentNotFound
+	if err := s.store.RevokeFederationEnrollment(callCtx, enrollmentID); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return ErrFederationEnrollmentNotFound
+		}
+		return fmt.Errorf("kata: revoke federation enrollment: %w", err)
+	}
+	return nil
 }
 
 func validateFederationEnrollmentSpec(spec FederationEnrollmentSpec) (string, string, error) {
@@ -236,6 +232,26 @@ func validateFederationEnrollmentSpec(spec FederationEnrollmentSpec) (string, st
 
 func validHostProjectUID(projectUID string) bool {
 	return katauid.Valid(projectUID) && projectUID != db.SystemProjectUID
+}
+
+// projectFederationEnrollment finds one enrollment inside a project's own
+// scope. Ownership is a database predicate rather than a Go-side filter, so
+// "absent" and "belongs to another project" collapse into one answer.
+func (s *Service) projectFederationEnrollment(
+	ctx context.Context,
+	projectID int64,
+	enrollmentID int64,
+) (db.FederationEnrollment, bool, error) {
+	enrollments, err := s.store.ListProjectFederationEnrollments(ctx, projectID)
+	if err != nil {
+		return db.FederationEnrollment{}, false, err
+	}
+	for _, enrollment := range enrollments {
+		if enrollment.ID == enrollmentID {
+			return enrollment, true, nil
+		}
+	}
+	return db.FederationEnrollment{}, false, nil
 }
 
 func publicFederationEnrollment(

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -52,7 +51,8 @@ func (s *Store) enableProjectFederationTx(
 			if err != nil {
 				return db.FederationBinding{}, err
 			}
-			if err := reconcileFederatedLinkGroup(ctx, tx, projectIDs, 0, nil); err != nil {
+			m := newFederatedLinkGroupMaterialization(projectIDs, 0)
+			if err := reconcileFederatedLinkGroup(ctx, tx, m, nil); err != nil {
 				return db.FederationBinding{}, err
 			}
 		}
@@ -364,6 +364,46 @@ func (s *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 	})
 }
 
+// federatedMaterialization names everything one materialization pass operates
+// on. Before it existed, five reconcile steps each rediscovered these facts
+// from SQL — and because federationBindingGroupProjectIDs returns the current
+// project as a member of its own group, the current project's whole event log
+// was read and folded twice per pass.
+//
+// events caches RAW events, never a merged db.FoldProjection: db.FoldEvents
+// resolves conflicts across its entire input by HLC order, so folding per
+// project and merging is not equivalent to folding the concatenation. The
+// current project's cache entry is its complete stream; group-only entries
+// retain the existing link-affecting event filter because links are their sole
+// consumer.
+type federatedMaterialization struct {
+	projectID       int64
+	binding         db.FederationBinding
+	groupProjectIDs []int64
+	events          map[int64][]db.FoldEvent
+	existingIssues  map[string]federatedIssueRow
+	observeFold     func(projectID int64)
+}
+
+func (m *federatedMaterialization) foldEvents(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+) ([]db.FoldEvent, error) {
+	if cached, ok := m.events[projectID]; ok {
+		return cached, nil
+	}
+	if m.observeFold != nil {
+		m.observeFold(projectID)
+	}
+	events, err := federationFoldEvents(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	m.events[projectID] = events
+	return events, nil
+}
+
 // materializeFederatedProjectTx rebuilds the project's projection from its
 // event log. reconcileLinks controls the binding-group link pass, whose cost
 // scales with every federated project in the group rather than with this
@@ -379,12 +419,22 @@ func (s *Store) materializeFederatedProjectTx(
 	if err != nil {
 		return err
 	}
-	events, err := federationFoldEvents(ctx, tx, projectID)
+	m := &federatedMaterialization{
+		projectID:   projectID,
+		binding:     binding,
+		events:      map[int64][]db.FoldEvent{},
+		observeFold: s.federationFoldObserver,
+	}
+	events, err := m.foldEvents(ctx, tx, projectID)
 	if err != nil {
 		return err
 	}
 	projection := db.FoldEvents(events)
-	issueIDs, err := s.reconcileFederatedIssues(ctx, tx, projectID, projection)
+	m.existingIssues, err = federatedIssueRowsByUID(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
+	issueIDs, err := s.reconcileFederatedIssues(ctx, tx, m, projection)
 	if err != nil {
 		return err
 	}
@@ -395,18 +445,23 @@ func (s *Store) materializeFederatedProjectTx(
 		return err
 	}
 	if reconcileLinks {
-		projectIDs, err := federationBindingGroupProjectIDs(ctx, tx, binding)
+		// federationBindingGroupProjectIDs takes FOR UPDATE on the group's
+		// binding rows. Its position here — after this project's events are read
+		// — is the transaction's lock-acquisition order under concurrent
+		// materialization of two projects in one group. Do not hoist it into the
+		// struct's construction above.
+		m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
 		if err != nil {
 			return err
 		}
-		if err := reconcileFederatedLinkGroup(ctx, tx, projectIDs, projectID, issueIDs); err != nil {
+		if err := reconcileFederatedLinkGroup(ctx, tx, m, issueIDs); err != nil {
 			return err
 		}
 	}
-	if err := pruneFederatedIssues(ctx, tx, projectID, issueIDs); err != nil {
+	if err := pruneFederatedIssues(ctx, tx, m, issueIDs); err != nil {
 		return err
 	}
-	if metadata := projection.ProjectMetadata[binding.HubProjectUID]; len(metadata) > 0 {
+	if metadata := projection.ProjectMetadata[m.binding.HubProjectUID]; len(metadata) > 0 {
 		_, err := tx.ExecContext(ctx, `UPDATE projects SET metadata=$1,revision=revision+1
 WHERE id=$2 AND metadata IS DISTINCT FROM $1`, string(metadata), projectID)
 		return mapSQLError(err, nil)
@@ -425,21 +480,14 @@ type federatedIssueRow struct {
 func (s *Store) reconcileFederatedIssues(
 	ctx context.Context,
 	tx *sql.Tx,
-	projectID int64,
+	m *federatedMaterialization,
 	projection db.FoldProjection,
 ) (map[string]int64, error) {
-	existing, err := federatedIssueRowsByUID(ctx, tx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	uids := make([]string, 0, len(projection.Issues))
-	for issueUID := range projection.Issues {
-		uids = append(uids, issueUID)
-	}
-	sort.Strings(uids)
+	existing := m.existingIssues
+	projectID := m.projectID
 	output := map[string]int64{}
-	for _, issueUID := range uids {
-		issue := projection.Issues[issueUID]
+	for _, issue := range projection.SortedIssues() {
+		issueUID := issue.UID
 		row, exists := existing[issueUID]
 		shortIDValue, err := resolveFederatedIssueShortID(ctx, tx, projectID, issue, row, exists)
 		if err != nil {
@@ -576,13 +624,11 @@ func reconcileFederatedComments(
 	if err != nil {
 		return err
 	}
-	desired := make(map[string]struct{}, len(projection.Comments))
-	commentUIDs := make([]string, 0, len(projection.Comments))
-	for commentUID := range projection.Comments {
-		desired[commentUID] = struct{}{}
-		commentUIDs = append(commentUIDs, commentUID)
+	sorted := projection.SortedComments()
+	desired := make(map[string]struct{}, len(sorted))
+	for _, comment := range sorted {
+		desired[comment.UID] = struct{}{}
 	}
-	sort.Strings(commentUIDs)
 	for commentUID, row := range existing {
 		if _, ok := desired[commentUID]; ok {
 			continue
@@ -598,8 +644,8 @@ func reconcileFederatedComments(
 			return mapSQLError(err, nil)
 		}
 	}
-	for _, commentUID := range commentUIDs {
-		comment := projection.Comments[commentUID]
+	for _, comment := range sorted {
+		commentUID := comment.UID
 		issueID, ok := issueIDs[comment.IssueUID]
 		if !ok {
 			return fmt.Errorf("federated comment %s references unknown issue %s", commentUID, comment.IssueUID)
@@ -696,19 +742,7 @@ func reconcileFederatedLabels(
 		return err
 	}
 	desired := map[federatedLabelKey]struct{}{}
-	keys := make([]db.FoldLabelKey, 0, len(projection.Labels))
-	for key, state := range projection.Labels {
-		if state.Present {
-			keys = append(keys, key)
-		}
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].IssueUID != keys[j].IssueUID {
-			return keys[i].IssueUID < keys[j].IssueUID
-		}
-		return keys[i].Label < keys[j].Label
-	})
-	for _, key := range keys {
+	for _, key := range projection.PresentLabels() {
 		issueID, ok := issueIDs[key.IssueUID]
 		if !ok {
 			return fmt.Errorf("federated label %s references unknown issue %s", key.Label, key.IssueUID)
@@ -762,29 +796,39 @@ JOIN issues i ON i.id=il.issue_id WHERE i.project_id=$1`, projectID)
 func pruneFederatedIssues(
 	ctx context.Context,
 	tx *sql.Tx,
-	projectID int64,
+	m *federatedMaterialization,
 	issueIDs map[string]int64,
 ) error {
-	rows, err := tx.QueryContext(ctx, `SELECT id,uid FROM issues WHERE project_id=$1`, projectID)
+	// Candidates come from the snapshot taken before reconcile inserted
+	// anything, so a row this pass just created is structurally unable to be a
+	// prune candidate.
+	var candidates []int64
+	for issueUID, row := range m.existingIssues {
+		if _, ok := issueIDs[issueUID]; ok {
+			continue
+		}
+		candidates = append(candidates, row.id)
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	// One anti-join instead of one count(*) per candidate.
+	rows, err := tx.QueryContext(ctx, `SELECT candidate.id
+FROM unnest($1::bigint[]) AS candidate(id)
+WHERE NOT EXISTS (
+  SELECT 1 FROM events e WHERE e.issue_id=candidate.id OR e.related_issue_id=candidate.id
+)`, candidates)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}
-	var candidates []struct {
-		id  int64
-		uid string
-	}
+	var unreferenced []int64
 	for rows.Next() {
-		var candidate struct {
-			id  int64
-			uid string
-		}
-		if err := rows.Scan(&candidate.id, &candidate.uid); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
 			_ = rows.Close()
 			return mapSQLError(err, nil)
 		}
-		if _, ok := issueIDs[candidate.uid]; !ok {
-			candidates = append(candidates, candidate)
-		}
+		unreferenced = append(unreferenced, id)
 	}
 	if err := rows.Close(); err != nil {
 		return mapSQLError(err, nil)
@@ -792,20 +836,11 @@ func pruneFederatedIssues(
 	if err := rows.Err(); err != nil {
 		return mapSQLError(err, nil)
 	}
-	for _, candidate := range candidates {
-		var references int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM events
-WHERE issue_id=$1 OR related_issue_id=$1`, candidate.id).Scan(&references); err != nil {
-			return mapSQLError(err, nil)
-		}
-		if references > 0 {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM issues WHERE id=$1`, candidate.id); err != nil {
-			return mapSQLError(err, nil)
-		}
+	if len(unreferenced) == 0 {
+		return nil
 	}
-	return nil
+	_, err = tx.ExecContext(ctx, `DELETE FROM issues WHERE id = ANY($1::bigint[])`, unreferenced)
+	return mapSQLError(err, nil)
 }
 
 func nonEmptyFederationTime(value string) string {

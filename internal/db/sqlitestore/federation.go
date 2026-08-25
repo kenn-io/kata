@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -1631,14 +1630,9 @@ func reconcileFederatedIssues(
 	if err != nil {
 		return nil, err
 	}
-	uids := make([]string, 0, len(projection.Issues))
-	for uid := range projection.Issues {
-		uids = append(uids, uid)
-	}
-	sort.Strings(uids)
 	out := map[string]int64{}
-	for _, uid := range uids {
-		issue := projection.Issues[uid]
+	for _, issue := range projection.SortedIssues() {
+		uid := issue.UID
 		var existingRow *federatedIssueRow
 		if row, ok := existing[uid]; ok {
 			existingRow = &row
@@ -1813,13 +1807,11 @@ func reconcileFederatedComments(
 	if err != nil {
 		return err
 	}
-	desired := map[string]struct{}{}
-	uids := make([]string, 0, len(projection.Comments))
-	for uid := range projection.Comments {
-		uids = append(uids, uid)
-		desired[uid] = struct{}{}
+	sorted := projection.SortedComments()
+	desired := make(map[string]struct{}, len(sorted))
+	for _, comment := range sorted {
+		desired[comment.UID] = struct{}{}
 	}
-	sort.Strings(uids)
 	for uid, row := range existing {
 		if _, ok := desired[uid]; ok {
 			continue
@@ -1835,8 +1827,8 @@ func reconcileFederatedComments(
 			return fmt.Errorf("delete stale federated comment %s: %w", uid, err)
 		}
 	}
-	for _, uid := range uids {
-		comment := projection.Comments[uid]
+	for _, comment := range sorted {
+		uid := comment.UID
 		issueID, ok := issueIDs[comment.IssueUID]
 		if !ok {
 			return fmt.Errorf("federated comment %s references unknown issue %s", uid, comment.IssueUID)
@@ -1925,19 +1917,7 @@ func reconcileFederatedLabels(
 		return err
 	}
 	desired := map[federatedLabelKey]struct{}{}
-	keys := make([]db.FoldLabelKey, 0, len(projection.Labels))
-	for key, state := range projection.Labels {
-		if state.Present {
-			keys = append(keys, key)
-		}
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].IssueUID != keys[j].IssueUID {
-			return keys[i].IssueUID < keys[j].IssueUID
-		}
-		return keys[i].Label < keys[j].Label
-	})
-	for _, key := range keys {
+	for _, key := range projection.PresentLabels() {
 		issueID, ok := issueIDs[key.IssueUID]
 		if !ok {
 			return fmt.Errorf("federated label %s references unknown issue %s", key.Label, key.IssueUID)
@@ -2036,23 +2016,8 @@ func reconcileFederatedLinkGroup(
 		return err
 	}
 	desired := map[db.FoldLinkKey]federatedLinkRow{}
-	keys := make([]db.FoldLinkKey, 0, len(projection.Links))
-	for key, state := range projection.Links {
-		if state.Present {
-			keys = append(keys, key)
-		}
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].FromUID != keys[j].FromUID {
-			return keys[i].FromUID < keys[j].FromUID
-		}
-		if keys[i].ToUID != keys[j].ToUID {
-			return keys[i].ToUID < keys[j].ToUID
-		}
-		return keys[i].Type < keys[j].Type
-	})
-	for _, key := range keys {
-		state := projection.Links[key]
+	for _, edge := range projection.PresentLinks() {
+		key, state := edge.Key, edge.State
 		fromID, fromOK := issueIDs[key.FromUID]
 		toID, toOK := issueIDs[key.ToUID]
 		if !fromOK || !toOK {

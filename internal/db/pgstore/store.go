@@ -47,6 +47,11 @@ type Store struct {
 	uiProjectStatsRead   func()
 	uiLinkDetailRead     func()
 	externalRootNow      func() time.Time
+	// federationFoldObserver, when non-nil, is called with each project ID
+	// whose raw event log a federated materialization reads. Tests use it to
+	// assert the log is read once per project per pass; production leaves it
+	// nil.
+	federationFoldObserver func(projectID int64)
 }
 
 // Close releases a process-lifetime serving lease before closing the pool.

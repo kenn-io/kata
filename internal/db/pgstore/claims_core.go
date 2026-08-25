@@ -70,7 +70,7 @@ func (s *Store) AcquireClaim(ctx context.Context, input db.AcquireClaimParams) (
 ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10) RETURNING id`,
 			claimUID, issue.ProjectID, issue.ID, issue.UID, input.Principal.Holder,
 			input.Principal.HolderInstanceUID, input.Principal.ClientKind, input.Purpose,
-			input.ClaimKind, formatStoredTime(now), nullableStoredTime(expiresAt),
+			input.ClaimKind, storedTime(now), storedNullTime{Time: expiresAt},
 		).Scan(&claimID)
 		if err != nil {
 			return mapSQLError(err, map[string]error{"uniq_issue_claims_live_issue": db.ErrClaimDenied})
@@ -152,7 +152,7 @@ func (s *Store) renewClaim(
 		expiresAt := now.Add(input.TTL)
 		if _, err := tx.ExecContext(ctx, `UPDATE issue_claims
 SET expires_at=$1, revision=revision+1, updated_at=$2 WHERE id=$3`,
-			formatStoredTime(expiresAt), formatStoredTime(now), claim.ID); err != nil {
+			storedTime(expiresAt), storedTime(now), claim.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		renewed, err := claimByIDTx(ctx, tx, claim.ID, false)
@@ -333,7 +333,7 @@ func (s *Store) CountLiveClaims(ctx context.Context, projectID int64) (int64, er
 	var count int64
 	err := s.QueryRowContext(ctx, `SELECT COUNT(*) FROM issue_claims
 WHERE project_id=$1 AND released_at IS NULL
-  AND (claim_kind='hard' OR expires_at > $2)`, projectID, nowStoredTimestamp()).Scan(&count)
+  AND (claim_kind='hard' OR expires_at > $2)`, projectID, storedTime(time.Now())).Scan(&count)
 	return count, mapSQLError(err, nil)
 }
 
@@ -390,51 +390,24 @@ func claimByIDTx(ctx context.Context, queryer claimQueryer, id int64, lock bool)
 
 func scanIssueClaim(row rowScanner) (db.IssueClaim, error) {
 	var claim db.IssueClaim
-	var acquiredAt, updatedAt string
-	var expiresAt, releasedAt, releaseReason sql.NullString
+	var expiresAt, releasedAt storedNullTime
+	var releaseReason sql.NullString
 	err := row.Scan(&claim.ID, &claim.ClaimUID, &claim.ProjectID, &claim.IssueID, &claim.IssueUID,
 		&claim.Holder, &claim.HolderInstanceUID, &claim.ClientKind, &claim.Purpose,
-		&claim.ClaimKind, &acquiredAt, &expiresAt, &releasedAt, &releaseReason,
-		&claim.Revision, &updatedAt)
+		&claim.ClaimKind, (*storedTime)(&claim.AcquiredAt), &expiresAt, &releasedAt,
+		&releaseReason, &claim.Revision, (*storedTime)(&claim.UpdatedAt))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.IssueClaim{}, db.ErrNotFound
 	}
 	if err != nil {
 		return db.IssueClaim{}, mapSQLError(err, nil)
 	}
-	claim.AcquiredAt, err = parseStoredTime(acquiredAt)
-	if err != nil {
-		return db.IssueClaim{}, fmt.Errorf("parse claim acquired_at: %w", err)
-	}
-	claim.UpdatedAt, err = parseStoredTime(updatedAt)
-	if err != nil {
-		return db.IssueClaim{}, fmt.Errorf("parse claim updated_at: %w", err)
-	}
-	if expiresAt.Valid {
-		value, parseErr := parseStoredTime(expiresAt.String)
-		if parseErr != nil {
-			return db.IssueClaim{}, fmt.Errorf("parse claim expires_at: %w", parseErr)
-		}
-		claim.ExpiresAt = &value
-	}
-	if releasedAt.Valid {
-		value, parseErr := parseStoredTime(releasedAt.String)
-		if parseErr != nil {
-			return db.IssueClaim{}, fmt.Errorf("parse claim released_at: %w", parseErr)
-		}
-		claim.ReleasedAt = &value
-	}
+	claim.ExpiresAt = expiresAt.Time
+	claim.ReleasedAt = releasedAt.Time
 	if releaseReason.Valid {
 		claim.ReleaseReason = &releaseReason.String
 	}
 	return claim, nil
-}
-
-func nullableStoredTime(value *time.Time) any {
-	if value == nil {
-		return nil
-	}
-	return formatStoredTime(*value)
 }
 
 func claimTimedExpired(claim db.IssueClaim, now time.Time) bool {
@@ -452,7 +425,7 @@ func (s *Store) releaseClaimTx(
 	reason string,
 	now time.Time,
 ) (db.IssueClaim, db.Event, error) {
-	stamp := formatStoredTime(now)
+	stamp := storedTime(now)
 	result, err := tx.ExecContext(ctx, `UPDATE issue_claims
 SET released_at=$1, release_reason=$2, revision=revision+1, updated_at=$1
 WHERE id=$3 AND released_at IS NULL`, stamp, nullableString(reason), claim.ID)
@@ -522,7 +495,7 @@ func (s *Store) expireTimedClaimsTx(
 	limit int,
 ) ([]db.Event, error) {
 	conditions := []string{"released_at IS NULL", "claim_kind='timed'", "expires_at <= $1"}
-	args := []any{formatStoredTime(now)}
+	args := []any{storedTime(now)}
 	if projectID != 0 {
 		args = append(args, projectID)
 		conditions = append(conditions, fmt.Sprintf("project_id=$%d", len(args)))

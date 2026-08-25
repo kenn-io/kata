@@ -85,7 +85,7 @@ WHERE project_id=$2 AND role=$3 AND hub_project_id=$4 AND hub_project_uid=$5
   AND hub_url=$6 AND allow_insecure=$7`,
 			p.TargetHubURL, p.ProjectID, string(db.FederationRoleSpoke),
 			p.HubProjectID, p.HubProjectUID, p.ExpectedHubURL,
-			boolNumber(p.ExpectedAllowInsecure))
+			storedBool(p.ExpectedAllowInsecure))
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -155,8 +155,8 @@ allow_insecure=EXCLUDED.allow_insecure, enabled=EXCLUDED.enabled,
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 			input.ProjectID, string(input.Role), input.HubURL, input.HubProjectID,
 			input.HubProjectUID, input.ReplayHorizonEventID, input.PullCursorEventID,
-			boolNumber(input.PushEnabled), input.PushCursorEventID, actor,
-			boolNumber(input.AllowInsecure), boolNumber(input.Enabled))
+			storedBool(input.PushEnabled), input.PushCursorEventID, actor,
+			storedBool(input.AllowInsecure), storedBool(input.Enabled))
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -272,7 +272,7 @@ func (s *Store) upsertFederationSyncTime(ctx context.Context, projectID int64, c
 	query := fmt.Sprintf(`INSERT INTO federation_sync_status(project_id,%s)
 SELECT $1,$2 WHERE EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)
 ON CONFLICT(project_id) DO UPDATE SET %s=EXCLUDED.%s`, column, column, column)
-	_, err := s.ExecContext(ctx, query, projectID, formatStoredTime(at.UTC()))
+	_, err := s.ExecContext(ctx, query, projectID, storedTime(at))
 	return mapSQLError(err, nil)
 }
 
@@ -285,7 +285,7 @@ func (s *Store) RecordFederationSyncError(ctx context.Context, projectID int64, 
 	_, err := s.ExecContext(ctx, `INSERT INTO federation_sync_status(project_id,last_error_at,last_error)
 SELECT $1,$2,$3 WHERE EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)
 ON CONFLICT(project_id) DO UPDATE SET last_error_at=EXCLUDED.last_error_at,last_error=EXCLUDED.last_error`,
-		projectID, formatStoredTime(at.UTC()), message)
+		projectID, storedTime(at), message)
 	return mapSQLError(err, nil)
 }
 
@@ -415,7 +415,7 @@ func createFederationEnrollmentTx(
 ON CONFLICT(token_hash) DO NOTHING
 RETURNING id`, db.FederationTokenHash(input.Token),
 		input.SpokeInstanceUID, projectID, input.Capabilities, input.Actor,
-		boolNumber(input.AllowAdoptionSnapshotAuthors)).Scan(&id)
+		storedBool(input.AllowAdoptionSnapshotAuthors)).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		if !prepared.ExplicitToken {
 			return db.CreatedFederationEnrollment{}, fmt.Errorf("create federation enrollment: generated token collision")
@@ -458,6 +458,30 @@ func (s *Store) ListFederationEnrollments(ctx context.Context) ([]db.FederationE
 	return output, mapSQLError(rows.Err(), nil)
 }
 
+// ListProjectFederationEnrollments returns one project's enrollment rows in
+// the same id order the global list emits, revoked rows included. The
+// project_id predicate already excludes instance-scoped (NULL) enrollments;
+// revoked_at stays out of the WHERE clause so retained history is visible.
+func (s *Store) ListProjectFederationEnrollments(
+	ctx context.Context, projectID int64,
+) ([]db.FederationEnrollment, error) {
+	rows, err := s.QueryContext(ctx,
+		federationEnrollmentSelect+` WHERE project_id=$1 ORDER BY id ASC`, projectID)
+	if err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	defer func() { _ = rows.Close() }()
+	output := []db.FederationEnrollment{}
+	for rows.Next() {
+		enrollment, err := scanFederationEnrollment(rows)
+		if err != nil {
+			return nil, err
+		}
+		output = append(output, enrollment)
+	}
+	return output, mapSQLError(rows.Err(), nil)
+}
+
 // FindActiveFederationEnrollment returns the newest active enrollment whose
 // public correlation fields exactly match the request.
 func (s *Store) FindActiveFederationEnrollment(
@@ -474,7 +498,7 @@ WHERE project_id=$1
 ORDER BY id DESC
 LIMIT 1`,
 		p.ProjectID, p.SpokeInstanceUID, p.Capabilities, p.Actor,
-		boolNumber(p.AllowAdoptionSnapshotAuthors)))
+		storedBool(p.AllowAdoptionSnapshotAuthors)))
 }
 
 // RevokeFederationEnrollment marks an enrollment inactive without changing its first revocation time.
@@ -573,13 +597,12 @@ WHERE revoked_at IS NULL AND (project_id=$1 OR project_id IS NULL)`, projectID).
 func scanFederationBinding(row rowScanner) (db.FederationBinding, error) {
 	var binding db.FederationBinding
 	var role string
-	var pushEnabled, allowInsecure, enabled int
-	var createdAt, updatedAt string
-	var lastSyncAt sql.NullString
+	var lastSyncAt storedNullTime
 	err := row.Scan(&binding.ProjectID, &role, &binding.HubURL, &binding.HubProjectID,
 		&binding.HubProjectUID, &binding.ReplayHorizonEventID, &binding.PullCursorEventID,
-		&pushEnabled, &binding.PushCursorEventID, &binding.Actor, &allowInsecure, &enabled,
-		&createdAt, &updatedAt, &lastSyncAt)
+		(*storedBool)(&binding.PushEnabled), &binding.PushCursorEventID, &binding.Actor,
+		(*storedBool)(&binding.AllowInsecure), (*storedBool)(&binding.Enabled),
+		(*storedTime)(&binding.CreatedAt), (*storedTime)(&binding.UpdatedAt), &lastSyncAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.FederationBinding{}, db.ErrNotFound
 	}
@@ -587,25 +610,15 @@ func scanFederationBinding(row rowScanner) (db.FederationBinding, error) {
 		return db.FederationBinding{}, mapSQLError(err, nil)
 	}
 	binding.Role = db.FederationRole(role)
-	binding.PushEnabled = pushEnabled == 1
-	binding.AllowInsecure = allowInsecure == 1
-	binding.Enabled = enabled == 1
-	if binding.CreatedAt, err = parseStoredTime(createdAt); err != nil {
-		return db.FederationBinding{}, fmt.Errorf("parse federation binding created_at: %w", err)
-	}
-	if binding.UpdatedAt, err = parseStoredTime(updatedAt); err != nil {
-		return db.FederationBinding{}, fmt.Errorf("parse federation binding updated_at: %w", err)
-	}
-	if binding.LastSyncAt, err = parseNullableStoredTime(lastSyncAt); err != nil {
-		return db.FederationBinding{}, fmt.Errorf("parse federation binding last_sync_at: %w", err)
-	}
+	binding.LastSyncAt = lastSyncAt.Time
 	return binding, nil
 }
 
 func scanFederationSyncStatus(row rowScanner) (db.FederationSyncStatus, error) {
 	var status db.FederationSyncStatus
-	var pullStarted, pullSuccess, pushStarted, pushSuccess sql.NullString
-	var lastErrorAt, lastError, lastResetAt sql.NullString
+	var pullStarted, pullSuccess, pushStarted, pushSuccess storedNullTime
+	var lastErrorAt, lastResetAt storedNullTime
+	var lastError sql.NullString
 	err := row.Scan(&status.ProjectID, &pullStarted, &pullSuccess, &pushStarted,
 		&pushSuccess, &lastErrorAt, &lastError, &lastResetAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -614,25 +627,12 @@ func scanFederationSyncStatus(row rowScanner) (db.FederationSyncStatus, error) {
 	if err != nil {
 		return db.FederationSyncStatus{}, mapSQLError(err, nil)
 	}
-	var parseErr error
-	if status.LastPullStartedAt, parseErr = parseNullableStoredTime(pullStarted); parseErr != nil {
-		return db.FederationSyncStatus{}, parseErr
-	}
-	if status.LastPullSuccessAt, parseErr = parseNullableStoredTime(pullSuccess); parseErr != nil {
-		return db.FederationSyncStatus{}, parseErr
-	}
-	if status.LastPushStartedAt, parseErr = parseNullableStoredTime(pushStarted); parseErr != nil {
-		return db.FederationSyncStatus{}, parseErr
-	}
-	if status.LastPushSuccessAt, parseErr = parseNullableStoredTime(pushSuccess); parseErr != nil {
-		return db.FederationSyncStatus{}, parseErr
-	}
-	if status.LastErrorAt, parseErr = parseNullableStoredTime(lastErrorAt); parseErr != nil {
-		return db.FederationSyncStatus{}, parseErr
-	}
-	if status.LastResetAt, parseErr = parseNullableStoredTime(lastResetAt); parseErr != nil {
-		return db.FederationSyncStatus{}, parseErr
-	}
+	status.LastPullStartedAt = pullStarted.Time
+	status.LastPullSuccessAt = pullSuccess.Time
+	status.LastPushStartedAt = pushStarted.Time
+	status.LastPushSuccessAt = pushSuccess.Time
+	status.LastErrorAt = lastErrorAt.Time
+	status.LastResetAt = lastResetAt.Time
 	if lastError.Valid {
 		status.LastError = &lastError.String
 	}
@@ -655,13 +655,15 @@ func federationEnrollmentByIDTx(
 func scanFederationEnrollment(row rowScanner) (db.FederationEnrollment, error) {
 	var enrollment db.FederationEnrollment
 	var projectID sql.NullInt64
-	var allowAuthors, baselineOpen int
-	var createdAt, updatedAt string
-	var revokedAt sql.NullString
+	var revokedAt storedNullTime
 	err := row.Scan(&enrollment.ID, &enrollment.TokenHash, &enrollment.SpokeInstanceUID,
-		&projectID, &enrollment.Capabilities, &enrollment.Actor, &allowAuthors,
-		&baselineOpen, &enrollment.AdoptionBaselineNextSourceEventID,
-		&enrollment.AdoptionBaselineEndSourceEventID, &createdAt, &updatedAt, &revokedAt)
+		&projectID, &enrollment.Capabilities, &enrollment.Actor,
+		(*storedBool)(&enrollment.AllowAdoptionSnapshotAuthors),
+		(*storedBool)(&enrollment.AdoptionBaselineOpen),
+		&enrollment.AdoptionBaselineNextSourceEventID,
+		&enrollment.AdoptionBaselineEndSourceEventID,
+		(*storedTime)(&enrollment.CreatedAt), (*storedTime)(&enrollment.UpdatedAt),
+		&revokedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.FederationEnrollment{}, db.ErrNotFound
 	}
@@ -671,25 +673,8 @@ func scanFederationEnrollment(row rowScanner) (db.FederationEnrollment, error) {
 	if projectID.Valid {
 		enrollment.ProjectID = &projectID.Int64
 	}
-	enrollment.AllowAdoptionSnapshotAuthors = allowAuthors == 1
-	enrollment.AdoptionBaselineOpen = baselineOpen == 1
-	if enrollment.CreatedAt, err = parseStoredTime(createdAt); err != nil {
-		return db.FederationEnrollment{}, err
-	}
-	if enrollment.UpdatedAt, err = parseStoredTime(updatedAt); err != nil {
-		return db.FederationEnrollment{}, err
-	}
-	if enrollment.RevokedAt, err = parseNullableStoredTime(revokedAt); err != nil {
-		return db.FederationEnrollment{}, err
-	}
+	enrollment.RevokedAt = revokedAt.Time
 	return enrollment, nil
-}
-
-func boolNumber(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 func encodeStringList(values []string) (string, error) {

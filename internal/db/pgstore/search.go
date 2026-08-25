@@ -96,17 +96,17 @@ SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
 
 	var candidates []db.SearchCandidate
 	for rows.Next() {
-		var buffer issueScanBuffer
+		var issue db.Issue
+		var closedAt, deletedAt storedNullTime
 		var score float64
 		var inTitle, inBody, inComments bool
-		destinations := append(buffer.destinations(), &score, &inTitle, &inBody, &inComments)
+		destinations := append(issueDestinations(&issue, &closedAt, &deletedAt),
+			&score, &inTitle, &inBody, &inComments)
 		if err := rows.Scan(destinations...); err != nil {
 			return nil, fmt.Errorf("scan search candidate: %w", mapSQLError(err, nil))
 		}
-		issue, err := buffer.value()
-		if err != nil {
-			return nil, err
-		}
+		issue.ClosedAt = closedAt.Time
+		issue.DeletedAt = deletedAt.Time
 		matchedIn := make([]string, 0, 3)
 		if inTitle {
 			matchedIn = append(matchedIn, "title")

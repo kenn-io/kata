@@ -38,7 +38,7 @@ type Storage interface { Only(context.Context) error }
 func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 	methods, err := CollectStorageMethodInventory("../../storage.go")
 	require.NoError(t, err)
-	require.Len(t, methods, 251)
+	require.Len(t, methods, 247)
 
 	var implemented []string
 	var stubbed []string
@@ -59,7 +59,6 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"AcquireIdempotencyLock",
 		"ActiveFederationQuarantine",
 		"ActiveFederationQuarantinesByProject",
-		"ActivelyBlockedIssueIDs",
 		"AddLabel",
 		"AddLabelAndEvent",
 		"AdoptProjectIntoFederation",
@@ -73,10 +72,7 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"AttachAlias",
 		"AuthorizeFederationToken",
 		"BatchProjectStats",
-		"BlockNumbersByIssues",
-		"BlockedByNumbersByIssues",
 		"CheckClaimGate",
-		"ChildCountsByParents",
 		"ChildrenOfIssue",
 		"ClaimExternalRootBinding",
 		"ClaimExternalRootBindingForManualAction",
@@ -205,6 +201,7 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"ListIssues",
 		"ListPendingClaimRequests",
 		"ListPendingClaimRequestsForIssue",
+		"ListProjectFederationEnrollments",
 		"ListProjects",
 		"ListProjectsIncludingArchived",
 		"ListRecurrencesByProject",
@@ -220,7 +217,6 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"MergeProjects",
 		"MoveIssueProject",
 		"OpenChildrenOf",
-		"ParentNumbersByIssues",
 		"ParentOf",
 		"ParentShortIDsByIssues",
 		"PatchIssueMetadata",
@@ -260,7 +256,7 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"RefreshIssueSyncBinding",
 		"RefreshProjectFederationBaseline",
 		"RejectPendingClaim",
-		"RelatedNumbersByIssues",
+		"RelationshipsByIssues",
 		"ReleaseClaim",
 		"ReleaseExternalRootClaim",
 		"RemoveLabel",

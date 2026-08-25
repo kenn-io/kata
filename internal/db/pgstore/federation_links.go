@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/url"
 	"slices"
-	"sort"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -57,7 +56,8 @@ func reconcileFederationBindingTransitionLinks(
 		if err != nil {
 			return err
 		}
-		if err := reconcileFederatedLinkGroup(ctx, tx, remainingProjectIDs, 0, nil); err != nil {
+		m := newFederatedLinkGroupMaterialization(remainingProjectIDs, 0)
+		if err := reconcileFederatedLinkGroup(ctx, tx, m, nil); err != nil {
 			return err
 		}
 		stillMember := slices.Contains(remainingProjectIDs, previous.ProjectID)
@@ -79,7 +79,8 @@ func reconcileFederationBindingTransitionLinks(
 	if err := removeIncompatibleFederatedBoundaryLinks(ctx, tx, current.ProjectID, currentProjectIDs); err != nil {
 		return err
 	}
-	return reconcileFederatedLinkGroup(ctx, tx, currentProjectIDs, 0, nil)
+	m := newFederatedLinkGroupMaterialization(currentProjectIDs, 0)
+	return reconcileFederatedLinkGroup(ctx, tx, m, nil)
 }
 
 func normalizedFederationHubOrigin(raw string) (string, error) {
@@ -156,40 +157,24 @@ func federationBindingGroupProjectIDs(
 func reconcileFederatedLinkGroup(
 	ctx context.Context,
 	tx *sql.Tx,
-	projectIDs []int64,
-	currentProjectID int64,
+	m *federatedMaterialization,
 	currentIssueIDs map[string]int64,
 ) error {
-	projection, err := federationGroupFoldProjection(ctx, tx, projectIDs)
+	projection, err := federationGroupFoldProjection(ctx, tx, m)
 	if err != nil {
 		return err
 	}
-	issueIDs, err := federationGroupIssueIDs(ctx, tx, projectIDs, currentProjectID, currentIssueIDs)
+	issueIDs, err := federationGroupIssueIDs(ctx, tx, m.groupProjectIDs, m.projectID, currentIssueIDs)
 	if err != nil {
 		return err
 	}
-	existing, err := federatedLinkRows(ctx, tx, projectIDs)
+	existing, err := federatedLinkRows(ctx, tx, m.groupProjectIDs)
 	if err != nil {
 		return err
 	}
 	desired := map[db.FoldLinkKey]federatedLinkRow{}
-	keys := make([]db.FoldLinkKey, 0, len(projection.Links))
-	for key, state := range projection.Links {
-		if state.Present {
-			keys = append(keys, key)
-		}
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].FromUID != keys[j].FromUID {
-			return keys[i].FromUID < keys[j].FromUID
-		}
-		if keys[i].ToUID != keys[j].ToUID {
-			return keys[i].ToUID < keys[j].ToUID
-		}
-		return keys[i].Type < keys[j].Type
-	})
-	for _, key := range keys {
-		state := projection.Links[key]
+	for _, edge := range projection.PresentLinks() {
+		key, state := edge.Key, edge.State
 		fromID, fromOK := issueIDs[key.FromUID]
 		toID, toOK := issueIDs[key.ToUID]
 		if !fromOK || !toOK {
@@ -244,22 +229,58 @@ from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author
 func federationGroupFoldProjection(
 	ctx context.Context,
 	tx *sql.Tx,
-	projectIDs []int64,
+	m *federatedMaterialization,
 ) (db.FoldProjection, error) {
-	// Only Links is read from this projection, so the fold is restricted to the
-	// events that can affect it. Everything else in the group's history stays
-	// out of the query, which is what keeps a single ingest from reading every
-	// federated project's full event payloads.
-	linkEventTypes := db.FederationLinkAffectingEventTypes()
 	var events []db.FoldEvent
-	for _, projectID := range projectIDs {
-		projectEvents, err := federationFoldEventsOfTypes(ctx, tx, projectID, linkEventTypes)
+	for _, projectID := range m.groupProjectIDs {
+		projectEvents, err := m.foldLinkEvents(ctx, tx, projectID)
 		if err != nil {
 			return db.FoldProjection{}, err
 		}
 		events = append(events, projectEvents...)
 	}
 	return db.FoldEvents(events), nil
+}
+
+func newFederatedLinkGroupMaterialization(
+	projectIDs []int64,
+	currentProjectID int64,
+) *federatedMaterialization {
+	return &federatedMaterialization{
+		projectID:       currentProjectID,
+		groupProjectIDs: projectIDs,
+		events:          map[int64][]db.FoldEvent{},
+	}
+}
+
+func (m *federatedMaterialization) foldLinkEvents(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+) ([]db.FoldEvent, error) {
+	if cached, ok := m.events[projectID]; ok {
+		linkEvents := make([]db.FoldEvent, 0, len(cached))
+		for _, event := range cached {
+			if db.FederationEventAffectsLinks(event.Type) {
+				linkEvents = append(linkEvents, event)
+			}
+		}
+		return linkEvents, nil
+	}
+	if m.observeFold != nil {
+		m.observeFold(projectID)
+	}
+	// Only Links is read from the group projection. Preserve the existing
+	// link-affecting event filter for sibling projects instead of expanding a
+	// materialization to every event payload in every linked project.
+	events, err := federationFoldEventsOfTypes(
+		ctx, tx, projectID, db.FederationLinkAffectingEventTypes(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	m.events[projectID] = events
+	return events, nil
 }
 
 func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) ([]db.FoldEvent, error) {

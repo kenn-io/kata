@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/recurrence"
@@ -219,7 +220,7 @@ func (s *Store) CreateRecurrenceForIssue(
 		if err != nil {
 			return fmt.Errorf("compose initial recurrence issue metadata: %w", err)
 		}
-		updatedAt := nowStoredTimestamp()
+		updatedAt := storedTime(time.Now())
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET recurrence_id=$1, occurrence_key=$2,
 metadata=$3, revision=revision+1, updated_at=$4 WHERE id=$5`, recurrenceID,
 			*firstOccurrence, string(updatedMetadata), updatedAt, issue.ID); err != nil {
@@ -420,7 +421,7 @@ func (s *Store) PatchRecurrence(ctx context.Context, input db.PatchRecurrenceIn)
 			next.NextOccurrenceKey = nextCursor
 		}
 
-		updatedAt := nowStoredTimestamp()
+		updatedAt := storedTime(time.Now())
 		newRevision := current.Revision + 1
 		_, err = tx.ExecContext(ctx, `UPDATE recurrences SET
   rrule=$1, dtstart=$2, timezone=$3, template_title=$4, template_body=$5,
@@ -485,7 +486,7 @@ func (s *Store) SoftDeleteRecurrence(ctx context.Context, input db.SoftDeleteRec
 			return &db.RevisionConflictError{CurrentRevision: recurrence.Revision}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE recurrences
-SET deleted_at=$1, revision=revision+1, updated_at=$1 WHERE id=$2`, nowStoredTimestamp(), input.RecurrenceID); err != nil {
+SET deleted_at=$1, revision=revision+1, updated_at=$1 WHERE id=$2`, storedTime(time.Now()), input.RecurrenceID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		payload, err := json.Marshal(map[string]string{"recurrence_uid": recurrence.UID})
@@ -542,10 +543,7 @@ WHERE r.id = $1 FOR UPDATE OF r`, recurrenceID).Scan(destinations...)
 	if err != nil {
 		return db.MaterializeNextOut{}, mapSQLError(err, nil)
 	}
-	current, err := buffer.value()
-	if err != nil {
-		return db.MaterializeNextOut{}, err
-	}
+	current := buffer.value()
 	if current.DeletedAt != nil {
 		return db.MaterializeNextOut{}, nil
 	}
@@ -559,7 +557,7 @@ WHERE r.id = $1 FOR UPDATE OF r`, recurrenceID).Scan(destinations...)
 	if next == nil {
 		if current.NextOccurrenceKey != nil && *current.NextOccurrenceKey != "" {
 			_, err = tx.ExecContext(ctx, `UPDATE recurrences SET next_occurrence_key=NULL,
-revision=revision+1, updated_at=$1 WHERE id=$2`, nowStoredTimestamp(), current.ID)
+revision=revision+1, updated_at=$1 WHERE id=$2`, storedTime(time.Now()), current.ID)
 		}
 		return db.MaterializeNextOut{}, mapSQLError(err, nil)
 	}
@@ -592,7 +590,7 @@ func (s *Store) materializeOccurrenceTx(
 	if err != nil {
 		return db.MaterializeNextOut{}, err
 	}
-	createdAt := nowStoredTimestamp()
+	createdAt := storedTime(time.Now())
 	var issueID int64
 	err = tx.QueryRowContext(ctx, `INSERT INTO issues(
   uid, project_id, short_id, title, body, status, owner, priority, author,
@@ -632,14 +630,14 @@ DO NOTHING RETURNING id`,
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE recurrences SET
 next_occurrence_key=$1, last_materialized_uid=$2, revision=revision+1, updated_at=$3 WHERE id=$4`,
-		next, issueUID, nowStoredTimestamp(), current.ID,
+		next, issueUID, storedTime(time.Now()), current.ID,
 	); err != nil {
 		return db.MaterializeNextOut{}, mapSQLError(err, nil)
 	}
 	createdPayload, err := json.Marshal(issueCreatedPayload{
 		UID: issueUID, ShortID: shortID, Title: current.TemplateTitle, Body: current.TemplateBody,
 		Author: actor, Owner: current.TemplateOwner, Priority: current.TemplatePriority, Status: "open",
-		Metadata: issueMetadata, Labels: labels, CreatedAt: createdAt,
+		Metadata: issueMetadata, Labels: labels, CreatedAt: formatStoredTime(time.Time(createdAt)),
 		RecurrenceUID: current.UID, OccurrenceKey: occurrenceKey,
 	})
 	if err != nil {
@@ -690,7 +688,7 @@ WHERE recurrence_id=$1 AND occurrence_key=$2`, current.ID, occurrenceKey).Scan(&
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE recurrences SET
 last_materialized_uid=$1, next_occurrence_key=$2, revision=revision+1, updated_at=$3 WHERE id=$4`,
-		existingUID, next, nowStoredTimestamp(), current.ID,
+		existingUID, next, storedTime(time.Now()), current.ID,
 	); err != nil {
 		return db.MaterializeNextOut{}, mapSQLError(err, nil)
 	}
@@ -713,9 +711,8 @@ last_materialized_uid=$1, next_occurrence_key=$2, revision=revision+1, updated_a
 }
 
 type recurrenceScanBuffer struct {
-	recurrence           db.Recurrence
-	createdAt, updatedAt string
-	deletedAt            sql.NullString
+	recurrence db.Recurrence
+	deletedAt  storedNullTime
 }
 
 func (buffer *recurrenceScanBuffer) destinations() []any {
@@ -727,28 +724,15 @@ func (buffer *recurrenceScanBuffer) destinations() []any {
 		&buffer.recurrence.TemplateLabels, &buffer.recurrence.TemplateMetadata,
 		&buffer.recurrence.NextOccurrenceKey, &buffer.recurrence.LastMaterializedUID,
 		&buffer.recurrence.Author, &buffer.recurrence.Revision,
-		&buffer.createdAt, &buffer.updatedAt, &buffer.deletedAt,
+		(*storedTime)(&buffer.recurrence.CreatedAt),
+		(*storedTime)(&buffer.recurrence.UpdatedAt),
+		&buffer.deletedAt,
 	}
 }
 
-func (buffer *recurrenceScanBuffer) value() (db.Recurrence, error) {
-	var err error
-	buffer.recurrence.CreatedAt, err = parseStoredTime(buffer.createdAt)
-	if err != nil {
-		return db.Recurrence{}, fmt.Errorf("parse recurrence created_at: %w", err)
-	}
-	buffer.recurrence.UpdatedAt, err = parseStoredTime(buffer.updatedAt)
-	if err != nil {
-		return db.Recurrence{}, fmt.Errorf("parse recurrence updated_at: %w", err)
-	}
-	if buffer.deletedAt.Valid {
-		value, err := parseStoredTime(buffer.deletedAt.String)
-		if err != nil {
-			return db.Recurrence{}, fmt.Errorf("parse recurrence deleted_at: %w", err)
-		}
-		buffer.recurrence.DeletedAt = &value
-	}
-	return buffer.recurrence, nil
+func (buffer *recurrenceScanBuffer) value() db.Recurrence {
+	buffer.recurrence.DeletedAt = buffer.deletedAt.Time
+	return buffer.recurrence
 }
 
 func scanRecurrence(row rowScanner) (db.Recurrence, error) {
@@ -760,5 +744,5 @@ func scanRecurrence(row rowScanner) (db.Recurrence, error) {
 	if err != nil {
 		return db.Recurrence{}, mapSQLError(err, nil)
 	}
-	return buffer.value()
+	return buffer.value(), nil
 }

@@ -229,19 +229,15 @@ func visibleProject(project db.Project, err error) (db.Project, error) {
 }
 
 func scanProject(row rowScanner) (db.Project, error) {
-	var (
-		project   db.Project
-		metadata  string
-		createdAt string
-		deletedAt sql.NullString
-	)
+	var project db.Project
+	var deletedAt storedNullTime
 	err := row.Scan(
 		&project.ID,
 		&project.UID,
 		&project.Name,
-		&metadata,
+		&project.Metadata,
 		&project.Revision,
-		&createdAt,
+		(*storedTime)(&project.CreatedAt),
 		&deletedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -250,18 +246,7 @@ func scanProject(row rowScanner) (db.Project, error) {
 	if err != nil {
 		return db.Project{}, mapSQLError(err, nil)
 	}
-	project.Metadata = db.JSONBlob(metadata)
-	project.CreatedAt, err = parseStoredTime(createdAt)
-	if err != nil {
-		return db.Project{}, fmt.Errorf("parse project created_at: %w", err)
-	}
-	if deletedAt.Valid {
-		value, err := parseStoredTime(deletedAt.String)
-		if err != nil {
-			return db.Project{}, fmt.Errorf("parse project deleted_at: %w", err)
-		}
-		project.DeletedAt = &value
-	}
+	project.DeletedAt = deletedAt.Time
 	return project, nil
 }
 

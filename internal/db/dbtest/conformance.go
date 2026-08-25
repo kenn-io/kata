@@ -150,13 +150,20 @@ var storageScenarios = []scenario{
 	{
 		name: "links and relationship projections",
 		methods: []string{
-			"ActivelyBlockedIssueIDs", "BlockNumbersByIssues", "BlockedByNumbersByIssues",
-			"ChildCountsByParents", "ChildrenOfIssue", "CloseIssue", "CreateIssue", "CreateLink",
+			"ChildrenOfIssue", "CloseIssue", "CreateIssue", "CreateLink",
 			"CreateLinkAndEvent", "CreateProject", "DeleteLinkAndEvent", "DeleteLinkByID",
-			"LinkByEndpoints", "LinkByID", "LinksByIssue", "OpenChildrenOf", "ParentNumbersByIssues",
-			"ParentOf", "ParentShortIDsByIssues", "RelatedNumbersByIssues",
+			"LinkByEndpoints", "LinkByID", "LinksByIssue", "OpenChildrenOf", "ParentOf",
+			"ParentShortIDsByIssues",
 		},
 		run: checkLinksAndRelationshipProjections,
+	},
+	{
+		name: "issue relationships",
+		methods: []string{
+			"CreateIssue", "CreateLink", "CreateProject", "RelationshipsByIssues",
+			"RemoveProject", "SoftDeleteIssue",
+		},
+		run: checkIssueRelationships,
 	},
 	{
 		name: "archived link targets",
@@ -359,6 +366,14 @@ var storageScenarios = []scenario{
 			"RotateFederationEnrollment",
 		},
 		runWithBackend: checkFederationEnrollmentRotation,
+	},
+	{
+		name: "project federation enrollment scope",
+		methods: []string{
+			"CreateFederationEnrollment", "CreateProject", "ListFederationEnrollments",
+			"ListProjectFederationEnrollments", "RevokeFederationEnrollment",
+		},
+		run: checkProjectFederationEnrollmentScope,
 	},
 	{
 		name: "federation event transport",

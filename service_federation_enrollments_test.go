@@ -114,6 +114,52 @@ func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 	assert.NotNil(t, firstHistory[0].RevokedAt)
 }
 
+// This focused test pins the cross-project revoke boundary and additionally
+// proves rejection leaves the enrollment active and exposes no enrollment
+// history to the bystander project.
+func TestServiceRevokeFederationEnrollmentRejectsCrossProjectID(t *testing.T) {
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	owner := ensureEnrollmentTestProject(
+		t, service, "01HZNQ7VFPK1XGD8R5MABCD4E1", "spoke-project",
+	)
+	bystander := ensureEnrollmentTestProject(
+		t, service, "01HZNQ7VFPK1XGD8R5MABCD4E2", "hub-project",
+	)
+	created, err := service.CreateFederationEnrollment(
+		context.Background(),
+		kata.FederationEnrollmentSpec{
+			ProjectUID:       owner.UID,
+			SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+			Capabilities:     "pull",
+			Actor:            "Example Operator",
+		},
+	)
+	require.NoError(t, err)
+
+	err = service.RevokeFederationEnrollment(
+		context.Background(), bystander.UID, created.Enrollment.ID,
+	)
+	require.ErrorIs(t, err, kata.ErrFederationEnrollmentNotFound,
+		"an enrollment belonging to another project must not be revocable")
+
+	history, err := service.ListFederationEnrollments(context.Background(), owner.UID)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	assert.Nil(t, history[0].RevokedAt,
+		"the rejected cross-project revoke must not have taken effect")
+
+	empty, err := service.ListFederationEnrollments(context.Background(), bystander.UID)
+	require.NoError(t, err)
+	assert.Empty(t, empty,
+		"a project with no enrollments must not see another project's history")
+}
+
 func TestServiceFederationEnrollmentRejectsInvalidOrArchivedProjects(t *testing.T) {
 	service, err := kata.New(context.Background(), kata.Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),

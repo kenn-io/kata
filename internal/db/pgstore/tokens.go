@@ -133,7 +133,7 @@ func (s *Store) RevokeAPIToken(
 		if err != nil {
 			return err
 		}
-		revokedAt := nowStoredTimestamp()
+		revokedAt := storedTime(time.Now())
 		token, err = scanAPIToken(tx.QueryRowContext(ctx,
 			`UPDATE api_tokens SET revoked_at = $1 WHERE id = $2 AND revoked_at IS NULL
 RETURNING id, token_hash, actor, name, created_at, last_used_at, revoked_at`, revokedAt, id))
@@ -167,7 +167,7 @@ func (s *Store) ResolveAPIToken(ctx context.Context, plaintext string) (db.APITo
 	result, err := s.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = $1
  WHERE token_hash = $2 AND revoked_at IS NULL
    AND (last_used_at IS NULL OR last_used_at < $3)`,
-		formatStoredTime(now), hash, formatStoredTime(now.Add(-time.Hour)))
+		storedTime(now), hash, storedTime(now.Add(-time.Hour)))
 	if err != nil {
 		return token, nil
 	}
@@ -206,10 +206,10 @@ func (s *Store) ListAPITokens(ctx context.Context) ([]db.APIToken, error) {
 
 func scanAPIToken(row rowScanner) (db.APIToken, error) {
 	var token db.APIToken
-	var createdAt string
-	var lastUsedAt, revokedAt sql.NullString
+	var lastUsedAt, revokedAt storedNullTime
 	err := row.Scan(
-		&token.ID, &token.TokenHash, &token.Actor, &token.Name, &createdAt, &lastUsedAt, &revokedAt,
+		&token.ID, &token.TokenHash, &token.Actor, &token.Name,
+		(*storedTime)(&token.CreatedAt), &lastUsedAt, &revokedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.APIToken{}, db.ErrNotFound
@@ -217,24 +217,8 @@ func scanAPIToken(row rowScanner) (db.APIToken, error) {
 	if err != nil {
 		return db.APIToken{}, fmt.Errorf("scan api token: %w", mapSQLError(err, nil))
 	}
-	token.CreatedAt, err = parseStoredTime(createdAt)
-	if err != nil {
-		return db.APIToken{}, fmt.Errorf("parse api token created_at: %w", err)
-	}
-	if lastUsedAt.Valid {
-		value, err := parseStoredTime(lastUsedAt.String)
-		if err != nil {
-			return db.APIToken{}, fmt.Errorf("parse api token last_used_at: %w", err)
-		}
-		token.LastUsedAt = &value
-	}
-	if revokedAt.Valid {
-		value, err := parseStoredTime(revokedAt.String)
-		if err != nil {
-			return db.APIToken{}, fmt.Errorf("parse api token revoked_at: %w", err)
-		}
-		token.RevokedAt = &value
-	}
+	token.LastUsedAt = lastUsedAt.Time
+	token.RevokedAt = revokedAt.Time
 	return token, nil
 }
 

@@ -487,9 +487,10 @@ func TestImportBatch_NonAuthoritativeParentLinksPreserveExistingSourceParentForC
 		assert.NotEqual(t, "issue.unlinked", event.Type)
 	}
 
-	parents, err := d.ParentNumbersByIssues(ctx, []int64{*childMap.IssueID})
+	relationships, err := d.RelationshipsByIssues(ctx, []int64{*childMap.IssueID})
 	require.NoError(t, err)
-	assert.Equal(t, *parentMap.IssueID, parents[*childMap.IssueID])
+	require.NotNil(t, relationships[*childMap.IssueID].ParentIssueID)
+	assert.Equal(t, *parentMap.IssueID, *relationships[*childMap.IssueID].ParentIssueID)
 	_, err = d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:101:parent:issue-id:102")
 	assert.NoError(t, err)
 }
@@ -520,9 +521,9 @@ func TestImportBatch_AuthoritativeParentLinksRemoveMissingSourceParentForChanged
 		}
 	}
 	assert.True(t, unlinked)
-	parents, err := d.ParentNumbersByIssues(ctx, []int64{*childMap.IssueID})
+	relationships, err := d.RelationshipsByIssues(ctx, []int64{*childMap.IssueID})
 	require.NoError(t, err)
-	assert.NotContains(t, parents, *childMap.IssueID)
+	assert.Nil(t, relationships[*childMap.IssueID].ParentIssueID)
 	_, err = d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:101:parent:issue-id:102")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
@@ -563,9 +564,10 @@ func TestImportBatch_AuthoritativeParentDoesNotReplaceExistingLocalParent(t *tes
 		assert.NotEqual(t, "issue.linked", event.Type)
 	}
 
-	parents, err := d.ParentNumbersByIssues(ctx, []int64{*childMap.IssueID})
+	relationships, err := d.RelationshipsByIssues(ctx, []int64{*childMap.IssueID})
 	require.NoError(t, err)
-	assert.Equal(t, *localParentMap.IssueID, parents[*childMap.IssueID])
+	require.NotNil(t, relationships[*childMap.IssueID].ParentIssueID)
+	assert.Equal(t, *localParentMap.IssueID, *relationships[*childMap.IssueID].ParentIssueID)
 	_, err = d.LinkByID(ctx, localLink.ID)
 	assert.NoError(t, err)
 	_, err = d.LinkByEndpoints(ctx, *childMap.IssueID, *sourceParentMap.IssueID, "parent")
@@ -632,9 +634,10 @@ func TestImportBatch_NonAuthoritativeParentDoesNotPreserveOtherLinkTypes(t *test
 		}
 	}
 	assert.True(t, unlinked)
-	parents, err := d.ParentNumbersByIssues(ctx, []int64{*childMap.IssueID})
+	relationships, err := d.RelationshipsByIssues(ctx, []int64{*childMap.IssueID})
 	require.NoError(t, err)
-	assert.Equal(t, *parentMap.IssueID, parents[*childMap.IssueID])
+	require.NotNil(t, relationships[*childMap.IssueID].ParentIssueID)
+	assert.Equal(t, *parentMap.IssueID, *relationships[*childMap.IssueID].ParentIssueID)
 	_, err = d.LinkByEndpoints(ctx, *childMap.IssueID, *blockedMap.IssueID, "blocks")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	_, err = d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:101:parent:issue-id:102")
