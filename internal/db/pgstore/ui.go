@@ -678,7 +678,7 @@ func readUILabelStrings(ctx context.Context, tx *sql.Tx, issueID int64) ([]strin
 }
 
 func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Comment, error) {
-	rows, err := tx.QueryContext(ctx, commentSelect+` WHERE issue_id = $1 ORDER BY created_at::timestamptz ASC, id ASC`, issueID)
+	rows, err := tx.QueryContext(ctx, commentSelect+` WHERE issue_id = $1`, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("read UI comments: %w", mapSQLError(err, nil))
 	}
@@ -691,7 +691,11 @@ func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Commen
 		}
 		comments = append(comments, comment)
 	}
-	return comments, mapSQLError(rows.Err(), nil)
+	if err := rows.Err(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	sortCommentsByCreatedAt(comments)
+	return comments, nil
 }
 
 func readUIIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueLabel, error) {

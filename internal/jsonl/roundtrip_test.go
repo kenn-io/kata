@@ -87,6 +87,69 @@ func TestExternalRootTrustedCutoverPreservesEnabledAndPendingUncertainty(t *test
 	assertTimePtrEqual(t, fixture.pendingStartedAt, binding.PendingCommentStartedAt)
 }
 
+func TestExternalRootRoundtripPreservesSubmillisecondStaleFrontier(t *testing.T) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	project, err := source.CreateProject(ctx, "precision-source")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Local title", Author: "tester",
+	})
+	require.NoError(t, err)
+	frontier := time.Date(2026, 8, 20, 10, 0, 0, 123000900, time.UTC)
+	binding, _, err := source.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "connector-precision",
+		ExternalRootKey: "root-precision", ExternalAccountKey: "example-account",
+		Actor: "tester", ReceiveCommentsAfter: frontier,
+	})
+	require.NoError(t, err)
+	binding, claimed, err := source.ClaimExternalRootBinding(
+		ctx, binding.ID, "source-claim", frontier.Add(time.Minute), frontier,
+	)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	_, _, changed, err := source.ApplyExternalRootProjection(ctx, db.ExternalRootProjectionParams{
+		BindingID: binding.ID, ClaimToken: binding.ClaimToken,
+		Title: "Current remote title", Body: "Current remote body",
+		ExternalRevision: "revision-current", ExternalActorID: "actor-one",
+		ExternalUpdatedAt: frontier, ExternalObservedAt: frontier.Add(time.Second),
+		IntegrationActor: "connector:connector-precision",
+	})
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	var exported bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{IncludeDeleted: true}))
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(exported.Bytes()), target,
+		jsonl.ImportOptions{PreserveExternalRootBindingsEnabled: true}))
+	restoredIssue, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	restoredBinding, err := target.ExternalRootBindingByIssue(ctx, restoredIssue.ID)
+	require.NoError(t, err)
+	claimAt := frontier.Add(2 * time.Hour)
+	restoredBinding, claimed, err = target.ClaimExternalRootBinding(
+		ctx, restoredBinding.ID, "target-claim", claimAt, claimAt.Add(-time.Minute),
+	)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	stale := frontier.Add(-100 * time.Nanosecond)
+	_, _, changed, err = target.ApplyExternalRootProjection(ctx, db.ExternalRootProjectionParams{
+		BindingID: restoredBinding.ID, ClaimToken: restoredBinding.ClaimToken,
+		Title: "Stale remote title", Body: "Stale remote body",
+		ExternalRevision: "revision-stale", ExternalActorID: "actor-one",
+		ExternalUpdatedAt: stale, ExternalObservedAt: frontier.Add(time.Second),
+		IntegrationActor: "connector:connector-precision",
+	})
+	assert.ErrorIs(t, err, db.ErrExternalRootValidation)
+	assert.False(t, changed)
+	retained, readErr := target.IssueByID(ctx, restoredIssue.ID)
+	require.NoError(t, readErr)
+	assert.Equal(t, "Current remote title", retained.Title)
+	assert.Equal(t, "Current remote body", retained.Body)
+}
+
 func TestExternalRootProjectFilteredExportIncludesActiveAndReferencedMappings(t *testing.T) {
 	ctx := t.Context()
 	source := openExportTestDB(t)

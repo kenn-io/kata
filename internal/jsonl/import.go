@@ -748,12 +748,11 @@ func parseExportTime(s string) (time.Time, error) {
 const rfc3339MilliLayout = "2006-01-02T15:04:05.000Z"
 
 // rfc3339NanoFixedLayout is the canonical precision-preserving wire format
-// for comments observed from external systems.
+// for timestamps observed from external systems.
 const rfc3339NanoFixedLayout = "2006-01-02T15:04:05.000000000Z"
 
 // rfc3339MicroFixedLayout is the canonical precision-preserving wire format
-// for comments stored on PostgreSQL, whose timestamptz resolution truncates
-// to microseconds.
+// for external timestamps that carry microsecond precision.
 const rfc3339MicroFixedLayout = "2006-01-02T15:04:05.000000Z"
 
 // normalizeImportTime rewrites *p to the canonical RFC3339-millis form in
@@ -771,6 +770,31 @@ func normalizeImportTime(field string, p *string) error {
 		return fmt.Errorf("normalize %s: %w", field, err)
 	}
 	*p = t.UTC().Format(rfc3339MilliLayout)
+	return nil
+}
+
+func normalizePrecisionImportTime(field string, p *string) error {
+	if p == nil || *p == "" {
+		return nil
+	}
+	t, err := parseExportTime(*p)
+	if err != nil {
+		return fmt.Errorf("normalize %s: %w", field, err)
+	}
+	utc := t.UTC()
+	if *p == utc.Format(rfc3339MilliLayout) ||
+		*p == utc.Format(rfc3339MicroFixedLayout) ||
+		*p == utc.Format(rfc3339NanoFixedLayout) {
+		return nil
+	}
+	switch nanos := utc.Nanosecond(); {
+	case nanos%1e3 != 0:
+		*p = utc.Format(rfc3339NanoFixedLayout)
+	case nanos%1e6 != 0:
+		*p = utc.Format(rfc3339MicroFixedLayout)
+	default:
+		*p = utc.Format(rfc3339MilliLayout)
+	}
 	return nil
 }
 
@@ -832,32 +856,7 @@ func normalizeIssueTimes(rec *db.IssueExport) error {
 }
 
 func normalizeCommentTimes(rec *db.CommentExport) error {
-	if rec.CreatedAt == "" {
-		return nil
-	}
-	t, err := parseExportTime(rec.CreatedAt)
-	if err != nil {
-		return fmt.Errorf("normalize comment.created_at: %w", err)
-	}
-	utc := t.UTC()
-	if rec.CreatedAt == utc.Format(rfc3339MilliLayout) ||
-		rec.CreatedAt == utc.Format(rfc3339MicroFixedLayout) ||
-		rec.CreatedAt == utc.Format(rfc3339NanoFixedLayout) {
-		return nil
-	}
-	// Canonicalize from the parsed instant, preserving whatever sub-millisecond
-	// precision the source actually carried: offset zones, variable-length
-	// fractions, and legacy space-separated stamps must not collapse distinct
-	// comments onto one millisecond.
-	switch nanos := utc.Nanosecond(); {
-	case nanos%1e3 != 0:
-		rec.CreatedAt = utc.Format(rfc3339NanoFixedLayout)
-	case nanos%1e6 != 0:
-		rec.CreatedAt = utc.Format(rfc3339MicroFixedLayout)
-	default:
-		rec.CreatedAt = utc.Format(rfc3339MilliLayout)
-	}
-	return nil
+	return normalizePrecisionImportTime("comment.created_at", &rec.CreatedAt)
 }
 
 func normalizeIssueLabelTimes(rec *db.IssueLabelExport) error {
@@ -869,7 +868,7 @@ func normalizeLinkTimes(rec *db.LinkExport) error {
 }
 
 func normalizeImportMappingTimes(rec *db.ImportMappingExport) error {
-	if err := normalizeImportTime("import_mapping.source_updated_at", rec.SourceUpdatedAt); err != nil {
+	if err := normalizePrecisionImportTime("import_mapping.source_updated_at", rec.SourceUpdatedAt); err != nil {
 		return err
 	}
 	return normalizeImportTime("import_mapping.imported_at", &rec.ImportedAt)

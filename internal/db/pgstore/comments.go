@@ -1,11 +1,13 @@
 package pgstore
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -270,7 +272,7 @@ func (s *Store) CommentBodyByID(ctx context.Context, id int64) (string, error) {
 // CommentsByIssue returns comments in stable chronological order.
 func (s *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
 	rows, err := s.QueryContext(ctx,
-		commentSelect+` WHERE issue_id = $1 ORDER BY created_at::timestamptz ASC, id ASC`, issueID)
+		commentSelect+` WHERE issue_id = $1`, issueID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -283,7 +285,20 @@ func (s *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 		}
 		comments = append(comments, comment)
 	}
-	return comments, mapSQLError(rows.Err(), nil)
+	if err := rows.Err(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	sortCommentsByCreatedAt(comments)
+	return comments, nil
+}
+
+func sortCommentsByCreatedAt(comments []db.Comment) {
+	slices.SortFunc(comments, func(a, b db.Comment) int {
+		if order := a.CreatedAt.Compare(b.CreatedAt); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
 }
 
 func scanComment(row rowScanner) (db.Comment, error) {

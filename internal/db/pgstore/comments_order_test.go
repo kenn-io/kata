@@ -30,12 +30,14 @@ func TestCommentsOrderMixedPrecisionTimestamps(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	bodies := []string{"Earlier", "Middle", "Later"}
+	bodies := []string{"Earlier", "Later submicrosecond", "Earlier submicrosecond", "Later"}
 	stamps := []string{
 		"2026-08-20T10:00:00.122900000Z",
-		"2026-08-20T10:00:00.123Z",
+		"2026-08-20T10:00:00.123000200Z",
+		"2026-08-20T10:00:00.123000100Z",
 		"2026-08-20T10:00:00.123100000Z",
 	}
+	want := []string{"Earlier", "Earlier submicrosecond", "Later submicrosecond", "Later"}
 	for i := range bodies {
 		comment, _, createErr := store.CreateComment(ctx, db.CreateCommentParams{
 			IssueID: issue.ID, Author: "tester", Body: bodies[i],
@@ -48,14 +50,14 @@ func TestCommentsOrderMixedPrecisionTimestamps(t *testing.T) {
 
 	comments, err := store.CommentsByIssue(ctx, issue.ID)
 	require.NoError(t, err)
-	assert.Equal(t, bodies, commentBodies(comments))
+	assert.Equal(t, want, commentBodies(comments))
 
 	tx, err := store.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback() })
 	uiComments, err := readUIComments(ctx, tx, issue.ID)
 	require.NoError(t, err)
-	assert.Equal(t, bodies, commentBodies(uiComments))
+	assert.Equal(t, want, commentBodies(uiComments))
 }
 
 func commentBodies(comments []db.Comment) []string {
