@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 )
 
 func TestFederationView_FKeyTransitionsFromList(t *testing.T) {
@@ -149,8 +150,8 @@ func TestFederationView_HelpAndFooterIncludeFederationBinding(t *testing.T) {
 
 func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemon(t *testing.T) {
 	spokeAPI := &Client{}
-	spokeTarget := daemonTarget{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"}
-	hubTarget := daemonTarget{Name: "catalog-hub", URL: "https://hub.example", Token: "hub-auth"}
+	spokeTarget := daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false)
+	hubTarget := daemonTargetWithResolvedAuth("catalog-hub", "https://hub.example", "hub-auth", false)
 	hub := &recordingFederationHubAdmin{
 		projects: []ProjectSummary{
 			{ID: 42, Name: "hub-project"},
@@ -200,7 +201,7 @@ func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemo
 }
 
 func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
-	hubTarget := daemonTarget{Name: "catalog-hub", URL: "https://hub.example", Token: "hub-auth"}
+	hubTarget := daemonTargetWithResolvedAuth("catalog-hub", "https://hub.example", "hub-auth", false)
 	hub := &recordingFederationHubAdmin{
 		projects: []ProjectSummary{{ID: 42, Name: "hub-project"}},
 	}
@@ -212,7 +213,7 @@ func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
 	})
 	m := setupFederationView()
 	m.api = &Client{}
-	m.activeDaemon = daemonTarget{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"}
+	m.activeDaemon = daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false)
 	m.daemonTargets = []daemonTarget{m.activeDaemon, hubTarget}
 	m.federationHubCursor = 1
 
@@ -250,8 +251,8 @@ func TestFederationEnroll_NWithCurrentProjectStartsLocalSelectionCursored(t *tes
 		mockProject{ID: 9, Name: "other-project"},
 	)
 	m.daemonTargets = []daemonTarget{
-		{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"},
-		{Name: "hub", URL: "https://hub.example", Token: "hub-auth"},
+		daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false),
+		daemonTargetWithResolvedAuth("hub", "https://hub.example", "hub-auth", false),
 	}
 	m.activeDaemon = m.daemonTargets[0]
 
@@ -386,8 +387,8 @@ func TestFederationEnroll_SelectHubLoadsHubAuthPrincipal(t *testing.T) {
 	m.scope = homedScope(7, "spoke-project")
 	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
 	m.daemonTargets = []daemonTarget{
-		{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"},
-		{Name: "hub", URL: "https://hub.example", Token: "hub-auth"},
+		daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false),
+		daemonTargetWithResolvedAuth("hub", "https://hub.example", "hub-auth", false),
 	}
 	m.activeDaemon = m.daemonTargets[0]
 
@@ -449,8 +450,8 @@ func TestFederationEnroll_CreateReplicaBranchDefaultsLocalNameFromHubProject(t *
 	m := setupFederationView()
 	m.scope = scope{allProjects: true}
 	m.daemonTargets = []daemonTarget{
-		{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"},
-		{Name: "hub", URL: "https://hub.example", Token: "hub-auth"},
+		daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false),
+		daemonTargetWithResolvedAuth("hub", "https://hub.example", "hub-auth", false),
 	}
 	m.activeDaemon = m.daemonTargets[0]
 
@@ -531,12 +532,13 @@ func TestFederationEnroll_ExistingLocalFederationBindingBlocksBeforeMutation(t *
 }
 
 func TestFederationEnroll_MissingTokenEnvBlocksBeforeMutation(t *testing.T) {
+	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv(missingHubAuthEnvName(), "")
 	m := setupFederationView()
 	m.scope = homedScope(7, "spoke-project")
 	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
 	m.daemonTargets = []daemonTarget{
-		{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"},
+		daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false),
 		{Name: "hub", URL: "https://hub.example", TokenEnv: missingHubAuthEnvName()},
 	}
 	m.activeDaemon = m.daemonTargets[0]
@@ -548,14 +550,38 @@ func TestFederationEnroll_MissingTokenEnvBlocksBeforeMutation(t *testing.T) {
 
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModeSelectHub, out.federationMode)
-	assert.Contains(t, stripANSI(renderFederation(out)), "token_env")
+	require.EqualError(t, out.federationEnrollErr,
+		`daemon "hub": token_env "`+missingHubAuthEnvName()+`" is unset or empty`)
+}
+
+func TestFederationEnroll_GlobalAuthTokenDoesNotOverrideMissingTargetTokenEnv(t *testing.T) {
+	t.Setenv("KATA_AUTH_TOKEN", "local-daemon-token")
+	t.Setenv(missingHubAuthEnvName(), "")
+	m := setupFederationView()
+	m.scope = homedScope(7, "spoke-project")
+	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
+	m.daemonTargets = []daemonTarget{
+		daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false),
+		{Name: "hub", URL: "https://hub.example", TokenEnv: missingHubAuthEnvName()},
+	}
+	m.activeDaemon = m.daemonTargets[0]
+
+	out, _ := m.routeFederationViewKey(keyRune('n'))
+	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	out.federationHubCursor = 1
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModeSelectHub, out.federationMode)
+	require.EqualError(t, out.federationEnrollErr,
+		`daemon "hub": token_env "`+missingHubAuthEnvName()+`" is unset or empty`)
 }
 
 func TestFederationEnroll_ActiveDaemonAsHubBlocked(t *testing.T) {
 	m := setupFederationView()
 	m.scope = homedScope(7, "spoke-project")
 	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
-	m.daemonTargets = []daemonTarget{{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"}}
+	m.daemonTargets = []daemonTarget{daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false)}
 	m.activeDaemon = m.daemonTargets[0]
 
 	out, _ := m.routeFederationViewKey(keyRune('n'))
@@ -594,8 +620,8 @@ func TestFederationEnroll_PlainHTTPHostnameRequiresCatalogAllowInsecure(t *testi
 	m.scope = homedScope(7, "spoke-project")
 	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
 	m.daemonTargets = []daemonTarget{
-		{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"},
-		{Name: "hub", URL: "http://hub.internal:7777", Token: "hub-auth"},
+		daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false),
+		daemonTargetWithResolvedAuth("hub", "http://hub.internal:7777", "hub-auth", false),
 	}
 	m.activeDaemon = m.daemonTargets[0]
 
@@ -813,7 +839,7 @@ func TestFederationEnroll_JoinFailureRecoveryRevealIsExplicitAndSecretBearing(t 
 
 func TestFederationEnroll_RecoveryCommandPreservesSpokeAllowInsecure(t *testing.T) {
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
-	m.activeDaemon.AllowInsecure = true
+	m.activeDaemon.resolved.AllowInsecure = true
 	out, cmd := enterThroughAdoptConfirm(t, m)
 	msg := cmd().(federationEnrollResultMsg)
 	out, _ = updateModel(out, msg)
@@ -829,7 +855,7 @@ func TestFederationEnroll_RecoveryCommandPreservesSpokeAllowInsecure(t *testing.
 func TestFederationEnroll_RecoveryCommandPreservesSpokeAuthOnlyAfterReveal(t *testing.T) {
 	spokeToken := spokeAuthSecret()
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
-	m.activeDaemon.Token = spokeToken
+	m.activeDaemon.resolved.Token = spokeToken
 	out, cmd := enterThroughAdoptConfirm(t, m)
 	msg := cmd().(federationEnrollResultMsg)
 	out, _ = updateModel(out, msg)
@@ -1276,17 +1302,17 @@ func TestFederationLeaveHubTargetUsesBindingURLAndToleratesTrailingSlash(t *test
 		{Name: "local", Local: true},
 		// Catalog entry's URL carries a trailing slash and a foreign-looking
 		// path; only its token must be reused.
-		{Name: "hub", URL: "https://bound.example/", Token: "catalog-token"},
+		daemonTargetWithResolvedAuth("hub", "https://bound.example/", "catalog-token", false),
 	}
 
 	got := m.federationLeaveHubTarget("https://bound.example", true)
 
 	// Token comes from the matched catalog entry (slash-tolerant match)...
-	assert.Equal(t, "catalog-token", got.Token)
+	assert.Equal(t, "catalog-token", got.resolved.Token)
 	// ...but the target URL is pinned to the binding's hub URL, normalized,
 	// and allow_insecure comes from the binding, not the catalog entry.
 	assert.Equal(t, "https://bound.example", got.URL)
-	assert.True(t, got.AllowInsecure, "binding allow_insecure must carry through")
+	assert.True(t, got.resolved.AllowInsecure, "binding allow_insecure must carry through")
 	assert.False(t, got.Implicit, "a matched catalog entry is not an implicit target")
 }
 
@@ -1298,13 +1324,13 @@ func TestFederationLeaveHubTargetUsesBindingURLAndToleratesTrailingSlash(t *test
 func TestFederationLeaveHubTargetUnionsCatalogAllowInsecure(t *testing.T) {
 	m := newTestModel()
 	m.daemonTargets = []daemonTarget{
-		{Name: "hub", URL: "http://hub.internal:7373", Token: "catalog-token", AllowInsecure: true},
+		daemonTargetWithResolvedAuth("hub", "http://hub.internal:7373", "catalog-token", true),
 	}
 
 	got := m.federationLeaveHubTarget("http://hub.internal:7373", false)
 
-	assert.Equal(t, "catalog-token", got.Token)
-	assert.True(t, got.AllowInsecure,
+	assert.Equal(t, "catalog-token", got.resolved.Token)
+	assert.True(t, got.resolved.AllowInsecure,
 		"same-origin catalog allow_insecure must union into the leave hub target")
 }
 
@@ -1318,8 +1344,8 @@ func TestFederationLeaveHubTargetNoMatchFallsBackToBindingURL(t *testing.T) {
 	// pick up the global daemon token, which must never go to the hub origin.
 	assert.False(t, got.Implicit, "fallback must not be implicit (global-auth pickup)")
 	assert.Equal(t, "https://bound.example", got.URL)
-	assert.Empty(t, got.Token)
-	assert.True(t, got.AllowInsecure, "binding allow_insecure must carry through")
+	assert.Empty(t, got.resolved.Token)
+	assert.True(t, got.resolved.AllowInsecure, "binding allow_insecure must carry through")
 }
 
 func setupFederationSourceModel() Model {
@@ -1413,12 +1439,9 @@ func setupFederationHubProjectSelection() Model {
 	m.federationDraft = newFederationDraft("operator")
 	m.federationDraft.SpokeProjectID = 7
 	m.federationDraft.SpokeProjectName = "spoke-project"
-	m.federationDraft.HubTarget = daemonTarget{
-		Name:          "hub",
-		URL:           "https://hub.example",
-		Token:         "hub-auth",
-		AllowInsecure: true,
-	}
+	m.federationDraft.HubTarget = daemonTargetWithResolvedAuth(
+		"hub", "https://hub.example", "hub-auth", true,
+	)
 	m.federationDraft.AllowInsecure = true
 	m.federationDraft.AdoptExisting = true
 	return m
@@ -1493,7 +1516,7 @@ func setupFederationExecutionPreview(
 	m.federationDraft.Operation = federationOperationAdoptSameName
 	m.federationDraft.HubProjectID = 42
 	m.federationDraft.HubProjectName = hubProjectName
-	m.federationDraft.HubTarget = daemonTarget{Name: "hub", URL: hub.URL, AllowInsecure: true}
+	m.federationDraft.HubTarget = daemonTargetWithResolvedAuth("hub", hub.URL, "", true)
 	m.federationDraft.AllowInsecure = true
 	return m, &joinBody
 }
@@ -1896,4 +1919,15 @@ func TestFetchProjectsCarriesUIDs(t *testing.T) {
 	// And the loaded handler must apply them to projectUIDByID.
 	out, _ := updateModel(m, msg)
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", out.projectUIDByID[7])
+}
+
+func daemonTargetWithResolvedAuth(name, baseURL, token string, allowInsecure bool) daemonTarget {
+	return daemonTarget{
+		Name: name,
+		URL:  baseURL,
+		resolved: clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceInjected, Name: name, BaseURL: baseURL,
+			Token: token, AllowInsecure: allowInsecure,
+		},
+	}
 }

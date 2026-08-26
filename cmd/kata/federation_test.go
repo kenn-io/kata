@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
@@ -968,7 +969,8 @@ func TestResolveFederationProjectUsesProvidedClientForWorkspaceResolution(t *tes
 		}, nil
 	})}
 
-	project, err := resolveFederationProject(context.Background(), client, baseURL, nil, false, "")
+	project, err := resolveFederationProject(
+		daemonAPI{ctx: context.Background(), baseURL: baseURL, client: client}, nil, false, "")
 
 	require.NoError(t, err)
 	assert.True(t, called)
@@ -1062,6 +1064,127 @@ url = "`+spoke.URL+`"
 
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 	assert.Empty(t, gotAuth)
+}
+
+func TestFederationSpokeHTTPClientNamedTokenlessHonorsTrustPrivateNetwork(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	flags.Daemon = "spoke"
+	baseURL := "http://100.64.0.5:7373"
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[auth]
+trust_private_network = true
+
+[[daemon]]
+name = "spoke"
+url = "`+baseURL+`"
+`), 0o600))
+
+	hc, err := federationSpokeHTTPClient(t.Context(), baseURL)
+
+	require.NoError(t, err)
+	assert.NotNil(t, hc)
+}
+
+func TestFederationImplicitSpokeTargetAuthMatchingServerPreservesTrust(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
+	spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
+	}))
+	t.Cleanup(spoke.Close)
+	t.Setenv("KATA_SERVER", spoke.URL)
+
+	auth, err := federationImplicitSpokeTargetAuth(t.Context(), spoke.URL)
+	require.NoError(t, err)
+	assert.Empty(t, auth.Token)
+	assert.True(t, auth.TrustPrivateNetwork)
+	assert.False(t, auth.AllowInsecure)
+
+	// Exercise the actual D2 construction boundary: the preserved global trust
+	// must make a tokenless plaintext private-IP target legal.
+	hc, err := clientpkg.NewHTTPClientForTarget(t.Context(), "http://100.64.0.5:7373", auth, clientpkg.Opts{})
+	require.NoError(t, err)
+	assert.NotNil(t, hc)
+}
+
+func TestFederationImplicitSpokeTargetAuthMatchingLocalConfigPreservesPolicy(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[auth]
+trust_private_network = true
+`), 0o600))
+	workspace := t.TempDir()
+	flags.Workspace = workspace
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"), []byte(
+		"version = 1\n\n[project]\nidentity = \"example.test/spoke-project\"\nname = \"spoke-project\"\n",
+	), 0o600))
+	spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
+	}))
+	t.Cleanup(spoke.Close)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(
+		"version = 1\n\n[server]\nurl = \""+spoke.URL+"\"\nallow_insecure = true\n",
+	), 0o600))
+
+	auth, err := federationImplicitSpokeTargetAuth(t.Context(), spoke.URL)
+
+	require.NoError(t, err)
+	assert.Empty(t, auth.Token)
+	assert.True(t, auth.TrustPrivateNetwork)
+	assert.True(t, auth.AllowInsecure)
+}
+
+func TestFederationImplicitSpokeTargetAuthMismatchDoesNotResolveActiveTokenEnv(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_UNRELATED_TOKEN", "")
+	active := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
+	}))
+	t.Cleanup(active.Close)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+active_daemon = "unrelated"
+
+[auth]
+trust_private_network = true
+
+[[daemon]]
+name = "unrelated"
+url = "`+active.URL+`"
+token_env = "KATA_UNRELATED_TOKEN"
+`), 0o600))
+
+	auth, err := federationImplicitSpokeTargetAuth(t.Context(), "http://127.0.0.1:27123")
+
+	require.NoError(t, err)
+	assert.Empty(t, auth.Token)
+	assert.True(t, auth.TrustPrivateNetwork)
+	assert.False(t, auth.AllowInsecure)
 }
 
 func TestFederationSpokeHTTPClientNamedDaemonTokenEnvHonorsTrustPrivateNetwork(t *testing.T) {
@@ -1796,6 +1919,28 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 	assert.ErrorIs(t, bindErr, db.ErrNotFound)
 }
 
+func TestFederationLeaveHubDecodeFailureIncludesLocalOnlyRecovery(t *testing.T) {
+	resetFlags(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/enrollments" {
+			_, _ = w.Write([]byte(`not-json`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(hub.Close)
+
+	_, err := revokeSpokeEnrollmentsOnHub(t.Context(), spokeLeaveTarget{
+		instanceUID:  "spoke-instance",
+		hubProjectID: 42,
+	}, hubAuthInputs{hubURL: hub.URL, hubToken: "hub-admin-token"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "hub revoke failed")
+	assert.Contains(t, err.Error(), "--local-only")
+}
+
 // TestFederationLeaveResolvesArchivedProject: an archive-leave retry must be
 // able to reach the daemon's idempotent resume by name even though the
 // project is archived — active-only resolution would report "not found"
@@ -2386,4 +2531,44 @@ func TestFederationLeaveWarnsAboutActiveGlobalEnrollment(t *testing.T) {
 	assert.Contains(t, stdout, "standalone")
 	assert.Contains(t, stderr, "global enrollment(s) #11")
 	assert.Contains(t, stderr, "remain active")
+}
+
+// TestEnsureFederationProjectByNameRejects3xx pins the deliberate divergence:
+// this one call site errors on any status >= 300, not >= 400. A redirect here
+// means the project was not created as asked, and the generic helper's >= 400
+// rule would let it fall through to an opaque decode failure.
+func TestEnsureFederationProjectByNameRejects3xx(t *testing.T) {
+	const actor = "cli-operator"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects" {
+			var body struct {
+				Name  string `json:"name"`
+				Actor string `json:"actor"`
+			}
+			if assert.NoError(t, json.NewDecoder(r.Body).Decode(&body)) {
+				assert.Equal(t, "spoke-project", body.Name)
+				assert.Equal(t, actor, body.Actor)
+			}
+			w.Header().Set("Location", "/api/v1/projects/1")
+			w.WriteHeader(http.StatusMovedPermanently)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	api := daemonAPI{ctx: context.Background(), baseURL: srv.URL, client: noRedirectClient(srv)}
+	_, err := ensureFederationProjectByName(api, "spoke-project", actor)
+
+	require.Error(t, err)
+	var cerr *cliError
+	require.ErrorAs(t, err, &cerr)
+}
+
+// noRedirectClient stops the client from following the redirect, so the 3xx
+// reaches the status check rather than being resolved transparently.
+func noRedirectClient(srv *httptest.Server) *http.Client {
+	c := srv.Client()
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return c
 }

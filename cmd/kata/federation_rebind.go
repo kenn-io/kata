@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -44,22 +42,18 @@ func federationRebindCmd() *cobra.Command {
 				return federationRebindSelectorError("--all and a single project selector are mutually exclusive")
 			}
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			targets, err := federationRebindTargets(ctx, client, baseURL, args, all)
+			targets, err := federationRebindTargets(a, args, all)
 			if err != nil {
 				return err
 			}
 			results := make([]federationRebindCLIResult, 0, len(targets))
 			failed := 0
 			for _, target := range targets {
-				result, rebindErr := executeFederationRebind(ctx, client, baseURL, target, hubCatalog)
+				result, rebindErr := executeFederationRebind(a, target, hubCatalog)
 				if rebindErr != nil {
 					if !all {
 						return rebindErr
@@ -97,23 +91,14 @@ func federationRebindSelectorError(message string) error {
 }
 
 func federationRebindTargets(
-	ctx context.Context,
-	client *http.Client,
-	baseURL string,
+	a daemonAPI,
 	args []string,
 	all bool,
 ) ([]api.FederationProjectStatus, error) {
 	// Archived projects can retain live spoke bindings, so endpoint migrations
 	// must discover them for both explicit selectors and --all.
-	status, body, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status?include=archived", nil)
-	if err != nil {
-		return nil, err
-	}
-	if status >= 400 {
-		return nil, apiErrFromBody(status, body)
-	}
 	var federationStatus api.FederationStatusBody
-	if err := json.Unmarshal(body, &federationStatus); err != nil {
+	if err := a.decode(http.MethodGet, "/api/v1/federation/status?include=archived", nil, &federationStatus); err != nil {
 		return nil, err
 	}
 	if all {
@@ -144,7 +129,7 @@ func federationRebindTargets(
 		return nil, federationRebindNotSpoke(name)
 	}
 
-	project, err := resolveFederationProject(ctx, client, baseURL, nil, false, "")
+	project, err := resolveFederationProject(a, nil, false, "")
 	if err != nil {
 		return nil, err
 	}
@@ -168,27 +153,14 @@ func federationRebindNotSpoke(project string) error {
 }
 
 func executeFederationRebind(
-	ctx context.Context,
-	client *http.Client,
-	baseURL string,
+	a daemonAPI,
 	target api.FederationProjectStatus,
 	hubCatalog string,
 ) (federationRebindCLIResult, error) {
-	status, body, err := httpDoJSON(
-		ctx,
-		client,
-		http.MethodPost,
-		fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/rebind", baseURL, target.ProjectID),
-		map[string]any{"hub_catalog": strings.TrimSpace(hubCatalog)},
-	)
-	if err != nil {
-		return federationRebindCLIResult{}, err
-	}
-	if status >= 400 {
-		return federationRebindCLIResult{}, apiErrFromBody(status, body)
-	}
 	var response api.RebindFederationReplicaResponseBody
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := a.decode(http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/rebind", target.ProjectID),
+		map[string]any{"hub_catalog": strings.TrimSpace(hubCatalog)}, &response); err != nil {
 		return federationRebindCLIResult{}, err
 	}
 	return federationRebindCLIResult{

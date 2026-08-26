@@ -122,7 +122,7 @@ func daemonEndpoint(target daemonTarget) string {
 }
 
 func daemonAuth(target daemonTarget) string {
-	if target.Token != "" || target.TokenEnv != "" {
+	if target.resolved.Token != "" || target.TokenEnv != "" {
 		return "token"
 	}
 	return "no token"
@@ -130,7 +130,7 @@ func daemonAuth(target daemonTarget) string {
 
 func daemonFooter(row daemonRow, width int) string {
 	text := sanitizeForLine(daemonName(row.target)) + " · " + sanitizeForLine(daemonEndpoint(row.target))
-	if row.target.AllowInsecure {
+	if row.target.resolved.AllowInsecure {
 		text += " · allow_insecure"
 	}
 	return truncate(text, width)

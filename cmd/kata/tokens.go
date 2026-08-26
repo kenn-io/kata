@@ -54,12 +54,7 @@ func tokensCreateCmd() *cobra.Command {
 			if actor == "" {
 				return &cliError{Message: "actor is required", Kind: kindUsage, ExitCode: ExitUsage}
 			}
-			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
-			if err != nil {
-				return err
-			}
-			client, err := httpClientFor(ctx, baseURL)
+			a, err := dialDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -67,15 +62,9 @@ func tokensCreateCmd() *cobra.Command {
 			if trimmed := strings.TrimSpace(name); trimmed != "" {
 				payload["name"] = trimmed
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost, baseURL+"/api/v1/tokens", payload)
-			if err != nil {
+			bs, emitted, err := a.passthrough(cmd, http.MethodPost, "/api/v1/tokens", payload)
+			if err != nil || emitted {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if currentOutputMode() == outputJSON {
-				return emitJSON(cmd.OutOrStdout(), json.RawMessage(bs))
 			}
 			var out createTokenCLIResponse
 			if err := json.Unmarshal(bs, &out); err != nil {
@@ -95,24 +84,13 @@ func tokensListCmd() *cobra.Command {
 		Short: "list identity tokens",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
+			bs, emitted, err := a.passthrough(cmd, http.MethodGet, "/api/v1/tokens", nil)
+			if err != nil || emitted {
 				return err
-			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/tokens", nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if currentOutputMode() == outputJSON {
-				return emitJSON(cmd.OutOrStdout(), json.RawMessage(bs))
 			}
 			var out listTokensCLIResponse
 			if err := json.Unmarshal(bs, &out); err != nil {
@@ -133,25 +111,14 @@ func tokensRevokeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
+			path := fmt.Sprintf("/api/v1/tokens/%d/actions/revoke", id)
+			bs, emitted, err := a.passthrough(cmd, http.MethodPost, path, nil)
+			if err != nil || emitted {
 				return err
-			}
-			url := fmt.Sprintf("%s/api/v1/tokens/%d/actions/revoke", baseURL, id)
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost, url, nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if currentOutputMode() == outputJSON {
-				return emitJSON(cmd.OutOrStdout(), json.RawMessage(bs))
 			}
 			var out revokeTokenCLIResponse
 			if err := json.Unmarshal(bs, &out); err != nil {

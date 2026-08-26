@@ -272,10 +272,9 @@ url = "`+srv.URL+`"
 token = "catalog-token"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
-		Timeout:    time.Second,
-		DaemonName: "shared",
-	})
+	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
@@ -316,10 +315,9 @@ url = "`+srv.URL+`"
 token_env = "KATA_SHARED_TOKEN"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
-		Timeout:    time.Second,
-		DaemonName: "shared",
-	})
+	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
@@ -358,10 +356,9 @@ name = "shared"
 url = "`+srv.URL+`"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
-		Timeout:    time.Second,
-		DaemonName: "shared",
-	})
+	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
@@ -405,10 +402,9 @@ name = "shared"
 url = "`+srv.URL+`"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
-		Timeout:    time.Second,
-		DaemonName: "shared",
-	})
+	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
@@ -421,6 +417,7 @@ url = "`+srv.URL+`"
 }
 
 func TestNewHTTPClient_NamedRemoteAuthTokenEnvHonorsTrustPrivateNetwork(t *testing.T) {
+	stubProbe(t, true)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_AUTH_TOKEN", "env-token")
@@ -432,16 +429,16 @@ name = "shared"
 url = "`+baseURL+`"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), baseURL, Opts{
-		Timeout:    time.Second,
-		DaemonName: "shared",
-	})
+	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
 
 func TestNewHTTPClient_NamedRemoteCatalogTokenHonorsTrustPrivateNetwork(t *testing.T) {
+	stubProbe(t, true)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
@@ -453,16 +450,16 @@ url = "`+baseURL+`"
 token = "catalog-token"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), baseURL, Opts{
-		Timeout:    time.Second,
-		DaemonName: "shared",
-	})
+	resolved, err := EnsureResolvedNamed(context.Background(), "shared")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
 
 func TestNewHTTPClient_ActiveRemoteTokenEnvHonorsTrustPrivateNetwork(t *testing.T) {
+	stubProbe(t, true)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_SERVER", "")
@@ -480,7 +477,9 @@ url = "`+baseURL+`"
 token_env = "KATA_SHARED_TOKEN"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), baseURL, Opts{Timeout: time.Second})
+	resolved, err := EnsureResolvedInWorkspace(context.Background(), "")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
@@ -514,10 +513,9 @@ local = true
 token = "local-token"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
-		Timeout:    time.Second,
-		DaemonName: "local-auth",
-	})
+	resolved, err := EnsureResolvedNamed(context.Background(), "local-auth")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
 	require.NoError(t, err)
@@ -533,10 +531,17 @@ func TestNewHTTPClient_NamedLocalUsesProvidedBaseURLWithoutStarting(t *testing.T
 	home := setupKataEnv(t)
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok": true, "service": "kata", "version": currentVersionForEnsure(), "pid": os.Getpid(),
+			})
+			return
+		}
 		gotAuth = r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(srv.Close)
+	require.NoError(t, writeRuntimeRecord(t, home, strings.TrimPrefix(srv.URL, "http://")))
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
 [[daemon]]
 name = "local-auth"
@@ -544,10 +549,9 @@ local = true
 token = "local-token"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
-		Timeout:    time.Second,
-		DaemonName: "local-auth",
-	})
+	resolved, err := EnsureResolvedNamed(context.Background(), "local-auth")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
@@ -563,10 +567,17 @@ func TestNewHTTPClient_NamedLocalBypassesActiveDaemonAuth(t *testing.T) {
 	home := setupKataEnv(t)
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok": true, "service": "kata", "version": currentVersionForEnsure(), "pid": os.Getpid(),
+			})
+			return
+		}
 		gotAuth = r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(srv.Close)
+	require.NoError(t, writeRuntimeRecord(t, home, strings.TrimPrefix(srv.URL, "http://")))
 	t.Setenv("KATA_REMOTE_TOKEN", "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
 active_daemon = "remote"
@@ -584,10 +595,9 @@ url = "`+srv.URL+`"
 token_env = "KATA_REMOTE_TOKEN"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
-		Timeout:    time.Second,
-		DaemonName: "local",
-	})
+	resolved, err := EnsureResolvedNamed(context.Background(), "local")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{Timeout: time.Second})
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)

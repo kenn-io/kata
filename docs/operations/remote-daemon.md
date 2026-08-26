@@ -1,3 +1,7 @@
+---
+last_edited: 2026-08-25
+---
+
 # Remote daemon
 
 A daemon can serve clients on other hosts over a private network. This is an
@@ -319,6 +323,19 @@ kata daemon start --foreground --listen 100.64.0.5:7777 --insecure-readonly
 This permits GET requests only. Mutations and the event stream still require
 authentication. Network ACLs, VPNs, or tailnet policy are the access boundary in
 this development mode.
+
+Clients of a plaintext private-network daemon must opt into the same trust the
+server does, even when no token is configured:
+
+```sh
+export KATA_SERVER=http://100.64.0.5:7777
+export KATA_TRUST_PRIVATE_NETWORK=1
+```
+
+kata validates the bearer target whenever it builds a client, so a plaintext
+non-loopback endpoint is refused up front rather than failing later as an opaque
+error. The opt-in states that the private network is the access boundary;
+without it, use HTTPS, a loopback address, or an SSH tunnel.
 
 `require_token_identity = true` cannot be combined with
 `--insecure-readonly`.

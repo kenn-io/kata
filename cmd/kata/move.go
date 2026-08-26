@@ -62,7 +62,8 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 	if err != nil {
 		return err
 	}
-	target, err := resolveProjectSelector(ctx, client, baseURL, targetProject)
+	target, err := resolveProjectSelector(
+		daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, targetProject)
 	if err != nil {
 		return err
 	}

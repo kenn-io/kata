@@ -51,30 +51,15 @@ func federationIdentityCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
+			bs, emitted, err := a.passthrough(cmd, http.MethodGet, "/api/v1/instance", nil)
+			if err != nil || emitted {
 				return err
-			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/instance", nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			mode := currentOutputMode()
-			if mode == outputJSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
-				return err
-			}
 			var body struct {
 				InstanceUID   string `json:"instance_uid"`
 				Version       string `json:"version"`
@@ -103,20 +88,16 @@ func federationEnableCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			project, err := resolveFederationProject(ctx, client, baseURL, args, false, "")
+			project, err := resolveFederationProject(a, args, false, "")
 			if err != nil {
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			metadata, err := enableAndReadFederationMetadata(ctx, client, baseURL, project.ID, actor)
+			metadata, err := enableAndReadFederationMetadata(a, project.ID, actor)
 			if err != nil {
 				return err
 			}
@@ -167,15 +148,16 @@ func federationEnrollCmd() *cobra.Command {
 			if err != nil {
 				return federationEnrollHTTPClientError(err)
 			}
+			hub := hubAPI(ctx, hubBaseURL, hubClient)
 			requestActor := strings.TrimSpace(actor)
 			if requestActor == "" {
 				requestActor, _ = resolveActor(ctx, flags.As, nil)
 			}
-			project, err := resolveFederationProject(ctx, hubClient, hubBaseURL, args, true, requestActor)
+			project, err := resolveFederationProject(hub, args, true, requestActor)
 			if err != nil {
 				return err
 			}
-			metadata, err := enableAndReadFederationMetadata(ctx, hubClient, hubBaseURL, project.ID, requestActor)
+			metadata, err := enableAndReadFederationMetadata(hub, project.ID, requestActor)
 			if err != nil {
 				return err
 			}
@@ -193,8 +175,7 @@ func federationEnrollCmd() *cobra.Command {
 					adoptExisting = spokeUID == "" || spokeUID != metadata.ProjectUID
 				}
 			}
-			status, bs, err := httpDoJSON(ctx, hubClient, http.MethodPost,
-				hubBaseURL+"/api/v1/federation/enrollments",
+			bs, err := hub.do(http.MethodPost, "/api/v1/federation/enrollments",
 				map[string]any{
 					"spoke_instance_uid":              spokeInstance,
 					"project_id":                      project.ID,
@@ -205,9 +186,6 @@ func federationEnrollCmd() *cobra.Command {
 				})
 			if err != nil {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			var enrollment api.FederationEnrollmentOut
 			if err := json.Unmarshal(bs, &enrollment); err != nil {
@@ -273,7 +251,10 @@ func federationSpokeProjectExists(ctx context.Context, projectName, spokeInstanc
 // federationSpokeProjectUID reports whether the default/spoke daemon (when its
 // instance matches spokeInstance) has a project named projectName, returning
 // that project's UID. The UID is "" when the daemon's list payload predates
-// uid, in which case callers should fall back to the adoption default.
+// uid, in which case callers should fall back to the adoption default. This
+// probe deliberately keeps its spoke-specific client instead of dialDaemon:
+// during federation enroll, KATA_AUTH_TOKEN belongs to the hub and must not be
+// attached to the spoke. Requests still use daemonAPI once that client is built.
 func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance string) (string, bool, error) {
 	explicitDaemon := federationSpokeProbeExplicit(ctx)
 	spokeURL, err := ensureDaemon(ctx)
@@ -290,8 +271,9 @@ func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance s
 		}
 		return "", false, nil
 	}
+	a := daemonAPI{ctx: ctx, baseURL: spokeURL, client: spokeClient}
 	if strings.TrimSpace(spokeInstance) != "" {
-		uid, err := federationSpokeInstanceUID(ctx, spokeClient, spokeURL)
+		uid, err := federationSpokeInstanceUID(a)
 		if err != nil || uid != strings.TrimSpace(spokeInstance) {
 			if err != nil && explicitDaemon {
 				return "", false, err
@@ -299,7 +281,7 @@ func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance s
 			return "", false, nil
 		}
 	}
-	uid, ok, err := federationSpokeProjectNameExists(ctx, spokeClient, spokeURL, projectName)
+	uid, ok, err := federationSpokeProjectNameExists(a, projectName)
 	if err != nil && explicitDaemon {
 		return "", false, err
 	}
@@ -332,7 +314,8 @@ func federationSpokeProbePreflight(ctx context.Context, spokeInstance string) er
 	if strings.TrimSpace(spokeInstance) == "" {
 		return nil
 	}
-	_, err = federationSpokeInstanceUID(ctx, spokeClient, spokeURL)
+	a := daemonAPI{ctx: ctx, baseURL: spokeURL, client: spokeClient}
+	_, err = federationSpokeInstanceUID(a)
 	return err
 }
 
@@ -366,93 +349,71 @@ func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Clie
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(token) == "" {
-		return clientpkg.NewHTTPClientForTarget(ctx, spokeURL,
-			clientpkg.TargetAuth{AllowInsecure: entry.AllowInsecure}, opts)
-	}
-	auth, err := config.ReadAuthConfig()
-	if err != nil {
-		auth.TrustPrivateNetwork = config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
-	}
 	return clientpkg.NewHTTPClientForTarget(ctx, spokeURL,
 		clientpkg.TargetAuth{
 			Token:               token,
 			AllowInsecure:       entry.AllowInsecure,
-			TrustPrivateNetwork: auth.TrustPrivateNetwork,
+			TrustPrivateNetwork: config.ResolvedBearerTrustPrivateNetwork(),
 		}, opts)
 }
 
 func federationImplicitSpokeTargetAuth(ctx context.Context, spokeURL string) (clientpkg.TargetAuth, error) {
 	workspaceStart := workspaceStartForRemote()
-	if remoteURL, ok, err := clientpkg.ResolveRemote(ctx, workspaceStart); err != nil {
-		return clientpkg.TargetAuth{}, err
-	} else if !ok || strings.TrimRight(remoteURL, "/") != strings.TrimRight(spokeURL, "/") {
-		return clientpkg.TargetAuth{}, nil
+	targetAuth := clientpkg.TargetAuth{
+		TrustPrivateNetwork: config.ResolvedBearerTrustPrivateNetwork(),
 	}
+	remoteURL, ok, err := clientpkg.ResolveRemote(ctx, workspaceStart)
+	if err != nil {
+		return clientpkg.TargetAuth{}, err
+	}
+	if !ok || strings.TrimRight(remoteURL, "/") != strings.TrimRight(spokeURL, "/") {
+		return targetAuth, nil
+	}
+	targetAuth.AllowInsecure = clientpkg.RemoteAllowInsecureForBaseURL(spokeURL, workspaceStart) //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 	if os.Getenv("KATA_SERVER") != "" {
-		return clientpkg.TargetAuth{}, nil
+		return targetAuth, nil
 	}
 	cfg, err := config.ReadDaemonConfig()
 	if err != nil {
 		return clientpkg.TargetAuth{}, err
 	}
 	if strings.TrimSpace(cfg.ActiveDaemon) == "" {
-		return clientpkg.TargetAuth{}, nil
+		return targetAuth, nil
 	}
 	entry := catalogByName(cfg, cfg.ActiveDaemon)
 	if entry == nil || entry.Local {
-		return clientpkg.TargetAuth{}, nil
+		return targetAuth, nil
 	}
 	entryURL, err := clientpkg.NormalizeRemoteURL(entry.URL, entry.AllowInsecure)
 	if err != nil {
 		return clientpkg.TargetAuth{}, err
 	}
 	if strings.TrimRight(entryURL, "/") != strings.TrimRight(spokeURL, "/") {
-		return clientpkg.TargetAuth{}, nil
+		return targetAuth, nil
 	}
+	targetAuth.AllowInsecure = entry.AllowInsecure
 	token, err := selectedCatalogToken(entry)
 	if err != nil {
 		return clientpkg.TargetAuth{}, err
 	}
-	auth, err := config.ReadAuthConfig()
-	if err != nil {
-		auth.TrustPrivateNetwork = config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
-	}
-	return clientpkg.TargetAuth{
-		Token:               token,
-		AllowInsecure:       entry.AllowInsecure,
-		TrustPrivateNetwork: auth.TrustPrivateNetwork,
-	}, nil
+	targetAuth.Token = token
+	return targetAuth, nil
 }
 
-func federationSpokeInstanceUID(ctx context.Context, client *http.Client, baseURL string) (string, error) {
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/instance", nil)
-	if err != nil {
-		return "", err
-	}
-	if status >= 400 {
-		return "", apiErrFromBody(status, bs)
-	}
+func federationSpokeInstanceUID(a daemonAPI) (string, error) {
 	var body struct {
 		InstanceUID string `json:"instance_uid"`
 	}
-	if err := json.Unmarshal(bs, &body); err != nil {
+	if err := a.decode(http.MethodGet, "/api/v1/instance", nil, &body); err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(body.InstanceUID), nil
 }
 
-func federationSpokeProjectNameExists(ctx context.Context, client *http.Client, baseURL, projectName string) (string, bool, error) {
+func federationSpokeProjectNameExists(a daemonAPI, projectName string) (string, bool, error) {
 	projectName = strings.TrimSpace(projectName)
 	if projectName == "" {
 		return "", false, nil
-	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/projects", nil)
-	if err != nil {
-		return "", false, err
-	}
-	if status >= 400 {
-		return "", false, apiErrFromBody(status, bs)
 	}
 	var body struct {
 		Projects []struct {
@@ -460,7 +421,7 @@ func federationSpokeProjectNameExists(ctx context.Context, client *http.Client, 
 			UID  string `json:"uid"`
 		} `json:"projects"`
 	}
-	if err := json.Unmarshal(bs, &body); err != nil {
+	if err := a.decode(http.MethodGet, "/api/v1/projects", nil, &body); err != nil {
 		return "", false, err
 	}
 	for _, project := range body.Projects {
@@ -481,21 +442,14 @@ func federationEnrollmentsCmd() *cobra.Command {
 		Short: "list hub federation enrollments",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
+			bs, emitted, err := a.passthrough(
+				cmd, http.MethodGet, "/api/v1/federation/enrollments", nil)
+			if err != nil || emitted {
 				return err
-			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/enrollments", nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			return printFederationEnrollments(cmd, bs)
 		},
@@ -513,22 +467,14 @@ func federationRevokeCmd() *cobra.Command {
 			if err != nil || id <= 0 {
 				return &cliError{Message: "enrollment-id must be a positive integer", Kind: kindValidation, ExitCode: ExitValidation}
 			}
-			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
+			bs, emitted, err := a.passthrough(cmd, http.MethodPost,
+				fmt.Sprintf("/api/v1/federation/enrollments/%d/revoke", id), map[string]any{})
+			if err != nil || emitted {
 				return err
-			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				fmt.Sprintf("%s/api/v1/federation/enrollments/%d/revoke", baseURL, id), map[string]any{})
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			return printFederationRevoke(cmd, bs)
 		},
@@ -582,19 +528,15 @@ func federationJoinCmd() *cobra.Command {
 					ExitCode: ExitValidation,
 				}
 			}
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
+			if err := clientpkg.ConfigureOriginPinnedRedirects(a.client, a.baseURL); err != nil {
 				return err
 			}
-			if err := clientpkg.ConfigureOriginPinnedRedirects(client, baseURL); err != nil {
-				return err
-			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				baseURL+"/api/v1/federation/replicas",
+			bs, emitted, err := a.passthrough(cmd, http.MethodPost,
+				"/api/v1/federation/replicas",
 				map[string]any{
 					"hub_url":                   strings.TrimRight(bundle.HubURL, "/"),
 					"hub_project_id":            bundle.HubProjectID,
@@ -609,11 +551,8 @@ func federationJoinCmd() *cobra.Command {
 					"push_enabled":              bundle.PushEnabled,
 					"adopt_existing":            bundle.AdoptExisting,
 				})
-			if err != nil {
+			if err != nil || emitted {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			if currentOutputMode() == outputHuman && federationCapabilitiesContain(internalCaps, "push") && !bundle.PushEnabled {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warning: push capability is present but local push is disabled; rerun join with --push to send spoke edits to the hub")
@@ -645,14 +584,14 @@ func federationJoinCmd() *cobra.Command {
 // runs the normal bound path (idempotent hub revoke + teardown). The cwd
 // workspace form keeps active-only resolution: its alias surface treats
 // archived projects as gone.
-func resolveLeaveProject(ctx context.Context, client *http.Client, baseURL string, args []string) (projectRef, error) {
+func resolveLeaveProject(a daemonAPI, args []string) (projectRef, error) {
 	if len(args) > 0 {
-		return resolveProjectSelectorIncludingArchived(ctx, client, baseURL, args[0])
+		return resolveProjectSelectorIncludingArchived(a, args[0])
 	}
 	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
-		return resolveProjectSelectorIncludingArchived(ctx, client, baseURL, projectName)
+		return resolveProjectSelectorIncludingArchived(a, projectName)
 	}
-	return resolveFederationProject(ctx, client, baseURL, args, false, "")
+	return resolveFederationProject(a, args, false, "")
 }
 
 // spokeLeaveTarget captures the resolved local spoke a leave will tear down.
@@ -692,15 +631,11 @@ func federationLeaveCmd() *cobra.Command {
 				return &cliError{Message: "--force requires --delete", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			target, err := resolveSpokeForLeave(ctx, client, baseURL, args)
+			target, err := resolveSpokeForLeave(a, args)
 			if err != nil {
 				return err
 			}
@@ -717,24 +652,18 @@ func federationLeaveCmd() *cobra.Command {
 			// checks stay inside the daemon's transactions.
 			if !localOnly {
 				actor, _ := resolveActor(ctx, flags.As, nil)
-				status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-					fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
-					map[string]any{"disposition": disposition, "force": force, "actor": actor, "preflight": true})
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return apiErrFromBody(status, bs)
-				}
 				var preflight api.LeaveFederationReplicaResultBody
-				if err := json.Unmarshal(bs, &preflight); err != nil {
+				if err := a.decode(http.MethodPost,
+					fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.projectID),
+					map[string]any{"disposition": disposition, "force": force, "actor": actor, "preflight": true},
+					&preflight); err != nil {
 					return err
 				}
 				if target.standalone && preflight.PendingEnrollment != nil {
 					target.hubURL = strings.TrimRight(preflight.PendingEnrollment.HubURL, "/")
 					target.hubProjectID = preflight.PendingEnrollment.HubProjectID
 					target.allowInsecure = preflight.PendingEnrollment.AllowInsecure
-					target.instanceUID, err = federationSpokeInstanceUID(ctx, client, baseURL)
+					target.instanceUID, err = federationSpokeInstanceUID(a)
 					if err != nil {
 						return err
 					}
@@ -758,17 +687,11 @@ func federationLeaveCmd() *cobra.Command {
 			}
 			if !localOnly {
 				actor, _ := resolveActor(ctx, flags.As, nil)
-				status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-					fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
-					map[string]any{"disposition": disposition, "force": force, "actor": actor, "prepare": true})
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return apiErrFromBody(status, bs)
-				}
 				var prepared api.LeaveFederationReplicaResultBody
-				if err := json.Unmarshal(bs, &prepared); err != nil {
+				if err := a.decode(http.MethodPost,
+					fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.projectID),
+					map[string]any{"disposition": disposition, "force": force, "actor": actor, "prepare": true},
+					&prepared); err != nil {
 					return err
 				}
 				if prepared.PendingEnrollment != nil {
@@ -776,7 +699,7 @@ func federationLeaveCmd() *cobra.Command {
 					target.hubProjectID = prepared.PendingEnrollment.HubProjectID
 					target.allowInsecure = prepared.PendingEnrollment.AllowInsecure
 					if target.instanceUID == "" {
-						target.instanceUID, err = federationSpokeInstanceUID(ctx, client, baseURL)
+						target.instanceUID, err = federationSpokeInstanceUID(a)
 						if err != nil {
 							return err
 						}
@@ -811,14 +734,11 @@ func federationLeaveCmd() *cobra.Command {
 				}
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
+			bs, emitted, err := a.passthrough(cmd, http.MethodPost,
+				fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.projectID),
 				map[string]any{"disposition": disposition, "force": force, "actor": actor})
-			if err != nil {
+			if err != nil || emitted {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			return printFederationLeave(cmd, bs)
 		},
@@ -839,8 +759,8 @@ func federationLeaveCmd() *cobra.Command {
 //     resume for plain leave; archive-only path for --delete).
 //   - hub binding    → hard error "not_a_spoke" (this command does not disband
 //     hubs).
-func resolveSpokeForLeave(ctx context.Context, client *http.Client, baseURL string, args []string) (spokeLeaveTarget, error) {
-	project, err := resolveLeaveProject(ctx, client, baseURL, args)
+func resolveSpokeForLeave(a daemonAPI, args []string) (spokeLeaveTarget, error) {
+	project, err := resolveLeaveProject(a, args)
 	if err != nil {
 		return spokeLeaveTarget{}, err
 	}
@@ -851,15 +771,8 @@ func resolveSpokeForLeave(ctx context.Context, client *http.Client, baseURL stri
 	// idempotent, so the already-revoked retry is a no-op while the
 	// never-revoked remove case gets its enrollment revoked instead of
 	// silently stranded.
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status?include=archived", nil)
-	if err != nil {
-		return spokeLeaveTarget{}, err
-	}
-	if status >= 400 {
-		return spokeLeaveTarget{}, apiErrFromBody(status, bs)
-	}
 	var body api.FederationStatusBody
-	if err := json.Unmarshal(bs, &body); err != nil {
+	if err := a.decode(http.MethodGet, "/api/v1/federation/status?include=archived", nil, &body); err != nil {
 		return spokeLeaveTarget{}, err
 	}
 	var match *api.FederationProjectStatus
@@ -889,7 +802,7 @@ func resolveSpokeForLeave(ctx context.Context, client *http.Client, baseURL stri
 			ExitCode: ExitValidation,
 		}
 	}
-	instanceUID, err := federationSpokeInstanceUID(ctx, client, baseURL)
+	instanceUID, err := federationSpokeInstanceUID(a)
 	if err != nil {
 		return spokeLeaveTarget{}, err
 	}
@@ -926,20 +839,14 @@ func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, i
 	if err != nil {
 		return nil, err
 	}
-	hub, err := hubAdminClient(ctx, auth)
+	hubClient, err := hubAdminClient(ctx, auth)
 	if err != nil {
 		return nil, federationLeaveHubError(err)
 	}
-	status, bs, err := httpDoJSON(ctx, hub, http.MethodGet, auth.url+"/api/v1/federation/enrollments", nil)
-	if err != nil {
-		return nil, federationLeaveHubError(err)
-	}
-	if status >= 400 {
-		return nil, federationLeaveHubError(apiErrFromBody(status, bs))
-	}
+	hub := hubAPI(ctx, auth.url, hubClient)
 	var list api.ListFederationEnrollmentsBody
-	if err := json.Unmarshal(bs, &list); err != nil {
-		return nil, err
+	if err := hub.decode(http.MethodGet, "/api/v1/federation/enrollments", nil, &list); err != nil {
+		return nil, federationLeaveHubError(err)
 	}
 	var globals, matched, foreignScoped []int64
 	for _, enrollment := range list.Enrollments {
@@ -972,13 +879,9 @@ func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, i
 		}
 	}
 	for _, id := range matched {
-		status, bs, err := httpDoJSON(ctx, hub, http.MethodPost,
-			fmt.Sprintf("%s/api/v1/federation/enrollments/%d/revoke", auth.url, id), map[string]any{})
-		if err != nil {
+		if _, err := hub.do(http.MethodPost,
+			fmt.Sprintf("/api/v1/federation/enrollments/%d/revoke", id), map[string]any{}); err != nil {
 			return nil, federationLeaveHubError(err)
-		}
-		if status >= 400 {
-			return nil, federationLeaveHubError(apiErrFromBody(status, bs))
 		}
 	}
 	return globals, nil
@@ -1098,31 +1001,16 @@ func federationStatusCmd() *cobra.Command {
 		Short: "show federation status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
+			bs, emitted, err := a.passthrough(
+				cmd, http.MethodGet, "/api/v1/federation/status", nil)
+			if err != nil || emitted {
 				return err
-			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status", nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			mode := currentOutputMode()
-			if mode == outputJSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
-				return err
-			}
 			var body api.FederationStatusBody
 			if err := json.Unmarshal(bs, &body); err != nil {
 				return err
@@ -1181,57 +1069,49 @@ func hydrateFederationJoinMetadata(ctx context.Context, bundle *federationJoinBu
 }
 
 func resolveFederationProject(
-	ctx context.Context,
-	client *http.Client,
-	baseURL string,
+	a daemonAPI,
 	args []string,
 	createMissing bool,
 	actor string,
 ) (projectRef, error) {
 	if len(args) > 0 {
-		return resolveProjectSelector(ctx, client, baseURL, args[0])
+		return resolveProjectSelector(a, args[0])
 	}
 	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
 		if !createMissing {
-			return resolveFederationProjectByName(ctx, client, baseURL, projectName)
+			return resolveFederationProjectByName(a, projectName)
 		}
-		return ensureFederationProjectByName(ctx, client, baseURL, projectName, actor)
+		return ensureFederationProjectByName(a, projectName, actor)
 	}
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
 		return projectRef{}, err
 	}
-	id, name, err := resolveProjectIDAndNameWithClient(ctx, client, baseURL, start)
+	id, name, err := resolveProjectIDAndNameWithClient(a, start)
 	if err != nil {
 		return projectRef{}, err
 	}
 	return projectRef{ID: id, Name: name}, nil
 }
 
-func resolveFederationProjectByName(ctx context.Context, client *http.Client, baseURL, name string) (projectRef, error) {
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, baseURL+"/api/v1/projects/resolve", map[string]any{"name": name})
-	if err != nil {
-		return projectRef{}, err
-	}
-	if status >= 400 {
-		return projectRef{}, apiErrFromBody(status, bs)
-	}
+func resolveFederationProjectByName(a daemonAPI, name string) (projectRef, error) {
 	var resp struct {
 		Project struct {
 			ID   int64  `json:"id"`
 			Name string `json:"name"`
 		} `json:"project"`
 	}
-	if err := json.Unmarshal(bs, &resp); err != nil {
+	if err := a.decode(http.MethodPost, "/api/v1/projects/resolve",
+		map[string]any{"name": name}, &resp); err != nil {
 		return projectRef{}, err
 	}
 	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil
 }
 
 func ensureFederationProjectByName(
-	ctx context.Context, client *http.Client, baseURL, name, actor string,
+	a daemonAPI, name, actor string,
 ) (projectRef, error) {
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, baseURL+"/api/v1/projects",
+	status, bs, err := a.status(http.MethodPost, "/api/v1/projects",
 		map[string]any{"name": name, "actor": actor})
 	if err != nil {
 		return projectRef{}, fmt.Errorf("POST /api/v1/projects: %w", err)
@@ -1251,18 +1131,11 @@ func ensureFederationProjectByName(
 	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil
 }
 
-func enableAndReadFederationMetadata(ctx context.Context, client *http.Client, baseURL string, projectID int64, actor string) (api.ProjectFederationBody, error) {
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/federation/enable", baseURL, projectID),
-		map[string]string{"actor": actor})
-	if err != nil {
-		return api.ProjectFederationBody{}, err
-	}
-	if status >= 400 {
-		return api.ProjectFederationBody{}, apiErrFromBody(status, bs)
-	}
+func enableAndReadFederationMetadata(a daemonAPI, projectID int64, actor string) (api.ProjectFederationBody, error) {
 	var metadata api.ProjectFederationBody
-	if err := json.Unmarshal(bs, &metadata); err != nil {
+	if err := a.decode(http.MethodPost,
+		fmt.Sprintf("/api/v1/projects/%d/federation/enable", projectID),
+		map[string]string{"actor": actor}, &metadata); err != nil {
 		return api.ProjectFederationBody{}, err
 	}
 	return metadata, nil
@@ -1630,23 +1503,12 @@ func parseFederationQuarantineID(raw string) (int64, error) {
 }
 
 func loadFederationStatus(ctx context.Context) (api.FederationStatusBody, error) {
-	baseURL, err := ensureDaemon(ctx)
+	a, err := dialDaemon(ctx)
 	if err != nil {
 		return api.FederationStatusBody{}, err
-	}
-	client, err := httpClientFor(ctx, baseURL)
-	if err != nil {
-		return api.FederationStatusBody{}, err
-	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status", nil)
-	if err != nil {
-		return api.FederationStatusBody{}, err
-	}
-	if status >= 400 {
-		return api.FederationStatusBody{}, apiErrFromBody(status, bs)
 	}
 	var body api.FederationStatusBody
-	if err := json.Unmarshal(bs, &body); err != nil {
+	if err := a.decode(http.MethodGet, "/api/v1/federation/status", nil, &body); err != nil {
 		return api.FederationStatusBody{}, err
 	}
 	return body, nil
@@ -1842,23 +1704,12 @@ func federationQuarantineRetryCmd() *cobra.Command {
 // releases the batch without advancing the cursor so the events can be sent
 // again on the next sync.
 func runFederationQuarantineAction(ctx context.Context, cmd *cobra.Command, id int64, action, confirm, reason string) error {
-	baseURL, err := ensureDaemon(ctx)
+	a, err := dialDaemon(ctx)
 	if err != nil {
 		return err
-	}
-	client, err := httpClientFor(ctx, baseURL)
-	if err != nil {
-		return err
-	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status", nil)
-	if err != nil {
-		return err
-	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
 	}
 	var body api.FederationStatusBody
-	if err := json.Unmarshal(bs, &body); err != nil {
+	if err := a.decode(http.MethodGet, "/api/v1/federation/status", nil, &body); err != nil {
 		return err
 	}
 	projectID, err := federationProjectForQuarantine(body, id)
@@ -1866,15 +1717,12 @@ func runFederationQuarantineAction(ctx context.Context, cmd *cobra.Command, id i
 		return err
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	status, bs, err = httpDoJSONWithHeader(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/federation/quarantine/%d/%s", baseURL, projectID, id, action),
+	bs, err := a.doWithHeaders(http.MethodPost,
+		fmt.Sprintf("/api/v1/projects/%d/federation/quarantine/%d/%s", projectID, id, action),
 		map[string]string{"X-Kata-Confirm": confirm},
 		map[string]any{"actor": actor, "reason": reason})
 	if err != nil {
 		return err
-	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
 	}
 	mode := currentOutputMode()
 	if mode == outputJSON {

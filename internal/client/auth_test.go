@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.kenn.io/kata/internal/config"
 )
 
 func TestResolveAuthTokenEnvWins(t *testing.T) {
@@ -74,7 +76,7 @@ func TestBearerTransportInjectsHeader(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := &http.Client{Transport: withBearer(http.DefaultTransport, "secret", srv.URL, false)}
+	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", srv.URL)}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -92,7 +94,7 @@ func TestBearerTransportNoTokenPassthrough(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	rt := withBearer(http.DefaultTransport, "", srv.URL, false)
+	rt := (config.BearerPolicy{}).Transport(http.DefaultTransport, "", srv.URL)
 	assert.Equal(t, http.DefaultTransport, rt,
 		"empty token must return the base transport unchanged")
 
@@ -114,7 +116,7 @@ func TestBearerTransportPreservesCallerHeader(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := &http.Client{Transport: withBearer(http.DefaultTransport, "from-transport", srv.URL, false)}
+	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(http.DefaultTransport, "from-transport", srv.URL)}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer caller-supplied")
@@ -132,7 +134,7 @@ func TestBearerTransportDoesNotMutateRequest(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := &http.Client{Transport: withBearer(http.DefaultTransport, "secret", srv.URL, false)}
+	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", srv.URL)}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -374,11 +376,11 @@ url = "::not-a-url::"
 url = "`+srv.URL+`"
 `), 0o600))
 
-	baseURL, ok, err := resolveRemote(context.Background(), workspace)
+	resolved, ok, err := ResolveRemoteDaemon(context.Background(), workspace)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, srv.URL, baseURL)
-	c, err := NewHTTPClient(context.Background(), baseURL, Opts{WorkspaceStart: workspace})
+	require.Equal(t, srv.URL, resolved.BaseURL)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{})
 	require.NoError(t, err)
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
@@ -416,7 +418,7 @@ url = "`+active.URL+`"
 token = "active-token"
 `))
 
-	c, err := NewHTTPClient(context.Background(), active.URL, Opts{})
+	c, err := NewHTTPClient(context.Background(), active.URL, Opts{DaemonName: "shared"})
 	require.NoError(t, err)
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
@@ -543,6 +545,10 @@ func TestNewHTTPClientWithBearerAttachesExplicitToken(t *testing.T) {
 func TestNewHTTPClientUsesActiveDaemonTargetToken(t *testing.T) {
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
+			return
+		}
 		got = r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -563,7 +569,9 @@ url = "`+srv.URL+`"
 token = "target-token"
 `))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	resolved, err := EnsureResolvedInWorkspace(context.Background(), "")
+	require.NoError(t, err)
+	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{})
 	require.NoError(t, err)
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
@@ -626,13 +634,54 @@ func TestNewHTTPClientForTargetRefusesPlaintextHostnameWithoutAllowInsecure(t *t
 	assert.Contains(t, err.Error(), "plaintext")
 }
 
+func TestNewHTTPClientForTargetEmptyTokenPolicy(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		auth    TargetAuth
+		wantErr bool
+	}{
+		{
+			name: "strict rejects plaintext hostname", baseURL: "http://daemon.internal:7373",
+			wantErr: true,
+		},
+		{
+			name: "strict rejects plaintext private IP", baseURL: "http://100.64.0.5:7373",
+			wantErr: true,
+		},
+		{name: "strict accepts loopback", baseURL: "http://127.0.0.1:7373"},
+		{name: "strict accepts https", baseURL: "https://daemon.example"},
+		{
+			name: "trust private network accepts private IP", baseURL: "http://100.64.0.5:7373",
+			auth: TargetAuth{TrustPrivateNetwork: true},
+		},
+		{
+			name: "allow insecure accepts plaintext hostname", baseURL: "http://daemon.internal:7373",
+			auth: TargetAuth{AllowInsecure: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, err := NewHTTPClientForTarget(context.Background(), tt.baseURL, tt.auth, Opts{})
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, client)
+				return
+			}
+			require.NoError(t, err)
+			assert.NotNil(t, client)
+		})
+	}
+}
+
 func TestNewHTTPClientForTargetAllowInsecureStillRefusesCrossOrigin(t *testing.T) {
 	called := false
 	base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		called = true
 		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
 	})
-	rt, err := explicitBearerTransport(base, "target-token", "http://100.64.0.5:7373", false, true)
+	rt, err := authBearerTransport(base, "target-token", "http://100.64.0.5:7373", false, true)
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"http://100.64.0.6:7373/api/v1/ping", nil)
@@ -647,8 +696,19 @@ func TestNewHTTPClientForTargetAllowInsecureStillRefusesCrossOrigin(t *testing.T
 	assert.False(t, called, "cross-origin request must not reach the base transport")
 }
 
-func TestNewHTTPClientWithBearerEmptyTokenSkipsSafetyCheck(t *testing.T) {
-	c, err := NewHTTPClientWithBearer(context.Background(), "http://example.invalid:7373", "", Opts{})
+// TestNewHTTPClientWithBearerEmptyTokenChecksTarget pins decision D2: the
+// target is validated whether or not a token is present, so a plaintext
+// non-loopback endpoint is reported at construction rather than silently
+// producing a client that will fail later as an opaque 401.
+func TestNewHTTPClientWithBearerEmptyTokenChecksTarget(t *testing.T) {
+	_, err := NewHTTPClientWithBearer(context.Background(), "http://example.invalid:7373", "", Opts{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plaintext")
+}
+
+func TestNewHTTPClientWithBearerEmptyTokenAllowsSafeTarget(t *testing.T) {
+	c, err := NewHTTPClientWithBearer(context.Background(), "http://127.0.0.1:7373", "", Opts{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
@@ -659,6 +719,18 @@ func TestNewHTTPClientWithBearerRefusesPlaintextNonLoopback(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plaintext")
+}
+
+func TestNewHTTPClientWithBearerHonorsConfiguredRemoteAllowInsecure(t *testing.T) {
+	const baseURL = "http://daemon.example:7373"
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_SERVER", baseURL)
+	t.Setenv("KATA_ALLOW_INSECURE", "1")
+
+	c, err := NewHTTPClientWithBearer(context.Background(), baseURL, "secret", Opts{})
+
+	require.NoError(t, err)
+	assert.NotNil(t, c)
 }
 
 func TestNewHTTPClientStreamingAttachesAuthHeader(t *testing.T) {
@@ -740,6 +812,7 @@ func TestNewHTTPClient_TrustPrivateNetworkRejectsPlaintextHostname(t *testing.T)
 }
 
 func TestNewHTTPClient_EnvRemoteAllowInsecureAllowsBearerOnPlaintextHostname(t *testing.T) {
+	stubProbe(t, true)
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "secret")
@@ -747,11 +820,15 @@ func TestNewHTTPClient_EnvRemoteAllowInsecureAllowsBearerOnPlaintextHostname(t *
 	t.Setenv("KATA_SERVER", "http://tailscale-host:7777")
 	t.Setenv("KATA_ALLOW_INSECURE", "1")
 
-	_, err := NewHTTPClient(context.Background(), "http://tailscale-host:7777", Opts{})
+	resolved, ok, err := ResolveRemoteDaemon(context.Background(), "")
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, err = NewHTTPClientForResolved(context.Background(), resolved, Opts{})
 	require.NoError(t, err)
 }
 
 func TestNewHTTPClient_FileRemoteAllowInsecureAllowsBearerOnPlaintextHostname(t *testing.T) {
+	stubProbe(t, true)
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "secret")
@@ -768,12 +845,15 @@ url = "http://tailscale-host:7777"
 allow_insecure = true
 `), 0o600))
 
-	_, err := NewHTTPClient(context.Background(), "http://tailscale-host:7777", Opts{})
+	resolved, ok, err := ResolveRemoteDaemon(context.Background(), dir)
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, err = NewHTTPClientForResolved(context.Background(), resolved, Opts{})
 	require.NoError(t, err)
 }
 
 // TestNewHTTPClient_AllowsBearerOnLoopback covers the safe-target arm of
-// checkBearerTargetSafe: 127.0.0.1 and [::1] keep the token in-host even
+// BearerPolicy: 127.0.0.1 and [::1] keep the token in-host even
 // over plaintext HTTP.
 func TestNewHTTPClient_AllowsBearerOnLoopback(t *testing.T) {
 	tmp := t.TempDir()
@@ -803,36 +883,66 @@ func TestNewHTTPClient_AllowsBearerOverHTTPS(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestCheckBearerTargetSafe_UnixBase verifies the UnixBase sentinel URL
+// TestBearerPolicyOriginForUnixBase verifies the UnixBase sentinel URL
 // passes the safety check directly. The previous test went through
-// NewHTTPClient, which can fail in unixClientFromRuntime before reaching
+// NewHTTPClient, which can fail while locating a Unix runtime before reaching
 // the bearer-attachment code path — so a regression in the UnixBase
-// branch of checkBearerTargetSafe would have been masked. Hitting the
-// helper directly makes the coverage unambiguous.
+// branch of BearerPolicy would have been masked. Hitting the policy directly
+// makes the coverage unambiguous.
 //
 // The returned origin is the scheme+host stripped of any path component —
 // path-bearing baseURLs must normalize to the same origin so the per-request
 // pin matches regardless of which API path triggered the check.
-func TestCheckBearerTargetSafe_UnixBase(t *testing.T) {
-	origin, err := checkBearerTargetSafe(UnixBase, false)
+func TestBearerPolicyOriginForUnixBase(t *testing.T) {
+	origin, err := (config.BearerPolicy{}).OriginForBaseURL(UnixBase)
 	require.NoError(t, err)
 	assert.Equal(t, UnixBase, origin)
 
-	origin, err = checkBearerTargetSafe(UnixBase+"/api/v1/ping", false)
+	origin, err = (config.BearerPolicy{}).OriginForBaseURL(UnixBase + "/api/v1/ping")
 	require.NoError(t, err)
 	assert.Equal(t, UnixBase, origin)
 }
 
-// TestNewHTTPClient_NoTokenSkipsSafetyCheck verifies the gate is
-// token-conditional: when KATA_AUTH_TOKEN is unset, even non-loopback
-// plaintext URLs are fine because no token will be attached.
-func TestNewHTTPClient_NoTokenSkipsSafetyCheck(t *testing.T) {
+// TestNewHTTPClient_NoTokenChecksTarget is the D2 counterpart for the global
+// auth path: an unset KATA_AUTH_TOKEN no longer waives the target check.
+func TestNewHTTPClient_NoTokenChecksTarget(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "")
 
 	_, err := NewHTTPClient(context.Background(), "http://example.invalid:7373", Opts{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plaintext")
+}
+
+// TestNewHTTPClient_NoTokenPrivateTargetNeedsTrustOptIn is the documented
+// unauthenticated private-network client flow. Without the opt-in the target
+// is refused; with it the client builds.
+func TestNewHTTPClient_NoTokenPrivateTargetNeedsTrustOptIn(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KATA_HOME", tmp)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+
+	_, err := NewHTTPClient(context.Background(), "http://100.64.0.5:7777", Opts{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "KATA_TRUST_PRIVATE_NETWORK")
+
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
+	c, err := NewHTTPClient(context.Background(), "http://100.64.0.5:7777", Opts{})
 	require.NoError(t, err)
+	assert.NotNil(t, c)
+}
+
+// TestNewHTTPClient_NoTokenLoopbackAlwaysSafe pins that the local loopback
+// path — by far the most common no-token configuration — is unaffected by D2.
+func TestNewHTTPClient_NoTokenLoopbackAlwaysSafe(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KATA_HOME", tmp)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+
+	c, err := NewHTTPClient(context.Background(), "http://127.0.0.1:7373", Opts{})
+	require.NoError(t, err)
+	assert.NotNil(t, c)
 }
 
 // TestBearerTransport_RefusesPlaintextNonLoopbackPerRequest pins the
@@ -841,7 +951,7 @@ func TestNewHTTPClient_NoTokenSkipsSafetyCheck(t *testing.T) {
 // pointed at a plaintext non-loopback URL must be refused before the
 // token reaches the wire.
 func TestBearerTransport_RefusesPlaintextNonLoopbackPerRequest(t *testing.T) {
-	rt := withBearer(http.DefaultTransport, "secret", "http://127.0.0.1:7373", false)
+	rt := (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", "http://127.0.0.1:7373")
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"http://example.invalid:7373/api/v1/ping", nil)
 	require.NoError(t, err)
@@ -864,7 +974,9 @@ func TestBearerTransport_AllowsPlaintextNonLoopbackWhenTrustPrivateNetworkSet(t 
 			Request:    req,
 		}, nil
 	})
-	rt := withBearer(base, "secret", "http://100.64.0.5:7373", true)
+	rt := (config.BearerPolicy{TrustPrivateNetwork: true}).Transport(
+		base, "secret", "http://100.64.0.5:7373",
+	)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"http://100.64.0.5:7373/api/v1/ping", nil)
 	require.NoError(t, err)
@@ -881,7 +993,9 @@ func TestBearerTransport_TrustPrivateNetworkStillRefusesCrossOrigin(t *testing.T
 		called = true
 		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
 	})
-	rt := withBearer(base, "secret", "http://100.64.0.5:7373", true)
+	rt := (config.BearerPolicy{TrustPrivateNetwork: true}).Transport(
+		base, "secret", "http://100.64.0.5:7373",
+	)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"http://100.64.0.6:7373/api/v1/ping", nil)
 	require.NoError(t, err)
@@ -906,7 +1020,7 @@ func TestBearerTransport_BlocksTokenOnRedirectToPlaintextNonLoopback(t *testing.
 	}))
 	t.Cleanup(srv.Close)
 
-	c := &http.Client{Transport: withBearer(http.DefaultTransport, "secret", srv.URL, false)}
+	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", srv.URL)}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -923,7 +1037,7 @@ func TestBearerTransport_BlocksTokenOnRedirectToPlaintextNonLoopback(t *testing.
 // passes the HTTPS / loopback safety check on its own) must be refused
 // before the token reaches the wire.
 func TestBearerTransport_RefusesCrossOriginPerRequest(t *testing.T) {
-	rt := withBearer(http.DefaultTransport, "secret", "https://daemon.example", false)
+	rt := (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", "https://daemon.example")
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"https://attacker.example/api/v1/ping", nil)
 	require.NoError(t, err)
@@ -940,7 +1054,7 @@ func TestBearerTransport_RefusesCrossOriginPerRequest(t *testing.T) {
 // TestBearerTransport_BlocksTokenOnCrossOriginHTTPSRedirect is the
 // regression test for the finding the HTTPS-only safety check missed:
 // the trusted daemon (or an attacker-influenced base URL) 302-redirects
-// to https://attacker.example. checkBearerTargetSafeURL accepts both
+// to https://attacker.example. BearerPolicy accepts both
 // hosts as "safe transport," so without origin pinning the redirected
 // request would carry Authorization: Bearer <token> to the attacker.
 // With origin pinning, the redirected RoundTrip refuses and never
@@ -952,7 +1066,7 @@ func TestBearerTransport_BlocksTokenOnCrossOriginHTTPSRedirect(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	base := srv.Client().Transport
-	c := &http.Client{Transport: withBearer(base, "secret", srv.URL, false)}
+	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(base, "secret", srv.URL)}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server

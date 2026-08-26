@@ -468,6 +468,58 @@ func TestWebDaemonBearerTransportRequiresExplicitPlaintextTrust(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestWebDaemonBearerTransportValidatesEmptyTokenTarget(t *testing.T) {
+	tests := []struct {
+		name              string
+		daemon            resolvedWebDaemon
+		trustPrivate      bool
+		wantErr           bool
+		wantBaseTransport bool
+	}{
+		{
+			name:    "strict unsafe target rejected",
+			daemon:  resolvedWebDaemon{baseURL: "http://daemon.example"},
+			wantErr: true,
+		},
+		{
+			name:              "loopback target accepted",
+			daemon:            resolvedWebDaemon{baseURL: "http://127.0.0.1:7777"},
+			wantBaseTransport: true,
+		},
+		{
+			name: "plaintext private target accepted with trust",
+			daemon: resolvedWebDaemon{
+				baseURL: "http://192.168.10.5:7777",
+			},
+			trustPrivate:      true,
+			wantBaseTransport: true,
+		},
+		{
+			name: "plaintext hostname accepted with allow insecure",
+			daemon: resolvedWebDaemon{
+				baseURL: "http://daemon.example", allowInsecure: true,
+			},
+			wantBaseTransport: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport, err := webDaemonBearerTransport(tt.daemon, tt.trustPrivate)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, transport)
+				return
+			}
+			require.NoError(t, err)
+			if tt.wantBaseTransport {
+				assert.Same(t, http.DefaultTransport, transport,
+					"an empty token must preserve the base transport")
+			}
+		})
+	}
+}
+
 func TestWebDaemonGatewayRejectsNullSnapshotEnvelope(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

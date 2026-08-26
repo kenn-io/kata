@@ -138,9 +138,11 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 	require.NoError(t, err)
 	spoke := NewClient(spokeSrv.URL, spokeHTTP)
 	hubAdmin, _, err := newHubAdminClient(ctx, daemonTarget{
-		Name:  "hub",
-		URL:   hubSrv.URL,
-		Token: "hub-admin-token",
+		Name: "hub",
+		URL:  hubSrv.URL,
+		resolved: clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceInjected, BaseURL: hubSrv.URL, Token: "hub-admin-token",
+		},
 	})
 	require.NoError(t, err)
 
@@ -223,12 +225,175 @@ func TestClientGetInstanceDecodesAuthPrincipal(t *testing.T) {
 
 func TestTUIHubAdminClientRejectsPlainHTTPHostnameWithoutAllowInsecure(t *testing.T) {
 	_, _, err := newHubAdminClient(context.Background(), daemonTarget{
-		Name:  "hub",
-		URL:   "http://hub.internal:7777",
-		Token: "hub-admin-token",
+		Name: "hub",
+		URL:  "http://hub.internal:7777",
+		resolved: clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceInjected, BaseURL: "http://hub.internal:7777", Token: "hub-admin-token",
+		},
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "allow_insecure")
+}
+
+func TestTUIHubAdminClientResolvesMatchedLeaveTargetTokenEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("HUB_ADMIN_TOKEN", "catalog-env-token")
+	srv := startTUIPingServer(t)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "hub"
+url = "`+srv.URL+`"
+token_env = "HUB_ADMIN_TOKEN"
+`), 0o600))
+	m := newTestModel()
+	m.daemonTargets = daemonTargetsFromConfig([]config.CatalogDaemonConfig{{ //nolint:gosec // Fake credential environment name verifies catalog lookup.
+		Name: "hub", URL: srv.URL, TokenEnv: "HUB_ADMIN_TOKEN",
+	}})
+	target := m.federationLeaveHubTarget(srv.URL, false)
+
+	_, resolved, err := newHubAdminClient(t.Context(), target)
+
+	require.NoError(t, err)
+	assert.Equal(t, "catalog-env-token", resolved.resolved.Token)
+	assert.Equal(t, srv.URL, resolved.resolved.BaseURL)
+}
+
+func TestTUIHubAdminClientDoesNotSendGlobalDaemonTokenToCatalogHub(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		credential string
+		token      string
+		tokenEnv   string
+	}{
+		{ //nolint:gosec // Fake credential literals exercise the catalog-token boundary.
+			name:       "literal token",
+			credential: "token = \"hub-token\"",
+			token:      "hub-token",
+		},
+		{ //nolint:gosec // Fake credential literals exercise the catalog-token boundary.
+			name:       "token env",
+			credential: "token_env = \"HUB_CATALOG_TOKEN\"",
+			tokenEnv:   "HUB_CATALOG_TOKEN",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_AUTH_TOKEN", "local-daemon-token")
+			if tt.tokenEnv != "" {
+				t.Setenv(tt.tokenEnv, "hub-token")
+			}
+			var gotAuth string
+			var allAuth []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if auth := r.Header.Get("Authorization"); auth != "" {
+					allAuth = append(allAuth, auth)
+				}
+				switch r.URL.Path {
+				case "/api/v1/ping":
+					respondJSON(t, w, map[string]any{"ok": true, "service": "kata", "version": "test"})
+				case "/api/v1/instance":
+					gotAuth = r.Header.Get("Authorization")
+					respondJSON(t, w, map[string]any{"instance_uid": "01HZNQ7VFPK1XGD8R5MABCD4EA"})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "hub"
+url = "`+srv.URL+`"
+`+tt.credential+`
+`), 0o600))
+			targets := daemonTargetsFromConfig([]config.CatalogDaemonConfig{{
+				Name: "hub", URL: srv.URL, Token: tt.token, TokenEnv: tt.tokenEnv,
+			}})
+
+			hub, _, err := newHubAdminClient(t.Context(), targets[0])
+			require.NoError(t, err)
+			_, err = hub.GetInstance(t.Context())
+			require.NoError(t, err)
+
+			assert.Equal(t, "Bearer hub-token", gotAuth)
+			assert.NotContains(t, allAuth, "Bearer local-daemon-token")
+		})
+	}
+}
+
+func TestTUIHubAdminClientInjectedRemoteRetainsPrivateNetworkTrustWithoutGlobalToken(t *testing.T) {
+	endpoint := "http://100.64.0.5:7777"
+	for _, tt := range []struct {
+		name   string
+		target func() daemonTarget
+	}{
+		{
+			name: "leave fallback",
+			target: func() daemonTarget {
+				m := newTestModel()
+				m.daemonTargets = []daemonTarget{{Name: "local", Local: true}}
+				return m.federationLeaveHubTarget(endpoint, false)
+			},
+		},
+		{
+			name: "empty resolved base URL",
+			target: func() daemonTarget {
+				return daemonTarget{
+					URL: endpoint,
+					resolved: clientpkg.ResolvedDaemon{
+						Source: clientpkg.DaemonSourceInjected,
+					},
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_AUTH_TOKEN", "local-daemon-token")
+			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[auth\n"), 0o600))
+
+			hub, resolved, err := newHubAdminClient(t.Context(), tt.target())
+
+			require.NoError(t, err)
+			require.NotNil(t, hub)
+			assert.Equal(t, endpoint, resolved.resolved.BaseURL)
+			assert.True(t, resolved.resolved.TrustPrivateNetwork)
+			assert.Empty(t, resolved.resolved.Token,
+				"the local daemon token must never be sent to an injected hub")
+		})
+	}
+}
+
+func TestTUIHubAdminClientLocalNamedTargetRetainsLocalDaemonGlobalAuth(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "local-daemon-token")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "local"
+local = true
+`), 0o600))
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		respondJSON(t, w, map[string]any{"instance_uid": "01HZNQ7VFPK1XGD8R5MABCD4EA"})
+	}))
+	t.Cleanup(srv.Close)
+	ctx := context.WithValue(t.Context(), clientpkg.BaseURLKey{}, srv.URL)
+	target := daemonTargetsFromConfig([]config.CatalogDaemonConfig{{
+		Name: "local", Local: true,
+	}})[0]
+
+	hub, resolved, err := newHubAdminClient(ctx, target)
+	require.NoError(t, err)
+	_, err = hub.GetInstance(ctx)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bearer local-daemon-token", gotAuth)
+	assert.Equal(t, "local-daemon-token", resolved.resolved.Token)
 }
 
 func TestTUIHubEnrollmentClientCarriesAllowInsecureForPlainHTTPHostname(t *testing.T) {

@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
 )
@@ -34,10 +38,10 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 	return d
 }
 
-// ensureDaemon discovers a live daemon's HTTP base URL, auto-starting one
-// if none is found. Thin wrapper over client.EnsureRunning so the CLI
-// and TUI share one resolution path; tests still inject a base URL via
-// client.BaseURLKey{} on the context.
+// ensureDaemonResolved discovers a live daemon, auto-starting one if none is
+// found, and carries the source, credentials, and transport policy selected by
+// that resolution. Client construction consumes this value without deriving
+// policy again from its base URL.
 //
 // When --workspace points at a specific directory, that path anchors
 // the .kata.local.toml walk so a workspace-local [server] override is
@@ -46,20 +50,27 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 // If a daemon is explicitly configured (via --daemon, KATA_SERVER,
 // .kata.local.toml, or active_daemon) but does not respond, the CLI surfaces
 // this as a daemon-unavailable error so callers see a stable exit code and shape.
-func ensureDaemon(ctx context.Context) (string, error) {
+func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	if flags.Daemon != "" {
-		baseURL, err := client.EnsureNamedRunning(ctx, flags.Daemon)
-		if err == nil {
-			return baseURL, nil
+		resolved, err := client.EnsureResolvedNamed(ctx, flags.Daemon)
+		if err != nil {
+			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 		}
-		return "", cliDaemonTargetError(err)
+		return resolved, nil
 	}
 	workspaceStart := workspaceStartForRemote()
-	baseURL, err := client.EnsureRunningInWorkspace(ctx, workspaceStart)
+	resolved, err := client.EnsureResolvedInWorkspace(ctx, workspaceStart)
 	if err != nil {
-		return "", cliDaemonTargetError(err)
+		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 	}
-	return baseURL, nil
+	return resolved, nil
+}
+
+// ensureDaemon is the URL-only compatibility view used by command paths that
+// have not moved to the resolved client constructors yet.
+func ensureDaemon(ctx context.Context) (string, error) {
+	resolved, err := ensureDaemonResolved(ctx)
+	return resolved.BaseURL, err
 }
 
 // workspaceStartForRemote returns the absolute --workspace path when
@@ -97,42 +108,51 @@ func workspaceStartForRemote() string {
 // Returns a kindDaemonUnavail cliError when no live daemon is found,
 // matching hammer-test finding #1's expectation that `kata health`
 // doesn't lie about the daemon's actual state.
-func discoverDaemon(ctx context.Context) (string, error) {
+func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	if v, ok := ctx.Value(client.BaseURLKey{}).(string); ok && v != "" {
-		return v, nil
+		// The injected branch returns before remote resolution or local startup,
+		// while retaining the same global auth policy as ensured injection.
+		return client.EnsureResolvedInWorkspace(ctx, "")
 	}
 	if flags.Daemon != "" {
-		baseURL, ok, err := client.DiscoverNamed(ctx, flags.Daemon)
-		if err == nil && ok {
-			return baseURL, nil
+		resolved, err := client.DiscoverResolvedNamed(ctx, flags.Daemon)
+		if err != nil {
+			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 		}
-		if err == nil {
-			return "", noDaemonRunningError()
+		if resolved.BaseURL == "" {
+			return client.ResolvedDaemon{}, noDaemonRunningError()
 		}
-		return "", cliDaemonTargetError(err)
+		return resolved, nil
 	}
-	if url, ok, err := client.ResolveRemote(ctx, workspaceStartForRemote()); err != nil {
+	if resolved, ok, err := client.ResolveRemoteDaemon(ctx, workspaceStartForRemote()); err != nil {
 		if errors.Is(err, client.ErrRemoteUnavailable) {
-			return "", &cliError{
+			return client.ResolvedDaemon{}, &cliError{
 				Message:  err.Error(),
 				Kind:     kindDaemonUnavail,
 				ExitCode: ExitDaemonUnavail,
 			}
 		}
-		return "", err
+		return client.ResolvedDaemon{}, err
 	} else if ok {
-		return url, nil
+		return resolved, nil
 	}
 	ns, err := daemon.NewNamespace()
 	if err != nil {
-		return "", err
+		return client.ResolvedDaemon{}, err
 	}
-	if url, ok, err := client.Discover(ctx, ns.DataDir); err != nil {
-		return "", cliDaemonTargetError(err)
+	if resolved, ok, err := client.DiscoverResolved(ctx, ns.DataDir); err != nil {
+		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 	} else if ok {
-		return url, nil
+		return resolved, nil
 	}
-	return "", noDaemonRunningError()
+	return client.ResolvedDaemon{}, noDaemonRunningError()
+}
+
+// discoverDaemon is the URL-only compatibility view used by command paths
+// that have not moved to the resolved client constructors yet.
+func discoverDaemon(ctx context.Context) (string, error) {
+	resolved, err := discoverDaemonResolved(ctx)
+	return resolved.BaseURL, err
 }
 
 func noDaemonRunningError() error {
@@ -168,13 +188,18 @@ func cliDaemonTargetError(err error) error {
 // CLI command site is already named for it.
 func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	workspaceStart := workspaceStartForRemote()
-	return client.NewHTTPClient(ctx, baseURL,
-		client.Opts{
-			Timeout:        envHTTPTimeout(defaultHTTPTimeout),
-			AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart),
-			WorkspaceStart: workspaceStart,
-			DaemonName:     flags.Daemon,
-		})
+	return client.NewHTTPClient(ctx, baseURL, client.Opts{
+		Timeout:        envHTTPTimeout(defaultHTTPTimeout),
+		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart), //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
+		WorkspaceStart: workspaceStart,
+		DaemonName:     flags.Daemon,
+	})
+}
+
+func httpClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
+	return client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
+		Timeout: envHTTPTimeout(defaultHTTPTimeout),
+	})
 }
 
 // longRunningClientFor builds a variant with no overall Client.Timeout for
@@ -183,10 +208,14 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 func longRunningClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	workspaceStart := workspaceStartForRemote()
 	return client.NewHTTPClient(ctx, baseURL, client.Opts{
-		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart),
+		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart), //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
 	})
+}
+
+func longRunningClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
+	return client.NewHTTPClientForResolved(ctx, resolved, client.Opts{})
 }
 
 // streamingClientFor builds the SSE-friendly variant. Body cancellation comes
@@ -195,10 +224,144 @@ func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, erro
 	workspaceStart := workspaceStartForRemote()
 	return client.NewHTTPClient(ctx, baseURL, client.Opts{
 		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
-		AllowInsecure:         client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart),
-		WorkspaceStart:        workspaceStart,
-		DaemonName:            flags.Daemon,
+		AllowInsecure: client.RemoteAllowInsecureForBaseURL( //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
+			baseURL, workspaceStart,
+		),
+		WorkspaceStart: workspaceStart,
+		DaemonName:     flags.Daemon,
 	})
+}
+
+func streamingClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
+	return client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
+		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
+	})
+}
+
+// daemonAPI is a resolved connection to one daemon: the base URL, the
+// *http.Client configured for it, and the resolution provenance behind both.
+// Paths passed to its methods are API-relative ("/api/v1/…").
+//
+// The ctx field is deliberate: a daemonAPI is built inside a command's RunE
+// and discarded when it returns, so it carries that invocation's context
+// rather than making every call site thread it. Do not store one in a
+// longer-lived struct or share it across goroutines.
+//
+// dialDaemon is LOCAL-DAEMON-ONLY. A federation hub is reached through hubAPI
+// with a client built by the hub-specific constructors; the local daemon's
+// token must never travel to a hub.
+type daemonAPI struct {
+	ctx      context.Context
+	baseURL  string
+	client   *http.Client
+	resolved client.ResolvedDaemon
+}
+
+// dialDaemon resolves the local daemon (auto-starting one if needed) and
+// builds the standard request-budget client for it.
+func dialDaemon(ctx context.Context) (daemonAPI, error) {
+	return dialResolved(ctx, httpClientForResolved)
+}
+
+func dialResolved(
+	ctx context.Context,
+	build func(context.Context, client.ResolvedDaemon) (*http.Client, error),
+) (daemonAPI, error) {
+	resolved, err := ensureDaemonResolved(ctx)
+	if err != nil {
+		return daemonAPI{}, err
+	}
+	hc, err := build(ctx, resolved)
+	if err != nil {
+		return daemonAPI{}, err
+	}
+	return daemonAPI{ctx: ctx, baseURL: resolved.BaseURL, client: hc, resolved: resolved}, nil
+}
+
+// discoverDaemonAPI is dialDaemon without auto-start, for probes where "no
+// daemon running" is a meaningful answer.
+func discoverDaemonAPI(ctx context.Context) (daemonAPI, error) {
+	resolved, err := discoverDaemonResolved(ctx)
+	if err != nil {
+		return daemonAPI{}, err
+	}
+	hc, err := httpClientForResolved(ctx, resolved)
+	if err != nil {
+		return daemonAPI{}, err
+	}
+	return daemonAPI{ctx: ctx, baseURL: resolved.BaseURL, client: hc, resolved: resolved}, nil
+}
+
+// hubAPI wraps an already-constructed federation hub client. It is a separate
+// constructor on purpose: hub credentials are resolved by the hub-specific
+// paths (resolveHubAdminAuth / federationEnrollHTTPClient) and must never come
+// from local daemon resolution.
+func hubAPI(ctx context.Context, hubBaseURL string, hc *http.Client) daemonAPI {
+	return daemonAPI{ctx: ctx, baseURL: strings.TrimRight(hubBaseURL, "/"), client: hc}
+}
+
+func (a daemonAPI) url(path string) string {
+	return strings.TrimRight(a.baseURL, "/") + path
+}
+
+// status is the raw form: the HTTP status and body with no error mapping. Use
+// it only where a call site deliberately diverges from the >= 400 rule.
+func (a daemonAPI) status(method, path string, body any) (int, []byte, error) {
+	return httpDoJSON(a.ctx, a.client, method, a.url(path), body)
+}
+
+// do performs the request and maps any status >= 400 to a cliError.
+func (a daemonAPI) do(method, path string, body any) ([]byte, error) {
+	status, bs, err := a.status(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, apiErrFromBody(status, bs)
+	}
+	return bs, nil
+}
+
+func (a daemonAPI) doWithHeaders(method, path string, headers map[string]string, body any) ([]byte, error) {
+	status, bs, err := httpDoJSONWithHeader(a.ctx, a.client, method, a.url(path), headers, body)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, apiErrFromBody(status, bs)
+	}
+	return bs, nil
+}
+
+// decode performs the request and unmarshals a successful body into out.
+func (a daemonAPI) decode(method, path string, body, out any) error {
+	bs, err := a.do(method, path, body)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(bs, out)
+}
+
+// passthrough performs the request and, in JSON output mode, writes the
+// daemon's response body straight through. The bool reports whether output was
+// written, so callers can return immediately in JSON mode and fall through to
+// their human/agent rendering otherwise.
+func (a daemonAPI) passthrough(cmd *cobra.Command, method, path string, body any) ([]byte, bool, error) {
+	bs, err := a.do(method, path, body)
+	if err != nil {
+		return nil, false, err
+	}
+	if currentOutputMode() != outputJSON {
+		return bs, false, nil
+	}
+	var buf bytes.Buffer
+	if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		return nil, false, err
+	}
+	if _, err := fmt.Fprint(cmd.OutOrStdout(), buf.String()); err != nil {
+		return nil, false, err
+	}
+	return bs, true, nil
 }
 
 // resolvedIssueRef captures everything a CLI command needs after parsing a

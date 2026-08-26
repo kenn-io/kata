@@ -32,6 +32,9 @@ type RequestEditorFn = runtime.RequestEditorFn
 type TargetAuth struct {
 	Token         string
 	AllowInsecure bool
+	// TrustPrivateNetwork permits a plaintext bearer target that is a literal
+	// non-public IP, matching the daemon-side private-network opt-in.
+	TrustPrivateNetwork bool
 }
 
 // TransportOptions controls the HTTP transport built by auth-aware
@@ -135,7 +138,11 @@ func NewWithBearer(ctx context.Context, baseURL, token string, opts ...Option) (
 func NewForTarget(ctx context.Context, baseURL string, auth TargetAuth, opts ...Option) (*Client, error) {
 	merged := collectOptions(opts...)
 	httpClient, err := internalclient.NewHTTPClientForTarget(ctx, baseURL,
-		internalclient.TargetAuth{Token: auth.Token, AllowInsecure: auth.AllowInsecure},
+		internalclient.TargetAuth{
+			Token:               auth.Token,
+			AllowInsecure:       auth.AllowInsecure,
+			TrustPrivateNetwork: auth.TrustPrivateNetwork,
+		},
 		internalOpts(merged.transport))
 	if err != nil {
 		return nil, err

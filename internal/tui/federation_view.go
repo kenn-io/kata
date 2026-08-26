@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	clientpkg "go.kenn.io/kata/internal/client"
 	hubfederation "go.kenn.io/kata/internal/federation"
 )
 
@@ -593,12 +594,11 @@ func (m Model) executeFederationLeave(attempt uint64) tea.Cmd {
 
 // federationLeaveHubTarget resolves the hub admin daemonTarget for a leave by
 // matching the binding's hub URL against the catalog (so its token/token_env
-// is used), falling back to an implicit target that picks up global auth.
-// This mirrors the CLI's hub-admin auth precedence: the catalog entry whose URL
-// matches the binding's hub_url supplies only the admin token, else the global
-// KATA_AUTH_TOKEN fallback. The target URL is ALWAYS the binding's hub URL —
-// the catalog entry never redirects the admin token to a different origin — and
-// the URL comparison normalizes trailing slashes so a catalog/binding slash
+// is used), falling back to an unauthenticated target. The catalog entry whose
+// URL matches the binding's hub_url supplies only the admin token; global daemon
+// auth is never sent to a hub. The target URL is ALWAYS the binding's hub URL —
+// the catalog entry never redirects the admin token to a different origin —
+// and the URL comparison normalizes trailing slashes so a catalog/binding slash
 // mismatch still matches (#273).
 func (m Model) federationLeaveHubTarget(hubURL string, allowInsecure bool) daemonTarget {
 	want := strings.TrimRight(hubURL, "/")
@@ -615,14 +615,20 @@ func (m Model) federationLeaveHubTarget(hubURL string, allowInsecure bool) daemo
 			// partial-leave recovery, but can never remove the binding's.
 			matched := target
 			matched.URL = want
-			matched.AllowInsecure = allowInsecure || target.AllowInsecure
+			matched.resolved.BaseURL = want
+			matched.resolved.AllowInsecure = allowInsecure || target.resolved.AllowInsecure
 			return matched
 		}
 	}
 	// No catalog match: an unauthenticated, non-implicit target. Implicit
-	// targets pick up the global KATA_AUTH_TOKEN/[auth].token in
-	// resolvedDaemonTarget, which must never be sent to the hub origin.
-	return daemonTarget{URL: want, AllowInsecure: allowInsecure}
+	// targets could pick up the global KATA_AUTH_TOKEN/[auth].token during
+	// implicit resolution, which must never be sent to the hub origin.
+	return daemonTarget{
+		URL: want,
+		resolved: clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceInjected, BaseURL: want, AllowInsecure: allowInsecure,
+		},
+	}
 }
 
 // runFederationLeave mirrors runFederationEnrollment: revoke-first on the hub
@@ -990,25 +996,24 @@ func (m Model) selectFederationHub(target daemonTarget) (Model, tea.Cmd) {
 		m.federationEnrollErr = errors.New("local hub targets cannot be used for federation enrollment; select a hub daemon with a spoke-reachable URL")
 		return m, nil
 	}
-	resolved, err := resolveDaemonTargetToken(target)
-	if err != nil {
+	if err := validateFederationHubTargetCredential(target); err != nil {
 		m.federationEnrollErr = err
 		return m, nil
 	}
-	if !resolved.Local {
-		if _, err := normalizeRemoteURLForTUI(resolved.URL, resolved.AllowInsecure); err != nil {
+	if !target.Local {
+		if _, err := normalizeRemoteURLForTUI(target.URL, target.resolved.AllowInsecure); err != nil {
 			m.federationEnrollErr = err
 			return m, nil
 		}
 	}
-	m.federationDraft.HubTarget = resolved
-	m.federationDraft.AllowInsecure = resolved.AllowInsecure
+	m.federationDraft.HubTarget = target
+	m.federationDraft.AllowInsecure = target.resolved.AllowInsecure
 	m.federationMode = federationModeSelectHubProject
 	m.federationHubProjectsLoading = true
 	m.federationHubProjects = nil
 	m.federationHubProjectCursor = 0
 	m.federationEnrollGen++
-	return m, m.fetchFederationHubProjects(resolved)
+	return m, m.fetchFederationHubProjects(target)
 }
 
 func (m Model) fetchFederationHubProjects(target daemonTarget) tea.Cmd {
@@ -1197,8 +1202,8 @@ func baseFederationRecovery(
 			AdoptExisting:      draft.AdoptExisting,
 			SpokeName:          daemonName(active),
 			SpokeEndpoint:      federationDaemonEndpoint(active),
-			SpokeAllowInsecure: active.AllowInsecure,
-			SpokeToken:         active.Token,
+			SpokeAllowInsecure: active.resolved.AllowInsecure,
+			SpokeToken:         active.resolved.Token,
 		},
 	}
 }
@@ -1296,7 +1301,7 @@ func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 			}
 		}
 	}
-	draft.AllowInsecure = draft.HubTarget.AllowInsecure
+	draft.AllowInsecure = draft.HubTarget.resolved.AllowInsecure
 	m.federationDraft = draft
 	m.federationMode = federationModePreview
 	return m, nil

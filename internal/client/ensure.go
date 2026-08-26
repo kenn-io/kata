@@ -84,7 +84,7 @@ var (
 	startDetachedDaemonForEnsure = kitdaemon.StartDetached
 	stopRunningDaemonsForEnsure  = stopRunningDaemons
 	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
-	discoverDaemonForAutoStart   = discoverTargetForEnsureWithError
+	discoverDaemonForAutoStart   = discoverForEnsure
 	checkDaemonStateForEnsure    = func(dataDir string) error {
 		return (kitdaemon.RuntimeStore{Dir: dataDir}).CheckWritable()
 	}
@@ -130,26 +130,23 @@ func EnsureRunningTargetInWorkspace(
 // outside the repo still picks up /repo/.kata.local.toml's [server]
 // override instead of falling through to local auto-start.
 func EnsureRunningInWorkspace(ctx context.Context, workspaceStart string) (string, error) {
-	target, err := ensureRunningTargetInWorkspace(ctx, workspaceStart)
-	return target.BaseURL, err
+	resolved, err := EnsureResolvedInWorkspace(ctx, workspaceStart)
+	return resolved.BaseURL, err
 }
 
 func ensureRunningTargetInWorkspace(ctx context.Context, workspaceStart string) (RunningDaemon, error) {
-	return runningTargetInWorkspace(ctx, workspaceStart, true)
+	resolved, err := EnsureResolvedInWorkspace(ctx, workspaceStart)
+	return resolved.Running(), err
 }
 
 // LocateRunningTargetInWorkspace selects and probes the same endpoint as
 // EnsureRunningTargetInWorkspace without resolving bearer credentials. Local
 // selections are still started when necessary.
 func LocateRunningTargetInWorkspace(ctx context.Context, workspaceStart string) (RunningDaemon, error) {
-	return runningTargetInWorkspace(ctx, workspaceStart, false)
-}
-
-func runningTargetInWorkspace(ctx context.Context, workspaceStart string, resolveCredentials bool) (RunningDaemon, error) {
 	if v, ok := ctx.Value(BaseURLKey{}).(string); ok && v != "" {
 		return remoteRunningDaemon(v, false), nil
 	}
-	if url, ok, err := resolveRemoteEndpoint(ctx, workspaceStart, resolveCredentials); err != nil {
+	if url, ok, err := resolveRemoteEndpoint(ctx, workspaceStart); err != nil {
 		return RunningDaemon{}, err
 	} else if ok {
 		return remoteRunningDaemon(url, true), nil
@@ -187,68 +184,69 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	if err != nil {
 		return RunningDaemon{}, err
 	}
-	target, compatible, ok, err := discoverTargetForEnsureWithError(ctx, ns.DataDir)
+	found, err := discoverForEnsure(ctx, ns.DataDir)
 	if err != nil {
 		return RunningDaemon{}, err
 	}
-	if ok {
-		if compatible {
-			return target, nil
-		}
+	switch found.Outcome {
+	case daemonScanCompatible:
+		return runningDaemonForLive(found.Daemon), nil
+	case daemonScanStale:
 		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
 			return RunningDaemon{}, err
 		}
-		return startDaemonForEnsure(ctx, ns.DataDir)
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
 }
 
-func discoverForEnsureWithError(ctx context.Context, dataDir string) (string, bool, bool, error) {
-	target, compatible, ok, err := discoverTargetForEnsureWithError(ctx, dataDir)
-	return target.BaseURL, compatible, ok, err
+// daemonScanOutcome is the three-case answer to whether a local daemon is
+// usable: none answered, one is version-compatible, or one is live but stale.
+// The previous (compatible, found) booleans also admitted the meaningless
+// compatible-but-not-found combination.
+type daemonScanOutcome int
+
+const (
+	daemonScanNone daemonScanOutcome = iota
+	daemonScanCompatible
+	daemonScanStale
+)
+
+// ensureDiscovery retains the exact runtime record behind a scan result so
+// callers can construct a RunningDaemon without re-deriving its endpoint.
+// Daemon is the zero value when Outcome is daemonScanNone.
+type ensureDiscovery struct {
+	Outcome daemonScanOutcome
+	Daemon  liveDaemon
 }
 
-func discoverTargetForEnsureWithError(ctx context.Context, dataDir string) (RunningDaemon, bool, bool, error) {
-	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
-	if err != nil {
-		return RunningDaemon{}, false, false, err
-	}
-	var staleTarget RunningDaemon
+func discoverForEnsure(ctx context.Context, dataDir string) (ensureDiscovery, error) {
+	var stale ensureDiscovery
 	var unreachable error
-	for _, r := range recs {
-		if !daemon.RuntimeProcessAlive(r) {
-			continue
-		}
-		address := r.Endpoint().ConfigAddress()
-		url, info, probeErr := probeAddressWithError(ctx, address)
-		if probeErr != nil {
-			if err := ctx.Err(); err != nil {
-				return RunningDaemon{}, false, false, err
-			}
-			if unreachable == nil {
-				unreachable = &localDaemonUnreachableError{
-					pid:     r.PID,
-					address: address,
-					cause:   probeErr,
+	for candidate, err := range liveDaemons(ctx, dataDir) {
+		if err != nil {
+			if errors.Is(err, ErrLocalDaemonUnreachable) {
+				if unreachable == nil {
+					unreachable = err
 				}
+				continue
 			}
-			continue
+			return ensureDiscovery{}, err
 		}
-		target := localRunningDaemon(url, address)
-		if daemonVersionCheckSkipped() || daemonVersionCompatible(info) {
-			return target, true, true, nil
+		if daemonVersionCheckSkipped() || daemonVersionCompatible(candidate.Info) {
+			return ensureDiscovery{Outcome: daemonScanCompatible, Daemon: candidate}, nil
 		}
-		if staleTarget.BaseURL == "" {
-			staleTarget = target
+		if stale.Outcome == daemonScanNone {
+			stale = ensureDiscovery{Outcome: daemonScanStale, Daemon: candidate}
 		}
 	}
 	if unreachable != nil {
-		return RunningDaemon{}, false, false, unreachable
+		return ensureDiscovery{}, unreachable
 	}
-	if staleTarget.BaseURL != "" {
-		return staleTarget, false, true, nil
-	}
-	return RunningDaemon{}, false, false, nil
+	return stale, nil
+}
+
+func runningDaemonForLive(candidate liveDaemon) RunningDaemon {
+	return localRunningDaemon(candidate.BaseURL, candidate.Record.Endpoint().ConfigAddress())
 }
 
 func daemonVersionCheckSkipped() bool {
@@ -260,25 +258,23 @@ func daemonVersionCompatible(info PingInfo) bool {
 }
 
 func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
-	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
-	if err != nil {
-		return err
-	}
 	signaled := false
-	for _, r := range recs {
-		if !daemon.RuntimeProcessAlive(r) {
+	for candidate, err := range liveDaemons(ctx, dataDir) {
+		if err != nil {
+			if errors.Is(err, ErrLocalDaemonUnreachable) {
+				continue
+			}
+			return err
+		}
+		if candidate.Info.Service != daemonServiceName || daemonVersionCompatible(candidate.Info) {
 			continue
 		}
-		address := r.Endpoint().ConfigAddress()
-		_, info, ok := probeAddress(ctx, address)
-		if !ok || info.Service != daemonServiceName || daemonVersionCompatible(info) {
-			continue
-		}
-		if info.PID == 0 || info.PID != r.PID {
+		address := candidate.Record.Endpoint().ConfigAddress()
+		if candidate.Info.PID == 0 || candidate.Info.PID != candidate.Record.PID {
 			return fmt.Errorf("daemon at %s is running but its PID could not be verified; stop it manually", address)
 		}
-		if err := signalDaemonStopForEnsure(r, dbhash); err != nil {
-			return fmt.Errorf("stop old daemon pid %d: %w", r.PID, err)
+		if err := signalDaemonStopForEnsure(candidate.Record, dbhash); err != nil {
+			return fmt.Errorf("stop old daemon pid %d: %w", candidate.Record.PID, err)
 		}
 		signaled = true
 	}
@@ -288,11 +284,11 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		_, _, ok, err := discoverForEnsureWithError(ctx, dataDir)
+		found, err := discoverForEnsure(ctx, dataDir)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if found.Outcome == daemonScanNone {
 			return nil
 		}
 		select {
@@ -338,15 +334,15 @@ func autoStart(ctx context.Context, dataDir string) (RunningDaemon, error) {
 	deadline := time.Now().Add(daemonStartupWait)
 	var unreachable error
 	for time.Now().Before(deadline) {
-		target, compatible, ok, err := discoverDaemonForAutoStart(ctx, dataDir)
+		found, err := discoverDaemonForAutoStart(ctx, dataDir)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
 			return RunningDaemon{}, err
 		}
 		if errors.Is(err, ErrLocalDaemonUnreachable) {
 			unreachable = err
 		}
-		if ok && compatible {
-			return target, nil
+		if found.Outcome == daemonScanCompatible {
+			return runningDaemonForLive(found.Daemon), nil
 		}
 		select {
 		case <-ctx.Done():

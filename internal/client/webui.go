@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -53,17 +52,14 @@ type WebUIOpener func(context.Context, WebUILaunch) error
 // PrepareWebUI resolves and probes the selected daemon and validates local
 // browser runtime metadata.
 func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI, error) {
-	baseURL, configuredRemote, allowInsecure, err := resolveWebUIHostTarget(ctx, opts)
+	resolved, err := resolveWebUIHostTarget(ctx, opts)
 	if err != nil {
 		return PreparedWebUI{}, err
 	}
-
-	httpClient, err := NewHTTPClient(ctx, baseURL, Opts{
-		Timeout:        DefaultHTTPTimeout,
-		AllowInsecure:  allowInsecure,
-		WorkspaceStart: opts.WorkspaceStart,
-		DaemonName:     opts.DaemonName,
-	})
+	baseURL := resolved.BaseURL
+	configuredRemote := resolved.ConfiguredRemote()
+	allowInsecure := resolved.AllowInsecure
+	httpClient, err := NewHTTPClientForResolved(ctx, resolved, Opts{Timeout: DefaultHTTPTimeout})
 	if err != nil {
 		return PreparedWebUI{}, err
 	}
@@ -79,7 +75,10 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 		if _, err := validatedWebBaseURL(baseURL, true); err != nil {
 			return PreparedWebUI{}, err
 		}
-		anonymousClient, err := NewHTTPClientForTarget(ctx, baseURL, TargetAuth{}, Opts{
+		anonymousClient, err := NewHTTPClientForTarget(ctx, baseURL, TargetAuth{
+			TrustPrivateNetwork: prepared.TrustPrivateNetwork,
+			AllowInsecure:       allowInsecure,
+		}, Opts{
 			Timeout: DefaultHTTPTimeout,
 		})
 		if err != nil {
@@ -103,17 +102,19 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 
 func resolveWebUIHostTarget(
 	ctx context.Context, opts PrepareWebUIOptions,
-) (baseURL string, configuredRemote, allowInsecure bool, err error) {
+) (ResolvedDaemon, error) {
 	if opts.DaemonName != "" {
-		target, err := resolveNamedDaemonTarget(ctx, opts.DaemonName)
-		if err != nil {
-			return "", false, false, err
-		}
-		return target.BaseURL, !target.Local, target.AllowInsecure, nil
+		return EnsureResolvedNamed(ctx, opts.DaemonName)
 	}
-
-	baseURL, err = EnsureLocalRunning(ctx)
-	return baseURL, false, false, err
+	running, err := EnsureLocalRunningTarget(ctx)
+	if err != nil {
+		return ResolvedDaemon{}, err
+	}
+	source := DaemonSourceLocalRuntime
+	if value, ok := ctx.Value(BaseURLKey{}).(string); ok && value != "" {
+		source = DaemonSourceInjected
+	}
+	return resolvedForRunning(source, "", running).withGlobalAuth(), nil
 }
 
 func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL string) (DiscoveredWebRuntime, error) {
@@ -297,11 +298,7 @@ func probeAnonymousReadonlyWebUI(
 }
 
 func validateWebLoginTarget(baseURL string, trustPrivateNetwork, allowInsecure bool) error {
-	if allowInsecure {
-		_, err := config.BearerOriginForBaseURLAllowInsecure(baseURL)
-		return err
-	}
-	_, err := checkBearerTargetSafe(baseURL, trustPrivateNetwork)
+	_, err := bearerPolicyFor(trustPrivateNetwork, allowInsecure).OriginForBaseURL(baseURL)
 	return err
 }
 

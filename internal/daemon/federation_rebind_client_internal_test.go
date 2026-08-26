@@ -158,6 +158,6 @@ func federationRebindTestBearerClient(
 	t.Helper()
 	origin, err := config.CanonicalHTTPOrigin(baseURL)
 	require.NoError(t, err)
-	httpClient.Transport = config.BearerTransport(httpClient.Transport, token, origin)
+	httpClient.Transport = (config.BearerPolicy{}).Transport(httpClient.Transport, token, origin)
 	return httpClient
 }

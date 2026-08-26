@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"net"
 	"net/http"
 	"strings"
@@ -83,36 +84,79 @@ func (e *localDaemonUnreachableError) Is(target error) bool {
 	return target == ErrLocalDaemonUnreachable
 }
 
+// liveDaemon is one runtime record that answered /api/v1/ping: the record
+// itself, the URL callers should dial, the socket path for unix endpoints,
+// and the identity the daemon reported. It is the single definition of "a
+// daemon worth talking to" so discovery call sites can filter one scan.
+type liveDaemon struct {
+	Record     kitdaemon.RuntimeRecord
+	BaseURL    string
+	UnixSocket string
+	Info       PingInfo
+}
+
+// liveDaemons scans the namespace's runtime records lazily. A successful
+// result contains a live daemon; an error result preserves store, context, or
+// unreachable-endpoint failures for callers that must distinguish them from
+// an empty store. Laziness is load bearing: Discover runs on every CLI
+// invocation and must stop after the first live record.
+func liveDaemons(ctx context.Context, dataDir string) iter.Seq2[liveDaemon, error] {
+	return func(yield func(liveDaemon, error) bool) {
+		recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
+		if err != nil {
+			yield(liveDaemon{}, err)
+			return
+		}
+		for _, r := range recs {
+			if !daemon.RuntimeProcessAlive(r) {
+				continue
+			}
+			ep := r.Endpoint()
+			address := ep.ConfigAddress()
+			url, info, probeErr := probeAddressWithError(ctx, address)
+			if probeErr != nil {
+				if err := ctx.Err(); err != nil {
+					yield(liveDaemon{}, err)
+					return
+				}
+				if !yield(liveDaemon{}, &localDaemonUnreachableError{
+					pid:     r.PID,
+					address: address,
+					cause:   probeErr,
+				}) {
+					return
+				}
+				continue
+			}
+			candidate := liveDaemon{Record: r, BaseURL: url, Info: info}
+			if ep.IsUnix() {
+				candidate.UnixSocket = ep.Address
+			}
+			if !yield(candidate, nil) {
+				return
+			}
+		}
+	}
+}
+
 // Discover scans the namespace's runtime files and returns the base URL of
 // the first daemon that passes /api/v1/ping. The bool is false when no live
 // runtime record exists. A live process whose endpoint cannot be reached
 // returns ErrLocalDaemonUnreachable so callers do not mistake a permission or
 // transport failure for an absent daemon.
 func Discover(ctx context.Context, dataDir string) (string, bool, error) {
-	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
-	if err != nil {
-		return "", false, err
-	}
 	var unreachable error
-	for _, r := range recs {
-		if !daemon.RuntimeProcessAlive(r) {
+	for candidate, err := range liveDaemons(ctx, dataDir) {
+		if err == nil {
+			return candidate.BaseURL, true, nil
+		}
+		if errors.Is(err, ErrLocalDaemonUnreachable) {
+			if unreachable == nil {
+				unreachable = err
+			}
 			continue
 		}
-		address := r.Endpoint().ConfigAddress()
-		url, _, probeErr := probeAddressWithError(ctx, address)
-		if probeErr == nil {
-			return url, true, nil
-		}
-		if err := ctx.Err(); err != nil {
-			return "", false, err
-		}
-		if unreachable == nil {
-			unreachable = &localDaemonUnreachableError{
-				pid:     r.PID,
-				address: address,
-				cause:   probeErr,
-			}
-		}
+		return "", false, err
 	}
 	return "", false, unreachable
 }
@@ -191,8 +235,15 @@ type Opts struct {
 	Timeout               time.Duration
 	ResponseHeaderTimeout time.Duration
 	AllowInsecure         bool
-	WorkspaceStart        string
-	DaemonName            string
+	// WorkspaceStart is retained for URL-only compatibility callers that have
+	// not yet migrated to ResolvedDaemon. It scopes the temporary active-daemon
+	// credential lookup and must not be used by resolved construction.
+	// Deprecated: resolve the daemon and call NewHTTPClientForResolved.
+	WorkspaceStart string
+	// DaemonName is retained for URL-only compatibility callers that discard a
+	// named daemon's provenance before client construction.
+	// Deprecated: resolve the daemon and call NewHTTPClientForResolved.
+	DaemonName string
 }
 
 // TargetAuth is explicit per-target bearer configuration. It is used by
@@ -205,18 +256,11 @@ type TargetAuth struct {
 	TrustPrivateNetwork bool
 }
 
-// NewHTTPClient returns an *http.Client whose transport matches baseURL —
-// unix-socket dialing when baseURL == UnixBase, plain TCP otherwise. Pair
-// with the URL returned by Discover/EnsureRunning. We re-scan and re-probe
-// runtime files for unix endpoints so a stale record listed before a live
-// one cannot redirect us to a dead socket.
-//
-// When KATA_AUTH_TOKEN or [auth].token in <KATA_HOME>/config.toml is set,
-// the returned client transparently attaches Authorization: Bearer <token>
-// to every outgoing request via a wrapping RoundTripper. This matches the
-// daemon's bearer-auth middleware so token-protected daemons stay usable
-// from the first-party CLI/TUI without callers having to plumb the header
-// through every request site.
+// NewHTTPClient returns an *http.Client for a URL-only compatibility caller.
+// DaemonName and WorkspaceStart temporarily recover catalog credentials for
+// callers that still discard source provenance. Callers that resolved their
+// daemon through this package should use NewHTTPClientForResolved, which
+// consumes the selected token and transport policy without re-reading config.
 func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client, error) {
 	if opts.DaemonName != "" {
 		target, err := namedDaemonTargetForBaseURL(opts.DaemonName, baseURL)
@@ -260,7 +304,8 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 }
 
 // NewHTTPClientWithBearer returns an HTTP client bound to baseURL with an
-// explicit bearer token. Empty token preserves the plain no-auth client path.
+// explicit bearer token. Empty token preserves the plain no-auth transport,
+// but the target is still validated before the client is returned.
 // TrustPrivateNetwork is still resolved from config so private-network
 // federation callers honour the operator opt-in even when supplying their
 // own token.
@@ -279,7 +324,7 @@ func NewHTTPClientForTarget(ctx context.Context, baseURL string, auth TargetAuth
 	if err != nil {
 		return nil, err
 	}
-	rt, err := explicitBearerTransport(c.Transport, auth.Token, baseURL,
+	rt, err := authBearerTransport(c.Transport, auth.Token, baseURL,
 		auth.TrustPrivateNetwork, auth.AllowInsecure)
 	if err != nil {
 		return nil, err
@@ -288,13 +333,39 @@ func NewHTTPClientForTarget(ctx context.Context, baseURL string, auth TargetAuth
 	return c, nil
 }
 
+// NewHTTPClientForResolved constructs a client from an already-resolved
+// daemon. The endpoint, token, and target policy are consumed as supplied;
+// construction does not re-read remote configuration, catalog credentials,
+// or global authentication policy.
+func NewHTTPClientForResolved(ctx context.Context, d ResolvedDaemon, opts Opts) (*http.Client, error) {
+	if d.BaseURL == "" {
+		return nil, errors.New("resolved daemon has no base URL")
+	}
+	if d.UnixSocket != "" {
+		c := unixClient(d.UnixSocket, opts)
+		rt, err := authBearerTransport(c.Transport, d.Token, d.BaseURL,
+			d.TrustPrivateNetwork, d.AllowInsecure)
+		if err != nil {
+			return nil, err
+		}
+		c.Transport = rt
+		return c, nil
+	}
+	return NewHTTPClientForTarget(ctx, d.BaseURL, TargetAuth{
+		Token:               d.Token,
+		AllowInsecure:       d.AllowInsecure,
+		TrustPrivateNetwork: d.TrustPrivateNetwork,
+	}, opts)
+}
+
 func newHTTPClientWithAuth(ctx context.Context, baseURL string, auth config.AuthConfig, opts Opts) (*http.Client, error) {
 	c, err := newHTTPClientWithoutAuth(ctx, baseURL, opts)
 	if err != nil {
 		return nil, err
 	}
 	allowInsecure := opts.AllowInsecure || remoteAllowInsecureForBaseURL(baseURL, opts.WorkspaceStart)
-	rt, err := authBearerTransport(c.Transport, auth.Token, baseURL, auth.TrustPrivateNetwork, allowInsecure)
+	rt, err := authBearerTransport(c.Transport, auth.Token, baseURL,
+		auth.TrustPrivateNetwork, allowInsecure)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +377,23 @@ func newHTTPClientWithoutAuth(ctx context.Context, baseURL string, opts Opts) (*
 	if !strings.HasPrefix(baseURL, UnixBase) {
 		return tcpClient(opts)
 	}
-	return unixClientFromRuntime(ctx, opts)
+	ns, err := daemon.NewNamespace()
+	if err != nil {
+		return nil, err
+	}
+	for candidate, err := range liveDaemons(ctx, ns.DataDir) {
+		if err != nil {
+			if errors.Is(err, ErrLocalDaemonUnreachable) {
+				continue
+			}
+			return nil, err
+		}
+		if candidate.UnixSocket == "" {
+			continue
+		}
+		return unixClient(candidate.UnixSocket, opts), nil
+	}
+	return nil, errors.New("no unix-socket daemon found")
 }
 
 func tcpClient(opts Opts) (*http.Client, error) {
@@ -329,33 +416,11 @@ func tcpClient(opts Opts) (*http.Client, error) {
 	return c, nil
 }
 
-func unixClientFromRuntime(ctx context.Context, opts Opts) (*http.Client, error) {
-	ns, err := daemon.NewNamespace()
-	if err != nil {
-		return nil, err
+// unixClient builds a client whose transport dials the named socket.
+func unixClient(socket string, opts Opts) *http.Client {
+	t := UnixTransport(socket)
+	if opts.ResponseHeaderTimeout > 0 {
+		t.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
 	}
-	recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range recs {
-		if !daemon.RuntimeProcessAlive(r) {
-			continue
-		}
-		ep := r.Endpoint()
-		if !ep.IsUnix() {
-			continue
-		}
-		path := ep.Address
-		probe := &http.Client{Transport: UnixTransport(path), Timeout: 1 * time.Second}
-		if !Ping(ctx, probe, UnixBase) {
-			continue
-		}
-		t := UnixTransport(path)
-		if opts.ResponseHeaderTimeout > 0 {
-			t.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
-		}
-		return &http.Client{Transport: t, Timeout: opts.Timeout}, nil
-	}
-	return nil, errors.New("no unix-socket daemon found")
+	return &http.Client{Transport: t, Timeout: opts.Timeout}
 }

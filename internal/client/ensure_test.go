@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -131,6 +134,82 @@ func TestEnsureRunningTargetRetainsSelectedLocalEndpoint(t *testing.T) {
 	assert.Equal(t, "http://"+addr, target.BaseURL)
 }
 
+func TestDiscoverForEnsureThreeOutcomes(t *testing.T) {
+	tests := []struct {
+		name        string
+		pingPayload map[string]any
+		want        daemonScanOutcome
+	}{
+		{name: "no live record", want: daemonScanNone},
+		{
+			name: "live and compatible",
+			pingPayload: map[string]any{
+				"ok": true, "service": "kata", "version": "test-version", "pid": os.Getpid(),
+			},
+			want: daemonScanCompatible,
+		},
+		{
+			name: "live but stale build",
+			pingPayload: map[string]any{
+				"ok": true, "service": "kata", "version": "old-version", "pid": os.Getpid(),
+			},
+			want: daemonScanStale,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			tmp := setupKataEnv(t)
+			origVersion := currentVersionForEnsure
+			currentVersionForEnsure = func() string { return "test-version" }
+			t.Cleanup(func() { currentVersionForEnsure = origVersion })
+
+			wantURL := ""
+			wantAddress := ""
+			if tt.pingPayload != nil {
+				wantURL, wantAddress = startMockDaemonPing(t, tt.pingPayload)
+				require.NoError(t, writeRuntimeRecord(t, tmp, wantAddress))
+			}
+			ns, err := daemon.NewNamespace()
+			require.NoError(t, err)
+
+			got, err := discoverForEnsure(context.Background(), ns.DataDir)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got.Outcome)
+			if tt.want == daemonScanNone {
+				assert.Empty(t, got.Daemon.BaseURL)
+				return
+			}
+			assert.Equal(t, wantURL, got.Daemon.BaseURL)
+			assert.Equal(t, wantAddress, got.Daemon.Record.Endpoint().ConfigAddress())
+			assert.Equal(t, os.Getpid(), got.Daemon.Record.PID)
+		})
+	}
+}
+
+func TestDiscoverForEnsurePreservesScanErrors(t *testing.T) {
+	t.Run("runtime store", func(t *testing.T) {
+		_, err := discoverForEnsure(t.Context(), "relative-data-dir")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be absolute")
+	})
+
+	t.Run("context cancellation", func(t *testing.T) {
+		tmp := setupKataEnv(t)
+		require.NoError(t, writeRuntimeRecord(t, tmp, "unix://"+filepath.Join(tmp, "missing.sock")))
+		ns, err := daemon.NewNamespace()
+		require.NoError(t, err)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		_, err = discoverForEnsure(ctx, ns.DataDir)
+
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}
+
 func TestDiscoverWebRuntime(t *testing.T) {
 	record := kitdaemon.RuntimeRecord{
 		PID: 4242,
@@ -231,11 +310,11 @@ func TestAutoStartAllowsDaemonStartupBeyondFiveSeconds(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		startedAt := time.Now()
-		discoverDaemonForAutoStart = func(context.Context, string) (RunningDaemon, bool, bool, error) {
+		discoverDaemonForAutoStart = func(context.Context, string) (ensureDiscovery, error) {
 			if time.Since(startedAt) < 6*time.Second {
-				return RunningDaemon{}, false, false, nil
+				return ensureDiscovery{}, nil
 			}
-			return remoteRunningDaemon("http://127.0.0.1:27123", false), true, true, nil
+			return compatibleEnsureDiscovery("127.0.0.1:27123"), nil
 		}
 
 		target, err := autoStart(t.Context(), dataDir)
@@ -259,11 +338,11 @@ func TestAutoStartWaitsForUnreachableSpawnedDaemonToBecomeReady(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		startedAt := time.Now()
-		discoverDaemonForAutoStart = func(context.Context, string) (RunningDaemon, bool, bool, error) {
+		discoverDaemonForAutoStart = func(context.Context, string) (ensureDiscovery, error) {
 			if time.Since(startedAt) < 6*time.Second {
-				return RunningDaemon{}, false, false, fmt.Errorf("%w: listener not ready", ErrLocalDaemonUnreachable)
+				return ensureDiscovery{}, fmt.Errorf("%w: listener not ready", ErrLocalDaemonUnreachable)
 			}
-			return remoteRunningDaemon("http://127.0.0.1:27123", false), true, true, nil
+			return compatibleEnsureDiscovery("127.0.0.1:27123"), nil
 		}
 
 		target, err := autoStart(t.Context(), dataDir)
@@ -287,8 +366,8 @@ func TestAutoStartReportsPersistentUnreachableDaemonAfterReadinessDeadline(t *te
 
 	synctest.Test(t, func(t *testing.T) {
 		probeErr := fmt.Errorf("%w: daemon pid 123 at unix:///tmp/kata.sock", ErrLocalDaemonUnreachable)
-		discoverDaemonForAutoStart = func(context.Context, string) (RunningDaemon, bool, bool, error) {
-			return RunningDaemon{}, false, false, probeErr
+		discoverDaemonForAutoStart = func(context.Context, string) (ensureDiscovery, error) {
+			return ensureDiscovery{}, probeErr
 		}
 
 		_, err := autoStart(t.Context(), dataDir)
@@ -314,6 +393,103 @@ func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {
 		t.Fatalf("unverified runtime PID was signaled; process exited with %v", err)
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+func TestNewHTTPClientWithoutAuthSkipsDeadRuntimeRecords(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix sockets are unsupported on Windows")
+	}
+	tmp := setupKataEnv(t)
+	socket := filepath.Join(t.TempDir(), "kata.sock")
+	ln, err := net.Listen("unix", socket)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/ping" {
+				http.NotFound(w, r)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "service": "kata"})
+		}),
+		ReadHeaderTimeout: time.Second,
+	}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	// A dead PID pointing at a socket path that does not exist, plus the
+	// live record. Construction must reach the live one.
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, deadPID(t), "unix:///nonexistent/kata.sock"))
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), "unix://"+socket))
+
+	c, err := newHTTPClientWithoutAuth(context.Background(), UnixBase, Opts{Timeout: 2 * time.Second})
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, UnixBase+"/api/v1/ping", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestNewHTTPClientWithoutAuthSkipsLiveTCPRuntimeBeforeUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix sockets are unsupported on Windows")
+	}
+	tmp := setupKataEnv(t)
+	_, tcpAddress := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": currentVersionForEnsure(),
+	})
+	tcpProcess, _ := startLongLivedTestProcess(t)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, tcpProcess.Process.Pid, tcpAddress))
+
+	socket := filepath.Join(t.TempDir(), "kata.sock")
+	ln, err := net.Listen("unix", socket)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/v1/ping":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok": true, "service": "kata", "version": currentVersionForEnsure(),
+				})
+			case "/ready":
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				http.NotFound(w, r)
+			}
+		}),
+		ReadHeaderTimeout: time.Second,
+	}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), "unix://"+socket))
+
+	c, err := newHTTPClientWithoutAuth(t.Context(), UnixBase, Opts{Timeout: 2 * time.Second})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, UnixBase+"/ready", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+}
+
+// deadPID returns a PID that is not alive: a child process that has already
+// been reaped.
+func deadPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=TestEnsureSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
+	cmd.Env = append(os.Environ(), "KATA_ENSURE_SLEEP_HELPER=1")
+	stdin, err := cmd.StdinPipe()
+	require.NoError(t, err)
+	require.NoError(t, cmd.Start())
+	pid := cmd.Process.Pid
+	require.NoError(t, stdin.Close())
+	_ = cmd.Wait()
+	return pid
 }
 
 func startLongLivedTestProcess(t *testing.T) (*exec.Cmd, <-chan error) {
@@ -512,6 +688,49 @@ func TestDiscoverIgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestDiscoverStopsProbingAfterFirstLiveDaemon(t *testing.T) {
+	tmp := setupKataEnv(t)
+
+	var firstHits, secondHits atomic.Int32
+	_, addr1 := startCountingPing(t, &firstHits)
+	_, addr2 := startCountingPing(t, &secondHits)
+
+	// Two distinct alive PIDs: this process and a long-lived helper.
+	helper, _ := startLongLivedTestProcess(t)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr1))
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, helper.Process.Pid, addr2))
+
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+
+	url, ok, err := Discover(context.Background(), ns.DataDir)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Contains(t, []string{"http://" + addr1, "http://" + addr2}, url)
+
+	total := firstHits.Load() + secondHits.Load()
+	assert.Equal(t, int32(1), total,
+		"Discover must stop probing after the first live record; an eager scan probes both")
+}
+
+// startCountingPing is startMockDaemonPing with a hit counter, for asserting
+// that a scan short-circuits rather than probing every record.
+func startCountingPing(t *testing.T, hits *atomic.Int32) (url, addr string) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		hits.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "service": "kata", "version": "test-version", "pid": os.Getpid(),
+		})
+	}))
+	t.Cleanup(server.Close)
+	return server.URL, strings.TrimPrefix(server.URL, "http://")
+}
+
 func mismatchedProcessIdentity(t *testing.T, identity kitdaemon.ProcessIdentity) kitdaemon.ProcessIdentity {
 	t.Helper()
 	encoded := string(identity)
@@ -584,6 +803,16 @@ func startMockDaemonPing(t *testing.T, payload map[string]any) (url, addr string
 	}))
 	t.Cleanup(server.Close)
 	return server.URL, strings.TrimPrefix(server.URL, "http://")
+}
+
+func compatibleEnsureDiscovery(address string) ensureDiscovery {
+	return ensureDiscovery{
+		Outcome: daemonScanCompatible,
+		Daemon: liveDaemon{
+			BaseURL: "http://" + address,
+			Record:  kitdaemon.RuntimeRecord{Address: address},
+		},
+	}
 }
 
 func writeRuntimeRecord(t *testing.T, home, addr string) error {
