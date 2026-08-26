@@ -80,9 +80,7 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return store.QueryRowContext(ctx, `
 			SELECT pid FROM pg_catalog.pg_locks
-			WHERE locktype = 'advisory' AND granted
-			  AND classid = (hashtext(current_database())::bigint & 4294967295)
-			  AND objid = (hashtext('kata:vector:reconciler:' || current_schema())::bigint & 4294967295)
+			WHERE `+vector.ReconcilerLockPredicateSQL+`
 			LIMIT 1`).Scan(&currentPID) == nil
 	}, 5*time.Second, 10*time.Millisecond, "reconciler did not acquire its initial lease")
 	require.Eventually(t, func() bool {
@@ -108,9 +106,7 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 		require.Eventually(t, func() bool {
 			err := store.QueryRowContext(ctx, `
 				SELECT pid FROM pg_catalog.pg_locks
-				WHERE locktype = 'advisory' AND granted
-				  AND classid = (hashtext(current_database())::bigint & 4294967295)
-				  AND objid = (hashtext('kata:vector:reconciler:' || current_schema())::bigint & 4294967295)
+				WHERE `+vector.ReconcilerLockPredicateSQL+`
 				LIMIT 1`).Scan(&currentPID)
 			return err == nil && currentPID != previousPID
 		}, 5*time.Second, 10*time.Millisecond, "cycle %d did not reacquire leadership", cycle)

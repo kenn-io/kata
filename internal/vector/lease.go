@@ -21,14 +21,9 @@ func (ix *Index) AcquireReconcilerLease(ctx context.Context) (func() error, erro
 	if err != nil {
 		return nil, fmt.Errorf("vector: reserve reconciler lease connection: %w", err)
 	}
-	const lockQuery = `
-		SELECT pg_try_advisory_lock(
-			hashtext(current_database()),
-			hashtext('kata:vector:reconciler:' || current_schema())
-		)`
 	for {
 		var acquired bool
-		if err := conn.QueryRowContext(ctx, lockQuery).Scan(&acquired); err != nil {
+		if err := conn.QueryRowContext(ctx, reconcilerLockSQL).Scan(&acquired); err != nil {
 			_ = conn.Close()
 			return nil, fmt.Errorf("vector: acquire postgres reconciler lease: %w", err)
 		}
@@ -44,55 +39,34 @@ func (ix *Index) AcquireReconcilerLease(ctx context.Context) (func() error, erro
 		case <-timer.C:
 		}
 	}
-	ix.pg.leaseMu.Lock()
-	if ix.pg.leaseConn != nil {
-		ix.pg.leaseMu.Unlock()
+	if err := ix.pg.adoptLease(conn); err != nil {
 		_ = conn.Close()
-		return nil, errors.New("vector: postgres reconciler lease already held by this index")
+		return nil, err
 	}
-	ix.pg.leaseConn = conn
-	ix.pg.leaseMu.Unlock()
 	return func() error {
-		ix.pg.leaseMu.Lock()
-		if ix.pg.leaseConn == conn {
-			ix.pg.leaseConn = nil
-		}
-		ix.pg.leaseMu.Unlock()
+		ix.pg.releaseLease(conn)
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, unlockErr := conn.ExecContext(releaseCtx, `
-			SELECT pg_advisory_unlock(
-				hashtext(current_database()),
-				hashtext('kata:vector:reconciler:' || current_schema())
-			)`)
+		_, unlockErr := conn.ExecContext(releaseCtx, reconcilerUnlockSQL)
 		return errors.Join(unlockErr, conn.Close())
 	}, nil
 }
 
 // ValidateReconcilerLease checks that the exact PostgreSQL session used for
-// derived-state mutations still owns the schema's reconciler lease. SQLite
+// derived-state mutations still owns the schema's reconciler lease. It asks
+// reconcilerExecutor for that session precisely so it can never validate a
+// different connection than the one a mutation would run on. SQLite
 // reconciliation has no cross-process lease and always succeeds.
 func (ix *Index) ValidateReconcilerLease(ctx context.Context) error {
 	if ix.pg == nil {
 		return nil
 	}
-	ix.pg.leaseMu.RLock()
-	conn := ix.pg.leaseConn
-	ix.pg.leaseMu.RUnlock()
-	if conn == nil {
-		return errors.New("vector: postgres reconciler lease is not held")
+	executor, err := ix.pg.reconcilerExecutor()
+	if err != nil {
+		return err
 	}
 	var held bool
-	err := conn.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM pg_catalog.pg_locks
-			WHERE pid = pg_backend_pid()
-			  AND locktype = 'advisory'
-			  AND granted
-			  AND classid = (hashtext(current_database())::bigint & 4294967295)
-			  AND objid = (hashtext('kata:vector:reconciler:' || current_schema())::bigint & 4294967295)
-		)`).Scan(&held)
-	if err != nil {
+	if err := executor.QueryRowContext(ctx, reconcilerLeaseHeldSQL).Scan(&held); err != nil {
 		return fmt.Errorf("vector: validate postgres reconciler lease: %w", err)
 	}
 	if !held {

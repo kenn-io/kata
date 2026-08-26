@@ -28,23 +28,62 @@ type postgresExecutor interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func (p *postgresIndex) reconcilerExecutor() postgresExecutor {
+// errReconcilerLeaseNotHeld is returned by every derived-state mutator when
+// this index does not hold the schema's reconciler lease. Falling back to an
+// unfenced pool connection would let two daemons in the unleased state write
+// to the same derived tables, so "no lease" is an error, not a default.
+var errReconcilerLeaseNotHeld = errors.New("vector: postgres reconciler lease is not held")
+
+// leaseSession returns the connection this index holds the reconciler lease
+// on. It is the only read of leaseConn.
+func (p *postgresIndex) leaseSession() (*sql.Conn, error) {
 	p.leaseMu.RLock()
 	defer p.leaseMu.RUnlock()
-	if p.leaseConn != nil {
-		return p.leaseConn
+	if p.leaseConn == nil {
+		return nil, errReconcilerLeaseNotHeld
 	}
-	return p.db
+	return p.leaseConn, nil
+}
+
+// adoptLease records conn as the session holding this index's reconciler
+// lease. Taking the advisory lock on conn, and releasing it, stay with the
+// caller; adoptLease only owns the bookkeeping.
+func (p *postgresIndex) adoptLease(conn *sql.Conn) error {
+	p.leaseMu.Lock()
+	defer p.leaseMu.Unlock()
+	if p.leaseConn != nil {
+		return errors.New("vector: postgres reconciler lease already held by this index")
+	}
+	p.leaseConn = conn
+	return nil
+}
+
+// releaseLease forgets conn if it is still the recorded lease session. It is
+// a no-op for any other connection, so a stale release closure cannot evict a
+// lease a later acquisition adopted.
+func (p *postgresIndex) releaseLease(conn *sql.Conn) {
+	p.leaseMu.Lock()
+	defer p.leaseMu.Unlock()
+	if p.leaseConn == conn {
+		p.leaseConn = nil
+	}
+}
+
+// reconcilerExecutor is the executor every derived-state mutation runs on.
+func (p *postgresIndex) reconcilerExecutor() (postgresExecutor, error) {
+	conn, err := p.leaseSession()
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
 }
 
 func (p *postgresIndex) beginReconcilerTx(ctx context.Context) (*sql.Tx, error) {
-	p.leaseMu.RLock()
-	conn := p.leaseConn
-	p.leaseMu.RUnlock()
-	if conn != nil {
-		return conn.BeginTx(ctx, nil)
+	conn, err := p.leaseSession()
+	if err != nil {
+		return nil, err
 	}
-	return p.db.BeginTx(ctx, nil)
+	return conn.BeginTx(ctx, nil)
 }
 
 func (p *postgresIndex) validate(ctx context.Context) error {
@@ -260,15 +299,17 @@ func (p *postgresIndex) ensureBuilding(ctx context.Context, key string, gen kitv
 	if gen.Dimensions > 4000 {
 		return fmt.Errorf("vector: postgres halfvec dimensions must not exceed 4,000 (got %d)", gen.Dimensions)
 	}
-	executor := p.reconcilerExecutor()
-	_, err := executor.ExecContext(ctx, `
+	executor, err := p.reconcilerExecutor()
+	if err != nil {
+		return fmt.Errorf("vector: ensure postgres generation %s: %w", key, err)
+	}
+	if _, err := executor.ExecContext(ctx, `
 		INSERT INTO issue_vector_generations(gen_key, model, dimensions, state)
 		VALUES($1, $2, $3, 'building')
 		ON CONFLICT(gen_key) DO UPDATE SET state = 'building'
 		WHERE issue_vector_generations.state <> 'active'
 		  AND issue_vector_generations.model = EXCLUDED.model
-		  AND issue_vector_generations.dimensions = EXCLUDED.dimensions`, key, gen.Model, gen.Dimensions)
-	if err != nil {
+		  AND issue_vector_generations.dimensions = EXCLUDED.dimensions`, key, gen.Model, gen.Dimensions); err != nil {
 		return fmt.Errorf("vector: ensure postgres generation %s: %w", key, err)
 	}
 	var model string
@@ -365,7 +406,10 @@ func (p *postgresIndex) coverage(ctx context.Context, key string) (embedded, ski
 }
 
 func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (int, error) {
-	executor := p.reconcilerExecutor()
+	executor, err := p.reconcilerExecutor()
+	if err != nil {
+		return 0, fmt.Errorf("vector: refresh postgres mirror: %w", err)
+	}
 	changed := 0
 	seen := make(map[string]struct{})
 	var afterID int64

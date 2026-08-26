@@ -45,27 +45,53 @@ type federationStressTB interface {
 	Cleanup(func())
 }
 
+// stressTBRecorder records assertion failures instead of aborting, so a test
+// can assert that a fixture-level check actually ran against a given node.
+// FailNow is deliberately inert: the caller controls the scenario and wants
+// every check in the loop to execute.
+type stressTBRecorder struct {
+	federationStressTB
+	failures []string
+}
+
+func (r *stressTBRecorder) Errorf(format string, args ...any) {
+	r.failures = append(r.failures, fmt.Sprintf(format, args...))
+}
+
+func (r *stressTBRecorder) Fatalf(format string, args ...any) {
+	r.failures = append(r.failures, fmt.Sprintf(format, args...))
+}
+
+func (r *stressTBRecorder) FailNow() {}
+
+func (r *stressTBRecorder) Failed() bool { return len(r.failures) > 0 }
+
 type federationStressFixture struct {
 	bin           string
-	hub           federationStressNode
-	spokes        []federationStressNode
-	hubProject    api.ProjectOut
+	hub           *federationStressNode
+	spokes        []*federationStressNode
 	hubIssue      createdIssue
 	meta          api.ProjectFederationBody
 	replayAfterID int64
 	opSeq         int
 }
 
+// federationStressNode is one daemon in the fixture. Hub and spoke are the
+// same shape: a node knows its own name, the project id it serves, and
+// whether its process is up, so no caller has to know a node's role to
+// address it. replica is zero for the hub.
 type federationStressNode struct {
-	dirs    e2eDirs
-	url     string
-	http    *http.Client
-	db      *sqlitestore.Store
-	stderr  *safeBuffer
-	cmd     *exec.Cmd
-	online  bool
-	cred    config.FederationCredential
-	replica api.CreateFederationReplicaBody
+	name      string
+	dirs      e2eDirs
+	url       string
+	http      *http.Client
+	db        *sqlitestore.Store
+	stderr    *safeBuffer
+	cmd       *exec.Cmd
+	projectID int64
+	running   bool
+	cred      config.FederationCredential
+	replica   api.CreateFederationReplicaBody
 }
 
 type federationStressIssue struct {
@@ -83,12 +109,19 @@ func newFederationStressFixture(t federationStressTB, spokeCount int) *federatio
 	fx := &federationStressFixture{
 		bin:    bin,
 		hub:    startFederationStressHub(t, bin),
-		spokes: make([]federationStressNode, 0, spokeCount),
+		spokes: make([]*federationStressNode, 0, spokeCount),
 	}
 	for i := 0; i < spokeCount; i++ {
-		fx.spokes = append(fx.spokes, startFederationStressSpoke(t, bin))
+		fx.spokes = append(fx.spokes, startFederationStressSpoke(t, bin, i))
 	}
 	return fx
+}
+
+// nodes returns every node in the fixture, hub first. Assertions that hold
+// for hub and spokes alike iterate this instead of writing a hub arm and a
+// spoke arm that can drift apart.
+func (fx *federationStressFixture) nodes() []*federationStressNode {
+	return append([]*federationStressNode{fx.hub}, fx.spokes...)
 }
 
 func (fx *federationStressFixture) enableProject(t federationStressTB, name string) {
@@ -99,10 +132,10 @@ func (fx *federationStressFixture) enableProject(t federationStressTB, name stri
 	}
 	stressDecodePOST(t, fx.hub.http, fx.hub.url+"/api/v1/projects",
 		map[string]any{"name": name, "actor": "user-a"}, &initBody)
-	fx.hubProject = initBody.Project
+	fx.hub.projectID = initBody.Project.ID
 
 	fx.hubIssue = stressCreateIssue(t, fx.hub.http,
-		fx.hub.url+"/api/v1/projects/"+strconv.FormatInt(fx.hubProject.ID, 10)+"/issues",
+		fx.hub.url+"/api/v1/projects/"+strconv.FormatInt(fx.hub.projectID, 10)+"/issues",
 		map[string]any{
 			"actor": "agent",
 			"title": "stress baseline",
@@ -110,12 +143,12 @@ func (fx *federationStressFixture) enableProject(t federationStressTB, name stri
 		})
 
 	stressDecodePOST(t, fx.hub.http,
-		fx.hub.url+"/api/v1/projects/"+strconv.FormatInt(fx.hubProject.ID, 10)+"/federation/enable",
+		fx.hub.url+"/api/v1/projects/"+strconv.FormatInt(fx.hub.projectID, 10)+"/federation/enable",
 		map[string]any{"actor": "agent"}, &fx.meta)
 	fx.replayAfterID = fx.meta.ReplayHorizonEventID - 1
 
-	for i := range fx.spokes {
-		fx.spokes[i].replica = fx.enrollSpoke(t, i)
+	for _, spoke := range fx.spokes {
+		fx.enrollSpoke(t, spoke)
 	}
 }
 
@@ -123,29 +156,27 @@ func (fx *federationStressFixture) waitForAllSpokes(t *testing.T) {
 	t.Helper()
 	require.NotEmpty(t, fx.hubIssue.UID, "enableProject must create the baseline issue before waiting")
 	fx.waitForConvergence(t)
-	for i := range fx.spokes {
-		waitForFederatedIssue(t, fx.spokes[i].db, fx.hubIssue.UID, fx.spokes[i].stderr)
+	for _, spoke := range fx.spokes {
+		waitForFederatedIssue(t, spoke.db, fx.hubIssue.UID, spoke.stderr)
 	}
 }
 
 func (fx *federationStressFixture) assertAllFoldedProjectionsMatch(t federationStressTB) {
 	t.Helper()
-	for i := range fx.spokes {
-		if !fx.spokes[i].online {
+	for _, spoke := range fx.spokes {
+		if !spoke.running {
 			continue
 		}
-		fx.waitForFoldedProjectionMatch(t, i)
+		fx.waitForFoldedProjectionMatch(t, spoke)
 	}
 }
 
+// A node's SQLite file is readable while its daemon is down, so the
+// duplicate-claim invariant is checked for every node unconditionally.
 func (fx *federationStressFixture) assertNoDuplicateLiveClaims(t federationStressTB) {
 	t.Helper()
-	assertNoDuplicateLiveClaimsOnNode(t, "hub", fx.hub.db)
-	for i := range fx.spokes {
-		if !fx.spokes[i].online {
-			continue
-		}
-		assertNoDuplicateLiveClaimsOnNode(t, fmt.Sprintf("spoke-%d", i), fx.spokes[i].db)
+	for _, node := range fx.nodes() {
+		assertNoDuplicateLiveClaimsOnNode(t, node)
 	}
 }
 
@@ -174,10 +205,9 @@ func (fx *federationStressFixture) assertNoPendingPushBacklogEventually(t federa
 	require.Empty(t, last, "pending federation push backlog did not drain")
 }
 
-func (fx *federationStressFixture) enrollSpoke(t federationStressTB, i int) api.CreateFederationReplicaBody {
+func (fx *federationStressFixture) enrollSpoke(t federationStressTB, spoke *federationStressNode) {
 	t.Helper()
-	spoke := fx.spokes[i]
-	token := fmt.Sprintf("stress-spoke-%d-token", i)
+	token := "stress-" + spoke.name + "-token"
 	var inst struct {
 		InstanceUID string `json:"instance_uid"`
 	}
@@ -186,7 +216,7 @@ func (fx *federationStressFixture) enrollSpoke(t federationStressTB, i int) api.
 	stressDecodePOST(t, fx.hub.http, fx.hub.url+"/api/v1/federation/enrollments", map[string]any{
 		"token":              token,
 		"spoke_instance_uid": inst.InstanceUID,
-		"project_id":         fx.hubProject.ID,
+		"project_id":         fx.hub.projectID,
 		"capabilities":       "pull,push,claim",
 		"actor":              "stress",
 	}, &created)
@@ -194,7 +224,7 @@ func (fx *federationStressFixture) enrollSpoke(t federationStressTB, i int) api.
 	var replica api.CreateFederationReplicaBody
 	stressDecodePOST(t, spoke.http, spoke.url+"/api/v1/federation/replicas", map[string]any{
 		"hub_url":                   fx.hub.url,
-		"hub_project_id":            fx.hubProject.ID,
+		"hub_project_id":            fx.hub.projectID,
 		"hub_project_uid":           fx.meta.ProjectUID,
 		"project_name":              fx.meta.ProjectName,
 		"replay_horizon_event_id":   fx.meta.ReplayHorizonEventID,
@@ -205,36 +235,36 @@ func (fx *federationStressFixture) enrollSpoke(t federationStressTB, i int) api.
 		"push_enabled":              true,
 	}, &replica)
 	require.True(t, replica.Binding.PushEnabled)
-	fx.spokes[i].cred = config.FederationCredential{
+	spoke.replica = replica
+	spoke.projectID = replica.Project.ID
+	spoke.cred = config.FederationCredential{
 		HubURL:       fx.hub.url,
-		HubProjectID: fx.hubProject.ID,
+		HubProjectID: fx.hub.projectID,
 		Token:        created.Token,
 		Capabilities: "claim,pull,push",
 		Actor:        "stress",
 	}
-	return replica
 }
 
 func (fx *federationStressFixture) pendingPushBacklogs(t federationStressTB) []string {
 	t.Helper()
 	ctx := context.Background()
 	var pending []string
-	for i := range fx.spokes {
-		if !fx.spokes[i].online {
+	for _, spoke := range fx.spokes {
+		if !spoke.running {
 			continue
 		}
-		spoke := fx.spokes[i]
-		binding, err := spoke.db.FederationBindingByProject(ctx, spoke.replica.Project.ID)
+		binding, err := spoke.db.FederationBindingByProject(ctx, spoke.projectID)
 		require.NoError(t, err)
 		events, err := spoke.db.PendingFederationPushEvents(ctx,
-			spoke.replica.Project.ID,
+			spoke.projectID,
 			spoke.db.InstanceUID(),
 			binding.PushCursorEventID,
 			1000,
 		)
 		require.NoError(t, err)
 		if len(events) > 0 {
-			pending = append(pending, fmt.Sprintf("spoke-%d:%d", i, len(events)))
+			pending = append(pending, fmt.Sprintf("%s:%d", spoke.name, len(events)))
 		}
 	}
 	return pending
@@ -245,9 +275,11 @@ func (fx *federationStressFixture) applyRandomOperation(t *rapid.T) {
 	fx.opSeq++
 	switch rapid.IntRange(0, 5).Draw(t, "operation") {
 	case 0:
-		fx.createHubIssue(t)
+		fx.createIssueOnNode(t, fx.hub, "hub-create")
 	case 1:
-		fx.createSpokeIssue(t)
+		if spoke, ok := fx.drawRunningSpoke(t, "create-spoke"); ok {
+			fx.createIssueOnNode(t, spoke, "spoke-create")
+		}
 	case 2:
 		fx.acquireSpokeHardClaim(t)
 	case 3:
@@ -259,41 +291,27 @@ func (fx *federationStressFixture) applyRandomOperation(t *rapid.T) {
 	}
 }
 
-func (fx *federationStressFixture) createHubIssue(t *rapid.T) {
-	t.Helper()
-	fx.createIssueOnNode(t, &fx.hub, fx.hubProject.ID, "hub-create")
-}
-
-func (fx *federationStressFixture) createSpokeIssue(t *rapid.T) {
-	t.Helper()
-	i, ok := fx.drawOnlineSpoke(t, "create-spoke")
-	if !ok {
-		return
-	}
-	fx.createIssueOnNode(t, &fx.spokes[i], fx.spokes[i].replica.Project.ID, "spoke-create")
-}
-
 func (fx *federationStressFixture) acquireSpokeHardClaim(t *rapid.T) {
 	t.Helper()
-	spokeIdx, issue, ok := fx.drawSpokeLiveIssue(t, "claim")
+	spoke, issue, ok := fx.drawSpokeLiveIssue(t, "claim")
 	if !ok {
 		return
 	}
 	actor := fx.drawActor(t, "claim-actor")
-	_ = fx.acquireClaim(t, spokeIdx, issue.ShortID, actor)
+	_ = fx.acquireClaim(t, spoke, issue.ShortID, actor)
 }
 
 func (fx *federationStressFixture) releaseSpokeClaim(t *rapid.T) {
 	t.Helper()
-	spokeIdx, ok := fx.drawOnlineSpoke(t, "release-spoke")
+	spoke, ok := fx.drawRunningSpoke(t, "release-spoke")
 	if !ok {
 		return
 	}
-	claim, ok := fx.drawLiveClaim(t, fx.spokes[spokeIdx], fx.spokes[spokeIdx].replica.Project.ID, "release-claim")
+	claim, ok := fx.drawLiveClaim(t, spoke, "release-claim")
 	if !ok {
 		return
 	}
-	fx.postClaimAction(t, spokeIdx, claim.IssueRef, "release", map[string]any{
+	fx.postClaimAction(t, spoke, claim.IssueRef, "release", map[string]any{
 		"holder": claim.Holder,
 		"reason": "stress release",
 	})
@@ -301,35 +319,34 @@ func (fx *federationStressFixture) releaseSpokeClaim(t *rapid.T) {
 
 func (fx *federationStressFixture) editClaimedIssue(t *rapid.T) {
 	t.Helper()
-	spokeIdx, issue, ok := fx.drawSpokeLiveIssue(t, "edit")
+	spoke, issue, ok := fx.drawSpokeLiveIssue(t, "edit")
 	if !ok {
 		return
 	}
 	actor := fx.drawActor(t, "edit-actor")
-	if !fx.acquireClaim(t, spokeIdx, issue.ShortID, actor) {
+	if !fx.acquireClaim(t, spoke, issue.ShortID, actor) {
 		return
 	}
-	spoke := fx.spokes[spokeIdx]
 	switch rapid.IntRange(0, 3).Draw(t, "edit-kind") {
 	case 0:
-		fx.patchIssue(t, spoke, spoke.replica.Project.ID, issue.ShortID, map[string]any{
+		fx.patchIssue(t, spoke, issue.ShortID, map[string]any{
 			"actor": actor,
 			"title": fmt.Sprintf("stress title %03d", fx.opSeq),
 			"body":  fmt.Sprintf("stress body %03d", fx.opSeq),
 		})
 	case 1:
 		priority := int64(rapid.IntRange(0, 3).Draw(t, "priority"))
-		fx.patchIssue(t, spoke, spoke.replica.Project.ID, issue.ShortID, map[string]any{
+		fx.patchIssue(t, spoke, issue.ShortID, map[string]any{
 			"actor":        actor,
 			"set_priority": priority,
 		})
 	case 2:
-		fx.patchIssue(t, spoke, spoke.replica.Project.ID, issue.ShortID, map[string]any{
+		fx.patchIssue(t, spoke, issue.ShortID, map[string]any{
 			"actor":          actor,
 			"clear_priority": true,
 		})
 	case 3:
-		fx.addLabel(t, spoke, spoke.replica.Project.ID, issue.ShortID, actor,
+		fx.addLabel(t, spoke, issue.ShortID, actor,
 			fmt.Sprintf("stress:%d", rapid.IntRange(0, 5).Draw(t, "label")))
 	}
 }
@@ -338,30 +355,30 @@ func (fx *federationStressFixture) commentClaimedIssue(t *rapid.T) {
 	t.Helper()
 	actor := fx.drawActor(t, "comment-actor")
 	if rapid.Bool().Draw(t, "comment-on-hub") {
-		issue, ok := fx.drawIssue(t, fx.hub, fx.hubProject.ID, false, "hub-comment")
+		issue, ok := fx.drawIssue(t, fx.hub, false, "hub-comment")
 		if !ok {
 			return
 		}
-		if !fx.acquireHubClaim(t, issue.ShortID, actor) {
+		if !fx.acquireClaim(t, fx.hub, issue.ShortID, actor) {
 			return
 		}
-		fx.commentOnNode(t, fx.hub, fx.hubProject.ID, issue.ShortID, actor)
+		fx.commentOnNode(t, fx.hub, issue.ShortID, actor)
 		return
 	}
-	spokeIdx, issue, ok := fx.drawSpokeLiveIssue(t, "spoke-comment")
+	spoke, issue, ok := fx.drawSpokeLiveIssue(t, "spoke-comment")
 	if !ok {
 		return
 	}
-	if !fx.acquireClaim(t, spokeIdx, issue.ShortID, actor) {
+	if !fx.acquireClaim(t, spoke, issue.ShortID, actor) {
 		return
 	}
-	fx.commentOnNode(t, fx.spokes[spokeIdx], fx.spokes[spokeIdx].replica.Project.ID, issue.ShortID, actor)
+	fx.commentOnNode(t, spoke, issue.ShortID, actor)
 }
 
-func (fx *federationStressFixture) createIssueOnNode(t federationStressTB, node *federationStressNode, projectID int64, prefix string) createdIssue {
+func (fx *federationStressFixture) createIssueOnNode(t federationStressTB, node *federationStressNode, prefix string) createdIssue {
 	t.Helper()
 	return stressCreateIssue(t, node.http,
-		node.url+"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues",
+		node.url+"/api/v1/projects/"+strconv.FormatInt(node.projectID, 10)+"/issues",
 		map[string]any{
 			"actor":     "stress",
 			"title":     fmt.Sprintf("%s %03d", prefix, fx.opSeq),
@@ -371,22 +388,10 @@ func (fx *federationStressFixture) createIssueOnNode(t federationStressTB, node 
 		})
 }
 
-func (fx *federationStressFixture) acquireClaim(t federationStressTB, spokeIdx int, ref, actor string) bool {
+func (fx *federationStressFixture) acquireClaim(t federationStressTB, node *federationStressNode, ref, actor string) bool {
 	t.Helper()
 	var out api.ClaimActionResponseBody
-	ok := fx.postClaimAction(t, spokeIdx, ref, "acquire", map[string]any{
-		"holder":      actor,
-		"client_kind": "stress",
-		"claim_kind":  "hard",
-		"purpose":     "edit",
-	}, &out)
-	return ok && out.Granted && !out.Pending
-}
-
-func (fx *federationStressFixture) acquireHubClaim(t federationStressTB, ref, actor string) bool {
-	t.Helper()
-	var out api.ClaimActionResponseBody
-	ok := fx.postClaimActionOnNode(t, fx.hub, fx.hubProject.ID, ref, "acquire", map[string]any{
+	ok := fx.postClaimAction(t, node, ref, "acquire", map[string]any{
 		"holder":      actor,
 		"client_kind": "stress",
 		"claim_kind":  "hard",
@@ -397,21 +402,7 @@ func (fx *federationStressFixture) acquireHubClaim(t federationStressTB, ref, ac
 
 func (fx *federationStressFixture) postClaimAction(
 	t federationStressTB,
-	spokeIdx int,
-	ref string,
-	action string,
-	body map[string]any,
-	out ...*api.ClaimActionResponseBody,
-) bool {
-	t.Helper()
-	spoke := fx.spokes[spokeIdx]
-	return fx.postClaimActionOnNode(t, spoke, spoke.replica.Project.ID, ref, action, body, out...)
-}
-
-func (fx *federationStressFixture) postClaimActionOnNode(
-	t federationStressTB,
-	node federationStressNode,
-	projectID int64,
+	node *federationStressNode,
 	ref string,
 	action string,
 	body map[string]any,
@@ -420,7 +411,7 @@ func (fx *federationStressFixture) postClaimActionOnNode(
 	t.Helper()
 	var parsed api.ClaimActionResponseBody
 	status, raw := stressDoJSON(t, node.http, http.MethodPost,
-		node.url+"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+
+		node.url+"/api/v1/projects/"+strconv.FormatInt(node.projectID, 10)+
 			"/issues/"+url.PathEscape(ref)+"/lease/actions/"+action,
 		nil, body, &parsed)
 	if status == http.StatusConflict {
@@ -435,43 +426,40 @@ func (fx *federationStressFixture) postClaimActionOnNode(
 
 func (fx *federationStressFixture) patchIssue(
 	t federationStressTB,
-	node federationStressNode,
-	projectID int64,
+	node *federationStressNode,
 	ref string,
 	body map[string]any,
 ) {
 	t.Helper()
 	status, raw := stressDoJSON(t, node.http, http.MethodPatch,
-		node.url+"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+url.PathEscape(ref),
+		node.url+"/api/v1/projects/"+strconv.FormatInt(node.projectID, 10)+"/issues/"+url.PathEscape(ref),
 		nil, body, nil)
 	require.Equalf(t, http.StatusOK, status, "patch issue body: %s", raw)
 }
 
 func (fx *federationStressFixture) addLabel(
 	t federationStressTB,
-	node federationStressNode,
-	projectID int64,
+	node *federationStressNode,
 	ref string,
 	actor string,
 	label string,
 ) {
 	t.Helper()
 	status, raw := stressDoJSON(t, node.http, http.MethodPost,
-		node.url+"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+url.PathEscape(ref)+"/labels",
+		node.url+"/api/v1/projects/"+strconv.FormatInt(node.projectID, 10)+"/issues/"+url.PathEscape(ref)+"/labels",
 		nil, map[string]any{"actor": actor, "label": label}, nil)
 	require.Equalf(t, http.StatusOK, status, "add label body: %s", raw)
 }
 
 func (fx *federationStressFixture) commentOnNode(
 	t federationStressTB,
-	node federationStressNode,
-	projectID int64,
+	node *federationStressNode,
 	ref string,
 	actor string,
 ) {
 	t.Helper()
 	status, raw := stressDoJSON(t, node.http, http.MethodPost,
-		node.url+"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+url.PathEscape(ref)+"/comments",
+		node.url+"/api/v1/projects/"+strconv.FormatInt(node.projectID, 10)+"/issues/"+url.PathEscape(ref)+"/comments",
 		nil, map[string]any{
 			"actor": actor,
 			"body":  fmt.Sprintf("claimed stress comment %03d", fx.opSeq),
@@ -485,27 +473,27 @@ func (fx *federationStressFixture) drawActor(t *rapid.T, label string) string {
 	return actors[rapid.IntRange(0, len(actors)-1).Draw(t, label)]
 }
 
-func (fx *federationStressFixture) drawOnlineSpoke(t *rapid.T, label string) (int, bool) {
+func (fx *federationStressFixture) drawRunningSpoke(t *rapid.T, label string) (*federationStressNode, bool) {
 	t.Helper()
-	var online []int
-	for i := range fx.spokes {
-		if fx.spokes[i].online {
-			online = append(online, i)
+	var running []*federationStressNode
+	for _, spoke := range fx.spokes {
+		if spoke.running {
+			running = append(running, spoke)
 		}
 	}
-	if len(online) == 0 {
-		return 0, false
+	if len(running) == 0 {
+		return nil, false
 	}
-	return online[rapid.IntRange(0, len(online)-1).Draw(t, label)], true
+	return running[rapid.IntRange(0, len(running)-1).Draw(t, label)], true
 }
 
-func (fx *federationStressFixture) drawSpokeLiveIssue(t *rapid.T, label string) (int, federationStressIssue, bool) {
+func (fx *federationStressFixture) drawSpokeLiveIssue(t *rapid.T, label string) (*federationStressNode, federationStressIssue, bool) {
 	t.Helper()
-	spokeIdx, ok := fx.drawOnlineSpoke(t, label+"-spoke")
+	spoke, ok := fx.drawRunningSpoke(t, label+"-spoke")
 	if !ok {
-		return 0, federationStressIssue{}, false
+		return nil, federationStressIssue{}, false
 	}
-	issues := fx.issuesOnNode(t, fx.spokes[spokeIdx], fx.spokes[spokeIdx].replica.Project.ID, false)
+	issues := fx.issuesOnNode(t, spoke, false)
 	hubKnown := issues[:0]
 	for _, issue := range issues {
 		if fx.issueLiveOnHub(t, issue.UID) {
@@ -513,21 +501,20 @@ func (fx *federationStressFixture) drawSpokeLiveIssue(t *rapid.T, label string) 
 		}
 	}
 	if len(hubKnown) == 0 {
-		return 0, federationStressIssue{}, false
+		return nil, federationStressIssue{}, false
 	}
 	issue := hubKnown[rapid.IntRange(0, len(hubKnown)-1).Draw(t, label+"-issue")]
-	return spokeIdx, issue, ok
+	return spoke, issue, true
 }
 
 func (fx *federationStressFixture) drawIssue(
 	t *rapid.T,
-	node federationStressNode,
-	projectID int64,
+	node *federationStressNode,
 	includeDeleted bool,
 	label string,
 ) (federationStressIssue, bool) {
 	t.Helper()
-	issues := fx.issuesOnNode(t, node, projectID, includeDeleted)
+	issues := fx.issuesOnNode(t, node, includeDeleted)
 	if len(issues) == 0 {
 		return federationStressIssue{}, false
 	}
@@ -541,8 +528,7 @@ type federationStressLiveClaim struct {
 
 func (fx *federationStressFixture) drawLiveClaim(
 	t *rapid.T,
-	node federationStressNode,
-	projectID int64,
+	node *federationStressNode,
 	label string,
 ) (federationStressLiveClaim, bool) {
 	t.Helper()
@@ -553,7 +539,7 @@ func (fx *federationStressFixture) drawLiveClaim(
 		 WHERE c.project_id = ?
 		   AND c.released_at IS NULL
 		   AND i.deleted_at IS NULL
-		 ORDER BY c.id`, projectID)
+		 ORDER BY c.id`, node.projectID)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var claims []federationStressLiveClaim
@@ -571,8 +557,7 @@ func (fx *federationStressFixture) drawLiveClaim(
 
 func (fx *federationStressFixture) issuesOnNode(
 	t federationStressTB,
-	node federationStressNode,
-	projectID int64,
+	node *federationStressNode,
 	includeDeleted bool,
 ) []federationStressIssue {
 	t.Helper()
@@ -581,7 +566,7 @@ func (fx *federationStressFixture) issuesOnNode(
 		q += ` AND deleted_at IS NULL`
 	}
 	q += ` ORDER BY id`
-	rows, err := node.db.QueryContext(context.Background(), q, projectID)
+	rows, err := node.db.QueryContext(context.Background(), q, node.projectID)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var issues []federationStressIssue
@@ -600,15 +585,14 @@ func (fx *federationStressFixture) issueLiveOnHub(t federationStressTB, issueUID
 	return err == nil
 }
 
-func (fx *federationStressFixture) waitForFoldedProjectionMatch(t federationStressTB, spokeIdx int) {
+func (fx *federationStressFixture) waitForFoldedProjectionMatch(t federationStressTB, spoke *federationStressNode) {
 	t.Helper()
-	spoke := fx.spokes[spokeIdx]
 	deadline := time.Now().Add(10 * time.Second)
 	var lastHub, lastSpoke db.FoldProjection
 	for time.Now().Before(deadline) {
 		var err error
 		lastHub, lastSpoke, err = stressFoldedProjections(t, fx.hub.db, spoke.db,
-			fx.hubProject.ID, spoke.replica.Project.ID, fx.replayAfterID)
+			fx.hub.projectID, spoke.projectID, fx.replayAfterID)
 		require.NoError(t, err)
 		if assert.ObjectsAreEqual(lastHub.Issues, lastSpoke.Issues) &&
 			assert.ObjectsAreEqual(lastHub.Comments, lastSpoke.Comments) &&
@@ -620,7 +604,7 @@ func (fx *federationStressFixture) waitForFoldedProjectionMatch(t federationStre
 	assert.Equal(t, lastHub.Issues, lastSpoke.Issues)
 	assert.Equal(t, lastHub.Comments, lastSpoke.Comments)
 	assert.Equal(t, lastHub.Labels, lastSpoke.Labels)
-	t.Fatalf("folded projections did not converge for spoke-%d\ndaemon stderr: %s", spokeIdx, spoke.stderr.String())
+	t.Fatalf("folded projections did not converge for %s\ndaemon stderr: %s", spoke.name, spoke.stderr.String())
 }
 
 func stressFoldedProjections(
@@ -651,17 +635,18 @@ func stressFoldedProjections(
 	return db.FoldEvents(foldEvents(hubEvents)), db.FoldEvents(foldEvents(spokeEvents)), nil
 }
 
+// A daemon's stderr buffer outlives its process, so every node is inspected
+// whether or not it is running. `running` gates only the loops that need a
+// live daemon to make progress (assertAllFoldedProjectionsMatch,
+// pendingPushBacklogs).
 func (fx *federationStressFixture) assertDaemonStderrClean(t federationStressTB) {
 	t.Helper()
-	fx.assertNodeStderrClean(t, "hub", fx.hub)
-	for i := range fx.spokes {
-		if fx.spokes[i].online {
-			fx.assertNodeStderrClean(t, fmt.Sprintf("spoke-%d", i), fx.spokes[i])
-		}
+	for _, node := range fx.nodes() {
+		fx.assertNodeStderrClean(t, node)
 	}
 }
 
-func (fx *federationStressFixture) assertNodeStderrClean(t federationStressTB, name string, node federationStressNode) {
+func (fx *federationStressFixture) assertNodeStderrClean(t federationStressTB, node *federationStressNode) {
 	t.Helper()
 	log := strings.ToLower(node.stderr.String())
 	for _, bad := range []string{
@@ -674,12 +659,12 @@ func (fx *federationStressFixture) assertNodeStderrClean(t federationStressTB, n
 		"invalid token",
 	} {
 		if strings.Contains(log, bad) {
-			t.Fatalf("%s daemon stderr contains %q:\n%s", name, bad, node.stderr.String())
+			t.Fatalf("%s daemon stderr contains %q:\n%s", node.name, bad, node.stderr.String())
 		}
 	}
 }
 
-func startFederationStressHub(t federationStressTB, bin string) federationStressNode {
+func startFederationStressHub(t federationStressTB, bin string) *federationStressNode {
 	t.Helper()
 	dirs := newFederationStressDirs(t)
 	port := federationStressFreeTCPPort(t)
@@ -691,14 +676,15 @@ func startFederationStressHub(t federationStressTB, bin string) federationStress
 	store, err := sqlitestore.Open(context.Background(), dirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	return federationStressNode{
-		dirs:   dirs,
-		url:    url,
-		http:   &http.Client{Timeout: 5 * time.Second},
-		db:     store,
-		stderr: stderr,
-		cmd:    cmd,
-		online: true,
+	return &federationStressNode{
+		name:    "hub",
+		dirs:    dirs,
+		url:     url,
+		http:    &http.Client{Timeout: 5 * time.Second},
+		db:      store,
+		stderr:  stderr,
+		cmd:     cmd,
+		running: true,
 	}
 }
 
@@ -726,7 +712,7 @@ func startFederationStressTCPDaemon(
 	return cmd
 }
 
-func startFederationStressSpoke(t federationStressTB, bin string) federationStressNode {
+func startFederationStressSpoke(t federationStressTB, bin string, index int) *federationStressNode {
 	t.Helper()
 	dirs := newFederationStressDirs(t)
 	stderr := &safeBuffer{}
@@ -735,7 +721,16 @@ func startFederationStressSpoke(t federationStressTB, bin string) federationStre
 	store, err := sqlitestore.Open(context.Background(), dirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	return federationStressNode{dirs: dirs, url: url, http: client, db: store, stderr: stderr, cmd: cmd, online: true}
+	return &federationStressNode{
+		name:    fmt.Sprintf("spoke-%d", index),
+		dirs:    dirs,
+		url:     url,
+		http:    client,
+		db:      store,
+		stderr:  stderr,
+		cmd:     cmd,
+		running: true,
+	}
 }
 
 func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eDirs, stderr *safeBuffer) *exec.Cmd {
@@ -756,9 +751,9 @@ func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eD
 	return cmd
 }
 
-func assertNoDuplicateLiveClaimsOnNode(t federationStressTB, node string, store *sqlitestore.Store) {
+func assertNoDuplicateLiveClaimsOnNode(t federationStressTB, node *federationStressNode) {
 	t.Helper()
-	rows, err := store.QueryContext(context.Background(), `
+	rows, err := node.db.QueryContext(context.Background(), `
 		SELECT issue_uid, COUNT(*)
 		  FROM issue_claims
 		 WHERE released_at IS NULL
@@ -770,7 +765,7 @@ func assertNoDuplicateLiveClaimsOnNode(t federationStressTB, node string, store 
 		var issueUID string
 		var count int
 		require.NoError(t, rows.Scan(&issueUID, &count))
-		assert.LessOrEqualf(t, count, 1, "%s has duplicate live claims for issue %s", node, issueUID)
+		assert.LessOrEqualf(t, count, 1, "%s has duplicate live claims for issue %s", node.name, issueUID)
 	}
 	require.NoError(t, rows.Err())
 }
