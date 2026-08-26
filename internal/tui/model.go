@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"slices"
 	"sort"
@@ -139,38 +138,13 @@ type Model struct {
 	projectIdentByID map[int64]string
 	// projectsCursor is the highlighted row in viewProjects. Reset when
 	// transitioning into the view; preserved across re-renders.
-	projectsCursor                int
-	activeDaemon                  daemonTarget
-	daemonTargets                 []daemonTarget
-	daemonCursor                  int
-	federationInstance            InstanceInfo
-	federationStatuses            []FederationProjectStatus
-	federationCursor              int
-	federationLoading             bool
-	federationErr                 error
-	federationGen                 uint64
-	federationSelectedProjectSet  bool
-	federationSelectedProjectID   int64
-	federationSelectedProjectName string
-	federationMode                federationMode
-	federationDraft               federationDraft
-	federationLocalProjectCursor  int
-	federationHubCursor           int
-	federationHubProjectCursor    int
-	federationHubProjects         []ProjectSummary
-	federationHubProjectsLoading  bool
-	federationEnrollErr           error
-	federationEnrollGen           uint64
-	federationEnrollAttempt       uint64
-	federationEnrollRunning       bool
-	federationAdoptConfirmInput   string
-	federationResult              federationEnrollResult
-	federationRecovery            federationRecovery
-	federationLeaveDraft          federationLeaveDraft
-	federationLeaveResult         federationLeaveResult
-	federationLeaveAttempt        uint64
-	federationLeaveRunning        bool
-	federationResultIsLeave       bool
+	projectsCursor int
+	activeDaemon   daemonTarget
+	daemonTargets  []daemonTarget
+	daemonCursor   int
+	// federation is every field the federation views own; see
+	// federationState in federation_view.go.
+	federation federationState
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
@@ -1635,7 +1609,7 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 	return m, nil
 }
 
-// commitFilterForm reads the three filter axes off the form and
+// commitFilterForm reads the four filter axes off the form and
 // applies them to lm.filter as a single atomic update. Cursor and
 // selectedUID are reset so the next render lands on a fresh row
 // (the prior selection may no longer match the new filter, and a
@@ -1648,14 +1622,11 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 // the filter" intent overrides the implicit "follow the same issue
 // across refetches" intent.
 func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
-	if len(form.fields) < 4 {
-		return m, nil
-	}
 	m.list.filter = ListFilter{
-		Status: form.fields[0].radio.value(),
-		Owner:  strings.TrimSpace(form.fields[1].input.Value()),
-		Search: strings.TrimSpace(form.fields[2].input.Value()),
-		Labels: normalizeLabels(form.fields[3].input.Value()),
+		Status: form.fieldValue(fieldStatus),
+		Owner:  strings.TrimSpace(form.fieldValue(fieldOwner)),
+		Search: strings.TrimSpace(form.fieldValue(fieldSearch)),
+		Labels: normalizeLabels(form.fieldValue(fieldLabels)),
 	}
 	// "all" is the surface label for "no Status filter"; the wire
 	// expects an empty string.
@@ -1706,8 +1677,9 @@ func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// commitNewIssueForm reads the five fields, normalizes Labels, Owner,
-// and Parent, gates on a non-blank Title, and dispatches CreateIssue.
+// commitNewIssueForm reads Title/Body/Labels/Owner/Parent by fieldID,
+// normalizes Labels, Owner, and Parent, gates on a non-blank Title, and
+// dispatches CreateIssue.
 // Title is sent untrimmed so deliberate leading/trailing whitespace
 // survives (mirrors the legacy inline-row contract). Labels are
 // comma-split with per-token TrimSpace; empty tokens drop. Owner is
@@ -1725,10 +1697,7 @@ func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 // view's "n" handler is gated against all-projects scope, so this is
 // non-zero in that path).
 func (m Model) commitNewIssueForm() (Model, tea.Cmd) {
-	if len(m.input.fields) < 5 {
-		return m, nil
-	}
-	title := m.input.fields[0].input.Value()
+	title := m.input.fieldValue(fieldTitle)
 	if strings.TrimSpace(title) == "" {
 		m.input.err = "title is required"
 		return m, nil
@@ -1752,18 +1721,15 @@ func (m Model) commitNewIssueForm() (Model, tea.Cmd) {
 }
 
 func newIssueBodyFromForm(fields []inputField, actor string) (CreateIssueBody, error) {
-	if len(fields) < 5 {
-		return CreateIssueBody{}, fmt.Errorf("new issue form is incomplete")
-	}
-	parent, err := normalizeParentRef(fields[newIssueFormParentIndex].input.Value())
+	parent, err := normalizeParentRef(fieldValueByID(fields, fieldParent))
 	if err != nil {
 		return CreateIssueBody{}, err
 	}
 	body := CreateIssueBody{
-		Title:  fields[0].input.Value(),
-		Body:   fields[1].area.Value(),
-		Labels: normalizeLabels(fields[2].input.Value()),
-		Owner:  normalizeOwner(fields[3].input.Value()),
+		Title:  fieldValueByID(fields, fieldTitle),
+		Body:   fieldValueByID(fields, fieldBody),
+		Labels: normalizeLabels(fieldValueByID(fields, fieldLabels)),
+		Owner:  normalizeOwner(fieldValueByID(fields, fieldOwner)),
 		Actor:  actor,
 	}
 	if parent != "" {
