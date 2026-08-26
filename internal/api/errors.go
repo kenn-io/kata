@@ -14,10 +14,10 @@ import (
 
 // ErrorBody is the inner payload of an error envelope.
 type ErrorBody struct {
-	Code    string         `json:"code"`
-	Message string         `json:"message"`
-	Hint    string         `json:"hint,omitempty"`
-	Data    map[string]any `json:"data,omitempty"`
+	Code    string  `json:"code"`
+	Message string  `json:"message"`
+	Hint    string  `json:"hint,omitempty"`
+	Data    JSONMap `json:"data,omitempty"`
 }
 
 // ErrorEnvelope is the stable wire shape for non-2xx responses.

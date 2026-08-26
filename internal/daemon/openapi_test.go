@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"io/fs"
 	"maps"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
+	humago "github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/stretchr/testify/require"
 )
 
@@ -189,6 +192,47 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 	}
 }
 
+// TestOpenAPITypedMetadataPropertyKeepsReflectedSchema pins that the document
+// pipeline no longer rewrites schemas by JSON property name. A component whose
+// `metadata` property is a typed struct must keep its reflected shape — a $ref
+// to the struct's own component — rather than being flattened into an open
+// object. The old override applied its `metadata` rule unconditionally to every
+// component in the document, so there was no way to publish a typed metadata
+// field at all.
+func TestOpenAPITypedMetadataPropertyKeepsReflectedSchema(t *testing.T) {
+	type probeMetadata struct {
+		Area string `json:"area"`
+	}
+	type probeBody struct {
+		Metadata probeMetadata `json:"metadata"`
+	}
+	type probeOutput struct {
+		Body probeBody
+	}
+
+	humaConfig := huma.DefaultConfig("probe", "1.0.0")
+	humaConfig.CreateHooks = nil
+	probeAPI := huma.NewAPI(humaConfig, humago.NewAdapter(http.NewServeMux(), ""))
+	huma.Register(probeAPI, huma.Operation{
+		OperationID: "probe",
+		Method:      http.MethodGet,
+		Path:        "/probe",
+	}, func(_ context.Context, _ *struct{}) (*probeOutput, error) {
+		return &probeOutput{}, nil
+	})
+
+	doc := probeAPI.OpenAPI()
+	applyDocumentPostProcessing(doc)
+	relaxResponseAdditionalProperties(doc)
+
+	body := doc.Components.Schemas.Map()["ProbeBody"]
+	require.NotNil(t, body, "missing ProbeBody schema")
+	metadata := body.Properties["metadata"]
+	require.NotNil(t, metadata, "missing ProbeBody.metadata schema")
+	require.Equal(t, "#/components/schemas/ProbeMetadata", metadata.Ref,
+		"typed metadata property must keep its reflected component reference")
+}
+
 func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	doc := OpenAPIDocument()
 
@@ -328,38 +372,48 @@ func TestOpenAPIDocumentIncludesEventsStream(t *testing.T) {
 	}
 }
 
+// TestOpenAPIDocumentJSONBlobShapes checks one representative component per
+// opaque-JSON shape family. It is no longer an enumeration: the schemas come
+// from the wire types themselves (huma.SchemaProvider), so there is no rule
+// table here to keep in sync with one in another package.
 func TestOpenAPIDocumentJSONBlobShapes(t *testing.T) {
 	doc := OpenAPIDocument()
-	assertSchemaPropertyType(t, doc, "Issue", "metadata", huma.TypeObject)
-	// The create body's optional metadata is an open object (the generic
-	// `metadata` override), so callers can supply arbitrary keys.
-	assertSchemaPropertyType(t, doc, "CreateIssueRequestBody", "metadata", huma.TypeObject)
-	createMeta := doc.Components.Schemas.Map()["CreateIssueRequestBody"].Properties["metadata"]
-	if createMeta.AdditionalProperties != true {
-		t.Fatalf("CreateIssueRequestBody.metadata additionalProperties = %#v, want true", createMeta.AdditionalProperties)
-	}
-	assertSchemaPropertyType(t, doc, "ProjectOut", "metadata", huma.TypeObject)
-	assertSchemaPropertyType(t, doc, "ReadyGlobalIssueOut", "metadata", huma.TypeObject)
-	assertSchemaPropertyType(t, doc, "Recurrence", "template_labels", huma.TypeArray)
-	assertSchemaPropertyType(t, doc, "Recurrence", "template_metadata", huma.TypeObject)
-	assertSchemaPropertyType(t, doc, "RecurrenceTemplateUpdateInput", "metadata", huma.TypeObject)
-	assertSchemaPropertyType(t, doc, "EnableIssueSyncRequestBody", "config", huma.TypeObject)
-	assertSchemaPropertyType(t, doc, "IssueSyncBindingOut", "config", huma.TypeObject)
 
+	// db.JSONBlob — the storage object form, on a response component.
+	assertOpenObjectProperty(t, doc, "Issue", "metadata")
+	// api.JSONRawMap — undecoded per-key values, on a request body.
+	assertOpenObjectProperty(t, doc, "CreateIssueRequestBody", "metadata")
+	assertOpenObjectProperty(t, doc, "PatchIssueMetadataRequestBody", "patch")
+	// api.JSONMap — decoded Go values, on a request body and a response body.
+	assertOpenObjectProperty(t, doc, "EnableIssueSyncRequestBody", "config")
+	assertOpenObjectProperty(t, doc, "ErrorBody", "data")
+	// api.JSONRawObject — raw bytes, on a request body.
+	assertOpenObjectProperty(t, doc, "RecurrenceTemplateInput", "metadata")
+
+	// db.JSONStringArray publishes an array of strings, not an object.
 	labels := doc.Components.Schemas.Map()["Recurrence"].Properties["template_labels"]
-	if labels.Items == nil || labels.Items.Type != huma.TypeString {
-		t.Fatalf("Recurrence.template_labels items = %+v, want string items", labels.Items)
-	}
+	require.NotNil(t, labels, "missing Recurrence.template_labels schema")
+	require.Equal(t, huma.TypeArray, labels.Type)
+	require.NotNil(t, labels.Items, "template_labels must declare item schema")
+	require.Equal(t, huma.TypeString, labels.Items.Type)
+
+	// api.JSONNullableRawObject additionally admits an explicit null, which is
+	// how a recurrence template patch clears metadata.
 	updateMetadata := doc.Components.Schemas.Map()["RecurrenceTemplateUpdateInput"].Properties["metadata"]
-	if !updateMetadata.Nullable {
-		t.Fatal("RecurrenceTemplateUpdateInput.metadata must allow null")
-	}
-	for _, schemaName := range []string{"EnableIssueSyncRequestBody", "IssueSyncBindingOut"} {
-		config := doc.Components.Schemas.Map()[schemaName].Properties["config"]
-		if config.AdditionalProperties != true {
-			t.Fatalf("%s.config additionalProperties = %#v, want true", schemaName, config.AdditionalProperties)
-		}
-	}
+	require.NotNil(t, updateMetadata, "missing RecurrenceTemplateUpdateInput.metadata schema")
+	require.Equal(t, huma.TypeObject, updateMetadata.Type)
+	require.True(t, updateMetadata.Nullable, "template patch metadata must allow null")
+}
+
+// assertOpenObjectProperty asserts that a component property publishes the
+// arbitrary-JSON-object shape: type object with additionalProperties
+// explicitly true.
+func assertOpenObjectProperty(t *testing.T, doc *huma.OpenAPI, schemaName, propertyName string) {
+	t.Helper()
+	assertSchemaPropertyType(t, doc, schemaName, propertyName, huma.TypeObject)
+	prop := doc.Components.Schemas.Map()[schemaName].Properties[propertyName]
+	require.Equal(t, true, prop.AdditionalProperties,
+		"%s.%s additionalProperties", schemaName, propertyName)
 }
 
 func TestOpenAPIDocumentArrayQueryParamsExplode(t *testing.T) {

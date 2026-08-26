@@ -18,9 +18,9 @@ type EnableIssueSyncRequest struct {
 // scheduling options. Config must not contain raw credentials; providers that
 // need credentials should store references or use their own CLI auth.
 type EnableIssueSyncRequestBody struct {
-	Config          map[string]any `json:"config,omitempty"`
-	IntervalSeconds int            `json:"interval_seconds,omitempty"`
-	Interval        string         `json:"interval,omitempty"`
+	Config          JSONMap `json:"config,omitempty"`
+	IntervalSeconds int     `json:"interval_seconds,omitempty"`
+	Interval        string  `json:"interval,omitempty"`
 }
 
 // DisableIssueSyncRequest disables durable external issue sync for one project.
@@ -66,10 +66,6 @@ type IssueSyncBindingOut struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
-
-// JSONMap is an opaque JSON object used for provider-specific issue-sync
-// configuration in API responses.
-type JSONMap map[string]any
 
 // IssueSyncStatusOut summarizes current sync state.
 type IssueSyncStatusOut struct {

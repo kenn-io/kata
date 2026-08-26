@@ -377,7 +377,7 @@ func (s *Store) PatchRecurrence(ctx context.Context, input db.PatchRecurrenceIn)
 			}
 			if string(labelsJSON) != string(current.TemplateLabels) {
 				addDiff("template_labels", json.RawMessage(current.TemplateLabels), json.RawMessage(labelsJSON))
-				next.TemplateLabels = db.JSONBlob(labelsJSON)
+				next.TemplateLabels = db.JSONStringArray(labelsJSON)
 			}
 		}
 		if value := input.Update.TemplateMetadata; value != nil && string(*value) != string(current.TemplateMetadata) {

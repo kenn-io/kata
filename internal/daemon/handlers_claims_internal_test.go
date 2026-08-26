@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -60,6 +61,55 @@ func TestNewClaimHubClientHonorsAllowInsecureHostnameOptIn(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, client)
 	assert.Equal(t, "http://tailnet-hub.internal:7787", client.baseURL)
+}
+
+func TestClaimHubClientNormalizesDeprecatedClaimFields(t *testing.T) {
+	legacyClaim := &api.IssueClaimOut{
+		ClaimUID: "01HZNQ7VFPK1XGD8R5MABCD4EF",
+		IssueUID: "01HZNQ7VFPK1XGD8R5MABCD4EG",
+	}
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(api.ClaimStatusBody{Held: true, Claim: legacyClaim})
+		case http.MethodPost:
+			_ = json.NewEncoder(w).Encode(api.ClaimActionResponseBody{Granted: true, Claim: legacyClaim})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+	t.Cleanup(hub.Close)
+
+	client, err := newClaimHubClient(context.Background(), hub.URL, "enrollment-token", false)
+	require.NoError(t, err)
+
+	actions := []struct {
+		name string
+		call func() (api.ClaimActionResponseBody, error)
+	}{
+		{"acquire", func() (api.ClaimActionResponseBody, error) {
+			return client.AcquireClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+		}},
+		{"renew", func() (api.ClaimActionResponseBody, error) {
+			return client.RenewClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+		}},
+		{"release", func() (api.ClaimActionResponseBody, error) {
+			return client.ReleaseClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+		}},
+	}
+	for _, action := range actions {
+		t.Run(action.name, func(t *testing.T) {
+			body, err := action.call()
+			require.NoError(t, err)
+			assert.Equal(t, legacyClaim, body.Lease)
+			assert.Equal(t, legacyClaim, body.Claim)
+		})
+	}
+
+	status, err := client.ClaimStatus(context.Background(), 42, "ABC")
+	require.NoError(t, err)
+	assert.Equal(t, legacyClaim, status.Lease)
+	assert.Equal(t, legacyClaim, status.Claim)
 }
 
 func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {

@@ -3605,6 +3605,55 @@ func TestPendingClaimRetryResolvesAfterHubReconnectWithFreshTimedTTL(t *testing.
 		status.Claim.ExpiresAt, retryStart)
 }
 
+func TestPendingClaimRetryResolvesClaimOnlyResponseFromOlderHub(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, issue, _ := createPendingClaimRetrySpoke(t, spoke.DB, "legacy-claim-response")
+	pending, err := spoke.DB.EnqueuePendingClaim(
+		ctx, pendingClaimParams(spoke.DB, project.ID, issue.ShortID, "legacy-client"),
+	)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	legacyClaim := &api.IssueClaimOut{
+		ClaimUID:          mustTestUID(t),
+		ProjectID:         42,
+		IssueUID:          issue.UID,
+		Holder:            pending.Holder,
+		HolderInstanceUID: pending.HolderInstanceUID,
+		ClientKind:        pending.ClientKind,
+		ClaimKind:         pending.ClaimKind,
+		AcquiredAt:        now,
+		Revision:          1,
+		UpdatedAt:         now,
+	}
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/projects/42/issues/"+issue.UID+"/lease/actions/acquire", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimActionResponseBody{
+			Granted: true,
+			Claim:   legacyClaim,
+		}))
+	}))
+	t.Cleanup(hub.Close)
+	client, err := NewClient(ctx, hub.URL, "token", clientOptsWithDefault(clientpkg.Opts{}))
+	require.NoError(t, err)
+
+	require.NoError(t, retryPendingClaim(ctx, spoke.DB, client, 42, pending, nil))
+
+	var resolved, rejected int
+	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
+		SELECT resolved_at IS NOT NULL, rejected_at IS NOT NULL
+		  FROM pending_claim_requests
+		 WHERE request_uid = ?`, pending.RequestUID).Scan(&resolved, &rejected))
+	assert.Equal(t, 1, resolved)
+	assert.Equal(t, 0, rejected)
+	status, err := spoke.DB.ClaimStatusReadOnly(ctx, project.ID, issue.ShortID, now)
+	require.NoError(t, err)
+	require.True(t, status.Held)
+	require.NotNil(t, status.Claim)
+	assert.Equal(t, "legacy-client", status.Claim.Holder)
+}
+
 func TestPendingClaimRetryUnknownCapabilitiesTransportFailureRetriesAfterReconnect(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)

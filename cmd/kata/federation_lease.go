@@ -301,15 +301,31 @@ func explicitClaimAdminReason(cmd *cobra.Command, reason string) (string, error)
 	return strings.TrimSpace(reason), nil
 }
 
+// claimHolderForCLI is the single field the CLI needs from a lease payload.
+type claimHolderForCLI struct {
+	Holder string `json:"holder"`
+}
+
 type claimMutationBody struct {
 	Granted bool `json:"granted"`
 	Pending bool `json:"pending"`
 	Holder  struct {
 		Holder string `json:"holder"`
 	} `json:"holder"`
-	Claim *struct {
-		Holder string `json:"holder"`
-	} `json:"claim"`
+	// Lease is canonical. Claim is the deprecated alias the daemon still
+	// publishes; it is decoded only as a fallback for a hub older than the
+	// release that started setting lease on every arbitration response.
+	Lease *claimHolderForCLI `json:"lease"`
+	Claim *claimHolderForCLI `json:"claim"`
+}
+
+// canonicalLease returns the lease payload, falling back to the deprecated
+// claim alias.
+func (b claimMutationBody) canonicalLease() *claimHolderForCLI {
+	if b.Lease != nil {
+		return b.Lease
+	}
+	return b.Claim
 }
 
 func decodeClaimMutation(bs []byte) (claimMutationBody, error) {
@@ -325,7 +341,7 @@ func printLeaseMutation(cmd *cobra.Command, bs []byte, action, ref, actor string
 	if err != nil {
 		return err
 	}
-	deniedErr := claimDeniedErr(action, ref, b.Granted, b.Pending, b.Claim)
+	deniedErr := claimDeniedErr(action, ref, b.Granted, b.Pending, b.canonicalLease())
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
@@ -526,25 +542,23 @@ func claimStealSecondClaimErr(ref string, claimed claimMutationBody) error {
 			ExitCode: ExitConflict,
 		}
 	}
-	return claimDeniedErr("claim", ref, claimed.Granted, claimed.Pending, claimed.Claim)
+	return claimDeniedErr("claim", ref, claimed.Granted, claimed.Pending, claimed.canonicalLease())
 }
 
 func holderFromClaimMutation(b claimMutationBody) string {
-	if b.Claim != nil && strings.TrimSpace(b.Claim.Holder) != "" {
-		return strings.TrimSpace(b.Claim.Holder)
+	if lease := b.canonicalLease(); lease != nil && strings.TrimSpace(lease.Holder) != "" {
+		return strings.TrimSpace(lease.Holder)
 	}
 	return strings.TrimSpace(b.Holder.Holder)
 }
 
-func claimDeniedErr(action, ref string, granted, pending bool, claim *struct {
-	Holder string `json:"holder"`
-}) error {
+func claimDeniedErr(action, ref string, granted, pending bool, lease *claimHolderForCLI) error {
 	if (action != "claim" && action != "acquire") || pending || granted {
 		return nil
 	}
 	deniedBy := ""
-	if claim != nil {
-		deniedBy = strings.TrimSpace(claim.Holder)
+	if lease != nil {
+		deniedBy = strings.TrimSpace(lease.Holder)
 	}
 	msg := "lease denied"
 	if deniedBy != "" {

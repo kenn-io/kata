@@ -16,6 +16,36 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
+// TestAcquireClaimResponseCarriesCanonicalLease pins that the hub sets the
+// canonical lease field on every granted arbitration, which is the precondition
+// for the sync runner reading resp.Lease directly instead of coalescing it with
+// the deprecated claim alias.
+func TestAcquireClaimResponseCarriesCanonicalLease(t *testing.T) {
+	body := api.ClaimActionResponseBody{
+		Granted: true,
+		Lease:   &api.IssueClaimOut{Holder: "alice", ClaimKind: "hard"},
+	}
+	body.MirrorDeprecatedClaimFields()
+
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	var decoded ClaimResponse
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	require.NotNil(t, decoded.Lease)
+	assert.Equal(t, "alice", decoded.Lease.Holder)
+	assert.Equal(t, decoded.Lease, decoded.Claim)
+}
+
+func TestClaimResponseCanonicalLeasePrefersCanonicalField(t *testing.T) {
+	lease := &api.IssueClaimOut{Holder: "canonical"}
+	deprecated := &api.IssueClaimOut{Holder: "deprecated"}
+
+	got := (ClaimResponse{Lease: lease, Claim: deprecated}).canonicalLease()
+
+	assert.Same(t, lease, got)
+}
+
 func TestFederationClientAcquireClaimPostsRequestAndParsesTimedHubFields(t *testing.T) {
 	expiresAt := time.Date(2026, 5, 23, 15, 4, 5, 0, time.UTC)
 	hubNow := time.Date(2026, 5, 23, 15, 0, 0, 0, time.UTC)
