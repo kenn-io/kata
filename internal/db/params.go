@@ -478,6 +478,17 @@ type PatchIssueMetadataIn struct {
 	IfMatchRev *int64
 	Actor      string
 	Patch      map[string]json.RawMessage
+	Guard      *MetadataPatchGuard
+}
+
+// MetadataPatchGuard conditionally applies a single-key issue metadata patch.
+// Exactly one of IfValue or IfAbsent must be set. The storage implementation
+// checks the condition against the current metadata inside the mutation
+// transaction, after acquiring the same row lock used by the write.
+type MetadataPatchGuard struct {
+	Key      string
+	IfValue  json.RawMessage
+	IfAbsent bool
 }
 
 // PatchIssueMetadataOut carries results from a successful PatchIssueMetadata call.

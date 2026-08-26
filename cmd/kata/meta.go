@@ -28,6 +28,8 @@ func newMetaCmd() *cobra.Command {
 func newMetaSetCmd() *cobra.Command {
 	var jsonValue bool
 	var ifMatch string
+	var ifValue string
+	var ifAbsent bool
 	cmd := &cobra.Command{
 		Use:   "set <ref> <key> <value>",
 		Short: "set issue metadata",
@@ -40,16 +42,24 @@ func newMetaSetCmd() *cobra.Command {
 			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
 				return err
 			}
-			return runMetaPatch(cmd, args[0], args[1], value, ifMatch, "set")
+			guard, err := metaSetGuardFromFlags(cmd, args[1], ifValue, ifAbsent, jsonValue)
+			if err != nil {
+				return err
+			}
+			return runMetaPatchGuarded(cmd, args[0], args[1], value, ifMatch, "set", guard)
 		},
 	}
-	cmd.Flags().BoolVar(&jsonValue, "json-value", false, "treat value as raw JSON")
+	cmd.Flags().BoolVar(&jsonValue, "json-value", false, "treat value and --if-value as raw JSON")
 	cmd.Flags().StringVar(&ifMatch, "if-match", "", "expected issue revision (N or rev-N)")
+	cmd.Flags().StringVar(&ifValue, "if-value", "", "apply only when the key has this value")
+	cmd.Flags().BoolVar(&ifAbsent, "if-absent", false, "apply only when the key does not exist")
 	return cmd
 }
 
 func newMetaUnsetCmd() *cobra.Command {
 	var ifMatch string
+	var ifValue string
+	var jsonValue bool
 	cmd := &cobra.Command{
 		Use:   "unset <ref> <key>",
 		Short: "clear issue metadata",
@@ -58,10 +68,16 @@ func newMetaUnsetCmd() *cobra.Command {
 			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
 				return err
 			}
-			return runMetaPatch(cmd, args[0], args[1], json.RawMessage("null"), ifMatch, "unset")
+			guard, err := metaUnsetGuardFromFlags(cmd, args[1], ifValue, jsonValue)
+			if err != nil {
+				return err
+			}
+			return runMetaPatchGuarded(cmd, args[0], args[1], json.RawMessage("null"), ifMatch, "unset", guard)
 		},
 	}
 	cmd.Flags().StringVar(&ifMatch, "if-match", "", "expected issue revision (N or rev-N)")
+	cmd.Flags().StringVar(&ifValue, "if-value", "", "clear only when the key has this value")
+	cmd.Flags().BoolVar(&jsonValue, "json-value", false, "treat --if-value as raw JSON")
 	return cmd
 }
 
@@ -134,6 +150,16 @@ type metaGetKeyJSON struct {
 }
 
 func parseMetaSetValue(raw string, asJSON bool) (json.RawMessage, error) {
+	return parseMetaValue(raw, asJSON,
+		"null is not allowed with --json-value; use `kata meta unset` to clear a key")
+}
+
+func parseMetaGuardValue(raw string, asJSON bool) (json.RawMessage, error) {
+	return parseMetaValue(raw, asJSON,
+		"null is not allowed for --if-value; use --if-absent to match a missing key")
+}
+
+func parseMetaValue(raw string, asJSON bool, nullMessage string) (json.RawMessage, error) {
 	if !asJSON {
 		bs, err := json.Marshal(raw)
 		return json.RawMessage(bs), err
@@ -164,7 +190,7 @@ func parseMetaSetValue(raw string, asJSON bool) (json.RawMessage, error) {
 	}
 	if v == nil {
 		return nil, &cliError{
-			Message:  "null is not allowed with --json-value; use `kata meta unset` to clear a key",
+			Message:  nullMessage,
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
 		}
@@ -178,6 +204,67 @@ func parseMetaSetValue(raw string, asJSON bool) (json.RawMessage, error) {
 		}
 	}
 	return json.RawMessage(compact.Bytes()), nil
+}
+
+type metaPatchGuard struct {
+	Key      string  `json:"key"`
+	IfValue  *string `json:"if_value,omitempty"`
+	IfAbsent bool    `json:"if_absent,omitempty"`
+}
+
+func metaSetGuardFromFlags(
+	cmd *cobra.Command,
+	key, ifValue string,
+	ifAbsent, asJSON bool,
+) (*metaPatchGuard, error) {
+	hasValue := cmd.Flags().Changed("if-value")
+	hasAbsent := cmd.Flags().Changed("if-absent")
+	if hasAbsent && !ifAbsent {
+		return nil, &cliError{
+			Message: "--if-absent=false is not allowed; omit --if-absent for an unconditional write",
+			Kind:    kindValidation, ExitCode: ExitValidation,
+		}
+	}
+	if hasValue && ifAbsent {
+		return nil, &cliError{
+			Message: "--if-value and --if-absent are mutually exclusive",
+			Kind:    kindValidation, ExitCode: ExitValidation,
+		}
+	}
+	if ifAbsent {
+		return &metaPatchGuard{Key: key, IfAbsent: true}, nil
+	}
+	if !hasValue {
+		return nil, nil
+	}
+	expected, err := parseMetaGuardValue(ifValue, asJSON)
+	if err != nil {
+		return nil, err
+	}
+	expectedJSON := string(expected)
+	return &metaPatchGuard{Key: key, IfValue: &expectedJSON}, nil
+}
+
+func metaUnsetGuardFromFlags(
+	cmd *cobra.Command,
+	key, ifValue string,
+	asJSON bool,
+) (*metaPatchGuard, error) {
+	if !cmd.Flags().Changed("if-value") {
+		if asJSON {
+			return nil, &cliError{
+				Message: "--json-value on meta unset requires --if-value",
+				Kind:    kindValidation, ExitCode: ExitValidation,
+			}
+		}
+		return nil, nil
+	}
+	expected, err := parseMetaGuardValue(ifValue, asJSON)
+	if err != nil {
+		return nil, err
+	}
+	expectedJSON := string(expected)
+	return &metaPatchGuard{Key: key, IfValue: &expectedJSON}, nil
 }
 
 // validateMetaIfMatchFlag distinguishes an absent --if-match (unconditional
@@ -199,6 +286,16 @@ func validateMetaIfMatchFlag(cmd *cobra.Command, ifMatch string) error {
 }
 
 func runMetaPatch(cmd *cobra.Command, rawRef, key string, value json.RawMessage, ifMatch, verb string) error {
+	return runMetaPatchGuarded(cmd, rawRef, key, value, ifMatch, verb, nil)
+}
+
+func runMetaPatchGuarded(
+	cmd *cobra.Command,
+	rawRef, key string,
+	value json.RawMessage,
+	ifMatch, verb string,
+	guard *metaPatchGuard,
+) error {
 	if strings.TrimSpace(key) == "" {
 		return &cliError{Message: "metadata key must not be empty", Kind: kindValidation, ExitCode: ExitValidation}
 	}
@@ -222,12 +319,16 @@ func runMetaPatch(cmd *cobra.Command, rawRef, key string, value json.RawMessage,
 		headers["If-Match"] = etag
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
+	body := map[string]any{
+		"actor": actor,
+		"patch": map[string]json.RawMessage{key: value},
+	}
+	if guard != nil {
+		body["guard"] = guard
+	}
 	status, bs, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", baseURL, pid, url.PathEscape(ref.RefForAPI)),
-		map[string]any{
-			"actor": actor,
-			"patch": map[string]json.RawMessage{key: value},
-		},
+		body,
 		headers)
 	if err != nil {
 		return err

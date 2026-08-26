@@ -3,6 +3,7 @@ skip-prune: true
 user-templates:
   client: templates/client.tmpl
   typeDef: templates/type_def.tmpl
+  union.tmpl: templates/union.tmpl
 additional-imports:
   - package: reflect
 output:

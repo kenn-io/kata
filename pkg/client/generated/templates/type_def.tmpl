@@ -74,6 +74,36 @@
         Priority      *int64          `json:"priority,omitempty"`
         Title         *string         `json:"title,omitempty"`
     }
+    {{ else if eq $td.Name "MetadataPatchGuard" }}
+    type MetadataPatchGuard struct {
+        MetadataPatchGuard_OneOf *MetadataPatchGuard_OneOf `json:"-"`
+    }
+
+    func (m MetadataPatchGuard) Validate() error {
+        if m.MetadataPatchGuard_OneOf == nil {
+            return runtime.NewValidationErrorsFromString("MetadataPatchGuard_OneOf", "must select exactly one guard condition")
+        }
+        return m.MetadataPatchGuard_OneOf.Validate()
+    }
+
+    func (m MetadataPatchGuard) MarshalJSON() ([]byte, error) {
+        if err := m.Validate(); err != nil {
+            return nil, err
+        }
+        return json.Marshal(m.MetadataPatchGuard_OneOf)
+    }
+
+    func (m *MetadataPatchGuard) UnmarshalJSON(data []byte) error {
+        union := &MetadataPatchGuard_OneOf{}
+        if err := json.Unmarshal(data, union); err != nil {
+            return err
+        }
+        if err := union.Validate(); err != nil {
+            return err
+        }
+        m.MetadataPatchGuard_OneOf = union
+        return nil
+    }
     {{ else }}
     {{ if not $config.Generate.OmitDescription}}{{ toGoComment $td.Schema.Description $td.Name }}{{ end }}
     type {{$td.Name}} {{if $td.IsAlias}}={{end}} {{$td.Schema.TypeDecl}}

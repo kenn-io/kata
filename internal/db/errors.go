@@ -351,3 +351,13 @@ type RevisionConflictError struct {
 func (e *RevisionConflictError) Error() string {
 	return fmt.Sprintf("revision conflict: current revision is %d", e.CurrentRevision)
 }
+
+// MetadataGuardConflictError reports that a per-key metadata condition did
+// not match the value read inside the mutation transaction.
+type MetadataGuardConflictError struct {
+	Key string
+}
+
+func (e *MetadataGuardConflictError) Error() string {
+	return fmt.Sprintf("metadata guard failed for key %q", e.Key)
+}

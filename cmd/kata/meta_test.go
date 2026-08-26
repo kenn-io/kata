@@ -167,6 +167,87 @@ func TestMetaSetIfMatchAbsentStillUnconditional(t *testing.T) {
 	require.JSONEq(t, `{"work.attention":"ok"}`, string(issue.Issue.Metadata))
 }
 
+func TestMetaSetIfAbsentUsesConflictExitAndPreservesCurrentValue(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "metadata absent guard issue")
+
+	runCLI(t, env, dir, "meta", "set", "--if-absent", ref, "deck.rank", "first")
+	_, stderr, err := runCLIWithErr(t, env, dir,
+		"meta", "set", "--if-absent", ref, "deck.rank", "second")
+	ce := requireCLIError(t, err, ExitConflict)
+	assert.Equal(t, kindConflict, ce.Kind)
+	assert.Contains(t, stderr, "metadata_guard_failed")
+
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	require.JSONEq(t, `{"deck.rank":"first"}`, string(issue.Issue.Metadata))
+}
+
+func TestMetaSetRejectsExplicitFalseIfAbsent(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "metadata false absent guard issue")
+
+	_, stderr, err := runCLIWithErr(t, env, dir,
+		"meta", "set", "--if-absent=false", ref, "deck.rank", "first")
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Equal(t, kindValidation, ce.Kind)
+	assert.Contains(t, stderr, "--if-absent=false")
+
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	require.JSONEq(t, `{}`, string(issue.Issue.Metadata))
+}
+
+func TestMetaSetIfValueRejectsStaleWriterAndAcceptsCurrentWriter(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "metadata value guard issue")
+
+	runCLI(t, env, dir, "meta", "set", ref, "deck.rank", "first")
+	runCLI(t, env, dir, "meta", "set", "--if-value", "first", ref, "deck.rank", "second")
+
+	_, _, err := runCLIWithErr(t, env, dir,
+		"meta", "set", "--if-value", "first", ref, "deck.rank", "stale-write")
+	_ = requireCLIError(t, err, ExitConflict)
+
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	require.JSONEq(t, `{"deck.rank":"second"}`, string(issue.Issue.Metadata))
+}
+
+func TestMetaUnsetIfValueRejectsStaleWriterAndAcceptsCurrentWriter(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "metadata unset guard issue")
+
+	runCLI(t, env, dir, "meta", "set", ref, "deck.rank", "current")
+	_, _, err := runCLIWithErr(t, env, dir,
+		"meta", "unset", "--if-value", "stale", ref, "deck.rank")
+	_ = requireCLIError(t, err, ExitConflict)
+
+	runCLI(t, env, dir, "meta", "unset", "--if-value", "current", ref, "deck.rank")
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	require.JSONEq(t, `{}`, string(issue.Issue.Metadata))
+}
+
+func TestMetaValueGuardSupportsRawJSON(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "metadata json guard issue")
+
+	runCLI(t, env, dir, "meta", "set", "--json-value", ref, "deck.rank", `1`)
+	runCLI(t, env, dir, "meta", "set", "--json-value", "--if-value", `1`, ref, "deck.rank", `2`)
+	runCLI(t, env, dir, "meta", "unset", "--json-value", "--if-value", `2`, ref, "deck.rank")
+
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	require.JSONEq(t, `{}`, string(issue.Issue.Metadata))
+}
+
+func TestMetaSetRejectsConflictingValueGuards(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "metadata conflicting guard issue")
+
+	_, stderr, err := runCLIWithErr(t, env, dir,
+		"meta", "set", "--if-value", "current", "--if-absent", ref, "deck.rank", "next")
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Equal(t, kindValidation, ce.Kind)
+	assert.Contains(t, stderr, "mutually exclusive")
+}
+
 func TestMetaSetAndGetAgentOutput(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "agent metadata issue")

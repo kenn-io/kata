@@ -91,6 +91,9 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 	if in.IfMatchRev != nil && *in.IfMatchRev != curRevision {
 		return out, &db.RevisionConflictError{CurrentRevision: curRevision}
 	}
+	if err := db.CheckMetadataPatchGuard(json.RawMessage(curMetadata), in.Patch, in.Guard); err != nil {
+		return out, err
+	}
 
 	// Apply the patch onto the current metadata to produce the new blob,
 	// then diff old vs new to detect no-ops and build the event payload.

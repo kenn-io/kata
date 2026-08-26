@@ -46,6 +46,9 @@ func (s *Store) patchIssueMetadata(
 		if input.IfMatchRev != nil && *input.IfMatchRev != current.Revision {
 			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
+		if err := db.CheckMetadataPatchGuard(json.RawMessage(current.Metadata), input.Patch, input.Guard); err != nil {
+			return err
+		}
 		updated, diff, err := patchedMetadata(current.Metadata, input.Patch)
 		if err != nil {
 			return err

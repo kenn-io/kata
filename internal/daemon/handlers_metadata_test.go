@@ -250,6 +250,66 @@ func TestPatchIssueMetadata_UnknownKey_Accepted(t *testing.T) {
 		"GET-after must surface the opaque key alongside the reserved ones")
 }
 
+func TestPatchIssueMetadata_GuardFailureReturnsConflictWithoutMutation(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p, iss := seedProjectAndIssue(t, env)
+	_, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: iss.ID,
+		Actor:   "tester",
+		Patch: map[string]json.RawMessage{
+			"deck.rank": json.RawMessage(`"current"`),
+		},
+	})
+	require.NoError(t, err)
+
+	url := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", env.URL, p.ID, iss.ShortID)
+	resp := doPostWithIfMatch(t, env, url,
+		`{"actor":"tester","patch":{"deck.rank":"replacement"},"guard":{"key":"deck.rank","if_value":"\"stale\""}}`, "")
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusConflict, resp.StatusCode, "body: %s", raw)
+	assert.Contains(t, string(raw), `"code":"metadata_guard_failed"`)
+
+	stored, err := env.DB.IssueByID(t.Context(), iss.ID)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"deck.rank":"current"}`, string(stored.Metadata))
+}
+
+func TestPatchIssueMetadata_GuardRejectsInvalidCombination(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p, iss := seedProjectAndIssue(t, env)
+	url := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", env.URL, p.ID, iss.ShortID)
+
+	resp := doPostWithIfMatch(t, env, url,
+		`{"actor":"tester","patch":{"deck.rank":"next"},"guard":{"key":"deck.rank","if_value":"\"current\"","if_absent":true}}`, "")
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
+	assert.Contains(t, string(raw), `"code":"invalid_metadata_guard"`)
+}
+
+func TestPatchIssueMetadata_GuardRejectsFalseIfAbsentAlongsideValue(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p, iss := seedProjectAndIssue(t, env)
+	url := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", env.URL, p.ID, iss.ShortID)
+
+	resp := doPostWithIfMatch(t, env, url,
+		`{"actor":"tester","patch":{"deck.rank":"next"},"guard":{"key":"deck.rank","if_value":"\"current\"","if_absent":false}}`, "")
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
+	assert.Contains(t, string(raw), `"code":"invalid_metadata_guard"`)
+}
+
+func TestPatchIssueMetadata_GuardRejectsWhitespacePaddedNull(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p, iss := seedProjectAndIssue(t, env)
+	url := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", env.URL, p.ID, iss.ShortID)
+
+	resp := doPostWithIfMatch(t, env, url,
+		`{"actor":"tester","patch":{"deck.rank":"next"},"guard":{"key":"deck.rank","if_value":" null "}}`, "")
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
+	assert.Contains(t, string(raw), `"code":"invalid_metadata_guard"`)
+}
+
 // TestPatchMetadata_NoIfMatch_UnconditionalWrite pins the concurrency contract
 // for both subjects: If-Match is OPTIONAL on the metadata patch endpoints.
 // Without it the patch is unconditional last-write-wins — the intended default
