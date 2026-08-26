@@ -77,13 +77,9 @@ func TestHTTPFetcherParentDataPaginatesAndIncludesRESTDatabaseIDs(t *testing.T) 
 	})
 	require.NoError(t, err)
 
-	assert.True(t, data.Authoritative)
-	assert.False(t, data.Unsupported)
+	assert.Equal(t, ParentScanComplete, data.Scan)
 	assert.Equal(t, map[int]int64{1: 102}, data.ParentByChild)
-	assert.Equal(t, map[int]int64{1: 101, 2: 102, 3: 103}, data.ChildIDByNumber)
-	assert.Contains(t, data.ScannedChildren, 1)
-	assert.Contains(t, data.ScannedChildren, 2)
-	assert.Contains(t, data.ScannedChildren, 3)
+	assert.Equal(t, map[int]int64{1: 101, 2: 102, 3: 103}, data.ScannedChildIDs)
 	assert.Len(t, requests, 2)
 }
 
@@ -115,11 +111,77 @@ func TestHTTPFetcherParentDataReturnsAuthoritativeEmptyForScannedChildrenWithout
 	})
 	require.NoError(t, err)
 
-	assert.True(t, data.Authoritative)
-	assert.False(t, data.Unsupported)
+	assert.Equal(t, ParentScanComplete, data.Scan)
 	assert.Empty(t, data.ParentByChild)
-	assert.Contains(t, data.ScannedChildren, 5)
-	assert.Contains(t, data.ScannedChildren, 7)
+	assert.Equal(t, map[int]int64{5: 105, 7: 107}, data.ScannedChildIDs)
+}
+
+func TestHTTPFetcherParentDataScanCoverageCarriesRESTIDsForEveryChild(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decodeParentGraphQLTestRequest(t, r)
+		writeParentGraphQLTestResponse(t, w, `{
+			"data": {
+				"repository": {
+					"issues": {
+						"pageInfo": {"hasNextPage": false, "endCursor": null},
+						"nodes": [
+							{"number": 11, "fullDatabaseId": "111", "parent": {"number": 12, "fullDatabaseId": "112"}},
+							{"number": 12, "fullDatabaseId": "112", "parent": null}
+						]
+					}
+				}
+			}
+		}`)
+	}))
+	defer server.Close()
+
+	fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
+
+	data, err := fetcher.ParentData(context.Background(), Binding{
+		Host:  "github.com",
+		Owner: "example-owner",
+		Repo:  "example-repo",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, ParentScanComplete, data.Scan)
+	assert.Equal(t, map[int]int64{11: 111, 12: 112}, data.ScannedChildIDs)
+	for number, id := range data.ScannedChildIDs {
+		assert.NotZero(t, id, "scanned child %d must carry a REST id", number)
+	}
+}
+
+func TestHTTPFetcherParentDataMissingChildIDIsFatalAndYieldsNoScanCoverage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decodeParentGraphQLTestRequest(t, r)
+		writeParentGraphQLTestResponse(t, w, `{
+			"data": {
+				"repository": {
+					"issues": {
+						"pageInfo": {"hasNextPage": false, "endCursor": null},
+						"nodes": [
+							{"number": 11, "fullDatabaseId": "111", "parent": null},
+							{"number": 12, "parent": null}
+						]
+					}
+				}
+			}
+		}`)
+	}))
+	defer server.Close()
+
+	fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
+
+	data, err := fetcher.ParentData(context.Background(), Binding{
+		Host:  "github.com",
+		Owner: "example-owner",
+		Repo:  "example-repo",
+	})
+	require.Error(t, err)
+
+	assert.Contains(t, err.Error(), "child issue 12 missing fullDatabaseId")
+	assert.Equal(t, ParentScanAbsent, data.Scan)
+	assert.Empty(t, data.ScannedChildIDs)
 }
 
 func TestHTTPFetcherParentDataFeatureUnsupportedIsNonFatal(t *testing.T) {
@@ -146,10 +208,9 @@ func TestHTTPFetcherParentDataFeatureUnsupportedIsNonFatal(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.True(t, data.Unsupported)
-	assert.False(t, data.Authoritative)
+	assert.Equal(t, ParentScanUnsupported, data.Scan)
 	assert.Empty(t, data.ParentByChild)
-	assert.Empty(t, data.ScannedChildren)
+	assert.Empty(t, data.ScannedChildIDs)
 }
 
 func TestHTTPFetcherParentDataFeatureUnsupportedFromSchemaFieldNameWithoutPath(t *testing.T) {
@@ -178,10 +239,9 @@ func TestHTTPFetcherParentDataFeatureUnsupportedFromSchemaFieldNameWithoutPath(t
 	})
 	require.NoError(t, err)
 
-	assert.True(t, data.Unsupported)
-	assert.False(t, data.Authoritative)
+	assert.Equal(t, ParentScanUnsupported, data.Scan)
 	assert.Empty(t, data.ParentByChild)
-	assert.Empty(t, data.ScannedChildren)
+	assert.Empty(t, data.ScannedChildIDs)
 }
 
 func TestHTTPFetcherParentDataFeatureUnsupportedFromStructuredClassOnly(t *testing.T) {
@@ -207,8 +267,7 @@ func TestHTTPFetcherParentDataFeatureUnsupportedFromStructuredClassOnly(t *testi
 	})
 	require.NoError(t, err)
 
-	assert.True(t, data.Unsupported)
-	assert.False(t, data.Authoritative)
+	assert.Equal(t, ParentScanUnsupported, data.Scan)
 }
 
 func TestHTTPFetcherParentDataFeatureUnsupportedFromStructuredFieldAndValidationClass(t *testing.T) {
@@ -237,8 +296,7 @@ func TestHTTPFetcherParentDataFeatureUnsupportedFromStructuredFieldAndValidation
 	})
 	require.NoError(t, err)
 
-	assert.True(t, data.Unsupported)
-	assert.False(t, data.Authoritative)
+	assert.Equal(t, ParentScanUnsupported, data.Scan)
 }
 
 func TestHTTPFetcherParentDataFeatureUnsupportedFromMessageOnlySchemaError(t *testing.T) {
@@ -263,10 +321,9 @@ func TestHTTPFetcherParentDataFeatureUnsupportedFromMessageOnlySchemaError(t *te
 	})
 	require.NoError(t, err)
 
-	assert.True(t, data.Unsupported)
-	assert.False(t, data.Authoritative)
+	assert.Equal(t, ParentScanUnsupported, data.Scan)
 	assert.Empty(t, data.ParentByChild)
-	assert.Empty(t, data.ScannedChildren)
+	assert.Empty(t, data.ScannedChildIDs)
 }
 
 func TestHTTPFetcherParentDataAmbiguousMessageOnlyFieldErrorIsFatalAndUncached(t *testing.T) {
@@ -312,8 +369,8 @@ func TestHTTPFetcherParentDataAmbiguousMessageOnlyFieldErrorIsFatalAndUncached(t
 
 	data, err := fetcher.ParentData(context.Background(), binding)
 	require.NoError(t, err)
-	assert.True(t, data.Authoritative)
-	assert.Contains(t, data.ScannedChildren, 10)
+	assert.Equal(t, ParentScanComplete, data.Scan)
+	assert.Contains(t, data.ScannedChildIDs, 10)
 	assert.Equal(t, 2, requests)
 }
 
@@ -369,8 +426,8 @@ func TestHTTPFetcherParentDataGraphQLRateLimitRetriesHTTP200Errors(t *testing.T)
 
 	assert.Equal(t, 2, attempts)
 	assert.Equal(t, []time.Duration{2 * time.Second}, sleeps)
-	assert.True(t, data.Authoritative)
-	assert.Contains(t, data.ScannedChildren, 4)
+	assert.Equal(t, ParentScanComplete, data.Scan)
+	assert.Contains(t, data.ScannedChildIDs, 4)
 }
 
 func TestHTTPFetcherParentDataRetryAfterCapReturnsFatal(t *testing.T) {
@@ -742,20 +799,19 @@ func TestParentCapabilityCacheReusesUnsupportedAndExpires(t *testing.T) {
 
 	first, err := fetcher.ParentData(context.Background(), binding)
 	require.NoError(t, err)
-	assert.True(t, first.Unsupported)
+	assert.Equal(t, ParentScanUnsupported, first.Scan)
 	assert.Equal(t, 1, requests)
 
 	second, err := fetcher.ParentData(context.Background(), binding)
 	require.NoError(t, err)
-	assert.True(t, second.Unsupported)
+	assert.Equal(t, ParentScanUnsupported, second.Scan)
 	assert.Equal(t, 1, requests)
 
 	now = now.Add(time.Hour + time.Nanosecond)
 	third, err := fetcher.ParentData(context.Background(), binding)
 	require.NoError(t, err)
-	assert.True(t, third.Authoritative)
-	assert.False(t, third.Unsupported)
-	assert.Contains(t, third.ScannedChildren, 8)
+	assert.Equal(t, ParentScanComplete, third.Scan)
+	assert.Contains(t, third.ScannedChildIDs, 8)
 	assert.Equal(t, 2, requests)
 }
 
@@ -803,8 +859,8 @@ func TestParentCapabilityCacheDoesNotCacheTransientErrors(t *testing.T) {
 
 	data, err := fetcher.ParentData(context.Background(), binding)
 	require.NoError(t, err)
-	assert.True(t, data.Authoritative)
-	assert.Contains(t, data.ScannedChildren, 9)
+	assert.Equal(t, ParentScanComplete, data.Scan)
+	assert.Contains(t, data.ScannedChildIDs, 9)
 	assert.Equal(t, 2, requests)
 }
 

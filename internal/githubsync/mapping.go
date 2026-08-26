@@ -61,10 +61,14 @@ func BuildImportBatchWithConfig(sourceKey string, config Config, issues []Issue,
 				TargetExternalID: fmt.Sprintf("issue-id:%d", parentID),
 			})
 		}
-		if parentData.Unsupported {
+		switch parentData.Scan {
+		case ParentScanUnsupported:
 			item.LinkTypesAuthoritative = map[string]bool{"parent": false}
-		} else if parentData.Authoritative {
+		case ParentScanComplete:
 			item.LinkTypesAuthoritative = map[string]bool{"parent": parentData.ChildScanned(issue.Number)}
+		case ParentScanAbsent:
+			// Leave LinkTypesAuthoritative nil: the import layer defaults an
+			// absent entry to authoritative.
 		}
 		batch.Items = append(batch.Items, item)
 	}

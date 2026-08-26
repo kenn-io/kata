@@ -40,33 +40,29 @@ query($owner: String!, $repo: String!, $after: String) {
 
 var errParentFeatureUnsupported = errors.New("GitHub parent GraphQL feature unsupported")
 
-// ParentData fetches child->parent REST database IDs through GitHub GraphQL.
+// ParentData fetches child->parent REST database IDs through GitHub GraphQL
+// using a single-use binding session.
 func (f *HTTPFetcher) ParentData(ctx context.Context, binding Binding) (ParentData, error) {
-	binding, err := normalizeBinding(binding)
+	session, err := f.ForBinding(ctx, binding)
 	if err != nil {
 		return ParentData{}, err
 	}
-	client, err := f.clientForBinding(ctx, binding)
-	if err != nil {
-		return ParentData{}, err
-	}
-	return f.parentDataWithClient(ctx, client, binding)
+	return session.ParentData(ctx, binding)
 }
 
 func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Client, binding Binding) (ParentData, error) {
 	cache := f.parentCapabilityCache()
 	if cache.featureUnsupported(binding.Host) {
-		return ParentData{Unsupported: true}, nil
+		return ParentData{Scan: ParentScanUnsupported}, nil
 	}
 	requestURL, err := f.graphQLEndpointURL(binding)
 	if err != nil {
 		return ParentData{}, err
 	}
 	data := ParentData{
+		Scan:            ParentScanComplete,
+		ScannedChildIDs: map[int]int64{},
 		ParentByChild:   map[int]int64{},
-		ScannedChildren: map[int]struct{}{},
-		ChildIDByNumber: map[int]int64{},
-		Authoritative:   true,
 	}
 	var after *string
 	retryBudget := &gitHubRetryBudget{}
@@ -75,7 +71,7 @@ func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Cli
 		if err != nil {
 			if errors.Is(err, errParentFeatureUnsupported) {
 				cache.markUnsupported(binding.Host)
-				return ParentData{Unsupported: true}, nil
+				return ParentData{Scan: ParentScanUnsupported}, nil
 			}
 			return ParentData{}, err
 		}
@@ -83,12 +79,11 @@ func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Cli
 			if node.Number <= 0 {
 				continue
 			}
-			data.ScannedChildren[node.Number] = struct{}{}
 			if node.FullDatabaseID <= 0 {
 				return ParentData{}, fmt.Errorf("%s child issue %d missing fullDatabaseId",
 					parentGraphQLResource, node.Number)
 			}
-			data.ChildIDByNumber[node.Number] = int64(node.FullDatabaseID)
+			data.ScannedChildIDs[node.Number] = int64(node.FullDatabaseID)
 			if node.Parent != nil {
 				if node.Parent.FullDatabaseID <= 0 {
 					return ParentData{}, fmt.Errorf("%s parent issue %d for child issue %d missing fullDatabaseId",

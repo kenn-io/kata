@@ -26,7 +26,7 @@ func TestLiveGitHubParentGraphQLMatchesREST(t *testing.T) {
 
 	data, err := fetcher.ParentData(ctx, binding)
 	require.NoError(t, err)
-	require.False(t, data.Unsupported, "live repository does not expose parent GraphQL fields")
+	require.NotEqual(t, ParentScanUnsupported, data.Scan, "live repository does not expose parent GraphQL fields")
 	assert.True(t, data.ChildScanned(childNumber))
 
 	parentID, ok := data.ParentID(childNumber)

@@ -253,7 +253,7 @@ func (r *Runner) runClaimed(
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
-	parentLinkBackfill := ghConfig.NeedsParentLinkBackfill() && parentData.Authoritative
+	parentLinkBackfill := ghConfig.NeedsParentLinkBackfill() && parentData.Scan == ParentScanComplete
 
 	since := syncSince(binding.LastCursorAt)
 	if reconcileLegacyTitles || parentLinkBackfill {
@@ -271,7 +271,7 @@ func (r *Runner) runClaimed(
 	batch := BuildImportBatchWithConfig(binding.SourceKey, ghConfig, issues, comments, parentData, syncStartedAt)
 	batch.ProjectID = binding.ProjectID
 	batch.PreserveLocalParentConflicts = true
-	if parentData.Authoritative {
+	if parentData.Scan == ParentScanComplete {
 		batch.ReconcileLinkTypesForUnchanged = map[string]bool{"parent": true}
 		batch.Items, err = r.appendScannedParentReconcileItems(ctx, batch, parentData)
 		if err != nil {
@@ -386,25 +386,21 @@ func (r *Runner) fetchComments(ctx context.Context, fetcher Fetcher, ghConfig Co
 }
 
 func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db.ImportBatchParams, parentData ParentData) ([]db.ImportItem, error) {
-	if !parentData.Authoritative || len(parentData.ChildIDByNumber) == 0 {
+	if parentData.Scan != ParentScanComplete || len(parentData.ScannedChildIDs) == 0 {
 		return batch.Items, nil
 	}
 	present := make(map[string]struct{}, len(batch.Items))
 	for _, item := range batch.Items {
 		present[item.ExternalID] = struct{}{}
 	}
-	numbers := make([]int, 0, len(parentData.ChildIDByNumber))
-	for number := range parentData.ChildIDByNumber {
+	numbers := make([]int, 0, len(parentData.ScannedChildIDs))
+	for number := range parentData.ScannedChildIDs {
 		numbers = append(numbers, number)
 	}
 	sort.Ints(numbers)
 	items := append([]db.ImportItem(nil), batch.Items...)
 	for _, number := range numbers {
-		childID := parentData.ChildIDByNumber[number]
-		if childID == 0 {
-			continue
-		}
-		childExternalID := fmt.Sprintf("issue-id:%d", childID)
+		childExternalID := fmt.Sprintf("issue-id:%d", parentData.ScannedChildIDs[number])
 		if _, ok := present[childExternalID]; ok {
 			continue
 		}

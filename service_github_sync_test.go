@@ -163,5 +163,5 @@ func (*serviceGitHubFetcher) Comments(context.Context, githubsync.Binding, int) 
 }
 
 func (*serviceGitHubFetcher) ParentData(context.Context, githubsync.Binding) (githubsync.ParentData, error) {
-	return githubsync.ParentData{Unsupported: true}, nil
+	return githubsync.ParentData{Scan: githubsync.ParentScanUnsupported}, nil
 }
