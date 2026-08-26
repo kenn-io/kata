@@ -1081,10 +1081,7 @@ func retryPendingClaim(
 		}
 		return err
 	}
-	lease := resp.Lease
-	if lease == nil {
-		lease = resp.Claim
-	}
+	lease := resp.canonicalLease()
 	if resp.Granted && lease != nil {
 		return store.ResolvePendingClaim(ctx, pending.RequestUID, issueClaimFromAPI(lease))
 	}

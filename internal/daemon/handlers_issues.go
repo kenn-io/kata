@@ -813,7 +813,20 @@ func resolveIssueByUIDOrPrefix(ctx context.Context, store db.Storage, ref string
 	}
 }
 
+// buildShowIssueResponse assembles the show-issue payload and mirrors the
+// canonical Lease* fields onto their deprecated Claim* aliases. Hydration has
+// several early returns; funneling every success through here is what keeps
+// the two spellings from ever disagreeing.
 func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool) (*api.ShowIssueResponse, error) {
+	out, err := hydrateShowIssueResponse(ctx, cfg, issue, includeDeleted)
+	if err != nil {
+		return nil, err
+	}
+	out.Body.MirrorDeprecatedClaimFields()
+	return out, nil
+}
+
+func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool) (*api.ShowIssueResponse, error) {
 	if issue.DeletedAt != nil && !includeDeleted {
 		return nil, api.NewError(404, "issue_not_found",
 			"issue not found",
@@ -879,7 +892,6 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 		return nil, err
 	}
 	if refreshedHubNow != nil && (out.Body.Lease != nil || len(out.Body.PendingLeases) > 0) {
-		out.Body.ClaimHubNow = refreshedHubNow
 		out.Body.LeaseHubNow = refreshedHubNow
 	}
 	return out, nil
@@ -893,9 +905,7 @@ func hydrateClaimViolationsForIssue(ctx context.Context, store db.Storage, issue
 	if count == 0 {
 		return nil
 	}
-	out.Body.ClaimViolations = claimViolationOuts(violations)
-	out.Body.LeaseViolations = out.Body.ClaimViolations
-	out.Body.ClaimViolationCount = &count
+	out.Body.LeaseViolations = claimViolationOuts(violations)
 	out.Body.LeaseViolationCount = &count
 	return nil
 }

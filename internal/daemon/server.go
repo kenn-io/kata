@@ -260,7 +260,6 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	mux.Handle("/", webHandler)
 	applyErrorEnvelopeResponses(humaAPI.OpenAPI())
-	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
 	policy := cfg.authPolicy()
 	policy.SelfAuthenticatedRoutes = newSelfAuthenticatedRouteMatcher(
 		selfAuthenticatedRoutes(humaAPI.OpenAPI()))

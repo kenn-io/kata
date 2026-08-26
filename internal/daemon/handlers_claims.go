@@ -667,6 +667,9 @@ func (c *claimHubClient) ReleaseClaim(
 func (c *claimHubClient) ClaimStatus(ctx context.Context, hubProjectID int64, ref string) (api.ClaimStatusBody, error) {
 	var body api.ClaimStatusBody
 	err := c.getJSON(ctx, claimHubPath(hubProjectID, ref, "lease"), &body)
+	if err == nil {
+		normalizeForwardedClaimStatus(&body)
+	}
 	return body, err
 }
 
@@ -679,7 +682,24 @@ func (c *claimHubClient) claimAction(
 ) (api.ClaimActionResponseBody, error) {
 	var body api.ClaimActionResponseBody
 	err := c.postJSON(ctx, claimHubPath(hubProjectID, ref, "lease/actions/"+action), req, &body)
+	if err == nil {
+		normalizeForwardedClaimActionResponse(&body)
+	}
 	return body, err
+}
+
+func normalizeForwardedClaimActionResponse(body *api.ClaimActionResponseBody) {
+	if body.Lease == nil {
+		body.Lease = body.Claim
+	}
+	body.MirrorDeprecatedClaimFields()
+}
+
+func normalizeForwardedClaimStatus(body *api.ClaimStatusBody) {
+	if body.Lease == nil {
+		body.Lease = body.Claim
+	}
+	body.MirrorDeprecatedClaimFields()
 }
 
 func (c *claimHubClient) getJSON(ctx context.Context, path string, out any) error {
@@ -785,25 +805,25 @@ func claimAPIError(err error) error {
 }
 
 func claimResultBody(result db.LeaseResult) api.ClaimActionResponseBody {
-	lease := issueClaimOut(result.Claim)
-	return api.ClaimActionResponseBody{
+	body := api.ClaimActionResponseBody{
 		Granted: result.Granted,
 		Holder:  claimPrincipalOut(result.Holder),
-		Lease:   lease,
-		Claim:   lease,
+		Lease:   issueClaimOut(result.Claim),
 		Event:   result.Event,
 	}
+	body.MirrorDeprecatedClaimFields()
+	return body
 }
 
 func claimStatusBody(status db.ClaimStatus) api.ClaimStatusBody {
-	lease := issueClaimOut(status.Claim)
-	return api.ClaimStatusBody{
+	body := api.ClaimStatusBody{
 		Held:   status.Held,
 		Holder: claimPrincipalOut(status.Holder),
-		Lease:  lease,
-		Claim:  lease,
+		Lease:  issueClaimOut(status.Claim),
 		HubNow: status.HubNow,
 	}
+	body.MirrorDeprecatedClaimFields()
+	return body
 }
 
 const showClaimStatusRetryAfter = time.Minute
@@ -950,18 +970,15 @@ func hydrateClaimOutForIssue(ctx context.Context, cfg ServerConfig, issue db.Iss
 	if err != nil {
 		return internalAPIError(err)
 	}
-	out.Body.Claim = issueClaimOut(status.Claim)
-	out.Body.Lease = out.Body.Claim
+	out.Body.Lease = issueClaimOut(status.Claim)
 	if len(pending) > 0 {
-		out.Body.PendingClaims = pendingClaimOuts(pending)
-		out.Body.PendingLeases = out.Body.PendingClaims
+		out.Body.PendingLeases = pendingClaimOuts(pending)
 	}
 	if out.Body.Lease != nil || len(pending) > 0 {
 		hubNow := status.HubNow
 		if hubNow.IsZero() {
 			hubNow = now
 		}
-		out.Body.ClaimHubNow = &hubNow
 		out.Body.LeaseHubNow = &hubNow
 	}
 	return nil

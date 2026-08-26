@@ -46,9 +46,7 @@ func openAPIClientDocument() *huma.OpenAPI {
 
 func baseOpenAPIDocument() *huma.OpenAPI {
 	doc := NewServer(ServerConfig{}).API().OpenAPI()
-	applyMetadataPatchGuardSchema(doc)
-	applyJSONBlobSchemaOverrides(doc)
-	applyArrayQueryParamEncoding(doc)
+	applyDocumentPostProcessing(doc)
 	return doc
 }
 
@@ -81,6 +79,16 @@ func applyMetadataPatchGuardSchema(doc *huma.OpenAPI) {
 	guard.OneOf[0].PrecomputeMessages()
 	guard.OneOf[1].PrecomputeMessages()
 	guard.PrecomputeMessages()
+}
+
+// applyDocumentPostProcessing runs the document-level passes that shape the
+// daemon's OpenAPI output. Opaque JSON wire shapes come from the types
+// themselves (huma.SchemaProvider — see internal/api/jsonwire.go and
+// internal/db/types.go), so adding one cannot silently publish the wrong
+// schema and a typed property named "metadata" keeps its reflected shape.
+func applyDocumentPostProcessing(doc *huma.OpenAPI) {
+	applyMetadataPatchGuardSchema(doc)
+	applyArrayQueryParamEncoding(doc)
 }
 
 // OpenAPIYAML renders the OpenAPI document (OpenAPI 3.1) as YAML.
@@ -292,71 +300,6 @@ func schemaChildren(schema *huma.Schema) []*huma.Schema {
 	return children
 }
 
-func applyJSONBlobSchemaOverrides(doc *huma.OpenAPI) {
-	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
-		return
-	}
-	for name, schema := range doc.Components.Schemas.Map() {
-		applyJSONBlobSchemaOverridesTo(name, schema, map[*huma.Schema]struct{}{})
-	}
-}
-
-func applyJSONBlobSchemaOverridesTo(componentName string, schema *huma.Schema, seen map[*huma.Schema]struct{}) {
-	if schema == nil {
-		return
-	}
-	if _, ok := seen[schema]; ok {
-		return
-	}
-	seen[schema] = struct{}{}
-
-	for name, prop := range schema.Properties {
-		switch name {
-		case "data":
-			if componentName == "ErrorBody" {
-				schema.Properties[name] = jsonObjectSchema()
-				continue
-			}
-			applyJSONBlobSchemaOverridesTo("", prop, seen)
-		case "patch":
-			if componentName == "PatchIssueMetadataRequestBody" || componentName == "PatchProjectMetadataRequestBody" {
-				schema.Properties[name] = jsonObjectSchema()
-				continue
-			}
-			applyJSONBlobSchemaOverridesTo("", prop, seen)
-		case "metadata":
-			if componentName == "RecurrenceTemplateUpdateInput" {
-				schema.Properties[name] = jsonNullableObjectSchema()
-				continue
-			}
-			schema.Properties[name] = jsonObjectSchema()
-		case "template_metadata":
-			schema.Properties[name] = jsonObjectSchema()
-		case "template_labels":
-			schema.Properties[name] = jsonStringArraySchema()
-		case "config":
-			if componentName == "EnableIssueSyncRequestBody" || componentName == "IssueSyncBindingOut" {
-				schema.Properties[name] = jsonObjectSchema()
-				continue
-			}
-			applyJSONBlobSchemaOverridesTo("", prop, seen)
-		default:
-			applyJSONBlobSchemaOverridesTo("", prop, seen)
-		}
-	}
-	applyJSONBlobSchemaOverridesTo("", schema.Items, seen)
-	for _, child := range schema.OneOf {
-		applyJSONBlobSchemaOverridesTo("", child, seen)
-	}
-	for _, child := range schema.AnyOf {
-		applyJSONBlobSchemaOverridesTo("", child, seen)
-	}
-	for _, child := range schema.AllOf {
-		applyJSONBlobSchemaOverridesTo("", child, seen)
-	}
-	applyJSONBlobSchemaOverridesTo("", schema.Not, seen)
-}
-
 func applyArrayQueryParamEncoding(doc *huma.OpenAPI) {
 	if doc == nil {
 		return
@@ -390,25 +333,5 @@ func applyArrayQueryParamEncodingTo(params []*huma.Param) {
 		}
 		explode := true
 		param.Explode = &explode
-	}
-}
-
-func jsonObjectSchema() *huma.Schema {
-	return &huma.Schema{
-		Type:                 huma.TypeObject,
-		AdditionalProperties: true,
-	}
-}
-
-func jsonNullableObjectSchema() *huma.Schema {
-	schema := jsonObjectSchema()
-	schema.Nullable = true
-	return schema
-}
-
-func jsonStringArraySchema() *huma.Schema {
-	return &huma.Schema{
-		Type:  huma.TypeArray,
-		Items: &huma.Schema{Type: huma.TypeString},
 	}
 }

@@ -3,10 +3,12 @@ package db
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
-// JSONBlob is the storage type for TEXT columns that hold a JSON value
-// (objects for metadata, arrays for labels). Underlying string lets the
+// JSONBlob is the storage type for TEXT columns that hold a JSON object,
+// such as metadata fields. Underlying string lets the
 // database/sql driver scan TEXT into it directly with no `(*[]byte)(&…)`
 // cast and lets handlers pass it back into INSERT/UPDATE as a regular
 // string parameter. Custom MarshalJSON / UnmarshalJSON make it round-trip
@@ -20,8 +22,8 @@ import (
 // does no shape validation on marshal.
 type JSONBlob string
 
-// MarshalJSON emits the stored bytes verbatim (a JSON object or array,
-// per schema). Empty JSONBlob marshals as JSON null.
+// MarshalJSON emits the stored JSON object bytes verbatim, per schema.
+// Empty JSONBlob marshals as JSON null.
 func (j JSONBlob) MarshalJSON() ([]byte, error) {
 	if j == "" {
 		return []byte("null"), nil
@@ -39,6 +41,57 @@ func (j *JSONBlob) UnmarshalJSON(b []byte) error {
 	}
 	*j = JSONBlob(b)
 	return nil
+}
+
+// Schema implements huma.SchemaProvider so the published OpenAPI document
+// describes this field with its true wire shape. Reflection would otherwise
+// publish `type: string` — JSONBlob's underlying type — which lies about
+// every metadata field on the wire. additionalProperties stays explicitly
+// true rather than unset: the code-generator document flavor clears it where
+// it must (see openAPIClientDocument in internal/daemon/openapi.go).
+func (JSONBlob) Schema(huma.Registry) *huma.Schema {
+	return &huma.Schema{
+		Type:                 huma.TypeObject,
+		AdditionalProperties: true,
+	}
+}
+
+// JSONStringArray is the storage type for TEXT columns that hold a JSON array
+// of strings — today only recurrences.template_labels. It is byte-for-byte the
+// same storage and wire behavior as JSONBlob; the two types exist separately so
+// each can publish its own OpenAPI shape instead of the shape being guessed
+// from a JSON property name in another package. As with JSONBlob, the schema's
+// json_type CHECK constraint is the authority on the persisted shape and this
+// type does no shape validation on marshal.
+type JSONStringArray string
+
+// MarshalJSON emits the stored bytes verbatim (a JSON array of strings, per
+// schema). The empty JSONStringArray marshals as JSON null.
+func (j JSONStringArray) MarshalJSON() ([]byte, error) {
+	if j == "" {
+		return []byte("null"), nil
+	}
+	return []byte(j), nil
+}
+
+// UnmarshalJSON copies the raw input bytes verbatim. JSON null is stored as
+// the empty string so a round-trip through unmarshal/marshal is idempotent.
+func (j *JSONStringArray) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		*j = ""
+		return nil
+	}
+	*j = JSONStringArray(b)
+	return nil
+}
+
+// Schema implements huma.SchemaProvider. See JSONBlob.Schema: reflection would
+// publish `type: string` for this string-backed storage type.
+func (JSONStringArray) Schema(huma.Registry) *huma.Schema {
+	return &huma.Schema{
+		Type:  huma.TypeArray,
+		Items: &huma.Schema{Type: huma.TypeString},
+	}
 }
 
 // Project mirrors a row in projects. DeletedAt is set when the project has
@@ -444,25 +497,25 @@ type IssueLabel struct {
 // link is closed by issues.recurrence_id + issues.occurrence_key, whose
 // partial unique index guarantees one materialized issue per occurrence.
 type Recurrence struct {
-	ID                  int64      `json:"id"`
-	UID                 string     `json:"uid"`
-	ProjectID           int64      `json:"project_id"`
-	RRule               string     `json:"rrule"`
-	DTStart             string     `json:"dtstart"`
-	Timezone            string     `json:"timezone"`
-	TemplateTitle       string     `json:"template_title"`
-	TemplateBody        string     `json:"template_body"`
-	TemplateOwner       *string    `json:"template_owner,omitempty"`
-	TemplatePriority    *int64     `json:"template_priority,omitempty"`
-	TemplateLabels      JSONBlob   `json:"template_labels"`
-	TemplateMetadata    JSONBlob   `json:"template_metadata"`
-	NextOccurrenceKey   *string    `json:"next_occurrence_key,omitempty"`
-	LastMaterializedUID *string    `json:"last_materialized_uid,omitempty"`
-	Author              string     `json:"author"`
-	Revision            int64      `json:"revision"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
-	DeletedAt           *time.Time `json:"deleted_at,omitempty"`
+	ID                  int64           `json:"id"`
+	UID                 string          `json:"uid"`
+	ProjectID           int64           `json:"project_id"`
+	RRule               string          `json:"rrule"`
+	DTStart             string          `json:"dtstart"`
+	Timezone            string          `json:"timezone"`
+	TemplateTitle       string          `json:"template_title"`
+	TemplateBody        string          `json:"template_body"`
+	TemplateOwner       *string         `json:"template_owner,omitempty"`
+	TemplatePriority    *int64          `json:"template_priority,omitempty"`
+	TemplateLabels      JSONStringArray `json:"template_labels"`
+	TemplateMetadata    JSONBlob        `json:"template_metadata"`
+	NextOccurrenceKey   *string         `json:"next_occurrence_key,omitempty"`
+	LastMaterializedUID *string         `json:"last_materialized_uid,omitempty"`
+	Author              string          `json:"author"`
+	Revision            int64           `json:"revision"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+	DeletedAt           *time.Time      `json:"deleted_at,omitempty"`
 }
 
 // LabelCount is the per-label aggregate returned by LabelCounts.

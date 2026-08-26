@@ -3,7 +3,6 @@ package api //nolint:revive // package name "api" is fixed by Plan 1 §4 wire-ty
 
 import (
 	"cmp"
-	"encoding/json"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
@@ -400,7 +399,7 @@ type CreateIssueRequest struct {
 		// validator; unknown keys pass opaquely). JSON null values are
 		// rejected — there is nothing to clear at creation. On idempotent
 		// replay this field is ignored (the stored issue is returned as-is).
-		Metadata map[string]json.RawMessage `json:"metadata,omitempty"`
+		Metadata JSONRawMap `json:"metadata,omitempty"`
 	}
 }
 
@@ -660,24 +659,45 @@ type ReachableGraphResponse struct {
 
 // ShowIssueResponse is the per-issue read payload (Plan 2: + links, + labels).
 type ShowIssueResponse struct {
-	Body struct {
-		Issue               db.Issue            `json:"issue"`
-		Comments            []db.Comment        `json:"comments"`
-		Links               []LinkOut           `json:"links"`
-		Labels              []db.IssueLabel     `json:"labels"`
-		Parent              *IssueRef           `json:"parent,omitempty"`
-		Children            []IssueOut          `json:"children,omitempty"`
-		Claim               *IssueClaimOut      `json:"claim,omitempty"`
-		Lease               *IssueClaimOut      `json:"lease,omitempty"`
-		PendingClaims       []PendingClaimOut   `json:"pending_claims,omitempty"`
-		PendingLeases       []PendingClaimOut   `json:"pending_leases,omitempty"`
-		ClaimHubNow         *time.Time          `json:"claim_hub_now,omitempty"`
-		LeaseHubNow         *time.Time          `json:"lease_hub_now,omitempty"`
-		ClaimViolations     []ClaimViolationOut `json:"claim_violations,omitempty"`
-		LeaseViolations     []ClaimViolationOut `json:"lease_violations,omitempty"`
-		ClaimViolationCount *int64              `json:"claim_violation_count,omitempty"`
-		LeaseViolationCount *int64              `json:"lease_violation_count,omitempty"`
-	}
+	Body ShowIssueResponseBody
+}
+
+// ShowIssueResponseBody is the show-issue payload. The Claim* fields are
+// deprecated aliases of the canonical Lease* fields; see
+// MirrorDeprecatedClaimFields. The type name is load-bearing: Huma publishes
+// this component as "ShowIssueResponseBody", so renaming the Go type renames
+// the published component and breaks every generated client.
+type ShowIssueResponseBody struct {
+	Issue               db.Issue            `json:"issue"`
+	Comments            []db.Comment        `json:"comments"`
+	Links               []LinkOut           `json:"links"`
+	Labels              []db.IssueLabel     `json:"labels"`
+	Parent              *IssueRef           `json:"parent,omitempty"`
+	Children            []IssueOut          `json:"children,omitempty"`
+	Claim               *IssueClaimOut      `json:"claim,omitempty"`
+	Lease               *IssueClaimOut      `json:"lease,omitempty"`
+	PendingClaims       []PendingClaimOut   `json:"pending_claims,omitempty"`
+	PendingLeases       []PendingClaimOut   `json:"pending_leases,omitempty"`
+	ClaimHubNow         *time.Time          `json:"claim_hub_now,omitempty"`
+	LeaseHubNow         *time.Time          `json:"lease_hub_now,omitempty"`
+	ClaimViolations     []ClaimViolationOut `json:"claim_violations,omitempty"`
+	LeaseViolations     []ClaimViolationOut `json:"lease_violations,omitempty"`
+	ClaimViolationCount *int64              `json:"claim_violation_count,omitempty"`
+	LeaseViolationCount *int64              `json:"lease_violation_count,omitempty"`
+}
+
+// MirrorDeprecatedClaimFields copies the canonical Lease* fields onto their
+// deprecated Claim* aliases. Producers set only the Lease* fields and call
+// this once; that is the whole enforcement of an invariant the struct itself
+// cannot express — five independent pairs that must never disagree. See the
+// deprecation note on ClaimActionResponseBody for why both spellings stay on
+// the wire.
+func (b *ShowIssueResponseBody) MirrorDeprecatedClaimFields() {
+	b.Claim = b.Lease
+	b.PendingClaims = b.PendingLeases
+	b.ClaimHubNow = b.LeaseHubNow
+	b.ClaimViolations = b.LeaseViolations
+	b.ClaimViolationCount = b.LeaseViolationCount
 }
 
 // ClaimViolationOut is the canonical Phase 4 claim violation display shape.
@@ -1352,12 +1372,12 @@ type AuditClosesResponse struct {
 // types into request bodies. Labels are accepted as a JSON array of strings;
 // metadata is an opaque JSON object.
 type RecurrenceTemplateInput struct {
-	Title    string          `json:"title" required:"true"`
-	Body     string          `json:"body,omitempty"`
-	Owner    *string         `json:"owner,omitempty"`
-	Priority *int64          `json:"priority,omitempty"`
-	Labels   []string        `json:"labels,omitempty"`
-	Metadata json.RawMessage `json:"metadata,omitempty"`
+	Title    string        `json:"title" required:"true"`
+	Body     string        `json:"body,omitempty"`
+	Owner    *string       `json:"owner,omitempty"`
+	Priority *int64        `json:"priority,omitempty"`
+	Labels   []string      `json:"labels,omitempty"`
+	Metadata JSONRawObject `json:"metadata,omitempty"`
 }
 
 // CreateRecurrenceRequest is POST /api/v1/projects/{project_id}/recurrences.
@@ -1409,14 +1429,14 @@ type ShowRecurrenceResponse struct {
 // recurrence template. Pointer fields use nil for "no change"; nullable scalar
 // fields have explicit clear operations because JSON null also decodes to nil.
 type RecurrenceTemplateUpdateInput struct {
-	Title         *string          `json:"title,omitempty"`
-	Body          *string          `json:"body,omitempty"`
-	Owner         *string          `json:"owner,omitempty"`
-	ClearOwner    bool             `json:"clear_owner,omitempty"`
-	Priority      *int64           `json:"priority,omitempty"`
-	ClearPriority bool             `json:"clear_priority,omitempty"`
-	Labels        *[]string        `json:"labels,omitempty"`
-	Metadata      *json.RawMessage `json:"metadata,omitempty"`
+	Title         *string                `json:"title,omitempty"`
+	Body          *string                `json:"body,omitempty"`
+	Owner         *string                `json:"owner,omitempty"`
+	ClearOwner    bool                   `json:"clear_owner,omitempty"`
+	Priority      *int64                 `json:"priority,omitempty"`
+	ClearPriority bool                   `json:"clear_priority,omitempty"`
+	Labels        *[]string              `json:"labels,omitempty"`
+	Metadata      *JSONNullableRawObject `json:"metadata,omitempty" nullable:"true"`
 }
 
 // PatchRecurrenceRequest is PATCH /api/v1/projects/{project_id}/recurrences/{recurrence_uid}.
@@ -1473,9 +1493,9 @@ type PatchIssueMetadataRequest struct {
 	Ref       string `path:"ref" required:"true"`
 	IfMatch   string `header:"If-Match"`
 	Body      struct {
-		Actor string                     `json:"actor,omitempty"`
-		Patch map[string]json.RawMessage `json:"patch"`
-		Guard *MetadataPatchGuard        `json:"guard,omitempty"`
+		Actor string              `json:"actor,omitempty"`
+		Patch JSONRawMap          `json:"patch"`
+		Guard *MetadataPatchGuard `json:"guard,omitempty"`
 	}
 }
 
@@ -1495,8 +1515,8 @@ type PatchProjectMetadataRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	IfMatch   string `header:"If-Match"`
 	Body      struct {
-		Actor string                     `json:"actor" required:"true"`
-		Patch map[string]json.RawMessage `json:"patch"`
+		Actor string     `json:"actor" required:"true"`
+		Patch JSONRawMap `json:"patch"`
 	}
 }
 

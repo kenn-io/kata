@@ -18,6 +18,41 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
+// TestClaimMutationBodyPrefersLeaseOverDeprecatedClaim pins that the CLI reads
+// the canonical lease field. It used to decode only "claim", so it and
+// kata show — same binary, same daemon — disagreed about which spelling was
+// authoritative, and the CLI would have broken on the day the deprecated
+// alias is retired.
+func TestClaimMutationBodyPrefersLeaseOverDeprecatedClaim(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		payload    string
+		wantHolder string
+	}{
+		{
+			name:       "both spellings present",
+			payload:    `{"granted":true,"holder":{"holder":"principal"},"lease":{"holder":"alice"},"claim":{"holder":"deprecated"}}`,
+			wantHolder: "alice",
+		},
+		{
+			name:       "only the deprecated alias",
+			payload:    `{"granted":true,"holder":{"holder":"principal"},"claim":{"holder":"bob"}}`,
+			wantHolder: "bob",
+		},
+		{
+			name:       "no lease at all falls back to the principal",
+			payload:    `{"granted":false,"holder":{"holder":"carol"}}`,
+			wantHolder: "carol",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := decodeClaimMutation([]byte(tc.payload))
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantHolder, holderFromClaimMutation(body))
+		})
+	}
+}
+
 func TestClaim_DefaultsToHardClaimPostsActor(t *testing.T) {
 	env, dir, pid, ref := setupFederatedHubIssue(t, "claim target")
 

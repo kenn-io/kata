@@ -12,7 +12,16 @@ import (
 type ClaimRequest = api.ClaimActionBody
 
 // ClaimResponse is the wire body returned by federation claim actions.
-type ClaimResponse = api.ClaimActionResponseBody
+type ClaimResponse api.ClaimActionResponseBody
+
+// canonicalLease returns the canonical lease, falling back to the deprecated
+// claim alias for responses from older hubs.
+func (r ClaimResponse) canonicalLease() *api.IssueClaimOut {
+	if r.Lease != nil {
+		return r.Lease
+	}
+	return r.Claim
+}
 
 // ClaimStatusResponse is the wire body returned by federation lease status reads.
 type ClaimStatusResponse = api.ClaimStatusBody

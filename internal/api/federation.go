@@ -438,8 +438,11 @@ type ClaimActionResponse struct {
 }
 
 // ClaimActionResponseBody summarizes the arbitration result. Lease is the
-// public federation name; Claim is kept as a compatibility alias for the
-// internal storage term until this pre-merge branch finishes the storage rename.
+// canonical federation name. Claim is a deprecated alias that has shipped in
+// every public release since 0.5.0 and is published in api/openapi.yaml, so
+// it cannot be removed without bumping APISchemaVersion (see
+// internal/daemon/openapi.go). Producers set Lease and call
+// MirrorDeprecatedClaimFields; consumers read Lease.
 type ClaimActionResponseBody struct {
 	Granted    bool              `json:"granted"`
 	Pending    bool              `json:"pending,omitempty"`
@@ -448,6 +451,12 @@ type ClaimActionResponseBody struct {
 	Lease      *IssueClaimOut    `json:"lease,omitempty"`
 	Claim      *IssueClaimOut    `json:"claim,omitempty"`
 	Event      *db.Event         `json:"event,omitempty"`
+}
+
+// MirrorDeprecatedClaimFields copies the canonical Lease field onto its
+// deprecated Claim alias.
+func (b *ClaimActionResponseBody) MirrorDeprecatedClaimFields() {
+	b.Claim = b.Lease
 }
 
 // ClaimStatusResponse wraps ClaimStatusBody.
@@ -462,6 +471,12 @@ type ClaimStatusBody struct {
 	Lease  *IssueClaimOut    `json:"lease,omitempty"`
 	Claim  *IssueClaimOut    `json:"claim,omitempty"`
 	HubNow time.Time         `json:"hub_now"`
+}
+
+// MirrorDeprecatedClaimFields copies the canonical Lease field onto its
+// deprecated Claim alias. See ClaimActionResponseBody.
+func (b *ClaimStatusBody) MirrorDeprecatedClaimFields() {
+	b.Claim = b.Lease
 }
 
 // FederationBindingOut is the API-owned representation of a local federation
