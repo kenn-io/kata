@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Button } from '@kenn-io/kit-ui'
+
   import Modal from './Modal.svelte'
   import RecurrenceEditor from './RecurrenceEditor.svelte'
   import type {
@@ -46,35 +48,14 @@
 >
   <RecurrenceEditor bind:this={editorRef} {mode} {actor} {onCreate} {onPatch} onSaved={onClose} />
   {#snippet footer()}
-    <button type="button" class="btn-secondary" disabled={busy} onclick={onClose}>Cancel</button>
-    <button
-      type="button"
-      class="btn-primary"
+    <Button size="sm" label="Cancel" disabled={busy} onclick={onClose} />
+    <Button
+      size="sm"
+      tone="info"
+      surface="solid"
+      label={busy ? 'Saving...' : 'Save'}
       disabled={disabled || busy || !editorRef?.canSave()}
-      onclick={handleSave}>{busy ? 'Saving...' : 'Save'}</button
-    >
+      onclick={() => void handleSave()}
+    />
   {/snippet}
 </Modal>
-
-<style>
-  .btn-secondary,
-  .btn-primary {
-    padding: 6px 12px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-default);
-    background: var(--bg-surface);
-    color: var(--text-primary);
-  }
-
-  .btn-primary {
-    background: var(--accent-primary);
-    border-color: transparent;
-    color: white;
-  }
-
-  .btn-primary:disabled,
-  .btn-secondary:disabled {
-    opacity: 0.55;
-    pointer-events: none;
-  }
-</style>

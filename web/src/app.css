@@ -12,18 +12,11 @@
   font-family: var(--font-sans);
   color: var(--text-primary);
   background: var(--bg-app);
-  --text-muted: #44495a;
-  --text-faint: #44495a;
-  --text-on-accent: #fff;
-  --border-strong: #6b7080;
+  --text-muted: var(--text-secondary);
+  --text-faint: var(--text-secondary);
+  --text-on-accent: var(--bg-surface);
+  --border-strong: var(--text-muted);
   --bg-hover: var(--bg-surface-hover);
-}
-
-:root.dark {
-  --text-muted: #b8bdc9;
-  --text-faint: #b8bdc9;
-  --text-on-accent: #0d0d12;
-  --border-strong: #8a8f9e;
 }
 
 html,
@@ -105,16 +98,4 @@ a:hover {
   min-height: 0;
   display: block;
   text-align: left;
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }

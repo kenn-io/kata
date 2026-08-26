@@ -74,3 +74,45 @@ test('desktop and responsive detail remain focused, contrasted, and axe-clean', 
   results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])
 })
+
+test('dark read-only detail actions keep a dark Kit UI surface', async ({ page, kata }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.route('**/api/v1/ui/snapshot?*', async (route) => {
+    const response = await route.fetch()
+    const snapshot = (await response.json()) as {
+      capabilities: { writable: boolean; updates: string }
+    }
+    snapshot.capabilities = { writable: false, updates: 'poll' }
+    await route.fulfill({ response, json: snapshot })
+  })
+
+  const credentials = await kata.launch(page)
+  const issue = await kata.seedIssue(page, credentials, { title: 'Dark theme example task' })
+  await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
+
+  const action = page.getByRole('button', { name: 'Edit issue' })
+  await expect(action).toBeDisabled()
+  await expect(action).toHaveClass(/kit-button/)
+  const appearance = await action.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { background: style.backgroundColor, foreground: style.color }
+  })
+
+  expect(relativeLuminance(appearance.background)).toBeLessThan(0.05)
+  expect(relativeLuminance(appearance.foreground)).toBeGreaterThan(
+    relativeLuminance(appearance.background),
+  )
+})
+
+function relativeLuminance(cssColor: string): number {
+  const channels = cssColor
+    .match(/[\d.]+/g)
+    ?.slice(0, 3)
+    .map(Number)
+  if (!channels || channels.length !== 3) throw new Error(`unsupported CSS color: ${cssColor}`)
+  const linear = channels.map((channel) => {
+    const value = channel / 255
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!
+}

@@ -4,6 +4,7 @@
     projectIssueDetail,
     type KataIssueHostAction,
   } from '@kenn-io/kata-ui'
+  import { Button } from '@kenn-io/kit-ui'
   import type { ComponentProps } from 'svelte'
 
   import IssueEditor from './IssueEditor.svelte'
@@ -58,7 +59,7 @@
 
 <section class="editor-mode" aria-label="Kata issue editor" hidden={!editing}>
   <div class="editor-toolbar">
-    <button type="button" onclick={() => (editing = false)}>Done editing</button>
+    <Button size="sm" label="Done editing" onclick={() => (editing = false)} />
   </div>
   <IssueEditor {...props} />
 </section>
@@ -100,15 +101,5 @@
     border-bottom: 1px solid var(--border-default);
     padding: 8px 22px;
     background: var(--bg-primary);
-  }
-
-  .editor-toolbar button {
-    border: 1px solid var(--border-default);
-    border-radius: 6px;
-    padding: 5px 9px;
-    background: var(--surface-interactive);
-    color: var(--text-primary);
-    font: inherit;
-    cursor: pointer;
   }
 </style>

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Button } from '@kenn-io/kit-ui'
+
   interface Props {
     onReload?: (() => void) | undefined
   }
@@ -9,7 +11,7 @@
 <section class="version-mismatch" role="alert" aria-labelledby="version-mismatch-heading">
   <h2 id="version-mismatch-heading">Kata was updated</h2>
   <p>This tab could not load the current application files. Reload it to use the latest version.</p>
-  <button type="button" onclick={onReload}>Reload Kata</button>
+  <Button tone="info" surface="solid" label="Reload Kata" onclick={onReload} />
 </section>
 
 <style>
@@ -26,15 +28,5 @@
   h2,
   p {
     margin: 0 0 0.75rem;
-  }
-
-  button {
-    border: 1px solid var(--border-default);
-    border-radius: 0.375rem;
-    padding: 0.5rem 0.75rem;
-    background: var(--surface-interactive);
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
   }
 </style>

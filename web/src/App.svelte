@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button, cleanupTheme, initTheme, setThemeMode } from '@kenn-io/kit-ui'
   import { onMount } from 'svelte'
 
   import AppShell from './components/AppShell.svelte'
@@ -58,6 +59,8 @@
   type ShellMode = 'loading' | 'launch' | 'login' | 'route-error' | 'ready'
   type AppRoute = Exclude<KataRoute, { kind: 'route-error' }>
   const requestActor = 'kata-web'
+
+  initTheme({ storageKey: 'kata.kit-ui.theme.v1' })
 
   if (window.location.pathname === '/') {
     history.replaceState(null, '', `/kata${window.location.search}${window.location.hash}`)
@@ -155,19 +158,7 @@
   })
 
   $effect(() => {
-    const selectedTheme = preferences.theme
-    const media =
-      typeof window.matchMedia === 'function'
-        ? window.matchMedia('(prefers-color-scheme: dark)')
-        : undefined
-    const apply = () => {
-      const dark = selectedTheme === 'dark' || (selectedTheme === 'system' && media?.matches)
-      document.documentElement.classList.toggle('dark', dark === true)
-    }
-    apply()
-    if (selectedTheme !== 'system') return
-    media?.addEventListener('change', apply)
-    return () => media?.removeEventListener('change', apply)
+    setThemeMode(preferences.theme)
   })
 
   onMount(() => {
@@ -213,6 +204,7 @@
       referenceGeneration += 1
       referenceAbort?.abort()
       unsubscribe()
+      cleanupTheme()
     }
   })
 
@@ -908,14 +900,14 @@
 </script>
 
 <main aria-labelledby="kata-heading" class="kata-app" class:ready={mode === 'ready'}>
-  <h1 id="kata-heading" class:visually-hidden={mode === 'ready'}>Kata</h1>
+  <h1 id="kata-heading" class:kit-sr-only={mode === 'ready'}>Kata</h1>
   {#if versionMismatch}
     <VersionMismatch />
   {:else if mode === 'loading'}
     {#if daemonError}
       <section class="kata-authority-recovery" role="alert">
         <span>{daemonError}</span>
-        <button type="button" onclick={() => void startAuthority()}>Retry daemon roster</button>
+        <Button label="Retry daemon roster" onclick={() => void startAuthority()} />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
@@ -930,7 +922,7 @@
     {:else if authority?.error && !authority.loading}
       <section class="kata-authority-recovery" role="alert">
         <span>{authority.error}</span>
-        <button type="button" onclick={() => void startAuthority()}>Retry Kata snapshot</button>
+        <Button label="Retry Kata snapshot" onclick={() => void startAuthority()} />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}
