@@ -70,17 +70,14 @@ func NewHTTPFetcher(cfg HTTPFetcherConfig) *HTTPFetcher {
 	return fetcher
 }
 
-// Repository validates and reads a GitHub repository over REST.
+// Repository validates and reads a GitHub repository over REST through a
+// single-use binding session.
 func (f *HTTPFetcher) Repository(ctx context.Context, host, owner, repo string) (Repository, error) {
-	binding, err := normalizeBinding(Binding{Host: host, Owner: owner, Repo: repo})
+	session, err := f.ForBinding(ctx, Binding{Host: host, Owner: owner, Repo: repo})
 	if err != nil {
 		return Repository{}, err
 	}
-	client, err := f.clientForBinding(ctx, binding)
-	if err != nil {
-		return Repository{}, err
-	}
-	return f.repositoryWithClient(ctx, client, binding)
+	return session.Repository(ctx, host, owner, repo)
 }
 
 func (f *HTTPFetcher) repositoryWithClient(ctx context.Context, client *http.Client, binding Binding) (Repository, error) {
@@ -100,41 +97,28 @@ func (f *HTTPFetcher) repositoryWithClient(ctx context.Context, client *http.Cli
 	return out, nil
 }
 
-// Issues reads repository issues over REST, following Link rel="next" pages.
+// Issues reads repository issues over REST through a single-use binding
+// session, following Link rel="next" pages.
 func (f *HTTPFetcher) Issues(ctx context.Context, binding Binding, since *time.Time) ([]Issue, error) {
-	binding, err := normalizeBinding(binding)
+	session, err := f.ForBinding(ctx, binding)
 	if err != nil {
 		return nil, err
 	}
-	requestURL, err := f.restEndpointURL(binding, issuesEndpoint(binding, since))
-	if err != nil {
-		return nil, err
-	}
-	client, err := f.clientForBinding(ctx, binding)
-	if err != nil {
-		return nil, err
-	}
-	return fetchRESTPagesWithClient[Issue](ctx, f, client, binding, requestURL, "GitHub issues")
+	return session.Issues(ctx, binding, since)
 }
 
-// Comments reads issue comments over REST, following Link rel="next" pages.
+// Comments reads issue comments over REST through a single-use binding
+// session, following Link rel="next" pages. The issue number is validated
+// here so an invalid argument is rejected before credentials are resolved.
 func (f *HTTPFetcher) Comments(ctx context.Context, binding Binding, issueNumber int) ([]Comment, error) {
 	if issueNumber <= 0 {
 		return nil, fmt.Errorf("GitHub issue number must be positive")
 	}
-	binding, err := normalizeBinding(binding)
+	session, err := f.ForBinding(ctx, binding)
 	if err != nil {
 		return nil, err
 	}
-	requestURL, err := f.restEndpointURL(binding, commentsEndpoint(binding, issueNumber))
-	if err != nil {
-		return nil, err
-	}
-	client, err := f.clientForBinding(ctx, binding)
-	if err != nil {
-		return nil, err
-	}
-	return fetchRESTPagesWithClient[Comment](ctx, f, client, binding, requestURL, "GitHub comments for issue "+strconv.Itoa(issueNumber))
+	return session.Comments(ctx, binding, issueNumber)
 }
 
 func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client *http.Client, binding Binding, firstURL, resource string) ([]T, error) {

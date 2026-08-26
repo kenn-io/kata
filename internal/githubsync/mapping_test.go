@@ -230,12 +230,9 @@ func TestBuildImportBatchUsesParentDataAuthority(t *testing.T) {
 		},
 	}
 	parentData := ParentData{
-		ParentByChild: map[int]int64{1: 102},
-		ScannedChildren: map[int]struct{}{
-			1: {},
-			2: {},
-		},
-		Authoritative: true,
+		Scan:            ParentScanComplete,
+		ParentByChild:   map[int]int64{1: 102},
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102},
 	}
 
 	batch := BuildImportBatchWithConfig("github:repo-node", Config{}, issues, nil, parentData, syncStartedAt)
@@ -270,7 +267,7 @@ func TestBuildImportBatchUnsupportedParentDataIsNotAuthoritative(t *testing.T) {
 		},
 	}
 
-	batch := BuildImportBatchWithConfig("github:repo-node", Config{}, issues, nil, ParentData{Unsupported: true}, syncStartedAt)
+	batch := BuildImportBatchWithConfig("github:repo-node", Config{}, issues, nil, ParentData{Scan: ParentScanUnsupported}, syncStartedAt)
 
 	item := itemByExternalID(t, batch.Items, "issue-id:101")
 	assert.Empty(t, item.Links)

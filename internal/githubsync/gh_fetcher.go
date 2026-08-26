@@ -12,13 +12,34 @@ import (
 	"time"
 )
 
+// ParentScan states which of three outcomes produced a ParentData value.
+type ParentScan uint8
+
+const (
+	// ParentScanAbsent means no parent information was supplied. Items built
+	// from such a fetch leave LinkTypesAuthoritative unset, and
+	// db.ImportItemLinkTypeAuthoritative reads an unset entry as
+	// authoritative. This state is therefore the opposite of
+	// ParentScanUnsupported, not a cautious "unknown".
+	ParentScanAbsent ParentScan = iota
+	// ParentScanUnsupported means the provider does not expose the parent
+	// field, so parent links from this source are not authoritative.
+	ParentScanUnsupported
+	// ParentScanComplete means a full repository parent scan succeeded and
+	// ScannedChildIDs is its coverage.
+	ParentScanComplete
+)
+
 // ParentData carries GitHub parent relationship data plus scan coverage.
 type ParentData struct {
-	ParentByChild   map[int]int64
-	ScannedChildren map[int]struct{}
-	ChildIDByNumber map[int]int64
-	Authoritative   bool
-	Unsupported     bool
+	// Scan states which fetch outcome produced this value.
+	Scan ParentScan
+	// ScannedChildIDs maps every child issue number the scan covered to its
+	// REST database id. Coverage and identity are the same map, so they
+	// cannot disagree, and every id is non-zero.
+	ScannedChildIDs map[int]int64
+	// ParentByChild maps a child issue number to its parent's REST id.
+	ParentByChild map[int]int64
 }
 
 // ParentID returns the parent REST ID for childNumber when GitHub reported one.
@@ -35,10 +56,10 @@ func (d ParentData) ParentID(childNumber int) (int64, bool) {
 
 // ChildScanned reports whether the parent scan included childNumber.
 func (d ParentData) ChildScanned(childNumber int) bool {
-	if d.ScannedChildren == nil {
+	if d.ScannedChildIDs == nil {
 		return false
 	}
-	_, ok := d.ScannedChildren[childNumber]
+	_, ok := d.ScannedChildIDs[childNumber]
 	return ok
 }
 

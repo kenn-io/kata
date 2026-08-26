@@ -1,6 +1,7 @@
 package githubsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -175,7 +176,7 @@ func TestRunnerFeatureUnsupportedParentDataPreservesChangedIssueParent(t *testin
 	lastCursor := h.now.Add(-10 * time.Minute)
 	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
 	h.fetcher.issues = []Issue{testIssue(101, 1, "changed child", h.now.Add(-time.Hour))}
-	h.fetcher.parentData = ParentData{Unsupported: true}
+	h.fetcher.parentData = ParentData{Scan: ParentScanUnsupported}
 	h.fetcher.parentDataSet = true
 
 	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
@@ -196,9 +197,9 @@ func TestRunnerBackfillsParentLinksWithOneFullImport(t *testing.T) {
 		testIssue(102, 2, "parent", h.now.Add(-time.Hour)),
 	}
 	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanComplete,
 		ParentByChild:   map[int]int64{1: 102},
-		ScannedChildren: map[int]struct{}{1: {}, 2: {}},
-		Authoritative:   true,
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102},
 	}
 	h.fetcher.parentDataSet = true
 
@@ -254,9 +255,9 @@ func TestRunnerBackfillReconcilesParentLinksForUnchangedExistingIssues(t *testin
 		testIssue(102, 2, "unchanged parent", initialTime),
 	}
 	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanComplete,
 		ParentByChild:   map[int]int64{1: 102},
-		ScannedChildren: map[int]struct{}{1: {}, 2: {}},
-		Authoritative:   true,
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102},
 	}
 	h.fetcher.parentDataSet = true
 
@@ -285,10 +286,9 @@ func TestRunnerReconcilesScannedParentForIssueAbsentFromIncrementalFetch(t *test
 		testIssue(102, 2, "old parent", initialTime),
 		testIssue(103, 3, "new parent", initialTime),
 	}, nil, ParentData{
+		Scan:            ParentScanComplete,
 		ParentByChild:   map[int]int64{1: 102},
-		ScannedChildren: map[int]struct{}{1: {}, 2: {}, 3: {}},
-		ChildIDByNumber: map[int]int64{1: 101, 2: 102, 3: 103},
-		Authoritative:   true,
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102, 3: 103},
 	}, h.now)
 	seedBatch.ProjectID = h.project.ID
 	_, _, err := h.db.ImportBatch(h.ctx, seedBatch)
@@ -298,10 +298,9 @@ func TestRunnerReconcilesScannedParentForIssueAbsentFromIncrementalFetch(t *test
 	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
 	h.fetcher.issues = nil
 	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanComplete,
 		ParentByChild:   map[int]int64{1: 103},
-		ScannedChildren: map[int]struct{}{1: {}, 2: {}, 3: {}},
-		ChildIDByNumber: map[int]int64{1: 101, 2: 102, 3: 103},
-		Authoritative:   true,
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102, 3: 103},
 	}
 	h.fetcher.parentDataSet = true
 
@@ -322,9 +321,8 @@ func TestRunnerRemovesScannedParentForIssueAbsentFromIncrementalFetch(t *testing
 	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
 	h.fetcher.issues = nil
 	h.fetcher.parentData = ParentData{
-		ScannedChildren: map[int]struct{}{1: {}, 2: {}},
-		ChildIDByNumber: map[int]int64{1: 101, 2: 102},
-		Authoritative:   true,
+		Scan:            ParentScanComplete,
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102},
 	}
 	h.fetcher.parentDataSet = true
 
@@ -346,9 +344,9 @@ func TestRunnerBackfillConfigPersistFailureRecordsErrorAndClearsInFlight(t *test
 		testIssue(102, 2, "parent", h.now.Add(-time.Hour)),
 	}
 	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanComplete,
 		ParentByChild:   map[int]int64{1: 102},
-		ScannedChildren: map[int]struct{}{1: {}, 2: {}},
-		Authoritative:   true,
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102},
 	}
 	h.fetcher.parentDataSet = true
 	h.store.refreshErr = errors.New("config persist unavailable")
@@ -373,9 +371,9 @@ func TestRunnerMissingParentTargetSkipsLinkAndPreservesExistingParent(t *testing
 	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
 	h.fetcher.issues = []Issue{testIssue(101, 1, "changed child", h.now.Add(-time.Hour))}
 	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanComplete,
 		ParentByChild:   map[int]int64{1: 999},
-		ScannedChildren: map[int]struct{}{1: {}},
-		Authoritative:   true,
+		ScannedChildIDs: map[int]int64{1: 101},
 	}
 	h.fetcher.parentDataSet = true
 
@@ -392,9 +390,9 @@ func TestRunnerParentTargetLookupErrorRecordsFailureAndSkipsImport(t *testing.T)
 	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
 	h.fetcher.issues = []Issue{testIssue(101, 1, "changed child", h.now.Add(-time.Hour))}
 	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanComplete,
 		ParentByChild:   map[int]int64{1: 999},
-		ScannedChildren: map[int]struct{}{1: {}},
-		Authoritative:   true,
+		ScannedChildIDs: map[int]int64{1: 101},
 	}
 	h.fetcher.parentDataSet = true
 	h.store.importMappingErr = errors.New("mapping lookup unavailable")
@@ -419,14 +417,41 @@ func TestRunnerChildAbsentFromParentScanPreservesChangedIssueParent(t *testing.T
 	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
 	h.fetcher.issues = []Issue{testIssue(101, 1, "changed child", h.now.Add(-time.Hour))}
 	h.fetcher.parentData = ParentData{
-		ScannedChildren: map[int]struct{}{2: {}},
-		Authoritative:   true,
+		Scan:            ParentScanComplete,
+		ScannedChildIDs: map[int]int64{2: 102},
 	}
 	h.fetcher.parentDataSet = true
 
 	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
 	require.NoError(t, err)
 
+	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+}
+
+func TestRunnerScannedChildWithoutImportMappingIsSkippedAndWarned(t *testing.T) {
+	var logs bytes.Buffer
+	h := newRunnerHarness(t, withLogger(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))))
+	initialTime := h.now.Add(-2 * time.Hour)
+	seedSourceParentLink(t, h, initialTime)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = []Issue{testIssue(101, 1, "changed child", h.now.Add(-time.Hour))}
+	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanComplete,
+		ParentByChild:   map[int]int64{1: 102},
+		ScannedChildIDs: map[int]int64{1: 101, 5: 105},
+	}
+	h.fetcher.parentDataSet = true
+
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, []int{1}, h.store.importItemCounts)
+	_, err = h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:105")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	assert.Contains(t, logs.String(), "github sync skipped parent reconciliation for unmapped scanned child")
+	assert.Contains(t, logs.String(), "issue-id:105")
 	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
 	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
 }
@@ -526,7 +551,7 @@ func TestRunnerBackfillRefreshRetainsTransactionFenceAfterCancellation(t *testin
 		cancel()
 		return nil
 	}
-	h.fetcher.parentData = ParentData{Authoritative: true}
+	h.fetcher.parentData = ParentData{Scan: ParentScanComplete}
 	h.fetcher.parentDataSet = true
 	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
 
@@ -1127,6 +1152,12 @@ func withWake(wake <-chan struct{}) runnerOption {
 	}
 }
 
+func withLogger(logger *slog.Logger) runnerOption {
+	return func(config *RunnerConfig) {
+		config.Logger = logger
+	}
+}
+
 func withDrainAdmission(admission activity.Admission) runnerOption {
 	return func(config *RunnerConfig) {
 		config.DrainAdmission = func() (*activity.Lease, bool, <-chan struct{}) {
@@ -1383,12 +1414,12 @@ func (f *fakeRunnerFetcher) ParentData(_ context.Context, _ Binding) (ParentData
 		return ParentData{}, nil
 	}
 	out := make(map[int]int64, len(f.parentMap))
-	scanned := make(map[int]struct{}, len(f.parentMap))
-	for k, v := range f.parentMap {
-		out[k] = v
-		scanned[k] = struct{}{}
+	maps.Copy(out, f.parentMap)
+	scanned := make(map[int]int64, len(f.issues))
+	for _, issue := range f.issues {
+		scanned[issue.Number] = issue.ID
 	}
-	return ParentData{ParentByChild: out, ScannedChildren: scanned, Authoritative: true}, nil
+	return ParentData{Scan: ParentScanComplete, ParentByChild: out, ScannedChildIDs: scanned}, nil
 }
 
 func cloneParentData(in ParentData) ParentData {
@@ -1397,13 +1428,9 @@ func cloneParentData(in ParentData) ParentData {
 		out.ParentByChild = make(map[int]int64, len(in.ParentByChild))
 		maps.Copy(out.ParentByChild, in.ParentByChild)
 	}
-	if in.ScannedChildren != nil {
-		out.ScannedChildren = make(map[int]struct{}, len(in.ScannedChildren))
-		maps.Copy(out.ScannedChildren, in.ScannedChildren)
-	}
-	if in.ChildIDByNumber != nil {
-		out.ChildIDByNumber = make(map[int]int64, len(in.ChildIDByNumber))
-		maps.Copy(out.ChildIDByNumber, in.ChildIDByNumber)
+	if in.ScannedChildIDs != nil {
+		out.ScannedChildIDs = make(map[int]int64, len(in.ScannedChildIDs))
+		maps.Copy(out.ScannedChildIDs, in.ScannedChildIDs)
 	}
 	return out
 }

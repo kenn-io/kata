@@ -523,6 +523,77 @@ func TestHTTPFetcherBindingSessionReusesCredentialTransport(t *testing.T) {
 	assert.Equal(t, 1, resolver.calls)
 }
 
+func TestHTTPFetcherUnboundReadsResolveCredentialsOncePerCall(t *testing.T) {
+	resolver := &countingHTTPFetcherTestResolver{token: "test-token"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertHTTPFetcherHeaders(t, r)
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/repos/example-owner/example-repo":
+			writeHTTPFetcherTestResponse(t, w, `{"node_id":"R_example","id":123456789012,"full_name":"example-owner/example-repo"}`)
+		case "/repos/example-owner/example-repo/issues":
+			writeHTTPFetcherTestResponse(t, w, `[{"id":101,"node_id":"I_first","number":1,"title":"first"}]`)
+		case "/repos/example-owner/example-repo/issues/1/comments":
+			writeHTTPFetcherTestResponse(t, w, `[{"id":201,"node_id":"C_first","body":"first"}]`)
+		case "/graphql":
+			writeHTTPFetcherTestResponse(t, w, `{
+				"data": {
+					"repository": {
+						"issues": {
+							"pageInfo": {"hasNextPage": false, "endCursor": null},
+							"nodes": [
+								{"number": 1, "fullDatabaseId": "101", "parent": null}
+							]
+						}
+					}
+				}
+			}`)
+		default:
+			t.Fatalf("unexpected unbound request path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	fetcher := NewHTTPFetcher(HTTPFetcherConfig{
+		Client:              server.Client(),
+		CredentialResolver:  resolver,
+		RESTBaseURLOverride: server.URL,
+		GraphQLURLOverride:  server.URL + "/graphql",
+	})
+	binding := Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}
+
+	_, err := fetcher.Repository(context.Background(), "github.com", "example-owner", "example-repo")
+	require.NoError(t, err)
+	_, err = fetcher.Issues(context.Background(), binding, nil)
+	require.NoError(t, err)
+	_, err = fetcher.Comments(context.Background(), binding, 1)
+	require.NoError(t, err)
+	data, err := fetcher.ParentData(context.Background(), binding)
+	require.NoError(t, err)
+
+	assert.Equal(t, ParentScanComplete, data.Scan)
+	assert.Equal(t, 4, resolver.calls)
+}
+
+func TestHTTPFetcherCommentsRejectsNonPositiveIssueNumberWithoutResolvingCredentials(t *testing.T) {
+	resolver := &countingHTTPFetcherTestResolver{token: "test-token"}
+	fetcher := NewHTTPFetcher(HTTPFetcherConfig{
+		Client:              http.DefaultClient,
+		CredentialResolver:  resolver,
+		RESTBaseURLOverride: "https://api.github.example",
+	})
+
+	_, err := fetcher.Comments(context.Background(), Binding{
+		Host:  "github.com",
+		Owner: "example-owner",
+		Repo:  "example-repo",
+	}, 0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GitHub issue number must be positive")
+	assert.Equal(t, 0, resolver.calls)
+}
+
 func assertHTTPFetcherHeaders(t testing.TB, r *http.Request) {
 	t.Helper()
 	assert.Equal(t, "application/vnd.github+json", r.Header.Get("Accept"))
