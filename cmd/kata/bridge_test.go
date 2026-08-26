@@ -164,7 +164,7 @@ func TestBridgeOutputSortsConflictsAndRendersMissingValuesNeutrally(t *testing.T
 	assert.Contains(t, human, "External: kind=- value=- timezone=-")
 	assert.Less(t, strings.Index(human, "Field conflict: deadline_on"), strings.Index(human, "Field conflict: scheduled_on"))
 
-	flags.Agent = true
+	flags.Mode = outputAgent
 	out.Reset()
 	require.NoError(t, printBridgeResponse(cmd, nil, &bridge, "show", nil))
 	agent := out.String()

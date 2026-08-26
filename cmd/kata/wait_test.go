@@ -89,6 +89,135 @@ func TestWaitClassifyFetchErr(t *testing.T) {
 	}
 }
 
+// --- target-state / join-mode table --------------------------------------
+
+// waitStateTargets builds one target per state, named "a", "b", … Satisfied
+// targets carry a result; abandoned targets carry their permanent error, so
+// the accessors' outputs are distinguishable per state.
+func waitStateTargets(states ...waitTargetState) []*waitTarget {
+	names := []string{"a", "b", "c"}
+	targets := make([]*waitTarget, 0, len(states))
+	for i, state := range states {
+		name := names[i]
+		t := &waitTarget{arg: name, state: state}
+		switch state {
+		case targetSatisfied:
+			t.result = waitResult{Ref: name, Reason: "closed"}
+		case targetAbandoned:
+			t.abandonErr = errors.New(name + " is gone")
+		case targetPending:
+		}
+		targets = append(targets, t)
+	}
+	return targets
+}
+
+func waitResultRefs(results []waitResult) []string {
+	out := []string{}
+	for _, r := range results {
+		out = append(out, r.Ref)
+	}
+	return out
+}
+
+func waitAbandonedRefs(abandoned []waitAbandoned) []string {
+	out := []string{}
+	for _, a := range abandoned {
+		out = append(out, a.Ref)
+	}
+	return out
+}
+
+// TestWaitTargetStateAccessors pins every combination of the three-state
+// target lifecycle against both join modes. The old done/abandoned bool pair
+// could not express this table without constructing the invalid
+// "done and abandoned" target.
+func TestWaitTargetStateAccessors(t *testing.T) {
+	cases := []struct {
+		name          string
+		states        []waitTargetState
+		join          waitJoin
+		wantComplete  bool
+		wantPending   []string
+		wantResults   []string
+		wantAbandoned []string
+		wantAllAband  bool
+		wantFirstErr  string
+	}{
+		{
+			name:   "all pending under all",
+			states: []waitTargetState{targetPending, targetPending},
+			join:   joinAll, wantComplete: false,
+			wantPending: []string{"a", "b"}, wantResults: []string{}, wantAbandoned: []string{},
+		},
+		{
+			name:   "one satisfied under all is incomplete",
+			states: []waitTargetState{targetSatisfied, targetPending},
+			join:   joinAll, wantComplete: false,
+			wantPending: []string{"b"}, wantResults: []string{"a"}, wantAbandoned: []string{},
+		},
+		{
+			name:   "one satisfied under any is complete",
+			states: []waitTargetState{targetSatisfied, targetPending},
+			join:   joinAny, wantComplete: true,
+			wantPending: []string{"b"}, wantResults: []string{"a"}, wantAbandoned: []string{},
+		},
+		{
+			name:   "every target satisfied under all is complete",
+			states: []waitTargetState{targetSatisfied, targetSatisfied},
+			join:   joinAll, wantComplete: true,
+			wantPending: []string{}, wantResults: []string{"a", "b"}, wantAbandoned: []string{},
+		},
+		{
+			name:   "abandoned is neither pending nor satisfied",
+			states: []waitTargetState{targetAbandoned, targetPending},
+			join:   joinAny, wantComplete: false,
+			wantPending: []string{"b"}, wantResults: []string{}, wantAbandoned: []string{"a"},
+			wantFirstErr: "a is gone",
+		},
+		{
+			name:   "abandoned plus satisfied leaves nothing pending",
+			states: []waitTargetState{targetAbandoned, targetSatisfied},
+			join:   joinAll, wantComplete: false,
+			wantPending: []string{}, wantResults: []string{"b"}, wantAbandoned: []string{"a"},
+			wantFirstErr: "a is gone",
+		},
+		{
+			name:   "all abandoned can never complete",
+			states: []waitTargetState{targetAbandoned, targetAbandoned},
+			join:   joinAny, wantComplete: false,
+			wantPending: []string{}, wantResults: []string{}, wantAbandoned: []string{"a", "b"},
+			wantAllAband: true, wantFirstErr: "a is gone",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			targets := waitStateTargets(tc.states...)
+			assert.Equal(t, tc.wantComplete, waitComplete(targets, tc.join))
+			assert.Equal(t, tc.wantPending, pendingRefs(targets))
+			assert.Equal(t, tc.wantResults, waitResultRefs(collectResults(targets)))
+			assert.Equal(t, tc.wantAbandoned, waitAbandonedRefs(collectAbandoned(targets)))
+			assert.Equal(t, tc.wantAllAband, allAbandoned(targets))
+			if tc.wantFirstErr == "" {
+				assert.NoError(t, firstAbandonErr(targets))
+			} else {
+				require.Error(t, firstAbandonErr(targets))
+				assert.Equal(t, tc.wantFirstErr, firstAbandonErr(targets).Error())
+			}
+		})
+	}
+}
+
+// TestWaitJoinZeroValueIsAll pins --all as the documented default join: the
+// zero value of waitJoin must be joinAll, because runWait only ever sets
+// joinAny explicitly.
+func TestWaitJoinZeroValueIsAll(t *testing.T) {
+	var zero waitJoin
+	targets := waitStateTargets(targetSatisfied, targetPending)
+	assert.False(t, waitComplete(targets, zero),
+		"the zero join must be --all, which is not satisfied by one of two refs")
+}
+
 func TestWaitParseModeRejectsUnknown(t *testing.T) {
 	_, err := parseWaitMode("banana")
 	require.Error(t, err)

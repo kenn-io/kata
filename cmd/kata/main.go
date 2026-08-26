@@ -16,19 +16,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// globalFlags carries the universal flags applied on every command.
+// globalFlags carries the universal flags applied on every command. Sel is the
+// output selection as typed; Mode is the single resolved answer, written once
+// by PersistentPreRunE and read everywhere through currentOutputMode().
 type globalFlags struct {
-	Format       string
-	FormatValues []string
-	JSON         bool
-	Agent        bool
-	Mode         outputMode
-	Quiet        bool
-	As           string
-	Workspace    string
-	Project      string
-	Daemon       string
-	Version      bool
+	Sel       outputSelection
+	Mode      outputMode
+	Quiet     bool
+	As        string
+	Workspace string
+	Project   string
+	Daemon    string
+	Version   bool
 }
 
 var flags globalFlags
@@ -75,16 +74,13 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 			flags.Mode = mode
-			if mode == outputJSON {
-				flags.JSON = true
-			}
 			return nil
 		},
 	}
-	cmd.PersistentFlags().Var(outputFormatFlag{value: &flags.Format, values: &flags.FormatValues},
+	cmd.PersistentFlags().Var(outputFormatFlag{values: &flags.Sel.formats},
 		"format", "output format: human|json|agent; contract for quickstart")
-	cmd.PersistentFlags().BoolVar(&flags.JSON, "json", false, "emit machine-readable JSON")
-	cmd.PersistentFlags().BoolVar(&flags.Agent, "agent", false, "emit concise agent-readable text")
+	cmd.PersistentFlags().BoolVar(&flags.Sel.json, "json", false, "emit machine-readable JSON")
+	cmd.PersistentFlags().BoolVar(&flags.Sel.agent, "agent", false, "emit concise agent-readable text")
 	cmd.PersistentFlags().BoolVarP(&flags.Quiet, "quiet", "q", false, "suppress non-essential output")
 	cmd.PersistentFlags().StringVar(&flags.As, "as", "", "override actor (default: $KATA_AUTHOR > $USER > git > anonymous)")
 	cmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "path used for project resolution (default: cwd)")
@@ -178,16 +174,6 @@ func main() {
 	}
 }
 
-// emitError preserves the legacy bool-shaped test/helper API while main uses
-// the resolved output mode.
-func emitError(w io.Writer, err error, jsonMode bool, runEReached bool) {
-	if jsonMode {
-		emitErrorForMode(w, err, outputJSON, runEReached)
-		return
-	}
-	emitErrorForMode(w, err, outputHuman, runEReached)
-}
-
 func emitErrorForMode(w io.Writer, err error, mode outputMode, runEReached bool) {
 	switch mode {
 	case outputJSON:
@@ -216,45 +202,8 @@ func resolvedOutputModeForError(root *cobra.Command, args []string) (outputMode,
 	if flags.Mode != "" {
 		return flags.Mode, nil
 	}
-	importLegacy := false
-	if cmd := commandFromArgs(root, args); isImportCommand(cmd) {
-		importLegacy = true
-	}
-	mode, err := resolveOutputModeArgsForCommand(args, flags.Format, flags.JSON, flags.Agent, importLegacy, root)
-	if err != nil {
-		return outputModeHintForResolutionError(importLegacy), err
-	}
-	return mode, nil
-}
-
-func outputModeHintForResolutionError(importLegacy bool) outputMode {
-	formats := flags.FormatValues
-	if len(formats) == 0 && flags.Format != "" {
-		formats = []string{flags.Format}
-	}
-	selected := make([]outputMode, 0, len(formats)+2)
-	for _, format := range formats {
-		switch mode := outputMode(outputFormatValue(format, importLegacy)); mode {
-		case outputHuman, outputJSON, outputAgent:
-			selected = append(selected, mode)
-		}
-	}
-	if flags.JSON {
-		selected = append(selected, outputJSON)
-	}
-	if flags.Agent {
-		selected = append(selected, outputAgent)
-	}
-	if len(selected) == 0 {
-		return outputHuman
-	}
-	first := selected[0]
-	for _, mode := range selected[1:] {
-		if mode != first {
-			return outputHuman
-		}
-	}
-	return first
+	cmd, sel := preParse(root, args)
+	return sel.resolve(isImportCommand(cmd), supportsContractOutput(cmd))
 }
 
 func commandNameForError(root *cobra.Command, args []string, runEReached bool) string {
@@ -262,36 +211,11 @@ func commandNameForError(root *cobra.Command, args []string, runEReached bool) s
 		return errorCommandName
 	}
 	if !runEReached {
-		if cmd := commandFromArgs(root, args); cmd != nil && cmd != root {
+		if cmd, _ := preParse(root, args); cmd != nil && cmd != root {
 			return commandLeaf(cmd)
 		}
 	}
 	return "kata"
-}
-
-func commandFromArgs(root *cobra.Command, args []string) *cobra.Command {
-	if root == nil {
-		return nil
-	}
-	cmd := root
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			break
-		}
-		if strings.HasPrefix(arg, "-") {
-			if flagArgConsumesValue(cmd, arg) && i+1 < len(args) {
-				i++
-			}
-			continue
-		}
-		next := childCommandByName(cmd, arg)
-		if next == nil {
-			break
-		}
-		cmd = next
-	}
-	return cmd
 }
 
 func childCommandByName(cmd *cobra.Command, name string) *cobra.Command {
@@ -307,24 +231,6 @@ func childCommandByName(cmd *cobra.Command, name string) *cobra.Command {
 		}
 	}
 	return nil
-}
-
-func flagArgConsumesValue(cmd *cobra.Command, arg string) bool {
-	name := strings.TrimLeft(arg, "-")
-	if found := strings.Contains(name, "="); found {
-		return false
-	}
-	if name == "" {
-		return false
-	}
-	flag := cmd.Flags().Lookup(name)
-	if flag == nil {
-		flag = cmd.PersistentFlags().Lookup(name)
-	}
-	if flag == nil {
-		flag = cmd.InheritedFlags().Lookup(name)
-	}
-	return flag != nil && flag.Value.Type() != "bool"
 }
 
 func commandLeaf(cmd *cobra.Command) string {
