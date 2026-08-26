@@ -87,6 +87,29 @@ const (
 	fieldRadio // Plan 8 commit 5a — finite-choice axis (e.g. Status all/open/closed)
 )
 
+// fieldID is a form field's stable identity. Forms are built in a fixed
+// order (tab cycling and every rendered layout depend on it) but are READ
+// by identity, so a schema change — reordering, adding an axis, re-backing
+// a field with a different fieldKind — cannot silently retarget a commit.
+//
+// fieldNone is the zero value and never matches: a field that forgets to
+// declare an id is unreachable by lookup rather than aliasing whichever
+// field happens to be declared first.
+type fieldID int
+
+const (
+	fieldNone fieldID = iota
+	fieldTitle
+	fieldBody
+	fieldLabels
+	fieldOwner
+	fieldParent
+	fieldStatus
+	fieldSearch
+	fieldComment
+	fieldPrompt
+)
+
 // radioField backs a fieldRadio inputField: a finite set of choices
 // and the index of the currently-selected one. Used by the filter
 // modal's Status axis (all/open/closed) where free-form text would
@@ -146,6 +169,7 @@ func (r *radioField) cycle(delta int) {
 // The radio member backs fieldRadio kinds (Plan 8 commit 5a — Status
 // axis on the filter modal); the bubbles models stay zero-valued.
 type inputField struct {
+	id       fieldID
 	label    string
 	kind     fieldKind
 	input    textinput.Model // populated when kind == fieldSingleLine
@@ -164,6 +188,58 @@ func (f *inputField) value() string {
 		return f.radio.value()
 	}
 	return f.input.Value()
+}
+
+// fieldByID returns a pointer INTO fields for the field carrying id, or
+// nil when the form has no such field. The pointer is load-bearing: the
+// key-routing paths write the mutated field back with
+// s.fields[s.active] = *f, and a value-returning accessor would silently
+// drop those mutations.
+func fieldByID(fields []inputField, id fieldID) *inputField {
+	if id == fieldNone {
+		return nil
+	}
+	for i := range fields {
+		if fields[i].id == id {
+			return &fields[i]
+		}
+	}
+	return nil
+}
+
+// fieldValueByID reads a field's text through inputField.value(), so the
+// caller never has to know which bubbles component backs it. A missing
+// field reads as "" — one uniform degradation instead of the per-form
+// arity guards that used to no-op a commit or paint a blank overlay.
+func fieldValueByID(fields []inputField, id fieldID) string {
+	if f := fieldByID(fields, id); f != nil {
+		return f.value()
+	}
+	return ""
+}
+
+func (s *inputState) field(id fieldID) *inputField {
+	if s == nil {
+		return nil
+	}
+	return fieldByID(s.fields, id)
+}
+
+func (s *inputState) fieldValue(id fieldID) string {
+	if s == nil {
+		return ""
+	}
+	return fieldValueByID(s.fields, id)
+}
+
+// activeFieldIs reports whether the focused field carries id. Replaces the
+// `s.active == <magic index>` comparisons in the ctrl+e and enter gates.
+func (s *inputState) activeFieldIs(id fieldID) bool {
+	if id == fieldNone {
+		return false
+	}
+	f := s.activeField()
+	return f != nil && f.id == id
 }
 
 // setValue mirrors a string into whichever bubbles model backs f.
@@ -544,13 +620,20 @@ func (s inputState) handleLockedFieldKey(msg tea.KeyPressMsg) (inputState, bool)
 // not "discard the form." Plan 8 commit 5b: now resets the Labels
 // field as well (4th field).
 func (s inputState) resetFilterFields() inputState {
-	if s.kind != inputFilterForm || len(s.fields) < 4 {
+	if s.kind != inputFilterForm {
 		return s
 	}
-	s.fields[0].radio.set("all")
-	s.fields[1].input.SetValue("")
-	s.fields[2].input.SetValue("")
-	s.fields[3].input.SetValue("")
+	// "all" is the Status radio's first choice; setValue pins an unknown
+	// value to index 0, so this is also the safe reset for any future
+	// choice list.
+	if f := s.field(fieldStatus); f != nil {
+		f.setValue("all")
+	}
+	for _, id := range []fieldID{fieldOwner, fieldSearch, fieldLabels} {
+		if f := s.field(id); f != nil {
+			f.setValue("")
+		}
+	}
 	return s
 }
 
@@ -564,7 +647,7 @@ func (s inputState) ctrlEAllowed() bool {
 	case inputFilterForm:
 		return false
 	case inputNewIssueForm:
-		return s.active == newIssueFormBodyIndex
+		return s.activeFieldIs(fieldBody)
 	}
 	return true
 }
@@ -595,7 +678,7 @@ func (s inputState) shouldAdvanceOnEnter() bool {
 	case inputFilterForm:
 		return true
 	case inputNewIssueForm:
-		return s.active != newIssueFormBodyIndex
+		return !s.activeFieldIs(fieldBody)
 	}
 	return false
 }
@@ -656,7 +739,7 @@ func newSearchBar(current ListFilter) inputState {
 	return inputState{
 		kind:      inputSearchBar,
 		title:     "search",
-		fields:    []inputField{{kind: fieldSingleLine, input: ti}},
+		fields:    []inputField{{id: fieldSearch, kind: fieldSingleLine, input: ti}},
 		preFilter: current,
 	}
 }
@@ -674,7 +757,7 @@ func newPanelPrompt(kind inputKind, target formTarget) inputState {
 	return inputState{
 		kind:   kind,
 		title:  panelPromptTitle(kind, target.issueShortID),
-		fields: []inputField{{kind: fieldSingleLine, input: ti}},
+		fields: []inputField{{id: fieldPrompt, kind: fieldSingleLine, input: ti}},
 		target: target,
 	}
 }
@@ -721,7 +804,7 @@ func newBodyEditForm(target formTarget, current string) inputState {
 	return inputState{
 		kind:   inputBodyEditForm,
 		title:  fmt.Sprintf("edit body of #%s", target.issueShortID),
-		fields: []inputField{newFormTextarea(current)},
+		fields: []inputField{newFormTextarea(fieldBody, current)},
 		target: target,
 	}
 }
@@ -735,7 +818,7 @@ func newCommentForm(target formTarget) inputState {
 	return inputState{
 		kind:   inputCommentForm,
 		title:  fmt.Sprintf("comment on #%s", target.issueShortID),
-		fields: []inputField{newFormTextarea("")},
+		fields: []inputField{newFormTextarea(fieldComment, "")},
 		target: target,
 	}
 }
@@ -744,22 +827,14 @@ func newCommentForm(target formTarget) inputState {
 // form's only field. Pre-filled with current; focused so the cursor
 // renders immediately; soft-wrap on so long lines fold inside the
 // modal panel instead of horizontal-scrolling.
-func newFormTextarea(current string) inputField {
+func newFormTextarea(id fieldID, current string) inputField {
 	ta := textarea.New()
 	ta.SetValue(current)
 	ta.Focus()
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
-	return inputField{kind: fieldMultiLine, area: ta}
+	return inputField{id: id, kind: fieldMultiLine, area: ta}
 }
-
-// newIssueForm*Index names fields inside newNewIssueForm. ctrl+e is
-// allowed only on Body; Parent is optional and may start locked for
-// the `N` new-child flow.
-const (
-	newIssueFormBodyIndex   = 1
-	newIssueFormParentIndex = 4
-)
 
 // filterFormStatusChoices is the canonical Status-axis choice list for
 // the filter modal. "all" maps to ListFilter.Status="" on commit so
@@ -794,6 +869,7 @@ var filterFormStatusChoices = []string{"all", "open", "closed"}
 // rework lands.
 func newFilterForm(current ListFilter) inputState {
 	status := inputField{
+		id:    fieldStatus,
 		label: "Status",
 		kind:  fieldRadio,
 		radio: radioField{choices: filterFormStatusChoices},
@@ -816,9 +892,9 @@ func newFilterForm(current ListFilter) inputState {
 		title: "filter",
 		fields: []inputField{
 			status,
-			{kind: fieldSingleLine, input: owner, label: "Owner"},
-			{kind: fieldSingleLine, input: search, label: "Search"},
-			{kind: fieldSingleLine, input: labels, label: "Labels"},
+			{id: fieldOwner, kind: fieldSingleLine, input: owner, label: "Owner"},
+			{id: fieldSearch, kind: fieldSingleLine, input: search, label: "Search"},
+			{id: fieldLabels, kind: fieldSingleLine, input: labels, label: "Labels"},
 		},
 		preFilter: current,
 	}
@@ -850,8 +926,10 @@ func newNewIssueForm() inputState {
 
 func newNewIssueFormWithParent(parentShortID string) inputState {
 	s := newNewIssueFormBase("new child issue")
-	s.fields[newIssueFormParentIndex].input.SetValue(parentShortID)
-	s.fields[newIssueFormParentIndex].locked = true
+	if f := s.field(fieldParent); f != nil {
+		f.setValue(parentShortID)
+		f.locked = true
+	}
 	s.initialFieldValues = normalizedFieldValues(s.fields)
 	return s
 }
@@ -877,11 +955,11 @@ func newNewIssueFormBase(title string) inputState {
 		kind:  inputNewIssueForm,
 		title: title,
 		fields: []inputField{
-			{kind: fieldSingleLine, input: ti, label: "Title", required: true},
-			{kind: fieldMultiLine, area: body, label: "Body"},
-			{kind: fieldSingleLine, input: labels, label: "Labels"},
-			{kind: fieldSingleLine, input: owner, label: "Owner"},
-			{kind: fieldSingleLine, input: parent, label: "Parent"},
+			{id: fieldTitle, kind: fieldSingleLine, input: ti, label: "Title", required: true},
+			{id: fieldBody, kind: fieldMultiLine, area: body, label: "Body"},
+			{id: fieldLabels, kind: fieldSingleLine, input: labels, label: "Labels"},
+			{id: fieldOwner, kind: fieldSingleLine, input: owner, label: "Owner"},
+			{id: fieldParent, kind: fieldSingleLine, input: parent, label: "Parent"},
 		},
 	}
 }

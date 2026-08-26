@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -79,12 +80,38 @@ func primeLabelCache(m *Model, projectID, gen int64) {
 	m.nextLabelsGen = gen
 }
 
-func focusNewIssueField(s inputState, idx int) inputState {
+// TestNewIssueForm_LabelsCommitReadsThroughValueAccessor is the audit's
+// requested regression pin for S04-2: flip one field's backing kind and
+// the committed payload must still carry its value. Before the id-based
+// reads, newIssueBodyFromForm did fields[2].input.Value() — which compiles
+// against a fieldMultiLine field and returns "", dropping the labels.
+func TestNewIssueForm_LabelsCommitReadsThroughValueAccessor(t *testing.T) {
+	s := newNewIssueForm()
+	s.field(fieldTitle).input.SetValue("re-backed labels field")
+
+	ta := textarea.New()
+	ta.SetValue("bug, prio-1")
+	*s.field(fieldLabels) = inputField{
+		id: fieldLabels, kind: fieldMultiLine, area: ta, label: "Labels",
+	}
+
+	body, err := newIssueBodyFromForm(s.fields, "tester")
+	if err != nil {
+		t.Fatalf("newIssueBodyFromForm: %v", err)
+	}
+	if len(body.Labels) != 2 || body.Labels[0] != "bug" || body.Labels[1] != "prio-1" {
+		t.Fatalf("Labels = %#v, want [bug prio-1]", body.Labels)
+	}
+}
+
+func focusNewIssueField(s inputState, id fieldID) inputState {
 	for i := range s.fields {
 		s.fields[i].blur()
+		if s.fields[i].id == id {
+			s.active = i
+		}
 	}
-	s.active = idx
-	_ = s.fields[idx].focus()
+	_ = s.fields[s.active].focus()
 	return s
 }
 
@@ -420,7 +447,7 @@ func TestList_NewChild_PrefillsSelectedParent(t *testing.T) {
 
 func TestNewChildForm_ParentPrefillIgnoresEditsUntilCleared(t *testing.T) {
 	s := newNewIssueFormWithParent("42aa")
-	s = focusNewIssueField(s, 4)
+	s = focusNewIssueField(s, fieldParent)
 	next, _ := s.Update(tea.KeyPressMsg{Code: '9', Text: "9"})
 	if got := next.fields[4].input.Value(); got != "42aa" {
 		t.Fatalf("locked parent accepted edit; got %q, want 42aa", got)
@@ -429,7 +456,7 @@ func TestNewChildForm_ParentPrefillIgnoresEditsUntilCleared(t *testing.T) {
 
 func TestNewChildForm_ParentPrefillBackspaceClearsAndUnlocks(t *testing.T) {
 	s := newNewIssueFormWithParent("42aa")
-	s = focusNewIssueField(s, 4)
+	s = focusNewIssueField(s, fieldParent)
 	next, _ := s.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if got := next.fields[4].input.Value(); got != "" {
 		t.Fatalf("backspace on locked parent = %q, want empty", got)
@@ -513,9 +540,9 @@ func TestNewIssueForm_EscWhitespaceOnlyOrRestoredBaselineClosesImmediately(t *te
 
 	t.Run("child parent restored", func(t *testing.T) {
 		m := newIssueFormFixture()
-		m.input = focusNewIssueField(newNewIssueFormWithParent("42aa"), newIssueFormParentIndex)
+		m.input = focusNewIssueField(newNewIssueFormWithParent("42aa"), fieldParent)
 		m.input, _ = m.input.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-		m.input.fields[newIssueFormParentIndex].setValue(" 42aa ")
+		m.input.field(fieldParent).setValue(" 42aa ")
 		nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 		if nm.input.kind != inputNone || nm.modal != modalNone || cmd != nil {
 			t.Fatalf("restored child cancel = input %v modal %v cmd %T",
@@ -558,7 +585,7 @@ func TestNewChildForm_EscEditedFieldRequiresConfirmation(t *testing.T) {
 	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd != nil || nm.modal != modalDiscardNewIssue ||
 		nm.input.fields[0].value() != "draft child" ||
-		nm.input.fields[newIssueFormParentIndex].value() != "42aa" {
+		nm.input.fieldValue(fieldParent) != "42aa" {
 		t.Fatalf("dirty child cancel = input %v modal %v cmd %T",
 			nm.input.kind, nm.modal, cmd)
 	}
@@ -582,25 +609,25 @@ func TestNewIssueForm_EscWhileSavingIsAbsorbed(t *testing.T) {
 func TestNewIssueDiscardModal_CancelPreservesDraft(t *testing.T) {
 	for _, msg := range []tea.KeyPressMsg{runeKey('n'), {Code: tea.KeyEsc}} {
 		m := newIssueFormFixture()
-		m.input = focusNewIssueField(newNewIssueFormWithParent("42aa"), newIssueFormBodyIndex)
-		m.input.fields[newIssueFormBodyIndex].area.SetValue("line one\nline two")
+		m.input = focusNewIssueField(newNewIssueFormWithParent("42aa"), fieldBody)
+		m.input.field(fieldBody).area.SetValue("line one\nline two")
 		m.input.formGen = 17
 		m.modal = modalDiscardNewIssue
 		before := m.input
-		beforeArea := before.fields[newIssueFormBodyIndex].area
+		beforeArea := before.field(fieldBody).area
 
 		nm, cmd := stepModel(m, msg)
 		if cmd != nil || nm.modal != modalNone || nm.input.kind != inputNewIssueForm {
 			t.Fatalf("cancel = input %v modal %v cmd %T", nm.input.kind, nm.modal, cmd)
 		}
-		afterArea := nm.input.fields[newIssueFormBodyIndex].area
+		afterArea := nm.input.field(fieldBody).area
 		if afterArea.Value() != beforeArea.Value() ||
 			afterArea.Line() != beforeArea.Line() ||
 			afterArea.Column() != beforeArea.Column() ||
 			afterArea.ScrollYOffset() != beforeArea.ScrollYOffset() ||
 			nm.input.active != before.active ||
 			nm.input.formGen != before.formGen ||
-			nm.input.fields[newIssueFormParentIndex].value() != "42aa" {
+			nm.input.fieldValue(fieldParent) != "42aa" {
 			t.Fatal("cancel changed the installed new-issue form state")
 		}
 	}
@@ -842,4 +869,37 @@ func TestNoLingeringInlineRowReferences(t *testing.T) {
 // for `openBodyEditPostCreate` — the M4 post-create chain symbol.
 func TestNoLingeringPostCreateChain(t *testing.T) {
 	assertNoSourceReference(t, "openBodyEditPostCreate")
+}
+
+// TestNewIssueForm_EditorHandoffFollowsBodyIdentity: ctrl+e is gated to the
+// body field. That gate used to compare s.active against the fixed Body
+// position 1, so it tracked a POSITION; a schema change that
+// moved Body would have silently offered $EDITOR for the one-line field
+// that inherited index 1. The fixture below moves Body without touching the
+// shipped form's order, which is what makes this a real regression pin.
+func TestNewIssueForm_EditorHandoffFollowsBodyIdentity(t *testing.T) {
+	s := newNewIssueForm()
+	// Swap Body (index 1) with Labels (index 2) in this fixture only.
+	s.fields[1], s.fields[2] = s.fields[2], s.fields[1]
+	s.fields[s.active].blur()
+	s.active = 2 // Body's new position
+	_ = s.fields[s.active].focus()
+
+	if !s.ctrlEAllowed() {
+		t.Error("ctrl+e must be allowed when the Body field has focus, wherever it sits")
+	}
+	if s.shouldAdvanceOnEnter() {
+		t.Error("enter on the Body field must insert a newline, not advance")
+	}
+
+	s.fields[s.active].blur()
+	s.active = 1 // Labels' new position
+	_ = s.fields[s.active].focus()
+
+	if s.ctrlEAllowed() {
+		t.Error("ctrl+e must be refused on the single-line Labels field")
+	}
+	if !s.shouldAdvanceOnEnter() {
+		t.Error("enter on a single-line field must advance to the next field")
+	}
 }

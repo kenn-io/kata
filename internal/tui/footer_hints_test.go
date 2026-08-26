@@ -247,8 +247,8 @@ func TestAuxiliaryViewFooters_ModalPrecedesActions(t *testing.T) {
 func TestFederationDetailEmpty_ModalFooterPrecedesEarlyReturn(t *testing.T) {
 	m := setupFederationView()
 	m.width, m.height = 120, 24
-	m.federationMode = federationModeDetail
-	m.federationStatuses = nil
+	m.federation.mode = federationModeDetail
+	m.federation.statuses = nil
 
 	if got := lastRenderedLine(renderFederation(m)); got != "no federation selected" {
 		t.Fatalf("ordinary empty-detail footer = %q", got)

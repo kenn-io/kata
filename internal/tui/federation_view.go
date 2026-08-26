@@ -103,6 +103,95 @@ type federationLeaveResult struct {
 	Body                LeaveFederationReplicaResult
 }
 
+// federationOpKind names the mutation flow an in-flight or completed
+// federation operation belongs to. Enroll and leave are one lifecycle —
+// confirm, dispatch, guard the reply against a staleness counter, land on
+// the shared result screen — so they share one operation record instead of
+// two parallel attempt/running/result triples plus a bool discriminator.
+type federationOpKind int
+
+const (
+	federationOpNone federationOpKind = iota
+	federationOpEnroll
+	federationOpLeave
+)
+
+// federationOp is the single in-flight-or-last federation mutation.
+//
+// attempt is the staleness counter both flows now share: starting either
+// flow bumps it, so a reply from the flow that was superseded no longer
+// matches and is dropped. err is deliberately flow-agnostic — the browse
+// flow writes it too, which is what the old enroll-specific error name hid.
+// enroll is valid when kind == federationOpEnroll, leave when
+// kind == federationOpLeave.
+type federationOp struct {
+	kind    federationOpKind
+	attempt uint64
+	running bool
+	err     error
+	enroll  federationEnrollResult
+	leave   federationLeaveResult
+}
+
+// federationState is every piece of Model state the federation views own.
+// Grouping matters for one specific reason: installDaemonConnection has to
+// drop all of it on a daemon switch, and a hand-written list of assignments
+// cannot be verified by construction — it silently missed six fields. One
+// zero-value assignment makes a forgotten field unrepresentable rather than
+// merely absent.
+type federationState struct {
+	instance            InstanceInfo
+	statuses            []FederationProjectStatus
+	cursor              int
+	loading             bool
+	err                 error
+	gen                 uint64
+	selectedProjectSet  bool
+	selectedProjectID   int64
+	selectedProjectName string
+	mode                federationMode
+	draft               federationDraft
+	localProjectCursor  int
+	hubCursor           int
+	hubProjectCursor    int
+	hubProjects         []ProjectSummary
+	hubProjectsLoading  bool
+	enrollGen           uint64
+	adoptConfirmInput   string
+	recovery            federationRecovery
+	leaveDraft          federationLeaveDraft
+	op                  federationOp
+}
+
+// federationOpOutcome is the flow-independent shape of a completed
+// operation, so one handler can serve both result messages.
+type federationOpOutcome struct {
+	kind    federationOpKind
+	connGen uint64
+	attempt uint64
+	enroll  federationEnrollResult
+	leave   federationLeaveResult
+	err     error
+}
+
+// federationOpPreviewMode is the screen a failed operation returns to: its
+// own preview, where the operator can adjust and retry.
+func federationOpPreviewMode(kind federationOpKind) federationMode {
+	if kind == federationOpLeave {
+		return federationModeLeavePreview
+	}
+	return federationModePreview
+}
+
+// invalidateFederationOp abandons any dispatched or completed operation while
+// retaining a monotonically increasing staleness counter. A later operation
+// therefore cannot reuse the attempt number of a reply that is still in
+// flight, and clearing kind prevents that reply from owning the next screen.
+func (m Model) invalidateFederationOp() Model {
+	m.federation.op = federationOp{attempt: m.federation.op.attempt + 1}
+	return m
+}
+
 type federationRecovery struct {
 	HubName       string
 	SpokeName     string
@@ -144,21 +233,22 @@ var (
 )
 
 func (m Model) transitionToFederation() (Model, tea.Cmd) {
+	m = m.invalidateFederationOp()
 	m = m.captureFederationSelectedProject()
 	m.prevView = m.view
 	m.view = viewFederation
-	m.federationMode = federationModeList
-	m.federationDraft = federationDraft{}
-	m.federationLoading = true
-	m.federationErr = nil
-	m.federationGen++
+	m.federation.mode = federationModeList
+	m.federation.draft = federationDraft{}
+	m.federation.loading = true
+	m.federation.err = nil
+	m.federation.gen++
 	return m, m.fetchFederationStatus()
 }
 
 func (m Model) fetchFederationStatus() tea.Cmd {
 	api := m.api
 	connGen := m.connGen
-	gen := m.federationGen
+	gen := m.federation.gen
 	return func() tea.Msg {
 		if api == nil {
 			return federationLoadedMsg{connGen: connGen, gen: gen, err: errors.New("daemon client unavailable")}
@@ -181,74 +271,91 @@ func (m Model) fetchFederationStatus() tea.Cmd {
 }
 
 func (m Model) handleFederationLoaded(msg federationLoadedMsg) Model {
-	if m.staleConnMsg(msg.connGen) || msg.gen != m.federationGen {
+	if m.staleConnMsg(msg.connGen) || msg.gen != m.federation.gen {
 		return m
 	}
-	m.federationLoading = false
-	m.federationErr = msg.err
+	m.federation.loading = false
+	m.federation.err = msg.err
 	if msg.err != nil {
 		return m
 	}
-	m.federationInstance = msg.instance
-	m.federationStatuses = msg.status.Statuses
-	m.federationCursor = clampFederationCursor(m.federationCursor, federationSpokeStatuses(m.federationStatuses))
+	m.federation.instance = msg.instance
+	m.federation.statuses = msg.status.Statuses
+	m.federation.cursor = clampFederationCursor(m.federation.cursor, federationSpokeStatuses(m.federation.statuses))
 	return m
 }
 
 func (m Model) handleFederationHubProjectsLoaded(msg federationHubProjectsLoadedMsg) Model {
-	if m.staleConnMsg(msg.connGen) || msg.gen != m.federationEnrollGen {
+	if m.staleConnMsg(msg.connGen) || msg.gen != m.federation.enrollGen {
 		return m
 	}
-	if m.federationMode != federationModeSelectHubProject && m.federationMode != federationModeBrowseHubs {
+	if m.federation.mode != federationModeSelectHubProject && m.federation.mode != federationModeBrowseHubs {
 		return m
 	}
-	m.federationHubProjectsLoading = false
-	m.federationEnrollErr = msg.err
+	m.federation.hubProjectsLoading = false
+	m.federation.op.err = msg.err
 	if msg.err != nil {
 		return m
 	}
-	m.federationDraft.HubTarget = msg.target
-	m.federationDraft.HubInstance = msg.instance
+	m.federation.draft.HubTarget = msg.target
+	m.federation.draft.HubInstance = msg.instance
 	if actor := strings.TrimSpace(msg.instance.Auth.Actor); actor != "" {
-		m.federationDraft.RequestedActor = actor
+		m.federation.draft.RequestedActor = actor
 	}
-	m.federationHubProjects = msg.projects
-	count := federationHubProjectRowCount(m)
-	if m.federationMode == federationModeBrowseHubs {
-		count = len(m.federationHubProjects)
-	}
-	m.federationHubProjectCursor = clampFederationIndex(m.federationHubProjectCursor, count, 0)
+	m.federation.hubProjects = msg.projects
+	m.federation.hubProjectCursor = clampFederationIndex(
+		m.federation.hubProjectCursor, len(federationHubProjectRowsForMode(m)), 0)
 	return m
 }
 
-func (m Model) handleFederationEnrollResult(msg federationEnrollResultMsg) (Model, tea.Cmd) {
-	if m.staleConnMsg(msg.connGen) || msg.attempt != m.federationEnrollAttempt {
+// handleFederationOpResult lands the reply from either mutation flow. The
+// guards are: not from a superseded daemon connection, matching the shared
+// attempt counter, and belonging to the operation that is actually current.
+//
+// The enroll flow has one branch of its own: a failure that produced a
+// recovery payload goes to the recovery screen (which shows the operator the
+// manual `kata federation join` command) instead of the preview.
+func (m Model) handleFederationOpResult(out federationOpOutcome) (Model, tea.Cmd) {
+	if m.staleConnMsg(out.connGen) ||
+		out.attempt != m.federation.op.attempt ||
+		out.kind != m.federation.op.kind {
 		return m, nil
 	}
-	m.federationEnrollRunning = false
-	if msg.err != nil {
-		if msg.result.Recovery.Token == "" && msg.result.Recovery.Stage == "" {
-			m.federationEnrollErr = msg.err
-			m.federationMode = federationModePreview
+	m.federation.op.running = false
+	if out.err != nil {
+		if out.kind == federationOpEnroll &&
+			(out.enroll.Recovery.Token != "" || out.enroll.Recovery.Stage != "") {
+			m.federation.recovery = out.enroll.Recovery
+			m.federation.recovery.Err = out.err
+			m.federation.mode = federationModeRecovery
 			return m, nil
 		}
-		m.federationRecovery = msg.result.Recovery
-		m.federationRecovery.Err = msg.err
-		m.federationMode = federationModeRecovery
+		m.federation.op.err = out.err
+		m.federation.mode = federationOpPreviewMode(out.kind)
 		return m, nil
 	}
-	m.federationResult = msg.result
-	m.federationResultIsLeave = false
-	m.federationMode = federationModeResult
-	m.federationLoading = true
-	m.federationErr = nil
-	m.federationGen++
+	m.federation.op.enroll = out.enroll
+	m.federation.op.leave = out.leave
+	m.federation.mode = federationModeResult
+	m.federation.loading = true
+	m.federation.err = nil
+	m.federation.gen++
 	return m, m.fetchFederationStatus()
 }
 
+func (m Model) handleFederationEnrollResult(msg federationEnrollResultMsg) (Model, tea.Cmd) {
+	return m.handleFederationOpResult(federationOpOutcome{
+		kind:    federationOpEnroll,
+		connGen: msg.connGen,
+		attempt: msg.attempt,
+		enroll:  msg.result,
+		err:     msg.err,
+	})
+}
+
 func (m Model) routeFederationViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	rows := federationSpokeStatuses(m.federationStatuses)
-	switch m.federationMode {
+	rows := federationSpokeStatuses(m.federation.statuses)
+	switch m.federation.mode {
 	case federationModeDetail:
 		return m.routeFederationDetailKey(msg)
 	case federationModeSelectLocalProject:
@@ -279,22 +386,22 @@ func (m Model) routeFederationViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "n":
 		return m.startFederationEnrollment()
 	case "r":
-		m.federationLoading = true
-		m.federationErr = nil
-		m.federationGen++
+		m.federation.loading = true
+		m.federation.err = nil
+		m.federation.gen++
 		return m, m.fetchFederationStatus()
 	case "b":
 		return m.startFederationHubBrowse()
 	case "x":
-		if m.federationCursor < 0 || m.federationCursor >= len(rows) {
+		if m.federation.cursor < 0 || m.federation.cursor >= len(rows) {
 			return m, nil
 		}
-		return m.startFederationLeave(rows[m.federationCursor])
+		return m.startFederationLeave(rows[m.federation.cursor])
 	case "enter":
-		if m.federationCursor < 0 || m.federationCursor >= len(rows) {
+		if m.federation.cursor < 0 || m.federation.cursor >= len(rows) {
 			return m, nil
 		}
-		m.federationMode = federationModeDetail
+		m.federation.mode = federationModeDetail
 		return m, nil
 	}
 	return m, nil
@@ -303,16 +410,16 @@ func (m Model) routeFederationViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 func (m Model) routeFederationDetailKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "backspace":
-		m.federationMode = federationModeList
+		m.federation.mode = federationModeList
 		return m, nil
 	case "r":
-		m.federationLoading = true
-		m.federationErr = nil
-		m.federationGen++
+		m.federation.loading = true
+		m.federation.err = nil
+		m.federation.gen++
 		return m, m.fetchFederationStatus()
 	case "x":
-		rows := federationSpokeStatuses(m.federationStatuses)
-		cursor := clampFederationCursor(m.federationCursor, rows)
+		rows := federationSpokeStatuses(m.federation.statuses)
+		cursor := clampFederationCursor(m.federation.cursor, rows)
 		if cursor < 0 || cursor >= len(rows) {
 			return m, nil
 		}
@@ -323,41 +430,42 @@ func (m Model) routeFederationDetailKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 func (m Model) routeFederationLocalProjectKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	rows := federationLocalProjectRows(m)
-	if next, ok := nextFederationCursor(msg, m.federationLocalProjectCursor, len(rows)); ok {
-		m.federationLocalProjectCursor = next
+	if next, ok := nextFederationCursor(msg, m.federation.localProjectCursor, len(rows)); ok {
+		m.federation.localProjectCursor = next
 		return m, nil
 	}
 	switch msg.String() {
 	case "esc":
-		m.federationMode = federationModeList
+		m = m.invalidateFederationOp()
+		m.federation.mode = federationModeList
 		return m, nil
 	case "enter":
 		if len(rows) == 0 {
 			return m, nil
 		}
-		row := rows[clampFederationIndex(m.federationLocalProjectCursor, len(rows), 0)]
+		row := rows[clampFederationIndex(m.federation.localProjectCursor, len(rows), 0)]
 		if row.createReplica {
-			m.federationDraft.CreateReplica = true
-			m.federationDraft.SelectedLocalProject = true
-			m.federationDraft.AdoptExisting = false
-			m.federationDraft.SpokeProjectID = 0
-			m.federationDraft.SpokeProjectName = ""
-			m.federationSelectedProjectSet = true
-			m.federationSelectedProjectID = 0
-			m.federationSelectedProjectName = ""
+			m.federation.draft.CreateReplica = true
+			m.federation.draft.SelectedLocalProject = true
+			m.federation.draft.AdoptExisting = false
+			m.federation.draft.SpokeProjectID = 0
+			m.federation.draft.SpokeProjectName = ""
+			m.federation.selectedProjectSet = true
+			m.federation.selectedProjectID = 0
+			m.federation.selectedProjectName = ""
 		} else {
-			m.federationDraft.CreateReplica = false
-			m.federationDraft.SelectedLocalProject = true
-			m.federationDraft.AdoptExisting = true
-			m.federationDraft.SpokeProjectID = row.project.ID
-			m.federationDraft.SpokeProjectName = row.project.Name
-			m.federationSelectedProjectSet = true
-			m.federationSelectedProjectID = row.project.ID
-			m.federationSelectedProjectName = row.project.Name
+			m.federation.draft.CreateReplica = false
+			m.federation.draft.SelectedLocalProject = true
+			m.federation.draft.AdoptExisting = true
+			m.federation.draft.SpokeProjectID = row.project.ID
+			m.federation.draft.SpokeProjectName = row.project.Name
+			m.federation.selectedProjectSet = true
+			m.federation.selectedProjectID = row.project.ID
+			m.federation.selectedProjectName = row.project.Name
 		}
-		m.federationMode = federationModeSelectHub
-		m.federationHubCursor = 0
-		m.federationEnrollErr = nil
+		m.federation.mode = federationModeSelectHub
+		m.federation.hubCursor = 0
+		m.federation.op.err = nil
 		return m, nil
 	}
 	return m, nil
@@ -365,37 +473,38 @@ func (m Model) routeFederationLocalProjectKey(msg tea.KeyPressMsg) (Model, tea.C
 
 func (m Model) routeFederationHubKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	rows := federationHubRows(m)
-	if next, ok := nextFederationCursor(msg, m.federationHubCursor, len(rows)); ok {
-		m.federationHubCursor = next
+	if next, ok := nextFederationCursor(msg, m.federation.hubCursor, len(rows)); ok {
+		m.federation.hubCursor = next
 		return m, nil
 	}
 	switch msg.String() {
 	case "esc":
-		if m.federationDraft.SelectedLocalProject {
-			m.federationMode = federationModeSelectLocalProject
+		if m.federation.draft.SelectedLocalProject {
+			m.federation.mode = federationModeSelectLocalProject
 		} else {
-			m.federationMode = federationModeList
+			m = m.invalidateFederationOp()
+			m.federation.mode = federationModeList
 		}
 		return m, nil
 	case "enter":
 		if len(rows) == 0 {
 			return m, nil
 		}
-		target := rows[clampFederationIndex(m.federationHubCursor, len(rows), 0)].target
+		target := rows[clampFederationIndex(m.federation.hubCursor, len(rows), 0)].target
 		return m.selectFederationHub(target)
 	}
 	return m, nil
 }
 
 func (m Model) routeFederationHubProjectKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	count := federationHubProjectRowCount(m)
-	if next, ok := nextFederationCursor(msg, m.federationHubProjectCursor, count); ok {
-		m.federationHubProjectCursor = next
+	count := len(federationHubProjectRows(m))
+	if next, ok := nextFederationCursor(msg, m.federation.hubProjectCursor, count); ok {
+		m.federation.hubProjectCursor = next
 		return m, nil
 	}
 	switch msg.String() {
 	case "esc":
-		m.federationMode = federationModeSelectHub
+		m.federation.mode = federationModeSelectHub
 		return m, nil
 	case "enter":
 		return m.previewFederationEnrollment()
@@ -404,14 +513,14 @@ func (m Model) routeFederationHubProjectKey(msg tea.KeyPressMsg) (Model, tea.Cmd
 }
 
 func (m Model) routeFederationBrowseHubsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	count := len(m.federationHubProjects)
-	if next, ok := nextFederationCursor(msg, m.federationHubProjectCursor, count); ok {
-		m.federationHubProjectCursor = next
+	count := len(federationBrowseHubProjectRows(m))
+	if next, ok := nextFederationCursor(msg, m.federation.hubProjectCursor, count); ok {
+		m.federation.hubProjectCursor = next
 		return m, nil
 	}
 	switch msg.String() {
 	case "esc", "backspace":
-		m.federationMode = federationModeList
+		m.federation.mode = federationModeList
 		return m, nil
 	case "enter":
 		return m, nil
@@ -422,24 +531,26 @@ func (m Model) routeFederationBrowseHubsKey(msg tea.KeyPressMsg) (Model, tea.Cmd
 func (m Model) routeFederationPreviewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "backspace":
-		m.federationMode = federationModeSelectHubProject
+		m.federation.mode = federationModeSelectHubProject
 		return m, nil
 	case "enter":
-		if m.federationDraft.BlockedReason != "" || m.federationEnrollRunning {
+		if m.federation.draft.BlockedReason != "" || m.federation.op.running {
 			return m, nil
 		}
-		if m.federationDraft.AdoptExisting {
+		if m.federation.draft.AdoptExisting {
 			// Adoption rewrites the local project's event history; require the
 			// operator to type the project name before executing.
-			m.federationAdoptConfirmInput = ""
-			m.federationEnrollErr = nil
-			m.federationMode = federationModeAdoptConfirm
+			m.federation.adoptConfirmInput = ""
+			m.federation.op.err = nil
+			m.federation.mode = federationModeAdoptConfirm
 			return m, nil
 		}
-		m.federationEnrollAttempt++
-		m.federationEnrollRunning = true
-		m.federationEnrollErr = nil
-		return m, m.executeFederationEnrollment(m.federationEnrollAttempt)
+		m.federation.op = federationOp{
+			kind:    federationOpEnroll,
+			attempt: m.federation.op.attempt + 1,
+			running: true,
+		}
+		return m, m.executeFederationEnrollment(m.federation.op.attempt)
 	}
 	return m, nil
 }
@@ -450,26 +561,28 @@ func (m Model) routeFederationPreviewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 func (m Model) routeFederationAdoptConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.federationAdoptConfirmInput = ""
-		m.federationEnrollErr = nil
-		m.federationMode = federationModePreview
+		m.federation.adoptConfirmInput = ""
+		m.federation.op.err = nil
+		m.federation.mode = federationModePreview
 		return m, nil
 	case "enter":
-		if m.federationEnrollRunning {
+		if m.federation.op.running {
 			return m, nil
 		}
-		if m.federationAdoptConfirmInput != m.federationDraft.SpokeProjectName {
-			m.federationEnrollErr = fmt.Errorf("type %q to confirm adoption", m.federationDraft.SpokeProjectName)
+		if m.federation.adoptConfirmInput != m.federation.draft.SpokeProjectName {
+			m.federation.op.err = fmt.Errorf("type %q to confirm adoption", m.federation.draft.SpokeProjectName)
 			return m, nil
 		}
-		m.federationAdoptConfirmInput = ""
-		m.federationEnrollAttempt++
-		m.federationEnrollRunning = true
-		m.federationEnrollErr = nil
-		return m, m.executeFederationEnrollment(m.federationEnrollAttempt)
+		m.federation.adoptConfirmInput = ""
+		m.federation.op = federationOp{
+			kind:    federationOpEnroll,
+			attempt: m.federation.op.attempt + 1,
+			running: true,
+		}
+		return m, m.executeFederationEnrollment(m.federation.op.attempt)
 	case "backspace":
-		if r := []rune(m.federationAdoptConfirmInput); len(r) > 0 {
-			m.federationAdoptConfirmInput = string(r[:len(r)-1])
+		if r := []rune(m.federation.adoptConfirmInput); len(r) > 0 {
+			m.federation.adoptConfirmInput = string(r[:len(r)-1])
 		}
 		return m, nil
 	}
@@ -477,7 +590,7 @@ func (m Model) routeFederationAdoptConfirmKey(msg tea.KeyPressMsg) (Model, tea.C
 	// Bubble Tea v2; anything else (arrows, function keys) leaves Text
 	// empty and falls through as a no-op.
 	if msg.Text != "" {
-		m.federationAdoptConfirmInput += msg.Text
+		m.federation.adoptConfirmInput += msg.Text
 		return m, nil
 	}
 	return m, nil
@@ -486,10 +599,10 @@ func (m Model) routeFederationAdoptConfirmKey(msg tea.KeyPressMsg) (Model, tea.C
 func (m Model) routeFederationRecoveryKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "R":
-		m.federationRecovery.Reveal = true
+		m.federation.recovery.Reveal = true
 		return m, nil
 	case "esc":
-		m.federationMode = federationModePreview
+		m.federation.mode = federationModePreview
 		return m, nil
 	}
 	return m, nil
@@ -498,7 +611,7 @@ func (m Model) routeFederationRecoveryKey(msg tea.KeyPressMsg) (Model, tea.Cmd) 
 func (m Model) routeFederationResultKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "enter":
-		m.federationMode = federationModeList
+		m.federation.mode = federationModeList
 		return m, nil
 	}
 	return m, nil
@@ -511,74 +624,66 @@ func (m Model) startFederationLeave(row FederationProjectStatus) (Model, tea.Cmd
 	if row.Role != "spoke" {
 		return m, nil
 	}
-	m.federationEnrollErr = nil
-	m.federationLeaveRunning = false
-	m.federationLeaveDraft = federationLeaveDraft{
+	m = m.invalidateFederationOp()
+	m.federation.leaveDraft = federationLeaveDraft{
 		ProjectID:    row.ProjectID,
 		ProjectName:  row.ProjectName,
 		HubURL:       row.HubURL,
 		HubProjectID: row.HubProjectID,
-		InstanceUID:  strings.TrimSpace(m.federationInstance.InstanceUID),
+		InstanceUID:  strings.TrimSpace(m.federation.instance.InstanceUID),
 		// The binding's transport opt-in, so a plain-HTTP overlay hub joined
 		// with allow_insecure can also be left from the TUI.
 		AllowInsecure: row.AllowInsecure,
 		Disposition:   "detach",
 		Actor:         m.list.actor,
 	}
-	m.federationMode = federationModeLeavePreview
+	m.federation.mode = federationModeLeavePreview
 	return m, nil
 }
 
 func (m Model) routeFederationLeavePreviewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "backspace":
-		m.federationMode = federationModeList
-		m.federationEnrollErr = nil
+		m = m.invalidateFederationOp()
+		m.federation.mode = federationModeList
 		return m, nil
 	case "d":
-		if m.federationLeaveDraft.Disposition == "archive" {
-			m.federationLeaveDraft.Disposition = "detach"
+		if m.federation.leaveDraft.Disposition == "archive" {
+			m.federation.leaveDraft.Disposition = "detach"
 		} else {
-			m.federationLeaveDraft.Disposition = "archive"
+			m.federation.leaveDraft.Disposition = "archive"
 		}
 		return m, nil
 	case "l":
-		m.federationLeaveDraft.LocalOnly = !m.federationLeaveDraft.LocalOnly
+		m.federation.leaveDraft.LocalOnly = !m.federation.leaveDraft.LocalOnly
 		return m, nil
 	case "enter":
-		if m.federationLeaveDraft.BlockedReason != "" || m.federationLeaveRunning {
+		if m.federation.leaveDraft.BlockedReason != "" || m.federation.op.running {
 			return m, nil
 		}
-		m.federationLeaveAttempt++
-		m.federationLeaveRunning = true
-		m.federationEnrollErr = nil
-		return m, m.executeFederationLeave(m.federationLeaveAttempt)
+		m.federation.op = federationOp{
+			kind:    federationOpLeave,
+			attempt: m.federation.op.attempt + 1,
+			running: true,
+		}
+		return m, m.executeFederationLeave(m.federation.op.attempt)
 	}
 	return m, nil
 }
 
 func (m Model) handleFederationLeaveResult(msg federationLeaveResultMsg) (Model, tea.Cmd) {
-	if m.staleConnMsg(msg.connGen) || msg.attempt != m.federationLeaveAttempt {
-		return m, nil
-	}
-	m.federationLeaveRunning = false
-	if msg.err != nil {
-		m.federationEnrollErr = msg.err
-		m.federationMode = federationModeLeavePreview
-		return m, nil
-	}
-	m.federationLeaveResult = msg.result
-	m.federationResultIsLeave = true
-	m.federationMode = federationModeResult
-	m.federationLoading = true
-	m.federationErr = nil
-	m.federationGen++
-	return m, m.fetchFederationStatus()
+	return m.handleFederationOpResult(federationOpOutcome{
+		kind:    federationOpLeave,
+		connGen: msg.connGen,
+		attempt: msg.attempt,
+		leave:   msg.result,
+		err:     msg.err,
+	})
 }
 
 func (m Model) executeFederationLeave(attempt uint64) tea.Cmd {
 	connGen := m.connGen
-	draft := m.federationLeaveDraft
+	draft := m.federation.leaveDraft
 	spoke := m.api
 	hubTarget := m.federationLeaveHubTarget(draft.HubURL, draft.AllowInsecure)
 	return func() tea.Msg {
@@ -774,20 +879,20 @@ func federationLeaveHubError(err error) error {
 func (m Model) cursorMoveFederation(msg tea.KeyPressMsg, rows []FederationProjectStatus) (Model, bool) {
 	switch msg.String() {
 	case "j", "down":
-		if m.federationCursor < len(rows)-1 {
-			m.federationCursor++
+		if m.federation.cursor < len(rows)-1 {
+			m.federation.cursor++
 		}
 		return m, true
 	case "k", "up":
-		if m.federationCursor > 0 {
-			m.federationCursor--
+		if m.federation.cursor > 0 {
+			m.federation.cursor--
 		}
 		return m, true
 	case "g", "home":
-		m.federationCursor = 0
+		m.federation.cursor = 0
 		return m, true
 	case "G", "end":
-		m.federationCursor = max(len(rows)-1, 0)
+		m.federation.cursor = max(len(rows)-1, 0)
 		return m, true
 	}
 	return m, false
@@ -795,33 +900,32 @@ func (m Model) cursorMoveFederation(msg tea.KeyPressMsg, rows []FederationProjec
 
 func (m Model) startFederationHubBrowse() (Model, tea.Cmd) {
 	target, cursor, ok := selectedFederationBrowseHub(m)
-	m.federationMode = federationModeBrowseHubs
-	m.federationHubCursor = cursor
-	m.federationHubProjectCursor = 0
-	m.federationHubProjects = nil
-	m.federationHubProjectsLoading = false
-	m.federationEnrollErr = nil
-	m.federationDraft = federationDraft{}
-	m.federationResult = federationEnrollResult{}
-	m.federationRecovery = federationRecovery{}
+	m = m.invalidateFederationOp()
+	m.federation.mode = federationModeBrowseHubs
+	m.federation.hubCursor = cursor
+	m.federation.hubProjectCursor = 0
+	m.federation.hubProjects = nil
+	m.federation.hubProjectsLoading = false
+	m.federation.draft = federationDraft{}
+	m.federation.recovery = federationRecovery{}
 	if !ok {
-		m.federationEnrollErr = errors.New("no catalog hub daemons configured")
+		m.federation.op.err = errors.New("no catalog hub daemons configured")
 		return m, nil
 	}
-	m.federationDraft.HubTarget = target
-	m.federationHubProjectsLoading = true
-	m.federationEnrollGen++
+	m.federation.draft.HubTarget = target
+	m.federation.hubProjectsLoading = true
+	m.federation.enrollGen++
 	return m, m.fetchFederationHubProjects(target)
 }
 
 func (m Model) startFederationEnrollment() (Model, tea.Cmd) {
-	m.federationDraft = newFederationDraft(m.list.actor)
-	m.federationLocalProjectCursor = 0
-	m.federationHubCursor = 0
-	m.federationHubProjectCursor = 0
-	m.federationHubProjects = nil
-	m.federationHubProjectsLoading = false
-	m.federationEnrollErr = nil
+	m = m.invalidateFederationOp()
+	m.federation.draft = newFederationDraft(m.list.actor)
+	m.federation.localProjectCursor = 0
+	m.federation.hubCursor = 0
+	m.federation.hubProjectCursor = 0
+	m.federation.hubProjects = nil
+	m.federation.hubProjectsLoading = false
 	// Never skip the local-project step: the choice between adopting a local
 	// project and creating a new replica must stay explicit and visible. An
 	// active project only pre-positions the cursor (the adopt flow costs one
@@ -830,12 +934,12 @@ func (m Model) startFederationEnrollment() (Model, tea.Cmd) {
 	if projectID, _, ok := m.defaultFederationProject(); ok {
 		for i, row := range federationLocalProjectRows(m) {
 			if !row.createReplica && row.project.ID == projectID {
-				m.federationLocalProjectCursor = i
+				m.federation.localProjectCursor = i
 				break
 			}
 		}
 	}
-	m.federationMode = federationModeSelectLocalProject
+	m.federation.mode = federationModeSelectLocalProject
 	return m, nil
 }
 
@@ -845,25 +949,25 @@ func (m Model) captureFederationSelectedProject() Model {
 		return m
 	case viewProjects:
 		projectID, projectName, ok := m.selectedProjectsViewProject()
-		m.federationSelectedProjectSet = true
+		m.federation.selectedProjectSet = true
 		if !ok {
-			m.federationSelectedProjectID = 0
-			m.federationSelectedProjectName = ""
+			m.federation.selectedProjectID = 0
+			m.federation.selectedProjectName = ""
 			return m
 		}
-		m.federationSelectedProjectID = projectID
-		m.federationSelectedProjectName = projectName
+		m.federation.selectedProjectID = projectID
+		m.federation.selectedProjectName = projectName
 		return m
 	default:
-		m.federationSelectedProjectSet = true
+		m.federation.selectedProjectSet = true
 		projectID, projectName, ok := m.currentFederationProject()
 		if !ok {
-			m.federationSelectedProjectID = 0
-			m.federationSelectedProjectName = ""
+			m.federation.selectedProjectID = 0
+			m.federation.selectedProjectName = ""
 			return m
 		}
-		m.federationSelectedProjectID = projectID
-		m.federationSelectedProjectName = projectName
+		m.federation.selectedProjectID = projectID
+		m.federation.selectedProjectName = projectName
 		return m
 	}
 }
@@ -881,11 +985,11 @@ func (m Model) selectedProjectsViewProject() (int64, string, bool) {
 }
 
 func (m Model) defaultFederationProject() (int64, string, bool) {
-	if m.federationSelectedProjectSet {
-		if m.federationSelectedProjectID == 0 || m.federationSelectedProjectName == "" {
+	if m.federation.selectedProjectSet {
+		if m.federation.selectedProjectID == 0 || m.federation.selectedProjectName == "" {
 			return 0, "", false
 		}
-		return m.federationSelectedProjectID, m.federationSelectedProjectName, true
+		return m.federation.selectedProjectID, m.federation.selectedProjectName, true
 	}
 	return m.currentFederationProject()
 }
@@ -957,6 +1061,88 @@ func federationLocalProjectRows(m Model) []federationLocalProjectRow {
 	return rows
 }
 
+// federationHubProjectRow is one selectable line in the hub-project step.
+// sentinel marks the adopt-same-name row — the implicit "use or create the
+// hub project matching this spoke project" entry that exists only in the
+// adopt flow and only at index 0. Its meaning used to live in a bare
+// `cursor == 0` test, with the count, the selection and the label each
+// re-deriving the same convention independently.
+//
+// Mirrors projectsRow (projects_view.go) and federationLocalProjectRow
+// above: build the rows once, then count, render and select off that list.
+type federationHubProjectRow struct {
+	sentinel bool
+	project  ProjectSummary
+	label    string
+}
+
+// federationHubProjectRows builds the enrollment flow's hub-project rows.
+//
+// create-replica: one row per hub project, no sentinel — the operator is
+// picking the hub project to replicate, and the local project does not
+// exist yet.
+//
+// adopt: the sentinel first, then every hub project whose name differs from
+// the spoke project's. The same-name project is folded into the sentinel
+// (the sentinel's label says whether it will be reused or created), which is
+// why it must not appear again as its own row.
+func federationHubProjectRows(m Model) []federationHubProjectRow {
+	if m.federation.draft.CreateReplica {
+		rows := make([]federationHubProjectRow, 0, len(m.federation.hubProjects))
+		for _, project := range m.federation.hubProjects {
+			rows = append(rows, federationHubProjectRow{project: project, label: project.Name})
+		}
+		return rows
+	}
+	rows := []federationHubProjectRow{{
+		sentinel: true,
+		label:    federationDefaultHubProjectLabel(m.federation.draft, m.federation.hubProjects),
+	}}
+	for _, project := range m.federation.hubProjects {
+		if project.Name == m.federation.draft.SpokeProjectName {
+			continue
+		}
+		rows = append(rows, federationHubProjectRow{project: project, label: project.Name})
+	}
+	return rows
+}
+
+// federationBrowseHubProjectRows builds the read-only catalog browse rows:
+// every hub project, unfiltered, with no sentinel, labeled "<id> <name>".
+// Browse shares federationHubProjectCursor and federationHubProjects with
+// the enrollment flow but none of its row semantics — this builder is where
+// that third convention is named.
+func federationBrowseHubProjectRows(m Model) []federationHubProjectRow {
+	rows := make([]federationHubProjectRow, 0, len(m.federation.hubProjects))
+	for _, project := range m.federation.hubProjects {
+		rows = append(rows, federationHubProjectRow{
+			project: project,
+			label:   federationBrowseHubProjectLabel(project),
+		})
+	}
+	return rows
+}
+
+// federationHubProjectRowsForMode picks the builder the current mode's
+// cursor indexes. Used by the message handler, which runs for both modes.
+func federationHubProjectRowsForMode(m Model) []federationHubProjectRow {
+	if m.federation.mode == federationModeBrowseHubs {
+		return federationBrowseHubProjectRows(m)
+	}
+	return federationHubProjectRows(m)
+}
+
+// selectedFederationHubProjectRow returns the row Enter acts on. The cursor
+// is clamped exactly the way the renderer clamps it, so the highlighted row
+// and the selected row are the same row by construction.
+func (m Model) selectedFederationHubProjectRow() (federationHubProjectRow, bool) {
+	rows := federationHubProjectRows(m)
+	if len(rows) == 0 {
+		return federationHubProjectRow{}, false
+	}
+	return rows[clampFederationIndex(m.federation.hubProjectCursor, len(rows), 0)], true
+}
+
 type federationHubRow struct {
 	target daemonTarget
 }
@@ -974,7 +1160,7 @@ func selectedFederationBrowseHub(m Model) (daemonTarget, int, bool) {
 	if len(rows) == 0 {
 		return daemonTarget{}, 0, false
 	}
-	cursor := clampFederationIndex(m.federationHubCursor, len(rows), 0)
+	cursor := clampFederationIndex(m.federation.hubCursor, len(rows), 0)
 	if !daemonTargetsMatch(rows[cursor].target, m.activeDaemon) {
 		return rows[cursor].target, cursor, true
 	}
@@ -987,38 +1173,38 @@ func selectedFederationBrowseHub(m Model) (daemonTarget, int, bool) {
 }
 
 func (m Model) selectFederationHub(target daemonTarget) (Model, tea.Cmd) {
-	m.federationEnrollErr = nil
+	m.federation.op.err = nil
 	if daemonTargetsMatch(target, m.activeDaemon) {
-		m.federationEnrollErr = errors.New("active daemon cannot be selected as hub")
+		m.federation.op.err = errors.New("active daemon cannot be selected as hub")
 		return m, nil
 	}
 	if target.Local {
-		m.federationEnrollErr = errors.New("local hub targets cannot be used for federation enrollment; select a hub daemon with a spoke-reachable URL")
+		m.federation.op.err = errors.New("local hub targets cannot be used for federation enrollment; select a hub daemon with a spoke-reachable URL")
 		return m, nil
 	}
 	if err := validateFederationHubTargetCredential(target); err != nil {
-		m.federationEnrollErr = err
+		m.federation.op.err = err
 		return m, nil
 	}
 	if !target.Local {
 		if _, err := normalizeRemoteURLForTUI(target.URL, target.resolved.AllowInsecure); err != nil {
-			m.federationEnrollErr = err
+			m.federation.op.err = err
 			return m, nil
 		}
 	}
-	m.federationDraft.HubTarget = target
-	m.federationDraft.AllowInsecure = target.resolved.AllowInsecure
-	m.federationMode = federationModeSelectHubProject
-	m.federationHubProjectsLoading = true
-	m.federationHubProjects = nil
-	m.federationHubProjectCursor = 0
-	m.federationEnrollGen++
+	m.federation.draft.HubTarget = target
+	m.federation.draft.AllowInsecure = target.resolved.AllowInsecure
+	m.federation.mode = federationModeSelectHubProject
+	m.federation.hubProjectsLoading = true
+	m.federation.hubProjects = nil
+	m.federation.hubProjectCursor = 0
+	m.federation.enrollGen++
 	return m, m.fetchFederationHubProjects(target)
 }
 
 func (m Model) fetchFederationHubProjects(target daemonTarget) tea.Cmd {
 	connGen := m.connGen
-	gen := m.federationEnrollGen
+	gen := m.federation.enrollGen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -1044,8 +1230,8 @@ func (m Model) fetchFederationHubProjects(target daemonTarget) tea.Cmd {
 
 func (m Model) executeFederationEnrollment(attempt uint64) tea.Cmd {
 	connGen := m.connGen
-	draft := m.federationDraft
-	instanceUID := m.federationInstance.InstanceUID
+	draft := m.federation.draft
+	instanceUID := m.federation.instance.InstanceUID
 	spoke := m.api
 	active := m.activeDaemon
 	return func() tea.Msg {
@@ -1209,16 +1395,17 @@ func baseFederationRecovery(
 }
 
 func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
-	m.federationEnrollErr = nil
-	draft := m.federationDraft
+	m.federation.op.err = nil
+	draft := m.federation.draft
 	draft.Operation = ""
 	draft.HubProjectID = 0
 	draft.HubProjectName = ""
 	draft.BlockedReason = ""
-	project, hasProject := m.selectedFederationHubProject()
+	row, hasRow := m.selectedFederationHubProjectRow()
+	project, hasProject := row.project, hasRow && !row.sentinel
 	if draft.CreateReplica {
 		if !hasProject {
-			m.federationEnrollErr = errors.New("select an existing hub project to create a local replica")
+			m.federation.op.err = errors.New("select an existing hub project to create a local replica")
 			return m, nil
 		}
 		draft.Operation = federationOperationCreateReplica
@@ -1226,9 +1413,9 @@ func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 		draft.HubProjectName = project.Name
 		draft.SpokeProjectName = project.Name
 		draft.AdoptExisting = false
-		m.federationSelectedProjectSet = true
-		m.federationSelectedProjectID = 0
-		m.federationSelectedProjectName = project.Name
+		m.federation.selectedProjectSet = true
+		m.federation.selectedProjectID = 0
+		m.federation.selectedProjectName = project.Name
 		if holderID, holderName, ok := localProjectByUID(m, project.UID); ok {
 			// The hub project's identity already exists locally, so this is a
 			// rejoin of that project (it previously left this federation), not
@@ -1243,18 +1430,18 @@ func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 			} else {
 				draft.Operation = federationOperationRejoin
 				draft.SpokeProjectName = holderName
-				m.federationSelectedProjectID = holderID
-				m.federationSelectedProjectName = holderName
+				m.federation.selectedProjectID = holderID
+				m.federation.selectedProjectName = holderName
 			}
 		} else if localProjectNameExists(m, draft.SpokeProjectName) {
 			draft.BlockedReason = fmt.Sprintf("local project %q already exists", draft.SpokeProjectName)
 		}
 	} else {
 		draft.AdoptExisting = true
-		if m.federationHubProjectCursor == 0 {
+		if hasRow && row.sentinel {
 			draft.Operation = federationOperationAdoptSameName
 			draft.HubProjectName = draft.SpokeProjectName
-			if same, ok := hubProjectByName(m.federationHubProjects, draft.SpokeProjectName); ok {
+			if same, ok := hubProjectByName(m.federation.hubProjects, draft.SpokeProjectName); ok {
 				draft.HubProjectID = same.ID
 			}
 		} else if hasProject {
@@ -1302,42 +1489,9 @@ func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 		}
 	}
 	draft.AllowInsecure = draft.HubTarget.resolved.AllowInsecure
-	m.federationDraft = draft
-	m.federationMode = federationModePreview
+	m.federation.draft = draft
+	m.federation.mode = federationModePreview
 	return m, nil
-}
-
-func federationHubProjectRowCount(m Model) int {
-	if m.federationDraft.CreateReplica {
-		return len(m.federationHubProjects)
-	}
-	return len(federationSelectableHubProjects(m)) + 1
-}
-
-func (m Model) selectedFederationHubProject() (ProjectSummary, bool) {
-	projects := federationSelectableHubProjects(m)
-	idx := m.federationHubProjectCursor
-	if !m.federationDraft.CreateReplica {
-		idx--
-	}
-	if idx < 0 || idx >= len(projects) {
-		return ProjectSummary{}, false
-	}
-	return projects[idx], true
-}
-
-func federationSelectableHubProjects(m Model) []ProjectSummary {
-	if m.federationDraft.CreateReplica {
-		return m.federationHubProjects
-	}
-	projects := make([]ProjectSummary, 0, len(m.federationHubProjects))
-	for _, project := range m.federationHubProjects {
-		if project.Name == m.federationDraft.SpokeProjectName {
-			continue
-		}
-		projects = append(projects, project)
-	}
-	return projects
 }
 
 func hubProjectByName(projects []ProjectSummary, name string) (ProjectSummary, bool) {
@@ -1361,7 +1515,7 @@ func localProjectNameExists(m Model, name string) bool {
 // federationHubProjectUIDByID returns the UID of a listed hub project, or ""
 // when the project (or its UID) is unknown.
 func federationHubProjectUIDByID(m Model, hubProjectID int64) string {
-	for _, p := range m.federationHubProjects {
+	for _, p := range m.federation.hubProjects {
 		if p.ID == hubProjectID {
 			return p.UID
 		}
@@ -1389,7 +1543,7 @@ func localProjectFederationBinding(
 	projectID int64,
 	projectName string,
 ) (FederationProjectStatus, bool) {
-	for _, status := range m.federationStatuses {
+	for _, status := range m.federation.statuses {
 		if status.Role == "" {
 			continue
 		}
@@ -1431,6 +1585,7 @@ func clampFederationIndex(v, count, fallback int) int {
 }
 
 func (m Model) escFromFederationView() (Model, tea.Cmd) {
+	m = m.invalidateFederationOp()
 	if m.prevView == viewFederation {
 		m.view = viewList
 		return m, nil
@@ -1463,12 +1618,12 @@ func clampFederationCursor(cursor int, rows []FederationProjectStatus) int {
 }
 
 func (m *Model) moveFederationCursor(delta int) {
-	rows := federationSpokeStatuses(m.federationStatuses)
-	if delta < 0 && m.federationCursor > 0 {
-		m.federationCursor--
+	rows := federationSpokeStatuses(m.federation.statuses)
+	if delta < 0 && m.federation.cursor > 0 {
+		m.federation.cursor--
 	}
-	if delta > 0 && m.federationCursor < len(rows)-1 {
-		m.federationCursor++
+	if delta > 0 && m.federation.cursor < len(rows)-1 {
+		m.federation.cursor++
 	}
 }
 
@@ -1477,7 +1632,7 @@ func (m Model) mouseFederationClick(y int) (Model, tea.Cmd) {
 	if row < 0 {
 		return m, nil
 	}
-	rows := federationSpokeStatuses(m.federationStatuses)
+	rows := federationSpokeStatuses(m.federation.statuses)
 	if len(rows) == 0 {
 		return m, nil
 	}
@@ -1485,11 +1640,11 @@ func (m Model) mouseFederationClick(y int) (Model, tea.Cmd) {
 	if m.height > 0 {
 		budget = max(m.height-federationViewChromeRows, 1)
 	}
-	start, end := windowBounds(len(rows), m.federationCursor, budget)
+	start, end := windowBounds(len(rows), m.federation.cursor, budget)
 	idx := start + row
 	if idx < start || idx >= end || idx >= len(rows) {
 		return m, nil
 	}
-	m.federationCursor = idx
+	m.federation.cursor = idx
 	return m, nil
 }

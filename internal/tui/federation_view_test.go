@@ -28,6 +28,60 @@ func TestFederationView_FKeyTransitionsFromList(t *testing.T) {
 	require.NotNil(t, cmd)
 }
 
+// TestFederationView_FKeyInvalidatesPriorOperationResults exercises the
+// global shortcut rather than calling transitionToFederation directly. A
+// fresh federation list must own neither an enrollment nor leave operation
+// retained from the previous view, so either late reply is discarded instead
+// of replacing the list with an unrelated result screen.
+func TestFederationView_FKeyInvalidatesPriorOperationResults(t *testing.T) {
+	tests := []struct {
+		name string
+		kind federationOpKind
+		late tea.Msg
+	}{
+		{
+			name: "enroll",
+			kind: federationOpEnroll,
+			late: federationEnrollResultMsg{
+				attempt: 7,
+				result:  federationEnrollResult{HubURL: "https://hub.example"},
+			},
+		},
+		{
+			name: "leave",
+			kind: federationOpLeave,
+			late: federationLeaveResultMsg{
+				attempt: 7,
+				result: federationLeaveResult{
+					Draft: federationLeaveDraft{ProjectName: "spoke-project"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := setupFederationSourceModel()
+			m.view = viewProjects
+			m.federation.op = federationOp{kind: tt.kind, attempt: 7, running: true}
+
+			out, fetchCmd := updateModel(m, keyRune('F'))
+			require.NotNil(t, fetchCmd)
+			require.Equal(t, viewFederation, out.view)
+			require.Equal(t, federationModeList, out.federation.mode)
+			assert.Greater(t, out.federation.op.attempt, uint64(7))
+			assert.Equal(t, federationOpNone, out.federation.op.kind)
+			assert.False(t, out.federation.op.running)
+
+			out, cmd := updateModel(out, tt.late)
+			require.Nil(t, cmd, "a late result must not trigger a status refetch")
+			assert.Equal(t, viewFederation, out.view)
+			assert.Equal(t, federationModeList, out.federation.mode)
+			assert.Equal(t, federationOpNone, out.federation.op.kind)
+		})
+	}
+}
+
 func TestFederationView_EscReturnsToPreviousView(t *testing.T) {
 	m := setupFederationView()
 
@@ -39,12 +93,12 @@ func TestFederationView_EscReturnsToPreviousView(t *testing.T) {
 
 func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
-	m.federationCursor = 0
+	m.federation.cursor = 0
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeDetail, out.federationMode)
+	assert.Equal(t, federationModeDetail, out.federation.mode)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "hub project UID")
 	assert.Contains(t, rendered, "pull cursor")
@@ -55,7 +109,7 @@ func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
 
 func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
-	m.federationInstance.Auth = AuthInfo{Kind: "db_token", Actor: "operator"}
+	m.federation.instance.Auth = AuthInfo{Kind: "db_token", Actor: "operator"}
 	rendered := stripANSI(renderFederation(m))
 
 	assert.Contains(t, rendered, "kata / federation")
@@ -79,7 +133,7 @@ func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
 func TestFederationView_ActiveLocalGlobalAuthDisplaysTokenActor(t *testing.T) {
 	m := setupFederationViewWithStatuses()
 	m.activeDaemon = daemonTarget{Name: "local", Local: true}
-	m.federationInstance.Auth = AuthInfo{Kind: "db_token", Actor: "operator"}
+	m.federation.instance.Auth = AuthInfo{Kind: "db_token", Actor: "operator"}
 
 	rendered := stripANSI(renderFederation(m))
 
@@ -117,7 +171,7 @@ func TestFederationView_ListFitsTerminalHeight(t *testing.T) {
 func TestFederationView_DetailFitsTerminalHeight(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.height = 12
-	m.federationMode = federationModeDetail
+	m.federation.mode = federationModeDetail
 
 	rendered := stripANSI(renderFederation(m))
 
@@ -136,7 +190,7 @@ func TestFederationView_MouseClickUsesFederationRowOffset(t *testing.T) {
 	out, cmd := m.mouseFederationClick(7)
 
 	require.Nil(t, cmd)
-	assert.Equal(t, 0, out.federationCursor)
+	assert.Equal(t, 0, out.federation.cursor)
 }
 
 func TestFederationView_HelpAndFooterIncludeFederationBinding(t *testing.T) {
@@ -170,7 +224,7 @@ func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemo
 	m.api = spokeAPI
 	m.activeDaemon = spokeTarget
 	m.daemonTargets = []daemonTarget{spokeTarget, hubTarget}
-	m.federationHubCursor = 1
+	m.federation.hubCursor = 1
 	initialScope := m.scope
 	initialSSE := m.sseCh
 	initialConnGen := m.connGen
@@ -178,7 +232,7 @@ func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemo
 
 	out, cmd := m.routeFederationViewKey(keyRune('b'))
 	require.NotNil(t, cmd)
-	assert.Equal(t, federationModeBrowseHubs, out.federationMode)
+	assert.Equal(t, federationModeBrowseHubs, out.federation.mode)
 
 	msg := cmd().(federationHubProjectsLoadedMsg)
 	out, nextCmd := updateModel(out, msg)
@@ -215,7 +269,7 @@ func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
 	m.api = &Client{}
 	m.activeDaemon = daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false)
 	m.daemonTargets = []daemonTarget{m.activeDaemon, hubTarget}
-	m.federationHubCursor = 1
+	m.federation.hubCursor = 1
 
 	out, cmd := m.routeFederationViewKey(keyRune('b'))
 	require.NotNil(t, cmd)
@@ -224,13 +278,13 @@ func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeBrowseHubs, out.federationMode)
+	assert.Equal(t, federationModeBrowseHubs, out.federation.mode)
 	assert.Equal(t, 0, hub.ensureProjectCalls)
 	assert.Equal(t, 0, hub.enableFederationCalls)
 	assert.Equal(t, 0, hub.createEnrollmentCalls)
-	assert.NotEqual(t, federationModePreview, out.federationMode)
-	assert.Empty(t, out.federationRecovery.Token)
-	assert.Empty(t, out.federationRecovery.Command.Token)
+	assert.NotEqual(t, federationModePreview, out.federation.mode)
+	assert.Empty(t, out.federation.recovery.Token)
+	assert.Empty(t, out.federation.recovery.Command.Token)
 	rendered := stripANSI(renderFederation(out))
 	assert.NotContains(t, rendered, "single-use/secret-bearing")
 	assert.NotContains(t, rendered, enrollmentSecret())
@@ -259,27 +313,27 @@ func TestFederationEnroll_NWithCurrentProjectStartsLocalSelectionCursored(t *tes
 	out, cmd := m.routeFederationViewKey(keyRune('n'))
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectLocalProject, out.federationMode)
+	assert.Equal(t, federationModeSelectLocalProject, out.federation.mode)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "create new local replica from hub project",
 		"the replica path must stay reachable with an active project")
 	rows := federationLocalProjectRows(out)
-	require.Greater(t, len(rows), out.federationLocalProjectCursor)
-	cursorRow := rows[out.federationLocalProjectCursor]
+	require.Greater(t, len(rows), out.federation.localProjectCursor)
+	cursorRow := rows[out.federation.localProjectCursor]
 	require.False(t, cursorRow.createReplica, "cursor should pre-position on the active project")
 	assert.Equal(t, "spoke-project", cursorRow.project.Name)
 
 	// One Enter keeps the previous adopt ergonomics.
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectHub, out.federationMode)
-	assert.Equal(t, int64(7), out.federationDraft.SpokeProjectID)
-	assert.Equal(t, "spoke-project", out.federationDraft.SpokeProjectName)
-	assert.True(t, out.federationDraft.AdoptExisting)
+	assert.Equal(t, federationModeSelectHub, out.federation.mode)
+	assert.Equal(t, int64(7), out.federation.draft.SpokeProjectID)
+	assert.Equal(t, "spoke-project", out.federation.draft.SpokeProjectName)
+	assert.True(t, out.federation.draft.AdoptExisting)
 	rendered = stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "Select hub daemon")
 	assert.Contains(t, rendered, "hub https://hub.example auth token")
-	assert.Equal(t, "operator", out.federationDraft.RequestedActor)
+	assert.Equal(t, "operator", out.federation.draft.RequestedActor)
 }
 
 // TestFederationEnroll_ScopedProjectAdoptableWithEmptyProjectCache: the boot
@@ -295,10 +349,10 @@ func TestFederationEnroll_ScopedProjectAdoptableWithEmptyProjectCache(t *testing
 	out, cmd := m.routeFederationViewKey(keyRune('n'))
 
 	require.Nil(t, cmd)
-	require.Equal(t, federationModeSelectLocalProject, out.federationMode)
+	require.Equal(t, federationModeSelectLocalProject, out.federation.mode)
 	rows := federationLocalProjectRows(out)
-	require.Greater(t, len(rows), out.federationLocalProjectCursor)
-	cursorRow := rows[out.federationLocalProjectCursor]
+	require.Greater(t, len(rows), out.federation.localProjectCursor)
+	cursorRow := rows[out.federation.localProjectCursor]
 	require.False(t, cursorRow.createReplica,
 		"scoped project must be selectable (and pre-positioned) without the project cache")
 	assert.Equal(t, "spoke-project", cursorRow.project.Name)
@@ -316,7 +370,7 @@ func TestFederationEnroll_NWithoutProjectStartsLocalProjectSelection(t *testing.
 	out, cmd := m.routeFederationViewKey(keyRune('n'))
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectLocalProject, out.federationMode)
+	assert.Equal(t, federationModeSelectLocalProject, out.federation.mode)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "Select local spoke project")
 	assert.Contains(t, rendered, "create new local replica from hub project")
@@ -331,21 +385,21 @@ func TestFederationEnroll_EscFromHubSelectionReturnsToLocalProjectSelection(t *t
 
 	out, cmd := m.routeFederationViewKey(keyRune('n'))
 	require.Nil(t, cmd)
-	out.federationLocalProjectCursor = 1
+	out.federation.localProjectCursor = 1
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
-	require.Equal(t, federationModeSelectHub, out.federationMode)
+	require.Equal(t, federationModeSelectHub, out.federation.mode)
 
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectLocalProject, out.federationMode)
+	assert.Equal(t, federationModeSelectLocalProject, out.federation.mode)
 }
 
 func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testing.T) {
 	m := setupFederationHubProjectSelection()
-	m.federationDraft.HubInstance = InstanceInfo{Auth: AuthInfo{Kind: "db_token", Actor: "hub-operator"}}
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
+	m.federation.draft.HubInstance = InstanceInfo{Auth: AuthInfo{Kind: "db_token", Actor: "hub-operator"}}
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
 
 	renderedSelection := stripANSI(renderFederation(m))
 	assert.Contains(t, renderedSelection, "hub auth: token actor hub-operator")
@@ -356,12 +410,12 @@ func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testin
 	out, cmd := enterThroughAdoptConfirm(t, m)
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModePreview, out.federationMode)
-	assert.Equal(t, federationOperationAdoptSameName, out.federationDraft.Operation)
-	assert.Equal(t, int64(42), out.federationDraft.HubProjectID)
-	assert.Equal(t, "claim,pull,push", out.federationDraft.APICapabilities)
-	assert.Equal(t, "pull,push,lease", out.federationDraft.DisplayCapabilities)
-	assert.True(t, out.federationDraft.AdoptExisting)
+	assert.Equal(t, federationModePreview, out.federation.mode)
+	assert.Equal(t, federationOperationAdoptSameName, out.federation.draft.Operation)
+	assert.Equal(t, int64(42), out.federation.draft.HubProjectID)
+	assert.Equal(t, "claim,pull,push", out.federation.draft.APICapabilities)
+	assert.Equal(t, "pull,push,lease", out.federation.draft.DisplayCapabilities)
+	assert.True(t, out.federation.draft.AdoptExisting)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "Operation: adopt existing local project")
 	assert.Contains(t, rendered, "hub auth: token actor hub-operator")
@@ -394,13 +448,13 @@ func TestFederationEnroll_SelectHubLoadsHubAuthPrincipal(t *testing.T) {
 
 	out, _ := m.routeFederationViewKey(keyRune('n'))
 	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // adopt the pre-cursored active project
-	out.federationHubCursor = 1
+	out.federation.hubCursor = 1
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	out = out.handleFederationHubProjectsLoaded(cmd().(federationHubProjectsLoadedMsg))
 
 	rendered := stripANSI(renderFederation(out))
-	assert.Equal(t, "hub-operator", out.federationDraft.HubInstance.Auth.Actor)
+	assert.Equal(t, "hub-operator", out.federation.draft.HubInstance.Auth.Actor)
 	assert.Contains(t, rendered, "hub auth: token actor hub-operator")
 
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -412,35 +466,35 @@ func TestFederationEnroll_SelectHubLoadsHubAuthPrincipal(t *testing.T) {
 
 func TestFederationEnroll_SelectDifferentHubProjectSkipsSameNameDuplicate(t *testing.T) {
 	m := setupFederationHubProjectSelection()
-	m.federationHubProjects = []ProjectSummary{
+	m.federation.hubProjects = []ProjectSummary{
 		{ID: 42, Name: "spoke-project"},
 		{ID: 77, Name: "team-hub-project"},
 	}
-	m.federationHubProjectCursor = 1
+	m.federation.hubProjectCursor = 1
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModePreview, out.federationMode)
-	assert.Equal(t, federationOperationAdoptSelectedHub, out.federationDraft.Operation)
-	assert.Equal(t, int64(77), out.federationDraft.HubProjectID)
-	assert.Equal(t, "team-hub-project", out.federationDraft.HubProjectName)
+	assert.Equal(t, federationModePreview, out.federation.mode)
+	assert.Equal(t, federationOperationAdoptSelectedHub, out.federation.draft.Operation)
+	assert.Equal(t, int64(77), out.federation.draft.HubProjectID)
+	assert.Equal(t, "team-hub-project", out.federation.draft.HubProjectName)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "team-hub-project")
 }
 
 func TestFederationEnroll_SelectDifferentExistingHubProjectStillAdoptsLocalProject(t *testing.T) {
 	m := setupFederationHubProjectSelection()
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "hub-project"}}
-	m.federationHubProjectCursor = 1
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "hub-project"}}
+	m.federation.hubProjectCursor = 1
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModePreview, out.federationMode)
-	assert.Equal(t, federationOperationAdoptSelectedHub, out.federationDraft.Operation)
-	assert.True(t, out.federationDraft.AdoptExisting)
-	assert.Equal(t, int64(42), out.federationDraft.HubProjectID)
+	assert.Equal(t, federationModePreview, out.federation.mode)
+	assert.Equal(t, federationOperationAdoptSelectedHub, out.federation.draft.Operation)
+	assert.True(t, out.federation.draft.AdoptExisting)
+	assert.Equal(t, int64(42), out.federation.draft.HubProjectID)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "Operation: adopt existing local project into selected hub project")
 	assert.Contains(t, rendered, "hub-project")
@@ -459,24 +513,24 @@ func TestFederationEnroll_CreateReplicaBranchDefaultsLocalNameFromHubProject(t *
 	require.Nil(t, cmd)
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectHub, out.federationMode)
-	out.federationHubCursor = 1
+	assert.Equal(t, federationModeSelectHub, out.federation.mode)
+	out.federation.hubCursor = 1
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	out = out.handleFederationHubProjectsLoaded(federationHubProjectsLoadedMsg{
 		connGen:  out.connGen,
-		gen:      out.federationEnrollGen,
-		target:   out.federationDraft.HubTarget,
+		gen:      out.federation.enrollGen,
+		target:   out.federation.draft.HubTarget,
 		projects: []ProjectSummary{{ID: 42, Name: "hub-project"}},
 	})
 
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModePreview, out.federationMode)
-	assert.Equal(t, federationOperationCreateReplica, out.federationDraft.Operation)
-	assert.Equal(t, "hub-project", out.federationDraft.SpokeProjectName)
-	assert.False(t, out.federationDraft.AdoptExisting)
+	assert.Equal(t, federationModePreview, out.federation.mode)
+	assert.Equal(t, federationOperationCreateReplica, out.federation.draft.Operation)
+	assert.Equal(t, "hub-project", out.federation.draft.SpokeProjectName)
+	assert.False(t, out.federation.draft.AdoptExisting)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "Operation: create new local replica from hub project")
 	assert.NotContains(t, rendered, "pre-adoption event history")
@@ -486,49 +540,49 @@ func TestFederationEnroll_CreateReplicaBranchPreflightsLocalNameConflict(t *test
 	m := setupFederationView()
 	m.scope = scope{allProjects: true}
 	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
-	m.federationMode = federationModeSelectHubProject
-	m.federationDraft = newFederationDraft("anonymous")
-	m.federationDraft.CreateReplica = true
-	m.federationDraft.HubTarget = daemonTarget{Name: "hub", URL: "https://hub.example"}
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
+	m.federation.mode = federationModeSelectHubProject
+	m.federation.draft = newFederationDraft("anonymous")
+	m.federation.draft.CreateReplica = true
+	m.federation.draft.HubTarget = daemonTarget{Name: "hub", URL: "https://hub.example"}
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModePreview, out.federationMode)
-	assert.False(t, out.federationDraft.AdoptExisting)
+	assert.Equal(t, federationModePreview, out.federation.mode)
+	assert.False(t, out.federation.draft.AdoptExisting)
 	assert.Contains(t, stripANSI(renderFederation(out)), `Blocked: local project "spoke-project" already exists`)
 }
 
 func TestFederationEnroll_SameNamePreviewClearsStaleSelectedHubProjectID(t *testing.T) {
 	m := setupFederationHubProjectSelection()
-	m.federationDraft.HubProjectID = 42
-	m.federationDraft.HubProjectName = "old-hub-project"
-	m.federationHubProjectCursor = 0
-	m.federationHubProjects = []ProjectSummary{{ID: 77, Name: "different-hub-project"}}
+	m.federation.draft.HubProjectID = 42
+	m.federation.draft.HubProjectName = "old-hub-project"
+	m.federation.hubProjectCursor = 0
+	m.federation.hubProjects = []ProjectSummary{{ID: 77, Name: "different-hub-project"}}
 
 	out, cmd := m.previewFederationEnrollment()
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationOperationAdoptSameName, out.federationDraft.Operation)
-	assert.Equal(t, int64(0), out.federationDraft.HubProjectID)
-	assert.Equal(t, "spoke-project", out.federationDraft.HubProjectName)
+	assert.Equal(t, federationOperationAdoptSameName, out.federation.draft.Operation)
+	assert.Equal(t, int64(0), out.federation.draft.HubProjectID)
+	assert.Equal(t, "spoke-project", out.federation.draft.HubProjectName)
 }
 
 func TestFederationEnroll_ExistingLocalFederationBindingBlocksBeforeMutation(t *testing.T) {
 	m := setupFederationHubProjectSelection()
-	m.federationStatuses = []FederationProjectStatus{federationStatusFixture("spoke-project", "spoke")}
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
+	m.federation.statuses = []FederationProjectStatus{federationStatusFixture("spoke-project", "spoke")}
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
 
 	out, cmd := m.previewFederationEnrollment()
 	require.Nil(t, cmd)
 
-	assert.Equal(t, federationModePreview, out.federationMode)
+	assert.Equal(t, federationModePreview, out.federation.mode)
 	assert.Contains(t, stripANSI(renderFederation(out)), "already has federation binding")
 
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModePreview, out.federationMode)
+	assert.Equal(t, federationModePreview, out.federation.mode)
 }
 
 func TestFederationEnroll_MissingTokenEnvBlocksBeforeMutation(t *testing.T) {
@@ -545,12 +599,12 @@ func TestFederationEnroll_MissingTokenEnvBlocksBeforeMutation(t *testing.T) {
 
 	out, _ := m.routeFederationViewKey(keyRune('n'))
 	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // adopt the pre-cursored active project
-	out.federationHubCursor = 1
+	out.federation.hubCursor = 1
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectHub, out.federationMode)
-	require.EqualError(t, out.federationEnrollErr,
+	assert.Equal(t, federationModeSelectHub, out.federation.mode)
+	require.EqualError(t, out.federation.op.err,
 		`daemon "hub": token_env "`+missingHubAuthEnvName()+`" is unset or empty`)
 }
 
@@ -568,12 +622,12 @@ func TestFederationEnroll_GlobalAuthTokenDoesNotOverrideMissingTargetTokenEnv(t 
 
 	out, _ := m.routeFederationViewKey(keyRune('n'))
 	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	out.federationHubCursor = 1
+	out.federation.hubCursor = 1
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectHub, out.federationMode)
-	require.EqualError(t, out.federationEnrollErr,
+	assert.Equal(t, federationModeSelectHub, out.federation.mode)
+	require.EqualError(t, out.federation.op.err,
 		`daemon "hub": token_env "`+missingHubAuthEnvName()+`" is unset or empty`)
 }
 
@@ -595,24 +649,24 @@ func TestFederationEnroll_ActiveDaemonAsHubBlocked(t *testing.T) {
 func TestFederationEnroll_LocalHubTargetBlocksBeforeMutation(t *testing.T) {
 	m := setupFederationView()
 	m.scope = homedScope(7, "spoke-project")
-	m.federationMode = federationModeSelectHub
-	m.federationDraft = newFederationDraft("operator")
-	m.federationDraft.SpokeProjectID = 7
-	m.federationDraft.SpokeProjectName = "spoke-project"
+	m.federation.mode = federationModeSelectHub
+	m.federation.draft = newFederationDraft("operator")
+	m.federation.draft.SpokeProjectID = 7
+	m.federation.draft.SpokeProjectName = "spoke-project"
 	m.activeDaemon = daemonTarget{Name: "spoke", URL: "https://spoke.example"}
 	m.daemonTargets = []daemonTarget{
 		m.activeDaemon,
 		{Name: "local-hub", Local: true},
 	}
-	m.federationHubCursor = 1
+	m.federation.hubCursor = 1
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectHub, out.federationMode)
-	assert.Empty(t, out.federationDraft.HubTarget.Name)
-	require.Error(t, out.federationEnrollErr)
-	assert.Contains(t, out.federationEnrollErr.Error(), "local hub")
+	assert.Equal(t, federationModeSelectHub, out.federation.mode)
+	assert.Empty(t, out.federation.draft.HubTarget.Name)
+	require.Error(t, out.federation.op.err)
+	assert.Contains(t, out.federation.op.err.Error(), "local hub")
 }
 
 func TestFederationEnroll_PlainHTTPHostnameRequiresCatalogAllowInsecure(t *testing.T) {
@@ -627,7 +681,7 @@ func TestFederationEnroll_PlainHTTPHostnameRequiresCatalogAllowInsecure(t *testi
 
 	out, _ := m.routeFederationViewKey(keyRune('n'))
 	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // adopt the pre-cursored active project
-	out.federationHubCursor = 1
+	out.federation.hubCursor = 1
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
@@ -643,7 +697,7 @@ func TestFederationEnroll_EnterCreatesEnrollmentAndJoinsSpoke(t *testing.T) {
 	out, refresh := updateModel(out, msg)
 
 	require.NotNil(t, refresh)
-	assert.Equal(t, federationModeResult, out.federationMode)
+	assert.Equal(t, federationModeResult, out.federation.mode)
 	assert.Equal(t, "hub-actor", joinBody.Actor)
 	assert.Equal(t, "claim,pull,push", joinBody.Capabilities)
 	assert.True(t, joinBody.PushEnabled)
@@ -655,18 +709,18 @@ func TestFederationEnroll_EnterCreatesEnrollmentAndJoinsSpoke(t *testing.T) {
 
 func TestFederationEnroll_AdoptSelectedHubJoinsSelectedLocalProjectName(t *testing.T) {
 	m, joinBody := setupFederationExecutionPreview(t, federationExecutionServerOptions{hubProjectName: "hub-project"})
-	m.federationDraft.Operation = federationOperationAdoptSelectedHub
-	m.federationDraft.SpokeProjectName = "local-spoke-project"
-	m.federationDraft.HubProjectName = "hub-project"
+	m.federation.draft.Operation = federationOperationAdoptSelectedHub
+	m.federation.draft.SpokeProjectName = "local-spoke-project"
+	m.federation.draft.HubProjectName = "hub-project"
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
 	require.NotNil(t, cmd)
 	msg := cmd().(federationEnrollResultMsg)
 	out, _ = updateModel(out, msg)
 
-	assert.Equal(t, federationModeResult, out.federationMode)
+	assert.Equal(t, federationModeResult, out.federation.mode)
 	assert.Equal(t, "local-spoke-project", joinBody.ProjectName)
-	assert.Equal(t, "hub-project", out.federationResult.Metadata.ProjectName)
+	assert.Equal(t, "hub-project", out.federation.op.enroll.Metadata.ProjectName)
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", joinBody.HubProjectUID)
 }
 
@@ -675,9 +729,9 @@ func TestFederationEnroll_AdoptSelectedHubRecoveryUsesSelectedLocalProjectName(t
 		hubProjectName: "hub-project",
 		joinStatus:     http.StatusInternalServerError,
 	})
-	m.federationDraft.Operation = federationOperationAdoptSelectedHub
-	m.federationDraft.SpokeProjectName = "local-spoke-project"
-	m.federationDraft.HubProjectName = "hub-project"
+	m.federation.draft.Operation = federationOperationAdoptSelectedHub
+	m.federation.draft.SpokeProjectName = "local-spoke-project"
+	m.federation.draft.HubProjectName = "hub-project"
 	out, cmd := enterThroughAdoptConfirm(t, m)
 	require.NotNil(t, cmd)
 	msg := cmd().(federationEnrollResultMsg)
@@ -718,7 +772,7 @@ func TestFederationEnroll_MetadataFailureShowsHubLabeledRecoveryAndHidesToken(t 
 	out, _ = updateModel(out, msg)
 
 	rendered := stripANSI(renderFederation(out))
-	assert.Equal(t, federationModeRecovery, out.federationMode)
+	assert.Equal(t, federationModeRecovery, out.federation.mode)
 	assert.Contains(t, rendered, "hub hub: enrollment metadata fetch failed")
 	assert.NotContains(t, rendered, enrollmentSecret())
 }
@@ -758,7 +812,7 @@ func TestFederationEnroll_JoinFailureShowsSpokeLabeledRecoveryAndHidesToken(t *t
 	out, _ = updateModel(out, msg)
 
 	rendered := stripANSI(renderFederation(out))
-	assert.Equal(t, federationModeRecovery, out.federationMode)
+	assert.Equal(t, federationModeRecovery, out.federation.mode)
 	assert.Contains(t, rendered, "hub: enrollment created")
 	assert.Contains(t, rendered, "spoke: join failed")
 	assert.NotContains(t, rendered, enrollmentSecret())
@@ -779,10 +833,10 @@ func TestFederationEnroll_PreEnrollmentFailureReturnsToPreview(t *testing.T) {
 	out, nextCmd := updateModel(out, msg)
 
 	require.Nil(t, nextCmd)
-	assert.Equal(t, federationModePreview, out.federationMode)
-	require.Error(t, out.federationEnrollErr)
-	assert.Contains(t, out.federationEnrollErr.Error(), "hub unavailable")
-	assert.Empty(t, out.federationRecovery.Token)
+	assert.Equal(t, federationModePreview, out.federation.mode)
+	require.Error(t, out.federation.op.err)
+	assert.Contains(t, out.federation.op.err.Error(), "hub unavailable")
+	assert.Empty(t, out.federation.recovery.Token)
 }
 
 func TestFederationEnroll_MissingSpokeInstanceBlocksBeforeHubMutation(t *testing.T) {
@@ -798,7 +852,7 @@ func TestFederationEnroll_MissingSpokeInstanceBlocksBeforeHubMutation(t *testing
 
 	result, err := runFederationEnrollment(
 		context.Background(),
-		m.federationDraft,
+		m.federation.draft,
 		"",
 		m.activeDaemon,
 		m.api,
@@ -899,18 +953,18 @@ func TestFederationEnroll_RecoveryCommandQuotesShellMetacharacters(t *testing.T)
 
 func TestFederationLeaveKeyOpensPreviewOnSpokeRowOnly(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
-	m.federationCursor = 0
+	m.federation.cursor = 0
 
 	out, cmd := m.routeFederationViewKey(keyRune('x'))
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeLeavePreview, out.federationMode)
-	assert.Equal(t, "spoke-proj", out.federationLeaveDraft.ProjectName)
-	assert.Equal(t, "http://hub.internal:7777", out.federationLeaveDraft.HubURL)
-	assert.Equal(t, int64(42), out.federationLeaveDraft.HubProjectID)
-	assert.Equal(t, int64(7), out.federationLeaveDraft.ProjectID)
-	assert.Equal(t, "detach", out.federationLeaveDraft.Disposition)
-	assert.Empty(t, out.federationLeaveDraft.BlockedReason)
+	assert.Equal(t, federationModeLeavePreview, out.federation.mode)
+	assert.Equal(t, "spoke-proj", out.federation.leaveDraft.ProjectName)
+	assert.Equal(t, "http://hub.internal:7777", out.federation.leaveDraft.HubURL)
+	assert.Equal(t, int64(42), out.federation.leaveDraft.HubProjectID)
+	assert.Equal(t, int64(7), out.federation.leaveDraft.ProjectID)
+	assert.Equal(t, "detach", out.federation.leaveDraft.Disposition)
+	assert.Empty(t, out.federation.leaveDraft.BlockedReason)
 }
 
 func TestFederationLeaveKeyDoesNotOpenPreviewOnNonSpokeRow(t *testing.T) {
@@ -918,19 +972,19 @@ func TestFederationLeaveKeyDoesNotOpenPreviewOnNonSpokeRow(t *testing.T) {
 	// a non-spoke selection must never enter leave preview. Drive the guard
 	// directly by exercising the detail router on a hub status.
 	m := setupFederationViewWithStatuses(federationStatusFixture("hub-only", "hub"))
-	m.federationCursor = 0
-	m.federationMode = federationModeDetail
+	m.federation.cursor = 0
+	m.federation.mode = federationModeDetail
 
 	out, cmd := m.routeFederationDetailKey(keyRune('x'))
 
 	require.Nil(t, cmd)
-	assert.NotEqual(t, federationModeLeavePreview, out.federationMode)
-	assert.Equal(t, federationModeDetail, out.federationMode)
+	assert.NotEqual(t, federationModeLeavePreview, out.federation.mode)
+	assert.Equal(t, federationModeDetail, out.federation.mode)
 }
 
 func TestFederationLeavePreviewRender(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
-	m.federationCursor = 0
+	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
 
 	rendered := stripANSI(renderFederation(out))
@@ -953,38 +1007,38 @@ func TestFederationLeaveListFooterAdvertisesLeaveKey(t *testing.T) {
 
 func TestFederationLeavePreviewTogglesDispositionAndLocalOnly(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
-	m.federationCursor = 0
+	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
-	require.Equal(t, "detach", out.federationLeaveDraft.Disposition)
+	require.Equal(t, "detach", out.federation.leaveDraft.Disposition)
 
 	out, cmd := out.routeFederationViewKey(keyRune('d'))
 	require.Nil(t, cmd)
-	assert.Equal(t, "archive", out.federationLeaveDraft.Disposition)
+	assert.Equal(t, "archive", out.federation.leaveDraft.Disposition)
 
 	out, cmd = out.routeFederationViewKey(keyRune('d'))
 	require.Nil(t, cmd)
-	assert.Equal(t, "detach", out.federationLeaveDraft.Disposition)
+	assert.Equal(t, "detach", out.federation.leaveDraft.Disposition)
 
 	out, cmd = out.routeFederationViewKey(keyRune('l'))
 	require.Nil(t, cmd)
-	assert.True(t, out.federationLeaveDraft.LocalOnly)
+	assert.True(t, out.federation.leaveDraft.LocalOnly)
 	assert.Contains(t, stripANSI(renderFederation(out)), "local-only")
 
 	out, cmd = out.routeFederationViewKey(keyRune('l'))
 	require.Nil(t, cmd)
-	assert.False(t, out.federationLeaveDraft.LocalOnly)
+	assert.False(t, out.federation.leaveDraft.LocalOnly)
 }
 
 func TestFederationLeavePreviewEscReturnsToList(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
-	m.federationCursor = 0
+	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
-	require.Equal(t, federationModeLeavePreview, out.federationMode)
+	require.Equal(t, federationModeLeavePreview, out.federation.mode)
 
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeList, out.federationMode)
+	assert.Equal(t, federationModeList, out.federation.mode)
 }
 
 func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T) {
@@ -1015,9 +1069,9 @@ func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.api = NewClient(spoke.URL, spoke.Client())
 	m.list.actor = "operator"
-	m.federationCursor = 0
+	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
-	require.Equal(t, federationModeLeavePreview, out.federationMode)
+	require.Equal(t, federationModeLeavePreview, out.federation.mode)
 
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
@@ -1026,11 +1080,11 @@ func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T
 
 	require.NotNil(t, refresh)
 	require.NoError(t, msg.err)
-	assert.Equal(t, federationModeResult, out.federationMode)
+	assert.Equal(t, federationModeResult, out.federation.mode)
 	assert.Equal(t, []int64{11}, hub.revokedEnrollmentIDs)
 	assert.Equal(t, "detach", leaveBody.Disposition)
 	assert.Equal(t, "operator", leaveBody.Actor)
-	assert.Equal(t, 1, out.federationLeaveResult.RevokedCount)
+	assert.Equal(t, 1, out.federation.op.leave.RevokedCount)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "Leave Result")
 	assert.Contains(t, rendered, "detached")
@@ -1074,9 +1128,9 @@ func TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject(t *testing.
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.api = NewClient(spoke.URL, spoke.Client())
 	m.list.actor = "operator"
-	m.federationCursor = 0
+	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
-	require.Equal(t, federationModeLeavePreview, out.federationMode)
+	require.Equal(t, federationModeLeavePreview, out.federation.mode)
 
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
@@ -1126,10 +1180,10 @@ func TestFederationLeaveDetachPreflightRefusalSkipsRevoke(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.api = NewClient(spoke.URL, spoke.Client())
 	m.list.actor = "operator"
-	m.federationCursor = 0
+	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
-	require.Equal(t, federationModeLeavePreview, out.federationMode)
-	require.NotEqual(t, "archive", out.federationLeaveDraft.Disposition, "this test covers the default detach path")
+	require.Equal(t, federationModeLeavePreview, out.federation.mode)
+	require.NotEqual(t, "archive", out.federation.leaveDraft.Disposition, "this test covers the default detach path")
 
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
@@ -1178,11 +1232,11 @@ func TestFederationLeaveArchivePreflightRefusalSkipsRevoke(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.api = NewClient(spoke.URL, spoke.Client())
 	m.list.actor = "operator"
-	m.federationCursor = 0
+	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
-	require.Equal(t, federationModeLeavePreview, out.federationMode)
+	require.Equal(t, federationModeLeavePreview, out.federation.mode)
 	out, _ = out.routeFederationViewKey(keyRune('d')) // toggle disposition to archive
-	require.Equal(t, "archive", out.federationLeaveDraft.Disposition)
+	require.Equal(t, "archive", out.federation.leaveDraft.Disposition)
 
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
@@ -1219,10 +1273,10 @@ func TestFederationLeaveLocalOnlySkipsHubRevoke(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.api = NewClient(spoke.URL, spoke.Client())
 	m.list.actor = "operator"
-	m.federationCursor = 0
+	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
 	out, _ = out.routeFederationViewKey(keyRune('l')) // toggle local-only
-	require.True(t, out.federationLeaveDraft.LocalOnly)
+	require.True(t, out.federation.leaveDraft.LocalOnly)
 
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
@@ -1230,10 +1284,10 @@ func TestFederationLeaveLocalOnlySkipsHubRevoke(t *testing.T) {
 	out, _ = updateModel(out, msg)
 
 	require.NoError(t, msg.err)
-	assert.Equal(t, federationModeResult, out.federationMode)
+	assert.Equal(t, federationModeResult, out.federation.mode)
 	assert.Equal(t, 0, hub.listEnrollmentsCalls)
 	assert.Empty(t, hub.revokedEnrollmentIDs)
-	assert.True(t, out.federationLeaveResult.SkippedRevoke)
+	assert.True(t, out.federation.op.leave.SkippedRevoke)
 	assert.Contains(t, stripANSI(renderFederation(out)), "hub revoke skipped")
 }
 
@@ -1260,7 +1314,7 @@ func TestFederationLeaveHubRevokeFailureReturnsToPreview(t *testing.T) {
 
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.api = NewClient(spoke.URL, spoke.Client())
-	m.federationCursor = 0
+	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
 
 	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -1270,9 +1324,9 @@ func TestFederationLeaveHubRevokeFailureReturnsToPreview(t *testing.T) {
 
 	require.Nil(t, next)
 	assert.False(t, leaveCalled, "local teardown must not run when hub revoke fails")
-	assert.Equal(t, federationModeLeavePreview, out.federationMode)
-	require.Error(t, out.federationEnrollErr)
-	assert.Contains(t, out.federationEnrollErr.Error(), "hub revoke failed")
+	assert.Equal(t, federationModeLeavePreview, out.federation.mode)
+	require.Error(t, out.federation.op.err)
+	assert.Contains(t, out.federation.op.err.Error(), "hub revoke failed")
 }
 
 func TestFederationLeaveMatchesActiveEnrollmentsForSpokeInstanceAndHubProject(t *testing.T) {
@@ -1372,18 +1426,18 @@ func setupFederationView() Model {
 	m := setupFederationSourceModel()
 	m.view = viewFederation
 	m.prevView = viewList
-	m.federationMode = federationModeList
+	m.federation.mode = federationModeList
 	return m
 }
 
 func setupFederationViewWithStatuses(statuses ...FederationProjectStatus) Model {
 	m := setupFederationView()
-	m.federationInstance = InstanceInfo{
+	m.federation.instance = InstanceInfo{
 		InstanceUID:   "01HZNQ7VFPK1XGD8R5MABCD4EA",
 		Version:       "dev",
 		SchemaVersion: 1,
 	}
-	m.federationStatuses = statuses
+	m.federation.statuses = statuses
 	return m
 }
 
@@ -1435,16 +1489,187 @@ func setupFederationHubProjectSelection() Model {
 	m := setupFederationView()
 	m.scope = homedScope(7, "spoke-project")
 	m.list.actor = "operator"
-	m.federationMode = federationModeSelectHubProject
-	m.federationDraft = newFederationDraft("operator")
-	m.federationDraft.SpokeProjectID = 7
-	m.federationDraft.SpokeProjectName = "spoke-project"
-	m.federationDraft.HubTarget = daemonTargetWithResolvedAuth(
+	m.federation.mode = federationModeSelectHubProject
+	m.federation.draft = newFederationDraft("operator")
+	m.federation.draft.SpokeProjectID = 7
+	m.federation.draft.SpokeProjectName = "spoke-project"
+	m.federation.draft.HubTarget = daemonTargetWithResolvedAuth(
 		"hub", "https://hub.example", "hub-auth", true,
 	)
-	m.federationDraft.AllowInsecure = true
-	m.federationDraft.AdoptExisting = true
+	m.federation.draft.AllowInsecure = true
+	m.federation.draft.AdoptExisting = true
 	return m
+}
+
+// TestFederationHubProjectRows is the audit's requested table over
+// {adopt, create-replica, browse} x {empty, only-same-name, mixed}. It is
+// the single place the sentinel-row convention is now stated: count,
+// labels and selection all come off one row list, so they cannot drift
+// apart the way the four independent derivations used to.
+func TestFederationHubProjectRows(t *testing.T) {
+	sameName := ProjectSummary{ID: 42, Name: "spoke-project"}
+	other := ProjectSummary{ID: 77, Name: "hub-project"}
+
+	setup := func(createReplica bool, projects []ProjectSummary) Model {
+		m := setupFederationHubProjectSelection()
+		m.federation.draft.CreateReplica = createReplica
+		m.federation.hubProjects = projects
+		return m
+	}
+
+	t.Run("adopt/empty", func(t *testing.T) {
+		rows := federationHubProjectRows(setup(false, nil))
+		require.Len(t, rows, 1)
+		assert.True(t, rows[0].sentinel)
+		assert.Equal(t, `create hub project "spoke-project" and enable federation`, rows[0].label)
+	})
+
+	t.Run("adopt/only-same-name", func(t *testing.T) {
+		rows := federationHubProjectRows(setup(false, []ProjectSummary{sameName}))
+		require.Len(t, rows, 1, "the same-name project is folded into the sentinel row")
+		assert.True(t, rows[0].sentinel)
+		assert.Equal(t,
+			`use existing hub project "spoke-project"; enable federation if needed`,
+			rows[0].label)
+	})
+
+	t.Run("adopt/mixed", func(t *testing.T) {
+		m := setup(false, []ProjectSummary{sameName, other})
+		rows := federationHubProjectRows(m)
+		require.Len(t, rows, 2)
+		assert.True(t, rows[0].sentinel)
+		assert.False(t, rows[1].sentinel)
+		assert.Equal(t, other, rows[1].project)
+		assert.Equal(t, "hub-project", rows[1].label)
+
+		m.federation.hubProjectCursor = 0
+		row, ok := m.selectedFederationHubProjectRow()
+		require.True(t, ok)
+		assert.True(t, row.sentinel, "row 0 stays the adopt-same-name sentinel")
+
+		m.federation.hubProjectCursor = 1
+		row, ok = m.selectedFederationHubProjectRow()
+		require.True(t, ok)
+		assert.False(t, row.sentinel)
+		assert.Equal(t, int64(77), row.project.ID)
+	})
+
+	t.Run("create-replica/empty", func(t *testing.T) {
+		assert.Empty(t, federationHubProjectRows(setup(true, nil)))
+	})
+
+	t.Run("create-replica/only-same-name", func(t *testing.T) {
+		m := setup(true, []ProjectSummary{sameName})
+		rows := federationHubProjectRows(m)
+		require.Len(t, rows, 1, "create-replica does not filter the same-name project")
+		assert.False(t, rows[0].sentinel)
+		assert.Equal(t, "spoke-project", rows[0].label)
+
+		m.federation.hubProjectCursor = 0
+		row, ok := m.selectedFederationHubProjectRow()
+		require.True(t, ok)
+		assert.Equal(t, int64(42), row.project.ID, "row 0 is the first hub project in create-replica mode")
+	})
+
+	t.Run("create-replica/mixed", func(t *testing.T) {
+		rows := federationHubProjectRows(setup(true, []ProjectSummary{sameName, other}))
+		require.Len(t, rows, 2)
+		assert.Equal(t, int64(42), rows[0].project.ID)
+		assert.Equal(t, int64(77), rows[1].project.ID)
+	})
+
+	t.Run("browse/empty", func(t *testing.T) {
+		assert.Empty(t, federationBrowseHubProjectRows(setup(false, nil)))
+	})
+
+	t.Run("browse/only-same-name", func(t *testing.T) {
+		rows := federationBrowseHubProjectRows(setup(false, []ProjectSummary{sameName}))
+		require.Len(t, rows, 1, "browse never filters and never prepends a sentinel")
+		assert.False(t, rows[0].sentinel)
+		assert.Equal(t, "42 spoke-project", rows[0].label)
+	})
+
+	t.Run("browse/mixed", func(t *testing.T) {
+		rows := federationBrowseHubProjectRows(setup(false, []ProjectSummary{sameName, other}))
+		require.Len(t, rows, 2)
+		assert.Equal(t, "42 spoke-project", rows[0].label)
+		assert.Equal(t, "77 hub-project", rows[1].label)
+	})
+}
+
+// TestFederationHubProjectRowsForMode: browse mode is a third row
+// convention over the same cursor and the same []ProjectSummary. Naming it
+// in a builder is what removes the count patch-up that
+// handleFederationHubProjectsLoaded used to need.
+func TestFederationHubProjectRowsForMode(t *testing.T) {
+	m := setupFederationHubProjectSelection()
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
+
+	m.federation.mode = federationModeSelectHubProject
+	assert.Len(t, federationHubProjectRowsForMode(m), 1)
+	assert.True(t, federationHubProjectRowsForMode(m)[0].sentinel)
+
+	m.federation.mode = federationModeBrowseHubs
+	assert.Len(t, federationHubProjectRowsForMode(m), 1)
+	assert.False(t, federationHubProjectRowsForMode(m)[0].sentinel)
+}
+
+// TestFederationSelectHubProject_EmptyCreateReplicaListIsNotSelectable pins
+// the resolution of the count-vs-label divergence: with create-replica and
+// no hub projects, the screen explains itself but offers nothing to move to,
+// and the key router agrees.
+func TestFederationSelectHubProject_EmptyCreateReplicaListIsNotSelectable(t *testing.T) {
+	m := setupFederationHubProjectSelection()
+	m.federation.draft.CreateReplica = true
+	m.federation.hubProjects = nil
+
+	rendered := stripANSI(renderFederation(m))
+
+	assert.Contains(t, rendered, "no hub projects")
+	assert.NotContains(t, rendered, "▶ no hub projects",
+		"the empty-list line must not render as a highlighted, selectable row")
+
+	assert.Empty(t, federationHubProjectRows(m),
+		"rendered selectable rows and the router's movement bound must agree")
+	out, cmd := m.routeFederationViewKey(keyRune('j'))
+	require.Nil(t, cmd)
+	assert.Equal(t, 0, out.federation.hubProjectCursor,
+		"j must not move a cursor over an empty row list")
+}
+
+// TestFederationSelectHubProject_OutOfRangeCursorSelectsTheHighlightedRow:
+// the renderer has always clamped its highlight, but the selection used to
+// return "nothing selected" past the end, so Enter and the highlight could
+// disagree. Selection now clamps the same way.
+func TestFederationSelectHubProject_OutOfRangeCursorSelectsTheHighlightedRow(t *testing.T) {
+	m := setupFederationHubProjectSelection()
+	m.federation.hubProjects = []ProjectSummary{{ID: 77, Name: "hub-project"}}
+	m.federation.hubProjectCursor = 99 // rows are [sentinel, hub-project]
+
+	out, cmd := m.previewFederationEnrollment()
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationOperationAdoptSelectedHub, out.federation.draft.Operation)
+	assert.Equal(t, int64(77), out.federation.draft.HubProjectID)
+}
+
+// TestFederationSelectHubProject_RowLabelsDriveTheRenderedList: the render
+// loop reads row.label instead of calling a parallel label builder, so a
+// label change cannot land on one of the two lists only.
+func TestFederationSelectHubProject_RowLabelsDriveTheRenderedList(t *testing.T) {
+	m := setupFederationHubProjectSelection()
+	m.federation.hubProjects = []ProjectSummary{
+		{ID: 42, Name: "spoke-project"},
+		{ID: 77, Name: "hub-project"},
+	}
+
+	rendered := stripANSI(renderFederation(m))
+
+	for _, row := range federationHubProjectRows(m) {
+		assert.Contains(t, rendered, row.label)
+	}
+	assert.Contains(t, rendered, `▶ use existing hub project "spoke-project"`,
+		"cursor 0 highlights the sentinel row")
 }
 
 type federationExecutionServerOptions struct {
@@ -1511,13 +1736,13 @@ func setupFederationExecutionPreview(
 	m := setupFederationHubProjectSelection()
 	m.api = NewClient(spoke.URL, spoke.Client())
 	m.activeDaemon = daemonTarget{Name: "spoke", URL: spoke.URL}
-	m.federationInstance = InstanceInfo{InstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
-	m.federationMode = federationModePreview
-	m.federationDraft.Operation = federationOperationAdoptSameName
-	m.federationDraft.HubProjectID = 42
-	m.federationDraft.HubProjectName = hubProjectName
-	m.federationDraft.HubTarget = daemonTargetWithResolvedAuth("hub", hub.URL, "", true)
-	m.federationDraft.AllowInsecure = true
+	m.federation.instance = InstanceInfo{InstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
+	m.federation.mode = federationModePreview
+	m.federation.draft.Operation = federationOperationAdoptSameName
+	m.federation.draft.HubProjectID = 42
+	m.federation.draft.HubProjectName = hubProjectName
+	m.federation.draft.HubTarget = daemonTargetWithResolvedAuth("hub", hub.URL, "", true)
+	m.federation.draft.AllowInsecure = true
 	return m, &joinBody
 }
 
@@ -1620,8 +1845,8 @@ func restoreFederationHubAdminClient(
 // the enrollment token.
 func TestFederationRecoveryShowsRealJoinError(t *testing.T) {
 	m := setupFederationView()
-	m.federationMode = federationModeRecovery
-	m.federationRecovery = federationRecovery{
+	m.federation.mode = federationModeRecovery
+	m.federation.recovery = federationRecovery{
 		Stage: "join",
 		Err: fmt.Errorf("spoke: join failed: %w", &APIError{
 			Status:  409,
@@ -1641,8 +1866,8 @@ func TestFederationRecoveryShowsRealJoinError(t *testing.T) {
 // the token-oriented hint alongside the real error.
 func TestFederationRecoveryKeepsTokenHintForAuthFailures(t *testing.T) {
 	m := setupFederationView()
-	m.federationMode = federationModeRecovery
-	m.federationRecovery = federationRecovery{
+	m.federation.mode = federationModeRecovery
+	m.federation.recovery = federationRecovery{
 		Stage: "join",
 		Err:   fmt.Errorf("spoke: join failed: %w", &APIError{Status: 401, Code: "unauthorized", Message: "bearer token rejected"}),
 	}
@@ -1660,13 +1885,13 @@ func TestFederationPreviewDetectsRejoinForUIDHolder(t *testing.T) {
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4EX"}
-	m.federationDraft = federationDraft{CreateReplica: true}
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "hub-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
-	m.federationHubProjectCursor = 0
+	m.federation.draft = federationDraft{CreateReplica: true}
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "hub-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
+	m.federation.hubProjectCursor = 0
 
 	out, _ := m.previewFederationEnrollment()
 
-	draft := out.federationDraft
+	draft := out.federation.draft
 	assert.Equal(t, federationOperationRejoin, draft.Operation)
 	assert.Equal(t, "spoke-project", draft.SpokeProjectName, "rejoin must target the local UID-holder")
 	assert.False(t, draft.AdoptExisting)
@@ -1685,15 +1910,15 @@ func TestFederationPreviewBlocksRejoinWhenHolderStillBound(t *testing.T) {
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4EX"}
-	m.federationStatuses = []FederationProjectStatus{{ProjectID: 7, ProjectName: "spoke-project", Role: "spoke"}}
-	m.federationDraft = federationDraft{CreateReplica: true}
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "hub-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
-	m.federationHubProjectCursor = 0
+	m.federation.statuses = []FederationProjectStatus{{ProjectID: 7, ProjectName: "spoke-project", Role: "spoke"}}
+	m.federation.draft = federationDraft{CreateReplica: true}
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "hub-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
+	m.federation.hubProjectCursor = 0
 
 	out, _ := m.previewFederationEnrollment()
 
-	assert.NotEqual(t, federationOperationRejoin, out.federationDraft.Operation)
-	assert.Contains(t, out.federationDraft.BlockedReason, "spoke-project")
+	assert.NotEqual(t, federationOperationRejoin, out.federation.draft.Operation)
+	assert.Contains(t, out.federation.draft.BlockedReason, "spoke-project")
 }
 
 // TestFederationPreviewCreateReplicaUnaffectedWithoutUIDMatch: no local
@@ -1702,14 +1927,14 @@ func TestFederationPreviewCreateReplicaUnaffectedWithoutUIDMatch(t *testing.T) {
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "other-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4ZZ"}
-	m.federationDraft = federationDraft{CreateReplica: true}
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "hub-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
-	m.federationHubProjectCursor = 0
+	m.federation.draft = federationDraft{CreateReplica: true}
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "hub-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
+	m.federation.hubProjectCursor = 0
 
 	out, _ := m.previewFederationEnrollment()
 
-	assert.Equal(t, federationOperationCreateReplica, out.federationDraft.Operation)
-	assert.Empty(t, out.federationDraft.BlockedReason)
+	assert.Equal(t, federationOperationCreateReplica, out.federation.draft.Operation)
+	assert.Empty(t, out.federation.draft.BlockedReason)
 }
 
 // typeFederationKeys feeds individual rune key presses into the federation
@@ -1728,11 +1953,11 @@ func typeFederationKeys(m Model, text string) Model {
 func enterThroughAdoptConfirm(t *testing.T, m Model) (Model, tea.Cmd) {
 	t.Helper()
 	out, cmd := m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if out.federationMode != federationModeAdoptConfirm {
+	if out.federation.mode != federationModeAdoptConfirm {
 		return out, cmd
 	}
 	require.Nil(t, cmd, "entering the adopt confirmation must not execute")
-	out = typeFederationKeys(out, out.federationDraft.SpokeProjectName)
+	out = typeFederationKeys(out, out.federation.draft.SpokeProjectName)
 	return out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 }
 
@@ -1744,7 +1969,7 @@ func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) {
 
 	out, cmd := m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd, "adoption must not execute on bare enter")
-	assert.Equal(t, federationModeAdoptConfirm, out.federationMode)
+	assert.Equal(t, federationModeAdoptConfirm, out.federation.mode)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "INTO hub project")
 	assert.Contains(t, rendered, "spoke-project")
@@ -1752,12 +1977,12 @@ func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) {
 	out = typeFederationKeys(out, "wrong-name")
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeAdoptConfirm, out.federationMode)
-	assert.False(t, out.federationEnrollRunning)
-	require.Error(t, out.federationEnrollErr)
+	assert.Equal(t, federationModeAdoptConfirm, out.federation.mode)
+	assert.False(t, out.federation.op.running)
+	require.Error(t, out.federation.op.err)
 
 	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
-	assert.Equal(t, federationModePreview, out.federationMode)
+	assert.Equal(t, federationModePreview, out.federation.mode)
 }
 
 // TestFederationAdoptConfirmTypesSpaces: project names may contain spaces
@@ -1770,9 +1995,9 @@ func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) {
 func TestFederationAdoptConfirmTypesSpaces(t *testing.T) {
 	newConfirm := func() Model {
 		m := setupFederationView()
-		m.federationMode = federationModeAdoptConfirm
-		m.federationDraft = newFederationDraft("operator")
-		m.federationDraft.SpokeProjectName = "spoke project"
+		m.federation.mode = federationModeAdoptConfirm
+		m.federation.draft = newFederationDraft("operator")
+		m.federation.draft.SpokeProjectName = "spoke project"
 		return m
 	}
 
@@ -1780,14 +2005,14 @@ func TestFederationAdoptConfirmTypesSpaces(t *testing.T) {
 		m := typeFederationKeys(newConfirm(), "spoke")
 		m, _ = m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 		m = typeFederationKeys(m, "project")
-		assert.Equal(t, "spoke project", m.federationAdoptConfirmInput)
+		assert.Equal(t, "spoke project", m.federation.adoptConfirmInput)
 	})
 
 	t.Run("unix-shape KeySpace with rune appends one space", func(t *testing.T) {
 		m := typeFederationKeys(newConfirm(), "spoke")
 		m, _ = m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 		m = typeFederationKeys(m, "project")
-		assert.Equal(t, "spoke project", m.federationAdoptConfirmInput)
+		assert.Equal(t, "spoke project", m.federation.adoptConfirmInput)
 	})
 }
 
@@ -1798,10 +2023,10 @@ func TestFederationAdoptTypedConfirmationExecutes(t *testing.T) {
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
 	require.NotNil(t, cmd)
-	assert.True(t, out.federationEnrollRunning)
+	assert.True(t, out.federation.op.running)
 	msg := cmd().(federationEnrollResultMsg)
 	out, _ = updateModel(out, msg)
-	assert.Equal(t, federationModeResult, out.federationMode)
+	assert.Equal(t, federationModeResult, out.federation.mode)
 	assert.True(t, joinBody.AdoptExisting)
 }
 
@@ -1814,15 +2039,15 @@ func TestFederationPreviewAdoptFlowBlocksWithoutLocalUID(t *testing.T) {
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	// projectUIDByID intentionally unseeded: the boot race window.
-	m.federationDraft = newFederationDraft("operator")
-	m.federationDraft.SpokeProjectID = 7
-	m.federationDraft.SpokeProjectName = "spoke-project"
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
-	m.federationHubProjectCursor = 0 // adopt-same-name row
+	m.federation.draft = newFederationDraft("operator")
+	m.federation.draft.SpokeProjectID = 7
+	m.federation.draft.SpokeProjectName = "spoke-project"
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
+	m.federation.hubProjectCursor = 0 // adopt-same-name row
 
 	out, _ := m.previewFederationEnrollment()
 
-	draft := out.federationDraft
+	draft := out.federation.draft
 	assert.NotEmpty(t, draft.BlockedReason,
 		"unknown local project UID must block adoption, not silently proceed with it")
 	assert.NotEqual(t, federationOperationRejoin, draft.Operation)
@@ -1836,16 +2061,16 @@ func TestFederationPreviewAdoptFlowBlocksWithoutHubUID(t *testing.T) {
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4EX"}
-	m.federationDraft = newFederationDraft("operator")
-	m.federationDraft.SpokeProjectID = 7
-	m.federationDraft.SpokeProjectName = "spoke-project"
+	m.federation.draft = newFederationDraft("operator")
+	m.federation.draft.SpokeProjectID = 7
+	m.federation.draft.SpokeProjectName = "spoke-project"
 	// Hub row carries no UID (e.g. an older hub daemon's project list).
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
-	m.federationHubProjectCursor = 0 // adopt-same-name row
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
+	m.federation.hubProjectCursor = 0 // adopt-same-name row
 
 	out, _ := m.previewFederationEnrollment()
 
-	draft := out.federationDraft
+	draft := out.federation.draft
 	assert.NotEmpty(t, draft.BlockedReason,
 		"unknown hub project UID must block adoption, not silently proceed with it")
 	assert.NotEqual(t, federationOperationRejoin, draft.Operation)
@@ -1861,15 +2086,15 @@ func TestFederationPreviewAdoptFlowDetectsRejoinForUIDHolder(t *testing.T) {
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4EX"}
-	m.federationDraft = newFederationDraft("operator")
-	m.federationDraft.SpokeProjectID = 7
-	m.federationDraft.SpokeProjectName = "spoke-project"
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
-	m.federationHubProjectCursor = 0 // adopt-same-name row
+	m.federation.draft = newFederationDraft("operator")
+	m.federation.draft.SpokeProjectID = 7
+	m.federation.draft.SpokeProjectName = "spoke-project"
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
+	m.federation.hubProjectCursor = 0 // adopt-same-name row
 
 	out, _ := m.previewFederationEnrollment()
 
-	draft := out.federationDraft
+	draft := out.federation.draft
 	assert.Equal(t, federationOperationRejoin, draft.Operation)
 	assert.False(t, draft.AdoptExisting, "rejoin must not request adoption snapshots")
 	assert.Equal(t, int64(42), draft.HubProjectID)
@@ -1884,16 +2109,16 @@ func TestFederationPreviewAdoptFlowStaysAdoptWithoutUIDMatch(t *testing.T) {
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4ZZ"}
-	m.federationDraft = newFederationDraft("operator")
-	m.federationDraft.SpokeProjectID = 7
-	m.federationDraft.SpokeProjectName = "spoke-project"
-	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
-	m.federationHubProjectCursor = 0
+	m.federation.draft = newFederationDraft("operator")
+	m.federation.draft.SpokeProjectID = 7
+	m.federation.draft.SpokeProjectName = "spoke-project"
+	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
+	m.federation.hubProjectCursor = 0
 
 	out, _ := m.previewFederationEnrollment()
 
-	assert.Equal(t, federationOperationAdoptSameName, out.federationDraft.Operation)
-	assert.True(t, out.federationDraft.AdoptExisting)
+	assert.Equal(t, federationOperationAdoptSameName, out.federation.draft.Operation)
+	assert.True(t, out.federation.draft.AdoptExisting)
 }
 
 // TestFetchProjectsCarriesUIDs is the rejoin-detection prerequisite: the
@@ -1920,7 +2145,6 @@ func TestFetchProjectsCarriesUIDs(t *testing.T) {
 	out, _ := updateModel(m, msg)
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", out.projectUIDByID[7])
 }
-
 func daemonTargetWithResolvedAuth(name, baseURL, token string, allowInsecure bool) daemonTarget {
 	return daemonTarget{
 		Name: name,
@@ -1930,4 +2154,210 @@ func daemonTargetWithResolvedAuth(name, baseURL, token string, allowInsecure boo
 			Token: token, AllowInsecure: allowInsecure,
 		},
 	}
+}
+
+// TestFederationResultScreenFollowsOperationKind: the result screen used to
+// pick its body from a separate bool discriminator any writer could leave
+// disagreeing with the populated result struct. It now switches on the kind
+// of the operation that produced the result.
+func TestFederationResultScreenFollowsOperationKind(t *testing.T) {
+	base := setupFederationView()
+	base.federation.mode = federationModeResult
+
+	enroll := base
+	enroll.federation.op = federationOp{
+		kind:   federationOpEnroll,
+		enroll: federationEnrollResult{HubURL: "https://hub.example"},
+	}
+	rendered := stripANSI(renderFederation(enroll))
+	assert.Contains(t, rendered, "Enrollment Result")
+	assert.NotContains(t, rendered, "Leave Result")
+
+	leave := base
+	leave.federation.op = federationOp{
+		kind: federationOpLeave,
+		leave: federationLeaveResult{
+			Draft:        federationLeaveDraft{ProjectName: "spoke-project"},
+			RevokedCount: 1,
+		},
+	}
+	rendered = stripANSI(renderFederation(leave))
+	assert.Contains(t, rendered, "Leave Result")
+	assert.NotContains(t, rendered, "Enrollment Result")
+}
+
+// TestFederationLateResultFromOtherFlowIsDiscarded: the two flows share one
+// attempt counter now, so starting a leave invalidates an in-flight enroll's
+// result. That is the intended reading of "the modes are mutually exclusive",
+// but it is a behavior change and has to be asserted rather than assumed.
+func TestFederationLateResultFromOtherFlowIsDiscarded(t *testing.T) {
+	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-project", "spoke"))
+	m.federation.op = federationOp{kind: federationOpEnroll, attempt: 1, running: true}
+
+	// A leave starts while the enroll is still in flight.
+	m.federation.op = federationOp{kind: federationOpLeave, attempt: 2, running: true}
+	m.federation.mode = federationModeLeavePreview
+
+	out, cmd := m.handleFederationEnrollResult(federationEnrollResultMsg{
+		connGen: m.connGen,
+		attempt: 1,
+		result:  federationEnrollResult{HubURL: "https://hub.example"},
+	})
+
+	assert.Nil(t, cmd, "a stale result must not trigger a status refetch")
+	assert.Equal(t, federationModeLeavePreview, out.federation.mode)
+	assert.Equal(t, federationOpLeave, out.federation.op.kind)
+	assert.True(t, out.federation.op.running, "the live leave must stay in flight")
+	assert.Equal(t, federationEnrollResult{}, out.federation.op.enroll)
+}
+
+// TestFederationMergedHandlerRoutesErrorsToTheFlowsOwnPreview pins that the
+// merged handler still routes each flow's failure back to its own preview.
+func TestFederationMergedHandlerRoutesErrorsToTheFlowsOwnPreview(t *testing.T) {
+	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-project", "spoke"))
+
+	enrolling := m
+	enrolling.federation.op = federationOp{kind: federationOpEnroll, attempt: 1, running: true}
+	out, cmd := enrolling.handleFederationEnrollResult(federationEnrollResultMsg{
+		connGen: m.connGen, attempt: 1, err: errors.New("hub unavailable"),
+	})
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModePreview, out.federation.mode)
+	assert.False(t, out.federation.op.running)
+	require.Error(t, out.federation.op.err)
+
+	leaving := m
+	leaving.federation.op = federationOp{kind: federationOpLeave, attempt: 1, running: true}
+	out, cmd = leaving.handleFederationLeaveResult(federationLeaveResultMsg{
+		connGen: m.connGen, attempt: 1, err: errors.New("hub revoke failed"),
+	})
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModeLeavePreview, out.federation.mode)
+	assert.False(t, out.federation.op.running)
+	require.Error(t, out.federation.op.err)
+}
+
+// TestFederationKeyRouteSwitchFromEnrollToLeaveInvalidatesLateEnrollResult
+// exercises the reachable path that exposed the stale-operation bug: dispatch
+// an enrollment, back out through each enrollment screen, then open the leave
+// preview from the list. The enrollment reply must no longer own the current
+// operation and therefore cannot replace the leave preview.
+func TestFederationKeyRouteSwitchFromEnrollToLeaveInvalidatesLateEnrollResult(t *testing.T) {
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
+	m.federation.statuses = []FederationProjectStatus{federationStatusFixture("spoke-project", "spoke")}
+
+	out, enrollCmd := enterThroughAdoptConfirm(t, m)
+	require.NotNil(t, enrollCmd)
+	require.Equal(t, federationOpEnroll, out.federation.op.kind)
+	enrollAttempt := out.federation.op.attempt
+
+	for _, wantMode := range []federationMode{
+		federationModePreview,
+		federationModeSelectHubProject,
+		federationModeSelectHub,
+		federationModeList,
+	} {
+		var cmd tea.Cmd
+		out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+		require.Nil(t, cmd)
+		require.Equal(t, wantMode, out.federation.mode)
+	}
+
+	out, cmd := out.routeFederationViewKey(keyRune('x'))
+	require.Nil(t, cmd)
+	require.Equal(t, federationModeLeavePreview, out.federation.mode)
+	assert.Greater(t, out.federation.op.attempt, enrollAttempt,
+		"switching flows must invalidate the dispatched enrollment attempt")
+	assert.Equal(t, federationOpNone, out.federation.op.kind)
+	assert.False(t, out.federation.op.running)
+
+	out, cmd = out.handleFederationEnrollResult(federationEnrollResultMsg{
+		connGen: out.connGen,
+		attempt: enrollAttempt,
+		result:  federationEnrollResult{HubURL: "https://hub.example"},
+	})
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModeLeavePreview, out.federation.mode)
+	assert.Equal(t, federationOpNone, out.federation.op.kind)
+}
+
+// TestFederationKeyRouteSwitchFromLeaveToEnrollCanDispatchEnrollment covers
+// the reverse path: an abandoned in-flight leave must not leave running=true
+// behind to block Enter on the enrollment preview. Every transition below is
+// driven through the federation key router, including loading the selected
+// hub's projects through the command returned by Enter.
+func TestFederationKeyRouteSwitchFromLeaveToEnrollCanDispatchEnrollment(t *testing.T) {
+	hubAdmin := &recordingFederationHubAdmin{
+		instance: InstanceInfo{Auth: AuthInfo{Kind: "db_token", Actor: "hub-operator"}},
+		projects: []ProjectSummary{{ID: 42, Name: "spoke-project"}},
+	}
+	restoreFederationHubAdminClient(t, func(
+		_ context.Context,
+		target daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		return hubAdmin, target, nil
+	})
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
+	hubTarget := m.federation.draft.HubTarget
+	m.federation.statuses = []FederationProjectStatus{federationStatusFixture("spoke-project", "spoke")}
+	m.federation.mode = federationModeList
+	m.scope = homedScope(9, "other-project")
+	injectProjects(&m, mockProject{ID: 9, Name: "other-project"})
+	m.daemonTargets = []daemonTarget{m.activeDaemon, hubTarget}
+
+	out, cmd := m.routeFederationViewKey(keyRune('x'))
+	require.Nil(t, cmd)
+	require.Equal(t, federationModeLeavePreview, out.federation.mode)
+	out, leaveCmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, leaveCmd)
+	require.Equal(t, federationOpLeave, out.federation.op.kind)
+	leaveAttempt := out.federation.op.attempt
+
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	require.Nil(t, cmd)
+	require.Equal(t, federationModeList, out.federation.mode)
+	out, cmd = out.routeFederationViewKey(keyRune('n'))
+	require.Nil(t, cmd)
+	require.Equal(t, federationModeSelectLocalProject, out.federation.mode)
+	assert.Greater(t, out.federation.op.attempt, leaveAttempt,
+		"starting enrollment must invalidate the dispatched leave attempt")
+	assert.False(t, out.federation.op.running)
+
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Nil(t, cmd)
+	require.Equal(t, federationModeSelectHub, out.federation.mode)
+	rows := federationHubRows(out)
+	require.NotEmpty(t, rows)
+	hubRow := -1
+	for i, row := range rows {
+		if daemonTargetsMatch(row.target, hubTarget) {
+			hubRow = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, hubRow)
+	for out.federation.hubCursor < hubRow {
+		out, _ = out.routeFederationViewKey(keyRune('j'))
+	}
+	for out.federation.hubCursor > hubRow {
+		out, _ = out.routeFederationViewKey(keyRune('k'))
+	}
+
+	out, loadCmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, loadCmd)
+	loaded, ok := loadCmd().(federationHubProjectsLoadedMsg)
+	require.True(t, ok)
+	require.NoError(t, loaded.err)
+	out = out.handleFederationHubProjectsLoaded(loaded)
+	require.Equal(t, federationModeSelectHubProject, out.federation.mode)
+
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Nil(t, cmd)
+	require.Equal(t, federationModePreview, out.federation.mode)
+	require.Empty(t, out.federation.draft.BlockedReason)
+	out, enrollCmd := enterThroughAdoptConfirm(t, out)
+	require.NotNil(t, enrollCmd, "the abandoned leave must not block enrollment dispatch")
+	assert.Equal(t, federationOpEnroll, out.federation.op.kind)
+	assert.True(t, out.federation.op.running)
+	assert.Greater(t, out.federation.op.attempt, leaveAttempt)
 }

@@ -18,9 +18,9 @@ const (
 )
 
 func renderFederation(m Model) string {
-	rows := federationSpokeStatuses(m.federationStatuses)
-	cursor := clampFederationCursor(m.federationCursor, rows)
-	switch m.federationMode {
+	rows := federationSpokeStatuses(m.federation.statuses)
+	cursor := clampFederationCursor(m.federation.cursor, rows)
+	switch m.federation.mode {
 	case federationModeDetail:
 		return renderFederationDetail(m, rows, cursor)
 	case federationModeSelectLocalProject:
@@ -56,10 +56,10 @@ func renderFederation(m Model) string {
 		"",
 		renderFederationHeader(m.width),
 	}
-	if m.federationLoading {
+	if m.federation.loading {
 		body = append(body, subtleStyle.Render("  loading federation status..."))
-	} else if m.federationErr != nil {
-		body = append(body, errorStyle.Render("  failed to load federation: "+sanitizeForLine(m.federationErr.Error())))
+	} else if m.federation.err != nil {
+		body = append(body, errorStyle.Render("  failed to load federation: "+sanitizeForLine(m.federation.err.Error())))
 	} else if len(rows) == 0 {
 		body = append(body, subtleStyle.Render("  no spoke federation enrollments"))
 	} else {
@@ -79,7 +79,7 @@ func renderFederation(m Model) string {
 
 func renderFederationSelectLocalProject(m Model) string {
 	rows := federationLocalProjectRows(m)
-	cursor := clampFederationIndex(m.federationLocalProjectCursor, len(rows), 0)
+	cursor := clampFederationIndex(m.federation.localProjectCursor, len(rows), 0)
 	body := federationModeHeader(m, "Select local spoke project")
 	for i, row := range rows {
 		label := "create new local replica from hub project"
@@ -88,19 +88,19 @@ func renderFederationSelectLocalProject(m Model) string {
 		}
 		body = append(body, renderFederationChoice(label, i == cursor))
 	}
-	body = appendFederationEnrollErr(body, m)
+	body = appendFederationOpErr(body, m)
 	body = append(body, "", renderAuxiliaryFooter(m, "[↑/↓ k/j] move  [enter] select  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
 func renderFederationSelectHub(m Model) string {
 	rows := federationHubRows(m)
-	cursor := clampFederationIndex(m.federationHubCursor, len(rows), 0)
+	cursor := clampFederationIndex(m.federation.hubCursor, len(rows), 0)
 	body := federationModeHeader(m, "Select hub daemon")
-	if m.federationDraft.SpokeProjectName != "" {
-		body = append(body, "local spoke project: "+sanitizeForLine(m.federationDraft.SpokeProjectName))
+	if m.federation.draft.SpokeProjectName != "" {
+		body = append(body, "local spoke project: "+sanitizeForLine(m.federation.draft.SpokeProjectName))
 	}
-	if m.federationDraft.CreateReplica {
+	if m.federation.draft.CreateReplica {
 		body = append(body, "local spoke project: create after selecting hub project")
 	}
 	body = append(body, "")
@@ -115,7 +115,7 @@ func renderFederationSelectHub(m Model) string {
 		}
 		body = append(body, renderFederationChoice(label, i == cursor))
 	}
-	body = appendFederationEnrollErr(body, m)
+	body = appendFederationOpErr(body, m)
 	body = append(body, "", renderAuxiliaryFooter(m, "[↑/↓ k/j] move  [enter] select  [esc] back"))
 	return strings.Join(body, "\n")
 }
@@ -123,51 +123,55 @@ func renderFederationSelectHub(m Model) string {
 func renderFederationSelectHubProject(m Model) string {
 	body := federationModeHeader(m, "Select hub project")
 	body = append(body,
-		"hub daemon: "+sanitizeForLine(daemonName(m.federationDraft.HubTarget))+
-			" "+sanitizeForLine(federationDaemonEndpoint(m.federationDraft.HubTarget)),
+		"hub daemon: "+sanitizeForLine(daemonName(m.federation.draft.HubTarget))+
+			" "+sanitizeForLine(federationDaemonEndpoint(m.federation.draft.HubTarget)),
 		"hub auth: "+sanitizeForLine(federationAuthDisplay(
-			m.federationDraft.HubTarget,
-			m.federationDraft.HubInstance.Auth,
+			m.federation.draft.HubTarget,
+			m.federation.draft.HubInstance.Auth,
 		)),
-		fmt.Sprintf("allow_insecure: %t", m.federationDraft.HubTarget.resolved.AllowInsecure),
+		fmt.Sprintf("allow_insecure: %t", m.federation.draft.HubTarget.resolved.AllowInsecure),
 		"",
 	)
-	if m.federationHubProjectsLoading {
+	if m.federation.hubProjectsLoading {
 		body = append(body, subtleStyle.Render("  loading hub projects..."))
+	} else if rows := federationHubProjectRows(m); len(rows) == 0 {
+		// Non-selectable placeholder: the key router has no rows to move
+		// over, so this line must not render as a highlightable row.
+		// Matches renderFederationBrowseHubs' empty case.
+		body = append(body, subtleStyle.Render("  no hub projects"))
 	} else {
-		rows := federationHubProjectLabels(m)
-		cursor := clampFederationIndex(m.federationHubProjectCursor, len(rows), 0)
-		for i, label := range rows {
-			body = append(body, renderFederationChoice(label, i == cursor))
+		cursor := clampFederationIndex(m.federation.hubProjectCursor, len(rows), 0)
+		for i, row := range rows {
+			body = append(body, renderFederationChoice(row.label, i == cursor))
 		}
 	}
-	body = appendFederationEnrollErr(body, m)
+	body = appendFederationOpErr(body, m)
 	body = append(body, "", renderAuxiliaryFooter(m, "[↑/↓ k/j] move  [enter] preview  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
 func renderFederationBrowseHubs(m Model) string {
-	target := m.federationDraft.HubTarget
+	target := m.federation.draft.HubTarget
 	body := federationModeHeader(m, "Browse catalog hub projects")
 	body = append(body,
 		"catalog hub: "+sanitizeForLine(daemonName(target))+
 			" "+sanitizeForLine(federationDaemonEndpoint(target)),
-		"hub auth: "+sanitizeForLine(federationAuthDisplay(target, m.federationDraft.HubInstance.Auth)),
+		"hub auth: "+sanitizeForLine(federationAuthDisplay(target, m.federation.draft.HubInstance.Auth)),
 		fmt.Sprintf("allow_insecure: %t", target.resolved.AllowInsecure),
 		"mode: read-only",
 		"",
 	)
-	if m.federationHubProjectsLoading {
+	if m.federation.hubProjectsLoading {
 		body = append(body, subtleStyle.Render("  loading hub projects..."))
-	} else if m.federationEnrollErr != nil {
+	} else if m.federation.op.err != nil {
 		body = append(body, errorStyle.Render("  failed to load hub projects: "+
-			sanitizeForLine(m.federationEnrollErr.Error())))
-	} else if len(m.federationHubProjects) == 0 {
+			sanitizeForLine(m.federation.op.err.Error())))
+	} else if rows := federationBrowseHubProjectRows(m); len(rows) == 0 {
 		body = append(body, subtleStyle.Render("  no hub projects"))
 	} else {
-		cursor := clampFederationIndex(m.federationHubProjectCursor, len(m.federationHubProjects), 0)
-		for i, project := range m.federationHubProjects {
-			body = append(body, renderFederationChoice(federationBrowseHubProjectLabel(project), i == cursor))
+		cursor := clampFederationIndex(m.federation.hubProjectCursor, len(rows), 0)
+		for i, row := range rows {
+			body = append(body, renderFederationChoice(row.label, i == cursor))
 		}
 	}
 	body = append(body, "", renderAuxiliaryFooter(m, "[↑/↓ k/j] move  [esc] back"))
@@ -175,7 +179,7 @@ func renderFederationBrowseHubs(m Model) string {
 }
 
 func renderFederationPreview(m Model) string {
-	draft := m.federationDraft
+	draft := m.federation.draft
 	body := federationModeHeader(m, "Enrollment Preview")
 	body = append(body,
 		"Operation: "+federationOperationLabel(draft.Operation),
@@ -215,7 +219,7 @@ func renderFederationPreview(m Model) string {
 	if draft.BlockedReason != "" {
 		body = append(body, "", errorStyle.Render("Blocked: "+sanitizeForLine(draft.BlockedReason)))
 	}
-	body = appendFederationEnrollErr(body, m)
+	body = appendFederationOpErr(body, m)
 	body = append(body, "", renderAuxiliaryFooter(m, "[enter] confirm  [esc] back"))
 	return strings.Join(body, "\n")
 }
@@ -224,7 +228,7 @@ func renderFederationPreview(m Model) string {
 // the consequence is stated in full and the operator must type the local
 // project's name before Enter executes.
 func renderFederationAdoptConfirm(m Model) string {
-	draft := m.federationDraft
+	draft := m.federation.draft
 	body := federationModeHeader(m, "Confirm Adoption")
 	body = append(body,
 		fmt.Sprintf("federate local project %q INTO hub project %q?",
@@ -235,15 +239,15 @@ func renderFederationAdoptConfirm(m Model) string {
 		"",
 		fmt.Sprintf("type %q to confirm: %s",
 			sanitizeForLine(draft.SpokeProjectName),
-			sanitizeForLine(m.federationAdoptConfirmInput)),
+			sanitizeForLine(m.federation.adoptConfirmInput)),
 	)
-	body = appendFederationEnrollErr(body, m)
+	body = appendFederationOpErr(body, m)
 	body = append(body, "", renderAuxiliaryFooter(m, "[enter] confirm  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
 func renderFederationLeavePreview(m Model) string {
-	draft := m.federationLeaveDraft
+	draft := m.federation.leaveDraft
 	disposition := draft.Disposition
 	if disposition == "" {
 		disposition = "detach"
@@ -270,7 +274,7 @@ func renderFederationLeavePreview(m Model) string {
 	if draft.BlockedReason != "" {
 		body = append(body, "", errorStyle.Render("Blocked: "+sanitizeForLine(draft.BlockedReason)))
 	}
-	body = appendFederationEnrollErr(body, m)
+	body = appendFederationOpErr(body, m)
 	body = append(body, "",
 		renderAuxiliaryFooter(m, "[enter] confirm  [d] keep / archive  [l] local-only  [esc] back"))
 	return strings.Join(body, "\n")
@@ -291,10 +295,10 @@ func federationLeaveTeardownLabel(disposition string) string {
 }
 
 func renderFederationResult(m Model) string {
-	if m.federationResultIsLeave {
+	if m.federation.op.kind == federationOpLeave {
 		return renderFederationLeaveResult(m)
 	}
-	result := m.federationResult
+	result := m.federation.op.enroll
 	body := federationModeHeader(m, "Enrollment Result")
 	status := "joined"
 	if result.Replica.Adopted {
@@ -314,7 +318,7 @@ func renderFederationResult(m Model) string {
 }
 
 func renderFederationLeaveResult(m Model) string {
-	result := m.federationLeaveResult
+	result := m.federation.op.leave
 	body := federationModeHeader(m, "Leave Result")
 	status := "detached"
 	if result.Body.Archived {
@@ -351,7 +355,7 @@ func formatEnrollmentIDs(ids []int64) string {
 }
 
 func renderFederationRecovery(m Model) string {
-	recovery := m.federationRecovery
+	recovery := m.federation.recovery
 	body := federationModeHeader(m, "Enrollment Recovery")
 	if recovery.Stage == "metadata" {
 		body = append(body, fmt.Sprintf("hub %s: enrollment metadata fetch failed", sanitizeForLine(recovery.HubName)))
@@ -409,25 +413,14 @@ func renderFederationChoice(label string, highlight bool) string {
 	return line
 }
 
-func appendFederationEnrollErr(body []string, m Model) []string {
-	if m.federationEnrollErr == nil {
+// appendFederationOpErr surfaces the last federation error under the body.
+// One error slot serves the browse, enroll and leave flows — they are
+// mutually exclusive by mode, and each entry point clears it.
+func appendFederationOpErr(body []string, m Model) []string {
+	if m.federation.op.err == nil {
 		return body
 	}
-	return append(body, "", errorStyle.Render(sanitizeForLine(m.federationEnrollErr.Error())))
-}
-
-func federationHubProjectLabels(m Model) []string {
-	labels := []string{}
-	if !m.federationDraft.CreateReplica {
-		labels = append(labels, federationDefaultHubProjectLabel(m.federationDraft, m.federationHubProjects))
-	}
-	for _, project := range federationSelectableHubProjects(m) {
-		labels = append(labels, project.Name)
-	}
-	if len(labels) == 0 {
-		return []string{"no hub projects"}
-	}
-	return labels
+	return append(body, "", errorStyle.Render(sanitizeForLine(m.federation.op.err.Error())))
 }
 
 func federationDefaultHubProjectLabel(draft federationDraft, hubProjects []ProjectSummary) string {
@@ -553,8 +546,8 @@ func federationHeaderLine(m Model) string {
 	return fmt.Sprintf("Federation for active daemon: %s %s instance %s auth %s",
 		sanitizeForLine(daemonName(m.activeDaemon)),
 		sanitizeForLine(federationDaemonEndpoint(m.activeDaemon)),
-		sanitizeForLine(emptyDash(m.federationInstance.InstanceUID)),
-		sanitizeForLine(federationAuthDisplay(m.activeDaemon, m.federationInstance.Auth)),
+		sanitizeForLine(emptyDash(m.federation.instance.InstanceUID)),
+		sanitizeForLine(federationAuthDisplay(m.activeDaemon, m.federation.instance.Auth)),
 	)
 }
 
@@ -563,21 +556,21 @@ func federationSelectedProjectLine(m Model) string {
 }
 
 func federationSelectedProjectDisplay(m Model) string {
-	if m.federationDraft.Operation == federationOperationRejoin {
-		return m.federationDraft.SpokeProjectName + " (rejoin)"
+	if m.federation.draft.Operation == federationOperationRejoin {
+		return m.federation.draft.SpokeProjectName + " (rejoin)"
 	}
-	if m.federationDraft.CreateReplica {
-		if m.federationDraft.SpokeProjectName != "" {
-			return m.federationDraft.SpokeProjectName + " (new local replica)"
+	if m.federation.draft.CreateReplica {
+		if m.federation.draft.SpokeProjectName != "" {
+			return m.federation.draft.SpokeProjectName + " (new local replica)"
 		}
 		return "create new local replica from hub project"
 	}
-	if m.federationDraft.SpokeProjectName != "" {
-		return m.federationDraft.SpokeProjectName
+	if m.federation.draft.SpokeProjectName != "" {
+		return m.federation.draft.SpokeProjectName
 	}
-	if m.federationSelectedProjectSet {
-		if m.federationSelectedProjectName != "" {
-			return m.federationSelectedProjectName
+	if m.federation.selectedProjectSet {
+		if m.federation.selectedProjectName != "" {
+			return m.federation.selectedProjectName
 		}
 		return "none"
 	}

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -73,6 +75,75 @@ func unwrapMutationCmd(t *testing.T, cmd tea.Cmd) mutationDoneMsg {
 type errStub string
 
 func (e errStub) Error() string { return string(e) }
+
+// TestInputState_FieldValueReadsThroughValueAccessor pins the contract
+// the positional reads currently bypass: a field is found by identity,
+// and its text comes from inputField.value() — so the backing bubbles
+// component (textinput / textarea / radio) is the field's business, not
+// the caller's. The fieldMultiLine swap below is the exact failure mode
+// the old fields[1].input.Value() reads hid: it compiled and returned "".
+func TestInputState_FieldValueReadsThroughValueAccessor(t *testing.T) {
+	s := newFilterForm(ListFilter{Status: "open", Owner: "avery"})
+
+	if got := s.fieldValue(fieldStatus); got != "open" {
+		t.Errorf("fieldValue(fieldStatus) = %q, want open", got)
+	}
+	if got := s.fieldValue(fieldOwner); got != "avery" {
+		t.Errorf("fieldValue(fieldOwner) = %q, want avery", got)
+	}
+
+	// Re-back Owner with a textarea. Identity is unchanged, so lookup must
+	// still find it and value() must still read it.
+	owner := s.field(fieldOwner)
+	if owner == nil {
+		t.Fatal("field(fieldOwner) = nil on a filter form")
+	}
+	ta := textarea.New()
+	ta.SetValue("river")
+	*owner = inputField{id: fieldOwner, kind: fieldMultiLine, area: ta, label: "Owner"}
+
+	if got := s.fieldValue(fieldOwner); got != "river" {
+		t.Errorf("fieldValue(fieldOwner) after kind swap = %q, want river", got)
+	}
+	if s.field(fieldBody) != nil {
+		t.Error("field(fieldBody) on a filter form must be nil; the form has no body")
+	}
+}
+
+// TestInputState_FieldLookupIgnoresUnsetIdentity: hand-built fixtures
+// (and any future field that forgets its id) must not be reachable by
+// lookup, or field(fieldNone) would return whichever field was declared
+// first and silently commit its value under the wrong axis.
+func TestInputState_FieldLookupIgnoresUnsetIdentity(t *testing.T) {
+	ti := textinput.New()
+	ti.SetValue("unnamed")
+	s := inputState{kind: inputFilterForm, fields: []inputField{{kind: fieldSingleLine, input: ti}}}
+
+	if f := s.field(fieldNone); f != nil {
+		t.Error("field(fieldNone) must never match a field")
+	}
+	if got := s.fieldValue(fieldOwner); got != "" {
+		t.Errorf("fieldValue on a form with no owner field = %q, want empty", got)
+	}
+}
+
+// TestInputState_ActiveFieldIsFollowsIdentity: the active-field predicate
+// must track the field under the cursor rather than the old positional
+// body-index comparison.
+func TestInputState_ActiveFieldIsFollowsIdentity(t *testing.T) {
+	s := newNewIssueForm()
+
+	if !s.activeFieldIs(fieldTitle) {
+		t.Error("a freshly opened new-issue form must start on Title")
+	}
+	s = s.advanceField(1)
+	if !s.activeFieldIs(fieldBody) {
+		t.Error("tab from Title must land on Body")
+	}
+	if s.activeFieldIs(fieldTitle) {
+		t.Error("activeFieldIs(fieldTitle) must be false once Body has focus")
+	}
+}
 
 // TestDetail_EKey_OpensBodyEditForm: pressing `e` from the detail
 // view opens the centered body editor pre-filled with the issue

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -38,6 +39,30 @@ func filterFormFixture() Model {
 		scope:  scope{projectID: 7, projectName: "kata"},
 		list:   listModel{actor: "tester"},
 		cache:  newIssueCache(),
+	}
+}
+
+// TestFilterForm_OwnerCommitReadsThroughValueAccessor is the filter-form
+// half of the S04-2 pin: commitFilterForm must read the Owner axis through
+// inputField.value(), not through the textinput it happens to be built
+// with today.
+func TestFilterForm_OwnerCommitReadsThroughValueAccessor(t *testing.T) {
+	m := newTestModel()
+	s := newFilterForm(ListFilter{})
+
+	ta := textarea.New()
+	ta.SetValue("  avery  ")
+	*s.field(fieldOwner) = inputField{
+		id: fieldOwner, kind: fieldMultiLine, area: ta, label: "Owner",
+	}
+
+	out, cmd := m.commitFilterForm(s)
+
+	if cmd != nil {
+		t.Fatalf("commitFilterForm returned cmd %T, want nil", cmd)
+	}
+	if got := out.list.filter.Owner; got != "avery" {
+		t.Fatalf("filter.Owner = %q, want avery (trimmed)", got)
 	}
 }
 

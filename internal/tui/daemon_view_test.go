@@ -218,6 +218,45 @@ func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
 	assert.True(t, restarted)
 }
 
+// TestDaemonSwitchClearsAllFederationState is the uncovered gap the audit
+// found: installDaemonConnection reset 22 federation fields by hand and
+// missed six, including the whole leave flow and the adopt-confirmation
+// buffer. Nothing prevented the next daemon's federation view from opening
+// on the previous connection's leave draft or result screen.
+func TestDaemonSwitchClearsAllFederationState(t *testing.T) {
+	m := setupDaemonViewSource()
+	m.view = viewFederation
+	m.federation = federationState{
+		instance:            InstanceInfo{InstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA"},
+		statuses:            []FederationProjectStatus{federationStatusFixture("spoke-project", "spoke")},
+		cursor:              1,
+		mode:                federationModeResult,
+		draft:               federationDraft{SpokeProjectName: "spoke-project"},
+		hubProjects:         []ProjectSummary{{ID: 42, Name: "hub-project"}},
+		hubProjectCursor:    1,
+		adoptConfirmInput:   "spoke-project",
+		leaveDraft:          federationLeaveDraft{ProjectID: 7, ProjectName: "spoke-project"},
+		recovery:            federationRecovery{HubName: "hub"},
+		selectedProjectSet:  true,
+		selectedProjectName: "spoke-project",
+		op: federationOp{
+			kind:  federationOpLeave,
+			leave: federationLeaveResult{RevokedCount: 1},
+		},
+	}
+	conn := daemonConnection{
+		api:    &Client{},
+		target: daemonTarget{Name: "other", URL: "https://other.example"},
+		init:   bootInit{view: viewList, scope: homedScope(9, "other-project")},
+	}
+
+	out, _ := m.installDaemonConnection(conn)
+
+	assert.Equal(t, federationState{}, out.federation,
+		"a daemon switch must drop every field of the previous connection's federation state")
+	assert.Equal(t, federationModeList, out.federation.mode)
+}
+
 func TestDaemonSwitchToEmptyDaemonEscReturnsToSelector(t *testing.T) {
 	m := setupDaemonView()
 	conn := daemonConnection{

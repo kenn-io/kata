@@ -100,14 +100,11 @@ func renderCenteredForm(s inputState, width, height int) string {
 // ctrl+e is omitted (no $EDITOR for this form). Plan 8 commit 5b
 // added the Labels row.
 func renderFilterForm(s inputState, innerW int) string {
-	if len(s.fields) < 4 {
-		return ""
-	}
 	statusLine := renderFormStatus(s)
 	footer := renderFilterFormFooter(s)
 	parts := []string{titleStyle.Render(s.title)}
-	for i := range 4 {
-		parts = append(parts, renderFilterField(s, i, innerW))
+	for idx := range s.fields {
+		parts = append(parts, renderFilterField(s, idx, innerW))
 	}
 	if statusLine != "" {
 		parts = append(parts, statusLine)
@@ -219,11 +216,8 @@ func renderSingleFieldForm(s inputState, innerW, innerH int) string {
 // field has focus so the user understands the editor handoff is
 // gated to the body textarea.
 func renderNewIssueForm(s inputState, innerW, innerH int) string {
-	if len(s.fields) < 5 {
-		return ""
-	}
 	statusLine := renderFormStatus(s)
-	footer := renderFormFooter(s, innerW, s.active == newIssueFormBodyIndex)
+	footer := renderFormFooter(s, innerW, s.activeFieldIs(fieldBody))
 	// Reserve title (1) + footer (1) + status (0 or 1) + one label
 	// per field + one row for every single-line field. Body gets the
 	// remaining height.
@@ -235,9 +229,10 @@ func renderNewIssueForm(s inputState, innerW, innerH int) string {
 	bodyRows := max(innerH-reserved, 3)
 	// Single-line field width = innerW; resize the body textarea so
 	// it fills the available width and bodyRows.
-	body := &s.fields[1]
-	body.area.SetWidth(innerW)
-	body.area.SetHeight(bodyRows)
+	if body := s.field(fieldBody); body != nil {
+		body.area.SetWidth(innerW)
+		body.area.SetHeight(bodyRows)
+	}
 	parts := []string{titleStyle.Render(s.title)}
 	for idx := range s.fields {
 		parts = append(parts, renderNewIssueField(s, idx, innerW))

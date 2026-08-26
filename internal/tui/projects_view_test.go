@@ -144,17 +144,17 @@ func TestProjectsView_FTransitionsToFederationWithHighlightedProjectSelected(t *
 	require.Nil(t, cmd)
 	// The local-project step is shown with the highlighted project pre-cursored
 	// (never skipped); one Enter proceeds to hub selection with it adopted.
-	assert.Equal(t, federationModeSelectLocalProject, out.federationMode)
+	assert.Equal(t, federationModeSelectLocalProject, out.federation.mode)
 	rows := federationLocalProjectRows(out)
-	require.Greater(t, len(rows), out.federationLocalProjectCursor)
-	require.False(t, rows[out.federationLocalProjectCursor].createReplica)
-	assert.Equal(t, "beta-project", rows[out.federationLocalProjectCursor].project.Name)
+	require.Greater(t, len(rows), out.federation.localProjectCursor)
+	require.False(t, rows[out.federation.localProjectCursor].createReplica)
+	assert.Equal(t, "beta-project", rows[out.federation.localProjectCursor].project.Name)
 
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectHub, out.federationMode)
-	assert.Equal(t, int64(22), out.federationDraft.SpokeProjectID)
-	assert.Equal(t, "beta-project", out.federationDraft.SpokeProjectName)
+	assert.Equal(t, federationModeSelectHub, out.federation.mode)
+	assert.Equal(t, int64(22), out.federation.draft.SpokeProjectID)
+	assert.Equal(t, "beta-project", out.federation.draft.SpokeProjectName)
 }
 
 func TestProjectsView_FTransitionSelectedProjectIgnoresStaleFederationDraft(t *testing.T) {
@@ -163,7 +163,7 @@ func TestProjectsView_FTransitionSelectedProjectIgnoresStaleFederationDraft(t *t
 		mockProject{ID: 22, Name: "beta-project", Ident: "..."},
 	)
 	m.projectsCursor = 2
-	m.federationDraft.SpokeProjectName = "stale-project"
+	m.federation.draft.SpokeProjectName = "stale-project"
 
 	out, cmd := updateModel(m, keyRune('F'))
 
@@ -188,7 +188,7 @@ func TestProjectsView_FFromAllProjectsHasNoSelectedFederationProject(t *testing.
 	out, cmd = out.routeFederationViewKey(keyRune('n'))
 
 	require.Nil(t, cmd)
-	assert.Equal(t, federationModeSelectLocalProject, out.federationMode)
+	assert.Equal(t, federationModeSelectLocalProject, out.federation.mode)
 }
 
 // TestProjectsView_ViewportClipsRowsToHeight pins that with many
