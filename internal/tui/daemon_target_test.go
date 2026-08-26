@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -28,10 +30,10 @@ func TestDaemonTargetsFromConfigIncludesConfiguredEntries(t *testing.T) {
 	require.Len(t, targets, 2)
 	assert.Equal(t, daemonTarget{Name: "local", Local: true}, targets[0])
 	assert.Equal(t, daemonTarget{ //nolint:gosec // env var name, not a credential
-		Name:          "shared",
-		URL:           "http://100.64.0.5:7777",
-		TokenEnv:      "KATA_SHARED_TOKEN",
-		AllowInsecure: true,
+		Name:     "shared",
+		URL:      "http://100.64.0.5:7777",
+		TokenEnv: "KATA_SHARED_TOKEN",
+		resolved: clientpkg.ResolvedDaemon{AllowInsecure: true},
 	}, targets[1])
 }
 
@@ -66,25 +68,28 @@ func TestDaemonTargetDisplayLocalFallback(t *testing.T) {
 }
 
 func TestConnectDaemonTargetLocalUsesLocalOnlyEnsurePath(t *testing.T) {
-	oldEnsure := ensureRunningForTUI
-	oldEnsureLocal := ensureLocalRunningForTUI
+	oldEnsure := ensureResolvedForTUI
+	oldEnsureNamed := ensureResolvedNamedForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	t.Cleanup(func() {
-		ensureRunningForTUI = oldEnsure
-		ensureLocalRunningForTUI = oldEnsureLocal
+		ensureResolvedForTUI = oldEnsure
+		ensureResolvedNamedForTUI = oldEnsureNamed
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
 	})
 
 	var ensured bool
-	ensureRunningForTUI = func(context.Context, string) (clientpkg.RunningDaemon, error) {
+	ensureResolvedForTUI = func(context.Context, string) (clientpkg.ResolvedDaemon, error) {
 		t.Fatal("explicit local target must not honor remote-aware EnsureRunning")
-		return clientpkg.RunningDaemon{}, nil
+		return clientpkg.ResolvedDaemon{}, nil
 	}
-	ensureLocalRunningForTUI = func(context.Context) (string, error) {
+	ensureResolvedNamedForTUI = func(_ context.Context, name string) (clientpkg.ResolvedDaemon, error) {
 		ensured = true
-		return "http://kata.invalid", nil
+		require.Equal(t, "local", name)
+		return clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceNamedCatalog, Name: name, BaseURL: "http://kata.invalid",
+		}, nil
 	}
 	newHTTPClientForTUI = func(_ context.Context, _ string, _ daemonTarget, _ clientOptsKind) (*http.Client, error) {
 		return &http.Client{}, nil
@@ -206,18 +211,18 @@ func TestConnectImplicitConfiguredLoopbackUsesPathFreeBoot(t *testing.T) {
 					0o600))
 			}
 
-			oldEnsure := ensureRunningForTUI
+			oldEnsure := ensureResolvedForTUI
 			oldNewClient := newHTTPClientForTUI
 			oldBootScope := bootResolveScopeForTUI
 			oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 			t.Cleanup(func() {
-				ensureRunningForTUI = oldEnsure
+				ensureResolvedForTUI = oldEnsure
 				newHTTPClientForTUI = oldNewClient
 				bootResolveScopeForTUI = oldBootScope
 				bootResolveScopePathFreeForTUI = oldPathFreeBootScope
 			})
 
-			ensureRunningForTUI = clientpkg.EnsureRunningTargetInWorkspace
+			ensureResolvedForTUI = clientpkg.EnsureResolvedInWorkspace
 			newHTTPClientForTUI = func(
 				context.Context,
 				string,
@@ -262,19 +267,19 @@ url = "http://daemon.internal:7777"
 allow_insecure = true
 `), 0o600))
 
-	oldEnsure := ensureRunningForTUI
+	oldEnsure := ensureResolvedForTUI
 	oldBootScope := bootResolveScopeForTUI
 	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 	t.Cleanup(func() {
-		ensureRunningForTUI = oldEnsure
+		ensureResolvedForTUI = oldEnsure
 		bootResolveScopeForTUI = oldBootScope
 		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
 	})
-	ensureRunningForTUI = func(_ context.Context, gotWorkspace string) (clientpkg.RunningDaemon, error) {
+	ensureResolvedForTUI = func(_ context.Context, gotWorkspace string) (clientpkg.ResolvedDaemon, error) {
 		assert.Equal(t, workspace, gotWorkspace)
-		return clientpkg.RunningDaemon{
-			BaseURL:          "http://daemon.internal:7777",
-			ConfiguredRemote: true,
+		return clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceLocalConfig, BaseURL: "http://daemon.internal:7777",
+			Token: "workspace-token", AllowInsecure: true,
 		}, nil
 	}
 	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
@@ -288,21 +293,21 @@ allow_insecure = true
 	conn, err := connectImplicitDaemonTarget(t.Context(), workspace, false)
 
 	require.NoError(t, err)
-	assert.True(t, conn.target.AllowInsecure)
+	assert.True(t, conn.target.resolved.AllowInsecure)
 	require.NotNil(t, conn.api)
 	require.NotNil(t, conn.sseHC)
 }
 
 func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *testing.T) {
 	oldRead := readDaemonConfigForTUI
-	oldEnsure := ensureRunningForTUI
-	oldEnsureLocal := ensureLocalRunningForTUI
+	oldEnsure := ensureResolvedForTUI
+	oldEnsureLocal := ensureLocalRunningTargetForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	t.Cleanup(func() {
 		readDaemonConfigForTUI = oldRead
-		ensureRunningForTUI = oldEnsure
-		ensureLocalRunningForTUI = oldEnsureLocal
+		ensureResolvedForTUI = oldEnsure
+		ensureLocalRunningTargetForTUI = oldEnsureLocal
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
 	})
@@ -313,13 +318,15 @@ func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *t
 	t.Chdir(t.TempDir())
 	workspace := t.TempDir()
 	var ensuredWorkspace string
-	ensureRunningForTUI = func(_ context.Context, workspace string) (clientpkg.RunningDaemon, error) {
+	ensureResolvedForTUI = func(_ context.Context, workspace string) (clientpkg.ResolvedDaemon, error) {
 		ensuredWorkspace = workspace
-		return clientpkg.RunningDaemon{BaseURL: "http://kata.invalid"}, nil
+		return clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceLocalRuntime, BaseURL: "http://kata.invalid",
+		}, nil
 	}
-	ensureLocalRunningForTUI = func(context.Context) (string, error) {
+	ensureLocalRunningTargetForTUI = func(context.Context) (clientpkg.RunningDaemon, error) {
 		t.Fatal("implicit default boot must keep existing remote-aware EnsureRunning behavior")
-		return "", nil
+		return clientpkg.RunningDaemon{}, nil
 	}
 	newHTTPClientForTUI = func(_ context.Context, _ string, _ daemonTarget, _ clientOptsKind) (*http.Client, error) {
 		return &http.Client{}, nil
@@ -344,20 +351,20 @@ func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *t
 
 func TestBootDaemonConnectionDefinitiveTargetSkipsCWDResolution(t *testing.T) {
 	oldRead := readDaemonConfigForTUI
-	oldEnsure := ensureRunningForTUI
+	oldEnsure := ensureResolvedForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	t.Cleanup(func() {
 		readDaemonConfigForTUI = oldRead
-		ensureRunningForTUI = oldEnsure
+		ensureResolvedForTUI = oldEnsure
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
 	})
 	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
 		return &config.DaemonConfig{}, nil
 	}
-	ensureRunningForTUI = func(context.Context, string) (clientpkg.RunningDaemon, error) {
-		return clientpkg.RunningDaemon{BaseURL: clientpkg.UnixBase}, nil
+	ensureResolvedForTUI = func(context.Context, string) (clientpkg.ResolvedDaemon, error) {
+		return clientpkg.ResolvedDaemon{Source: clientpkg.DaemonSourceLocalRuntime, BaseURL: clientpkg.UnixBase}, nil
 	}
 	newHTTPClientForTUI = func(_ context.Context, _ string, _ daemonTarget, _ clientOptsKind) (*http.Client, error) {
 		return &http.Client{}, nil
@@ -421,13 +428,13 @@ func TestBootDaemonConnectionOptionsDaemonNameOverridesActiveDaemon(t *testing.T
 
 func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testing.T) {
 	oldRead := readDaemonConfigForTUI
-	oldEnsure := ensureRunningForTUI
+	oldEnsure := ensureResolvedForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 	t.Cleanup(func() {
 		readDaemonConfigForTUI = oldRead
-		ensureRunningForTUI = oldEnsure
+		ensureResolvedForTUI = oldEnsure
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
 		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
@@ -436,10 +443,9 @@ func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testin
 	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
 		return &config.DaemonConfig{}, nil
 	}
-	ensureRunningForTUI = func(context.Context, string) (clientpkg.RunningDaemon, error) {
-		return clientpkg.RunningDaemon{
-			BaseURL:          "https://daemon.example:7777",
-			ConfiguredRemote: true,
+	ensureResolvedForTUI = func(context.Context, string) (clientpkg.ResolvedDaemon, error) {
+		return clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceServerEnv, BaseURL: "https://daemon.example:7777",
 		}, nil
 	}
 	newHTTPClientForTUI = func(_ context.Context, _ string, _ daemonTarget, _ clientOptsKind) (*http.Client, error) {
@@ -459,24 +465,30 @@ func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testin
 }
 
 func TestResolvedImplicitRemoteTargetCarriesEnvAllowInsecure(t *testing.T) {
-	endpoint := "http://spoke.internal:7777"
-	t.Setenv("KATA_SERVER", endpoint)
+	srv := startTUIPingServer(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_SERVER", srv.URL)
 	t.Setenv("KATA_ALLOW_INSECURE", "1")
 
-	target := resolvedDaemonTarget(implicitDaemonTarget(endpoint), endpoint)
+	resolved, ok, err := clientpkg.ResolveRemoteDaemon(t.Context(), "")
 
-	assert.True(t, target.AllowInsecure)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.True(t, resolved.AllowInsecure)
 }
 
 func TestResolvedImplicitRemoteTargetCarriesGlobalAuthToken(t *testing.T) {
-	endpoint := "http://spoke.internal:7777"
-	t.Setenv("KATA_SERVER", endpoint)
+	srv := startTUIPingServer(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_SERVER", srv.URL)
 	t.Setenv("KATA_ALLOW_INSECURE", "1")
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 
-	target := resolvedDaemonTarget(implicitDaemonTarget(endpoint), endpoint)
+	resolved, ok, err := clientpkg.ResolveRemoteDaemon(t.Context(), "")
 
-	assert.Equal(t, "global-token", target.Token)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "global-token", resolved.Token)
 }
 
 func TestResolvedImplicitRemoteTargetEnvTokenOverridesAuthConfig(t *testing.T) {
@@ -487,10 +499,13 @@ func TestResolvedImplicitRemoteTargetEnvTokenOverridesAuthConfig(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
 		[]byte("[auth]\ntoken = \"bootstrap-token\"\nrequire_token_identity = true\n"), 0o600))
 
-	endpoint := "http://spoke.internal:7777"
-	target := resolvedDaemonTarget(implicitDaemonTarget(endpoint), endpoint)
+	srv := startTUIPingServer(t)
+	t.Setenv("KATA_SERVER", srv.URL)
+	resolved, ok, err := clientpkg.ResolveRemoteDaemon(t.Context(), "")
 
-	assert.Equal(t, "client-db-token", target.Token)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "client-db-token", resolved.Token)
 }
 
 func TestConnectResolvedImplicitRemoteUsesEnvTokenForHTTPClient(t *testing.T) {
@@ -522,11 +537,15 @@ func TestConnectResolvedImplicitRemoteUsesEnvTokenForHTTPClient(t *testing.T) {
 		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
 	}
 
-	conn, err := connectResolvedDaemonTarget(t.Context(), implicitDaemonTarget(srv.URL), srv.URL)
+	target := implicitDaemonTarget(srv.URL)
+	target.resolved = clientpkg.ResolvedDaemon{
+		Source: clientpkg.DaemonSourceServerEnv, BaseURL: srv.URL, Token: "client-db-token",
+	}
+	conn, err := connectResolvedDaemonTarget(t.Context(), target, srv.URL)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer client-db-token", gotAuth)
-	assert.Equal(t, "client-db-token", conn.target.Token)
+	assert.Equal(t, "client-db-token", conn.target.resolved.Token)
 }
 
 func TestNewHTTPClientForTUIResolvedImplicitRemoteHonorsTrustPrivateNetwork(t *testing.T) {
@@ -534,9 +553,13 @@ func TestNewHTTPClientForTUIResolvedImplicitRemoteHonorsTrustPrivateNetwork(t *t
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
 	endpoint := "http://100.64.0.5:7777"
-	target := resolvedDaemonTarget(implicitDaemonTarget(endpoint), endpoint)
-	require.Equal(t, "global-token", target.Token)
-	require.False(t, target.AllowInsecure)
+	target := implicitDaemonTarget(endpoint)
+	target.resolved = clientpkg.ResolvedDaemon{
+		Source: clientpkg.DaemonSourceServerEnv, BaseURL: endpoint,
+		Token: "global-token", TrustPrivateNetwork: true,
+	}
+	require.Equal(t, "global-token", target.resolved.Token)
+	require.False(t, target.resolved.AllowInsecure)
 
 	_, err := newHTTPClientForTUI(t.Context(), endpoint, target, clientOptsNormal)
 
@@ -552,7 +575,12 @@ func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	hc, err := newHTTPClientForTUI(t.Context(), srv.URL, daemonTarget{Local: true}, clientOptsNormal)
+	hc, err := newHTTPClientForTUI(t.Context(), srv.URL, daemonTarget{
+		Local: true,
+		resolved: clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceLocalRuntime, BaseURL: srv.URL, Token: "global-token",
+		},
+	}, clientOptsNormal)
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
@@ -564,6 +592,8 @@ func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 }
 
 func TestNewHTTPClientForTUIExplicitLocalBypassesActiveDaemonAuth(t *testing.T) {
+	originalEnsureResolvedNamed := ensureResolvedNamedForTUI
+	t.Cleanup(func() { ensureResolvedNamedForTUI = originalEnsureResolvedNamed })
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_REMOTE_TOKEN", "")
@@ -573,6 +603,12 @@ func TestNewHTTPClientForTUIExplicitLocalBypassesActiveDaemonAuth(t *testing.T) 
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(srv.Close)
+	ensureResolvedNamedForTUI = func(context.Context, string) (clientpkg.ResolvedDaemon, error) {
+		return clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceNamedCatalog, Name: "local",
+			BaseURL: srv.URL, Token: "global-token",
+		}, nil
+	}
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
 active_daemon = "remote"
 
@@ -590,7 +626,10 @@ token_env = "KATA_REMOTE_TOKEN"
 `), 0o600))
 
 	hc, err := newHTTPClientForTUI(t.Context(), srv.URL,
-		daemonTarget{Name: "local", Local: true}, clientOptsNormal)
+		daemonTarget{Name: "local", Local: true, resolved: clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceNamedCatalog, Name: "local",
+			BaseURL: srv.URL, Token: "global-token",
+		}}, clientOptsNormal)
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
@@ -612,12 +651,10 @@ func TestNewHTTPClientForTUIExplicitRemoteAuthTokenEnvOverridesCatalogToken(t *t
 	t.Cleanup(srv.Close)
 
 	hc, err := newHTTPClientForTUI(t.Context(), srv.URL,
-		daemonTarget{
-			Name:                 "shared",
-			URL:                  srv.URL,
-			Token:                "catalog-token",
-			UseAuthTokenOverride: true,
-		}, clientOptsNormal)
+		daemonTarget{Name: "shared", URL: srv.URL, resolved: clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceNamedCatalog, Name: "shared",
+			BaseURL: srv.URL, Token: "env-token",
+		}}, clientOptsNormal)
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
@@ -637,7 +674,11 @@ func TestNewHTTPClientForTUIImplicitRemoteFallsBackToGlobalAuth(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	hc, err := newHTTPClientForTUI(t.Context(), srv.URL, implicitDaemonTarget(srv.URL), clientOptsNormal)
+	target := implicitDaemonTarget(srv.URL)
+	target.resolved = clientpkg.ResolvedDaemon{
+		Source: clientpkg.DaemonSourceServerEnv, BaseURL: srv.URL, Token: "global-token",
+	}
+	hc, err := newHTTPClientForTUI(t.Context(), srv.URL, target, clientOptsNormal)
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
@@ -648,28 +689,78 @@ func TestNewHTTPClientForTUIImplicitRemoteFallsBackToGlobalAuth(t *testing.T) {
 	assert.Equal(t, "Bearer global-token", gotAuth)
 }
 
+func TestNewHTTPClientForTUIImplicitRemoteAnchorsCompatibilityToWorkspace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_MISSING_TOKEN", "")
+
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+active_daemon = "shared"
+
+[auth]
+token = "global-token"
+
+[[daemon]]
+name = "shared"
+url = "`+srv.URL+`"
+token_env = "KATA_MISSING_TOKEN"
+`), 0o600))
+
+	workspace := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"), []byte(
+		"version = 1\n\n[project]\nidentity = \"example.test/spoke-project\"\nname = \"spoke-project\"\n",
+	), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(
+		"version = 1\n\n[server]\nurl = \""+srv.URL+"\"\n",
+	), 0o600))
+	unrelatedCWD := t.TempDir()
+	t.Chdir(unrelatedCWD)
+
+	target := implicitDaemonTarget(srv.URL)
+	target.workspaceStart = workspace
+	target.resolved = clientpkg.ResolvedDaemon{
+		Source: clientpkg.DaemonSourceLocalConfig, BaseURL: srv.URL, Token: "global-token",
+	}
+	hc, err := newHTTPClientForTUI(t.Context(), srv.URL, target, clientOptsNormal)
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/protected", nil)
+	require.NoError(t, err)
+	resp, err := hc.Do(req) //nolint:gosec // request targets the test's own server
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	assert.Equal(t, "Bearer global-token", gotAuth)
+}
+
 func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {
-	oldNormalize := normalizeRemoteURLForTUI
-	oldProbe := probeRemoteForTUI
+	oldEnsureResolvedNamed := ensureResolvedNamedForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 	t.Cleanup(func() {
-		normalizeRemoteURLForTUI = oldNormalize
-		probeRemoteForTUI = oldProbe
+		ensureResolvedNamedForTUI = oldEnsureResolvedNamed
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
 		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
 	})
 
-	target := daemonTarget{Name: "shared", URL: "http://daemon.internal:7777", Token: "tok", AllowInsecure: true}
+	target := daemonTarget{Name: "shared", URL: "http://daemon.internal:7777"}
 	var gotNormal, gotSSE daemonTarget
-	normalizeRemoteURLForTUI = func(v string, allowInsecure bool) (string, error) {
-		require.Equal(t, target.URL, v)
-		require.True(t, allowInsecure)
-		return "http://daemon.internal:7777", nil
+	ensureResolvedNamedForTUI = func(_ context.Context, name string) (clientpkg.ResolvedDaemon, error) {
+		require.Equal(t, target.Name, name)
+		return clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceNamedCatalog, Name: name,
+			BaseURL: target.URL, Token: "tok", AllowInsecure: true,
+		}, nil
 	}
-	probeRemoteForTUI = func(context.Context, string) bool { return true }
 	newHTTPClientForTUI = func(_ context.Context, _ string, target daemonTarget, kind clientOptsKind) (*http.Client, error) {
 		if kind == clientOptsNormal {
 			gotNormal = target
@@ -688,21 +779,70 @@ func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "http://daemon.internal:7777", conn.endpoint)
 	expected := target
-	expected.UseAuthTokenOverride = true
+	expected.resolved = clientpkg.ResolvedDaemon{
+		Source: clientpkg.DaemonSourceNamedCatalog, Name: "shared",
+		BaseURL: target.URL, Token: "tok", AllowInsecure: true,
+	}
 	assert.Equal(t, expected, gotNormal)
 	assert.Equal(t, expected, gotSSE)
 	assert.Equal(t, "shared", conn.target.Name)
 }
 
+func TestConnectDaemonTargetCarriesResolvedProvenance(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("HUB_TOKEN_ENV", "catalog-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "service": "kata", "version": "test",
+		}))
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "hub-project-daemon"
+url = "`+srv.URL+`"
+token_env = "HUB_TOKEN_ENV"
+`), 0o600))
+
+	oldNewClient := newHTTPClientForTUI
+	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
+	t.Cleanup(func() {
+		newHTTPClientForTUI = oldNewClient
+		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
+	})
+	newHTTPClientForTUI = func(
+		context.Context, string, daemonTarget, clientOptsKind,
+	) (*http.Client, error) {
+		return &http.Client{}, nil
+	}
+	bootResolveScopePathFreeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		return bootInit{view: viewProjects}, nil
+	}
+
+	conn, err := connectDaemonTarget(t.Context(), daemonTarget{ //nolint:gosec // Fake credential environment name verifies token snapshotting.
+		Name: "hub-project-daemon", URL: srv.URL, TokenEnv: "HUB_TOKEN_ENV",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "catalog-token", conn.target.resolved.Token)
+	assert.Equal(t, clientpkg.DaemonSourceNamedCatalog, conn.target.resolved.Source)
+	t.Setenv("HUB_TOKEN_ENV", "rotated-token")
+	assert.Equal(t, "catalog-token", conn.target.resolved.Token)
+}
+
 func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
-	oldNormalize := normalizeRemoteURLForTUI
-	oldProbe := probeRemoteForTUI
+	oldEnsureResolvedNamed := ensureResolvedNamedForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 	t.Cleanup(func() {
-		normalizeRemoteURLForTUI = oldNormalize
-		probeRemoteForTUI = oldProbe
+		ensureResolvedNamedForTUI = oldEnsureResolvedNamed
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
 		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
@@ -711,10 +851,12 @@ func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
 
 	target := daemonTarget{Name: "shared", URL: "https://daemon.example", TokenEnv: "KATA_WORK_TOKEN"} //nolint:gosec // env var name, not a credential
 	var gotNormal, gotSSE daemonTarget
-	normalizeRemoteURLForTUI = func(v string, _ bool) (string, error) {
-		return v, nil
+	ensureResolvedNamedForTUI = func(context.Context, string) (clientpkg.ResolvedDaemon, error) {
+		return clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceNamedCatalog, Name: "shared",
+			BaseURL: target.URL, Token: "secret-from-env",
+		}, nil
 	}
-	probeRemoteForTUI = func(context.Context, string) bool { return true }
 	newHTTPClientForTUI = func(_ context.Context, _ string, target daemonTarget, kind clientOptsKind) (*http.Client, error) {
 		if kind == clientOptsNormal {
 			gotNormal = target
@@ -731,20 +873,18 @@ func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
 	conn, err := connectDaemonTarget(context.Background(), target)
 
 	require.NoError(t, err)
-	assert.Equal(t, "secret-from-env", gotNormal.Token)
-	assert.Equal(t, "secret-from-env", gotSSE.Token)
-	assert.Equal(t, "secret-from-env", conn.target.Token)
+	assert.Equal(t, "secret-from-env", gotNormal.resolved.Token)
+	assert.Equal(t, "secret-from-env", gotSSE.resolved.Token)
+	assert.Equal(t, "secret-from-env", conn.target.resolved.Token)
 }
 
 func TestConnectDaemonTargetRemoteAuthTokenEnvOverridesUnsetTokenEnv(t *testing.T) {
-	oldNormalize := normalizeRemoteURLForTUI
-	oldProbe := probeRemoteForTUI
+	oldEnsureResolvedNamed := ensureResolvedNamedForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 	t.Cleanup(func() {
-		normalizeRemoteURLForTUI = oldNormalize
-		probeRemoteForTUI = oldProbe
+		ensureResolvedNamedForTUI = oldEnsureResolvedNamed
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
 		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
@@ -755,10 +895,12 @@ func TestConnectDaemonTargetRemoteAuthTokenEnvOverridesUnsetTokenEnv(t *testing.
 
 	target := daemonTarget{Name: "shared", URL: "https://daemon.example", TokenEnv: "KATA_WORK_TOKEN"} //nolint:gosec // env var name, not a credential
 	var gotNormal, gotSSE daemonTarget
-	normalizeRemoteURLForTUI = func(v string, _ bool) (string, error) {
-		return v, nil
+	ensureResolvedNamedForTUI = func(context.Context, string) (clientpkg.ResolvedDaemon, error) {
+		return clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceNamedCatalog, Name: "shared",
+			BaseURL: target.URL, Token: "env-token",
+		}, nil
 	}
-	probeRemoteForTUI = func(context.Context, string) bool { return true }
 	newHTTPClientForTUI = func(_ context.Context, _ string, target daemonTarget, kind clientOptsKind) (*http.Client, error) {
 		if kind == clientOptsNormal {
 			gotNormal = target
@@ -775,25 +917,47 @@ func TestConnectDaemonTargetRemoteAuthTokenEnvOverridesUnsetTokenEnv(t *testing.
 	conn, err := connectDaemonTarget(context.Background(), target)
 
 	require.NoError(t, err)
-	assert.Equal(t, "env-token", gotNormal.Token)
-	assert.Equal(t, "env-token", gotSSE.Token)
-	assert.Equal(t, "env-token", conn.target.Token)
+	assert.Equal(t, "env-token", gotNormal.resolved.Token)
+	assert.Equal(t, "env-token", gotSSE.resolved.Token)
+	assert.Equal(t, "env-token", conn.target.resolved.Token)
 }
 
 func TestConnectResolvedLocalTargetRetryRefreshPreservesTargetToken(t *testing.T) {
-	oldEnsureLocal := ensureLocalRunningForTUI
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix sockets are unsupported on Windows")
+	}
+	oldEnsureLocal := ensureLocalRunningTargetForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	oldRefresh := refreshLocalHTTPClientForTUI
 	t.Cleanup(func() {
-		ensureLocalRunningForTUI = oldEnsureLocal
+		ensureLocalRunningTargetForTUI = oldEnsureLocal
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
 		refreshLocalHTTPClientForTUI = oldRefresh
 	})
 
-	ensureLocalRunningForTUI = func(context.Context) (string, error) {
-		return clientpkg.UnixBase, nil
+	t.Setenv("KATA_HOME", t.TempDir())
+	socket := filepath.Join(t.TempDir(), "fresh-kata.sock")
+	ln, err := net.Listen("unix", socket)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	var gotAuth string
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]any{"issues": []map[string]any{}})
+		}),
+		ReadHeaderTimeout: time.Second,
+	}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	ensureLocalRunningTargetForTUI = func(context.Context) (clientpkg.RunningDaemon, error) {
+		return clientpkg.RunningDaemon{
+			BaseURL: clientpkg.UnixBase, Address: "unix://" + socket,
+			Network: "unix", Scheme: "http",
+		}, nil
 	}
 	refreshLocalHTTPClientForTUI = func(context.Context) (*http.Client, error) {
 		t.Fatal("local retry should refresh through the resolved daemon target")
@@ -805,7 +969,7 @@ func TestConnectResolvedLocalTargetRetryRefreshPreservesTargetToken(t *testing.T
 	var normalCalls int
 	var retryTarget daemonTarget
 	newHTTPClientForTUI = func(
-		_ context.Context, _ string, target daemonTarget, kind clientOptsKind,
+		ctx context.Context, _ string, target daemonTarget, kind clientOptsKind,
 	) (*http.Client, error) {
 		if kind == clientOptsSSE {
 			return &http.Client{}, nil
@@ -817,23 +981,45 @@ func TestConnectResolvedLocalTargetRetryRefreshPreservesTargetToken(t *testing.T
 			})}, nil
 		}
 		retryTarget = target
-		return &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return jsonResponse(t, map[string]any{"issues": []map[string]any{}}), nil
-		})}, nil
+		return clientpkg.NewHTTPClientForResolved(ctx, target.resolved,
+			clientpkg.Opts{Timeout: time.Second})
 	}
 
 	conn, err := connectResolvedDaemonTarget(t.Context(),
-		daemonTarget{Name: "local-secure", Local: true, Token: "target-token"},
+		daemonTarget{Name: "local-secure", Local: true, resolved: clientpkg.ResolvedDaemon{
+			Source: clientpkg.DaemonSourceNamedCatalog, Name: "local-secure",
+			BaseURL: clientpkg.UnixBase, Address: "unix:///tmp/stale.sock",
+			Network: "unix", Scheme: "http", UnixSocket: "/tmp/stale.sock",
+			Token: "target-token", AllowInsecure: true, TrustPrivateNetwork: true,
+		}},
 		clientpkg.UnixBase)
 	require.NoError(t, err)
 
 	_, err = conn.api.ListIssues(t.Context(), 7, ListFilter{Limit: 2001})
 	require.NoError(t, err)
-	assert.Equal(t, "target-token", retryTarget.Token)
+	assert.Equal(t, "target-token", retryTarget.resolved.Token)
+	assert.Equal(t, clientpkg.DaemonSourceNamedCatalog, retryTarget.resolved.Source)
+	assert.Equal(t, "local-secure", retryTarget.resolved.Name)
+	assert.Equal(t, clientpkg.UnixBase, retryTarget.resolved.BaseURL)
+	assert.Equal(t, "unix://"+socket, retryTarget.resolved.Address)
+	assert.Equal(t, "unix", retryTarget.resolved.Network)
+	assert.Equal(t, "http", retryTarget.resolved.Scheme)
+	assert.Equal(t, socket, retryTarget.resolved.UnixSocket)
+	assert.True(t, retryTarget.resolved.AllowInsecure)
+	assert.True(t, retryTarget.resolved.TrustPrivateNetwork)
+	assert.Equal(t, "Bearer target-token", gotAuth)
 }
 
 func TestConnectDaemonTargetRemoteRejectsUnsetTokenEnvOnUse(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_WORK_TOKEN", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "shared"
+url = "https://daemon.example"
+token_env = "KATA_WORK_TOKEN"
+`), 0o600))
 
 	_, err := connectDaemonTarget(context.Background(),
 		daemonTarget{Name: "shared", URL: "https://daemon.example", TokenEnv: "KATA_WORK_TOKEN"}) //nolint:gosec // env var name, not a credential
@@ -865,4 +1051,19 @@ func TestDaemonConnectionUsesSSEHeaderTimeout(t *testing.T) {
 
 func clientSSEHandshakeTimeout() time.Duration {
 	return 10 * time.Second
+}
+
+func startTUIPingServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "service": "kata", "version": "test",
+		}))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
 }

@@ -129,7 +129,8 @@ func newMCPServeCmd() *cobra.Command {
 				if startErr != nil {
 					return startErr
 				}
-				projectID, projectName, err = resolveProjectIDAndNameWithClient(ctx, httpClient, baseURL, start)
+				projectID, projectName, err = resolveProjectIDAndNameWithClient(
+					daemonAPI{ctx: ctx, client: httpClient, baseURL: baseURL}, start)
 				if err != nil && strings.TrimSpace(flags.Workspace) == "" && strings.TrimSpace(flags.Project) == "" {
 					err = fmt.Errorf("%w (run inside a kata workspace, or pass --project, --workspace, --projects, or --all-projects)", err)
 				}

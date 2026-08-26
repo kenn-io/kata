@@ -95,11 +95,11 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			client, baseURL, projectID, err := githubSyncProjectClient(ctx)
+			a, projectID, err := githubSyncProjectAPI(ctx)
 			if err != nil {
 				return err
 			}
-			binding, err := githubSyncResolveBinding(ctx, client, baseURL, projectID, opts)
+			binding, err := githubSyncResolveBinding(a, projectID, opts)
 			if err != nil {
 				return err
 			}
@@ -114,13 +114,10 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 			if strings.TrimSpace(opts.interval) != "" {
 				body["interval"] = strings.TrimSpace(opts.interval)
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				issueSyncEndpointURL(baseURL, projectID, "github", "enable"), body)
+			bs, err := a.do(http.MethodPost,
+				issueSyncEndpointPath(projectID, "github", "enable"), body)
 			if err != nil {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, "enabled")
 		},
@@ -150,17 +147,14 @@ func newIssueSyncStatusCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			client, baseURL, projectID, err := githubSyncProjectClient(ctx)
+			a, projectID, err := githubSyncProjectAPI(ctx)
 			if err != nil {
 				return err
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-				issueSyncEndpointURL(baseURL, projectID, "github", "status"), nil)
+			bs, err := a.do(http.MethodGet,
+				issueSyncEndpointPath(projectID, "github", "status"), nil)
 			if err != nil {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, "status")
 		},
@@ -174,21 +168,18 @@ func newGitHubSyncOnceCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			_, baseURL, projectID, err := githubSyncProjectClient(ctx)
+			a, projectID, err := githubSyncProjectAPI(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := longRunningClientFor(ctx, baseURL)
+			a.client, err = longRunningClientForResolved(ctx, a.resolved)
 			if err != nil {
 				return err
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				issueSyncEndpointURL(baseURL, projectID, "github", "once"), map[string]any{})
+			bs, err := a.do(http.MethodPost,
+				issueSyncEndpointPath(projectID, "github", "once"), map[string]any{})
 			if err != nil {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			return githubSyncPrintOnceBody(cmd.OutOrStdout(), bs)
 		},
@@ -197,49 +188,43 @@ func newGitHubSyncOnceCmd() *cobra.Command {
 
 func githubSyncPostEmpty(cmd *cobra.Command, endpoint, action string) error {
 	ctx := cmd.Context()
-	client, baseURL, projectID, err := githubSyncProjectClient(ctx)
+	a, projectID, err := githubSyncProjectAPI(ctx)
 	if err != nil {
 		return err
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-		issueSyncEndpointURL(baseURL, projectID, "github", endpoint), map[string]any{})
+	bs, err := a.do(http.MethodPost,
+		issueSyncEndpointPath(projectID, "github", endpoint), map[string]any{})
 	if err != nil {
 		return err
-	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
 	}
 	return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, action)
 }
 
-func issueSyncEndpointURL(baseURL string, projectID int64, provider, action string) string {
-	return fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/%s/%s", baseURL, projectID, provider, action)
+func issueSyncEndpointPath(projectID int64, provider, action string) string {
+	return fmt.Sprintf("/api/v1/projects/%d/issue-sync/%s/%s", projectID, provider, action)
 }
 
-func githubSyncProjectClient(ctx context.Context) (*http.Client, string, int64, error) {
-	baseURL, err := ensureDaemon(ctx)
+// githubSyncProjectAPI is the connected daemon plus the workspace's project
+// ID — the pairing githubSyncProjectClient used to return as a four-value
+// tuple.
+func githubSyncProjectAPI(ctx context.Context) (daemonAPI, int64, error) {
+	a, err := dialDaemon(ctx)
 	if err != nil {
-		return nil, "", 0, err
-	}
-	client, err := httpClientFor(ctx, baseURL)
-	if err != nil {
-		return nil, "", 0, err
+		return daemonAPI{}, 0, err
 	}
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
-		return nil, "", 0, err
+		return daemonAPI{}, 0, err
 	}
-	projectID, _, err := resolveProjectIDAndNameWithClient(ctx, client, baseURL, start)
+	projectID, _, err := resolveProjectIDAndNameWithClient(a, start)
 	if err != nil {
-		return nil, "", 0, err
+		return daemonAPI{}, 0, err
 	}
-	return client, baseURL, projectID, nil
+	return a, projectID, nil
 }
 
 func githubSyncResolveBinding(
-	ctx context.Context,
-	client *http.Client,
-	baseURL string,
+	a daemonAPI,
 	projectID int64,
 	opts githubSyncOptions,
 ) (githubsync.Binding, error) {
@@ -254,7 +239,7 @@ func githubSyncResolveBinding(
 		}
 		return githubsync.Binding{Host: host, Owner: owner, Repo: repo}, nil
 	}
-	return inferIssueSyncBinding(ctx, client, baseURL, projectID, opts.host)
+	return inferIssueSyncBinding(a, projectID, opts.host)
 }
 
 func parseGitHubSyncRepo(repo string) (string, string, error) {
@@ -269,15 +254,11 @@ func parseGitHubSyncRepo(repo string) (string, string, error) {
 	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), nil
 }
 
-func inferIssueSyncBinding(ctx context.Context, client *http.Client, baseURL string, projectID int64, requestedHost string) (githubsync.Binding, error) {
+func inferIssueSyncBinding(a daemonAPI, projectID int64, requestedHost string) (githubsync.Binding, error) {
 	requestedHost = strings.ToLower(strings.TrimSpace(requestedHost))
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%d", baseURL, projectID), nil)
+	bs, err := a.do(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d", projectID), nil)
 	if err != nil {
 		return githubsync.Binding{}, err
-	}
-	if status >= 400 {
-		return githubsync.Binding{}, apiErrFromBody(status, bs)
 	}
 	var out struct {
 		Aliases []projectAliasRef `json:"aliases"`

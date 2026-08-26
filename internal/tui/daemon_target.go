@@ -14,17 +14,14 @@ import (
 )
 
 type daemonTarget struct {
-	Name                 string
-	Local                bool
-	URL                  string
-	Token                string
-	TokenEnv             string
-	AllowInsecure        bool
-	Implicit             bool
-	ConfiguredRemote     bool
-	UseAuthTokenOverride bool
-	workspaceStart       string
-	skipInitialScope     bool
+	Name             string
+	Local            bool
+	URL              string
+	TokenEnv         string
+	Implicit         bool
+	resolved         client.ResolvedDaemon
+	workspaceStart   string
+	skipInitialScope bool
 }
 
 type daemonConnection struct {
@@ -44,50 +41,22 @@ const (
 )
 
 var (
-	readDaemonConfigForTUI   = config.ReadDaemonConfig
-	ensureRunningForTUI      = client.EnsureRunningTargetInWorkspace
-	ensureLocalRunningForTUI = client.EnsureLocalRunning
-	normalizeRemoteURLForTUI = func(v string, allowInsecure bool) (string, error) {
+	readDaemonConfigForTUI         = config.ReadDaemonConfig
+	ensureResolvedForTUI           = client.EnsureResolvedInWorkspace
+	ensureLocalRunningTargetForTUI = client.EnsureLocalRunningTarget
+	ensureResolvedNamedForTUI      = client.EnsureResolvedNamed
+	normalizeRemoteURLForTUI       = func(v string, allowInsecure bool) (string, error) {
 		return client.NormalizeRemoteURL(v, allowInsecure)
-	}
-	probeRemoteForTUI = func(ctx context.Context, base string) bool {
-		return client.Ping(ctx, &http.Client{Timeout: remoteProbeTimeout}, base)
 	}
 	newHTTPClientForTUI = func(
 		ctx context.Context,
-		endpoint string,
+		_ string,
 		target daemonTarget,
 		kind clientOptsKind,
 	) (*http.Client, error) {
 		opts := optsForKind(kind)
 		opts.WorkspaceStart = target.workspaceStart
-		if target.Local || target.Implicit {
-			if target.Implicit {
-				opts.AllowInsecure = target.AllowInsecure ||
-					client.RemoteAllowInsecureForBaseURL(endpoint, target.workspaceStart)
-			}
-			if target.Token != "" {
-				return client.NewHTTPClientWithBearer(ctx, endpoint, target.Token, opts)
-			}
-			if target.Local && target.Name != "" {
-				opts.DaemonName = target.Name
-			}
-			return client.NewHTTPClient(ctx, endpoint, opts)
-		}
-		auth := effectiveGlobalAuthForTUI()
-		token := target.Token
-		if target.UseAuthTokenOverride {
-			if envToken := authTokenEnvOverrideForTUI(); envToken != "" {
-				token = envToken
-			}
-		}
-		return client.NewHTTPClientForTarget(ctx, endpoint,
-			client.TargetAuth{
-				Token:               token,
-				AllowInsecure:       target.AllowInsecure,
-				TrustPrivateNetwork: auth.TrustPrivateNetwork,
-			},
-			opts)
+		return client.NewHTTPClientForResolved(ctx, target.resolved, opts)
 	}
 	bootResolveScopeForTUI         = bootResolveScope
 	bootResolveScopePathFreeForTUI = bootResolveScopePathFree
@@ -98,12 +67,13 @@ func daemonTargetsFromConfig(daemons []config.CatalogDaemonConfig) []daemonTarge
 	out := make([]daemonTarget, 0, len(daemons))
 	for _, d := range daemons {
 		out = append(out, daemonTarget{
-			Name:          d.Name,
-			Local:         d.Local,
-			URL:           d.URL,
-			Token:         d.Token,
-			TokenEnv:      d.TokenEnv,
-			AllowInsecure: d.AllowInsecure,
+			Name:     d.Name,
+			Local:    d.Local,
+			URL:      d.URL,
+			TokenEnv: d.TokenEnv,
+			resolved: client.ResolvedDaemon{
+				Token: d.Token, AllowInsecure: d.AllowInsecure,
+			},
 		})
 	}
 	return out
@@ -178,15 +148,15 @@ func daemonTargetWithLaunchSelectors(target daemonTarget, opts Options) daemonTa
 func connectImplicitDaemonTarget(
 	ctx context.Context, workspaceStart string, skipInitialScope bool,
 ) (daemonConnection, error) {
-	running, err := ensureRunningForTUI(ctx, workspaceStart)
+	resolved, err := ensureResolvedForTUI(ctx, workspaceStart)
 	if err != nil {
 		return daemonConnection{}, err
 	}
-	target := implicitDaemonTarget(running.BaseURL)
-	target.ConfiguredRemote = running.ConfiguredRemote
+	target := implicitDaemonTarget(resolved.BaseURL)
+	target.resolved = resolved
 	target.workspaceStart = workspaceStart
 	target.skipInitialScope = skipInitialScope
-	return connectResolvedDaemonTarget(ctx, target, running.BaseURL)
+	return connectResolvedDaemonTarget(ctx, target, resolved.BaseURL)
 }
 
 func initialScopeDirective(opts Options) (string, bool, error) {
@@ -199,41 +169,20 @@ func initialScopeDirective(opts Options) (string, bool, error) {
 }
 
 func connectDaemonTarget(ctx context.Context, target daemonTarget) (daemonConnection, error) {
-	var err error
-	target.UseAuthTokenOverride = true
-	target, err = resolveDaemonTargetToken(target)
+	resolved, err := ensureResolvedNamedForTUI(ctx, target.Name)
 	if err != nil {
 		return daemonConnection{}, err
 	}
-	endpoint, err := resolveDaemonEndpoint(ctx, target)
-	if err != nil {
-		return daemonConnection{}, err
+	target.resolved = resolved
+	if target.Local {
+		target.URL = ""
+	} else {
+		target.URL = resolved.BaseURL
 	}
-	return connectResolvedDaemonTarget(ctx, target, endpoint)
-}
-
-func resolveDaemonTargetToken(target daemonTarget) (daemonTarget, error) {
-	if target.UseAuthTokenOverride && !target.Local {
-		if token := authTokenEnvOverrideForTUI(); token != "" {
-			target.Token = token
-			target.TokenEnv = ""
-			return target, nil
-		}
-	}
-	if target.TokenEnv == "" {
-		return target, nil
-	}
-	token := strings.TrimSpace(os.Getenv(target.TokenEnv))
-	if token == "" {
-		return target, fmt.Errorf("daemon %q: token_env %q is unset or empty",
-			daemonTargetDisplay(target), target.TokenEnv)
-	}
-	target.Token = token
-	return target, nil
+	return connectResolvedDaemonTarget(ctx, target, resolved.BaseURL)
 }
 
 func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpoint string) (daemonConnection, error) {
-	target = resolvedDaemonTarget(target, endpoint)
 	hc, err := newHTTPClientForTUI(ctx, endpoint, target, clientOptsNormal)
 	if err != nil {
 		return daemonConnection{}, err
@@ -274,7 +223,7 @@ func daemonTargetUsesRemoteFilesystem(target daemonTarget, endpoint string) bool
 	if target.Local || endpoint == client.UnixBase {
 		return false
 	}
-	if target.ConfiguredRemote {
+	if target.resolved.ConfiguredRemote() {
 		return true
 	}
 	if !target.Implicit {
@@ -292,66 +241,16 @@ func localHTTPClientRefreshForTarget(
 	endpoint string, target daemonTarget,
 ) func(context.Context) (*http.Client, error) {
 	return func(ctx context.Context) (*http.Client, error) {
-		refreshedEndpoint := endpoint
+		refreshedTarget := target
 		if target.Local || endpoint == client.UnixBase {
-			var err error
-			refreshedEndpoint, err = ensureLocalRunningForTUI(ctx)
+			running, err := ensureLocalRunningTargetForTUI(ctx)
 			if err != nil {
 				return nil, err
 			}
+			refreshedTarget.resolved = target.resolved.WithRunning(running)
 		}
-		refreshedTarget := resolvedDaemonTarget(target, refreshedEndpoint)
-		return newHTTPClientForTUI(ctx, refreshedEndpoint, refreshedTarget, clientOptsNormal)
+		return newHTTPClientForTUI(ctx, refreshedTarget.resolved.BaseURL, refreshedTarget, clientOptsNormal)
 	}
-}
-
-func resolveDaemonEndpoint(ctx context.Context, target daemonTarget) (string, error) {
-	if target.Local {
-		return ensureLocalRunningForTUI(ctx)
-	}
-	endpoint, err := normalizeRemoteURLForTUI(target.URL, target.AllowInsecure)
-	if err != nil {
-		return "", err
-	}
-	if !probeRemoteForTUI(ctx, endpoint) {
-		return "", fmt.Errorf("%w: %s", client.ErrRemoteUnavailable, endpoint)
-	}
-	return endpoint, nil
-}
-
-func resolvedDaemonTarget(target daemonTarget, endpoint string) daemonTarget {
-	target.URL = endpoint
-	if target.Local {
-		target.URL = ""
-	} else if target.Implicit {
-		target.AllowInsecure = client.RemoteAllowInsecureForBaseURL(
-			endpoint, target.workspaceStart,
-		)
-	}
-	if (target.Local || target.Implicit) && target.Token == "" {
-		target.Token = effectiveGlobalAuthTokenForTUI()
-	}
-	return target
-}
-
-func effectiveGlobalAuthTokenForTUI() string {
-	return strings.TrimSpace(effectiveGlobalAuthForTUI().Token)
-}
-
-func effectiveGlobalAuthForTUI() config.AuthConfig {
-	auth, err := config.ReadAuthConfig()
-	if err != nil {
-		auth.TrustPrivateNetwork = config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
-	}
-	if token := authTokenEnvOverrideForTUI(); token != "" {
-		auth.Token = token
-	}
-	return auth
-}
-
-func authTokenEnvOverrideForTUI() string {
-	envToken := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN"))
-	return envToken
 }
 
 func implicitDaemonTarget(endpoint string) daemonTarget {

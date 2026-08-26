@@ -83,6 +83,25 @@ func TestNewForTargetAllowsPlaintextPrivateNetworkOptOut(t *testing.T) {
 	require.NotNil(t, api)
 }
 
+// TestNewForTargetHonorsTrustPrivateNetwork pins that the public SDK can
+// express the same private-network trust the CLI does. Without the field the
+// conversion dropped it, so an SDK caller got a stricter policy than kata
+// itself for the same endpoint.
+func TestNewForTargetHonorsTrustPrivateNetwork(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+
+	_, err := NewForTarget(context.Background(), "http://100.64.0.5:7777",
+		TargetAuth{Token: "target-token"})
+	require.Error(t, err, "a plaintext CGNAT target must be refused without the opt-in")
+
+	c, err := NewForTarget(context.Background(), "http://100.64.0.5:7777",
+		TargetAuth{Token: "target-token", TrustPrivateNetwork: true})
+	require.NoError(t, err)
+	assert.NotNil(t, c)
+}
+
 func TestNewWithTrustedActorHeader(t *testing.T) {
 	var gotActor string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

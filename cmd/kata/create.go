@@ -331,16 +331,15 @@ func resolveProjectIDAndName(ctx context.Context, baseURL, startPath string) (in
 	if err != nil {
 		return 0, "", err
 	}
-	return resolveProjectIDAndNameWithClient(ctx, client, baseURL, startPath)
+	return resolveProjectIDAndNameWithClient(
+		daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, startPath)
 }
 
 func resolveProjectIDAndNameWithClient(
-	ctx context.Context,
-	client *http.Client,
-	baseURL string,
+	a daemonAPI,
 	startPath string,
 ) (int64, string, error) {
-	return resolveProjectIDAndNameWithClientHeaders(ctx, client, baseURL, startPath, nil)
+	return resolveProjectIDAndNameWithDaemonHeaders(a, startPath, nil)
 }
 
 func resolveProjectIDAndNameWithClientHeaders(
@@ -350,17 +349,22 @@ func resolveProjectIDAndNameWithClientHeaders(
 	startPath string,
 	headers map[string]string,
 ) (int64, string, error) {
-	body, repair, err := buildResolveRequest(ctx, startPath)
+	return resolveProjectIDAndNameWithDaemonHeaders(
+		daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, startPath, headers)
+}
+
+func resolveProjectIDAndNameWithDaemonHeaders(
+	a daemonAPI,
+	startPath string,
+	headers map[string]string,
+) (int64, string, error) {
+	body, repair, err := buildResolveRequest(a.ctx, startPath)
 	if err != nil {
 		return 0, "", err
 	}
-	status, bs, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
-		baseURL+"/api/v1/projects/resolve", body, headers)
+	bs, err := a.doWithHeaders(http.MethodPost, "/api/v1/projects/resolve", headers, body)
 	if err != nil {
 		return 0, "", err
-	}
-	if status >= 400 {
-		return 0, "", apiErrFromBody(status, bs)
 	}
 	var b struct {
 		Project struct {

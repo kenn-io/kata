@@ -50,14 +50,14 @@ type namedDaemonTarget struct {
 	BaseURL       string
 	Token         string
 	AllowInsecure bool
+	Running       RunningDaemon
 }
 
-// ResolveRemote is the exported view of resolveRemote so callers
-// outside client (e.g. cmd/kata health) can honor the same
-// KATA_SERVER / .kata.local.toml / active_daemon resolution rules without
-// auto-starting a local daemon.
+// ResolveRemote selects and probes configured remote sources without
+// resolving their credentials or auto-starting a local daemon. Callers that
+// need credentials and provenance use ResolveRemoteDaemon.
 func ResolveRemote(ctx context.Context, workspaceStart string) (string, bool, error) {
-	return resolveRemote(ctx, workspaceStart)
+	return resolveRemoteEndpoint(ctx, workspaceStart)
 }
 
 // DiscoverNamed returns the base URL for a named daemon catalog entry without
@@ -76,11 +76,11 @@ func DiscoverNamed(ctx context.Context, name string) (string, bool, error) {
 // per-invocation selection and therefore ignores KATA_SERVER, .kata.local.toml,
 // and active_daemon.
 func EnsureNamedRunning(ctx context.Context, name string) (string, error) {
-	target, err := resolveNamedDaemonTarget(ctx, name)
+	resolved, err := EnsureResolvedNamed(ctx, name)
 	if err != nil {
 		return "", err
 	}
-	return target.BaseURL, nil
+	return resolved.BaseURL, nil
 }
 
 // LocateNamedRunningTarget ensures a named local daemon is running or probes a
@@ -146,6 +146,12 @@ func NormalizeRemoteBaseURL(v string, allowInsecure bool) (string, error) {
 
 // RemoteAllowInsecureForBaseURL reports whether the configured remote source
 // for workspaceStart explicitly opted baseURL into plaintext HTTP.
+//
+// Deprecated: string-matching a base URL cannot distinguish two sources that
+// normalize to the same origin. Resolve through EnsureResolvedInWorkspace and
+// read ResolvedDaemon.AllowInsecure instead. Retained while compatibility CLI
+// lifecycle and federation callers still construct clients from base URLs
+// alone.
 func RemoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 	return remoteAllowInsecureForBaseURL(baseURL, workspaceStart)
 }
@@ -169,66 +175,127 @@ func RemoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 // CWD; otherwise running from outside the repo with `--workspace`
 // would silently miss the workspace's local override.
 func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, error) {
-	return resolveRemoteEndpoint(ctx, workspaceStart, true)
+	return resolveRemoteEndpoint(ctx, workspaceStart)
 }
 
-func resolveRemoteEndpoint(ctx context.Context, workspaceStart string, resolveCredentials bool) (string, bool, error) {
-	if v := os.Getenv(remoteServerEnvVar); v != "" {
-		u, err := normalizeRemoteURL(v, envAllowInsecure())
+func resolveRemoteDaemon(ctx context.Context, workspaceStart string) (ResolvedDaemon, bool, error) {
+	return resolveRemoteSelection(ctx, workspaceStart, remoteWithCredentials)
+}
+
+type remoteResolutionMode int
+
+const (
+	remoteEndpointOnly remoteResolutionMode = iota
+	remoteWithCredentials
+)
+
+func resolveRemoteSelection(
+	ctx context.Context, workspaceStart string, mode remoteResolutionMode,
+) (ResolvedDaemon, bool, error) {
+	if value := os.Getenv(remoteServerEnvVar); value != "" {
+		allowInsecure := envAllowInsecure()
+		baseURL, err := normalizeRemoteURL(value, allowInsecure)
 		if err != nil {
-			return "", false, fmt.Errorf("KATA_SERVER %q: %w", remoteURLForError(v), err)
+			return ResolvedDaemon{}, false,
+				fmt.Errorf("KATA_SERVER %q: %w", remoteURLForError(value), err)
 		}
-		if !probeRemote(ctx, u) {
-			return "", false, fmt.Errorf("%w: %s (KATA_SERVER)", ErrRemoteUnavailable, u)
+		if !probeRemote(ctx, baseURL) {
+			return ResolvedDaemon{}, false,
+				fmt.Errorf("%w: %s (KATA_SERVER)", ErrRemoteUnavailable, baseURL)
 		}
-		return u, true, nil
+		resolved := resolvedForRunning(
+			DaemonSourceServerEnv, "", remoteRunningDaemon(baseURL, true),
+		)
+		resolved.AllowInsecure = allowInsecure
+		if mode == remoteWithCredentials {
+			resolved = resolved.withGlobalAuth()
+		}
+		return resolved, true, nil
 	}
+
 	root, path, ok, err := findLocalConfig(workspaceStart)
 	if err != nil {
-		return "", false, err
+		return ResolvedDaemon{}, false, err
 	}
 	if !ok {
-		return resolveActiveRemote(ctx, resolveCredentials)
+		return resolveActiveRemoteSelection(ctx, mode)
 	}
 	cfg, err := config.ReadLocalConfig(root)
 	if err != nil {
 		if errors.Is(err, config.ErrLocalConfigMissing) {
-			return "", false, nil
+			return ResolvedDaemon{}, false, nil
 		}
-		return "", false, fmt.Errorf("read %s: %w", path, err)
+		return ResolvedDaemon{}, false, fmt.Errorf("read %s: %w", path, err)
 	}
 	if cfg.Server.URL == "" {
-		return resolveActiveRemote(ctx, resolveCredentials)
+		return resolveActiveRemoteSelection(ctx, mode)
 	}
-	u, err := normalizeRemoteURL(cfg.Server.URL, cfg.Server.AllowInsecure)
+	baseURL, err := normalizeRemoteURL(cfg.Server.URL, cfg.Server.AllowInsecure)
 	if err != nil {
-		return "", false, fmt.Errorf("%s server.url %q: %w", path, remoteURLForError(cfg.Server.URL), err)
+		return ResolvedDaemon{}, false,
+			fmt.Errorf("%s server.url %q: %w", path, remoteURLForError(cfg.Server.URL), err)
 	}
-	if !probeRemote(ctx, u) {
-		return "", false, fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, u, path)
+	if !probeRemote(ctx, baseURL) {
+		return ResolvedDaemon{}, false,
+			fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, baseURL, path)
 	}
-	return u, true, nil
+	resolved := resolvedForRunning(
+		DaemonSourceLocalConfig, "", remoteRunningDaemon(baseURL, true),
+	)
+	resolved.AllowInsecure = cfg.Server.AllowInsecure
+	if mode == remoteWithCredentials {
+		resolved = resolved.withGlobalAuth()
+	}
+	return resolved, true, nil
 }
 
-func resolveActiveRemote(ctx context.Context, resolveCredentials bool) (string, bool, error) {
+func resolveActiveRemoteSelection(
+	ctx context.Context, mode remoteResolutionMode,
+) (ResolvedDaemon, bool, error) {
 	target, ok, err := activeRemoteFromConfig()
 	if err != nil || !ok {
-		return "", false, err
+		return ResolvedDaemon{}, false, err
 	}
-	if resolveCredentials && !globalAuthTokenOverrideSet() {
-		_, err = resolveActiveRemoteTargetToken(target)
-	}
-	if err != nil {
-		return "", false, err
+	token := target.Token
+	if mode == remoteWithCredentials && !globalAuthTokenOverrideSet() {
+		token, err = resolveActiveRemoteTargetToken(target)
+		if err != nil {
+			return ResolvedDaemon{}, false, err
+		}
 	}
 	if !probeRemote(ctx, target.BaseURL) {
-		return "", false, fmt.Errorf("%w: %s (%s active_daemon %q)",
+		return ResolvedDaemon{}, false, fmt.Errorf("%w: %s (%s active_daemon %q)",
 			ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), target.Name)
 	}
-	return target.BaseURL, true, nil
+	resolved := resolvedForRunning(
+		DaemonSourceActiveDaemon, target.Name, remoteRunningDaemon(target.BaseURL, true),
+	)
+	resolved.AllowInsecure = target.AllowInsecure
+	if mode == remoteWithCredentials {
+		resolved = resolved.withRemoteTargetAuth(token, target.AllowInsecure)
+	}
+	return resolved, true, nil
+}
+
+func resolveRemoteEndpoint(ctx context.Context, workspaceStart string) (string, bool, error) {
+	resolved, ok, err := resolveRemoteSelection(ctx, workspaceStart, remoteEndpointOnly)
+	return resolved.BaseURL, ok, err
 }
 
 func discoverNamedDaemonTarget(ctx context.Context, name string) (namedDaemonTarget, bool, error) {
+	return buildNamedDaemonTarget(ctx, name, namedDiscoverOnly)
+}
+
+type namedResolutionMode int
+
+const (
+	namedDiscoverOnly namedResolutionMode = iota
+	namedEnsureRunning
+)
+
+func buildNamedDaemonTarget(
+	ctx context.Context, name string, mode namedResolutionMode,
+) (namedDaemonTarget, bool, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return namedDaemonTarget{}, false, fmt.Errorf("%w: empty name", ErrNamedDaemonNotFound)
@@ -242,21 +309,30 @@ func discoverNamedDaemonTarget(ctx context.Context, name string) (namedDaemonTar
 			continue
 		}
 		if d.Local {
-			ns, err := daemon.NewNamespace()
+			var running RunningDaemon
+			if mode == namedEnsureRunning {
+				running, err = EnsureLocalRunningTarget(ctx)
+			} else {
+				var ns *daemon.Namespace
+				ns, err = daemon.NewNamespace()
+				if err == nil {
+					var ok bool
+					var resolved ResolvedDaemon
+					resolved, ok, err = DiscoverResolved(ctx, ns.DataDir)
+					if err == nil && !ok {
+						return namedDaemonTarget{}, false, nil
+					}
+					running = resolved.Running()
+				}
+			}
 			if err != nil {
 				return namedDaemonTarget{}, false, err
 			}
-			baseURL, ok, err := Discover(ctx, ns.DataDir)
+			target, err := namedDaemonTargetFromCatalog(d, running.BaseURL, true)
 			if err != nil {
 				return namedDaemonTarget{}, false, err
 			}
-			if !ok {
-				return namedDaemonTarget{}, false, nil
-			}
-			target, err := namedDaemonTargetFromCatalog(d, baseURL, true)
-			if err != nil {
-				return namedDaemonTarget{}, false, err
-			}
+			target.Running = running
 			return target, true, nil
 		}
 		target, err := namedDaemonTargetFromCatalog(d, "", false)
@@ -272,39 +348,22 @@ func discoverNamedDaemonTarget(ctx context.Context, name string) (namedDaemonTar
 	return namedDaemonTarget{}, false, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
 }
 
-func resolveNamedDaemonTarget(ctx context.Context, name string) (namedDaemonTarget, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return namedDaemonTarget{}, fmt.Errorf("%w: empty name", ErrNamedDaemonNotFound)
-	}
-	cfg, err := config.ReadDaemonConfig()
+func resolveNamedDaemon(ctx context.Context, name string) (ResolvedDaemon, error) {
+	target, ok, err := buildNamedDaemonTarget(ctx, name, namedEnsureRunning)
 	if err != nil {
-		return namedDaemonTarget{}, err
+		return ResolvedDaemon{}, err
 	}
-	for _, d := range cfg.Daemons {
-		if d.Name != name {
-			continue
-		}
-		if d.Local {
-			baseURL, err := EnsureLocalRunning(ctx)
-			if err != nil {
-				return namedDaemonTarget{}, err
-			}
-			return namedDaemonTargetFromCatalog(d, baseURL, true)
-		}
-		target, err := namedDaemonTargetFromCatalog(d, "", false)
-		if err != nil {
-			return namedDaemonTarget{}, err
-		}
-		if !probeRemote(ctx, target.BaseURL) {
-			return namedDaemonTarget{}, fmt.Errorf("%w: %s (%s daemon %q)",
-				ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), d.Name)
-		}
-		return target, nil
+	if !ok {
+		return ResolvedDaemon{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, strings.TrimSpace(name))
 	}
-	return namedDaemonTarget{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
+	return namedResolved(target), nil
 }
 
+// namedDaemonTargetForBaseURL is the compatibility bridge for callers that
+// resolved a named daemon but retained only its URL. It does not probe or
+// start a daemon; the mismatch check in NewHTTPClient rejects changed catalog
+// provenance.
+// Deprecated: use EnsureResolvedNamed and NewHTTPClientForResolved.
 func namedDaemonTargetForBaseURL(name, baseURL string) (namedDaemonTarget, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -340,7 +399,7 @@ func namedDaemonTargetFromCatalog(
 				daemonConfigSource(), daemon.Name, remoteURLForError(daemon.URL), err)
 		}
 	}
-	target := activeRemoteTarget{
+	activeTarget := activeRemoteTarget{
 		Name:          daemon.Name,
 		BaseURL:       baseURL,
 		Token:         daemon.Token,
@@ -350,18 +409,22 @@ func namedDaemonTargetFromCatalog(
 	token := daemon.Token
 	if local || !globalAuthTokenOverrideSet() {
 		var err error
-		token, err = resolveActiveRemoteTargetToken(target)
+		token, err = resolveActiveRemoteTargetToken(activeTarget)
 		if err != nil {
 			return namedDaemonTarget{}, err
 		}
 	}
-	return namedDaemonTarget{
+	target := namedDaemonTarget{
 		Name:          daemon.Name,
 		Local:         local,
 		BaseURL:       baseURL,
 		Token:         token,
 		AllowInsecure: daemon.AllowInsecure,
-	}, nil
+	}
+	if !local {
+		target.Running = remoteRunningDaemon(baseURL, true)
+	}
+	return target, nil
 }
 
 func activeRemoteFromConfig() (activeRemoteTarget, bool, error) {
@@ -408,6 +471,10 @@ func resolveActiveRemoteTargetToken(target activeRemoteTarget) (string, error) {
 	return token, nil
 }
 
+// activeRemoteTargetAuthForBaseURL is the compatibility bridge for callers
+// that retained only the selected active daemon's URL. It reads configuration
+// but never re-probes the endpoint.
+// Deprecated: use EnsureResolvedInWorkspace and NewHTTPClientForResolved.
 func activeRemoteTargetAuthForBaseURL(baseURL, workspaceStart string) (TargetAuth, bool, error) {
 	if globalAuthTokenOverrideSet() || higherPriorityRemoteSourceMatchesBaseURL(baseURL, workspaceStart) {
 		return TargetAuth{}, false, nil
@@ -441,9 +508,8 @@ func higherPriorityRemoteSourceMatchesBaseURL(baseURL, workspaceStart string) bo
 		u, err := normalizeRemoteURL(v, envAllowInsecure())
 		return err == nil && u == baseURL
 	}
-	// An unverifiable local config (findErr != nil) aborts resolution in
-	// resolveRemote, so no client reaches this point through it; report
-	// no match rather than guessing at its contents.
+	// An unverifiable local config aborts resolution before a compatibility
+	// client is built, so no match is safer than guessing at its contents.
 	root, _, ok, findErr := findLocalConfig(workspaceStart)
 	if findErr != nil || !ok {
 		return false
@@ -454,11 +520,6 @@ func higherPriorityRemoteSourceMatchesBaseURL(baseURL, workspaceStart string) bo
 	}
 	u, err := normalizeRemoteURL(cfg.Server.URL, cfg.Server.AllowInsecure)
 	return err == nil && u == baseURL
-}
-
-func activeRemoteAllowInsecureForBaseURL(baseURL string) bool {
-	target, ok, err := activeRemoteFromConfig()
-	return err == nil && ok && target.BaseURL == baseURL && target.AllowInsecure
 }
 
 func daemonConfigSource() string {
@@ -478,6 +539,10 @@ func envAllowInsecure() bool {
 }
 
 func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
+	activeAllows := func() bool {
+		target, ok, err := activeRemoteFromConfig()
+		return err == nil && ok && target.BaseURL == baseURL && target.AllowInsecure
+	}
 	if v := os.Getenv(remoteServerEnvVar); v != "" {
 		allow := envAllowInsecure()
 		u, err := normalizeRemoteURL(v, allow)
@@ -489,7 +554,7 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 		return false
 	}
 	if !ok {
-		return activeRemoteAllowInsecureForBaseURL(baseURL)
+		return activeAllows()
 	}
 	cfg, err := config.ReadLocalConfig(root)
 	if err != nil {
@@ -502,7 +567,7 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 		u, err := normalizeRemoteURL(cfg.Server.URL, true)
 		return err == nil && u == baseURL
 	}
-	return activeRemoteAllowInsecureForBaseURL(baseURL)
+	return activeAllows()
 }
 
 // findLocalConfig walks upward from start looking for .kata.local.toml,

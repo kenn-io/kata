@@ -1,3 +1,7 @@
+---
+last_edited: 2026-08-25
+---
+
 # Semantic search technical notes
 
 Status: implemented. This note captures the semantic search design
@@ -56,7 +60,7 @@ Credential handling follows the existing bearer-token trust model:
 - The embedding API key is attached only to requests whose origin exactly
   matches the configured `base_url` origin. The client reuses the
   origin-pinned transport machinery from `internal/config/bearer.go`
-  (`bearerTransport`, `CheckBearerTargetSafeURLWithTrust`): cross-origin
+  (`bearerTransport`, `BearerPolicy.CheckTargetURL`): cross-origin
   redirects are refused rather than followed, so a key configured for one
   origin can never leak to another.
 - Plaintext HTTP targets follow the same safety ladder as other bearer

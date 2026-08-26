@@ -18,7 +18,6 @@ import (
 )
 
 const defaultHTTPTimeout = 5 * time.Second
-const remoteProbeTimeout = time.Second
 
 type sseStarter func(context.Context, sseClient, string, *int64, chan tea.Msg, uint64)
 

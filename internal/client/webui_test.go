@@ -49,12 +49,69 @@ func TestResolveWebUIHostTargetUsesLocalGatewayDespiteRemoteOverride(t *testing.
 	t.Setenv("KATA_SERVER", "https://daemon.example")
 	ctx := context.WithValue(t.Context(), BaseURLKey{}, "http://127.0.0.1:27123")
 
-	baseURL, configuredRemote, allowInsecure, err := resolveWebUIHostTarget(ctx, PrepareWebUIOptions{})
+	resolved, err := resolveWebUIHostTarget(ctx, PrepareWebUIOptions{})
 
 	require.NoError(t, err)
-	assert.Equal(t, "http://127.0.0.1:27123", baseURL)
-	assert.False(t, configuredRemote)
-	assert.False(t, allowInsecure)
+	assert.Equal(t, "http://127.0.0.1:27123", resolved.BaseURL)
+	assert.False(t, resolved.ConfiguredRemote())
+	assert.False(t, resolved.AllowInsecure)
+}
+
+// TestPrepareWebUIBuildsAnonymousClientWithResolvedPolicy covers the actual
+// configured-remote construction path. The anonymous client carries no token,
+// but D2 still requires the target policy that made the selected daemon legal.
+func TestPrepareWebUIBuildsAnonymousClientWithResolvedPolicy(t *testing.T) {
+	stubProbe(t, true)
+	tests := []struct {
+		name              string
+		daemonName        string
+		configBody        string
+		wantTrustPrivate  bool
+		wantAllowInsecure bool
+	}{
+		{
+			name:       "trusted private network literal",
+			daemonName: "trusted-private",
+			configBody: `
+[auth]
+trust_private_network = true
+
+[[daemon]]
+name = "trusted-private"
+url = "http://100.64.0.5:7777"
+`,
+			wantTrustPrivate: true,
+		},
+		{
+			name:       "explicit insecure hostname",
+			daemonName: "insecure-hostname",
+			configBody: `
+[[daemon]]
+name = "insecure-hostname"
+url = "http://daemon.example:7777"
+allow_insecure = true
+`,
+			wantAllowInsecure: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+			require.NoError(t, writeRawConfig(home, tt.configBody))
+
+			prepared, err := PrepareWebUI(t.Context(), PrepareWebUIOptions{DaemonName: tt.daemonName})
+
+			require.NoError(t, err)
+			assert.True(t, prepared.ConfiguredRemote)
+			assert.Equal(t, tt.wantTrustPrivate, prepared.TrustPrivateNetwork)
+			assert.Equal(t, tt.wantAllowInsecure, prepared.AllowInsecure)
+			assert.NotNil(t, prepared.AnonymousClient)
+		})
+	}
 }
 
 func TestOpenWebUILocalTrustedProxyOpensDirectly(t *testing.T) {
@@ -176,6 +233,39 @@ func TestOpenWebUIRemoteLoginRejectsUntrustedPlaintext(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plaintext non-loopback")
 	assert.False(t, opened)
+}
+
+func TestValidateWebLoginTargetPolicy(t *testing.T) {
+	tests := []struct {
+		name                string
+		baseURL             string
+		trustPrivateNetwork bool
+		allowInsecure       bool
+		wantErr             bool
+	}{
+		{name: "strict rejects plaintext hostname", baseURL: "http://daemon.example", wantErr: true},
+		{name: "strict accepts loopback", baseURL: "http://127.0.0.1:7777"},
+		{name: "strict accepts https", baseURL: "https://daemon.example"},
+		{
+			name: "trust private network accepts private literal", baseURL: "http://100.64.0.5:7777",
+			trustPrivateNetwork: true,
+		},
+		{
+			name: "allow insecure accepts plaintext hostname", baseURL: "http://daemon.example",
+			allowInsecure: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateWebLoginTarget(tt.baseURL, tt.trustPrivateNetwork, tt.allowInsecure)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestOpenWebUIRemoteAuthenticationOpensCanonicalLoginOrigin(t *testing.T) {

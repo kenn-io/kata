@@ -35,6 +35,46 @@ func TestProjects_ListJSONHasNoNextIssueNumber(t *testing.T) {
 	}
 }
 
+// TestProjectResolutionHelpersUseDaemonAPI pins the shared resolver seam to
+// one already-resolved daemon connection. A regression back to independently
+// supplied context/client/baseURL values could route the lookup through a
+// different credential or endpoint than the command that consumes it.
+func TestProjectResolutionHelpersUseDaemonAPI(t *testing.T) {
+	resetFlags(t)
+	flags.Project = "spoke-project"
+
+	deletedAt := "2026-08-25T00:00:00Z"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects" && r.URL.Query().Get("include") == "archived":
+			_, _ = w.Write([]byte(`{"projects":[{"id":17,"name":"archived-project","deleted_at":"` + deletedAt + `"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects":
+			_, _ = w.Write([]byte(`{"projects":[{"id":7,"name":"spoke-project"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/7":
+			_, _ = w.Write([]byte(`{"aliases":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":7,"name":"spoke-project"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	a := daemonAPI{ctx: t.Context(), baseURL: srv.URL, client: srv.Client()}
+
+	active, err := resolveProjectSelector(a, "spoke-project")
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), active.ID)
+
+	archived, err := resolveProjectSelectorIncludingArchived(a, "archived-project")
+	require.NoError(t, err)
+	assert.Equal(t, int64(17), archived.ID)
+
+	id, name, err := resolveProjectIDAndNameWithClient(a, t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), id)
+	assert.Equal(t, "spoke-project", name)
+}
+
 func TestProjects_ListAgentIncludesStats(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()

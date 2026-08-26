@@ -42,7 +42,7 @@ func resolveIssueRefForCommandWithOptions(
 	if err != nil {
 		return nil, "", 0, resolvedIssueRef{}, err
 	}
-	baseURL, err := ensureDaemon(ctx)
+	a, err := dialDaemon(ctx)
 	if err != nil {
 		return nil, "", 0, resolvedIssueRef{}, err
 	}
@@ -64,12 +64,12 @@ func resolveIssueRefForCommandWithOptions(
 		}
 	}
 	pid, projectName, err := resolveProjectIDAndNameForRef(
-		ctx, baseURL, start, parsed.ProjectName, includeArchivedProject,
+		a, start, parsed.ProjectName, includeArchivedProject,
 	)
 	if err != nil {
 		return nil, "", 0, resolvedIssueRef{}, err
 	}
-	return ctx, baseURL, pid, resolvedIssueRef{
+	return ctx, a.baseURL, pid, resolvedIssueRef{
 		RefForAPI:   parsed.RefForAPI,
 		ProjectName: projectName,
 	}, nil
@@ -81,17 +81,17 @@ func resolveIssueRefForCommandWithOptions(
 // The canonical name is used by destructive verbs to format the
 // X-Kata-Confirm header value ("DELETE <project>#<short_id>").
 func resolveProjectIDAndNameForRef(
-	ctx context.Context,
-	baseURL, startPath, refProjectName string,
+	a daemonAPI,
+	startPath, refProjectName string,
 	includeArchived bool,
 ) (int64, string, error) {
 	if strings.TrimSpace(refProjectName) == "" {
-		return resolveProjectIDAndName(ctx, baseURL, startPath)
+		return resolveProjectIDAndNameWithClient(a, startPath)
 	}
 	saved := flags.Project
 	flags.Project = refProjectName
 	defer func() { flags.Project = saved }()
-	projectID, projectName, err := resolveProjectIDAndName(ctx, baseURL, startPath)
+	projectID, projectName, err := resolveProjectIDAndNameWithClient(a, startPath)
 	if err == nil || !includeArchived {
 		return projectID, projectName, err
 	}
@@ -99,11 +99,7 @@ func resolveProjectIDAndNameForRef(
 	if !errors.As(err, &cliErr) || cliErr.Kind != kindNotFound {
 		return 0, "", err
 	}
-	client, err := httpClientFor(ctx, baseURL)
-	if err != nil {
-		return 0, "", err
-	}
-	project, err := resolveProjectSelectorIncludingArchived(ctx, client, baseURL, refProjectName)
+	project, err := resolveProjectSelectorIncludingArchived(a, refProjectName)
 	if err != nil {
 		return 0, "", err
 	}

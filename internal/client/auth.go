@@ -39,54 +39,30 @@ func authTokenEnvOverride() string {
 	return strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN"))
 }
 
-// withBearer wraps base with bearer-token injection when token is
-// non-empty. When token is empty the base transport is returned
-// unchanged so the no-auth daemon deployments incur zero extra cost.
-// A nil base falls back to http.DefaultTransport — matching net/http's
-// own zero-value behavior when *http.Client.Transport is nil. origin
-// is the scheme://host the bearer is pinned to (see bearerTransport).
-func withBearer(base http.RoundTripper, token, origin string, trustPrivateNetwork bool) http.RoundTripper {
-	return config.BearerTransportWithTrust(base, token, origin, trustPrivateNetwork)
+// bearerPolicyFor builds the target-validation policy for a client.
+// allow_insecure is an explicit per-target operator opt-out and subsumes the
+// private-network trust axis, so the two are never both set.
+func bearerPolicyFor(trustPrivateNetwork, allowInsecure bool) config.BearerPolicy {
+	if allowInsecure {
+		return config.BearerPolicy{AllowInsecurePlaintext: true}
+	}
+	return config.BearerPolicy{TrustPrivateNetwork: trustPrivateNetwork}
 }
 
-// checkBearerTargetSafe refuses to attach a bearer token to a baseURL that
-// would put the token on the wire in cleartext, and returns the scheme://host
-// origin the bearer should be pinned to for subsequent requests. Thin wrapper
-// over checkBearerTargetSafeURL that accepts a string base URL — used at
-// client construction time to fail fast before any request is built.
-func checkBearerTargetSafe(baseURL string, trustPrivateNetwork bool) (string, error) {
-	return config.BearerOriginForBaseURLWithTrust(baseURL, trustPrivateNetwork)
-}
-
+// authBearerTransport wraps base with an origin-pinned bearer transport for
+// baseURL. The target is validated whether or not token is empty (decision
+// D2): an empty token against a safe target installs nothing, while an unsafe
+// target is an error either way.
 func authBearerTransport(
 	base http.RoundTripper,
 	token, baseURL string,
 	trustPrivateNetwork bool,
 	allowInsecure bool,
 ) (http.RoundTripper, error) {
-	if token == "" {
-		return base, nil
-	}
-	if allowInsecure {
-		origin, err := config.BearerOriginForBaseURLAllowInsecure(baseURL)
-		if err != nil {
-			return nil, err
-		}
-		return config.BearerTransportWithPolicy(base, token, origin,
-			config.BearerPolicy{AllowInsecurePlaintext: true}), nil
-	}
-	origin, err := checkBearerTargetSafe(baseURL, trustPrivateNetwork)
+	policy := bearerPolicyFor(trustPrivateNetwork, allowInsecure)
+	origin, err := policy.OriginForBaseURL(baseURL)
 	if err != nil {
 		return nil, err
 	}
-	return withBearer(base, token, origin, trustPrivateNetwork), nil
-}
-
-func explicitBearerTransport(
-	base http.RoundTripper,
-	token, baseURL string,
-	trustPrivateNetwork bool,
-	allowInsecure bool,
-) (http.RoundTripper, error) {
-	return authBearerTransport(base, token, baseURL, trustPrivateNetwork, allowInsecure)
+	return policy.Transport(base, token, origin), nil
 }

@@ -576,17 +576,15 @@ func newClaimHubClient(ctx context.Context, baseURL, token string, allowInsecure
 	}, nil
 }
 
+// configureClaimHubBearerClient pins the hub's own token to the hub origin.
+// This is a hub client, never the local daemon: the local daemon's global
+// token must never reach it.
 func configureClaimHubBearerClient(c *http.Client, baseURL, token string, allowInsecure bool) error {
+	policy := config.BearerPolicy{AllowInsecurePlaintext: allowInsecure}
 	if !allowInsecure {
-		return config.ConfigureBearerClient(c, baseURL, token)
+		policy.TrustPrivateNetwork = config.ResolvedBearerTrustPrivateNetwork()
 	}
-	origin, err := config.BearerOriginForBaseURLAllowInsecure(baseURL)
-	if err != nil {
-		return err
-	}
-	c.Transport = config.BearerTransportWithPolicy(c.Transport, token, origin,
-		config.BearerPolicy{AllowInsecurePlaintext: true})
-	return nil
+	return policy.ConfigureClient(c, baseURL, token)
 }
 
 func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, error) {

@@ -64,16 +64,17 @@ func New(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	origin, err := config.BearerOriginForBaseURLWithTrust(cfg.BaseURL, cfg.TrustPrivateNetwork)
+	policy := config.BearerPolicy{TrustPrivateNetwork: cfg.TrustPrivateNetwork}
+	origin, err := policy.OriginForBaseURL(cfg.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("embedding: configure client: %w", err)
 	}
 	hc := &http.Client{
 		Timeout: timeout,
 		Transport: &embeddingTransport{
-			origin:              origin,
-			apiKey:              cfg.APIKey,
-			trustPrivateNetwork: cfg.TrustPrivateNetwork,
+			origin: origin,
+			apiKey: cfg.APIKey,
+			policy: policy,
 		},
 	}
 	return &Client{
@@ -87,10 +88,10 @@ func New(cfg Config) (*Client, error) {
 }
 
 type embeddingTransport struct {
-	base                http.RoundTripper
-	origin              string
-	apiKey              string
-	trustPrivateNetwork bool
+	base   http.RoundTripper
+	origin string
+	apiKey string
+	policy config.BearerPolicy
 }
 
 func (t *embeddingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -98,7 +99,7 @@ func (t *embeddingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	if err := config.CheckBearerTargetSafeURLWithTrust(req.URL, t.trustPrivateNetwork); err != nil {
+	if err := t.policy.CheckTargetURL(req.URL); err != nil {
 		return nil, err
 	}
 	if reqOrigin := req.URL.Scheme + "://" + req.URL.Host; reqOrigin != t.origin {

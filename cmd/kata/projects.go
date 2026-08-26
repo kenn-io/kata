@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,33 +112,17 @@ func projectsListCmd() *cobra.Command {
 		Short: "list known projects",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
-			if err != nil {
-				return err
-			}
-			client, err := httpClientFor(ctx, baseURL)
+			a, err := dialDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
 			mode := currentOutputMode()
-			path := baseURL + "/api/v1/projects"
+			path := "/api/v1/projects"
 			if mode == outputAgent {
 				path += "?include=stats"
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, path, nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if mode == outputJSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+			bs, emitted, err := a.passthrough(cmd, http.MethodGet, path, nil)
+			if err != nil || emitted {
 				return err
 			}
 			var b struct {
@@ -201,33 +184,18 @@ func projectsRenameCmd() *cobra.Command {
 
 			ctx := cmd.Context()
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
+			project, err := resolveProjectSelector(a, args[0])
 			if err != nil {
 				return err
 			}
-			project, err := resolveProjectSelector(ctx, client, baseURL, args[0])
-			if err != nil {
-				return err
-			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPatch,
-				fmt.Sprintf("%s/api/v1/projects/%d", baseURL, project.ID),
+			bs, emitted, err := a.passthrough(cmd, http.MethodPatch,
+				fmt.Sprintf("/api/v1/projects/%d", project.ID),
 				map[string]string{"name": name, "actor": actor})
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if flags.JSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+			if err != nil || emitted {
 				return err
 			}
 			var b struct {
@@ -267,21 +235,17 @@ func projectsRewriteAuthorCmd() *cobra.Command {
 				return &cliError{Message: "--to is required", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			project, err := resolveProjectArgFlagOrWorkspace(ctx, client, baseURL, args)
+			project, err := resolveProjectArgFlagOrWorkspace(a, args)
 			if err != nil {
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				fmt.Sprintf("%s/api/v1/projects/%d/actions/rewrite-author", baseURL, project.ID),
+			bs, err := a.do(http.MethodPost,
+				fmt.Sprintf("/api/v1/projects/%d/actions/rewrite-author", project.ID),
 				map[string]any{
 					"actor": actor,
 					"from":  from,
@@ -289,9 +253,6 @@ func projectsRewriteAuthorCmd() *cobra.Command {
 				})
 			if err != nil {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			var result db.RewriteAuthorIdentityResult
 			if err := json.Unmarshal(bs, &result); err != nil {
@@ -338,19 +299,15 @@ func projectsMergeCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
+			source, err := resolveProjectSelector(a, args[0])
 			if err != nil {
 				return err
 			}
-			source, err := resolveProjectSelector(ctx, client, baseURL, args[0])
-			if err != nil {
-				return err
-			}
-			target, err := resolveProjectSelector(ctx, client, baseURL, args[1])
+			target, err := resolveProjectSelector(a, args[1])
 			if err != nil {
 				return err
 			}
@@ -365,13 +322,10 @@ func projectsMergeCmd() *cobra.Command {
 			if strings.TrimSpace(targetName) != "" {
 				body["target_name"] = strings.TrimSpace(targetName)
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				fmt.Sprintf("%s/api/v1/projects/%d/merge", baseURL, target.ID), body)
+			bs, err := a.do(http.MethodPost,
+				fmt.Sprintf("/api/v1/projects/%d/merge", target.ID), body)
 			if err != nil {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			var b struct {
 				Source            projectRef             `json:"source"`
@@ -387,7 +341,7 @@ func projectsMergeCmd() *cobra.Command {
 			if err := repairMergedWorkspaceBinding(source, b.Target); err != nil {
 				return err
 			}
-			if flags.JSON {
+			if currentOutputMode() == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err
@@ -487,12 +441,7 @@ func projectsShowCmd() *cobra.Command {
 		Short: "show project details",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
-			if err != nil {
-				return err
-			}
-			client, err := httpClientFor(ctx, baseURL)
+			a, err := dialDaemon(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -501,25 +450,14 @@ func projectsShowCmd() *cobra.Command {
 				project.ID = id
 			} else {
 				var err error
-				project, err = resolveProjectSelector(ctx, client, baseURL, args[0])
+				project, err = resolveProjectSelector(a, args[0])
 				if err != nil {
 					return err
 				}
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-				fmt.Sprintf("%s/api/v1/projects/%d", baseURL, project.ID), nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if flags.JSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+			bs, emitted, err := a.passthrough(cmd, http.MethodGet,
+				fmt.Sprintf("/api/v1/projects/%d", project.ID), nil)
+			if err != nil || emitted {
 				return err
 			}
 			var b struct {
@@ -548,12 +486,12 @@ func projectsShowCmd() *cobra.Command {
 	}
 }
 
-func resolveProjectSelector(ctx context.Context, client *http.Client, baseURL, selector string) (projectRef, error) {
+func resolveProjectSelector(a daemonAPI, selector string) (projectRef, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return projectRef{}, &cliError{Message: "project selector must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
 	}
-	projects, err := loadProjectRefs(ctx, client, baseURL)
+	projects, err := loadProjectRefs(a)
 	if err != nil {
 		return projectRef{}, err
 	}
@@ -561,34 +499,32 @@ func resolveProjectSelector(ctx context.Context, client *http.Client, baseURL, s
 }
 
 func resolveProjectArgFlagOrWorkspace(
-	ctx context.Context,
-	client *http.Client,
-	baseURL string,
+	a daemonAPI,
 	args []string,
 ) (projectRef, error) {
 	if len(args) > 0 {
-		return resolveProjectSelector(ctx, client, baseURL, args[0])
+		return resolveProjectSelector(a, args[0])
 	}
 	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
-		return resolveProjectSelector(ctx, client, baseURL, projectName)
+		return resolveProjectSelector(a, projectName)
 	}
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
 		return projectRef{}, err
 	}
-	id, name, err := resolveProjectIDAndNameWithClient(ctx, client, baseURL, start)
+	id, name, err := resolveProjectIDAndNameWithClient(a, start)
 	if err != nil {
 		return projectRef{}, err
 	}
 	return projectRef{ID: id, Name: name}, nil
 }
 
-func resolveProjectSelectorIncludingArchived(ctx context.Context, client *http.Client, baseURL, selector string) (projectRef, error) {
+func resolveProjectSelectorIncludingArchived(a daemonAPI, selector string) (projectRef, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return projectRef{}, &cliError{Message: "project selector must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
 	}
-	projects, err := loadProjectRefsIncludingArchived(ctx, client, baseURL)
+	projects, err := loadProjectRefsIncludingArchived(a)
 	if err != nil {
 		return projectRef{}, err
 	}
@@ -618,25 +554,22 @@ func resolveProjectSelectorFromRefs(selector string, projects []projectRef) (pro
 	}
 }
 
-func loadProjectRefs(ctx context.Context, client *http.Client, baseURL string) ([]projectRef, error) {
-	return loadProjectRefsWithArchived(ctx, client, baseURL, false)
+func loadProjectRefs(a daemonAPI) ([]projectRef, error) {
+	return loadProjectRefsWithArchived(a, false)
 }
 
-func loadProjectRefsIncludingArchived(ctx context.Context, client *http.Client, baseURL string) ([]projectRef, error) {
-	return loadProjectRefsWithArchived(ctx, client, baseURL, true)
+func loadProjectRefsIncludingArchived(a daemonAPI) ([]projectRef, error) {
+	return loadProjectRefsWithArchived(a, true)
 }
 
-func loadProjectRefsWithArchived(ctx context.Context, client *http.Client, baseURL string, includeArchived bool) ([]projectRef, error) {
-	path := baseURL + "/api/v1/projects"
+func loadProjectRefsWithArchived(a daemonAPI, includeArchived bool) ([]projectRef, error) {
+	path := "/api/v1/projects"
 	if includeArchived {
 		path += "?include=archived"
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, path, nil)
+	bs, err := a.do(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
-	}
-	if status >= 400 {
-		return nil, apiErrFromBody(status, bs)
 	}
 	var list struct {
 		Projects []projectRef `json:"projects"`
@@ -648,13 +581,10 @@ func loadProjectRefsWithArchived(ctx context.Context, client *http.Client, baseU
 		if list.Projects[i].DeletedAt != nil {
 			continue
 		}
-		status, detail, err := httpDoJSON(ctx, client, http.MethodGet,
-			fmt.Sprintf("%s/api/v1/projects/%d", baseURL, list.Projects[i].ID), nil)
+		detail, err := a.do(http.MethodGet,
+			fmt.Sprintf("/api/v1/projects/%d", list.Projects[i].ID), nil)
 		if err != nil {
 			return nil, err
-		}
-		if status >= 400 {
-			return nil, apiErrFromBody(status, detail)
 		}
 		var show struct {
 			Aliases []projectAliasRef `json:"aliases"`
@@ -761,37 +691,22 @@ func projectsRemoveCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			project, err := resolveProjectSelector(ctx, client, baseURL, args[0])
+			project, err := resolveProjectSelector(a, args[0])
 			if err != nil {
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			path := fmt.Sprintf("%s/api/v1/projects/%d?actor=%s",
-				baseURL, project.ID, url.QueryEscape(actor))
+			path := fmt.Sprintf("/api/v1/projects/%d?actor=%s",
+				project.ID, url.QueryEscape(actor))
 			if force {
 				path += "&force=true"
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodDelete, path, nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if flags.JSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+			_, emitted, err := a.passthrough(cmd, http.MethodDelete, path, nil)
+			if err != nil || emitted {
 				return err
 			}
 			if currentOutputMode() == outputAgent {
@@ -817,34 +732,19 @@ func projectsRestoreCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			project, err := resolveProjectSelectorIncludingArchived(ctx, client, baseURL, args[0])
+			project, err := resolveProjectSelectorIncludingArchived(a, args[0])
 			if err != nil {
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			path := fmt.Sprintf("%s/api/v1/projects/%d/restore?actor=%s",
-				baseURL, project.ID, url.QueryEscape(actor))
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost, path, nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if flags.JSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+			path := fmt.Sprintf("/api/v1/projects/%d/restore?actor=%s",
+				project.ID, url.QueryEscape(actor))
+			bs, emitted, err := a.passthrough(cmd, http.MethodPost, path, nil)
+			if err != nil || emitted {
 				return err
 			}
 			var b struct {
@@ -890,16 +790,12 @@ func projectsDetachCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
-			if err != nil {
-				return err
-			}
-			client, err := httpClientFor(ctx, baseURL)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
 			selector := strings.TrimSpace(args[0])
-			projects, err := loadProjectRefs(ctx, client, baseURL)
+			projects, err := loadProjectRefs(a)
 			if err != nil {
 				return err
 			}
@@ -912,24 +808,13 @@ func projectsDetachCmd() *cobra.Command {
 				}
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			path := fmt.Sprintf("%s/api/v1/projects/%d/aliases/%d?actor=%s",
-				baseURL, projectID, aliasID, url.QueryEscape(actor))
+			path := fmt.Sprintf("/api/v1/projects/%d/aliases/%d?actor=%s",
+				projectID, aliasID, url.QueryEscape(actor))
 			if force {
 				path += "&force=true"
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodDelete, path, nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if flags.JSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+			_, emitted, err := a.passthrough(cmd, http.MethodDelete, path, nil)
+			if err != nil || emitted {
 				return err
 			}
 			if currentOutputMode() == outputAgent {

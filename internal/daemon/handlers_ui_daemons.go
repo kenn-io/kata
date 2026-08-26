@@ -633,23 +633,14 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 }
 
 func webDaemonBearerTransport(d resolvedWebDaemon, trustPrivateNetwork bool) (http.RoundTripper, error) {
-	if d.token == "" {
-		return http.DefaultTransport, nil
-	}
 	policy := config.BearerPolicy{
 		TrustPrivateNetwork: trustPrivateNetwork, AllowInsecurePlaintext: d.allowInsecure,
 	}
-	var origin string
-	var err error
-	if d.allowInsecure {
-		origin, err = config.BearerOriginForBaseURLAllowInsecure(d.baseURL)
-	} else {
-		origin, err = config.BearerOriginForBaseURLWithTrust(d.baseURL, trustPrivateNetwork)
-	}
-	if err != nil {
+	client := &http.Client{Transport: http.DefaultTransport}
+	if err := policy.ConfigureClient(client, d.baseURL, d.token); err != nil {
 		return nil, err
 	}
-	return config.BearerTransportWithPolicy(http.DefaultTransport, d.token, origin, policy), nil
+	return client.Transport, nil
 }
 
 func webDaemonCapabilityPath(path string) bool {

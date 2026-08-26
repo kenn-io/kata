@@ -184,6 +184,13 @@ func TestGitHubSyncOnceAllowsLongRunningRequest(t *testing.T) {
 	assert.Equal(t, int64(1), f.runner.runs)
 }
 
+func TestIssueSyncEndpointPathIsAPIRelative(t *testing.T) {
+	assert.Equal(t,
+		"/api/v1/projects/42/issue-sync/github/once",
+		issueSyncEndpointPath(42, "github", "once"),
+	)
+}
+
 func TestRootRegistersSyncGitHub(t *testing.T) {
 	syncCmd, ok := rootSubcommands()["sync"]
 	require.True(t, ok, "root command should register sync")

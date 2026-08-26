@@ -7,49 +7,37 @@ import (
 	"net/url"
 )
 
-// ConfigureBearerClient attaches an origin-pinned bearer transport to c. Empty
-// token preserves the no-auth client path and skips target safety checks.
-func ConfigureBearerClient(c *http.Client, baseURL, token string) error {
-	return ConfigureBearerClientWithTrust(c, baseURL, token, resolvedBearerTrustPrivateNetwork())
-}
-
-// ConfigureBearerClientWithTrust is ConfigureBearerClient with an explicit
-// plaintext-private-network trust decision. Empty token preserves the no-auth
-// client path and skips target safety checks.
-func ConfigureBearerClientWithTrust(c *http.Client, baseURL, token string, trustPrivateNetwork bool) error {
+// ConfigureClient attaches an origin-pinned bearer transport to c under this
+// policy.
+//
+// The target is validated whether or not a token is present (decision D2,
+// daemon-strict). An empty token against a safe target installs nothing and
+// returns nil; an unsafe target is an error regardless of token presence, so a
+// misrouted or plaintext-exposed endpoint is reported at construction instead
+// of silently producing a client that will fail later as an opaque 401. Legal
+// deployments stay legal through TrustPrivateNetwork and
+// AllowInsecurePlaintext.
+func (p BearerPolicy) ConfigureClient(c *http.Client, baseURL, token string) error {
 	if c == nil {
 		return fmt.Errorf("nil HTTP client for bearer configuration")
 	}
-	origin := ""
-	var err error
-	if token != "" {
-		origin, err = BearerOriginForBaseURLWithTrust(baseURL, trustPrivateNetwork)
-		if err != nil {
-			return err
-		}
+	origin, err := p.OriginForBaseURL(baseURL)
+	if err != nil {
+		return err
 	}
-	c.Transport = BearerTransportWithTrust(c.Transport, token, origin, trustPrivateNetwork)
+	c.Transport = p.Transport(c.Transport, token, origin)
 	return nil
 }
 
-func resolvedBearerTrustPrivateNetwork() bool {
+// ResolvedBearerTrustPrivateNetwork reports the operator's configured
+// private-network trust decision ([auth].trust_private_network, or
+// KATA_TRUST_PRIVATE_NETWORK when the config cannot be read).
+func ResolvedBearerTrustPrivateNetwork() bool {
 	auth, err := ReadAuthConfig()
 	if err != nil {
 		return EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
 	}
 	return auth.TrustPrivateNetwork
-}
-
-// BearerTransport wraps base with bearer-token injection when token is
-// non-empty. The token is attached only to requests that still target origin.
-func BearerTransport(base http.RoundTripper, token, origin string) http.RoundTripper {
-	return BearerTransportWithTrust(base, token, origin, false)
-}
-
-// BearerTransportWithTrust wraps base with bearer-token injection when token is
-// non-empty, allowing plaintext private-IP targets only when trust is explicit.
-func BearerTransportWithTrust(base http.RoundTripper, token, origin string, trustPrivateNetwork bool) http.RoundTripper {
-	return BearerTransportWithPolicy(base, token, origin, BearerPolicy{TrustPrivateNetwork: trustPrivateNetwork})
 }
 
 // BearerPolicy controls bearer-token target validation.
@@ -62,56 +50,81 @@ type BearerPolicy struct {
 	AllowInsecurePlaintext bool
 }
 
-// BearerTransportWithPolicy wraps base with bearer-token injection when token
-// is non-empty, applying the supplied target-validation policy.
-func BearerTransportWithPolicy(base http.RoundTripper, token, origin string, policy BearerPolicy) http.RoundTripper {
+// CheckTargetURL reports whether u is a safe target for a bearer token under
+// this policy. It is the single definition of that rule: the per-request guard
+// in bearerTransport.RoundTrip, construction-time validation in
+// ConfigureClient, and OriginForBaseURL all go through here.
+//
+// AllowInsecurePlaintext skips the plaintext-exposure judgement but NOT the
+// shape rules — an unparseable scheme or a missing host is still refused, and
+// origin pinning (applied by the transport) still prevents a token following a
+// cross-origin redirect. That combination is what makes an explicit
+// allow_insecure target safe to pin a token to.
+func (p BearerPolicy) CheckTargetURL(u *url.URL) error {
+	if u == nil {
+		return fmt.Errorf("nil URL for bearer-token safety check")
+	}
+	if u.Host == "kata.invalid" {
+		return nil
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("unsupported URL scheme %q for bearer-token client", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("bearer-token target %q must include host", u.Redacted())
+	}
+	if p.AllowInsecurePlaintext || u.Scheme == "https" {
+		return nil
+	}
+	host := u.Hostname()
+	if host == "" || host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	if p.TrustPrivateNetwork {
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return fmt.Errorf("plaintext trusted-private-network bearer target %q rejected: address %q is not a literal IP", u.Redacted(), host)
+		}
+		if ip.IsUnspecified() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || cgnatBlock.Contains(ip) {
+			return nil
+		}
+		return fmt.Errorf("plaintext trusted-private-network bearer target %q rejected: address %q is not non-public", u.Redacted(), host)
+	}
+	return fmt.Errorf("refusing to attach bearer token to plaintext non-loopback URL %q - "+
+		"the daemon does not terminate TLS, so the token would travel in cleartext; "+
+		"use a Unix socket or loopback address, tunnel via SSH, terminate TLS "+
+		"in a reverse proxy, or opt into the private network with "+
+		"KATA_TRUST_PRIVATE_NETWORK=1 ([auth].trust_private_network)", u.Redacted())
+}
+
+// OriginForBaseURL validates baseURL under this policy and returns the
+// canonical scheme://host origin the bearer is pinned to.
+func (p BearerPolicy) OriginForBaseURL(baseURL string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse base URL %q for bearer-token safety check: %w", baseURL, err)
+	}
+	if err := p.CheckTargetURL(u); err != nil {
+		return "", err
+	}
+	return CanonicalHTTPOrigin(baseURL)
+}
+
+// Transport wraps base with bearer-token injection when token is non-empty,
+// applying this policy per request. An empty token returns base unchanged so
+// no-auth deployments incur zero cost; target validation for the empty-token
+// case belongs to ConfigureClient, not here.
+func (p BearerPolicy) Transport(base http.RoundTripper, token, origin string) http.RoundTripper {
 	if token == "" {
 		return base
 	}
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	return &bearerTransport{base: base, token: token, origin: origin, policy: policy}
-}
-
-// BearerOriginForBaseURL validates baseURL as a safe bearer target and returns
-// the scheme://host origin used for redirect pinning.
-func BearerOriginForBaseURL(baseURL string) (string, error) {
-	return BearerOriginForBaseURLWithTrust(baseURL, false)
-}
-
-// BearerOriginForBaseURLWithTrust validates baseURL as a safe bearer target
-// and returns the scheme://host origin used for redirect pinning.
-func BearerOriginForBaseURLWithTrust(baseURL string, trustPrivateNetwork bool) (string, error) {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return "", fmt.Errorf("parse base URL %q for bearer-token safety check: %w", baseURL, err)
-	}
-	if err := CheckBearerTargetSafeURLWithTrust(u, trustPrivateNetwork); err != nil {
-		return "", err
-	}
-	return CanonicalHTTPOrigin(baseURL)
-}
-
-// BearerOriginForBaseURLAllowInsecure validates only the URL shape and returns
-// the scheme://host origin used for redirect pinning. It is for explicit
-// per-target allow_insecure configuration where the operator has opted out of
-// plaintext target safety checks.
-func BearerOriginForBaseURLAllowInsecure(baseURL string) (string, error) {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return "", fmt.Errorf("parse base URL %q for bearer-token safety check: %w", baseURL, err)
-	}
-	if u.Host == "kata.invalid" {
-		return CanonicalHTTPOrigin(baseURL)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("unsupported URL scheme %q for bearer-token client", u.Scheme)
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("bearer-token target %q must include host", u.Redacted())
-	}
-	return CanonicalHTTPOrigin(baseURL)
+	return &bearerTransport{base: base, token: token, origin: origin, policy: p}
 }
 
 type bearerTransport struct {
@@ -125,10 +138,8 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.token == "" || req.Header.Get("Authorization") != "" {
 		return t.base.RoundTrip(req)
 	}
-	if !t.policy.AllowInsecurePlaintext {
-		if err := CheckBearerTargetSafeURLWithTrust(req.URL, t.policy.TrustPrivateNetwork); err != nil {
-			return nil, err
-		}
+	if err := t.policy.CheckTargetURL(req.URL); err != nil {
+		return nil, err
 	}
 	reqOrigin, err := CanonicalHTTPOrigin(req.URL.String())
 	if err != nil {
@@ -146,52 +157,6 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
 	clone.Header.Set("Authorization", "Bearer "+t.token)
 	return t.base.RoundTrip(clone)
-}
-
-// CheckBearerTargetSafeURL is the per-request bearer-safety check. Safe
-// targets are the Unix-socket sentinel host, HTTPS, and HTTP loopback.
-func CheckBearerTargetSafeURL(u *url.URL) error {
-	return CheckBearerTargetSafeURLWithTrust(u, false)
-}
-
-// CheckBearerTargetSafeURLWithTrust is the per-request bearer-safety check.
-// Safe targets are the Unix-socket sentinel host, HTTPS, HTTP loopback, and
-// plaintext non-public IP literals only when the operator opted into trusting
-// the private network.
-func CheckBearerTargetSafeURLWithTrust(u *url.URL, trustPrivateNetwork bool) error {
-	if u == nil {
-		return fmt.Errorf("nil URL for bearer-token safety check")
-	}
-	if u.Host == "kata.invalid" {
-		return nil
-	}
-	if u.Scheme == "https" {
-		return nil
-	}
-	if u.Scheme != "http" {
-		return fmt.Errorf("unsupported URL scheme %q for bearer-token client", u.Scheme)
-	}
-	host := u.Hostname()
-	if host == "" || host == "localhost" {
-		return nil
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return nil
-	}
-	if trustPrivateNetwork {
-		ip := net.ParseIP(host)
-		if ip == nil {
-			return fmt.Errorf("plaintext trusted-private-network bearer target %q rejected: address %q is not a literal IP", u.Redacted(), host)
-		}
-		if ip.IsUnspecified() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || cgnatBlock.Contains(ip) {
-			return nil
-		}
-		return fmt.Errorf("plaintext trusted-private-network bearer target %q rejected: address %q is not non-public", u.Redacted(), host)
-	}
-	return fmt.Errorf("refusing to attach bearer token to plaintext non-loopback URL %q - "+
-		"the daemon does not terminate TLS, so the token would travel in cleartext; "+
-		"use a Unix socket or loopback address, tunnel via SSH, or terminate TLS "+
-		"in a reverse proxy", u.Redacted())
 }
 
 // cgnatBlock is RFC6598 100.64.0.0/10. Go's net.IP.IsPrivate() intentionally

@@ -15,24 +15,16 @@ func newHealthCmd() *cobra.Command {
 		Short: "report daemon health",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
 			// health is a probe — it must report the daemon's actual
 			// state, not auto-start one and report on the spawned
 			// child. Hammer-test finding #1.
-			baseURL, err := discoverDaemon(ctx)
+			a, err := discoverDaemonAPI(cmd.Context())
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
+			bs, err := a.do(http.MethodGet, "/api/v1/health", nil)
 			if err != nil {
 				return err
-			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/health", nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			var b struct {
 				OK            bool   `json:"ok"`

@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	clientpkg "go.kenn.io/kata/internal/client"
 )
 
 func TestDaemonView_DKeyTransitionsFromList(t *testing.T) {
@@ -463,7 +464,9 @@ func setupDaemonViewSource() Model {
 	m.activeDaemon = daemonTarget{Name: "shared", URL: "http://daemon.internal:7777"}
 	m.daemonTargets = []daemonTarget{
 		{Name: "local", Local: true},
-		{Name: "shared", URL: "http://daemon.internal:7777", Token: "tok", AllowInsecure: true},
+		{Name: "shared", URL: "http://daemon.internal:7777", resolved: clientpkg.ResolvedDaemon{
+			Token: "tok", AllowInsecure: true,
+		}},
 		{Name: "prod", URL: "https://kata.example.test"},
 	}
 	return m

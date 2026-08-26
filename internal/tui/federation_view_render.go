@@ -107,7 +107,7 @@ func renderFederationSelectHub(m Model) string {
 	for i, row := range rows {
 		label := daemonName(row.target) + " " + federationDaemonEndpoint(row.target) +
 			" auth " + daemonAuth(row.target)
-		if row.target.AllowInsecure {
+		if row.target.resolved.AllowInsecure {
 			label += " allow_insecure"
 		}
 		if daemonTargetsMatch(row.target, m.activeDaemon) {
@@ -129,7 +129,7 @@ func renderFederationSelectHubProject(m Model) string {
 			m.federationDraft.HubTarget,
 			m.federationDraft.HubInstance.Auth,
 		)),
-		fmt.Sprintf("allow_insecure: %t", m.federationDraft.HubTarget.AllowInsecure),
+		fmt.Sprintf("allow_insecure: %t", m.federationDraft.HubTarget.resolved.AllowInsecure),
 		"",
 	)
 	if m.federationHubProjectsLoading {
@@ -153,7 +153,7 @@ func renderFederationBrowseHubs(m Model) string {
 		"catalog hub: "+sanitizeForLine(daemonName(target))+
 			" "+sanitizeForLine(federationDaemonEndpoint(target)),
 		"hub auth: "+sanitizeForLine(federationAuthDisplay(target, m.federationDraft.HubInstance.Auth)),
-		fmt.Sprintf("allow_insecure: %t", target.AllowInsecure),
+		fmt.Sprintf("allow_insecure: %t", target.resolved.AllowInsecure),
 		"mode: read-only",
 		"",
 	)

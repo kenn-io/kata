@@ -31,15 +31,11 @@ func projectsPurgeCmd() *cobra.Command {
 				}
 			}
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			a, err := dialDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			project, err := resolveProjectSelectorIncludingArchived(ctx, client, baseURL, args[0])
+			project, err := resolveProjectSelectorIncludingArchived(a, args[0])
 			if err != nil {
 				return err
 			}
@@ -54,14 +50,11 @@ func projectsPurgeCmd() *cobra.Command {
 			if reason != "" {
 				body["reason"] = reason
 			}
-			postURL := fmt.Sprintf("%s/api/v1/projects/%d/actions/purge", baseURL, project.ID)
-			status, bs, err := httpDoJSONWithHeader(ctx, client, http.MethodPost, postURL,
+			bs, err := a.doWithHeaders(http.MethodPost,
+				fmt.Sprintf("/api/v1/projects/%d/actions/purge", project.ID),
 				map[string]string{"X-Kata-Confirm": confirm}, body)
 			if err != nil {
 				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
 			}
 			return printProjectPurge(cmd, project.Name, bs)
 		},

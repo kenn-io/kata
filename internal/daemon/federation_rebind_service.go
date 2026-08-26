@@ -38,7 +38,7 @@ var (
 			Transport: transport.Clone(),
 			Timeout:   federationRebindRequestTimeout,
 		}
-		if err := config.ConfigureBearerClientWithTrust(httpClient, baseURL, token, false); err != nil {
+		if err := (config.BearerPolicy{}).ConfigureClient(httpClient, baseURL, token); err != nil {
 			return nil, err
 		}
 		return httpClient, nil

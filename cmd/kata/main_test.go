@@ -563,6 +563,21 @@ func TestHealth_DoesNotAutoStartDaemon(t *testing.T) {
 		"hint must point the user at the right action")
 }
 
+func TestHealthCommandDoesNotAutoStartDaemon(t *testing.T) {
+	resetFlags(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_SERVER", "")
+
+	cmd := newHealthCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.ExecuteContext(context.Background())
+
+	ce := requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Equal(t, kindDaemonUnavail, ce.Kind)
+	assert.Contains(t, ce.Message, "no daemon running")
+}
+
 func TestHealthReportsLiveUnreachableDaemon(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
