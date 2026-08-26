@@ -297,7 +297,7 @@ func isBeadsImportUnattended(cmd *cobra.Command) bool {
 }
 
 func printBeadsImportResult(cmd *cobra.Command, bs []byte, projectID int64) error {
-	if flags.JSON {
+	if currentOutputMode() == outputJSON {
 		_, err := cmd.OutOrStdout().Write(bs)
 		return err
 	}

@@ -133,15 +133,35 @@ type waitJSONOutput struct {
 	Abandoned []waitAbandoned `json:"abandoned,omitempty"`
 }
 
+// waitTargetState is a ref's position in the per-run lifecycle: pending →
+// satisfied, or pending → abandoned. One field rather than a done/abandoned
+// bool pair, which admitted the meaningless "done and abandoned" combination
+// and forced every reader to re-derive pending as !done && !abandoned.
+type waitTargetState int
+
+const (
+	targetPending waitTargetState = iota
+	targetSatisfied
+	targetAbandoned
+)
+
+// waitJoin is the multi-ref join rule. The zero value is joinAll because --all
+// is the documented default when neither --any nor --all is passed.
+type waitJoin int
+
+const (
+	joinAll waitJoin = iota
+	joinAny
+)
+
 // waitTarget is a ref's mutable per-run state.
 type waitTarget struct {
 	arg        string // user-supplied ref, used verbatim for display
 	pid        int64
 	refForAPI  string
 	fails      int
-	done       bool
-	abandoned  bool  // dropped from the join after a permanent fetch error (--any)
-	abandonErr error // the permanent error that caused abandonment
+	state      waitTargetState
+	abandonErr error // the permanent error that moved this ref to targetAbandoned
 	result     waitResult
 }
 
@@ -151,6 +171,28 @@ type waitOptions struct {
 	pollInterval time.Duration
 	anyMode      bool
 	allMode      bool
+}
+
+// waitRun is the immutable per-invocation plan: what each ref is waiting for,
+// how the refs join, and the single deadline every elapsed check reads.
+type waitRun struct {
+	mode     waitMode
+	join     waitJoin
+	start    time.Time
+	deadline time.Time // zero = wait forever (--timeout 0)
+	poll     time.Duration
+}
+
+// expired reports whether the wait's own --timeout deadline has passed.
+//
+// This is deliberately a wall-clock comparison and must never be conflated
+// with ctx.Err(): the wait's context is derived from the caller's, so a parent
+// context deadline also surfaces as context.DeadlineExceeded here. Attributing
+// that to --timeout would report a caller's budget exhaustion as a wait
+// timeout (exit 8, timed_out=true) instead of the real error. Callers that
+// need both conditions test ctx.Err() and expired() together.
+func (r waitRun) expired() bool {
+	return !r.deadline.IsZero() && !time.Now().Before(r.deadline)
 }
 
 func newWaitCmd() *cobra.Command {
@@ -240,18 +282,29 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 			ExitCode: ExitValidation,
 		}
 	}
-	anyMode := opts.anyMode // --all is the default when neither is set
+	// --all is the default when neither flag is set, and joinAll is the zero
+	// value, so only --any needs an explicit assignment.
+	join := joinAll
+	if opts.anyMode {
+		join = joinAny
+	}
 
 	originalCtx := cmd.Context()
-	start := time.Now()
+	run := waitRun{
+		mode:  mode,
+		join:  join,
+		start: time.Now(),
+		poll:  opts.pollInterval,
+	}
 	ctx := originalCtx
 	var cancel context.CancelFunc
 	if opts.timeout > 0 {
-		ctx, cancel = context.WithDeadline(originalCtx, start.Add(opts.timeout))
+		run.deadline = run.start.Add(opts.timeout)
+		ctx, cancel = context.WithDeadline(originalCtx, run.deadline)
 		defer cancel()
 		// Ref/project resolution reads cmd.Context(), so temporarily install the
 		// wait deadline before resolving refs. Restore the original context before
-		// returning so tests and future callers do not observe a mutated command.
+		// returning so tests and future callers do not observe a mutated context.
 		cmd.SetContext(ctx)
 		defer cmd.SetContext(originalCtx)
 	}
@@ -268,8 +321,7 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 			// (e.g. a caller's ExecuteContext budget) also surfaces as
 			// DeadlineExceeded on the derived context, and that failure must
 			// return the resolution error, not timed_out=true.
-			if opts.timeout > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) &&
-				!time.Now().Before(start.Add(opts.timeout)) {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) && run.expired() {
 				if err := emitWaitJSON(cmd, waitJSONOutput{
 					Results:  []waitResult{},
 					TimedOut: true,
@@ -290,11 +342,10 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 		return err
 	}
 
-	// Bound every state fetch by the wait deadline so a hung daemon request
-	// cannot block past --timeout. The same deadline also covered ref/project
-	// resolution above, making --timeout a wall-clock cap for the whole command.
-	// Cancellation (Ctrl-C) still flows through the parent context.
-	fetchCtx := ctx
+	// ctx carries both the wait deadline (installed above when --timeout > 0)
+	// and the parent's cancellation (Ctrl-C), so every state GET below is
+	// bounded by --timeout as a wall-clock cap for the whole command. The old
+	// fetchCtx alias was always this same value and is merged away.
 
 	// Initial pass: fail fast only on a permanent (4xx) unresolvable ref
 	// (listing which), and complete refs whose condition already holds at
@@ -305,7 +356,7 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 	var firstFetchErr error
 	var badRefs []string
 	for _, t := range targets {
-		st, msg, ferr := waitFetchState(fetchCtx, client, baseURL, t)
+		st, msg, ferr := waitFetchState(ctx, client, baseURL, t)
 		if ferr != nil {
 			if classifyFetchErr(ferr) {
 				if firstFetchErr == nil {
@@ -317,11 +368,11 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 			}
 			continue
 		}
-		if evalTarget(mode, t, st, msg, start) {
+		if evalTarget(run, t, st, msg) {
 			if rerr := reporter.report(t); rerr != nil {
 				return rerr
 			}
-			if anyMode {
+			if join == joinAny {
 				// --any is satisfied; stop probing the remaining refs. A later
 				// ref whose fetch stalls (no --timeout to bound it) would
 				// otherwise hang the whole command despite the join being met.
@@ -334,7 +385,7 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 	// rather than failing on them. --all is unaffected (any bad ref still
 	// fails fast); in --any, bad refs still fail fast when the join is not
 	// yet satisfied.
-	if len(badRefs) > 0 && (!anyMode || !waitComplete(targets, anyMode)) {
+	if len(badRefs) > 0 && (run.join == joinAll || !waitComplete(targets, run.join)) {
 		if len(badRefs) == 1 {
 			return firstFetchErr // preserve the daemon-derived exit code (e.g. 404)
 		}
@@ -345,11 +396,11 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 		}
 	}
 
-	if err := waitPollLoop(ctx, fetchCtx, client, baseURL, mode, opts, anyMode, start, targets, reporter); err != nil {
+	if err := waitPollLoop(ctx, client, baseURL, run, targets, reporter); err != nil {
 		return err
 	}
 
-	timedOut := !waitComplete(targets, anyMode)
+	timedOut := !waitComplete(targets, run.join)
 
 	if reporter.mode == outputJSON {
 		// pending is documented as timeout-only: on a successful join (notably
@@ -399,43 +450,37 @@ func waitTimeoutError(timeout time.Duration, pending []string) *cliError {
 	}
 }
 
-// waitPollLoop polls the still-pending targets on the configured cadence until
-// the join condition is met, the timeout deadline passes, or the context is
-// cancelled. It returns an error only for a hard failure (context cancellation
-// or a ref that has failed too many consecutive fetches); timeout is signalled
-// to the caller via the targets' completion state, not an error here.
-// ctx carries cancellation (Ctrl-C) for the inter-poll sleep; fetchCtx bounds
-// each state GET by the wait deadline so a hung request cannot outlast --timeout.
+// waitPollLoop polls the still-pending targets on run.poll cadence until the
+// join condition is met, run's deadline passes, or the context is cancelled.
+// It returns an error only for a hard failure (context cancellation or a ref
+// that has failed too many consecutive fetches); timeout is signalled to the
+// caller via the targets' completion state, not an error here.
+//
+// ctx carries both cancellation (Ctrl-C) for the inter-poll sleep and the wait
+// deadline that bounds each state GET, so a hung request cannot outlast
+// --timeout.
 func waitPollLoop(
 	ctx context.Context,
-	fetchCtx context.Context,
 	client *http.Client,
 	baseURL string,
-	mode waitMode,
-	opts waitOptions,
-	anyMode bool,
-	start time.Time,
+	run waitRun,
 	targets []*waitTarget,
 	reporter *waitReporter,
 ) error {
-	var deadline time.Time
-	if opts.timeout > 0 {
-		deadline = start.Add(opts.timeout)
-	}
-	for !waitComplete(targets, anyMode) {
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
+	for !waitComplete(targets, run.join) {
+		if run.expired() {
 			return nil // timed out; caller detects via waitComplete
 		}
-		sleep := opts.pollInterval
-		if !deadline.IsZero() {
-			if rem := time.Until(deadline); rem < sleep {
+		sleep := run.poll
+		if !run.deadline.IsZero() {
+			if rem := time.Until(run.deadline); rem < sleep {
 				sleep = rem
 			}
 		}
 		if sleep > 0 {
 			select {
 			case <-ctx.Done():
-				if !deadline.IsZero() && !time.Now().Before(deadline) {
+				if run.expired() {
 					return nil // timed out during the sleep
 				}
 				return ctx.Err()
@@ -445,32 +490,32 @@ func waitPollLoop(
 		// Re-check the deadline before fetching: the sleep above is clamped to
 		// land on the deadline, so without this a whole extra poll pass would
 		// fire after --timeout had already elapsed.
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
+		if run.expired() {
 			return nil // timed out during the sleep
 		}
 		for _, t := range targets {
-			if t.done || t.abandoned {
+			if t.state != targetPending {
 				continue
 			}
-			st, msg, err := waitFetchState(fetchCtx, client, baseURL, t)
+			st, msg, err := waitFetchState(ctx, client, baseURL, t)
 			if err != nil {
 				// A fetch cut short by the wait deadline is a timeout, not a
 				// fetch failure: bail to the clean timeout result rather than
 				// counting it toward the consecutive-failure budget (which would
 				// otherwise surface ExitInternal after prior transient errors).
-				if !deadline.IsZero() && !time.Now().Before(deadline) {
+				if run.expired() {
 					return nil
 				}
 				if classifyFetchErr(err) {
 					// Permanent daemon error (e.g. a deleted issue's 404).
-					if !anyMode {
+					if run.join == joinAll {
 						// --all: one dead ref can never satisfy the join, so
 						// abort now preserving the daemon's kind/exit code
 						// (a deleted ref surfaces as not-found exit 4).
 						return err
 					}
 					// --any: drop this ref and keep waiting on the rest.
-					t.abandoned = true
+					t.state = targetAbandoned
 					t.abandonErr = err
 					if rerr := reporter.reportAbandoned(t); rerr != nil {
 						return rerr
@@ -492,11 +537,11 @@ func waitPollLoop(
 				continue
 			}
 			t.fails = 0
-			if evalTarget(mode, t, st, msg, start) {
+			if evalTarget(run, t, st, msg) {
 				if rerr := reporter.report(t); rerr != nil {
 					return rerr
 				}
-				if anyMode {
+				if run.join == joinAny {
 					return nil
 				}
 			}
@@ -505,22 +550,22 @@ func waitPollLoop(
 	return nil
 }
 
-// evalTarget evaluates st against mode for a not-yet-done target. When the
+// evalTarget evaluates st against run.mode for a still-pending target. When the
 // condition is newly satisfied it records the result (sanitizing user-visible
 // attention text) and returns true.
-func evalTarget(mode waitMode, t *waitTarget, st issueState, msg string, start time.Time) bool {
-	if t.done {
+func evalTarget(run waitRun, t *waitTarget, st issueState, msg string) bool {
+	if t.state != targetPending {
 		return false
 	}
-	satisfied, reason := evalWait(mode, st)
+	satisfied, reason := evalWait(run.mode, st)
 	if !satisfied {
 		return false
 	}
-	t.done = true
+	t.state = targetSatisfied
 	t.result = waitResult{
 		Ref:      t.arg,
 		Reason:   reason,
-		WaitedMs: time.Since(start).Milliseconds(),
+		WaitedMs: time.Since(run.start).Milliseconds(),
 	}
 	if reason == "attention" {
 		t.result.Attention = textsafe.Line(st.attention)
@@ -587,23 +632,23 @@ func decodeJSONString(raw json.RawMessage) string {
 
 // waitComplete reports whether the join condition is met: every target for
 // --all, at least one for --any.
-func waitComplete(targets []*waitTarget, anyMode bool) bool {
-	done := 0
+func waitComplete(targets []*waitTarget, join waitJoin) bool {
+	satisfied := 0
 	for _, t := range targets {
-		if t.done {
-			done++
+		if t.state == targetSatisfied {
+			satisfied++
 		}
 	}
-	if anyMode {
-		return done > 0
+	if join == joinAny {
+		return satisfied > 0
 	}
-	return done == len(targets)
+	return satisfied == len(targets)
 }
 
 func collectResults(targets []*waitTarget) []waitResult {
 	out := make([]waitResult, 0, len(targets))
 	for _, t := range targets {
-		if t.done {
+		if t.state == targetSatisfied {
 			out = append(out, t.result)
 		}
 	}
@@ -613,7 +658,7 @@ func collectResults(targets []*waitTarget) []waitResult {
 func pendingRefs(targets []*waitTarget) []string {
 	out := make([]string, 0)
 	for _, t := range targets {
-		if !t.done && !t.abandoned {
+		if t.state == targetPending {
 			out = append(out, t.arg)
 		}
 	}
@@ -624,7 +669,7 @@ func pendingRefs(targets []*waitTarget) []string {
 func collectAbandoned(targets []*waitTarget) []waitAbandoned {
 	var out []waitAbandoned
 	for _, t := range targets {
-		if !t.abandoned {
+		if t.state != targetAbandoned {
 			continue
 		}
 		msg := ""
@@ -640,12 +685,12 @@ func collectAbandoned(targets []*waitTarget) []waitAbandoned {
 	return out
 }
 
-// allAbandoned reports whether every target was abandoned (none completed the
+// allAbandoned reports whether every target was abandoned (none satisfied the
 // join, none still pending). In --any this means the wait can never fire, so
 // the caller surfaces the first permanent error rather than spinning.
 func allAbandoned(targets []*waitTarget) bool {
 	for _, t := range targets {
-		if !t.abandoned {
+		if t.state != targetAbandoned {
 			return false
 		}
 	}
@@ -656,7 +701,7 @@ func allAbandoned(targets []*waitTarget) bool {
 // preserving its daemon-derived kind/exit code.
 func firstAbandonErr(targets []*waitTarget) error {
 	for _, t := range targets {
-		if t.abandoned && t.abandonErr != nil {
+		if t.state == targetAbandoned && t.abandonErr != nil {
 			return t.abandonErr
 		}
 	}

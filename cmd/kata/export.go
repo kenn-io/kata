@@ -64,7 +64,7 @@ func newExportCmd() *cobra.Command {
 			}); err != nil {
 				return err
 			}
-			if flags.Quiet || flags.JSON {
+			if flags.Quiet || currentOutputMode() == outputJSON {
 				return nil
 			}
 			switch currentOutputMode() {

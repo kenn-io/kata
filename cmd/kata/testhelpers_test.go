@@ -398,7 +398,7 @@ func runCLIWithErr(t *testing.T, env *testenv.Env, dir string, args ...string) (
 	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
 	err = cmd.Execute()
 	if err != nil {
-		emitError(&se, err, false, true)
+		emitErrorForMode(&se, err, outputHuman, true)
 	}
 	return so.String(), se.String(), err
 }

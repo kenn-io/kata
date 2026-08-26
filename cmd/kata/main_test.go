@@ -91,10 +91,8 @@ func assertNoFederationStorageInternals(t *testing.T, out string, msgAndArgs ...
 
 func TestNewRootCmdResetsGlobalFlagState(t *testing.T) {
 	resetFlags(t)
-	flags.Format = "json"
-	flags.FormatValues = []string{"json"}
-	flags.JSON = true
-	flags.Agent = true
+	flags.Sel = outputSelection{formats: []string{"json"}, json: true, agent: true}
+	flags.Mode = outputJSON
 	flags.Workspace = "/tmp/leaked"
 	flags.Daemon = "shared"
 
@@ -105,9 +103,9 @@ func TestNewRootCmdResetsGlobalFlagState(t *testing.T) {
 	cmd.SetArgs([]string{"version"})
 
 	require.NoError(t, cmd.Execute())
-	assert.False(t, flags.JSON)
-	assert.False(t, flags.Agent)
-	assert.Empty(t, flags.FormatValues)
+	assert.Equal(t, outputSelection{}, flags.Sel)
+	assert.Equal(t, outputHuman, flags.Mode,
+		"a run with no output flags resolves to human, not the leaked mode")
 	assert.Empty(t, flags.Workspace)
 	assert.Empty(t, flags.Daemon)
 }
@@ -259,7 +257,7 @@ func TestEmitError_JSONMode_ProducesParseableEnvelope(t *testing.T) {
 		ExitCode: ExitNotFound,
 	}
 	var buf bytes.Buffer
-	emitError(&buf, cli, true, true)
+	emitErrorForMode(&buf, cli, outputJSON, true)
 	got := parseErrorEnvelope(t, buf.Bytes())
 	assert.Equal(t, "not_found", got.Error.Kind)
 	assert.Equal(t, "issue_not_found", got.Error.Code)
@@ -276,7 +274,7 @@ func TestEmitError_HumanMode_StillPrintsKataPrefix(t *testing.T) {
 		ExitCode: ExitValidation,
 	}
 	var buf bytes.Buffer
-	emitError(&buf, cli, false, true)
+	emitErrorForMode(&buf, cli, outputHuman, true)
 	assert.Contains(t, buf.String(), "kata: title must not be empty")
 }
 
@@ -403,6 +401,31 @@ func TestOutputMode_ContractConflictsWithAgentAndJSON(t *testing.T) {
 	}
 }
 
+func TestEmitError_QuickstartContractConflictUsesAgentFallback(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	stdout, stderr, err := executeRootCapture(t, context.Background(),
+		"quickstart", "--agent", "--format", "contract")
+	require.Error(t, err)
+	assert.Empty(t, stdout)
+	assert.Truef(t, strings.HasPrefix(stderr, "ERR quickstart usage:"),
+		"contract conflict should retain agent error output, got %q", stderr)
+	assert.Contains(t, stderr, "conflicting output modes")
+}
+
+func TestEmitError_QuickstartContractConflictUsesJSONFallback(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	stdout, stderr, err := executeRootCapture(t, context.Background(),
+		"quickstart", "--format", "contract", "--format", "json")
+	require.Error(t, err)
+	assert.Empty(t, stdout)
+	got := parseErrorEnvelope(t, []byte(stderr))
+	assert.Equal(t, "usage", got.Error.Kind)
+	assert.Equal(t, "conflicting output modes", got.Error.Message)
+	assert.Equal(t, ExitUsage, got.Error.ExitCode)
+}
+
 func TestEmitError_RawModeScanParsesJSONTrueValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
@@ -493,6 +516,20 @@ func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
 		"stderr should start with agent usage error for show, got %q", stderr)
 }
 
+// TestEmitError_AgentMode_FlagParseErrorUsesLeafCommand covers the only
+// consumer of the error path's fallback mode: cobra rejects the flags before
+// PersistentPreRunE resolves an output mode, so the ERR line's mode has to be
+// recovered from argv. Without that, an --agent caller gets a human-shaped
+// error it cannot parse.
+func TestEmitError_AgentMode_FlagParseErrorUsesLeafCommand(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "show", "--nonexistent-flag")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "ERR show usage:"),
+		"a flag-parse failure under --agent must still emit the agent ERR shape, got %q", stderr)
+}
+
 // TestEmitError_NonCliError_SynthesizesEnvelope confirms a plain
 // error (e.g. a network failure that escaped the cliError wrap)
 // still gets a uniform JSON envelope when --json is set, with the
@@ -500,7 +537,7 @@ func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
 func TestEmitError_NonCliError_SynthesizesEnvelope(t *testing.T) {
 	plain := errors.New("connection refused")
 	var buf bytes.Buffer
-	emitError(&buf, plain, true, true) // runEReached=true → ExitInternal/internal
+	emitErrorForMode(&buf, plain, outputJSON, true) // runEReached=true → ExitInternal/internal
 	got := parseErrorEnvelope(t, buf.Bytes())
 	assert.Equal(t, "internal", got.Error.Kind)
 	assert.Equal(t, "connection refused", got.Error.Message)

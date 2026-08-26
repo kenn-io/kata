@@ -80,13 +80,19 @@ func resolveImportSourceFormat(cmd *cobra.Command, sourceFormat string) (string,
 }
 
 func legacyImportSourceFormat() string {
-	for _, format := range flags.FormatValues {
+	for _, format := range flags.Sel.formats {
 		format = strings.TrimSpace(format)
 		if isImportLegacySourceFormat(format) {
 			return format
 		}
 	}
-	return strings.TrimSpace(flags.Format)
+	// No legacy value: fall back to the last --format occurrence, which is what
+	// the removed singular format field held. The caller only acts on a legacy
+	// value, so a non-legacy string here is inert.
+	if n := len(flags.Sel.formats); n > 0 {
+		return strings.TrimSpace(flags.Sel.formats[n-1])
+	}
+	return ""
 }
 
 func validateBeadsImportFlags(cmd *cobra.Command) error {
@@ -322,7 +328,7 @@ func removeFreshPostgresTargetAfterFailure(
 }
 
 func writeImportSuccess(cmd *cobra.Command, target string) error {
-	if flags.Quiet || flags.JSON {
+	if flags.Quiet || currentOutputMode() == outputJSON {
 		return nil
 	}
 	var err error

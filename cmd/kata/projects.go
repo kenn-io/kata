@@ -72,7 +72,7 @@ func projectsCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if flags.JSON {
+			if currentOutputMode() == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err

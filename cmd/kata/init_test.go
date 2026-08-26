@@ -25,7 +25,7 @@ func TestInit_FreshGitRepoBindsViaRemote(t *testing.T) {
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 
 	resetFlags(t)
-	flags.JSON = true
+	flags.Mode = outputJSON
 
 	ctx := context.Background()
 	out, err := callInit(ctx, env.URL, dir, callInitOpts{})
@@ -41,8 +41,8 @@ func TestInit_AddsLocalToGitignoreWhenAbsent(t *testing.T) {
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
 	require.NoError(t, err)
@@ -61,8 +61,8 @@ func TestInit_GitignoreIsIdempotent(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), //nolint:gosec // test fixture mirrors production .gitignore mode
 		[]byte("node_modules/\n.kata.local.toml\n"), 0o644))
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
 	require.NoError(t, err)
@@ -88,8 +88,8 @@ func TestInit_GitignoreLandsAtWorkspaceRoot(t *testing.T) {
 	sub := filepath.Join(root, "internal", "tui")
 	require.NoError(t, os.MkdirAll(sub, 0o755)) //nolint:gosec // test fixture under TempDir
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, sub, callInitOpts{})
 	require.NoError(t, err)
@@ -166,8 +166,8 @@ func TestInit_RemoteClient_SendsNameNotPath(t *testing.T) {
 
 	daemonStub := newFakeDaemon(t)
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
 	require.NoError(t, err)
@@ -192,8 +192,8 @@ func TestInit_RemoteClient_WritesGitignore(t *testing.T) {
 
 	daemonStub := newFakeDaemon(t)
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
 	require.NoError(t, err)
@@ -216,8 +216,8 @@ func TestInit_RemoteClient_FromSubdir(t *testing.T) {
 
 	daemonStub := newFakeDaemon(t)
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), daemonStub.srv.URL, sub, callInitOpts{})
 	require.NoError(t, err)
@@ -248,8 +248,8 @@ name     = "kata"
 
 	daemonStub := newFakeDaemon(t)
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), daemonStub.srv.URL, dir,
 		callInitOpts{Project: "other"})
@@ -275,8 +275,8 @@ func TestInit_RemoteClient_SendsAliasInfo(t *testing.T) {
 
 	daemonStub := newFakeDaemon(t)
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
 	require.NoError(t, err)
@@ -298,8 +298,8 @@ func TestInit_GitignoreAppendsToExisting(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), //nolint:gosec // test fixture mirrors production .gitignore mode
 		[]byte("dist/\n"), 0o644))
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
 	require.NoError(t, err)
@@ -312,7 +312,7 @@ func TestInit_GitignoreAppendsToExisting(t *testing.T) {
 
 func TestInit_AgentOutputReportsProjectWorkspaceAndChanged(t *testing.T) {
 	resetFlags(t)
-	flags.Agent = true
+	flags.Mode = outputAgent
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
@@ -326,7 +326,7 @@ func TestInit_AgentOutputReportsProjectWorkspaceAndChanged(t *testing.T) {
 
 func TestInit_AgentOutputChangedWhenExistingProjectBindsFreshWorkspace(t *testing.T) {
 	resetFlags(t)
-	flags.Agent = true
+	flags.Mode = outputAgent
 	env := testenv.New(t)
 	_, err := env.DB.CreateProject(context.Background(), "kata")
 	require.NoError(t, err)
@@ -357,7 +357,7 @@ func TestInit_HumanOutputKeepsProjectCreatedSemanticsForFreshWorkspace(t *testin
 
 func TestInit_AgentOutputChangedWhenOnlyGitignoreUpdated(t *testing.T) {
 	resetFlags(t)
-	flags.Agent = true
+	flags.Mode = outputAgent
 	env := testenv.New(t)
 	_, err := env.DB.CreateProject(context.Background(), "kata")
 	require.NoError(t, err)
@@ -380,7 +380,7 @@ name     = "kata"
 
 func TestInit_AgentOutputQuotesProjectName(t *testing.T) {
 	resetFlags(t)
-	flags.Agent = true
+	flags.Mode = outputAgent
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
@@ -401,14 +401,14 @@ func TestInit_MachineOutputSuppressesGitignoreWarning(t *testing.T) {
 		{
 			name: "agent",
 			configure: func() {
-				flags.Agent = true
+				flags.Mode = outputAgent
 			},
 			wantOut: "OK init project=kata workspace=",
 		},
 		{
 			name: "json",
 			configure: func() {
-				flags.JSON = true
+				flags.Mode = outputJSON
 			},
 			wantOut: `"kata_api_version":1`,
 		},
@@ -442,8 +442,8 @@ func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) {
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
@@ -461,8 +461,8 @@ func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) {
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
 	require.NoError(t, err)
@@ -476,8 +476,8 @@ func TestInit_WithAgents_Idempotent(t *testing.T) {
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
@@ -499,8 +499,8 @@ func TestInit_WithAgents_AppendsToExistingFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), //nolint:gosec // test fixture under TempDir
 		[]byte("# House rules\n\nRun the linter before committing.\n"), 0o644))
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
@@ -520,8 +520,8 @@ func TestInit_WithAgents_AppendsToExistingClaudeFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "CLAUDE.md"), //nolint:gosec // test fixture under TempDir
 		[]byte("# Claude rules\n\nUse the project test helper.\n"), 0o644))
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
@@ -543,8 +543,8 @@ func TestInit_WithAgents_AppendsToBothAgentFilesWhenBothExist(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "CLAUDE.md"), //nolint:gosec // test fixture under TempDir
 		[]byte("# Claude rules\n\nUse the project test helper.\n"), 0o644))
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
@@ -568,8 +568,8 @@ func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), //nolint:gosec // test fixture under TempDir
 		[]byte("# House rules\n\n"+stale), 0o644))
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
@@ -591,8 +591,8 @@ func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
@@ -612,8 +612,8 @@ func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testin
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/example/example-project.git")
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
@@ -658,8 +658,8 @@ func TestInit_WithAgents_RefreshesPreWorkConventionsBlock(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), //nolint:gosec // test fixture under TempDir
 		[]byte(fixture), 0o644))
 
-	flags.JSON = true
-	t.Cleanup(func() { flags.JSON = false })
+	flags.Mode = outputJSON
+	t.Cleanup(func() { flags.Mode = "" })
 
 	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
