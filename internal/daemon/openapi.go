@@ -16,7 +16,7 @@ import (
 // (info.version). It tracks the HTTP API contract, not the build version, so
 // the committed schema artifact stays stable across builds and is bumped
 // deliberately when the wire contract changes.
-const APISchemaVersion = "0.12.0"
+const APISchemaVersion = "0.13.0"
 
 // OpenAPIDocument builds the daemon's complete OpenAPI model by wiring every
 // route through NewServer with a zero ServerConfig. It binds no listener and
@@ -46,9 +46,41 @@ func openAPIClientDocument() *huma.OpenAPI {
 
 func baseOpenAPIDocument() *huma.OpenAPI {
 	doc := NewServer(ServerConfig{}).API().OpenAPI()
+	applyMetadataPatchGuardSchema(doc)
 	applyJSONBlobSchemaOverrides(doc)
 	applyArrayQueryParamEncoding(doc)
 	return doc
+}
+
+func applyMetadataPatchGuardSchema(doc *huma.OpenAPI) {
+	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
+		return
+	}
+	guard := doc.Components.Schemas.Map()["MetadataPatchGuard"]
+	if guard == nil {
+		return
+	}
+	variant := func(condition string, conditionSchema *huma.Schema) *huma.Schema {
+		return &huma.Schema{
+			Type:                 huma.TypeObject,
+			AdditionalProperties: false,
+			Properties: map[string]*huma.Schema{
+				"key":     {Type: huma.TypeString},
+				condition: conditionSchema,
+			},
+			Required: []string{"key", condition},
+		}
+	}
+	*guard = huma.Schema{OneOf: []*huma.Schema{
+		variant("if_value", &huma.Schema{
+			Type:        huma.TypeString,
+			Description: "Expected metadata value encoded as JSON text",
+		}),
+		variant("if_absent", &huma.Schema{Type: huma.TypeBoolean, Enum: []any{true}}),
+	}}
+	guard.OneOf[0].PrecomputeMessages()
+	guard.OneOf[1].PrecomputeMessages()
+	guard.PrecomputeMessages()
 }
 
 // OpenAPIYAML renders the OpenAPI document (OpenAPI 3.1) as YAML.

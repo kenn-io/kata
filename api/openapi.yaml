@@ -2783,6 +2783,31 @@ components:
         - pre_merge_short_id
         - post_merge_short_id
       type: object
+    MetadataPatchGuard:
+      oneOf:
+        - additionalProperties: false
+          properties:
+            if_value:
+              description: Expected metadata value encoded as JSON text
+              type: string
+            key:
+              type: string
+          required:
+            - key
+            - if_value
+          type: object
+        - additionalProperties: false
+          properties:
+            if_absent:
+              enum:
+                - true
+              type: boolean
+            key:
+              type: string
+          required:
+            - key
+            - if_absent
+          type: object
     MoveIssueRequestBody:
       additionalProperties: false
       properties:
@@ -2834,6 +2859,8 @@ components:
       properties:
         actor:
           type: string
+        guard:
+          $ref: "#/components/schemas/MetadataPatchGuard"
         patch:
           additionalProperties: true
           type: object
@@ -4562,7 +4589,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.12.0
+  version: 0.13.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

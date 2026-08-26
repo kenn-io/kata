@@ -44,6 +44,70 @@ func TestPatchIssueMetadata_StaleRevisionReturns409(t *testing.T) {
 	assert.Equal(t, iss.Revision, conflict.CurrentRevision)
 }
 
+func TestPatchIssueMetadata_ValueGuardRejectsStaleValueWithoutMutation(t *testing.T) {
+	d, ctx, _, iss := setupTestIssue(t)
+
+	seed, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: iss.ID,
+		Actor:   "tester",
+		Patch: map[string]json.RawMessage{
+			"deck.rank": json.RawMessage(`"current"`),
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: iss.ID,
+		Actor:   "tester",
+		Patch: map[string]json.RawMessage{
+			"deck.rank": json.RawMessage(`"replacement"`),
+		},
+		Guard: &db.MetadataPatchGuard{
+			Key:     "deck.rank",
+			IfValue: json.RawMessage(`"stale"`),
+		},
+	})
+	var conflict *db.MetadataGuardConflictError
+	require.ErrorAs(t, err, &conflict)
+	assert.Equal(t, "deck.rank", conflict.Key)
+
+	stored, err := d.IssueByID(ctx, iss.ID)
+	require.NoError(t, err)
+	assert.Equal(t, seed.NewRevision, stored.Revision)
+	assert.JSONEq(t, `{"deck.rank":"current"}`, string(stored.Metadata))
+}
+
+func TestPatchIssueMetadata_AbsentGuardIsCheckedInsideMutation(t *testing.T) {
+	d, ctx, _, iss := setupTestIssue(t)
+
+	first, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: iss.ID,
+		Actor:   "tester",
+		Patch: map[string]json.RawMessage{
+			"deck.rank": json.RawMessage(`"first"`),
+		},
+		Guard: &db.MetadataPatchGuard{Key: "deck.rank", IfAbsent: true},
+	})
+	require.NoError(t, err)
+	assert.True(t, first.Changed)
+
+	_, err = d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: iss.ID,
+		Actor:   "tester",
+		Patch: map[string]json.RawMessage{
+			"deck.rank": json.RawMessage(`"second"`),
+		},
+		Guard: &db.MetadataPatchGuard{Key: "deck.rank", IfAbsent: true},
+	})
+	var conflict *db.MetadataGuardConflictError
+	require.ErrorAs(t, err, &conflict)
+
+	stored, err := d.IssueByID(ctx, iss.ID)
+	require.NoError(t, err)
+	assert.Equal(t, first.NewRevision, stored.Revision)
+	assert.JSONEq(t, `{"deck.rank":"first"}`, string(stored.Metadata))
+}
+
 func TestPatchIssueMetadata_EmptyDiffNoEvent(t *testing.T) {
 	d, ctx, _, iss := setupTestIssue(t)
 

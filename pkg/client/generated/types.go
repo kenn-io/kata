@@ -2557,6 +2557,36 @@ func (m MergeShortIDExtension) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(m))
 }
 
+type MetadataPatchGuard struct {
+	MetadataPatchGuard_OneOf *MetadataPatchGuard_OneOf `json:"-"`
+}
+
+func (m MetadataPatchGuard) Validate() error {
+	if m.MetadataPatchGuard_OneOf == nil {
+		return runtime.NewValidationErrorsFromString("MetadataPatchGuard_OneOf", "must select exactly one guard condition")
+	}
+	return m.MetadataPatchGuard_OneOf.Validate()
+}
+
+func (m MetadataPatchGuard) MarshalJSON() ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(m.MetadataPatchGuard_OneOf)
+}
+
+func (m *MetadataPatchGuard) UnmarshalJSON(data []byte) error {
+	union := &MetadataPatchGuard_OneOf{}
+	if err := json.Unmarshal(data, union); err != nil {
+		return err
+	}
+	if err := union.Validate(); err != nil {
+		return err
+	}
+	m.MetadataPatchGuard_OneOf = union
+	return nil
+}
+
 type MoveIssueRequestBody struct {
 	Actor        *string `json:"actor,omitempty"`
 	ToProjectUID string  `json:"to_project_uid" validate:"required"`
@@ -2623,8 +2653,24 @@ func (m MutationResponseBody) Validate() error {
 }
 
 type PatchIssueMetadataRequestBody struct {
-	Actor *string        `json:"actor,omitempty"`
-	Patch map[string]any `json:"patch"`
+	Actor *string             `json:"actor,omitempty"`
+	Guard *MetadataPatchGuard `json:"guard,omitempty"`
+	Patch map[string]any      `json:"patch"`
+}
+
+func (p PatchIssueMetadataRequestBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if p.Guard != nil {
+		if v, ok := any(p.Guard).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Guard", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type PatchIssueMetadataResponseBody struct {

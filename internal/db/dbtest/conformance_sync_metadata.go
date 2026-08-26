@@ -3,6 +3,7 @@ package dbtest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -517,6 +518,105 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	}
 	assert.Equal(t, 2, metadataEvents)
 	assert.Zero(t, rolledBackEvents)
+
+	guarded, err := createFixtureIssue(ctx, store, fixture.Project.ID, "guarded metadata", "author", nil)
+	if err != nil {
+		return err
+	}
+	guardedSet, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: guarded.ID,
+		Actor:   "metadata-editor",
+		Patch: map[string]json.RawMessage{
+			"custom": json.RawMessage(`{"enabled":true,"rank":1}`),
+		},
+		Guard: &db.MetadataPatchGuard{Key: "custom", IfAbsent: true},
+	})
+	if err != nil {
+		return fmt.Errorf("set guarded absent metadata: %w", err)
+	}
+	guardedUpdate, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: guarded.ID,
+		Actor:   "metadata-editor",
+		Patch: map[string]json.RawMessage{
+			"custom": json.RawMessage(`{"enabled":false,"rank":2}`),
+		},
+		Guard: &db.MetadataPatchGuard{
+			Key:     "custom",
+			IfValue: json.RawMessage(`{ "rank": 1, "enabled": true }`),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("replace guarded metadata: %w", err)
+	}
+	assert.Equal(t, guardedSet.NewRevision+1, guardedUpdate.NewRevision)
+
+	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: guarded.ID,
+		Actor:   "metadata-editor",
+		Patch: map[string]json.RawMessage{
+			"custom": json.RawMessage(`{"enabled":true,"rank":3}`),
+		},
+		Guard: &db.MetadataPatchGuard{
+			Key:     "custom",
+			IfValue: json.RawMessage(`{"enabled":true,"rank":1}`),
+		},
+	})
+	var metadataGuardConflict *db.MetadataGuardConflictError
+	assert.ErrorAs(t, err, &metadataGuardConflict)
+	guardedAfterConflict, err := store.IssueByID(ctx, guarded.ID)
+	if err != nil {
+		return fmt.Errorf("load issue after metadata guard conflict: %w", err)
+	}
+	assert.Equal(t, guardedUpdate.NewRevision, guardedAfterConflict.Revision)
+	assert.JSONEq(t, `{"custom":{"enabled":false,"rank":2}}`, string(guardedAfterConflict.Metadata))
+
+	racing, err := createFixtureIssue(ctx, store, fixture.Project.ID, "metadata race", "author", nil)
+	if err != nil {
+		return err
+	}
+	type metadataRaceResult struct {
+		out db.PatchIssueMetadataOut
+		err error
+	}
+	startGuardRace := make(chan struct{})
+	guardRaceResults := make(chan metadataRaceResult, 2)
+	for _, rank := range []string{"first", "second"} {
+		go func() {
+			<-startGuardRace
+			out, patchErr := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+				IssueID: racing.ID,
+				Actor:   "metadata-editor",
+				Patch: map[string]json.RawMessage{
+					"deck.rank": json.RawMessage(fmt.Sprintf("%q", rank)),
+				},
+				Guard: &db.MetadataPatchGuard{Key: "deck.rank", IfAbsent: true},
+			})
+			guardRaceResults <- metadataRaceResult{out: out, err: patchErr}
+		}()
+	}
+	close(startGuardRace)
+	guardSuccesses := 0
+	guardConflicts := 0
+	for range 2 {
+		result := <-guardRaceResults
+		switch {
+		case result.err == nil:
+			guardSuccesses++
+			assert.True(t, result.out.Changed)
+		case errors.As(result.err, new(*db.MetadataGuardConflictError)):
+			guardConflicts++
+		default:
+			return fmt.Errorf("race guarded metadata patch: %w", result.err)
+		}
+	}
+	assert.Equal(t, 1, guardSuccesses)
+	assert.Equal(t, 1, guardConflicts)
+	racingAfterRace, err := store.IssueByID(ctx, racing.ID)
+	if err != nil {
+		return fmt.Errorf("load issue after metadata guard race: %w", err)
+	}
+	assert.Equal(t, racing.Revision+1, racingAfterRace.Revision)
+	assert.Contains(t, []string{`{"deck.rank":"first"}`, `{"deck.rank":"second"}`}, string(racingAfterRace.Metadata))
 	return nil
 }
 

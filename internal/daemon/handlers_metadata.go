@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -62,11 +63,16 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, iss, actor); err != nil {
 			return nil, err
 		}
+		guard, err := parseMetadataPatchGuard(in.Body.Patch, in.Body.Guard)
+		if err != nil {
+			return nil, err
+		}
 		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID:    iss.ID,
 			IfMatchRev: rev,
 			Actor:      actor,
 			Patch:      in.Body.Patch,
+			Guard:      guard,
 		})
 		if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 			return nil, api.NewError(412, "revision_conflict",
@@ -74,6 +80,9 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		}
 		if errors.Is(err, metadata.ErrInvalidValue) {
 			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
+		}
+		if conflict, ok := errors.AsType[*db.MetadataGuardConflictError](err); ok {
+			return nil, api.NewError(409, "metadata_guard_failed", conflict.Error(), "", nil)
 		}
 		if errors.Is(err, db.ErrFederatedReadOnly) {
 			return nil, federationReadOnlyError(err)
@@ -97,6 +106,42 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		}
 		return out, nil
 	}
+}
+
+func parseMetadataPatchGuard(
+	patch map[string]json.RawMessage,
+	guard *api.MetadataPatchGuard,
+) (*db.MetadataPatchGuard, error) {
+	if guard == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(guard.Key) == "" {
+		return nil, api.NewError(400, "invalid_metadata_guard", "metadata guard key must not be empty", "", nil)
+	}
+	if _, ok := patch[guard.Key]; !ok {
+		return nil, api.NewError(400, "invalid_metadata_guard", "metadata guard key must be present in patch", "", nil)
+	}
+	hasValue := guard.IfValue != nil
+	hasAbsent := guard.IfAbsent != nil
+	if hasValue == hasAbsent {
+		return nil, api.NewError(400, "invalid_metadata_guard", "metadata guard requires exactly one of if_value or if_absent", "", nil)
+	}
+	if hasAbsent && !*guard.IfAbsent {
+		return nil, api.NewError(400, "invalid_metadata_guard", "metadata guard if_absent must be true", "", nil)
+	}
+	var ifValue json.RawMessage
+	if hasValue {
+		ifValue = json.RawMessage(*guard.IfValue)
+		if !json.Valid(ifValue) {
+			return nil, api.NewError(400, "invalid_metadata_guard", "metadata guard if_value must be valid JSON text", "", nil)
+		}
+	}
+	if strings.TrimSpace(string(ifValue)) == "null" {
+		return nil, api.NewError(400, "invalid_metadata_guard", "metadata guard if_value must not be null", "", nil)
+	}
+	return &db.MetadataPatchGuard{
+		Key: guard.Key, IfValue: ifValue, IfAbsent: hasAbsent,
+	}, nil
 }
 
 func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.PatchProjectMetadataRequest) (*api.PatchProjectMetadataResponse, error) {

@@ -157,6 +157,22 @@ func (i ImportLinkInputType) Validate() error {
 	}
 }
 
+type MetadataPatchGuardOneOf1IfAbsent bool
+
+const (
+	True MetadataPatchGuardOneOf1IfAbsent = true
+)
+
+// Validate checks if the MetadataPatchGuardOneOf1IfAbsent value is valid
+func (m MetadataPatchGuardOneOf1IfAbsent) Validate() error {
+	switch m {
+	case True:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid MetadataPatchGuardOneOf1IfAbsent value, got: %v", m))
+	}
+}
+
 type ReachableGraphEdgeKind string
 
 const (

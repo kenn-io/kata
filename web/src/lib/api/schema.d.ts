@@ -2717,6 +2717,17 @@ export interface components {
     } & {
       [key: string]: unknown
     }
+    MetadataPatchGuard:
+      | {
+          /** @description Expected metadata value encoded as JSON text */
+          if_value: string
+          key: string
+        }
+      | {
+          /** @enum {boolean} */
+          if_absent: true
+          key: string
+        }
     MoveIssueRequestBody: {
       actor?: string
       to_project_uid: string
@@ -2741,6 +2752,7 @@ export interface components {
     }
     PatchIssueMetadataRequestBody: {
       actor?: string
+      guard?: components['schemas']['MetadataPatchGuard']
       patch: {
         [key: string]: unknown
       }

@@ -1,0 +1,338 @@
+{{/*
+Copyright 2025 DoorDash, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+{{ $config := .Config }}
+{{ $typeSchemaMap := .TypeSchemaMap }}
+
+{{range .Types}}
+{{$typeName := .Name -}}
+{{ $alias := $typeName | fst | lower }}
+
+{{/* Handle types with union elements */}}
+{{ if .Schema.UnionElements }}
+    {{ template "typeDef" (dict "type" . "config" $config "specLocation" "union" "alias" $alias) }}
+
+    {{$discriminator := .Schema.Discriminator}}
+    {{$properties := .Schema.Properties -}}
+
+    {{ $eitherType := eq (len .Schema.UnionElements) 2}}
+    {{ $conditionalType := .Schema.IsConditional }}
+
+    {{/* Add Validate method for union types */}}
+    func ({{$alias}} *{{$typeName}}) Validate() error {
+        {{- if and $eitherType $conditionalType }}
+        {{- $elementThen := index .Schema.UnionElements 0 }}
+        {{- $elementElse := index .Schema.UnionElements 1 }}
+        {{- $tagsThen := filterOmitEmpty $elementThen.Schema.Constraints.ValidationTags }}
+        {{- $tagsElse := filterOmitEmpty $elementElse.Schema.Constraints.ValidationTags }}
+        if {{$alias}}.IsThen() {
+            {{- if gt (len $tagsThen) 0 }}
+            if err := typesValidator.Var({{$alias}}.Then, "{{join "," $tagsThen}}"); err != nil {
+                return err
+            }
+            {{- else }}
+            if v, ok := any({{$alias}}.Then).(runtime.Validator); ok {
+                return v.Validate()
+            }
+            {{- end }}
+        }
+        if {{$alias}}.IsElse() {
+            {{- if gt (len $tagsElse) 0 }}
+            if err := typesValidator.Var({{$alias}}.Else, "{{join "," $tagsElse}}"); err != nil {
+                return err
+            }
+            {{- else }}
+            if v, ok := any({{$alias}}.Else).(runtime.Validator); ok {
+                return v.Validate()
+            }
+            {{- end }}
+        }
+        if !{{$alias}}.IsThen() && !{{$alias}}.IsElse() {
+            return runtime.NewValidationErrorsFromString("oneOf", "must select exactly one alternative")
+        }
+        return nil
+        {{- else if $eitherType }}
+        {{- $elementA := index .Schema.UnionElements 0 }}
+        {{- $elementB := index .Schema.UnionElements 1 }}
+        {{- $tagsA := filterOmitEmpty $elementA.Schema.Constraints.ValidationTags }}
+        {{- $tagsB := filterOmitEmpty $elementB.Schema.Constraints.ValidationTags }}
+        if {{$alias}}.IsA() {
+            {{- if gt (len $tagsA) 0 }}
+            if err := typesValidator.Var({{$alias}}.A, "{{join "," $tagsA}}"); err != nil {
+                return err
+            }
+            {{- else }}
+            if v, ok := any({{$alias}}.A).(runtime.Validator); ok {
+                return v.Validate()
+            }
+            {{- end }}
+        }
+        if {{$alias}}.IsB() {
+            {{- if gt (len $tagsB) 0 }}
+            if err := typesValidator.Var({{$alias}}.B, "{{join "," $tagsB}}"); err != nil {
+                return err
+            }
+            {{- else }}
+            if v, ok := any({{$alias}}.B).(runtime.Validator); ok {
+                return v.Validate()
+            }
+            {{- end }}
+        }
+        if !{{$alias}}.IsA() && !{{$alias}}.IsB() {
+            return runtime.NewValidationErrorsFromString("oneOf", "must select exactly one alternative")
+        }
+        return nil
+        {{- else }}
+        // NOTE: Validation is not supported for unions with more than 2 elements.
+        // Validating would require unmarshaling against each possible type, which is inefficient.
+        // Use AsValidated<Type>() methods to validate after retrieving the specific type.
+        return nil
+        {{- end }}
+    }
+
+    {{ if not $eitherType }}
+    // Raw returns the union data inside the {{$typeName}} as bytes
+    func ({{$alias}} *{{$typeName}}) Raw() json.RawMessage {
+        return {{$alias}}.union
+    }
+
+    {{/* Generate exported As/AsValidated/From methods for each union element */}}
+    {{range .Schema.UnionElements}}
+        {{$element := . -}}
+
+        // As{{ .Method }} returns the union data inside the {{$typeName}} as a {{.TypeName}}
+        func ({{$alias}} *{{$typeName}}) As{{ .Method }}() ({{.TypeName}}, error) {
+            return runtime.UnmarshalAs[{{.TypeName}}]({{$alias}}.union)
+        }
+
+        // AsValidated{{ .Method }} returns the union data inside the {{$typeName}} as a validated {{.TypeName}}
+        func ({{$alias}} *{{$typeName}}) AsValidated{{ .Method }}() ({{.TypeName}}, error) {
+            val, err := {{$alias}}.As{{ .Method }}()
+            if err != nil {
+                var zero {{.TypeName}}
+                return zero, err
+            }
+            if err := {{$alias}}.validate{{ .Method }}(val); err != nil {
+                var zero {{.TypeName}}
+                return zero, err
+            }
+            return val, nil
+        }
+
+        // From{{ .Method }} overwrites any union data inside the {{$typeName}} as the provided {{.TypeName}}
+        func ({{$alias}} *{{$typeName}}) From{{ .Method }} (val {{.TypeName}}) error {
+            // Validate before storing
+            if err := {{$alias}}.validate{{ .Method }}(val); err != nil {
+                return err
+            }
+            {{if $discriminator -}}
+                {{range $value, $type := $discriminator.Mapping -}}
+                    {{if eq $type $element.TypeName -}}
+                        {{range $properties -}}
+                            {{if eq .GoName $discriminator.PropertyName -}}
+                                {{if .IsPointerType -}}
+                                    {{$alias}}.{{$discriminator.PropertyName}} = runtime.Ptr({{.Schema.TypeDecl}}("{{escapeGoString $value}}"))
+                                {{else -}}
+                                    {{$alias}}.{{$discriminator.PropertyName}} = {{.Schema.TypeDecl}}("{{escapeGoString $value}}")
+                                {{end -}}
+                            {{end -}}
+                        {{end -}}
+                    {{end -}}
+                {{end -}}
+            {{end -}}
+            bts, err := json.Marshal(val)
+            {{$alias}}.union = bts
+            return err
+        }
+    {{end}}
+
+    {{/* Generate unexported validation helper methods for each union element */}}
+    {{range .Schema.UnionElements}}
+        {{$element := . -}}
+        {{- $tags := filterOmitEmpty .Schema.Constraints.ValidationTags }}
+        {{- if gt (len $tags) 0 }}
+        // validate{{.Method}} validates a {{.TypeName}} value
+        func ({{$alias}} *{{$typeName}}) validate{{.Method}}(val {{.TypeName}}) error {
+            return typesValidator.Var(val, "{{join "," $tags}}")
+        }
+        {{- else }}
+        // validate{{.Method}} validates a {{.TypeName}} value
+        func ({{$alias}} *{{$typeName}}) validate{{.Method}}(val {{.TypeName}}) error {
+            if v, ok := any(val).(runtime.Validator); ok {
+                return v.Validate()
+            }
+            return nil
+        }
+        {{- end }}
+    {{end}}
+    {{ end }}
+
+    {{if $discriminator}}
+        func ({{$alias}} {{.Name}}) discriminator(data []byte) (string, error) {
+            var discriminator struct {
+                Value string {{$discriminator.JSONTag}}
+            }
+            if err := json.Unmarshal(data, &discriminator); err != nil {
+                return "", err
+            }
+            return discriminator.Value, nil
+        }
+
+        {{if and (ne 0 (len $discriminator.Mapping)) (not $eitherType)}}
+            func ({{$alias}} {{.Name}}) ValueByDiscriminator() (any, error) {
+                discriminator, err := {{$alias}}.discriminator({{$alias}}.union)
+                if err != nil {
+                    return nil, err
+                }
+                switch discriminator{
+                    {{range $value, $type := $discriminator.Mapping -}}
+                        case "{{escapeGoString $value}}":
+                            return {{$alias}}.As{{$type}}()
+                    {{end -}}
+                    default:
+                        return nil, errors.New("unknown discriminator value: "+discriminator)
+                }
+            }
+        {{end}}
+    {{end}}
+
+    {{ if .Schema.HasAdditionalProperties }}
+      {{ template "unionAdditionalProperties" (dict "Name" .Name "Schema" .Schema "alias" $alias "typeSchemaMap" $typeSchemaMap) }}
+    {{ else }}
+        {{if $eitherType}}
+            {{ if $discriminator }}
+                {{ template "marshalEitherWithDiscriminator" (dict "name" .Name "discriminator" $discriminator "alias" $alias) }}
+            {{ end }}
+        {{ else }}
+            {{ template "marshalUnion" (dict "name" .Name "schema" .Schema "alias" $alias) }}
+        {{ end }}
+
+        {{ if $eitherType  }}
+            {{ if $discriminator }}
+                {{ template "unmarshalEitherTypeWithDiscriminator" (dict "discriminator" $discriminator "elements" .Schema.UnionElements "name" .Name "alias" $alias) }}
+            {{ end }}
+        {{ else }}
+            {{ template "unmarshalUnion" (dict "name" .Name "schema" .Schema "alias" $alias) }}
+        {{ end }}
+    {{end}}
+{{end}}
+{{end}}
+
+
+{{ define "marshalEitherWithDiscriminator" }}
+{{- $args := . -}}
+func ({{$args.alias}} *{{$args.name}}) MarshalJSON() ([]byte, error) {
+    data := {{$args.alias}}.Value()
+    if data == nil {
+        return []byte("null"), nil
+    }
+
+    obj, err := json.Marshal(data)
+    if err != nil {
+        return nil, err
+    }
+
+    disc, err := {{$args.alias}}.discriminator(obj)
+    if err != nil {
+        return nil, err
+    }
+    return runtime.MarshalEitherWithDiscriminator(obj, "{{escapeGoString $args.discriminator.Property}}", disc)
+}
+{{ end }}
+
+{{ define "unmarshalEitherTypeWithDiscriminator" }}
+{{- $args := . -}}
+func ({{$args.alias}} *{{$args.name}}) UnmarshalJSON(data []byte) error {
+    discriminator, err := {{$args.alias}}.discriminator(data)
+    if err != nil {
+        return err
+    }
+
+    switch discriminator{
+    {{range $value, $type := $args.discriminator.Mapping -}}
+        case "{{escapeGoString $value}}":
+            var res {{$type}}
+            if err = json.Unmarshal(data, &res); err != nil {
+                return err
+            }
+
+            {{if eq $type (index $args.elements 0).TypeName}}
+                {{$args.alias}}.A = res
+                {{$args.alias}}.N = 1
+            {{ else }}
+                {{$args.alias}}.B = res
+                {{$args.alias}}.N = 2
+            {{ end -}}
+    {{end -}}
+    default:
+        return errors.New("unknown discriminator value: "+discriminator)
+    }
+    return nil
+}
+{{ end }}
+
+{{ define "marshalUnion" }}
+{{- $args := . -}}
+func ({{$args.alias}} {{$args.name}}) MarshalJSON() ([]byte, error) {
+    bts, err := {{$args.alias}}.union.MarshalJSON()
+
+    {{if ne 0 (len $args.schema.Properties) -}}
+        if err != nil {
+            return nil, err
+        }
+        object := make(map[string]json.RawMessage)
+        if err = json.Unmarshal(bts, &object); err != nil {
+            return nil, err
+        }
+
+        {{range $args.schema.Properties}}
+            {{if .IsPointerType}}if {{$args.alias}}.{{.GoName}} != nil { {{end}}
+                object["{{.JsonFieldName}}"], err = json.Marshal({{$args.alias}}.{{.GoName}})
+                if err != nil {
+                    return nil, fmt.Errorf("error marshaling '{{.JsonFieldName}}': %w", err)
+                }
+                {{if .IsPointerType}} }{{end}}
+        {{end -}}
+        bts, err = json.Marshal(object)
+    {{end -}}
+    return bts, err
+}
+{{ end }}
+
+{{ define "unmarshalUnion" }}
+{{- $args := . -}}
+func ({{$args.alias}} *{{$args.name}}) UnmarshalJSON(bts []byte) error {
+    err := {{$args.alias}}.union.UnmarshalJSON(bts)
+
+    {{if ne 0 (len $args.schema.Properties) -}}
+        if err != nil {
+            return err
+        }
+        object := make(map[string]json.RawMessage)
+        if err = json.Unmarshal(bts, &object); err != nil {
+            return err
+        }
+
+        {{range $args.schema.Properties}}
+        if raw, found := object["{{.JsonFieldName}}"]; found {
+            if err = json.Unmarshal(raw, &{{$args.alias}}.{{.GoName}}); err != nil {
+                return fmt.Errorf("error reading '{{.JsonFieldName}}': %w", err)
+            }
+        }
+        {{end}}
+    {{end -}}
+    return err
+}
+{{ end }}

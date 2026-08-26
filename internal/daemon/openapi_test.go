@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -242,9 +243,9 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsIdleShutdownCapability(t *testing.T) {
-	if APISchemaVersion != "0.12.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.12.0 for the idle shutdown health capability", APISchemaVersion)
+func TestOpenAPISchemaVersionReflectsMetadataPatchGuards(t *testing.T) {
+	if APISchemaVersion != "0.13.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.13.0 for metadata patch guards", APISchemaVersion)
 	}
 }
 
@@ -451,6 +452,34 @@ func TestRequestBodyRejectsAdditionalProperties(t *testing.T) {
 	schema := doc.Components.Schemas.Map()["CreateIssueRequestBody"]
 	require.NotNil(t, schema, "missing CreateIssueRequestBody schema")
 	require.Equal(t, false, schema.AdditionalProperties, "request bodies must reject unknown fields")
+}
+
+func TestMetadataPatchGuardSchemaRequiresExactlyOneCondition(t *testing.T) {
+	doc := OpenAPIDocument()
+	schema := doc.Components.Schemas.Map()["MetadataPatchGuard"]
+	require.NotNil(t, schema, "missing MetadataPatchGuard schema")
+	require.Len(t, schema.OneOf, 2, "guard schema must expose mutually exclusive condition variants")
+	require.Empty(t, schema.Properties, "guard fields must live in the exclusive variants")
+
+	byCondition := make(map[string]*huma.Schema, len(schema.OneOf))
+	for _, variant := range schema.OneOf {
+		require.Contains(t, variant.Required, "key")
+		require.Equal(t, false, variant.AdditionalProperties)
+		for _, condition := range []string{"if_value", "if_absent"} {
+			if slices.Contains(variant.Required, condition) {
+				byCondition[condition] = variant
+			}
+		}
+	}
+	valueVariant := byCondition["if_value"]
+	require.NotNil(t, valueVariant)
+	require.ElementsMatch(t, []string{"key", "if_value"}, valueVariant.Required)
+	require.ElementsMatch(t, []string{"key", "if_value"}, slices.Collect(maps.Keys(valueVariant.Properties)))
+	absentVariant := byCondition["if_absent"]
+	require.NotNil(t, absentVariant)
+	require.ElementsMatch(t, []string{"key", "if_absent"}, absentVariant.Required)
+	require.ElementsMatch(t, []string{"key", "if_absent"}, slices.Collect(maps.Keys(absentVariant.Properties)))
+	require.Equal(t, []any{true}, absentVariant.Properties["if_absent"].Enum)
 }
 
 // TestAllResponseSchemasAllowAdditionalProperties is the policy invariant: every

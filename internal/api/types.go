@@ -1456,6 +1456,15 @@ type DeleteRecurrenceRequest struct {
 // The 204 status is set via DefaultStatus in the huma.Operation; no body is returned.
 type DeleteRecurrenceResponse struct{}
 
+// MetadataPatchGuard conditionally applies an issue metadata patch based on
+// the current value of the patched key. Exactly one of IfValue or IfAbsent is
+// required when a guard is present.
+type MetadataPatchGuard struct {
+	Key      string  `json:"key"`
+	IfValue  *string `json:"if_value,omitempty" doc:"Expected metadata value encoded as JSON text"`
+	IfAbsent *bool   `json:"if_absent,omitempty"`
+}
+
 // PatchIssueMetadataRequest is POST /api/v1/projects/{project_id}/issues/{ref}/metadata.
 // If-Match is optional: absent means an unconditional last-write-wins patch;
 // present it must be the current `"rev-N"` ETag (412 on mismatch).
@@ -1466,6 +1475,7 @@ type PatchIssueMetadataRequest struct {
 	Body      struct {
 		Actor string                     `json:"actor,omitempty"`
 		Patch map[string]json.RawMessage `json:"patch"`
+		Guard *MetadataPatchGuard        `json:"guard,omitempty"`
 	}
 }
 
