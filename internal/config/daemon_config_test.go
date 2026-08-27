@@ -1337,6 +1337,8 @@ func TestReadDaemonConfig_SearchEmbeddingsValid(t *testing.T) {
 [search.embeddings]
 base_url = "http://localhost:11434/v1"
 model = "nomic-embed-text"
+model_context_tokens = 32000
+max_batch_tokens = 120000
 `), 0o600))
 
 	cfg, err := config.ReadDaemonConfig()
@@ -1345,6 +1347,8 @@ model = "nomic-embed-text"
 		"base_url + model present must enable embeddings")
 	assert.Equal(t, "http://localhost:11434/v1", cfg.Search.Embeddings.BaseURL)
 	assert.Equal(t, "nomic-embed-text", cfg.Search.Embeddings.Model)
+	assert.Equal(t, 32000, cfg.Search.Embeddings.ModelContextTokens)
+	assert.Equal(t, 120000, cfg.Search.Embeddings.MaxBatchTokens)
 }
 
 func TestReadDaemonConfig_SearchEmbeddingsDisabledWhenAbsent(t *testing.T) {

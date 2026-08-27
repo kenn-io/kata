@@ -37,6 +37,7 @@ import (
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
+	kitvec "go.kenn.io/kit/vector"
 )
 
 func newDaemonCmd() *cobra.Command {
@@ -1518,11 +1519,26 @@ func preflightEmbeddingStartup(
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
 	}
+	batchOptions := embeddingBatchOptions(ec, embedder.BatchSize())
+	if _, err := kitvec.EncodeBatched(
+		context.Background(), embedder.EncodeFunc(), nil, batchOptions...,
+	); err != nil {
+		return nil, "", fmt.Errorf("embedding batching: %w", err)
+	}
 	vectorsPath, err := vectorsPathForDSN(dbPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding index: %w", err)
 	}
 	return embedder, vectorsPath, nil
+}
+
+func embeddingBatchOptions(ec config.EmbeddingsConfig, batchSize int) []kitvec.BatchOption {
+	options := []kitvec.BatchOption{kitvec.WithBatchSize(batchSize)}
+	if ec.MaxBatchTokens != 0 || ec.ModelContextTokens != 0 {
+		options = append(options,
+			kitvec.WithBatchTokenBudget(ec.MaxBatchTokens, ec.ModelContextTokens))
+	}
+	return options
 }
 
 // startEmbeddingReconciler opens the sidecar vector index for the embedding
@@ -1553,6 +1569,7 @@ func startEmbeddingReconciler(
 	}
 	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{
 		BatchSize:      ec.BatchSize,
+		BatchOptions:   embeddingBatchOptions(ec, embedder.BatchSize()),
 		DrainAdmission: drainAdmission,
 	})
 	workers.Go(func() {

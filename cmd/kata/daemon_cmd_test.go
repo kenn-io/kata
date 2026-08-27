@@ -2038,6 +2038,17 @@ func TestVectorsPathForDSN(t *testing.T) {
 	}
 }
 
+func TestPreflightEmbeddingStartupLetsKitRejectInvalidTokenBudget(t *testing.T) {
+	_, _, err := preflightEmbeddingStartup(config.EmbeddingsConfig{
+		BaseURL:            "http://127.0.0.1:11434/v1",
+		Model:              "example-model",
+		ModelContextTokens: 32_000,
+		MaxBatchTokens:     31_999,
+	}, filepath.Join(t.TempDir(), "kata.db"))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "embedding batching")
+}
+
 func TestGitHubSyncRunnerInterval(t *testing.T) {
 	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "")
 	assert.Equal(t, 5*time.Minute, githubSyncRunnerInterval())

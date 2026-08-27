@@ -53,8 +53,11 @@ speaks the wire format and never bundles a model.
    provider also needs a key — set `api_key` or, better, `api_key_env` pointing
    at an environment variable. See
    [Configuration](../reference/configuration.md#semantic-search) for every
-   field (`dims`, `batch_size`, `timeout_seconds`, `fingerprint_salt`,
-   `trust_private_network`).
+   field (`dims`, `batch_size`, `model_context_tokens`, `max_batch_tokens`,
+   `timeout_seconds`, `fingerprint_salt`, `trust_private_network`). If the
+   provider limits total input tokens per request, set both token fields to
+   keep background embedding batches below that limit. Leave them unset for
+   the existing count-only batching behavior.
 
 3. Restart the daemon (or start it — `kata` will pick up the config). It begins
    embedding existing issues in the background immediately.

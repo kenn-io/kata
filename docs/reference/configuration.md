@@ -523,6 +523,8 @@ model    = "nomic-embed-text"
 # fingerprint_salt = ""         # bump to force re-embed when model weights change
 # dims                          # expected vector dimensionality (default 768)
 # batch_size                    # inputs per request (default 64)
+# model_context_tokens          # model's maximum tokens for one input
+# max_batch_tokens              # provider's aggregate input-token cap per request
 # timeout_seconds               # per-request timeout (default 30)
 # trust_private_network = false # allow plaintext HTTP to literal non-public IPs
 ```
@@ -533,6 +535,19 @@ are mutually exclusive. The embedding API key is attached only to requests whose
 origin matches `base_url`, following the same bearer-token trust ladder as
 daemon catalog tokens: HTTPS is always allowed, HTTP to loopback is allowed, and
 HTTP to other private IPs needs `trust_private_network = true`.
+
+Some providers cap the total input tokens across one embedding request as well
+as the number of inputs. Set `model_context_tokens` to the model's per-input
+context limit and `max_batch_tokens` to the provider's aggregate request limit
+when that applies. Kata passes both limits to kit, which conservatively treats
+every input as capable of filling the model context and reduces `batch_size` as
+needed. This avoids repeatable oversized-request errors from providers that
+truncate each input before enforcing their aggregate limit.
+
+Both settings are optional and default to zero. Existing deployments therefore
+keep count-only batching. When either setting is used, both must be positive and
+`max_batch_tokens` must fit at least one `model_context_tokens` input; kit checks
+this during daemon startup before Kata processes documents.
 
 Privacy: configuring an endpoint sends issue titles and bodies to it on every
 embed. That is the consent boundary — the operator who writes this section

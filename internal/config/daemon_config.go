@@ -122,6 +122,11 @@ type EmbeddingsConfig struct {
 	// BatchSize caps inputs per embedding request. 0 means the client
 	// default; negative values are rejected.
 	BatchSize int `toml:"batch_size"`
+	// ModelContextTokens is the maximum tokens accepted for one input.
+	// MaxBatchTokens is the provider's aggregate input-token cap per request.
+	// Leaving both at zero preserves count-only batching.
+	ModelContextTokens int `toml:"model_context_tokens"`
+	MaxBatchTokens     int `toml:"max_batch_tokens"`
 	// TimeoutSeconds is the per-request HTTP timeout. 0 means the client
 	// default; negative values are rejected.
 	TimeoutSeconds int `toml:"timeout_seconds"`
