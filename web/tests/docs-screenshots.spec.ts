@@ -98,6 +98,7 @@ test('captures stable Web UI documentation states from synthetic issues', async 
   await page.evaluate(() => {
     document.documentElement.style.zoom = '0.875'
   })
+  await page.getByRole('button', { name: 'Edit issue' }).click()
   await page
     .getByRole('textbox', { name: 'Comment' })
     .fill('The synthetic release is ready for documentation review.')
@@ -110,6 +111,7 @@ test('captures stable Web UI documentation states from synthetic issues', async 
   await page.getByRole('textbox', { name: 'New checklist item' }).fill('Verify example build')
   await page.getByRole('textbox', { name: 'New checklist item' }).press('Enter')
   await expect(page.getByRole('checkbox', { name: 'Verify example build' })).toBeVisible()
+  await page.getByRole('button', { name: 'Done editing' }).click()
   await expect(page.getByRole('region', { name: 'Description' })).toContainText('Release checklist')
   await expect(page.getByRole('region', { name: 'Links' })).toContainText(
     /Document browser workflows|Verify example packages|Coordinate example announcement/,
