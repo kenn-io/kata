@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-25
+last_edited: 2026-08-27
 ---
 
 # Remote daemon
@@ -99,11 +99,18 @@ socket address form.
 
 ## Browser access
 
-`kata ui` follows the same daemon selection order. A configured remote opens
-the daemon's canonical browser route and shows an in-document token login; the
-token is exchanged for a browser session in memory and is never put in the URL
-or browser storage. Identity-token mode keeps the token actor authoritative.
-Static-token deployments use the daemon's normal request-actor policy.
+Plain `kata ui` always starts or discovers the local browser gateway; it does
+not use `KATA_SERVER`. The gateway initially selects `active_daemon` when one
+is configured.
+
+To open a remote daemon directly, add it as a named `[[daemon]]` entry and run
+`kata ui --daemon <name>`. If the remote is configured only through
+`KATA_SERVER`, open its canonical `/kata` route in a browser instead, for
+example `https://daemon.example/kata`. A remote browser route shows an
+in-document token login; the token is exchanged for a browser session in
+memory and is never put in the URL or browser storage. Identity-token mode
+keeps the token actor authoritative. Static-token deployments use the daemon's
+normal request-actor policy.
 
 For an HTTPS reverse proxy, set `[web].public_origin` to the exact browser
 origin and route the UI, assets, `/api/v1/ui/*`, ordinary `/api/v1/*`, and the
