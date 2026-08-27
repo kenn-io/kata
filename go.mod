@@ -25,12 +25,11 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
 	github.com/teambition/rrule-go v1.8.2
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
-	go.kenn.io/kit v0.21.3
+	go.kenn.io/kit v0.22.0
 	golang.org/x/sync v0.21.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
@@ -125,6 +124,7 @@ require (
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.6 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect

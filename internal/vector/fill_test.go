@@ -3,6 +3,8 @@ package vector
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -51,7 +53,7 @@ func TestFillEmbedsChunksAndQueryFindsThem(t *testing.T) {
 		}
 		return out, nil
 	}
-	stats, err := ix.Fill(ctx, key, enc, 0, 0, nil)
+	stats, err := ix.Fill(ctx, key, enc, 0, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +67,39 @@ func TestFillEmbedsChunksAndQueryFindsThem(t *testing.T) {
 	}
 	if len(hits) == 0 || hits[0].Doc != "u1" {
 		t.Fatalf("hits = %+v, want u1 first", hits)
+	}
+}
+
+func TestFillCapsConfiguredBatchesByTokenBudget(t *testing.T) {
+	ctx := context.Background()
+	ix := openTestIndex(t)
+	for i := range 4 {
+		seedMirror(t, ix, fmt.Sprintf("u%d", i), 1)
+	}
+	g := testGen("m1")
+	key := g.Fingerprint()
+	if err := ix.EnsureBuilding(ctx, key, g); err != nil {
+		t.Fatal(err)
+	}
+
+	var batchSizes []int
+	enc := func(_ context.Context, texts []string) ([][]float32, error) {
+		batchSizes = append(batchSizes, len(texts))
+		out := make([][]float32, len(texts))
+		for i := range texts {
+			out[i] = []float32{1, 0, 0, 0}
+		}
+		return out, nil
+	}
+	_, err := ix.Fill(ctx, key, enc, 0, []kitvec.BatchOption{
+		kitvec.WithBatchSize(4),
+		kitvec.WithBatchTokenBudget(120_000, 32_000),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(batchSizes, []int{3, 1}) {
+		t.Fatalf("encode batch sizes = %v, want [3 1]", batchSizes)
 	}
 }
 
@@ -85,7 +120,7 @@ func TestFillAbortsOnRequestLevel400(t *testing.T) {
 	enc := func(_ context.Context, _ []string) ([][]float32, error) {
 		return nil, &embedding.APIError{StatusCode: 400, Body: "invalid model"}
 	}
-	stats, err := ix.Fill(ctx, key, enc, 0, 0, nil)
+	stats, err := ix.Fill(ctx, key, enc, 0, nil, nil)
 	var apiErr *embedding.APIError
 	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Fatalf("request-level 400 must abort the fill, got %v", err)
@@ -129,7 +164,7 @@ func TestFillAbortsOnBatchShape400(t *testing.T) {
 		}
 		return [][]float32{{1, 0, 0, 0}}, nil
 	}
-	stats, err := ix.Fill(ctx, key, enc, 0, 0, nil)
+	stats, err := ix.Fill(ctx, key, enc, 0, nil, nil)
 	var apiErr *embedding.APIError
 	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Fatalf("shape-level 400 must abort the fill, got %v", err)
@@ -162,7 +197,7 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 		}
 		return out, nil
 	}
-	stats, err := ix.Fill(ctx, key, enc, 0, 0, nil)
+	stats, err := ix.Fill(ctx, key, enc, 0, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +217,7 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	authFail := func(_ context.Context, _ []string) ([][]float32, error) {
 		return nil, &embedding.APIError{StatusCode: 401, Body: "no"}
 	}
-	_, err = ix.Fill(ctx, key, authFail, 0, 0, nil)
+	_, err = ix.Fill(ctx, key, authFail, 0, nil, nil)
 	var apiErr *embedding.APIError
 	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 401 {
 		t.Fatalf("401 must abort the fill, got %v", err)

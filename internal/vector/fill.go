@@ -20,7 +20,7 @@ const (
 )
 
 // Fill embeds every pending mirror document into the generation keyed by key.
-// scanBatch and encodeBatch <= 0 use kit defaults / single-batch respectively.
+// scanBatch <= 0 uses kit's default. batchOptions controls encode batching.
 //
 // Only a content-definitive HTTP 400 skips a document (poison-document
 // stamping). The embedding API reports request-level problems (bad model,
@@ -30,22 +30,21 @@ const (
 // aborts so the reconciler can back off instead of stamping the corpus as
 // skipped. Every non-400 error aborts unconditionally — an auth failure must
 // never stamp anything.
-func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch, encodeBatch int, onDocument func(bool)) (kitvec.FillStats, error) {
+func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool)) (kitvec.FillStats, error) {
 	split := kitvec.SplitOptions{MaxRunes: splitMaxRunes, Overlap: splitOverlap}
-	batch := kitvec.BatchOptions{BatchSize: encodeBatch}
 	store := progressStore{Store: ix.flowStore, onDocument: onDocument}
-	return kitvec.Fill(ctx, store, key, enc, kitvec.FillOptions[string]{
-		ScanBatch: scanBatch,
-		Split:     split,
-		Batch:     batch,
-		OnEncodeError: func(doc string, err error) bool {
+	return kitvec.Fill(ctx, store, key, enc,
+		kitvec.WithFillScanBatch[string](scanBatch),
+		kitvec.WithFillSplit[string](split),
+		kitvec.WithFillBatch[string](batchOptions...),
+		kitvec.WithFillEncodeError[string](func(doc string, err error) bool {
 			var apiErr *embedding.APIError
 			if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
 				return false
 			}
-			return ix.contentSpecific400(ctx, doc, enc, split, batch)
-		},
-	})
+			return ix.contentSpecific400(ctx, doc, enc, split, batchOptions)
+		}),
+	)
 }
 
 type progressStore struct {
@@ -70,7 +69,7 @@ func (s progressStore) SaveVectors(ctx context.Context, gen, doc string, revisio
 // rejection was the content itself and poison-skip is safe. Any replay
 // failure (shape-level 400, transient error, missing mirror row) keeps the
 // document pending by aborting the fill.
-func (ix *Index) contentSpecific400(ctx context.Context, doc string, enc kitvec.EncodeFunc, split kitvec.SplitOptions, batch kitvec.BatchOptions) bool {
+func (ix *Index) contentSpecific400(ctx context.Context, doc string, enc kitvec.EncodeFunc, split kitvec.SplitOptions, batchOptions []kitvec.BatchOption) bool {
 	content, err := ix.mirrorContent(ctx, doc)
 	if err != nil {
 		return false
@@ -79,6 +78,6 @@ func (ix *Index) contentSpecific400(ctx context.Context, doc string, enc kitvec.
 	for i := range chunks {
 		chunks[i].Text = strings.Repeat("a", utf8.RuneCountInString(chunks[i].Text))
 	}
-	_, err = kitvec.EncodeBatched(ctx, enc, chunks, batch)
+	_, err = kitvec.EncodeBatched(ctx, enc, chunks, batchOptions...)
 	return err == nil
 }

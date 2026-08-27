@@ -19,12 +19,12 @@ import (
 type embedder interface {
 	EncodeFunc() kitvec.EncodeFunc
 	Generation() kitvec.Generation
-	BatchSize() int
 }
 
 // ReconcilerConfig tunes the reconciler.
 type ReconcilerConfig struct {
 	BatchSize      int
+	BatchOptions   []kitvec.BatchOption
 	SweepEvery     time.Duration // periodic safety sweep; default 5m
 	MinBackoff     time.Duration // default 1s
 	MaxBackoff     time.Duration // default 5m
@@ -286,7 +286,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		return err
 	}
 	r.setCoverage(key, embedded, skipped, backlog)
-	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.emb.BatchSize(), r.markDocumentFilled); err != nil {
+	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled); err != nil {
 		if embedded, skipped, backlog, coverageErr := r.idx.Coverage(ctx, key); coverageErr == nil {
 			r.setCoverage(key, embedded, skipped, backlog)
 		}
