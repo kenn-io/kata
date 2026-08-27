@@ -154,9 +154,10 @@ model context at startup.
 | `kata.load_external_roots` | `kata.connectors`, `kata.connector_fields`, `kata.connector_field_map`, `kata.connector_field_unmap`, `kata.bridge_bind`, `kata.bridge_show`, `kata.bridge_reconcile`, `kata.bridge_pause`, `kata.bridge_resume`, `kata.bridge_resolve_field`, `kata.bridge_resolve_comment`, `kata.bridge_unbind` |
 | `kata.load_storage` | `kata.storage_export`, `kata.storage_import` when host storage is enabled |
 
-Bridge tools operate on issues inside the startup project scope;
-`kata.connector_field_map` and `kata.connector_field_unmap` require the
-`--all-projects` daemon-wide scope.
+`kata.connectors`, `kata.connector_fields`, `kata.connector_field_map`,
+`kata.connector_field_unmap`, and `kata.bridge_bind` require the
+`--all-projects` daemon-wide scope. The remaining bridge tools operate on
+already-bound issues inside the startup project scope.
 
 Loaders are idempotent. A loader reports `available=false` when its optional
 startup dependency is absent. Loaded tools keep their individual input and

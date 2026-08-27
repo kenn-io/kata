@@ -369,9 +369,13 @@ bounds each connector call (omit it for the default). `connector.env` maps
 child environment variable names to daemon environment variable names; only
 these variables reach the connector process, and their values are redacted from
 connector errors as secrets. `connector.settings` is non-secret JSON-compatible
-configuration passed to the connector on every call. The daemon validates all
-of this at startup and starts its reconciliation workers only when at least one
-connector is configured.
+configuration passed to the connector on every call. The daemon validates this
+structure at startup and refuses to start on an invalid `[[connector]]` table,
+but it does not run the executable or read the mapped environment sources
+until a connector call needs them; connector health is observed through
+`kata connector status`. The bridge reconciliation workers always run, so
+durable bindings are still handled when their connector is removed from
+configuration.
 
 ### Declarative federation mappings
 
