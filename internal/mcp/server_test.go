@@ -431,7 +431,7 @@ func TestCreateAndCommentRequireIdempotencyKeys(t *testing.T) {
 	closeProperties := schemaObject(t, byName["kata.close"].InputSchema)["properties"].(map[string]any)
 	require.ElementsMatch(t, []any{"done", "wontfix", "duplicate", "superseded", "audit-no-change"}, closeProperties["reason"].(map[string]any)["enum"])
 	evidenceItems := closeProperties["evidence"].(map[string]any)["items"].(map[string]any)
-	require.Len(t, evidenceItems["oneOf"], 7)
+	require.Len(t, evidenceItems["oneOf"], 8)
 	require.Len(t, schemaObject(t, byName["kata.close"].InputSchema)["oneOf"], 5)
 
 	require.Len(t, schemaObject(t, byName["kata.list"].InputSchema)["allOf"], 1)
@@ -460,6 +460,7 @@ func TestCloseInputSchemaMirrorsDaemonEvidenceMatrix(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "done with test", input: map[string]any{"ref": "abc1", "reason": "done", "message": message40, "evidence": []any{map[string]any{"type": "test", "command": "go test ./..."}}}},
+		{name: "done with external account", input: map[string]any{"ref": "abc1", "reason": "done", "message": message40, "evidence": []any{map[string]any{"type": "external", "account": "email thread archived; calendar hold sent"}}}},
 		{name: "done without evidence", input: map[string]any{"ref": "abc1", "reason": "done", "message": message40, "evidence": []any{}}, wantErr: true},
 		{name: "wontfix", input: map[string]any{"ref": "abc1", "reason": "wontfix", "message": message60, "evidence": []any{}}},
 		{name: "wontfix with evidence", input: map[string]any{"ref": "abc1", "reason": "wontfix", "message": message60, "evidence": []any{map[string]any{"type": "test", "command": "go test ./..."}}}, wantErr: true},
@@ -480,6 +481,23 @@ func TestCloseInputSchemaMirrorsDaemonEvidenceMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConvertEvidenceExternalPreservesAccount(t *testing.T) {
+	var input Evidence
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"type":"external",
+		"account":"email thread archived; calendar hold sent"
+	}`), &input))
+
+	converted, err := (toolHandlers{}).convertEvidence(t.Context(), ProjectIdentity{}, input)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(converted)
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"type":"external",
+		"account":"email thread archived; calendar hold sent"
+	}`, string(encoded))
 }
 
 func TestSetDeadlineInputSchemaRequiresOneMutation(t *testing.T) {

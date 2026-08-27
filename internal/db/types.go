@@ -587,6 +587,7 @@ type Evidence struct {
 	URL       string   `json:"url,omitempty"`       // pr
 	Command   string   `json:"command,omitempty"`   // test
 	Paths     []string `json:"paths,omitempty"`     // reviewed-paths
+	Account   string   `json:"account,omitempty"`   // external
 	Rationale string   `json:"rationale,omitempty"` // no-change-audit
 	IssueRef  string   `json:"issue_ref,omitempty"` // duplicate-of, superseded-by
 }

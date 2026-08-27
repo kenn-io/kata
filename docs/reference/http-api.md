@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-19
+last_edited: 2026-08-27
 ---
 
 # HTTP API schema
@@ -45,7 +45,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.12.0",
+  "api_schema_version": "0.14.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db",
@@ -107,6 +107,8 @@ and decline to render issue detail.
 
 | Version | Change |
 | --- | --- |
+| `0.14.0` | Added `external` close evidence with its required `account` field. |
+| `0.13.0` | Added optimistic revision guards to issue and project metadata patch requests. |
 | `0.12.0` | Added the optional `idle_shutdown` health block for effective auto-start idle shutdown state and capability discovery. |
 | `0.11.0` | Added optional `to_project_uid` on create-time initial links and `expected_project_uids` on edit link deltas so clients can pin resolved relationship targets to immutable project identities inside the mutation transaction. Close-audit rows gain a required `event_id` (stable pagination cursor) and optional `parent_uid`. |
 | `0.10.0` | Added the repeatable `issue_uid` query parameter to UI references so embedding hosts can hydrate summaries by stable issue UID. |

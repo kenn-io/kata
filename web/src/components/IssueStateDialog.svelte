@@ -14,7 +14,7 @@
   let { issue, onCloseIssue, onReopenIssue }: Props = $props()
 
   type CloseReason = 'done' | 'wontfix' | 'duplicate' | 'superseded'
-  type DoneEvidence = 'test' | 'commit' | 'pr' | 'reviewed-paths'
+  type DoneEvidence = 'test' | 'commit' | 'pr' | 'reviewed-paths' | 'external'
 
   const closeReasons: ReadonlyArray<{
     value: CloseReason
@@ -118,15 +118,17 @@
           ? { type: 'commit', sha: value }
           : evidenceType === 'pr'
             ? { type: 'pr', url: value }
-            : evidenceType === 'reviewed-paths'
-              ? {
-                  type: 'reviewed-paths',
-                  paths: value
-                    .split(/[\n,]/)
-                    .map((path) => path.trim())
-                    .filter(Boolean),
-                }
-              : { type: 'test', command: value }
+            : evidenceType === 'external'
+              ? { type: 'external', account: value }
+              : evidenceType === 'reviewed-paths'
+                ? {
+                    type: 'reviewed-paths',
+                    paths: value
+                      .split(/[\n,]/)
+                      .map((path) => path.trim())
+                      .filter(Boolean),
+                  }
+                : { type: 'test', command: value }
       return { reason: completeReason, message, evidence: [evidence] }
     }
     return { reason: completeReason, message, evidence: [] }
@@ -208,6 +210,7 @@
             <option value="commit">Commit SHA</option>
             <option value="pr">Pull request URL</option>
             <option value="reviewed-paths">Reviewed paths</option>
+            <option value="external">External account</option>
           </select>
         </label>
         <label>
@@ -215,7 +218,11 @@
           <input
             aria-label="Evidence value"
             bind:value={evidenceValue}
-            placeholder={evidenceType === 'reviewed-paths' ? 'path/one, path/two' : ''}
+            placeholder={evidenceType === 'reviewed-paths'
+              ? 'path/one, path/two'
+              : evidenceType === 'external'
+                ? 'where and how the work was completed'
+                : ''}
             disabled={pending}
           />
         </label>

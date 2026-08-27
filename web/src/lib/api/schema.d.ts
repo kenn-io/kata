@@ -1931,6 +1931,7 @@ export interface components {
       [key: string]: unknown
     }
     Evidence: {
+      account?: string
       command?: string
       issue_ref?: string
       paths?: string[] | null

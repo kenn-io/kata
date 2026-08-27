@@ -28,6 +28,34 @@ func TestValidateCloseInput_DoneAcceptsCommit(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestValidateCloseInput_DoneAcceptsExternal(t *testing.T) {
+	err := ValidateCloseInput("done",
+		"Arranged the meeting by email and sent the calendar hold.",
+		[]api.Evidence{{
+			Type:    api.EvidenceExternal,
+			Account: "email thread archived; calendar hold sent",
+		}})
+	assert.NoError(t, err)
+}
+
+func TestValidateCloseInput_DoneRejectsEmptyExternalAccount(t *testing.T) {
+	err := ValidateCloseInput("done",
+		"Arranged the meeting by email and sent the calendar hold.",
+		[]api.Evidence{{Type: api.EvidenceExternal, Account: "  "}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "external")
+	assert.Contains(t, err.Error(), "account")
+}
+
+func TestValidateCloseInput_DoneReportsDisallowedEvidenceBeforeRequired(t *testing.T) {
+	err := ValidateCloseInput("done",
+		"Reviewed the work carefully and confirmed no code change was needed.",
+		[]api.Evidence{{Type: api.EvidenceNoChangeAudit, Rationale: "metadata-only"}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `evidence type "no-change-audit" not allowed`)
+	assert.NotContains(t, err.Error(), "evidence required")
+}
+
 func TestValidateCloseInput_DoneRejectsDuplicateOfAlongside(t *testing.T) {
 	err := ValidateCloseInput("done",
 		"Fixed the bug and ran tests on Safari and Chrome.",

@@ -439,6 +439,8 @@ func evidenceVariant(kind string) *jsonschema.Schema {
 		return variant(kind, "command", stringValue(1, 1<<20))
 	case "reviewed-paths":
 		return variant(kind, "paths", paths)
+	case "external":
+		return variant(kind, "account", stringValue(1, 1<<20))
 	case "no-change-audit":
 		return variant(kind, "rationale", stringValue(1, 1<<20))
 	case "duplicate-of", "superseded-by":
@@ -457,7 +459,7 @@ func evidenceSchemaFor(kinds ...string) *jsonschema.Schema {
 }
 
 func evidenceSchema() *jsonschema.Schema {
-	return evidenceSchemaFor("commit", "pr", "test", "reviewed-paths", "no-change-audit", "duplicate-of", "superseded-by")
+	return evidenceSchemaFor("commit", "pr", "test", "reviewed-paths", "external", "no-change-audit", "duplicate-of", "superseded-by")
 }
 
 func closeReasonSchemas() []*jsonschema.Schema {
@@ -482,7 +484,7 @@ func closeReasonSchemas() []*jsonschema.Schema {
 			Required: []string{"reason", "message", "evidence"},
 		}
 	}
-	done := variant("done", 40, 1, -1, "commit", "pr", "test", "reviewed-paths")
+	done := variant("done", 40, 1, -1, "commit", "pr", "test", "reviewed-paths", "external")
 	wontfix := variant("wontfix", 60, 0, 0, "commit")
 	duplicate := variant("duplicate", 20, 1, 1, "duplicate-of")
 	superseded := variant("superseded", 20, 1, 1, "superseded-by")
@@ -649,11 +651,12 @@ type SetMetadataInput struct {
 
 // Evidence is a typed completion proof accepted by Kata close.
 type Evidence struct {
-	Type      string   `json:"type" jsonschema:"Evidence type: commit, pr, test, reviewed-paths, no-change-audit, duplicate-of, or superseded-by"`
+	Type      string   `json:"type" jsonschema:"Evidence type: commit, pr, test, reviewed-paths, external, no-change-audit, duplicate-of, or superseded-by"`
 	SHA       string   `json:"sha,omitempty" jsonschema:"Commit SHA for commit evidence"`
 	URL       string   `json:"url,omitempty" jsonschema:"Pull request URL for pr evidence"`
 	Command   string   `json:"command,omitempty" jsonschema:"Executed command for test evidence"`
 	Paths     []string `json:"paths,omitempty" jsonschema:"Reviewed paths for reviewed-paths evidence"`
+	Account   string   `json:"account,omitempty" jsonschema:"Free-text account of where and how externally completed work was done"`
 	Rationale string   `json:"rationale,omitempty" jsonschema:"Rationale for no-change-audit evidence"`
 	IssueRef  string   `json:"issue_ref,omitempty" jsonschema:"Target issue for duplicate-of or superseded-by evidence"`
 }

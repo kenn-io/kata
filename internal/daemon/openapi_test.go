@@ -287,9 +287,9 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsMetadataPatchGuards(t *testing.T) {
-	if APISchemaVersion != "0.13.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.13.0 for metadata patch guards", APISchemaVersion)
+func TestOpenAPISchemaVersionReflectsExternalEvidence(t *testing.T) {
+	if APISchemaVersion != "0.14.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.14.0 for external evidence", APISchemaVersion)
 	}
 }
 

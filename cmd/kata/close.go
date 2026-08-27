@@ -140,7 +140,8 @@ Instead, label and comment:
 	// StringSliceVar would shred them into broken sub-items.
 	cmd.Flags().StringArrayVar(&evidence, "evidence", nil,
 		"typed evidence, repeatable: commit:<sha>, pr:<url>, test:<cmd>, "+
-			"reviewed-paths:<path>, no-change-audit:<text>, duplicate-of:<N>, superseded-by:<N>")
+			"reviewed-paths:<path>, external:<account>, no-change-audit:<text>, "+
+			"duplicate-of:<N>, superseded-by:<N>")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
 		"validate without mutating; reports the would-be close event")
 
@@ -183,6 +184,8 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 			}
 			seenReviewedPath[value] = struct{}{}
 			reviewedPaths = append(reviewedPaths, value)
+		case api.EvidenceExternal:
+			out = append(out, api.Evidence{Type: kind, Account: value})
 		case api.EvidenceNoChangeAudit:
 			out = append(out, api.Evidence{Type: kind, Rationale: value})
 		case api.EvidenceDuplicateOf:
@@ -262,6 +265,8 @@ func evidencePayloadKey(e api.Evidence) string {
 		return e.URL
 	case api.EvidenceTest:
 		return e.Command
+	case api.EvidenceExternal:
+		return e.Account
 	case api.EvidenceNoChangeAudit:
 		return e.Rationale
 	case api.EvidenceDuplicateOf, api.EvidenceSupersededBy:

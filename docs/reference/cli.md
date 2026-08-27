@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-20
+last_edited: 2026-08-27
 ---
 
 # CLI reference
@@ -284,6 +284,29 @@ kata close <ref> --done --message <text> \
   [--reviewed <path>] \
   [--evidence <type:value>]
 ```
+
+Evidence is validated against the close reason:
+
+| Reason | Evidence rule |
+| --- | --- |
+| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, or `external` |
+| `wontfix` | No evidence; any evidence item is rejected |
+| `duplicate` | Exactly one `duplicate-of` item |
+| `superseded` | Exactly one `superseded-by` item |
+| `audit-no-change` | Exactly one `no-change-audit` item; `reviewed-paths` is optional |
+
+Use `external:<account>` for completed work that has no repository artifact or
+command to cite. The value is a non-empty, free-text account of where and how
+the work was done, for example:
+
+```sh
+kata close <ref> --done \
+  --message "Arranged the meeting by email and sent the calendar hold." \
+  --evidence "external:email thread archived; calendar hold sent"
+```
+
+External evidence is an attributable account, not independently verified
+proof. It remains visible as `external` in `kata audit closes` evidence types.
 
 Other close reasons:
 

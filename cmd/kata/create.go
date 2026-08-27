@@ -715,6 +715,7 @@ func agentEvidenceSummaries(m agentIssueMutation) []string {
 			URL       string   `json:"url,omitempty"`
 			Command   string   `json:"command,omitempty"`
 			Paths     []string `json:"paths,omitempty"`
+			Account   string   `json:"account,omitempty"`
 			Rationale string   `json:"rationale,omitempty"`
 			IssueRef  string   `json:"issue_ref,omitempty"`
 		} `json:"evidence,omitempty"`
@@ -733,6 +734,8 @@ func agentEvidenceSummaries(m agentIssueMutation) []string {
 			out = append(out, "test:"+ev.Command)
 		case "reviewed-paths":
 			out = append(out, "reviewed-paths:"+strings.Join(ev.Paths, ","))
+		case "external":
+			out = append(out, "external:"+ev.Account)
 		case "no-change-audit":
 			out = append(out, "no-change-audit:"+ev.Rationale)
 		case "duplicate-of":

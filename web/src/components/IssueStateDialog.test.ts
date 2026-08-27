@@ -109,6 +109,32 @@ describe('IssueStateDialog', () => {
     })
   })
 
+  it('submits an external account for work completed outside a repository', async () => {
+    const onCloseIssue = vi.fn(async () => true)
+
+    render(IssueStateDialog, {
+      props: { issue: makeIssue(), onCloseIssue, onReopenIssue: vi.fn() },
+    })
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Complete' })[0]!)
+    const dialog = screen.getByRole('dialog', { name: 'Complete task' })
+    await fireEvent.change(within(dialog).getByLabelText('Evidence type'), {
+      target: { value: 'external' },
+    })
+    await fireEvent.input(within(dialog).getByLabelText('Evidence value'), {
+      target: { value: 'email thread archived; calendar hold sent' },
+    })
+    await fireEvent.input(within(dialog).getByLabelText(/Completion note/), {
+      target: { value: 'Arranged the meeting by email and sent the calendar hold.' },
+    })
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Complete' }))
+
+    expect(onCloseIssue).toHaveBeenCalledWith({
+      reason: 'done',
+      message: 'Arranged the meeting by email and sent the calendar hold.',
+      evidence: [{ type: 'external', account: 'email thread archived; calendar hold sent' }],
+    })
+  })
+
   it('collects the target reference for duplicate closes', async () => {
     const onCloseIssue = vi.fn(async () => true)
 
