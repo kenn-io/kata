@@ -765,7 +765,7 @@
     font-size: var(--font-size-sm);
   }
 
-  @media (max-width: 700px) {
+  @media (max-width: 760px) {
     .kata-layout {
       grid-template-columns: 1fr;
     }

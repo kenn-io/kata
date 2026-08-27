@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Button } from '@kenn-io/kit-ui'
+
   import type { KataTaskDetail } from '../lib/kata/types'
   import Modal from './Modal.svelte'
 
@@ -45,52 +47,21 @@
   </div>
 
   {#snippet footer()}
-    <button type="button" class="ghost-button" onclick={close} disabled={pending}>Cancel</button>
-    <button
-      type="button"
-      class="danger-button"
+    <Button size="sm" label="Cancel" onclick={close} disabled={pending} />
+    <Button
+      size="sm"
+      tone="danger"
+      surface="solid"
+      label={pending ? 'Deleting...' : 'Delete'}
       onclick={() => {
         void deleteIssue()
       }}
       disabled={pending}
-    >
-      {pending ? 'Deleting...' : 'Delete'}
-    </button>
+    />
   {/snippet}
 </Modal>
 
 <style>
-  .ghost-button,
-  .danger-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-height: 28px;
-    padding: 5px 11px;
-    border-radius: 6px;
-    font-size: var(--font-size-sm);
-    font-weight: 650;
-  }
-
-  .ghost-button {
-    border: 1px solid var(--border-default);
-    background: var(--bg-surface);
-    color: var(--text-secondary);
-  }
-
-  .danger-button {
-    border: 1px solid var(--accent-red);
-    background: var(--accent-red);
-    color: white;
-  }
-
-  .ghost-button:disabled,
-  .danger-button:disabled {
-    cursor: default;
-    opacity: 0.62;
-  }
-
   .delete-dialog {
     display: grid;
     gap: 8px;

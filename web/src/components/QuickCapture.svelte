@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button } from '@kenn-io/kit-ui'
   import PlusIcon from '@lucide/svelte/icons/plus'
 
   import Modal from './Modal.svelte'
@@ -76,16 +77,17 @@
     />
   </form>
   {#snippet footer()}
-    <button class="modal-btn" type="button" onclick={onClose} disabled={pending}>Cancel</button>
-    <button
-      class="modal-btn modal-btn-primary"
-      type="button"
-      onclick={submit}
+    <Button size="sm" label="Cancel" onclick={onClose} disabled={pending} />
+    <Button
+      size="sm"
+      tone="info"
+      surface="solid"
+      label="Capture"
+      onclick={() => void submit()}
       disabled={disabled || pending || title.trim().length === 0}
     >
       <PlusIcon size={12} strokeWidth={2} />
-      <span>Capture</span>
-    </button>
+    </Button>
   {/snippet}
 </Modal>
 
@@ -112,34 +114,5 @@
     outline: none;
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 3px var(--accent-blue-soft);
-  }
-
-  .modal-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-height: 28px;
-    padding: 4px 12px;
-    border-radius: var(--radius-sm);
-    background: var(--bg-inset);
-    color: var(--text-secondary);
-    font-size: var(--font-size-sm);
-    font-weight: 500;
-    border: 1px solid var(--border-default);
-  }
-
-  .modal-btn:hover:not(:disabled) {
-    background: var(--bg-surface-hover);
-    color: var(--text-primary);
-  }
-
-  .modal-btn-primary {
-    background: var(--accent-blue);
-    color: var(--text-on-accent);
-    border-color: var(--accent-blue);
-  }
-
-  .modal-btn-primary:hover:not(:disabled) {
-    filter: brightness(1.08);
   }
 </style>

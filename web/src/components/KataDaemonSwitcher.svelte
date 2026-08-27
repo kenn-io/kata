@@ -71,7 +71,7 @@
       aria-hidden="true"
     ></span>
     {#if activeStatusLabel}
-      <span class="status-message" role="status" aria-label="Kata daemon status">
+      <span class="kit-sr-only" role="status" aria-label="Kata daemon status">
         {activeStatusLabel}
       </span>
     {/if}
@@ -162,18 +162,6 @@
 
   .status-indicator.error {
     background: var(--accent-red);
-  }
-
-  .status-message {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
   }
 
   .dot {

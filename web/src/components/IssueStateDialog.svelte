@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button } from '@kenn-io/kit-ui'
   import CheckIcon from '@lucide/svelte/icons/check'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
   import type { KataTaskCloseRequest, KataTaskDetail } from '../lib/kata/types'
@@ -150,20 +151,27 @@
 </script>
 
 {#if issue.issue.status === 'closed'}
-  <button type="button" class="ghost-button detail-action" disabled={pending} onclick={reopenIssue}>
+  <Button
+    class="detail-action"
+    size="sm"
+    label="Reopen"
+    disabled={pending}
+    onclick={() => void reopenIssue()}
+  >
     <RotateCcwIcon size={13} strokeWidth={1.9} />
-    <span>Reopen</span>
-  </button>
+  </Button>
 {:else}
-  <button
-    type="button"
-    class="accent-button detail-action"
+  <Button
+    class="detail-action"
+    size="sm"
+    tone="info"
+    surface="solid"
+    label="Complete"
     disabled={pending}
     onclick={openCompleteDialog}
   >
     <CheckIcon size={13} strokeWidth={1.9} />
-    <span>Complete</span>
-  </button>
+  </Button>
 {/if}
 
 <Modal open={completeOpen} title="Complete task" onClose={closeCompleteDialog} width={480}>
@@ -237,69 +245,26 @@
   </div>
 
   {#snippet footer()}
-    <button type="button" class="ghost-button" onclick={closeCompleteDialog} disabled={pending}>
-      Cancel
-    </button>
-    <button
-      type="button"
-      class="accent-button"
+    <Button size="sm" label="Cancel" onclick={closeCompleteDialog} disabled={pending} />
+    <Button
+      size="sm"
+      tone="info"
+      surface="solid"
+      label={pending ? 'Completing...' : 'Complete'}
       onclick={() => {
         void completeIssue()
       }}
       disabled={pending || !canComplete()}
-    >
-      {pending ? 'Completing...' : 'Complete'}
-    </button>
+    />
   {/snippet}
 </Modal>
 
 <style>
-  .ghost-button,
-  .accent-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-height: 28px;
-    border-radius: 6px;
-    padding: 5px 11px;
-    font-size: var(--font-size-sm);
-    font-weight: 650;
-  }
-
-  .ghost-button {
-    border: 1px solid var(--border-default);
-    background: var(--bg-surface);
-    color: var(--text-secondary);
-  }
-
-  .ghost-button:hover:not(:disabled) {
-    border-color: var(--border-muted);
-    background: var(--bg-surface-hover);
-    color: var(--text-primary);
-  }
-
-  .accent-button {
-    border: 1px solid var(--accent-blue);
-    background: var(--accent-blue);
-    color: white;
-  }
-
-  .accent-button:hover:not(:disabled) {
-    filter: brightness(0.96);
-  }
-
-  .ghost-button:disabled,
-  .accent-button:disabled {
-    cursor: default;
-    opacity: 0.62;
-  }
-
-  .detail-action {
+  :global(.detail-action) {
     min-width: 98px;
   }
 
-  .detail-action :global(svg) {
+  :global(.detail-action svg) {
     flex: 0 0 auto;
   }
 
@@ -410,7 +375,7 @@
   .complete-evidence {
     display: grid;
     grid-template-columns: minmax(130px, 0.4fr) minmax(0, 1fr);
-    gap: 10px;
+    gap: var(--space-5);
   }
 
   .complete-evidence select,

@@ -34,6 +34,22 @@ describe('IssueStateDialog', () => {
     cleanup()
   })
 
+  it('uses shared Kit UI actions', async () => {
+    render(IssueStateDialog, {
+      props: { issue: makeIssue(), onCloseIssue: vi.fn(), onReopenIssue: vi.fn() },
+    })
+
+    const trigger = screen.getByRole('button', { name: 'Complete' })
+    expect(trigger.classList).toContain('kit-button')
+    await fireEvent.click(trigger)
+
+    const dialog = screen.getByRole('dialog', { name: 'Complete task' })
+    expect(within(dialog).getByRole('button', { name: 'Cancel' }).classList).toContain('kit-button')
+    expect(within(dialog).getByRole('button', { name: 'Complete' }).classList).toContain(
+      'kit-button',
+    )
+  })
+
   it('submits a valid wont-do close request', async () => {
     const onCloseIssue = vi.fn(async () => true)
 

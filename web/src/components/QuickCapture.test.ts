@@ -6,6 +6,19 @@ import QuickCapture from './QuickCapture.svelte'
 describe('QuickCapture', () => {
   afterEach(cleanup)
 
+  it('uses shared Kit UI actions', () => {
+    render(QuickCapture, {
+      props: {
+        open: true,
+        onClose: vi.fn(),
+        onSubmit: vi.fn(),
+      },
+    })
+
+    expect(screen.getByRole('button', { name: 'Cancel' }).classList).toContain('kit-button')
+    expect(screen.getByRole('button', { name: 'Capture' }).classList).toContain('kit-button')
+  })
+
   it('resets a task draft after authentication authority changes', async () => {
     const view = render(QuickCapture, {
       props: {
