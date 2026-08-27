@@ -110,7 +110,7 @@ by default. `--workspace` or `--project` selects one explicit project.
 `--projects` fixes an allowlist of project names, pinned by immutable project
 UID. `--all-projects` follows every project in the selected daemon catalog.
 The startup scope and actor apply to every tool call. The initial catalog
-contains 13 section loaders that progressively expose the detailed typed
+contains 14 section loaders that progressively expose the detailed typed
 tools. Optional `--storage-root` and repeatable `--storage-target
 alias=path-or-DSN` enable the otherwise absent host-local JSONL tools. See the
 [MCP reference](mcp.md) for transport configuration, the complete catalog,
@@ -499,6 +499,54 @@ immediate sync through the daemon and requires an enabled binding.
 V1 does not write back to GitHub, import timeline events, import pull requests,
 propagate deleted or transferred issues, or propagate edited or deleted GitHub
 comments.
+
+## External root bridges
+
+Bridges bind one kata issue to one root object in an external system through a
+configured connector process. The daemon reads connector instances from
+`[[connector]]` tables in `<KATA_HOME>/config.toml` (see the
+[configuration reference](configuration.md)); connector authors implement the
+[connector protocol](connector-protocol.md).
+
+```sh
+kata connector list
+kata connector status <instance>
+kata connector field list <instance>
+kata connector field map <instance> <kata-field> --external <selector>
+kata connector field unmap <instance> <kata-field>
+```
+
+`kata connector list` reports the configured instances, `status` shows one
+instance's safe status without credentials, and the `field` subcommands
+inspect and manage bidirectional field mappings. Kata planning-field mappings
+are limited to `scheduled_on` and `deadline_on`. Field mapping requires
+daemon-wide authority.
+
+```sh
+kata bridge bind <issue> --connector <instance> --external <locator> [--publish-comments]
+kata bridge show <issue>
+kata bridge reconcile <issue>
+kata bridge pause <issue> [--reason <text>]
+kata bridge resume <issue>
+kata bridge resolve-field <issue> <kata-field> --use kata|external
+kata bridge resolve-comment <issue> --adopt <external-comment-id> | --retry | --skip
+kata bridge unbind <issue>
+```
+
+`bind` attaches an issue to an existing external root that the connector
+resolves from `--external`. While a binding is active, the external root owns
+the bound title and body. Inbound comments and lifecycle sync are enabled by
+default; outbound comments require `--publish-comments` at bind time. `show`
+reports the binding's policy and reconciliation status, and `reconcile` runs a
+reconciliation pass now instead of waiting for the daemon's workers.
+
+`pause` stops reconciliation with an optional operator-visible reason and
+`resume` validates the binding before reconciliation restarts. When a mapped
+field changed on both sides, `resolve-field` picks the winning side explicitly.
+When outbound comment delivery is uncertain, `resolve-comment` either adopts
+the exact external comment ID that was published, retries publication, or
+skips the pending comment. `unbind` stops reconciliation permanently while
+preserving the binding's history.
 
 ## Events and audit
 

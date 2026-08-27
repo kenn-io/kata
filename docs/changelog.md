@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-08-20
+last_edited: 2026-08-27
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,8 +9,35 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+## 0.16.0
+<small>2026-08-27</small>
+
+kata 0.16.0 connects issues to work that lives outside kata: external root
+bridges backed by a public connector protocol, close evidence for work
+finished outside any repository, and per-project merge imports. Auto-started
+daemons can now shut themselves down when idle.
+
 **New features**
 
+- Added external root bridges. A connector process configured through
+  `[[connector]]` in `<KATA_HOME>/config.toml` binds a kata issue to one root
+  object in an external system. The `kata connector` and `kata bridge`
+  commands and the MCP `kata.load_external_roots` tools cover discovery, field
+  mapping, and the bind, pause, resume, reconcile, and unbind lifecycle. The
+  external root owns the bound title and body; inbound comments and lifecycle
+  sync are on by default, and outbound comments are opt-in per binding.
+- Published the versioned `kata.connector.v1` connector protocol with a public
+  Go SDK and a language-neutral conformance kit, so provider credentials and
+  APIs stay inside the connector executable.
+- Added `external:<account>` close evidence for `done` work finished by email,
+  phone, or another channel that produces no repository artifact. The weaker
+  claim stays visible in `kata audit closes`, and a supplied-but-disallowed
+  evidence type is now reported instead of the missing-evidence error.
+- Added `kata import --merge`, which restores a one-project JSONL snapshot
+  into an existing SQLite or PostgreSQL database without touching other
+  projects. Merge imports preserve project and issue UIDs, refuse UID
+  collisions, skip cross-project links, and keep imported federation
+  authority disabled.
 - Added opt-in idle shutdown for implicitly started owner-local daemons. Active
   requests and finite background work drain safely, while running stdio or
   streamable-HTTP MCP server processes renew the advertised timeout
@@ -19,10 +46,47 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 **Improvements**
 
-- Daemon stop now drains accepted hook jobs instead of dropping them, and
-  cancels in-flight hooks early enough to exit cleanly inside the 25-second
+- Capped embedding provider requests by an aggregate token budget through the
+  optional `model_context_tokens` and `max_batch_tokens` settings. Deployments
+  that omit them keep count-only batching.
+- Validated plaintext daemon targets when the client is built: a non-loopback
+  plaintext target without the required private-network trust or
+  `allow_insecure` opt-in now fails before any request is sent.
+- Resolved `kata wait` target state and CLI output mode once per command, so
+  error reporting uses the same output mode as normal execution.
+- Let JSON storage and API types define their own OpenAPI shapes, and mirrored
+  deprecated federation `claim` fields from the canonical `lease` fields at
+  one response boundary. Committed schemas and generated clients are
+  unchanged.
+- Moved the remaining web actions onto shared Kit UI buttons and theme state
+  so disabled controls keep readable contrast in dark mode.
+- Made daemon stop drain accepted hook jobs instead of dropping them, and
+  cancel in-flight hooks early enough to exit cleanly inside the 25-second
   shutdown budget. `kata daemon restart` waits up to 30 seconds for the old
   process to exit.
+
+**Bug fixes**
+
+- Restored owner-local loopback sessions for local `kata ui` tabs when the
+  daemon has a static API token, instead of falling into token login, and
+  omitted bodies from GET and HEAD responses so Firefox loads the initial
+  snapshot.
+- Kept the task list primary at narrow widths: the sidebar moves into a drawer
+  below 700px and filter controls wrap to the list pane width.
+
+**Acknowledgements**
+
+- Thanks to [Rusty Shackleford](https://github.com/salmonumbrella) for the
+  external root bridges and connector protocol, external close evidence,
+  per-project merge import, and the daemon credential and web action
+  improvements.
+- Thanks to [codyw912](https://github.com/codyw912) for idle shutdown of
+  auto-started daemons.
+- Thanks to [Wes McKinney](https://github.com/wesm) for the Firefox web UI
+  startup coverage.
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for the
+  local web UI access fix and narrow layouts, embedding token budgets, and the
+  Go 1.27 upgrade.
 
 ## 0.15.1
 <small>2026-08-20</small>

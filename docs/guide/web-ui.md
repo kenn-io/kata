@@ -52,6 +52,10 @@ and label. Parent and child issues can be expanded inline, and the column
 picker controls the visible fields. Collection, scope, filter, and
 selected-issue state stays in the URL, making the current view bookmarkable.
 
+At narrow window widths the task list stays primary: below 700px the sidebar
+moves into a drawer, and filter controls wrap to fit the list pane, including
+side-by-side detail layouts.
+
 ![Kata Web UI showing a synthetic project and issue hierarchy](/assets/screenshots/web-ui/workspace.png)
 
 ## Manage an issue

@@ -147,8 +147,9 @@ Close with:
 
 - a reason;
 - a substantive message;
-- typed evidence such as commit SHA, test command, PR URL, reviewed path, or
-  no-change audit note.
+- typed evidence such as commit SHA, test command, PR URL, reviewed path,
+  external account for work finished outside any repository, or no-change
+  audit note.
 
 If the work is not complete, keep the issue open and add a comment explaining
 what was attempted and what remains.
