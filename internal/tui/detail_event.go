@@ -306,6 +306,8 @@ func formatEvidenceItem(m map[string]any) string {
 		return evidenceLabel(t, stringField(m, "url"))
 	case "test":
 		return evidenceLabel(t, stringField(m, "command"))
+	case "external":
+		return evidenceLabel(t, stringField(m, "account"))
 	case "no-change-audit":
 		return evidenceLabel(t, stringField(m, "rationale"))
 	case "duplicate-of", "superseded-by":

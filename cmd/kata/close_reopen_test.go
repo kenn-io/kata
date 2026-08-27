@@ -41,6 +41,22 @@ func TestClose_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Reminder:")
 }
 
+func TestClose_AgentOutputExternalEvidence(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "coordination task")
+	account := "arranged by email with the venue; calendar hold sent"
+
+	out := runCLI(t, env, dir, "--agent", "close", ref,
+		"--done",
+		"--message", "Arranged the meeting by email and sent the calendar hold.",
+		"--evidence", "external:"+account)
+
+	assert.Contains(t, out, "Status: closed")
+	assert.Contains(t, out, `Evidence: "external:`+account+`"`)
+
+	audit := runCLI(t, env, dir, "audit", "closes", "--json")
+	assert.Contains(t, audit, `"evidence_types":["external"]`)
+}
+
 func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 

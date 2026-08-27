@@ -1119,6 +1119,7 @@ func (e EventEnvelope) Validate() error {
 }
 
 type Evidence struct {
+	Account   *string  `json:"account,omitempty"`
 	Command   *string  `json:"command,omitempty"`
 	IssueRef  *string  `json:"issue_ref,omitempty"`
 	Paths     []string `json:"paths,omitempty"`

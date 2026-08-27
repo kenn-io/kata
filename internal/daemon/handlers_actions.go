@@ -268,6 +268,7 @@ func evidenceToDB(in []api.Evidence) []db.Evidence {
 			URL:       e.URL,
 			Command:   e.Command,
 			Paths:     e.Paths,
+			Account:   e.Account,
 			Rationale: e.Rationale,
 			IssueRef:  e.IssueRef,
 		}

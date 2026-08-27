@@ -18,6 +18,7 @@ const (
 	EvidencePR            EvidenceType = "pr"
 	EvidenceTest          EvidenceType = "test"
 	EvidenceReviewedPaths EvidenceType = "reviewed-paths"
+	EvidenceExternal      EvidenceType = "external"
 	EvidenceNoChangeAudit EvidenceType = "no-change-audit"
 	EvidenceDuplicateOf   EvidenceType = "duplicate-of"
 	EvidenceSupersededBy  EvidenceType = "superseded-by"
@@ -33,6 +34,7 @@ type Evidence struct {
 	URL       string   `json:"url,omitempty"`       // pr
 	Command   string   `json:"command,omitempty"`   // test
 	Paths     []string `json:"paths,omitempty"`     // reviewed-paths
+	Account   string   `json:"account,omitempty"`   // external
 	Rationale string   `json:"rationale,omitempty"` // no-change-audit
 	IssueRef  string   `json:"issue_ref,omitempty"` // duplicate-of, superseded-by
 }
@@ -42,6 +44,7 @@ var validEvidenceTypes = map[EvidenceType]struct{}{
 	EvidencePR:            {},
 	EvidenceTest:          {},
 	EvidenceReviewedPaths: {},
+	EvidenceExternal:      {},
 	EvidenceNoChangeAudit: {},
 	EvidenceDuplicateOf:   {},
 	EvidenceSupersededBy:  {},

@@ -1383,7 +1383,7 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	typeName := strings.TrimSpace(input.Type)
 	allowed := map[string]bool{
 		"commit": true, "pr": true, "test": true, "reviewed-paths": true,
-		"no-change-audit": true, "duplicate-of": true, "superseded-by": true,
+		"external": true, "no-change-audit": true, "duplicate-of": true, "superseded-by": true,
 	}
 	if !allowed[typeName] {
 		return generated.Evidence{}, fmt.Errorf("unknown type %q", typeName)
@@ -1393,6 +1393,7 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	result.Sha = optionalString(input.SHA)
 	result.URL = optionalString(input.URL)
 	result.Command = optionalString(input.Command)
+	result.Account = optionalString(input.Account)
 	result.Rationale = optionalString(input.Rationale)
 	if input.IssueRef != "" {
 		target, err := h.relationshipRef(ctx, project, input.IssueRef)
@@ -1417,6 +1418,10 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	case "reviewed-paths":
 		if len(result.Paths) == 0 {
 			return generated.Evidence{}, errors.New("reviewed-paths evidence requires paths")
+		}
+	case "external":
+		if result.Account == nil {
+			return generated.Evidence{}, errors.New("external evidence requires account")
 		}
 	case "no-change-audit":
 		if result.Rationale == nil {

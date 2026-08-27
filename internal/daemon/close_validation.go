@@ -62,6 +62,10 @@ func validateEvidenceShape(index int, e api.Evidence) error {
 				return fmt.Errorf("evidence[%d] reviewed-paths entry %d is empty", index, j)
 			}
 		}
+	case api.EvidenceExternal:
+		if strings.TrimSpace(e.Account) == "" {
+			return fmt.Errorf("evidence[%d] external requires non-empty account", index)
+		}
 	case api.EvidenceNoChangeAudit:
 		if strings.TrimSpace(e.Rationale) == "" {
 			return fmt.Errorf("evidence[%d] no-change-audit requires non-empty rationale", index)
@@ -163,16 +167,18 @@ func ValidateCloseInput(reason, message string, evidence []api.Evidence) error {
 
 	switch reason {
 	case "done":
+		if err := onlyAllow(api.EvidenceCommit, api.EvidencePR,
+			api.EvidenceTest, api.EvidenceReviewedPaths, api.EvidenceExternal); err != nil {
+			return err
+		}
 		if !has(api.EvidenceCommit) && !has(api.EvidencePR) &&
-			!has(api.EvidenceTest) && !has(api.EvidenceReviewedPaths) {
+			!has(api.EvidenceTest) && !has(api.EvidenceReviewedPaths) &&
+			!has(api.EvidenceExternal) {
 			return fmt.Errorf("evidence required for reason=done. " +
-				"Accepted: commit:<sha>, pr:<url>, test:<cmd>, reviewed-paths:<path>. " +
+				"Accepted: commit:<sha>, pr:<url>, test:<cmd>, reviewed-paths:<path>, " +
+				"external:<account>. " +
 				"If the work is not actually complete, do not close — use " +
 				"`kata edit <ref> --label needs-review` and comment what remains")
-		}
-		if err := onlyAllow(api.EvidenceCommit, api.EvidencePR,
-			api.EvidenceTest, api.EvidenceReviewedPaths); err != nil {
-			return err
 		}
 	case "wontfix":
 		if len(evidence) > 0 {

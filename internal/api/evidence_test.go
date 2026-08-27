@@ -36,6 +36,16 @@ func TestEvidence_UnmarshalDuplicateOf(t *testing.T) {
 	assert.Equal(t, "abc4", e.IssueRef)
 }
 
+func TestEvidence_UnmarshalExternalPreservesAccount(t *testing.T) {
+	in := `{"type":"external","account":"arranged by email; calendar hold sent"}`
+	var e Evidence
+	require.NoError(t, json.Unmarshal([]byte(in), &e))
+
+	bs, err := json.Marshal(e)
+	require.NoError(t, err)
+	assert.JSONEq(t, in, string(bs))
+}
+
 func TestEvidence_UnmarshalUnknownTypeIsError(t *testing.T) {
 	in := `{"type":"bogus"}`
 	var e Evidence
