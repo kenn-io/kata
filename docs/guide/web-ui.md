@@ -60,9 +60,12 @@ side-by-side detail layouts.
 
 ## Manage an issue
 
-Select an issue to open its detail panel. The browser renders Markdown in the
-description and comments and can update the title, description, schedule, due
-date, owner, priority, labels, and project. It also supports:
+Select an issue to open its detail panel. The panel opens as a read-only view
+of the description, properties, checklist, links, comments, recurrence, and
+events, with Markdown rendered in the description and comments. **Edit issue**
+switches the panel to the editor, which can update the title, description,
+schedule, due date, owner, priority, labels, and project, and **Done editing**
+returns to the read-only view. The editor also supports:
 
 - adding, completing, and removing checklist items;
 - adding comments with issue-reference completion;
