@@ -105,6 +105,29 @@ jobs:
           KATA_TEST_POSTGRES_AUTO_CONTAINER: "0"
         run: env -u KATA_AUTH_TOKEN go test -p 1 ./...
 
+  api-breaking:
+    name: OpenAPI breaking changes
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
+
+      - name: Check for breaking API contract changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: make api-breaking BASE_REF="origin/$BASE_REF"
+
   postgres:
     name: PostgreSQL ${{ matrix.postgres }} conformance
     runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
