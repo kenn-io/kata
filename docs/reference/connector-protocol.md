@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-23
+last_edited: 2026-08-27
 ---
 
 # Connector author contract
@@ -8,12 +8,12 @@ Kata external-root connectors are executables that implement the versioned
 `kata.connector.v1` JSON protocol. Provider-specific credentials and APIs stay
 inside the connector.
 
-The current implementation provides the public protocol SDK and conformance kit
-plus internal process-client building blocks. Daemon configuration, durable
-bindings, synchronization, and API/CLI administration are not implemented yet.
-Do not add connector sections to `<KATA_HOME>/config.toml`; the daemon rejects
-unknown configuration keys. Those integration surfaces will be documented when
-they are available.
+This page is the contract for connector authors: the wire protocol, the public
+Go SDK, and the conformance kit. Operators configure connector instances with
+`[[connector]]` tables in `<KATA_HOME>/config.toml` (see the
+[configuration reference](configuration.md)) and manage bindings with the
+`kata connector` and `kata bridge` commands (see the
+[CLI reference](cli.md#external-root-bridges)).
 
 ## Process and framing
 
@@ -53,9 +53,8 @@ or `error`:
 Errors must be safe, bounded operator text: a lowercase structured code and a
 message without credentials, absolute paths, command lines, stack traces,
 standard-output/error dumps, or control characters. The process client redacts
-values supplied through its explicit environment mapping, but no daemon
-configuration exists for that mapping yet. The connector remains responsible
-for returning safe errors.
+values supplied through the instance's explicit `connector.env` mapping. The
+connector remains responsible for returning safe errors.
 
 ## Methods and capabilities
 
@@ -152,5 +151,4 @@ subsequent unchanged reads.
 - Kata planning-field mappings are limited to `scheduled_on` and `deadline_on`
   in protocol v1.
 - Kata uses one process per RPC for isolation and bounded cleanup.
-- The browser UI has no bridge indicator yet. Connector and bridge
-  administration through the daemon API and CLI is also deferred.
+- The browser UI has no bridge indicator yet.

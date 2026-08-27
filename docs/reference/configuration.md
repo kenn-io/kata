@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-20
+last_edited: 2026-08-27
 ---
 
 # Configuration
@@ -21,7 +21,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
-| `KATA_TRUST_PRIVATE_NETWORK` | Set to `1` to permit trusted plaintext bearer use on private non-loopback HTTP. |
+| `KATA_TRUST_PRIVATE_NETWORK` | Set to `1` to permit trusted plaintext bearer use on private non-loopback HTTP. Without it (or `allow_insecure`), a plaintext non-loopback target fails when the client is built, before any request is sent. |
 | `KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES` | Set to `1` to permit tokenless writes and event streams on a literal private-IP daemon bind. |
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
 | `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
@@ -342,6 +342,36 @@ Postgres DSNs may carry credentials. Runtime redaction strips userinfo and
 query parameters before a DSN appears in daemon metadata, health output, import
 output, errors, or per-database namespace hashing. Use environment variables or
 secret-managed configuration rather than committing a credential-bearing DSN.
+
+### Connector instances
+
+Each `[[connector]]` table configures one external-root connector process for
+[issue bridges](cli.md#external-root-bridges):
+
+```toml
+[[connector]]
+id = "notes"
+command = "/usr/local/bin/kata-connector-notes"
+args = ["--workspace-mode"]
+timeout_seconds = 30
+
+[connector.env]
+NOTES_TOKEN = "KATA_NOTES_TOKEN"
+
+[connector.settings]
+workspace = "example-workspace"
+```
+
+`id` is the lowercase instance name used by `kata connector` and
+`kata bridge --connector`; it must be unique. `command` is the absolute path of
+the connector executable and `args` its fixed arguments. `timeout_seconds`
+bounds each connector call (omit it for the default). `connector.env` maps
+child environment variable names to daemon environment variable names; only
+these variables reach the connector process, and their values are redacted from
+connector errors as secrets. `connector.settings` is non-secret JSON-compatible
+configuration passed to the connector on every call. The daemon validates all
+of this at startup and starts its reconciliation workers only when at least one
+connector is configured.
 
 ### Declarative federation mappings
 

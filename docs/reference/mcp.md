@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-20
+last_edited: 2026-08-27
 ---
 
 # Model Context Protocol server
@@ -131,10 +131,10 @@ projects.
 
 ## Progressive tool catalog
 
-The initial catalog contains 13 read-only section loaders. Call the applicable
+The initial catalog contains 14 read-only section loaders. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
-typed tools needed for the current task instead of placing all 55 tools in the
+typed tools needed for the current task instead of placing all 67 tools in the
 model context at startup.
 
 | Loader | Detailed tools |
@@ -151,7 +151,12 @@ model context at startup.
 | `kata.load_recurrence` | `kata.recurrences`, `kata.recurrence_update`, `kata.recurrence_delete` |
 | `kata.load_activity` | `kata.digest`, `kata.events` |
 | `kata.load_import` | `kata.import_issues` |
+| `kata.load_external_roots` | `kata.connectors`, `kata.connector_fields`, `kata.connector_field_map`, `kata.connector_field_unmap`, `kata.bridge_bind`, `kata.bridge_show`, `kata.bridge_reconcile`, `kata.bridge_pause`, `kata.bridge_resume`, `kata.bridge_resolve_field`, `kata.bridge_resolve_comment`, `kata.bridge_unbind` |
 | `kata.load_storage` | `kata.storage_export`, `kata.storage_import` when host storage is enabled |
+
+Bridge tools operate on issues inside the startup project scope;
+`kata.connector_field_map` and `kata.connector_field_unmap` require the
+`--all-projects` daemon-wide scope.
 
 Loaders are idempotent. A loader reports `available=false` when its optional
 startup dependency is absent. Loaded tools keep their individual input and
