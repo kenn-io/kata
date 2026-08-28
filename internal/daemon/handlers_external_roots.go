@@ -26,14 +26,14 @@ var externalRootOperationIDs = map[string]bool{
 	"resolveExternalComment": true, "unbindExternalRoot": true,
 }
 
-func withExternalRootAdministration(humaAPI huma.API) {
+func withExternalRootAdministration(humaAPI huma.API, allowIdentityConnectorAdministration bool) {
 	humaAPI.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
 		operation := ctx.Operation()
 		if operation == nil || !externalRootOperationIDs[operation.OperationID] {
 			next(ctx)
 			return
 		}
-		if err := ensureExternalRootAdministrationAllowed(ctx.Context()); err != nil {
+		if err := ensureExternalRootAdministrationAllowed(ctx.Context(), allowIdentityConnectorAdministration); err != nil {
 			writeHostAccessError(ctx, http.StatusForbidden, "integration_administration_forbidden", "connector administration is unavailable to this principal")
 			return
 		}
@@ -41,11 +41,14 @@ func withExternalRootAdministration(humaAPI huma.API) {
 	})
 }
 
-func ensureExternalRootAdministrationAllowed(ctx context.Context) error {
+func ensureExternalRootAdministrationAllowed(ctx context.Context, allowIdentityConnectorAdministration bool) error {
 	if webSessionAuthenticated(ctx) || insecureReadonlyRequest(ctx) || unauthenticatedPrivateNetworkRequest(ctx) {
 		return api.NewError(http.StatusForbidden, "integration_administration_forbidden", "connector administration is unavailable to this principal", "", nil)
 	}
 	if principal, ok := PrincipalFromContext(ctx); ok {
+		if principal.Kind == PrincipalDBToken && allowIdentityConnectorAdministration {
+			return nil
+		}
 		switch principal.Kind {
 		case PrincipalDBToken, PrincipalBootstrap, PrincipalTrustedProxy,
 			PrincipalTrustedProxyAbsent, PrincipalWebLocal:

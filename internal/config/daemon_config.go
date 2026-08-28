@@ -236,11 +236,14 @@ func NormalizeGitHubSyncConfig(cfg GitHubSyncConfig) (GitHubSyncConfig, error) {
 // KATA_TRUST_PRIVATE_NETWORK=1 is equivalent to trust_private_network = true.
 // KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES=1 is equivalent to
 // allow_unauthenticated_private_network_writes = true.
+// KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION=1 is equivalent to
+// allow_identity_connector_administration = true.
 type AuthConfig struct {
 	Token                                    string      `toml:"token"`
 	TrustPrivateNetwork                      bool        `toml:"trust_private_network"`
 	AllowUnauthenticatedPrivateNetworkWrites bool        `toml:"allow_unauthenticated_private_network_writes"`
 	RequireTokenIdentity                     bool        `toml:"require_token_identity"`
+	AllowIdentityConnectorAdministration     bool        `toml:"allow_identity_connector_administration"`
 	Proxy                                    ProxyConfig `toml:"proxy"`
 }
 
@@ -707,6 +710,9 @@ func applyDaemonConfigEnv(cfg *DaemonConfig) {
 	}
 	if EnvTruthy("KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES") {
 		cfg.Auth.AllowUnauthenticatedPrivateNetworkWrites = true
+	}
+	if EnvTruthy("KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION") {
+		cfg.Auth.AllowIdentityConnectorAdministration = true
 	}
 	if v := strings.TrimSpace(os.Getenv("KATA_TRUSTED_ACTOR_HEADER")); v != "" {
 		cfg.Auth.Proxy.TrustedActorHeader = v

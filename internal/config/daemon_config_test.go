@@ -1055,6 +1055,42 @@ func TestReadDaemonConfig_ReadsRequireTokenIdentity(t *testing.T) {
 	assert.True(t, cfg.Auth.RequireTokenIdentity)
 }
 
+func TestReadDaemonConfig_ReadsAllowIdentityConnectorAdministration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[auth]\nallow_identity_connector_administration = true\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.Auth.AllowIdentityConnectorAdministration)
+}
+
+func TestReadDaemonConfig_AllowIdentityConnectorAdministrationDefaultsDisabled(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION", "")
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.False(t, cfg.Auth.AllowIdentityConnectorAdministration)
+}
+
+func TestReadDaemonConfig_AllowIdentityConnectorAdministrationEnvOverridesTOML(t *testing.T) {
+	for _, value := range []string{"1", "true"} {
+		t.Run(value, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION", value)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+				[]byte("[auth]\nallow_identity_connector_administration = false\n"), 0o600))
+
+			cfg, err := config.ReadDaemonConfig()
+			require.NoError(t, err)
+			assert.True(t, cfg.Auth.AllowIdentityConnectorAdministration)
+		})
+	}
+}
+
 func TestReadDaemonConfig_AuthTrustPrivateNetworkEnvOverridesTOML(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
