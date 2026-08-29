@@ -95,33 +95,41 @@ func TestListConnectorsResponseDoesNotExposeExecutableConfiguration(t *testing.T
 	assert.NotContains(t, rr.Body.String(), "environment")
 }
 
-func TestExternalRootAdministrationRejectsBrowserAndReadonlyPrincipals(t *testing.T) {
-	for _, ctx := range []context.Context{
-		withWebSession(context.Background(), Principal{Kind: PrincipalWebLocal, Actor: "operator"}),
-		withWebSession(context.Background(), Principal{Kind: PrincipalDBToken, Actor: "operator", TokenID: 7}),
-		WithPrincipal(context.Background(), Principal{Kind: PrincipalWebLocal, Actor: "operator"}),
-		WithPrincipal(context.Background(), Principal{Kind: PrincipalDBToken, Actor: "operator", TokenID: 7}),
-		WithPrincipal(context.Background(), Principal{Kind: PrincipalBootstrap}),
-		WithPrincipal(context.Background(), Principal{Kind: PrincipalTrustedProxy, Actor: "operator"}),
-		WithPrincipal(context.Background(), Principal{Kind: PrincipalTrustedProxyAbsent}),
-		withInsecureReadonlyRequest(context.Background()),
-	} {
-		err := ensureExternalRootAdministrationAllowed(ctx)
-		require.Error(t, err)
-		var apiErr interface{ GetStatus() int }
-		if errors.As(err, &apiErr) {
-			assert.Equal(t, http.StatusForbidden, apiErr.GetStatus())
-		}
+func TestExternalRootAdministrationPolicy(t *testing.T) {
+	dbPrincipal := Principal{Kind: PrincipalDBToken, Actor: "operator", TokenID: 7}
+	tests := []struct {
+		name          string
+		ctx           context.Context
+		allowIdentity bool
+		wantAllowed   bool
+	}{
+		{name: "owner local", ctx: context.Background(), wantAllowed: true},
+		{name: "static token", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalStaticToken}), wantAllowed: true},
+		{name: "host", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalHost, Actor: "operator", Subject: "example-service"}), wantAllowed: true},
+		{name: "DB token default", ctx: WithPrincipal(context.Background(), dbPrincipal)},
+		{name: "DB token opted in", ctx: WithPrincipal(context.Background(), dbPrincipal), allowIdentity: true, wantAllowed: true},
+		{name: "bootstrap opted in", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalBootstrap}), allowIdentity: true},
+		{name: "browser local opted in", ctx: withWebSession(context.Background(), Principal{Kind: PrincipalWebLocal, Actor: "operator"}), allowIdentity: true},
+		{name: "browser DB token opted in", ctx: withWebSession(context.Background(), dbPrincipal), allowIdentity: true},
+		{name: "web local principal opted in", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalWebLocal, Actor: "operator"}), allowIdentity: true},
+		{name: "trusted proxy opted in", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalTrustedProxy, Actor: "operator"}), allowIdentity: true},
+		{name: "missing proxy actor opted in", ctx: WithPrincipal(context.Background(), Principal{Kind: PrincipalTrustedProxyAbsent}), allowIdentity: true},
+		{name: "insecure readonly opted in", ctx: withInsecureReadonlyRequest(context.Background()), allowIdentity: true},
+		{name: "unauthenticated private network opted in", ctx: withUnauthenticatedPrivateNetworkRequest(context.Background()), allowIdentity: true},
 	}
-}
 
-func TestExternalRootAdministrationAllowsOwnerAndIntegrationPrincipals(t *testing.T) {
-	for _, ctx := range []context.Context{
-		context.Background(),
-		WithPrincipal(context.Background(), Principal{Kind: PrincipalStaticToken}),
-		WithPrincipal(context.Background(), Principal{Kind: PrincipalHost, Subject: "example-service"}),
-	} {
-		require.NoError(t, ensureExternalRootAdministrationAllowed(ctx))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ensureExternalRootAdministrationAllowed(test.ctx, test.allowIdentity)
+			if test.wantAllowed {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var apiErr interface{ GetStatus() int }
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, http.StatusForbidden, apiErr.GetStatus())
+		})
 	}
 }
 

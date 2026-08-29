@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-27
+last_edited: 2026-08-29
 ---
 
 # CLI reference
@@ -519,8 +519,7 @@ kata connector field unmap <instance> <kata-field>
 `kata connector list` reports the configured instances, `status` shows one
 instance's safe status without credentials, and the `field` subcommands
 inspect and manage bidirectional field mappings. Kata planning-field mappings
-are limited to `scheduled_on` and `deadline_on`. Field mapping requires
-daemon-wide authority.
+are limited to `scheduled_on` and `deadline_on`.
 
 ```sh
 kata bridge bind <issue> --connector <instance> --external <locator> [--publish-comments]
@@ -532,6 +531,11 @@ kata bridge resolve-field <issue> <kata-field> --use kata|external
 kata bridge resolve-comment <issue> --adopt <external-comment-id> | --retry | --skip
 kata bridge unbind <issue>
 ```
+
+Every command in this section requires daemon-wide connector administration.
+In token identity mode, DB-backed tokens have this authority only when
+`allow_identity_connector_administration` is enabled; see the
+[configuration reference](configuration.md#token-identity-mode).
 
 `bind` attaches an issue to an existing external root that the connector
 resolves from `--external`. While a binding is active, the external root owns

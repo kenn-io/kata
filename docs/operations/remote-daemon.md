@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-27
+last_edited: 2026-08-29
 ---
 
 # Remote daemon
@@ -223,6 +223,20 @@ In identity mode:
 - attributed writes require a DB-backed token;
 - the daemon derives the actor from the token and ignores body-provided actor
   strings for mutations.
+
+Connector administration is denied to database-backed tokens by default.
+Enable it only when every active identity token should administer connectors
+and external-root bridges across the daemon. Add this setting to the existing
+`[auth]` table:
+
+```toml
+allow_identity_connector_administration = true
+```
+
+The environment equivalent is
+`KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION=1`. The identity-mode bootstrap
+token, browser sessions, and trusted-proxy principals still cannot administer
+connectors.
 
 The `kata federation enroll` CLI workflow also uses normal direct-client auth
 when it talks to the hub. Run it with a DB-backed personal token; the generated

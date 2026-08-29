@@ -31,6 +31,99 @@ func testExternalRootCommand(t *testing.T) string {
 	return filepath.Join(t.TempDir(), "example-connector")
 }
 
+func TestExternalRootIdentityAdministrationRequiresOptIn(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		enabled bool
+		want    int
+	}{
+		{name: "default denied", want: http.StatusForbidden},
+		{name: "opted in", enabled: true, want: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			database := openTestDB(t)
+			_, _, err := database.db.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+				PlaintextToken: "identity-token", Actor: "operator", AdminActor: db.BootstrapActor,
+			})
+			require.NoError(t, err)
+			ts := startTestServer(t, daemon.ServerConfig{
+				DB: database.db,
+				Auth: config.AuthConfig{
+					Token: "bootstrap-token", RequireTokenIdentity: true,
+					AllowIdentityConnectorAdministration: test.enabled,
+				},
+			})
+
+			status, body := requestExternalRootJSONWithBearer(
+				t, ts.URL, http.MethodGet, "/api/v1/connectors", nil, "identity-token",
+			)
+			assert.Equal(t, test.want, status, string(body))
+			if !test.enabled {
+				assert.Contains(t, string(body), `"integration_administration_forbidden"`)
+			}
+		})
+	}
+}
+
+func TestExternalRootIdentityAdministrationUsesTokenActor(t *testing.T) {
+	database := openTestDB(t)
+	project, err := database.db.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := database.db.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Local title", Author: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = database.db.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "identity-token", Actor: "operator", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
+	client := &daemonExternalRootClient{
+		description: connector.Description{
+			ConnectorID: "example.connector", DisplayName: "Example connector",
+			Protocol: connector.ProtocolVersion, AccountIdentity: "account-1",
+		},
+		root: connector.Root{
+			Key: "root-1", IdentityKey: "account-1", Title: "External title",
+			State: "open", Revision: "revision-1", UpdatedAt: now, ObservedAt: now,
+		},
+	}
+	registry, err := rootbridge.NewRegistry(t.Context(), []config.ConnectorConfig{{
+		ID: "example-connector", Command: testExternalRootCommand(t),
+	}}, func(config.ConnectorConfig) connectorclient.Client { return client })
+	require.NoError(t, err)
+	reconciler := rootbridge.NewReconciler(database.db, registry, rootbridge.ReconcilerConfig{Now: func() time.Time { return now }})
+	service := rootbridge.NewService(database.db, registry,
+		func(ctx context.Context, bindingID int64, claimToken string) ([]db.Event, error) {
+			result, reconcileErr := reconciler.Run(ctx, bindingID, rootbridge.RunOptions{ClaimToken: claimToken})
+			return result.Events, reconcileErr
+		})
+	ts := startTestServer(t, daemon.ServerConfig{
+		DB: database.db, StartedAt: now, ExternalRootRegistry: registry,
+		ExternalRootService: service, ExternalRootReconciler: reconciler,
+		Auth: config.AuthConfig{
+			Token: "bootstrap-token", RequireTokenIdentity: true,
+			AllowIdentityConnectorAdministration: true,
+		},
+	})
+
+	bridgePath := fmt.Sprintf("/api/v1/projects/%d/issues/%s/bridge", project.ID, issue.ShortID)
+	status, body := requestExternalRootJSONWithBearer(t, ts.URL, http.MethodPost, bridgePath, map[string]any{
+		"connector": "example-connector", "external": "opaque-locator", "actor": "mallory",
+	}, "identity-token")
+	require.Equal(t, http.StatusOK, status, string(body))
+	events, err := database.db.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+	require.NoError(t, err)
+	for _, event := range events {
+		if event.Type == "issue.external_root_bound" {
+			assert.Equal(t, "operator", event.Actor)
+			return
+		}
+	}
+	t.Fatal("issue.external_root_bound event not found")
+}
+
 func TestExternalRootHandlersFullLifecycleAndDelivery(t *testing.T) {
 	database := openTestDB(t)
 	project, err := database.db.CreateProject(t.Context(), "example-project")
@@ -522,6 +615,10 @@ func TestExternalRootHandlersClassifyConnectorAndInternalFailures(t *testing.T) 
 }
 
 func requestExternalRootJSON(t *testing.T, baseURL, method, path string, body any) (int, []byte) {
+	return requestExternalRootJSONWithBearer(t, baseURL, method, path, body, "")
+}
+
+func requestExternalRootJSONWithBearer(t *testing.T, baseURL, method, path string, body any, bearer string) (int, []byte) {
 	t.Helper()
 	var reader io.Reader
 	if body != nil {
@@ -533,6 +630,9 @@ func requestExternalRootJSON(t *testing.T, baseURL, method, path string, body an
 	require.NoError(t, err)
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
+	}
+	if bearer != "" {
+		request.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
