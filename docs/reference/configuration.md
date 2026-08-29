@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-27
+last_edited: 2026-08-29
 ---
 
 # Configuration
@@ -23,6 +23,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
 | `KATA_TRUST_PRIVATE_NETWORK` | Set to `1` to permit trusted plaintext bearer use on private non-loopback HTTP. Without it (or `allow_insecure`), a plaintext non-loopback target fails when the client is built, before any request is sent. |
 | `KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES` | Set to `1` to permit tokenless writes and event streams on a literal private-IP daemon bind. |
+| `KATA_ALLOW_IDENTITY_CONNECTOR_ADMINISTRATION` | Set to `1` to let database-backed identity tokens administer connectors and external-root bridges. Off by default. |
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
 | `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
@@ -502,6 +503,22 @@ Lost tokens must be revoked and recreated.
 In identity mode, the bootstrap/admin token can manage tokens and perform
 reads, but attributed writes require a DB-backed token. The daemon derives the
 actor from that token.
+
+Connector administration is off for DB-backed tokens by default. To grant it,
+add this setting to the same `[auth]` table:
+
+```toml
+allow_identity_connector_administration = true
+```
+
+Every active DB-backed token can then use all connector and external-root
+bridge routes across the daemon. For attributed mutations, the token actor
+overrides any `actor` in the request body.
+
+This setting changes only DB-backed token authority. The identity-mode
+bootstrap token, browser sessions, trusted-proxy principals, insecure read-only
+requests, and unauthenticated private-network requests still cannot administer
+connectors.
 
 ## Close throttle
 
