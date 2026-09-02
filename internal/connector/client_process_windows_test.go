@@ -3,6 +3,7 @@
 package connector
 
 import (
+	"errors"
 	"os"
 	"testing"
 
@@ -32,6 +33,9 @@ type processClientHelperObservation struct {
 func observeProcessClientHelper(t *testing.T, pid int) processClientHelperObservation {
 	t.Helper()
 	process, err := os.FindProcess(pid)
+	if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+		return processClientHelperObservation{}
+	}
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = process.Release() })
 	return processClientHelperObservation{process: process}
@@ -39,6 +43,9 @@ func observeProcessClientHelper(t *testing.T, pid int) processClientHelperObserv
 
 func requireProcessClientHelperGone(t *testing.T, observed processClientHelperObservation) {
 	t.Helper()
+	if observed.process == nil {
+		return
+	}
 	var waitResult uint32
 	var waitErr error
 	require.NoError(t, observed.process.WithHandle(func(handle uintptr) {

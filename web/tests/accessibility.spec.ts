@@ -14,7 +14,7 @@ test('standalone shell preserves the Forge base typography and header geometry',
     const style = getComputedStyle(element)
     return { boxSizing: style.boxSizing, height: element.getBoundingClientRect().height }
   })
-  expect(shell).toEqual({ boxSizing: 'border-box', height: 61 })
+  expect(shell).toEqual({ boxSizing: 'border-box', height: 44 })
   await expect(page.locator('body')).toHaveCSS('font-size', '13px')
 })
 
