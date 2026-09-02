@@ -14,7 +14,7 @@ TCP.
 ## Required environment
 
 - `KATA_AUTH_TOKEN=<token>` plus `KATA_TRUST_PRIVATE_NETWORK=1`. Without
-  both, the daemon refuses the non-loopback bind — the platform
+  both, the daemon refuses the non-loopback bind: the platform
   terminates TLS upstream, so the operator must explicitly assert trust
   in the container's network path.
 - `KATA_HOME` must point at a writable path (e.g. `/tmp/kata`); the

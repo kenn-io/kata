@@ -11,10 +11,10 @@ for machine readers.
 
 ## Product
 
-- [Product overview](https://katatracker.com/index.md): what kata is — speed,
+- [Product overview](https://katatracker.com/index.md): what kata is; speed,
   memory, coordination, discipline, supervision, interfaces, sync, reach
 - [The kata guide](https://katatracker.com/guide.md): the nine-move operating
-  loop — bind, seed, claim, note, coordinate, close, supervise, sync, own
+  loop of bind, seed, claim, note, coordinate, close, supervise, sync, own
 
 ## Docs
 

@@ -27,7 +27,7 @@ are the supported way to obtain the schema.
 
 ## What the schema is
 
-A **per-release snapshot** of the daemon's current HTTP API — a faithful
+A **per-release snapshot** of the daemon's current HTTP API: a faithful
 description of the routes and wire types as they exist at that commit. It is
 useful for client generation and review.
 
@@ -75,7 +75,7 @@ Three distinct version fields appear here; they answer different questions:
 
 | Field | Meaning |
 | --- | --- |
-| `api_schema_version` | The HTTP API contract version — match this against the schema you generated your client from. |
+| `api_schema_version` | The HTTP API contract version; match this against the schema you generated your client from. |
 | `schema_version` | The database/storage schema version (`meta.schema_version`), an internal storage concern. |
 | `version` | The daemon build version. |
 
@@ -115,11 +115,11 @@ and decline to render issue detail.
 | `0.9.0` | Added owner, label, exclusion, and metadata filters to the cross-project issue list. Global list rows now include `project_name`. |
 | `0.8.0` | Added repeatable `label` and `exclude_label` query parameters to project-scoped search. It also identifies daemons that support filtered global ready queries. |
 | `0.7.0` | Added transactional federation enrollment rotation, idempotent replay semantics for caller-supplied enrollment tokens, and the optional `federation_config` health block used by startup reconciliation. |
-| `0.6.0` | Ready responses now return fully hydrated issues. Project-scoped ready rows are `IssueOut` instead of the slimmer `Issue` projection, and global ready rows (`ReadyGlobalIssueOut`, renamed from `ReadyGlobalIssue`) embed `IssueOut` plus `project_name` — so both gain `labels`, `qualified_id` (required), link peers (`parent`, `blocks`, `blocked_by`, `related`), `blocked`, and `child_counts`. Clients regenerated from the schema see the new component name; the shipped Go client keeps `ReadyGlobalIssue` as a deprecated alias. |
+| `0.6.0` | Ready responses now return fully hydrated issues. Project-scoped ready rows are `IssueOut` instead of the slimmer `Issue` projection, and global ready rows (`ReadyGlobalIssueOut`, renamed from `ReadyGlobalIssue`) embed `IssueOut` plus `project_name`, so both gain `labels`, `qualified_id` (required), link peers (`parent`, `blocks`, `blocked_by`, `related`), `blocked`, and `child_counts`. Clients regenerated from the schema see the new component name; the shipped Go client keeps `ReadyGlobalIssue` as a deprecated alias. |
 | `0.5.0` | Added metadata patch endpoints for issues and projects, issue create metadata, and metadata-key filters on project issue lists. Generated clients can patch metadata with `If-Match` revisions, send initial metadata in create requests, and request selected metadata keys with the `meta` query parameter. |
 | `0.4.0` | Added semantic-search response mode metadata and embeddings health fields. Search responses now always include the effective `mode`; configured daemons may also report sanitized embedding reconciler status from `/health`, including backlog and provider HTTP status without raw provider diagnostics. |
 | `0.3.0` | Moved the author identity rewrite endpoint from `POST /api/v1/projects/{project_id}/federation/rewrite-author` to `POST /api/v1/projects/{project_id}/actions/rewrite-author`. The operation is project current-state hygiene rather than a federation command, so generated clients should use the project action route. |
-| `0.2.0` | Removed `links[].project_id` from link projections. Links are now project-independent edges that may span projects, so a single `project_id` no longer describes a link. `links[].from` and `links[].to` (and the edit response's `changes` block peers) gain `project` and `qualified_id` — always populated. `IssueOut.parent_short_id` is replaced by `parent` (a `LinkPeer` object with all four fields). The cross-project link feature lands across this version. Event payloads are unchanged: a cross-project link mutation currently emits its event in the subject issue's project only (mirrored peer-project events are planned). |
+| `0.2.0` | Removed `links[].project_id` from link projections. Links are now project-independent edges that may span projects, so a single `project_id` no longer describes a link. `links[].from` and `links[].to` (and the edit response's `changes` block peers) gain `project` and `qualified_id`, always populated. `IssueOut.parent_short_id` is replaced by `parent` (a `LinkPeer` object with all four fields). The cross-project link feature lands across this version. Event payloads are unchanged: a cross-project link mutation currently emits its event in the subject issue's project only (mirrored peer-project events are planned). |
 | `0.1.0` | Initial published contract. |
 
 ## Compatibility expectations
@@ -131,14 +131,14 @@ These are the current intentions, not a contractual guarantee:
   objects are published with `additionalProperties: true`, so a client generated
   from the schema tolerates fields it does not yet know about even under strict
   validation. The response relaxation never loosens request schemas: those keep
-  the strictness their types declare — `additionalProperties: false` by default,
+  the strictness their types declare: `additionalProperties: false` by default,
   so unknown request fields are rejected unless a type explicitly opts in.
   New optional request fields and query parameters do bump
   `api_schema_version`: generated clients may emit them, and older strict
   daemons may reject them.
   The OpenAPI 3.0 flavor (`kata openapi --version 3.0`), which exists as
   code-generator input, leaves `additionalProperties` unset on response
-  schemas instead — the same permissive meaning, phrased so generators model
+  schemas instead: the same permissive meaning, phrased so generators model
   optional object-valued response fields (such as `parent`) as pointers
   rather than always-present values.
 - **Breaking changes bump `api_schema_version`.** Removing or renaming a field,
@@ -150,7 +150,7 @@ These are the current intentions, not a contractual guarantee:
   `api/openapi.yaml` drifts from the routes, so the published schema cannot
   silently fall out of date with the daemon it describes.
 
-If you build against this schema and hit a gap, please open an issue — the
+If you build against this schema and hit a gap, please open an issue. The
 contract is meant to be useful to external clients, and feedback shapes how far
 the compatibility guarantees are taken.
 

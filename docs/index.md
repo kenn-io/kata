@@ -7,7 +7,7 @@ description: Documentation for kata, the local-first issue tracker for humans an
 
 kata カタ is a local-first issue tracker for coding agents and the humans
 steering them: a task ledger agents drive from the CLI and humans supervise in
-the terminal or browser. This is the operating documentation — for the product
+the terminal or browser. This is the operating documentation; for the product
 story, start at the [overview](https://katatracker.com/) and the
 [guide](https://katatracker.com/guide/).
 

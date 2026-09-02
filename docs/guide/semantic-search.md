@@ -2,8 +2,8 @@
 
 By default `kata search` is lexical: it matches the words you type against issue
 titles, bodies, and comments. That misses issues that describe the same problem
-in different words — the case that matters most when an agent searches before
-creating a duplicate. Semantic search adds a vector (embedding) leg so a query
+in different words, which is the case that matters most when an agent searches
+before creating a duplicate. Semantic search adds a vector (embedding) leg so a query
 like "auth redirect duplicates" can surface an issue titled "Login callback
 double-submits on Safari" even though they share no keywords.
 
@@ -20,8 +20,8 @@ and body, chunking long text instead of truncating it so long issues get full
 coverage, and stores the resulting vectors in backend-native derived storage.
 A search then runs two legs and fuses them:
 
-- the **lexical leg** — the existing full-text search, unchanged; and
-- the **vector leg** — embeds your query and finds issues whose vectors are
+- the **lexical leg**: the existing full-text search, unchanged; and
+- the **vector leg**: embeds your query and finds issues whose vectors are
   closest to it.
 
 Results are merged with reciprocal rank fusion, so an issue that ranks well in
@@ -29,7 +29,7 @@ either leg surfaces, and an issue that ranks well in both rises to the top.
 
 Embeddings are produced by an **OpenAI-compatible `/embeddings` endpoint** that
 you point kata at. That can be a local runtime (Ollama, LM Studio, or a
-llama.cpp server) or a hosted provider (OpenAI, Voyage, and others) — kata only
+llama.cpp server) or a hosted provider (OpenAI, Voyage, and others). kata only
 speaks the wire format and never bundles a model.
 
 ## Enabling it
@@ -50,7 +50,7 @@ speaks the wire format and never bundles a model.
    ```
 
    `base_url` and `model` are both required once the section exists. A hosted
-   provider also needs a key — set `api_key` or, better, `api_key_env` pointing
+   provider also needs a key: set `api_key` or, better, `api_key_env` pointing
    at an environment variable. See
    [Configuration](../reference/configuration.md#semantic-search) for every
    field (`dims`, `batch_size`, `model_context_tokens`, `max_batch_tokens`,
@@ -59,7 +59,7 @@ speaks the wire format and never bundles a model.
    keep background embedding batches below that limit. Leave them unset for
    the existing count-only batching behavior.
 
-3. Restart the daemon (or start it — `kata` will pick up the config). It begins
+3. Restart the daemon (or start it; `kata` will pick up the config). It begins
    embedding existing issues in the background immediately.
 
 4. Confirm it is live and watch the backfill drain. The reconciler state is in
@@ -80,7 +80,7 @@ then on.
 | Mode | Flag | Behavior |
 | --- | --- | --- |
 | auto (default) | *(none)* | Hybrid when embeddings are configured, lexical otherwise. |
-| lexical | `--lexical` | Full-text search only — today's behavior. |
+| lexical | `--lexical` | Full-text search only; today's behavior. |
 | hybrid | `--hybrid` | Fuse the lexical and vector legs. |
 | semantic | `--semantic` | Vector results only. |
 
@@ -95,14 +95,14 @@ output it appears as a `mode` field (`lexical`, `hybrid`, or `semantic`); see th
 
 ## Freshness: lexical is instant, semantic is eventual
 
-Lexical search is always up to date the moment you write an issue — creating an
+Lexical search is always up to date the moment you write an issue: creating an
 issue and immediately searching for it works exactly as before, which keeps the
 agent search-before-create flow reliable.
 
 The vector index is **eventually consistent**. A background reconciler embeds new
 and edited issues a few seconds after they change (sooner against a fast local
 endpoint, longer against a busy cloud API). A brand-new issue is not in the
-vector leg until its first embedding lands — it is still found lexically, so
+vector leg until its first embedding lands, but it is still found lexically, so
 nothing becomes unsearchable. An *edited* issue keeps serving its previous
 vector (so the vector leg may rank it on the old text) until the reconciler
 re-embeds it; the lexical leg already reflects the new text in the same results.
@@ -110,20 +110,20 @@ Either way the staleness is brief and bounded by reconciler lag.
 
 You can watch the reconciler in `kata health --json` under `embeddings`:
 
-- `configured` — whether an endpoint is set;
-- `embedded` — how many issues are embedded at their current revision for the
+- `configured`: whether an endpoint is set;
+- `embedded`: how many issues are embedded at their current revision for the
   configured generation;
-- `skipped` — how many issues were deliberately stamped without vectors after
+- `skipped`: how many issues were deliberately stamped without vectors after
   the configured model rejected their content;
-- `backlog` — how many issues are waiting to be (re-)embedded; decreases as
+- `backlog`: how many issues are waiting to be (re-)embedded; decreases as
   each issue is persisted and trends to 0;
-- `rate_per_second` and `eta_seconds` — a smoothed measured rate and estimated
+- `rate_per_second` and `eta_seconds`: a smoothed measured rate and estimated
   time remaining; omitted until at least two positive progress samples exist;
-- `started_at` and `last_progress_at` — when the current backfill began and
+- `started_at` and `last_progress_at`: when the current backfill began and
   when its most recent issue was persisted, useful for distinguishing slow
   progress from a stalled endpoint;
-- `last_success_at` — when the reconciler last completed a batch;
-- `last_error_status` — the HTTP status of the most recent embedding-endpoint
+- `last_success_at`: when the reconciler last completed a batch;
+- `last_error_status`: the HTTP status of the most recent embedding-endpoint
   error response, if any. It is set only when the endpoint answered with an
   HTTP error; an unreachable endpoint (transport failure) leaves it unset.
 
@@ -136,7 +136,7 @@ mode:
   never silent: a `# mode=lexical degraded: …` note in human output, `degraded`
   and `degraded_reason` fields in `--json`, and a `degraded=<reason>` field in
   `--agent`.
-- **explicit `--hybrid` / `--semantic`** do not degrade — they return an error
+- **explicit `--hybrid` / `--semantic`** do not degrade; they return an error
   (HTTP 503) so a caller that asked for semantic results knows it did not get
   them. They return 400 when embeddings are not configured at all.
 
@@ -149,7 +149,7 @@ the requested limit.
 
 A persistent endpoint problem shows up as a growing `backlog` and a stale
 `last_success_at` in health; the reconciler backs off and retries. When the
-endpoint answers with an HTTP error, `last_error_status` carries that status —
+endpoint answers with an HTTP error, `last_error_status` carries that status:
 a misconfiguration (bad key, wrong model) is reported there rather than
 silently looping. An endpoint that is unreachable outright (transport error,
 no HTTP response) leaves `last_error_status` unset; the growing backlog and
@@ -160,7 +160,7 @@ stale `last_success_at` are the signal in that case.
 Each stored vector belongs to a generation keyed by a fingerprint of the
 model, dimensionality, and text recipe it was produced under. If you switch
 `model`, `dims`, or `fingerprint_salt`, kata builds a new generation in the
-background. While that backfill runs, the vector leg is **unavailable** —
+background. While that backfill runs, the vector leg is **unavailable**:
 queries embedded under the new model cannot be scored against the old
 generation's vectors, so auto mode serves labeled degraded lexical results
 and explicit `--hybrid`/`--semantic` requests return 503. Lexical search is
@@ -172,8 +172,8 @@ to force the same re-embed.
 
 ## Privacy and federation
 
-Configuring an endpoint sends issue titles and bodies to it on every embed —
-that is the consent boundary. For sensitive projects, prefer a local endpoint
+Configuring an endpoint sends issue titles and bodies to it on every embed.
+That is the consent boundary. For sensitive projects, prefer a local endpoint
 (such as Ollama on loopback) so issue text never leaves the host. The embedding
 API key is only ever sent to the configured `base_url` origin.
 
@@ -182,7 +182,7 @@ only what it stores, and no vectors are sent to or pulled from federated hubs.
 SQLite keeps them in a sidecar database; PostgreSQL keeps them in pgvector
 tables in its selected Kata schema when that optional extension is installed.
 They are not included in JSONL
-[backup/export](../operations/backup-restore.md) — a restore or a storage-format
+[backup/export](../operations/backup-restore.md); a restore or a storage-format
 upgrade re-embeds from scratch rather than carrying vectors forward. Archives
 exported by older kata versions that still contain
 embedding records import cleanly: those records are skipped and the

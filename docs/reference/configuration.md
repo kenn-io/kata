@@ -561,7 +561,7 @@ This section is the field reference; see the
 [Semantic search guide](../guide/semantic-search.md) for setup and behavior.
 
 Semantic (vector) search is opt-in. With no `[search.embeddings]` section,
-`kata search` behaves exactly as before — lexical FTS only — and the daemon
+`kata search` behaves exactly as before (lexical FTS only) and the daemon
 makes no embedding network calls. Adding the section enables hybrid search: the
 daemon embeds each issue's title and body through an OpenAI-compatible
 `/embeddings` endpoint and fuses vector results with the lexical leg.
@@ -601,7 +601,7 @@ keep count-only batching. When either setting is used, both must be positive and
 this during daemon startup before Kata processes documents.
 
 Privacy: configuring an endpoint sends issue titles and bodies to it on every
-embed. That is the consent boundary — the operator who writes this section
+embed. That is the consent boundary: the operator who writes this section
 authorizes the data flow. For sensitive projects, prefer a local endpoint (for
 example Ollama on loopback) so issue text never leaves the host. Embeddings are
 local derived state and **do not federate**: each daemon embeds only what it
@@ -613,7 +613,7 @@ and edited issues within seconds, and `kata` reports its state under
 `last_error_status`, `embedded`, `skipped`, and `backlog`). During a backfill it also
 reports `started_at` and `last_progress_at`, then adds a smoothed
 `rate_per_second` and `eta_seconds` after two positive progress samples. Search
-never blocks on embedding lag — an issue is findable lexically the instant it
+never blocks on embedding lag: an issue is findable lexically the instant it
 is created, and gains semantic recall once the reconciler catches up.
 
 Issue text is chunked before embedding rather than embedded as a single
@@ -634,7 +634,7 @@ issue from scratch on the first daemon start after the upgrade. The rebuilt
 index starts serving immediately, so search returns partial semantic results
 while the backfill drains; the `embeddings` backlog in `/health` reports the
 remaining coverage. An ordinary reconciler backlog with an active index does
-not degrade search — fresh or edited issues simply lack semantic recall
+not degrade search; fresh or edited issues simply lack semantic recall
 until they are embedded. Search degrades (labeled in `auto` mode, 503 for
 explicit `--hybrid`/`--semantic`) when the vector leg is unavailable or when
 bounded label filtering exhausts its candidate ceiling before filling the
@@ -644,8 +644,8 @@ changes while the replacement index is still backfilling.
 
 Changing `model`, `dims`, or `fingerprint_salt` builds a new index generation
 in the background and cuts over automatically once it finishes filling.
-During that backfill the vector leg is unavailable — queries embedded under
-the new model cannot be scored against the old generation's vectors — so
+During that backfill the vector leg is unavailable (queries embedded under
+the new model cannot be scored against the old generation's vectors), so
 `auto` searches degrade to labeled lexical results and explicit
 `--hybrid`/`--semantic` requests return 503 until the cutover.
 

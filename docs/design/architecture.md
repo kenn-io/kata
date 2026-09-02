@@ -96,13 +96,13 @@ an explicit `--project`, every command except `kata init` fails with
 `project_not_initialized`.
 kata never silently namespaces issues to a random directory, and `kata init` is
 the only command that creates a project row. Auto-creation on first read or write
-is deliberately excluded — it is exactly how agents end up writing into the wrong
+is deliberately excluded; it is exactly how agents end up writing into the wrong
 project.
 
 ### Identity comes from the git remote, not the path
 
-A workspace's alias identity is derived from its git remote URL — normalized
-across SSH and HTTPS forms and stripped of embedded credentials — not from its
+A workspace's alias identity is derived from its git remote URL (normalized
+across SSH and HTTPS forms and stripped of embedded credentials), not from its
 filesystem location. Cloning a repository to a new path therefore resolves to the
 same project, and two repositories that ship together can share one project by
 committing the same project name. Because alias identity is unique per git
@@ -174,7 +174,7 @@ which issues a change resolves calls the close endpoint directly and can attach
 source metadata (provider, repository, pull request, commit) in the event
 payload. This supports merge-driven closure without turning kata into a git
 workflow engine. Because closing asserts completion, it carries more than a
-status flip — a reason, a substantive message, and typed evidence — so a reviewer
+status flip (a reason, a substantive message, and typed evidence) so a reviewer
 can later verify the claim. The user-facing rules are in
 [close discipline](../guide/concepts.md#close-discipline).
 
@@ -185,7 +185,7 @@ constrained:
 
 - They fire **after** the database commit, asynchronously, on a bounded worker
   pool. A hook can never block or roll back a state change.
-- They are invoked with `exec.Command(cmd, args...)` — **no shell**, and no
+- They are invoked with `exec.Command(cmd, args...)`: **no shell**, and no
   environment-variable expansion of arguments. Event data reaches a hook as JSON
   on stdin and a small set of `KATA_*` scalar environment variables.
 - This avoids the obvious shell-injection surface, but a hook is **not a
@@ -204,8 +204,8 @@ Hooks are configured globally on the daemon host, not per workspace.
 
 `kata doctor` is read-only and reports on system health only: daemon
 reachability, database integrity, schema drift, stale runtime files, config parse
-errors, and skill-install drift. It never lints the workflow — no "stale open
-issues," no "dangling owners," no commit-reference orphans — and it never mutates
+errors, and skill-install drift. It never lints the workflow (no "stale open
+issues," no "dangling owners," no commit-reference orphans) and it never mutates
 state. Its recommendations are limited to system-repair commands such as
 reloading the daemon or reinstalling skills. Keeping diagnostics free of workflow
 opinions is what makes the command safe to run anywhere and trustworthy when it
@@ -218,6 +218,6 @@ workspace-local behavior overrides, per-issue SSE subscriptions, bulk mutation
 endpoints, remote webhooks, a `(kata-#N)` commit-message convention, and the
 workflow lints noted above. The list of non-goals is itself a design tool: it
 keeps the surface small enough that an agent can learn the whole system and a
-human can audit it. Features that later earned their place — federation, a
-constrained priority field, token authentication — were added narrowly and only
+human can audit it. Features that later earned their place, such as federation,
+a constrained priority field, and token authentication, were added narrowly and only
 after real use justified them, not speculatively.

@@ -5,8 +5,8 @@ last_edited: 2026-08-12
 # Metadata
 
 Every kata issue (and every project) carries a free-form JSON `metadata` object.
-Consumers use it to attach their own structured data — schedules, orchestration
-state, or anything else — without coordinating a schema release with the daemon.
+Consumers use it to attach their own structured data (schedules, orchestration
+state, or anything else) without coordinating a schema release with the daemon.
 A small set of reserved keys carry daemon-side semantics; every other key is
 accepted opaquely.
 
@@ -65,7 +65,7 @@ rules. It is a deadline only; it does not control `ready` or `next`.
 All other keys are accepted opaquely by design: consumers carry their own
 metadata without a daemon release. When an opaque key later needs query
 performance, the documented promotion path is a **SQLite expression index** over
-the JSON path — no schema column and no change to the stored shape. Reserving a
+the JSON path: no schema column and no change to the stored shape. Reserving a
 key in the daemon's registry (adding a validator) is the second, heavier step,
 taken only when the daemon starts to attach real semantics to the key.
 
@@ -151,26 +151,26 @@ cross-project dashboards, poll each project or consume the event stream.
 
 ## Orchestration conventions (`work.*` keys)
 
-`work.*` is a documented convention layered on top of the generic metadata model
-— a coordination contract between the tools that launch coding agents and the
-tools that watch them. kata itself does not validate these keys; it only stores
+`work.*` is a documented convention layered on top of the generic metadata
+model: a coordination contract between the tools that launch coding agents and
+the tools that watch them. kata itself does not validate these keys; it only stores
 and serves them. The convention is what makes them useful. See
 [Agent orchestration](../operations/agent-orchestration.md) for the operational
 recipe.
 
 ### The keys
 
-- **`work.branch`** (string) — the git branch doing the work. Set by the
+- **`work.branch`** (string): the git branch doing the work. Set by the
   launcher. kata never validates it against a repository: kata does not learn
   git, so any string is accepted and a stale value is a coordination problem for
   the consumer, not an error kata can detect.
-- **`work.attention`** (`ok | needs-human | stuck`) — the working-agent side's
+- **`work.attention`** (`ok | needs-human | stuck`): the working-agent side's
   live signal about whether a human is wanted:
-    - `ok` — proceeding, no human needed.
-    - `needs-human` — the agent wants human input or review; it may still be
+    - `ok`: proceeding, no human needed.
+    - `needs-human`: the agent wants human input or review; it may still be
       making progress.
-    - `stuck` — the agent cannot proceed.
-- **`work.attention_msg`** (string) — a one-line current-state message that
+    - `stuck`: the agent cannot proceed.
+- **`work.attention_msg`** (string): a one-line current-state message that
   accompanies the attention level.
 
 ### Scope
@@ -183,7 +183,7 @@ surface it.
 ### Concurrency
 
 Per-key merge means the launcher writing `work.branch` and the agent writing
-`work.attention` never conflict — different keys. Attention updates are
+`work.attention` never conflict; they are different keys. Attention updates are
 **last-write-wins by design**: the newest signal is the one that matters, so an
 unconditional write is correct. `If-Match` exists for the rare case where a
 caller genuinely needs read-modify-write on a single key.
@@ -196,7 +196,7 @@ One writer per key by convention:
 - The **working-agent side** owns `work.attention` and `work.attention_msg`.
 
 "Working-agent side" is deliberately broader than the agent process. It includes
-**launcher-installed harness hooks** — for example a session-stop or idle hook in
+**launcher-installed harness hooks**, for example a session-stop or idle hook in
 the coding-agent harness. Pure agent self-assertion under-delivers because agents
 forget to clear or raise attention; a hook that fires when a session ends keeps
 the signal truthful without depending on the agent remembering. Both the agent

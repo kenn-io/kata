@@ -407,7 +407,7 @@ transport calls.
 
 `kata federation leave <project>` is the spoke-side inverse of `join`. It
 revokes the matching hub enrollment, then detaches the local spoke back to a
-standalone project — removing the binding, sync-status, quarantine, and claim
+standalone project, removing the binding, sync-status, quarantine, and claim
 rows and deleting the daemon-local hub credential in one daemon-route operation
 (`POST /api/v1/federation/replicas/{id}/actions/leave`). Leaving is revoke-first,
 so a hub failure leaves local state intact for a clean retry; it is idempotent
@@ -418,8 +418,8 @@ now-standalone project (reversible via `kata projects restore`), with archive
 eligibility checked before any detach so an open-issue refusal cannot leave the
 project half-torn-down; `--force` overrides that refusal. An advisory daemon
 preflight (`preflight=true` on the leave route) runs before the hub revoke for
-every hub-contacting leave — detach refusals (spoke-role drift, vanished
-project, actor validation) and the archive's open-issue check alike — so a
+every hub-contacting leave, covering detach refusals (spoke-role drift, vanished
+project, actor validation) and the archive's open-issue check alike, so a
 predictable local refusal cannot strand a hub-revoked, locally bound spoke. Retrying an
 archive-leave whose archive already committed resumes rather than refusing:
 the already-archived step is skipped (that call reports `archived=false`) and
@@ -546,13 +546,13 @@ metadata. Origin instance UIDs disambiguate daemon identity.
 ## Design Rationale
 
 The operational sections above describe what federation does. This section
-records why it converges and why the lease model is shaped the way it is —
+records why it converges and why the lease model is shaped the way it is:
 the reasoning that is not recoverable from the behavior alone.
 
 ### Why Federation Converges
 
 For federated projects the event log is the source of truth and the
-issue/comment/label/link/metadata tables are a deterministic projection — a pure
+issue/comment/label/link/metadata tables are a deterministic projection, a pure
 `Fold` over the events. All mutable state is modeled as a CRDT: scalar fields and
 metadata leaves are last-writer-wins registers, labels and links are per-element
 LWW sets with tombstones, and comments are a grow-only log keyed by UID. Given a
@@ -560,7 +560,7 @@ deterministic total order over the retained event set, the fold is
 commutative-after-sort: any two nodes holding the same events compute identical
 state regardless of arrival order, so there is no irreconcilable conflict to
 resolve by hand. A late event with a lower clock simply loses to an
-already-applied higher-clock write for the same field, without being discarded —
+already-applied higher-clock write for the same field, without being discarded:
 it stays in the audit log and remains visible. This is property-tested by
 shuffling arrival order and asserting a byte-identical projection.
 
@@ -571,8 +571,8 @@ local write path and the replay path from drifting apart.
 ### The Hybrid Logical Clock And Merge Order
 
 The total order is `(hlc, origin_instance_uid, event_uid)`. The HLC is a hybrid
-logical clock — a `(physical_ms, counter)` pair stamped when an event is emitted
-and advanced past the clock of every foreign event applied — so causally later
+logical clock, a `(physical_ms, counter)` pair stamped when an event is emitted
+and advanced past the clock of every foreign event applied, so causally later
 work always sorts after what it saw. The local autoincrement event id is only a
 delivery cursor, never the merge order, and wall-clock `created_at` is kept for
 display and digests but is too skew-prone to order merges. An immutable
@@ -588,8 +588,8 @@ per-origin continuity counter, orthogonal to the HLC.
 The guarantee that event-truth can be trusted rests on one invariant: for every
 non-federated project, which still uses the direct-write path,
 `direct_write_projection == Fold(project_events)`. It is asserted at **project**
-scope, not per issue, because links and project metadata are project-scoped — an
-event on one issue can affect another issue's projection — so a per-issue
+scope, not per issue, because links and project metadata are project-scoped (an
+event on one issue can affect another issue's projection), so a per-issue
 comparison would be too narrow to catch a missing field. Holding this invariant
 across every mutation type proves events are replay-complete and keeps the
 direct-write and replay paths from diverging. It is the gate that had to pass
@@ -614,7 +614,7 @@ arbitrary nested JSON. To salvage concurrent edits to different sub-fields of th
 same key, the fold diffs each metadata event's per-key `{from, to}` down to
 JSON-pointer paths and resolves each leaf as an LWW register. Deletion keys off
 **structural absence, never off JSON `null`**: a path present in `from` but
-absent in `to` is a tombstone — covering the whole subtree if it was an object —
+absent in `to` is a tombstone (covering the whole subtree if it was an object),
 while a leaf whose value is `null` in `to` is a real null value and is preserved.
 Arrays are atomic leaves, with no element-level array CRDT, so a checklist is
 replaced wholesale. The only place `null` acts as a marker is the top-level
@@ -633,7 +633,7 @@ offline, so requiring a live lease before every edit would force a synchronous
 hub round-trip and trade away the offline editing that federation exists to
 preserve. Ordinary edits are therefore always local-first and converge by LWW. A
 lease adds only temporary exclusivity against *conflicting* non-comment work by
-another holder while it is live — the hub guarantees at most one live holder.
+another holder while it is live; the hub guarantees at most one live holder.
 Unleased work is normal and is never a violation; pending or expired leases do
 not block edits; and comment creation or body edits always pass as comment-level
 work.
@@ -641,7 +641,7 @@ work.
 Because the hub cannot reject a mutation that already happened offline, it does
 not try to. When pushed work conflicts with another holder's live lease the hub
 keeps the data and records a best-effort `claim.violated` annotation rather than
-dropping anything. Lease state — especially timed-lease expiry after renewals —
+dropping anything. Lease state, especially timed-lease expiry after renewals,
 is authoritative from the hub, not folded from events, so a spoke treats cached
 lease state as a hint and confirms against the hub before relying on
 exclusivity, never as proof that exclusivity still holds.

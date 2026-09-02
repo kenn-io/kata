@@ -137,7 +137,7 @@ export KATA_POSTGRES_SCHEMA_OWNER='kata_schema_owner'
 ```
 
 In `validate` mode, `schema_owner` is required. Every direct storage
-open—including daemon startup and offline export—checks that the namespace,
+open, including daemon startup and offline export, checks that the namespace,
 canonical relations, functions, operators, types, and text-search configuration
 belong to that role before reading application tables, and rejects schema
 `CREATE` grants to non-owner roles. A canonical catalog fingerprint verifies
