@@ -59,6 +59,15 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		var expectedOwner *string
+		if in.Body.ExpectedOwner != nil {
+			expected := strings.TrimSpace(*in.Body.ExpectedOwner)
+			if expected == "" {
+				return nil, api.NewError(400, "validation",
+					"expected_owner must be non-empty when provided", "omit expected_owner for an unconditional unassign", nil)
+			}
+			expectedOwner = &expected
+		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
@@ -66,8 +75,18 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
 			return nil, err
 		}
-		updated, evt, changed, err := cfg.DB.UpdateOwner(ctx, issue.ID, nil, actor)
+		updated, evt, changed, err := cfg.DB.UnassignOwner(ctx, issue.ID, actor, expectedOwner)
 		if err != nil {
+			if errors.Is(err, db.ErrOwnerMismatch) {
+				var currentOwner any
+				if updated.Owner != nil {
+					currentOwner = *updated.Owner
+				}
+				return nil, api.NewError(409, "owner_mismatch",
+					"issue owner does not match expected owner",
+					"refresh issue state before retrying",
+					map[string]any{"expected_owner": *expectedOwner, "current_owner": currentOwner})
+			}
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}
@@ -92,6 +111,10 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if in.Body.Force && in.Body.IfUnowned {
+			return nil, api.NewError(400, "validation",
+				"force and if_unowned are mutually exclusive", "choose one claim mode", nil)
+		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
@@ -103,7 +126,11 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		var result db.ClaimResult
 		err = cfg.DB.RetryTransient(ctx, func() error {
 			var err error
-			result, err = cfg.DB.ClaimOwner(ctx, issue.ID, actor, in.Body.Force)
+			if in.Body.IfUnowned {
+				result, err = cfg.DB.ClaimOwnerIfUnowned(ctx, issue.ID, actor)
+			} else {
+				result, err = cfg.DB.ClaimOwner(ctx, issue.ID, actor, in.Body.Force)
+			}
 			return err
 		})
 		if errors.Is(err, db.ErrAlreadyClaimed) {
@@ -111,9 +138,13 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if result.CurrentOwner != nil {
 				currentOwner = *result.CurrentOwner
 			}
+			hint := "use --force to reassign"
+			if in.Body.IfUnowned {
+				hint = "choose another issue, or omit if_unowned only for a deliberate retry"
+			}
 			return nil, api.NewError(409, "already_claimed",
 				fmt.Sprintf("issue is already claimed by %s", currentOwner),
-				"use --force to reassign",
+				hint,
 				map[string]any{"current_owner": currentOwner})
 		}
 		if err != nil {

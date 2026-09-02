@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -52,6 +53,27 @@ func TestClaim_AlreadyClaimedBySameActor(t *testing.T) {
 	iss := mustGetIssueViaHTTP(t, env.URL, pid, issue.ShortID)
 	require.NotNil(t, iss.Owner)
 	assert.Equal(t, "agent1", *iss.Owner)
+}
+
+func TestClaim_IfUnownedRejectsSameActor(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	issue := createIssueViaHTTPFull(t, env, dir, "guarded claim")
+	runCLIAs(t, env, dir, "agent1", "claim", issue.ShortID)
+
+	_, err := runCLICapture(t, env, dir, "--as", "agent1", "claim", issue.ShortID, "--if-unowned")
+
+	cliErr := requireCLIError(t, err, ExitConflict)
+	assert.Contains(t, strings.ToLower(cliErr.Message), "already claimed")
+	assert.NotContains(t, cliErr.Message, "--force")
+}
+
+func TestClaim_ForceAndIfUnownedAreMutuallyExclusive(t *testing.T) {
+	_, _, err := executeRootCapture(t, context.Background(),
+		"claim", "abcd", "--force", "--if-unowned")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "if-unowned")
+	assert.Contains(t, err.Error(), "force")
 }
 
 func TestClaim_Conflict(t *testing.T) {

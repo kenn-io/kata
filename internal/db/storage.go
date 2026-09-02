@@ -86,7 +86,9 @@ type Storage interface {
 	// projects; ErrNotFound if the project does not exist.
 	PurgeProject(ctx context.Context, p PurgeProjectParams) (ProjectPurgeLog, error)
 	ClaimOwner(ctx context.Context, issueID int64, actor string, force bool) (ClaimResult, error)
+	ClaimOwnerIfUnowned(ctx context.Context, issueID int64, actor string) (ClaimResult, error)
 	UpdateOwner(ctx context.Context, issueID int64, newOwner *string, actor string) (Issue, *Event, bool, error)
+	UnassignOwner(ctx context.Context, issueID int64, actor string, expectedOwner *string) (Issue, *Event, bool, error)
 	UpdatePriority(ctx context.Context, issueID int64, newPriority *int64, actor string) (Issue, *Event, bool, error)
 	PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
 	IssueQualifiersByUIDs(ctx context.Context, uids []string) (map[string]IssueQualifier, error)

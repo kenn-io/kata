@@ -63,6 +63,44 @@ func TestUpdateOwner_NoOpAlreadyUnassigned(t *testing.T) {
 	assert.Nil(t, evt)
 }
 
+func TestUnassignOwner_ExpectedOwnerMatches(t *testing.T) {
+	d, ctx, _, i := setupAssignedIssue(t, "agent-a")
+	expected := "agent-a"
+
+	updated, evt, changed, err := d.UnassignOwner(ctx, i.ID, "tester", &expected)
+
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Nil(t, updated.Owner)
+	require.NotNil(t, evt)
+	assert.Equal(t, "issue.unassigned", evt.Type)
+}
+
+func TestUnassignOwner_ExpectedOwnerMismatch(t *testing.T) {
+	d, ctx, _, i := setupAssignedIssue(t, "agent-b")
+	expected := "agent-a"
+
+	current, evt, changed, err := d.UnassignOwner(ctx, i.ID, "tester", &expected)
+
+	require.ErrorIs(t, err, db.ErrOwnerMismatch)
+	require.NotNil(t, current.Owner)
+	assert.Equal(t, "agent-b", *current.Owner)
+	assert.False(t, changed)
+	assert.Nil(t, evt)
+}
+
+func TestUnassignOwner_ExpectedOwnerMismatchWhenUnowned(t *testing.T) {
+	d, ctx, _, i := setupTestIssue(t)
+	expected := "agent-a"
+
+	current, evt, changed, err := d.UnassignOwner(ctx, i.ID, "tester", &expected)
+
+	require.ErrorIs(t, err, db.ErrOwnerMismatch)
+	assert.Nil(t, current.Owner)
+	assert.False(t, changed)
+	assert.Nil(t, evt)
+}
+
 // Regression: %q-encoded payloads produced invalid JSON for owner strings
 // containing control bytes (e.g. NUL), tripping the events.payload
 // json_valid CHECK and rolling back the assignment. Now built via
@@ -109,6 +147,18 @@ func TestClaimOwner_AlreadyOwnedBySameActor(t *testing.T) {
 	assert.Nil(t, result.Event)
 	require.NotNil(t, result.Issue.Owner)
 	assert.Equal(t, "agent1", *result.Issue.Owner)
+}
+
+func TestClaimOwnerIfUnowned_AlreadyOwnedBySameActor(t *testing.T) {
+	d, ctx, _, i := setupAssignedIssue(t, "agent1")
+
+	result, err := d.ClaimOwnerIfUnowned(ctx, i.ID, "agent1")
+
+	require.ErrorIs(t, err, db.ErrAlreadyClaimed)
+	require.NotNil(t, result.CurrentOwner)
+	assert.Equal(t, "agent1", *result.CurrentOwner)
+	assert.False(t, result.Changed)
+	assert.Nil(t, result.Event)
 }
 
 func TestClaimOwner_AlreadyOwnedByDifferentActor(t *testing.T) {
