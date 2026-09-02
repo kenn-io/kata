@@ -35,6 +35,10 @@ var (
 	// ErrAlreadyClaimed is returned by ClaimOwner when another actor already
 	// owns the issue and Force=false.
 	ErrAlreadyClaimed = errors.New("already claimed")
+
+	// ErrOwnerMismatch is returned by guarded unassign when the current owner
+	// does not match the caller's expected owner.
+	ErrOwnerMismatch = errors.New("owner mismatch")
 )
 
 // EditIssueAtomic sentinels.

@@ -356,12 +356,20 @@ kata label rm <ref> <label> [--comment TEXT]
 kata labels
 
 kata assign <ref> <owner> [--comment TEXT]
-kata unassign <ref> [--comment TEXT]
-kata claim <ref> [--force] [--comment TEXT]
+kata unassign <ref> [--expect-owner <owner>] [--comment TEXT]
+kata claim <ref> [--force | --if-unowned] [--comment TEXT]
 ```
 
 `kata claim` atomically sets ownership to the current actor and fails if the
-issue is already owned by someone else unless `--force` is used.
+issue is already owned by someone else unless `--force` is used. A repeated
+claim by the current actor remains a no-op. Use `--if-unowned` when competing
+workers must claim only a truly ownerless issue; it conflicts even when the
+current actor already owns the issue.
+
+`kata unassign --expect-owner <owner>` clears ownership only when the current
+owner matches the expected value. A mismatch returns a conflict without
+changing the issue. Omitting `--expect-owner` preserves unconditional
+unassignment.
 
 ## Issue metadata
 

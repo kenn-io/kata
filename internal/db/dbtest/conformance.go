@@ -131,6 +131,21 @@ var storageScenarios = []scenario{
 		run:     checkConcurrentOwnerClaim,
 	},
 	{
+		name:    "concurrent guarded owner claim",
+		methods: []string{"ClaimOwnerIfUnowned", "CreateIssue", "CreateProject", "IssueByID"},
+		run:     checkConcurrentGuardedOwnerClaim,
+	},
+	{
+		name:    "expected owner unassign",
+		methods: []string{"CreateIssue", "CreateProject", "UnassignOwner"},
+		run:     checkExpectedOwnerUnassign,
+	},
+	{
+		name:    "concurrent expected owner unassign",
+		methods: []string{"CreateIssue", "CreateProject", "IssueByID", "UnassignOwner", "UpdateOwner"},
+		run:     checkConcurrentExpectedOwnerUnassign,
+	},
+	{
 		name: "comments",
 		methods: []string{
 			"CommentBodyByID", "CommentsByIssue", "CreateComment", "CreateIssue", "CreateProject",
