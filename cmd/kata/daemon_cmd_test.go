@@ -2920,6 +2920,7 @@ func TestExternalRootEventWakeReconnectsAndDiscardsQueuedEventsAfterReset(t *tes
 
 	broadcaster := daemon.NewEventBroadcaster()
 	firstWake := make(chan struct{})
+	secondWake := make(chan struct{})
 	release := make(chan struct{})
 	var wakeCount atomic.Int64
 	ctx, cancel := context.WithCancel(t.Context())
@@ -2934,9 +2935,12 @@ func TestExternalRootEventWakeReconnectsAndDiscardsQueuedEventsAfterReset(t *tes
 		if id != binding.ID {
 			return
 		}
-		if wakeCount.Add(1) == 1 {
+		switch wakeCount.Add(1) {
+		case 1:
 			close(firstWake)
 			<-release
+		case 2:
+			close(secondWake)
 		}
 	})
 	issueID := issue.ID
@@ -2957,7 +2961,12 @@ func TestExternalRootEventWakeReconnectsAndDiscardsQueuedEventsAfterReset(t *tes
 
 	require.Eventually(t, func() bool {
 		broadcaster.Broadcast(msg)
-		return wakeCount.Load() == 2
+		select {
+		case <-secondWake:
+			return true
+		default:
+			return false
+		}
 	}, time.Second, time.Millisecond, "event wake subscriber did not reconnect after reset")
 }
 
