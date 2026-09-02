@@ -52,6 +52,13 @@ Instead, label and comment:
     kata comment <ref> --body "what was attempted, what remains"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("idempotency-key") && strings.TrimSpace(idempotencyKey) == "" {
+				return &cliError{
+					Message:  "--idempotency-key must not be blank",
+					Kind:     kindValidation,
+					ExitCode: ExitValidation,
+				}
+			}
 			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
 				return err
 			}

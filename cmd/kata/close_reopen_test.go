@@ -88,6 +88,20 @@ func TestCloseCmd_RejectsBlankIfMatch(t *testing.T) {
 	assert.Contains(t, stderr, "--if-match must not be blank")
 }
 
+func TestCloseCmd_RejectsBlankIdempotencyKey(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	_, stderr, err := runCLIWithErr(t, env, dir,
+		"close", ref,
+		"--wontfix",
+		"--message", "Reviewed the request and recorded why the work should stop here.",
+		"--idempotency-key", "   ")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "--idempotency-key must not be blank")
+
+	show := runCLI(t, env, dir, "show", ref, "--json")
+	assert.Contains(t, show, `"status":"open"`)
+}
+
 func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 

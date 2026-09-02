@@ -65,17 +65,21 @@ func postFollowupCommentWithKey(
 	if idempotencyKey != "" {
 		headers["Idempotency-Key"] = idempotencyKey
 	}
+	retryCommand := fmt.Sprintf("kata comment %s --body ...", issueRef)
+	if idempotencyKey != "" {
+		retryCommand += fmt.Sprintf(" --idempotency-key %q", idempotencyKey)
+	}
 	status, bs, err := httpDoJSONWithHeader(ctx, client, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/comments", baseURL, projectID, url.PathEscape(issueRef)),
 		headers, map[string]any{"actor": actor, "body": body})
 	if err != nil {
 		return fmt.Errorf("issue mutation succeeded but appending --comment failed: %w "+
-			"(retry with: kata comment %s --body ...)", err, issueRef)
+			"(retry with: %s)", err, retryCommand)
 	}
 	if status >= 400 {
 		base := apiErrFromBody(status, bs)
 		return fmt.Errorf("issue mutation succeeded but appending --comment failed: %w "+
-			"(retry with: kata comment %s --body ...)", base, issueRef)
+			"(retry with: %s)", base, retryCommand)
 	}
 	return nil
 }
