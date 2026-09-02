@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>kata カタ — the issue tracker that runs inside the loop</title>
+    <meta name="description" content="kata is a local-first issue tracker for coding agents and the humans steering them. Millisecond round trips to a daemon on your own machine turn the tracker into working memory and a coordination bus for agent workflows.">
+    <link rel="canonical" href="https://katatracker.com/">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="alternate" type="text/markdown" href="https://katatracker.com/index.md">
+    <link rel="stylesheet" href="/styles/site.css">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="The issue tracker that runs inside the loop.">
+    <meta property="og:description" content="kata is a local-first issue tracker for coding agents and the humans steering them. Millisecond round trips turn the tracker into working memory and a coordination bus.">
+    <meta property="og:url" content="https://katatracker.com/">
+    <meta property="og:site_name" content="kata">
+    <meta property="og:image" content="https://katatracker.com/docs/assets/screenshots/web-ui/workspace.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="The issue tracker that runs inside the loop.">
+    <meta name="twitter:description" content="kata is a local-first issue tracker for coding agents and the humans steering them. Millisecond round trips turn the tracker into working memory and a coordination bus.">
+    <meta name="twitter:image" content="https://katatracker.com/docs/assets/screenshots/web-ui/workspace.png">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="wordmark" href="/">kata <span class="kana">カタ</span></a>
+      <nav aria-label="Primary navigation">
+        <a href="/guide/">Guide</a>
+        <a href="/docs/">Docs</a>
+        <a class="repo" href="https://github.com/kenn-io/kata">
+          <span class="sr-only">kata on GitHub:</span>
+          <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+              0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+              -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07
+              -.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2
+              -.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27
+              c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0
+              3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0
+              .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+          </svg>
+          <span class="repo-meta">
+            <span class="repo-name">kenn-io/kata</span>
+            <span class="facts" data-facts hidden>
+              <span class="fact" data-fact="version" hidden>
+                <span class="sr-only">latest release</span>
+                <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0
+                    .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426
+                    2.426 0 0 0 0-3.42z"/>
+                  <circle cx="7.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                </svg>
+                <span data-fact-text></span>
+              </span>
+              <span class="fact" data-fact="stars" hidden>
+                <span class="sr-only">stars</span>
+                <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" fill="currentColor">
+                  <path d="M8 .25a.75.75 0 0 1 .67.42l1.88 3.8 4.2.62a.75.75 0 0 1 .42
+                    1.28l-3.04 2.97.72 4.18a.75.75 0 0 1-1.09.8L8 12.35l-3.76
+                    1.97a.75.75 0 0 1-1.09-.79l.72-4.19L.83 6.37a.75.75 0 0 1
+                    .42-1.28l4.2-.61L7.33.67A.75.75 0 0 1 8 .25Z"/>
+                </svg>
+                <span data-fact-text></span>
+              </span>
+              <span class="fact" data-fact="forks" hidden>
+                <span class="sr-only">forks</span>
+                <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="18" r="3"></circle>
+                  <circle cx="6" cy="6" r="3"></circle>
+                  <circle cx="18" cy="6" r="3"></circle>
+                  <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9m6 3v3"></path>
+                </svg>
+                <span data-fact-text></span>
+              </span>
+            </span>
+          </span>
+        </a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="hero-brand">kata <span class="kana">カタ</span></p>
+        <h1 id="hero-title">The issue tracker that runs inside the loop.</h1>
+        <p class="lede">kata is a local-first issue ledger for coding agents and the humans steering them. Every operation is a round trip to a daemon on <strong>your own machine</strong> — milliseconds, not a SaaS API away — so the tracker stops being the place where work gets filed and becomes the way work gets coordinated.</p>
+        <figure class="term">
+          <figcaption class="term-title"><span>the operating loop</span><span>local daemon · no network</span></figcaption>
+          <pre><code><span class="ps1">$</span> <span class="cmd">kata next --unowned --agent</span>
+<span class="ok">OK</span> <span class="out">next issue=abc4 priority=1 title="fix login race"</span>
+<span class="ps1">$</span> <span class="cmd">kata claim abc4 --agent</span>
+<span class="ok">OK</span> <span class="out">claim abc4</span>
+<span class="ps1">$</span> <span class="cmd">kata comment abc4 --body "root cause: double submit in Safari callback"</span>
+<span class="ok">OK</span> <span class="out">comment abc4</span>
+<span class="ps1">$</span> <span class="cmd">kata close abc4 --done --message "Fixed the race; tests pass." --commit 4f2a91c</span>
+<span class="ok">OK</span> <span class="out">close abc4</span></code></pre>
+        </figure>
+        <div class="install-matrix">
+          <div class="install-row" data-install-command data-command="brew install kata">
+            <span class="install-label">macOS</span>
+            <code>brew install kata</code>
+            <button class="button install-copy" type="button" data-install-copy>Copy</button>
+          </div>
+          <div class="install-row" data-install-command data-command="curl -fsSL https://katatracker.com/install.sh | bash">
+            <span class="install-label">Linux</span>
+            <code>curl -fsSL https://katatracker.com/install.sh | bash</code>
+            <button class="button install-copy" type="button" data-install-copy>Copy</button>
+          </div>
+          <div class="install-row" data-install-command data-command="irm https://katatracker.com/install.ps1 | iex">
+            <span class="install-label">Windows</span>
+            <code class="ps">irm https://katatracker.com/install.ps1 | iex</code>
+            <button class="button install-copy" type="button" data-install-copy>Copy</button>
+          </div>
+        </div>
+        <p class="install-hint">One Go binary, no runtime dependencies. See <a href="/docs/get-started/install/">all install options</a>.<span data-install-status aria-live="polite"></span></p>
+        <div class="actions">
+          <a class="button primary" href="/guide/">Walk the kata</a>
+          <a class="button" href="/docs/">Read the docs</a>
+        </div>
+      </section>
+
+      <section class="site-section" aria-labelledby="speed-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">01 / Speed</p>
+            <h2 id="speed-title">Milliseconds change what a tracker is for.</h2>
+          </div>
+          <p>A SaaS tracker is an API call away: TLS, auth, someone else's datacenter, a rate limit. kata is a daemon on your machine with a SQLite ledger behind a Unix socket — a round trip that costs about as much as a file read, more than 100× closer than any hosted tracker. At that price, agents stop batching tracker updates at the end of a task and start consulting the ledger at every decision. That is not a faster version of the same tool. It is a different tool.</p>
+        </div>
+        <figure class="diagram pipeline">
+          <img src="/assets/latency-scale.svg" alt="Log-scale latency chart: a kata daemon round trip completes in under a millisecond and a full kata CLI invocation in tens of milliseconds, while a SaaS tracker API call takes hundreds of milliseconds plus rate limits">
+        </figure>
+        <ol class="ledger">
+          <li><strong>Round trip</strong><span class="stat">&lt;1<small>ms</small></span><span>Daemon round trips over the local socket. Full CLI invocations in tens of milliseconds.</span></li>
+          <li><strong>Network</strong><span class="stat">0</span><span>Ordinary issue operations never leave the machine. Works offline, on a plane, in a lab.</span></li>
+          <li><strong>Rate limits</strong><span class="stat">none</span><span>Poll, stream, and fan out as hard as your hardware allows. No 429s, no backoff dance.</span></li>
+          <li><strong>Binary</strong><span class="stat">1</span><span>A single Go binary. The daemon auto-starts on first use and idles itself away after.</span></li>
+          <li><strong>Ownership</strong><span class="stat">100<small>%</small></span><span>State lives in SQLite under <code>KATA_HOME</code>. Your repo commits only a small, secret-free <code>.kata.toml</code>.</span></li>
+        </ol>
+      </section>
+
+      <section class="site-section" aria-labelledby="memory-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">02 / Memory</p>
+            <h2 id="memory-title">Working memory that survives the session.</h2>
+          </div>
+          <p>Chat context gets compacted. Markdown plans go stale in abandoned worktrees. kata is the durable store agents write their state into as they work — cheap enough to update constantly, structured enough to pick up cold. A new session runs <code>kata list</code> and knows exactly where the last one stopped.</p>
+        </div>
+        <div class="proof-grid">
+          <article class="proof">
+            <p class="proof-tag">Durable notes</p>
+            <h3>Record the attempt, not just the outcome.</h3>
+            <p>Comments capture decisions, partial attempts, and remaining work — written before a long pause, context compaction, or a handoff to another agent, and read by whoever resumes.</p>
+          </article>
+          <article class="proof">
+            <p class="proof-tag">Planning state</p>
+            <h3>Park work with real semantics.</h3>
+            <p>A future <code>kata schedule</code> gates work until its date. A <code>deadline</code> presses without parking. <code>someday</code> shelves without losing. Native state, not prose conventions.</p>
+          </article>
+          <article class="proof">
+            <p class="proof-tag">Structure</p>
+            <h3>Plans as data, not paragraphs.</h3>
+            <p>Parent/child hierarchy, <code>--blocks</code> and <code>--blocked-by</code> ordering, and <code>--related</code> context turn a plan into a graph that queries like one — <code>ready</code> knows what is actually unblocked.</p>
+          </article>
+          <article class="proof">
+            <p class="proof-tag">Events</p>
+            <h3>Replay what happened while you were away.</h3>
+            <p>Every mutation lands on a durable, cursor-addressable event stream. Resume from your cursor, or <code>kata events --tail</code> to watch the ledger live.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="site-section" aria-labelledby="coordination-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">03 / Coordination</p>
+            <h2 id="coordination-title">Fan out. Claim. Join.</h2>
+          </div>
+          <p>This is the workflow that hosted trackers cannot serve: several agents on one machine, coordinating through the ledger at loop speed. An orchestrator fans work out as child issues, workers claim and close them, and the event stream joins results back — hundreds of tracker operations per task, none of them worth thinking twice about.</p>
+        </div>
+        <figure class="diagram pipeline">
+          <img src="/assets/coordination-map.svg" alt="An orchestrator fans work out into the kata ledger, worker agents claim and close issues against it, the event stream joins results back, and a human supervises the same ledger from the TUI and browser">
+        </figure>
+        <div class="proof-grid">
+          <article class="proof">
+            <p class="proof-tag">Claim flow</p>
+            <h3>One issue, one owner, no scraping.</h3>
+            <p><code>kata next --unowned</code> applies shared priority rules and returns at most one candidate. A lost claim race fails loudly — that failure is the coordination protocol working.</p>
+          </article>
+          <article class="proof">
+            <p class="proof-tag">Fan out / join</p>
+            <h3>The event stream is the join point.</h3>
+            <p>Create children under a tracking issue, launch agents on their own branches, then follow <code>kata events --tail</code> to return the moment a sub-task closes or needs a human.</p>
+          </article>
+          <article class="proof">
+            <p class="proof-tag">Handoff</p>
+            <h3>Give work back without losing it.</h3>
+            <p><code>kata unassign</code> releases ownership with a comment explaining why. Labels like <code>needs-review</code> and <code>handoff</code> route work between agents and sessions mid-stream.</p>
+          </article>
+          <article class="proof">
+            <p class="proof-tag">Attention hooks</p>
+            <h3>Keep attention truthful.</h3>
+            <p><code>kata init --with-hooks</code> installs session lifecycle hooks for Claude Code and Codex, so the ledger knows which issues actually have an agent on them right now.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="site-section" aria-labelledby="discipline-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">04 / Discipline</p>
+            <h2 id="discipline-title">A close is a completion claim.</h2>
+          </div>
+          <p>Agents finish confidently and wrongly. kata makes completion an auditable assertion rather than a checkbox: every close carries a reason, substantive prose, typed evidence, and actor attribution — and a reviewer can replay and undo the ones that don't hold up.</p>
+        </div>
+        <div class="proof-grid">
+          <article class="proof">
+            <p class="proof-tag">Evidence</p>
+            <h3>Closes cite their proof.</h3>
+            <p><code>kata close --done</code> takes <code>--commit</code>, <code>--test</code>, and typed <code>--evidence</code>, so "done" points at a verifiable artifact instead of a feeling.</p>
+          </article>
+          <article class="proof">
+            <p class="proof-tag">Attribution</p>
+            <h3>Every mutation names its actor.</h3>
+            <p>Humans and agents write to the same ledger under distinct identities. When five workers share a project, the history says who did what.</p>
+          </article>
+          <article class="proof">
+            <p class="proof-tag">Review</p>
+            <h3>Lazy closes get replayed.</h3>
+            <p><code>kata audit closes</code> replays close activity; <code>kata reopen</code> undoes the ones that don't survive review. The daemon refuses to close a parent over open children.</p>
+          </article>
+          <article class="proof">
+            <p class="proof-tag">Idempotency</p>
+            <h3>Retries don't duplicate work.</h3>
+            <p>Search-before-create is the contract, and idempotency keys make creation safe to retry — a crashed agent run resumes instead of littering the ledger.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="site-section" aria-labelledby="supervision-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">05 / Supervision</p>
+            <h2 id="supervision-title">Humans steer over the same ledger.</h2>
+          </div>
+          <p>Agent-first does not mean human-hostile. <code>kata tui</code> keeps triage in the terminal; <code>kata ui</code> opens the same data as a full browser workspace — projects, collections, relationships, recurrences, and issue editing — served directly by the daemon.</p>
+        </div>
+        <div class="capture-pair">
+          <figure class="capture">
+            <a href="/docs/assets/screenshots/tui/hero.svg" data-lightbox>
+              <img src="/docs/assets/screenshots/tui/hero.svg" alt="kata TUI showing a simulated issue hierarchy with priorities and statuses in the terminal">
+            </a>
+            <figcaption class="caption"><code>kata tui</code> — triage without leaving the terminal.</figcaption>
+          </figure>
+          <figure class="capture">
+            <a href="/docs/assets/screenshots/web-ui/workspace.png" data-lightbox>
+              <img src="/docs/assets/screenshots/web-ui/workspace.png" alt="kata web UI showing a synthetic project and issue hierarchy in the browser">
+            </a>
+            <figcaption class="caption"><code>kata ui</code> — the browser workspace. Captures use synthetic data.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="site-section" aria-labelledby="interfaces-title">
+        <div class="interface-layout">
+          <div>
+            <p class="section-index">06 / Interfaces</p>
+            <h2 id="interfaces-title">One ledger across every surface.</h2>
+            <p class="lede">The daemon owns the data and serializes every mutation. People, scripts, and agents pick the surface that fits the task and work against the same record.</p>
+            <ul class="interface-list">
+              <li><strong>CLI</strong><span><code>--agent</code> and <code>--json</code> output modes built for automation.</span></li>
+              <li><strong>TUI</strong><span>Keyboard triage and browsing in the terminal.</span></li>
+              <li><strong>Web UI</strong><span>The full browser workspace, served by the daemon.</span></li>
+              <li><strong>MCP</strong><span>Stdio or HTTP server with on-demand tool loading.</span></li>
+              <li><strong>HTTP API</strong><span>A versioned schema for anything else.</span></li>
+              <li><strong>Go embed</strong><span><code>go.kenn.io/kata</code> runs the whole service in-process.</span></li>
+            </ul>
+            <div class="actions">
+              <a class="button" href="/docs/workflows/agents/">The agent contract</a>
+              <a class="button" href="/docs/reference/mcp/">MCP reference</a>
+            </div>
+          </div>
+          <figure class="diagram">
+            <img src="/assets/interface-map.svg" alt="The CLI, TUI, web UI, MCP server, HTTP API, and embedded Go service all working against one kata daemon and its SQLite ledger">
+          </figure>
+        </div>
+      </section>
+
+      <section class="site-section" aria-labelledby="sync-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">07 / Sync</p>
+            <h2 id="sync-title">In sync everywhere. Local-first everywhere.</h2>
+          </div>
+          <p>A team of agents across machines doesn't have to choose between shared state and instantaneous UX. With federation, every machine runs its own daemon, and every agent works against that daemon at millisecond speed. Daemons replicate shared projects through a hub in the background — daemon to daemon, off the critical path. A SaaS tracker puts the network between the agent and every single read; kata puts it between daemons, where nobody is waiting on it.</p>
+        </div>
+        <figure class="diagram pipeline">
+          <img src="/assets/federation-sync.svg" alt="Two machines, each with agents making sub-millisecond round trips to their own local kata daemon, while the daemons replicate shared projects through a federation hub in the background, off the agents' critical path">
+        </figure>
+        <div class="capture-pair">
+          <figure class="capture">
+            <a href="/docs/assets/screenshots/federation-tui/list.svg" data-lightbox>
+              <img src="/docs/assets/screenshots/federation-tui/list.svg" alt="kata federation TUI listing a simulated active spoke daemon's federated projects and their sync state">
+            </a>
+            <figcaption class="caption">Federation status in the TUI — replicated projects and their sync state.</figcaption>
+          </figure>
+          <figure class="capture">
+            <a href="/docs/assets/screenshots/federation-tui/preview.svg" data-lightbox>
+              <img src="/docs/assets/screenshots/federation-tui/preview.svg" alt="Previewing a simulated federation enrollment in the kata TUI before joining a hub project">
+            </a>
+            <figcaption class="caption">Enrolling in a hub project — previewed before anything replicates.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="site-section" aria-labelledby="reach-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">08 / Reach</p>
+            <h2 id="reach-title">Local first. Shared when you choose.</h2>
+          </div>
+          <p>Local-first is the default, not a ceiling. When the ledger needs to travel, every hop is explicit and opt-in — and the browser workspace can supervise all of it, switching between configured daemons without losing the local-first model.</p>
+        </div>
+        <figure class="capture pipeline">
+          <a href="/docs/assets/screenshots/web-ui/daemon-switcher.png" data-lightbox>
+            <img src="/docs/assets/screenshots/web-ui/daemon-switcher.png" alt="kata web UI switching between two synthetic configured daemons from one browser workspace">
+          </a>
+        </figure>
+        <div class="choice-grid">
+          <article class="choice">
+            <p class="choice-label">Private network</p>
+            <h3>One daemon, many machines.</h3>
+            <p>Serve the ledger over a tailnet or LAN with bearer auth. Clients point <code>KATA_SERVER</code> at it and keep the same CLI, TUI, and agent workflows.</p>
+          </article>
+          <article class="choice">
+            <p class="choice-label">GitHub sync</p>
+            <h3>Meet the upstream where it lives.</h3>
+            <p>Mirror a repository's GitHub issues into kata so agents triage and reference upstream work at local speed.</p>
+          </article>
+          <article class="choice">
+            <p class="choice-label">Shared local</p>
+            <h3>One machine, many actors.</h3>
+            <p>Several users — or a fleet of agents — on one host share a project through the same daemon, each mutation attributed to its actor.</p>
+          </article>
+          <article class="choice">
+            <p class="choice-label">Hosted</p>
+            <h3>Or run it like a service.</h3>
+            <p>The daemon speaks the Heroku-style <code>$PORT</code> contract and runs on Cloud Run, Fly.io, Render, or Railway — with PostgreSQL when SQLite isn't enough.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="site-section" aria-labelledby="boundary-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">09 / Boundary</p>
+            <h2 id="boundary-title">Not a Linear replacement. A different layer.</h2>
+          </div>
+          <p>SaaS trackers coordinate companies. kata coordinates the machine doing the work. Keep roadmaps, stakeholders, and reporting in the hosted tracker — and give the working loop a ledger that answers in a millisecond.</p>
+        </div>
+        <div class="boundary-grid">
+          <article class="boundary">
+            <p class="choice-label">SaaS tracker</p>
+            <h3>The company's coordination.</h3>
+            <p>Roadmaps, cycles, dashboards, permissions. Built for people typing into browsers — and hundreds of milliseconds away from the code.</p>
+          </article>
+          <article class="boundary">
+            <p class="choice-label">Markdown plan</p>
+            <h3>The session's scratchpad.</h3>
+            <p>A plan file has no claims, no events, no evidence, and no second reader. It dies with the branch or the context window that wrote it.</p>
+          </article>
+          <article class="boundary">
+            <p class="choice-label">kata</p>
+            <h3>The machine's ledger.</h3>
+            <p>Operational work state inside the development runtime: fast enough for agents to think with, durable enough to audit, local enough to own.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="site-section" aria-labelledby="start-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-index">10 / Start</p>
+            <h2 id="start-title">Learn the form. Then make it muscle memory.</h2>
+          </div>
+          <div>
+            <p>A kata is a form practiced until it disappears into instinct. The guide walks the operating loop — bind, seed, claim, note, coordinate, close, supervise, share, own — and the documentation carries exact commands, configuration, and architecture. <code>kata init --with-agents</code> teaches the form to every agent in your repo.</p>
+            <div class="actions">
+              <a class="button primary" href="/guide/">Walk the kata</a>
+              <a class="button" href="/docs/">Open the documentation</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Copyright 2026 Kenn Software LLC. Open source under MIT.</p>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <a href="/index.md">Markdown</a>
+        <a href="/llms.txt">llms.txt</a>
+        <a href="https://github.com/kenn-io/kata/blob/main/LICENSE">License</a>
+      </nav>
+    </footer>
+
+    <dialog data-lightbox-dialog aria-labelledby="lightbox-title">
+      <div class="dialog-header">
+        <p id="lightbox-title" data-lightbox-title>Documentation capture</p>
+        <button class="dialog-close" type="button" data-lightbox-close aria-label="Close image">Close</button>
+      </div>
+      <img alt="Expanded documentation capture">
+    </dialog>
+    <script type="module" src="/scripts/site.js"></script>
+  </body>
+</html>

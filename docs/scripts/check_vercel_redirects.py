@@ -172,9 +172,6 @@ def main() -> None:
         fail("unexpected Vercel outputDirectory")
 
     redirects = collect_redirects(data)
-    for source in redirects:
-        if source.endswith(".md"):
-            fail(f"Markdown source URL must be served as a static file, not redirected: {source}")
 
     for source, destination in TEMPORARY.items():
         item = redirects.get(source)
@@ -183,7 +180,43 @@ def main() -> None:
         if item.get("destination") != destination or item.get("permanent") is not False:
             fail(f"incorrect temporary redirect {source}")
 
+    expected_permanent = expected_legacy_redirects()
+    for source, destination in expected_permanent.items():
+        item = redirects.get(source)
+        if not item:
+            fail(f"missing legacy redirect {source}")
+        if item.get("destination") != destination or item.get("permanent") is not True:
+            fail(f"incorrect legacy redirect {source}")
+
+    allowed = set(TEMPORARY) | set(expected_permanent)
+    for source in redirects:
+        if source not in allowed:
+            fail(f"unexpected redirect source {source}")
+
     print("vercel redirect checks passed")
+
+
+def expected_legacy_redirects() -> dict[str, str]:
+    """Every pre-tiered docs route redirects to its /docs/ location.
+
+    The docs tier moved under /docs/ when the marketing tier took over the
+    site root, so each nav page's legacy HTML route and Markdown twin must
+    redirect permanently. The root index is the exception: the marketing
+    page owns / and /index.md now.
+    """
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from public_markdown_sources import public_markdown_sources
+
+    expected: dict[str, str] = {}
+    for path in public_markdown_sources(ROOT / "zensical.toml"):
+        if path == "index.md":
+            continue
+        stem = path.removesuffix(".md")
+        route = stem.removesuffix("/index")
+        expected[f"/{route}/"] = f"/docs/{route}/"
+        expected[f"/{path}"] = f"/docs/{path}"
+    expected["/assets/screenshots/:path*"] = "/docs/assets/screenshots/:path*"
+    return expected
 
 
 if __name__ == "__main__":

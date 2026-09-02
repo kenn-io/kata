@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 430" role="img" aria-label="An orchestrator fans work out into the kata ledger, worker agents claim and close issues against it, the event stream joins results back, and a human supervises the same ledger from the TUI and browser">
+  <style>
+    text { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
+    .t { fill: #e8e8e8; font-size: 16px; }
+    .m { fill: #a3a3a3; font-size: 13px; }
+    .d { fill: #6b6b6b; font-size: 13px; }
+    .box { fill: #131313; stroke: #6b6b6b; stroke-width: 1.25; }
+    .core { fill: #131313; stroke: #e8e8e8; stroke-width: 1.5; }
+    .edge { stroke: #a3a3a3; stroke-width: 1.25; fill: none; }
+    .evt { stroke: #6b6b6b; stroke-width: 1.25; fill: none; stroke-dasharray: 4 4; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10" fill="none" stroke="#a3a3a3" stroke-width="1.5"/>
+    </marker>
+    <marker id="arrdim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10" fill="none" stroke="#6b6b6b" stroke-width="1.5"/>
+    </marker>
+  </defs>
+
+  <!-- orchestrator -->
+  <rect class="box" x="40" y="150" width="200" height="76"/>
+  <text class="t" x="60" y="182">orchestrator</text>
+  <text class="d" x="60" y="204">agent or human</text>
+
+  <!-- ledger core -->
+  <rect class="core" x="380" y="130" width="220" height="116"/>
+  <text class="t" x="404" y="168">kata daemon</text>
+  <text class="m" x="404" y="192">one ledger · SQLite</text>
+  <text class="d" x="404" y="214">local, milliseconds</text>
+
+  <!-- workers -->
+  <rect class="box" x="740" y="52" width="180" height="56"/>
+  <text class="t" x="758" y="86">worker A</text>
+  <rect class="box" x="740" y="160" width="180" height="56"/>
+  <text class="t" x="758" y="194">worker B</text>
+  <rect class="box" x="740" y="268" width="180" height="56"/>
+  <text class="t" x="758" y="302">worker C</text>
+
+  <!-- human -->
+  <rect class="box" x="380" y="340" width="220" height="56"/>
+  <text class="t" x="404" y="374">kata tui · kata ui</text>
+
+  <!-- edges -->
+  <line class="edge" x1="240" y1="172" x2="374" y2="172" marker-end="url(#arr)"/>
+  <text class="m" x="248" y="162">create · fan out</text>
+  <line class="evt" x1="374" y1="206" x2="240" y2="206" marker-end="url(#arrdim)"/>
+  <text class="d" x="248" y="262">events --tail · join</text>
+
+  <line class="edge" x1="606" y1="150" x2="734" y2="90" marker-end="url(#arr)"/>
+  <line class="edge" x1="606" y1="188" x2="734" y2="188" marker-end="url(#arr)"/>
+  <line class="edge" x1="606" y1="226" x2="734" y2="286" marker-end="url(#arr)"/>
+  <text class="m" x="626" y="120">next --unowned</text>
+  <text class="m" x="626" y="176">claim · comment</text>
+  <text class="m" x="626" y="266">close --done</text>
+
+  <line class="evt" x1="490" y1="334" x2="490" y2="252" marker-end="url(#arrdim)"/>
+  <text class="d" x="504" y="308">supervise</text>
+</svg>

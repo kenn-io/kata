@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 330" role="img" aria-label="Log-scale latency chart: a kata daemon round trip completes in under a millisecond and a full kata CLI invocation in tens of milliseconds, while a SaaS tracker API call takes hundreds of milliseconds">
+  <style>
+    text { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
+    .t { fill: #e8e8e8; font-size: 16px; }
+    .m { fill: #a3a3a3; font-size: 14px; }
+    .d { fill: #6b6b6b; font-size: 13px; }
+    .axis { stroke: #282828; stroke-width: 1; }
+  </style>
+  <text class="d" x="40" y="36" letter-spacing="2">ONE TRACKER OPERATION · LOG SCALE</text>
+
+  <!-- axis -->
+  <line class="axis" x1="200" y1="270" x2="900" y2="270"/>
+  <g class="axis">
+    <line x1="200" y1="264" x2="200" y2="276"/>
+    <line x1="370" y1="264" x2="370" y2="276"/>
+    <line x1="540" y1="264" x2="540" y2="276"/>
+    <line x1="710" y1="264" x2="710" y2="276"/>
+    <line x1="880" y1="264" x2="880" y2="276"/>
+  </g>
+  <text class="d" x="200" y="294" text-anchor="middle">0.1ms</text>
+  <text class="d" x="370" y="294" text-anchor="middle">1ms</text>
+  <text class="d" x="540" y="294" text-anchor="middle">10ms</text>
+  <text class="d" x="710" y="294" text-anchor="middle">100ms</text>
+  <text class="d" x="880" y="294" text-anchor="middle">1s</text>
+
+  <!-- kata daemon round trip -->
+  <text class="t" x="40" y="86">kata daemon</text>
+  <text class="d" x="40" y="104">unix socket round trip</text>
+  <rect x="200" y="74" width="132" height="18" fill="#e8e8e8"/>
+  <text class="m" x="344" y="88">&lt;1ms</text>
+
+  <!-- kata CLI -->
+  <text class="t" x="40" y="156">kata CLI</text>
+  <text class="d" x="40" y="174">spawn, query, render</text>
+  <rect x="200" y="144" width="432" height="18" fill="#6b6b6b"/>
+  <text class="m" x="644" y="158">~35ms</text>
+
+  <!-- SaaS API -->
+  <text class="t" x="40" y="226">SaaS tracker API</text>
+  <text class="d" x="40" y="244">TLS + auth + datacenter + rate limits</text>
+  <rect x="200" y="214" width="540" height="18" fill="#282828" stroke="#6b6b6b" stroke-width="1"/>
+  <rect x="740" y="214" width="89" height="18" fill="none" stroke="#6b6b6b" stroke-width="1" stroke-dasharray="3 3"/>
+  <text class="m" x="841" y="228">150–500ms</text>
+</svg>

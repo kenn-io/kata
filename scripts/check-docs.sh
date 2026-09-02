@@ -29,7 +29,21 @@ required_files=(
   "docs/vercel-build.sh"
   "docs/zensical-docs.sh"
   "docs/scripts/check_vercel_redirects.py"
+  "docs/scripts/check_built_site.py"
   "docs/scripts/check_public_markdown_sources.py"
+  "docs/llms.txt"
+  "docs/overrides/main.html"
+  "docs/overrides/sitemap.xml"
+  "docs/website/index.html"
+  "docs/website/index.md"
+  "docs/website/guide/index.html"
+  "docs/website/guide.md"
+  "docs/website/404.html"
+  "docs/website/favicon.svg"
+  "docs/website/styles/site.css"
+  "docs/website/scripts/site.js"
+  "docs/website/fonts/licenses/Inter-OFL-1.1.txt"
+  "docs/website/fonts/licenses/JetBrains-Mono-OFL-1.1.txt"
   "docs/scripts/copy_public_markdown_sources.py"
   "docs/scripts/public_markdown_sources.py"
   "scripts/update-docs.sh"
@@ -177,11 +191,19 @@ for generated in \
   docs/site/.env.local \
   docs/site/.vercel \
   docs/site/federation/index.html \
+  docs/site/docs/.cache/kata-docs-build-check \
+  docs/site/docs/federation/index.html \
+  docs/site/docs/guide/.kata-build-check/.kata.local.toml \
+  docs/site/docs/guide/kata-docs-build-check.out \
+  docs/site/docs/guide/kata-docs-build-check~ \
+  docs/site/docs/hosted-mode/index.html \
+  docs/site/docs/superpowers \
   docs/site/guide/.kata-build-check/.kata.local.toml \
   docs/site/guide/kata-docs-build-check.out \
   docs/site/guide/kata-docs-build-check~ \
   docs/site/hosted-mode/index.html \
-  docs/site/superpowers; do
+  docs/site/superpowers \
+  docs/site/website; do
   if [[ -e "$generated" ]]; then
     printf 'generated site contains maintainer-only docs: %s\n' "$generated" >&2
     exit 1
@@ -189,14 +211,19 @@ for generated in \
 done
 
 for generated in \
-  docs/site/design/index.html \
-  docs/site/design/architecture/index.html \
-  docs/site/design/data-model/index.html \
-  docs/site/design/federation/index.html \
-  docs/site/design/hosted-mode/index.html \
-  docs/site/design/semantic-search/index.html; do
+  docs/site/index.html \
+  docs/site/guide/index.html \
+  docs/site/llms.txt \
+  docs/site/docs/design/index.html \
+  docs/site/docs/design/architecture/index.html \
+  docs/site/docs/design/data-model/index.html \
+  docs/site/docs/design/federation/index.html \
+  docs/site/docs/design/hosted-mode/index.html \
+  docs/site/docs/design/semantic-search/index.html; do
   if [[ ! -e "$generated" ]]; then
-    printf 'generated site is missing design docs page: %s\n' "$generated" >&2
+    printf 'generated site is missing required page: %s\n' "$generated" >&2
     exit 1
   fi
 done
+
+(cd docs && python3 scripts/check_built_site.py)

@@ -14,6 +14,391 @@
       "source": "/install.ps1",
       "destination": "https://raw.githubusercontent.com/kenn-io/kata/main/scripts/install.ps1",
       "permanent": false
+    },
+    {
+      "source": "/get-started/quickstart/",
+      "destination": "/docs/get-started/quickstart/",
+      "permanent": true
+    },
+    {
+      "source": "/get-started/quickstart.md",
+      "destination": "/docs/get-started/quickstart.md",
+      "permanent": true
+    },
+    {
+      "source": "/get-started/install/",
+      "destination": "/docs/get-started/install/",
+      "permanent": true
+    },
+    {
+      "source": "/get-started/install.md",
+      "destination": "/docs/get-started/install.md",
+      "permanent": true
+    },
+    {
+      "source": "/changelog/",
+      "destination": "/docs/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/changelog.md",
+      "destination": "/docs/changelog.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/concepts/",
+      "destination": "/docs/guide/concepts/",
+      "permanent": true
+    },
+    {
+      "source": "/guide/concepts.md",
+      "destination": "/docs/guide/concepts.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/web-ui/",
+      "destination": "/docs/guide/web-ui/",
+      "permanent": true
+    },
+    {
+      "source": "/guide/web-ui.md",
+      "destination": "/docs/guide/web-ui.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/workspaces-projects/",
+      "destination": "/docs/guide/workspaces-projects/",
+      "permanent": true
+    },
+    {
+      "source": "/guide/workspaces-projects.md",
+      "destination": "/docs/guide/workspaces-projects.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/semantic-search/",
+      "destination": "/docs/guide/semantic-search/",
+      "permanent": true
+    },
+    {
+      "source": "/guide/semantic-search.md",
+      "destination": "/docs/guide/semantic-search.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/comparisons/",
+      "destination": "/docs/guide/comparisons/",
+      "permanent": true
+    },
+    {
+      "source": "/guide/comparisons.md",
+      "destination": "/docs/guide/comparisons.md",
+      "permanent": true
+    },
+    {
+      "source": "/guide/migrating-from-beads/",
+      "destination": "/docs/guide/migrating-from-beads/",
+      "permanent": true
+    },
+    {
+      "source": "/guide/migrating-from-beads.md",
+      "destination": "/docs/guide/migrating-from-beads.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/cli/",
+      "destination": "/docs/reference/cli/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/cli.md",
+      "destination": "/docs/reference/cli.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/daemon-discovery/",
+      "destination": "/docs/reference/daemon-discovery/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/daemon-discovery.md",
+      "destination": "/docs/reference/daemon-discovery.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/mcp/",
+      "destination": "/docs/reference/mcp/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/mcp.md",
+      "destination": "/docs/reference/mcp.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/configuration/",
+      "destination": "/docs/reference/configuration/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/configuration.md",
+      "destination": "/docs/reference/configuration.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/connector-protocol/",
+      "destination": "/docs/reference/connector-protocol/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/connector-protocol.md",
+      "destination": "/docs/reference/connector-protocol.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/metadata/",
+      "destination": "/docs/reference/metadata/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/metadata.md",
+      "destination": "/docs/reference/metadata.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/agent-output/",
+      "destination": "/docs/reference/agent-output/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/agent-output.md",
+      "destination": "/docs/reference/agent-output.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/http-api/",
+      "destination": "/docs/reference/http-api/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/http-api.md",
+      "destination": "/docs/reference/http-api.md",
+      "permanent": true
+    },
+    {
+      "source": "/workflows/agents/",
+      "destination": "/docs/workflows/agents/",
+      "permanent": true
+    },
+    {
+      "source": "/workflows/agents.md",
+      "destination": "/docs/workflows/agents.md",
+      "permanent": true
+    },
+    {
+      "source": "/workflows/sharing/",
+      "destination": "/docs/workflows/sharing/",
+      "permanent": true
+    },
+    {
+      "source": "/workflows/sharing.md",
+      "destination": "/docs/workflows/sharing.md",
+      "permanent": true
+    },
+    {
+      "source": "/operations/remote-daemon/",
+      "destination": "/docs/operations/remote-daemon/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/remote-daemon.md",
+      "destination": "/docs/operations/remote-daemon.md",
+      "permanent": true
+    },
+    {
+      "source": "/operations/github-sync/",
+      "destination": "/docs/operations/github-sync/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/github-sync.md",
+      "destination": "/docs/operations/github-sync.md",
+      "permanent": true
+    },
+    {
+      "source": "/operations/federation/",
+      "destination": "/docs/operations/federation/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/federation.md",
+      "destination": "/docs/operations/federation.md",
+      "permanent": true
+    },
+    {
+      "source": "/operations/agent-orchestration/",
+      "destination": "/docs/operations/agent-orchestration/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/agent-orchestration.md",
+      "destination": "/docs/operations/agent-orchestration.md",
+      "permanent": true
+    },
+    {
+      "source": "/operations/hosted-mode/",
+      "destination": "/docs/operations/hosted-mode/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/hosted-mode.md",
+      "destination": "/docs/operations/hosted-mode.md",
+      "permanent": true
+    },
+    {
+      "source": "/operations/postgres/",
+      "destination": "/docs/operations/postgres/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/postgres.md",
+      "destination": "/docs/operations/postgres.md",
+      "permanent": true
+    },
+    {
+      "source": "/operations/backup-restore/",
+      "destination": "/docs/operations/backup-restore/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/backup-restore.md",
+      "destination": "/docs/operations/backup-restore.md",
+      "permanent": true
+    },
+    {
+      "source": "/design/",
+      "destination": "/docs/design/",
+      "permanent": true
+    },
+    {
+      "source": "/design/index.md",
+      "destination": "/docs/design/index.md",
+      "permanent": true
+    },
+    {
+      "source": "/design/architecture/",
+      "destination": "/docs/design/architecture/",
+      "permanent": true
+    },
+    {
+      "source": "/design/architecture.md",
+      "destination": "/docs/design/architecture.md",
+      "permanent": true
+    },
+    {
+      "source": "/design/autostart-idle-shutdown/",
+      "destination": "/docs/design/autostart-idle-shutdown/",
+      "permanent": true
+    },
+    {
+      "source": "/design/autostart-idle-shutdown.md",
+      "destination": "/docs/design/autostart-idle-shutdown.md",
+      "permanent": true
+    },
+    {
+      "source": "/design/data-model/",
+      "destination": "/docs/design/data-model/",
+      "permanent": true
+    },
+    {
+      "source": "/design/data-model.md",
+      "destination": "/docs/design/data-model.md",
+      "permanent": true
+    },
+    {
+      "source": "/design/federation/",
+      "destination": "/docs/design/federation/",
+      "permanent": true
+    },
+    {
+      "source": "/design/federation.md",
+      "destination": "/docs/design/federation.md",
+      "permanent": true
+    },
+    {
+      "source": "/design/hosted-mode/",
+      "destination": "/docs/design/hosted-mode/",
+      "permanent": true
+    },
+    {
+      "source": "/design/hosted-mode.md",
+      "destination": "/docs/design/hosted-mode.md",
+      "permanent": true
+    },
+    {
+      "source": "/design/semantic-search/",
+      "destination": "/docs/design/semantic-search/",
+      "permanent": true
+    },
+    {
+      "source": "/design/semantic-search.md",
+      "destination": "/docs/design/semantic-search.md",
+      "permanent": true
+    },
+    {
+      "source": "/development/contributing/",
+      "destination": "/docs/development/contributing/",
+      "permanent": true
+    },
+    {
+      "source": "/development/contributing.md",
+      "destination": "/docs/development/contributing.md",
+      "permanent": true
+    },
+    {
+      "source": "/development/packaging/",
+      "destination": "/docs/development/packaging/",
+      "permanent": true
+    },
+    {
+      "source": "/development/packaging.md",
+      "destination": "/docs/development/packaging.md",
+      "permanent": true
+    },
+    {
+      "source": "/development/embedding/",
+      "destination": "/docs/development/embedding/",
+      "permanent": true
+    },
+    {
+      "source": "/development/embedding.md",
+      "destination": "/docs/development/embedding.md",
+      "permanent": true
+    },
+    {
+      "source": "/development/postgres-migrations/",
+      "destination": "/docs/development/postgres-migrations/",
+      "permanent": true
+    },
+    {
+      "source": "/development/postgres-migrations.md",
+      "destination": "/docs/development/postgres-migrations.md",
+      "permanent": true
+    },
+    {
+      "source": "/development/deploying-docs/",
+      "destination": "/docs/development/deploying-docs/",
+      "permanent": true
+    },
+    {
+      "source": "/development/deploying-docs.md",
+      "destination": "/docs/development/deploying-docs.md",
+      "permanent": true
+    },
+    {
+      "source": "/assets/screenshots/:path*",
+      "destination": "/docs/assets/screenshots/:path*",
+      "permanent": true
     }
   ]
 }

@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>The kata — a nine-stop tour of the operating loop</title>
+    <meta name="description" content="Walk the kata operating loop: bind a workspace, seed the ledger, claim work, keep durable notes, coordinate agents, close with evidence, supervise, sync across machines, and own your data.">
+    <link rel="canonical" href="https://katatracker.com/guide/">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="alternate" type="text/markdown" href="https://katatracker.com/guide.md">
+    <link rel="stylesheet" href="/styles/site.css">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="The kata — a tour of the operating loop">
+    <meta property="og:description" content="Bind, seed, claim, note, coordinate, close, supervise, sync, own: the practiced form that humans and coding agents run against a local-first issue ledger.">
+    <meta property="og:url" content="https://katatracker.com/guide/">
+    <meta property="og:site_name" content="kata">
+    <meta property="og:image" content="https://katatracker.com/docs/assets/screenshots/web-ui/workspace.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="The kata — a tour of the operating loop">
+    <meta name="twitter:description" content="Bind, seed, claim, note, coordinate, close, supervise, sync, own: the practiced form that humans and coding agents run against a local-first issue ledger.">
+    <meta name="twitter:image" content="https://katatracker.com/docs/assets/screenshots/web-ui/workspace.png">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="wordmark" href="/">kata <span class="kana">カタ</span></a>
+      <nav aria-label="Primary navigation">
+        <a href="/guide/" aria-current="page">Guide</a>
+        <a href="/docs/">Docs</a>
+        <a class="repo" href="https://github.com/kenn-io/kata">
+          <span class="sr-only">kata on GitHub:</span>
+          <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+              0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+              -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07
+              -.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2
+              -.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27
+              c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0
+              3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0
+              .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+          </svg>
+          <span class="repo-meta">
+            <span class="repo-name">kenn-io/kata</span>
+          </span>
+        </a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero compact" aria-labelledby="guide-title">
+        <p class="eyebrow">The guide</p>
+        <h1 id="guide-title">A kata is a form you practice until it disappears.</h1>
+        <p class="lede">This is the operating loop humans and coding agents run against the ledger — nine moves, each a habit worth building. Every stop links into the <a href="/docs/">documentation</a> for exact commands and configuration.</p>
+        <ol class="guide-nav">
+          <li><a href="#bind">01 Bind</a></li>
+          <li><a href="#seed">02 Seed</a></li>
+          <li><a href="#claim">03 Claim</a></li>
+          <li><a href="#note">04 Note</a></li>
+          <li><a href="#coordinate">05 Coordinate</a></li>
+          <li><a href="#close">06 Close</a></li>
+          <li><a href="#supervise">07 Supervise</a></li>
+          <li><a href="#sync">08 Sync</a></li>
+          <li><a href="#own">09 Own</a></li>
+        </ol>
+      </section>
+
+      <ol class="guide-stops">
+        <li class="guide-stop" id="bind">
+          <div class="guide-copy">
+            <h2>Bind the workspace.</h2>
+            <p><code>kata init</code> writes a small, secret-free <code>.kata.toml</code> that binds your repo — and every clone and worktree of it — to one kata project. Issue state lives in SQLite under <code>KATA_HOME</code>, so your code history stays clean of tracker churn.</p>
+            <p><code>kata init --with-agents</code> also drops kata's operating contract into <code>AGENTS.md</code>/<code>CLAUDE.md</code>, and <code>kata quickstart</code> prints it on demand — so every agent that opens the repo already knows the form.</p>
+            <p><a href="/docs/get-started/quickstart/">Quickstart</a> · <a href="/docs/guide/workspaces-projects/">Workspaces and projects</a></p>
+          </div>
+          <div class="guide-media">
+            <figure class="term">
+              <figcaption class="term-title"><span>bind once, resolve everywhere</span></figcaption>
+              <pre><code><span class="ps1">$</span> <span class="cmd">cd your-repo</span>
+<span class="ps1">$</span> <span class="cmd">kata init --with-agents</span>
+<span class="out"># .kata.toml written — commit it; clones and</span>
+<span class="out"># worktrees now resolve to the same project</span>
+<span class="ps1">$</span> <span class="cmd">kata quickstart</span>
+<span class="out"># the agent contract, printed on demand</span></code></pre>
+            </figure>
+          </div>
+        </li>
+
+        <li class="guide-stop" id="seed">
+          <div class="guide-copy">
+            <h2>Seed the ledger, not the chat.</h2>
+            <p>Work that only exists in a conversation dies with the conversation. The form: search before creating, then create with an idempotency key so a retried run resumes instead of duplicating.</p>
+            <p>Structure is data, not prose — children hang under a parent with <code>--parent</code>, ordering lives in <code>--blocks</code> and <code>--blocked-by</code>, and context rides on <code>--related</code>.</p>
+            <p><a href="/docs/workflows/agents/">Agent workflows</a> · <a href="/docs/guide/concepts/">Concepts</a></p>
+          </div>
+          <div class="guide-media">
+            <figure class="term">
+              <figcaption class="term-title"><span>search, then create</span></figcaption>
+              <pre><code><span class="ps1">$</span> <span class="cmd">kata search "login race" --agent</span>
+<span class="ps1">$</span> <span class="cmd">kata create "fix login race" \
+    --body "Double-submit in Safari callback." \
+    --idempotency-key "login-race-2026-05-31" \
+    --agent</span>
+<span class="ok">OK</span> <span class="out">create abc4</span>
+<span class="ps1">$</span> <span class="cmd">kata create "add regression test" --parent abc4 --agent</span>
+<span class="ok">OK</span> <span class="out">create d4ex</span></code></pre>
+            </figure>
+          </div>
+        </li>
+
+        <li class="guide-stop" id="claim">
+          <div class="guide-copy">
+            <h2>Claim one issue. Loudly.</h2>
+            <p>In a multi-agent workspace, <code>kata next --unowned</code> applies the shared priority rules and returns at most one candidate. <code>kata claim</code> takes ownership — and fails if someone got there first. That failure is not an error to retry around; it is the coordination protocol telling you to pick different work.</p>
+            <p>Because the round trip costs nothing, agents can afford to check, claim, and re-check constantly — the ledger stays truthful at loop speed.</p>
+            <p><a href="/docs/workflows/agents/#claim-work">The claim flow</a></p>
+          </div>
+          <div class="guide-media">
+            <figure class="term">
+              <figcaption class="term-title"><span>one issue, one owner</span></figcaption>
+              <pre><code><span class="ps1">$</span> <span class="cmd">kata next --unowned --agent</span>
+<span class="ok">OK</span> <span class="out">next issue=abc4 priority=1 title="fix login race"</span>
+<span class="ps1">$</span> <span class="cmd">kata claim abc4 --agent</span>
+<span class="ok">OK</span> <span class="out">claim abc4</span>
+<span class="out"># another agent's claim on abc4 now fails —</span>
+<span class="out"># it runs `next` again and takes different work</span></code></pre>
+            </figure>
+          </div>
+        </li>
+
+        <li class="guide-stop" id="note">
+          <div class="guide-copy">
+            <h2>Write notes the next session can use.</h2>
+            <p>Before a long pause, a context compaction, or a handoff, record the decision, the partial attempt, and what remains — in a comment on the issue, where the next actor will actually look.</p>
+            <p>Planning state is native: <code>kata schedule</code> parks work until a date, <code>kata deadline</code> presses without parking, and a <code>someday</code> flag shelves an idea without losing it.</p>
+            <p><a href="/docs/workflows/agents/#keep-durable-notes">Durable notes</a> · <a href="/docs/guide/web-ui/#manage-an-issue">Issue editing</a></p>
+          </div>
+          <div class="guide-media">
+            <figure class="capture">
+              <a href="/docs/assets/screenshots/web-ui/issue-detail.png" data-lightbox>
+                <img src="/docs/assets/screenshots/web-ui/issue-detail.png" alt="kata web UI issue detail with Markdown body, properties, recurrence, links, checklist, and comments">
+              </a>
+              <figcaption class="caption">An issue is a document: Markdown body, properties, links, checklist, comments. Captures use synthetic data.</figcaption>
+            </figure>
+          </div>
+        </li>
+
+        <li class="guide-stop" id="coordinate">
+          <div class="guide-copy">
+            <h2>Fan out, then join on the event stream.</h2>
+            <p>An orchestrator — agent or human — creates child issues under a tracking parent and launches workers on their own branches. Workers claim, comment, and close against the same ledger. The orchestrator follows <code>kata events --tail</code> and returns the moment a sub-task closes or needs a human.</p>
+            <p>Every mutation lands on a durable, cursor-addressable stream, so a supervisor that was away replays exactly what it missed. Session hooks keep attention truthful: the ledger knows which issues have an agent on them right now.</p>
+            <p><a href="/docs/operations/agent-orchestration/">Agent orchestration</a> · <a href="/docs/workflows/agents/#poll-events-during-long-runs">Event polling</a></p>
+          </div>
+          <div class="guide-media">
+            <figure class="diagram">
+              <img src="/assets/coordination-map.svg" alt="An orchestrator fans work out into the kata ledger, worker agents claim and close issues against it, the event stream joins results back, and a human supervises the same ledger">
+            </figure>
+          </div>
+        </li>
+
+        <li class="guide-stop" id="close">
+          <div class="guide-copy">
+            <h2>Close only what you can prove.</h2>
+            <p>Closing is a completion claim, and claims need evidence: substantive prose plus a commit, a test command, or typed evidence a reviewer can check later. Attempted is not done — incomplete work gets a <code>needs-review</code> label and an honest comment instead of a close.</p>
+            <p>Close each issue as its work is verified, not in a batch at the end. The daemon refuses to close a parent over open children, and <code>kata audit closes</code> lets a reviewer replay — and <code>kata reopen</code> undo — anything that doesn't hold up.</p>
+            <p><a href="/docs/guide/concepts/#close-discipline">Close discipline</a></p>
+          </div>
+          <div class="guide-media">
+            <figure class="term">
+              <figcaption class="term-title"><span>a close is a claim</span></figcaption>
+              <pre><code><span class="ps1">$</span> <span class="cmd">kata close abc4 --done \
+    --message "Fixed the Safari double-submit; race test passes." \
+    --commit 4f2a91c --test "go test ./internal/auth/..." \
+    --agent</span>
+<span class="ok">OK</span> <span class="out">close abc4</span>
+<span class="out"># not actually done? don't close:</span>
+<span class="ps1">$</span> <span class="cmd">kata label add abc4 needs-review --agent</span>
+<span class="ps1">$</span> <span class="cmd">kata comment abc4 --body "Fix drafted; flake persists in CI." --agent</span></code></pre>
+            </figure>
+          </div>
+        </li>
+
+        <li class="guide-stop" id="supervise">
+          <div class="guide-copy">
+            <h2>Steer from the terminal or the browser.</h2>
+            <p>Everything the agents wrote is there for you to read — the same ledger, no export step. <code>kata tui</code> keeps triage in the terminal; <code>kata ui</code> opens the daemon's own browser workspace with projects, collections, editing, recurrences, and a relationship graph of how the work connects.</p>
+            <p>Supervision is not a separate product bolted onto the agent surface. It is the same data, milliseconds away, rendered for a human.</p>
+            <p><a href="/docs/guide/web-ui/">Web UI guide</a></p>
+          </div>
+          <div class="guide-media">
+            <figure class="capture">
+              <a href="/docs/assets/screenshots/web-ui/relationships.png" data-lightbox>
+                <img src="/docs/assets/screenshots/web-ui/relationships.png" alt="kata web UI relationship graph generated from synthetic issues, showing parents, blockers, and related work">
+              </a>
+              <figcaption class="caption">The relationship graph — the plan your agents built, drawn as one.</figcaption>
+            </figure>
+          </div>
+        </li>
+
+        <li class="guide-stop" id="sync">
+          <div class="guide-copy">
+            <h2>Sync daemons, not keystrokes.</h2>
+            <p>Federation is how a team of agents stays in sync <em>without giving up</em> the instantaneous local-first loop. Each machine runs its own daemon; agents and humans only ever talk to the daemon beside them. Spoke daemons enroll with a hub and replicate shared projects in the background — the network serves the daemons, and nobody's read waits on it.</p>
+            <p>Other reach is just as deliberate: serve one daemon over a private network with bearer auth, mirror GitHub issues into the ledger, or run hosted behind <code>$PORT</code>.</p>
+            <p><a href="/docs/operations/federation/">Federation</a> · <a href="/docs/workflows/sharing/">Sharing models</a> · <a href="/docs/operations/github-sync/">GitHub sync</a></p>
+          </div>
+          <div class="guide-media">
+            <figure class="diagram">
+              <img src="/assets/federation-sync.svg" alt="Two machines whose agents each work against their own local kata daemon at sub-millisecond speed while the daemons replicate shared projects through a federation hub in the background">
+            </figure>
+          </div>
+        </li>
+
+        <li class="guide-stop" id="own">
+          <div class="guide-copy">
+            <h2>Own the ledger outright.</h2>
+            <p>The whole record — issues, comments, events, attribution — is a SQLite database under <code>KATA_HOME</code> on hardware you control. <code>kata export</code> writes it as JSONL for backup; <code>kata import</code> restores or merges it anywhere, no vendor in the loop.</p>
+            <p>kata is MIT-licensed, a single Go binary, and yours: the coordination fabric your agents depend on shouldn't live behind someone else's API key.</p>
+            <p><a href="/docs/operations/backup-restore/">Backup and restore</a> · <a href="/docs/design/data-model/">Data model and durability</a></p>
+          </div>
+          <div class="guide-media">
+            <figure class="term">
+              <figcaption class="term-title"><span>your data, in the open</span></figcaption>
+              <pre><code><span class="ps1">$</span> <span class="cmd">kata export --output backups/kata-20260901.jsonl</span>
+<span class="out"># the full ledger as JSONL — issues, comments, events</span>
+<span class="ps1">$</span> <span class="cmd">kata import --input backups/kata-20260901.jsonl \
+    --target ~/.kata/restored.db</span>
+<span class="out"># restored on any machine, no vendor in the loop</span></code></pre>
+            </figure>
+          </div>
+        </li>
+      </ol>
+
+      <section class="site-section" aria-labelledby="after-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">After the tour</p>
+            <h2 id="after-title">Run the form until it's muscle memory.</h2>
+          </div>
+          <div>
+            <p>Install kata, bind a repo, and let <code>kata init --with-agents</code> teach the loop to every agent that opens it. The documentation carries the exact commands, configuration, and architecture.</p>
+            <div class="actions">
+              <a class="button primary" href="/docs/get-started/quickstart/">Start in five minutes</a>
+              <a class="button" href="/docs/">Open the documentation</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Copyright 2026 Kenn Software LLC. Open source under MIT.</p>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <a href="/guide.md">Markdown</a>
+        <a href="/llms.txt">llms.txt</a>
+        <a href="https://github.com/kenn-io/kata/blob/main/LICENSE">License</a>
+      </nav>
+    </footer>
+
+    <dialog data-lightbox-dialog aria-labelledby="lightbox-title">
+      <div class="dialog-header">
+        <p id="lightbox-title" data-lightbox-title>Documentation capture</p>
+        <button class="dialog-close" type="button" data-lightbox-close aria-label="Close image">Close</button>
+      </div>
+      <img alt="Expanded documentation capture">
+    </dialog>
+    <script type="module" src="/scripts/site.js"></script>
+  </body>
+</html>

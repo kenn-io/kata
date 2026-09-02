@@ -56,7 +56,7 @@ At narrow window widths the task list stays primary: below 700px the sidebar
 moves into a drawer, and filter controls wrap to fit the list pane, including
 side-by-side detail layouts.
 
-![Kata Web UI showing a synthetic project and issue hierarchy](/assets/screenshots/web-ui/workspace.png)
+![Kata Web UI showing a synthetic project and issue hierarchy](/docs/assets/screenshots/web-ui/workspace.png)
 
 ## Manage an issue
 
@@ -78,7 +78,7 @@ Mutations use the same daemon validation, actor attribution, revision checks,
 events, and hooks as the CLI. Controls are disabled while authority is stale,
 read-only, or another mutation is pending.
 
-![Kata Web UI issue detail with Markdown, properties, recurrence, links, checklist, and comment](/assets/screenshots/web-ui/issue-detail.png)
+![Kata Web UI issue detail with Markdown, properties, recurrence, links, checklist, and comment](/docs/assets/screenshots/web-ui/issue-detail.png)
 
 ## Explore relationships
 
@@ -87,7 +87,7 @@ The selected issue stays anchored while the graph shows parents, children,
 blocking dependencies, and related issues. Graph filters choose the link types,
 direction, and traversal depth; selecting a node opens its issue detail.
 
-![Kata Web UI relationship graph generated from synthetic issues](/assets/screenshots/web-ui/relationships.png)
+![Kata Web UI relationship graph generated from synthetic issues](/docs/assets/screenshots/web-ui/relationships.png)
 
 ## Work across daemons
 
@@ -97,7 +97,7 @@ move among them without leaving that browser origin. Configured bearer tokens
 remain server-side, and the application remembers the active route separately
 for each daemon.
 
-![Kata Web UI switching between two synthetic configured daemons](/assets/screenshots/web-ui/daemon-switcher.png)
+![Kata Web UI switching between two synthetic configured daemons](/docs/assets/screenshots/web-ui/daemon-switcher.png)
 
 Use `kata ui --daemon <name>` when you want to open one configured target
 directly instead. See [Configuration](../reference/configuration.md#daemon-config)

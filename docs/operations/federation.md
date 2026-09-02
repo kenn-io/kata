@@ -206,32 +206,32 @@ make docs-assets-branch
 The first screen identifies the active spoke daemon and the selected local
 project before enrollment starts:
 
-![Federation list for a simulated active spoke daemon](/assets/screenshots/federation-tui/list.svg)
+![Federation list for a simulated active spoke daemon](/docs/assets/screenshots/federation-tui/list.svg)
 
 The enrollment flow starts by selecting a hub daemon from the catalog. The
 active spoke is shown but blocked as a hub target; the catalog hub keeps its own
 URL, auth, and `allow_insecure` setting:
 
-![Selecting a simulated catalog hub daemon](/assets/screenshots/federation-tui/select-hub.svg)
+![Selecting a simulated catalog hub daemon](/docs/assets/screenshots/federation-tui/select-hub.svg)
 
 After the hub daemon is selected, choose the hub project behavior. The default
 row creates or enables the hub project that matches the local spoke project; an
 existing hub project can be selected when the local project should adopt into a
 different hub project:
 
-![Selecting a simulated hub project for enrollment](/assets/screenshots/federation-tui/select-hub-project.svg)
+![Selecting a simulated hub project for enrollment](/docs/assets/screenshots/federation-tui/select-hub-project.svg)
 
 The preview is the mutation boundary. Confirm the operation type, local spoke
 project, hub daemon, hub auth state, requested actor, capabilities, push
 setting, and `allow_insecure` value before pressing Enter:
 
-![Previewing a simulated federation enrollment](/assets/screenshots/federation-tui/preview.svg)
+![Previewing a simulated federation enrollment](/docs/assets/screenshots/federation-tui/preview.svg)
 
 On success, the TUI shows the actor returned by the hub, adoption status,
 snapshot count, and hub project metadata, then refreshes the spoke federation
 list:
 
-![Result of a simulated federation enrollment](/assets/screenshots/federation-tui/result.svg)
+![Result of a simulated federation enrollment](/docs/assets/screenshots/federation-tui/result.svg)
 
 ## Worked example: direct token-auth hub
 

@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" role="img" aria-label="Two machines, each with agents making sub-millisecond round trips to their own local kata daemon, while the daemons replicate shared projects through a federation hub in the background, off the agents' critical path">
+  <style>
+    text { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
+    .t { fill: #e8e8e8; font-size: 16px; }
+    .m { fill: #a3a3a3; font-size: 13px; }
+    .d { fill: #6b6b6b; font-size: 13px; }
+    .box { fill: #131313; stroke: #6b6b6b; stroke-width: 1.25; }
+    .core { fill: #131313; stroke: #e8e8e8; stroke-width: 1.5; }
+    .zone { fill: none; stroke: #282828; stroke-width: 1; stroke-dasharray: 2 4; }
+    .hot { stroke: #e8e8e8; stroke-width: 1.5; fill: none; }
+    .bg { stroke: #6b6b6b; stroke-width: 1.25; fill: none; stroke-dasharray: 5 5; }
+  </style>
+  <defs>
+    <marker id="fhot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10" fill="none" stroke="#e8e8e8" stroke-width="1.5"/>
+    </marker>
+    <marker id="fbg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10" fill="none" stroke="#6b6b6b" stroke-width="1.5"/>
+    </marker>
+  </defs>
+
+  <!-- machine A -->
+  <rect class="zone" x="28" y="34" width="300" height="392"/>
+  <text class="d" x="48" y="62" letter-spacing="2">MACHINE A</text>
+
+  <rect class="box" x="60" y="88" width="236" height="48"/>
+  <text class="t" x="78" y="118">agent · claude</text>
+  <rect class="box" x="60" y="152" width="236" height="48"/>
+  <text class="t" x="78" y="182">agent · codex</text>
+  <rect class="box" x="60" y="216" width="236" height="48"/>
+  <text class="t" x="78" y="246">human · kata tui</text>
+
+  <line class="hot" x1="178" y1="136" x2="178" y2="146"/>
+  <line class="hot" x1="178" y1="200" x2="178" y2="210"/>
+  <line class="hot" x1="178" y1="264" x2="178" y2="300" marker-end="url(#fhot)"/>
+
+  <rect class="core" x="60" y="306" width="236" height="76"/>
+  <text class="t" x="78" y="338">local daemon</text>
+  <text class="m" x="78" y="362">&lt;1ms · every operation</text>
+
+  <!-- machine B -->
+  <rect class="zone" x="632" y="34" width="300" height="392"/>
+  <text class="d" x="652" y="62" letter-spacing="2">MACHINE B</text>
+
+  <rect class="box" x="664" y="88" width="236" height="48"/>
+  <text class="t" x="682" y="118">agent · worker-1</text>
+  <rect class="box" x="664" y="152" width="236" height="48"/>
+  <text class="t" x="682" y="182">agent · worker-2</text>
+  <rect class="box" x="664" y="216" width="236" height="48"/>
+  <text class="t" x="682" y="246">human · kata ui</text>
+
+  <line class="hot" x1="782" y1="136" x2="782" y2="146"/>
+  <line class="hot" x1="782" y1="200" x2="782" y2="210"/>
+  <line class="hot" x1="782" y1="264" x2="782" y2="300" marker-end="url(#fhot)"/>
+
+  <rect class="core" x="664" y="306" width="236" height="76"/>
+  <text class="t" x="682" y="338">local daemon</text>
+  <text class="m" x="682" y="362">&lt;1ms · every operation</text>
+
+  <!-- hub -->
+  <rect class="box" x="400" y="318" width="160" height="52"/>
+  <text class="t" x="422" y="340">hub</text>
+  <text class="d" x="422" y="358">shared projects</text>
+
+  <line class="bg" x1="296" y1="344" x2="394" y2="344" marker-end="url(#fbg)" marker-start="url(#fbg)"/>
+  <line class="bg" x1="566" y1="344" x2="658" y2="344" marker-end="url(#fbg)" marker-start="url(#fbg)"/>
+
+  <text class="m" x="480" y="404" text-anchor="middle">replication runs daemon-to-daemon,</text>
+  <text class="m" x="480" y="424" text-anchor="middle">off the agents' critical path</text>
+
+  <text class="d" x="480" y="70" text-anchor="middle">every read and write stays local —</text>
+  <text class="d" x="480" y="90" text-anchor="middle">sync is the daemon's job, not the agent's</text>
+</svg>
