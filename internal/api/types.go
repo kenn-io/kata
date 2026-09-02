@@ -1038,7 +1038,8 @@ type UnassignRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor string `json:"actor,omitempty"`
+		Actor         string  `json:"actor,omitempty"`
+		ExpectedOwner *string `json:"expected_owner,omitempty"`
 	}
 }
 
@@ -1047,8 +1048,9 @@ type ClaimRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor string `json:"actor" required:"true"`
-		Force bool   `json:"force,omitempty"`
+		Actor     string `json:"actor" required:"true"`
+		Force     bool   `json:"force,omitempty"`
+		IfUnowned bool   `json:"if_unowned,omitempty"`
 	}
 }
 

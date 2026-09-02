@@ -107,6 +107,61 @@ func TestUnassign_HappyPath(t *testing.T) {
 	assert.True(t, out.Changed)
 }
 
+func TestUnassign_ExpectedOwnerMatches(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	resp, _ := postAssign(t, env, pid, n, "tester", "agent-a")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "actions/unassign"),
+		map[string]any{"actor": "tester", "expected_owner": "agent-a"}, nil)
+
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(raw))
+	var out ownerResp
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.True(t, out.Changed)
+	assert.Nil(t, out.Issue.Owner)
+}
+
+func TestUnassign_ExpectedOwnerMismatch(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	resp, _ := postAssign(t, env, pid, n, "tester", "agent-b")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "actions/unassign"),
+		map[string]any{"actor": "tester", "expected_owner": "agent-a"}, nil)
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	assert.Contains(t, string(raw), `"code":"owner_mismatch"`)
+	assert.Contains(t, string(raw), `"expected_owner":"agent-a"`)
+	assert.Contains(t, string(raw), `"current_owner":"agent-b"`)
+}
+
+func TestUnassign_ExpectedOwnerMismatchWhenUnowned(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "actions/unassign"),
+		map[string]any{"actor": "tester", "expected_owner": "agent-a"}, nil)
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	assert.Contains(t, string(raw), `"code":"owner_mismatch"`)
+	assert.Contains(t, string(raw), `"current_owner":null`)
+}
+
+func TestUnassign_BlankExpectedOwnerIs400(t *testing.T) {
+	for _, expected := range []string{"", "   "} {
+		t.Run("value="+expected, func(t *testing.T) {
+			env := testenv.New(t)
+			pid, n := setupOneIssue(t, env)
+			resp, _ := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "actions/unassign"),
+				map[string]any{"actor": "tester", "expected_owner": expected}, nil)
+			assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		})
+	}
+}
+
 func TestClaim_UnownedIssue(t *testing.T) {
 	env := testenv.New(t)
 	pid, n := setupOneIssue(t, env)
@@ -130,6 +185,55 @@ func TestClaim_AlreadyOwnedBySameActor(t *testing.T) {
 	assert.False(t, out.Changed)
 	assert.Nil(t, out.Event)
 	assert.Nil(t, out.PreviousOwner)
+}
+
+func TestClaim_IfUnownedClaimsUnownedIssue(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "actions/claim"),
+		map[string]any{"actor": "alice", "if_unowned": true}, nil)
+
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(raw))
+	var out claimResp
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.True(t, out.Changed)
+	require.NotNil(t, out.Event)
+}
+
+func TestClaim_IfUnownedRejectsSameActorWithoutForceHint(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	resp, _ := postClaim(t, env, pid, n, "alice", false)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "actions/claim"),
+		map[string]any{"actor": "alice", "if_unowned": true}, nil)
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	assert.Contains(t, string(raw), `"code":"already_claimed"`)
+	assert.Contains(t, string(raw), `"current_owner":"alice"`)
+	assert.NotContains(t, string(raw), "--force")
+}
+
+func TestClaim_IfUnownedRejectsDifferentActor(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	resp, _ := postClaim(t, env, pid, n, "alice", false)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, _ = envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "actions/claim"),
+		map[string]any{"actor": "bob", "if_unowned": true}, nil)
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+func TestClaim_ForceAndIfUnownedIs400(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	resp, _ := envDoRaw(t, env, http.MethodPost, issuePath(pid, n, "actions/claim"),
+		map[string]any{"actor": "alice", "force": true, "if_unowned": true}, nil)
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 func TestClaim_AlreadyOwnedByDifferentActor(t *testing.T) {

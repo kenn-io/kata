@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -17,7 +18,7 @@ func newAssignCmd() *cobra.Command {
 		Short: "set the owner of an issue",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAssign(cmd, args[0], args[1], false)
+			return runAssign(cmd, args[0], args[1], false, nil)
 		},
 	}
 	addCommentFlag(cmd)
@@ -25,19 +26,31 @@ func newAssignCmd() *cobra.Command {
 }
 
 func newUnassignCmd() *cobra.Command {
+	var expectedOwner string
 	cmd := &cobra.Command{
 		Use:   "unassign <issue-ref>",
 		Short: "clear the owner of an issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAssign(cmd, args[0], "", true)
+			var expected *string
+			if cmd.Flags().Changed("expect-owner") {
+				trimmed := strings.TrimSpace(expectedOwner)
+				if trimmed == "" {
+					return &cliError{
+						Message: "--expect-owner must not be empty", Kind: kindValidation, ExitCode: ExitValidation,
+					}
+				}
+				expected = &trimmed
+			}
+			return runAssign(cmd, args[0], "", true, expected)
 		},
 	}
+	cmd.Flags().StringVar(&expectedOwner, "expect-owner", "", "clear ownership only if it matches this owner")
 	addCommentFlag(cmd)
 	return cmd
 }
 
-func runAssign(cmd *cobra.Command, raw, owner string, unassign bool) error {
+func runAssign(cmd *cobra.Command, raw, owner string, unassign bool, expectedOwner *string) error {
 	comment, err := commentFromFlag(cmd)
 	if err != nil {
 		return err
@@ -56,6 +69,9 @@ func runAssign(cmd *cobra.Command, raw, owner string, unassign bool) error {
 	if unassign {
 		action = "unassign"
 		body = map[string]any{"actor": actor}
+		if expectedOwner != nil {
+			body["expected_owner"] = *expectedOwner
+		}
 	}
 	postURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", baseURL, pid, url.PathEscape(issue.RefForAPI), action)
 	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, postURL, body)

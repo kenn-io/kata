@@ -1912,11 +1912,19 @@ type eventInsert struct {
 // new value matches the current value (returns nil event, changed=false).
 func (d *Store) UpdateOwner(ctx context.Context, issueID int64, newOwner *string, actor string) (db.Issue, *db.Event, bool, error) {
 	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
-		return d.updateOwner(ctx, issueID, newOwner, actor)
+		return d.updateOwner(ctx, issueID, newOwner, actor, nil)
 	})
 }
 
-func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string, actor string) (db.Issue, *db.Event, bool, error) {
+// UnassignOwner clears ownership only when expectedOwner is nil or matches the
+// current owner. A mismatch returns the current issue without an event.
+func (d *Store) UnassignOwner(ctx context.Context, issueID int64, actor string, expectedOwner *string) (db.Issue, *db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
+		return d.updateOwner(ctx, issueID, nil, actor, expectedOwner)
+	})
+}
+
+func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string, actor string, expectedOwner *string) (db.Issue, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Issue{}, nil, false, err
@@ -1926,6 +1934,9 @@ func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string
 	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
+	}
+	if expectedOwner != nil && !ownerEqual(issue.Owner, expectedOwner) {
+		return issue, nil, false, db.ErrOwnerMismatch
 	}
 	// No-op: same owner.
 	if ownerEqual(issue.Owner, newOwner) {
@@ -1998,11 +2009,19 @@ func ownerEqual(a, b *string) bool {
 // and force is false. The ClaimResult.CurrentOwner field is set in this case.
 func (d *Store) ClaimOwner(ctx context.Context, issueID int64, actor string, force bool) (db.ClaimResult, error) {
 	return retryWrite1(ctx, d, func() (db.ClaimResult, error) {
-		return d.claimOwner(ctx, issueID, actor, force)
+		return d.claimOwner(ctx, issueID, actor, force, false)
 	})
 }
 
-func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, force bool) (db.ClaimResult, error) {
+// ClaimOwnerIfUnowned claims only when no owner is set, including when the
+// current owner has the same actor identity.
+func (d *Store) ClaimOwnerIfUnowned(ctx context.Context, issueID int64, actor string) (db.ClaimResult, error) {
+	return retryWrite1(ctx, d, func() (db.ClaimResult, error) {
+		return d.claimOwner(ctx, issueID, actor, false, true)
+	})
+}
+
+func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, force, ifUnowned bool) (db.ClaimResult, error) {
 	actor = strings.TrimSpace(actor)
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
@@ -2014,6 +2033,10 @@ func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
 	if err != nil {
 		return db.ClaimResult{}, err
+	}
+
+	if ifUnowned && issue.Owner != nil {
+		return db.ClaimResult{CurrentOwner: issue.Owner}, db.ErrAlreadyClaimed
 	}
 
 	// Already owned by same actor: no-op
@@ -2047,6 +2070,12 @@ func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 			 SET owner      = ?,
 			     updated_at = ?
 			 WHERE id = ? AND deleted_at IS NULL`, actor, ts, issueID)
+	} else if ifUnowned {
+		res, err = tx.ExecContext(ctx,
+			`UPDATE issues
+			 SET owner      = ?,
+			     updated_at = ?
+			 WHERE id = ? AND deleted_at IS NULL AND owner IS NULL`, actor, ts, issueID)
 	} else {
 		res, err = tx.ExecContext(ctx,
 			`UPDATE issues
