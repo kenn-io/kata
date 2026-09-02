@@ -141,6 +141,23 @@ func TestClose_IfMatchRejectsStaleRevision(t *testing.T) {
 	assert.Equal(t, "open", issue.Status)
 }
 
+func TestClose_PresentEmptyIfMatchRejectsRequest(t *testing.T) {
+	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+	body := map[string]any{
+		"actor":   "agent-one",
+		"reason":  "wontfix",
+		"message": "Reviewed the request and recorded why the work should stop here.",
+	}
+	response := postWithHeader(t, ts, issueURL(projectID, issueID, "actions/close"),
+		map[string]string{"If-Match": ""}, body)
+	assertAPIError(t, response.status, response.body,
+		http.StatusBadRequest, "validation")
+
+	issue, err := h.DB().IssueByID(context.Background(), issueID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", issue.Status)
+}
+
 func TestClose_IfMatchRejectsStaleRevisionAfterAnotherClose(t *testing.T) {
 	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
 	_, err := h.DB().PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{

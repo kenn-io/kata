@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPostFollowupCommentFailurePreservesRetryKey(t *testing.T) {
+func TestPostFollowupCommentFailureRecommendsSafeKeyedRetry(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		http.Error(writer, "temporary failure", http.StatusServiceUnavailable)
 	}))
@@ -20,7 +20,7 @@ func TestPostFollowupCommentFailurePreservesRetryKey(t *testing.T) {
 	err := postFollowupCommentWithKey(t.Context(), server.Client(), server.URL,
 		1, "abc1", "example-agent", "finished work", "close-comment:close-request-1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `kata comment abc1 --body ... --idempotency-key "close-comment:close-request-1"`)
+	assert.Contains(t, err.Error(), "rerun the original kata close command with the same --idempotency-key")
 }
 
 func TestComment_AppendsToIssue(t *testing.T) {
