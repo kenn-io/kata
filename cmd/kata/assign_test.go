@@ -59,3 +59,38 @@ func TestUnassign_WithComment_AppendsComment(t *testing.T) {
 	require.Len(t, got.Comments, 1)
 	assert.Equal(t, "rolling off", got.Comments[0].Body)
 }
+
+func TestUnassign_ExpectOwnerMatches(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "x")
+	runCLI(t, env, dir, "assign", ref, "agent-a")
+
+	out := runCLI(t, env, dir, "unassign", ref, "--expect-owner", "agent-a")
+
+	assert.Contains(t, out, "unassigned")
+}
+
+func TestUnassign_ExpectOwnerMismatchDoesNotAppendComment(t *testing.T) {
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "x")
+	runCLI(t, env, dir, "assign", ref, "agent-b")
+
+	_, err := runCLICapture(t, env, dir, "unassign", ref,
+		"--expect-owner", "agent-a", "--comment", "release if unchanged")
+
+	cliErr := requireCLIError(t, err, ExitConflict)
+	assert.Equal(t, "owner_mismatch", cliErr.Code)
+	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
+	assert.Empty(t, got.Comments)
+}
+
+func TestUnassign_BlankExpectOwnerIsValidationError(t *testing.T) {
+	for _, expected := range []string{"", "   "} {
+		t.Run("value="+expected, func(t *testing.T) {
+			env, dir, _, ref := setupWorkspaceWithIssue(t, "x")
+
+			_, err := runCLICapture(t, env, dir, "unassign", ref, "--expect-owner", expected)
+
+			cliErr := requireCLIError(t, err, ExitValidation)
+			assert.Contains(t, cliErr.Message, "--expect-owner")
+		})
+	}
+}

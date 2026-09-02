@@ -370,8 +370,9 @@ func (c ClaimPrincipalOut) Validate() error {
 }
 
 type ClaimRequestBody struct {
-	Actor string `json:"actor" validate:"required"`
-	Force *bool  `json:"force,omitempty"`
+	Actor     string `json:"actor" validate:"required"`
+	Force     *bool  `json:"force,omitempty"`
+	IfUnowned *bool  `json:"if_unowned,omitempty"`
 }
 
 func (c ClaimRequestBody) Validate() error {
@@ -4268,5 +4269,6 @@ func (u UISnapshotResponseBody) Validate() error {
 }
 
 type UnassignRequestBody struct {
-	Actor *string `json:"actor,omitempty"`
+	Actor         *string `json:"actor,omitempty"`
+	ExpectedOwner *string `json:"expected_owner,omitempty"`
 }
