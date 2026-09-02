@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 560" role="img" aria-label="The CLI, TUI, web UI, MCP server, HTTP API, and embedded Go service all working against one kata daemon and its SQLite ledger">
+  <style>
+    text { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
+    .t { fill: #e8e8e8; font-size: 16px; }
+    .m { fill: #a3a3a3; font-size: 13px; }
+    .d { fill: #6b6b6b; font-size: 13px; }
+    .box { fill: #131313; stroke: #6b6b6b; stroke-width: 1.25; }
+    .core { fill: #131313; stroke: #e8e8e8; stroke-width: 1.5; }
+    .edge { stroke: #454545; stroke-width: 1.25; }
+  </style>
+
+  <!-- spokes first, under the boxes -->
+  <line class="edge" x1="160" y1="80" x2="320" y2="252"/>
+  <line class="edge" x1="480" y1="80" x2="320" y2="252"/>
+  <line class="edge" x1="90" y1="280" x2="320" y2="280"/>
+  <line class="edge" x1="550" y1="280" x2="320" y2="280"/>
+  <line class="edge" x1="160" y1="480" x2="320" y2="308"/>
+  <line class="edge" x1="480" y1="480" x2="320" y2="308"/>
+
+  <!-- clients -->
+  <rect class="box" x="70" y="40" width="180" height="60"/>
+  <text class="t" x="88" y="66">kata CLI</text>
+  <text class="d" x="88" y="86">--agent · --json</text>
+
+  <rect class="box" x="390" y="40" width="180" height="60"/>
+  <text class="t" x="408" y="66">kata tui</text>
+  <text class="d" x="408" y="86">terminal triage</text>
+
+  <rect class="box" x="20" y="250" width="150" height="60"/>
+  <text class="t" x="38" y="276">kata ui</text>
+  <text class="d" x="38" y="296">browser app</text>
+
+  <rect class="box" x="470" y="250" width="150" height="60"/>
+  <text class="t" x="488" y="276">MCP</text>
+  <text class="d" x="488" y="296">stdio · HTTP</text>
+
+  <rect class="box" x="70" y="460" width="180" height="60"/>
+  <text class="t" x="88" y="486">HTTP API</text>
+  <text class="d" x="88" y="506">versioned schema</text>
+
+  <rect class="box" x="390" y="460" width="180" height="60"/>
+  <text class="t" x="408" y="486">go.kenn.io/kata</text>
+  <text class="d" x="408" y="506">embed in-process</text>
+
+  <!-- core -->
+  <rect class="core" x="210" y="240" width="220" height="86"/>
+  <text class="t" x="234" y="274">kata daemon</text>
+  <text class="m" x="234" y="298">SQLite under KATA_HOME</text>
+</svg>

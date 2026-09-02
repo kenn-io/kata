@@ -1,15 +1,15 @@
 ---
-title: kata カタ
-description: Local-first issue tracking for humans and coding agents.
+title: kata カタ documentation
+description: Documentation for kata, the local-first issue tracker for humans and coding agents.
 ---
 
-<div class="kata-hero" markdown>
+# kata documentation
 
-# kata カタ
-
-<p class="kata-hero-tagline">The issue tracker built for coding agents and the humans steering them.</p>
-
-<p class="kata-hero-summary">A local-first task ledger agents drive from the CLI and humans supervise in the terminal or browser.</p>
+kata カタ is a local-first issue tracker for coding agents and the humans
+steering them: a task ledger agents drive from the CLI and humans supervise in
+the terminal or browser. This is the operating documentation; for the product
+story, start at the [overview](https://katatracker.com/) and the
+[guide](https://katatracker.com/guide/).
 
 <section class="kata-install" data-install-panel markdown>
 <div class="kata-install-header">
@@ -33,54 +33,6 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 ```
 </section>
 
-<div class="kata-hero-actions">
-<a href="#quickstart">Quickstart →</a>
-<a href="get-started/install.md">All install options →</a>
-</div>
-
-</div>
-
-## Two ways to supervise
-
-![kata TUI showing a simulated issue hierarchy](/assets/screenshots/tui/hero.svg)
-
-`kata tui` keeps triage in the terminal. `kata ui` opens the same ledger in a
-full browser workspace:
-
-![kata Web UI showing a synthetic project and issue hierarchy](/assets/screenshots/web-ui/workspace.png)
-
-Both images are generated from disposable synthetic data by the docs screenshot
-workflow. See the [Web UI guide](guide/web-ui.md) for projects, collections,
-issue editing, relationships, recurrences, and configured-daemon switching.
-
-## Why kata
-
-<div class="grid cards" markdown>
-
--   __Built for agents__
-
-    Stable short refs, `--json` and `--agent` output, idempotent creates, a
-    claim flow, semantic-aware search, and predictable failure modes agents can
-    script against.
-
--   __Made for humans too__
-
-    `kata tui` and `kata ui` browse, triage, and supervise agent-written work
-    over the same data. The daemon serves the browser app directly.
-
--   __Local-first, repo-clean__
-
-    One Go binary, no runtime dependencies. Issue state lives in SQLite under
-    `KATA_HOME`; your repo commits only a small, secret-free `.kata.toml`.
-
--   __Auditable by design__
-
-    Closing an issue is an explicit completion claim with a reason, message,
-    evidence, and actor attribution, on top of editable comments and durable
-    events.
-
-</div>
-
 ## Quickstart
 
 ```sh
@@ -102,6 +54,19 @@ with coding agents? `kata init --with-agents` drops kata's operating contract
 into `AGENTS.md`/`CLAUDE.md`, and `kata quickstart` prints the full agent
 contract. See the [Quickstart](get-started/quickstart.md) for the complete
 walkthrough.
+
+## Two ways to supervise
+
+![kata TUI showing a simulated issue hierarchy](/docs/assets/screenshots/tui/hero.svg)
+
+`kata tui` keeps triage in the terminal. `kata ui` opens the same ledger in a
+full browser workspace:
+
+![kata Web UI showing a synthetic project and issue hierarchy](/docs/assets/screenshots/web-ui/workspace.png)
+
+Both images are generated from disposable synthetic data by the docs screenshot
+workflow. See the [Web UI guide](guide/web-ui.md) for projects, collections,
+issue editing, relationships, recurrences, and configured-daemon switching.
 
 ## How it works
 

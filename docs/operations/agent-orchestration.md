@@ -15,10 +15,10 @@ relationships such as `--parent`; there is no separate delegated-link type.
 The coordination substrate is the `work.*` metadata convention documented in the
 [Metadata reference](../reference/metadata.md#orchestration-conventions-work-keys):
 
-- `work.branch` — the git branch doing the work.
-- `work.attention` — `ok | needs-human | stuck`, the live signal about whether a
+- `work.branch`: the git branch doing the work.
+- `work.attention`: `ok | needs-human | stuck`, the live signal about whether a
   human is wanted.
-- `work.attention_msg` — a one-line current-state message.
+- `work.attention_msg`: a one-line current-state message.
 
 All names below are neutral placeholders: `spoke-project` is the kata project,
 `agent-a` an actor, and `hub.example` / `daemon.example` daemon hosts.
@@ -32,7 +32,7 @@ session, and installs the harness hooks that keep attention truthful. It owns
 <ref> work.branch ...`.
 
 **Working agent.** The coding agent running in the worktree. It signals its own
-live state on the issue by writing the attention pair for mid-session events —
+live state on the issue by writing the attention pair for mid-session events:
 raising `stuck` when it cannot proceed, `needs-human` when it wants review, and
 clearing back to `ok`. Commands: `kata meta set <ref> work.attention ...`.
 
@@ -61,7 +61,7 @@ kata create "implement widget export" \
 `--meta` takes string values only, which is all `work.branch` needs. Capture the
 returned issue ref (for example `abc4`) and launch `agent-a` on the
 `agent/widget-export` branch. If the launcher must set the branch after creation
-— because it created the issue before checking out — `kata meta set abc4
+(because it created the issue before checking out), `kata meta set abc4
 work.branch agent/widget-export` is equivalent and safe to retry.
 
 ## Keep attention truthful with hooks
@@ -72,18 +72,18 @@ attention. Agents forget to clear or raise it, and an issue stuck at a stale
 attention pair reflects reality even when the agent says nothing.
 
 Wire two launcher-installed hooks around the session. These are generic shell
-hooks — a "session-start hook" and a "stop/idle hook" that run a command; any
+hooks, a "session-start hook" and a "stop/idle hook" that run a command; any
 coding-agent harness that can run a command at those points works.
 
-Session-start hook — mark the issue in-progress and healthy:
+Session-start hook: mark the issue in-progress and healthy.
 
 ```sh
 # runs when the agent session starts
 kata meta set "$KATA_REF" work.attention ok
 ```
 
-Stop/idle hook — if the session ends and the agent never cleared to a terminal
-state, raise `needs-human` so the issue does not silently go quiet:
+Stop/idle hook: if the session ends and the agent never cleared to a terminal
+state, raise `needs-human` so the issue does not silently go quiet.
 
 ```sh
 # runs when the agent session stops or goes idle
@@ -98,7 +98,7 @@ fi
 tracking issue ref.)
 
 On top of that default wiring, the agent itself does direct self-assertion for
-**mid-session** signals the hooks cannot see — it knows it is stuck long before
+**mid-session** signals the hooks cannot see; it knows it is stuck long before
 the session stops:
 
 ```sh
@@ -135,8 +135,8 @@ symlinked `.codex` or `hooks.json` paths are refused; if `.codex/config.toml`
 already defines a `[hooks]` table, the command prints a non-fatal warning that
 Codex loads both files' hooks together.
 
-Codex has no stable session-end hook event yet — the upstream event exists but
-is not yet in a stable Codex release — so `--with-codex-hooks` does not wire an
+Codex has no stable session-end hook event yet (the upstream event exists but
+is not yet in a stable Codex release), so `--with-codex-hooks` does not wire an
 end half, and wiring it once Codex ships a stable release is tracked as a
 follow-up. Until then, cover the end half with a launcher wrapper around the
 `codex` invocation (this also works for `codex exec`, since hook subprocesses
@@ -168,7 +168,7 @@ kata wait "$a" "$b" --until attention --any
 ```
 
 `--until attention` matches either `needs-human` or `stuck`, and in the attention
-modes a *close* also completes the wait — the reported reason distinguishes a
+modes a *close* also completes the wait; the reported reason distinguishes a
 close from an attention change, so the coordinator can branch on it. Default
 `--until closed` with default `--all` blocks until every named issue is closed;
 `--timeout <dur>` exits with a dedicated nonzero code so a wrapper can tell a
@@ -207,7 +207,7 @@ kata close abc4 --done \
 
 Closing does not reset metadata. The closed issue may still carry
 `work.attention=needs-human` from before the merge; that is expected. Consumers
-ignore `work.*` on closed issues — the close itself is the terminal signal, not
+ignore `work.*` on closed issues: the close itself is the terminal signal, not
 the attention value.
 
 ## Failure modes
@@ -221,7 +221,7 @@ self-assertion alone.
 
 **Stale `work.branch` after force-push or rebase.** kata never validates
 `work.branch` against a repository, so a rewritten or deleted branch leaves the
-value pointing at history that no longer exists. This is informational only —
+value pointing at history that no longer exists. This is informational only;
 kata cannot detect it. Merge automation should treat `work.branch` as a hint and
 verify the branch still resolves before acting on it.
 
@@ -240,18 +240,19 @@ into the repo's `AGENTS.md` / `CLAUDE.md` so every agent that touches the board
 follows the same protocol. The same snippet also works ad hoc: drop it into a
 session prompt when a repo has not adopted it yet, and the agent will honor the
 convention for that session. The draft below is deliberate, reference-grade
-prose — paste it essentially intact.
+prose; paste it essentially intact.
 
 ```markdown
 ## Kata `work.*` conventions (agent orchestration)
 
-This repo's kata board uses the `work.*` metadata contract — see kata's
-<https://katatracker.com/operations/agent-orchestration/> for the full recipe.
+This repo's kata board uses the `work.*` metadata contract; see kata's
+<https://katatracker.com/docs/operations/agent-orchestration/> for the full
+recipe.
 
 **When you work a kata-tracked issue:**
 
 - When you claim or start a kata issue, immediately mark it actively tracked:
-  `kata meta set <ref> work.attention ok` — this makes in-flight work visible
+  `kata meta set <ref> work.attention ok`. This makes in-flight work visible
   to coordinators and dashboards from the moment it is grabbed.
 - If the work happens on a dedicated branch, stamp it once:
   `kata meta set <ref> work.branch <branch>` (or bind at creation:
@@ -271,11 +272,11 @@ This repo's kata board uses the `work.*` metadata contract — see kata's
 - Join with `kata wait <refs> --until attention --any` (matches `needs-human`
   or `stuck`; a close also completes the wait, and the reported reason
   distinguishes which). Use `--timeout` so a wrapper can tell timeout from
-  satisfaction. As coordinator you read `work.*` — you never write it on
+  satisfaction. As coordinator you read `work.*`; you never write it on
   issues you delegated.
 
-**Always:** one writer per key; `work.*` on closed issues is meaningless —
-never write it there, ignore it when reading.
+**Always:** one writer per key; `work.*` on closed issues is meaningless, so
+never write it there and ignore it when reading.
 ```
 
 Instructions produce tendency, not contract: an agent may still forget to raise

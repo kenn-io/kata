@@ -1,6 +1,6 @@
 [project]
 site_name = "kata カタ"
-site_url = "https://katatracker.com/"
+site_url = "https://katatracker.com/docs/"
 site_description = "Local-first issue tracking for humans and coding agents."
 site_author = "Kenn Software LLC"
 copyright = 'Copyright &copy; 2026 <a href="https://kenn.io">Kenn Software LLC</a>'
@@ -71,6 +71,7 @@ nav = [
 
 [project.theme]
 variant = "modern"
+custom_dir = "overrides"
 features = [
   "navigation.instant",
   "navigation.instant.progress",

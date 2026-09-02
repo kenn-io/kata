@@ -28,7 +28,7 @@ machines with a C toolchain default to `CGO_ENABLED=1`, where kit's sqlitevec
 selects its cgo sqlite-vec bindings by build constraint; those need C sqlite
 symbols at link time, so `internal/vector/driver_cgo.go` links
 `mattn/go-sqlite3` purely to keep ambient `go build`/`go test` working. Both
-driver shims live in `internal/vector/driver_*.go` — nothing to configure,
+driver shims live in `internal/vector/driver_*.go`; nothing to configure,
 but don't remove the mattn dependency because release builds don't use it.
 
 ## Local checks

@@ -189,10 +189,10 @@ By default `kata search` runs lexical (FTS) search. When the daemon has
 automatically fuses lexical and vector results. The mode flags are mutually
 exclusive and force a strategy:
 
-- `--lexical` — FTS only, exactly the default behavior on a daemon without
+- `--lexical`: FTS only, exactly the default behavior on a daemon without
   embeddings.
-- `--hybrid` — fuse the lexical and vector legs (reciprocal rank fusion).
-- `--semantic` — vector (embedding) results only.
+- `--hybrid`: fuse the lexical and vector legs (reciprocal rank fusion).
+- `--semantic`: vector (embedding) results only.
 
 Search label matching is case-insensitive. Repeating `--label` requires every
 named label; repeating `--no-label` excludes a result with any named label.
@@ -257,7 +257,7 @@ may differ from the source `short_id` if the target project already has a
 collision. `--dry-run` is a client-side preview: it resolves the source issue
 and target project without mutating anything.
 
-Links survive a move — `parent`, `blocks`/`blocked-by`, and `related` edges
+Links survive a move: `parent`, `blocks`/`blocked-by`, and `related` edges
 are never removed or rewritten. See the link-flag reference above for
 cross-project ref syntax and rendering rules.
 

@@ -49,7 +49,7 @@ conventions (see
 refreshes only kata's block, so a repo initialized before that section shipped
 gains it on the next run. If a target file still carries a Beads integration
 block, kata leaves it untouched
-and writes a `<file>.kata-proposed` sidecar to adopt or discard — see
+and writes a `<file>.kata-proposed` sidecar to adopt or discard; see
 [`--with-agents`](../get-started/quickstart.md#initialize-a-workspace). If
 `AGENTS.md` is a symlink, kata refuses to manage it before reading the target;
 replace it with a regular file before using `--with-agents`.
@@ -86,7 +86,7 @@ contract on startup, resume, clear, and context compaction. The other runs
 `kata attention-hook start` on startup, resume, and clear (but not compaction),
 using the same launcher-provided `KATA_REF`. Codex has no stable session-end
 hook event yet, so pair the attention hook with a launcher wrapper that runs
-`kata attention-hook end` after the Codex invocation exits — see
+`kata attention-hook end` after the Codex invocation exits; see
 [agent orchestration](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 for the recipe.
 

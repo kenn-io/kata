@@ -23,7 +23,7 @@ kata list --format human          # default terminal output
 - Passing several output-mode flags that resolve to the **same** mode is valid
   (`--format agent --agent`). Flags that resolve to **different** modes are a
   usage error before the command runs.
-- `--quiet` is orthogonal — a suppression flag, not a mode. In agent mode it may
+- `--quiet` is orthogonal: a suppression flag, not a mode. In agent mode it may
   suppress the `OK ...` success header where a command already has quiet
   behavior, but it never suppresses an `ERR ...` line.
 - `--format` is reserved globally for output mode. `kata import` selects its
@@ -177,8 +177,8 @@ The event UID rows preserve the order recorded for the quarantined batch.
 Operators can inspect these read-only commands before invoking the separately
 confirmed `quarantine retry` or `quarantine skip` mutation.
 
-`kata search` appends a `mode=` field to its header — `lexical`, `hybrid`, or
-`semantic` — reporting the strategy actually run. When the embedding endpoint is
+`kata search` appends a `mode=` field to its header (`lexical`, `hybrid`, or
+`semantic`) reporting the strategy actually run. When the embedding endpoint is
 configured but could not serve a query, the search falls back to lexical and a
 `degraded=<reason>` field follows `mode=`; it is omitted when the query was not
 degraded. Result rows carry `matched=` listing the contributing sources (FTS
@@ -265,7 +265,7 @@ Safari can double-submit the callback.
 
 - No silent truncation is allowed. If truncation is ever introduced, the
   metadata fields immediately precede the field they describe and are emitted as
-  a pair — `<Field>-Truncated: true` and `<Field>-Bytes: <full-byte-count>` —
+  a pair, `<Field>-Truncated: true` and `<Field>-Bytes: <full-byte-count>`,
   never one without the other.
 - A fenced block uses at least three backticks and the `text` info string. If
   the content itself contains a triple-backtick sequence, a longer fence is
@@ -274,7 +274,7 @@ Safari can double-submit the callback.
 ## Guarantees
 
 - `--json` is never weakened or removed; it stays the complete structured API.
-- Agent mode does not change daemon API responses — it is purely a CLI rendering
+- Agent mode does not change daemon API responses; it is purely a CLI rendering
   of the same data.
 - Agent mode is not the default.
 - Interactive commands (`kata tui`) and daemon startup (`kata daemon start`)

@@ -13,7 +13,7 @@ described here.
 Every issue (and project) has a stable ULID `uid` that never changes. The
 `uid` is the authoritative identity: it survives schema cutovers, it is unique
 across instances, and it is what event payloads and links reference. Agents and
-humans, however, work with a `short_id` — derived from the lowercased suffix of
+humans, however, work with a `short_id`, derived from the lowercased suffix of
 the ULID and extended only as far as needed to stay unique within the project.
 The short ID is a display label, not the identity; legacy numeric references no
 longer resolve. See [issue identity](../guide/concepts.md#issue-identity) for the
@@ -47,11 +47,11 @@ This is what makes kata auditable by construction, and it is the foundation the
 Removal is staged so that the reversible and irreversible steps are clearly
 separated:
 
-1. **Close** — the issue is closed but fully visible.
-2. **Delete** (`--force`) — sets `deleted_at`; the issue is hidden but
+1. **Close**: the issue is closed but fully visible.
+2. **Delete** (`--force`): sets `deleted_at`; the issue is hidden but
    recoverable. Emits `issue.soft_deleted`.
-3. **Restore** — clears `deleted_at`. Emits `issue.restored`.
-4. **Purge** (`--force --confirm`) — irreversible. In one transaction it
+3. **Restore**: clears `deleted_at`. Emits `issue.restored`.
+4. **Purge** (`--force --confirm`): irreversible. In one transaction it
    cascade-deletes the issue's comments, links, labels, and events, then writes a
    `purge_log` row that is intentionally **outside** the cascade so the audit of
    the deletion survives the data it describes.
@@ -107,7 +107,7 @@ correctness one.
 Two independent mechanisms keep agents from creating duplicate issues.
 
 **Idempotency keys.** A create request may carry an idempotency key. kata stores
-a fingerprint alongside it that covers every creation-affecting field — title,
+a fingerprint alongside it that covers every creation-affecting field: title,
 body, owner, labels, and initial links, each canonicalized so cosmetic
 whitespace differences do not matter. Replaying the same key with the same
 fingerprint returns the existing issue and emits no new event; replaying the same
@@ -135,8 +135,8 @@ swaps the database files into place.
 This choice does several jobs at once. The JSONL export is git-friendly and
 doubles as the supported [backup and restore](../operations/backup-restore.md)
 format. Importing into a fresh database sidesteps the fragility of rewriting live
-tables. And the fill rules are deterministic — backfilled identifiers are derived
-from a stable seed rather than generated randomly — so the same legacy record
+tables. And the fill rules are deterministic (backfilled identifiers are derived
+from a stable seed rather than generated randomly), so the same legacy record
 produces the same UID on every machine and every re-run, which is precisely what
 lets independently upgraded instances later federate without identity conflicts.
 

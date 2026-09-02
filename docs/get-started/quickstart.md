@@ -129,7 +129,7 @@ rest of each file untouched. The flag is off by default, so a plain `kata init`
 still writes only `.kata.toml`.
 
 If `AGENTS.md` (or a real, non-symlinked `CLAUDE.md`) still carries a Beads
-integration block — common when migrating off Beads — kata refuses to edit it in
+integration block (common when migrating off Beads), kata refuses to edit it in
 place. It leaves the original untouched and writes a `<file>.kata-proposed`
 sidecar with the Beads block removed and kata's block added. Review the sidecar,
 then move `<file>.kata-proposed` over the original to adopt it, or delete it to

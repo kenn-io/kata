@@ -1,0 +1,20 @@
+{#-
+  Zensical only includes nav pages in the sitemap; the build copies this file to
+  the site root, so index the marketing tier here too.
+-#}
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://katatracker.com/</loc>
+  </url>
+  <url>
+    <loc>https://katatracker.com/guide/</loc>
+  </url>
+  {%- for page in pages -%}
+    {%- if page.canonical_url %}
+      <url>
+        <loc>{{ page.canonical_url }}</loc>
+      </url>
+    {%- endif -%}
+  {%- endfor %}
+</urlset>

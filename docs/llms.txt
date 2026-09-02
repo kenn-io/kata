@@ -1,0 +1,61 @@
+# kata
+
+> kata is a local-first, open-source issue tracker for coding agents and the
+> humans steering them. A daemon on your own machine answers queries in about
+> 4ms, agents coordinate and hand off work through the ledger, and a TUI and
+> browser UI supervise the same data.
+
+The product and guide pages have exact Markdown twins; documentation pages are
+served as HTML with Markdown twins alongside. Markdown versions are canonical
+for machine readers.
+
+## Product
+
+- [Product overview](https://katatracker.com/index.md): what kata is; speed,
+  memory, coordination, discipline, supervision, interfaces, sync, reach
+- [The kata guide](https://katatracker.com/guide.md): the nine-move operating
+  loop of bind, seed, claim, note, coordinate, close, supervise, sync, own
+
+## Docs
+
+- [Documentation index](https://katatracker.com/docs/index.md): overview and
+  quickstart
+- [Quickstart](https://katatracker.com/docs/get-started/quickstart.md): install
+  to first close
+- [Install](https://katatracker.com/docs/get-started/install.md): all install
+  options
+- [Concepts](https://katatracker.com/docs/guide/concepts.md): projects,
+  workspaces, issue identity, events, close discipline
+- [Agent workflows](https://katatracker.com/docs/workflows/agents.md): the
+  operating contract for coding agents
+- [Agent orchestration](https://katatracker.com/docs/operations/agent-orchestration.md):
+  fan-out/join, attention hooks, dashboards
+- [CLI reference](https://katatracker.com/docs/reference/cli.md): every command
+  and flag
+- [MCP reference](https://katatracker.com/docs/reference/mcp.md): stdio and
+  Streamable HTTP transports, tool loading
+- [Agent output format](https://katatracker.com/docs/reference/agent-output.md):
+  the `--agent` output contract
+- [Web UI](https://katatracker.com/docs/guide/web-ui.md): the browser workspace
+- [Semantic search](https://katatracker.com/docs/guide/semantic-search.md):
+  opt-in embeddings
+- [Sharing models](https://katatracker.com/docs/workflows/sharing.md): local,
+  private network, federation, hosted
+- [Federation](https://katatracker.com/docs/operations/federation.md):
+  hub-and-spoke replication between daemons
+- [GitHub sync](https://katatracker.com/docs/operations/github-sync.md):
+  mirror upstream issues into kata
+- [Configuration](https://katatracker.com/docs/reference/configuration.md):
+  config.toml reference
+- [Backup and restore](https://katatracker.com/docs/operations/backup-restore.md):
+  JSONL export and import
+- [Architecture](https://katatracker.com/docs/design/architecture.md): design
+  notes
+- [Comparisons](https://katatracker.com/docs/guide/comparisons.md): kata vs.
+  SaaS issue trackers
+
+## Other
+
+- [GitHub repository](https://github.com/kenn-io/kata): source, issues,
+  releases
+- [Changelog](https://katatracker.com/docs/changelog.md): release history

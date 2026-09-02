@@ -116,8 +116,8 @@ read all projects in scope. Multi-project results carry a `projects` list and
 omit the singular `project` field; multi-project search interleaves each
 project's own ranking (per-project scores are not comparable) and reports
 `mode: "mixed"` when projects resolve different effective search modes. Issue creation and other project-selected writes
-require an explicit `project` in multi-project mode. Project administration —
-create, rename, metadata, merge, archive, restore, and purge — requires the
+require an explicit `project` in multi-project mode. Project administration
+(create, rename, metadata, merge, archive, restore, and purge) requires the
 `--all-projects` daemon-wide scope; a scoped server can read its projects but
 cannot alter or destroy the catalog it was bound to.
 
@@ -255,8 +255,8 @@ Federation leave exposes `preflight`, `prepare`, and `commit` phases so an
 operator can preserve the normal revoke-before-local-teardown order. The phase
 is required. A commit without external hub revocation also requires
 `COMMIT FEDERATION LEAVE <project>`. The `archive` disposition and
-`kata.federation_rebind` — which routes the replica's enrollment token to the
-selected catalog origin — require the `--all-projects` daemon-wide scope.
+`kata.federation_rebind`, which routes the replica's enrollment token to the
+selected catalog origin, require the `--all-projects` daemon-wide scope.
 Quarantine retry and skip require
 `RETRY FEDERATION BATCH <id>` or `SKIP FEDERATION BATCH <id>`.
 
