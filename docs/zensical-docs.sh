@@ -10,13 +10,21 @@ shift || true
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 docs_root="$script_dir"
+# The build case removes this directory outright, so it must stay a plain
+# relative path inside docs/: no absolute paths, no "."/".." traversal.
 site_dir="${KATA_DOCS_SITE_DIR:-site}"
-case "$site_dir" in
-  /*)
-    printf 'KATA_DOCS_SITE_DIR must be relative to docs/: %s\n' "$site_dir" >&2
+if [[ -z "$site_dir" || "$site_dir" == /* ]]; then
+  printf 'KATA_DOCS_SITE_DIR must be relative to docs/: %s\n' "$site_dir" >&2
+  exit 2
+fi
+IFS='/' read -r -a site_dir_parts <<< "$site_dir"
+for site_dir_part in "${site_dir_parts[@]}"; do
+  if [[ -z "$site_dir_part" || "$site_dir_part" == "." || "$site_dir_part" == ".." ]]; then
+    printf 'KATA_DOCS_SITE_DIR must not contain empty, ".", or ".." segments: %s\n' \
+      "$site_dir" >&2
     exit 2
-    ;;
-esac
+  fi
+done
 
 if [[ -n "${VIRTUAL_ENV:-}" && -x "$VIRTUAL_ENV/bin/zensical" ]]; then
   zensical_bin="$VIRTUAL_ENV/bin/zensical"

@@ -170,6 +170,9 @@ def check_docs_tier() -> None:
         alternate = f'<link rel="alternate" type="text/markdown" href="{twin_url}">'
         if alternate not in page.read_text(encoding="utf-8"):
             fail(f"{page.relative_to(SITE)} does not advertise its Markdown twin")
+        advertised = SITE / twin_url[len(ORIGIN) + 1 :]
+        if not advertised.is_file():
+            fail(f"advertised Markdown twin missing for nav source {source}: {twin_url}")
 
 
 def check_markdown_twin_links() -> None:
