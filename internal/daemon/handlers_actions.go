@@ -2,6 +2,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -21,7 +24,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "closeIssue",
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/close",
-	}, func(ctx context.Context, in *api.ActionRequest) (*api.MutationResponse, error) {
+	}, func(ctx context.Context, in *api.CloseActionRequest) (*api.MutationResponse, error) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
@@ -42,6 +45,10 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.Body.Source == "tui" && in.Body.Reason == "" {
 			in.Body.Reason = "done"
 		}
+		ifMatchRev, err := parseOptionalIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		// The TUI bypass is scoped to reason="done" — the only shape
 		// the interactive "press x to close" path ever produces. A
 		// caller sending source="tui" with reason="duplicate" or
@@ -54,6 +61,26 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
+		}
+		idempotencyFingerprint := ""
+		if in.IdempotencyKey != "" {
+			release, err := cfg.DB.AcquireIdempotencyLock(ctx, in.ProjectID, in.IdempotencyKey)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			defer func() { _ = release() }()
+
+			idempotencyFingerprint = closeIdempotencyFingerprint(
+				issue.UID, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
+				in.Body.Evidence, in.Body.DryRun, ifMatchRev)
+			reuse, err := tryCloseIdempotencyMatch(
+				ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+			if err != nil {
+				return nil, err
+			}
+			if reuse != nil {
+				return reuse, nil
+			}
 		}
 		// Already-closed short-circuit. CloseIssue itself returns
 		// changed=false for this case; short-circuiting before the
@@ -137,14 +164,21 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			var err error
 			evt = nil
 			events = nil
-			updated, events, changed, err = cfg.DB.CloseIssueWithEvents(ctx, issue.ID,
-				in.Body.Reason, actor, in.Body.Message, dbEvidence)
+			updated, events, changed, err = cfg.DB.CloseIssueGuarded(ctx, db.CloseIssueParams{
+				IssueID: issue.ID, Reason: in.Body.Reason, Actor: actor,
+				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
+				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
+			})
 			if len(events) > 0 {
 				evt = &events[0]
 			}
 			return err
 		})
 		if err != nil {
+			if revisionConflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
+				return nil, api.NewError(412, "revision_conflict",
+					fmt.Sprintf("issue revision is %d", revisionConflict.CurrentRevision), "", nil)
+			}
 			// In-transaction guard re-fires when a concurrent link/create
 			// added an open child between the read-side guard and the
 			// close write. Map it to the same 409 code so clients see
@@ -162,6 +196,19 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, federationReadOnlyError(err)
 			}
 			return nil, internalAPIError(err)
+		}
+		// A database retry can observe that its first attempt committed even
+		// when the commit response was lost. Recover that attempt's receipt
+		// before returning a plain no-op response.
+		if !changed && in.IdempotencyKey != "" {
+			reuse, err := tryCloseIdempotencyMatch(
+				ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+			if err != nil {
+				return nil, err
+			}
+			if reuse != nil {
+				return reuse, nil
+			}
 		}
 		if changed {
 			cfg.Publish().Events(in.ProjectID, events)
@@ -217,6 +264,60 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Changed = changed
 		return out, nil
 	})
+}
+
+func tryCloseIdempotencyMatch(
+	ctx context.Context,
+	cfg ServerConfig,
+	projectID int64,
+	key, fingerprint string,
+) (*api.MutationResponse, error) {
+	match, err := cfg.DB.LookupIssueMutationIdempotency(
+		ctx, projectID, "issue.closed", key, time.Now().Add(-idempotencyWindow))
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	if match == nil {
+		return nil, nil
+	}
+	if match.Fingerprint != fingerprint {
+		return nil, api.NewError(409, "idempotency_mismatch",
+			"idempotency key matched a prior close with a different fingerprint",
+			"use a fresh key or send the exact original close request", nil)
+	}
+	current, err := cfg.DB.IssueByID(ctx, match.IssueID)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	original := match.Event
+	out := &api.MutationResponse{}
+	out.Body.Issue = current
+	out.Body.OriginalEvent = &original
+	out.Body.Reused = true
+	return out, nil
+}
+
+func closeIdempotencyFingerprint(
+	issueUID, actor, reason, message, source string,
+	evidence []api.Evidence,
+	dryRun bool,
+	ifMatchRev *int64,
+) string {
+	encoded, _ := json.Marshal(struct {
+		IssueUID   string         `json:"issue_uid"`
+		Actor      string         `json:"actor"`
+		Reason     string         `json:"reason"`
+		Message    string         `json:"message"`
+		Source     string         `json:"source"`
+		Evidence   []api.Evidence `json:"evidence"`
+		DryRun     bool           `json:"dry_run"`
+		IfMatchRev *int64         `json:"if_match_revision"`
+	}{
+		IssueUID: issueUID, Actor: actor, Reason: reason, Message: message,
+		Source: source, Evidence: evidence, DryRun: dryRun, IfMatchRev: ifMatchRev,
+	})
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }
 
 // validateEvidenceTargets resolves duplicate-of and superseded-by issue

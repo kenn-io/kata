@@ -342,6 +342,50 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	}
 	assert.Nil(t, missingComment)
 
+	closed, closeEvents, changed, err := store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: issue.ID, Reason: "wontfix", Actor: "conformance-agent",
+		Message:        "Recorded the reason for stopping this conformance task.",
+		IdempotencyKey: "close-request-1", IdempotencyFingerprint: "close-fingerprint-1",
+		IfMatchRev: new(issue.Revision),
+	})
+	if err != nil {
+		return fmt.Errorf("guarded close: %w", err)
+	}
+	assert.True(t, changed)
+	assert.Equal(t, "closed", closed.Status)
+	require.NotEmpty(t, closeEvents)
+	closeMatch, err := store.LookupIssueMutationIdempotency(
+		ctx, project.ID, "issue.closed", "close-request-1", since)
+	if err != nil {
+		return fmt.Errorf("lookup close idempotency: %w", err)
+	}
+	require.NotNil(t, closeMatch)
+	assert.Equal(t, issue.ID, closeMatch.IssueID)
+	assert.Equal(t, closeEvents[0].UID, closeMatch.Event.UID)
+	assert.Equal(t, "close-fingerprint-1", closeMatch.Fingerprint)
+
+	staleIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "stale close guard", Author: "conformance-agent",
+	})
+	if err != nil {
+		return fmt.Errorf("create stale close issue: %w", err)
+	}
+	if _, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: staleIssue.ID, Actor: "conformance-agent",
+		Patch: map[string]json.RawMessage{"work.state": json.RawMessage(`"ready"`)},
+	}); err != nil {
+		return fmt.Errorf("advance close revision: %w", err)
+	}
+	_, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: staleIssue.ID, Reason: "wontfix", Actor: "conformance-agent",
+		IfMatchRev: new(staleIssue.Revision),
+	})
+	conflict, ok := errors.AsType[*db.RevisionConflictError](err)
+	if !ok || conflict == nil {
+		return fmt.Errorf("guarded close returned %v, want revision conflict", err)
+	}
+	assert.Equal(t, staleIssue.Revision+1, conflict.CurrentRevision)
+
 	releaseFirst, err := store.AcquireIdempotencyLock(ctx, project.ID, "serialized-request")
 	if err != nil {
 		return fmt.Errorf("acquire first idempotency lock: %w", err)

@@ -82,6 +82,21 @@ type CreateIssueParams struct {
 	Metadata map[string]json.RawMessage
 }
 
+// CloseIssueParams carries optional retry and concurrency guards for one close.
+// A nil IfMatchRev preserves the unconditional close behavior. Idempotency
+// fields are written to the close event so a caller can recover its original
+// receipt after losing the response.
+type CloseIssueParams struct {
+	IssueID                int64
+	Reason                 string
+	Actor                  string
+	Message                string
+	Evidence               []Evidence
+	IfMatchRev             *int64
+	IdempotencyKey         string
+	IdempotencyFingerprint string
+}
+
 // ListIssuesParams filters single-project list output.
 type ListIssuesParams struct {
 	ProjectID     int64

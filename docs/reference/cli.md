@@ -282,8 +282,20 @@ kata close <ref> --done --message <text> \
   [--pr <url>] \
   [--test <command>] \
   [--reviewed <path>] \
-  [--evidence <type:value>]
+  [--evidence <type:value>] \
+  [--idempotency-key <key>] \
+  [--if-match <revision>]
 ```
+
+`--idempotency-key` makes a close safe to retry after a lost response. For
+seven days, an exact retry returns the original `issue.closed` event through
+`original_event` and does not close the issue again. Reusing the key with a
+different issue, actor, close payload, or revision returns a conflict.
+
+`--if-match` accepts `7` or `rev-7`. The daemon checks that revision inside the
+close transaction and returns a revision conflict when it has changed. An
+exact retry with a matching idempotency key returns the committed receipt even
+after the original close advanced the issue state.
 
 Evidence is validated against the close reason:
 

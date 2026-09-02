@@ -246,21 +246,27 @@ func (s *Store) CloseIssueWithEvents(
 	message string,
 	evidence []db.Evidence,
 ) (db.Issue, []db.Event, bool, error) {
+	return s.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: issueID, Reason: reason, Actor: actor, Message: message, Evidence: evidence,
+	})
+}
+
+// CloseIssueGuarded applies the close and its optional revision precondition in
+// the same transaction, then returns every event committed by that mutation.
+func (s *Store) CloseIssueGuarded(
+	ctx context.Context, p db.CloseIssueParams,
+) (db.Issue, []db.Event, bool, error) {
 	return s.closeIssueWithEvents(
-		ctx, issueID, reason, actor, message, evidence, s.withSerializableTx,
+		ctx, p, s.withSerializableTx,
 	)
 }
 
 func (s *Store) closeIssueWithEvents(
 	ctx context.Context,
-	issueID int64,
-	reason string,
-	actor string,
-	message string,
-	evidence []db.Evidence,
+	p db.CloseIssueParams,
 	runTx func(context.Context, transactionFunc) error,
 ) (db.Issue, []db.Event, bool, error) {
-	if reason == "" {
+	if p.Reason == "" {
 		return db.Issue{}, nil, false, fmt.Errorf("close reason is required")
 	}
 	var issue db.Issue
@@ -268,13 +274,16 @@ func (s *Store) closeIssueWithEvents(
 	var changed bool
 	err := runTx(ctx, func(tx *sql.Tx) error {
 		issue, events, changed = db.Issue{}, nil, false
-		current, project, err := lockedIssueTx(ctx, tx, issueID, false)
+		current, project, err := lockedIssueTx(ctx, tx, p.IssueID, false)
 		if err != nil {
 			return err
 		}
 		if current.Status == "closed" {
 			issue = current
 			return nil
+		}
+		if p.IfMatchRev != nil && current.Revision != *p.IfMatchRev {
+			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
 		var hasOpenChildren bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
@@ -289,7 +298,7 @@ func (s *Store) closeIssueWithEvents(
 		}
 		closedAt := mutationTimestamp()
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET status = 'closed', closed_reason = $1,
-          closed_at = $2, updated_at = $2 WHERE id = $3`, reason, closedAt, current.ID); err != nil {
+		  closed_at = $2, updated_at = $2 WHERE id = $3`, p.Reason, closedAt, current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		parentUID, parentShortID := new(string), new(string)
@@ -304,27 +313,30 @@ func (s *Store) closeIssueWithEvents(
 			return mapSQLError(parentErr, nil)
 		}
 		body, err := json.Marshal(struct {
-			Reason        string        `json:"reason"`
-			ClosedAt      string        `json:"closed_at"`
-			Message       string        `json:"message,omitempty"`
-			Evidence      []db.Evidence `json:"evidence,omitempty"`
-			ParentUID     *string       `json:"parent_uid,omitempty"`
-			ParentShortID *string       `json:"parent_short_id,omitempty"`
+			Reason                 string        `json:"reason"`
+			ClosedAt               string        `json:"closed_at"`
+			Message                string        `json:"message,omitempty"`
+			Evidence               []db.Evidence `json:"evidence,omitempty"`
+			ParentUID              *string       `json:"parent_uid,omitempty"`
+			ParentShortID          *string       `json:"parent_short_id,omitempty"`
+			IdempotencyKey         string        `json:"idempotency_key,omitempty"`
+			IdempotencyFingerprint string        `json:"idempotency_fingerprint,omitempty"`
 		}{
-			Reason: reason, ClosedAt: closedAt, Message: message, Evidence: evidence,
+			Reason: p.Reason, ClosedAt: closedAt, Message: p.Message, Evidence: p.Evidence,
 			ParentUID: parentUID, ParentShortID: parentShortID,
+			IdempotencyKey: p.IdempotencyKey, IdempotencyFingerprint: p.IdempotencyFingerprint,
 		})
 		if err != nil {
 			return err
 		}
 		created, err := s.insertEventTx(ctx, tx,
-			issueEventInput(current, project, "issue.closed", actor, string(body)))
+			issueEventInput(current, project, "issue.closed", p.Actor, string(body)))
 		if err != nil {
 			return err
 		}
 		events, changed = []db.Event{created}, true
 		auditEvents, err := s.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
-			Project: project, Issue: current, EventType: "issue.closed", Actor: actor,
+			Project: project, Issue: current, EventType: "issue.closed", Actor: p.Actor,
 			HolderInstanceUID: s.InstanceUID(), OffendingEventUID: created.UID,
 		})
 		if err != nil {
@@ -335,9 +347,9 @@ func (s *Store) closeIssueWithEvents(
 		if len(auditEvents) > 0 {
 			lastEventID = auditEvents[len(auditEvents)-1].ID
 		}
-		if reason == "done" && current.RecurrenceID != nil && current.OccurrenceKey != nil {
+		if p.Reason == "done" && current.RecurrenceID != nil && current.OccurrenceKey != nil {
 			if _, err := s.materializeNextTx(
-				ctx, tx, *current.RecurrenceID, *current.OccurrenceKey, actor,
+				ctx, tx, *current.RecurrenceID, *current.OccurrenceKey, p.Actor,
 			); err != nil {
 				return fmt.Errorf("materialize next recurrence: %w", err)
 			}

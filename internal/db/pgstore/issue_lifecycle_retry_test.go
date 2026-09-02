@@ -31,7 +31,7 @@ func TestCloseIssueRetryClearsRolledBackAttemptOutput(t *testing.T) {
 
 	closedAt := mutationTimestamp()
 	closed, events, changed, err := store.closeIssueWithEvents(
-		ctx, issue.ID, "done", "tester", "", nil,
+		ctx, db.CloseIssueParams{IssueID: issue.ID, Reason: "done", Actor: "tester"},
 		rollbackThenRetry(t, store, func() {
 			_, updateErr := store.ExecContext(ctx, `UPDATE issues
 SET status='closed', closed_reason='done', closed_at=$1, updated_at=$1 WHERE id=$2`,

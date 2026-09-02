@@ -18,12 +18,24 @@ func (s *Store) LookupIdempotency(
 	key string,
 	since time.Time,
 ) (*db.IdempotencyMatch, error) {
-	query := eventSelect + ` WHERE e.type = 'issue.created'
-      AND e.project_id = $1
-      AND e.payload::jsonb ->> 'idempotency_key' = $2
-      AND e.created_at >= $3
-      ORDER BY e.id DESC LIMIT 1`
-	event, err := scanEvent(s.QueryRowContext(ctx, query, projectID, key, formatStoredTime(since)))
+	return s.LookupIssueMutationIdempotency(ctx, projectID, "issue.created", key, since)
+}
+
+// LookupIssueMutationIdempotency finds the newest recent issue event of the
+// requested type carrying key.
+func (s *Store) LookupIssueMutationIdempotency(
+	ctx context.Context,
+	projectID int64,
+	eventType string,
+	key string,
+	since time.Time,
+) (*db.IdempotencyMatch, error) {
+	query := eventSelect + ` WHERE e.type = $1
+	      AND e.project_id = $2
+	      AND e.payload::jsonb ->> 'idempotency_key' = $3
+	      AND e.created_at >= $4
+	      ORDER BY e.id DESC LIMIT 1`
+	event, err := scanEvent(s.QueryRowContext(ctx, query, eventType, projectID, key, formatStoredTime(since)))
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil
 	}

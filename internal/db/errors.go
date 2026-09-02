@@ -342,8 +342,8 @@ func (e *RecurrencePinnedError) Error() string {
 	return "cannot move: issue is part of a recurrence series"
 }
 
-// RevisionConflictError is returned by MoveIssueProject when the caller's
-// IfMatchRev does not match the issue's current revision.
+// RevisionConflictError reports that a caller's IfMatchRev does not match the
+// current revision of the guarded record.
 type RevisionConflictError struct {
 	CurrentRevision int64
 }

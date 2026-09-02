@@ -57,6 +57,37 @@ func TestClose_AgentOutputExternalEvidence(t *testing.T) {
 	assert.Contains(t, audit, `"evidence_types":["external"]`)
 }
 
+func TestCloseCmd_RetryFlagsReplayOriginalReceipt(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	args := []string{
+		"--json", "close", ref,
+		"--done",
+		"--message", "Implemented the requested behavior and ran the focused tests.",
+		"--test", "go test ./cmd/kata",
+		"--idempotency-key", "close-request-1",
+		"--if-match", "1",
+	}
+	first := runCLI(t, env, dir, args...)
+	assert.Contains(t, first, `"changed":true`)
+
+	second := runCLI(t, env, dir, args...)
+	assert.Contains(t, second, `"changed":false`)
+	assert.Contains(t, second, `"reused":true`)
+	assert.Contains(t, second, `"original_event":`)
+}
+
+func TestCloseCmd_RejectsBlankIfMatch(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	_, stderr, err := runCLIWithErr(t, env, dir,
+		"close", ref,
+		"--done",
+		"--message", "Implemented the requested behavior and ran the focused tests.",
+		"--test", "go test ./cmd/kata",
+		"--if-match", "")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "--if-match must not be blank")
+}
+
 func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 

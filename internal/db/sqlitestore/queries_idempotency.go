@@ -128,6 +128,15 @@ func fingerprintCore(title, body string, owner *string, labels []string, sortedL
 // at-or-after `since`. Returns nil when no match. Uses the partial index
 // idx_events_idempotency declared in 0001_init.sql.
 func (d *Store) LookupIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*db.IdempotencyMatch, error) {
+	return d.LookupIssueMutationIdempotency(ctx, projectID, "issue.created", key, since)
+}
+
+// LookupIssueMutationIdempotency finds the newest recent issue event of the
+// requested type carrying key. Event types are bound query values so callers
+// can use the same retry contract for additional issue mutations.
+func (d *Store) LookupIssueMutationIdempotency(
+	ctx context.Context, projectID int64, eventType, key string, since time.Time,
+) (*db.IdempotencyMatch, error) {
 	const q = `
 		SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
 		       e.issue_id, e.issue_uid,
@@ -136,13 +145,13 @@ func (d *Store) LookupIdempotency(ctx context.Context, projectID int64, key stri
 		       json_extract(e.payload, '$.idempotency_fingerprint')
 		FROM events e
 		JOIN projects p ON p.id = e.project_id
-		WHERE e.type = 'issue.created'
+		WHERE e.type = ?
 		  AND e.project_id = ?
 		  AND json_extract(e.payload, '$.idempotency_key') = ?
 		  AND e.created_at >= ?
 		ORDER BY e.id DESC
 		LIMIT 1`
-	row := d.QueryRowContext(ctx, q, projectID, key, since.UTC().Format(sqliteTimeFormat))
+	row := d.QueryRowContext(ctx, q, eventType, projectID, key, since.UTC().Format(sqliteTimeFormat))
 
 	var (
 		evt db.Event
@@ -155,18 +164,18 @@ func (d *Store) LookupIdempotency(ctx context.Context, projectID int64, key stri
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("lookup idempotency: %w", err)
+		return nil, fmt.Errorf("lookup issue mutation idempotency: %w", err)
 	}
 	if evt.IssueID == nil {
 		// Defensive: an issue.created event without an issue_id is malformed.
-		return nil, fmt.Errorf("idempotency match has no issue_id")
+		return nil, fmt.Errorf("issue mutation idempotency match has no issue_id")
 	}
 	// Carveout (spec §6): idempotency-key collision detection sees the issue
 	// even if it has been soft-deleted, so it can report the right mismatch.
 	// IssueByID returns rows regardless of deleted_at, matching that intent.
 	issue, err := d.IssueByID(ctx, *evt.IssueID)
 	if err != nil {
-		return nil, fmt.Errorf("idempotency match issue: %w", err)
+		return nil, fmt.Errorf("issue mutation idempotency match issue: %w", err)
 	}
 	return &db.IdempotencyMatch{
 		IssueID:      issue.ID,
