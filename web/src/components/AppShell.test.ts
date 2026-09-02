@@ -11,6 +11,30 @@ describe('AppShell', () => {
     vi.useRealTimers()
   })
 
+  test('renders the workspace header through the kit-ui top bar', () => {
+    const { container } = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    const header = container.querySelector('header.kata-header')
+    expect(header).not.toBeNull()
+    expect(header?.classList.contains('kit-top-bar')).toBe(true)
+    expect(within(header as HTMLElement).getByRole('heading', { name: 'Kata' })).not.toBeNull()
+    expect(within(header as HTMLElement).getByRole('button', { name: 'New task' })).not.toBeNull()
+  })
+
   test('connects the ported navigation, filters, and collection to canonical routes', async () => {
     const onNavigate = vi.fn()
     render(AppShell, {
