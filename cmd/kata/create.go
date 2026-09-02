@@ -222,7 +222,10 @@ func requestTimedOut(err error) bool {
 		return true
 	}
 	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
+	if !errors.As(err, &netErr) || netErr == nil {
+		return false
+	}
+	return netErr.Timeout()
 }
 
 // initialLinksAsChanges builds a synthetic mutationChanges from the
