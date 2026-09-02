@@ -1,9 +1,9 @@
 # kata
 
 > kata is a local-first, open-source issue tracker for coding agents and the
-> humans steering them. A daemon on your own machine serves issue operations in
-> milliseconds — working memory, coordination, and audit discipline for agent
-> workflows, with a TUI and browser UI over the same ledger.
+> humans steering them. A daemon on your own machine answers queries in about
+> 4ms, agents coordinate and hand off work through the ledger, and a TUI and
+> browser UI supervise the same data.
 
 The product and guide pages have exact Markdown twins; documentation pages are
 served as HTML with Markdown twins alongside. Markdown versions are canonical

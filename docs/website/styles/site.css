@@ -243,14 +243,6 @@ main {
   overflow: hidden;
 }
 
-.hero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(46rem 28rem at 16% 4%, rgb(232 232 232 / 6%), transparent 70%);
-  pointer-events: none;
-}
-
 .hero::after {
   content: "カタ";
   position: absolute;
@@ -657,6 +649,12 @@ dialog img {
 
 .caption {
   margin: 0.8rem 0 0;
+}
+
+.pipeline .caption {
+  margin: 0;
+  padding: 0.8rem 1.25rem 1rem;
+  border-top: 1px solid var(--rule);
 }
 
 .capture-pair {

@@ -1,73 +1,78 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" role="img" aria-label="Two machines, each with agents making sub-millisecond round trips to their own local kata daemon, while the daemons replicate shared projects through a federation hub in the background, off the agents' critical path">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" role="img" aria-label="Two machines, each with agents and a human making millisecond round trips to their own local kata daemon, while the two daemons replicate shared projects through a federation hub in the background, off the agents' critical path">
   <style>
     text { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
-    .t { fill: #e8e8e8; font-size: 16px; }
+    .h { fill: #e8e8e8; font-size: 18px; font-weight: 600; }
+    .t { fill: #e8e8e8; font-size: 15px; }
     .m { fill: #a3a3a3; font-size: 13px; }
     .d { fill: #6b6b6b; font-size: 13px; }
-    .box { fill: #131313; stroke: #6b6b6b; stroke-width: 1.25; }
-    .core { fill: #131313; stroke: #e8e8e8; stroke-width: 1.5; }
-    .zone { fill: none; stroke: #282828; stroke-width: 1; stroke-dasharray: 2 4; }
+    .card { fill: #131313; stroke: #282828; stroke-width: 1; }
+    .row { stroke: #282828; stroke-width: 1; }
+    .daemon { fill: #1b1b1b; stroke: #e8e8e8; stroke-width: 1.5; }
+    .hub { fill: #131313; stroke: #a3a3a3; stroke-width: 1.5; }
     .hot { stroke: #e8e8e8; stroke-width: 1.5; fill: none; }
-    .bg { stroke: #6b6b6b; stroke-width: 1.25; fill: none; stroke-dasharray: 5 5; }
+    .bg { stroke: #6b6b6b; stroke-width: 1.25; fill: none; stroke-dasharray: 6 5; }
   </style>
   <defs>
-    <marker id="fhot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10" fill="none" stroke="#e8e8e8" stroke-width="1.5"/>
+    <marker id="fs-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10" fill="none" stroke="#e8e8e8" stroke-width="1.6"/>
     </marker>
-    <marker id="fbg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10" fill="none" stroke="#6b6b6b" stroke-width="1.5"/>
+    <marker id="fs-bg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10" fill="none" stroke="#6b6b6b" stroke-width="1.6"/>
     </marker>
   </defs>
 
-  <!-- machine A -->
-  <rect class="zone" x="28" y="34" width="300" height="392"/>
-  <text class="d" x="48" y="62" letter-spacing="2">MACHINE A</text>
+  <!-- machine A card -->
+  <rect class="card" x="40" y="40" width="320" height="330"/>
+  <text class="h" x="64" y="76">machine a</text>
+  <line class="row" x1="40" y1="94" x2="360" y2="94"/>
 
-  <rect class="box" x="60" y="88" width="236" height="48"/>
-  <text class="t" x="78" y="118">agent · claude</text>
-  <rect class="box" x="60" y="152" width="236" height="48"/>
-  <text class="t" x="78" y="182">agent · codex</text>
-  <rect class="box" x="60" y="216" width="236" height="48"/>
-  <text class="t" x="78" y="246">human · kata tui</text>
+  <text class="t" x="64" y="126">claude</text>
+  <text class="d" x="336" y="126" text-anchor="end">agent</text>
+  <line class="row" x1="64" y1="144" x2="336" y2="144"/>
+  <text class="t" x="64" y="172">codex</text>
+  <text class="d" x="336" y="172" text-anchor="end">agent</text>
+  <line class="row" x1="64" y1="190" x2="336" y2="190"/>
+  <text class="t" x="64" y="218">wes</text>
+  <text class="d" x="336" y="218" text-anchor="end">kata tui</text>
 
-  <line class="hot" x1="178" y1="136" x2="178" y2="146"/>
-  <line class="hot" x1="178" y1="200" x2="178" y2="210"/>
-  <line class="hot" x1="178" y1="264" x2="178" y2="300" marker-end="url(#fhot)"/>
+  <line class="hot" x1="200" y1="234" x2="200" y2="270" marker-end="url(#fs-hot)"/>
+  <text class="m" x="214" y="260">ms</text>
 
-  <rect class="core" x="60" y="306" width="236" height="76"/>
-  <text class="t" x="78" y="338">local daemon</text>
-  <text class="m" x="78" y="362">&lt;1ms · every operation</text>
+  <rect class="daemon" x="64" y="276" width="272" height="66"/>
+  <text class="t" x="88" y="304">kata daemon</text>
+  <text class="m" x="88" y="326">full local ledger · SQLite</text>
 
-  <!-- machine B -->
-  <rect class="zone" x="632" y="34" width="300" height="392"/>
-  <text class="d" x="652" y="62" letter-spacing="2">MACHINE B</text>
+  <!-- machine B card -->
+  <rect class="card" x="600" y="40" width="320" height="330"/>
+  <text class="h" x="624" y="76">machine b</text>
+  <line class="row" x1="600" y1="94" x2="920" y2="94"/>
 
-  <rect class="box" x="664" y="88" width="236" height="48"/>
-  <text class="t" x="682" y="118">agent · worker-1</text>
-  <rect class="box" x="664" y="152" width="236" height="48"/>
-  <text class="t" x="682" y="182">agent · worker-2</text>
-  <rect class="box" x="664" y="216" width="236" height="48"/>
-  <text class="t" x="682" y="246">human · kata ui</text>
+  <text class="t" x="624" y="126">worker-1</text>
+  <text class="d" x="896" y="126" text-anchor="end">agent</text>
+  <line class="row" x1="624" y1="144" x2="896" y2="144"/>
+  <text class="t" x="624" y="172">worker-2</text>
+  <text class="d" x="896" y="172" text-anchor="end">agent</text>
+  <line class="row" x1="624" y1="190" x2="896" y2="190"/>
+  <text class="t" x="624" y="218">ana</text>
+  <text class="d" x="896" y="218" text-anchor="end">kata ui</text>
 
-  <line class="hot" x1="782" y1="136" x2="782" y2="146"/>
-  <line class="hot" x1="782" y1="200" x2="782" y2="210"/>
-  <line class="hot" x1="782" y1="264" x2="782" y2="300" marker-end="url(#fhot)"/>
+  <line class="hot" x1="760" y1="234" x2="760" y2="270" marker-end="url(#fs-hot)"/>
+  <text class="m" x="774" y="260">ms</text>
 
-  <rect class="core" x="664" y="306" width="236" height="76"/>
-  <text class="t" x="682" y="338">local daemon</text>
-  <text class="m" x="682" y="362">&lt;1ms · every operation</text>
+  <rect class="daemon" x="624" y="276" width="272" height="66"/>
+  <text class="t" x="648" y="304">kata daemon</text>
+  <text class="m" x="648" y="326">full local ledger · SQLite</text>
 
   <!-- hub -->
-  <rect class="box" x="400" y="318" width="160" height="52"/>
-  <text class="t" x="422" y="340">hub</text>
-  <text class="d" x="422" y="358">shared projects</text>
+  <rect class="hub" x="420" y="281" width="120" height="56"/>
+  <rect fill="none" stroke="#282828" stroke-width="1" x="426" y="287" width="108" height="44"/>
+  <text class="t" x="480" y="305" text-anchor="middle">hub</text>
+  <text class="d" x="480" y="323" text-anchor="middle">projects</text>
 
-  <line class="bg" x1="296" y1="344" x2="394" y2="344" marker-end="url(#fbg)" marker-start="url(#fbg)"/>
-  <line class="bg" x1="566" y1="344" x2="658" y2="344" marker-end="url(#fbg)" marker-start="url(#fbg)"/>
+  <!-- replication lane -->
+  <line class="bg" x1="342" y1="309" x2="414" y2="309" marker-end="url(#fs-bg)" marker-start="url(#fs-bg)"/>
+  <line class="bg" x1="546" y1="309" x2="618" y2="309" marker-end="url(#fs-bg)" marker-start="url(#fs-bg)"/>
 
-  <text class="m" x="480" y="404" text-anchor="middle">replication runs daemon-to-daemon,</text>
-  <text class="m" x="480" y="424" text-anchor="middle">off the agents' critical path</text>
-
-  <text class="d" x="480" y="70" text-anchor="middle">every read and write stays local —</text>
-  <text class="d" x="480" y="90" text-anchor="middle">sync is the daemon's job, not the agent's</text>
+  <text class="m" x="480" y="410" text-anchor="middle">agents and humans only ever talk to the daemon beside them.</text>
+  <text class="d" x="480" y="432" text-anchor="middle">daemons replicate shared projects through the hub, off the critical path.</text>
 </svg>
