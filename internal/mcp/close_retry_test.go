@@ -1,8 +1,7 @@
 package mcpserver
 
 import (
-	"context"
-	"errors"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -11,7 +10,7 @@ import (
 )
 
 func TestCloseForwardsRetryGuardsAndReturnsOriginalReceipt(t *testing.T) {
-	var idempotencyKey, ifMatch string
+	var idempotencyKey, ifMatch, retryProtocol string
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.URL.Path == "/api/v1/projects":
@@ -21,6 +20,9 @@ func TestCloseForwardsRetryGuardsAndReturnsOriginalReceipt(t *testing.T) {
 		case strings.HasSuffix(request.URL.Path, "/actions/close"):
 			idempotencyKey = request.Header.Get("Idempotency-Key")
 			ifMatch = request.Header.Get("If-Match")
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&body))
+			retryProtocol, _ = body["retry_protocol"].(string)
 			issue := issueJSON(1, "spoke-project", "abc1")
 			issue["status"] = "closed"
 			writeJSON(writer, map[string]any{
@@ -36,7 +38,6 @@ func TestCloseForwardsRetryGuardsAndReturnsOriginalReceipt(t *testing.T) {
 	})
 	handlers := toolHandlers{options: Options{
 		Client: client, Scope: NewAllScope(), Actor: "example-agent",
-		CheckCloseRetrySupport: func(context.Context) error { return nil },
 	}}
 	revision := int64(7)
 	_, output, err := handlers.close(t.Context(), nil, CloseInput{
@@ -47,6 +48,7 @@ func TestCloseForwardsRetryGuardsAndReturnsOriginalReceipt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "close-request-1", idempotencyKey)
 	require.Equal(t, `"rev-7"`, ifMatch)
+	require.Equal(t, "close-v1", retryProtocol)
 	require.NotNil(t, output.Reused)
 	require.True(t, *output.Reused)
 	require.NotNil(t, output.Event)
@@ -83,7 +85,6 @@ func TestCloseRejectsReusedIssueMovedOutsideFixedScope(t *testing.T) {
 	require.NoError(t, err)
 	handlers := toolHandlers{options: Options{
 		Client: client, Scope: scope, Actor: "example-agent",
-		CheckCloseRetrySupport: func(context.Context) error { return nil },
 	}}
 
 	_, _, err = handlers.close(t.Context(), nil, CloseInput{
@@ -125,7 +126,6 @@ func TestCloseUsesCurrentProjectForReusedIssueMovedWithinScope(t *testing.T) {
 	require.NoError(t, err)
 	handlers := toolHandlers{options: Options{
 		Client: client, Scope: scope, Actor: "example-agent",
-		CheckCloseRetrySupport: func(context.Context) error { return nil },
 	}}
 
 	_, output, err := handlers.close(t.Context(), nil, CloseInput{
@@ -138,8 +138,9 @@ func TestCloseUsesCurrentProjectForReusedIssueMovedWithinScope(t *testing.T) {
 	require.Equal(t, "target-project#def1", output.Issue.QualifiedRef)
 }
 
-func TestCloseRechecksRetrySupportEachCall(t *testing.T) {
-	var checks, closeCalls int
+func TestCloseRetryProtocolMakesLegacyDaemonRejectRequest(t *testing.T) {
+	var closeCalls, mutations int
+	var retryProtocol string
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.URL.Path == "/api/v1/projects":
@@ -148,47 +149,24 @@ func TestCloseRechecksRetrySupportEachCall(t *testing.T) {
 			}})
 		case strings.HasSuffix(request.URL.Path, "/actions/close"):
 			closeCalls++
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&body))
+			retryProtocol, _ = body["retry_protocol"].(string)
+			if retryProtocol != "" {
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(http.StatusBadRequest)
+				writeJSON(writer, map[string]any{
+					"status": http.StatusBadRequest,
+					"error": map[string]any{
+						"code": "validation", "message": "retry_protocol: unexpected property",
+					},
+				})
+				return
+			}
+			mutations++
 			writeJSON(writer, map[string]any{
 				"issue": issueJSON(1, "spoke-project", "abc1"), "changed": true,
 			})
-		default:
-			http.NotFound(writer, request)
-		}
-	})
-	handlers := toolHandlers{options: Options{
-		Client: client, Scope: NewAllScope(), Actor: "example-agent",
-		CheckCloseRetrySupport: func(context.Context) error {
-			checks++
-			if checks > 1 {
-				return errors.New("daemon API became incompatible")
-			}
-			return nil
-		},
-	}}
-	input := CloseInput{
-		Ref: "spoke-project#abc1", Reason: "wontfix",
-		Message:        "Reviewed the request and recorded why the work should stop here.",
-		IdempotencyKey: "close-request-1",
-	}
-	_, _, err := handlers.close(t.Context(), nil, input)
-	require.NoError(t, err)
-	_, _, err = handlers.close(t.Context(), nil, input)
-	require.ErrorContains(t, err, "daemon API became incompatible")
-	require.Equal(t, 2, checks)
-	require.Equal(t, 1, closeCalls)
-}
-
-func TestCloseRejectsRetryGuardsWhenDaemonDoesNotSupportThem(t *testing.T) {
-	var closeCalls int
-	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
-		switch {
-		case request.URL.Path == "/api/v1/projects":
-			writeJSON(writer, map[string]any{"projects": []any{
-				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
-			}})
-		case strings.HasSuffix(request.URL.Path, "/actions/close"):
-			closeCalls++
-			writeJSON(writer, map[string]any{"changed": true})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -201,8 +179,10 @@ func TestCloseRejectsRetryGuardsWhenDaemonDoesNotSupportThem(t *testing.T) {
 		Message:        "Reviewed the request and recorded why the work should stop here.",
 		IdempotencyKey: "close-request-1",
 	})
-	require.ErrorContains(t, err, "daemon does not support kata.close retry controls")
-	require.Zero(t, closeCalls)
+	require.Error(t, err)
+	require.Equal(t, "close-v1", retryProtocol)
+	require.Equal(t, 1, closeCalls)
+	require.Zero(t, mutations)
 }
 
 func closeRetryEventJSON() map[string]any {

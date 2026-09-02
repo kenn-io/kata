@@ -284,6 +284,40 @@ components:
         - issue_uid
         - at
       type: object
+    CloseActionRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        dry_run:
+          type: boolean
+        evidence:
+          items:
+            $ref: "#/components/schemas/Evidence"
+          nullable: true
+          type: array
+        message:
+          type: string
+        reason:
+          enum:
+            - done
+            - wontfix
+            - duplicate
+            - superseded
+            - audit-no-change
+            - ""
+          type: string
+        retry_protocol:
+          enum:
+            - close-v1
+            - ""
+          type: string
+        source:
+          enum:
+            - tui
+            - ""
+          type: string
+      type: object
     Comment:
       properties:
         author:
@@ -6043,7 +6077,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ActionRequestBody"
+              $ref: "#/components/schemas/CloseActionRequestBody"
         required: true
       responses:
         "200":

@@ -460,6 +460,52 @@ func (c ClaimViolationOut) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type CloseActionRequestBody struct {
+	Actor         *string                              `json:"actor,omitempty"`
+	DryRun        *bool                                `json:"dry_run,omitempty"`
+	Evidence      []Evidence                           `json:"evidence,omitempty"`
+	Message       *string                              `json:"message,omitempty"`
+	Reason        *CloseActionRequestBodyReason        `json:"reason,omitempty"`
+	RetryProtocol *CloseActionRequestBodyRetryProtocol `json:"retry_protocol,omitempty"`
+	Source        *CloseActionRequestBodySource        `json:"source,omitempty"`
+}
+
+func (c CloseActionRequestBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range c.Evidence {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Evidence[%d]", i), err)
+			}
+		}
+	}
+	if c.Reason != nil {
+		if v, ok := any(c.Reason).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Reason", err)
+			}
+		}
+	}
+	if c.RetryProtocol != nil {
+		if v, ok := any(c.RetryProtocol).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("RetryProtocol", err)
+			}
+		}
+	}
+	if c.Source != nil {
+		if v, ok := any(c.Source).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Source", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type Comment struct {
 	Author    string    `json:"author" validate:"required"`
 	Body      string    `json:"body" validate:"required"`

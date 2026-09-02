@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -20,11 +21,17 @@ import (
 // issue is already in the target state; both fields propagate verbatim into
 // the MutationResponse envelope.
 func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
+	var closeDeliveries pendingCloseDeliveries
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "closeIssue",
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/close",
 	}, func(ctx context.Context, in *api.CloseActionRequest) (*api.MutationResponse, error) {
+		if (in.IdempotencyKey != "" || in.IfMatch != "") &&
+			in.Body.RetryProtocol != api.CloseRetryProtocol {
+			return nil, api.NewError(400, "retry_protocol_required",
+				"retry_protocol close-v1 is required with close retry headers", "", nil)
+		}
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
@@ -65,6 +72,16 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			defer func() { _ = release() }()
+			if pending, ok := closeDeliveries.get(in.ProjectID, in.IdempotencyKey); ok {
+				retryFingerprint := closeIdempotencyFingerprint(
+					pending.issueUID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
+					in.Body.Evidence, in.Body.DryRun, ifMatchRev)
+				if err := closeDeliveries.publishCommitted(
+					ctx, cfg, in.ProjectID, in.IdempotencyKey, retryFingerprint,
+				); err != nil {
+					return nil, err
+				}
+			}
 
 			match, err := lookupCloseIdempotencyMatch(ctx, cfg, in.ProjectID, in.IdempotencyKey)
 			if err != nil {
@@ -193,8 +210,23 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if len(events) > 0 {
 				evt = &events[0]
 			}
+			if err != nil && in.IdempotencyKey != "" && len(events) > 0 {
+				closeDeliveries.remember(in.ProjectID, in.IdempotencyKey,
+					issue.UID, idempotencyFingerprint, events)
+			}
 			return err
 		})
+		if err == nil && changed {
+			closeDeliveries.discard(in.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+			cfg.Publish().Events(in.ProjectID, events)
+		}
+		if in.IdempotencyKey != "" && (err != nil || !changed) {
+			if recoveryErr := closeDeliveries.publishCommitted(
+				ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint,
+			); recoveryErr != nil {
+				return nil, recoveryErr
+			}
+		}
 		if err != nil {
 			// A connection can fail after the database commits. The keyed
 			// receipt proves whether this attempt landed. When it did, publish
@@ -205,8 +237,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if lookupErr != nil {
 					return nil, lookupErr
 				}
-				if reuse != nil && closeEventBatchMatchesReceipt(events, reuse) {
-					cfg.Publish().Events(in.ProjectID, events)
+				if reuse != nil {
 					return reuse, nil
 				}
 			}
@@ -252,9 +283,6 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "issue_already_closed",
 				"issue was closed by another request before this close committed",
 				"retry after reopening, or omit the idempotency key to accept the current state", nil)
-		}
-		if changed {
-			cfg.Publish().Events(in.ProjectID, events)
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
@@ -309,9 +337,94 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 }
 
-func closeEventBatchMatchesReceipt(events []db.Event, response *api.MutationResponse) bool {
-	return len(events) > 0 && response != nil && response.Body.OriginalEvent != nil &&
-		events[0].UID == response.Body.OriginalEvent.UID
+type pendingCloseDeliveryKey struct {
+	projectID      int64
+	idempotencyKey string
+}
+
+type pendingCloseDelivery struct {
+	issueUID    string
+	fingerprint string
+	events      []db.Event
+}
+
+// pendingCloseDeliveries retains the event identities returned by a close
+// whose commit response was ambiguous. A later exact retry can verify those
+// events in storage and deliver them before it returns the stored receipt.
+type pendingCloseDeliveries struct {
+	mu      sync.Mutex
+	pending map[pendingCloseDeliveryKey]pendingCloseDelivery
+}
+
+func (p *pendingCloseDeliveries) remember(
+	projectID int64, key, issueUID, fingerprint string, events []db.Event,
+) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pending == nil {
+		p.pending = make(map[pendingCloseDeliveryKey]pendingCloseDelivery)
+	}
+	p.pending[pendingCloseDeliveryKey{projectID: projectID, idempotencyKey: key}] = pendingCloseDelivery{
+		issueUID: issueUID, fingerprint: fingerprint, events: append([]db.Event(nil), events...),
+	}
+}
+
+func (p *pendingCloseDeliveries) get(
+	projectID int64, key string,
+) (pendingCloseDelivery, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delivery, ok := p.pending[pendingCloseDeliveryKey{projectID: projectID, idempotencyKey: key}]
+	return delivery, ok
+}
+
+func (p *pendingCloseDeliveries) discard(projectID int64, key, fingerprint string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	mapKey := pendingCloseDeliveryKey{projectID: projectID, idempotencyKey: key}
+	if delivery, ok := p.pending[mapKey]; ok && delivery.fingerprint == fingerprint {
+		delete(p.pending, mapKey)
+	}
+}
+
+func (p *pendingCloseDeliveries) publishCommitted(
+	ctx context.Context, cfg ServerConfig, projectID int64, key, fingerprint string,
+) error {
+	delivery, ok := p.get(projectID, key)
+	if !ok || delivery.fingerprint != fingerprint {
+		return nil
+	}
+	uids := make([]string, len(delivery.events))
+	for i := range delivery.events {
+		uids[i] = delivery.events[i].UID
+	}
+	stored, err := cfg.DB.EventsByUIDs(ctx, projectID, uids)
+	if errors.Is(err, db.ErrNotFound) {
+		p.discard(projectID, key, fingerprint)
+		return nil
+	}
+	if err != nil {
+		return internalAPIError(err)
+	}
+	if !sameCloseEventBatch(delivery.events, stored) {
+		return internalAPIError(errors.New("stored close event batch does not match the committed attempt"))
+	}
+	cfg.Publish().Events(projectID, stored)
+	p.discard(projectID, key, fingerprint)
+	return nil
+}
+
+func sameCloseEventBatch(expected, stored []db.Event) bool {
+	if len(expected) != len(stored) {
+		return false
+	}
+	for i := range expected {
+		if expected[i].UID != stored[i].UID ||
+			expected[i].ContentHash != stored[i].ContentHash {
+			return false
+		}
+	}
+	return true
 }
 
 func tryCloseIdempotencyMatch(

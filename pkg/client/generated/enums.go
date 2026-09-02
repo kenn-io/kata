@@ -46,6 +46,61 @@ func (a ActionRequestBodySource) Validate() error {
 	}
 }
 
+type CloseActionRequestBodyReason string
+
+const (
+	CloseActionRequestBodyReasonAuditNoChange CloseActionRequestBodyReason = "audit-no-change"
+	CloseActionRequestBodyReasonDone          CloseActionRequestBodyReason = "done"
+	CloseActionRequestBodyReasonDuplicate     CloseActionRequestBodyReason = "duplicate"
+	CloseActionRequestBodyReasonEmpty         CloseActionRequestBodyReason = ""
+	CloseActionRequestBodyReasonSuperseded    CloseActionRequestBodyReason = "superseded"
+	CloseActionRequestBodyReasonWontfix       CloseActionRequestBodyReason = "wontfix"
+)
+
+// Validate checks if the CloseActionRequestBodyReason value is valid
+func (c CloseActionRequestBodyReason) Validate() error {
+	switch c {
+	case CloseActionRequestBodyReasonAuditNoChange, CloseActionRequestBodyReasonDone, CloseActionRequestBodyReasonDuplicate, CloseActionRequestBodyReasonEmpty, CloseActionRequestBodyReasonSuperseded, CloseActionRequestBodyReasonWontfix:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CloseActionRequestBodyReason value, got: %v", c))
+	}
+}
+
+type CloseActionRequestBodyRetryProtocol string
+
+const (
+	CloseActionRequestBodyRetryProtocolEmpty CloseActionRequestBodyRetryProtocol = ""
+	CloseV1                                  CloseActionRequestBodyRetryProtocol = "close-v1"
+)
+
+// Validate checks if the CloseActionRequestBodyRetryProtocol value is valid
+func (c CloseActionRequestBodyRetryProtocol) Validate() error {
+	switch c {
+	case CloseActionRequestBodyRetryProtocolEmpty, CloseV1:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CloseActionRequestBodyRetryProtocol value, got: %v", c))
+	}
+}
+
+type CloseActionRequestBodySource string
+
+const (
+	CloseActionRequestBodySourceEmpty CloseActionRequestBodySource = ""
+	CloseActionRequestBodySourceTui   CloseActionRequestBodySource = "tui"
+)
+
+// Validate checks if the CloseActionRequestBodySource value is valid
+func (c CloseActionRequestBodySource) Validate() error {
+	switch c {
+	case CloseActionRequestBodySourceEmpty, CloseActionRequestBodySourceTui:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CloseActionRequestBodySource value, got: %v", c))
+	}
+}
+
 type CreateInitialLinkBodyType string
 
 const (

@@ -753,20 +753,12 @@ func (h toolHandlers) patchMetadata(ctx context.Context, project ProjectIdentity
 }
 
 func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, input CloseInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	if input.IdempotencyKey != "" || input.Revision != nil {
-		if h.options.CheckCloseRetrySupport == nil {
-			return nil, MutationOutput{}, errors.New("daemon does not support kata.close retry controls; upgrade the daemon")
-		}
-		if err := h.options.CheckCloseRetrySupport(ctx); err != nil {
-			return nil, MutationOutput{}, err
-		}
-	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	reason := generated.ActionRequestBodyReason(input.Reason)
-	if err := reason.Validate(); err != nil || reason == generated.Empty {
+	reason := generated.CloseActionRequestBodyReason(input.Reason)
+	if err := reason.Validate(); err != nil || reason == generated.CloseActionRequestBodyReasonEmpty {
 		return nil, MutationOutput{}, fmt.Errorf("reason must be one of done, wontfix, duplicate, superseded, or audit-no-change")
 	}
 	if strings.TrimSpace(input.Message) == "" {
@@ -781,8 +773,11 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 		evidence = append(evidence, converted)
 	}
 	var headers *generated.CloseIssueHeaders
+	var retryProtocol *generated.CloseActionRequestBodyRetryProtocol
 	if input.IdempotencyKey != "" || input.Revision != nil {
 		headers = &generated.CloseIssueHeaders{}
+		protocol := generated.CloseV1
+		retryProtocol = &protocol
 		if input.IdempotencyKey != "" {
 			headers.IdempotencyKey = &input.IdempotencyKey
 		}
@@ -797,11 +792,12 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	response, err := h.options.Client.CloseIssue(ctx, &generated.CloseIssueRequestOptions{
 		PathParams: &generated.CloseIssuePath{ProjectID: project.ID, Ref: ref},
 		Body: &generated.CloseIssueBody{
-			Actor:    &h.options.Actor,
-			Reason:   &reason,
-			Message:  &input.Message,
-			Evidence: evidence,
-			DryRun:   optionalTrue(input.DryRun),
+			Actor:         &h.options.Actor,
+			Reason:        &reason,
+			Message:       &input.Message,
+			Evidence:      evidence,
+			DryRun:        optionalTrue(input.DryRun),
+			RetryProtocol: retryProtocol,
 		},
 		Header: headers,
 	})

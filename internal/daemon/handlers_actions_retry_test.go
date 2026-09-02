@@ -64,8 +64,11 @@ func (s *closeRaceStore) CloseIssueGuarded(
 
 type lostCloseResponseStore struct {
 	db.Storage
-	failNext        bool
-	committedEvents []db.Event
+	failNext            bool
+	failEventLookupOnce bool
+	failIssueReadOnce   bool
+	committed           bool
+	committedEvents     []db.Event
 }
 
 func (s *lostCloseResponseStore) CloseIssueGuarded(
@@ -74,10 +77,59 @@ func (s *lostCloseResponseStore) CloseIssueGuarded(
 	issue, events, changed, err := s.Storage.CloseIssueGuarded(ctx, params)
 	if err == nil && changed && s.failNext {
 		s.failNext = false
+		s.committed = true
 		s.committedEvents = append([]db.Event(nil), events...)
 		return issue, events, changed, errors.New("commit response lost")
 	}
 	return issue, events, changed, err
+}
+
+func (s *lostCloseResponseStore) EventsByUIDs(
+	ctx context.Context, projectID int64, uids []string,
+) ([]db.Event, error) {
+	if s.committed && s.failEventLookupOnce {
+		s.failEventLookupOnce = false
+		return nil, errors.New("event lookup unavailable")
+	}
+	return s.Storage.EventsByUIDs(ctx, projectID, uids)
+}
+
+func (s *lostCloseResponseStore) IssueByID(ctx context.Context, id int64) (db.Issue, error) {
+	if s.committed && s.failIssueReadOnce {
+		s.failIssueReadOnce = false
+		return db.Issue{}, errors.New("issue read unavailable")
+	}
+	return s.Storage.IssueByID(ctx, id)
+}
+
+func TestClose_RetryControlsRequireProtocolMarker(t *testing.T) {
+	_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+	response := postWithHeader(t, ts, issueURL(projectID, issueID, "actions/close"),
+		map[string]string{"Idempotency-Key": "close-without-protocol"}, map[string]any{
+			"actor":   "agent-one",
+			"reason":  "wontfix",
+			"message": "Reviewed the request and recorded why the work should stop here.",
+		})
+	assertAPIError(t, response.status, response.body,
+		http.StatusBadRequest, "retry_protocol_required")
+}
+
+func TestClose_RetryProtocolMarkerIsCloseOnly(t *testing.T) {
+	_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+	body := map[string]any{
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
+	}
+	response := postWithHeader(t, ts, issueURL(projectID, issueID, "actions/close"),
+		map[string]string{"Idempotency-Key": "close-with-protocol"}, body)
+	requireOK(t, response)
+
+	reopen := postWithHeader(t, ts, issueURL(projectID, issueID, "actions/reopen"), nil,
+		map[string]any{"actor": "agent-one", "retry_protocol": "close-v1"})
+	assert.Equal(t, http.StatusBadRequest, reopen.status, string(reopen.body))
+	assert.Contains(t, string(reopen.body), "retry_protocol")
 }
 
 func TestClose_IdempotencyReplaysCommittedReceipt(t *testing.T) {
@@ -90,9 +142,10 @@ func TestClose_IdempotencyReplaysCommittedReceipt(t *testing.T) {
 		"If-Match":        `"rev-1"`,
 	}
 	body := map[string]any{
-		"actor":   "agent-one",
-		"reason":  "done",
-		"message": "Implemented the requested behavior and ran the focused tests.",
+		"actor":          "agent-one",
+		"reason":         "done",
+		"message":        "Implemented the requested behavior and ran the focused tests.",
+		"retry_protocol": "close-v1",
 		"evidence": []map[string]any{{
 			"type": "test", "command": "go test ./internal/daemon",
 		}},
@@ -137,9 +190,10 @@ func TestClose_IdempotencyReplaysReceiptAfterSoftDelete(t *testing.T) {
 	path := issueURLRef(projectID, issue.ShortID, "actions/close")
 	headers := map[string]string{"Idempotency-Key": "close-request-then-delete"}
 	body := map[string]any{
-		"actor":   "agent-one",
-		"reason":  "wontfix",
-		"message": "Reviewed the request and recorded why the work should stop here.",
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
 	}
 
 	first := postWithHeader(t, ts, path, headers, body)
@@ -170,9 +224,10 @@ func TestClose_IdempotencyReplaysReceiptAfterMove(t *testing.T) {
 	path := issueURLRef(projectID, issue.ShortID, "actions/close")
 	headers := map[string]string{"Idempotency-Key": "close-request-then-move"}
 	body := map[string]any{
-		"actor":   "agent-one",
-		"reason":  "wontfix",
-		"message": "Reviewed the request and recorded why the work should stop here.",
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
 	}
 
 	first := postWithHeader(t, ts, path, headers, body)
@@ -213,9 +268,10 @@ func TestClose_RejectsKeyWhenAnotherCloseWinsBeforeWrite(t *testing.T) {
 	path := issueURLRef(project.ID, issue.ShortID, "actions/close")
 	headers := map[string]string{"Idempotency-Key": "close-race-1"}
 	body := map[string]any{
-		"actor":   "agent-one",
-		"reason":  "wontfix",
-		"message": "Reviewed the request and recorded why the work should stop here.",
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
 	}
 
 	first := postWithHeader(t, ts, path, headers, body)
@@ -248,9 +304,10 @@ func TestClose_RejectsMoveThatWinsBeforeGuardedWrite(t *testing.T) {
 	response := postWithHeader(t, ts,
 		issueURLRef(source.ID, issue.ShortID, "actions/close"),
 		map[string]string{"Idempotency-Key": "close-move-race-1"}, map[string]any{
-			"actor":   "agent-one",
-			"reason":  "wontfix",
-			"message": "Reviewed the request and recorded why the work should stop here.",
+			"actor":          "agent-one",
+			"reason":         "wontfix",
+			"message":        "Reviewed the request and recorded why the work should stop here.",
+			"retry_protocol": "close-v1",
 		})
 	assertAPIError(t, response.status, response.body, http.StatusConflict, "issue_moved")
 
@@ -282,9 +339,10 @@ func TestClose_RecoversCommittedReceiptAndPublishesEventsOnce(t *testing.T) {
 	path := issueURLRef(project.ID, issue.ShortID, "actions/close")
 	headers := map[string]string{"Idempotency-Key": "close-lost-response-1"}
 	body := map[string]any{
-		"actor":   "agent-one",
-		"reason":  "wontfix",
-		"message": "Reviewed the request and recorded why the work should stop here.",
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
 	}
 
 	first := postWithHeader(t, ts, path, headers, body)
@@ -307,14 +365,64 @@ func TestClose_RecoversCommittedReceiptAndPublishesEventsOnce(t *testing.T) {
 	assert.Empty(t, drainBroadcastIDs(t, subscription.Ch, 50*time.Millisecond))
 }
 
+func TestClose_RetryRecoversUndeliveredCommitWithoutDuplicateEvents(t *testing.T) {
+	database := openTestDB(t)
+	project, issue := createClaimHubIssueInDB(t, database.db)
+	_, err := database.db.AcquireClaim(t.Context(), db.AcquireClaimParams{
+		ProjectID: project.ID, IssueRef: issue.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: database.db.InstanceUID(), Holder: "agent-one", ClientKind: "cli",
+		},
+		ClaimKind: "hard", Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	store := &lostCloseResponseStore{
+		Storage: database.db, failNext: true,
+		failEventLookupOnce: true, failIssueReadOnce: true,
+	}
+	sink := &recordingSink{}
+	broadcaster := daemon.NewEventBroadcaster()
+	subscription := broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+	defer subscription.Unsub()
+	ts := startTestServer(t, daemon.ServerConfig{
+		DB: store, StartedAt: database.now, Hooks: sink, Broadcaster: broadcaster,
+	})
+	path := issueURLRef(project.ID, issue.ShortID, "actions/close")
+	headers := map[string]string{"Idempotency-Key": "close-delivery-retry-1"}
+	body := map[string]any{
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
+	}
+
+	first := postWithHeader(t, ts, path, headers, body)
+	assertAPIError(t, first.status, first.body, http.StatusInternalServerError, "internal")
+	require.Len(t, store.committedEvents, 2)
+	assert.Empty(t, sink.snapshot())
+	assert.Empty(t, drainBroadcastIDs(t, subscription.Ch, 50*time.Millisecond))
+
+	second := postWithHeader(t, ts, path, headers, body)
+	assertAPIError(t, second.status, second.body, http.StatusInternalServerError, "internal")
+	assert.Equal(t, store.committedEvents, sink.snapshot())
+	assert.Equal(t, []int64{store.committedEvents[0].ID, store.committedEvents[1].ID},
+		drainBroadcastIDs(t, subscription.Ch, 50*time.Millisecond))
+
+	third := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, third)
+	assert.Equal(t, store.committedEvents, sink.snapshot())
+	assert.Empty(t, drainBroadcastIDs(t, subscription.Ch, 50*time.Millisecond))
+}
+
 func TestClose_IdempotencyRejectsDifferentRequest(t *testing.T) {
 	_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
 	path := issueURL(projectID, issueID, "actions/close")
 	headers := map[string]string{"Idempotency-Key": "close-request-1"}
 	body := map[string]any{
-		"actor":   "agent-one",
-		"reason":  "wontfix",
-		"message": "Reviewed the request and recorded why the work should stop here.",
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
 	}
 	requireOK(t, postWithHeader(t, ts, path, headers, body))
 
@@ -333,9 +441,10 @@ func TestClose_IdempotencyRejectsDifferentIssueWithSameBody(t *testing.T) {
 	require.NoError(t, err)
 	headers := map[string]string{"Idempotency-Key": "close-request-1"}
 	body := map[string]any{
-		"actor":   "agent-one",
-		"reason":  "wontfix",
-		"message": "Reviewed the request and recorded why the work should stop here.",
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
 	}
 	requireOK(t, postWithHeader(t, ts,
 		issueURLRef(projectID, first.ShortID, "actions/close"), headers, body))
@@ -360,9 +469,10 @@ func TestClose_IfMatchRejectsStaleRevision(t *testing.T) {
 	require.NoError(t, err)
 
 	body := map[string]any{
-		"actor":   "agent-one",
-		"reason":  "done",
-		"message": "Implemented the requested behavior and ran the focused tests.",
+		"actor":          "agent-one",
+		"reason":         "done",
+		"message":        "Implemented the requested behavior and ran the focused tests.",
+		"retry_protocol": "close-v1",
 		"evidence": []map[string]any{{
 			"type": "test", "command": "go test ./internal/daemon",
 		}},
@@ -412,6 +522,7 @@ func TestClose_IfMatchRejectsStaleRevisionAfterAnotherClose(t *testing.T) {
 	}
 	requireOK(t, postWithHeader(t, ts, path, nil, body))
 
+	body["retry_protocol"] = "close-v1"
 	response := postWithHeader(t, ts, path,
 		map[string]string{"If-Match": `"rev-1"`}, body)
 	assertAPIError(t, response.status, response.body,

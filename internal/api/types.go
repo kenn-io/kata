@@ -8,6 +8,10 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// CloseRetryProtocol marks a close request whose retry headers must be
+// understood by the receiving daemon before it may mutate an issue.
+const CloseRetryProtocol = "close-v1"
+
 // PingResponse mirrors the cheapest liveness response.
 type PingResponse struct {
 	Body struct {
@@ -841,7 +845,15 @@ type CloseActionRequest struct {
 	Ref            string `path:"ref" required:"true"`
 	IdempotencyKey string `header:"Idempotency-Key"`
 	IfMatch        string `header:"If-Match"`
-	Body           ActionRequestBody
+	Body           CloseActionRequestBody
+}
+
+// CloseActionRequestBody extends the legacy action body with a close-only
+// protocol marker. Older daemons reject the unknown marker before they can
+// ignore retry headers and mutate an issue.
+type CloseActionRequestBody struct {
+	ActionRequestBody
+	RetryProtocol string `json:"retry_protocol,omitempty" enum:"close-v1,"`
 }
 
 // ActionRequestBody is the shared JSON body for close and reopen actions.

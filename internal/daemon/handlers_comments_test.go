@@ -3,13 +3,31 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 )
+
+type commentProjectHostAccess struct {
+	deniedProjectID int64
+}
+
+func (a commentProjectHostAccess) Authorize(
+	_ context.Context,
+	request daemon.HostAccessRequest,
+) (daemon.HostAccessDecision, error) {
+	if slices.Contains(request.Operation.ProjectIDs, a.deniedProjectID) {
+		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
+	}
+	return daemon.HostAccessDecision{}, nil
+}
 
 func TestCommentEndpoint_AppendsAndEmitsEvent(t *testing.T) {
 	_, ts, pid, num := bootstrapProjectWithIssue(t)
@@ -85,6 +103,41 @@ func TestCommentEndpoint_IdempotencyReplaysCommittedCommentAfterMove(t *testing.
 	comments, err := h.DB().CommentsByIssue(t.Context(), issueID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
+}
+
+func TestCommentEndpoint_IdempotencyReauthorizesMovedIssue(t *testing.T) {
+	dbh, initialServer, sourceProjectID, issueID := bootstrapProjectWithIssue(t)
+	issue, err := dbh.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	body := map[string]any{"actor": "agent", "body": "first comment"}
+	headers := map[string]string{"Idempotency-Key": "comment-request-before-move"}
+	path := issueURLRef(sourceProjectID, issue.UID, "comments")
+	requireOK(t, postWithHeader(t, initialServer, path, headers, body))
+
+	target, err := dbh.DB().CreateProject(t.Context(), "denied-target")
+	require.NoError(t, err)
+	issue, err = dbh.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	_, err = dbh.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: sourceProjectID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "coordinator",
+	})
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB: dbh.DB(), StartedAt: time.Now(),
+		HostAccess: commentProjectHostAccess{deniedProjectID: target.ID},
+	})
+	hostServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		ctx := daemon.WithPrincipal(request.Context(), daemon.Principal{
+			Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "agent",
+		})
+		server.Handler().ServeHTTP(writer, request.WithContext(ctx))
+	}))
+	t.Cleanup(hostServer.Close)
+
+	retry := postWithHeader(t, hostServer, path, headers, body)
+	assertAPIError(t, retry.status, retry.body, http.StatusNotFound, "not_found")
 }
 
 func TestCommentEndpoint_IdempotencyRejectsDifferentBody(t *testing.T) {

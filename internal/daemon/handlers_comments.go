@@ -66,6 +66,11 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err != nil {
 					return nil, internalAPIError(err)
 				}
+				if _, err := authorizeHostProjectScope(
+					ctx, []int64{updated.ProjectID}, nil, false,
+				); err != nil {
+					return nil, err
+				}
 				out := &api.CommentResponse{}
 				out.Body.Issue = updated
 				out.Body.Comment = match.Comment

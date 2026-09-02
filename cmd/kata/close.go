@@ -258,15 +258,12 @@ func runActionWithHeaders(
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	body := map[string]any{"actor": actor}
 	maps.Copy(body, extra)
+	if action == "close" && len(headers) > 0 {
+		body["retry_protocol"] = api.CloseRetryProtocol
+	}
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return err
-	}
-	if action == "close" && len(headers) > 0 {
-		if err := requireDaemonAPIVersion(ctx, client, baseURL,
-			apiVersionCloseRetrySafety, "close retry controls"); err != nil {
-			return err
-		}
 	}
 	status, bs, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", baseURL, pid, url.PathEscape(issue.RefForAPI), action),

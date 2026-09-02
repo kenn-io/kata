@@ -151,10 +151,6 @@ func newMCPServeCmd() *cobra.Command {
 				Version:           version.Version,
 				StorageAdmin:      storage,
 				EnableTokenAdmin:  enableTokenAdmin,
-				CheckCloseRetrySupport: func(callCtx context.Context) error {
-					return requireDaemonAPIVersion(callCtx, httpClient, baseURL,
-						apiVersionCloseRetrySafety, "kata.close retry controls")
-				},
 			})
 			if err != nil {
 				return err
