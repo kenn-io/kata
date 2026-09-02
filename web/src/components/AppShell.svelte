@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DetailDrawer, IconButton, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { DetailDrawer, IconButton, TopBar, type TypeaheadOption } from '@kenn-io/kit-ui'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
   import LayoutPanelTopIcon from '@lucide/svelte/icons/layout-panel-top'
   import MonitorIcon from '@lucide/svelte/icons/monitor'
@@ -367,9 +367,9 @@
 {/snippet}
 
 <section class="kata-feature" aria-label="Kata workspace">
-  <header class="kata-header">
-    <div class="kata-header-title">
-      <h1>Kata</h1>
+  <TopBar class="kata-header" ariaLabel="Kata workspace">
+    {#snippet left()}
+      <h1 class="kata-brand">Kata</h1>
       {#if daemons.length > 0}
         <KataDaemonSwitcher
           {daemons}
@@ -389,55 +389,57 @@
           {daemonError ?? 'Reconnecting…'}
         </span>
       {/if}
-    </div>
-    <div class="kata-header-actions">
-      <span class="mobile-navigation-trigger">
-        <IconButton
-          ariaLabel="Open navigation"
-          title="Open navigation"
-          onclick={() => {
-            mobileNavigationOpen = true
-          }}
-        >
-          <MenuIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+    {/snippet}
+    {#snippet right()}
+      <div class="kata-header-actions">
+        <span class="mobile-navigation-trigger">
+          <IconButton
+            ariaLabel="Open navigation"
+            title="Open navigation"
+            onclick={() => {
+              mobileNavigationOpen = true
+            }}
+          >
+            <MenuIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+          </IconButton>
+        </span>
+        <IconButton ariaLabel={`Theme: ${themeLabel()}`} title="Change theme" onclick={cycleTheme}>
+          {#if preferences.theme === 'light'}
+            <SunIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+          {:else if preferences.theme === 'dark'}
+            <MoonIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+          {:else}
+            <MonitorIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+          {/if}
         </IconButton>
-      </span>
-      <IconButton ariaLabel={`Theme: ${themeLabel()}`} title="Change theme" onclick={cycleTheme}>
-        {#if preferences.theme === 'light'}
-          <SunIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-        {:else if preferences.theme === 'dark'}
-          <MoonIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-        {:else}
-          <MonitorIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-        {/if}
-      </IconButton>
-      <IconButton
-        ariaLabel={preferences.splitDirection === 'vertical'
-          ? 'Switch to side-by-side layout'
-          : 'Switch to stacked layout'}
-        title={preferences.splitDirection === 'vertical'
-          ? 'Side-by-side (list left, detail right)'
-          : 'Stacked (list top, detail bottom)'}
-        onclick={toggleSplitDirection}
-      >
-        {#if preferences.splitDirection === 'vertical'}
-          <LayoutPanelLeftIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-        {:else}
-          <LayoutPanelTopIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-        {/if}
-      </IconButton>
-      <button
-        type="button"
-        class="accent-button header-action"
-        disabled={!canMutate || mutationPending}
-        title="New task"
-        onclick={beginNewTask}
-      >
-        <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
-        <span>New task</span>
-      </button>
-    </div>
-  </header>
+        <IconButton
+          ariaLabel={preferences.splitDirection === 'vertical'
+            ? 'Switch to side-by-side layout'
+            : 'Switch to stacked layout'}
+          title={preferences.splitDirection === 'vertical'
+            ? 'Side-by-side (list left, detail right)'
+            : 'Stacked (list top, detail bottom)'}
+          onclick={toggleSplitDirection}
+        >
+          {#if preferences.splitDirection === 'vertical'}
+            <LayoutPanelLeftIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+          {:else}
+            <LayoutPanelTopIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+          {/if}
+        </IconButton>
+        <button
+          type="button"
+          class="accent-button header-action"
+          disabled={!canMutate || mutationPending}
+          title="New task"
+          onclick={beginNewTask}
+        >
+          <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
+          <span>New task</span>
+        </button>
+      </div>
+    {/snippet}
+  </TopBar>
   {#if stale || readOnly}
     <aside
       class="authority-status"
@@ -613,28 +615,12 @@
     position: relative;
   }
 
-  .kata-header {
-    min-height: 56px;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border-default);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-  }
-
-  .kata-header h1 {
+  .kata-brand {
     margin: 0;
     font-size: var(--font-size-lg);
     font-weight: 650;
     line-height: 1.2;
-  }
-
-  .kata-header-title {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    min-width: 0;
+    white-space: nowrap;
   }
 
   .daemon-fallback-status {
@@ -649,7 +635,7 @@
 
   .authority-status {
     position: absolute;
-    top: calc(56px + var(--space-3));
+    top: calc(var(--header-height, 44px) + var(--space-3));
     right: var(--space-3);
     z-index: 20;
     max-width: min(360px, calc(100% - 24px));
