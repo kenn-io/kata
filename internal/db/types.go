@@ -569,6 +569,7 @@ type IdempotencyMatch struct {
 // through its issue.commented event payload.
 type CommentIdempotencyMatch struct {
 	Comment     Comment
+	IssueUID    string
 	Fingerprint string
 	Event       Event
 }

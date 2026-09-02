@@ -812,7 +812,39 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if response.OriginalEvent != nil {
 		event = response.OriginalEvent
 	}
+	project, err = h.closeMutationProject(ctx, project, response.Issue)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
 	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, event), nil
+}
+
+// closeMutationProject keeps replayed close receipts inside the immutable MCP
+// startup scope. A retry can return an issue that moved after the original
+// close, so the request project is only valid while its UID still matches.
+func (h toolHandlers) closeMutationProject(
+	ctx context.Context, requestProject ProjectIdentity, issue generated.Issue,
+) (ProjectIdentity, error) {
+	projectUID := ""
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
+	if projectUID == "" {
+		return ProjectIdentity{}, errors.New("close response did not include the issue project UID")
+	}
+	if requestProject.UID == projectUID || requestProject.UID == "" && requestProject.ID == issue.ProjectID {
+		return requestProject, nil
+	}
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
+	if err != nil {
+		return ProjectIdentity{}, err
+	}
+	for _, project := range projects {
+		if project.UID == projectUID {
+			return project, nil
+		}
+	}
+	return ProjectIdentity{}, errors.New("close response issue moved outside the MCP startup scope")
 }
 
 // Close-guard refusals render child, sibling-cohort, and prior-close

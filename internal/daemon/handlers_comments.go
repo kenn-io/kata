@@ -13,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // registerCommentsHandlers installs POST /comments. CreateComment writes the
@@ -28,31 +29,40 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-		if err != nil {
-			return nil, err
+		lookupIssueUID := ""
+		if uid.Valid(in.Ref) {
+			lookupIssueUID = strings.ToUpper(in.Ref)
 		}
 		fingerprint := ""
 		if in.IdempotencyKey != "" {
-			release, err := cfg.DB.AcquireIdempotencyLock(ctx, in.ProjectID, in.IdempotencyKey)
+			lockProjectID, lockKey := in.ProjectID, in.IdempotencyKey
+			if lookupIssueUID != "" {
+				// Project IDs change when an issue moves. Zero is outside the
+				// persisted project ID range and gives UID-addressed retries one
+				// stable, backend-wide lock scope.
+				lockProjectID = 0
+				lockKey = lookupIssueUID + "\x00" + in.IdempotencyKey
+			}
+			release, err := cfg.DB.AcquireIdempotencyLock(ctx, lockProjectID, lockKey)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
 			defer func() { _ = release() }()
 
-			fingerprint = commentIdempotencyFingerprint(issue.UID, actor, in.Body.Body)
 			match, err := cfg.DB.LookupCommentIdempotency(
-				ctx, in.ProjectID, in.IdempotencyKey, time.Now().Add(-idempotencyWindow))
+				ctx, in.ProjectID, lookupIssueUID, in.IdempotencyKey,
+				time.Now().Add(-idempotencyWindow))
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
 			if match != nil {
+				fingerprint = commentIdempotencyFingerprint(match.IssueUID, actor, in.Body.Body)
 				if match.Fingerprint != fingerprint {
 					return nil, api.NewError(409, "idempotency_mismatch",
 						"idempotency key matched a prior comment with a different fingerprint",
 						"use a fresh key or send the exact original comment", nil)
 				}
-				updated, err := cfg.DB.IssueByID(ctx, issue.ID)
+				updated, err := cfg.DB.IssueByID(ctx, match.Comment.IssueID)
 				if err != nil {
 					return nil, internalAPIError(err)
 				}
@@ -63,6 +73,13 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				out.Body.Changed = false
 				return out, nil
 			}
+		}
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		if in.IdempotencyKey != "" {
+			fingerprint = commentIdempotencyFingerprint(issue.UID, actor, in.Body.Body)
 		}
 		c, evt, err := cfg.DB.CreateComment(ctx, db.CreateCommentParams{
 			IssueID:                issue.ID,

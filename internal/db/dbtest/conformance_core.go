@@ -328,15 +328,23 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create comment: %w", err)
 	}
-	commentMatch, err := store.LookupCommentIdempotency(ctx, project.ID, "comment-request-1", since)
+	commentMatch, err := store.LookupCommentIdempotency(ctx, project.ID, "", "comment-request-1", since)
 	if err != nil {
 		return fmt.Errorf("lookup comment idempotency: %w", err)
 	}
 	require.NotNil(t, commentMatch)
 	assert.Equal(t, comment.UID, commentMatch.Comment.UID)
+	assert.Equal(t, issue.UID, commentMatch.IssueUID)
 	assert.Equal(t, commentEvent.UID, commentMatch.Event.UID)
 	assert.Equal(t, "comment-fingerprint-1", commentMatch.Fingerprint)
-	missingComment, err := store.LookupCommentIdempotency(ctx, project.ID, "comment-request-2", since)
+	commentMatchByUID, err := store.LookupCommentIdempotency(
+		ctx, 0, issue.UID, "comment-request-1", since)
+	if err != nil {
+		return fmt.Errorf("lookup comment idempotency by issue UID: %w", err)
+	}
+	require.NotNil(t, commentMatchByUID)
+	assert.Equal(t, comment.UID, commentMatchByUID.Comment.UID)
+	missingComment, err := store.LookupCommentIdempotency(ctx, project.ID, "", "comment-request-2", since)
 	if err != nil {
 		return fmt.Errorf("lookup missing comment idempotency key: %w", err)
 	}

@@ -66,6 +66,7 @@ func (s *Store) LookupIssueMutationIdempotency(
 func (s *Store) LookupCommentIdempotency(
 	ctx context.Context,
 	projectID int64,
+	issueUID string,
 	key string,
 	since time.Time,
 ) (*db.CommentIdempotencyMatch, error) {
@@ -74,15 +75,24 @@ func (s *Store) LookupCommentIdempotency(
       AND e.payload::jsonb ->> 'idempotency_key' = $2
       AND e.created_at >= $3
       ORDER BY e.id DESC LIMIT 1`
-	event, err := scanEvent(s.QueryRowContext(ctx, query, projectID, key, formatStoredTime(since)))
+	scope := any(projectID)
+	if issueUID != "" {
+		query = eventSelect + ` WHERE e.type = 'issue.commented'
+      AND e.issue_uid = $1
+      AND e.payload::jsonb ->> 'idempotency_key' = $2
+      AND e.created_at >= $3
+      ORDER BY e.id DESC LIMIT 1`
+		scope = issueUID
+	}
+	event, err := scanEvent(s.QueryRowContext(ctx, query, scope, key, formatStoredTime(since)))
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if event.IssueID == nil {
-		return nil, fmt.Errorf("comment idempotency match has no issue_id")
+	if event.IssueID == nil || event.IssueUID == nil {
+		return nil, fmt.Errorf("comment idempotency match has no issue identity")
 	}
 	var payload struct {
 		CommentUID  string `json:"comment_uid"`
@@ -97,6 +107,7 @@ func (s *Store) LookupCommentIdempotency(
 		return nil, fmt.Errorf("comment idempotency match comment: %w", err)
 	}
 	return &db.CommentIdempotencyMatch{
-		Comment: comment, Fingerprint: payload.Fingerprint, Event: event,
+		Comment: comment, IssueUID: *event.IssueUID,
+		Fingerprint: payload.Fingerprint, Event: event,
 	}, nil
 }

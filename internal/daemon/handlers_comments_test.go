@@ -56,6 +56,37 @@ func TestCommentEndpoint_IdempotencyReusesCommittedComment(t *testing.T) {
 	require.Len(t, comments, 1)
 }
 
+func TestCommentEndpoint_IdempotencyReplaysCommittedCommentAfterMove(t *testing.T) {
+	h, ts, sourceProjectID, issueID := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	body := map[string]any{"actor": "agent", "body": "first comment"}
+	headers := map[string]string{"Idempotency-Key": "comment-request-then-move"}
+
+	first := postWithHeader(t, ts, issueURLRef(sourceProjectID, issue.UID, "comments"), headers, body)
+	requireOK(t, first)
+	target, err := h.DB().CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	issue, err = h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	_, err = h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: sourceProjectID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "coordinator",
+	})
+	require.NoError(t, err)
+
+	retry := postWithHeader(t, ts, issueURLRef(target.ID, issue.UID, "comments"), headers, body)
+	requireOK(t, retry)
+	var reused struct {
+		Changed bool `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(retry.body, &reused))
+	assert.False(t, reused.Changed)
+	comments, err := h.DB().CommentsByIssue(t.Context(), issueID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+}
+
 func TestCommentEndpoint_IdempotencyRejectsDifferentBody(t *testing.T) {
 	_, ts, pid, issueID := bootstrapProjectWithIssue(t)
 	path := issueURL(pid, issueID, "comments")

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
@@ -280,8 +281,20 @@ func runActionWithHeaders(
 	if key := headers["Idempotency-Key"]; key != "" {
 		commentKey = "close-comment:" + key
 	}
+	commentProjectID, commentIssueRef := pid, issue.RefForAPI
+	if comment != "" && commentKey != "" {
+		var response api.MutationResponse
+		if err := json.Unmarshal(bs, &response.Body); err != nil {
+			return fmt.Errorf("decode close response for follow-up comment: %w", err)
+		}
+		if response.Body.Issue.ProjectID <= 0 || response.Body.Issue.UID == "" {
+			return fmt.Errorf("close response is missing the issue identity for the follow-up comment")
+		}
+		commentProjectID = response.Body.Issue.ProjectID
+		commentIssueRef = response.Body.Issue.UID
+	}
 	if err := postFollowupCommentWithKey(
-		ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, commentKey,
+		ctx, client, baseURL, commentProjectID, commentIssueRef, actor, comment, commentKey,
 	); err != nil {
 		return err
 	}

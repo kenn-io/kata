@@ -150,7 +150,10 @@ type Storage interface {
 	AcquireIdempotencyLock(ctx context.Context, projectID int64, key string) (release func() error, err error)
 	LookupIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*IdempotencyMatch, error)
 	LookupIssueMutationIdempotency(ctx context.Context, projectID int64, eventType, key string, since time.Time) (*IdempotencyMatch, error)
-	LookupCommentIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*CommentIdempotencyMatch, error)
+	// LookupCommentIdempotency scopes by issue UID when issueUID is non-empty;
+	// otherwise it scopes by project. UID scope lets a committed comment receipt
+	// survive a later project move without making keys global across issues.
+	LookupCommentIdempotency(ctx context.Context, projectID int64, issueUID, key string, since time.Time) (*CommentIdempotencyMatch, error)
 	InsertCloseThrottledEvent(ctx context.Context, issueID int64, actor string, payload CloseThrottledPayload) (Event, error)
 	RecentSiblingCloses(ctx context.Context, parentIssueID, excludeIssueID int64, actor string, since time.Time) ([]Event, error)
 	RecentSameMessageClose(ctx context.Context, parentIssueID, excludeIssueID int64, actor, normalizedMessage string, since time.Time) (*Event, error)
