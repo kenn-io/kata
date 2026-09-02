@@ -164,6 +164,20 @@ func TestSearchAgentExcerptKeepsMatchAfterLongContext(t *testing.T) {
 	assert.LessOrEqual(t, len([]rune(excerpt)), agentSearchExcerptLimit)
 }
 
+func TestSearchAgentExcerptSplitsQueryPunctuationLikeSearch(t *testing.T) {
+	prefix := strings.Repeat("prefix ", 30)
+	excerpt := searchAgentExcerpt("foo-bar", prefix+"foo bar useful context")
+
+	assert.Contains(t, excerpt, "foo bar useful context")
+}
+
+func TestSearchAgentExcerptDoesNotMatchInsideAnotherToken(t *testing.T) {
+	body := "catalog " + strings.Repeat("filler ", 30) + "log useful context"
+	excerpt := searchAgentExcerpt("log", body)
+
+	assert.Contains(t, excerpt, "log useful context")
+}
+
 // TestSearch_ModeFlagsMutuallyExclusive pins that --lexical/--hybrid/--semantic
 // cannot be combined; each conflicting pair is a validation error.
 func TestSearch_ModeFlagsMutuallyExclusive(t *testing.T) {

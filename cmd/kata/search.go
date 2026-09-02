@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -261,6 +262,12 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 
 const agentSearchExcerptLimit = 160
 
+type searchExcerptToken struct {
+	value      string
+	runeOffset int
+	runeLength int
+}
+
 func optionalAgentString(value string) *string {
 	if value == "" {
 		return nil
@@ -273,20 +280,23 @@ func searchAgentExcerpt(query, body string) string {
 	if len(words) == 0 {
 		return ""
 	}
-	queryWords := strings.Fields(strings.ToLower(query))
+	queryTokens := tokenizeSearchExcerpt(query)
 	hit := 0
 	matchOffset := 0
 	matchLength := 0
 	found := false
 	for i, word := range words {
-		candidate := strings.ToLower(word)
-		for _, queryWord := range queryWords {
-			queryWord = strings.Trim(queryWord, `.,:;!?()[]{}"'`)
-			if offset := strings.Index(candidate, queryWord); queryWord != "" && offset >= 0 {
-				hit = i
-				matchOffset = utf8.RuneCountInString(candidate[:offset])
-				matchLength = utf8.RuneCountInString(queryWord)
-				found = true
+		for _, candidate := range tokenizeSearchExcerpt(word) {
+			for _, queryToken := range queryTokens {
+				if candidate.value == queryToken.value {
+					hit = i
+					matchOffset = candidate.runeOffset
+					matchLength = candidate.runeLength
+					found = true
+					break
+				}
+			}
+			if found {
 				break
 			}
 		}
@@ -335,6 +345,31 @@ func searchAgentExcerpt(query, body string) string {
 		leftTrimmed || windowStart > 0,
 		rightTrimmed || windowEnd < len(excerptRunes),
 	)
+}
+
+func tokenizeSearchExcerpt(value string) []searchExcerptToken {
+	runes := []rune(value)
+	tokens := make([]searchExcerptToken, 0, len(strings.Fields(value)))
+	for i := 0; i < len(runes); {
+		if !isSearchExcerptTokenRune(runes[i]) {
+			i++
+			continue
+		}
+		start := i
+		for i < len(runes) && isSearchExcerptTokenRune(runes[i]) {
+			i++
+		}
+		tokens = append(tokens, searchExcerptToken{
+			value:      strings.ToLower(string(runes[start:i])),
+			runeOffset: start,
+			runeLength: i - start,
+		})
+	}
+	return tokens
+}
+
+func isSearchExcerptTokenRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r)
 }
 
 func formatSearchExcerpt(runes []rune, leftTrimmed, rightTrimmed bool) string {
