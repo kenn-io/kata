@@ -397,6 +397,7 @@ kata federation leave <project> [--delete [--force]] [--local-only] [--hub <name
 kata federation status
 kata federation status --json
 kata federation lease acquire <issue-ref> [--ttl 30m]
+kata federation lease renew <issue-ref> --ttl 30m
 kata federation lease release <issue-ref>
 ```
 

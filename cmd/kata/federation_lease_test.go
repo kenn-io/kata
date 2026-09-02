@@ -83,6 +83,32 @@ func TestClaim_TTLPostsTimedClaim(t *testing.T) {
 	assert.LessOrEqual(t, left, 31*time.Minute)
 }
 
+func TestLeaseRenew_ExtendsTimedLease(t *testing.T) {
+	env, dir, pid, ref := setupFederatedHubIssue(t, "renew target")
+	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref, "--ttl", "5m")
+	before := fetchClaimStatus(t, env, pid, ref)
+	require.NotNil(t, before.Claim)
+	require.NotNil(t, before.Claim.ExpiresAt)
+
+	out := runCLIAs(t, env, dir, "alice", "federation", "lease", "renew", ref, "--ttl", "30m")
+	assert.Equal(t, "renewed lease on "+ref+" as alice", out)
+
+	after := fetchClaimStatus(t, env, pid, ref)
+	require.NotNil(t, after.Claim)
+	require.NotNil(t, after.Claim.ExpiresAt)
+	assert.Equal(t, before.Claim.ClaimUID, after.Claim.ClaimUID)
+	assert.Greater(t, after.Claim.Revision, before.Claim.Revision)
+	assert.Greater(t, after.Claim.ExpiresAt.Sub(*before.Claim.ExpiresAt), 20*time.Minute)
+}
+
+func TestLeaseRenew_RequiresTTL(t *testing.T) {
+	env, dir, _, ref := setupFederatedHubIssue(t, "renew without ttl")
+
+	_, err := runCLICapture(t, env, dir, "federation", "lease", "renew", ref)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--ttl is required")
+}
+
 func TestClaim_RejectsBareNumericTTL(t *testing.T) {
 	env, dir, _, ref := setupFederatedHubIssue(t, "bad ttl")
 
