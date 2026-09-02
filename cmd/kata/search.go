@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
@@ -274,13 +275,17 @@ func searchAgentExcerpt(query, body string) string {
 	}
 	queryWords := strings.Fields(strings.ToLower(query))
 	hit := 0
+	matchOffset := 0
+	matchLength := 0
 	found := false
 	for i, word := range words {
 		candidate := strings.ToLower(word)
 		for _, queryWord := range queryWords {
 			queryWord = strings.Trim(queryWord, `.,:;!?()[]{}"'`)
-			if queryWord != "" && strings.Contains(candidate, queryWord) {
+			if offset := strings.Index(candidate, queryWord); queryWord != "" && offset >= 0 {
 				hit = i
+				matchOffset = utf8.RuneCountInString(candidate[:offset])
+				matchLength = utf8.RuneCountInString(queryWord)
 				found = true
 				break
 			}
@@ -294,16 +299,51 @@ func searchAgentExcerpt(query, body string) string {
 		start = max(0, hit-8)
 	}
 	end := min(len(words), start+24)
-	excerpt := strings.Join(words[start:end], " ")
-	if start > 0 {
+	excerptRunes := []rune(strings.Join(words[start:end], " "))
+	focusStart := -1
+	if found {
+		focusStart = matchOffset
+		for i := start; i < hit; i++ {
+			focusStart += utf8.RuneCountInString(words[i]) + 1
+		}
+	}
+	leftTrimmed := start > 0
+	rightTrimmed := end < len(words)
+	markerRunes := 0
+	if leftTrimmed {
+		markerRunes += 2
+	}
+	if rightTrimmed {
+		markerRunes += 2
+	}
+	if len(excerptRunes)+markerRunes <= agentSearchExcerptLimit {
+		return formatSearchExcerpt(excerptRunes, leftTrimmed, rightTrimmed)
+	}
+
+	// Reserve room for both ellipsis markers. Center the bounded window on
+	// the matched query term so long context before it cannot hide the match.
+	windowSize := agentSearchExcerptLimit - 4
+	windowStart := 0
+	if focusStart >= 0 {
+		focusEnd := focusStart + matchLength
+		windowStart = max(0, (focusStart+focusEnd-windowSize)/2)
+		windowStart = min(windowStart, max(0, len(excerptRunes)-windowSize))
+	}
+	windowEnd := min(len(excerptRunes), windowStart+windowSize)
+	return formatSearchExcerpt(
+		excerptRunes[windowStart:windowEnd],
+		leftTrimmed || windowStart > 0,
+		rightTrimmed || windowEnd < len(excerptRunes),
+	)
+}
+
+func formatSearchExcerpt(runes []rune, leftTrimmed, rightTrimmed bool) string {
+	excerpt := string(runes)
+	if leftTrimmed {
 		excerpt = "… " + excerpt
 	}
-	if end < len(words) {
+	if rightTrimmed {
 		excerpt += " …"
-	}
-	runes := []rune(excerpt)
-	if len(runes) > agentSearchExcerptLimit {
-		excerpt = string(runes[:agentSearchExcerptLimit-1]) + "…"
 	}
 	return excerpt
 }

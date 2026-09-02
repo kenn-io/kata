@@ -156,6 +156,14 @@ func TestSearchAgentIncludesBoundedTaskContext(t *testing.T) {
 	assert.NotContains(t, out, "body=")
 }
 
+func TestSearchAgentExcerptKeepsMatchAfterLongContext(t *testing.T) {
+	prefix := strings.Repeat("supercalifragilisticexpialidociousword ", 8)
+	excerpt := searchAgentExcerpt("needle", prefix+"needle useful context after the match")
+
+	assert.Contains(t, excerpt, "needle")
+	assert.LessOrEqual(t, len([]rune(excerpt)), agentSearchExcerptLimit)
+}
+
 // TestSearch_ModeFlagsMutuallyExclusive pins that --lexical/--hybrid/--semantic
 // cannot be combined; each conflicting pair is a validation error.
 func TestSearch_ModeFlagsMutuallyExclusive(t *testing.T) {
