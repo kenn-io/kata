@@ -263,7 +263,13 @@ func runActionWithHeaders(
 	if status >= 400 {
 		return apiErrFromBody(status, bs)
 	}
-	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
+	commentKey := ""
+	if key := headers["Idempotency-Key"]; key != "" {
+		commentKey = "close-comment:" + key
+	}
+	if err := postFollowupCommentWithKey(
+		ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, commentKey,
+	); err != nil {
 		return err
 	}
 	return printMutation(cmd, bs)

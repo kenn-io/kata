@@ -663,11 +663,13 @@ type Evidence struct {
 
 // CloseInput makes the completion assertion explicit.
 type CloseInput struct {
-	Ref      string     `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
-	Reason   string     `json:"reason" jsonschema:"Close reason: done, wontfix, duplicate, superseded, or audit-no-change"`
-	Message  string     `json:"message" jsonschema:"Substantive completion message"`
-	Evidence []Evidence `json:"evidence" jsonschema:"Typed evidence that supports the close"`
-	DryRun   bool       `json:"dry_run,omitempty" jsonschema:"Validate the close without changing the issue"`
+	Ref            string     `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
+	Reason         string     `json:"reason" jsonschema:"Close reason: done, wontfix, duplicate, superseded, or audit-no-change"`
+	Message        string     `json:"message" jsonschema:"Substantive completion message"`
+	Evidence       []Evidence `json:"evidence" jsonschema:"Typed evidence that supports the close"`
+	DryRun         bool       `json:"dry_run,omitempty" jsonschema:"Validate the close without changing the issue"`
+	IdempotencyKey string     `json:"idempotency_key,omitempty" jsonschema:"Stable unique key for safe retries"`
+	Revision       *int64     `json:"revision,omitempty" jsonschema:"Expected current issue revision for a conditional close"`
 }
 
 // ReopenInput reactivates closed work.

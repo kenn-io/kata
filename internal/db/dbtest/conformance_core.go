@@ -385,6 +385,20 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("guarded close returned %v, want revision conflict", err)
 	}
 	assert.Equal(t, staleIssue.Revision+1, conflict.CurrentRevision)
+	if _, _, _, err := store.CloseIssueWithEvents(
+		ctx, staleIssue.ID, "wontfix", "conformance-agent", "stopped", nil,
+	); err != nil {
+		return fmt.Errorf("close after revision conflict: %w", err)
+	}
+	_, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: staleIssue.ID, Reason: "wontfix", Actor: "conformance-agent",
+		IfMatchRev: new(staleIssue.Revision),
+	})
+	conflict, ok = errors.AsType[*db.RevisionConflictError](err)
+	if !ok || conflict == nil {
+		return fmt.Errorf("guarded closed-issue retry returned %v, want revision conflict", err)
+	}
+	assert.Equal(t, staleIssue.Revision+1, conflict.CurrentRevision)
 
 	releaseFirst, err := store.AcquireIdempotencyLock(ctx, project.ID, "serialized-request")
 	if err != nil {

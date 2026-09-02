@@ -82,6 +82,10 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return reuse, nil
 			}
 		}
+		if ifMatchRev != nil && issue.Revision != *ifMatchRev {
+			return nil, api.NewError(412, "revision_conflict",
+				fmt.Sprintf("issue revision is %d", issue.Revision), "", nil)
+		}
 		// Already-closed short-circuit. CloseIssue itself returns
 		// changed=false for this case; short-circuiting before the
 		// guards (and substance / evidence validation) keeps idempotent

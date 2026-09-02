@@ -772,6 +772,20 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 		}
 		evidence = append(evidence, converted)
 	}
+	var headers *generated.CloseIssueHeaders
+	if input.IdempotencyKey != "" || input.Revision != nil {
+		headers = &generated.CloseIssueHeaders{}
+		if input.IdempotencyKey != "" {
+			headers.IdempotencyKey = &input.IdempotencyKey
+		}
+		if input.Revision != nil {
+			if *input.Revision < 0 {
+				return nil, MutationOutput{}, errors.New("revision must not be negative")
+			}
+			ifMatch := `"rev-` + strconv.FormatInt(*input.Revision, 10) + `"`
+			headers.IfMatch = &ifMatch
+		}
+	}
 	response, err := h.options.Client.CloseIssue(ctx, &generated.CloseIssueRequestOptions{
 		PathParams: &generated.CloseIssuePath{ProjectID: project.ID, Ref: ref},
 		Body: &generated.CloseIssueBody{
@@ -781,11 +795,16 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 			Evidence: evidence,
 			DryRun:   optionalTrue(input.DryRun),
 		},
+		Header: headers,
 	})
 	if err != nil {
 		return nil, MutationOutput{}, h.scopedCloseError(err)
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	event := &response.Event
+	if response.OriginalEvent != nil {
+		event = response.OriginalEvent
+	}
+	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, event), nil
 }
 
 // Close-guard refusals render child, sibling-cohort, and prior-close

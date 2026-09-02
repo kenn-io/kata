@@ -5354,7 +5354,10 @@ export interface operations {
   closeIssue: {
     parameters: {
       query?: never
-      header?: never
+      header?: {
+        'Idempotency-Key'?: string
+        'If-Match'?: string
+      }
       path: {
         project_id: number
         ref: string

@@ -107,3 +107,27 @@ func TestClose_IfMatchRejectsStaleRevision(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "open", issue.Status)
 }
+
+func TestClose_IfMatchRejectsStaleRevisionAfterAnotherClose(t *testing.T) {
+	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+	_, err := h.DB().PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
+		IssueID: issueID,
+		Actor:   "coordinator",
+		Patch: map[string]json.RawMessage{
+			"work.state": json.RawMessage(`"ready"`),
+		},
+	})
+	require.NoError(t, err)
+	path := issueURL(projectID, issueID, "actions/close")
+	body := map[string]any{
+		"actor":   "agent-one",
+		"reason":  "wontfix",
+		"message": "Reviewed the request and recorded why the work should stop here.",
+	}
+	requireOK(t, postWithHeader(t, ts, path, nil, body))
+
+	response := postWithHeader(t, ts, path,
+		map[string]string{"If-Match": `"rev-1"`}, body)
+	assertAPIError(t, response.status, response.body,
+		http.StatusPreconditionFailed, "revision_conflict")
+}

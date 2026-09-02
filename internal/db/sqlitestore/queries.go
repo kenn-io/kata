@@ -1484,14 +1484,14 @@ func (d *Store) closeIssueGuarded(
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
+	if p.IfMatchRev != nil && issue.Revision != *p.IfMatchRev {
+		return db.Issue{}, nil, false, &db.RevisionConflictError{CurrentRevision: issue.Revision}
+	}
 	if issue.Status == "closed" {
 		if err := tx.Commit(); err != nil {
 			return db.Issue{}, nil, false, err
 		}
 		return issue, nil, false, nil
-	}
-	if p.IfMatchRev != nil && issue.Revision != *p.IfMatchRev {
-		return db.Issue{}, nil, false, &db.RevisionConflictError{CurrentRevision: issue.Revision}
 	}
 	if hasOpen, err := txHasOpenChildren(ctx, tx, p.IssueID); err != nil {
 		return db.Issue{}, nil, false, err

@@ -435,6 +435,24 @@ func TestClose_WithComment_AppendsComment(t *testing.T) {
 	assert.Equal(t, "closed", got.Issue.Status)
 }
 
+func TestClose_RetryWithCommentAppendsOneComment(t *testing.T) {
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
+	args := []string{
+		"close", ref,
+		"--done",
+		"--message", "Implemented the requested behavior and ran the focused tests.",
+		"--test", "go test ./cmd/kata",
+		"--comment", "fixed in abc1234",
+		"--idempotency-key", "close-request-with-comment-1",
+	}
+	runCLI(t, env, dir, args...)
+	runCLI(t, env, dir, args...)
+
+	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
+	require.Len(t, got.Comments, 1)
+	assert.Equal(t, "fixed in abc1234", got.Comments[0].Body)
+}
+
 func TestReopen_WithComment_AppendsComment(t *testing.T) {
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
 	runCLI(t, env, dir, "close", ref,

@@ -278,12 +278,12 @@ func (s *Store) closeIssueWithEvents(
 		if err != nil {
 			return err
 		}
+		if p.IfMatchRev != nil && current.Revision != *p.IfMatchRev {
+			return &db.RevisionConflictError{CurrentRevision: current.Revision}
+		}
 		if current.Status == "closed" {
 			issue = current
 			return nil
-		}
-		if p.IfMatchRev != nil && current.Revision != *p.IfMatchRev {
-			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
 		var hasOpenChildren bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
