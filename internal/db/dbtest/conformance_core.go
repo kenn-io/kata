@@ -1196,3 +1196,136 @@ func checkConcurrentOwnerClaim(t *testing.T, store db.Storage) error {
 	assert.Equal(t, 1, conflicts)
 	return nil
 }
+
+func checkConcurrentGuardedOwnerClaim(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "concurrent-guarded-owner-project")
+	if err != nil {
+		return fmt.Errorf("create project: %w", err)
+	}
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "guarded claim once", Author: "conformance-agent",
+	})
+	if err != nil {
+		return fmt.Errorf("create issue: %w", err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			_, err := store.ClaimOwnerIfUnowned(ctx, issue.ID, "shared-agent")
+			results <- err
+		}()
+	}
+	close(start)
+	var success, conflicts int
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, db.ErrAlreadyClaimed):
+			conflicts++
+		default:
+			return fmt.Errorf("concurrent guarded owner claim: %w", err)
+		}
+	}
+	assert.Equal(t, 1, success)
+	assert.Equal(t, 1, conflicts)
+	claimed, err := store.IssueByID(ctx, issue.ID)
+	if err != nil {
+		return fmt.Errorf("load claimed issue: %w", err)
+	}
+	require.NotNil(t, claimed.Owner)
+	assert.Equal(t, "shared-agent", *claimed.Owner)
+	return nil
+}
+
+func checkExpectedOwnerUnassign(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "expected-owner-project")
+	if err != nil {
+		return fmt.Errorf("create project: %w", err)
+	}
+	owner := "agent-a"
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "release expected owner", Author: "conformance-agent", Owner: &owner,
+	})
+	if err != nil {
+		return fmt.Errorf("create issue: %w", err)
+	}
+
+	updated, event, changed, err := store.UnassignOwner(ctx, issue.ID, "conformance-agent", &owner)
+	if err != nil {
+		return fmt.Errorf("matching expected owner: %w", err)
+	}
+	assert.Nil(t, updated.Owner)
+	assert.True(t, changed)
+	require.NotNil(t, event)
+
+	owner = "agent-b"
+	issue, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "preserve replacement owner", Author: "conformance-agent", Owner: &owner,
+	})
+	if err != nil {
+		return fmt.Errorf("create replacement issue: %w", err)
+	}
+	expected := "agent-a"
+	current, event, changed, err := store.UnassignOwner(ctx, issue.ID, "conformance-agent", &expected)
+	if !errors.Is(err, db.ErrOwnerMismatch) {
+		return fmt.Errorf("mismatched expected owner: %w", err)
+	}
+	require.NotNil(t, current.Owner)
+	assert.Equal(t, "agent-b", *current.Owner)
+	assert.False(t, changed)
+	assert.Nil(t, event)
+	return nil
+}
+
+func checkConcurrentExpectedOwnerUnassign(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "concurrent-expected-owner-project")
+	if err != nil {
+		return fmt.Errorf("create project: %w", err)
+	}
+	ownerA := "agent-a"
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "preserve concurrent replacement", Author: "conformance-agent", Owner: &ownerA,
+	})
+	if err != nil {
+		return fmt.Errorf("create issue: %w", err)
+	}
+	ownerB := "agent-b"
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	go func() {
+		<-start
+		_, _, _, err := store.UnassignOwner(ctx, issue.ID, "conformance-agent", &ownerA)
+		if errors.Is(err, db.ErrOwnerMismatch) {
+			err = nil
+		}
+		results <- err
+	}()
+	go func() {
+		<-start
+		_, _, _, err := store.UpdateOwner(ctx, issue.ID, &ownerB, "conformance-agent")
+		results <- err
+	}()
+	close(start)
+	for range 2 {
+		if err := <-results; err != nil {
+			return fmt.Errorf("concurrent expected-owner unassign: %w", err)
+		}
+	}
+	current, err := store.IssueByID(ctx, issue.ID)
+	if err != nil {
+		return fmt.Errorf("load concurrently assigned issue: %w", err)
+	}
+	require.NotNil(t, current.Owner)
+	assert.Equal(t, ownerB, *current.Owner)
+	return nil
+}

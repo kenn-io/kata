@@ -12,21 +12,23 @@ import (
 )
 
 func newClaimCmd() *cobra.Command {
-	var force bool
+	var force, ifUnowned bool
 	cmd := &cobra.Command{
 		Use:   "claim <issue-ref>",
 		Short: "claim ownership of an issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runClaim(cmd, args[0], force)
+			return runClaim(cmd, args[0], force, ifUnowned)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "force claim even if already owned by another actor")
+	cmd.Flags().BoolVar(&ifUnowned, "if-unowned", false, "claim only if the issue has no owner")
+	cmd.MarkFlagsMutuallyExclusive("force", "if-unowned")
 	addCommentFlag(cmd)
 	return cmd
 }
 
-func runClaim(cmd *cobra.Command, raw string, force bool) error {
+func runClaim(cmd *cobra.Command, raw string, force, ifUnowned bool) error {
 	comment, err := commentFromFlag(cmd)
 	if err != nil {
 		return err
@@ -41,6 +43,9 @@ func runClaim(cmd *cobra.Command, raw string, force bool) error {
 		return err
 	}
 	body := map[string]any{"actor": actor, "force": force}
+	if ifUnowned {
+		body["if_unowned"] = true
+	}
 	postURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/claim", baseURL, pid, url.PathEscape(issue.RefForAPI))
 	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, postURL, body)
 	if err != nil {

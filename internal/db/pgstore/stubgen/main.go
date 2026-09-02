@@ -99,6 +99,7 @@ var alreadyImplemented = map[string]bool{
 	"CompleteCloseEventDelivery":           true, // close_event_deliveries.go
 	"ClaimExternalRootBinding":             true, // external_roots.go
 	"ClaimOwner":                           true, // issue_lifecycle.go
+	"ClaimOwnerIfUnowned":                  true, // issue_lifecycle.go
 	"ClaimStatus":                          true, // claims_core.go
 	"ClaimStatusReadOnly":                  true, // claims_core.go
 	"ClaimStatusRefreshError":              true, // claims_pending.go
@@ -287,6 +288,7 @@ var alreadyImplemented = map[string]bool{
 	"UnresolvedClaimViolationsForIssue":    true, // claim_violations.go
 	"UnresolvedClaimViolationsForProject":  true, // claim_violations.go
 	"UpdateOwner":                          true, // issue_lifecycle.go
+	"UnassignOwner":                        true, // issue_lifecycle.go
 	"UpdatePriority":                       true, // issue_lifecycle.go
 	"UpsertClaimCache":                     true, // claims_pending.go
 	"UpsertImportMapping":                  true, // import_mappings.go

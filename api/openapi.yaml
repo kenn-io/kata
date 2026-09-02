@@ -230,6 +230,8 @@ components:
           type: string
         force:
           type: boolean
+        if_unowned:
+          type: boolean
       required:
         - actor
       type: object
@@ -4622,6 +4624,8 @@ components:
       additionalProperties: false
       properties:
         actor:
+          type: string
+        expected_owner:
           type: string
       type: object
 info:

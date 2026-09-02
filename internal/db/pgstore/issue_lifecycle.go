@@ -91,7 +91,20 @@ func (s *Store) EditIssue(ctx context.Context, params db.EditIssueParams) (db.Is
 
 // UpdateOwner changes assignment state, treating an equal value as a no-op.
 func (s *Store) UpdateOwner(ctx context.Context, issueID int64, owner *string, actor string) (db.Issue, *db.Event, bool, error) {
+	return s.updateOwner(ctx, issueID, owner, actor, nil)
+}
+
+// UnassignOwner clears ownership only when expectedOwner is nil or matches the
+// current owner. A mismatch returns the current issue without an event.
+func (s *Store) UnassignOwner(ctx context.Context, issueID int64, actor string, expectedOwner *string) (db.Issue, *db.Event, bool, error) {
+	return s.updateOwner(ctx, issueID, nil, actor, expectedOwner)
+}
+
+func (s *Store) updateOwner(ctx context.Context, issueID int64, owner *string, actor string, expectedOwner *string) (db.Issue, *db.Event, bool, error) {
 	return s.updateIssueAttribute(ctx, issueID, actor, func(current db.Issue, updatedAt string) (string, any, string, string, bool, error) {
+		if expectedOwner != nil && !equalStringPointers(current.Owner, expectedOwner) {
+			return "", nil, "", "", false, db.ErrOwnerMismatch
+		}
 		if equalStringPointers(current.Owner, owner) {
 			return "", nil, "", "", false, nil
 		}
@@ -149,6 +162,7 @@ func (s *Store) updateIssueAttribute(
 		if err != nil {
 			return err
 		}
+		issue = current
 		updatedAt := mutationTimestamp()
 		column, value, eventType, payload, shouldChange, err := plan(current, updatedAt)
 		if err != nil {
@@ -183,6 +197,16 @@ func (s *Store) updateIssueAttribute(
 
 // ClaimOwner atomically assigns an unowned issue or force-replaces its owner.
 func (s *Store) ClaimOwner(ctx context.Context, issueID int64, actor string, force bool) (db.ClaimResult, error) {
+	return s.claimOwner(ctx, issueID, actor, force, false)
+}
+
+// ClaimOwnerIfUnowned claims only when no owner is set, including when the
+// current owner has the same actor identity.
+func (s *Store) ClaimOwnerIfUnowned(ctx context.Context, issueID int64, actor string) (db.ClaimResult, error) {
+	return s.claimOwner(ctx, issueID, actor, false, true)
+}
+
+func (s *Store) claimOwner(ctx context.Context, issueID int64, actor string, force, ifUnowned bool) (db.ClaimResult, error) {
 	actor = strings.TrimSpace(actor)
 	var result db.ClaimResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
@@ -190,6 +214,10 @@ func (s *Store) ClaimOwner(ctx context.Context, issueID int64, actor string, for
 		current, project, err := lockedIssueTx(ctx, tx, issueID, false)
 		if err != nil {
 			return err
+		}
+		if ifUnowned && current.Owner != nil {
+			result.CurrentOwner = current.Owner
+			return db.ErrAlreadyClaimed
 		}
 		if current.Owner != nil && *current.Owner == actor {
 			result.Issue = current

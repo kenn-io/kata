@@ -1540,6 +1540,7 @@ export interface components {
     ClaimRequestBody: {
       actor: string
       force?: boolean
+      if_unowned?: boolean
     }
     ClaimResponseBody: {
       changed: boolean
@@ -3544,6 +3545,7 @@ export interface components {
     }
     UnassignRequestBody: {
       actor?: string
+      expected_owner?: string
     }
   }
   responses: never
