@@ -86,6 +86,35 @@ func TestFilteredListAllRejectsDaemonBeforeGlobalListFilters(t *testing.T) {
 	assert.Zero(t, listCalls.Load(), "the unfiltered old endpoint must not be queried")
 }
 
+func TestCloseRetryFlagsRejectOldDaemonBeforeClose(t *testing.T) {
+	var closeCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+		case "/api/v1/health":
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.14.0"}`))
+		case "/api/v1/projects/1/issues/abc1/actions/close":
+			closeCalls.Add(1)
+			_, _ = w.Write([]byte(`{"changed":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	_, _, err := executeRootCapture(t,
+		contextWithBaseURL(context.Background(), server.URL),
+		"--project", "example-project", "close", "abc1",
+		"--wontfix",
+		"--message", "Reviewed the request and recorded why the work should stop here.",
+		"--idempotency-key", "close-request-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires daemon API 0.15.0 or newer")
+	assert.Contains(t, err.Error(), "reports 0.14.0")
+	assert.Zero(t, closeCalls.Load(), "an old daemon must not receive retry headers")
+}
+
 func TestListAllDefaultsToUnlimited(t *testing.T) {
 	var sentLimit atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

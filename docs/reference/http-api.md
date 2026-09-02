@@ -45,7 +45,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.14.0",
+  "api_schema_version": "0.15.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db",
@@ -107,6 +107,7 @@ and decline to render issue detail.
 
 | Version | Change |
 | --- | --- |
+| `0.15.0` | Added close idempotency and revision headers plus retry receipt fields. Clients must check this version before sending the new headers because older daemons ignore them. |
 | `0.14.0` | Added `external` close evidence with its required `account` field. |
 | `0.13.0` | Added optimistic revision guards to issue and project metadata patch requests. |
 | `0.12.0` | Added the optional `idle_shutdown` health block for effective auto-start idle shutdown state and capability discovery. |

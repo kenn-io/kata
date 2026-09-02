@@ -58,7 +58,11 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// so duplicate/superseded closes still must carry their typed
 		// targets and won't corrupt the audit trail.
 		tuiBypass := tuiBypassAllowed(ctx, in.Body.Source, in.Body.Reason)
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		includeDeleted := db.IncludeDeletedNo
+		if in.IdempotencyKey != "" {
+			includeDeleted = db.IncludeDeletedYes
+		}
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, includeDeleted)
 		if err != nil {
 			return nil, err
 		}
@@ -81,6 +85,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if reuse != nil {
 				return reuse, nil
 			}
+		}
+		if issue.DeletedAt != nil {
+			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}
 		if ifMatchRev != nil && issue.Revision != *ifMatchRev {
 			return nil, api.NewError(412, "revision_conflict",

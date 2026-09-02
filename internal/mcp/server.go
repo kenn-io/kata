@@ -27,15 +27,16 @@ const (
 
 // Options fixes the Kata daemon scope and actor for one MCP process.
 type Options struct {
-	Client            *kataclient.Client
-	LongRunningClient *kataclient.Client
-	Scope             *Scope
-	ProjectID         int64
-	ProjectName       string
-	Actor             string
-	Version           string
-	StorageAdmin      *storageadmin.Admin
-	EnableTokenAdmin  bool
+	Client                     *kataclient.Client
+	LongRunningClient          *kataclient.Client
+	Scope                      *Scope
+	ProjectID                  int64
+	ProjectName                string
+	Actor                      string
+	Version                    string
+	StorageAdmin               *storageadmin.Admin
+	EnableTokenAdmin           bool
+	CloseRetryHeadersSupported bool
 }
 
 // New creates a tools-only MCP server for one startup project scope.

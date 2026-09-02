@@ -63,6 +63,39 @@ func TestClose_IdempotencyReplaysCommittedReceipt(t *testing.T) {
 	assert.Equal(t, 1, closed)
 }
 
+func TestClose_IdempotencyReplaysReceiptAfterSoftDelete(t *testing.T) {
+	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(context.Background(), issueID)
+	require.NoError(t, err)
+	path := issueURLRef(projectID, issue.ShortID, "actions/close")
+	headers := map[string]string{"Idempotency-Key": "close-request-then-delete"}
+	body := map[string]any{
+		"actor":   "agent-one",
+		"reason":  "wontfix",
+		"message": "Reviewed the request and recorded why the work should stop here.",
+	}
+
+	first := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, first)
+	var firstOut api.MutationResponse
+	require.NoError(t, json.Unmarshal(first.body, &firstOut.Body))
+	require.NotNil(t, firstOut.Body.Event)
+
+	_, _, changed, err := h.DB().SoftDeleteIssue(context.Background(), issueID, "agent-one")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	retry := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, retry)
+	var retryOut api.MutationResponse
+	require.NoError(t, json.Unmarshal(retry.body, &retryOut.Body))
+	assert.False(t, retryOut.Body.Changed)
+	assert.True(t, retryOut.Body.Reused)
+	require.NotNil(t, retryOut.Body.OriginalEvent)
+	assert.Equal(t, firstOut.Body.Event.UID, retryOut.Body.OriginalEvent.UID)
+	require.NotNil(t, retryOut.Body.Issue.DeletedAt)
+}
+
 func TestClose_IdempotencyRejectsDifferentRequest(t *testing.T) {
 	_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
 	path := issueURL(projectID, issueID, "actions/close")

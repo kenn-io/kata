@@ -34,6 +34,7 @@ func TestCloseForwardsRetryGuardsAndReturnsOriginalReceipt(t *testing.T) {
 	})
 	handlers := toolHandlers{options: Options{
 		Client: client, Scope: NewAllScope(), Actor: "example-agent",
+		CloseRetryHeadersSupported: true,
 	}}
 	revision := int64(7)
 	_, output, err := handlers.close(t.Context(), nil, CloseInput{
@@ -48,6 +49,33 @@ func TestCloseForwardsRetryGuardsAndReturnsOriginalReceipt(t *testing.T) {
 	require.True(t, *output.Reused)
 	require.NotNil(t, output.Event)
 	require.Equal(t, "01HCCCCCCCCCCCCCCCCCCCCCCC", output.Event.UID)
+}
+
+func TestCloseRejectsRetryGuardsWhenDaemonDoesNotSupportThem(t *testing.T) {
+	var closeCalls int
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case strings.HasSuffix(request.URL.Path, "/actions/close"):
+			closeCalls++
+			writeJSON(writer, map[string]any{"changed": true})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	handlers := toolHandlers{options: Options{
+		Client: client, Scope: NewAllScope(), Actor: "example-agent",
+	}}
+	_, _, err := handlers.close(t.Context(), nil, CloseInput{
+		Ref: "spoke-project#abc1", Reason: "wontfix",
+		Message:        "Reviewed the request and recorded why the work should stop here.",
+		IdempotencyKey: "close-request-1",
+	})
+	require.ErrorContains(t, err, "daemon does not support kata.close retry controls")
+	require.Zero(t, closeCalls)
 }
 
 func closeRetryEventJSON() map[string]any {
