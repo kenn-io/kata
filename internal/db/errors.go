@@ -19,6 +19,10 @@ var (
 	// has open child issues.
 	ErrOpenChildren = errors.New("issue has open children")
 
+	// ErrIssueProjectChanged is returned when a guarded mutation finds that
+	// its issue moved after the caller resolved the project-scoped route.
+	ErrIssueProjectChanged = errors.New("issue project changed")
+
 	// ErrNoFields is returned by EditIssue when no field changes are
 	// requested.
 	ErrNoFields = errors.New("no fields to update")

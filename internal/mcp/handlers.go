@@ -753,8 +753,13 @@ func (h toolHandlers) patchMetadata(ctx context.Context, project ProjectIdentity
 }
 
 func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, input CloseInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	if (input.IdempotencyKey != "" || input.Revision != nil) && !h.options.CloseRetryHeadersSupported {
-		return nil, MutationOutput{}, errors.New("daemon does not support kata.close retry controls; upgrade the daemon")
+	if input.IdempotencyKey != "" || input.Revision != nil {
+		if h.options.CheckCloseRetrySupport == nil {
+			return nil, MutationOutput{}, errors.New("daemon does not support kata.close retry controls; upgrade the daemon")
+		}
+		if err := h.options.CheckCloseRetrySupport(ctx); err != nil {
+			return nil, MutationOutput{}, err
+		}
 	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {

@@ -88,6 +88,7 @@ type CreateIssueParams struct {
 // receipt after losing the response.
 type CloseIssueParams struct {
 	IssueID                int64
+	ExpectedProjectID      int64
 	Reason                 string
 	Actor                  string
 	Message                string

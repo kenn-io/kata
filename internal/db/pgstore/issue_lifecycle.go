@@ -278,6 +278,9 @@ func (s *Store) closeIssueWithEvents(
 		if err != nil {
 			return err
 		}
+		if p.ExpectedProjectID != 0 && current.ProjectID != p.ExpectedProjectID {
+			return db.ErrIssueProjectChanged
+		}
 		if p.IfMatchRev != nil && current.Revision != *p.IfMatchRev {
 			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}

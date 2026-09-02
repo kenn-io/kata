@@ -56,7 +56,7 @@ func (s *Store) LookupIssueMutationIdempotency(
 		return nil, mapSQLError(err, nil)
 	}
 	return &db.IdempotencyMatch{
-		IssueID: issue.ID, IssueShortID: issue.ShortID,
+		IssueID: issue.ID, IssueUID: issue.UID, IssueShortID: issue.ShortID,
 		Fingerprint: fingerprint.String, Event: event,
 	}, nil
 }

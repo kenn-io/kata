@@ -364,6 +364,25 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	assert.Equal(t, closeEvents[0].UID, closeMatch.Event.UID)
 	assert.Equal(t, "close-fingerprint-1", closeMatch.Fingerprint)
 
+	projectGuardIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "project-pinned close", Author: "conformance-agent",
+	})
+	if err != nil {
+		return fmt.Errorf("create project-pinned close issue: %w", err)
+	}
+	_, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: projectGuardIssue.ID, ExpectedProjectID: project.ID + 9999,
+		Reason: "wontfix", Actor: "conformance-agent",
+	})
+	if !errors.Is(err, db.ErrIssueProjectChanged) {
+		return fmt.Errorf("project-pinned close returned %v, want issue project changed", err)
+	}
+	projectGuardIssue, err = store.IssueByID(ctx, projectGuardIssue.ID)
+	if err != nil {
+		return fmt.Errorf("read project-pinned close issue: %w", err)
+	}
+	assert.Equal(t, "open", projectGuardIssue.Status)
+
 	staleIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID, Title: "stale close guard", Author: "conformance-agent",
 	})

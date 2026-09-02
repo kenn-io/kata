@@ -21,6 +21,32 @@ type closeRaceStore struct {
 	raceNext bool
 }
 
+type closeMoveRaceStore struct {
+	db.Storage
+	toProjectID int64
+	moveNext    bool
+}
+
+func (s *closeMoveRaceStore) CloseIssueGuarded(
+	ctx context.Context, params db.CloseIssueParams,
+) (db.Issue, []db.Event, bool, error) {
+	if s.moveNext {
+		s.moveNext = false
+		issue, err := s.IssueByID(ctx, params.IssueID)
+		if err != nil {
+			return db.Issue{}, nil, false, err
+		}
+		_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: s.toProjectID,
+			IfMatchRev: issue.Revision, Actor: "moving-agent",
+		})
+		if err != nil {
+			return db.Issue{}, nil, false, err
+		}
+	}
+	return s.Storage.CloseIssueGuarded(ctx, params)
+}
+
 func (s *closeRaceStore) CloseIssueGuarded(
 	ctx context.Context, params db.CloseIssueParams,
 ) (db.Issue, []db.Event, bool, error) {
@@ -137,6 +163,43 @@ func TestClose_IdempotencyReplaysReceiptAfterSoftDelete(t *testing.T) {
 	require.NotNil(t, retryOut.Body.Issue.DeletedAt)
 }
 
+func TestClose_IdempotencyReplaysReceiptAfterMove(t *testing.T) {
+	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	path := issueURLRef(projectID, issue.ShortID, "actions/close")
+	headers := map[string]string{"Idempotency-Key": "close-request-then-move"}
+	body := map[string]any{
+		"actor":   "agent-one",
+		"reason":  "wontfix",
+		"message": "Reviewed the request and recorded why the work should stop here.",
+	}
+
+	first := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, first)
+	var firstOut api.MutationResponse
+	require.NoError(t, json.Unmarshal(first.body, &firstOut.Body))
+	require.NotNil(t, firstOut.Body.Event)
+
+	target, err := h.DB().CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	moved, err := h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: issueID, FromProjectID: projectID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "coordinator",
+	})
+	require.NoError(t, err)
+
+	retry := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, retry)
+	var retryOut api.MutationResponse
+	require.NoError(t, json.Unmarshal(retry.body, &retryOut.Body))
+	assert.False(t, retryOut.Body.Changed)
+	assert.True(t, retryOut.Body.Reused)
+	require.NotNil(t, retryOut.Body.OriginalEvent)
+	assert.Equal(t, firstOut.Body.Event.UID, retryOut.Body.OriginalEvent.UID)
+	assert.Equal(t, moved.Issue.ProjectID, retryOut.Body.Issue.ProjectID)
+}
+
 func TestClose_RejectsKeyWhenAnotherCloseWinsBeforeWrite(t *testing.T) {
 	database := openTestDB(t)
 	project, err := database.db.CreateProject(t.Context(), "kata")
@@ -168,6 +231,33 @@ func TestClose_RejectsKeyWhenAnotherCloseWinsBeforeWrite(t *testing.T) {
 	require.NoError(t, json.Unmarshal(retry.body, &retryOut.Body))
 	assert.True(t, retryOut.Body.Changed)
 	assert.False(t, retryOut.Body.Reused)
+}
+
+func TestClose_RejectsMoveThatWinsBeforeGuardedWrite(t *testing.T) {
+	database := openTestDB(t)
+	source, err := database.db.CreateProject(t.Context(), "source")
+	require.NoError(t, err)
+	target, err := database.db.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	issue, _, err := database.db.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: source.ID, Title: "move race", Author: "agent-one",
+	})
+	require.NoError(t, err)
+	store := &closeMoveRaceStore{Storage: database.db, toProjectID: target.ID, moveNext: true}
+	ts := startTestServer(t, daemon.ServerConfig{DB: store, StartedAt: database.now})
+	response := postWithHeader(t, ts,
+		issueURLRef(source.ID, issue.ShortID, "actions/close"),
+		map[string]string{"Idempotency-Key": "close-move-race-1"}, map[string]any{
+			"actor":   "agent-one",
+			"reason":  "wontfix",
+			"message": "Reviewed the request and recorded why the work should stop here.",
+		})
+	assertAPIError(t, response.status, response.body, http.StatusConflict, "issue_moved")
+
+	current, err := database.db.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, target.ID, current.ProjectID)
+	assert.Equal(t, "open", current.Status)
 }
 
 func TestClose_RecoversCommittedReceiptAndPublishesEventsOnce(t *testing.T) {
@@ -231,6 +321,31 @@ func TestClose_IdempotencyRejectsDifferentRequest(t *testing.T) {
 	body["message"] = "A different explanation must not reuse the original close receipt."
 	retry := postWithHeader(t, ts, path, headers, body)
 	assertAPIError(t, retry.status, retry.body, http.StatusConflict, "idempotency_mismatch")
+}
+
+func TestClose_IdempotencyRejectsDifferentIssueWithSameBody(t *testing.T) {
+	h, ts, projectID, firstID := bootstrapProjectWithIssue(t)
+	first, err := h.DB().IssueByID(t.Context(), firstID)
+	require.NoError(t, err)
+	second, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: projectID, Title: "second issue", Author: "agent-one",
+	})
+	require.NoError(t, err)
+	headers := map[string]string{"Idempotency-Key": "close-request-1"}
+	body := map[string]any{
+		"actor":   "agent-one",
+		"reason":  "wontfix",
+		"message": "Reviewed the request and recorded why the work should stop here.",
+	}
+	requireOK(t, postWithHeader(t, ts,
+		issueURLRef(projectID, first.ShortID, "actions/close"), headers, body))
+
+	retry := postWithHeader(t, ts,
+		issueURLRef(projectID, second.ShortID, "actions/close"), headers, body)
+	assertAPIError(t, retry.status, retry.body, http.StatusConflict, "idempotency_mismatch")
+	current, err := h.DB().IssueByID(t.Context(), second.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", current.Status)
 }
 
 func TestClose_IfMatchRejectsStaleRevision(t *testing.T) {

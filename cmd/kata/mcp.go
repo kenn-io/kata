@@ -98,9 +98,6 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			closeRetryHeadersSupported, _ := apiVersionAtLeast(
-				health.APISchemaVersion, apiVersionCloseRetrySafety,
-			)
 			stopKeepalive := startMCPIdleKeepalive(ctx, httpClient, baseURL, health)
 			defer stopKeepalive()
 			actor, _ := resolveActor(ctx, flags.As, nil)
@@ -145,16 +142,19 @@ func newMCPServeCmd() *cobra.Command {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
 			server, err := mcpserver.New(mcpserver.Options{
-				Client:                     apiClient,
-				LongRunningClient:          longRunningAPIClient,
-				Scope:                      scope,
-				ProjectID:                  projectID,
-				ProjectName:                projectName,
-				Actor:                      actor,
-				Version:                    version.Version,
-				StorageAdmin:               storage,
-				EnableTokenAdmin:           enableTokenAdmin,
-				CloseRetryHeadersSupported: closeRetryHeadersSupported,
+				Client:            apiClient,
+				LongRunningClient: longRunningAPIClient,
+				Scope:             scope,
+				ProjectID:         projectID,
+				ProjectName:       projectName,
+				Actor:             actor,
+				Version:           version.Version,
+				StorageAdmin:      storage,
+				EnableTokenAdmin:  enableTokenAdmin,
+				CheckCloseRetrySupport: func(callCtx context.Context) error {
+					return requireDaemonAPIVersion(callCtx, httpClient, baseURL,
+						apiVersionCloseRetrySafety, "kata.close retry controls")
+				},
 			})
 			if err != nil {
 				return err

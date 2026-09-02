@@ -559,6 +559,7 @@ type SearchCandidate struct {
 // receipt without a second query.
 type IdempotencyMatch struct {
 	IssueID      int64
+	IssueUID     string
 	IssueShortID string
 	Fingerprint  string
 	Event        Event

@@ -1484,6 +1484,9 @@ func (d *Store) closeIssueGuarded(
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
+	if p.ExpectedProjectID != 0 && issue.ProjectID != p.ExpectedProjectID {
+		return db.Issue{}, nil, false, db.ErrIssueProjectChanged
+	}
 	if p.IfMatchRev != nil && issue.Revision != *p.IfMatchRev {
 		return db.Issue{}, nil, false, &db.RevisionConflictError{CurrentRevision: issue.Revision}
 	}

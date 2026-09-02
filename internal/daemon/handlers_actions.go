@@ -58,14 +58,6 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// so duplicate/superseded closes still must carry their typed
 		// targets and won't corrupt the audit trail.
 		tuiBypass := tuiBypassAllowed(ctx, in.Body.Source, in.Body.Reason)
-		includeDeleted := db.IncludeDeletedNo
-		if in.IdempotencyKey != "" {
-			includeDeleted = db.IncludeDeletedYes
-		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, includeDeleted)
-		if err != nil {
-			return nil, err
-		}
 		idempotencyFingerprint := ""
 		if in.IdempotencyKey != "" {
 			release, err := cfg.DB.AcquireIdempotencyLock(ctx, in.ProjectID, in.IdempotencyKey)
@@ -74,17 +66,29 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			defer func() { _ = release() }()
 
-			idempotencyFingerprint = closeIdempotencyFingerprint(
-				issue.UID, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-				in.Body.Evidence, in.Body.DryRun, ifMatchRev)
-			reuse, err := tryCloseIdempotencyMatch(
-				ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+			match, err := lookupCloseIdempotencyMatch(ctx, cfg, in.ProjectID, in.IdempotencyKey)
 			if err != nil {
 				return nil, err
 			}
-			if reuse != nil {
-				return reuse, nil
+			if match != nil {
+				idempotencyFingerprint = closeIdempotencyFingerprint(
+					match.IssueUID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
+					in.Body.Evidence, in.Body.DryRun, ifMatchRev)
+				return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 			}
+		}
+		includeDeleted := db.IncludeDeletedNo
+		if in.IdempotencyKey != "" {
+			includeDeleted = db.IncludeDeletedYes
+		}
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, includeDeleted)
+		if err != nil {
+			return nil, err
+		}
+		if in.IdempotencyKey != "" {
+			idempotencyFingerprint = closeIdempotencyFingerprint(
+				issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
+				in.Body.Evidence, in.Body.DryRun, ifMatchRev)
 		}
 		if issue.DeletedAt != nil {
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
@@ -181,7 +185,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			evt = nil
 			events = nil
 			updated, events, changed, err = cfg.DB.CloseIssueGuarded(ctx, db.CloseIssueParams{
-				IssueID: issue.ID, Reason: in.Body.Reason, Actor: actor,
+				IssueID: issue.ID, ExpectedProjectID: in.ProjectID,
+				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
 				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
 			})
@@ -221,6 +226,11 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 					detail = listErr.Error()
 				}
 				return nil, api.NewError(409, "parent_has_open_children", detail, "", nil)
+			}
+			if errors.Is(err, db.ErrIssueProjectChanged) {
+				return nil, api.NewError(409, "issue_moved",
+					"issue moved to another project before the close committed",
+					"resolve the issue in its current project and retry with a fresh idempotency key", nil)
 			}
 			if errors.Is(err, db.ErrFederatedReadOnly) {
 				return nil, federationReadOnlyError(err)
@@ -310,14 +320,30 @@ func tryCloseIdempotencyMatch(
 	projectID int64,
 	key, fingerprint string,
 ) (*api.MutationResponse, error) {
+	match, err := lookupCloseIdempotencyMatch(ctx, cfg, projectID, key)
+	if err != nil {
+		return nil, err
+	}
+	if match == nil {
+		return nil, nil
+	}
+	return closeIdempotencyResponse(ctx, cfg, match, fingerprint)
+}
+
+func lookupCloseIdempotencyMatch(
+	ctx context.Context, cfg ServerConfig, projectID int64, key string,
+) (*db.IdempotencyMatch, error) {
 	match, err := cfg.DB.LookupIssueMutationIdempotency(
 		ctx, projectID, "issue.closed", key, time.Now().Add(-idempotencyWindow))
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
-	if match == nil {
-		return nil, nil
-	}
+	return match, nil
+}
+
+func closeIdempotencyResponse(
+	ctx context.Context, cfg ServerConfig, match *db.IdempotencyMatch, fingerprint string,
+) (*api.MutationResponse, error) {
 	if match.Fingerprint != fingerprint {
 		return nil, api.NewError(409, "idempotency_mismatch",
 			"idempotency key matched a prior close with a different fingerprint",
@@ -336,13 +362,14 @@ func tryCloseIdempotencyMatch(
 }
 
 func closeIdempotencyFingerprint(
-	issueUID, actor, reason, message, source string,
+	issueUID, requestRef, actor, reason, message, source string,
 	evidence []api.Evidence,
 	dryRun bool,
 	ifMatchRev *int64,
 ) string {
 	encoded, _ := json.Marshal(struct {
 		IssueUID   string         `json:"issue_uid"`
+		RequestRef string         `json:"request_ref"`
 		Actor      string         `json:"actor"`
 		Reason     string         `json:"reason"`
 		Message    string         `json:"message"`
@@ -351,7 +378,8 @@ func closeIdempotencyFingerprint(
 		DryRun     bool           `json:"dry_run"`
 		IfMatchRev *int64         `json:"if_match_revision"`
 	}{
-		IssueUID: issueUID, Actor: actor, Reason: reason, Message: message,
+		IssueUID: issueUID, RequestRef: requestRef,
+		Actor: actor, Reason: reason, Message: message,
 		Source: source, Evidence: evidence, DryRun: dryRun, IfMatchRev: ifMatchRev,
 	})
 	sum := sha256.Sum256(encoded)

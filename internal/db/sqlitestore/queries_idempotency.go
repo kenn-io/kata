@@ -179,6 +179,7 @@ func (d *Store) LookupIssueMutationIdempotency(
 	}
 	return &db.IdempotencyMatch{
 		IssueID:      issue.ID,
+		IssueUID:     issue.UID,
 		IssueShortID: issue.ShortID,
 		Fingerprint:  fp.String,
 		Event:        evt,
