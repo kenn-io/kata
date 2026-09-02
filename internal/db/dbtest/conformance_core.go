@@ -427,6 +427,14 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	}
 	assert.Equal(t, staleIssue.Revision+1, conflict.CurrentRevision)
 
+	nulRelease, err := store.AcquireIdempotencyLock(ctx, 0, "issue-uid\x00comment-request")
+	if err != nil {
+		return fmt.Errorf("acquire idempotency lock containing NUL: %w", err)
+	}
+	if err := nulRelease(); err != nil {
+		return fmt.Errorf("release idempotency lock containing NUL: %w", err)
+	}
+
 	releaseFirst, err := store.AcquireIdempotencyLock(ctx, project.ID, "serialized-request")
 	if err != nil {
 		return fmt.Errorf("acquire first idempotency lock: %w", err)
