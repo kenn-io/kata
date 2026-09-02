@@ -237,14 +237,14 @@ included when present. Their existing ordering and omission rules apply.
 lease state separate on one line:
 
 ```text
-OK status issue=abc4 issue_status=open revision=4 actor=agent-a actor_source=db_token auth=db_token instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a claim=active holder=agent-a holder_instance=01HZNQ7VFPK1XGD8R5MABCD4AB lease_kind=timed expires_at=2026-09-02T12:30:00Z
+OK status issue=abc4 project=kata issue_status=open revision=4 actor=agent-a actor_source=db_token auth=db_token instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a claim=active holder=agent-a holder_instance=01HZNQ7VFPK1XGD8R5MABCD4AB lease_kind=timed expires_at=2026-09-02T12:30:00Z
 ```
 
-The fixed field order is `issue`, `issue_status`, `revision`, `actor`,
-`actor_source`, `auth`, `instance`, optional `owner`, and `claim`. An active or
-expired lease then appends optional `holder`, `holder_instance`, `lease_kind`,
-and `expires_at`; pending leases append `pending_leases`. Claim state is one of
-`active`, `expired`, `pending`, `assigned`, `unassigned`, or `closed`.
+The fixed field order is `issue`, `project`, `issue_status`, `revision`,
+`actor`, `actor_source`, `auth`, `instance`, optional `owner`, and `claim`. An
+active or expired lease then appends optional `holder`, `holder_instance`,
+`lease_kind`, and `expires_at`; pending leases append `pending_leases`. Claim
+state is one of `active`, `expired`, `pending`, `assigned`, `unassigned`, or `closed`.
 `assigned` identifies an open issue with an owner and without a live or pending
 lease. Use `kata show <ref> --agent` when the body, comments, metadata, links,
 or lease violations are needed.

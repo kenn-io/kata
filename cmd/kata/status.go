@@ -162,6 +162,7 @@ func printIssueStatus(cmd *cobra.Command, status issueStatusProjection) error {
 func printIssueStatusAgent(out io.Writer, status issueStatusProjection) error {
 	fields := []agentField{
 		agentRowField("issue", status.Issue),
+		agentRowField("project", status.Project),
 		agentRowField("issue_status", status.IssueStatus),
 		agentRowField("revision", fmt.Sprint(status.Revision)),
 		agentRowField("actor", status.Actor),

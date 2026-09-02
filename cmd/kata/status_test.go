@@ -63,7 +63,7 @@ func TestStatusAgentReportsAuthenticatedIdentityAndAssignment(t *testing.T) {
 
 	out := runCLI(t, env, dir, "--agent", "status", issue.ShortID)
 
-	assert.Contains(t, out, "OK status issue="+issue.ShortID+" issue_status=open revision=1")
+	assert.Contains(t, out, "OK status issue="+issue.ShortID+" project=kata issue_status=open revision=1")
 	assert.Contains(t, out, "actor=operator actor_source=db_token auth=db_token")
 	assert.Contains(t, out, "instance="+env.DB.InstanceUID())
 	assert.Contains(t, out, "owner=operator claim=assigned")
