@@ -140,6 +140,22 @@ func TestSearchAgentAppendsMode(t *testing.T) {
 	}
 }
 
+func TestSearchAgentIncludesBoundedTaskContext(t *testing.T) {
+	body := `{"query":"needle","mode":"lexical","results":[
+	  {"issue":{"short_id":"abc4","title":"Investigate the worker","body":"zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen needle nearby context sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two thirty-three distant-tail","status":"open","owner":"alice","priority":2,"revision":7},"score":1.2,"matched_in":["body"]}]}`
+	out := renderSearch(t, outputAgent, body)
+
+	assert.Contains(t, out, "issue=abc4")
+	assert.Contains(t, out, `title="Investigate the worker"`)
+	assert.Contains(t, out, "status=open")
+	assert.Contains(t, out, "owner=alice")
+	assert.Contains(t, out, "priority=2")
+	assert.Contains(t, out, "revision=7")
+	assert.Contains(t, out, "needle nearby context")
+	assert.NotContains(t, out, "distant-tail")
+	assert.NotContains(t, out, "body=")
+}
+
 // TestSearch_ModeFlagsMutuallyExclusive pins that --lexical/--hybrid/--semantic
 // cannot be combined; each conflicting pair is a validation error.
 func TestSearch_ModeFlagsMutuallyExclusive(t *testing.T) {

@@ -119,9 +119,9 @@ A read emits an `OK <command> count=<n>` header followed by one row per record:
 
 ```text
 OK list count=3
-- issue=abc4 status=open priority=2 owner=agent-a labels=bug,safari title="Fix login race"
-- issue=def7 status=open labels=architecture title="Control channel"
-- issue=j9k2 status=closed title="Old task"
+- issue=abc4 status=open priority=2 owner=agent-a labels=bug,safari title="Fix login race" revision=4
+- issue=def7 status=open labels=architecture title="Control channel" revision=1
+- issue=j9k2 status=closed title="Old task" revision=3
 ```
 
 Empty reads emit the header with `count=0` and no rows:
@@ -187,10 +187,13 @@ matched it:
 
 ```text
 OK search count=1 query="auth redirect duplicates" mode=hybrid
-- issue=abc4 score=0.0312 status=open matched=title,semantic title="Login callback double-submits on Safari"
+- issue=abc4 score=0.0312 status=open matched=title,semantic title="Login callback double-submits on Safari" owner=agent-a priority=1 revision=4 excerpt="The callback can submit twice after the auth redirect."
 ```
 
-`count`, `query`, and the existing row fields keep their names, positions, and
+Search rows append owner, priority, revision, and a body excerpt when present.
+The excerpt is at most 160 characters and centers the first query match when
+possible. `kata show <ref> --agent` remains the complete record. List rows append
+revision after title. Existing row fields keep their names, positions, and
 meanings, so these additions are purely additive and `agent_format` stays `1`.
 A daemon without `[search.embeddings]` always reports `mode=lexical` and never
 sets `degraded=`, so its output is unchanged apart from the appended `mode=`.

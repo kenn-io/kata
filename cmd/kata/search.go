@@ -169,9 +169,13 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		DegradedReason string `json:"degraded_reason"`
 		Results        []struct {
 			Issue struct {
-				ShortID string `json:"short_id"`
-				Title   string `json:"title"`
-				Status  string `json:"status"`
+				ShortID  string  `json:"short_id"`
+				Title    string  `json:"title"`
+				Body     string  `json:"body"`
+				Status   string  `json:"status"`
+				Owner    *string `json:"owner"`
+				Priority *int64  `json:"priority"`
+				Revision int64   `json:"revision"`
 			} `json:"issue"`
 			Score     float64  `json:"score"`
 			MatchedIn []string `json:"matched_in"`
@@ -196,13 +200,19 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 			return err
 		}
 		for _, r := range b.Results {
-			if err := writeAgentKVRow(out,
+			excerpt := searchAgentExcerpt(b.Query, r.Issue.Body)
+			fields := []agentField{
 				agentRowField("issue", r.Issue.ShortID),
 				agentRowFloatField("score", r.Score),
 				agentRowField("status", r.Issue.Status),
 				agentRowListField("matched", r.MatchedIn),
 				agentRowField("title", r.Issue.Title),
-			); err != nil {
+				agentOptionalRowField("owner", r.Issue.Owner),
+				agentRowIntField("priority", r.Issue.Priority),
+				agentRowField("revision", fmt.Sprint(r.Issue.Revision)),
+				agentOptionalRowField("excerpt", optionalAgentString(excerpt)),
+			}
+			if err := writeAgentKVRow(out, fields...); err != nil {
 				return err
 			}
 		}
@@ -246,4 +256,54 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		}
 	}
 	return nil
+}
+
+const agentSearchExcerptLimit = 160
+
+func optionalAgentString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func searchAgentExcerpt(query, body string) string {
+	words := strings.Fields(body)
+	if len(words) == 0 {
+		return ""
+	}
+	queryWords := strings.Fields(strings.ToLower(query))
+	hit := 0
+	found := false
+	for i, word := range words {
+		candidate := strings.ToLower(word)
+		for _, queryWord := range queryWords {
+			queryWord = strings.Trim(queryWord, `.,:;!?()[]{}"'`)
+			if queryWord != "" && strings.Contains(candidate, queryWord) {
+				hit = i
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	start := 0
+	if found {
+		start = max(0, hit-8)
+	}
+	end := min(len(words), start+24)
+	excerpt := strings.Join(words[start:end], " ")
+	if start > 0 {
+		excerpt = "… " + excerpt
+	}
+	if end < len(words) {
+		excerpt += " …"
+	}
+	runes := []rune(excerpt)
+	if len(runes) > agentSearchExcerptLimit {
+		excerpt = string(runes[:agentSearchExcerptLimit-1]) + "…"
+	}
+	return excerpt
 }
