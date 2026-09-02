@@ -251,6 +251,7 @@ type showResponseForCLI struct {
 		Author   string                     `json:"author"`
 		Owner    *string                    `json:"owner"`
 		Priority *int64                     `json:"priority"`
+		Revision int64                      `json:"revision"`
 		Metadata map[string]json.RawMessage `json:"metadata"`
 	} `json:"issue"`
 	Comments []struct {
