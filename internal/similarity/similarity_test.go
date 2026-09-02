@@ -3,10 +3,43 @@ package similarity_test
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"go.kenn.io/kata/internal/similarity"
 )
+
+func TestBodyPrefix(t *testing.T) {
+	t.Run("short body is unchanged", func(t *testing.T) {
+		assert.Equal(t, "short body", similarity.BodyPrefix("short body"))
+	})
+
+	t.Run("ASCII is limited to 500 runes", func(t *testing.T) {
+		got := similarity.BodyPrefix(strings.Repeat("a", 501))
+		assert.Equal(t, 500, utf8.RuneCountInString(got))
+		assert.Equal(t, strings.Repeat("a", 500), got)
+	})
+
+	t.Run("multibyte text stays valid at the boundary", func(t *testing.T) {
+		got := similarity.BodyPrefix(strings.Repeat("界", 501))
+		assert.Equal(t, 500, utf8.RuneCountInString(got))
+		assert.True(t, utf8.ValidString(got))
+		assert.Equal(t, strings.Repeat("界", 500), got)
+	})
+}
+
+func TestLookalikeQuery(t *testing.T) {
+	prefix := strings.Repeat("界", 499) + "留"
+	body := prefix + " discard-this-suffix"
+
+	got := similarity.LookalikeQuery("  full issue title  ", body)
+
+	assert.Contains(t, got, "full issue title")
+	assert.Contains(t, got, "留")
+	assert.NotContains(t, got, "discard-this-suffix")
+	assert.True(t, utf8.ValidString(got))
+	assert.Equal(t, "full issue title   "+prefix, got)
+}
 
 const epsilon = 1e-9
 

@@ -132,19 +132,25 @@ func Jaccard(a, b []string) float64 {
 // are tokenized. Spec §3.7.
 func Score(titleA, bodyA, titleB, bodyB string) float64 {
 	titleScore := Jaccard(Tokenize(titleA), Tokenize(titleB))
-	bodyScore := Jaccard(Tokenize(firstRunes(bodyA, 500)), Tokenize(firstRunes(bodyB, 500)))
+	bodyScore := Jaccard(Tokenize(BodyPrefix(bodyA)), Tokenize(BodyPrefix(bodyB)))
 	return 0.6*titleScore + 0.4*bodyScore
 }
 
-// firstRunes returns the first n runes of s. If s has fewer than n runes,
-// it's returned unchanged.
-func firstRunes(s string, n int) string {
+// BodyPrefix returns the first 500 runes of body. If body has fewer than 500
+// runes, it is returned unchanged.
+func BodyPrefix(body string) string {
 	count := 0
-	for i := range s {
-		if count == n {
-			return s[:i]
+	for i := range body {
+		if count == 500 {
+			return body[:i]
 		}
 		count++
 	}
-	return s
+	return body
+}
+
+// LookalikeQuery returns the issue text used to retrieve look-alike
+// candidates. Its body portion matches the prefix used by Score.
+func LookalikeQuery(title, body string) string {
+	return strings.TrimSpace(title + " " + BodyPrefix(body))
 }

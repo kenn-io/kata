@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +21,156 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/testfix"
 )
+
+func TestCreateRequestError(t *testing.T) {
+	timeoutErr := &url.Error{
+		Op:  http.MethodPost,
+		URL: "https://daemon.example/api/v1/projects/7/issues",
+		Err: context.DeadlineExceeded,
+	}
+
+	got := createRequestError(timeoutErr, false)
+	var cliErr *cliError
+	require.ErrorAs(t, got, &cliErr)
+	assert.Equal(t, kindInternal, cliErr.Kind)
+	assert.Equal(t, "create_outcome_unknown", cliErr.Code)
+	assert.Equal(t, ExitInternal, cliErr.ExitCode)
+	assert.Contains(t, cliErr.Message, "timed out")
+	assert.Contains(t, cliErr.Message, "check whether the issue was created")
+	assert.Contains(t, cliErr.Message, "--force-new")
+	assert.NotContains(t, cliErr.Message, "daemon.example")
+
+	forceGot := createRequestError(timeoutErr, true)
+	var forceErr *cliError
+	require.ErrorAs(t, forceGot, &forceErr)
+	assert.Equal(t, "create_outcome_unknown", forceErr.Code)
+	assert.Contains(t, forceErr.Message, "check whether the issue was created")
+	assert.NotContains(t, forceErr.Message, "--force-new")
+	assert.NotContains(t, forceErr.Message, "daemon.example")
+
+	clientTimeoutErr := &url.Error{
+		Op:  http.MethodPost,
+		URL: "https://daemon.example/api/v1/projects/7/issues",
+		Err: &net.DNSError{IsTimeout: true},
+	}
+	clientTimeoutGot := createRequestError(clientTimeoutErr, false)
+	var clientTimeoutCLIError *cliError
+	require.ErrorAs(t, clientTimeoutGot, &clientTimeoutCLIError)
+	assert.Equal(t, "create_outcome_unknown", clientTimeoutCLIError.Code)
+	assert.Contains(t, clientTimeoutCLIError.Message, "check whether the issue was created")
+	assert.NotContains(t, clientTimeoutCLIError.Message, "daemon.example")
+
+	otherErr := errors.New("connection refused")
+	assert.Same(t, otherErr, createRequestError(otherErr, false))
+}
+
+func TestCreateRequestErrorCanceled(t *testing.T) {
+	canceledErr := &url.Error{
+		Op:  http.MethodPost,
+		URL: "https://daemon.example/api/v1/projects/7/issues",
+		Err: context.Canceled,
+	}
+
+	got := createRequestError(canceledErr, false)
+	var cliErr *cliError
+	require.ErrorAs(t, got, &cliErr)
+	assert.Equal(t, kindInternal, cliErr.Kind)
+	assert.Equal(t, "create_outcome_unknown", cliErr.Code)
+	assert.Equal(t, ExitInternal, cliErr.ExitCode)
+	assert.Contains(t, cliErr.Message, "canceled")
+	assert.Contains(t, cliErr.Message, "check whether the issue was created")
+	assert.Contains(t, cliErr.Message, "--force-new")
+	assert.NotContains(t, cliErr.Message, "timed out")
+	assert.NotContains(t, cliErr.Message, "daemon.example")
+
+	forceGot := createRequestError(canceledErr, true)
+	var forceErr *cliError
+	require.ErrorAs(t, forceGot, &forceErr)
+	assert.Equal(t, "create_outcome_unknown", forceErr.Code)
+	assert.Contains(t, forceErr.Message, "canceled")
+	assert.Contains(t, forceErr.Message, "check whether the issue was created")
+	assert.NotContains(t, forceErr.Message, "--force-new")
+	assert.NotContains(t, forceErr.Message, "timed out")
+	assert.NotContains(t, forceErr.Message, "daemon.example")
+}
+
+func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) {
+	createHit := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"example-project"}}`)
+		case "/api/v1/projects/7/issues":
+			select {
+			case createHit <- struct{}{}:
+			default:
+			}
+			select {
+			case <-r.Context().Done():
+			case <-time.After(500 * time.Millisecond):
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(contextWithBaseURL(context.Background(), server.URL))
+	t.Cleanup(cancel)
+	go func() {
+		<-createHit
+		cancel()
+	}()
+
+	_, _, err := executeRootCapture(t, ctx, "--workspace", t.TempDir(),
+		"create", "example issue")
+	cliErr := requireCLIError(t, err, ExitInternal)
+	assert.Equal(t, "create_outcome_unknown", cliErr.Code)
+	assert.Contains(t, cliErr.Message, "canceled")
+	assert.Contains(t, cliErr.Message, "check whether the issue was created")
+	assert.NotContains(t, cliErr.Message, "timed out")
+}
+
+func TestCreateTimeoutClassificationAtCommandBoundary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"example-project"}}`)
+		case "/api/v1/projects/7/issues":
+			select {
+			case <-r.Context().Done():
+			case <-time.After(500 * time.Millisecond):
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	run := func(t *testing.T, extra ...string) error {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(
+			contextWithBaseURL(context.Background(), server.URL), 150*time.Millisecond)
+		defer cancel()
+		args := []string{"--workspace", t.TempDir(), "create", "example issue"}
+		args = append(args, extra...)
+		_, _, err := executeRootCapture(t, ctx, args...)
+		return err
+	}
+
+	t.Run("normal create reports unknown outcome", func(t *testing.T) {
+		cliErr := requireCLIError(t, run(t), ExitInternal)
+		assert.Equal(t, "create_outcome_unknown", cliErr.Code)
+	})
+
+	t.Run("force new reports unknown outcome without retry advice", func(t *testing.T) {
+		cliErr := requireCLIError(t, run(t, "--force-new"), ExitInternal)
+		assert.Equal(t, "create_outcome_unknown", cliErr.Code)
+		assert.NotContains(t, cliErr.Message, "--force-new")
+	})
+}
 
 func TestCreate_PrintsIssueShortIDInQuietMode(t *testing.T) {
 	env, dir := setupCLIEnv(t)

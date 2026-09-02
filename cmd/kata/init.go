@@ -43,8 +43,9 @@ type callInitOpts struct {
 //
 // Kind is the coarse classification used by the --json error envelope so
 // scripts can branch on a stable taxonomy instead of grepping the
-// human-readable message. Code is the daemon-supplied per-error tag
-// (e.g. "issue_not_found"); empty when the error originated client-side.
+// human-readable message. Code is the stable per-error tag, usually supplied
+// by the daemon (e.g. "issue_not_found") but occasionally added by a client
+// path with command-specific recovery semantics.
 // Message is the human-readable text. ExitCode is what main() exits with.
 type cliError struct {
 	Message  string
