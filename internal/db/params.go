@@ -98,6 +98,28 @@ type CloseIssueParams struct {
 	IdempotencyFingerprint string
 }
 
+// ClaimCloseEventDeliveryParams identifies one pending close-event batch and
+// gives its publisher a bounded ownership window. ClaimToken distinguishes a
+// stale publisher from a later daemon that recovers an expired claim.
+type ClaimCloseEventDeliveryParams struct {
+	ProjectID      int64
+	IdempotencyKey string
+	Fingerprint    string
+	ClaimToken     string
+	ClaimedAt      time.Time
+	ClaimExpiresAt time.Time
+}
+
+// CloseEventDeliveryClaimUpdateParams completes or releases the exact claim
+// acquired by ClaimCloseEventDelivery.
+type CloseEventDeliveryClaimUpdateParams struct {
+	ProjectID      int64
+	IdempotencyKey string
+	Fingerprint    string
+	ClaimToken     string
+	At             time.Time
+}
+
 // ListIssuesParams filters single-project list output.
 type ListIssuesParams struct {
 	ProjectID     int64

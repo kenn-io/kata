@@ -362,6 +362,9 @@ func (s *Store) closeIssueWithEvents(
 			}
 			events = append(events, generated...)
 		}
+		if err := insertCloseEventDeliveryTx(ctx, tx, p, current.ProjectID, current.UID, events, closedAt); err != nil {
+			return err
+		}
 		issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
 		return err
 	})

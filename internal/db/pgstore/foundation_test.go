@@ -83,14 +83,17 @@ func TestValidationModeRequiresConfiguredSchemaOwnerBeforeConnecting(t *testing.
 	assert.Contains(t, err.Error(), "postgres schema owner is required in validation mode")
 }
 
-func TestPostgresMigrationRegistryIncludesExternalRootBridges(t *testing.T) {
+func TestPostgresMigrationRegistryIncludesForwardChain(t *testing.T) {
 	t.Parallel()
 
 	migrations := pgstore.Migrations()
-	require.Len(t, migrations, 1)
+	require.Len(t, migrations, 2)
 	assert.Equal(t, 25, migrations[0].FromVersion)
 	assert.Equal(t, 26, migrations[0].ToVersion)
 	assert.Equal(t, "000026_external_root_bridges.up.sql", migrations[0].Name)
+	assert.Equal(t, 26, migrations[1].FromVersion)
+	assert.Equal(t, 27, migrations[1].ToVersion)
+	assert.Equal(t, "000027_close_event_deliveries.up.sql", migrations[1].Name)
 }
 
 func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
@@ -120,7 +123,7 @@ func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 26, version)
+	assert.Equal(t, db.CurrentSchemaVersion(), version)
 
 	project, err := migrated.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -136,6 +139,66 @@ func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, binding.Active)
 	assert.Equal(t, "issue.external_root_bound", event.Type)
+}
+
+func TestCloseEventDeliveryMigrationUpgradesVersion26(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	const schema = "close_delivery_upgrade"
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	_, err = admin.ExecContext(ctx, `
+DROP TABLE close_delivery_upgrade.close_event_deliveries;
+UPDATE close_delivery_upgrade.meta SET value='26' WHERE key='schema_version'`)
+	require.NoError(t, err)
+
+	migrated, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = migrated.Close() })
+	version, err := migrated.SchemaVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, db.CurrentSchemaVersion(), version)
+
+	project, err := migrated.CreateProject(ctx, "delivery-project")
+	require.NoError(t, err)
+	issue, _, err := migrated.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Recover close delivery", Author: "tester",
+	})
+	require.NoError(t, err)
+	fingerprint := strings.Repeat("b", 64)
+	_, events, changed, err := migrated.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: issue.ID, ExpectedProjectID: project.ID, Reason: "wontfix", Actor: "tester",
+		IdempotencyKey: "migration-close", IdempotencyFingerprint: fingerprint,
+	})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NotEmpty(t, events)
+	claimedAt := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	claim, err := migrated.ClaimCloseEventDelivery(ctx, db.ClaimCloseEventDeliveryParams{
+		ProjectID: project.ID, IdempotencyKey: "migration-close", Fingerprint: fingerprint,
+		ClaimToken: "migration-publisher", ClaimedAt: claimedAt,
+		ClaimExpiresAt: claimedAt.Add(time.Minute),
+	})
+	require.NoError(t, err)
+	assert.True(t, claim.Acquired)
+	require.Len(t, claim.EventUIDs, len(events))
+	for i := range events {
+		assert.Equal(t, events[i].UID, claim.EventUIDs[i])
+	}
 }
 
 func TestExternalRootMigrationRollsBackSchemaAndVersionTogether(t *testing.T) {
@@ -186,10 +249,11 @@ func setExternalRootMigrationSource(
 ) {
 	t.Helper()
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
+DROP TABLE %s.close_event_deliveries;
 DROP TABLE %s.external_field_states;
 DROP TABLE %s.external_field_mappings;
 DROP TABLE %s.external_root_bindings;
-UPDATE %s.meta SET value='25' WHERE key='schema_version'`, schema, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
+UPDATE %s.meta SET value='25' WHERE key='schema_version'`, schema, schema, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
 

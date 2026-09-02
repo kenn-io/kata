@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
 // registerActionsHandlers installs POST /actions/close and /actions/reopen.
@@ -21,7 +21,6 @@ import (
 // issue is already in the target state; both fields propagate verbatim into
 // the MutationResponse envelope.
 func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
-	var closeDeliveries pendingCloseDeliveries
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "closeIssue",
 		Method:      "POST",
@@ -72,17 +71,6 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			defer func() { _ = release() }()
-			if pending, ok := closeDeliveries.get(in.ProjectID, in.IdempotencyKey); ok {
-				retryFingerprint := closeIdempotencyFingerprint(
-					pending.issueUID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-					in.Body.Evidence, in.Body.DryRun, ifMatchRev)
-				if err := closeDeliveries.publishCommitted(
-					ctx, cfg, in.ProjectID, in.IdempotencyKey, retryFingerprint,
-				); err != nil {
-					return nil, err
-				}
-			}
-
 			match, err := lookupCloseIdempotencyMatch(ctx, cfg, in.ProjectID, in.IdempotencyKey)
 			if err != nil {
 				return nil, err
@@ -91,6 +79,13 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				idempotencyFingerprint = closeIdempotencyFingerprint(
 					match.IssueUID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
 					in.Body.Evidence, in.Body.DryRun, ifMatchRev)
+				if match.Fingerprint == idempotencyFingerprint {
+					if err := publishCloseEventDelivery(
+						ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint,
+					); err != nil {
+						return nil, err
+					}
+				}
 				return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 			}
 		}
@@ -210,18 +205,13 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if len(events) > 0 {
 				evt = &events[0]
 			}
-			if err != nil && in.IdempotencyKey != "" && len(events) > 0 {
-				closeDeliveries.remember(in.ProjectID, in.IdempotencyKey,
-					issue.UID, idempotencyFingerprint, events)
-			}
 			return err
 		})
-		if err == nil && changed {
-			closeDeliveries.discard(in.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+		if err == nil && changed && in.IdempotencyKey == "" {
 			cfg.Publish().Events(in.ProjectID, events)
 		}
-		if in.IdempotencyKey != "" && (err != nil || !changed) {
-			if recoveryErr := closeDeliveries.publishCommitted(
+		if in.IdempotencyKey != "" {
+			if recoveryErr := publishCloseEventDelivery(
 				ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint,
 			); recoveryErr != nil {
 				return nil, recoveryErr
@@ -337,94 +327,61 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 }
 
-type pendingCloseDeliveryKey struct {
-	projectID      int64
-	idempotencyKey string
-}
+const closeEventDeliveryClaimLease = 30 * time.Second
 
-type pendingCloseDelivery struct {
-	issueUID    string
-	fingerprint string
-	events      []db.Event
-}
-
-// pendingCloseDeliveries retains the event identities returned by a close
-// whose commit response was ambiguous. A later exact retry can verify those
-// events in storage and deliver them before it returns the stored receipt.
-type pendingCloseDeliveries struct {
-	mu      sync.Mutex
-	pending map[pendingCloseDeliveryKey]pendingCloseDelivery
-}
-
-func (p *pendingCloseDeliveries) remember(
-	projectID int64, key, issueUID, fingerprint string, events []db.Event,
-) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.pending == nil {
-		p.pending = make(map[pendingCloseDeliveryKey]pendingCloseDelivery)
-	}
-	p.pending[pendingCloseDeliveryKey{projectID: projectID, idempotencyKey: key}] = pendingCloseDelivery{
-		issueUID: issueUID, fingerprint: fingerprint, events: append([]db.Event(nil), events...),
-	}
-}
-
-func (p *pendingCloseDeliveries) get(
-	projectID int64, key string,
-) (pendingCloseDelivery, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	delivery, ok := p.pending[pendingCloseDeliveryKey{projectID: projectID, idempotencyKey: key}]
-	return delivery, ok
-}
-
-func (p *pendingCloseDeliveries) discard(projectID int64, key, fingerprint string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	mapKey := pendingCloseDeliveryKey{projectID: projectID, idempotencyKey: key}
-	if delivery, ok := p.pending[mapKey]; ok && delivery.fingerprint == fingerprint {
-		delete(p.pending, mapKey)
-	}
-}
-
-func (p *pendingCloseDeliveries) publishCommitted(
+func publishCloseEventDelivery(
 	ctx context.Context, cfg ServerConfig, projectID int64, key, fingerprint string,
 ) error {
-	delivery, ok := p.get(projectID, key)
-	if !ok || delivery.fingerprint != fingerprint {
-		return nil
+	claimToken, err := katauid.New()
+	if err != nil {
+		return internalAPIError(fmt.Errorf("generate close event delivery claim: %w", err))
 	}
-	uids := make([]string, len(delivery.events))
-	for i := range delivery.events {
-		uids[i] = delivery.events[i].UID
-	}
-	stored, err := cfg.DB.EventsByUIDs(ctx, projectID, uids)
+	claimedAt := time.Now().UTC()
+	claim, err := cfg.DB.ClaimCloseEventDelivery(ctx, db.ClaimCloseEventDeliveryParams{
+		ProjectID: projectID, IdempotencyKey: key, Fingerprint: fingerprint,
+		ClaimToken: claimToken, ClaimedAt: claimedAt,
+		ClaimExpiresAt: claimedAt.Add(closeEventDeliveryClaimLease),
+	})
 	if errors.Is(err, db.ErrNotFound) {
-		p.discard(projectID, key, fingerprint)
+		// Receipts created before durable delivery tracking have no batch row.
 		return nil
 	}
 	if err != nil {
 		return internalAPIError(err)
 	}
-	if !sameCloseEventBatch(delivery.events, stored) {
-		return internalAPIError(errors.New("stored close event batch does not match the committed attempt"))
+	if claim.Delivered {
+		return nil
 	}
-	cfg.Publish().Events(projectID, stored)
-	p.discard(projectID, key, fingerprint)
-	return nil
-}
-
-func sameCloseEventBatch(expected, stored []db.Event) bool {
-	if len(expected) != len(stored) {
-		return false
+	if !claim.Acquired {
+		return internalAPIError(db.ErrCloseEventDeliveryClaimActive)
 	}
-	for i := range expected {
-		if expected[i].UID != stored[i].UID ||
-			expected[i].ContentHash != stored[i].ContentHash {
-			return false
+	releaseClaim := func(cause error) error {
+		releaseErr := cfg.DB.ReleaseCloseEventDeliveryClaim(ctx, db.CloseEventDeliveryClaimUpdateParams{
+			ProjectID: projectID, IdempotencyKey: key, Fingerprint: fingerprint,
+			ClaimToken: claimToken, At: time.Now().UTC(),
+		})
+		return internalAPIError(errors.Join(cause, releaseErr))
+	}
+	stored, err := cfg.DB.EventsByUIDs(ctx, projectID, claim.EventUIDs)
+	if err != nil {
+		return releaseClaim(err)
+	}
+	if len(stored) != len(claim.EventUIDs) {
+		return releaseClaim(errors.New("stored close event batch is incomplete"))
+	}
+	for i := range stored {
+		if stored[i].UID != claim.EventUIDs[i] {
+			return releaseClaim(errors.New("stored close event batch is out of order"))
 		}
 	}
-	return true
+	cfg.Publish().Events(projectID, stored)
+	if err := cfg.DB.CompleteCloseEventDelivery(ctx, db.CloseEventDeliveryClaimUpdateParams{
+		ProjectID: projectID, IdempotencyKey: key, Fingerprint: fingerprint,
+		ClaimToken: claimToken, At: time.Now().UTC(),
+	}); err != nil {
+		return internalAPIError(err)
+	}
+	return nil
 }
 
 func tryCloseIdempotencyMatch(

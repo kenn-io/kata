@@ -414,6 +414,64 @@ func TestClose_RetryRecoversUndeliveredCommitWithoutDuplicateEvents(t *testing.T
 	assert.Empty(t, drainBroadcastIDs(t, subscription.Ch, 50*time.Millisecond))
 }
 
+func TestClose_FreshServerRecoversUndeliveredCommitWithoutDuplicateEvents(t *testing.T) {
+	database := openTestDB(t)
+	project, issue := createClaimHubIssueInDB(t, database.db)
+	_, err := database.db.AcquireClaim(t.Context(), db.AcquireClaimParams{
+		ProjectID: project.ID, IssueRef: issue.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: database.db.InstanceUID(), Holder: "agent-one", ClientKind: "cli",
+		},
+		ClaimKind: "hard", Now: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	store := &lostCloseResponseStore{
+		Storage: database.db, failNext: true,
+		failEventLookupOnce: true,
+	}
+	firstSink := &recordingSink{}
+	firstBroadcaster := daemon.NewEventBroadcaster()
+	firstSubscription := firstBroadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+	defer firstSubscription.Unsub()
+	firstServer := startTestServer(t, daemon.ServerConfig{
+		DB: store, StartedAt: database.now, Hooks: firstSink, Broadcaster: firstBroadcaster,
+	})
+	path := issueURLRef(project.ID, issue.ShortID, "actions/close")
+	headers := map[string]string{"Idempotency-Key": "close-fresh-server-retry-1"}
+	body := map[string]any{
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
+	}
+
+	first := postWithHeader(t, firstServer, path, headers, body)
+	assertAPIError(t, first.status, first.body, http.StatusInternalServerError, "internal")
+	require.Len(t, store.committedEvents, 2)
+	assert.Empty(t, firstSink.snapshot())
+	assert.Empty(t, drainBroadcastIDs(t, firstSubscription.Ch, 50*time.Millisecond))
+	firstServer.Close()
+
+	secondSink := &recordingSink{}
+	secondBroadcaster := daemon.NewEventBroadcaster()
+	secondSubscription := secondBroadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+	defer secondSubscription.Unsub()
+	secondServer := startTestServer(t, daemon.ServerConfig{
+		DB: database.db, StartedAt: database.now, Hooks: secondSink, Broadcaster: secondBroadcaster,
+	})
+
+	second := postWithHeader(t, secondServer, path, headers, body)
+	requireOK(t, second)
+	assert.Equal(t, store.committedEvents, secondSink.snapshot())
+	assert.Equal(t, []int64{store.committedEvents[0].ID, store.committedEvents[1].ID},
+		drainBroadcastIDs(t, secondSubscription.Ch, 50*time.Millisecond))
+
+	third := postWithHeader(t, secondServer, path, headers, body)
+	requireOK(t, third)
+	assert.Equal(t, store.committedEvents, secondSink.snapshot())
+	assert.Empty(t, drainBroadcastIDs(t, secondSubscription.Ch, 50*time.Millisecond))
+}
+
 func TestClose_IdempotencyRejectsDifferentRequest(t *testing.T) {
 	_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
 	path := issueURL(projectID, issueID, "actions/close")

@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "ac18204f243ce27534e2dc584392492ff0deb4f9bad259b4eb40dc2db2131bd3"
-	canonicalConstraintFingerprint = "622da4ed2d6779e3f627ef3e4c8287ef6d1b4876a139ca9b6f7d8fa11a8192f4"
-	canonicalIndexFingerprint      = "e128126dddd2ce0bc37ac07a4cc98352f556f0e986c34e0e83b73d06594e848b"
+	canonicalColumnFingerprint     = "1365bac20d9eb2c93f899bcd9f205c93d75156c2532849fb670d41b64ead47b8"
+	canonicalConstraintFingerprint = "ac644760305b405a899980500b20c0c7e0766a97910e88e5caf08d53353281c5"
+	canonicalIndexFingerprint      = "dfbd0f5315a34bfbe2359d72e74d4715e0a8a87540f44a6435394488301f50af"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -25,6 +25,7 @@ const (
 var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
 	"api_tokens":              "id,token_hash,actor,name,created_at,last_used_at,revoked_at",
 	"comments":                "id,uid,issue_id,author,body,created_at",
+	"close_event_deliveries":  "project_id,idempotency_key,issue_uid,fingerprint,event_uids,state,claim_token,claim_expires_at,delivered_at,created_at,updated_at",
 	"events":                  "id,uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,related_issue_id,related_issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at",
 	"external_field_mappings": "id,connector_instance,kata_field,external_field_id,external_field_name,accepted_kinds_json,nullable,writable,schema_revision,active,created_at,updated_at",
 	"external_field_states":   "binding_id,mapping_id,baseline_json,conflicted,conflict_kata,conflict_external,conflict_at,updated_at",
@@ -65,6 +66,7 @@ uniq_one_parent_per_child idx_links_from idx_links_to idx_links_from_uid idx_lin
 idx_issue_labels_label idx_events_project idx_events_issue idx_events_related
 idx_events_issue_uid idx_events_related_issue_uid idx_events_origin_instance
 idx_events_origin_project_id idx_events_hlc idx_events_content_hash idx_events_idempotency
+close_event_deliveries_pkey
 idx_purge_log_reset idx_purge_log_project_reset idx_purge_log_issue idx_purge_log_issue_uid
 idx_purge_log_project_uid idx_purge_log_origin_instance idx_purge_log_short_id
 idx_project_purge_log_reset idx_project_purge_log_project_reset idx_federation_bindings_role_enabled

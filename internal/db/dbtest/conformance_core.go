@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -350,10 +351,11 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	}
 	assert.Nil(t, missingComment)
 
+	closeFingerprint := strings.Repeat("a", 64)
 	closed, closeEvents, changed, err := store.CloseIssueGuarded(ctx, db.CloseIssueParams{
 		IssueID: issue.ID, Reason: "wontfix", Actor: "conformance-agent",
 		Message:        "Recorded the reason for stopping this conformance task.",
-		IdempotencyKey: "close-request-1", IdempotencyFingerprint: "close-fingerprint-1",
+		IdempotencyKey: "close-request-1", IdempotencyFingerprint: closeFingerprint,
 		IfMatchRev: new(issue.Revision),
 	})
 	if err != nil {
@@ -370,7 +372,82 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	require.NotNil(t, closeMatch)
 	assert.Equal(t, issue.ID, closeMatch.IssueID)
 	assert.Equal(t, closeEvents[0].UID, closeMatch.Event.UID)
-	assert.Equal(t, "close-fingerprint-1", closeMatch.Fingerprint)
+	assert.Equal(t, closeFingerprint, closeMatch.Fingerprint)
+
+	claimAt := time.Date(2026, time.September, 2, 12, 0, 0, 0, time.UTC)
+	firstClaim, err := store.ClaimCloseEventDelivery(ctx, db.ClaimCloseEventDeliveryParams{
+		ProjectID: project.ID, IdempotencyKey: "close-request-1", Fingerprint: closeFingerprint,
+		ClaimToken: "publisher-one", ClaimedAt: claimAt, ClaimExpiresAt: claimAt.Add(30 * time.Second),
+	})
+	if err != nil {
+		return fmt.Errorf("claim close event delivery: %w", err)
+	}
+	assert.True(t, firstClaim.Acquired)
+	assert.False(t, firstClaim.Delivered)
+	expectedUIDs := make([]string, len(closeEvents))
+	for i := range closeEvents {
+		expectedUIDs[i] = closeEvents[i].UID
+	}
+	assert.Equal(t, expectedUIDs, firstClaim.EventUIDs)
+
+	activeClaim, err := store.ClaimCloseEventDelivery(ctx, db.ClaimCloseEventDeliveryParams{
+		ProjectID: project.ID, IdempotencyKey: "close-request-1", Fingerprint: closeFingerprint,
+		ClaimToken: "publisher-two", ClaimedAt: claimAt.Add(time.Second),
+		ClaimExpiresAt: claimAt.Add(31 * time.Second),
+	})
+	if err != nil {
+		return fmt.Errorf("inspect active close event delivery claim: %w", err)
+	}
+	assert.False(t, activeClaim.Acquired)
+	assert.False(t, activeClaim.Delivered)
+
+	recoveredClaim, err := store.ClaimCloseEventDelivery(ctx, db.ClaimCloseEventDeliveryParams{
+		ProjectID: project.ID, IdempotencyKey: "close-request-1", Fingerprint: closeFingerprint,
+		ClaimToken: "publisher-two", ClaimedAt: claimAt.Add(31 * time.Second),
+		ClaimExpiresAt: claimAt.Add(61 * time.Second),
+	})
+	if err != nil {
+		return fmt.Errorf("recover expired close event delivery claim: %w", err)
+	}
+	assert.True(t, recoveredClaim.Acquired)
+	err = store.CompleteCloseEventDelivery(ctx, db.CloseEventDeliveryClaimUpdateParams{
+		ProjectID: project.ID, IdempotencyKey: "close-request-1", Fingerprint: closeFingerprint,
+		ClaimToken: "publisher-one", At: claimAt.Add(32 * time.Second),
+	})
+	assert.ErrorIs(t, err, db.ErrCloseEventDeliveryClaimLost)
+	if err := store.ReleaseCloseEventDeliveryClaim(ctx, db.CloseEventDeliveryClaimUpdateParams{
+		ProjectID: project.ID, IdempotencyKey: "close-request-1", Fingerprint: closeFingerprint,
+		ClaimToken: "publisher-two", At: claimAt.Add(32 * time.Second),
+	}); err != nil {
+		return fmt.Errorf("release close event delivery claim: %w", err)
+	}
+
+	finalClaim, err := store.ClaimCloseEventDelivery(ctx, db.ClaimCloseEventDeliveryParams{
+		ProjectID: project.ID, IdempotencyKey: "close-request-1", Fingerprint: closeFingerprint,
+		ClaimToken: "publisher-three", ClaimedAt: claimAt.Add(33 * time.Second),
+		ClaimExpiresAt: claimAt.Add(63 * time.Second),
+	})
+	if err != nil {
+		return fmt.Errorf("claim released close event delivery: %w", err)
+	}
+	assert.True(t, finalClaim.Acquired)
+	if err := store.CompleteCloseEventDelivery(ctx, db.CloseEventDeliveryClaimUpdateParams{
+		ProjectID: project.ID, IdempotencyKey: "close-request-1", Fingerprint: closeFingerprint,
+		ClaimToken: "publisher-three", At: claimAt.Add(34 * time.Second),
+	}); err != nil {
+		return fmt.Errorf("complete close event delivery: %w", err)
+	}
+	deliveredClaim, err := store.ClaimCloseEventDelivery(ctx, db.ClaimCloseEventDeliveryParams{
+		ProjectID: project.ID, IdempotencyKey: "close-request-1", Fingerprint: closeFingerprint,
+		ClaimToken: "publisher-four", ClaimedAt: claimAt.Add(35 * time.Second),
+		ClaimExpiresAt: claimAt.Add(65 * time.Second),
+	})
+	if err != nil {
+		return fmt.Errorf("read completed close event delivery: %w", err)
+	}
+	assert.False(t, deliveredClaim.Acquired)
+	assert.True(t, deliveredClaim.Delivered)
+	assert.Equal(t, expectedUIDs, deliveredClaim.EventUIDs)
 
 	projectGuardIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID, Title: "project-pinned close", Author: "conformance-agent",

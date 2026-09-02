@@ -215,6 +215,13 @@ attacker. It is not the production private-network posture.
 Until a release explicitly documents an online migration, treat every schema
 upgrade as an offline operation:
 
+Schema version 27 adds `close_event_deliveries`, which keeps the ordered event
+identities and publish claim for retry-safe keyed closes. Upgrade it with the
+schema-owner role while all daemons are stopped. The runtime role needs the
+standard table grants described above before daemons restart. A version 26
+binary cannot open the upgraded schema. Rollback requires the pre-upgrade
+snapshot and the matching version 26 binary.
+
 1. Stop every daemon or scale all replicas to zero. The migration advisory lock
    serializes migrators; it does not quiesce ordinary writes from an old binary.
 2. Take a database-native snapshot and a JSONL export. Keep the native snapshot

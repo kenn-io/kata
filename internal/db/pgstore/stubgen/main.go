@@ -95,6 +95,8 @@ var alreadyImplemented = map[string]bool{
 	"BatchProjectStats":                    true, // project_lifecycle.go
 	"ChildrenOfIssue":                      true, // relationship_queries.go
 	"ClaimIssueSyncBinding":                true, // issue_sync.go
+	"ClaimCloseEventDelivery":              true, // close_event_deliveries.go
+	"CompleteCloseEventDelivery":           true, // close_event_deliveries.go
 	"ClaimExternalRootBinding":             true, // external_roots.go
 	"ClaimOwner":                           true, // issue_lifecycle.go
 	"ClaimStatus":                          true, // claims_core.go
@@ -245,6 +247,7 @@ var alreadyImplemented = map[string]bool{
 	"RecordExternalRootError":              true, // external_roots.go
 	"RecordExternalRootSuccess":            true, // external_roots.go
 	"RefreshInstanceUID":                   true, // store.go
+	"ReleaseCloseEventDeliveryClaim":       true, // close_event_deliveries.go
 	"RefreshIssueSyncBinding":              true, // issue_sync.go
 	"RejectPendingClaim":                   true, // claims_pending.go
 	"ReassignAlias":                        true, // aliases.go

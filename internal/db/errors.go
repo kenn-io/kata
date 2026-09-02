@@ -39,6 +39,18 @@ var (
 	// ErrAlreadyClaimed is returned by ClaimOwner when another actor already
 	// owns the issue and Force=false.
 	ErrAlreadyClaimed = errors.New("already claimed")
+
+	// ErrCloseEventDeliveryFingerprintMismatch means a caller addressed an
+	// existing close delivery with a different request fingerprint.
+	ErrCloseEventDeliveryFingerprintMismatch = errors.New("close event delivery fingerprint mismatch")
+
+	// ErrCloseEventDeliveryClaimActive means another daemon still owns the
+	// bounded delivery claim.
+	ErrCloseEventDeliveryClaimActive = errors.New("close event delivery claim is active")
+
+	// ErrCloseEventDeliveryClaimLost means another publisher recovered or
+	// completed the delivery before this claim update.
+	ErrCloseEventDeliveryClaimLost = errors.New("close event delivery claim lost")
 )
 
 // EditIssueAtomic sentinels.

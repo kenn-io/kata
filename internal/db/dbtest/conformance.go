@@ -71,7 +71,7 @@ var storageScenarios = []scenario{
 	},
 	{
 		name:    "idempotency",
-		methods: []string{"AcquireIdempotencyLock", "CreateComment", "CreateIssue", "CreateProject", "LookupCommentIdempotency", "LookupIdempotency", "LookupIssueMutationIdempotency"},
+		methods: []string{"AcquireIdempotencyLock", "ClaimCloseEventDelivery", "CompleteCloseEventDelivery", "CreateComment", "CreateIssue", "CreateProject", "LookupCommentIdempotency", "LookupIdempotency", "LookupIssueMutationIdempotency", "ReleaseCloseEventDeliveryClaim"},
 		run:     checkIdempotency,
 	},
 	{
