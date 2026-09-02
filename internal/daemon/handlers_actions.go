@@ -101,6 +101,11 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// has landed since the original close, or when the throttle
 		// window is hot. Validation only gates real state transitions.
 		if issue.Status == "closed" {
+			if in.IdempotencyKey != "" {
+				return nil, api.NewError(409, "issue_already_closed",
+					"issue was already closed by another request",
+					"omit the idempotency key to accept the current state", nil)
+			}
 			out := &api.MutationResponse{}
 			out.Body.Issue = issue
 			return out, nil
@@ -186,6 +191,20 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return err
 		})
 		if err != nil {
+			// A connection can fail after the database commits. The keyed
+			// receipt proves whether this attempt landed. When it did, publish
+			// the complete event batch returned by that attempt before replying.
+			if in.IdempotencyKey != "" {
+				reuse, lookupErr := tryCloseIdempotencyMatch(
+					ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+				if lookupErr != nil {
+					return nil, lookupErr
+				}
+				if reuse != nil && closeEventBatchMatchesReceipt(events, reuse) {
+					cfg.Publish().Events(in.ProjectID, events)
+					return reuse, nil
+				}
+			}
 			if revisionConflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 				return nil, api.NewError(412, "revision_conflict",
 					fmt.Sprintf("issue revision is %d", revisionConflict.CurrentRevision), "", nil)
@@ -220,6 +239,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if reuse != nil {
 				return reuse, nil
 			}
+			return nil, api.NewError(409, "issue_already_closed",
+				"issue was closed by another request before this close committed",
+				"retry after reopening, or omit the idempotency key to accept the current state", nil)
 		}
 		if changed {
 			cfg.Publish().Events(in.ProjectID, events)
@@ -275,6 +297,11 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Changed = changed
 		return out, nil
 	})
+}
+
+func closeEventBatchMatchesReceipt(events []db.Event, response *api.MutationResponse) bool {
+	return len(events) > 0 && response != nil && response.Body.OriginalEvent != nil &&
+		events[0].UID == response.Body.OriginalEvent.UID
 }
 
 func tryCloseIdempotencyMatch(

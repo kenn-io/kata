@@ -1595,7 +1595,9 @@ func (d *Store) closeIssueGuarded(
 		return db.Issue{}, nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return db.Issue{}, nil, false, err
+		// Preserve the attempted result so the daemon can match its keyed
+		// receipt after an ambiguous commit response and publish every event.
+		return updated, events, true, err
 	}
 	return updated, events, true, nil
 }

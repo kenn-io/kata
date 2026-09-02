@@ -76,6 +76,9 @@ type Storage interface {
 	EditIssueAtomic(ctx context.Context, p EditIssueAtomicParams) (EditIssueAtomicResult, error)
 	CloseIssue(ctx context.Context, issueID int64, reason, actor, message string, evidence []Evidence) (Issue, *Event, bool, error)
 	CloseIssueWithEvents(ctx context.Context, issueID int64, reason, actor, message string, evidence []Evidence) (Issue, []Event, bool, error)
+	// CloseIssueGuarded preserves its attempted issue, event batch, and changed
+	// result when commit returns an ambiguous error. A caller holding an
+	// idempotency lock can compare those events with the persisted receipt.
 	CloseIssueGuarded(ctx context.Context, p CloseIssueParams) (Issue, []Event, bool, error)
 	ReopenIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
 	SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
