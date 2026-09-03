@@ -453,15 +453,6 @@ type Event struct {
 	CreatedAt           time.Time `json:"created_at"`
 }
 
-// CloseEventDeliveryClaim is the durable publish state for one keyed close.
-// EventUIDs preserve the transaction's event order while the immutable events
-// table remains the source of each event's contents.
-type CloseEventDeliveryClaim struct {
-	EventUIDs []string
-	Acquired  bool
-	Delivered bool
-}
-
 // RemoteEvent is the portable event shape accepted from a federation hub.
 // Backend-local row IDs and display-only short IDs are intentionally excluded.
 type RemoteEvent struct {

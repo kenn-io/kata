@@ -150,9 +150,6 @@ type Storage interface {
 	// the returned release function runs. Implementations must coordinate every
 	// daemon that can write the same backend, not only goroutines in one server.
 	AcquireIdempotencyLock(ctx context.Context, projectID int64, key string) (release func() error, err error)
-	ClaimCloseEventDelivery(ctx context.Context, p ClaimCloseEventDeliveryParams) (CloseEventDeliveryClaim, error)
-	ReleaseCloseEventDeliveryClaim(ctx context.Context, p CloseEventDeliveryClaimUpdateParams) error
-	CompleteCloseEventDelivery(ctx context.Context, p CloseEventDeliveryClaimUpdateParams) error
 	LookupIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*IdempotencyMatch, error)
 	LookupIssueMutationIdempotency(ctx context.Context, projectID int64, eventType, key string, since time.Time) (*IdempotencyMatch, error)
 	// LookupCommentIdempotency scopes by issue UID when issueUID is non-empty;

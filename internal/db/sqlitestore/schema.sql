@@ -219,30 +219,6 @@ CREATE INDEX idx_events_idempotency
   ON events(project_id, json_extract(payload, '$.idempotency_key'), created_at)
   WHERE type = 'issue.created' AND json_extract(payload, '$.idempotency_key') IS NOT NULL;
 
-CREATE TABLE close_event_deliveries (
-  project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  idempotency_key  TEXT NOT NULL,
-  issue_uid        TEXT NOT NULL CHECK (length(issue_uid) = 26),
-  fingerprint      TEXT NOT NULL CHECK (length(fingerprint) = 64),
-  event_uids       TEXT NOT NULL
-                     CHECK (json_valid(event_uids)
-                            AND json_type(event_uids) = 'array'
-                            AND json_array_length(event_uids) > 0),
-  state             TEXT NOT NULL DEFAULT 'pending'
-                      CHECK (state IN ('pending', 'delivering', 'delivered')),
-  claim_token       TEXT,
-  claim_expires_at  DATETIME,
-  delivered_at      DATETIME,
-  created_at        DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  updated_at        DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  PRIMARY KEY(project_id, idempotency_key),
-  CHECK (
-    (state = 'pending' AND claim_token IS NULL AND claim_expires_at IS NULL AND delivered_at IS NULL)
-    OR (state = 'delivering' AND claim_token IS NOT NULL AND length(trim(claim_token)) > 0 AND claim_expires_at IS NOT NULL AND delivered_at IS NULL)
-    OR (state = 'delivered' AND claim_token IS NULL AND claim_expires_at IS NULL AND delivered_at IS NOT NULL)
-  )
-);
-
 CREATE TABLE api_tokens (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   token_hash   TEXT NOT NULL UNIQUE,

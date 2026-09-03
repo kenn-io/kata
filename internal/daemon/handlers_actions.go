@@ -13,7 +13,6 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
-	katauid "go.kenn.io/kata/internal/uid"
 )
 
 // registerActionsHandlers installs POST /actions/close and /actions/reopen.
@@ -66,6 +65,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		tuiBypass := tuiBypassAllowed(ctx, in.Body.Source, in.Body.Reason)
 		idempotencyFingerprint := ""
 		if in.IdempotencyKey != "" {
+			if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+				return nil, err
+			}
 			release, err := cfg.DB.AcquireIdempotencyLock(ctx, in.ProjectID, in.IdempotencyKey)
 			if err != nil {
 				return nil, internalAPIError(err)
@@ -79,21 +81,10 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				idempotencyFingerprint = closeIdempotencyFingerprint(
 					match.IssueUID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
 					in.Body.Evidence, in.Body.DryRun, ifMatchRev)
-				if match.Fingerprint == idempotencyFingerprint {
-					if err := publishCloseEventDelivery(
-						ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint,
-					); err != nil {
-						return nil, err
-					}
-				}
 				return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 			}
 		}
-		includeDeleted := db.IncludeDeletedNo
-		if in.IdempotencyKey != "" {
-			includeDeleted = db.IncludeDeletedYes
-		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, includeDeleted)
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
 		}
@@ -101,9 +92,6 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			idempotencyFingerprint = closeIdempotencyFingerprint(
 				issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
 				in.Body.Evidence, in.Body.DryRun, ifMatchRev)
-		}
-		if issue.DeletedAt != nil {
-			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}
 		if ifMatchRev != nil && issue.Revision != *ifMatchRev {
 			return nil, api.NewError(412, "revision_conflict",
@@ -207,28 +195,25 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return err
 		})
-		if err == nil && changed && in.IdempotencyKey == "" {
+		if err == nil && changed {
 			cfg.Publish().Events(in.ProjectID, events)
-		}
-		if in.IdempotencyKey != "" {
-			if recoveryErr := publishCloseEventDelivery(
-				ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint,
-			); recoveryErr != nil {
-				return nil, recoveryErr
-			}
 		}
 		if err != nil {
 			// A connection can fail after the database commits. The keyed
-			// receipt proves whether this attempt landed. When it did, publish
-			// the complete event batch returned by that attempt before replying.
+			// receipt proves whether this attempt landed. When it did, the
+			// batch this attempt returned is the committed batch, so publish
+			// it exactly once before replying with the receipt.
 			if in.IdempotencyKey != "" {
-				reuse, lookupErr := tryCloseIdempotencyMatch(
-					ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+				match, lookupErr := lookupCloseIdempotencyMatch(
+					ctx, cfg, in.ProjectID, in.IdempotencyKey)
 				if lookupErr != nil {
 					return nil, lookupErr
 				}
-				if reuse != nil {
-					return reuse, nil
+				if match != nil {
+					if len(events) > 0 && events[0].UID == match.Event.UID {
+						cfg.Publish().Events(in.ProjectID, events)
+					}
+					return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 				}
 			}
 			if revisionConflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
@@ -327,63 +312,6 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 }
 
-const closeEventDeliveryClaimLease = 30 * time.Second
-
-func publishCloseEventDelivery(
-	ctx context.Context, cfg ServerConfig, projectID int64, key, fingerprint string,
-) error {
-	claimToken, err := katauid.New()
-	if err != nil {
-		return internalAPIError(fmt.Errorf("generate close event delivery claim: %w", err))
-	}
-	claimedAt := time.Now().UTC()
-	claim, err := cfg.DB.ClaimCloseEventDelivery(ctx, db.ClaimCloseEventDeliveryParams{
-		ProjectID: projectID, IdempotencyKey: key, Fingerprint: fingerprint,
-		ClaimToken: claimToken, ClaimedAt: claimedAt,
-		ClaimExpiresAt: claimedAt.Add(closeEventDeliveryClaimLease),
-	})
-	if errors.Is(err, db.ErrNotFound) {
-		// Receipts created before durable delivery tracking have no batch row.
-		return nil
-	}
-	if err != nil {
-		return internalAPIError(err)
-	}
-	if claim.Delivered {
-		return nil
-	}
-	if !claim.Acquired {
-		return internalAPIError(db.ErrCloseEventDeliveryClaimActive)
-	}
-	releaseClaim := func(cause error) error {
-		releaseErr := cfg.DB.ReleaseCloseEventDeliveryClaim(ctx, db.CloseEventDeliveryClaimUpdateParams{
-			ProjectID: projectID, IdempotencyKey: key, Fingerprint: fingerprint,
-			ClaimToken: claimToken, At: time.Now().UTC(),
-		})
-		return internalAPIError(errors.Join(cause, releaseErr))
-	}
-	stored, err := cfg.DB.EventsByUIDs(ctx, projectID, claim.EventUIDs)
-	if err != nil {
-		return releaseClaim(err)
-	}
-	if len(stored) != len(claim.EventUIDs) {
-		return releaseClaim(errors.New("stored close event batch is incomplete"))
-	}
-	for i := range stored {
-		if stored[i].UID != claim.EventUIDs[i] {
-			return releaseClaim(errors.New("stored close event batch is out of order"))
-		}
-	}
-	cfg.Publish().Events(projectID, stored)
-	if err := cfg.DB.CompleteCloseEventDelivery(ctx, db.CloseEventDeliveryClaimUpdateParams{
-		ProjectID: projectID, IdempotencyKey: key, Fingerprint: fingerprint,
-		ClaimToken: claimToken, At: time.Now().UTC(),
-	}); err != nil {
-		return internalAPIError(err)
-	}
-	return nil
-}
-
 func tryCloseIdempotencyMatch(
 	ctx context.Context,
 	cfg ServerConfig,
@@ -422,6 +350,12 @@ func closeIdempotencyResponse(
 	current, err := cfg.DB.IssueByID(ctx, match.IssueID)
 	if err != nil {
 		return nil, internalAPIError(err)
+	}
+	// The issue may have moved since the original close. Replaying the
+	// receipt exposes its current state, so the caller's host scope must
+	// cover the project it lives in now.
+	if _, err := authorizeHostProjectScope(ctx, []int64{current.ProjectID}, nil, false); err != nil {
+		return nil, err
 	}
 	original := match.Event
 	out := &api.MutationResponse{}

@@ -1593,9 +1593,6 @@ func (d *Store) closeIssueGuarded(
 		}
 		events = append(events, generated...)
 	}
-	if err := insertCloseEventDeliveryTx(ctx, tx, p, issue.ProjectID, issue.UID, events, closedAt); err != nil {
-		return db.Issue{}, nil, false, err
-	}
 	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err

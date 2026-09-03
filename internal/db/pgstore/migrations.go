@@ -14,9 +14,6 @@ var vectorSchemaSQL string
 //go:embed migrations/000026_external_root_bridges.up.sql
 var externalRootBridgesMigrationSQL string
 
-//go:embed migrations/000027_close_event_deliveries.up.sql
-var closeEventDeliveriesMigrationSQL string
-
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -36,12 +33,6 @@ var migrationAssets = []Migration{
 		ToVersion:   26,
 		Name:        "000026_external_root_bridges.up.sql",
 		SQL:         externalRootBridgesMigrationSQL,
-	},
-	{
-		FromVersion: 26,
-		ToVersion:   27,
-		Name:        "000027_close_event_deliveries.up.sql",
-		SQL:         closeEventDeliveriesMigrationSQL,
 	},
 }
 
