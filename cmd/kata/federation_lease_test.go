@@ -101,6 +101,15 @@ func TestLeaseRenew_ExtendsTimedLease(t *testing.T) {
 	assert.Greater(t, after.Claim.ExpiresAt.Sub(*before.Claim.ExpiresAt), 20*time.Minute)
 }
 
+func TestLeaseRenew_RejectsHardLease(t *testing.T) {
+	env, dir, _, ref := setupFederatedHubIssue(t, "renew hard lease")
+	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
+
+	_, err := runCLICapture(t, env, dir, "--as", "alice", "federation", "lease", "renew", ref, "--ttl", "30m")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "hard claims cannot be renewed")
+}
+
 func TestLeaseRenew_RequiresTTL(t *testing.T) {
 	env, dir, _, ref := setupFederatedHubIssue(t, "renew without ttl")
 

@@ -55,12 +55,12 @@ func newFederationLeaseRenewCmd() *cobra.Command {
 		Short: "renew a timed federation write lease",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(ttlRaw) == "" {
-				return &cliError{Message: "--ttl is required", Kind: kindUsage, ExitCode: ExitUsage}
-			}
-			ttl, _, err := parseClaimTTL(ttlRaw)
+			ttl, timed, err := parseClaimTTL(ttlRaw)
 			if err != nil {
 				return err
+			}
+			if !timed {
+				return &cliError{Message: "--ttl is required", Kind: kindUsage, ExitCode: ExitUsage}
 			}
 			return runClaimAction(cmd, args[0], "renew", ttl, true)
 		},
