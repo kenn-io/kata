@@ -35,6 +35,18 @@ func TestRunLookalikeCheckBoundsSearchQuery(t *testing.T) {
 	assert.Contains(t, store.query, "留")
 	assert.NotContains(t, store.query, "discard-this-suffix")
 	assert.True(t, utf8.ValidString(store.query))
+
+	store = &lookalikeQueryRecordingStore{}
+	in.Body.Title = strings.Repeat("界", 499) + "留 discarded-title-suffix"
+	in.Body.Body = "plain body"
+
+	err = runLookalikeCheck(context.Background(), ServerConfig{DB: store}, in)
+
+	require.NoError(t, err)
+	assert.Contains(t, store.query, "plain body")
+	assert.Contains(t, store.query, "留")
+	assert.NotContains(t, store.query, "discarded-title-suffix")
+	assert.True(t, utf8.ValidString(store.query))
 }
 
 type lookalikeCandidateStore struct {

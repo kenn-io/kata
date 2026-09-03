@@ -201,6 +201,10 @@ func createRequestError(err error, forceNew bool) error {
 		reason = "request timed out"
 	case errors.Is(err, context.Canceled):
 		reason = "request canceled before the response arrived"
+	case responseBodyWasCut(err):
+		reason = "the response was cut off before it completed"
+	case connectionDroppedBeforeResponse(err):
+		reason = "the connection dropped before the response arrived"
 	default:
 		return err
 	}
@@ -222,10 +226,19 @@ func requestTimedOut(err error) bool {
 		return true
 	}
 	var netErr net.Error
-	if !errors.As(err, &netErr) || netErr == nil {
-		return false
-	}
-	return netErr.Timeout()
+	// netErr != nil is guaranteed when errors.As returns true; the explicit
+	// check exists to satisfy NilAway (same idiom as internal/federation).
+	return errors.As(err, &netErr) && netErr != nil && netErr.Timeout()
+}
+
+func responseBodyWasCut(err error) bool {
+	var readErr *responseBodyReadError
+	return errors.As(err, &readErr)
+}
+
+func connectionDroppedBeforeResponse(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		connDroppedErrno(err)
 }
 
 // initialLinksAsChanges builds a synthetic mutationChanges from the

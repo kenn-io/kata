@@ -64,6 +64,16 @@ func TestCreateRequestError(t *testing.T) {
 	assert.Same(t, otherErr, createRequestError(otherErr, false))
 }
 
+func TestCreateRequestErrorConnectionDropped(t *testing.T) {
+	dropped := &url.Error{Op: http.MethodPost, URL: "https://daemon.example/issues", Err: io.EOF}
+	got := createRequestError(dropped, false)
+	var cliErr *cliError
+	require.ErrorAs(t, got, &cliErr)
+	assert.Equal(t, "create_outcome_unknown", cliErr.Code)
+	assert.Contains(t, cliErr.Message, "connection dropped")
+
+}
+
 func TestCreateRequestErrorCanceled(t *testing.T) {
 	canceledErr := &url.Error{
 		Op:  http.MethodPost,
@@ -170,6 +180,45 @@ func TestCreateTimeoutClassificationAtCommandBoundary(t *testing.T) {
 		assert.Equal(t, "create_outcome_unknown", cliErr.Code)
 		assert.NotContains(t, cliErr.Message, "--force-new")
 	})
+}
+
+func TestCreateResponseBodyCutClassificationAtCommandBoundary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"example-project"}}`)
+		case "/api/v1/projects/7/issues":
+			_, _ = io.Copy(io.Discard, r.Body)
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "hijacking unsupported", http.StatusInternalServerError)
+				return
+			}
+			conn, buf, err := hj.Hijack()
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+			_, _ = buf.WriteString("HTTP/1.1 200 OK\r\n" +
+				"Content-Type: application/json\r\n" +
+				"Content-Length: 512\r\n\r\n" +
+				`{"issue":{"short_id":"abc4","title":"example issue","status":"open"`)
+			_ = buf.Flush()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	ctx := contextWithBaseURL(context.Background(), server.URL)
+	_, _, err := executeRootCapture(t, ctx, "--workspace", t.TempDir(),
+		"create", "example issue")
+	cliErr := requireCLIError(t, err, ExitInternal)
+	assert.Equal(t, "create_outcome_unknown", cliErr.Code)
+	assert.Contains(t, cliErr.Message, "cut off")
+	assert.Contains(t, cliErr.Message, "check whether the issue was created")
+	assert.NotContains(t, cliErr.Message, "timed out")
 }
 
 func TestCreate_PrintsIssueShortIDInQuietMode(t *testing.T) {
