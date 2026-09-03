@@ -43,6 +43,11 @@ type CreateIssueHeaders struct {
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 }
 
+type CloseIssueHeaders struct {
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+	IfMatch        *string `json:"If-Match,omitempty"`
+}
+
 type DeleteIssueHeaders struct {
 	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
 }

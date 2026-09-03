@@ -48,7 +48,7 @@ type AssignIssueBody = AssignRequestBody
 
 type ClaimIssueBody = ClaimRequestBody
 
-type CloseIssueBody = ActionRequestBody
+type CloseIssueBody = CloseActionRequestBody
 
 type DeleteIssueBody = DestructiveActionRequestBody
 

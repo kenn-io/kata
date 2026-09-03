@@ -48,20 +48,38 @@ func postFollowupComment(
 	projectID int64,
 	issueRef, actor, body string,
 ) error {
+	return postFollowupCommentWithKey(ctx, client, baseURL, projectID, issueRef, actor, body, "")
+}
+
+func postFollowupCommentWithKey(
+	ctx context.Context,
+	client *http.Client,
+	baseURL string,
+	projectID int64,
+	issueRef, actor, body, idempotencyKey string,
+) error {
 	if body == "" {
 		return nil
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
+	headers := map[string]string{}
+	if idempotencyKey != "" {
+		headers["Idempotency-Key"] = idempotencyKey
+	}
+	retryInstruction := fmt.Sprintf("retry with: kata comment %s --body ...", issueRef)
+	if idempotencyKey != "" {
+		retryInstruction = "rerun the original kata close command with the same --idempotency-key"
+	}
+	status, bs, err := httpDoJSONWithHeader(ctx, client, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/comments", baseURL, projectID, url.PathEscape(issueRef)),
-		map[string]any{"actor": actor, "body": body})
+		headers, map[string]any{"actor": actor, "body": body})
 	if err != nil {
 		return fmt.Errorf("issue mutation succeeded but appending --comment failed: %w "+
-			"(retry with: kata comment %s --body ...)", err, issueRef)
+			"(%s)", err, retryInstruction)
 	}
 	if status >= 400 {
 		base := apiErrFromBody(status, bs)
 		return fmt.Errorf("issue mutation succeeded but appending --comment failed: %w "+
-			"(retry with: kata comment %s --body ...)", base, issueRef)
+			"(%s)", base, retryInstruction)
 	}
 	return nil
 }

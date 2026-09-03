@@ -1453,18 +1453,25 @@ func (d *Store) CloseIssueWithEvents(
 	reason, actor, message string,
 	evidence []db.Evidence,
 ) (db.Issue, []db.Event, bool, error) {
-	return retryWrite3(ctx, d, func() (db.Issue, []db.Event, bool, error) {
-		return d.closeIssueWithEvents(ctx, issueID, reason, actor, message, evidence)
+	return d.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: issueID, Reason: reason, Actor: actor, Message: message, Evidence: evidence,
 	})
 }
 
-func (d *Store) closeIssueWithEvents(
-	ctx context.Context,
-	issueID int64,
-	reason, actor, message string,
-	evidence []db.Evidence,
+// CloseIssueGuarded applies the close and its optional revision precondition in
+// the same transaction, then returns every event committed by that mutation.
+func (d *Store) CloseIssueGuarded(
+	ctx context.Context, p db.CloseIssueParams,
 ) (db.Issue, []db.Event, bool, error) {
-	if reason == "" {
+	return retryWrite3(ctx, d, func() (db.Issue, []db.Event, bool, error) {
+		return d.closeIssueGuarded(ctx, p)
+	})
+}
+
+func (d *Store) closeIssueGuarded(
+	ctx context.Context, p db.CloseIssueParams,
+) (db.Issue, []db.Event, bool, error) {
+	if p.Reason == "" {
 		return db.Issue{}, nil, false, fmt.Errorf("close: reason is required")
 	}
 	tx, err := d.BeginTx(ctx, nil)
@@ -1473,9 +1480,15 @@ func (d *Store) closeIssueWithEvents(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
+	}
+	if p.ExpectedProjectID != 0 && issue.ProjectID != p.ExpectedProjectID {
+		return db.Issue{}, nil, false, db.ErrIssueProjectChanged
+	}
+	if p.IfMatchRev != nil && issue.Revision != *p.IfMatchRev {
+		return db.Issue{}, nil, false, &db.RevisionConflictError{CurrentRevision: issue.Revision}
 	}
 	if issue.Status == "closed" {
 		if err := tx.Commit(); err != nil {
@@ -1483,7 +1496,7 @@ func (d *Store) closeIssueWithEvents(
 		}
 		return issue, nil, false, nil
 	}
-	if hasOpen, err := txHasOpenChildren(ctx, tx, issueID); err != nil {
+	if hasOpen, err := txHasOpenChildren(ctx, tx, p.IssueID); err != nil {
 		return db.Issue{}, nil, false, err
 	} else if hasOpen {
 		return db.Issue{}, nil, false, db.ErrOpenChildren
@@ -1495,7 +1508,7 @@ func (d *Store) closeIssueWithEvents(
 		     closed_reason = ?,
 		     closed_at     = ?,
 		     updated_at    = ?
-		 WHERE id = ?`, reason, closedAt, closedAt, issueID); err != nil {
+		 WHERE id = ?`, p.Reason, closedAt, closedAt, p.IssueID); err != nil {
 		return db.Issue{}, nil, false, fmt.Errorf("close: %w", err)
 	}
 
@@ -1508,7 +1521,7 @@ func (d *Store) closeIssueWithEvents(
 	// at close" (non-nil empty) from "legacy event that predates these
 	// fields" (nil) — the audit projection falls back to a live links
 	// lookup only for the legacy case.
-	parentUID, parentSID, hasParent, err := txParentIdentity(ctx, tx, issueID)
+	parentUID, parentSID, hasParent, err := txParentIdentity(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
@@ -1518,19 +1531,23 @@ func (d *Store) closeIssueWithEvents(
 		*parentSIDForPayload = parentSID
 	}
 	payloadBytes, err := json.Marshal(struct {
-		Reason        string        `json:"reason"`
-		ClosedAt      string        `json:"closed_at"`
-		Message       string        `json:"message,omitempty"`
-		Evidence      []db.Evidence `json:"evidence,omitempty"`
-		ParentUID     *string       `json:"parent_uid,omitempty"`
-		ParentShortID *string       `json:"parent_short_id,omitempty"`
+		Reason                 string        `json:"reason"`
+		ClosedAt               string        `json:"closed_at"`
+		Message                string        `json:"message,omitempty"`
+		Evidence               []db.Evidence `json:"evidence,omitempty"`
+		ParentUID              *string       `json:"parent_uid,omitempty"`
+		ParentShortID          *string       `json:"parent_short_id,omitempty"`
+		IdempotencyKey         string        `json:"idempotency_key,omitempty"`
+		IdempotencyFingerprint string        `json:"idempotency_fingerprint,omitempty"`
 	}{
-		Reason:        reason,
-		ClosedAt:      closedAt,
-		Message:       message,
-		Evidence:      evidence,
-		ParentUID:     parentUIDForPayload,
-		ParentShortID: parentSIDForPayload,
+		Reason:                 p.Reason,
+		ClosedAt:               closedAt,
+		Message:                p.Message,
+		Evidence:               p.Evidence,
+		ParentUID:              parentUIDForPayload,
+		ParentShortID:          parentSIDForPayload,
+		IdempotencyKey:         p.IdempotencyKey,
+		IdempotencyFingerprint: p.IdempotencyFingerprint,
 	})
 	if err != nil {
 		return db.Issue{}, nil, false, fmt.Errorf("close payload: %w", err)
@@ -1541,7 +1558,7 @@ func (d *Store) closeIssueWithEvents(
 		ProjectName: projectName,
 		IssueID:     &issue.ID,
 		Type:        "issue.closed",
-		Actor:       actor,
+		Actor:       p.Actor,
 		Payload:     string(payloadBytes),
 	})
 	if err != nil {
@@ -1554,7 +1571,7 @@ func (d *Store) closeIssueWithEvents(
 		IssueID:           issue.ID,
 		IssueUID:          issue.UID,
 		EventType:         "issue.closed",
-		Actor:             actor,
+		Actor:             p.Actor,
 		HolderInstanceUID: d.InstanceUID(),
 	})
 	if err != nil {
@@ -1565,9 +1582,9 @@ func (d *Store) closeIssueWithEvents(
 		events = append(events, auditEvents...)
 		lastEventID = auditEvents[len(auditEvents)-1].ID
 	}
-	if reason == "done" && issue.RecurrenceID != nil && issue.OccurrenceKey != nil {
+	if p.Reason == "done" && issue.RecurrenceID != nil && issue.OccurrenceKey != nil {
 		if _, err := d.materializeNextTx(ctx, tx, *issue.RecurrenceID,
-			*issue.OccurrenceKey, actor); err != nil {
+			*issue.OccurrenceKey, p.Actor); err != nil {
 			return db.Issue{}, nil, false, fmt.Errorf("materialize next recurrence: %w", err)
 		}
 		generated, err := eventsAfterTx(ctx, tx, lastEventID)
@@ -1576,12 +1593,14 @@ func (d *Store) closeIssueWithEvents(
 		}
 		events = append(events, generated...)
 	}
-	updated, err := issueByIDTx(ctx, tx, issueID)
+	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return db.Issue{}, nil, false, err
+		// Preserve the attempted result so the daemon can match its keyed
+		// receipt after an ambiguous commit response and publish every event.
+		return updated, events, true, err
 	}
 	return updated, events, true, nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
@@ -14,10 +15,12 @@ import (
 
 func newCloseCmd() *cobra.Command {
 	var (
-		reason   string
-		message  string
-		evidence []string
-		dryRun   bool
+		reason         string
+		message        string
+		evidence       []string
+		dryRun         bool
+		idempotencyKey string
+		ifMatch        string
 
 		sugarDone          bool
 		sugarWontfix       bool
@@ -50,6 +53,16 @@ Instead, label and comment:
     kata comment <ref> --body "what was attempted, what remains"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("idempotency-key") && strings.TrimSpace(idempotencyKey) == "" {
+				return &cliError{
+					Message:  "--idempotency-key must not be blank",
+					Kind:     kindValidation,
+					ExitCode: ExitValidation,
+				}
+			}
+			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
+				return err
+			}
 			// Resolve sugar -> reason (with conflict checks). Multiple sugar
 			// flags are mutually exclusive: a sequential switch would silently
 			// keep the first match and drop the rest (`--done --wontfix` would
@@ -127,7 +140,18 @@ Instead, label and comment:
 			if dryRun && currentOutputMode() == outputHuman && !flags.Quiet {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "close: dry-run (no mutations will occur)")
 			}
-			return runAction(cmd, args[0], "close", extra)
+			headers := map[string]string{}
+			if idempotencyKey != "" {
+				headers["Idempotency-Key"] = idempotencyKey
+			}
+			if strings.TrimSpace(ifMatch) != "" {
+				etag, err := normalizeMetaIfMatch(ifMatch)
+				if err != nil {
+					return err
+				}
+				headers["If-Match"] = etag
+			}
+			return runActionWithHeaders(cmd, args[0], "close", extra, headers)
 		},
 	}
 	cmd.Flags().StringVar(&reason, "reason", "",
@@ -144,6 +168,10 @@ Instead, label and comment:
 			"duplicate-of:<N>, superseded-by:<N>")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
 		"validate without mutating; reports the would-be close event")
+	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "",
+		"send Idempotency-Key header for safe retry")
+	cmd.Flags().StringVar(&ifMatch, "if-match", "",
+		"expected issue revision (N or rev-N)")
 
 	cmd.Flags().BoolVar(&sugarDone, "done", false, "sugar for --reason done")
 	cmd.Flags().BoolVar(&sugarWontfix, "wontfix", false, "sugar for --reason wontfix")
@@ -213,6 +241,12 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 // the daemon action endpoint. If --comment was passed on the command, the
 // comment is appended in a separate POST after the action succeeds.
 func runAction(cmd *cobra.Command, raw, action string, extra map[string]any) error {
+	return runActionWithHeaders(cmd, raw, action, extra, nil)
+}
+
+func runActionWithHeaders(
+	cmd *cobra.Command, raw, action string, extra map[string]any, headers map[string]string,
+) error {
 	comment, err := commentFromFlag(cmd)
 	if err != nil {
 		return err
@@ -224,20 +258,41 @@ func runAction(cmd *cobra.Command, raw, action string, extra map[string]any) err
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	body := map[string]any{"actor": actor}
 	maps.Copy(body, extra)
+	if action == "close" && len(headers) > 0 {
+		body["retry_protocol"] = api.CloseRetryProtocol
+	}
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return err
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
+	status, bs, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", baseURL, pid, url.PathEscape(issue.RefForAPI), action),
-		body)
+		body, headers)
 	if err != nil {
 		return err
 	}
 	if status >= 400 {
 		return apiErrFromBody(status, bs)
 	}
-	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
+	commentKey := ""
+	if key := headers["Idempotency-Key"]; key != "" {
+		commentKey = "close-comment:" + key
+	}
+	commentProjectID, commentIssueRef := pid, issue.RefForAPI
+	if comment != "" && commentKey != "" {
+		var response api.MutationResponse
+		if err := json.Unmarshal(bs, &response.Body); err != nil {
+			return fmt.Errorf("decode close response for follow-up comment: %w", err)
+		}
+		if response.Body.Issue.ProjectID <= 0 || response.Body.Issue.UID == "" {
+			return fmt.Errorf("close response is missing the issue identity for the follow-up comment")
+		}
+		commentProjectID = response.Body.Issue.ProjectID
+		commentIssueRef = response.Body.Issue.UID
+	}
+	if err := postFollowupCommentWithKey(
+		ctx, client, baseURL, commentProjectID, commentIssueRef, actor, comment, commentKey,
+	); err != nil {
 		return err
 	}
 	return printMutation(cmd, bs)

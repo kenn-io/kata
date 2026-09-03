@@ -8,6 +8,10 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// CloseRetryProtocol marks a close request whose retry headers must be
+// understood by the receiving daemon before it may mutate an issue.
+const CloseRetryProtocol = "close-v1"
+
 // PingResponse mirrors the cheapest liveness response.
 type PingResponse struct {
 	Body struct {
@@ -822,7 +826,8 @@ type CommentResponse struct {
 	}
 }
 
-// ActionRequest is POST /api/v1/projects/{id}/issues/{ref}/actions/close|reopen.
+// ActionRequest is POST /api/v1/projects/{id}/issues/{ref}/actions/reopen.
+// CloseActionRequest adds the close-only retry and revision headers.
 // Reason is enforced to the schema's CHECK list so unsupported values surface
 // as 400 validation rather than a SQLite constraint failure (500 internal).
 // Message, Evidence, and DryRun are close-only inputs (anti-agent-justification);
@@ -830,23 +835,43 @@ type CommentResponse struct {
 type ActionRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
-	Body      struct {
-		Actor   string `json:"actor,omitempty"`
-		Reason  string `json:"reason,omitempty" enum:"done,wontfix,duplicate,superseded,audit-no-change,"`
-		Message string `json:"message,omitempty"`
-		// Source signals the caller's UI surface. "tui" relaxes the
-		// substance / evidence validation so an interactive human close
-		// is one keystroke, but only over an owner-local Unix socket or
-		// direct, unforwarded loopback TCP connection. Forwarded TCP,
-		// non-loopback TCP, and identity-backed, trusted-proxy, or browser
-		// principals get full validation even when they send source="tui".
-		// Structural guards
-		// (parent-close, sibling throttle) always apply. Empty string means
-		// "agent / CLI" and gets full validation.
-		Source   string     `json:"source,omitempty" enum:"tui,"`
-		Evidence []Evidence `json:"evidence,omitempty"`
-		DryRun   bool       `json:"dry_run,omitempty"`
-	}
+	Body      ActionRequestBody
+}
+
+// CloseActionRequest adds retry and optimistic-concurrency headers to the
+// shared issue action body.
+type CloseActionRequest struct {
+	ProjectID      int64  `path:"project_id" required:"true"`
+	Ref            string `path:"ref" required:"true"`
+	IdempotencyKey string `header:"Idempotency-Key"`
+	IfMatch        string `header:"If-Match"`
+	Body           CloseActionRequestBody
+}
+
+// CloseActionRequestBody extends the legacy action body with a close-only
+// protocol marker. Older daemons reject the unknown marker before they can
+// ignore retry headers and mutate an issue.
+type CloseActionRequestBody struct {
+	ActionRequestBody
+	RetryProtocol string `json:"retry_protocol,omitempty" enum:"close-v1,"`
+}
+
+// ActionRequestBody is the shared JSON body for close and reopen actions.
+type ActionRequestBody struct {
+	Actor   string `json:"actor,omitempty"`
+	Reason  string `json:"reason,omitempty" enum:"done,wontfix,duplicate,superseded,audit-no-change,"`
+	Message string `json:"message,omitempty"`
+	// Source signals the caller's UI surface. "tui" relaxes the
+	// substance / evidence validation so an interactive human close
+	// is one keystroke, but only over an owner-local Unix socket or
+	// direct, unforwarded loopback TCP connection. Forwarded TCP,
+	// non-loopback TCP, and identity-backed, trusted-proxy, or browser
+	// principals get full validation even when they send source="tui".
+	// Structural guards (parent-close, sibling throttle) always apply.
+	// Empty string means "agent / CLI" and gets full validation.
+	Source   string     `json:"source,omitempty" enum:"tui,"`
+	Evidence []Evidence `json:"evidence,omitempty"`
+	DryRun   bool       `json:"dry_run,omitempty"`
 }
 
 // CreateLinkRequest is POST /api/v1/projects/{id}/issues/{ref}/links.

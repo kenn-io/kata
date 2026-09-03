@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 func TestCloseReopen_RoundTrip(t *testing.T) {
@@ -55,6 +56,51 @@ func TestClose_AgentOutputExternalEvidence(t *testing.T) {
 
 	audit := runCLI(t, env, dir, "audit", "closes", "--json")
 	assert.Contains(t, audit, `"evidence_types":["external"]`)
+}
+
+func TestCloseCmd_RetryFlagsReplayOriginalReceipt(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	args := []string{
+		"--json", "close", ref,
+		"--done",
+		"--message", "Implemented the requested behavior and ran the focused tests.",
+		"--test", "go test ./cmd/kata",
+		"--idempotency-key", "close-request-1",
+		"--if-match", "1",
+	}
+	first := runCLI(t, env, dir, args...)
+	assert.Contains(t, first, `"changed":true`)
+
+	second := runCLI(t, env, dir, args...)
+	assert.Contains(t, second, `"changed":false`)
+	assert.Contains(t, second, `"reused":true`)
+	assert.Contains(t, second, `"original_event":`)
+}
+
+func TestCloseCmd_RejectsBlankIfMatch(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	_, stderr, err := runCLIWithErr(t, env, dir,
+		"close", ref,
+		"--done",
+		"--message", "Implemented the requested behavior and ran the focused tests.",
+		"--test", "go test ./cmd/kata",
+		"--if-match", "")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "--if-match must not be blank")
+}
+
+func TestCloseCmd_RejectsBlankIdempotencyKey(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	_, stderr, err := runCLIWithErr(t, env, dir,
+		"close", ref,
+		"--wontfix",
+		"--message", "Reviewed the request and recorded why the work should stop here.",
+		"--idempotency-key", "   ")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "--idempotency-key must not be blank")
+
+	show := runCLI(t, env, dir, "show", ref, "--json")
+	assert.Contains(t, show, `"status":"open"`)
 }
 
 func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
@@ -402,6 +448,53 @@ func TestClose_WithComment_AppendsComment(t *testing.T) {
 	require.Len(t, got.Comments, 1, "close --comment must append exactly one comment")
 	assert.Equal(t, "fixed in abc1234", got.Comments[0].Body)
 	assert.Equal(t, "closed", got.Issue.Status)
+}
+
+func TestClose_RetryWithCommentAppendsOneComment(t *testing.T) {
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
+	args := []string{
+		"close", ref,
+		"--done",
+		"--message", "Implemented the requested behavior and ran the focused tests.",
+		"--test", "go test ./cmd/kata",
+		"--comment", "fixed in abc1234",
+		"--idempotency-key", "close-request-with-comment-1",
+	}
+	runCLI(t, env, dir, args...)
+	runCLI(t, env, dir, args...)
+
+	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
+	require.Len(t, got.Comments, 1)
+	assert.Equal(t, "fixed in abc1234", got.Comments[0].Body)
+}
+
+func TestClose_RetryWithCommentAfterMoveAppendsOneComment(t *testing.T) {
+	env, dir, sourceProjectID, ref := setupWorkspaceWithIssue(t, "test issue")
+	args := []string{
+		"close", ref,
+		"--done",
+		"--message", "Implemented the requested behavior and ran the focused tests.",
+		"--test", "go test ./cmd/kata",
+		"--comment", "fixed in abc1234",
+		"--idempotency-key", "close-request-with-comment-then-move",
+	}
+	runCLI(t, env, dir, args...)
+	issue, err := env.DB.IssueByShortID(t.Context(), sourceProjectID, ref, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	target, err := env.DB.CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: sourceProjectID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "coordinator",
+	})
+	require.NoError(t, err)
+
+	runCLI(t, env, dir, args...)
+
+	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	assert.Equal(t, "fixed in abc1234", comments[0].Body)
 }
 
 func TestReopen_WithComment_AppendsComment(t *testing.T) {

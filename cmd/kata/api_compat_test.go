@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -84,6 +85,45 @@ func TestFilteredListAllRejectsDaemonBeforeGlobalListFilters(t *testing.T) {
 	assert.Contains(t, err.Error(), "requires daemon API 0.9.0 or newer")
 	assert.Contains(t, err.Error(), "reports 0.8.0")
 	assert.Zero(t, listCalls.Load(), "the unfiltered old endpoint must not be queried")
+}
+
+func TestCloseRetryFlagsMakeOldDaemonRejectCloseBeforeMutation(t *testing.T) {
+	var closeCalls, mutations atomic.Int32
+	var retryProtocol string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+		case "/api/v1/projects/1/issues/abc1/actions/close":
+			closeCalls.Add(1)
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			retryProtocol, _ = body["retry_protocol"].(string)
+			if retryProtocol != "" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"status":400,"error":{"code":"validation","message":"retry_protocol: unexpected property"}}`))
+				return
+			}
+			mutations.Add(1)
+			_, _ = w.Write([]byte(`{"changed":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	_, _, err := executeRootCapture(t,
+		contextWithBaseURL(context.Background(), server.URL),
+		"--project", "example-project", "close", "abc1",
+		"--wontfix",
+		"--message", "Reviewed the request and recorded why the work should stop here.",
+		"--idempotency-key", "close-request-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "retry_protocol")
+	assert.Equal(t, "close-v1", retryProtocol)
+	assert.Equal(t, int32(1), closeCalls.Load())
+	assert.Zero(t, mutations.Load(), "the legacy request schema must reject before mutation")
 }
 
 func TestListAllDefaultsToUnlimited(t *testing.T) {

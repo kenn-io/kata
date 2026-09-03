@@ -554,11 +554,12 @@ type SearchCandidate struct {
 	MatchedIn []string `json:"matched_in"`
 }
 
-// IdempotencyMatch is the payload returned by LookupIdempotency. The Event row
-// is included so the handler can populate `original_event` in the reuse-case
-// MutationResponse without a second query.
+// IdempotencyMatch is a previously committed issue mutation matched through
+// its event payload. The Event row lets handlers return the original mutation
+// receipt without a second query.
 type IdempotencyMatch struct {
 	IssueID      int64
+	IssueUID     string
 	IssueShortID string
 	Fingerprint  string
 	Event        Event
@@ -568,6 +569,7 @@ type IdempotencyMatch struct {
 // through its issue.commented event payload.
 type CommentIdempotencyMatch struct {
 	Comment     Comment
+	IssueUID    string
 	Fingerprint string
 	Event       Event
 }

@@ -757,8 +757,8 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	reason := generated.ActionRequestBodyReason(input.Reason)
-	if err := reason.Validate(); err != nil || reason == generated.Empty {
+	reason := generated.CloseActionRequestBodyReason(input.Reason)
+	if err := reason.Validate(); err != nil || reason == generated.CloseActionRequestBodyReasonEmpty {
 		return nil, MutationOutput{}, fmt.Errorf("reason must be one of done, wontfix, duplicate, superseded, or audit-no-change")
 	}
 	if strings.TrimSpace(input.Message) == "" {
@@ -772,20 +772,75 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 		}
 		evidence = append(evidence, converted)
 	}
+	var headers *generated.CloseIssueHeaders
+	var retryProtocol *generated.CloseActionRequestBodyRetryProtocol
+	if input.IdempotencyKey != "" || input.Revision != nil {
+		headers = &generated.CloseIssueHeaders{}
+		protocol := generated.CloseV1
+		retryProtocol = &protocol
+		if input.IdempotencyKey != "" {
+			headers.IdempotencyKey = &input.IdempotencyKey
+		}
+		if input.Revision != nil {
+			if *input.Revision < 0 {
+				return nil, MutationOutput{}, errors.New("revision must not be negative")
+			}
+			ifMatch := `"rev-` + strconv.FormatInt(*input.Revision, 10) + `"`
+			headers.IfMatch = &ifMatch
+		}
+	}
 	response, err := h.options.Client.CloseIssue(ctx, &generated.CloseIssueRequestOptions{
 		PathParams: &generated.CloseIssuePath{ProjectID: project.ID, Ref: ref},
 		Body: &generated.CloseIssueBody{
-			Actor:    &h.options.Actor,
-			Reason:   &reason,
-			Message:  &input.Message,
-			Evidence: evidence,
-			DryRun:   optionalTrue(input.DryRun),
+			Actor:         &h.options.Actor,
+			Reason:        &reason,
+			Message:       &input.Message,
+			Evidence:      evidence,
+			DryRun:        optionalTrue(input.DryRun),
+			RetryProtocol: retryProtocol,
 		},
+		Header: headers,
 	})
 	if err != nil {
 		return nil, MutationOutput{}, h.scopedCloseError(err)
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	event := &response.Event
+	if response.OriginalEvent != nil {
+		event = response.OriginalEvent
+	}
+	project, err = h.closeMutationProject(ctx, project, response.Issue)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
+	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, event), nil
+}
+
+// closeMutationProject keeps replayed close receipts inside the immutable MCP
+// startup scope. A retry can return an issue that moved after the original
+// close, so the request project is only valid while its UID still matches.
+func (h toolHandlers) closeMutationProject(
+	ctx context.Context, requestProject ProjectIdentity, issue generated.Issue,
+) (ProjectIdentity, error) {
+	projectUID := ""
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
+	if projectUID == "" {
+		return ProjectIdentity{}, errors.New("close response did not include the issue project UID")
+	}
+	if requestProject.UID == projectUID || requestProject.UID == "" && requestProject.ID == issue.ProjectID {
+		return requestProject, nil
+	}
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
+	if err != nil {
+		return ProjectIdentity{}, err
+	}
+	for _, project := range projects {
+		if project.UID == projectUID {
+			return project, nil
+		}
+	}
+	return ProjectIdentity{}, errors.New("close response issue moved outside the MCP startup scope")
 }
 
 // Close-guard refusals render child, sibling-cohort, and prior-close

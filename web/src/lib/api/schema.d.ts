@@ -1576,6 +1576,18 @@ export interface components {
     } & {
       [key: string]: unknown
     }
+    CloseActionRequestBody: {
+      actor?: string
+      dry_run?: boolean
+      evidence?: components['schemas']['Evidence'][] | null
+      message?: string
+      /** @enum {string} */
+      reason?: 'done' | 'wontfix' | 'duplicate' | 'superseded' | 'audit-no-change' | ''
+      /** @enum {string} */
+      retry_protocol?: 'close-v1' | ''
+      /** @enum {string} */
+      source?: 'tui' | ''
+    }
     Comment: {
       author: string
       body: string
@@ -5356,7 +5368,10 @@ export interface operations {
   closeIssue: {
     parameters: {
       query?: never
-      header?: never
+      header?: {
+        'Idempotency-Key'?: string
+        'If-Match'?: string
+      }
       path: {
         project_id: number
         ref: string
@@ -5365,7 +5380,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['ActionRequestBody']
+        'application/json': components['schemas']['CloseActionRequestBody']
       }
     }
     responses: {

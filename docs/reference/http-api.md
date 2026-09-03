@@ -45,7 +45,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.14.0",
+  "api_schema_version": "0.15.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db",
@@ -95,6 +95,11 @@ once at startup and requires API `0.11.0`, because its relationship tools
 always send the pinned-target fields and its close-audit paging relies on
 `event_id`.
 
+Guarded close requests use a request-local compatibility check instead of a
+separate health probe. A request that sends `Idempotency-Key` or `If-Match`
+also sends `retry_protocol: "close-v1"`. Current daemons require the marker;
+older daemons reject the unknown field before the close can run.
+
 The field is **optional in the schema** even though current daemons always send
 it. That is deliberate: a version-detection field has to survive version skew,
 so a client generated from a schema that includes it can still parse the
@@ -107,6 +112,7 @@ and decline to render issue detail.
 
 | Version | Change |
 | --- | --- |
+| `0.15.0` | Added close idempotency and revision headers, the `close-v1` request marker, and retry receipt fields. |
 | `0.14.0` | Added `external` close evidence with its required `account` field. |
 | `0.13.0` | Added optimistic revision guards to issue and project metadata patch requests. |
 | `0.12.0` | Added the optional `idle_shutdown` health block for effective auto-start idle shutdown state and capability discovery. |

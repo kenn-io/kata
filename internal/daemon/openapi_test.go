@@ -287,9 +287,9 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsExternalEvidence(t *testing.T) {
-	if APISchemaVersion != "0.14.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.14.0 for external evidence", APISchemaVersion)
+func TestOpenAPISchemaVersionReflectsCloseRetrySafety(t *testing.T) {
+	if APISchemaVersion != "0.15.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.15.0 for close retry safety", APISchemaVersion)
 	}
 }
 

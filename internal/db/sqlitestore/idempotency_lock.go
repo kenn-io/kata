@@ -22,7 +22,7 @@ func newIdempotencyLockSet() *idempotencyLockSet {
 	return set
 }
 
-// AcquireIdempotencyLock serializes concurrent create retries within the one
+// AcquireIdempotencyLock serializes concurrent mutation retries within the one
 // SQLite daemon that owns this database. SQLite daemon discovery prevents a
 // second process from serving the same file; fixed stripes keep memory bounded.
 func (d *Store) AcquireIdempotencyLock(

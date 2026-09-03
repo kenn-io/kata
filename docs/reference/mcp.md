@@ -171,7 +171,10 @@ The tools use structured input and output. List-like results, including
 timestamps cannot skip or repeat rows and a project merge or issue purge
 during pagination fails the page with a restart error instead of silently
 skewing it. `kata.show` returns at most 100 comments. Create and
-comment require idempotency keys. `kata.token_create`, recurrence creation,
+comment require idempotency keys. `kata.close` accepts an optional
+`idempotency_key` for safe retries and an optional `revision` for a conditional
+close. An exact retry returns the original close event in the mutation output.
+`kata.token_create`, recurrence creation,
 `kata.storage_import`, `kata.lease`, and `kata.sync_once` are annotated
 non-idempotent: the first two mint a new record on every identical retry, a
 forced storage import replaces the target again (with a fresh instance

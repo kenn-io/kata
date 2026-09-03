@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -23,7 +24,8 @@ func (s *Store) AcquireIdempotencyLock(
 	if s.idempotencyDB == nil {
 		return nil, errors.New("postgres idempotency coordinator is unavailable")
 	}
-	lockIdentity := fmt.Sprintf("kata:pgstore:idempotency:%s:%d:%s", s.schema, projectID, key)
+	rawLockIdentity := fmt.Sprintf("kata:pgstore:idempotency:%s:%d:%s", s.schema, projectID, key)
+	lockIdentity := fmt.Sprintf("%x", sha256.Sum256([]byte(rawLockIdentity)))
 	for {
 		conn, err := s.idempotencyDB.Conn(ctx)
 		if err != nil {

@@ -71,7 +71,7 @@ var storageScenarios = []scenario{
 	},
 	{
 		name:    "idempotency",
-		methods: []string{"AcquireIdempotencyLock", "CreateComment", "CreateIssue", "CreateProject", "LookupCommentIdempotency", "LookupIdempotency"},
+		methods: []string{"AcquireIdempotencyLock", "CreateComment", "CreateIssue", "CreateProject", "LookupCommentIdempotency", "LookupIdempotency", "LookupIssueMutationIdempotency"},
 		run:     checkIdempotency,
 	},
 	{
@@ -99,7 +99,7 @@ var storageScenarios = []scenario{
 	{
 		name: "issue lifecycle",
 		methods: []string{
-			"BatchProjectStats", "ClaimOwner", "CloseIssue", "CloseIssueWithEvents", "CreateIssue", "CreateProject", "EditIssue",
+			"BatchProjectStats", "ClaimOwner", "CloseIssue", "CloseIssueGuarded", "CloseIssueWithEvents", "CreateIssue", "CreateProject", "EditIssue",
 			"IssueByShortID", "IssueUIDPrefixMatch", "ListAllIssues", "ReopenIssue", "RestoreIssue",
 			"SoftDeleteIssue", "UpdateOwner", "UpdatePriority",
 		},

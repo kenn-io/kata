@@ -76,6 +76,10 @@ type Storage interface {
 	EditIssueAtomic(ctx context.Context, p EditIssueAtomicParams) (EditIssueAtomicResult, error)
 	CloseIssue(ctx context.Context, issueID int64, reason, actor, message string, evidence []Evidence) (Issue, *Event, bool, error)
 	CloseIssueWithEvents(ctx context.Context, issueID int64, reason, actor, message string, evidence []Evidence) (Issue, []Event, bool, error)
+	// CloseIssueGuarded preserves its attempted issue, event batch, and changed
+	// result when commit returns an ambiguous error. A caller holding an
+	// idempotency lock can compare those events with the persisted receipt.
+	CloseIssueGuarded(ctx context.Context, p CloseIssueParams) (Issue, []Event, bool, error)
 	ReopenIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
 	SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
 	RestoreIssue(ctx context.Context, issueID int64, actor string) (Issue, *Event, bool, error)
@@ -142,12 +146,15 @@ type Storage interface {
 	MaxEventID(ctx context.Context) (int64, error)
 	MaxLocalOriginEventID(ctx context.Context, projectID int64) (int64, error)
 	MaxFederationBaselineEventID(ctx context.Context, projectID, sinceEventID int64) (int64, error)
-	// AcquireIdempotencyLock serializes one project/key create decision until
+	// AcquireIdempotencyLock serializes one project/key mutation decision until
 	// the returned release function runs. Implementations must coordinate every
 	// daemon that can write the same backend, not only goroutines in one server.
 	AcquireIdempotencyLock(ctx context.Context, projectID int64, key string) (release func() error, err error)
 	LookupIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*IdempotencyMatch, error)
-	LookupCommentIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*CommentIdempotencyMatch, error)
+	LookupIssueMutationIdempotency(ctx context.Context, projectID int64, eventType, key string, since time.Time) (*IdempotencyMatch, error)
+	// LookupCommentIdempotency scopes comment keys by issue UID so a committed
+	// receipt survives a later project move without making keys global.
+	LookupCommentIdempotency(ctx context.Context, issueUID, key string, since time.Time) (*CommentIdempotencyMatch, error)
 	InsertCloseThrottledEvent(ctx context.Context, issueID int64, actor string, payload CloseThrottledPayload) (Event, error)
 	RecentSiblingCloses(ctx context.Context, parentIssueID, excludeIssueID int64, actor string, since time.Time) ([]Event, error)
 	RecentSameMessageClose(ctx context.Context, parentIssueID, excludeIssueID int64, actor, normalizedMessage string, since time.Time) (*Event, error)

@@ -106,6 +106,7 @@ var alreadyImplemented = map[string]bool{
 	"ClearPendingExternalComment":          true, // external_roots.go
 	"Close":                                true, // inherited from embedded *sql.DB
 	"CloseIssue":                           true, // issue_lifecycle.go
+	"CloseIssueGuarded":                    true, // issue_lifecycle.go
 	"CloseIssueWithEvents":                 true, // issue_lifecycle.go
 	"CommentBodyByID":                      true, // comments.go
 	"CommentsByIssue":                      true, // comments.go
@@ -208,6 +209,7 @@ var alreadyImplemented = map[string]bool{
 	"LinksByIssue":                         true, // links.go
 	"Path":                                 true, // store.go
 	"LookupIdempotency":                    true, // idempotency.go
+	"LookupIssueMutationIdempotency":       true, // idempotency.go
 	"LookupCommentIdempotency":             true, // idempotency.go
 	"MaxEventID":                           true, // events.go
 	"MaxFederationBaselineEventID":         true, // events.go

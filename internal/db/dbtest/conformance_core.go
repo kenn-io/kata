@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -328,19 +329,106 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create comment: %w", err)
 	}
-	commentMatch, err := store.LookupCommentIdempotency(ctx, project.ID, "comment-request-1", since)
+	commentMatch, err := store.LookupCommentIdempotency(ctx, issue.UID, "comment-request-1", since)
 	if err != nil {
 		return fmt.Errorf("lookup comment idempotency: %w", err)
 	}
 	require.NotNil(t, commentMatch)
 	assert.Equal(t, comment.UID, commentMatch.Comment.UID)
+	assert.Equal(t, issue.UID, commentMatch.IssueUID)
 	assert.Equal(t, commentEvent.UID, commentMatch.Event.UID)
 	assert.Equal(t, "comment-fingerprint-1", commentMatch.Fingerprint)
-	missingComment, err := store.LookupCommentIdempotency(ctx, project.ID, "comment-request-2", since)
+	missingComment, err := store.LookupCommentIdempotency(ctx, issue.UID, "comment-request-2", since)
 	if err != nil {
 		return fmt.Errorf("lookup missing comment idempotency key: %w", err)
 	}
 	assert.Nil(t, missingComment)
+
+	closeFingerprint := strings.Repeat("a", 64)
+	closed, closeEvents, changed, err := store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: issue.ID, Reason: "wontfix", Actor: "conformance-agent",
+		Message:        "Recorded the reason for stopping this conformance task.",
+		IdempotencyKey: "close-request-1", IdempotencyFingerprint: closeFingerprint,
+		IfMatchRev: new(issue.Revision),
+	})
+	if err != nil {
+		return fmt.Errorf("guarded close: %w", err)
+	}
+	assert.True(t, changed)
+	assert.Equal(t, "closed", closed.Status)
+	require.NotEmpty(t, closeEvents)
+	closeMatch, err := store.LookupIssueMutationIdempotency(
+		ctx, project.ID, "issue.closed", "close-request-1", since)
+	if err != nil {
+		return fmt.Errorf("lookup close idempotency: %w", err)
+	}
+	require.NotNil(t, closeMatch)
+	assert.Equal(t, issue.ID, closeMatch.IssueID)
+	assert.Equal(t, closeEvents[0].UID, closeMatch.Event.UID)
+	assert.Equal(t, closeFingerprint, closeMatch.Fingerprint)
+
+	projectGuardIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "project-pinned close", Author: "conformance-agent",
+	})
+	if err != nil {
+		return fmt.Errorf("create project-pinned close issue: %w", err)
+	}
+	_, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: projectGuardIssue.ID, ExpectedProjectID: project.ID + 9999,
+		Reason: "wontfix", Actor: "conformance-agent",
+	})
+	if !errors.Is(err, db.ErrIssueProjectChanged) {
+		return fmt.Errorf("project-pinned close returned %v, want issue project changed", err)
+	}
+	projectGuardIssue, err = store.IssueByID(ctx, projectGuardIssue.ID)
+	if err != nil {
+		return fmt.Errorf("read project-pinned close issue: %w", err)
+	}
+	assert.Equal(t, "open", projectGuardIssue.Status)
+
+	staleIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "stale close guard", Author: "conformance-agent",
+	})
+	if err != nil {
+		return fmt.Errorf("create stale close issue: %w", err)
+	}
+	if _, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: staleIssue.ID, Actor: "conformance-agent",
+		Patch: map[string]json.RawMessage{"work.state": json.RawMessage(`"ready"`)},
+	}); err != nil {
+		return fmt.Errorf("advance close revision: %w", err)
+	}
+	_, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: staleIssue.ID, Reason: "wontfix", Actor: "conformance-agent",
+		IfMatchRev: new(staleIssue.Revision),
+	})
+	conflict, ok := errors.AsType[*db.RevisionConflictError](err)
+	if !ok || conflict == nil {
+		return fmt.Errorf("guarded close returned %v, want revision conflict", err)
+	}
+	assert.Equal(t, staleIssue.Revision+1, conflict.CurrentRevision)
+	if _, _, _, err := store.CloseIssueWithEvents(
+		ctx, staleIssue.ID, "wontfix", "conformance-agent", "stopped", nil,
+	); err != nil {
+		return fmt.Errorf("close after revision conflict: %w", err)
+	}
+	_, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: staleIssue.ID, Reason: "wontfix", Actor: "conformance-agent",
+		IfMatchRev: new(staleIssue.Revision),
+	})
+	conflict, ok = errors.AsType[*db.RevisionConflictError](err)
+	if !ok || conflict == nil {
+		return fmt.Errorf("guarded closed-issue retry returned %v, want revision conflict", err)
+	}
+	assert.Equal(t, staleIssue.Revision+1, conflict.CurrentRevision)
+
+	nulRelease, err := store.AcquireIdempotencyLock(ctx, 0, "issue-uid\x00comment-request")
+	if err != nil {
+		return fmt.Errorf("acquire idempotency lock containing NUL: %w", err)
+	}
+	if err := nulRelease(); err != nil {
+		return fmt.Errorf("release idempotency lock containing NUL: %w", err)
+	}
 
 	releaseFirst, err := store.AcquireIdempotencyLock(ctx, project.ID, "serialized-request")
 	if err != nil {
