@@ -192,8 +192,9 @@ OK search count=1 query="auth redirect duplicates" mode=hybrid
 
 Search rows append owner, priority, revision, and a body excerpt when present.
 The excerpt is at most 160 characters and centers the first query match when
-possible. `kata show <ref> --agent` remains the complete record. List rows append
-revision after title. Existing row fields keep their names, positions, and
+possible, folding case and diacritics like lexical search. `kata show <ref>
+--agent` remains the complete record and emits `Revision:` after `Priority:`.
+List rows append revision after title. Existing row fields keep their names, positions, and
 meanings, so these additions are purely additive and `agent_format` stays `1`.
 A daemon without `[search.embeddings]` always reports `mode=lexical` and never
 sets `degraded=`, so its output is unchanged apart from the appended `mode=`.
@@ -260,6 +261,7 @@ Bodies and comments are preserved in fenced `text` blocks:
 OK show abc4
 Issue: abc4 "Fix login race"
 Status: open
+Revision: 4
 Body:
 ```text
 Safari can double-submit the callback.

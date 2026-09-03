@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	"golang.org/x/text/unicode/norm"
 )
 
 // newSearchCmd returns the cobra.Command for `kata search`. It calls the
@@ -212,7 +213,7 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 				agentOptionalRowField("owner", r.Issue.Owner),
 				agentRowIntField("priority", r.Issue.Priority),
 				agentRowField("revision", fmt.Sprint(r.Issue.Revision)),
-				agentOptionalRowField("excerpt", optionalAgentString(excerpt)),
+				agentOptionalRowField("excerpt", &excerpt),
 			}
 			if err := writeAgentKVRow(out, fields...); err != nil {
 				return err
@@ -266,13 +267,6 @@ type searchExcerptToken struct {
 	value      string
 	runeOffset int
 	runeLength int
-}
-
-func optionalAgentString(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
 }
 
 func searchAgentExcerpt(query, body string) string {
@@ -360,12 +354,25 @@ func tokenizeSearchExcerpt(value string) []searchExcerptToken {
 			i++
 		}
 		tokens = append(tokens, searchExcerptToken{
-			value:      strings.ToLower(string(runes[start:i])),
+			value:      foldSearchExcerptToken(string(runes[start:i])),
 			runeOffset: start,
 			runeLength: i - start,
 		})
 	}
 	return tokens
+}
+
+// foldSearchExcerptToken lowercases and strips combining marks so excerpt
+// matching folds diacritics the way both lexical search backends do.
+func foldSearchExcerptToken(value string) string {
+	var b strings.Builder
+	for _, r := range norm.NFD.String(value) {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
 }
 
 func isSearchExcerptTokenRune(r rune) bool {

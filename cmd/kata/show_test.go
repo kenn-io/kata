@@ -238,6 +238,16 @@ func TestShow_AgentOutputRendersIssueBodyLabelsAndComments(t *testing.T) {
 	assert.NotContains(t, out, "Owner:")
 }
 
+func TestShow_AgentOutputIncludesRevision(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "revision task")
+	runCLI(t, env, dir, "meta", "set", ref, "work.attention", "needs-human")
+
+	out := runCLI(t, env, dir, "--agent", "show", ref)
+
+	assert.Contains(t, out, "Revision: 2\n")
+}
+
 func TestShow_AgentOutputLinkRowsUseExistingLinkResponseFields(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	blocker := createIssue(t, env, pid, "blocker")

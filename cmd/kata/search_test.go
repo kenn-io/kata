@@ -178,6 +178,13 @@ func TestSearchAgentExcerptDoesNotMatchInsideAnotherToken(t *testing.T) {
 	assert.Contains(t, excerpt, "log useful context")
 }
 
+func TestSearchAgentExcerptFoldsDiacriticsLikeSearch(t *testing.T) {
+	prefix := strings.Repeat("prefix ", 30)
+
+	assert.Contains(t, searchAgentExcerpt("cafe", prefix+"café useful context"), "café useful context")
+	assert.Contains(t, searchAgentExcerpt("café", prefix+"cafe useful context"), "cafe useful context")
+}
+
 // TestSearch_ModeFlagsMutuallyExclusive pins that --lexical/--hybrid/--semantic
 // cannot be combined; each conflicting pair is a validation error.
 func TestSearch_ModeFlagsMutuallyExclusive(t *testing.T) {

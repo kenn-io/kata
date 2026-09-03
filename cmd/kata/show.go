@@ -251,6 +251,7 @@ type showResponseForCLI struct {
 		Author   string                     `json:"author"`
 		Owner    *string                    `json:"owner"`
 		Priority *int64                     `json:"priority"`
+		Revision int64                      `json:"revision"`
 		Metadata map[string]json.RawMessage `json:"metadata"`
 	} `json:"issue"`
 	Comments []struct {
@@ -360,6 +361,9 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 		if err := writeAgentField(w, "Priority", fmt.Sprint(*b.Issue.Priority)); err != nil {
 			return err
 		}
+	}
+	if err := writeAgentField(w, "Revision", fmt.Sprint(b.Issue.Revision)); err != nil {
+		return err
 	}
 	if len(b.Issue.Metadata) > 0 {
 		if _, err := fmt.Fprintln(w, "Metadata:"); err != nil {
