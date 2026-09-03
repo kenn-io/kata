@@ -244,6 +244,16 @@ func isShellSafeArg(s string) bool {
 	return true
 }
 
+// responseBodyReadError marks a response that was cut off after its headers
+// arrived, when a mutating request may already have committed.
+type responseBodyReadError struct{ err error }
+
+func (e *responseBodyReadError) Error() string {
+	return "read response body: " + e.err.Error()
+}
+
+func (e *responseBodyReadError) Unwrap() error { return e.err }
+
 // httpDoJSONWithHeader mirrors httpDoJSON but lets callers attach extra
 // request headers (notably X-Kata-Confirm). Defined here so delete and the
 // upcoming purge command don't have to extend the helpers.go signature.
@@ -274,7 +284,7 @@ func httpDoJSONWithHeader(ctx context.Context, client *http.Client,
 	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, &responseBodyReadError{err: err}
 	}
 	return resp.StatusCode, out, nil
 }

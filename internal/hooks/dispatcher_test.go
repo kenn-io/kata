@@ -53,7 +53,10 @@ func mustNewDispatcher(t *testing.T, hooks []ResolvedHook, cfg Config) (*Dispatc
 // second wait matters on Windows, where an open appender prevents unlinking.
 func cleanupDispatcher(t *testing.T, d *Dispatcher) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Shutdown aborts in-flight work at deadline-2x GraceWindow, so a 2s
+	// budget is too tight for five sequential process spawns on Windows CI.
+	const budget = 20 * dispatcherTestGraceWindow
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	err := d.Shutdown(ctx)
 	cancel()
 	if err == nil {

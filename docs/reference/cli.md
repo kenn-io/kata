@@ -139,10 +139,11 @@ kata create <title> \
 `--meta` binds string-valued metadata at creation and is repeatable.
 
 Before creating an issue, the daemon checks existing non-deleted look-alikes,
-including closed ones, using the full title and the first 500 Unicode code
-points of the body. `--force-new` bypasses that check; idempotency still wins
-when an idempotency key matches. If create times out, or the request is
-canceled before the response arrives, its outcome is unknown: check whether
+including closed ones, using the first 500 Unicode code points of the title
+and body. `--force-new` bypasses that check; idempotency still wins
+when an idempotency key matches. If create times out, the request is canceled
+or the connection drops before the response arrives, or the response is cut
+off before it completes, its outcome is unknown: check whether
 the issue exists before retrying, and use `--force-new` only after confirming
 that no issue was created.
 

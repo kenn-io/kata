@@ -126,31 +126,43 @@ func Jaccard(a, b []string) float64 {
 
 // Score returns the weighted similarity between two issues:
 //
-//	0.6 * Jaccard(title tokens) + 0.4 * Jaccard(body[:500] tokens)
+//	0.6 * Jaccard(title[:500] tokens) + 0.4 * Jaccard(body[:500] tokens)
 //
-// Body slicing is rune-based: the first 500 Unicode codepoints of each body
-// are tokenized. Spec §3.7.
+// Field slicing is rune-based: the first 500 Unicode codepoints of each title
+// and body are tokenized. Spec §3.7.
 func Score(titleA, bodyA, titleB, bodyB string) float64 {
-	titleScore := Jaccard(Tokenize(titleA), Tokenize(titleB))
+	titleScore := Jaccard(Tokenize(TitlePrefix(titleA)), Tokenize(TitlePrefix(titleB)))
 	bodyScore := Jaccard(Tokenize(BodyPrefix(bodyA)), Tokenize(BodyPrefix(bodyB)))
 	return 0.6*titleScore + 0.4*bodyScore
+}
+
+const lookalikePrefixRunes = 500
+
+func fieldPrefix(value string) string {
+	count := 0
+	for i := range value {
+		if count == lookalikePrefixRunes {
+			return value[:i]
+		}
+		count++
+	}
+	return value
 }
 
 // BodyPrefix returns the first 500 runes of body. If body has fewer than 500
 // runes, it is returned unchanged.
 func BodyPrefix(body string) string {
-	count := 0
-	for i := range body {
-		if count == 500 {
-			return body[:i]
-		}
-		count++
-	}
-	return body
+	return fieldPrefix(body)
+}
+
+// TitlePrefix returns the first 500 runes of title. If title has fewer than
+// 500 runes, it is returned unchanged.
+func TitlePrefix(title string) string {
+	return fieldPrefix(title)
 }
 
 // LookalikeQuery returns the issue text used to retrieve look-alike
-// candidates. Its body portion matches the prefix used by Score.
+// candidates. Its title and body portions match the prefixes used by Score.
 func LookalikeQuery(title, body string) string {
-	return strings.TrimSpace(title + " " + BodyPrefix(body))
+	return strings.TrimSpace(TitlePrefix(title) + " " + BodyPrefix(body))
 }

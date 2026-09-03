@@ -41,6 +41,16 @@ func TestLookalikeQuery(t *testing.T) {
 	assert.Equal(t, "full issue title   "+prefix, got)
 }
 
+func TestLookalikeQuery_TitleIsBounded(t *testing.T) {
+	title := strings.Repeat("界", 499) + "留 discard-this-suffix"
+
+	got := similarity.LookalikeQuery(title, "")
+
+	assert.Contains(t, got, "留")
+	assert.NotContains(t, got, "discard-this-suffix")
+	assert.True(t, utf8.ValidString(got))
+}
+
 const epsilon = 1e-9
 
 type tokenizeTestCase struct {
@@ -142,6 +152,14 @@ func TestScore_Body500CharLimit(t *testing.T) {
 		"same", prefix+" alpha-divergent",
 		"same", prefix+" beta-divergent",
 		"divergence past 500 chars must not affect the score")
+}
+
+func TestScore_Title500RuneLimit(t *testing.T) {
+	prefix := strings.Repeat("x", 500)
+	assertScore(t, 1.0,
+		prefix+" alpha-divergent", "same body",
+		prefix+" beta-divergent", "same body",
+		"title divergence past 500 runes must not affect the score")
 }
 
 // TestTokenize_AllStopWordsAreFiltered guards against stopword/stem ordering

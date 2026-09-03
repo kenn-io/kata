@@ -1320,8 +1320,8 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 	return fp, out, nil
 }
 
-// runLookalikeCheck runs the §3.7 soft-block: SearchFTSAny over the title and
-// the body prefix used by the scorer
+// runLookalikeCheck runs the §3.7 soft-block: SearchFTSAny over the
+// 500-code-point title and body prefixes used by the scorer
 // (OR-of-tokens for high recall), scores each candidate via similarity.Score,
 // and returns a 409 duplicate_candidates error if any candidate is at or
 // above the 0.7 threshold. nil means proceed. The OR variant is required
