@@ -140,6 +140,51 @@ func TestSearchAgentAppendsMode(t *testing.T) {
 	}
 }
 
+func TestSearchAgentIncludesBoundedTaskContext(t *testing.T) {
+	body := `{"query":"needle","mode":"lexical","results":[
+	  {"issue":{"short_id":"abc4","title":"Investigate the worker","body":"zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen needle nearby context sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two thirty-three distant-tail","status":"open","owner":"alice","priority":2,"revision":7},"score":1.2,"matched_in":["body"]}]}`
+	out := renderSearch(t, outputAgent, body)
+
+	assert.Contains(t, out, "issue=abc4")
+	assert.Contains(t, out, `title="Investigate the worker"`)
+	assert.Contains(t, out, "status=open")
+	assert.Contains(t, out, "owner=alice")
+	assert.Contains(t, out, "priority=2")
+	assert.Contains(t, out, "revision=7")
+	assert.Contains(t, out, "needle nearby context")
+	assert.NotContains(t, out, "distant-tail")
+	assert.NotContains(t, out, "body=")
+}
+
+func TestSearchAgentExcerptKeepsMatchAfterLongContext(t *testing.T) {
+	prefix := strings.Repeat("supercalifragilisticexpialidociousword ", 8)
+	excerpt := searchAgentExcerpt("needle", prefix+"needle useful context after the match")
+
+	assert.Contains(t, excerpt, "needle")
+	assert.LessOrEqual(t, len([]rune(excerpt)), agentSearchExcerptLimit)
+}
+
+func TestSearchAgentExcerptSplitsQueryPunctuationLikeSearch(t *testing.T) {
+	prefix := strings.Repeat("prefix ", 30)
+	excerpt := searchAgentExcerpt("foo-bar", prefix+"foo bar useful context")
+
+	assert.Contains(t, excerpt, "foo bar useful context")
+}
+
+func TestSearchAgentExcerptDoesNotMatchInsideAnotherToken(t *testing.T) {
+	body := "catalog " + strings.Repeat("filler ", 30) + "log useful context"
+	excerpt := searchAgentExcerpt("log", body)
+
+	assert.Contains(t, excerpt, "log useful context")
+}
+
+func TestSearchAgentExcerptFoldsDiacriticsLikeSearch(t *testing.T) {
+	prefix := strings.Repeat("prefix ", 30)
+
+	assert.Contains(t, searchAgentExcerpt("cafe", prefix+"café useful context"), "café useful context")
+	assert.Contains(t, searchAgentExcerpt("café", prefix+"cafe useful context"), "cafe useful context")
+}
+
 // TestSearch_ModeFlagsMutuallyExclusive pins that --lexical/--hybrid/--semantic
 // cannot be combined; each conflicting pair is a validation error.
 func TestSearch_ModeFlagsMutuallyExclusive(t *testing.T) {

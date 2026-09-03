@@ -391,6 +391,7 @@ func TestList_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
 
 	assert.Contains(t, out, "OK list count=1\n")
 	assert.Contains(t, out, `title="unowned task"`)
+	assert.Contains(t, out, "revision=1")
 	assert.NotContains(t, out, "owner=")
 }
 

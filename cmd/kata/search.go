@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	"golang.org/x/text/unicode/norm"
 )
 
 // newSearchCmd returns the cobra.Command for `kata search`. It calls the
@@ -169,9 +172,13 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		DegradedReason string `json:"degraded_reason"`
 		Results        []struct {
 			Issue struct {
-				ShortID string `json:"short_id"`
-				Title   string `json:"title"`
-				Status  string `json:"status"`
+				ShortID  string  `json:"short_id"`
+				Title    string  `json:"title"`
+				Body     string  `json:"body"`
+				Status   string  `json:"status"`
+				Owner    *string `json:"owner"`
+				Priority *int64  `json:"priority"`
+				Revision int64   `json:"revision"`
 			} `json:"issue"`
 			Score     float64  `json:"score"`
 			MatchedIn []string `json:"matched_in"`
@@ -196,13 +203,19 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 			return err
 		}
 		for _, r := range b.Results {
-			if err := writeAgentKVRow(out,
+			excerpt := searchAgentExcerpt(b.Query, r.Issue.Body)
+			fields := []agentField{
 				agentRowField("issue", r.Issue.ShortID),
 				agentRowFloatField("score", r.Score),
 				agentRowField("status", r.Issue.Status),
 				agentRowListField("matched", r.MatchedIn),
 				agentRowField("title", r.Issue.Title),
-			); err != nil {
+				agentOptionalRowField("owner", r.Issue.Owner),
+				agentRowIntField("priority", r.Issue.Priority),
+				agentRowField("revision", fmt.Sprint(r.Issue.Revision)),
+				agentOptionalRowField("excerpt", &excerpt),
+			}
+			if err := writeAgentKVRow(out, fields...); err != nil {
 				return err
 			}
 		}
@@ -246,4 +259,133 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		}
 	}
 	return nil
+}
+
+const agentSearchExcerptLimit = 160
+
+type searchExcerptToken struct {
+	value      string
+	runeOffset int
+	runeLength int
+}
+
+func searchAgentExcerpt(query, body string) string {
+	words := strings.Fields(body)
+	if len(words) == 0 {
+		return ""
+	}
+	queryTokens := tokenizeSearchExcerpt(query)
+	hit := 0
+	matchOffset := 0
+	matchLength := 0
+	found := false
+	for i, word := range words {
+		for _, candidate := range tokenizeSearchExcerpt(word) {
+			for _, queryToken := range queryTokens {
+				if candidate.value == queryToken.value {
+					hit = i
+					matchOffset = candidate.runeOffset
+					matchLength = candidate.runeLength
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	start := 0
+	if found {
+		start = max(0, hit-8)
+	}
+	end := min(len(words), start+24)
+	excerptRunes := []rune(strings.Join(words[start:end], " "))
+	focusStart := -1
+	if found {
+		focusStart = matchOffset
+		for i := start; i < hit; i++ {
+			focusStart += utf8.RuneCountInString(words[i]) + 1
+		}
+	}
+	leftTrimmed := start > 0
+	rightTrimmed := end < len(words)
+	markerRunes := 0
+	if leftTrimmed {
+		markerRunes += 2
+	}
+	if rightTrimmed {
+		markerRunes += 2
+	}
+	if len(excerptRunes)+markerRunes <= agentSearchExcerptLimit {
+		return formatSearchExcerpt(excerptRunes, leftTrimmed, rightTrimmed)
+	}
+
+	// Reserve room for both ellipsis markers. Center the bounded window on
+	// the matched query term so long context before it cannot hide the match.
+	windowSize := agentSearchExcerptLimit - 4
+	windowStart := 0
+	if focusStart >= 0 {
+		focusEnd := focusStart + matchLength
+		windowStart = max(0, (focusStart+focusEnd-windowSize)/2)
+		windowStart = min(windowStart, max(0, len(excerptRunes)-windowSize))
+	}
+	windowEnd := min(len(excerptRunes), windowStart+windowSize)
+	return formatSearchExcerpt(
+		excerptRunes[windowStart:windowEnd],
+		leftTrimmed || windowStart > 0,
+		rightTrimmed || windowEnd < len(excerptRunes),
+	)
+}
+
+func tokenizeSearchExcerpt(value string) []searchExcerptToken {
+	runes := []rune(value)
+	tokens := make([]searchExcerptToken, 0, len(strings.Fields(value)))
+	for i := 0; i < len(runes); {
+		if !isSearchExcerptTokenRune(runes[i]) {
+			i++
+			continue
+		}
+		start := i
+		for i < len(runes) && isSearchExcerptTokenRune(runes[i]) {
+			i++
+		}
+		tokens = append(tokens, searchExcerptToken{
+			value:      foldSearchExcerptToken(string(runes[start:i])),
+			runeOffset: start,
+			runeLength: i - start,
+		})
+	}
+	return tokens
+}
+
+// foldSearchExcerptToken lowercases and strips combining marks so excerpt
+// matching folds diacritics the way both lexical search backends do.
+func foldSearchExcerptToken(value string) string {
+	var b strings.Builder
+	for _, r := range norm.NFD.String(value) {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+
+func isSearchExcerptTokenRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r)
+}
+
+func formatSearchExcerpt(runes []rune, leftTrimmed, rightTrimmed bool) string {
+	excerpt := string(runes)
+	if leftTrimmed {
+		excerpt = "… " + excerpt
+	}
+	if rightTrimmed {
+		excerpt += " …"
+	}
+	return excerpt
 }

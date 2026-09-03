@@ -137,6 +137,7 @@ func newListCmd() *cobra.Command {
 					Status      string   `json:"status"`
 					Owner       *string  `json:"owner"`
 					Priority    *int64   `json:"priority"`
+					Revision    int64    `json:"revision"`
 					Labels      []string `json:"labels"`
 					Blocked     bool     `json:"blocked"`
 					Parent      *struct {
@@ -164,6 +165,7 @@ func newListCmd() *cobra.Command {
 						agentOptionalRowField("owner", i.Owner),
 						agentRowListField("labels", i.Labels),
 						agentRowField("title", i.Title),
+						agentRowField("revision", fmt.Sprint(i.Revision)),
 					); err != nil {
 						return err
 					}
