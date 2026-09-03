@@ -25,7 +25,7 @@ func newFederationLeaseCmd() *cobra.Command {
 		Use:   "lease",
 		Short: "manage federation write leases",
 	}
-	cmd.AddCommand(newFederationLeaseAcquireCmd(), newFederationLeaseReleaseCmd(),
+	cmd.AddCommand(newFederationLeaseAcquireCmd(), newFederationLeaseRenewCmd(), newFederationLeaseReleaseCmd(),
 		newFederationLeaseForceReleaseCmd(), newFederationLeaseStealCmd())
 	return cmd
 }
@@ -45,6 +45,27 @@ func newFederationLeaseAcquireCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&ttlRaw, "ttl", "", "timed lease duration (for example 30m or 2h)")
+	return cmd
+}
+
+func newFederationLeaseRenewCmd() *cobra.Command {
+	var ttlRaw string
+	cmd := &cobra.Command{
+		Use:   "renew <issue-ref>",
+		Short: "renew a timed federation write lease",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ttl, timed, err := parseClaimTTL(ttlRaw)
+			if err != nil {
+				return err
+			}
+			if !timed {
+				return &cliError{Message: "--ttl is required", Kind: kindUsage, ExitCode: ExitUsage}
+			}
+			return runClaimAction(cmd, args[0], "renew", ttl, true)
+		},
+	}
+	cmd.Flags().StringVar(&ttlRaw, "ttl", "", "new timed lease duration (for example 30m or 2h)")
 	return cmd
 }
 
@@ -180,13 +201,16 @@ func runClaimAction(cmd *cobra.Command, rawRef, action string, ttl time.Duration
 		"holder":      actor,
 		"client_kind": "cli",
 	}
-	if action == "claim" || action == "acquire" {
+	switch action {
+	case "claim", "acquire":
 		if timed {
 			body["claim_kind"] = "timed"
 			body["ttl_seconds"] = int64(ttl / time.Second)
 		} else {
 			body["claim_kind"] = "hard"
 		}
+	case "renew":
+		body["ttl_seconds"] = int64(ttl / time.Second)
 	}
 	bs, ref, err := postClaimAction(cmd, rawRef, action, body)
 	if err != nil {
@@ -383,6 +407,10 @@ func printLeaseMutation(cmd *cobra.Command, bs []byte, action, ref, actor string
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "lease pending for %s as %s\n", ref, holder)
 		return err
 	}
+	if action == "renew" {
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "renewed lease on %s as %s\n", ref, holder)
+		return err
+	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "acquired lease on %s as %s\n", ref, holder)
 	return err
 }
@@ -410,6 +438,9 @@ func printLeaseMutationAgent(cmd *cobra.Command, action, ref, actor string, b cl
 		return err
 	}
 	state := "acquired"
+	if action == "renew" {
+		state = "renewed"
+	}
 	if b.Pending {
 		state = "pending"
 	}

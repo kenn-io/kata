@@ -855,6 +855,7 @@ kata federation status
 kata federation enrollments list
 kata federation revoke <enrollment-id>
 kata federation lease acquire <issue-ref> [--ttl 30m]
+kata federation lease renew <issue-ref> --ttl 30m
 kata federation lease release <issue-ref>
 kata federation quarantine list
 kata federation quarantine show <id>
@@ -895,7 +896,9 @@ Federation is an operator workflow. Most users never need these commands.
 Issue edits on push-enabled federated spokes remain local-first; use
 `kata federation lease acquire` only when you want exclusive coordination on an
 issue. A live lease held by another actor blocks non-comment mutations until it
-is released or expires.
+is released or expires. Renew a timed lease before it expires with
+`kata federation lease renew <issue-ref> --ttl <duration>`. Renewal preserves
+the lease identity and sets a new expiry from the hub's current time.
 
 `kata federation quarantine list` reports every active quarantine with its
 project, direction, event range, creation time, and retained error. Use
