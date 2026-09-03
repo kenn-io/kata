@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -172,7 +173,7 @@ func newCreateCmd() *cobra.Command {
 			fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, projectID),
 			headers, req)
 		if err != nil {
-			return err
+			return createRequestError(err, forceNew)
 		}
 		if status >= 400 {
 			return apiErrFromBody(status, bs)
@@ -188,6 +189,43 @@ func newCreateCmd() *cobra.Command {
 		return printMutationWithApplied(cmd, bs, applied, projectName)
 	}
 	return cmd
+}
+
+func createRequestError(err error, forceNew bool) error {
+	if err == nil {
+		return err
+	}
+	reason := ""
+	switch {
+	case requestTimedOut(err):
+		reason = "request timed out"
+	case errors.Is(err, context.Canceled):
+		reason = "request canceled before the response arrived"
+	default:
+		return err
+	}
+	message := "create outcome unknown: " + reason +
+		"; check whether the issue was created before retrying"
+	if !forceNew {
+		message += "; use --force-new only after confirming no issue exists"
+	}
+	return &cliError{
+		Message:  message,
+		Kind:     kindInternal,
+		Code:     "create_outcome_unknown",
+		ExitCode: ExitInternal,
+	}
+}
+
+func requestTimedOut(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) || netErr == nil {
+		return false
+	}
+	return netErr.Timeout()
 }
 
 // initialLinksAsChanges builds a synthetic mutationChanges from the
