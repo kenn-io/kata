@@ -106,7 +106,10 @@ func TestServiceRunWakesFederationOnCommittedEvent(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		_, issueErr := hubService.store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		return issueErr == nil
+		status, statusErr := spokeService.store.FederationSyncStatusByProject(ctx, spokeProject.ID)
+		// The hub commit becomes visible before the spoke finishes pulling its echo.
+		// Keep Run alive until that successful pass clears the seeded offline error.
+		return issueErr == nil && statusErr == nil && status.LastError == nil
 	}, 2*time.Second, 10*time.Millisecond, "federation push should be event-driven, not wait for the 30-second poll")
 }
 
