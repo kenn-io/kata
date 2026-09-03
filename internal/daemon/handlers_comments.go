@@ -13,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -33,22 +34,27 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		resolved := false
 		fingerprint := ""
 		if in.IdempotencyKey != "" {
-			if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+			routeProject, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+			if err != nil {
 				return nil, err
 			}
 			// Comment keys are scoped to one issue UID. A full ULID ref needs
 			// no resolution, so its retry survives a project move; any other
-			// ref form resolves inside the route project first.
+			// ref form resolves inside the route project first and falls back
+			// to the receipt this project already holds for the key.
 			issueUID := ""
 			if uid.Valid(in.Ref) {
 				issueUID = strings.ToUpper(in.Ref)
 			} else {
 				issue, err = activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-				if err != nil {
+				if err == nil {
+					resolved = true
+					issueUID = issue.UID
+				} else if issueUID, err = receiptIssueUID(
+					ctx, cfg, routeProject, in.Ref, in.IdempotencyKey, err,
+				); err != nil {
 					return nil, err
 				}
-				resolved = true
-				issueUID = issue.UID
 			}
 			// Project IDs change when an issue moves. Zero is outside the
 			// persisted project ID range and gives every keyed comment one
@@ -178,7 +184,8 @@ func replayComment(
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
-	if routeProjectID != match.Event.ProjectID && routeProjectID != current.ProjectID {
+	if current.DeletedAt != nil ||
+		(routeProjectID != match.Event.ProjectID && routeProjectID != current.ProjectID) {
 		return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 	}
 	if _, err := activeProjectByID(ctx, cfg.DB, current.ProjectID); err != nil {
@@ -193,6 +200,38 @@ func replayComment(
 	out.Body.Event = nil
 	out.Body.Changed = false
 	return out, nil
+}
+
+// receiptIssueUID recovers the issue a short-id retry addresses after that
+// issue moved out of the route project. The receipt written in this project
+// names the issue; the ref must still be a suffix of that issue's ULID, and a
+// qualifier must name this project, so a key cannot steer a retry elsewhere.
+// Any other outcome returns the original resolution error.
+func receiptIssueUID(
+	ctx context.Context,
+	cfg ServerConfig,
+	routeProject db.Project,
+	ref, key string,
+	resolveErr error,
+) (string, error) {
+	parsed, err := shortid.Parse(ref)
+	if err != nil || parsed.ShortID == "" ||
+		(parsed.Project != "" && parsed.Project != routeProject.Name) {
+		return "", resolveErr
+	}
+	match, err := cfg.DB.LookupIssueMutationIdempotency(
+		ctx, routeProject.ID, "issue.commented", key, time.Now().Add(-idempotencyWindow))
+	if err != nil {
+		return "", internalAPIError(err)
+	}
+	if match == nil {
+		return "", resolveErr
+	}
+	derived, err := shortid.Derive(match.IssueUID, len(parsed.ShortID))
+	if err != nil || derived != parsed.ShortID {
+		return "", resolveErr
+	}
+	return match.IssueUID, nil
 }
 
 func commentIdempotencyFingerprint(issueUID, actor, body string) string {

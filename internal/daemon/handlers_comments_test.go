@@ -342,3 +342,52 @@ func TestCommentEndpoint_IdempotencyReplayRejectsArchivedCurrentProject(t *testi
 	retry := postWithHeader(t, ts, path, headers, body)
 	assertAPIError(t, retry.status, retry.body, http.StatusNotFound, "project_not_found")
 }
+
+func TestCommentEndpoint_IdempotencyReplaysShortIDRetryAfterMove(t *testing.T) {
+	h, ts, sourceProjectID, issueID := bootstrapProjectWithIssue(t)
+	body := map[string]any{"actor": "agent", "body": "first comment"}
+	headers := map[string]string{"Idempotency-Key": "short-id-comment-then-move"}
+	path := issueURL(sourceProjectID, issueID, "comments")
+	requireOK(t, postWithHeader(t, ts, path, headers, body))
+
+	target, err := h.DB().CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	_, err = h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: sourceProjectID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "coordinator",
+	})
+	require.NoError(t, err)
+
+	retry := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, retry)
+	var reused struct {
+		Changed bool `json:"changed"`
+		Issue   struct {
+			ProjectID int64 `json:"project_id"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(retry.body, &reused))
+	assert.False(t, reused.Changed)
+	assert.Equal(t, target.ID, reused.Issue.ProjectID)
+	comments, err := h.DB().CommentsByIssue(t.Context(), issueID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+}
+
+func TestCommentEndpoint_IdempotencyReplayRejectsSoftDeletedIssue(t *testing.T) {
+	h, ts, pid, issueID := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	body := map[string]any{"actor": "agent", "body": "first comment"}
+	headers := map[string]string{"Idempotency-Key": "comment-then-delete"}
+	path := issueURLRef(pid, issue.UID, "comments")
+	requireOK(t, postWithHeader(t, ts, path, headers, body))
+
+	_, _, _, err = h.DB().SoftDeleteIssue(t.Context(), issueID, "agent")
+	require.NoError(t, err)
+
+	retry := postWithHeader(t, ts, path, headers, body)
+	assertAPIError(t, retry.status, retry.body, http.StatusNotFound, "issue_not_found")
+}
