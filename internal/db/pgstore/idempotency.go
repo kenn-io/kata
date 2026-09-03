@@ -61,30 +61,20 @@ func (s *Store) LookupIssueMutationIdempotency(
 	}, nil
 }
 
-// LookupCommentIdempotency finds the newest recent issue.commented event
-// carrying key and returns the comment that event created.
+// LookupCommentIdempotency finds the newest recent issue.commented event on
+// issueUID carrying key and returns the comment that event created.
 func (s *Store) LookupCommentIdempotency(
 	ctx context.Context,
-	projectID int64,
 	issueUID string,
 	key string,
 	since time.Time,
 ) (*db.CommentIdempotencyMatch, error) {
 	query := eventSelect + ` WHERE e.type = 'issue.commented'
-      AND e.project_id = $1
-      AND e.payload::jsonb ->> 'idempotency_key' = $2
-      AND e.created_at >= $3
-      ORDER BY e.id DESC LIMIT 1`
-	scope := any(projectID)
-	if issueUID != "" {
-		query = eventSelect + ` WHERE e.type = 'issue.commented'
       AND e.issue_uid = $1
       AND e.payload::jsonb ->> 'idempotency_key' = $2
       AND e.created_at >= $3
       ORDER BY e.id DESC LIMIT 1`
-		scope = issueUID
-	}
-	event, err := scanEvent(s.QueryRowContext(ctx, query, scope, key, formatStoredTime(since)))
+	event, err := scanEvent(s.QueryRowContext(ctx, query, issueUID, key, formatStoredTime(since)))
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil
 	}

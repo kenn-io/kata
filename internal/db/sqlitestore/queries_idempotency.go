@@ -186,27 +186,12 @@ func (d *Store) LookupIssueMutationIdempotency(
 	}, nil
 }
 
-// LookupCommentIdempotency finds the newest recent issue.commented event
-// carrying key and returns the comment that event created.
+// LookupCommentIdempotency finds the newest recent issue.commented event on
+// issueUID carrying key and returns the comment that event created.
 func (d *Store) LookupCommentIdempotency(
-	ctx context.Context, projectID int64, issueUID, key string, since time.Time,
+	ctx context.Context, issueUID, key string, since time.Time,
 ) (*db.CommentIdempotencyMatch, error) {
-	q := `
-		SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
-		       e.issue_id, e.issue_uid,
-		       e.related_issue_id, e.related_issue_uid, e.type, e.actor, e.payload,
-		       e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
-		FROM events e
-		JOIN projects p ON p.id = e.project_id
-		WHERE e.type = 'issue.commented'
-		  AND e.project_id = ?
-		  AND json_extract(e.payload, '$.idempotency_key') = ?
-		  AND e.created_at >= ?
-		ORDER BY e.id DESC
-		LIMIT 1`
-	scope := any(projectID)
-	if issueUID != "" {
-		q = `
+	const q = `
 		SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
 		       e.issue_id, e.issue_uid,
 		       e.related_issue_id, e.related_issue_uid, e.type, e.actor, e.payload,
@@ -219,9 +204,7 @@ func (d *Store) LookupCommentIdempotency(
 		  AND e.created_at >= ?
 		ORDER BY e.id DESC
 		LIMIT 1`
-		scope = issueUID
-	}
-	row := d.QueryRowContext(ctx, q, scope, key, since.UTC().Format(sqliteTimeFormat))
+	row := d.QueryRowContext(ctx, q, issueUID, key, since.UTC().Format(sqliteTimeFormat))
 
 	var evt db.Event
 	err := row.Scan(&evt.ID, &evt.UID, &evt.OriginInstanceUID, &evt.ProjectID, &evt.ProjectUID, &evt.ProjectName,

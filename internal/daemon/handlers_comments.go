@@ -29,59 +29,50 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		lookupIssueUID := ""
-		if uid.Valid(in.Ref) {
-			lookupIssueUID = strings.ToUpper(in.Ref)
-		}
+		var issue db.Issue
+		resolved := false
 		fingerprint := ""
 		if in.IdempotencyKey != "" {
-			lockProjectID, lockKey := in.ProjectID, in.IdempotencyKey
-			if lookupIssueUID != "" {
-				// Project IDs change when an issue moves. Zero is outside the
-				// persisted project ID range and gives UID-addressed retries one
-				// stable, backend-wide lock scope.
-				lockProjectID = 0
-				lockKey = lookupIssueUID + "\x00" + in.IdempotencyKey
+			if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+				return nil, err
 			}
-			release, err := cfg.DB.AcquireIdempotencyLock(ctx, lockProjectID, lockKey)
+			// Comment keys are scoped to one issue UID. A full ULID ref needs
+			// no resolution, so its retry survives a project move; any other
+			// ref form resolves inside the route project first.
+			issueUID := ""
+			if uid.Valid(in.Ref) {
+				issueUID = strings.ToUpper(in.Ref)
+			} else {
+				issue, err = activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+				if err != nil {
+					return nil, err
+				}
+				resolved = true
+				issueUID = issue.UID
+			}
+			// Project IDs change when an issue moves. Zero is outside the
+			// persisted project ID range and gives every keyed comment one
+			// stable, backend-wide lock scope.
+			release, err := cfg.DB.AcquireIdempotencyLock(ctx, 0, issueUID+"\x00"+in.IdempotencyKey)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
 			defer func() { _ = release() }()
 
 			match, err := cfg.DB.LookupCommentIdempotency(
-				ctx, in.ProjectID, lookupIssueUID, in.IdempotencyKey,
-				time.Now().Add(-idempotencyWindow))
+				ctx, issueUID, in.IdempotencyKey, time.Now().Add(-idempotencyWindow))
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
 			if match != nil {
-				fingerprint = commentIdempotencyFingerprint(match.IssueUID, actor, in.Body.Body)
-				if match.Fingerprint != fingerprint {
-					return nil, api.NewError(409, "idempotency_mismatch",
-						"idempotency key matched a prior comment with a different fingerprint",
-						"use a fresh key or send the exact original comment", nil)
-				}
-				updated, err := cfg.DB.IssueByID(ctx, match.Comment.IssueID)
-				if err != nil {
-					return nil, internalAPIError(err)
-				}
-				if _, err := authorizeHostProjectScope(
-					ctx, []int64{updated.ProjectID}, nil, false,
-				); err != nil {
-					return nil, err
-				}
-				out := &api.CommentResponse{}
-				out.Body.Issue = updated
-				out.Body.Comment = match.Comment
-				out.Body.Event = nil
-				out.Body.Changed = false
-				return out, nil
+				return replayComment(ctx, cfg, in.ProjectID, match, actor, in.Body.Body)
 			}
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-		if err != nil {
-			return nil, err
+		if !resolved {
+			issue, err = activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if in.IdempotencyKey != "" {
 			fingerprint = commentIdempotencyFingerprint(issue.UID, actor, in.Body.Body)
@@ -165,6 +156,43 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Changed = changed
 		return out, nil
 	})
+}
+
+// replayComment returns a committed comment receipt to an exact retry. The
+// route must be the project the comment was written in or the project the
+// issue lives in now, and that current project must still be active and
+// inside the caller's host scope, because the reply exposes current state.
+func replayComment(
+	ctx context.Context,
+	cfg ServerConfig,
+	routeProjectID int64,
+	match *db.CommentIdempotencyMatch,
+	actor, body string,
+) (*api.CommentResponse, error) {
+	if match.Fingerprint != commentIdempotencyFingerprint(match.IssueUID, actor, body) {
+		return nil, api.NewError(409, "idempotency_mismatch",
+			"idempotency key matched a prior comment with a different fingerprint",
+			"use a fresh key or send the exact original comment", nil)
+	}
+	current, err := cfg.DB.IssueByID(ctx, match.Comment.IssueID)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	if routeProjectID != match.Event.ProjectID && routeProjectID != current.ProjectID {
+		return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
+	}
+	if _, err := activeProjectByID(ctx, cfg.DB, current.ProjectID); err != nil {
+		return nil, err
+	}
+	if _, err := authorizeHostProjectScope(ctx, []int64{current.ProjectID}, nil, false); err != nil {
+		return nil, err
+	}
+	out := &api.CommentResponse{}
+	out.Body.Issue = current
+	out.Body.Comment = match.Comment
+	out.Body.Event = nil
+	out.Body.Changed = false
+	return out, nil
 }
 
 func commentIdempotencyFingerprint(issueUID, actor, body string) string {

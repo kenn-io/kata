@@ -515,3 +515,32 @@ func TestClose_IfMatchRejectsStaleRevisionAfterAnotherClose(t *testing.T) {
 	assertAPIError(t, response.status, response.body,
 		http.StatusPreconditionFailed, "revision_conflict")
 }
+
+func TestClose_ReplayRejectsArchivedCurrentProject(t *testing.T) {
+	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	path := issueURLRef(projectID, issue.UID, "actions/close")
+	headers := map[string]string{"Idempotency-Key": "close-then-archive"}
+	body := map[string]any{
+		"actor":          "agent-one",
+		"reason":         "wontfix",
+		"message":        "Reviewed the request and recorded why the work should stop here.",
+		"retry_protocol": "close-v1",
+	}
+	requireOK(t, postWithHeader(t, ts, path, headers, body))
+
+	target, err := h.DB().CreateProject(t.Context(), "archived-target")
+	require.NoError(t, err)
+	issue, err = h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	_, err = h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: projectID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "coordinator",
+	})
+	require.NoError(t, err)
+	archiveProject(t, h, target.ID, true)
+
+	retry := postWithHeader(t, ts, path, headers, body)
+	assertAPIError(t, retry.status, retry.body, http.StatusNotFound, "project_not_found")
+}

@@ -352,8 +352,11 @@ func closeIdempotencyResponse(
 		return nil, internalAPIError(err)
 	}
 	// The issue may have moved since the original close. Replaying the
-	// receipt exposes its current state, so the caller's host scope must
-	// cover the project it lives in now.
+	// receipt exposes its current state, so the project it lives in now must
+	// be active and inside the caller's host scope.
+	if _, err := activeProjectByID(ctx, cfg.DB, current.ProjectID); err != nil {
+		return nil, err
+	}
 	if _, err := authorizeHostProjectScope(ctx, []int64{current.ProjectID}, nil, false); err != nil {
 		return nil, err
 	}

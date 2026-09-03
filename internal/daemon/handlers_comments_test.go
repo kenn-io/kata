@@ -270,3 +270,75 @@ func TestReopenIssue_BlankActorIs400(t *testing.T) {
 		map[string]any{"actor": "   "})
 	assertAPIError(t, resp.StatusCode, bs, 400, "validation")
 }
+
+func TestCommentEndpoint_IdempotencyKeyIsScopedToIssue(t *testing.T) {
+	h, ts, pid, firstIssueID := bootstrapProjectWithIssue(t)
+	second, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: pid, Title: "second issue", Author: "agent",
+	})
+	require.NoError(t, err)
+	body := map[string]any{"actor": "agent", "body": "same body"}
+	headers := map[string]string{"Idempotency-Key": "shared-key"}
+
+	first := postWithHeader(t, ts, issueURL(pid, firstIssueID, "comments"), headers, body)
+	requireOK(t, first)
+	var firstOut struct {
+		Comment struct {
+			UID string `json:"uid"`
+		} `json:"comment"`
+	}
+	require.NoError(t, json.Unmarshal(first.body, &firstOut))
+
+	other := postWithHeader(t, ts, issueURLRef(pid, second.ShortID, "comments"), headers, body)
+	requireOK(t, other)
+	var otherOut struct {
+		Comment struct {
+			UID string `json:"uid"`
+		} `json:"comment"`
+		Changed bool `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(other.body, &otherOut))
+	assert.True(t, otherOut.Changed, "a key used on another issue must not replay the first issue's comment")
+	assert.NotEqual(t, firstOut.Comment.UID, otherOut.Comment.UID)
+	comments, err := h.DB().CommentsByIssue(t.Context(), second.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+}
+
+func TestCommentEndpoint_IdempotencyReplayRequiresRelatedProject(t *testing.T) {
+	h, ts, pid, issueID := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	body := map[string]any{"actor": "agent", "body": "first comment"}
+	headers := map[string]string{"Idempotency-Key": "comment-request-unrelated-route"}
+	requireOK(t, postWithHeader(t, ts, issueURLRef(pid, issue.UID, "comments"), headers, body))
+
+	unrelated, err := h.DB().CreateProject(t.Context(), "unrelated-project")
+	require.NoError(t, err)
+	retry := postWithHeader(t, ts, issueURLRef(unrelated.ID, issue.UID, "comments"), headers, body)
+	assertAPIError(t, retry.status, retry.body, http.StatusNotFound, "issue_not_found")
+}
+
+func TestCommentEndpoint_IdempotencyReplayRejectsArchivedCurrentProject(t *testing.T) {
+	h, ts, sourceProjectID, issueID := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	body := map[string]any{"actor": "agent", "body": "first comment"}
+	headers := map[string]string{"Idempotency-Key": "comment-request-then-archive"}
+	path := issueURLRef(sourceProjectID, issue.UID, "comments")
+	requireOK(t, postWithHeader(t, ts, path, headers, body))
+
+	target, err := h.DB().CreateProject(t.Context(), "archived-target")
+	require.NoError(t, err)
+	issue, err = h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	_, err = h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: sourceProjectID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "coordinator",
+	})
+	require.NoError(t, err)
+	archiveProject(t, h, target.ID, true)
+
+	retry := postWithHeader(t, ts, path, headers, body)
+	assertAPIError(t, retry.status, retry.body, http.StatusNotFound, "project_not_found")
+}
