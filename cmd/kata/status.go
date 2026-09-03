@@ -24,7 +24,7 @@ type issueStatusProjection struct {
 	Auth              string     `json:"auth"`
 	Instance          string     `json:"instance"`
 	Owner             *string    `json:"owner,omitempty"`
-	Claim             string     `json:"claim"`
+	Hold              string     `json:"hold"`
 	Holder            string     `json:"holder,omitempty"`
 	HolderInstance    string     `json:"holder_instance,omitempty"`
 	LeaseKind         string     `json:"lease_kind,omitempty"`
@@ -43,7 +43,7 @@ type instanceStatusForCLI struct {
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status <issue-ref>",
-		Short: "show compact issue identity and claim status",
+		Short: "show compact issue identity and hold status",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIssueStatus(cmd, args[0])
@@ -75,7 +75,7 @@ func runIssueStatus(cmd *cobra.Command, issueRef string) error {
 	actor, source := resolveActor(ctx, flags.As, nil)
 	if instance.Auth.Actor != "" {
 		actor = instance.Auth.Actor
-		source = instance.Auth.Kind
+		source = "daemon"
 	}
 	authKind := instance.Auth.Kind
 	if authKind == "" {
@@ -95,7 +95,7 @@ func runIssueStatus(cmd *cobra.Command, issueRef string) error {
 		Auth:              authKind,
 		Instance:          instance.InstanceUID,
 		Owner:             show.Issue.Owner,
-		Claim:             projectedClaimState(show.Issue.Status, show.Issue.Owner, show.Lease, show.PendingLeases, now),
+		Hold:              projectedHoldState(show.Issue.Status, show.Issue.Owner, show.Lease, show.PendingLeases, now),
 		PendingLeaseCount: len(show.PendingLeases),
 	}
 	if show.Lease != nil {
@@ -118,7 +118,7 @@ func getStatusPayload(ctx context.Context, client *http.Client, target string, o
 	return json.Unmarshal(body, out)
 }
 
-func projectedClaimState(
+func projectedHoldState(
 	issueStatus string,
 	owner *string,
 	lease *claimForShowCLI,
@@ -170,7 +170,7 @@ func printIssueStatusAgent(out io.Writer, status issueStatusProjection) error {
 		agentRowField("auth", status.Auth),
 		agentRowField("instance", status.Instance),
 		agentOptionalRowField("owner", status.Owner),
-		agentRowField("claim", status.Claim),
+		agentRowField("hold", status.Hold),
 		agentOptionalRowField("holder", optionalStatusString(status.Holder)),
 		agentOptionalRowField("holder_instance", optionalStatusString(status.HolderInstance)),
 		agentOptionalRowField("lease_kind", optionalStatusString(status.LeaseKind)),
@@ -205,8 +205,8 @@ func optionalStatusString(value string) *string {
 }
 
 func printIssueStatusHuman(out io.Writer, status issueStatusProjection) error {
-	if _, err := fmt.Fprintf(out, "%s  [%s]  claim=%s\n",
-		textsafe.Line(status.Issue), textsafe.Line(status.IssueStatus), status.Claim); err != nil {
+	if _, err := fmt.Fprintf(out, "%s  [%s]  hold=%s\n",
+		textsafe.Line(status.Issue), textsafe.Line(status.IssueStatus), status.Hold); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "actor: %s (%s; auth=%s)\ninstance: %s\n",
@@ -223,6 +223,16 @@ func printIssueStatusHuman(out io.Writer, status issueStatusProjection) error {
 		if _, err := fmt.Fprintf(out, "lease: %s from instance %s (%s)\n",
 			textsafe.Line(status.Holder), textsafe.Line(status.HolderInstance),
 			textsafe.Line(status.LeaseKind)); err != nil {
+			return err
+		}
+	}
+	if status.ExpiresAt != nil {
+		if _, err := fmt.Fprintln(out, "expires:", status.ExpiresAt.UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	if status.PendingLeaseCount > 0 {
+		if _, err := fmt.Fprintln(out, "pending leases:", status.PendingLeaseCount); err != nil {
 			return err
 		}
 	}

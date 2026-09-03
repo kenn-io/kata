@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +13,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestProjectedClaimStateDistinguishesLeaseAndAssignment(t *testing.T) {
+func TestProjectedHoldStateDistinguishesLeaseAndAssignment(t *testing.T) {
 	now := time.Date(2026, time.September, 2, 12, 0, 0, 0, time.UTC)
 	before := now.Add(-time.Minute)
 	after := now.Add(time.Minute)
@@ -34,7 +35,7 @@ func TestProjectedClaimStateDistinguishesLeaseAndAssignment(t *testing.T) {
 		{name: "closed", status: "closed", owner: &owner, want: "closed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, projectedClaimState(tc.status, tc.owner, tc.lease, tc.pending, now))
+			assert.Equal(t, tc.want, projectedHoldState(tc.status, tc.owner, tc.lease, tc.pending, now))
 		})
 	}
 }
@@ -64,9 +65,9 @@ func TestStatusAgentReportsAuthenticatedIdentityAndAssignment(t *testing.T) {
 	out := runCLI(t, env, dir, "--agent", "status", issue.ShortID)
 
 	assert.Contains(t, out, "OK status issue="+issue.ShortID+" project=kata issue_status=open revision=1")
-	assert.Contains(t, out, "actor=operator actor_source=db_token auth=db_token")
+	assert.Contains(t, out, "actor=operator actor_source=daemon auth=db_token")
 	assert.Contains(t, out, "instance="+env.DB.InstanceUID())
-	assert.Contains(t, out, "owner=operator claim=assigned")
+	assert.Contains(t, out, "owner=operator hold=assigned")
 	assert.NotContains(t, out, operatorToken)
 }
 
@@ -76,8 +77,51 @@ func TestStatusAgentReportsActiveTimedLease(t *testing.T) {
 
 	out := runCLIAs(t, env, dir, "alice", "--agent", "status", ref)
 
-	assert.Contains(t, out, "claim=active")
+	assert.Contains(t, out, "hold=active")
 	assert.Contains(t, out, "holder=alice")
 	assert.Contains(t, out, "lease_kind=timed")
 	assert.True(t, strings.Contains(out, "expires_at="), out)
+}
+
+func TestStatusJSONReportsDaemonActorAndHold(t *testing.T) {
+	env, dir, pid := setupCLIWorkspaceOptions(t,
+		testenv.WithAuthToken("bootstrap-token"),
+		testenv.WithRequireTokenIdentity(),
+	)
+	const operatorToken = "operator-bearer"
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{ //nolint:gosec // test-only bearer credential
+		PlaintextToken: operatorToken,
+		Actor:          "operator",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: pid,
+		Title:     "report json status",
+		Author:    "operator",
+	})
+	require.NoError(t, err)
+	t.Setenv("KATA_AUTH_TOKEN", operatorToken)
+
+	out := runCLI(t, env, dir, "--json", "status", issue.ShortID)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.Equal(t, "operator", got["actor"])
+	assert.Equal(t, "daemon", got["actor_source"])
+	assert.Equal(t, "db_token", got["auth"])
+	assert.Equal(t, "unassigned", got["hold"])
+	assert.NotContains(t, got, "claim")
+	assert.NotContains(t, out, operatorToken)
+}
+
+func TestStatusHumanShowsLeaseExpiry(t *testing.T) {
+	env, dir, _, ref := setupFederatedHubIssue(t, "report lease expiry")
+	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref, "--ttl", "30m")
+
+	out := runCLIAs(t, env, dir, "alice", "status", ref)
+
+	assert.Contains(t, out, "hold=active")
+	assert.Contains(t, out, "lease: alice from instance "+env.DB.InstanceUID()+" (timed)")
+	assert.Regexp(t, `(?m)^expires: \d{4}-\d{2}-\d{2}T`, out)
 }

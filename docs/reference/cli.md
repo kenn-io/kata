@@ -170,9 +170,10 @@ remain plain text. This version has no force-render option for non-terminal
 output.
 
 `kata status` gives agents a compact view of the daemon identity, effective
-actor, issue owner, and federation lease. Its `claim` value is `active`,
+actor, issue owner, and federation lease. Its `hold` value is `active`,
 `expired`, `pending`, `assigned`, `unassigned`, or `closed`. `assigned` means
-the open issue has an owner without a live or pending lease. A cached timed
+the open issue has an owner without a live or pending lease, which is the
+state `kata claim` produces outside federation. A cached timed
 lease can report `expired` while its hub is unavailable; a successful hub read
 releases the expired lease before returning current state. JSON output is a
 flat projection of the same fields. Use `kata show` for the complete issue.
