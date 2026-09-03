@@ -157,6 +157,7 @@ kata list --all [--status open|closed|all] [--limit N]
               [--owner NAME | --unowned]
               [--label LABEL] [--no-label LABEL] [--meta key[=value]]
 kata show <issue-ref> [--render]
+kata status <issue-ref>
 kata search <query> [--limit N] [--include-deleted]
 kata search <query> [--lexical | --hybrid | --semantic]
 kata search <query> [--label LABEL] [--no-label LABEL]
@@ -175,6 +176,15 @@ rendered color through kata's normal output profile.
 pipelines, including `kata show <issue-ref> --render | less -R`, intentionally
 remain plain text. This version has no force-render option for non-terminal
 output.
+
+`kata status` gives agents a compact view of the daemon identity, effective
+actor, issue owner, and federation lease. Its `hold` value is `active`,
+`expired`, `pending`, `assigned`, `unassigned`, or `closed`. `assigned` means
+the open issue has an owner without a live or pending lease, which is the
+state `kata claim` produces outside federation. A cached timed
+lease can report `expired` while its hub is unavailable; a successful hub read
+releases the expired lease before returning current state. JSON output is a
+flat projection of the same fields. Use `kata show` for the complete issue.
 
 For `kata list`, `--meta` is repeatable. A bare key filters on presence,
 while `key=value` filters on string equality. Multiple filters combine with
