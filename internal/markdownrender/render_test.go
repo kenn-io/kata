@@ -51,6 +51,39 @@ func TestRenderLinesRejectsDecodedConceal(t *testing.T) {
 	assert.NotContains(t, got, "\x1b[31m")
 }
 
+func TestTerminalRendererFormatsIssueMarkdown(t *testing.T) {
+	background := "236"
+	input := "## Steps\n\n" +
+		"> Keep context\n\n" +
+		"1. **Open** [issue](https://example.com)\n" +
+		"2. [x] Comment with `kata comment`\n\n" +
+		"```go\nfmt.Println(\"ok\")\n```\n\n" +
+		"| Field | Value |\n| --- | --- |\n| Status | open |\n\n" +
+		"![diagram](https://example.com/diagram.png)\n"
+	got, err := renderMarkdownDocument(
+		input, Options{Width: 80, CodeBlockBackground: &background},
+	)
+	require.NoError(t, err)
+
+	want := `Steps
+| Keep context
+
+1. Open issue
+2. [x] Comment with ` + "`kata comment`" + `
+
+fmt.Println("ok")
+
+| Field | Value |
+| --- | --- |
+| Status | open |
+
+[image: diagram]`
+	assert.Equal(t, want, textsafe.StripANSI(strings.TrimSpace(got)))
+	assert.Contains(t, got, "\x1b[1mSteps\x1b[22m")
+	assert.Contains(t, got, "\x1b[4missue\x1b[24m")
+	assert.Contains(t, got, "\x1b[48;5;236mfmt.Println(\"ok\")\x1b[49m")
+}
+
 func TestANSIWrappedLinesPreservesVisibleContent(t *testing.T) {
 	rendered := "\x1b[31mカタabcdef\x1b[0m"
 	lines := ANSIWrappedLines(rendered, 4)

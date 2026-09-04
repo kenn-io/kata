@@ -1,0 +1,239 @@
+package markdownrender
+
+import (
+	"fmt"
+	"html"
+	"strings"
+
+	"github.com/charmbracelet/x/ansi"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	extast "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/text"
+)
+
+const (
+	ansiBoldOn       = "\x1b[1m"
+	ansiBoldOff      = "\x1b[22m"
+	ansiItalicOn     = "\x1b[3m"
+	ansiItalicOff    = "\x1b[23m"
+	ansiUnderlineOn  = "\x1b[4m"
+	ansiUnderlineOff = "\x1b[24m"
+	ansiStrikeOn     = "\x1b[9m"
+	ansiStrikeOff    = "\x1b[29m"
+)
+
+type terminalRenderer struct {
+	source []byte
+	opts   Options
+}
+
+func renderMarkdownDocument(markdown string, opts Options) (string, error) {
+	source := []byte(markdown)
+	parser := goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser()
+	document := parser.Parse(text.NewReader(source))
+	renderer := terminalRenderer{source: source, opts: opts}
+	out := strings.TrimRight(renderer.renderBlocks(document), "\n")
+	if out == "" {
+		return "", nil
+	}
+	return out + "\n", nil
+}
+
+func (r terminalRenderer) renderBlocks(parent ast.Node) string {
+	var out strings.Builder
+	var previous ast.Node
+	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
+		var block string
+		switch node := node.(type) {
+		case *ast.Heading:
+			block = ansiBoldOn + r.renderInlines(node) + ansiBoldOff
+		case *ast.Paragraph, *ast.TextBlock:
+			block = r.wrap(r.renderInlines(node), r.opts.Width)
+		case *ast.CodeBlock:
+			block = r.renderCodeBlock(node.Lines())
+		case *ast.FencedCodeBlock:
+			block = r.renderCodeBlock(node.Lines())
+		case *ast.Blockquote:
+			block = prefixLines(r.renderBlocks(node), "| ")
+		case *ast.List:
+			block = r.renderList(node, 0)
+		case *extast.Table:
+			block = r.renderTable(node)
+		case *ast.ThematicBreak:
+			continue
+		default:
+			if node.HasChildren() {
+				block = r.renderBlocks(node)
+			}
+		}
+		block = strings.TrimRight(block, "\n")
+		if block != "" {
+			if out.Len() > 0 {
+				separator := "\n\n"
+				if _, ok := previous.(*ast.Heading); ok {
+					separator = "\n"
+				}
+				out.WriteString(separator)
+			}
+			out.WriteString(block)
+			previous = node
+		}
+	}
+	return out.String()
+}
+
+func (r terminalRenderer) renderList(list *ast.List, depth int) string {
+	lines := make([]string, 0, list.ChildCount())
+	itemNumber := list.Start
+	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
+		item, ok := child.(*ast.ListItem)
+		if !ok {
+			continue
+		}
+		marker := "- "
+		if list.IsOrdered() {
+			marker = fmt.Sprintf("%d. ", itemNumber)
+			itemNumber++
+		}
+		indent := strings.Repeat("  ", depth)
+		continuation := indent + strings.Repeat(" ", ansi.StringWidth(marker))
+		itemLines := r.renderListItem(item, depth, max(1, r.opts.Width-ansi.StringWidth(indent+marker)))
+		if len(itemLines) == 0 {
+			lines = append(lines, indent+marker)
+			continue
+		}
+		lines = append(lines, indent+marker+itemLines[0])
+		for _, line := range itemLines[1:] {
+			if line == "" {
+				lines = append(lines, "")
+			} else if strings.HasPrefix(line, strings.Repeat("  ", depth+1)) {
+				lines = append(lines, line)
+			} else {
+				lines = append(lines, continuation+line)
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (r terminalRenderer) renderListItem(item *ast.ListItem, depth, width int) []string {
+	var lines []string
+	for child := item.FirstChild(); child != nil; child = child.NextSibling() {
+		switch child := child.(type) {
+		case *ast.Paragraph, *ast.TextBlock:
+			paragraph := r.wrap(r.renderInlines(child), width)
+			lines = append(lines, strings.Split(paragraph, "\n")...)
+		case *ast.List:
+			nested := r.renderList(child, depth+1)
+			lines = append(lines, strings.Split(nested, "\n")...)
+		case *ast.CodeBlock:
+			lines = append(lines, strings.Split(r.renderCodeBlock(child.Lines()), "\n")...)
+		case *ast.FencedCodeBlock:
+			lines = append(lines, strings.Split(r.renderCodeBlock(child.Lines()), "\n")...)
+		default:
+			if child.HasChildren() {
+				lines = append(lines, strings.Split(r.renderBlocks(child), "\n")...)
+			}
+		}
+	}
+	return lines
+}
+
+func (r terminalRenderer) renderCodeBlock(segments *text.Segments) string {
+	var code strings.Builder
+	for i := range segments.Len() {
+		segment := segments.At(i)
+		code.Write(segment.Value(r.source))
+	}
+	raw := strings.TrimSuffix(code.String(), "\n")
+	if r.opts.CodeBlockBackground == nil || *r.opts.CodeBlockBackground == "" {
+		return raw
+	}
+	prefix := "\x1b[48;5;" + *r.opts.CodeBlockBackground + "m"
+	lines := strings.Split(raw, "\n")
+	for i := range lines {
+		lines[i] = prefix + lines[i] + "\x1b[49m"
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (r terminalRenderer) renderTable(table *extast.Table) string {
+	rows := make([]string, 0, table.ChildCount()+1)
+	for child := table.FirstChild(); child != nil; child = child.NextSibling() {
+		cells := make([]string, 0, child.ChildCount())
+		for cell := child.FirstChild(); cell != nil; cell = cell.NextSibling() {
+			cells = append(cells, r.renderInlines(cell))
+		}
+		rows = append(rows, "| "+strings.Join(cells, " | ")+" |")
+		if _, ok := child.(*extast.TableHeader); ok {
+			separators := make([]string, len(cells))
+			for i := range separators {
+				separators[i] = "---"
+			}
+			rows = append(rows, "| "+strings.Join(separators, " | ")+" |")
+		}
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (r terminalRenderer) renderInlines(parent ast.Node) string {
+	var out strings.Builder
+	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
+		switch node := node.(type) {
+		case *ast.Text:
+			out.WriteString(html.UnescapeString(string(node.Segment.Value(r.source))))
+			if node.HardLineBreak() || node.SoftLineBreak() {
+				out.WriteByte('\n')
+			}
+		case *ast.String:
+			out.WriteString(html.UnescapeString(string(node.Value)))
+		case *ast.CodeSpan:
+			out.WriteByte('`')
+			out.WriteString(strings.Join(strings.Fields(r.renderInlines(node)), " "))
+			out.WriteByte('`')
+		case *ast.Emphasis:
+			if node.Level == 2 {
+				out.WriteString(ansiBoldOn + r.renderInlines(node) + ansiBoldOff)
+			} else {
+				out.WriteString(ansiItalicOn + r.renderInlines(node) + ansiItalicOff)
+			}
+		case *ast.Link:
+			out.WriteString(ansiUnderlineOn + r.renderInlines(node) + ansiUnderlineOff)
+		case *ast.Image:
+			out.WriteString("[image: " + r.renderInlines(node) + "]")
+		case *ast.AutoLink:
+			out.WriteString(ansiUnderlineOn + html.UnescapeString(string(node.Label(r.source))) + ansiUnderlineOff)
+		case *extast.Strikethrough:
+			out.WriteString(ansiStrikeOn + r.renderInlines(node) + ansiStrikeOff)
+		case *extast.TaskCheckBox:
+			if node.IsChecked {
+				out.WriteString("[x] ")
+			} else {
+				out.WriteString("[ ] ")
+			}
+		default:
+			if node.HasChildren() {
+				out.WriteString(r.renderInlines(node))
+			}
+		}
+	}
+	return out.String()
+}
+
+func (r terminalRenderer) wrap(value string, width int) string {
+	return ansi.Wordwrap(value, max(1, width), "")
+}
+
+func prefixLines(value, prefix string) string {
+	lines := strings.Split(strings.TrimRight(value, "\n"), "\n")
+	for i := range lines {
+		if lines[i] == "" {
+			lines[i] = strings.TrimRight(prefix, " ")
+		} else {
+			lines[i] = prefix + lines[i]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
