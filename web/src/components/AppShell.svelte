@@ -7,7 +7,7 @@
   import MoonIcon from '@lucide/svelte/icons/moon'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SunIcon from '@lucide/svelte/icons/sun'
-  import type { components } from '../lib/api/schema'
+  import type { UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
   import type { KataRoute, ShareableFilters, SystemView } from '../lib/router'
   import {
@@ -63,7 +63,7 @@
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
     onDesignateInbox: (projectUID: string) => Promise<void>
     onCreateIssue: (title: string) => void | Promise<void>
-    searchReferences: (query: string) => Promise<components['schemas']['UIIssueReference'][]>
+    searchReferences: (query: string) => Promise<UIIssueReference[]>
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
     onAddComment: (uid: string, body: string) => boolean | Promise<boolean>

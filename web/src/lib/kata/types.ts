@@ -304,13 +304,13 @@ export interface KataTaskCloseOptions {
   reason?: 'done' | 'wontfix' | 'duplicate' | 'superseded' | 'audit-no-change' | undefined
   message?: string | undefined
   source?: string | undefined
-  evidence?: import('../api/schema').components['schemas']['Evidence'][] | undefined
+  evidence?: import('../api/generated').Evidence[] | undefined
 }
 
 export interface KataTaskCloseRequest {
   reason: 'done' | 'wontfix' | 'duplicate' | 'superseded'
   message: string
-  evidence: import('../api/schema').components['schemas']['Evidence'][]
+  evidence: import('../api/generated').Evidence[]
 }
 
 export interface KataTaskMutationResponse {

@@ -1,4 +1,4 @@
-import type { components } from '../api/schema'
+import type { UISnapshotResponseBody } from '../api/generated'
 import { createCredentialedFetch } from '../api/client'
 import { AuthenticationRequiredError, isAuthenticationRequiredError } from '../auth/session'
 import type { KataRoute } from '../router'
@@ -200,7 +200,7 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
   }
 }
 
-export type UISnapshot = components['schemas']['UISnapshotResponseBody']
+export type UISnapshot = UISnapshotResponseBody
 
 export interface UISnapshotIntent {
   daemonID?: string

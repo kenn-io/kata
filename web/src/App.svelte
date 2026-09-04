@@ -8,7 +8,34 @@
   import LoginView from './components/LoginView.svelte'
   import RouteError from './components/RouteError.svelte'
   import VersionMismatch from './components/VersionMismatch.svelte'
-  import { createCredentialedFetch, createKataClient } from './lib/api/client'
+  import { createCredentialedFetch, setGeneratedFetch } from './lib/api/client'
+  import {
+    addLabel as addLabelRequest,
+    assignIssue,
+    closeIssue as closeIssueRequest,
+    createComment,
+    createIssue as createIssueRequest,
+    createLink,
+    createRecurrence as createRecurrenceRequest,
+    deleteRecurrence as deleteRecurrenceRequest,
+    editIssue as editIssueRequest,
+    initProject,
+    moveIssue as moveIssueRequest,
+    patchIssueMetadata,
+    patchProjectMetadata,
+    patchRecurrence as patchRecurrenceRequest,
+    readUIReferences,
+    removeLabel as removeLabelRequest,
+    reopenIssue as reopenIssueRequest,
+    setIssuePriority,
+    unassignIssue,
+    type CreateRecurrenceRequestBody,
+    type PatchRecurrenceRequestBody,
+    type RecurrenceTemplateInput,
+    type RecurrenceTemplateUpdateInput,
+    type UIIssueReference,
+    type UIReferencesResponseBody,
+  } from './lib/api/generated'
   import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
   import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
   import {
@@ -31,7 +58,6 @@
   } from './lib/events/controller'
   import { openEventStream } from './lib/events/sse'
   import { parseRoute, serializeRoute, type KataRoute } from './lib/router'
-  import type { components } from './lib/api/schema'
   import type {
     KataCreateRecurrenceInput,
     KataPatchRecurrenceInput,
@@ -75,7 +101,7 @@
   let returnPath = $state(launch.returnPath)
   let mode = $state(initialMode(launch, initialRoute, selectedAuthentication))
   let authority = $state<SnapshotState<UISnapshotIntent, UISnapshot> | undefined>()
-  let references = $state<components['schemas']['UIReferencesResponseBody'] | undefined>()
+  let references = $state<UIReferencesResponseBody | undefined>()
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let draftFenceGeneration = $state(0)
@@ -115,7 +141,7 @@
     daemonFetch,
     rejectCredentialsAndRequireAuthentication,
   )
-  const client = createKataClient(undefined, browserFetch)
+  setGeneratedFetch(browserFetch)
   const snapshots = new SnapshotController(
     createUISnapshotRequest(browserFetch),
     uiSnapshotIntentKey,
@@ -253,10 +279,8 @@
   async function createProject(name: string): Promise<{ changed: boolean }> {
     let changed = false
     const accepted = await runMutation({}, async (context) => {
-      const result = await client.POST('/api/v1/projects', {
-        body: context.body({ name }, requestActor),
-      })
-      if (result.data) changed = result.data.created
+      const result = await initProject(context.body({ name }, requestActor))
+      if (result.status === 200) changed = result.data.created
       return result
     })
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create project.')
@@ -272,13 +296,11 @@
     const accepted = await runMutation(
       { draft: projectUID, revision: `"rev-${target.revision}"` },
       (context) =>
-        client.POST('/api/v1/projects/{project_id}/metadata', {
-          params: {
-            path: { project_id: target.id },
-            header: { 'If-Match': context.headers.get('If-Match')! },
-          },
-          body: { actor: requestActor, patch: { role: 'inbox' } },
-        }),
+        patchProjectMetadata(
+          { projectId: target.id },
+          { actor: requestActor, patch: { role: 'inbox' } },
+          { headers: context.headers },
+        ),
     )
     if (!accepted) {
       throw new Error(mutationMessage(mutationState) ?? 'Could not designate the Inbox project.')
@@ -297,12 +319,8 @@
         : { title, key: globalThis.crypto.randomUUID() }
     pendingCreate = create
     const accepted = await runMutation({ draft: title, createKey: create.key }, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues', {
-        params: {
-          path: { project_id: inbox.id },
-          header: { 'Idempotency-Key': create.key },
-        },
-        body: context.body({ title }, requestActor),
+      createIssueRequest({ projectId: inbox.id }, context.body({ title }, requestActor), {
+        headers: { 'Idempotency-Key': create.key },
       }),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create task.')
@@ -318,18 +336,15 @@
     referenceAbort = abort
     const daemonID = activeDaemonID
     try {
-      const { data } = await client.GET('/api/v1/ui/references', {
-        params: { query: { limit: 200 } },
-        signal: abort.signal,
-      })
+      const result = await readUIReferences({ limit: 200 }, { signal: abort.signal })
       if (
-        data &&
+        result.status === 200 &&
         !destroyed &&
         !abort.signal.aborted &&
         generation === referenceGeneration &&
         daemonID === activeDaemonID
       ) {
-        references = data
+        references = result.data
       }
     } catch {
       // Snapshot authority remains usable when reference enrichment is canceled or unavailable.
@@ -338,16 +353,12 @@
     }
   }
 
-  async function searchReferences(
-    query: string,
-  ): Promise<components['schemas']['UIIssueReference'][]> {
+  async function searchReferences(query: string): Promise<UIIssueReference[]> {
     const generation = referenceGeneration
     const daemonID = activeDaemonID
-    const { data } = await client.GET('/api/v1/ui/references', {
-      params: { query: { q: query, limit: 20 } },
-    })
+    const result = await readUIReferences({ q: query, limit: 20 })
     if (destroyed || generation !== referenceGeneration || daemonID !== activeDaemonID) return []
-    return data?.issues ?? []
+    return result.status === 200 ? (result.data.issues ?? []) : []
   }
 
   async function editIssue(uid: string, patch: KataTaskEditPatch): Promise<boolean> {
@@ -356,20 +367,20 @@
     const related = patch.links_delta?.add_related?.[0]
     if (related) {
       return runMutation({ draft: patch }, (context) =>
-        client.POST('/api/v1/projects/{project_id}/issues/{ref}/links', {
-          params: { path: target },
-          body: context.body({ type: 'related', to_ref: related }, requestActor),
-        }),
+        createLink(
+          { projectId: target.project_id, ref: target.ref },
+          context.body({ type: 'related' as const, to_ref: related }, requestActor),
+        ),
       )
     }
     const body: { title?: string; body?: string } = {}
     if (patch.title !== undefined) body.title = patch.title
     if (patch.body !== undefined) body.body = patch.body
     return runMutation({ draft: patch }, (context) =>
-      client.PATCH('/api/v1/projects/{project_id}/issues/{ref}', {
-        params: { path: target },
-        body: context.body(body, requestActor),
-      }),
+      editIssueRequest(
+        { projectId: target.project_id, ref: target.ref },
+        context.body(body, requestActor),
+      ),
     )
   }
 
@@ -378,10 +389,11 @@
     const revision = selectedRevision(uid)
     if (!target || !revision) return false
     return runMutation({ draft: patch, revision }, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues/{ref}/metadata', {
-        params: { path: target, header: { 'If-Match': context.headers.get('If-Match')! } },
-        body: context.body({ patch }, requestActor),
-      }),
+      patchIssueMetadata(
+        { projectId: target.project_id, ref: target.ref },
+        context.body({ patch }, requestActor),
+        { headers: context.headers },
+      ),
     )
   }
 
@@ -394,10 +406,11 @@
         : { issueUID: uid, body, key: crypto.randomUUID() }
     pendingComment = comment
     const accepted = await runMutation({ draft: body }, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues/{ref}/comments', {
-        params: { path: target, header: { 'Idempotency-Key': comment.key } },
-        body: context.body({ body }, requestActor),
-      }),
+      createComment(
+        { projectId: target.project_id, ref: target.ref },
+        context.body({ body }, requestActor),
+        { headers: { 'Idempotency-Key': comment.key } },
+      ),
     )
     if (accepted) pendingComment = undefined
     return accepted
@@ -407,7 +420,7 @@
     projectID: number,
     input: KataCreateRecurrenceInput,
   ): Promise<void> {
-    const body: components['schemas']['CreateRecurrenceRequestBody'] = {
+    const body: CreateRecurrenceRequestBody = {
       initial_issue_ref: input.initialIssueRef,
       rrule: input.rrule,
       dtstart: input.dtstart,
@@ -415,10 +428,10 @@
       template: recurrenceTemplate(input.template),
     }
     const accepted = await runMutation({ draft: input }, (context) =>
-      client.POST('/api/v1/projects/{project_id}/recurrences', {
-        params: { path: { project_id: projectID } },
-        body: context.body(body, input.actor || requestActor),
-      }),
+      createRecurrenceRequest(
+        { projectId: projectID },
+        context.body(body, input.actor || requestActor),
+      ),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create recurrence.')
   }
@@ -430,19 +443,17 @@
   ): Promise<void> {
     const recurrence = authority?.snapshot?.selected?.recurrences?.find((item) => item.id === id)
     if (!recurrence) throw new Error(`Recurrence is not loaded: id=${id}`)
-    const body: components['schemas']['PatchRecurrenceRequestBody'] = {}
+    const body: PatchRecurrenceRequestBody = {}
     if (input.rrule !== undefined) body.rrule = input.rrule
     if (input.dtstart !== undefined) body.dtstart = input.dtstart
     if (input.timezone !== undefined) body.timezone = input.timezone
     if (input.template !== undefined) body.template = recurrenceTemplateUpdate(input.template)
     const accepted = await runMutation({ draft: input, revision: etag }, (context) =>
-      client.PATCH('/api/v1/projects/{project_id}/recurrences/{recurrence_uid}', {
-        params: {
-          path: { project_id: recurrence.project_id, recurrence_uid: recurrence.uid },
-          header: { 'If-Match': context.headers.get('If-Match')! },
-        },
-        body: context.body(body, input.actor || requestActor),
-      }),
+      patchRecurrenceRequest(
+        { projectId: recurrence.project_id, recurrenceUid: recurrence.uid },
+        context.body(body, input.actor || requestActor),
+        { headers: context.headers },
+      ),
     )
     if (accepted) return
     if (mutationState.kind === 'revision-conflict') {
@@ -464,28 +475,22 @@
     return runMutation(
       { draft: recurrence, revision: `"rev-${recurrence.revision}"` },
       async (context) => {
-        const result = await client.DELETE(
-          '/api/v1/projects/{project_id}/recurrences/{recurrence_uid}',
-          {
-            params: {
-              path: { project_id: recurrence.project_id, recurrence_uid: recurrence.uid },
-              header: { 'If-Match': context.headers.get('If-Match')! },
-              query:
-                authority?.snapshot?.capabilities.actor_policy === 'identity'
-                  ? {}
-                  : { actor: requestActor },
-            },
-          },
+        const result = await deleteRecurrenceRequest(
+          { projectId: recurrence.project_id, recurrenceUid: recurrence.uid },
+          authority?.snapshot?.capabilities.actor_policy === 'identity'
+            ? undefined
+            : { actor: requestActor },
+          { headers: context.headers },
         )
-        return { ...result, data: result.response.ok ? true : undefined }
+        return { ...result, data: result.status === 204 ? true : result.data }
       },
     )
   }
 
   function recurrenceTemplate(
     input: KataCreateRecurrenceInput['template'],
-  ): components['schemas']['RecurrenceTemplateInput'] {
-    const template: components['schemas']['RecurrenceTemplateInput'] = {
+  ): RecurrenceTemplateInput {
+    const template: RecurrenceTemplateInput = {
       title: input.title,
     }
     if (input.body !== undefined) template.body = input.body
@@ -498,8 +503,8 @@
 
   function recurrenceTemplateUpdate(
     input: NonNullable<KataPatchRecurrenceInput['template']>,
-  ): components['schemas']['RecurrenceTemplateUpdateInput'] {
-    const template: components['schemas']['RecurrenceTemplateUpdateInput'] = {}
+  ): RecurrenceTemplateUpdateInput {
+    const template: RecurrenceTemplateUpdateInput = {}
     if (input.title !== undefined) template.title = input.title
     if (input.body !== undefined) template.body = input.body
     if (input.owner !== undefined) template.owner = input.owner
@@ -517,10 +522,11 @@
     const revision = selected ? selectedRevision(selected.uid) : undefined
     if (!target || !revision) return false
     return runMutation({ draft: toProjectUID, revision }, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues/{ref}/actions/move', {
-        params: { path: target, header: { 'If-Match': context.headers.get('If-Match')! } },
-        body: context.body({ to_project_uid: toProjectUID }, requestActor),
-      }),
+      moveIssueRequest(
+        { projectId: target.project_id, ref: target.ref },
+        context.body({ to_project_uid: toProjectUID }, requestActor),
+        { headers: context.headers },
+      ),
     )
   }
 
@@ -528,10 +534,10 @@
     const target = selectedMutationTarget(uid)
     if (!target) return false
     return runMutation({ draft: owner }, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues/{ref}/actions/assign', {
-        params: { path: target },
-        body: context.body({ owner }, requestActor),
-      }),
+      assignIssue(
+        { projectId: target.project_id, ref: target.ref },
+        context.body({ owner }, requestActor),
+      ),
     )
   }
 
@@ -539,10 +545,10 @@
     const target = selectedMutationTarget(uid)
     if (!target) return false
     return runMutation({}, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues/{ref}/actions/unassign', {
-        params: { path: target },
-        body: context.body({}, requestActor),
-      }),
+      unassignIssue(
+        { projectId: target.project_id, ref: target.ref },
+        context.body({}, requestActor),
+      ),
     )
   }
 
@@ -550,10 +556,10 @@
     const target = selectedMutationTarget(uid)
     if (!target) return false
     return runMutation({ draft: priority }, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues/{ref}/actions/priority', {
-        params: { path: target },
-        body: context.body(priority === null ? {} : { priority }, requestActor),
-      }),
+      setIssuePriority(
+        { projectId: target.project_id, ref: target.ref },
+        context.body(priority === null ? {} : { priority }, requestActor),
+      ),
     )
   }
 
@@ -561,10 +567,10 @@
     const target = selectedMutationTarget(uid)
     if (!target) return false
     return runMutation({ draft: label }, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues/{ref}/labels', {
-        params: { path: target },
-        body: context.body({ label }, requestActor),
-      }),
+      addLabelRequest(
+        { projectId: target.project_id, ref: target.ref },
+        context.body({ label }, requestActor),
+      ),
     )
   }
 
@@ -572,15 +578,12 @@
     const target = selectedMutationTarget(uid)
     if (!target) return
     await runMutation({ draft: label }, () =>
-      client.DELETE('/api/v1/projects/{project_id}/issues/{ref}/labels/{label}', {
-        params: {
-          path: { ...target, label },
-          query:
-            authority?.snapshot?.capabilities.actor_policy === 'identity'
-              ? {}
-              : { actor: requestActor },
-        },
-      }),
+      removeLabelRequest(
+        { projectId: target.project_id, ref: target.ref, label },
+        authority?.snapshot?.capabilities.actor_policy === 'identity'
+          ? undefined
+          : { actor: requestActor },
+      ),
     )
   }
 
@@ -589,10 +592,10 @@
     const target = selected ? selectedMutationTarget(selected.uid) : undefined
     if (!target) return false
     return runMutation({ draft: request }, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues/{ref}/actions/close', {
-        params: { path: target },
-        body: context.body({ ...request }, requestActor),
-      }),
+      closeIssueRequest(
+        { projectId: target.project_id, ref: target.ref },
+        context.body({ ...request }, requestActor),
+      ),
     )
   }
 
@@ -601,10 +604,10 @@
     const target = selected ? selectedMutationTarget(selected.uid) : undefined
     if (!target) return
     await runMutation({}, (context) =>
-      client.POST('/api/v1/projects/{project_id}/issues/{ref}/actions/reopen', {
-        params: { path: target },
-        body: context.body({}, requestActor),
-      }),
+      reopenIssueRequest(
+        { projectId: target.project_id, ref: target.ref },
+        context.body({}, requestActor),
+      ),
     )
   }
 
@@ -617,9 +620,9 @@
     })
   }
 
-  async function runMutation<T>(
+  async function runMutation(
     options: { draft?: unknown; revision?: string; createKey?: string },
-    mutate: (context: MutationContext) => Promise<MutationResult<T>>,
+    mutate: (context: MutationContext) => Promise<MutationResult>,
   ): Promise<boolean> {
     mutationPending = true
     try {

@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { components } from '../lib/api/schema'
+import type { UIIssueReference } from '../lib/api/generated'
 import type { KataTaskDetail } from '../lib/kata/types'
 import Comments from './Comments.svelte'
 
-type Reference = components['schemas']['UIIssueReference']
+type Reference = UIIssueReference
 
 describe('Comments', () => {
   afterEach(cleanup)

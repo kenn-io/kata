@@ -9,7 +9,7 @@
     formatTimestamp as localDateTimeLabel,
   } from '@kenn-io/kit-ui/utils/time'
 
-  import type { components } from '../lib/api/schema'
+  import type { UIIssueReference } from '../lib/api/generated'
   import { createKataLinkFilters, type KataLinkFilters } from '../lib/kata/linkFilters'
   import type {
     KataCreateRecurrenceInput,
@@ -32,7 +32,7 @@
   import RecurrenceDialogs from './RecurrenceDialogs.svelte'
   import RecurrencePanel from './RecurrencePanel.svelte'
 
-  type Reference = components['schemas']['UIIssueReference']
+  type Reference = UIIssueReference
   interface IssueNavigationTarget {
     uid: string
   }
