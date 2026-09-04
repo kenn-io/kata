@@ -180,6 +180,28 @@ func TestTerminalRendererKeepsPrefixesOnHardWrappedContent(t *testing.T) {
 	}
 }
 
+func TestTerminalRendererKeepsBlockquotePrefixesInsideList(t *testing.T) {
+	lines, err := RenderLines("- > abcdefghijkl\n", Options{Width: 10})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"- | abcdef", "  | ghijkl"}, lines)
+}
+
+func TestTerminalRendererKeepsListIndentOnWrappedCodeBlock(t *testing.T) {
+	lines, err := RenderLines(
+		"- ```\n  abcdefghijkl\n  ```\n", Options{Width: 10},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"- abcdefgh", "  ijkl"}, lines)
+}
+
+func TestTerminalRendererKeepsHTMLBlockTextInsideList(t *testing.T) {
+	lines, err := RenderLines(
+		"- <div>\n  hello world\n  </div>\n", Options{Width: 10},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"- hello wo", "  rld"}, lines)
+}
+
 func TestTerminalRendererUsesCheckboxAsTaskMarker(t *testing.T) {
 	got, err := renderMarkdownDocument(
 		"- [x] done\n- [ ] pending\n", Options{Width: 80},

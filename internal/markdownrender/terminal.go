@@ -57,36 +57,7 @@ func (r terminalRenderer) renderBlocks(parent ast.Node) string {
 	var out strings.Builder
 	var previous ast.Node
 	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
-		var block string
-		switch node := node.(type) {
-		case *ast.Heading:
-			block = ansiBoldOn + r.renderInlinesStyled(node, inlineBold) + ansiBoldOff
-		case *ast.Paragraph, *ast.TextBlock:
-			block = r.wrap(r.renderInlines(node), r.opts.Width)
-		case *ast.CodeBlock:
-			block = r.renderCodeBlock(node.Lines())
-		case *ast.FencedCodeBlock:
-			block = r.renderCodeBlock(node.Lines())
-		case *ast.HTMLBlock:
-			block = r.renderHTMLBlock(node)
-		case *ast.Blockquote:
-			const prefix = "| "
-			quoted := r
-			quoted.opts.Width = max(1, r.opts.Width-ansi.StringWidth(prefix))
-			block = prefixLines(quoted.renderBlocks(node), prefix)
-		case *ast.List:
-			block = r.renderList(node, 0)
-		case *extast.Table:
-			block = r.renderTable(node)
-		case *extast.DefinitionList:
-			block = r.renderDefinitionList(node)
-		case *ast.ThematicBreak:
-			continue
-		default:
-			if node.HasChildren() {
-				block = r.renderBlocks(node)
-			}
-		}
+		block := r.renderBlock(node)
 		block = strings.TrimRight(block, "\n")
 		if block != "" {
 			if out.Len() > 0 {
@@ -101,6 +72,39 @@ func (r terminalRenderer) renderBlocks(parent ast.Node) string {
 		}
 	}
 	return out.String()
+}
+
+func (r terminalRenderer) renderBlock(node ast.Node) string {
+	switch node := node.(type) {
+	case *ast.Heading:
+		return ansiBoldOn + r.renderInlinesStyled(node, inlineBold) + ansiBoldOff
+	case *ast.Paragraph, *ast.TextBlock:
+		return r.wrap(r.renderInlines(node), r.opts.Width)
+	case *ast.CodeBlock:
+		return r.renderCodeBlock(node.Lines())
+	case *ast.FencedCodeBlock:
+		return r.renderCodeBlock(node.Lines())
+	case *ast.HTMLBlock:
+		return r.renderHTMLBlock(node)
+	case *ast.Blockquote:
+		const prefix = "| "
+		quoted := r
+		quoted.opts.Width = max(1, r.opts.Width-ansi.StringWidth(prefix))
+		return prefixLines(quoted.renderBlocks(node), prefix)
+	case *ast.List:
+		return r.renderList(node, 0)
+	case *extast.Table:
+		return r.renderTable(node)
+	case *extast.DefinitionList:
+		return r.renderDefinitionList(node)
+	case *ast.ThematicBreak:
+		return ""
+	default:
+		if node.HasChildren() {
+			return r.renderBlocks(node)
+		}
+		return ""
+	}
 }
 
 func (r terminalRenderer) renderList(list *ast.List, indentWidth int) string {
@@ -182,13 +186,13 @@ func (r terminalRenderer) renderListItem(
 		case *ast.List:
 			nested := r.renderList(child, nestedIndent)
 			lines = append(lines, strings.Split(nested, "\n")...)
-		case *ast.CodeBlock:
-			lines = append(lines, strings.Split(r.renderCodeBlock(child.Lines()), "\n")...)
-		case *ast.FencedCodeBlock:
-			lines = append(lines, strings.Split(r.renderCodeBlock(child.Lines()), "\n")...)
 		default:
-			if child.HasChildren() {
-				lines = append(lines, strings.Split(r.renderBlocks(child), "\n")...)
+			blockRenderer := r
+			blockRenderer.opts.Width = width
+			block := blockRenderer.renderBlock(child)
+			if block != "" {
+				block = ansi.Hardwrap(block, width, true)
+				lines = append(lines, strings.Split(block, "\n")...)
 			}
 		}
 	}
