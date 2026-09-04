@@ -68,8 +68,8 @@ func TestTerminalRendererFormatsIssueMarkdown(t *testing.T) {
 	want := `Steps
 | Keep context
 
-1. Open issue
-2. [x] Comment with ` + "`kata comment`" + `
+1. Open issue https://example.com
+[x] Comment with ` + "`kata comment`" + `
 
 fmt.Println("ok")
 
@@ -77,10 +77,10 @@ fmt.Println("ok")
 | --- | --- |
 | Status | open |
 
-[image: diagram]`
+[image: diagram] https://example.com/diagram.png`
 	assert.Equal(t, want, textsafe.StripANSI(strings.TrimSpace(got)))
 	assert.Contains(t, got, "\x1b[1mSteps\x1b[22m")
-	assert.Contains(t, got, "\x1b[4missue\x1b[24m")
+	assert.Contains(t, got, "issue \x1b[4mhttps://example.com\x1b[24m")
 	assert.Contains(t, got, "\x1b[48;5;236mfmt.Println(\"ok\")\x1b[49m")
 }
 
@@ -90,6 +90,52 @@ func TestTerminalRendererKeepsHeadingBoldAfterNestedStrong(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "\x1b[1mBefore nested after\x1b[22m\n", got)
+}
+
+func TestTerminalRendererFormatsDefinitionLists(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"Term\n: Definition\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "Term\nDefinition\n", got)
+}
+
+func TestTerminalRendererKeepsLinkAndImageDestinationsVisible(t *testing.T) {
+	lines, err := RenderLines(
+		"[issue](https://example.com/issues/1)\n\n"+
+			"![diagram](https://example.com/diagram.png)\n",
+		Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t,
+		"issue https://example.com/issues/1\n\n"+
+			"[image: diagram] https://example.com/diagram.png",
+		textsafe.StripANSI(strings.Join(lines, "\n")),
+	)
+}
+
+func TestTerminalRendererDoesNotAddMailtoToAutolinkedEmail(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"<user@example.com>\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "user@example.com\n", got)
+}
+
+func TestTerminalRendererKeepsHTMLBlockText(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"<div>hello <strong>world</strong></div>\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "hello world\n", got)
+}
+
+func TestTerminalRendererUsesCheckboxAsTaskMarker(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"- [x] done\n- [ ] pending\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "[x] done\n[ ] pending\n", got)
 }
 
 func TestANSIWrappedLinesPreservesVisibleContent(t *testing.T) {
