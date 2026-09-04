@@ -160,6 +160,14 @@ func TestTerminalRendererWrapsBlockquoteWithinPrefixWidth(t *testing.T) {
 	assert.Equal(t, []string{"| one two", "| three", "| four"}, lines)
 }
 
+func TestTerminalRendererKeepsQuotePrefixOnWrappedCode(t *testing.T) {
+	lines, err := RenderLines(
+		"> ```\n> abcdefghijkl\n> ```\n", Options{Width: 8},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"| abcdef", "| ghijkl"}, lines)
+}
+
 func TestTerminalRendererKeepsPrefixesOnHardWrappedContent(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -228,6 +236,18 @@ func TestTerminalRendererAlignsNestedListToParentContinuation(t *testing.T) {
 		"    - child",
 		"      one two",
 		"      three",
+	}, lines)
+}
+
+func TestTerminalRendererPreservesListParagraphBoundaries(t *testing.T) {
+	lines, err := RenderLines(
+		"- first paragraph\n\n  second paragraph\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"- first paragraph",
+		"",
+		"  second paragraph",
 	}, lines)
 }
 

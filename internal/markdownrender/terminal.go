@@ -90,7 +90,9 @@ func (r terminalRenderer) renderBlock(node ast.Node) string {
 		const prefix = "| "
 		quoted := r
 		quoted.opts.Width = max(1, r.opts.Width-ansi.StringWidth(prefix))
-		return prefixLines(quoted.renderBlocks(node), prefix)
+		return prefixLines(
+			hardWrapLines(quoted.renderBlocks(node), quoted.opts.Width), prefix,
+		)
 	case *ast.List:
 		return r.renderList(node, 0)
 	case *extast.Table:
@@ -132,7 +134,11 @@ func (r terminalRenderer) renderList(list *ast.List, indentWidth int) string {
 		continuationWidth := indentWidth + ansi.StringWidth(marker)
 		continuation := strings.Repeat(" ", continuationWidth)
 		itemLines := r.renderListItem(
-			item, continuationWidth, max(1, r.opts.Width-continuationWidth), taskMarker,
+			item,
+			continuationWidth,
+			max(1, r.opts.Width-continuationWidth),
+			taskMarker,
+			!list.IsTight,
 		)
 		if len(itemLines) == 0 {
 			lines = append(lines, indent+marker)
@@ -171,9 +177,11 @@ func (r terminalRenderer) renderListItem(
 	item *ast.ListItem,
 	nestedIndent, width int,
 	taskMarker string,
+	separateBlocks bool,
 ) []string {
 	var lines []string
 	for child := item.FirstChild(); child != nil; child = child.NextSibling() {
+		var childLines []string
 		switch child := child.(type) {
 		case *ast.Paragraph, *ast.TextBlock:
 			content := r.renderInlines(child)
@@ -182,19 +190,26 @@ func (r terminalRenderer) renderListItem(
 				taskMarker = ""
 			}
 			paragraph := r.wrap(content, width)
-			lines = append(lines, strings.Split(paragraph, "\n")...)
+			childLines = strings.Split(paragraph, "\n")
 		case *ast.List:
 			nested := r.renderList(child, nestedIndent)
-			lines = append(lines, strings.Split(nested, "\n")...)
+			childLines = strings.Split(nested, "\n")
 		default:
 			blockRenderer := r
 			blockRenderer.opts.Width = width
 			block := blockRenderer.renderBlock(child)
 			if block != "" {
-				block = ansi.Hardwrap(block, width, true)
-				lines = append(lines, strings.Split(block, "\n")...)
+				block = hardWrapLines(block, width)
+				childLines = strings.Split(block, "\n")
 			}
 		}
+		if len(childLines) == 0 {
+			continue
+		}
+		if separateBlocks && len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, childLines...)
 	}
 	return lines
 }
@@ -439,6 +454,16 @@ func (r terminalRenderer) renderInlineStyle(
 func (r terminalRenderer) wrap(value string, width int) string {
 	width = max(1, width)
 	return ansi.Hardwrap(ansi.Wordwrap(value, width, ""), width, true)
+}
+
+func hardWrapLines(value string, width int) string {
+	width = max(1, width)
+	lines := strings.Split(strings.TrimRight(value, "\n"), "\n")
+	wrapped := make([]string, 0, len(lines))
+	for _, line := range lines {
+		wrapped = append(wrapped, strings.Split(ansi.Hardwrap(line, width, true), "\n")...)
+	}
+	return strings.Join(wrapped, "\n")
 }
 
 func prefixLines(value, prefix string) string {
