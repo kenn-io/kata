@@ -113,7 +113,7 @@ func (r terminalRenderer) renderList(list *ast.List, depth int) string {
 			marker = fmt.Sprintf("%d. ", itemNumber)
 			itemNumber++
 		}
-		if isTaskListItem(item) {
+		if isTaskListItem(item) && !list.IsOrdered() {
 			marker = ""
 		}
 		indent := strings.Repeat("  ", depth)

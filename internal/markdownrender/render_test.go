@@ -69,7 +69,7 @@ func TestTerminalRendererFormatsIssueMarkdown(t *testing.T) {
 | Keep context
 
 1. Open issue https://example.com
-[x] Comment with ` + "`kata comment`" + `
+2. [x] Comment with ` + "`kata comment`" + `
 
 fmt.Println("ok")
 
@@ -136,6 +136,14 @@ func TestTerminalRendererUsesCheckboxAsTaskMarker(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "[x] done\n[ ] pending\n", got)
+}
+
+func TestTerminalRendererPreservesOrderedTaskMarker(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"2. [x] done\n3. [ ] pending\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "2. [x] done\n3. [ ] pending\n", got)
 }
 
 func TestANSIWrappedLinesPreservesVisibleContent(t *testing.T) {
