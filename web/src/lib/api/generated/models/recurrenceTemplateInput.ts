@@ -5,8 +5,7 @@ import type { RecurrenceTemplateInputMetadata } from './recurrenceTemplateInputM
 
 export interface RecurrenceTemplateInput {
   body?: string
-  /** @nullable */
-  labels?: string[] | null
+  labels?: string[]
   metadata?: RecurrenceTemplateInputMetadata
   owner?: string
   priority?: number

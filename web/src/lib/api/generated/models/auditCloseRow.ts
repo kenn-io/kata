@@ -5,10 +5,8 @@
 export interface AuditCloseRow {
   actor: string
   event_id: number
-  /** @nullable */
-  evidence_types?: string[] | null
-  /** @nullable */
-  flags?: string[] | null
+  evidence_types?: string[]
+  flags?: string[]
   issue: string
   message?: string
   parent?: string

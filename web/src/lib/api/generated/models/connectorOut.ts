@@ -4,8 +4,7 @@
 
 export interface ConnectorOut {
   account_identity?: string
-  /** @nullable */
-  capabilities?: string[] | null
+  capabilities?: string[]
   connector_id?: string
   display_name?: string
   health_error?: string

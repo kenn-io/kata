@@ -10,12 +10,9 @@ import type { UISelectedAuthority } from './uISelectedAuthority.ts'
 
 export interface UISnapshotResponseBody {
   capabilities: UICapabilities
-  /** @nullable */
-  catalog: UIProject[] | null
-  /** @nullable */
-  collection: UIIssue[] | null
-  /** @nullable */
-  collection_links: UILink[] | null
+  catalog: UIProject[]
+  collection: UIIssue[]
+  collection_links: UILink[]
   contract_version: string
   cursor: number
   graph?: UIGraph

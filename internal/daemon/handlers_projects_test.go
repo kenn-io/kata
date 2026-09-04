@@ -912,6 +912,20 @@ func TestListProjectsAndShow(t *testing.T) {
 	assert.Contains(t, showBody, `"aliases":`)
 }
 
+func TestShowProject_EmptyAliasesAreAnArray(t *testing.T) {
+	h := openTestDB(t)
+	project, err := h.db.CreateProject(t.Context(), "x")
+	require.NoError(t, err)
+	srv := daemon.NewServer(daemon.ServerConfig{DB: h.db, StartedAt: h.now})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	body := getBody(t, ts, "/api/v1/projects/"+strconv.FormatInt(project.ID, 10))
+	var parsed map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(body), &parsed))
+	assert.JSONEq(t, `[]`, string(parsed["aliases"]))
+}
+
 // TestListProjects_DefaultShape pins the byte-level wire shape of
 // GET /api/v1/projects. A future addition of a field to db.Project
 // (e.g. an internal-only column) must not silently leak onto this

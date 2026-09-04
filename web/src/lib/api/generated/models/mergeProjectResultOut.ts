@@ -9,8 +9,7 @@ export interface MergeProjectResultOut {
   events_moved: number
   issues_moved: number
   purge_logs_moved: number
-  /** @nullable */
-  short_id_extensions?: MergeShortIDExtension[] | null
+  short_id_extensions?: MergeShortIDExtension[]
   source: ProjectOut
   target: ProjectOut
   [key: string]: unknown

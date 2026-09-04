@@ -8,8 +8,7 @@ import type { Evidence } from './evidence.ts'
 export interface ActionRequestBody {
   actor?: string
   dry_run?: boolean
-  /** @nullable */
-  evidence?: Evidence[] | null
+  evidence?: Evidence[]
   message?: string
   reason?: ActionRequestBodyReason
   source?: ActionRequestBodySource

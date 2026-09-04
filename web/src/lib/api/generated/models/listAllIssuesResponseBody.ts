@@ -4,7 +4,6 @@
 import type { ListGlobalIssueOut } from './listGlobalIssueOut.ts'
 
 export interface ListAllIssuesResponseBody {
-  /** @nullable */
-  issues: ListGlobalIssueOut[] | null
+  issues: ListGlobalIssueOut[]
   [key: string]: unknown
 }

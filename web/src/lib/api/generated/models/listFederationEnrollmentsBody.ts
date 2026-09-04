@@ -4,7 +4,6 @@
 import type { FederationEnrollmentOut } from './federationEnrollmentOut.ts'
 
 export interface ListFederationEnrollmentsBody {
-  /** @nullable */
-  enrollments: FederationEnrollmentOut[] | null
+  enrollments: FederationEnrollmentOut[]
   [key: string]: unknown
 }

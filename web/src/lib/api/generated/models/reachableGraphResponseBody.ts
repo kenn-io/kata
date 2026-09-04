@@ -7,13 +7,10 @@ import type { ReachableGraphUnresolvedRef } from './reachableGraphUnresolvedRef.
 
 export interface ReachableGraphResponseBody {
   depth: string
-  /** @nullable */
-  edges: ReachableGraphEdge[] | null
+  edges: ReachableGraphEdge[]
   hide_done: boolean
-  /** @nullable */
-  nodes: ReachableGraphNode[] | null
+  nodes: ReachableGraphNode[]
   source_uid: string
-  /** @nullable */
-  unresolved_refs: ReachableGraphUnresolvedRef[] | null
+  unresolved_refs: ReachableGraphUnresolvedRef[]
   [key: string]: unknown
 }

@@ -9,8 +9,7 @@ export interface ExternalRootBridgeOut {
   connector_instance: string
   consecutive_failures: number
   enabled: boolean
-  /** @nullable */
-  field_conflicts?: ExternalFieldConflictOut[] | null
+  field_conflicts?: ExternalFieldConflictOut[]
   id: number
   issue_id: number
   last_attempt_at?: string

@@ -4,7 +4,6 @@
 import type { ConnectorOut } from './connectorOut.ts'
 
 export interface ConnectorListResponseBody {
-  /** @nullable */
-  connectors: ConnectorOut[] | null
+  connectors: ConnectorOut[]
   [key: string]: unknown
 }

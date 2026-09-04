@@ -4,7 +4,6 @@
 import type { TokenOut } from './tokenOut.ts'
 
 export interface ListTokensResponseBody {
-  /** @nullable */
-  tokens: TokenOut[] | null
+  tokens: TokenOut[]
   [key: string]: unknown
 }

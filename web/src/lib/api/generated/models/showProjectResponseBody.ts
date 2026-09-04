@@ -5,8 +5,7 @@ import type { ProjectAlias } from './projectAlias.ts'
 import type { ProjectOut } from './projectOut.ts'
 
 export interface ShowProjectResponseBody {
-  /** @nullable */
-  aliases: ProjectAlias[] | null
+  aliases: ProjectAlias[]
   project: ProjectOut
   [key: string]: unknown
 }

@@ -4,7 +4,6 @@
 import type { LabelCount } from './labelCount.ts'
 
 export interface LabelsListResponseBody {
-  /** @nullable */
-  labels: LabelCount[] | null
+  labels: LabelCount[]
   [key: string]: unknown
 }

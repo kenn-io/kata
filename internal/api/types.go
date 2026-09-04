@@ -435,7 +435,7 @@ type MutationResponse struct {
 		Event         *db.Event `json:"event"`
 		OriginalEvent *db.Event `json:"original_event,omitempty"`
 		Changed       bool      `json:"changed"`
-		Reused        bool      `json:"reused,omitempty"`
+		Reused        bool      `json:"reused,omitzero"`
 	}
 }
 
@@ -790,7 +790,7 @@ type EditIssueResponse struct {
 		Event   *db.Event    `json:"event"`
 		Events  []db.Event   `json:"events,omitempty"`
 		Changed bool         `json:"changed"`
-		Changes *LinkChanges `json:"changes,omitempty"`
+		Changes *LinkChanges `json:"changes,omitzero"`
 	}
 }
 

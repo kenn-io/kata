@@ -12,29 +12,21 @@ import type { LinkOut } from './linkOut.ts'
 import type { PendingClaimOut } from './pendingClaimOut.ts'
 
 export interface ShowIssueResponseBody {
-  /** @nullable */
-  children?: IssueOut[] | null
+  children?: IssueOut[]
   claim?: IssueClaimOut
   claim_hub_now?: string
   claim_violation_count?: number
-  /** @nullable */
-  claim_violations?: ClaimViolationOut[] | null
-  /** @nullable */
-  comments: Comment[] | null
+  claim_violations?: ClaimViolationOut[]
+  comments: Comment[]
   issue: Issue
-  /** @nullable */
-  labels: IssueLabel[] | null
+  labels: IssueLabel[]
   lease?: IssueClaimOut
   lease_hub_now?: string
   lease_violation_count?: number
-  /** @nullable */
-  lease_violations?: ClaimViolationOut[] | null
-  /** @nullable */
-  links: LinkOut[] | null
+  lease_violations?: ClaimViolationOut[]
+  links: LinkOut[]
   parent?: IssueRef
-  /** @nullable */
-  pending_claims?: PendingClaimOut[] | null
-  /** @nullable */
-  pending_leases?: PendingClaimOut[] | null
+  pending_claims?: PendingClaimOut[]
+  pending_leases?: PendingClaimOut[]
   [key: string]: unknown
 }

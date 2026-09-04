@@ -8,10 +8,8 @@ import type { ListGlobalIssueOutMetadata } from './listGlobalIssueOutMetadata.ts
 export interface ListGlobalIssueOut {
   author: string
   blocked?: boolean
-  /** @nullable */
-  blocked_by?: LinkPeer[] | null
-  /** @nullable */
-  blocks?: LinkPeer[] | null
+  blocked_by?: LinkPeer[]
+  blocks?: LinkPeer[]
   body: string
   child_counts?: ChildCounts
   closed_at?: string
@@ -19,8 +17,7 @@ export interface ListGlobalIssueOut {
   created_at: string
   deleted_at?: string
   id: number
-  /** @nullable */
-  labels?: string[] | null
+  labels?: string[]
   metadata: ListGlobalIssueOutMetadata
   occurrence_key?: string
   owner?: string
@@ -31,8 +28,7 @@ export interface ListGlobalIssueOut {
   project_uid?: string
   qualified_id: string
   recurrence_id?: number
-  /** @nullable */
-  related?: LinkPeer[] | null
+  related?: LinkPeer[]
   revision: number
   short_id: string
   status: string

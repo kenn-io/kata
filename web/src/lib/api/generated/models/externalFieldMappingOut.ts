@@ -3,8 +3,7 @@
  */
 
 export interface ExternalFieldMappingOut {
-  /** @nullable */
-  accepted_kinds: string[] | null
+  accepted_kinds: string[]
   active: boolean
   external_field_id: string
   external_field_name: string

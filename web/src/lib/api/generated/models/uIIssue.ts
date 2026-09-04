@@ -12,8 +12,7 @@ export interface UIIssue {
   deadline_on_date?: string
   deleted_at?: string
   id: number
-  /** @nullable */
-  labels: string[] | null
+  labels: string[]
   metadata: UIIssueMetadata
   occurrence_key?: string
   owner?: string

@@ -8,7 +8,6 @@ export interface SearchResponseBody {
   degraded_reason?: string
   mode: string
   query: string
-  /** @nullable */
-  results: SearchHit[] | null
+  results: SearchHit[]
   [key: string]: unknown
 }

@@ -4,7 +4,6 @@
 import type { ProjectOut } from './projectOut.ts'
 
 export interface ListProjectsResponseBody {
-  /** @nullable */
-  projects: ProjectOut[] | null
+  projects: ProjectOut[]
   [key: string]: unknown
 }

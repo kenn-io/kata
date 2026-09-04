@@ -3,8 +3,7 @@
  */
 
 export interface FieldDescriptor {
-  /** @nullable */
-  accepted_kinds: string[] | null
+  accepted_kinds: string[]
   display_name: string
   id: string
   nullable: boolean

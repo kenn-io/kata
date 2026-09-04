@@ -5,8 +5,7 @@ import type { Issue } from './issue.ts'
 
 export interface SearchHit {
   issue: Issue
-  /** @nullable */
-  matched_in: string[] | null
+  matched_in: string[]
   score: number
   [key: string]: unknown
 }

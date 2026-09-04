@@ -5,8 +5,5 @@
 export type DigestGlobalParams = {
   since: string
   until?: string
-  /**
-   * @nullable
-   */
-  actor?: string[] | null
+  actor?: string[]
 }

@@ -17,16 +17,7 @@ export type ListAllIssuesParams = {
   limit?: number
   unowned?: boolean
   owner?: string
-  /**
-   * @nullable
-   */
-  label?: string[] | null
-  /**
-   * @nullable
-   */
-  exclude_label?: string[] | null
-  /**
-   * @nullable
-   */
-  meta?: string[] | null
+  label?: string[]
+  exclude_label?: string[]
+  meta?: string[]
 }

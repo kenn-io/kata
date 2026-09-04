@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**Improvements**
+
+- Made API collection responses consistently use empty arrays instead of
+  `null`, and aligned generated Go and TypeScript client types with that wire
+  contract.
+
 ## 0.16.0
 <small>2026-08-27</small>
 

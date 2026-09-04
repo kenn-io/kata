@@ -4,7 +4,6 @@
 import type { Recurrence } from './recurrence.ts'
 
 export interface ListRecurrencesResponseBody {
-  /** @nullable */
-  recurrences: Recurrence[] | null
+  recurrences: Recurrence[]
   [key: string]: unknown
 }

@@ -5,9 +5,6 @@
 export type ReadUIReferencesParams = {
   q?: string
   project_uid?: string
-  /**
-   * @nullable
-   */
-  issue_uid?: string[] | null
+  issue_uid?: string[]
   limit?: number
 }

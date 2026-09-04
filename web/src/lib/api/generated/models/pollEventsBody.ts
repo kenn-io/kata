@@ -4,8 +4,7 @@
 import type { EventEnvelope } from './eventEnvelope.ts'
 
 export interface PollEventsBody {
-  /** @nullable */
-  events: EventEnvelope[] | null
+  events: EventEnvelope[]
   next_after_id: number
   reset_after_id?: number
   reset_required: boolean

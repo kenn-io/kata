@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -213,9 +215,20 @@ type ListenerBinding struct {
 	Policy   ListenerPolicy
 }
 
+var configureHumaOnce sync.Once
+
+func configureHuma() {
+	configureHumaOnce.Do(func() {
+		// JSON v2 encodes nil slices as empty arrays. Keep Huma's schemas aligned
+		// with that response contract.
+		huma.DefaultArrayNullable = false
+	})
+}
+
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
+	configureHuma()
 	if cfg.Broadcaster == nil {
 		cfg.Broadcaster = NewEventBroadcaster()
 	}
@@ -233,6 +246,18 @@ func NewServer(cfg ServerConfig) *Server {
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("kata", APISchemaVersion)
+	jsonFormat := huma.Format{
+		Marshal: func(w io.Writer, value any) error {
+			return jsonv2.MarshalWrite(w, value)
+		},
+		Unmarshal: func(data []byte, value any) error {
+			return jsonv2.Unmarshal(data, value)
+		},
+	}
+	humaConfig.Formats = map[string]huma.Format{
+		"application/json": jsonFormat,
+		"json":             jsonFormat,
+	}
 	humaConfig.OpenAPIPath = "" // Plan 1: no /openapi.json served at runtime; see `kata openapi` + OpenAPIDocument
 	humaConfig.DocsPath = ""
 	humaConfig.Transformers = append(humaConfig.Transformers, api.TransformHumaError)

@@ -6,22 +6,10 @@ import type { ReadUISnapshotRelationshipItem } from './readUISnapshotRelationshi
 export type ReadUISnapshotParams = {
   view?: string
   project_uid?: string
-  /**
-   * @nullable
-   */
-  status?: string[] | null
-  /**
-   * @nullable
-   */
-  owner?: string[] | null
-  /**
-   * @nullable
-   */
-  label?: string[] | null
-  /**
-   * @nullable
-   */
-  relationship?: ReadUISnapshotRelationshipItem[] | null
+  status?: string[]
+  owner?: string[]
+  label?: string[]
+  relationship?: ReadUISnapshotRelationshipItem[]
   text?: string
   selected_issue_uid?: string
   include_graph?: boolean

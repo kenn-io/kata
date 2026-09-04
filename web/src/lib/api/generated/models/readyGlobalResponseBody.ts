@@ -4,7 +4,6 @@
 import type { ReadyGlobalIssueOut } from './readyGlobalIssueOut.ts'
 
 export interface ReadyGlobalResponseBody {
-  /** @nullable */
-  issues: ReadyGlobalIssueOut[] | null
+  issues: ReadyGlobalIssueOut[]
   [key: string]: unknown
 }

@@ -6,10 +6,8 @@ import type { ImportItemResult } from './importItemResult.ts'
 export interface ImportBatchResult {
   comments: number
   created: number
-  /** @nullable */
-  errors: string[] | null
-  /** @nullable */
-  items: ImportItemResult[] | null
+  errors: string[]
+  items: ImportItemResult[]
   links: number
   source: string
   unchanged: number

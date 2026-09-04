@@ -6,8 +6,7 @@ export interface Evidence {
   account?: string
   command?: string
   issue_ref?: string
-  /** @nullable */
-  paths?: string[] | null
+  paths?: string[]
   rationale?: string
   sha?: string
   type: string

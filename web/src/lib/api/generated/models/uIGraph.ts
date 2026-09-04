@@ -7,13 +7,9 @@ import type { UIIssue } from './uIIssue.ts'
 import type { UILink } from './uILink.ts'
 
 export interface UIGraph {
-  /** @nullable */
-  edges: UIGraphEdge[] | null
-  /** @nullable */
-  issues: UIIssue[] | null
-  /** @nullable */
-  links: UILink[] | null
-  /** @nullable */
-  unresolved_refs: UIGraphUnresolvedRef[] | null
+  edges: UIGraphEdge[]
+  issues: UIIssue[]
+  links: UILink[]
+  unresolved_refs: UIGraphUnresolvedRef[]
   [key: string]: unknown
 }

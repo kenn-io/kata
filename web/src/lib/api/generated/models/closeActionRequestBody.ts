@@ -9,8 +9,7 @@ import type { Evidence } from './evidence.ts'
 export interface CloseActionRequestBody {
   actor?: string
   dry_run?: boolean
-  /** @nullable */
-  evidence?: Evidence[] | null
+  evidence?: Evidence[]
   message?: string
   reason?: CloseActionRequestBodyReason
   retry_protocol?: CloseActionRequestBodyRetryProtocol

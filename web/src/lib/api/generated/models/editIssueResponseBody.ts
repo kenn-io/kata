@@ -9,8 +9,7 @@ export interface EditIssueResponseBody {
   changed: boolean
   changes?: LinkChanges
   event: Event
-  /** @nullable */
-  events?: Event[] | null
+  events?: Event[]
   issue: Issue
   [key: string]: unknown
 }

@@ -8,12 +8,6 @@ export type SearchIssuesParams = {
   limit?: number
   include_deleted?: boolean
   mode?: SearchIssuesMode
-  /**
-   * @nullable
-   */
-  label?: string[] | null
-  /**
-   * @nullable
-   */
-  exclude_label?: string[] | null
+  label?: string[]
+  exclude_label?: string[]
 }

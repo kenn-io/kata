@@ -9,15 +9,11 @@ export interface UIReferencesResponseBody {
   capabilities: UICapabilities
   contract_version: string
   cursor: number
-  /** @nullable */
-  issues: UIIssueReference[] | null
-  /** @nullable */
-  labels: string[] | null
+  issues: UIIssueReference[]
+  labels: string[]
   origin: string
   origin_stable: boolean
-  /** @nullable */
-  owners: string[] | null
-  /** @nullable */
-  projects: Project[] | null
+  owners: string[]
+  projects: Project[]
   [key: string]: unknown
 }

@@ -4,7 +4,6 @@
 import type { IssueOut } from './issueOut.ts'
 
 export interface ReadyResponseBody {
-  /** @nullable */
-  issues: IssueOut[] | null
+  issues: IssueOut[]
   [key: string]: unknown
 }

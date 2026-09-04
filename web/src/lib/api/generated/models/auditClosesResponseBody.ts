@@ -4,7 +4,6 @@
 import type { AuditCloseRow } from './auditCloseRow.ts'
 
 export interface AuditClosesResponseBody {
-  /** @nullable */
-  rows: AuditCloseRow[] | null
+  rows: AuditCloseRow[]
   [key: string]: unknown
 }

@@ -11,14 +11,11 @@ export interface ImportIssueInput {
   body?: string
   closed_at?: string
   closed_reason?: ImportIssueInputClosedReason
-  /** @nullable */
-  comments?: ImportCommentInput[] | null
+  comments?: ImportCommentInput[]
   created_at: string
   external_id: string
-  /** @nullable */
-  labels?: string[] | null
-  /** @nullable */
-  links?: ImportLinkInput[] | null
+  labels?: string[]
+  links?: ImportLinkInput[]
   owner?: string
   priority?: number
   status: ImportIssueInputStatus

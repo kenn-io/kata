@@ -5,7 +5,6 @@ import type { ImportIssueInput } from './importIssueInput.ts'
 
 export interface ImportRequestBody {
   actor: string
-  /** @nullable */
-  items: ImportIssueInput[] | null
+  items: ImportIssueInput[]
   source: string
 }

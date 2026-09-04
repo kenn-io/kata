@@ -4,7 +4,6 @@
 import type { FederationProjectStatus } from './federationProjectStatus.ts'
 
 export interface FederationStatusBody {
-  /** @nullable */
-  statuses: FederationProjectStatus[] | null
+  statuses: FederationProjectStatus[]
   [key: string]: unknown
 }

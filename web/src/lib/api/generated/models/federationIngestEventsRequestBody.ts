@@ -6,7 +6,6 @@ import type { FederationIngestEventEnvelope } from './federationIngestEventEnvel
 export interface FederationIngestEventsRequestBody {
   adoption_baseline?: string
   adoption_baseline_end_event_id?: number
-  /** @nullable */
-  events?: FederationIngestEventEnvelope[] | null
+  events?: FederationIngestEventEnvelope[]
   schema_version: number
 }

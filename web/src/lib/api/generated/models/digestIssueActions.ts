@@ -3,8 +3,7 @@
  */
 
 export interface DigestIssueActions {
-  /** @nullable */
-  actions: string[] | null
+  actions: string[]
   issue_short_id: string
   issue_uid: string
   project_id: number

@@ -4,19 +4,13 @@
 import type { LinkPeer } from './linkPeer.ts'
 
 export interface LinkChanges {
-  /** @nullable */
-  blocked_by_added?: LinkPeer[] | null
-  /** @nullable */
-  blocked_by_removed?: LinkPeer[] | null
-  /** @nullable */
-  blocks_added?: LinkPeer[] | null
-  /** @nullable */
-  blocks_removed?: LinkPeer[] | null
+  blocked_by_added?: LinkPeer[]
+  blocked_by_removed?: LinkPeer[]
+  blocks_added?: LinkPeer[]
+  blocks_removed?: LinkPeer[]
   parent_removed?: LinkPeer
   parent_set?: LinkPeer
-  /** @nullable */
-  related_added?: LinkPeer[] | null
-  /** @nullable */
-  related_removed?: LinkPeer[] | null
+  related_added?: LinkPeer[]
+  related_removed?: LinkPeer[]
   [key: string]: unknown
 }

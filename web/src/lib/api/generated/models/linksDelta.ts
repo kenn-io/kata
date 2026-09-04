@@ -4,19 +4,13 @@
 import type { LinksDeltaExpectedProjectUids } from './linksDeltaExpectedProjectUids.ts'
 
 export interface LinksDelta {
-  /** @nullable */
-  add_blocked_by?: string[] | null
-  /** @nullable */
-  add_blocks?: string[] | null
-  /** @nullable */
-  add_related?: string[] | null
+  add_blocked_by?: string[]
+  add_blocks?: string[]
+  add_related?: string[]
   expected_project_uids?: LinksDeltaExpectedProjectUids
-  /** @nullable */
-  remove_blocked_by?: string[] | null
-  /** @nullable */
-  remove_blocks?: string[] | null
+  remove_blocked_by?: string[]
+  remove_blocks?: string[]
   remove_parent?: string
-  /** @nullable */
-  remove_related?: string[] | null
+  remove_related?: string[]
   set_parent?: string
 }

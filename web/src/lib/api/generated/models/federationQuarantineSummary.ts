@@ -6,8 +6,7 @@ export interface FederationQuarantineSummary {
   created_at: string
   direction: string
   error: string
-  /** @nullable */
-  event_uids: string[] | null
+  event_uids: string[]
   first_event_id: number
   id: number
   last_event_id: number

@@ -6,8 +6,7 @@ import type { FederationViolationSummary } from './federationViolationSummary.ts
 
 export interface FederationProjectStatus {
   active_quarantine_count: number
-  /** @nullable */
-  active_quarantines: FederationQuarantineSummary[] | null
+  active_quarantines: FederationQuarantineSummary[]
   allow_insecure?: boolean
   bound_actor?: string
   capabilities?: string
@@ -37,8 +36,7 @@ export interface FederationProjectStatus {
   push_cursor_event_id: number
   push_enabled: boolean
   recent_violation_count: number
-  /** @nullable */
-  recent_violations: FederationViolationSummary[] | null
+  recent_violations: FederationViolationSummary[]
   reset_blocker?: string
   role: string
   unresolved_violation_count: number

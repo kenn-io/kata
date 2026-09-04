@@ -6,8 +6,7 @@ import type { DigestTotals } from './digestTotals.ts'
 
 export interface DigestActorEntry {
   actor: string
-  /** @nullable */
-  issues: DigestIssueActions[] | null
+  issues: DigestIssueActions[]
   totals: DigestTotals
   [key: string]: unknown
 }

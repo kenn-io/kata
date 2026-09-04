@@ -287,9 +287,24 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsCloseRetrySafety(t *testing.T) {
-	if APISchemaVersion != "0.15.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.15.0 for close retry safety", APISchemaVersion)
+func TestOpenAPISchemaVersionReflectsNonNullCollections(t *testing.T) {
+	if APISchemaVersion != "0.16.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.16.0 for non-null collection responses", APISchemaVersion)
+	}
+}
+
+func TestOpenAPIDocumentOrdinarySlicesAreNonNullable(t *testing.T) {
+	doc := OpenAPIDocument()
+	for schemaName, propertyName := range map[string]string{
+		"ListProjectsResponseBody": "projects",
+		"ShowProjectResponseBody":  "aliases",
+	} {
+		schema := doc.Components.Schemas.Map()[schemaName]
+		require.NotNil(t, schema, "missing %s", schemaName)
+		property := schema.Properties[propertyName]
+		require.NotNil(t, property, "missing %s.%s", schemaName, propertyName)
+		require.Equal(t, huma.TypeArray, property.Type)
+		require.False(t, property.Nullable, "%s.%s must not accept null", schemaName, propertyName)
 	}
 }
 

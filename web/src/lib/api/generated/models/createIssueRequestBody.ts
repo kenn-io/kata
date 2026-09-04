@@ -8,10 +8,8 @@ export interface CreateIssueRequestBody {
   actor?: string
   body?: string
   force_new?: boolean
-  /** @nullable */
-  labels?: string[] | null
-  /** @nullable */
-  links?: CreateInitialLinkBody[] | null
+  labels?: string[]
+  links?: CreateInitialLinkBody[]
   metadata?: CreateIssueRequestBodyMetadata
   owner?: string
   priority?: number

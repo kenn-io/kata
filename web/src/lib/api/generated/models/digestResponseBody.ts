@@ -5,8 +5,7 @@ import type { DigestActorEntry } from './digestActorEntry.ts'
 import type { DigestTotals } from './digestTotals.ts'
 
 export interface DigestResponseBody {
-  /** @nullable */
-  actors: DigestActorEntry[] | null
+  actors: DigestActorEntry[]
   event_count: number
   project_id: number
   since: string

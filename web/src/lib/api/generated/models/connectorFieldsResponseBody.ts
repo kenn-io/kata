@@ -4,7 +4,6 @@
 import type { FieldDescriptor } from './fieldDescriptor.ts'
 
 export interface ConnectorFieldsResponseBody {
-  /** @nullable */
-  fields: FieldDescriptor[] | null
+  fields: FieldDescriptor[]
   [key: string]: unknown
 }

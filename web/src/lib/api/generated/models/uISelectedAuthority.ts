@@ -9,17 +9,12 @@ import type { UIIssue } from './uIIssue.ts'
 import type { UILink } from './uILink.ts'
 
 export interface UISelectedAuthority {
-  /** @nullable */
-  comments: Comment[] | null
-  /** @nullable */
-  history: Event[] | null
+  comments: Comment[]
+  history: Event[]
   issue?: UIIssue
-  /** @nullable */
-  labels: IssueLabel[] | null
-  /** @nullable */
-  links: UILink[] | null
-  /** @nullable */
-  recurrences: Recurrence[] | null
+  labels: IssueLabel[]
+  links: UILink[]
+  recurrences: Recurrence[]
   state: string
   [key: string]: unknown
 }
