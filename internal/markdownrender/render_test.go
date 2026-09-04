@@ -130,6 +130,14 @@ func TestTerminalRendererKeepsHTMLBlockText(t *testing.T) {
 	assert.Equal(t, "hello world\n", got)
 }
 
+func TestTerminalRendererPreservesInlineHTMLBreak(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"before<br>after\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "before\nafter\n", got)
+}
+
 func TestTerminalRendererUsesCheckboxAsTaskMarker(t *testing.T) {
 	got, err := renderMarkdownDocument(
 		"- [x] done\n- [ ] pending\n", Options{Width: 80},

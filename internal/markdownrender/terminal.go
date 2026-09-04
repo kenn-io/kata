@@ -309,6 +309,8 @@ func (r terminalRenderer) renderInlinesStyled(parent ast.Node, active inlineStyl
 			} else {
 				out.WriteString(ansiUnderlineOn + label + ansiUnderlineOff)
 			}
+		case *ast.RawHTML:
+			out.WriteString(r.renderRawHTML(node))
 		case *extast.Strikethrough:
 			out.WriteString(r.renderInlineStyle(
 				node, active, inlineStrike, ansiStrikeOn, ansiStrikeOff,
@@ -326,6 +328,23 @@ func (r terminalRenderer) renderInlinesStyled(parent ast.Node, active inlineStyl
 		}
 	}
 	return out.String()
+}
+
+func (r terminalRenderer) renderRawHTML(node *ast.RawHTML) string {
+	var raw strings.Builder
+	for i := range node.Segments.Len() {
+		segment := node.Segments.At(i)
+		raw.Write(segment.Value(r.source))
+	}
+	value := raw.String()
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) >= 3 && trimmed[0] == '<' && trimmed[len(trimmed)-1] == '>' {
+		fields := strings.Fields(strings.TrimSpace(trimmed[1 : len(trimmed)-1]))
+		if len(fields) > 0 && strings.EqualFold(strings.TrimSuffix(fields[0], "/"), "br") {
+			return "\n"
+		}
+	}
+	return stripHTMLTags(value)
 }
 
 func visibleLinkDestination(destination []byte) string {
