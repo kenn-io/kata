@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"charm.land/glamour/v2"
-	glamansi "charm.land/glamour/v2/ansi"
 	"github.com/charmbracelet/x/ansi"
 	"go.kenn.io/kata/internal/textsafe"
 )
@@ -21,7 +19,7 @@ type Options struct {
 }
 
 var terminalControlEntityPattern = regexp.MustCompile(
-	`&(?:#[xX][0-9A-Fa-f]{1,8}|#[0-9]{1,10}|[A-Za-z][A-Za-z0-9]{0,31});`,
+	`&(?:#[xX][0-9A-Fa-f]{1,8}|#[0-9]{1,10}|[A-Za-z][A-Za-z0-9]{0,31});?`,
 )
 
 // SanitizeInput removes terminal controls from Markdown before either a
@@ -37,6 +35,10 @@ func SanitizeInput(markdown string) string {
 	return textsafe.Block(markdown)
 }
 
+func unescapeTerminalText(value string) string {
+	return textsafe.Block(html.UnescapeString(value))
+}
+
 // Render converts Markdown into ANSI terminal output. Callers must pass the
 // result through ANSIWrappedLines before writing it to a terminal.
 func Render(markdown string, opts Options) (out string, err error) {
@@ -46,17 +48,7 @@ func Render(markdown string, opts Options) (out string, err error) {
 			err = fmt.Errorf("render markdown: %v", recovered)
 		}
 	}()
-	width := max(1, opts.Width)
-	renderer, err := glamour.NewTermRenderer(
-		glamour.WithStyles(styleConfig(opts.CodeBlockBackground)),
-		glamour.WithPreservedNewLines(),
-		glamour.WithWordWrap(width),
-		glamour.WithTableWrap(true),
-	)
-	if err != nil {
-		return "", err
-	}
-	return renderer.Render(SanitizeInput(markdown))
+	return renderMarkdownDocument(SanitizeInput(markdown), opts)
 }
 
 // RenderLines converts Markdown into display-width-bounded terminal lines.
@@ -233,56 +225,4 @@ func safeExtendedColor(values []int) (int, bool) {
 		return 5, true
 	}
 	return 0, false
-}
-
-func styleConfig(codeBackground *string) glamansi.StyleConfig {
-	bold := true
-	italic := true
-	zero := uint(0)
-	quoteToken := "| "
-	return glamansi.StyleConfig{
-		Document: glamansi.StyleBlock{Margin: &zero},
-		BlockQuote: glamansi.StyleBlock{
-			Indent:      &zero,
-			IndentToken: &quoteToken,
-		},
-		Paragraph: glamansi.StyleBlock{Margin: &zero},
-		Heading: glamansi.StyleBlock{
-			StylePrimitive: glamansi.StylePrimitive{Bold: &bold},
-			Margin:         &zero,
-		},
-		H1:     glamansi.StyleBlock{StylePrimitive: glamansi.StylePrimitive{Bold: &bold}},
-		H2:     glamansi.StyleBlock{StylePrimitive: glamansi.StylePrimitive{Bold: &bold}},
-		H3:     glamansi.StyleBlock{StylePrimitive: glamansi.StylePrimitive{Bold: &bold}},
-		H4:     glamansi.StyleBlock{StylePrimitive: glamansi.StylePrimitive{Bold: &bold}},
-		H5:     glamansi.StyleBlock{StylePrimitive: glamansi.StylePrimitive{Bold: &bold}},
-		H6:     glamansi.StyleBlock{StylePrimitive: glamansi.StylePrimitive{Bold: &bold}},
-		Strong: glamansi.StylePrimitive{Bold: &bold},
-		Emph:   glamansi.StylePrimitive{Italic: &italic},
-		Item:   glamansi.StylePrimitive{BlockPrefix: "- "},
-		Enumeration: glamansi.StylePrimitive{
-			BlockPrefix: ". ",
-		},
-		Task: glamansi.StyleTask{Ticked: "[x] ", Unticked: "[ ] "},
-		Link: glamansi.StylePrimitive{Underline: &bold},
-		Code: glamansi.StyleBlock{
-			StylePrimitive: glamansi.StylePrimitive{Prefix: "`", Suffix: "`"},
-		},
-		CodeBlock: glamansi.StyleCodeBlock{
-			StyleBlock: glamansi.StyleBlock{
-				StylePrimitive: glamansi.StylePrimitive{
-					BackgroundColor: codeBackground,
-				},
-				Margin: &zero,
-			},
-		},
-		HorizontalRule: glamansi.StylePrimitive{Format: ""},
-		ImageText: glamansi.StylePrimitive{
-			Format: "[image: {{.text}}]",
-		},
-		List: glamansi.StyleList{
-			StyleBlock:  glamansi.StyleBlock{Margin: &zero},
-			LevelIndent: 2,
-		},
-	}
 }

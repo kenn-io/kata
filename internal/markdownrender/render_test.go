@@ -38,6 +38,23 @@ func TestRenderLinesSanitizesDecodedControlEntities(t *testing.T) {
 	assert.Contains(t, got, "spoof")
 }
 
+func TestRenderLinesSanitizesSemicolonlessControlEntities(t *testing.T) {
+	lines, err := RenderLines(
+		"before&#27[31mred&#27[0mafter", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"beforeredafter"}, lines)
+}
+
+func TestTerminalRendererSanitizesDecodedControlEntities(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"before&#27;[31mred&#27;[0mafter", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "before[31mred[0mafter\n", got)
+	assert.NotContains(t, got, "\x1b")
+}
+
 func TestRenderLinesRejectsDecodedConceal(t *testing.T) {
 	lines, err := RenderLines(
 		"before&#27;[8mvisible&#27;[31mred",
@@ -49,6 +66,222 @@ func TestRenderLinesRejectsDecodedConceal(t *testing.T) {
 	assert.Equal(t, "beforevisiblered", textsafe.StripANSI(got))
 	assert.NotContains(t, got, "\x1b[8m")
 	assert.NotContains(t, got, "\x1b[31m")
+}
+
+func TestTerminalRendererFormatsIssueMarkdown(t *testing.T) {
+	background := "236"
+	input := "## Steps\n\n" +
+		"> Keep context\n\n" +
+		"1. **Open** [issue](https://example.com)\n" +
+		"2. [x] Comment with `kata comment`\n\n" +
+		"```go\nfmt.Println(\"ok\")\n```\n\n" +
+		"| Field | Value |\n| --- | --- |\n| Status | open |\n\n" +
+		"![diagram](https://example.com/diagram.png)\n"
+	got, err := renderMarkdownDocument(
+		input, Options{Width: 80, CodeBlockBackground: &background},
+	)
+	require.NoError(t, err)
+
+	want := `Steps
+| Keep context
+
+1. Open issue https://example.com
+2. [x] Comment with ` + "`kata comment`" + `
+
+fmt.Println("ok")
+
+| Field | Value |
+| --- | --- |
+| Status | open |
+
+[image: diagram] https://example.com/diagram.png`
+	assert.Equal(t, want, textsafe.StripANSI(strings.TrimSpace(got)))
+	assert.Contains(t, got, "\x1b[1mSteps\x1b[22m")
+	assert.Contains(t, got, "issue \x1b[4mhttps://example.com\x1b[24m")
+	assert.Contains(t, got, "\x1b[48;5;236mfmt.Println(\"ok\")\x1b[49m")
+}
+
+func TestTerminalRendererKeepsHeadingBoldAfterNestedStrong(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"## Before **nested** after\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "\x1b[1mBefore nested after\x1b[22m\n", got)
+}
+
+func TestTerminalRendererFormatsDefinitionLists(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"Term\n: Definition\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "Term\nDefinition\n", got)
+}
+
+func TestTerminalRendererKeepsLinkAndImageDestinationsVisible(t *testing.T) {
+	lines, err := RenderLines(
+		"[issue](https://example.com/issues/1)\n\n"+
+			"![diagram](https://example.com/diagram.png)\n",
+		Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t,
+		"issue https://example.com/issues/1\n\n"+
+			"[image: diagram] https://example.com/diagram.png",
+		textsafe.StripANSI(strings.Join(lines, "\n")),
+	)
+}
+
+func TestTerminalRendererDoesNotAddMailtoToAutolinkedEmail(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"<user@example.com>\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "user@example.com\n", got)
+}
+
+func TestTerminalRendererKeepsHTMLBlockText(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"<div>hello <strong>world</strong></div>\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "hello world\n", got)
+}
+
+func TestTerminalRendererPreservesLiteralLessThanInHTMLBlock(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"<div>1 < 2</div>\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "1 < 2\n", got)
+}
+
+func TestTerminalRendererPreservesInlineHTMLBreak(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"before<br>after\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "before\nafter\n", got)
+}
+
+func TestTerminalRendererPreservesCodeSpanWhitespaceAndEntities(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"`a  &amp; b`\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "`a  &amp; b`\n", got)
+}
+
+func TestTerminalRendererWrapsBlockquoteWithinPrefixWidth(t *testing.T) {
+	lines, err := RenderLines("> one two three four\n", Options{Width: 10})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"| one two", "| three", "| four"}, lines)
+}
+
+func TestTerminalRendererKeepsQuotePrefixOnWrappedCode(t *testing.T) {
+	lines, err := RenderLines(
+		"> ```\n> abcdefghijkl\n> ```\n", Options{Width: 8},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"| abcdef", "| ghijkl"}, lines)
+}
+
+func TestTerminalRendererKeepsPrefixesOnHardWrappedContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		markdown string
+		width    int
+		want     []string
+	}{
+		{"blockquote", "> abcdefghijkl\n", 8, []string{"| abcdef", "| ghijkl"}},
+		{"list", "- abcdefghijkl\n", 8, []string{"- abcdef", "  ghijkl"}},
+		{"task", "- [ ] abcdefghijkl\n", 10, []string{"[ ] abcdef", "    ghijkl"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			lines, err := RenderLines(test.markdown, Options{Width: test.width})
+			require.NoError(t, err)
+			assert.Equal(t, test.want, lines)
+		})
+	}
+}
+
+func TestTerminalRendererKeepsBlockquotePrefixesInsideList(t *testing.T) {
+	lines, err := RenderLines("- > abcdefghijkl\n", Options{Width: 10})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"- | abcdef", "  | ghijkl"}, lines)
+}
+
+func TestTerminalRendererKeepsListIndentOnWrappedCodeBlock(t *testing.T) {
+	lines, err := RenderLines(
+		"- ```\n  abcdefghijkl\n  ```\n", Options{Width: 10},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"- abcdefgh", "  ijkl"}, lines)
+}
+
+func TestTerminalRendererPreservesLeadingSpacesInListCodeBlock(t *testing.T) {
+	lines, err := RenderLines(
+		"- ```\n  first\n    indented\n  ```\n", Options{Width: 20},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"- first", "    indented"}, lines)
+}
+
+func TestTerminalRendererKeepsHTMLBlockTextInsideList(t *testing.T) {
+	lines, err := RenderLines(
+		"- <div>\n  hello world\n  </div>\n", Options{Width: 10},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"- hello wo", "  rld"}, lines)
+}
+
+func TestTerminalRendererUsesCheckboxAsTaskMarker(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"- [x] done\n- [ ] pending\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "[x] done\n[ ] pending\n", got)
+}
+
+func TestTerminalRendererAlignsTaskContinuationAfterCheckbox(t *testing.T) {
+	lines, err := RenderLines(
+		"- [ ] one two three four\n", Options{Width: 12},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"[ ] one two", "    three", "    four"}, lines)
+}
+
+func TestTerminalRendererAlignsNestedListToParentContinuation(t *testing.T) {
+	lines, err := RenderLines(
+		"10. parent\n    - child one two three\n", Options{Width: 14},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"10. parent",
+		"    - child",
+		"      one two",
+		"      three",
+	}, lines)
+}
+
+func TestTerminalRendererPreservesListParagraphBoundaries(t *testing.T) {
+	lines, err := RenderLines(
+		"- first paragraph\n\n  second paragraph\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"- first paragraph",
+		"",
+		"  second paragraph",
+	}, lines)
+}
+
+func TestTerminalRendererPreservesOrderedTaskMarker(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"2. [x] done\n3. [ ] pending\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "2. [x] done\n3. [ ] pending\n", got)
 }
 
 func TestANSIWrappedLinesPreservesVisibleContent(t *testing.T) {
