@@ -1,5 +1,13 @@
 # Packaging kata
 
+## Release ownership
+
+Releases happen externally. This repository keeps build and packaging tools
+and checks snapshot builds in pull requests. Pushing a tag here does not
+publish a release. Release operators should use the external release process.
+
+## Building packages
+
 Package managers must identify themselves in the Kata binary so `kata update`
 does not replace a file owned by the package database. Set the version,
 distribution, and build date explicitly when building from a release source
@@ -75,7 +83,7 @@ events and excluded data.
 
 ## Official tap publishing
 
-Kata release workflows publish artifacts but never write to
+Release publication happens externally and does not write to
 `kenn-io/homebrew-tap`. The tap's hourly workflow reads Kata's latest stable
 release, validates it, and opens a same-repository formula update pull request
 with the tap repository's short-lived `GITHUB_TOKEN`.

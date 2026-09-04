@@ -1,4 +1,4 @@
-.PHONY: build install test test-short test-stress test-federation-docker release-scripts-test lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
+.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
@@ -92,9 +92,6 @@ test-stress:
 
 test-federation-docker:
 	./scripts/test-federation-docker.sh
-
-release-scripts-test:
-	bash scripts/release_scripts_test.sh
 
 docs-install:
 	cd docs && uv sync --frozen --no-dev
