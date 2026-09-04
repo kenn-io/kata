@@ -138,12 +138,26 @@ func TestTerminalRendererPreservesInlineHTMLBreak(t *testing.T) {
 	assert.Equal(t, "before\nafter\n", got)
 }
 
+func TestTerminalRendererWrapsBlockquoteWithinPrefixWidth(t *testing.T) {
+	lines, err := RenderLines("> one two three four\n", Options{Width: 10})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"| one two", "| three", "| four"}, lines)
+}
+
 func TestTerminalRendererUsesCheckboxAsTaskMarker(t *testing.T) {
 	got, err := renderMarkdownDocument(
 		"- [x] done\n- [ ] pending\n", Options{Width: 80},
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "[x] done\n[ ] pending\n", got)
+}
+
+func TestTerminalRendererAlignsTaskContinuationAfterCheckbox(t *testing.T) {
+	lines, err := RenderLines(
+		"- [ ] one two three four\n", Options{Width: 12},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"[ ] one two", "    three", "    four"}, lines)
 }
 
 func TestTerminalRendererPreservesOrderedTaskMarker(t *testing.T) {

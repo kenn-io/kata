@@ -70,7 +70,10 @@ func (r terminalRenderer) renderBlocks(parent ast.Node) string {
 		case *ast.HTMLBlock:
 			block = r.renderHTMLBlock(node)
 		case *ast.Blockquote:
-			block = prefixLines(r.renderBlocks(node), "| ")
+			const prefix = "| "
+			quoted := r
+			quoted.opts.Width = max(1, r.opts.Width-ansi.StringWidth(prefix))
+			block = prefixLines(quoted.renderBlocks(node), prefix)
 		case *ast.List:
 			block = r.renderList(node, 0)
 		case *extast.Table:
@@ -113,12 +116,19 @@ func (r terminalRenderer) renderList(list *ast.List, depth int) string {
 			marker = fmt.Sprintf("%d. ", itemNumber)
 			itemNumber++
 		}
-		if isTaskListItem(item) && !list.IsOrdered() {
-			marker = ""
+		taskMarker := taskListMarker(item)
+		if taskMarker != "" {
+			if list.IsOrdered() {
+				marker += taskMarker
+			} else {
+				marker = taskMarker
+			}
 		}
 		indent := strings.Repeat("  ", depth)
 		continuation := indent + strings.Repeat(" ", ansi.StringWidth(marker))
-		itemLines := r.renderListItem(item, depth, max(1, r.opts.Width-ansi.StringWidth(indent+marker)))
+		itemLines := r.renderListItem(
+			item, depth, max(1, r.opts.Width-ansi.StringWidth(indent+marker)), taskMarker,
+		)
 		if len(itemLines) == 0 {
 			lines = append(lines, indent+marker)
 			continue
@@ -137,18 +147,36 @@ func (r terminalRenderer) renderList(list *ast.List, depth int) string {
 	return strings.Join(lines, "\n")
 }
 
-func isTaskListItem(item *ast.ListItem) bool {
+func taskListMarker(item *ast.ListItem) string {
 	firstBlock := item.FirstChild()
-	return firstBlock != nil && firstBlock.FirstChild() != nil &&
-		firstBlock.FirstChild().Kind() == extast.KindTaskCheckBox
+	if firstBlock == nil {
+		return ""
+	}
+	checkbox, ok := firstBlock.FirstChild().(*extast.TaskCheckBox)
+	if !ok {
+		return ""
+	}
+	if checkbox.IsChecked {
+		return "[x] "
+	}
+	return "[ ] "
 }
 
-func (r terminalRenderer) renderListItem(item *ast.ListItem, depth, width int) []string {
+func (r terminalRenderer) renderListItem(
+	item *ast.ListItem,
+	depth, width int,
+	taskMarker string,
+) []string {
 	var lines []string
 	for child := item.FirstChild(); child != nil; child = child.NextSibling() {
 		switch child := child.(type) {
 		case *ast.Paragraph, *ast.TextBlock:
-			paragraph := r.wrap(r.renderInlines(child), width)
+			content := r.renderInlines(child)
+			if taskMarker != "" {
+				content = strings.TrimPrefix(content, taskMarker)
+				taskMarker = ""
+			}
+			paragraph := r.wrap(content, width)
 			lines = append(lines, strings.Split(paragraph, "\n")...)
 		case *ast.List:
 			nested := r.renderList(child, depth+1)
