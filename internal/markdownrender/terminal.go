@@ -103,7 +103,7 @@ func (r terminalRenderer) renderBlocks(parent ast.Node) string {
 	return out.String()
 }
 
-func (r terminalRenderer) renderList(list *ast.List, depth int) string {
+func (r terminalRenderer) renderList(list *ast.List, indentWidth int) string {
 	lines := make([]string, 0, list.ChildCount())
 	itemNumber := list.Start
 	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
@@ -124,10 +124,11 @@ func (r terminalRenderer) renderList(list *ast.List, depth int) string {
 				marker = taskMarker
 			}
 		}
-		indent := strings.Repeat("  ", depth)
-		continuation := indent + strings.Repeat(" ", ansi.StringWidth(marker))
+		indent := strings.Repeat(" ", indentWidth)
+		continuationWidth := indentWidth + ansi.StringWidth(marker)
+		continuation := strings.Repeat(" ", continuationWidth)
 		itemLines := r.renderListItem(
-			item, depth, max(1, r.opts.Width-ansi.StringWidth(indent+marker)), taskMarker,
+			item, continuationWidth, max(1, r.opts.Width-continuationWidth), taskMarker,
 		)
 		if len(itemLines) == 0 {
 			lines = append(lines, indent+marker)
@@ -137,7 +138,7 @@ func (r terminalRenderer) renderList(list *ast.List, depth int) string {
 		for _, line := range itemLines[1:] {
 			if line == "" {
 				lines = append(lines, "")
-			} else if strings.HasPrefix(line, strings.Repeat("  ", depth+1)) {
+			} else if strings.HasPrefix(line, continuation) {
 				lines = append(lines, line)
 			} else {
 				lines = append(lines, continuation+line)
@@ -164,7 +165,7 @@ func taskListMarker(item *ast.ListItem) string {
 
 func (r terminalRenderer) renderListItem(
 	item *ast.ListItem,
-	depth, width int,
+	nestedIndent, width int,
 	taskMarker string,
 ) []string {
 	var lines []string
@@ -179,7 +180,7 @@ func (r terminalRenderer) renderListItem(
 			paragraph := r.wrap(content, width)
 			lines = append(lines, strings.Split(paragraph, "\n")...)
 		case *ast.List:
-			nested := r.renderList(child, depth+1)
+			nested := r.renderList(child, nestedIndent)
 			lines = append(lines, strings.Split(nested, "\n")...)
 		case *ast.CodeBlock:
 			lines = append(lines, strings.Split(r.renderCodeBlock(child.Lines()), "\n")...)
@@ -305,9 +306,7 @@ func (r terminalRenderer) renderInlinesStyled(parent ast.Node, active inlineStyl
 		case *ast.String:
 			out.WriteString(html.UnescapeString(string(node.Value)))
 		case *ast.CodeSpan:
-			out.WriteByte('`')
-			out.WriteString(strings.Join(strings.Fields(r.renderInlinesStyled(node, active)), " "))
-			out.WriteByte('`')
+			out.WriteString(r.renderCodeSpan(node))
 		case *ast.Emphasis:
 			if node.Level == 2 {
 				out.WriteString(r.renderInlineStyle(
@@ -355,6 +354,23 @@ func (r terminalRenderer) renderInlinesStyled(parent ast.Node, active inlineStyl
 			}
 		}
 	}
+	return out.String()
+}
+
+func (r terminalRenderer) renderCodeSpan(node *ast.CodeSpan) string {
+	var out strings.Builder
+	out.WriteByte('`')
+	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+		textNode := child.(*ast.Text)
+		value := textNode.Segment.Value(r.source)
+		if len(value) > 0 && value[len(value)-1] == '\n' {
+			out.Write(value[:len(value)-1])
+			out.WriteByte(' ')
+		} else {
+			out.Write(value)
+		}
+	}
+	out.WriteByte('`')
 	return out.String()
 }
 

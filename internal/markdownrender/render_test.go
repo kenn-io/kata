@@ -138,6 +138,14 @@ func TestTerminalRendererPreservesInlineHTMLBreak(t *testing.T) {
 	assert.Equal(t, "before\nafter\n", got)
 }
 
+func TestTerminalRendererPreservesCodeSpanWhitespaceAndEntities(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"`a  &amp; b`\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "`a  &amp; b`\n", got)
+}
+
 func TestTerminalRendererWrapsBlockquoteWithinPrefixWidth(t *testing.T) {
 	lines, err := RenderLines("> one two three four\n", Options{Width: 10})
 	require.NoError(t, err)
@@ -158,6 +166,19 @@ func TestTerminalRendererAlignsTaskContinuationAfterCheckbox(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"[ ] one two", "    three", "    four"}, lines)
+}
+
+func TestTerminalRendererAlignsNestedListToParentContinuation(t *testing.T) {
+	lines, err := RenderLines(
+		"10. parent\n    - child one two three\n", Options{Width: 14},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"10. parent",
+		"    - child",
+		"      one two",
+		"      three",
+	}, lines)
 }
 
 func TestTerminalRendererPreservesOrderedTaskMarker(t *testing.T) {
