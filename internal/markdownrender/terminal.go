@@ -2,7 +2,6 @@ package markdownrender
 
 import (
 	"fmt"
-	"html"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -266,7 +265,7 @@ func stripHTMLTags(value string) string {
 		out.WriteByte(value[index])
 		index++
 	}
-	return strings.TrimSpace(html.UnescapeString(out.String()))
+	return strings.TrimSpace(unescapeTerminalText(out.String()))
 }
 
 func htmlTagLength(value string) (int, bool) {
@@ -352,12 +351,12 @@ func (r terminalRenderer) renderInlinesStyled(parent ast.Node, active inlineStyl
 	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
 		switch node := node.(type) {
 		case *ast.Text:
-			out.WriteString(html.UnescapeString(string(node.Segment.Value(r.source))))
+			out.WriteString(unescapeTerminalText(string(node.Segment.Value(r.source))))
 			if node.HardLineBreak() || node.SoftLineBreak() {
 				out.WriteByte('\n')
 			}
 		case *ast.String:
-			out.WriteString(html.UnescapeString(string(node.Value)))
+			out.WriteString(unescapeTerminalText(string(node.Value)))
 		case *ast.CodeSpan:
 			out.WriteString(r.renderCodeSpan(node))
 		case *ast.Emphasis:
@@ -378,12 +377,12 @@ func (r terminalRenderer) renderInlinesStyled(parent ast.Node, active inlineStyl
 			}
 		case *ast.Image:
 			out.WriteString("[image: " + r.renderInlinesStyled(node, active) + "]")
-			if destination := html.UnescapeString(string(node.Destination)); destination != "" {
+			if destination := unescapeTerminalText(string(node.Destination)); destination != "" {
 				out.WriteByte(' ')
 				out.WriteString(destination)
 			}
 		case *ast.AutoLink:
-			label := html.UnescapeString(string(node.Label(r.source)))
+			label := unescapeTerminalText(string(node.Label(r.source)))
 			if node.AutoLinkType == ast.AutoLinkEmail {
 				out.WriteString(label)
 			} else {
@@ -445,7 +444,7 @@ func (r terminalRenderer) renderRawHTML(node *ast.RawHTML) string {
 }
 
 func visibleLinkDestination(destination []byte) string {
-	value := html.UnescapeString(string(destination))
+	value := unescapeTerminalText(string(destination))
 	if strings.HasPrefix(value, "#") {
 		return ""
 	}

@@ -38,6 +38,23 @@ func TestRenderLinesSanitizesDecodedControlEntities(t *testing.T) {
 	assert.Contains(t, got, "spoof")
 }
 
+func TestRenderLinesSanitizesSemicolonlessControlEntities(t *testing.T) {
+	lines, err := RenderLines(
+		"before&#27[31mred&#27[0mafter", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"beforeredafter"}, lines)
+}
+
+func TestTerminalRendererSanitizesDecodedControlEntities(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"before&#27;[31mred&#27;[0mafter", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "before[31mred[0mafter\n", got)
+	assert.NotContains(t, got, "\x1b")
+}
+
 func TestRenderLinesRejectsDecodedConceal(t *testing.T) {
 	lines, err := RenderLines(
 		"before&#27;[8mvisible&#27;[31mred",

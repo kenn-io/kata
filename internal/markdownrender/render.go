@@ -19,7 +19,7 @@ type Options struct {
 }
 
 var terminalControlEntityPattern = regexp.MustCompile(
-	`&(?:#[xX][0-9A-Fa-f]{1,8}|#[0-9]{1,10}|[A-Za-z][A-Za-z0-9]{0,31});`,
+	`&(?:#[xX][0-9A-Fa-f]{1,8}|#[0-9]{1,10}|[A-Za-z][A-Za-z0-9]{0,31});?`,
 )
 
 // SanitizeInput removes terminal controls from Markdown before either a
@@ -33,6 +33,10 @@ func SanitizeInput(markdown string) string {
 		return entity
 	})
 	return textsafe.Block(markdown)
+}
+
+func unescapeTerminalText(value string) string {
+	return textsafe.Block(html.UnescapeString(value))
 }
 
 // Render converts Markdown into ANSI terminal output. Callers must pass the
