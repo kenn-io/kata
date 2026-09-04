@@ -227,17 +227,35 @@ func (r terminalRenderer) renderHTMLBlock(block *ast.HTMLBlock) string {
 
 func stripHTMLTags(value string) string {
 	var out strings.Builder
-	inTag := false
-	var quote rune
-	for _, char := range value {
-		if !inTag {
-			if char == '<' {
-				inTag = true
-				continue
-			}
-			out.WriteRune(char)
+	for index := 0; index < len(value); {
+		if tagLength, ok := htmlTagLength(value[index:]); ok {
+			index += tagLength
 			continue
 		}
+		out.WriteByte(value[index])
+		index++
+	}
+	return strings.TrimSpace(html.UnescapeString(out.String()))
+}
+
+func htmlTagLength(value string) (int, bool) {
+	if len(value) < 3 || value[0] != '<' {
+		return 0, false
+	}
+	switch value[1] {
+	case '/':
+		if len(value) < 4 || !isASCIIAlpha(value[2]) {
+			return 0, false
+		}
+	case '!', '?':
+	default:
+		if !isASCIIAlpha(value[1]) {
+			return 0, false
+		}
+	}
+	var quote byte
+	for index := 2; index < len(value); index++ {
+		char := value[index]
 		if quote != 0 {
 			if char == quote {
 				quote = 0
@@ -248,10 +266,14 @@ func stripHTMLTags(value string) string {
 		case '\'', '"':
 			quote = char
 		case '>':
-			inTag = false
+			return index + 1, true
 		}
 	}
-	return strings.TrimSpace(html.UnescapeString(out.String()))
+	return 0, false
+}
+
+func isASCIIAlpha(char byte) bool {
+	return char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z'
 }
 
 func (r terminalRenderer) renderTable(table *extast.Table) string {

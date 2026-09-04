@@ -130,6 +130,14 @@ func TestTerminalRendererKeepsHTMLBlockText(t *testing.T) {
 	assert.Equal(t, "hello world\n", got)
 }
 
+func TestTerminalRendererPreservesLiteralLessThanInHTMLBlock(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"<div>1 < 2</div>\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "1 < 2\n", got)
+}
+
 func TestTerminalRendererPreservesInlineHTMLBreak(t *testing.T) {
 	got, err := renderMarkdownDocument(
 		"before<br>after\n", Options{Width: 80},
