@@ -202,6 +202,14 @@ func TestTerminalRendererKeepsListIndentOnWrappedCodeBlock(t *testing.T) {
 	assert.Equal(t, []string{"- abcdefgh", "  ijkl"}, lines)
 }
 
+func TestTerminalRendererPreservesLeadingSpacesInListCodeBlock(t *testing.T) {
+	lines, err := RenderLines(
+		"- ```\n  first\n    indented\n  ```\n", Options{Width: 20},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"- first", "    indented"}, lines)
+}
+
 func TestTerminalRendererKeepsHTMLBlockTextInsideList(t *testing.T) {
 	lines, err := RenderLines(
 		"- <div>\n  hello world\n  </div>\n", Options{Width: 10},

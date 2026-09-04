@@ -38,6 +38,11 @@ type terminalRenderer struct {
 	opts   Options
 }
 
+type listItemLine struct {
+	text            string
+	hasParentIndent bool
+}
+
 func renderMarkdownDocument(markdown string, opts Options) (string, error) {
 	source := []byte(markdown)
 	parser := goldmark.New(goldmark.WithExtensions(
@@ -144,14 +149,14 @@ func (r terminalRenderer) renderList(list *ast.List, indentWidth int) string {
 			lines = append(lines, indent+marker)
 			continue
 		}
-		lines = append(lines, indent+marker+itemLines[0])
+		lines = append(lines, indent+marker+itemLines[0].text)
 		for _, line := range itemLines[1:] {
-			if line == "" {
+			if line.text == "" {
 				lines = append(lines, "")
-			} else if strings.HasPrefix(line, continuation) {
-				lines = append(lines, line)
+			} else if line.hasParentIndent {
+				lines = append(lines, line.text)
 			} else {
-				lines = append(lines, continuation+line)
+				lines = append(lines, continuation+line.text)
 			}
 		}
 	}
@@ -178,10 +183,11 @@ func (r terminalRenderer) renderListItem(
 	nestedIndent, width int,
 	taskMarker string,
 	separateBlocks bool,
-) []string {
-	var lines []string
+) []listItemLine {
+	var lines []listItemLine
 	for child := item.FirstChild(); child != nil; child = child.NextSibling() {
 		var childLines []string
+		hasParentIndent := false
 		switch child := child.(type) {
 		case *ast.Paragraph, *ast.TextBlock:
 			content := r.renderInlines(child)
@@ -194,6 +200,7 @@ func (r terminalRenderer) renderListItem(
 		case *ast.List:
 			nested := r.renderList(child, nestedIndent)
 			childLines = strings.Split(nested, "\n")
+			hasParentIndent = true
 		default:
 			blockRenderer := r
 			blockRenderer.opts.Width = width
@@ -207,9 +214,14 @@ func (r terminalRenderer) renderListItem(
 			continue
 		}
 		if separateBlocks && len(lines) > 0 {
-			lines = append(lines, "")
+			lines = append(lines, listItemLine{})
 		}
-		lines = append(lines, childLines...)
+		for _, line := range childLines {
+			lines = append(lines, listItemLine{
+				text:            line,
+				hasParentIndent: hasParentIndent,
+			})
+		}
 	}
 	return lines
 }
