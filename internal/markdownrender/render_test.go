@@ -160,6 +160,26 @@ func TestTerminalRendererWrapsBlockquoteWithinPrefixWidth(t *testing.T) {
 	assert.Equal(t, []string{"| one two", "| three", "| four"}, lines)
 }
 
+func TestTerminalRendererKeepsPrefixesOnHardWrappedContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		markdown string
+		width    int
+		want     []string
+	}{
+		{"blockquote", "> abcdefghijkl\n", 8, []string{"| abcdef", "| ghijkl"}},
+		{"list", "- abcdefghijkl\n", 8, []string{"- abcdef", "  ghijkl"}},
+		{"task", "- [ ] abcdefghijkl\n", 10, []string{"[ ] abcdef", "    ghijkl"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			lines, err := RenderLines(test.markdown, Options{Width: test.width})
+			require.NoError(t, err)
+			assert.Equal(t, test.want, lines)
+		})
+	}
+}
+
 func TestTerminalRendererUsesCheckboxAsTaskMarker(t *testing.T) {
 	got, err := renderMarkdownDocument(
 		"- [x] done\n- [ ] pending\n", Options{Width: 80},

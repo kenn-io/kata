@@ -433,7 +433,8 @@ func (r terminalRenderer) renderInlineStyle(
 }
 
 func (r terminalRenderer) wrap(value string, width int) string {
-	return ansi.Wordwrap(value, max(1, width), "")
+	width = max(1, width)
+	return ansi.Hardwrap(ansi.Wordwrap(value, width, ""), width, true)
 }
 
 func prefixLines(value, prefix string) string {
