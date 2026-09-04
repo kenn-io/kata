@@ -219,8 +219,9 @@ var configureHumaOnce sync.Once
 
 func configureHuma() {
 	configureHumaOnce.Do(func() {
-		// JSON v2 encodes nil slices as empty arrays. Keep Huma's schemas aligned
-		// with that response contract.
+		// Keep Huma validation and schemas aligned with JSON v2: member names are
+		// case-sensitive and ordinary slices are non-null arrays.
+		huma.ValidateStrictCasing = true
 		huma.DefaultArrayNullable = false
 	})
 }

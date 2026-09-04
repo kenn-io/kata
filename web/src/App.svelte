@@ -142,10 +142,7 @@
     rejectCredentialsAndRequireAuthentication,
   )
   setGeneratedFetch(browserFetch)
-  const snapshots = new SnapshotController(
-    createUISnapshotRequest(browserFetch),
-    uiSnapshotIntentKey,
-  )
+  const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
   const mutations = new MutationController({
     authority: () => ({
       canMutate: authority?.canMutate ?? false,

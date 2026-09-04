@@ -211,7 +211,6 @@ import type {
   ShowRecurrenceResponseBody,
   SkipFederationQuarantinePathParameters,
   SkipFederationQuarantineRequestBody,
-  StreamEventsParams,
   UIIssueReferenceResponseBody,
   UILaunchTargetResponseBody,
   UIReferencesResponseBody,
@@ -645,55 +644,6 @@ export const pollEvents = async (
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<pollEventsResponse> => {
   return orvalFetch<pollEventsResponse>(getPollEventsUrl(params), {
-    ...options,
-    method: 'GET',
-  })
-}
-
-export type streamEventsResponse200 = {
-  data: string
-  status: 200
-}
-
-export type streamEventsResponseDefault = {
-  data: ErrorEnvelope
-  status: Exclude<HTTPStatusCodes, 200>
-}
-
-export type streamEventsResponseSuccess = streamEventsResponse200 & {
-  headers: Headers
-}
-export type streamEventsResponseError = streamEventsResponseDefault & {
-  headers: Headers
-}
-
-export type streamEventsResponse = streamEventsResponseSuccess | streamEventsResponseError
-
-export const getStreamEventsUrl = (params?: StreamEventsParams) => {
-  const normalizedParams = new URLSearchParams()
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  })
-
-  const stringifiedParams = normalizedParams.toString()
-
-  return stringifiedParams.length > 0
-    ? `/api/v1/events/stream?${stringifiedParams}`
-    : `/api/v1/events/stream`
-}
-
-/**
- * Streams durable events as Server-Sent Events. Clients may resume with Last-Event-ID or after_id, but not both.
- * @summary Stream events
- */
-export const streamEvents = async (
-  params?: StreamEventsParams,
-  options?: Parameters<typeof orvalFetch>[1],
-): Promise<streamEventsResponse> => {
-  return orvalFetch<streamEventsResponse>(getStreamEventsUrl(params), {
     ...options,
     method: 'GET',
   })

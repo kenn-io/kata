@@ -287,9 +287,9 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsNonNullCollections(t *testing.T) {
+func TestOpenAPISchemaVersionReflectsNonNullArrays(t *testing.T) {
 	if APISchemaVersion != "0.16.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.16.0 for non-null collection responses", APISchemaVersion)
+		t.Fatalf("APISchemaVersion = %q, want 0.16.0 for non-null API arrays", APISchemaVersion)
 	}
 }
 

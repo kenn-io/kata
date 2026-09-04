@@ -96,6 +96,7 @@ func TestPollEvents_EmptyResultIsNonNullArray(t *testing.T) {
 	assert.Contains(t, body, `"events":[]`, "must be empty array, never null")
 	assert.Contains(t, body, `"reset_required":false`)
 	assert.Contains(t, body, `"next_after_id":0`)
+	assert.NotContains(t, body, `"reset_after_id"`, "ordinary polls omit the reset-only cursor")
 }
 
 func TestPollEvents_ReturnsEventsAndAdvancesCursor(t *testing.T) {

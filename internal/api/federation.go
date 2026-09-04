@@ -119,10 +119,10 @@ type FederationProjectStatus struct {
 	PushEnabled                 bool                          `json:"push_enabled"`
 	BoundActor                  string                        `json:"bound_actor,omitempty"`
 	HubURL                      string                        `json:"hub_url,omitempty"`
-	HubProjectID                int64                         `json:"hub_project_id,omitempty"`
+	HubProjectID                int64                         `json:"hub_project_id,omitempty,omitzero"`
 	HubProjectUID               string                        `json:"hub_project_uid,omitempty"`
 	Capabilities                string                        `json:"capabilities,omitempty"`
-	AllowInsecure               bool                          `json:"allow_insecure,omitempty"`
+	AllowInsecure               bool                          `json:"allow_insecure,omitempty,omitzero"`
 	CredentialStatus            string                        `json:"credential_status,omitempty"`
 	PullCursorEventID           int64                         `json:"pull_cursor_event_id"`
 	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
@@ -194,7 +194,7 @@ type CreateFederationEnrollmentRequest struct {
 		Capabilities                 string `json:"capabilities"`
 		Token                        string `json:"token,omitempty"`
 		Actor                        string `json:"actor,omitempty"`
-		AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty"`
+		AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty,omitzero"`
 	}
 }
 
@@ -226,7 +226,7 @@ type RotateFederationEnrollmentRequest struct {
 		Capabilities                 string `json:"capabilities"`
 		Token                        string `json:"token"`
 		Actor                        string `json:"actor,omitempty"`
-		AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty"`
+		AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty,omitzero"`
 	}
 }
 
@@ -275,13 +275,13 @@ type CreateFederationReplicaRequest struct {
 		HubProjectUID          string `json:"hub_project_uid"`
 		ProjectName            string `json:"project_name"`
 		ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
-		BaselineThroughEventID int64  `json:"baseline_through_event_id,omitempty"`
+		BaselineThroughEventID int64  `json:"baseline_through_event_id,omitempty,omitzero"`
 		Token                  string `json:"token,omitempty"`
 		Capabilities           string `json:"capabilities,omitempty"`
 		Actor                  string `json:"actor,omitempty"`
-		AllowInsecure          bool   `json:"allow_insecure,omitempty"`
-		PushEnabled            bool   `json:"push_enabled,omitempty"`
-		AdoptExisting          bool   `json:"adopt_existing,omitempty"`
+		AllowInsecure          bool   `json:"allow_insecure,omitempty,omitzero"`
+		PushEnabled            bool   `json:"push_enabled,omitempty,omitzero"`
+		AdoptExisting          bool   `json:"adopt_existing,omitempty,omitzero"`
 	}
 }
 
@@ -289,8 +289,8 @@ type CreateFederationReplicaRequest struct {
 type CreateFederationReplicaBody struct {
 	Project               ProjectOut           `json:"project"`
 	Binding               FederationBindingOut `json:"binding"`
-	Adopted               bool                 `json:"adopted,omitempty"`
-	AdoptionSnapshotCount int64                `json:"adoption_snapshot_count,omitempty"`
+	Adopted               bool                 `json:"adopted,omitempty,omitzero"`
+	AdoptionSnapshotCount int64                `json:"adoption_snapshot_count,omitempty,omitzero"`
 }
 
 // CreateFederationReplicaResponse wraps CreateFederationReplicaBody.
@@ -356,7 +356,7 @@ type FederationIngestEventsRequest struct {
 type FederationIngestEventsRequestBody struct {
 	SchemaVersion              int                             `json:"schema_version"`
 	AdoptionBaseline           string                          `json:"adoption_baseline,omitempty"`
-	AdoptionBaselineEndEventID int64                           `json:"adoption_baseline_end_event_id,omitempty"`
+	AdoptionBaselineEndEventID int64                           `json:"adoption_baseline_end_event_id,omitempty,omitzero"`
 	Events                     []FederationIngestEventEnvelope `json:"events,omitempty"`
 }
 
@@ -419,7 +419,7 @@ type ClaimActionBody struct {
 	Holder     string   `json:"holder,omitempty"`
 	ClientKind string   `json:"client_kind,omitempty"`
 	ClaimKind  string   `json:"claim_kind,omitempty"`
-	TTLSeconds int64    `json:"ttl_seconds,omitempty"`
+	TTLSeconds int64    `json:"ttl_seconds,omitempty,omitzero"`
 	Purpose    string   `json:"purpose,omitempty"`
 	Reason     string   `json:"reason,omitempty"`
 	Actor      string   `json:"actor,omitempty"`
@@ -445,7 +445,7 @@ type ClaimActionResponse struct {
 // MirrorDeprecatedClaimFields; consumers read Lease.
 type ClaimActionResponseBody struct {
 	Granted    bool              `json:"granted"`
-	Pending    bool              `json:"pending,omitempty"`
+	Pending    bool              `json:"pending,omitempty,omitzero"`
 	RequestUID string            `json:"request_uid,omitempty"`
 	Holder     ClaimPrincipalOut `json:"holder"`
 	Lease      *IssueClaimOut    `json:"lease,omitempty"`
@@ -516,7 +516,7 @@ type LeaveFederationReplicaRequest struct {
 // body and the generated client could not send force/actor.
 type LeaveFederationReplicaRequestBody struct {
 	Disposition string `json:"disposition,omitempty"` // "detach" | "archive"
-	Force       bool   `json:"force,omitempty"`
+	Force       bool   `json:"force,omitempty,omitzero"`
 	Actor       string `json:"actor,omitempty"`
 	// Preflight runs the same validation as the real call — spoke-role
 	// refusal and the archive's open-issue check (honoring Force, with an
@@ -524,11 +524,11 @@ type LeaveFederationReplicaRequestBody struct {
 	// anything. Leave clients use it to verify archive eligibility BEFORE
 	// the irreversible hub revoke. Advisory only: the authoritative check
 	// stays inside RemoveProject's transaction.
-	Preflight bool `json:"preflight,omitempty"`
+	Preflight bool `json:"preflight,omitempty,omitzero"`
 	// Prepare durably marks config-managed reconciliation as leaving and
 	// waits for earlier enrollment or rotation calls to drain. It does not
 	// revoke, detach, archive, or delete credentials.
-	Prepare bool `json:"prepare,omitempty"`
+	Prepare bool `json:"prepare,omitempty,omitzero"`
 }
 
 // LeaveFederationReplicaResultBody reports the outcome of a leave.
@@ -538,7 +538,7 @@ type LeaveFederationReplicaResultBody struct {
 	// false on an idempotent resume of an already-standalone project.
 	Detached    bool   `json:"detached"`
 	Disposition string `json:"disposition"`
-	Archived    bool   `json:"archived,omitempty"`
+	Archived    bool   `json:"archived,omitempty,omitzero"`
 	// PendingEnrollment identifies a config-managed enrollment that may have
 	// committed before local adoption. It omits the enrollment credential.
 	PendingEnrollment *PendingFederationEnrollmentCleanup `json:"pending_enrollment,omitempty"`
@@ -550,7 +550,7 @@ type PendingFederationEnrollmentCleanup struct {
 	HubURL        string `json:"hub_url"`
 	HubProjectID  int64  `json:"hub_project_id"`
 	HubProjectUID string `json:"hub_project_uid"`
-	AllowInsecure bool   `json:"allow_insecure,omitempty"`
+	AllowInsecure bool   `json:"allow_insecure,omitempty,omitzero"`
 }
 
 // LeaveFederationReplicaResponse wraps LeaveFederationReplicaResultBody.

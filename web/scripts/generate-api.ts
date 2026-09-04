@@ -44,7 +44,15 @@ try {
   await mkdir(dirname(destination), { recursive: true })
   await generate(
     {
-      input: schema,
+      input: {
+        target: schema,
+        override: {
+          transformer: (document) => {
+            if (document.paths) delete document.paths['/api/v1/events/stream']
+            return document
+          },
+        },
+      },
       output: {
         client: 'fetch',
         mode: 'tags-split',
