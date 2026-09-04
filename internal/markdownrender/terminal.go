@@ -24,6 +24,15 @@ const (
 	ansiStrikeOff    = "\x1b[29m"
 )
 
+type inlineStyle uint8
+
+const (
+	inlineBold inlineStyle = 1 << iota
+	inlineItalic
+	inlineUnderline
+	inlineStrike
+)
+
 type terminalRenderer struct {
 	source []byte
 	opts   Options
@@ -48,7 +57,7 @@ func (r terminalRenderer) renderBlocks(parent ast.Node) string {
 		var block string
 		switch node := node.(type) {
 		case *ast.Heading:
-			block = ansiBoldOn + r.renderInlines(node) + ansiBoldOff
+			block = ansiBoldOn + r.renderInlinesStyled(node, inlineBold) + ansiBoldOff
 		case *ast.Paragraph, *ast.TextBlock:
 			block = r.wrap(r.renderInlines(node), r.opts.Width)
 		case *ast.CodeBlock:
@@ -179,6 +188,10 @@ func (r terminalRenderer) renderTable(table *extast.Table) string {
 }
 
 func (r terminalRenderer) renderInlines(parent ast.Node) string {
+	return r.renderInlinesStyled(parent, 0)
+}
+
+func (r terminalRenderer) renderInlinesStyled(parent ast.Node, active inlineStyle) string {
 	var out strings.Builder
 	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
 		switch node := node.(type) {
@@ -191,22 +204,30 @@ func (r terminalRenderer) renderInlines(parent ast.Node) string {
 			out.WriteString(html.UnescapeString(string(node.Value)))
 		case *ast.CodeSpan:
 			out.WriteByte('`')
-			out.WriteString(strings.Join(strings.Fields(r.renderInlines(node)), " "))
+			out.WriteString(strings.Join(strings.Fields(r.renderInlinesStyled(node, active)), " "))
 			out.WriteByte('`')
 		case *ast.Emphasis:
 			if node.Level == 2 {
-				out.WriteString(ansiBoldOn + r.renderInlines(node) + ansiBoldOff)
+				out.WriteString(r.renderInlineStyle(
+					node, active, inlineBold, ansiBoldOn, ansiBoldOff,
+				))
 			} else {
-				out.WriteString(ansiItalicOn + r.renderInlines(node) + ansiItalicOff)
+				out.WriteString(r.renderInlineStyle(
+					node, active, inlineItalic, ansiItalicOn, ansiItalicOff,
+				))
 			}
 		case *ast.Link:
-			out.WriteString(ansiUnderlineOn + r.renderInlines(node) + ansiUnderlineOff)
+			out.WriteString(r.renderInlineStyle(
+				node, active, inlineUnderline, ansiUnderlineOn, ansiUnderlineOff,
+			))
 		case *ast.Image:
-			out.WriteString("[image: " + r.renderInlines(node) + "]")
+			out.WriteString("[image: " + r.renderInlinesStyled(node, active) + "]")
 		case *ast.AutoLink:
 			out.WriteString(ansiUnderlineOn + html.UnescapeString(string(node.Label(r.source))) + ansiUnderlineOff)
 		case *extast.Strikethrough:
-			out.WriteString(ansiStrikeOn + r.renderInlines(node) + ansiStrikeOff)
+			out.WriteString(r.renderInlineStyle(
+				node, active, inlineStrike, ansiStrikeOn, ansiStrikeOff,
+			))
 		case *extast.TaskCheckBox:
 			if node.IsChecked {
 				out.WriteString("[x] ")
@@ -215,11 +236,22 @@ func (r terminalRenderer) renderInlines(parent ast.Node) string {
 			}
 		default:
 			if node.HasChildren() {
-				out.WriteString(r.renderInlines(node))
+				out.WriteString(r.renderInlinesStyled(node, active))
 			}
 		}
 	}
 	return out.String()
+}
+
+func (r terminalRenderer) renderInlineStyle(
+	node ast.Node,
+	active, style inlineStyle,
+	on, off string,
+) string {
+	if active&style != 0 {
+		return r.renderInlinesStyled(node, active)
+	}
+	return on + r.renderInlinesStyled(node, active|style) + off
 }
 
 func (r terminalRenderer) wrap(value string, width int) string {

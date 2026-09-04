@@ -84,6 +84,14 @@ fmt.Println("ok")
 	assert.Contains(t, got, "\x1b[48;5;236mfmt.Println(\"ok\")\x1b[49m")
 }
 
+func TestTerminalRendererKeepsHeadingBoldAfterNestedStrong(t *testing.T) {
+	got, err := renderMarkdownDocument(
+		"## Before **nested** after\n", Options{Width: 80},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "\x1b[1mBefore nested after\x1b[22m\n", got)
+}
+
 func TestANSIWrappedLinesPreservesVisibleContent(t *testing.T) {
 	rendered := "\x1b[31mカタabcdef\x1b[0m"
 	lines := ANSIWrappedLines(rendered, 4)
