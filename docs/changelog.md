@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**Improvements**
+
+- Made ordinary API arrays non-null. Empty and nil response slices serialize
+  as `[]`, requests reject `null` for ordinary array fields, and generated Go
+  and TypeScript clients match that contract. JSON object member names are now
+  case-sensitive.
+
 ## 0.16.0
 <small>2026-08-27</small>
 

@@ -1,6 +1,3 @@
-import createClient from 'openapi-fetch'
-
-import type { paths } from './schema'
 import type { SessionCredentials } from '../auth/session'
 import { loadSessionCredentials } from '../auth/session'
 
@@ -45,15 +42,25 @@ export function createCredentialedFetch(
   }
 }
 
-export function createKataClient(
-  readCredentials?: CredentialReader,
-  upstream: typeof fetch = fetch,
-): ReturnType<typeof createClient<paths>> {
-  return createClient<paths>({
-    baseUrl: window.location.origin,
-    credentials: 'same-origin',
-    fetch: createCredentialedFetch(readCredentials, upstream),
-  })
+let generatedFetch: typeof fetch = createCredentialedFetch()
+
+export function setGeneratedFetch(fetcher: typeof fetch): void {
+  generatedFetch = fetcher
+}
+
+export async function orvalFetch<T>(
+  url: string,
+  options: RequestInit,
+  fetcher: typeof fetch = generatedFetch,
+): Promise<T> {
+  const response = await fetcher(new URL(url, window.location.origin), options)
+  const text = await response.text()
+  const data = response.headers.get('Content-Type')?.includes('json') ? JSON.parse(text) : text
+  return {
+    data: text ? data : undefined,
+    status: response.status,
+    headers: response.headers,
+  } as T
 }
 
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])

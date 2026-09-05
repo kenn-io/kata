@@ -19,7 +19,7 @@ type EnableIssueSyncRequest struct {
 // need credentials should store references or use their own CLI auth.
 type EnableIssueSyncRequestBody struct {
 	Config          JSONMap `json:"config,omitempty"`
-	IntervalSeconds int     `json:"interval_seconds,omitempty"`
+	IntervalSeconds int     `json:"interval_seconds,omitempty,omitzero"`
 	Interval        string  `json:"interval,omitempty"`
 }
 

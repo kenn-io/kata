@@ -10,7 +10,6 @@ components:
         evidence:
           items:
             $ref: "#/components/schemas/Evidence"
-          nullable: true
           type: array
         message:
           type: string
@@ -88,12 +87,10 @@ components:
         evidence_types:
           items:
             type: string
-          nullable: true
           type: array
         flags:
           items:
             type: string
-          nullable: true
           type: array
         issue:
           type: string
@@ -119,7 +116,6 @@ components:
         rows:
           items:
             $ref: "#/components/schemas/AuditCloseRow"
-          nullable: true
           type: array
       required:
         - rows
@@ -296,7 +292,6 @@ components:
         evidence:
           items:
             $ref: "#/components/schemas/Evidence"
-          nullable: true
           type: array
         message:
           type: string
@@ -376,7 +371,6 @@ components:
         fields:
           items:
             $ref: "#/components/schemas/FieldDescriptor"
-          nullable: true
           type: array
       required:
         - fields
@@ -386,7 +380,6 @@ components:
         connectors:
           items:
             $ref: "#/components/schemas/ConnectorOut"
-          nullable: true
           type: array
       required:
         - connectors
@@ -398,7 +391,6 @@ components:
         capabilities:
           items:
             type: string
-          nullable: true
           type: array
         connector_id:
           type: string
@@ -521,12 +513,10 @@ components:
         labels:
           items:
             type: string
-          nullable: true
           type: array
         links:
           items:
             $ref: "#/components/schemas/CreateInitialLinkBody"
-          nullable: true
           type: array
         metadata:
           additionalProperties: true
@@ -651,7 +641,6 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/DigestIssueActions"
-          nullable: true
           type: array
         totals:
           $ref: "#/components/schemas/DigestTotals"
@@ -665,7 +654,6 @@ components:
         actions:
           items:
             type: string
-          nullable: true
           type: array
         issue_short_id:
           type: string
@@ -688,7 +676,6 @@ components:
         actors:
           items:
             $ref: "#/components/schemas/DigestActorEntry"
-          nullable: true
           type: array
         event_count:
           format: int64
@@ -828,7 +815,6 @@ components:
         events:
           items:
             $ref: "#/components/schemas/Event"
-          nullable: true
           type: array
         issue:
           $ref: "#/components/schemas/Issue"
@@ -1052,7 +1038,6 @@ components:
         paths:
           items:
             type: string
-          nullable: true
           type: array
         rationale:
           type: string
@@ -1095,7 +1080,6 @@ components:
         accepted_kinds:
           items:
             type: string
-          nullable: true
           type: array
         active:
           type: boolean
@@ -1145,7 +1129,6 @@ components:
         field_conflicts:
           items:
             $ref: "#/components/schemas/ExternalFieldConflictOut"
-          nullable: true
           type: array
         id:
           format: int64
@@ -1420,7 +1403,6 @@ components:
         events:
           items:
             $ref: "#/components/schemas/FederationIngestEventEnvelope"
-          nullable: true
           type: array
         schema_version:
           format: int64
@@ -1436,7 +1418,6 @@ components:
         active_quarantines:
           items:
             $ref: "#/components/schemas/FederationQuarantineSummary"
-          nullable: true
           type: array
         allow_insecure:
           type: boolean
@@ -1517,7 +1498,6 @@ components:
         recent_violations:
           items:
             $ref: "#/components/schemas/FederationViolationSummary"
-          nullable: true
           type: array
         reset_blocker:
           type: string
@@ -1558,7 +1538,6 @@ components:
         event_uids:
           items:
             type: string
-          nullable: true
           type: array
         first_event_id:
           format: int64
@@ -1597,7 +1576,6 @@ components:
         statuses:
           items:
             $ref: "#/components/schemas/FederationProjectStatus"
-          nullable: true
           type: array
       required:
         - statuses
@@ -1637,7 +1615,6 @@ components:
         accepted_kinds:
           items:
             type: string
-          nullable: true
           type: array
         display_name:
           type: string
@@ -1718,12 +1695,10 @@ components:
         errors:
           items:
             type: string
-          nullable: true
           type: array
         items:
           items:
             $ref: "#/components/schemas/ImportItemResult"
-          nullable: true
           type: array
         links:
           format: int64
@@ -1786,7 +1761,6 @@ components:
         comments:
           items:
             $ref: "#/components/schemas/ImportCommentInput"
-          nullable: true
           type: array
         created_at:
           format: date-time
@@ -1796,12 +1770,10 @@ components:
         labels:
           items:
             type: string
-          nullable: true
           type: array
         links:
           items:
             $ref: "#/components/schemas/ImportLinkInput"
-          nullable: true
           type: array
         owner:
           type: string
@@ -1864,7 +1836,6 @@ components:
         items:
           items:
             $ref: "#/components/schemas/ImportIssueInput"
-          nullable: true
           type: array
         source:
           type: string
@@ -2071,12 +2042,10 @@ components:
         blocked_by:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         blocks:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         body:
           type: string
@@ -2099,7 +2068,6 @@ components:
         labels:
           items:
             type: string
-          nullable: true
           type: array
         metadata:
           additionalProperties: true
@@ -2126,7 +2094,6 @@ components:
         related:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         revision:
           format: int64
@@ -2307,7 +2274,6 @@ components:
         labels:
           items:
             $ref: "#/components/schemas/LabelCount"
-          nullable: true
           type: array
       required:
         - labels
@@ -2348,22 +2314,18 @@ components:
         blocked_by_added:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         blocked_by_removed:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         blocks_added:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         blocks_removed:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         parent_removed:
           $ref: "#/components/schemas/LinkPeer"
@@ -2372,12 +2334,10 @@ components:
         related_added:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         related_removed:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
       type: object
     LinkOut:
@@ -2429,17 +2389,14 @@ components:
         add_blocked_by:
           items:
             type: string
-          nullable: true
           type: array
         add_blocks:
           items:
             type: string
-          nullable: true
           type: array
         add_related:
           items:
             type: string
-          nullable: true
           type: array
         expected_project_uids:
           additionalProperties:
@@ -2448,19 +2405,16 @@ components:
         remove_blocked_by:
           items:
             type: string
-          nullable: true
           type: array
         remove_blocks:
           items:
             type: string
-          nullable: true
           type: array
         remove_parent:
           type: string
         remove_related:
           items:
             type: string
-          nullable: true
           type: array
         set_parent:
           type: string
@@ -2470,7 +2424,6 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/ListGlobalIssueOut"
-          nullable: true
           type: array
       required:
         - issues
@@ -2480,7 +2433,6 @@ components:
         enrollments:
           items:
             $ref: "#/components/schemas/FederationEnrollmentOut"
-          nullable: true
           type: array
       required:
         - enrollments
@@ -2494,12 +2446,10 @@ components:
         blocked_by:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         blocks:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         body:
           type: string
@@ -2522,7 +2472,6 @@ components:
         labels:
           items:
             type: string
-          nullable: true
           type: array
         metadata:
           additionalProperties: true
@@ -2551,7 +2500,6 @@ components:
         related:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         revision:
           format: int64
@@ -2588,7 +2536,6 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/IssueOut"
-          nullable: true
           type: array
       required:
         - issues
@@ -2598,7 +2545,6 @@ components:
         projects:
           items:
             $ref: "#/components/schemas/ProjectOut"
-          nullable: true
           type: array
       required:
         - projects
@@ -2608,7 +2554,6 @@ components:
         recurrences:
           items:
             $ref: "#/components/schemas/Recurrence"
-          nullable: true
           type: array
       required:
         - recurrences
@@ -2618,7 +2563,6 @@ components:
         tokens:
           items:
             $ref: "#/components/schemas/TokenOut"
-          nullable: true
           type: array
       required:
         - tokens
@@ -2661,7 +2605,6 @@ components:
         short_id_extensions:
           items:
             $ref: "#/components/schemas/MergeShortIDExtension"
-          nullable: true
           type: array
         source:
           $ref: "#/components/schemas/ProjectOut"
@@ -2900,7 +2843,6 @@ components:
         events:
           items:
             $ref: "#/components/schemas/EventEnvelope"
-          nullable: true
           type: array
         next_after_id:
           format: int64
@@ -3338,21 +3280,18 @@ components:
         edges:
           items:
             $ref: "#/components/schemas/ReachableGraphEdge"
-          nullable: true
           type: array
         hide_done:
           type: boolean
         nodes:
           items:
             $ref: "#/components/schemas/ReachableGraphNode"
-          nullable: true
           type: array
         source_uid:
           type: string
         unresolved_refs:
           items:
             $ref: "#/components/schemas/ReachableGraphUnresolvedRef"
-          nullable: true
           type: array
       required:
         - source_uid
@@ -3394,12 +3333,10 @@ components:
         blocked_by:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         blocks:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         body:
           type: string
@@ -3422,7 +3359,6 @@ components:
         labels:
           items:
             type: string
-          nullable: true
           type: array
         metadata:
           additionalProperties: true
@@ -3451,7 +3387,6 @@ components:
         related:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          nullable: true
           type: array
         revision:
           format: int64
@@ -3488,7 +3423,6 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/ReadyGlobalIssueOut"
-          nullable: true
           type: array
       required:
         - issues
@@ -3498,7 +3432,6 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/IssueOut"
-          nullable: true
           type: array
       required:
         - issues
@@ -3609,7 +3542,6 @@ components:
         labels:
           items:
             type: string
-          nullable: true
           type: array
         metadata:
           additionalProperties: true
@@ -3847,7 +3779,6 @@ components:
         matched_in:
           items:
             type: string
-          nullable: true
           type: array
         score:
           format: double
@@ -3870,7 +3801,6 @@ components:
         results:
           items:
             $ref: "#/components/schemas/SearchHit"
-          nullable: true
           type: array
       required:
         - query
@@ -3882,7 +3812,6 @@ components:
         children:
           items:
             $ref: "#/components/schemas/IssueOut"
-          nullable: true
           type: array
         claim:
           $ref: "#/components/schemas/IssueClaimOut"
@@ -3895,19 +3824,16 @@ components:
         claim_violations:
           items:
             $ref: "#/components/schemas/ClaimViolationOut"
-          nullable: true
           type: array
         comments:
           items:
             $ref: "#/components/schemas/Comment"
-          nullable: true
           type: array
         issue:
           $ref: "#/components/schemas/Issue"
         labels:
           items:
             $ref: "#/components/schemas/IssueLabel"
-          nullable: true
           type: array
         lease:
           $ref: "#/components/schemas/IssueClaimOut"
@@ -3920,24 +3846,20 @@ components:
         lease_violations:
           items:
             $ref: "#/components/schemas/ClaimViolationOut"
-          nullable: true
           type: array
         links:
           items:
             $ref: "#/components/schemas/LinkOut"
-          nullable: true
           type: array
         parent:
           $ref: "#/components/schemas/IssueRef"
         pending_claims:
           items:
             $ref: "#/components/schemas/PendingClaimOut"
-          nullable: true
           type: array
         pending_leases:
           items:
             $ref: "#/components/schemas/PendingClaimOut"
-          nullable: true
           type: array
       required:
         - issue
@@ -3950,7 +3872,6 @@ components:
         aliases:
           items:
             $ref: "#/components/schemas/ProjectAlias"
-          nullable: true
           type: array
         project:
           $ref: "#/components/schemas/ProjectOut"
@@ -4025,22 +3946,18 @@ components:
         edges:
           items:
             $ref: "#/components/schemas/UIGraphEdge"
-          nullable: true
           type: array
         issues:
           items:
             $ref: "#/components/schemas/UIIssue"
-          nullable: true
           type: array
         links:
           items:
             $ref: "#/components/schemas/UILink"
-          nullable: true
           type: array
         unresolved_refs:
           items:
             $ref: "#/components/schemas/UIGraphUnresolvedRef"
-          nullable: true
           type: array
       required:
         - issues
@@ -4105,7 +4022,6 @@ components:
         labels:
           items:
             type: string
-          nullable: true
           type: array
         metadata:
           additionalProperties: true
@@ -4274,12 +4190,10 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/UIIssueReference"
-          nullable: true
           type: array
         labels:
           items:
             type: string
-          nullable: true
           type: array
         origin:
           type: string
@@ -4288,12 +4202,10 @@ components:
         owners:
           items:
             type: string
-          nullable: true
           type: array
         projects:
           items:
             $ref: "#/components/schemas/Project"
-          nullable: true
           type: array
       required:
         - contract_version
@@ -4311,29 +4223,24 @@ components:
         comments:
           items:
             $ref: "#/components/schemas/Comment"
-          nullable: true
           type: array
         history:
           items:
             $ref: "#/components/schemas/Event"
-          nullable: true
           type: array
         issue:
           $ref: "#/components/schemas/UIIssue"
         labels:
           items:
             $ref: "#/components/schemas/IssueLabel"
-          nullable: true
           type: array
         links:
           items:
             $ref: "#/components/schemas/UILink"
-          nullable: true
           type: array
         recurrences:
           items:
             $ref: "#/components/schemas/Recurrence"
-          nullable: true
           type: array
         state:
           type: string
@@ -4352,17 +4259,14 @@ components:
         catalog:
           items:
             $ref: "#/components/schemas/UIProject"
-          nullable: true
           type: array
         collection:
           items:
             $ref: "#/components/schemas/UIIssue"
-          nullable: true
           type: array
         collection_links:
           items:
             $ref: "#/components/schemas/UILink"
-          nullable: true
           type: array
         contract_version:
           type: string
@@ -4397,7 +4301,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.15.0
+  version: 0.16.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -4628,7 +4532,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
       responses:
         "200":
@@ -4989,7 +4892,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -4997,7 +4899,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -5005,7 +4906,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
       responses:
         "200":
@@ -5341,7 +5241,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
       responses:
         "200":
@@ -5857,7 +5756,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -5865,7 +5763,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -5873,7 +5770,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
       responses:
         "200":
@@ -7228,7 +7124,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -7236,7 +7131,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
       responses:
         "200":
@@ -7476,7 +7370,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -7484,7 +7377,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
       responses:
         "200":
@@ -7525,7 +7417,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -7533,7 +7424,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
       responses:
         "200":
@@ -7687,7 +7577,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: false
           in: query
@@ -7734,7 +7623,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -7742,7 +7630,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -7750,7 +7637,6 @@ paths:
           schema:
             items:
               type: string
-            nullable: true
             type: array
         - explode: true
           in: query
@@ -7764,7 +7650,6 @@ paths:
                 - blocked_by
                 - related
               type: string
-            nullable: true
             type: array
         - explode: false
           in: query

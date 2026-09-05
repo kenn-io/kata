@@ -86,7 +86,7 @@ type BindExternalRootRequest struct {
 		Connector       string `json:"connector"`
 		External        string `json:"external"`
 		Actor           string `json:"actor,omitempty"`
-		PublishComments bool   `json:"publish_comments,omitempty"`
+		PublishComments bool   `json:"publish_comments,omitempty,omitzero"`
 	}
 }
 

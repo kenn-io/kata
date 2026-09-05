@@ -18,7 +18,7 @@ type PingResponse struct {
 		OK      bool   `json:"ok"`
 		Service string `json:"service"`
 		Version string `json:"version"`
-		PID     int    `json:"pid,omitempty"`
+		PID     int    `json:"pid,omitempty,omitzero"`
 	}
 }
 
@@ -85,7 +85,7 @@ type UISessionResponse struct {
 type EmbeddingsHealth struct {
 	Configured      bool       `json:"configured"`
 	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
-	LastErrorStatus int        `json:"last_error_status,omitempty"`
+	LastErrorStatus int        `json:"last_error_status,omitempty,omitzero"`
 	Embedded        int64      `json:"embedded"`
 	Skipped         int64      `json:"skipped"`
 	Backlog         int64      `json:"backlog"`
@@ -106,7 +106,7 @@ type FederationConfigHealth struct {
 	LastAttemptAt     *time.Time `json:"last_attempt_at,omitempty"`
 	LastSuccessAt     *time.Time `json:"last_success_at,omitempty"`
 	LastErrorCategory string     `json:"last_error_category,omitempty"`
-	LastErrorStatus   int        `json:"last_error_status,omitempty"`
+	LastErrorStatus   int        `json:"last_error_status,omitempty,omitzero"`
 }
 
 // InstanceResponse mirrors /api/v1/instance. Surfaces the local kata
@@ -298,8 +298,8 @@ type InitProjectRequest struct {
 	Body struct {
 		StartPath string      `json:"start_path,omitempty" doc:"absolute path on the daemon's filesystem; omit for path-free init"`
 		Name      string      `json:"name,omitempty" doc:"project name; required when start_path is empty"`
-		Replace   bool        `json:"replace,omitempty"`
-		Reassign  bool        `json:"reassign,omitempty"`
+		Replace   bool        `json:"replace,omitempty,omitzero"`
+		Reassign  bool        `json:"reassign,omitempty,omitzero"`
 		Alias     *AliasInput `json:"alias,omitempty" doc:"client-derived alias metadata; only honored when start_path is empty"`
 		Actor     string      `json:"actor,omitempty"`
 	}
@@ -397,7 +397,7 @@ type CreateIssueRequest struct {
 		Priority *int64                  `json:"priority,omitempty"`
 		Labels   []string                `json:"labels,omitempty"`
 		Links    []CreateInitialLinkBody `json:"links,omitempty"`
-		ForceNew bool                    `json:"force_new,omitempty"`
+		ForceNew bool                    `json:"force_new,omitempty,omitzero"`
 		// Metadata is optional initial issue metadata. Keys are validated
 		// against metadata.IssueRegistry (reserved keys through their type
 		// validator; unknown keys pass opaquely). JSON null values are
@@ -423,7 +423,7 @@ type CreateInitialLinkBody struct {
 	Type         string `json:"type" enum:"parent,blocks,related"`
 	ToRef        string `json:"to_ref"`
 	ToProjectUID string `json:"to_project_uid,omitempty"`
-	Incoming     bool   `json:"incoming,omitempty"`
+	Incoming     bool   `json:"incoming,omitempty,omitzero"`
 }
 
 // MutationResponse is the standard mutation envelope (§4.5). OriginalEvent is
@@ -435,7 +435,7 @@ type MutationResponse struct {
 		Event         *db.Event `json:"event"`
 		OriginalEvent *db.Event `json:"original_event,omitempty"`
 		Changed       bool      `json:"changed"`
-		Reused        bool      `json:"reused,omitempty"`
+		Reused        bool      `json:"reused,omitzero"`
 	}
 }
 
@@ -520,7 +520,7 @@ type IssueOut struct {
 	// predicate: at least one open blocker in a non-archived project. It is
 	// server-computed display state, distinct from BlockedBy which carries
 	// the full (policy-free) set of blocker relationship edges.
-	Blocked bool `json:"blocked,omitempty"`
+	Blocked bool `json:"blocked,omitempty,omitzero"`
 }
 
 // ListIssuesResponse is the list payload. Plan 8 commit 5b: each row
@@ -728,7 +728,7 @@ type EditIssueRequest struct {
 		Body          *string     `json:"body,omitempty"`
 		Owner         *string     `json:"owner,omitempty"`
 		SetPriority   *int64      `json:"set_priority,omitempty"`
-		ClearPriority bool        `json:"clear_priority,omitempty"`
+		ClearPriority bool        `json:"clear_priority,omitempty,omitzero"`
 		LinksDelta    *LinksDelta `json:"links_delta,omitempty"`
 	}
 }
@@ -790,7 +790,7 @@ type EditIssueResponse struct {
 		Event   *db.Event    `json:"event"`
 		Events  []db.Event   `json:"events,omitempty"`
 		Changed bool         `json:"changed"`
-		Changes *LinkChanges `json:"changes,omitempty"`
+		Changes *LinkChanges `json:"changes,omitzero"`
 	}
 }
 
@@ -871,7 +871,7 @@ type ActionRequestBody struct {
 	// Empty string means "agent / CLI" and gets full validation.
 	Source   string     `json:"source,omitempty" enum:"tui,"`
 	Evidence []Evidence `json:"evidence,omitempty"`
-	DryRun   bool       `json:"dry_run,omitempty"`
+	DryRun   bool       `json:"dry_run,omitempty,omitzero"`
 }
 
 // CreateLinkRequest is POST /api/v1/projects/{id}/issues/{ref}/links.
@@ -882,7 +882,7 @@ type CreateLinkRequest struct {
 		Actor   string `json:"actor,omitempty"`
 		Type    string `json:"type" required:"true" enum:"parent,blocks,related"`
 		ToRef   string `json:"to_ref" required:"true"`
-		Replace bool   `json:"replace,omitempty"` // type=parent only
+		Replace bool   `json:"replace,omitempty,omitzero"` // type=parent only
 	}
 }
 
@@ -1074,8 +1074,8 @@ type ClaimRequest struct {
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
 		Actor     string `json:"actor" required:"true"`
-		Force     bool   `json:"force,omitempty"`
-		IfUnowned bool   `json:"if_unowned,omitempty"`
+		Force     bool   `json:"force,omitempty,omitzero"`
+		IfUnowned bool   `json:"if_unowned,omitempty,omitzero"`
 	}
 }
 
@@ -1293,8 +1293,8 @@ type SearchResponse struct {
 	Body struct {
 		Query          string      `json:"query"`
 		Mode           string      `json:"mode"`
-		Degraded       bool        `json:"degraded,omitempty"`
-		DegradedReason string      `json:"degraded_reason,omitempty"`
+		Degraded       bool        `json:"degraded,omitzero"`
+		DegradedReason string      `json:"degraded_reason,omitzero"`
 		Results        []SearchHit `json:"results"`
 	}
 }
@@ -1459,9 +1459,9 @@ type RecurrenceTemplateUpdateInput struct {
 	Title         *string                `json:"title,omitempty"`
 	Body          *string                `json:"body,omitempty"`
 	Owner         *string                `json:"owner,omitempty"`
-	ClearOwner    bool                   `json:"clear_owner,omitempty"`
+	ClearOwner    bool                   `json:"clear_owner,omitempty,omitzero"`
 	Priority      *int64                 `json:"priority,omitempty"`
-	ClearPriority bool                   `json:"clear_priority,omitempty"`
+	ClearPriority bool                   `json:"clear_priority,omitempty,omitzero"`
 	Labels        *[]string              `json:"labels,omitempty"`
 	Metadata      *JSONNullableRawObject `json:"metadata,omitempty" nullable:"true"`
 }

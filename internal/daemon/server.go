@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -233,6 +235,19 @@ func NewServer(cfg ServerConfig) *Server {
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("kata", APISchemaVersion)
+	humaConfig.Components.Schemas = newAPISchemaRegistry()
+	jsonFormat := huma.Format{
+		Marshal: func(w io.Writer, value any) error {
+			return jsonv2.MarshalWrite(w, value)
+		},
+		Unmarshal: func(data []byte, value any) error {
+			return unmarshalAPIJSON(data, value)
+		},
+	}
+	humaConfig.Formats = map[string]huma.Format{
+		"application/json": jsonFormat,
+		"json":             jsonFormat,
+	}
 	humaConfig.OpenAPIPath = "" // Plan 1: no /openapi.json served at runtime; see `kata openapi` + OpenAPIDocument
 	humaConfig.DocsPath = ""
 	humaConfig.Transformers = append(humaConfig.Transformers, api.TransformHumaError)

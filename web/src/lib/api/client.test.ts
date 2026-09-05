@@ -1,8 +1,37 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createCredentialedFetch, responseTriggeredAuthenticationTransition } from './client'
+import {
+  createCredentialedFetch,
+  orvalFetch,
+  responseTriggeredAuthenticationTransition,
+} from './client'
+import { getReadUISnapshotUrl } from './generated'
 
 describe('Kata browser API credentials', () => {
+  it('serializes exploded array query parameters as repeated keys', () => {
+    const url = new URL(
+      getReadUISnapshotUrl({ status: ['open', 'closed'], label: ['bug', 'urgent'] }),
+      'https://daemon.example',
+    )
+
+    expect(url.searchParams.getAll('status')).toEqual(['open', 'closed'])
+    expect(url.searchParams.getAll('label')).toEqual(['bug', 'urgent'])
+  })
+
+  it('returns the JSON body from generated API requests', async () => {
+    const upstream = vi.fn(async () =>
+      Response.json({ issues: [{ title: 'Generated client request' }] }),
+    )
+
+    const result = await orvalFetch<{
+      data: { issues: Array<{ title: string }> }
+      status: number
+      headers: Headers
+    }>('/api/v1/ui/references', { method: 'GET' }, upstream as typeof fetch)
+
+    expect(result.data.issues[0]?.title).toBe('Generated client request')
+  })
+
   it('attaches the tab session to reads and adds CSRF only to mutations', async () => {
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
     const upstream = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

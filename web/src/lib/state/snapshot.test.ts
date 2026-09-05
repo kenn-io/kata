@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { parseRoute } from '../router'
-import { SnapshotController, snapshotIntentForRoute, type SnapshotRequest } from './snapshot'
+import {
+  createUISnapshotRequest,
+  SnapshotController,
+  snapshotIntentForRoute,
+  type SnapshotRequest,
+  type UISnapshot,
+} from './snapshot'
 
 interface TestIntent {
   key: string
@@ -144,6 +150,54 @@ describe('snapshotIntentForRoute', () => {
 
     expect(intent.timeZone).toBe('America/Los_Angeles')
     expect(intent.localDate).toBeUndefined()
+  })
+})
+
+describe('createUISnapshotRequest', () => {
+  it('delegates snapshot transport and query serialization to the generated client', async () => {
+    const generatedRequest = vi.fn(async () => ({
+      status: 200 as const,
+      headers: new Headers({ ETag: '"snapshot"' }),
+      data: {
+        cursor: 9,
+        capabilities: { writable: true, updates: 'poll' },
+      } as UISnapshot,
+    }))
+    const request = createUISnapshotRequest(generatedRequest)
+    const signal = new AbortController().signal
+
+    const response = await request(
+      {
+        view: 'all-open',
+        statuses: ['open', 'closed'],
+        owners: ['agent-a'],
+        labels: ['urgent'],
+        relationships: ['blocks'],
+        includeGraph: true,
+        includeHistory: false,
+        timeZone: 'America/New_York',
+      },
+      { signal, etag: '"previous"', full: false },
+    )
+
+    expect(generatedRequest).toHaveBeenCalledWith(
+      {
+        view: 'all-open',
+        status: ['open', 'closed'],
+        owner: ['agent-a'],
+        label: ['urgent'],
+        relationship: ['blocks'],
+        include_graph: true,
+        include_history: false,
+        time_zone: 'America/New_York',
+      },
+      { signal, headers: { 'If-None-Match': '"previous"' } },
+    )
+    expect(response).toEqual({
+      status: 200,
+      etag: '"snapshot"',
+      snapshot: expect.objectContaining({ cursor: 9 }),
+    })
   })
 })
 

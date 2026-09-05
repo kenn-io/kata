@@ -29,6 +29,8 @@ func TestSearchEndpoint_ReturnsHitsWithScores(t *testing.T) {
 	assert.Contains(t, body, `"query":"login Safari"`)
 	assert.Contains(t, body, `"title":"fix login crash on Safari"`)
 	assert.Contains(t, body, `"matched_in"`)
+	assert.NotContains(t, body, `"degraded"`,
+		"baseline lexical responses omit optional degradation fields")
 	assert.NotContains(t, body, `"title":"unrelated"`,
 		"unrelated issue should not appear in results")
 }

@@ -10,9 +10,7 @@ components:
         evidence:
           items:
             $ref: "#/components/schemas/Evidence"
-          type:
-            - array
-            - "null"
+          type: array
         message:
           type: string
         reason:
@@ -91,15 +89,11 @@ components:
         evidence_types:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         flags:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         issue:
           type: string
         message:
@@ -125,9 +119,7 @@ components:
         rows:
           items:
             $ref: "#/components/schemas/AuditCloseRow"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - rows
       type: object
@@ -310,9 +302,7 @@ components:
         evidence:
           items:
             $ref: "#/components/schemas/Evidence"
-          type:
-            - array
-            - "null"
+          type: array
         message:
           type: string
         reason:
@@ -394,9 +384,7 @@ components:
         fields:
           items:
             $ref: "#/components/schemas/FieldDescriptor"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - fields
       type: object
@@ -406,9 +394,7 @@ components:
         connectors:
           items:
             $ref: "#/components/schemas/ConnectorOut"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - connectors
       type: object
@@ -420,9 +406,7 @@ components:
         capabilities:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         connector_id:
           type: string
         display_name:
@@ -546,15 +530,11 @@ components:
         labels:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         links:
           items:
             $ref: "#/components/schemas/CreateInitialLinkBody"
-          type:
-            - array
-            - "null"
+          type: array
         metadata:
           additionalProperties: true
           type: object
@@ -683,9 +663,7 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/DigestIssueActions"
-          type:
-            - array
-            - "null"
+          type: array
         totals:
           $ref: "#/components/schemas/DigestTotals"
       required:
@@ -699,9 +677,7 @@ components:
         actions:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         issue_short_id:
           type: string
         issue_uid:
@@ -724,9 +700,7 @@ components:
         actors:
           items:
             $ref: "#/components/schemas/DigestActorEntry"
-          type:
-            - array
-            - "null"
+          type: array
         event_count:
           format: int64
           type: integer
@@ -867,9 +841,7 @@ components:
         events:
           items:
             $ref: "#/components/schemas/Event"
-          type:
-            - array
-            - "null"
+          type: array
         issue:
           $ref: "#/components/schemas/Issue"
       required:
@@ -1097,9 +1069,7 @@ components:
         paths:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         rationale:
           type: string
         sha:
@@ -1144,9 +1114,7 @@ components:
         accepted_kinds:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         active:
           type: boolean
         external_field_id:
@@ -1196,9 +1164,7 @@ components:
         field_conflicts:
           items:
             $ref: "#/components/schemas/ExternalFieldConflictOut"
-          type:
-            - array
-            - "null"
+          type: array
         id:
           format: int64
           type: integer
@@ -1478,9 +1444,7 @@ components:
         events:
           items:
             $ref: "#/components/schemas/FederationIngestEventEnvelope"
-          type:
-            - array
-            - "null"
+          type: array
         schema_version:
           format: int64
           type: integer
@@ -1496,9 +1460,7 @@ components:
         active_quarantines:
           items:
             $ref: "#/components/schemas/FederationQuarantineSummary"
-          type:
-            - array
-            - "null"
+          type: array
         allow_insecure:
           type: boolean
         bound_actor:
@@ -1578,9 +1540,7 @@ components:
         recent_violations:
           items:
             $ref: "#/components/schemas/FederationViolationSummary"
-          type:
-            - array
-            - "null"
+          type: array
         reset_blocker:
           type: string
         role:
@@ -1621,9 +1581,7 @@ components:
         event_uids:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         first_event_id:
           format: int64
           type: integer
@@ -1663,9 +1621,7 @@ components:
         statuses:
           items:
             $ref: "#/components/schemas/FederationProjectStatus"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - statuses
       type: object
@@ -1706,9 +1662,7 @@ components:
         accepted_kinds:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         display_name:
           type: string
         id:
@@ -1791,15 +1745,11 @@ components:
         errors:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         items:
           items:
             $ref: "#/components/schemas/ImportItemResult"
-          type:
-            - array
-            - "null"
+          type: array
         links:
           format: int64
           type: integer
@@ -1861,9 +1811,7 @@ components:
         comments:
           items:
             $ref: "#/components/schemas/ImportCommentInput"
-          type:
-            - array
-            - "null"
+          type: array
         created_at:
           format: date-time
           type: string
@@ -1872,15 +1820,11 @@ components:
         labels:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         links:
           items:
             $ref: "#/components/schemas/ImportLinkInput"
-          type:
-            - array
-            - "null"
+          type: array
         owner:
           type: string
         priority:
@@ -1943,9 +1887,7 @@ components:
         items:
           items:
             $ref: "#/components/schemas/ImportIssueInput"
-          type:
-            - array
-            - "null"
+          type: array
         source:
           type: string
       required:
@@ -2157,15 +2099,11 @@ components:
         blocked_by:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         blocks:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         body:
           type: string
         child_counts:
@@ -2187,9 +2125,7 @@ components:
         labels:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         metadata:
           additionalProperties: true
           type: object
@@ -2215,9 +2151,7 @@ components:
         related:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         revision:
           format: int64
           type: integer
@@ -2404,9 +2338,7 @@ components:
         labels:
           items:
             $ref: "#/components/schemas/LabelCount"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - labels
       type: object
@@ -2448,27 +2380,19 @@ components:
         blocked_by_added:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         blocked_by_removed:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         blocks_added:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         blocks_removed:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         parent_removed:
           $ref: "#/components/schemas/LinkPeer"
         parent_set:
@@ -2476,15 +2400,11 @@ components:
         related_added:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         related_removed:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
       type: object
     LinkOut:
       additionalProperties: true
@@ -2537,21 +2457,15 @@ components:
         add_blocked_by:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         add_blocks:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         add_related:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         expected_project_uids:
           additionalProperties:
             type: string
@@ -2559,23 +2473,17 @@ components:
         remove_blocked_by:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         remove_blocks:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         remove_parent:
           type: string
         remove_related:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         set_parent:
           type: string
       type: object
@@ -2585,9 +2493,7 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/ListGlobalIssueOut"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - issues
       type: object
@@ -2597,9 +2503,7 @@ components:
         enrollments:
           items:
             $ref: "#/components/schemas/FederationEnrollmentOut"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - enrollments
       type: object
@@ -2613,15 +2517,11 @@ components:
         blocked_by:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         blocks:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         body:
           type: string
         child_counts:
@@ -2643,9 +2543,7 @@ components:
         labels:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         metadata:
           additionalProperties: true
           type: object
@@ -2673,9 +2571,7 @@ components:
         related:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         revision:
           format: int64
           type: integer
@@ -2712,9 +2608,7 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/IssueOut"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - issues
       type: object
@@ -2724,9 +2618,7 @@ components:
         projects:
           items:
             $ref: "#/components/schemas/ProjectOut"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - projects
       type: object
@@ -2736,9 +2628,7 @@ components:
         recurrences:
           items:
             $ref: "#/components/schemas/Recurrence"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - recurrences
       type: object
@@ -2748,9 +2638,7 @@ components:
         tokens:
           items:
             $ref: "#/components/schemas/TokenOut"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - tokens
       type: object
@@ -2793,9 +2681,7 @@ components:
         short_id_extensions:
           items:
             $ref: "#/components/schemas/MergeShortIDExtension"
-          type:
-            - array
-            - "null"
+          type: array
         source:
           $ref: "#/components/schemas/ProjectOut"
         target:
@@ -3043,9 +2929,7 @@ components:
         events:
           items:
             $ref: "#/components/schemas/EventEnvelope"
-          type:
-            - array
-            - "null"
+          type: array
         next_after_id:
           format: int64
           type: integer
@@ -3498,25 +3382,19 @@ components:
         edges:
           items:
             $ref: "#/components/schemas/ReachableGraphEdge"
-          type:
-            - array
-            - "null"
+          type: array
         hide_done:
           type: boolean
         nodes:
           items:
             $ref: "#/components/schemas/ReachableGraphNode"
-          type:
-            - array
-            - "null"
+          type: array
         source_uid:
           type: string
         unresolved_refs:
           items:
             $ref: "#/components/schemas/ReachableGraphUnresolvedRef"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - source_uid
         - depth
@@ -3559,15 +3437,11 @@ components:
         blocked_by:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         blocks:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         body:
           type: string
         child_counts:
@@ -3589,9 +3463,7 @@ components:
         labels:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         metadata:
           additionalProperties: true
           type: object
@@ -3619,9 +3491,7 @@ components:
         related:
           items:
             $ref: "#/components/schemas/LinkPeer"
-          type:
-            - array
-            - "null"
+          type: array
         revision:
           format: int64
           type: integer
@@ -3658,9 +3528,7 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/ReadyGlobalIssueOut"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - issues
       type: object
@@ -3670,9 +3538,7 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/IssueOut"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - issues
       type: object
@@ -3784,9 +3650,7 @@ components:
         labels:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         metadata:
           additionalProperties: true
           type: object
@@ -4031,9 +3895,7 @@ components:
         matched_in:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         score:
           format: double
           type: number
@@ -4056,9 +3918,7 @@ components:
         results:
           items:
             $ref: "#/components/schemas/SearchHit"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - query
         - mode
@@ -4070,9 +3930,7 @@ components:
         children:
           items:
             $ref: "#/components/schemas/IssueOut"
-          type:
-            - array
-            - "null"
+          type: array
         claim:
           $ref: "#/components/schemas/IssueClaimOut"
         claim_hub_now:
@@ -4084,23 +3942,17 @@ components:
         claim_violations:
           items:
             $ref: "#/components/schemas/ClaimViolationOut"
-          type:
-            - array
-            - "null"
+          type: array
         comments:
           items:
             $ref: "#/components/schemas/Comment"
-          type:
-            - array
-            - "null"
+          type: array
         issue:
           $ref: "#/components/schemas/Issue"
         labels:
           items:
             $ref: "#/components/schemas/IssueLabel"
-          type:
-            - array
-            - "null"
+          type: array
         lease:
           $ref: "#/components/schemas/IssueClaimOut"
         lease_hub_now:
@@ -4112,29 +3964,21 @@ components:
         lease_violations:
           items:
             $ref: "#/components/schemas/ClaimViolationOut"
-          type:
-            - array
-            - "null"
+          type: array
         links:
           items:
             $ref: "#/components/schemas/LinkOut"
-          type:
-            - array
-            - "null"
+          type: array
         parent:
           $ref: "#/components/schemas/IssueRef"
         pending_claims:
           items:
             $ref: "#/components/schemas/PendingClaimOut"
-          type:
-            - array
-            - "null"
+          type: array
         pending_leases:
           items:
             $ref: "#/components/schemas/PendingClaimOut"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - issue
         - comments
@@ -4147,9 +3991,7 @@ components:
         aliases:
           items:
             $ref: "#/components/schemas/ProjectAlias"
-          type:
-            - array
-            - "null"
+          type: array
         project:
           $ref: "#/components/schemas/ProjectOut"
       required:
@@ -4230,27 +4072,19 @@ components:
         edges:
           items:
             $ref: "#/components/schemas/UIGraphEdge"
-          type:
-            - array
-            - "null"
+          type: array
         issues:
           items:
             $ref: "#/components/schemas/UIIssue"
-          type:
-            - array
-            - "null"
+          type: array
         links:
           items:
             $ref: "#/components/schemas/UILink"
-          type:
-            - array
-            - "null"
+          type: array
         unresolved_refs:
           items:
             $ref: "#/components/schemas/UIGraphUnresolvedRef"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - issues
         - links
@@ -4317,9 +4151,7 @@ components:
         labels:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         metadata:
           additionalProperties: true
           type: object
@@ -4493,15 +4325,11 @@ components:
         issues:
           items:
             $ref: "#/components/schemas/UIIssueReference"
-          type:
-            - array
-            - "null"
+          type: array
         labels:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         origin:
           type: string
         origin_stable:
@@ -4509,15 +4337,11 @@ components:
         owners:
           items:
             type: string
-          type:
-            - array
-            - "null"
+          type: array
         projects:
           items:
             $ref: "#/components/schemas/Project"
-          type:
-            - array
-            - "null"
+          type: array
       required:
         - contract_version
         - cursor
@@ -4535,35 +4359,25 @@ components:
         comments:
           items:
             $ref: "#/components/schemas/Comment"
-          type:
-            - array
-            - "null"
+          type: array
         history:
           items:
             $ref: "#/components/schemas/Event"
-          type:
-            - array
-            - "null"
+          type: array
         issue:
           $ref: "#/components/schemas/UIIssue"
         labels:
           items:
             $ref: "#/components/schemas/IssueLabel"
-          type:
-            - array
-            - "null"
+          type: array
         links:
           items:
             $ref: "#/components/schemas/UILink"
-          type:
-            - array
-            - "null"
+          type: array
         recurrences:
           items:
             $ref: "#/components/schemas/Recurrence"
-          type:
-            - array
-            - "null"
+          type: array
         state:
           type: string
       required:
@@ -4582,21 +4396,15 @@ components:
         catalog:
           items:
             $ref: "#/components/schemas/UIProject"
-          type:
-            - array
-            - "null"
+          type: array
         collection:
           items:
             $ref: "#/components/schemas/UIIssue"
-          type:
-            - array
-            - "null"
+          type: array
         collection_links:
           items:
             $ref: "#/components/schemas/UILink"
-          type:
-            - array
-            - "null"
+          type: array
         contract_version:
           type: string
         cursor:
@@ -4630,7 +4438,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.15.0
+  version: 0.16.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -4861,9 +4669,7 @@ paths:
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
       responses:
         "200":
           content:
@@ -5223,27 +5029,21 @@ paths:
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: exclude_label
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: meta
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
       responses:
         "200":
           content:
@@ -5578,9 +5378,7 @@ paths:
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
       responses:
         "200":
           content:
@@ -6095,27 +5893,21 @@ paths:
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: exclude_label
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: meta
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
       responses:
         "200":
           content:
@@ -7469,18 +7261,14 @@ paths:
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: exclude_label
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
       responses:
         "200":
           content:
@@ -7719,18 +7507,14 @@ paths:
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: exclude_label
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
       responses:
         "200":
           content:
@@ -7770,18 +7554,14 @@ paths:
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: exclude_label
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
       responses:
         "200":
           content:
@@ -7934,9 +7714,7 @@ paths:
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: false
           in: query
           name: limit
@@ -7982,27 +7760,21 @@ paths:
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: owner
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: label
           schema:
             items:
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: true
           in: query
           name: relationship
@@ -8015,9 +7787,7 @@ paths:
                 - blocked_by
                 - related
               type: string
-            type:
-              - array
-              - "null"
+            type: array
         - explode: false
           in: query
           name: text

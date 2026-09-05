@@ -29,6 +29,29 @@ type throttledEventRecord struct {
 	Payload      json.RawMessage `json:"payload"`
 }
 
+func TestCloseIssue_RejectsWrongCaseDryRunField(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "example-workspace")
+	issueID := createIssueViaHTTP(t, env, pid, "close me")
+
+	resp, body := envDoRaw(t, env, http.MethodPost,
+		issuePath(pid, issueID, "actions/close"),
+		map[string]any{
+			"actor":   "agent-a",
+			"reason":  "done",
+			"message": "Implemented and verified the requested change.",
+			"evidence": []map[string]any{
+				{"type": "commit", "sha": "abc1234"},
+			},
+			"Dry_Run": true,
+		}, nil)
+
+	assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "validation")
+	issue, err := env.DB.IssueByID(context.Background(), issueID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", issue.Status)
+}
+
 func TestCloseIssue_NonLoopbackStaticTokenCannotForgeTUIBypass(t *testing.T) {
 	d := openTestDB(t)
 	project, err := d.db.CreateProject(context.Background(), "example-workspace")

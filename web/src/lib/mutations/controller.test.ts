@@ -124,7 +124,8 @@ describe('MutationController', () => {
     })
 
     await controller.execute({ draft: 'Comment draft' }, async () => ({
-      response: new Response('{', { status: 200 }),
+      status: 200,
+      headers: new Headers(),
     }))
 
     expect(refresh).toHaveBeenCalledOnce()
@@ -178,13 +179,15 @@ describe('MutationController', () => {
 function ok<T>(data: T) {
   return {
     data,
-    response: new Response(JSON.stringify(data), { status: 200 }),
+    status: 200 as const,
+    headers: new Headers(),
   }
 }
 
 function failure(status: number, code: string, detail: string) {
   return {
-    error: { error: { code, detail } },
-    response: new Response(JSON.stringify({ error: { code, detail } }), { status }),
+    data: { error: { code, detail } },
+    status,
+    headers: new Headers(),
   }
 }

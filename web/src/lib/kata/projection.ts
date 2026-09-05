@@ -1,4 +1,4 @@
-import type { components } from '../api/schema'
+import type { UIIssue, UILink } from '../api/generated'
 import type { UISnapshot } from '../state/snapshot'
 import type {
   KataLinkPeer,
@@ -20,9 +20,6 @@ type Immutable<T> = T extends (...args: never[]) => unknown
     : T extends object
       ? { readonly [Key in keyof T]: Immutable<T[Key]> }
       : T
-
-type UIIssue = components['schemas']['UIIssue']
-type UILink = components['schemas']['UILink']
 
 export interface KataUISnapshotProjection {
   readonly fetched_at: string

@@ -126,7 +126,7 @@ func (a AuditCloseRow) Validate() error {
 }
 
 type AuditClosesResponseBody struct {
-	Rows []AuditCloseRow `json:"rows,omitempty" validate:"required"`
+	Rows []AuditCloseRow `json:"rows" validate:"required"`
 }
 
 func (a AuditClosesResponseBody) Validate() error {
@@ -560,7 +560,7 @@ func (c CommentResponseBody) Validate() error {
 }
 
 type ConnectorFieldsResponseBody struct {
-	Fields []FieldDescriptor `json:"fields,omitempty" validate:"required"`
+	Fields []FieldDescriptor `json:"fields" validate:"required"`
 }
 
 func (c ConnectorFieldsResponseBody) Validate() error {
@@ -579,7 +579,7 @@ func (c ConnectorFieldsResponseBody) Validate() error {
 }
 
 type ConnectorListResponseBody struct {
-	Connectors []ConnectorOut `json:"connectors,omitempty" validate:"required"`
+	Connectors []ConnectorOut `json:"connectors" validate:"required"`
 }
 
 func (c ConnectorListResponseBody) Validate() error {
@@ -887,7 +887,7 @@ func (d DetachProjectAliasResponseBody) Validate() error {
 
 type DigestActorEntry struct {
 	Actor  string               `json:"actor" validate:"required"`
-	Issues []DigestIssueActions `json:"issues,omitempty" validate:"required"`
+	Issues []DigestIssueActions `json:"issues" validate:"required"`
 	Totals DigestTotals         `json:"totals"`
 }
 
@@ -915,7 +915,7 @@ func (d DigestActorEntry) Validate() error {
 }
 
 type DigestIssueActions struct {
-	Actions      []string `json:"actions,omitempty" validate:"required"`
+	Actions      []string `json:"actions" validate:"required"`
 	IssueShortID string   `json:"issue_short_id" validate:"required"`
 	IssueUID     string   `json:"issue_uid" validate:"required"`
 	ProjectID    int64    `json:"project_id"`
@@ -927,7 +927,7 @@ func (d DigestIssueActions) Validate() error {
 }
 
 type DigestResponseBody struct {
-	Actors     []DigestActorEntry `json:"actors,omitempty" validate:"required"`
+	Actors     []DigestActorEntry `json:"actors" validate:"required"`
 	EventCount int64              `json:"event_count"`
 	ProjectID  int64              `json:"project_id"`
 	Since      time.Time          `json:"since" validate:"required"`
@@ -1223,7 +1223,7 @@ func (e ExternalFieldConflictOut) Validate() error {
 }
 
 type ExternalFieldMappingOut struct {
-	AcceptedKinds     []string `json:"accepted_kinds,omitempty" validate:"required"`
+	AcceptedKinds     []string `json:"accepted_kinds" validate:"required"`
 	Active            bool     `json:"active"`
 	ExternalFieldID   string   `json:"external_field_id" validate:"required"`
 	ExternalFieldName string   `json:"external_field_name" validate:"required"`
@@ -1409,7 +1409,7 @@ func (f FederationIngestEventsRequestBody) Validate() error {
 
 type FederationProjectStatus struct {
 	ActiveQuarantineCount       int64                         `json:"active_quarantine_count"`
-	ActiveQuarantines           []FederationQuarantineSummary `json:"active_quarantines,omitempty" validate:"required"`
+	ActiveQuarantines           []FederationQuarantineSummary `json:"active_quarantines" validate:"required"`
 	AllowInsecure               *bool                         `json:"allow_insecure,omitempty"`
 	BoundActor                  *string                       `json:"bound_actor,omitempty"`
 	Capabilities                *string                       `json:"capabilities,omitempty"`
@@ -1439,7 +1439,7 @@ type FederationProjectStatus struct {
 	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
 	PushEnabled                 bool                          `json:"push_enabled"`
 	RecentViolationCount        int64                         `json:"recent_violation_count"`
-	RecentViolations            []FederationViolationSummary  `json:"recent_violations,omitempty" validate:"required"`
+	RecentViolations            []FederationViolationSummary  `json:"recent_violations" validate:"required"`
 	ResetBlocker                *string                       `json:"reset_blocker,omitempty"`
 	Role                        string                        `json:"role" validate:"required"`
 	UnresolvedViolationCount    int64                         `json:"unresolved_violation_count"`
@@ -1480,7 +1480,7 @@ type FederationQuarantineSummary struct {
 	CreatedAt    time.Time `json:"created_at" validate:"required"`
 	Direction    string    `json:"direction" validate:"required"`
 	ErrorData    string    `json:"error" validate:"required"`
-	EventUids    []string  `json:"event_uids,omitempty" validate:"required"`
+	EventUids    []string  `json:"event_uids" validate:"required"`
 	FirstEventID int64     `json:"first_event_id"`
 	ID           int64     `json:"id"`
 	LastEventID  int64     `json:"last_event_id"`
@@ -1501,7 +1501,7 @@ func (f FederationRebindProjectOut) Validate() error {
 }
 
 type FederationStatusBody struct {
-	Statuses []FederationProjectStatus `json:"statuses,omitempty" validate:"required"`
+	Statuses []FederationProjectStatus `json:"statuses" validate:"required"`
 }
 
 func (f FederationStatusBody) Validate() error {
@@ -1537,7 +1537,7 @@ func (f FederationViolationSummary) Validate() error {
 }
 
 type FieldDescriptor struct {
-	AcceptedKinds  []string `json:"accepted_kinds,omitempty" validate:"required"`
+	AcceptedKinds  []string `json:"accepted_kinds" validate:"required"`
 	DisplayName    string   `json:"display_name" validate:"required"`
 	ID             string   `json:"id" validate:"required"`
 	Nullable       bool     `json:"nullable"`
@@ -1628,8 +1628,8 @@ func (i IdleShutdownHealth) Validate() error {
 type ImportBatchResult struct {
 	Comments  int64              `json:"comments"`
 	Created   int64              `json:"created"`
-	Errors    []string           `json:"errors,omitempty" validate:"required"`
-	Items     []ImportItemResult `json:"items,omitempty" validate:"required"`
+	Errors    []string           `json:"errors" validate:"required"`
+	Items     []ImportItemResult `json:"items" validate:"required"`
 	Links     int64              `json:"links"`
 	Source    string             `json:"source" validate:"required"`
 	Unchanged int64              `json:"unchanged"`
@@ -1768,7 +1768,7 @@ func (i ImportLinkInput) Validate() error {
 
 type ImportRequestBody struct {
 	Actor  string             `json:"actor" validate:"required"`
-	Items  []ImportIssueInput `json:"items,omitempty" validate:"required"`
+	Items  []ImportIssueInput `json:"items" validate:"required"`
 	Source string             `json:"source" validate:"required"`
 }
 
@@ -2135,7 +2135,7 @@ func (l LabelCount) Validate() error {
 }
 
 type LabelsListResponseBody struct {
-	Labels []LabelCount `json:"labels,omitempty" validate:"required"`
+	Labels []LabelCount `json:"labels" validate:"required"`
 }
 
 func (l LabelsListResponseBody) Validate() error {
@@ -2328,7 +2328,7 @@ type LinksDelta struct {
 }
 
 type ListAllIssuesResponseBody struct {
-	Issues []ListGlobalIssueOut `json:"issues,omitempty" validate:"required"`
+	Issues []ListGlobalIssueOut `json:"issues" validate:"required"`
 }
 
 func (l ListAllIssuesResponseBody) Validate() error {
@@ -2347,7 +2347,7 @@ func (l ListAllIssuesResponseBody) Validate() error {
 }
 
 type ListFederationEnrollmentsBody struct {
-	Enrollments []FederationEnrollmentOut `json:"enrollments,omitempty" validate:"required"`
+	Enrollments []FederationEnrollmentOut `json:"enrollments" validate:"required"`
 }
 
 func (l ListFederationEnrollmentsBody) Validate() error {
@@ -2471,7 +2471,7 @@ func (l ListGlobalIssueOut) Validate() error {
 }
 
 type ListIssuesResponseBody struct {
-	Issues []IssueOut `json:"issues,omitempty" validate:"required"`
+	Issues []IssueOut `json:"issues" validate:"required"`
 }
 
 func (l ListIssuesResponseBody) Validate() error {
@@ -2490,7 +2490,7 @@ func (l ListIssuesResponseBody) Validate() error {
 }
 
 type ListProjectsResponseBody struct {
-	Projects []ProjectOut `json:"projects,omitempty" validate:"required"`
+	Projects []ProjectOut `json:"projects" validate:"required"`
 }
 
 func (l ListProjectsResponseBody) Validate() error {
@@ -2509,7 +2509,7 @@ func (l ListProjectsResponseBody) Validate() error {
 }
 
 type ListRecurrencesResponseBody struct {
-	Recurrences []Recurrence `json:"recurrences,omitempty" validate:"required"`
+	Recurrences []Recurrence `json:"recurrences" validate:"required"`
 }
 
 func (l ListRecurrencesResponseBody) Validate() error {
@@ -2528,7 +2528,7 @@ func (l ListRecurrencesResponseBody) Validate() error {
 }
 
 type ListTokensResponseBody struct {
-	Tokens []TokenOut `json:"tokens,omitempty" validate:"required"`
+	Tokens []TokenOut `json:"tokens" validate:"required"`
 }
 
 func (l ListTokensResponseBody) Validate() error {
@@ -2863,7 +2863,7 @@ func (p PingResponseBody) Validate() error {
 }
 
 type PollEventsBody struct {
-	Events        []EventEnvelope `json:"events,omitempty" validate:"required"`
+	Events        []EventEnvelope `json:"events" validate:"required"`
 	NextAfterID   int64           `json:"next_after_id"`
 	ResetAfterID  *int64          `json:"reset_after_id,omitempty"`
 	ResetRequired bool            `json:"reset_required"`
@@ -3160,11 +3160,11 @@ func (r ReachableGraphNode) Validate() error {
 
 type ReachableGraphResponseBody struct {
 	Depth          string                        `json:"depth" validate:"required"`
-	Edges          []ReachableGraphEdge          `json:"edges,omitempty" validate:"required"`
+	Edges          []ReachableGraphEdge          `json:"edges" validate:"required"`
 	HideDone       bool                          `json:"hide_done"`
-	Nodes          []ReachableGraphNode          `json:"nodes,omitempty" validate:"required"`
+	Nodes          []ReachableGraphNode          `json:"nodes" validate:"required"`
 	SourceUID      string                        `json:"source_uid" validate:"required"`
-	UnresolvedRefs []ReachableGraphUnresolvedRef `json:"unresolved_refs,omitempty" validate:"required"`
+	UnresolvedRefs []ReachableGraphUnresolvedRef `json:"unresolved_refs" validate:"required"`
 }
 
 func (r ReachableGraphResponseBody) Validate() error {
@@ -3339,7 +3339,7 @@ func (r ReadyGlobalIssueOut) Validate() error {
 }
 
 type ReadyGlobalResponseBody struct {
-	Issues []ReadyGlobalIssueOut `json:"issues,omitempty" validate:"required"`
+	Issues []ReadyGlobalIssueOut `json:"issues" validate:"required"`
 }
 
 func (r ReadyGlobalResponseBody) Validate() error {
@@ -3358,7 +3358,7 @@ func (r ReadyGlobalResponseBody) Validate() error {
 }
 
 type ReadyResponseBody struct {
-	Issues []IssueOut `json:"issues,omitempty" validate:"required"`
+	Issues []IssueOut `json:"issues" validate:"required"`
 }
 
 func (r ReadyResponseBody) Validate() error {
@@ -3698,7 +3698,7 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 
 type SearchHit struct {
 	Issue     Issue    `json:"issue"`
-	MatchedIn []string `json:"matched_in,omitempty" validate:"required"`
+	MatchedIn []string `json:"matched_in" validate:"required"`
 	Score     float64  `json:"score"`
 }
 
@@ -3723,7 +3723,7 @@ type SearchResponseBody struct {
 	DegradedReason *string     `json:"degraded_reason,omitempty"`
 	Mode           string      `json:"mode" validate:"required"`
 	Query          string      `json:"query" validate:"required"`
-	Results        []SearchHit `json:"results,omitempty" validate:"required"`
+	Results        []SearchHit `json:"results" validate:"required"`
 }
 
 func (s SearchResponseBody) Validate() error {
@@ -3753,14 +3753,14 @@ type ShowIssueResponseBody struct {
 	ClaimHubNow         *time.Time          `json:"claim_hub_now,omitempty"`
 	ClaimViolationCount *int64              `json:"claim_violation_count,omitempty"`
 	ClaimViolations     []ClaimViolationOut `json:"claim_violations,omitempty"`
-	Comments            []Comment           `json:"comments,omitempty" validate:"required"`
+	Comments            []Comment           `json:"comments" validate:"required"`
 	Issue               Issue               `json:"issue"`
-	Labels              []IssueLabel        `json:"labels,omitempty" validate:"required"`
+	Labels              []IssueLabel        `json:"labels" validate:"required"`
 	Lease               *IssueClaimOut      `json:"lease,omitempty"`
 	LeaseHubNow         *time.Time          `json:"lease_hub_now,omitempty"`
 	LeaseViolationCount *int64              `json:"lease_violation_count,omitempty"`
 	LeaseViolations     []ClaimViolationOut `json:"lease_violations,omitempty"`
-	Links               []LinkOut           `json:"links,omitempty" validate:"required"`
+	Links               []LinkOut           `json:"links" validate:"required"`
 	Parent              *IssueRef           `json:"parent,omitempty"`
 	PendingClaims       []PendingClaimOut   `json:"pending_claims,omitempty"`
 	PendingLeases       []PendingClaimOut   `json:"pending_leases,omitempty"`
@@ -3857,7 +3857,7 @@ func (s ShowIssueResponseBody) Validate() error {
 }
 
 type ShowProjectResponseBody struct {
-	Aliases []ProjectAlias `json:"aliases,omitempty" validate:"required"`
+	Aliases []ProjectAlias `json:"aliases" validate:"required"`
 	Project ProjectOut     `json:"project"`
 }
 
@@ -3943,10 +3943,10 @@ func (u UICapabilities) Validate() error {
 }
 
 type UIGraph struct {
-	Edges          []UIGraphEdge          `json:"edges,omitempty" validate:"required"`
-	Issues         []UIIssue              `json:"issues,omitempty" validate:"required"`
-	Links          []UILink               `json:"links,omitempty" validate:"required"`
-	UnresolvedRefs []UIGraphUnresolvedRef `json:"unresolved_refs,omitempty" validate:"required"`
+	Edges          []UIGraphEdge          `json:"edges" validate:"required"`
+	Issues         []UIIssue              `json:"issues" validate:"required"`
+	Links          []UILink               `json:"links" validate:"required"`
+	UnresolvedRefs []UIGraphUnresolvedRef `json:"unresolved_refs" validate:"required"`
 }
 
 func (u UIGraph) Validate() error {
@@ -4016,7 +4016,7 @@ type UIIssue struct {
 	DeadlineOnDate  *string        `json:"deadline_on_date,omitempty"`
 	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
 	ID              int64          `json:"id"`
-	Labels          []string       `json:"labels,omitempty" validate:"required"`
+	Labels          []string       `json:"labels" validate:"required"`
 	Metadata        map[string]any `json:"metadata"`
 	OccurrenceKey   *string        `json:"occurrence_key,omitempty"`
 	Owner           *string        `json:"owner,omitempty"`
@@ -4137,12 +4137,12 @@ type UIReferencesResponseBody struct {
 	Capabilities    UICapabilities     `json:"capabilities"`
 	ContractVersion string             `json:"contract_version" validate:"required"`
 	Cursor          int64              `json:"cursor"`
-	Issues          []UIIssueReference `json:"issues,omitempty" validate:"required"`
-	Labels          []string           `json:"labels,omitempty" validate:"required"`
+	Issues          []UIIssueReference `json:"issues" validate:"required"`
+	Labels          []string           `json:"labels" validate:"required"`
 	Origin          string             `json:"origin" validate:"required"`
 	OriginStable    bool               `json:"origin_stable"`
-	Owners          []string           `json:"owners,omitempty" validate:"required"`
-	Projects        []Project          `json:"projects,omitempty" validate:"required"`
+	Owners          []string           `json:"owners" validate:"required"`
+	Projects        []Project          `json:"projects" validate:"required"`
 }
 
 func (u UIReferencesResponseBody) Validate() error {
@@ -4185,12 +4185,12 @@ func (u UIReferencesResponseBody) Validate() error {
 }
 
 type UISelectedAuthority struct {
-	Comments    []Comment    `json:"comments,omitempty" validate:"required"`
-	History     []Event      `json:"history,omitempty" validate:"required"`
+	Comments    []Comment    `json:"comments" validate:"required"`
+	History     []Event      `json:"history" validate:"required"`
 	Issue       *UIIssue     `json:"issue,omitempty"`
-	Labels      []IssueLabel `json:"labels,omitempty" validate:"required"`
-	Links       []UILink     `json:"links,omitempty" validate:"required"`
-	Recurrences []Recurrence `json:"recurrences,omitempty" validate:"required"`
+	Labels      []IssueLabel `json:"labels" validate:"required"`
+	Links       []UILink     `json:"links" validate:"required"`
+	Recurrences []Recurrence `json:"recurrences" validate:"required"`
 	State       string       `json:"state" validate:"required"`
 }
 
@@ -4249,9 +4249,9 @@ func (u UISelectedAuthority) Validate() error {
 
 type UISnapshotResponseBody struct {
 	Capabilities    UICapabilities       `json:"capabilities"`
-	Catalog         []UIProject          `json:"catalog,omitempty" validate:"required"`
-	Collection      []UIIssue            `json:"collection,omitempty" validate:"required"`
-	CollectionLinks []UILink             `json:"collection_links,omitempty" validate:"required"`
+	Catalog         []UIProject          `json:"catalog" validate:"required"`
+	Collection      []UIIssue            `json:"collection" validate:"required"`
+	CollectionLinks []UILink             `json:"collection_links" validate:"required"`
 	ContractVersion string               `json:"contract_version" validate:"required"`
 	Cursor          int64                `json:"cursor"`
 	Graph           *UIGraph             `json:"graph,omitempty"`

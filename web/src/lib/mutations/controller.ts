@@ -7,16 +7,13 @@ export interface MutationAuthority {
 
 export interface MutationContext {
   headers: Headers
-  body<T extends Record<string, unknown>>(
-    body: T,
-    requestActor?: string,
-  ): T | (T & { actor: string })
+  body<T extends object>(body: T, requestActor?: string): T | (T & { actor: string })
 }
 
-export interface MutationResult<T> {
-  data?: T
-  error?: unknown
-  response: Response
+export interface MutationResult {
+  data?: unknown
+  status: number
+  headers: Headers
 }
 
 export interface MutationOptions<TDraft = unknown> {
@@ -60,7 +57,7 @@ export class MutationController {
 
   async execute<T, TDraft = unknown>(
     options: MutationOptions<TDraft>,
-    mutate: (context: MutationContext) => Promise<MutationResult<T>>,
+    mutate: (context: MutationContext) => Promise<MutationResult>,
   ): Promise<T | false> {
     if (options.createKey && this.#committedCreates.has(options.createKey)) {
       return this.#committedCreates.get(options.createKey) as T
@@ -83,7 +80,7 @@ export class MutationController {
           : { ...body, actor: requestActor },
     }
 
-    let result: MutationResult<T>
+    let result: MutationResult
     try {
       result = await mutate(context)
     } catch (error) {
@@ -97,18 +94,18 @@ export class MutationController {
       return false
     }
 
-    if (!result.response.ok || result.error !== undefined || result.data === undefined) {
-      const error = mutationError(result.error, result.response.status)
-      if (result.response.status === 401) {
+    if (result.status < 200 || result.status >= 300 || result.data === undefined) {
+      const error = mutationError(result.data, result.status)
+      if (result.status === 401) {
         this.#onAuthenticationRequired()
         this.state = withDraft({ kind: 'blocked' }, options.draft)
-      } else if (result.response.status === 412 || error.code === 'revision_conflict') {
+      } else if (result.status === 412 || error.code === 'revision_conflict') {
         await this.#refreshAfterUncertainWrite()
         this.state = withDraft(
           { kind: 'revision-conflict', code: error.code, detail: error.detail },
           options.draft,
         )
-      } else if (result.response.status >= 400 && result.response.status < 500) {
+      } else if (result.status >= 400 && result.status < 500) {
         this.state = withDraft(
           { kind: 'domain-error', code: error.code, detail: error.detail },
           options.draft,
@@ -123,7 +120,7 @@ export class MutationController {
     if (options.createKey) this.#committedCreates.set(options.createKey, result.data)
     this.state = { kind: 'idle' }
     await this.#refreshAfterUncertainWrite()
-    return result.data
+    return result.data as T
   }
 
   async #refreshAfterUncertainWrite(): Promise<void> {

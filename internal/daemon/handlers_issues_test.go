@@ -534,6 +534,17 @@ func TestCreateIssue_BlankActorIs400(t *testing.T) {
 	assertAPIError(t, resp.StatusCode, bs, 400, "validation")
 }
 
+func TestCreateIssue_RejectsNullLabels(t *testing.T) {
+	h, pid := bootstrapProject(t)
+	resp, bs := postJSON(t, h.ts.(*httptest.Server), issuesURL(pid),
+		map[string]any{"actor": "tester", "title": "x", "labels": nil})
+	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
+
+	count, err := h.DB().CountOpenIssues(t.Context(), pid)
+	require.NoError(t, err)
+	assert.Zero(t, count)
+}
+
 // TestEditIssue_LinksDelta_AddBlocks pins the smallest end-to-end behavior of
 // the new PATCH-with-links shape: a single `add_blocks` entry in `links_delta`
 // creates the corresponding link and reports it back in the response's

@@ -94,7 +94,7 @@ type PollEventsGlobalRequest struct {
 // PollEventsBody is the response body for both polling endpoints.
 type PollEventsBody struct {
 	ResetRequired bool            `json:"reset_required"`
-	ResetAfterID  int64           `json:"reset_after_id,omitempty"`
+	ResetAfterID  int64           `json:"reset_after_id,omitzero"`
 	Events        []EventEnvelope `json:"events"`        // always non-nil; empty array on no rows
 	NextAfterID   int64           `json:"next_after_id"` // = max events.id in response, or after_id if empty
 }

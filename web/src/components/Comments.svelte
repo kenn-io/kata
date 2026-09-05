@@ -8,10 +8,10 @@
     formatTimestamp as localDateTimeLabel,
   } from '@kenn-io/kit-ui/utils/time'
 
-  import type { components } from '../lib/api/schema'
+  import type { UIIssueReference } from '../lib/api/generated'
   import type { KataTaskDetail } from '../lib/kata/types'
 
-  type Reference = components['schemas']['UIIssueReference']
+  type Reference = UIIssueReference
 
   interface Props {
     issue: KataTaskDetail

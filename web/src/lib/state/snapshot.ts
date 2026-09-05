@@ -1,5 +1,5 @@
-import type { components } from '../api/schema'
-import { createCredentialedFetch } from '../api/client'
+import type { UISnapshotResponseBody } from '../api/generated'
+import { readUISnapshot, type ReadUISnapshotParams } from '../api/generated'
 import { AuthenticationRequiredError, isAuthenticationRequiredError } from '../auth/session'
 import type { KataRoute } from '../router'
 
@@ -200,7 +200,7 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
   }
 }
 
-export type UISnapshot = components['schemas']['UISnapshotResponseBody']
+export type UISnapshot = UISnapshotResponseBody
 
 export interface UISnapshotIntent {
   daemonID?: string
@@ -247,47 +247,43 @@ export function uiSnapshotIntentKey(intent: UISnapshotIntent): string {
   return JSON.stringify(intent)
 }
 
+type ReadUISnapshot = typeof readUISnapshot
+
 export function createUISnapshotRequest(
-  fetcher: typeof fetch = createCredentialedFetch(),
+  request: ReadUISnapshot = readUISnapshot,
 ): SnapshotRequest<UISnapshotIntent, UISnapshot> {
   return async (intent, options) => {
-    const query = new URLSearchParams({
+    const params: ReadUISnapshotParams = {
       view: intent.view,
-      include_graph: String(intent.includeGraph),
-      include_history: String(intent.includeHistory),
-    })
-    appendValues(query, 'status', intent.statuses)
-    appendValues(query, 'owner', intent.owners)
-    appendValues(query, 'label', intent.labels)
-    appendValues(query, 'relationship', intent.relationships)
-    if (intent.projectUID) query.set('project_uid', intent.projectUID)
-    if (intent.text) query.set('text', intent.text)
-    if (intent.selectedIssueUID) query.set('selected_issue_uid', intent.selectedIssueUID)
-    if (intent.localDate) query.set('local_date', intent.localDate)
-    if (intent.timeZone) query.set('time_zone', intent.timeZone)
-    const headers = new Headers()
-    if (options.etag) headers.set('If-None-Match', options.etag)
-    const response = await fetcher(`/api/v1/ui/snapshot?${query}`, {
-      method: 'GET',
-      headers,
+      status: intent.statuses,
+      owner: intent.owners,
+      label: intent.labels,
+      relationship: intent.relationships as NonNullable<ReadUISnapshotParams['relationship']>,
+      include_graph: intent.includeGraph,
+      include_history: intent.includeHistory,
+    }
+    if (intent.projectUID) params.project_uid = intent.projectUID
+    if (intent.text) params.text = intent.text
+    if (intent.selectedIssueUID) params.selected_issue_uid = intent.selectedIssueUID
+    if (intent.localDate) params.local_date = intent.localDate
+    if (intent.timeZone) params.time_zone = intent.timeZone
+    const response = await request(params, {
       signal: options.signal,
+      ...(options.etag ? { headers: { 'If-None-Match': options.etag } } : {}),
     })
-    if (response.status === 304) {
+    const status: number = response.status
+    if (status === 304) {
       const etag = response.headers.get('ETag')
       return etag ? { status: 304, etag } : { status: 304 }
     }
-    if (response.status === 401) throw new AuthenticationRequiredError('Snapshot unavailable')
-    if (!response.ok) throw new Error('Snapshot unavailable')
+    if (status === 401) throw new AuthenticationRequiredError('Snapshot unavailable')
+    if (status !== 200) throw new Error('Snapshot unavailable')
     return {
       status: 200,
       etag: response.headers.get('ETag') ?? '',
-      snapshot: (await response.json()) as UISnapshot,
+      snapshot: response.data as UISnapshot,
     }
   }
-}
-
-function appendValues(query: URLSearchParams, key: string, values: readonly string[]): void {
-  for (const value of values) query.append(key, value)
 }
 
 function localDate(now: Date, timeZone: string): string {

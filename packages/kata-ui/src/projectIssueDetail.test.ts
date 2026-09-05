@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import type { components } from '../../../web/src/lib/api/schema'
+import type { ShowIssueResponseBody } from '../../../web/src/lib/api/generated/models/showIssueResponseBody.ts'
 import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
 function acceptCanonicalWire(
-  wire: components['schemas']['ShowIssueResponseBody'],
+  wire: ShowIssueResponseBody,
 ): KataIssueDetailWire {
   return wire
 }

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"maps"
@@ -261,7 +262,7 @@ func httpDoJSONWithHeader(ctx context.Context, client *http.Client,
 	method, url string, headers map[string]string, body any) (int, []byte, error) {
 	var rdr io.Reader
 	if body != nil {
-		bs, err := json.Marshal(body)
+		bs, err := jsonv2.Marshal(body)
 		if err != nil {
 			return 0, nil, err
 		}
