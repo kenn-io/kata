@@ -209,7 +209,7 @@ func parseMetaValue(raw string, asJSON bool, nullMessage string) (json.RawMessag
 type metaPatchGuard struct {
 	Key      string  `json:"key"`
 	IfValue  *string `json:"if_value,omitempty"`
-	IfAbsent bool    `json:"if_absent,omitempty"`
+	IfAbsent bool    `json:"if_absent,omitempty,omitzero"`
 }
 
 func metaSetGuardFromFlags(

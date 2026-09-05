@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -126,7 +127,7 @@ func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, pr
 func httpDoJSONHeaders(ctx context.Context, client *http.Client, method, path string, body any, headers map[string]string) (int, []byte, error) {
 	var rdr io.Reader
 	if body != nil {
-		bs, err := json.Marshal(body)
+		bs, err := jsonv2.Marshal(body)
 		if err != nil {
 			return 0, nil, err
 		}

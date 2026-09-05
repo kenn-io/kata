@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -168,7 +169,7 @@ func emitJSON(w io.Writer, v any) error {
 func httpDoJSON(ctx context.Context, client *http.Client, method, url string, body any) (int, []byte, error) {
 	var rdr io.Reader
 	if body != nil {
-		bs, err := json.Marshal(body)
+		bs, err := jsonv2.Marshal(body)
 		if err != nil {
 			return 0, nil, err
 		}

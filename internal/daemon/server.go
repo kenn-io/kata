@@ -215,21 +215,9 @@ type ListenerBinding struct {
 	Policy   ListenerPolicy
 }
 
-var configureHumaOnce sync.Once
-
-func configureHuma() {
-	configureHumaOnce.Do(func() {
-		// Keep Huma validation and schemas aligned with JSON v2: member names are
-		// case-sensitive and ordinary slices are non-null arrays.
-		huma.ValidateStrictCasing = true
-		huma.DefaultArrayNullable = false
-	})
-}
-
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
-	configureHuma()
 	if cfg.Broadcaster == nil {
 		cfg.Broadcaster = NewEventBroadcaster()
 	}
@@ -247,12 +235,13 @@ func NewServer(cfg ServerConfig) *Server {
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("kata", APISchemaVersion)
+	humaConfig.Components.Schemas = newAPISchemaRegistry()
 	jsonFormat := huma.Format{
 		Marshal: func(w io.Writer, value any) error {
 			return jsonv2.MarshalWrite(w, value)
 		},
 		Unmarshal: func(data []byte, value any) error {
-			return jsonv2.Unmarshal(data, value)
+			return unmarshalAPIJSON(data, value)
 		},
 	}
 	humaConfig.Formats = map[string]huma.Format{
