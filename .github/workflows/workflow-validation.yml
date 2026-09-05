@@ -12,7 +12,6 @@ on:
       - "internal/web/**"
       - "packaging/homebrew-core/**"
       - "scripts/release*"
-      - "scripts/verify-release-tag.sh"
       - "web/**"
 
 permissions:

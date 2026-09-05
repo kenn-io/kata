@@ -49,6 +49,9 @@
 
 ## Documentation and release PRs
 
+Releases happen externally. Do not add local release scripts or workflows
+that create tags or publish releases. Keep build and packaging checks here.
+
 Update documentation as behavior lands whenever practical: CLI flags, config
 keys, operator workflows, installation paths, and user-facing contracts should
 not wait for a release-only sweep when they can be documented with the code.
