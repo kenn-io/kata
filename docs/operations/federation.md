@@ -302,7 +302,11 @@ printed command omits `--adopt-existing` and `join` creates a new spoke
 replica. If the spoke project name differs from the hub project name, replace
 the printed `--project <hub-project>` with `--project <spoke-project>`, and
 create the enrollment with `kata federation enroll --adopt-existing` so the
-token is marked for adoption snapshots.
+token is marked for adoption snapshots. That permission preserves historical
+issue, comment, and link authors across every chunk of the initial baseline,
+including resumed transfers. The event actor still identifies the enrolled
+installation's actor. Completing the baseline consumes the permission; later
+writes must use the bound actor.
 
 Before enrollment, clean current-state data that should not appear in baseline
 snapshots. Use `kata comment edit <ref> <comment-uid> --body ...` to replace

@@ -214,7 +214,15 @@ On each spoke:
 
    Adoption preserves the current state of local issues, including closed and
    soft-deleted issues, comments, labels, metadata, priority, owner, and
-   links. It does not preserve the old local event history.
+   links. Historical issue, comment, and link authors survive every transport
+   chunk of the approved baseline, not only its first snapshot batch. The
+   enrollment's bound actor remains the event actor throughout. The hub records
+   the terminal source cursor when the baseline opens and consumes the
+   historical-author grant only when that terminal chunk commits. Exact
+   retries remain idempotent; completion does not permit fresh snapshot events
+   under the consumed grant.
+
+   Adoption does not preserve the old local event history.
    Instead it removes those pre-adoption local events and queues fresh snapshots
    for the hub with links embedded in the snapshot payloads. A cross-project
    edge materializes after both endpoint projects reach the same hub; until
