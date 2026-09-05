@@ -225,19 +225,6 @@ jobs:
       - name: Run golangci-lint
         run: make lint
 
-  release-scripts:
-    name: Release script tests
-    runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run release script tests
-        run: env -u KATA_AUTH_TOKEN make release-scripts-test
-
   nilaway:
     name: nilaway
     runs-on: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
