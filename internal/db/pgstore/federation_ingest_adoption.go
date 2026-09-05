@@ -123,10 +123,12 @@ func computeFederationIngestOpenAdoptionBaselineState(
 	shape federationIngestBaselineShape,
 	endSourceEventID int64,
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
+	// A transport chunk is not the whole adoption. Preserve the grant until
+	// the recorded terminal cursor commits, including across retries.
 	state := federationIngestAdoptionSnapshotAuthorState{
 		allowAuthorPreservation:      shape.hasSnapshot && marker.allowSnapshotAuthors,
 		shouldDeferMarker:            true,
-		deferAuthorPreservationGrant: marker.allowSnapshotAuthors && !shape.hasSnapshot,
+		deferAuthorPreservationGrant: marker.allowSnapshotAuthors,
 		overrideSnapshotAuthors:      shape.hasSnapshot && marker.baselineOpen && !marker.allowSnapshotAuthors,
 		nextSourceEventID:            shape.maxSourceEventID + 1,
 		endSourceEventID:             endSourceEventID,

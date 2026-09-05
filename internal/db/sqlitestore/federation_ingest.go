@@ -228,7 +228,7 @@ func validateFederationBoundActorPayload(
 	switch ev.Type {
 	case "issue.snapshot":
 		if allowSnapshotAuthorPreservation {
-			return nil
+			return db.ValidateFederationSnapshotEntries(ev)
 		}
 		if err := validateFederationPayloadAuthor(ev, boundActor); err != nil {
 			return err
@@ -371,10 +371,12 @@ func computeFederationIngestOpenAdoptionBaselineState(
 	baselineShape federationIngestBaselineShape,
 	adoptionBaselineEndSourceEventID int64,
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
+	// A transport chunk is not the whole adoption. Preserve the grant until
+	// the recorded terminal cursor commits, including across retries.
 	state := federationIngestAdoptionSnapshotAuthorState{
 		allowAuthorPreservation:      baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
 		shouldDeferMarker:            true,
-		deferAuthorPreservationGrant: marker.allowSnapshotAuthors && !baselineShape.hasSnapshot,
+		deferAuthorPreservationGrant: marker.allowSnapshotAuthors,
 		overrideSnapshotAuthors:      baselineShape.hasSnapshot && marker.baselineOpen && !marker.allowSnapshotAuthors,
 		nextSourceEventID:            baselineShape.maxSourceEventID + 1,
 		endSourceEventID:             adoptionBaselineEndSourceEventID,

@@ -2098,15 +2098,19 @@ func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) erro
 		return err
 	}
 	assert.True(t, enrollment.AdoptionBaselineOpen)
-	assert.False(t, enrollment.AllowAdoptionSnapshotAuthors)
+	assert.True(t, enrollment.AllowAdoptionSnapshotAuthors)
 	assert.Equal(t, int64(12), enrollment.AdoptionBaselineNextSourceEventID)
 
 	secondIssueUID, err := uid.New()
 	if err != nil {
 		return err
 	}
+	commentUID, err := uid.New()
+	if err != nil {
+		return err
+	}
 	secondSnapshot := newRemoteEvent(t, project, &secondIssueUID, "issue.snapshot", "adoption-agent",
-		spokeUID, 400, json.RawMessage(`{"uid":"`+secondIssueUID+`","title":"historical second","body":"","author":"another-historical-author","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+		spokeUID, 400, json.RawMessage(`{"uid":"`+secondIssueUID+`","title":"historical second","body":"","author":"another-historical-author","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"historical-reviewer","body":"original comment","created_at":"2026-05-23T12:00:00.000Z"}],"links":[{"type":"related","to_issue_uid":"`+firstIssueUID+`","author":"historical-linker"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
 	terminalParams := db.FederationIngestParams{
 		ProjectID: project.ID, FederationEnrollmentID: created.Enrollment.ID,
 		SpokeInstanceUID: spokeUID, BoundActor: "adoption-agent",
@@ -2123,7 +2127,20 @@ func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) erro
 	if err != nil {
 		return err
 	}
-	assert.Equal(t, "adoption-agent", secondIssue.Author)
+	assert.Equal(t, "another-historical-author", secondIssue.Author)
+	comments, err := store.CommentsByIssue(ctx, secondIssue.ID)
+	if err != nil {
+		return err
+	}
+	require.Len(t, comments, 1)
+	assert.Equal(t, commentUID, comments[0].UID)
+	assert.Equal(t, "historical-reviewer", comments[0].Author)
+	links, err := store.LinksByIssue(ctx, secondIssue.ID)
+	if err != nil {
+		return err
+	}
+	require.Len(t, links, 1)
+	assert.Equal(t, "historical-linker", links[0].Author)
 	enrollment, err = federationEnrollmentByID(ctx, store, created.Enrollment.ID)
 	if err != nil {
 		return err

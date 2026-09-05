@@ -3028,7 +3028,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Equal(t, 1, firstRes.Accepted)
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
-		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
+		assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
 		firstIssue, err := d.IssueByUID(ctx, firstUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
 		assert.Equal(t, "historical-agent", firstIssue.Author)
@@ -3053,14 +3053,14 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
 		secondIssue, err := d.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
-		assert.Equal(t, "bound-agent", secondIssue.Author)
+		assert.Equal(t, "second-historical-agent", secondIssue.Author)
 		links, err = d.LinksByIssue(ctx, firstIssue.ID)
 		require.NoError(t, err)
 		require.Len(t, links, 1)
 		assert.Equal(t, "historical-linker", links[0].Author)
 	})
 
-	t.Run("projects continuation adoption snapshot historical author as bound actor", func(t *testing.T) {
+	t.Run("preserves continuation snapshot payload and bound event actor", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		markerValue := strings.Join([]string{"snapshot", "adoption", "continuation", "author"}, "-")
 		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -3114,11 +3114,12 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Equal(t, "historical-agent", firstIssue.Author)
 		secondIssue, err := d.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
-		assert.Equal(t, "bound-agent", secondIssue.Author)
-		var storedPayload string
+		assert.Equal(t, "spoofed-agent", secondIssue.Author)
+		var storedPayload, storedActor string
 		require.NoError(t, d.QueryRowContext(ctx,
-			`SELECT payload FROM events WHERE uid = ?`, second.EventUID).Scan(&storedPayload))
-		assert.Contains(t, storedPayload, `"author":"bound-agent"`)
+			`SELECT payload, actor FROM events WHERE uid = ?`, second.EventUID).Scan(&storedPayload, &storedActor))
+		assert.JSONEq(t, string(second.Payload), storedPayload)
+		assert.Equal(t, "bound-agent", storedActor)
 	})
 
 	t.Run("rejects null continuation adoption snapshot entries", func(t *testing.T) {
@@ -3247,7 +3248,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Equal(t, 1, res.Accepted)
 		secondIssue, err := d.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
-		assert.Equal(t, "bound-agent", secondIssue.Author)
+		assert.Equal(t, "second-historical-agent", secondIssue.Author)
 
 		retryParams := completeParams
 		retryParams.AllowSnapshotAuthorPreservation = false
@@ -3580,7 +3581,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
-		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
+		assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
 		var baselineOpen, nextSourceEventID, endSourceEventID int64
 		require.NoError(t, d.QueryRowContext(ctx, `
 				SELECT adoption_baseline_open, adoption_baseline_next_source_event_id,

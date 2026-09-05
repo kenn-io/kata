@@ -59,6 +59,30 @@ func ValidateRemoteEventContentHash(event RemoteEvent) (json.RawMessage, string,
 	return payload, createdAt, nil
 }
 
+// ValidateFederationSnapshotEntries checks embedded entries without changing
+// historical authors. Author preservation must not bypass payload validation.
+func ValidateFederationSnapshotEntries(event RemoteEvent) error {
+	var payload struct {
+		Comments []map[string]json.RawMessage `json:"comments"`
+		Links    []map[string]json.RawMessage `json:"links"`
+	}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("%w: event %s issue.snapshot entries are invalid JSON",
+			ErrFederationIngestValidation, event.EventUID)
+	}
+	for field, entries := range map[string][]map[string]json.RawMessage{
+		"comments": payload.Comments, "links": payload.Links,
+	} {
+		for _, entry := range entries {
+			if entry == nil {
+				return fmt.Errorf("%w: event %s issue.snapshot %s payload entry must be a JSON object",
+					ErrFederationIngestValidation, event.EventUID, field)
+			}
+		}
+	}
+	return nil
+}
+
 // CanonicalizeFederationSnapshotAuthors rewrites an adoption snapshot's
 // embedded authors to its bound actor and recomputes the portable hash.
 func CanonicalizeFederationSnapshotAuthors(event RemoteEvent, boundActor string) (RemoteEvent, error) {

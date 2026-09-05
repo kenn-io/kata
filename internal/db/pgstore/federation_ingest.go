@@ -263,7 +263,7 @@ func validateFederationBoundActorPayload(
 	switch event.Type {
 	case "issue.snapshot":
 		if allowSnapshotAuthorPreservation {
-			return nil
+			return db.ValidateFederationSnapshotEntries(event)
 		}
 		if err := validateFederationPayloadAuthor(event, boundActor); err != nil {
 			return err
