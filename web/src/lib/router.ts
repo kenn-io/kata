@@ -1,3 +1,5 @@
+import { applicationRoutePath } from './applicationBase'
+
 export const systemViews = [
   'inbox',
   'today',
@@ -36,10 +38,9 @@ export type KataRoute =
       searchRef?: string
     }
 
-export function parseRoute(url: URL): KataRoute {
-  const segments = url.pathname.split('/').filter(Boolean)
+export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRoute {
   const filters = parseFilters(url.searchParams)
-  if (segments.length !== 1 || segments[0] !== 'kata') {
+  if (normalizeRoutePath(url.pathname) !== normalizeRoutePath(routePath)) {
     return { kind: 'route-error', path: url.pathname, reason: 'path' }
   }
   const view = url.searchParams.get('view')?.trim()
@@ -71,7 +72,7 @@ export function parseRoute(url: URL): KataRoute {
   }
 }
 
-export function serializeRoute(route: KataRoute): string {
+export function serializeRoute(route: KataRoute, routePath = applicationRoutePath()): string {
   if (route.kind === 'route-error') return route.path
   const query = new URLSearchParams()
   if (route.view) query.set('view', route.view)
@@ -88,7 +89,11 @@ export function serializeRoute(route: KataRoute): string {
   }
   if (route.filters.text) query.set('text', route.filters.text)
   const encoded = query.toString()
-  return encoded ? `/kata?${encoded}` : '/kata'
+  return encoded ? `${routePath}?${encoded}` : routePath
+}
+
+function normalizeRoutePath(value: string): string {
+  return value.length > 1 ? value.replace(/\/+$/, '') : value
 }
 
 function parseFilters(query: URLSearchParams): ShareableFilters {

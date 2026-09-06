@@ -111,9 +111,9 @@ func TestReleaseBinaryContainsValidatedWebUI(t *testing.T) {
 	index := releaseGET(t, client, origin+"/")
 	require.Contains(t, index, productionWebMarker)
 	require.NotContains(t, index, "Kata UI assets are not built")
-	assetPath := regexp.MustCompile(`(?:src|href)="(/assets/[^"]+)"`).FindStringSubmatch(index)
+	assetPath := regexp.MustCompile(`(?:src|href)="(\./assets/[^"]+)"`).FindStringSubmatch(index)
 	require.Len(t, assetPath, 2, "production index must reference a built asset")
-	releaseGET(t, client, origin+assetPath[1])
+	releaseGET(t, client, origin+"/"+strings.TrimPrefix(assetPath[1], "./"))
 	require.Contains(t, releaseGET(t, client, origin+"/kata?view=all-open"), productionWebMarker)
 
 	waitForWebRuntime(t, home, origin, stderr)

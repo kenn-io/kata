@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +62,59 @@ func TestServiceMountRunAndClose(t *testing.T) {
 	projects := listProjects(t, reopenedServer.URL)
 	require.Len(t, projects.Projects, 1)
 	assert.Equal(t, "example-project", projects.Projects[0].Name)
+}
+
+func TestServiceHandlerAtMountsAPIAndBrowserApplication(t *testing.T) {
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	handler, err := service.HandlerAt("/tools/tasks")
+	require.NoError(t, err)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/tools/tasks", nil)
+	require.NoError(t, err)
+	request.Header.Set("Accept", "text/html")
+	redirect, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = redirect.Body.Close() }()
+	assert.Equal(t, server.URL+"/tools/tasks/", redirect.Request.URL.String())
+	assert.Equal(t, http.StatusOK, redirect.StatusCode)
+	body, err := io.ReadAll(redirect.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "Kata UI assets are not built")
+
+	health, err := http.Get(server.URL + "/tools/tasks/api/v1/health")
+	require.NoError(t, err)
+	defer func() { _ = health.Body.Close() }()
+	assert.Equal(t, http.StatusOK, health.StatusCode)
+
+	outside, err := http.Get(server.URL + "/api/v1/health")
+	require.NoError(t, err)
+	defer func() { _ = outside.Body.Close() }()
+	assert.Equal(t, http.StatusNotFound, outside.StatusCode)
+}
+
+func TestServiceHandlerAtRejectsInvalidMountPaths(t *testing.T) {
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	for _, mountPath := range []string{"", "/", "relative", "/trailing/", "/not/../clean"} {
+		t.Run(strings.ReplaceAll(mountPath, "/", "_"), func(t *testing.T) {
+			handler, err := service.HandlerAt(mountPath)
+			assert.Nil(t, handler)
+			assert.ErrorContains(t, err, "mount path")
+		})
+	}
 }
 
 func TestNewRejectsMissingDSN(t *testing.T) {
