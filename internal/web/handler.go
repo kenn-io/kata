@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -81,6 +82,14 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/" {
 		w.Header().Set("Cache-Control", "no-store")
 		http.Redirect(w, r, defaultRoute, http.StatusFound)
+		return
+	}
+	if r.URL.Path == defaultRoute+"/" {
+		// Relative assets must resolve from the origin root on standalone pages.
+		location := (&url.URL{Path: "../kata", RawQuery: r.URL.RawQuery}).String()
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Location", location)
+		w.WriteHeader(http.StatusPermanentRedirect)
 		return
 	}
 	if daemonOwnedPath(r.URL.Path) || !safeRequestPath(r.URL.Path) {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,6 +116,23 @@ func TestReleaseBinaryContainsValidatedWebUI(t *testing.T) {
 	require.Len(t, assetPath, 2, "production index must reference a built asset")
 	releaseGET(t, client, origin+"/"+strings.TrimPrefix(assetPath[1], "./"))
 	require.Contains(t, releaseGET(t, client, origin+"/kata?view=all-open"), productionWebMarker)
+
+	request, err := http.NewRequest(http.MethodGet, origin+"/kata/?view=today&label=ready", nil)
+	require.NoError(t, err)
+	request.Header.Set("Accept", "text/html")
+	page, err := client.Do(request) //nolint:gosec // loopback origin selected by this test.
+	require.NoError(t, err)
+	pageBody, err := io.ReadAll(page.Body)
+	require.NoError(t, page.Body.Close())
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, page.StatusCode)
+	require.Equal(t, origin+"/kata?view=today&label=ready", page.Request.URL.String())
+	require.Contains(t, string(pageBody), productionWebMarker)
+	pageAsset := regexp.MustCompile(`(?:src|href)="(\./assets/[^"]+)"`).FindSubmatch(pageBody)
+	require.Len(t, pageAsset, 2)
+	reference, err := url.Parse(string(pageAsset[1]))
+	require.NoError(t, err)
+	releaseGET(t, client, page.Request.URL.ResolveReference(reference).String())
 
 	waitForWebRuntime(t, home, origin, stderr)
 	sessionResponse := releaseJSON(t, client, http.MethodPost, origin+"/api/v1/ui/session/local",

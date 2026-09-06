@@ -148,6 +148,8 @@ sessions, and event streams below the mount. It returns `404` outside that
 path. The host still owns authentication exactly as described below;
 `HandlerAt` changes routing only. Mounts at `/api` or below it are rejected
 because that namespace belongs to the browser application's API routes.
+Standalone `/kata/` redirects to `/kata`, preserving view and filter queries
+so relative assets load from the origin root.
 
 ## Host-owned access
 
