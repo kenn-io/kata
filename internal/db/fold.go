@@ -111,6 +111,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 			ToIssueUID string `json:"to_issue_uid"`
 			Incoming   bool   `json:"incoming"`
 			Author     string `json:"author"`
+			CreatedAt  string `json:"created_at"`
 		} `json:"links"`
 		Comments []struct {
 			CommentUID string `json:"comment_uid"`
@@ -178,7 +179,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		if author == "" {
 			author = e.Actor
 		}
-		p.setLink(from, to, link.Type, true, clockOf(e), author)
+		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt)
 	}
 	for _, comment := range in.Comments {
 		p.setComment(comment.CommentUID, uid, comment.Author, comment.Body, comment.CreatedAt, clockOf(e))
@@ -412,7 +413,7 @@ func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]json.Raw
 			from, to = linkFrom, linkTo
 		}
 	}
-	p.setLink(from, to, typ, present, clockOf(e), e.Actor)
+	p.setLink(from, to, typ, present, clockOf(e), e.Actor, "")
 	p.touchIssue(issueUID(e, payload), issueUpdatedAt(e, payload))
 }
 
@@ -425,22 +426,22 @@ func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]json.
 	p.applyUIDList(base, payload["parent_set_uid"], "parent", true, false, clockOf(e), e.Actor)
 	p.applyUIDList(base, payload["parent_removed_uid"], "parent", false, false, clockOf(e), e.Actor)
 	for _, uid := range stringSlice(payload["blocks_added_uids"]) {
-		p.setLink(base, uid, "blocks", true, clockOf(e), e.Actor)
+		p.setLink(base, uid, "blocks", true, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["blocks_removed_uids"]) {
-		p.setLink(base, uid, "blocks", false, clockOf(e), e.Actor)
+		p.setLink(base, uid, "blocks", false, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["blocked_by_added_uids"]) {
-		p.setLink(uid, base, "blocks", true, clockOf(e), e.Actor)
+		p.setLink(uid, base, "blocks", true, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["blocked_by_removed_uids"]) {
-		p.setLink(uid, base, "blocks", false, clockOf(e), e.Actor)
+		p.setLink(uid, base, "blocks", false, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["related_added_uids"]) {
-		p.setLink(base, uid, "related", true, clockOf(e), e.Actor)
+		p.setLink(base, uid, "related", true, clockOf(e), e.Actor, "")
 	}
 	for _, uid := range stringSlice(payload["related_removed_uids"]) {
-		p.setLink(base, uid, "related", false, clockOf(e), e.Actor)
+		p.setLink(base, uid, "related", false, clockOf(e), e.Actor, "")
 	}
 }
 
@@ -522,17 +523,17 @@ func (p *FoldProjection) applyUIDList(base string, raw json.RawMessage, typ stri
 	if incoming {
 		from, to = to, from
 	}
-	p.setLink(from, to, typ, present, clock, author)
+	p.setLink(from, to, typ, present, clock, author, "")
 }
 
-func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldClock, author string) {
+func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldClock, author, createdAt string) {
 	if typ == "related" && from > to {
 		from, to = to, from
 	}
 	if typ == "parent" && present {
 		p.clearOlderParents(from, to, clock)
 	}
-	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock, Author: author}
+	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock, Author: author, CreatedAt: createdAt}
 }
 
 func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock FoldClock) {

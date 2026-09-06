@@ -2028,6 +2028,62 @@ func checkFederationIngestLifecycle(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkFederationSnapshotLinkDates(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "snapshot-links")
+	require.NoError(t, err)
+	first, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "first", Author: "author",
+	})
+	require.NoError(t, err)
+	second, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "second", Author: "author",
+	})
+	require.NoError(t, err)
+	var originals []db.Link
+	for _, typ := range []string{"blocks", "related", "parent"} {
+		link, err := store.CreateLink(ctx, db.CreateLinkParams{
+			FromIssueID: first.ID, ToIssueID: second.ID, Type: typ, Author: "link-author",
+		})
+		require.NoError(t, err)
+		originals = append(originals, link)
+	}
+	binding, err := store.EnableProjectFederation(ctx, project.ID, "operator")
+	require.NoError(t, err)
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, AfterID: binding.ReplayHorizonEventID, Limit: 100})
+	require.NoError(t, err)
+	var snapshotLinks []struct {
+		Type      string    `json:"type"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	for _, event := range events {
+		if event.Type == "issue.snapshot" && event.IssueUID != nil && *event.IssueUID == first.UID {
+			payload := db.PayloadMap(json.RawMessage(event.Payload))
+			require.NoError(t, json.Unmarshal(payload["links"], &snapshotLinks))
+		}
+	}
+	require.Len(t, snapshotLinks, 3)
+	for _, original := range originals {
+		for _, link := range snapshotLinks {
+			if link.Type == original.Type {
+				assert.True(t, original.CreatedAt.Equal(link.CreatedAt), "snapshot %s date: got %s, want %s", link.Type, link.CreatedAt, original.CreatedAt)
+			}
+		}
+		// Recreate from events, not from an already populated link row.
+		require.NoError(t, store.DeleteLinkByID(ctx, original.ID))
+	}
+	for range 2 {
+		err := store.MaterializeFederatedProject(ctx, project.ID)
+		require.NoError(t, err)
+		for _, original := range originals {
+			link, err := store.LinkByEndpoints(ctx, original.FromIssueID, original.ToIssueID, original.Type)
+			require.NoError(t, err)
+			assert.True(t, original.CreatedAt.Equal(link.CreatedAt), "rebuilt %s date: got %s, want %s", link.Type, link.CreatedAt, original.CreatedAt)
+		}
+	}
+	return nil
+}
+
 func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := context.Background()
@@ -2110,7 +2166,7 @@ func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) erro
 		return err
 	}
 	secondSnapshot := newRemoteEvent(t, project, &secondIssueUID, "issue.snapshot", "adoption-agent",
-		spokeUID, 400, json.RawMessage(`{"uid":"`+secondIssueUID+`","title":"historical second","body":"","author":"another-historical-author","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"historical-reviewer","body":"original comment","created_at":"2026-05-23T12:00:00.000Z"}],"links":[{"type":"related","to_issue_uid":"`+firstIssueUID+`","author":"historical-linker"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
+		spokeUID, 400, json.RawMessage(`{"uid":"`+secondIssueUID+`","title":"historical second","body":"","author":"another-historical-author","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"historical-reviewer","body":"original comment","created_at":"2026-05-23T12:00:00.000Z"}],"links":[{"type":"related","to_issue_uid":"`+firstIssueUID+`","author":"historical-linker","created_at":"2026-04-01T09:10:11.123456789Z"},{"type":"blocks","to_issue_uid":"`+firstIssueUID+`","author":"historical-linker"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
 	terminalParams := db.FederationIngestParams{
 		ProjectID: project.ID, FederationEnrollmentID: created.Enrollment.ID,
 		SpokeInstanceUID: spokeUID, BoundActor: "adoption-agent",
@@ -2139,8 +2195,21 @@ func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) erro
 	if err != nil {
 		return err
 	}
-	require.Len(t, links, 1)
-	assert.Equal(t, "historical-linker", links[0].Author)
+	require.Len(t, links, 2)
+	for _, link := range links {
+		assert.Equal(t, "historical-linker", link.Author)
+		if link.Type == "related" {
+			assert.Equal(t, "2026-04-01T09:10:11.123456789Z", link.CreatedAt.UTC().Format(time.RFC3339Nano))
+		} else {
+			// Old snapshots have no link date. Keep their insertion-time behavior,
+			// and do not replace that date on a subsequent rebuild.
+			assert.False(t, link.CreatedAt.IsZero())
+			require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+			rebuilt, err := store.LinkByID(ctx, link.ID)
+			require.NoError(t, err)
+			assert.True(t, link.CreatedAt.Equal(rebuilt.CreatedAt))
+		}
+	}
 	enrollment, err = federationEnrollmentByID(ctx, store, created.Enrollment.ID)
 	if err != nil {
 		return err

@@ -440,6 +440,14 @@ var storageScenarios = []scenario{
 		run: checkFederationAdoptionIngestLifecycle,
 	},
 	{
+		name: "federation snapshot link dates",
+		methods: []string{
+			"CreateProject", "CreateIssue", "CreateLink", "EnableProjectFederation",
+			"EventsAfter", "DeleteLinkByID", "MaterializeFederatedProject", "LinkByEndpoints",
+		},
+		run: checkFederationSnapshotLinkDates,
+	},
+	{
 		name: "federation project adoption",
 		methods: []string{
 			"AcquireClaim", "AdoptProjectIntoFederation", "CountLiveClaims", "CountPendingClaims",

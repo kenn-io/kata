@@ -16,13 +16,14 @@ import (
 )
 
 type federatedLinkRow struct {
-	id      int64
-	fromID  int64
-	toID    int64
-	fromUID string
-	toUID   string
-	typ     string
-	author  string
+	id        int64
+	fromID    int64
+	toID      int64
+	fromUID   string
+	toUID     string
+	typ       string
+	author    string
+	createdAt string
 }
 
 func (row federatedLinkRow) key() db.FoldLinkKey {
@@ -187,7 +188,7 @@ func reconcileFederatedLinkGroup(
 		}
 		row := federatedLinkRow{
 			fromID: fromID, toID: toID, fromUID: fromUID, toUID: toUID,
-			typ: key.Type, author: state.Author,
+			typ: key.Type, author: state.Author, createdAt: state.CreatedAt,
 		}
 		desired[row.key()] = row
 	}
@@ -205,20 +206,21 @@ func reconcileFederatedLinkGroup(
 	for key, row := range desired {
 		author := nonEmptyFederationAuthor(row.author)
 		if existingRow, ok := existing[key]; ok {
-			if existingRow.fromID == row.fromID && existingRow.toID == row.toID && existingRow.author == author {
+			if existingRow.fromID == row.fromID && existingRow.toID == row.toID && existingRow.author == author && (row.createdAt == "" || existingRow.createdAt == row.createdAt) {
 				continue
 			}
 			_, err := tx.ExecContext(ctx, `UPDATE links SET from_issue_id=$1,to_issue_id=$2,
-from_issue_uid=$3,to_issue_uid=$4,type=$5,author=$6 WHERE id=$7`,
-				row.fromID, row.toID, row.fromUID, row.toUID, row.typ, author, existingRow.id)
+from_issue_uid=$3,to_issue_uid=$4,type=$5,author=$6,created_at=COALESCE(NULLIF($7,''),created_at) WHERE id=$8`,
+				row.fromID, row.toID, row.fromUID, row.toUID, row.typ, author, row.createdAt, existingRow.id)
 			if err != nil {
 				return mapSQLError(err, linkConstraintErrors)
 			}
 			continue
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO links(
-from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author
-) VALUES($1,$2,$3,$4,$5,$6)`, row.fromID, row.toID, row.fromUID, row.toUID, row.typ, author)
+from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at
+) VALUES($1,$2,$3,$4,$5,$6,COALESCE(NULLIF($7,''),to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')))`,
+			row.fromID, row.toID, row.fromUID, row.toUID, row.typ, author, row.createdAt)
 		if err != nil {
 			return mapSQLError(err, linkConstraintErrors)
 		}
@@ -390,7 +392,7 @@ func federatedLinkRows(
 	args := append(fromArgs, toArgs...)
 	//nolint:gosec // IN values use generated placeholders with separately bound integer IDs.
 	rows, err := tx.QueryContext(ctx, `SELECT l.id,l.from_issue_id,l.to_issue_id,
-l.from_issue_uid,l.to_issue_uid,l.type,l.author FROM links l
+l.from_issue_uid,l.to_issue_uid,l.type,l.author,l.created_at FROM links l
 JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id
 WHERE f.project_id IN (`+fromPlaceholders+`) AND t.project_id IN (`+toPlaceholders+`)`, args...)
 	if err != nil {
@@ -401,7 +403,7 @@ WHERE f.project_id IN (`+fromPlaceholders+`) AND t.project_id IN (`+toPlaceholde
 	for rows.Next() {
 		var row federatedLinkRow
 		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID,
-			&row.typ, &row.author); err != nil {
+			&row.typ, &row.author, &row.createdAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		output[row.key()] = row

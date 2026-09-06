@@ -67,6 +67,67 @@ func TestMaterializeFederatedProjectPrunesLinkedIssueMissingFromProjection(t *te
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
+func TestMaterializeFederatedProjectLeavesUnchangedCommentsUnwritten(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := t.Context()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := OpenWithConfig(ctx, dsn, Config{
+		Schema: "comment_rebuild", SchemaMode: SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(ctx, "comment-rebuild")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke,
+		HubURL: "https://hub.example", HubProjectID: 1,
+		HubProjectUID: project.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	issueUID, err := uid.New()
+	require.NoError(t, err)
+	commentUID, err := uid.New()
+	require.NoError(t, err)
+	snapshot := projectionSnapshotEvent(t, project, issueUID, origin, 1,
+		json.RawMessage(`{"uid":"`+issueUID+`","title":"original issue","author":"remote","status":"open","comments":[{"comment_uid":"`+commentUID+`","author":"reviewer","body":"original comment","created_at":"2026-05-20T10:00:00.000Z"}],"created_at":"2026-05-20T09:00:00.000Z"}`))
+	_, err = store.InsertRemoteEvent(ctx, project.ID, snapshot)
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	var before, after string
+	require.NoError(t, store.QueryRowContext(ctx,
+		`SELECT xmin::text FROM comments WHERE uid=$1`, commentUID).Scan(&before))
+	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	require.NoError(t, store.QueryRowContext(ctx,
+		`SELECT xmin::text FROM comments WHERE uid=$1`, commentUID).Scan(&after))
+	assert.Equal(t, before, after, "rebuilding unchanged state must not rewrite the comment row")
+
+	edit := snapshot
+	edit.EventUID, err = uid.New()
+	require.NoError(t, err)
+	edit.Type, edit.HLCCounter = "issue.comment_edited", 2
+	edit.Payload = json.RawMessage(`{"comment_uid":"` + commentUID + `","body":"revised comment"}`)
+	edit.ContentHash, err = db.EventContentHash(db.EventHashInput{
+		UID: edit.EventUID, OriginInstanceUID: edit.OriginInstanceUID,
+		ProjectUID: edit.ProjectUID, ProjectName: edit.ProjectName,
+		IssueUID: edit.IssueUID, Type: edit.Type, Actor: edit.Actor,
+		HLCPhysicalMS: edit.HLCPhysicalMS, HLCCounter: edit.HLCCounter,
+		CreatedAt: "2026-05-23T12:00:00.000Z", Payload: edit.Payload,
+	})
+	require.NoError(t, err)
+	_, err = store.InsertRemoteEvent(ctx, project.ID, edit)
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
+	var body string
+	require.NoError(t, store.QueryRowContext(ctx,
+		`SELECT body FROM comments WHERE uid=$1`, commentUID).Scan(&body))
+	assert.Equal(t, "revised comment", body, "a real remote edit must still update the comment")
+}
+
 func projectionSnapshotEvent(
 	t *testing.T,
 	project db.Project,

@@ -301,10 +301,10 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 }
 
 func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLink, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT l.type,peer.short_id,peer.uid,FALSE,l.author
+	rows, err := tx.QueryContext(ctx, `SELECT l.type,peer.short_id,peer.uid,FALSE,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.to_issue_id WHERE l.from_issue_id=$1
 UNION ALL
-SELECT l.type,peer.short_id,peer.uid,CASE WHEN l.type='related' THEN FALSE ELSE TRUE END,l.author
+SELECT l.type,peer.short_id,peer.uid,CASE WHEN l.type='related' THEN FALSE ELSE TRUE END,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.from_issue_id WHERE l.to_issue_id=$1
 AND peer.project_id<>(SELECT project_id FROM issues WHERE id=$1)
 ORDER BY 1 ASC,3 ASC,4 ASC`, issueID)
@@ -315,7 +315,7 @@ ORDER BY 1 ASC,3 ASC,4 ASC`, issueID)
 	var output []createdLink
 	for rows.Next() {
 		var link createdLink
-		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author); err != nil {
+		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author, &link.CreatedAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		output = append(output, link)
@@ -651,6 +651,13 @@ func reconcileFederatedComments(
 			return fmt.Errorf("federated comment %s references unknown issue %s", commentUID, comment.IssueUID)
 		}
 		if row, ok := existing[commentUID]; ok {
+			// A fold visits all existing comments, even when the incoming batch
+			// changed none of them. Avoid per-comment queries and writes while
+			// the ingest transaction holds the event-ordering fence.
+			if row.issueID == issueID && row.author == nonEmptyFederationAuthor(comment.Author) &&
+				row.body == comment.Body && row.createdAt == nonEmptyFederationTime(comment.CreatedAt) {
+				continue
+			}
 			owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
 			if err != nil {
 				return err
@@ -681,8 +688,11 @@ WHERE id=$5`, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
 }
 
 type federatedCommentRow struct {
-	id   int64
-	body string
+	id        int64
+	issueID   int64
+	author    string
+	body      string
+	createdAt string
 }
 
 func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
@@ -707,7 +717,7 @@ func federatedCommentRowsByUID(
 	tx *sql.Tx,
 	projectID int64,
 ) (map[string]federatedCommentRow, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id,c.body FROM comments c
+	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id,c.issue_id,c.author,c.body,c.created_at FROM comments c
 JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -717,7 +727,7 @@ JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
 	for rows.Next() {
 		var commentUID string
 		var row federatedCommentRow
-		if err := rows.Scan(&commentUID, &row.id, &row.body); err != nil {
+		if err := rows.Scan(&commentUID, &row.id, &row.issueID, &row.author, &row.body, &row.createdAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		output[commentUID] = row
