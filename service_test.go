@@ -124,6 +124,23 @@ func TestServiceHandlerAtRejectsInvalidMountPaths(t *testing.T) {
 	}
 }
 
+func TestServiceHandlerAtRejectsSiblingPathBeforeCallingService(t *testing.T) {
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+	})
+	require.NoError(t, err)
+	handler, err := service.HandlerAt("/tools/tasks")
+	require.NoError(t, err)
+	require.NoError(t, service.Close())
+
+	request := httptest.NewRequest(http.MethodGet, "/tools/tasks-other", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusNotFound, response.Code)
+}
+
 func TestNewRejectsMissingDSN(t *testing.T) {
 	service, err := kata.New(context.Background(), kata.Config{})
 

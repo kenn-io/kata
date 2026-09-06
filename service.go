@@ -353,6 +353,10 @@ func (s *Service) HandlerAt(mountPath string) (http.Handler, error) {
 			w.WriteHeader(http.StatusPermanentRedirect)
 			return
 		}
+		if !strings.HasPrefix(r.URL.Path, mountPath+"/") {
+			http.NotFound(w, r)
+			return
+		}
 		mounted.ServeHTTP(w, r)
 	}), nil
 }
