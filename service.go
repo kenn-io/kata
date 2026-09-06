@@ -342,7 +342,11 @@ func (s *Service) HandlerAt(mountPath string) (http.Handler, error) {
 	}))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == mountPath {
-			http.Redirect(w, r, path.Base(mountPath)+"/", http.StatusPermanentRedirect)
+			target := path.Base(mountPath) + "/"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusPermanentRedirect)
 			return
 		}
 		mounted.ServeHTTP(w, r)

@@ -77,13 +77,18 @@ func TestServiceHandlerAtMountsAPIAndBrowserApplication(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	request, err := http.NewRequest(http.MethodGet, server.URL+"/tools/tasks", nil)
+	request, err := http.NewRequest(
+		http.MethodGet, server.URL+"/tools/tasks?view=today&label=ready", nil,
+	)
 	require.NoError(t, err)
 	request.Header.Set("Accept", "text/html")
 	redirect, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	defer func() { _ = redirect.Body.Close() }()
-	assert.Equal(t, server.URL+"/tools/tasks/", redirect.Request.URL.String())
+	assert.Equal(t,
+		server.URL+"/tools/tasks/?view=today&label=ready",
+		redirect.Request.URL.String(),
+	)
 	assert.Equal(t, http.StatusOK, redirect.StatusCode)
 	body, err := io.ReadAll(redirect.Body)
 	require.NoError(t, err)
