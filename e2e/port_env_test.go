@@ -92,6 +92,9 @@ func TestPortEnvBind_ServesAndShutsDownCleanly(t *testing.T) {
 	// Graceful SIGTERM: the daemon's signal.NotifyContext wiring cancels
 	// the root context, which triggers httpSrv.Shutdown. A clean exit is
 	// code 0; we assert no error from cmd.Wait().
+	// Allow the documented 25-second drain budget plus five seconds for
+	// final cleanup and process exit, as daemon restart does.
+	const shutdownWait = 30 * time.Second
 	require.NoError(t, cmd.Process.Signal(syscall.SIGTERM))
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -99,10 +102,10 @@ func TestPortEnvBind_ServesAndShutsDownCleanly(t *testing.T) {
 	case waitErr := <-done:
 		assert.NoErrorf(t, waitErr,
 			"daemon should exit cleanly on SIGTERM (stderr: %s)", stderr.String())
-	case <-time.After(5 * time.Second):
+	case <-time.After(shutdownWait):
 		_ = cmd.Process.Kill()
 		<-done
-		t.Fatalf("daemon did not exit within 5s of SIGTERM (stderr: %s)", stderr.String())
+		t.Fatalf("daemon did not exit within %s of SIGTERM (stderr: %s)", shutdownWait, stderr.String())
 	}
 }
 

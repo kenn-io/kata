@@ -1,3 +1,5 @@
+import { applicationRequest, applicationRoutePath } from '../applicationBase'
+
 export const sessionStorageKey = 'kata.web.session.v1'
 export const authenticationModeStorageKey = 'kata.web.authentication-mode.v1'
 const directTargetStorageKey = 'kata.web.direct-target.v1'
@@ -106,12 +108,12 @@ export async function openLocalSession(
   fetcher: typeof fetch = fetch,
   storage: Storage = sessionStorage,
 ): Promise<AuthenticatedSession | undefined> {
-  const response = await fetcher('/api/v1/ui/session/local', {
+  const response = await fetcher(applicationRequest('/api/v1/ui/session/local'), {
     method: 'POST',
     credentials: 'same-origin',
     redirect: 'error',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ return_path: normalizeReturnPath(returnPath, '/kata') }),
+    body: JSON.stringify({ return_path: normalizeReturnPath(returnPath, applicationRoutePath()) }),
   })
   if ([401, 403, 404].includes(response.status)) return undefined
   return acceptSessionResponse(response, storage, 'Local authorization failed')
@@ -122,12 +124,12 @@ export async function openTrustedProxySession(
   fetcher: typeof fetch = fetch,
   storage: Storage = sessionStorage,
 ): Promise<AuthenticatedSession> {
-  const response = await fetcher('/api/v1/ui/session/proxy', {
+  const response = await fetcher(applicationRequest('/api/v1/ui/session/proxy'), {
     method: 'POST',
     credentials: 'same-origin',
     redirect: 'error',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ return_path: normalizeReturnPath(returnPath, '/kata') }),
+    body: JSON.stringify({ return_path: normalizeReturnPath(returnPath, applicationRoutePath()) }),
   })
   return acceptSessionResponse(response, storage, 'Trusted proxy authorization failed')
 }
@@ -138,12 +140,15 @@ export async function exchangeLoginToken(
   fetcher: typeof fetch = fetch,
   storage: Storage = sessionStorage,
 ): Promise<AuthenticatedSession> {
-  const response = await fetcher('/api/v1/ui/session/login', {
+  const response = await fetcher(applicationRequest('/api/v1/ui/session/login'), {
     method: 'POST',
     credentials: 'same-origin',
     redirect: 'error',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, return_path: normalizeReturnPath(returnPath, '/kata') }),
+    body: JSON.stringify({
+      token,
+      return_path: normalizeReturnPath(returnPath, applicationRoutePath()),
+    }),
   })
   return acceptSessionResponse(response, storage, 'Login failed')
 }
@@ -205,7 +210,7 @@ async function acceptSessionResponse(
       updates: body.updates,
       actorPolicy: body.actor_policy,
     },
-    returnPath: normalizeReturnPath(body.return_path, '/kata'),
+    returnPath: normalizeReturnPath(body.return_path, applicationRoutePath()),
   }
 }
 

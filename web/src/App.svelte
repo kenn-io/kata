@@ -81,10 +81,13 @@
     type UISnapshotIntent,
   } from './lib/state/snapshot'
   import { loadPreferences, savePreferences, type Preferences } from './lib/state/preferences'
+  import { applicationRoutePath, currentApplicationBaseURL } from './lib/applicationBase'
 
   type ShellMode = 'loading' | 'launch' | 'login' | 'route-error' | 'ready'
   type AppRoute = Exclude<KataRoute, { kind: 'route-error' }>
   const requestActor = 'kata-web'
+  const routePath = applicationRoutePath()
+  const mountedApplication = currentApplicationBaseURL().pathname !== '/'
 
   initTheme({ storageKey: 'kata.kit-ui.theme.v1' })
 
@@ -93,7 +96,7 @@
   }
   const launch = consumeLaunchFragment(window.location, history.replaceState.bind(history))
   const launchDaemonID = launch.daemonID
-  const directDaemonTarget = launch.directTarget === true
+  const directDaemonTarget = launch.directTarget === true || mountedApplication
   const selectedAuthentication = selectAuthenticationMode(launch)
   const initialRoute = parseRoute(new URL(window.location.href))
   let route = $state(initialRoute)
@@ -249,7 +252,9 @@
   async function navigateAfterAuthentication(target: string): Promise<boolean> {
     const parsed = new URL(target, window.location.origin)
     const canonicalTarget =
-      parsed.pathname === '/' ? `/kata${parsed.search}` : `${parsed.pathname}${parsed.search}`
+      parsed.pathname === '/'
+        ? `${routePath}${parsed.search}`
+        : `${parsed.pathname}${parsed.search}`
     history.replaceState(null, '', canonicalTarget)
     route = parseRoute(new URL(window.location.href))
     mode = route.kind === 'route-error' ? 'route-error' : authority?.snapshot ? 'ready' : 'loading'
@@ -793,7 +798,7 @@
         return false
       }
       daemonError = undefined
-      if (activeDaemonID && window.location.pathname === '/kata' && !window.location.search) {
+      if (activeDaemonID && window.location.pathname === routePath && !window.location.search) {
         const persisted = loadDaemonRoute(activeDaemonID)
         if (persisted) {
           history.replaceState(null, '', persisted)
@@ -828,7 +833,7 @@
     const sourceDaemon = activeDaemonID
     const sourceRoute = route.kind === 'route-error' ? acceptedRoute : route
     if (sourceDaemon && sourceRoute) saveDaemonRoute(sourceDaemon, serializeRoute(sourceRoute))
-    const restoredPath = loadDaemonRoute(id) ?? '/kata?view=all-open'
+    const restoredPath = loadDaemonRoute(id) ?? `${routePath}?view=all-open`
     const restored = parseRoute(new URL(restoredPath, window.location.origin))
     if (restored.kind === 'route-error') return
 

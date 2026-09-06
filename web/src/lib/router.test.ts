@@ -71,4 +71,15 @@ describe('canonical Kata routes', () => {
       `/kata?scope=${issueUID}&label=backend&label=urgent&owner=user-a&status=open`,
     )
   })
+
+  it('parses and serializes a browser application mounted below a path', () => {
+    const routePath = '/tools/tasks/'
+    const route = parseRoute(
+      new URL(`https://daemon.example${routePath}?view=today&label=ready`),
+      routePath,
+    )
+
+    expect(route).toMatchObject({ kind: 'kata', view: 'today' })
+    expect(serializeRoute(route, routePath)).toBe('/tools/tasks/?view=today&label=ready')
+  })
 })

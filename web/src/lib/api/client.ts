@@ -1,5 +1,6 @@
 import type { SessionCredentials } from '../auth/session'
 import { loadSessionCredentials } from '../auth/session'
+import { applicationRequest, applicationURL } from '../applicationBase'
 
 type CredentialReader = () => SessionCredentials | undefined
 type AuthenticationRequiredHandler = () => boolean
@@ -29,7 +30,7 @@ export function createCredentialedFetch(
         headers.set('X-Kata-CSRF', credentials.csrf)
       }
     }
-    const response = await upstream(input, {
+    const response = await upstream(applicationRequest(input), {
       ...init,
       credentials: 'same-origin',
       redirect: 'error',
@@ -53,7 +54,7 @@ export async function orvalFetch<T>(
   options: RequestInit,
   fetcher: typeof fetch = generatedFetch,
 ): Promise<T> {
-  const response = await fetcher(new URL(url, window.location.origin), options)
+  const response = await fetcher(applicationURL(url), options)
   const text = await response.text()
   const data = response.headers.get('Content-Type')?.includes('json') ? JSON.parse(text) : text
   return {

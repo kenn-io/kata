@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -311,6 +313,53 @@ func resolveGitHubSyncConfig(cfg GitHubSyncConfig) (config.GitHubSyncConfig, err
 
 // Handler returns the HTTP application for mounting in a caller-owned server.
 func (s *Service) Handler() http.Handler { return http.HandlerFunc(s.serveHTTP) }
+
+// HandlerAt mounts the complete Kata HTTP application below one clean,
+// absolute path. The returned handler owns only that path. Requests for the
+// path without its trailing slash are redirected so relative browser assets
+// and API requests stay beneath the mount.
+func (s *Service) HandlerAt(mountPath string) (http.Handler, error) {
+	if mountPath == "" || mountPath == "/" || !strings.HasPrefix(mountPath, "/") ||
+		strings.HasSuffix(mountPath, "/") || path.Clean(mountPath) != mountPath ||
+		strings.Contains(mountPath, `\`) {
+		return nil, errors.New("kata: mount path must be a clean absolute path without a trailing slash")
+	}
+	if mountPath == "/api" || strings.HasPrefix(mountPath, "/api/") {
+		return nil, errors.New("kata: mount path must not overlap the API namespace")
+	}
+	for _, r := range mountPath {
+		if r < 0x20 || r == 0x7f {
+			return nil, errors.New("kata: mount path must not contain control characters")
+		}
+	}
+
+	application := s.Handler()
+	mounted := http.StripPrefix(mountPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			request := r.Clone(r.Context())
+			request.URL.Path = "/kata"
+			request.URL.RawPath = ""
+			application.ServeHTTP(w, request)
+			return
+		}
+		application.ServeHTTP(w, r)
+	}))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == mountPath {
+			location := (&url.URL{
+				Path: path.Base(mountPath) + "/", RawQuery: r.URL.RawQuery,
+			}).String()
+			w.Header().Set("Location", location)
+			w.WriteHeader(http.StatusPermanentRedirect)
+			return
+		}
+		if !strings.HasPrefix(r.URL.Path, mountPath+"/") {
+			http.NotFound(w, r)
+			return
+		}
+		mounted.ServeHTTP(w, r)
+	}), nil
+}
 
 func (s *Service) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
