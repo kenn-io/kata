@@ -763,6 +763,7 @@ type createdLinkOut struct {
 	ToIssueUID string `json:"to_issue_uid,omitempty"`
 	Incoming   bool   `json:"incoming,omitempty"`
 	Author     string `json:"author,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"`
 }
 
 type issueSnapshotComment struct {

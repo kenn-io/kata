@@ -301,10 +301,10 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 }
 
 func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLink, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT l.type,peer.short_id,peer.uid,FALSE,l.author
+	rows, err := tx.QueryContext(ctx, `SELECT l.type,peer.short_id,peer.uid,FALSE,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.to_issue_id WHERE l.from_issue_id=$1
 UNION ALL
-SELECT l.type,peer.short_id,peer.uid,CASE WHEN l.type='related' THEN FALSE ELSE TRUE END,l.author
+SELECT l.type,peer.short_id,peer.uid,CASE WHEN l.type='related' THEN FALSE ELSE TRUE END,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.from_issue_id WHERE l.to_issue_id=$1
 AND peer.project_id<>(SELECT project_id FROM issues WHERE id=$1)
 ORDER BY 1 ASC,3 ASC,4 ASC`, issueID)
@@ -315,7 +315,7 @@ ORDER BY 1 ASC,3 ASC,4 ASC`, issueID)
 	var output []createdLink
 	for rows.Next() {
 		var link createdLink
-		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author); err != nil {
+		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author, &link.CreatedAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		output = append(output, link)

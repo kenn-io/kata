@@ -83,6 +83,9 @@ type FoldElementState struct {
 	Present bool
 	Clock   FoldClock
 	Author  string
+	// CreatedAt is the original link date when supplied by a snapshot.
+	// Empty means the event did not record it; labels do not use this field.
+	CreatedAt string
 }
 
 // FoldLinkEdge pairs one link key with its tombstone state. It is the element

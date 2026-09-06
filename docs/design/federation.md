@@ -616,6 +616,14 @@ history is not replay-complete, enabling federation emits a baseline of
 single-writer view; replicas fold forward from that horizon and keep older events
 as audit-only.
 
+New baseline snapshots include each relationship's stored `created_at` date.
+Both storage backends preserve that date when rebuilding links, including links
+whose other endpoint arrives in a later batch. Older persisted snapshots omit
+the date and remain readable: a newly materialized link gets its insertion time,
+and later rebuilds retain it. Those events cannot recover the original date.
+This does not rewrite old events or attempt historical repair; generating a new
+baseline on the original hub carries the dates that hub still stores.
+
 ### Metadata Merge Semantics
 
 Issue and project metadata is a per-key map, and unreserved keys may hold

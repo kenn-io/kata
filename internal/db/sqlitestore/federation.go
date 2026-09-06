@@ -1448,14 +1448,14 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 
 func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLinkOut, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT l.type, peer.short_id, peer.uid, 0 AS incoming, l.author
+		SELECT l.type, peer.short_id, peer.uid, 0 AS incoming, l.author, l.created_at
 		  FROM links l
 		  JOIN issues peer ON peer.id = l.to_issue_id
 		 WHERE l.from_issue_id = ?
 		UNION ALL
 		SELECT l.type, peer.short_id, peer.uid,
 		       CASE WHEN l.type = 'related' THEN 0 ELSE 1 END AS incoming,
-		       l.author
+		       l.author, l.created_at
 		  FROM links l
 		  JOIN issues peer ON peer.id = l.from_issue_id
 		 WHERE l.to_issue_id = ?
@@ -1468,9 +1468,11 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 	var out []createdLinkOut
 	for rows.Next() {
 		var link createdLinkOut
-		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author); err != nil {
+		var createdAt time.Time
+		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan federation snapshot link: %w", err)
 		}
+		link.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		out = append(out, link)
 	}
 	return out, rows.Err()
@@ -1968,13 +1970,14 @@ func federatedLabelKeys(ctx context.Context, tx *sql.Tx, projectID int64) (map[f
 }
 
 type federatedLinkRow struct {
-	id      int64
-	fromID  int64
-	toID    int64
-	fromUID string
-	toUID   string
-	typ     string
-	author  string
+	id        int64
+	fromID    int64
+	toID      int64
+	fromUID   string
+	toUID     string
+	typ       string
+	author    string
+	createdAt string
 }
 
 func (r federatedLinkRow) key() db.FoldLinkKey {
@@ -2032,12 +2035,13 @@ func reconcileFederatedLinkGroup(
 			fromUID, toUID = toUID, fromUID
 		}
 		row := federatedLinkRow{
-			fromID:  fromID,
-			toID:    toID,
-			fromUID: fromUID,
-			toUID:   toUID,
-			typ:     key.Type,
-			author:  state.Author,
+			fromID:    fromID,
+			toID:      toID,
+			fromUID:   fromUID,
+			toUID:     toUID,
+			typ:       key.Type,
+			author:    state.Author,
+			createdAt: state.CreatedAt,
 		}
 		desired[row.key()] = row
 	}
@@ -2054,23 +2058,24 @@ func reconcileFederatedLinkGroup(
 	}
 	for key, row := range desired {
 		if existingRow, ok := existing[key]; ok {
-			if existingRow.fromID == row.fromID && existingRow.toID == row.toID && existingRow.author == nonEmptyAuthor(row.author) {
+			if existingRow.fromID == row.fromID && existingRow.toID == row.toID && existingRow.author == nonEmptyAuthor(row.author) && (row.createdAt == "" || existingRow.createdAt == row.createdAt) {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE links
 				   SET from_issue_id = ?, to_issue_id = ?,
-				       from_issue_uid = ?, to_issue_uid = ?, type = ?, author = ?
+				       from_issue_uid = ?, to_issue_uid = ?, type = ?, author = ?,
+				       created_at = COALESCE(NULLIF(?, ''), created_at)
 				 WHERE id = ?`,
-				row.fromID, row.toID, row.fromUID, row.toUID, row.typ, nonEmptyAuthor(row.author), existingRow.id); err != nil {
+				row.fromID, row.toID, row.fromUID, row.toUID, row.typ, nonEmptyAuthor(row.author), row.createdAt, existingRow.id); err != nil {
 				return fmt.Errorf("update federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
 			}
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-			VALUES(?, ?, ?, ?, ?, ?)`,
-			row.fromID, row.toID, row.fromUID, row.toUID, row.typ, nonEmptyAuthor(row.author)); err != nil {
+			INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author, created_at)
+			VALUES(?, ?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), strftime('%Y-%m-%dT%H:%M:%fZ','now')))`,
+			row.fromID, row.toID, row.fromUID, row.toUID, row.typ, nonEmptyAuthor(row.author), row.createdAt); err != nil {
 			return fmt.Errorf("insert federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
 		}
 	}
@@ -2405,7 +2410,7 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map
 	queryArgs = append(queryArgs, args...)
 	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type, l.author
+		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type, l.author, CAST(l.created_at AS TEXT)
 		  FROM links l
 		  JOIN issues f ON f.id = l.from_issue_id
 		  JOIN issues t ON t.id = l.to_issue_id
@@ -2418,7 +2423,7 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map
 	out := map[db.FoldLinkKey]federatedLinkRow{}
 	for rows.Next() {
 		var row federatedLinkRow
-		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID, &row.typ, &row.author); err != nil {
+		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID, &row.typ, &row.author, &row.createdAt); err != nil {
 			return nil, fmt.Errorf("scan federated link: %w", err)
 		}
 		out[row.key()] = row
