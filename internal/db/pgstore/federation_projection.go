@@ -651,6 +651,13 @@ func reconcileFederatedComments(
 			return fmt.Errorf("federated comment %s references unknown issue %s", commentUID, comment.IssueUID)
 		}
 		if row, ok := existing[commentUID]; ok {
+			// A fold visits all existing comments, even when the incoming batch
+			// changed none of them. Avoid per-comment queries and writes while
+			// the ingest transaction holds the event-ordering fence.
+			if row.issueID == issueID && row.author == nonEmptyFederationAuthor(comment.Author) &&
+				row.body == comment.Body && row.createdAt == nonEmptyFederationTime(comment.CreatedAt) {
+				continue
+			}
 			owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
 			if err != nil {
 				return err
@@ -681,8 +688,11 @@ WHERE id=$5`, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
 }
 
 type federatedCommentRow struct {
-	id   int64
-	body string
+	id        int64
+	issueID   int64
+	author    string
+	body      string
+	createdAt string
 }
 
 func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
@@ -707,7 +717,7 @@ func federatedCommentRowsByUID(
 	tx *sql.Tx,
 	projectID int64,
 ) (map[string]federatedCommentRow, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id,c.body FROM comments c
+	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id,c.issue_id,c.author,c.body,c.created_at FROM comments c
 JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -717,7 +727,7 @@ JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
 	for rows.Next() {
 		var commentUID string
 		var row federatedCommentRow
-		if err := rows.Scan(&commentUID, &row.id, &row.body); err != nil {
+		if err := rows.Scan(&commentUID, &row.id, &row.issueID, &row.author, &row.body, &row.createdAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
 		output[commentUID] = row
