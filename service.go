@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -323,6 +324,9 @@ func (s *Service) HandlerAt(mountPath string) (http.Handler, error) {
 		strings.Contains(mountPath, `\`) {
 		return nil, errors.New("kata: mount path must be a clean absolute path without a trailing slash")
 	}
+	if mountPath == "/api" || strings.HasPrefix(mountPath, "/api/") {
+		return nil, errors.New("kata: mount path must not overlap the API namespace")
+	}
 	for _, r := range mountPath {
 		if r < 0x20 || r == 0x7f {
 			return nil, errors.New("kata: mount path must not contain control characters")
@@ -342,11 +346,11 @@ func (s *Service) HandlerAt(mountPath string) (http.Handler, error) {
 	}))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == mountPath {
-			target := path.Base(mountPath) + "/"
-			if r.URL.RawQuery != "" {
-				target += "?" + r.URL.RawQuery
-			}
-			http.Redirect(w, r, target, http.StatusPermanentRedirect)
+			location := (&url.URL{
+				Path: path.Base(mountPath) + "/", RawQuery: r.URL.RawQuery,
+			}).String()
+			w.Header().Set("Location", location)
+			w.WriteHeader(http.StatusPermanentRedirect)
 			return
 		}
 		mounted.ServeHTTP(w, r)

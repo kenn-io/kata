@@ -113,7 +113,9 @@ func TestServiceHandlerAtRejectsInvalidMountPaths(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 
-	for _, mountPath := range []string{"", "/", "relative", "/trailing/", "/not/../clean"} {
+	for _, mountPath := range []string{
+		"", "/", "relative", "/trailing/", "/not/../clean", "/api", "/api/v1",
+	} {
 		t.Run(strings.ReplaceAll(mountPath, "/", "_"), func(t *testing.T) {
 			handler, err := service.HandlerAt(mountPath)
 			assert.Nil(t, handler)

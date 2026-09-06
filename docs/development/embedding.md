@@ -146,7 +146,8 @@ To serve the complete API and browser application below a path, use
 its trailing-slash form and keeps browser assets, deep links, API requests,
 sessions, and event streams below the mount. It returns `404` outside that
 path. The host still owns authentication exactly as described below;
-`HandlerAt` changes routing only.
+`HandlerAt` changes routing only. Mounts at `/api` or below it are rejected
+because that namespace belongs to the browser application's API routes.
 
 ## Host-owned access
 
