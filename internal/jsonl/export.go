@@ -1576,14 +1576,16 @@ func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		CreatedAt         string          `json:"created_at"`
 	}
 	policy := newEventOrphanPolicy(opts)
+	// Moving an issue changes its project, but its earlier events retain
+	// their original project. Resolve the subject by identity alone.
 	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, %s, events.issue_id, events.issue_uid,
 	                 `+policy.relatedIDExpr()+`, `+policy.relatedUIDExpr()+`,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
 	                 CAST(events.created_at AS TEXT)
 	          FROM events%s
 	          JOIN projects export_project ON export_project.id = events.project_id
-	          LEFT JOIN issues subject_issue ON subject_issue.project_id = events.project_id
-	               AND (subject_issue.id = events.issue_id OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid))
+	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
+	               OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
 	          LEFT JOIN issues peer ON peer.id = events.related_issue_id`, projectNameExpr, joinProjects)
 	clauses, args := policy.whereClauses(opts)
 	clauses = append([]string{policy.subjectLiveClause(true)}, clauses...)
@@ -2196,7 +2198,7 @@ func (p eventOrphanPolicy) relatedUIDExpr() string {
 
 // subjectLiveClause keeps an event whose subject issue is absent from the
 // export out of the output. The two shapes are deliberately different, not an
-// accident of copying: uidAware is the current projection's project-scoped
+// accident of copying: uidAware is the current projection's identity-based
 // join, which resolves the subject by id OR uid and is soft-delete sensitive
 // on live-only export; the legacy shape matches on issue_id alone and relies
 // on the WHERE half for the soft-delete dimension.

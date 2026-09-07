@@ -17,6 +17,12 @@ successful while missing recent data.
 The `kata.db.bak.*` files created by schema cutover are temporary rollback
 files, not scheduled backups.
 
+SQLite schema cutover preserves a moved issue's audit events in their original
+projects. Before replacing the database, it checks the imported event count
+against the source, allowing only orphan-event drops identified by preflight.
+An unexplained difference stops startup with `cutover event count mismatch`
+and leaves the source database unchanged. Preserve that database for diagnosis.
+
 ## Full backup
 
 For an offline backup:

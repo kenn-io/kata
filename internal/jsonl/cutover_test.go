@@ -29,6 +29,64 @@ func TestAutoCutoverNoopsAtCurrentSchema(t *testing.T) {
 	assertNoCutoverTemps(t, path)
 }
 
+func TestAutoCutoverPreservesMovedIssueHistory(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	source := openCutoverTargetDB(t, ctx, path)
+	from, err := source.CreateProject(ctx, "source-project")
+	require.NoError(t, err)
+	to, err := source.CreateProject(ctx, "destination-project")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: from.ID, Title: "Moved issue", Author: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = source.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{
+		EventType: "issue.labeled", Label: "bug", Actor: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: "Before the move",
+	})
+	require.NoError(t, err)
+	issue, err = source.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = source.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: from.ID, ToProjectID: to.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: "After the move",
+	})
+	require.NoError(t, err)
+
+	var before []db.EventExport
+	for event, err := range source.ExportEvents(ctx, db.ExportFilter{IncludeDeleted: true}) {
+		require.NoError(t, err)
+		before = append(before, event)
+	}
+	_, err = source.ExecContext(ctx,
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	target, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = target.Close() })
+	var after []db.EventExport
+	for event, err := range target.ExportEvents(ctx, db.ExportFilter{IncludeDeleted: true}) {
+		require.NoError(t, err)
+		after = append(after, event)
+	}
+	assert.Equal(t, before, after, "cutover must preserve event identity, ownership, payload, and timestamps")
+	got, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	assert.Equal(t, to.ID, got.ProjectID)
+}
+
 func TestAutoCutoverRefusesExistingTempFiles(t *testing.T) {
 	ctx, path := setupClosedTestDB(t)
 	require.NoError(t, os.WriteFile(path+".import.tmp.jsonl", []byte("partial"), 0o600))
@@ -37,6 +95,41 @@ func TestAutoCutoverRefusesExistingTempFiles(t *testing.T) {
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, jsonl.ErrCutoverInProgress))
+}
+
+func TestAutoCutoverRefusesUnaccountedEventLoss(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	source := openCutoverTargetDB(t, ctx, path)
+	project, err := source.CreateProject(ctx, "source-project")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "History without a local subject", Author: "tester",
+	})
+	require.NoError(t, err)
+	// UID-only history can exist without a local issue, as in a scoped
+	// moved-issue export. The legacy exporter omits it without an FK violation.
+	_, err = source.ExecContext(ctx, `UPDATE events SET issue_id = NULL WHERE issue_id = ?`, issue.ID)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, issue.ID)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx,
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	before, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+
+	err = jsonl.AutoCutover(ctx, path)
+
+	require.ErrorContains(t, err, "event count mismatch")
+	after, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "a count mismatch must leave the source database untouched")
+	backups, err := filepath.Glob(path + ".bak.*")
+	require.NoError(t, err)
+	assert.Empty(t, backups, "a count mismatch must stop before the database swap")
+	assertNoCutoverTemps(t, path)
 }
 
 func TestAutoCutoverFailureLeavesSourceAndRemovesTemps(t *testing.T) {

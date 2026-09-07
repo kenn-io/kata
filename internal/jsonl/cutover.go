@@ -49,10 +49,14 @@ func AutoCutover(ctx context.Context, path string) error {
 			removeSQLiteFileSet(tmpDB)
 		}
 	}()
-	if err := exportCutoverSource(ctx, path, tmpJSONL); err != nil {
+	sourceEvents, err := exportCutoverSource(ctx, path, tmpJSONL)
+	if err != nil {
 		return err
 	}
-	if err := importCutoverTarget(ctx, tmpJSONL, tmpDB); err != nil {
+	// Preflight identifies the only event drops allowed during cutover.
+	// Check against the source DB, not the potentially incomplete export.
+	expectedEvents := sourceEvents - int64(report.DropCount("events"))
+	if err := importCutoverTarget(ctx, tmpJSONL, tmpDB, expectedEvents); err != nil {
 		return err
 	}
 
@@ -83,31 +87,35 @@ func rejectCutoverTemps(paths ...string) error {
 	return nil
 }
 
-func exportCutoverSource(ctx context.Context, sourcePath, tmpJSONL string) error {
+func exportCutoverSource(ctx context.Context, sourcePath, tmpJSONL string) (int64, error) {
 	source, err := sqlitestore.Open(ctx, sourcePath, db.ReadOnly())
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = source.Close() }()
+	var sourceEvents int64
+	if err := source.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&sourceEvents); err != nil {
+		return 0, fmt.Errorf("count source events: %w", err)
+	}
 	f, err := os.OpenFile(tmpJSONL, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // tmpJSONL is daemon-controlled state-dir filename
 	if err != nil {
-		return fmt.Errorf("create cutover jsonl: %w", err)
+		return 0, fmt.Errorf("create cutover jsonl: %w", err)
 	}
 	if err := exportForCutover(ctx, source, f, ExportOptions{IncludeDeleted: true}); err != nil {
 		_ = f.Close()
-		return err
+		return 0, err
 	}
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("sync cutover jsonl: %w", err)
+		return 0, fmt.Errorf("sync cutover jsonl: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("close cutover jsonl: %w", err)
+		return 0, fmt.Errorf("close cutover jsonl: %w", err)
 	}
-	return nil
+	return sourceEvents, nil
 }
 
-func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string) error {
+func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string, expectedEvents int64) error {
 	// sqlitestore.Open bootstraps the canonical schema in one transaction
 	// when the file is fresh, so a freshly created tmpDB is ready for the
 	// import to land directly.
@@ -126,6 +134,13 @@ func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string) error {
 		PreserveExternalRootBindingsEnabled: true,
 	}); err != nil {
 		return err
+	}
+	var importedEvents int64
+	if err := target.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&importedEvents); err != nil {
+		return fmt.Errorf("count imported events: %w", err)
+	}
+	if importedEvents != expectedEvents {
+		return fmt.Errorf("cutover event count mismatch: expected %d after preflight orphan drops, imported %d; source database unchanged", expectedEvents, importedEvents)
 	}
 	return nil
 }
