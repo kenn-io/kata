@@ -180,7 +180,12 @@ type ListIssuesPath struct {
 }
 
 type CreateIssuePath struct {
-	ProjectID int64 `json:"project_id"`
+	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
+	ProjectID string `json:"project_id" validate:"required"`
+}
+
+func (c CreateIssuePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
 type ShowIssuePath struct {
@@ -193,7 +198,8 @@ func (s ShowIssuePath) Validate() error {
 }
 
 type EditIssuePath struct {
-	ProjectID int64  `json:"project_id"`
+	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
+	ProjectID string `json:"project_id" validate:"required"`
 	Ref       string `json:"ref" validate:"required"`
 }
 
@@ -364,7 +370,8 @@ func (r ResumeExternalRootBridgePath) Validate() error {
 }
 
 type CreateCommentPath struct {
-	ProjectID int64  `json:"project_id"`
+	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
+	ProjectID string `json:"project_id" validate:"required"`
 	Ref       string `json:"ref" validate:"required"`
 }
 
@@ -392,7 +399,8 @@ func (r ReachableIssueGraphPath) Validate() error {
 }
 
 type AddLabelPath struct {
-	ProjectID int64  `json:"project_id"`
+	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
+	ProjectID string `json:"project_id" validate:"required"`
 	Ref       string `json:"ref" validate:"required"`
 }
 

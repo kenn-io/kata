@@ -36,25 +36,17 @@ func labelAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, baseURL, pid, issue, err := resolveIssueRefForCommand(cmd, args[0])
+			project, issue, err := prepareIssueMutation(cmd, args[0], false)
 			if err != nil {
 				return err
 			}
-			actor, _ := resolveActor(ctx, flags.As, nil)
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
+			actor, _ := resolveActor(project.api.ctx, flags.As, nil)
 			payload := map[string]string{"actor": actor, "label": label}
-			postURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/labels", baseURL, pid, url.PathEscape(issue.RefForAPI))
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost, postURL, payload)
+			bs, err := project.mutate(http.MethodPost, "/issues/"+url.PathEscape(issue.RefForAPI)+"/labels", payload, nil)
 			if err != nil {
 				return err
 			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
+			if err := project.comment(bs, issue.RefForAPI, actor, comment); err != nil {
 				return err
 			}
 			return printLabelMutation(cmd, bs)

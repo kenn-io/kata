@@ -321,7 +321,7 @@
         : { title, key: globalThis.crypto.randomUUID() }
     pendingCreate = create
     const accepted = await runMutation({ draft: title, createKey: create.key }, (context) =>
-      createIssueRequest({ projectId: inbox.id }, context.body({ title }, requestActor), {
+      createIssueRequest({ projectId: String(inbox.id) }, context.body({ title }, requestActor), {
         headers: { 'Idempotency-Key': create.key },
       }),
     )
@@ -380,7 +380,7 @@
     if (patch.body !== undefined) body.body = patch.body
     return runMutation({ draft: patch }, (context) =>
       editIssueRequest(
-        { projectId: target.project_id, ref: target.ref },
+        { projectId: String(target.project_id), ref: target.ref },
         context.body(body, requestActor),
       ),
     )
@@ -409,7 +409,7 @@
     pendingComment = comment
     const accepted = await runMutation({ draft: body }, (context) =>
       createComment(
-        { projectId: target.project_id, ref: target.ref },
+        { projectId: String(target.project_id), ref: target.ref },
         context.body({ body }, requestActor),
         { headers: { 'Idempotency-Key': comment.key } },
       ),
@@ -570,7 +570,7 @@
     if (!target) return false
     return runMutation({ draft: label }, (context) =>
       addLabelRequest(
-        { projectId: target.project_id, ref: target.ref },
+        { projectId: String(target.project_id), ref: target.ref },
         context.body({ label }, requestActor),
       ),
     )

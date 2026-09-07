@@ -738,11 +738,16 @@ type ListIssuesResp struct {
 	JSON200      *ListIssuesResponse
 }
 
+type CreateIssueResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
 type CreateIssueResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateIssueResponse
+	Headers200   *CreateIssueResp200Headers
 }
 
 type ShowIssueResp struct {
@@ -752,11 +757,20 @@ type ShowIssueResp struct {
 	JSON200      *ShowIssueResponse
 }
 
+type EditIssueResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
 type EditIssueResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *EditIssueResponse
+	Headers200   *EditIssueResp200Headers
+}
+
+type AssignIssueResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
 }
 
 type AssignIssueResp struct {
@@ -764,6 +778,7 @@ type AssignIssueResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AssignIssueResponse
+	Headers200   *AssignIssueResp200Headers
 }
 
 type ClaimIssueResp struct {
@@ -773,11 +788,20 @@ type ClaimIssueResp struct {
 	JSON200      *ClaimIssueResponse
 }
 
+type CloseIssueResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
 type CloseIssueResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *CloseIssueResponse
+	Headers200   *CloseIssueResp200Headers
+}
+
+type DeleteIssueResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
 }
 
 type DeleteIssueResp struct {
@@ -785,6 +809,7 @@ type DeleteIssueResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DeleteIssueResponse
+	Headers200   *DeleteIssueResp200Headers
 }
 
 type MoveIssueResp200Headers struct {
@@ -799,11 +824,16 @@ type MoveIssueResp struct {
 	Headers200   *MoveIssueResp200Headers
 }
 
+type SetIssuePriorityResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
 type SetIssuePriorityResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *SetIssuePriorityResponse
+	Headers200   *SetIssuePriorityResp200Headers
 }
 
 type PurgeIssueResp struct {
@@ -813,11 +843,20 @@ type PurgeIssueResp struct {
 	JSON200      *PurgeIssueResponse
 }
 
+type ReopenIssueResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
 type ReopenIssueResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReopenIssueResponse
+	Headers200   *ReopenIssueResp200Headers
+}
+
+type RestoreIssueResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
 }
 
 type RestoreIssueResp struct {
@@ -825,6 +864,11 @@ type RestoreIssueResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RestoreIssueResponse
+	Headers200   *RestoreIssueResp200Headers
+}
+
+type UnassignIssueResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
 }
 
 type UnassignIssueResp struct {
@@ -832,6 +876,7 @@ type UnassignIssueResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *UnassignIssueResponse
+	Headers200   *UnassignIssueResp200Headers
 }
 
 type UnbindExternalRootResp struct {
@@ -890,11 +935,20 @@ type ResumeExternalRootBridgeResp struct {
 	JSON200      *ResumeExternalRootBridgeResponse
 }
 
+type CreateCommentResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
 type CreateCommentResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateCommentResponse
+	Headers200   *CreateCommentResp200Headers
+}
+
+type EditCommentResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
 }
 
 type EditCommentResp struct {
@@ -902,6 +956,7 @@ type EditCommentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *EditCommentResponse
+	Headers200   *EditCommentResp200Headers
 }
 
 type ReachableIssueGraphResp struct {
@@ -911,11 +966,20 @@ type ReachableIssueGraphResp struct {
 	JSON200      *ReachableIssueGraphResponse
 }
 
+type AddLabelResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
 type AddLabelResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *AddLabelResponse
+	Headers200   *AddLabelResp200Headers
+}
+
+type RemoveLabelResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
 }
 
 type RemoveLabelResp struct {
@@ -923,6 +987,7 @@ type RemoveLabelResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RemoveLabelResponse
+	Headers200   *RemoveLabelResp200Headers
 }
 
 type GetIssueLeaseStatusResp struct {
@@ -967,11 +1032,16 @@ type CreateLinkResp struct {
 	JSON200      *CreateLinkResponse
 }
 
+type DeleteLinkResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
 type DeleteLinkResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *DeleteLinkResponse
+	Headers200   *DeleteLinkResp200Headers
 }
 
 type PatchIssueMetadataResp200Headers struct {

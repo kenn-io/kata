@@ -19,8 +19,8 @@ import (
 	"go.kenn.io/kata/internal/testfix"
 )
 
-// A remote command should spend its requests on project resolution and the
-// operation itself, not a preliminary liveness check. Exercise every remote
+// A simple remote mutation resolves its project in the mutation request.
+// Exercise every remote
 // selection source against a real, authenticated daemon and persisted writes.
 func TestRemoteMutationsWithoutPreflight(t *testing.T) {
 	for _, source := range []string{"environment", "workspace", "active", "named"} {
@@ -67,7 +67,7 @@ func TestRemoteMutationsWithoutPreflight(t *testing.T) {
 			for _, operation := range []string{"create", "edit", "comment", "label"} {
 				var command []string
 				var wantMutation string
-				issuePath := fmt.Sprintf("/api/v1/projects/%d/issues", project.ID)
+				issuePath := "/api/v1/projects/name:example-project/issues"
 				switch operation {
 				case "create":
 					command = []string{"create", "Example task", "--body", "Original description"}
@@ -88,7 +88,7 @@ func TestRemoteMutationsWithoutPreflight(t *testing.T) {
 				stdout, stderr, err := executeRootCapture(t, t.Context(), append(command, args...)...)
 				require.NoError(t, err, "%s: %s", operation, stderr)
 				mu.Lock()
-				assert.Equal(t, []string{"POST /api/v1/projects/resolve", wantMutation}, paths, operation)
+				assert.Equal(t, []string{wantMutation}, paths, operation)
 				mu.Unlock()
 				if operation == "create" {
 					var response struct {

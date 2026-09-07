@@ -3,5 +3,5 @@
  */
 
 export type CreateIssuePathParameters = {
-  projectId: number
+  projectId: string
 }

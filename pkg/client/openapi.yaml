@@ -4301,7 +4301,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.16.0
+  version: 0.17.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -5787,12 +5787,25 @@ paths:
     post:
       operationId: createIssue
       parameters:
-        - in: path
+        - description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+          in: path
           name: project_id
           required: true
           schema:
-            format: int64
-            type: integer
+            description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+            type: string
+        - description: "Workspace alias identity; requires a name: selector"
+          in: header
+          name: X-Kata-Project-Alias
+          schema:
+            description: "Workspace alias identity; requires a name: selector"
+            type: string
+        - description: Workspace alias kind; required with X-Kata-Project-Alias
+          in: header
+          name: X-Kata-Project-Alias-Kind
+          schema:
+            description: Workspace alias kind; required with X-Kata-Project-Alias
+            type: string
         - in: header
           name: Idempotency-Key
           schema:
@@ -5810,6 +5823,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -5852,12 +5870,25 @@ paths:
     patch:
       operationId: editIssue
       parameters:
-        - in: path
+        - description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+          in: path
           name: project_id
           required: true
           schema:
-            format: int64
-            type: integer
+            description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+            type: string
+        - description: "Workspace alias identity; requires a name: selector"
+          in: header
+          name: X-Kata-Project-Alias
+          schema:
+            description: "Workspace alias identity; requires a name: selector"
+            type: string
+        - description: Workspace alias kind; required with X-Kata-Project-Alias
+          in: header
+          name: X-Kata-Project-Alias-Kind
+          schema:
+            description: Workspace alias kind; required with X-Kata-Project-Alias
+            type: string
         - in: path
           name: ref
           required: true
@@ -5876,6 +5907,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/EditIssueResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -5910,6 +5946,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -5986,6 +6027,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6024,6 +6070,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6100,6 +6151,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6172,6 +6228,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6206,6 +6267,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6240,6 +6306,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6518,12 +6589,25 @@ paths:
     post:
       operationId: createComment
       parameters:
-        - in: path
+        - description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+          in: path
           name: project_id
           required: true
           schema:
-            format: int64
-            type: integer
+            description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+            type: string
+        - description: "Workspace alias identity; requires a name: selector"
+          in: header
+          name: X-Kata-Project-Alias
+          schema:
+            description: "Workspace alias identity; requires a name: selector"
+            type: string
+        - description: Workspace alias kind; required with X-Kata-Project-Alias
+          in: header
+          name: X-Kata-Project-Alias-Kind
+          schema:
+            description: Workspace alias kind; required with X-Kata-Project-Alias
+            type: string
         - in: path
           name: ref
           required: true
@@ -6546,6 +6630,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/CommentResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6585,6 +6674,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/CommentResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6635,12 +6729,25 @@ paths:
     post:
       operationId: addLabel
       parameters:
-        - in: path
+        - description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+          in: path
           name: project_id
           required: true
           schema:
-            format: int64
-            type: integer
+            description: "Numeric project ID or name:<project name>; name: alone requires an alias"
+            type: string
+        - description: "Workspace alias identity; requires a name: selector"
+          in: header
+          name: X-Kata-Project-Alias
+          schema:
+            description: "Workspace alias identity; requires a name: selector"
+            type: string
+        - description: Workspace alias kind; required with X-Kata-Project-Alias
+          in: header
+          name: X-Kata-Project-Alias-Kind
+          schema:
+            description: Workspace alias kind; required with X-Kata-Project-Alias
+            type: string
         - in: path
           name: ref
           required: true
@@ -6659,6 +6766,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/AddLabelResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6697,6 +6809,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:
@@ -6955,6 +7072,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/MutationResponseBody"
           description: OK
+          headers:
+            X-Kata-Project-Name:
+              schema:
+                description: Canonical project name
+                type: string
         default:
           content:
             application/json:

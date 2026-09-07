@@ -44,23 +44,16 @@ func newCommentCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		ctx, baseURL, pid, issue, err := resolveIssueRefForCommand(cmd, args[0])
+		project, issue, err := prepareIssueMutation(cmd, args[0], false)
 		if err != nil {
 			return err
 		}
-		actor, _ := resolveActor(ctx, flags.As, nil)
-		client, err := httpClientFor(ctx, baseURL)
+		actor, _ := resolveActor(project.api.ctx, flags.As, nil)
+		bs, err := project.mutate(http.MethodPost,
+			"/issues/"+url.PathEscape(issue.RefForAPI)+"/comments",
+			map[string]any{"actor": actor, "body": body}, nil)
 		if err != nil {
 			return err
-		}
-		status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-			fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/comments", baseURL, pid, url.PathEscape(issue.RefForAPI)),
-			map[string]any{"actor": actor, "body": body})
-		if err != nil {
-			return err
-		}
-		if status >= 400 {
-			return apiErrFromBody(status, bs)
 		}
 		switch currentOutputMode() {
 		case outputJSON:

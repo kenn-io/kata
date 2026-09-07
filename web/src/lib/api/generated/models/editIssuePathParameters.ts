@@ -3,6 +3,6 @@
  */
 
 export type EditIssuePathParameters = {
-  projectId: number
+  projectId: string
   ref: string
 }

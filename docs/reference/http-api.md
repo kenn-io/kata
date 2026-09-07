@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-27
+last_edited: 2026-09-07
 ---
 
 # HTTP API schema
@@ -45,7 +45,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.16.0",
+  "api_schema_version": "0.17.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db",
@@ -112,6 +112,7 @@ and decline to render issue detail.
 
 | Version | Change |
 | --- | --- |
+| `0.17.0` | Create issue, edit issue, create comment, and add label accept a numeric project ID or `name:<project>` in the project path. Optional alias headers use alias-first resolution. Successful responses include `X-Kata-Project-Name`. Generated clients represent these four path parameters as strings. |
 | `0.16.0` | Ordinary API array fields are non-null. Empty and nil Go slices serialize as `[]`, generated clients omit `null` from ordinary array types, and requests reject `null` for those arrays. JSON object member names are case-sensitive. |
 | `0.15.0` | Added close idempotency and revision headers, the `close-v1` request marker, and retry receipt fields. |
 | `0.14.0` | Added `external` close evidence with its required `account` field. |
@@ -134,6 +135,35 @@ this means nil maps encode as `{}`, duplicate object member names and invalid
 UTF-8 are rejected, and struct field names match case-sensitively. JSON object
 member order is unspecified. Unknown request members remain governed by the
 request schema and are rejected for strict request objects.
+
+## Resolving projects inside mutations
+
+These operations accept either a numeric project ID or a `name:` selector:
+
+| Method | Path |
+| --- | --- |
+| `POST` | `/api/v1/projects/name:example-project/issues` |
+| `PATCH` | `/api/v1/projects/name:example-project/issues/{ref}` |
+| `POST` | `/api/v1/projects/name:example-project/issues/{ref}/comments` |
+| `POST` | `/api/v1/projects/name:example-project/issues/{ref}/labels` |
+
+URL-encode the project selector as one path segment. Numeric paths such as
+`/api/v1/projects/42/issues` remain valid. The issue ref and mutation body
+keep their existing meanings. A successful response includes the canonical
+project name in `X-Kata-Project-Name`.
+
+A `name:` request can also carry `X-Kata-Project-Alias` (the workspace alias
+identity) and `X-Kata-Project-Alias-Kind` (`git` or `local`). The alias takes
+precedence over the name, preserving rename and merge resolution. If the
+alias is unknown, the existing named project is used and the alias is
+attached. `name:` with no name requires a registered alias. Resolution does
+not create projects, and numeric selectors do not accept alias headers.
+
+Alias attachment requires attributed write authority and is unavailable to
+local browser sessions. When a host access controller is installed, named
+resolution requires all-project authority before resolution or attachment,
+matching the standalone project-resolve endpoint. Project-scoped clients
+can continue using numeric IDs.
 
 ## Compatibility expectations
 

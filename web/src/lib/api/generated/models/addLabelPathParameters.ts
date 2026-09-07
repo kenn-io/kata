@@ -3,6 +3,6 @@
  */
 
 export type AddLabelPathParameters = {
-  projectId: number
+  projectId: string
   ref: string
 }

@@ -2359,6 +2359,9 @@ func (c *Client) CreateIssueWithResponse(ctx context.Context, options *CreateIss
 				}
 			}
 		}
+		out.Headers200 = &CreateIssueResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
+		}
 		return out, nil
 	case 500:
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
@@ -2456,6 +2459,9 @@ func (c *Client) EditIssueWithResponse(ctx context.Context, options *EditIssueRe
 				}
 			}
 		}
+		out.Headers200 = &EditIssueResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
+		}
 		return out, nil
 	case 500:
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
@@ -2504,6 +2510,9 @@ func (c *Client) AssignIssueWithResponse(ctx context.Context, options *AssignIss
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &AssignIssueResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
 		}
 		return out, nil
 	case 500:
@@ -2603,6 +2612,9 @@ func (c *Client) CloseIssueWithResponse(ctx context.Context, options *CloseIssue
 				}
 			}
 		}
+		out.Headers200 = &CloseIssueResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
+		}
 		return out, nil
 	case 500:
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
@@ -2651,6 +2663,9 @@ func (c *Client) DeleteIssueWithResponse(ctx context.Context, options *DeleteIss
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &DeleteIssueResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
 		}
 		return out, nil
 	case 500:
@@ -2753,6 +2768,9 @@ func (c *Client) SetIssuePriorityWithResponse(ctx context.Context, options *SetI
 				}
 			}
 		}
+		out.Headers200 = &SetIssuePriorityResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
+		}
 		return out, nil
 	case 500:
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
@@ -2851,6 +2869,9 @@ func (c *Client) ReopenIssueWithResponse(ctx context.Context, options *ReopenIss
 				}
 			}
 		}
+		out.Headers200 = &ReopenIssueResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
+		}
 		return out, nil
 	case 500:
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
@@ -2900,6 +2921,9 @@ func (c *Client) RestoreIssueWithResponse(ctx context.Context, options *RestoreI
 				}
 			}
 		}
+		out.Headers200 = &RestoreIssueResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
+		}
 		return out, nil
 	case 500:
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
@@ -2948,6 +2972,9 @@ func (c *Client) UnassignIssueWithResponse(ctx context.Context, options *Unassig
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &UnassignIssueResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
 		}
 		return out, nil
 	case 500:
@@ -3388,6 +3415,9 @@ func (c *Client) CreateCommentWithResponse(ctx context.Context, options *CreateC
 				}
 			}
 		}
+		out.Headers200 = &CreateCommentResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
+		}
 		return out, nil
 	case 500:
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
@@ -3436,6 +3466,9 @@ func (c *Client) EditCommentWithResponse(ctx context.Context, options *EditComme
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &EditCommentResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
 		}
 		return out, nil
 	case 500:
@@ -3534,6 +3567,9 @@ func (c *Client) AddLabelWithResponse(ctx context.Context, options *AddLabelRequ
 				}
 			}
 		}
+		out.Headers200 = &AddLabelResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
+		}
 		return out, nil
 	case 500:
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
@@ -3581,6 +3617,9 @@ func (c *Client) RemoveLabelWithResponse(ctx context.Context, options *RemoveLab
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &RemoveLabelResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
 		}
 		return out, nil
 	case 500:
@@ -3922,6 +3961,9 @@ func (c *Client) DeleteLinkWithResponse(ctx context.Context, options *DeleteLink
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &DeleteLinkResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
 		}
 		return out, nil
 	case 500:
