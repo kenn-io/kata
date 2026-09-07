@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,6 +73,88 @@ func TestRemoteCommand_UnavailableMapsToCLIError(t *testing.T) {
 	}
 	assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
 	assert.Contains(t, stderr, `"kind":"daemon_unavailable"`)
+}
+
+func TestFederationEnroll_UnavailableHubKeepsOperationalError(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Chdir(t.TempDir())
+
+	_, stderr, err := executeRootCapture(t, t.Context(), "federation", "enroll", "hub-project",
+		"--hub-url", "http://127.0.0.1:1", "--spoke-instance", "example-spoke",
+		"--capabilities", "pull", "--actor", "user-a", "--json")
+	require.Error(t, err)
+	assert.Equal(t, ExitInternal, exitCodeForErr(err, true))
+	assert.Contains(t, stderr, `"kind":"internal"`)
+	assert.NotContains(t, stderr, `"kind":"daemon_unavailable"`)
+}
+
+func TestDaemonClients_ClassifyOnlyTheirOwnDialFailures(t *testing.T) {
+	resetFlags(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Chdir(t.TempDir())
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://127.0.0.1:1/external", http.StatusFound)
+	}))
+	t.Cleanup(redirect.Close)
+
+	for _, constructor := range []struct {
+		name     string
+		url      func(context.Context, string) (*http.Client, error)
+		resolved func(context.Context, client.ResolvedDaemon) (*http.Client, error)
+	}{
+		{name: "default", url: httpClientFor, resolved: httpClientForResolved},
+		{name: "long-running", url: longRunningClientFor, resolved: longRunningClientForResolved},
+		{name: "streaming", url: streamingClientFor, resolved: streamingClientForResolved},
+	} {
+		for _, resolved := range []bool{false, true} {
+			for _, target := range []struct {
+				name, url string
+				exit      int
+			}{
+				{name: "daemon", url: "http://127.0.0.1:1", exit: ExitDaemonUnavail},
+				{name: "redirect", url: redirect.URL, exit: ExitInternal},
+			} {
+				t.Run(fmt.Sprintf("%s/resolved=%t/%s", constructor.name, resolved, target.name), func(t *testing.T) {
+					var hc *http.Client
+					var err error
+					if resolved {
+						hc, err = constructor.resolved(t.Context(), client.ResolvedDaemon{BaseURL: target.url})
+					} else {
+						hc, err = constructor.url(t.Context(), target.url)
+					}
+					require.NoError(t, err)
+					req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target.url, nil)
+					require.NoError(t, err)
+					resp, err := hc.Do(req) //nolint:gosec // loopback fixtures only
+					if resp != nil {
+						require.NoError(t, resp.Body.Close())
+					}
+					require.Error(t, err)
+					assert.Equal(t, target.exit, exitCodeForErr(fmt.Errorf("request failed: %w", err), true))
+				})
+			}
+		}
+	}
+}
+
+func TestDaemonDialTimeoutPreservesCreateOutcomeUnknown(t *testing.T) {
+	hc, err := markDaemonHTTPClient("https://daemon.example", &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTimeout: true}}
+		}),
+	}, nil)
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://daemon.example/issues", nil)
+	require.NoError(t, err)
+	_, err = hc.Do(req) //nolint:gosec // fixture transport does not make network requests
+	require.Error(t, err)
+	classified := cliErrorForErr(createRequestError(err, false), true)
+	assert.Equal(t, "create_outcome_unknown", classified.Code)
+	assert.Equal(t, ExitInternal, classified.ExitCode)
 }
 
 func TestEnsureDaemonResolvedPreservesInjectedResolution(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/signal"
 	"slices"
@@ -299,11 +298,10 @@ func exitCodeForErr(err error, runEReached bool) int {
 	if cli, ok := errors.AsType[*cliError](err); ok {
 		return cli.ExitCode
 	}
-	// Ordinary remote requests establish reachability themselves. A failed
-	// dial still means daemon unavailable, even without a preliminary ping.
-	// Do not classify post-connect failures this way: a mutation may already
-	// have committed, and command-specific outcome-unknown errors take priority.
-	if op, ok := errors.AsType[*net.OpError](err); ok && op.Op == "dial" {
+	// Only the selected daemon's transport marks unavailable errors. Hub and
+	// other external dial failures retain their command's error classification.
+	// Command-specific outcome-unknown errors above still take priority.
+	if _, ok := errors.AsType[*daemonDialError](err); ok {
 		return ExitDaemonUnavail
 	}
 	return exitCodeFor(err, runEReached)
