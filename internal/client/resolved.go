@@ -155,12 +155,23 @@ func (d ResolvedDaemon) withLocalTargetAuth(token string) ResolvedDaemon {
 // EnsureResolvedInWorkspace selects a daemon and retains the policy selected
 // by that same source. Configured remotes precede local discovery and start.
 func EnsureResolvedInWorkspace(ctx context.Context, workspaceStart string) (ResolvedDaemon, error) {
+	return resolveForClient(ctx, workspaceStart, remoteWithCredentials)
+}
+
+// PrepareResolvedInWorkspace selects the target and credentials for an API
+// request. Configured remotes are not pinged: the request itself establishes
+// reachability. Local discovery, version checks, and auto-start are unchanged.
+func PrepareResolvedInWorkspace(ctx context.Context, workspaceStart string) (ResolvedDaemon, error) {
+	return resolveForClient(ctx, workspaceStart, remoteRequestTarget)
+}
+
+func resolveForClient(ctx context.Context, workspaceStart string, mode remoteResolutionMode) (ResolvedDaemon, error) {
 	if value, ok := ctx.Value(BaseURLKey{}).(string); ok && value != "" {
 		return resolvedForRunning(
 			DaemonSourceInjected, "", remoteRunningDaemon(value, false),
 		).withGlobalAuth(), nil
 	}
-	if resolved, ok, err := resolveRemoteDaemon(ctx, workspaceStart); err != nil {
+	if resolved, ok, err := resolveRemoteSelection(ctx, workspaceStart, mode); err != nil {
 		return ResolvedDaemon{}, err
 	} else if ok {
 		return resolved, nil
@@ -178,6 +189,12 @@ func ResolveRemoteDaemon(ctx context.Context, workspaceStart string) (ResolvedDa
 // entries may start the local daemon; named remotes are probed.
 func EnsureResolvedNamed(ctx context.Context, name string) (ResolvedDaemon, error) {
 	return resolveNamedDaemon(ctx, name)
+}
+
+// PrepareResolvedNamed selects a catalog target for an API request without
+// probing a remote. Named local daemons retain discovery and auto-start.
+func PrepareResolvedNamed(ctx context.Context, name string) (ResolvedDaemon, error) {
+	return resolveNamedDaemonMode(ctx, name, namedRequestTarget)
 }
 
 // DiscoverResolved returns the first live local runtime with its exact

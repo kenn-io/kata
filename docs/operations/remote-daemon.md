@@ -84,6 +84,10 @@ If none of those are set, clients next honor `active_daemon` in
 `<KATA_HOME>/config.toml`; otherwise they use local daemon discovery or
 auto-start.
 
+Ordinary remote CLI commands send their API requests without a preliminary
+ping. Refused connections still report `daemon_unavailable` (exit code 7).
+Explicit health and discovery commands continue to probe the selected daemon.
+
 To inspect the endpoint selected by those rules, including its transport and
 canonical request URL, run:
 

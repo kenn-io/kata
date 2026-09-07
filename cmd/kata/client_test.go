@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -54,25 +53,24 @@ func TestLongRunningClientForLeavesResponseHeadersUnbounded(t *testing.T) {
 	}
 }
 
-func TestEnsureDaemon_RemoteUnavailableMapsToCLIError(t *testing.T) {
+func TestRemoteCommand_UnavailableMapsToCLIError(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1") // closed port
+	t.Chdir(t.TempDir())
 
-	_, err := ensureDaemon(context.Background())
+	_, stderr, err := executeRootCapture(t, t.Context(), "projects", "list", "--json")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-
-	var ce *cliError
-	if !errors.As(err, &ce) {
-		t.Fatalf("expected *cliError, got %T (%v)", err, err)
-	}
+	ce := cliErrorForErr(err, true)
 	if ce.Kind != kindDaemonUnavail {
 		t.Errorf("expected Kind=%v, got %v", kindDaemonUnavail, ce.Kind)
 	}
 	if ce.ExitCode != ExitDaemonUnavail {
 		t.Errorf("expected ExitCode=%d, got %d", ExitDaemonUnavail, ce.ExitCode)
 	}
+	assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
+	assert.Contains(t, stderr, `"kind":"daemon_unavailable"`)
 }
 
 func TestEnsureDaemonResolvedPreservesInjectedResolution(t *testing.T) {

@@ -38,7 +38,7 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 	return d
 }
 
-// ensureDaemonResolved discovers a live daemon, auto-starting one if none is
+// ensureDaemonResolved selects a daemon, auto-starting a local one if none is
 // found, and carries the source, credentials, and transport policy selected by
 // that resolution. Client construction consumes this value without deriving
 // policy again from its base URL.
@@ -47,19 +47,18 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 // the .kata.local.toml walk so a workspace-local [server] override is
 // honored even when the user is invoking kata from outside the repo.
 //
-// If a daemon is explicitly configured (via --daemon, KATA_SERVER,
-// .kata.local.toml, or active_daemon) but does not respond, the CLI surfaces
-// this as a daemon-unavailable error so callers see a stable exit code and shape.
+// Configured remotes are not pinged before ordinary API requests. Discovery
+// and health commands use discoverDaemonResolved when liveness is the result.
 func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	if flags.Daemon != "" {
-		resolved, err := client.EnsureResolvedNamed(ctx, flags.Daemon)
+		resolved, err := client.PrepareResolvedNamed(ctx, flags.Daemon)
 		if err != nil {
 			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 		}
 		return resolved, nil
 	}
 	workspaceStart := workspaceStartForRemote()
-	resolved, err := client.EnsureResolvedInWorkspace(ctx, workspaceStart)
+	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStart)
 	if err != nil {
 		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 	}
