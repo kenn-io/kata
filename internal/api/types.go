@@ -381,13 +381,33 @@ type MergeProjectResponse struct {
 	Body MergeProjectResultOut
 }
 
+// ProjectTarget selects a mutation's project by local numeric ID or name.
+// Alias headers use the same alias-first resolution as the resolve endpoint.
+type ProjectTarget struct {
+	ProjectSelector  string `path:"project_id" required:"true" doc:"Numeric project ID or name:<project name>; name: alone requires an alias"`
+	ProjectAlias     string `header:"X-Kata-Project-Alias" doc:"Workspace alias identity; requires a name: selector"`
+	ProjectAliasKind string `header:"X-Kata-Project-Alias-Kind" doc:"Workspace alias kind; required with X-Kata-Project-Alias"`
+	ProjectID        int64  `json:"-" hidden:"true"`
+}
+
+// Target provides the mutable target shared by issue mutation requests.
+func (p *ProjectTarget) Target() *ProjectTarget { return p }
+
+// ProjectNameHeader carries the canonical name selected for a mutation.
+type ProjectNameHeader struct {
+	ProjectName string `header:"X-Kata-Project-Name" doc:"Canonical project name"`
+}
+
+// SetProjectName records the canonical project selected by the daemon.
+func (p *ProjectNameHeader) SetProjectName(name string) { p.ProjectName = name }
+
 // CreateIssueRequest is POST /api/v1/projects/{id}/issues.
 //
 // IdempotencyKey is read from the Idempotency-Key HTTP header (spec §4.4).
 // Body.ForceNew bypasses look-alike soft-block but is overridden by an
 // idempotent match (idempotency wins per spec §3.7).
 type CreateIssueRequest struct {
-	ProjectID      int64  `path:"project_id" required:"true"`
+	ProjectTarget
 	IdempotencyKey string `header:"Idempotency-Key"`
 	Body           struct {
 		Actor    string                  `json:"actor,omitempty"`
@@ -430,6 +450,7 @@ type CreateInitialLinkBody struct {
 // non-nil only on idempotent reuse — the issue.created event row of the prior
 // creation, so clients can correlate the reuse to the original mutation.
 type MutationResponse struct {
+	ProjectNameHeader
 	Body struct {
 		Issue         db.Issue  `json:"issue"`
 		Event         *db.Event `json:"event"`
@@ -720,9 +741,9 @@ type ClaimViolationOut struct {
 
 // EditIssueRequest is PATCH /api/v1/projects/{id}/issues/{ref}.
 type EditIssueRequest struct {
-	ProjectID int64  `path:"project_id" required:"true"`
-	Ref       string `path:"ref" required:"true"`
-	Body      struct {
+	ProjectTarget
+	Ref  string `path:"ref" required:"true"`
+	Body struct {
 		Actor         string      `json:"actor,omitempty"`
 		Title         *string     `json:"title,omitempty"`
 		Body          *string     `json:"body,omitempty"`
@@ -785,6 +806,7 @@ type LinkChanges struct {
 // new clients can walk the full slice to observe every transition (e.g.
 // distinguishing a priority change from a link change).
 type EditIssueResponse struct {
+	ProjectNameHeader
 	Body struct {
 		Issue   db.Issue     `json:"issue"`
 		Event   *db.Event    `json:"event"`
@@ -796,7 +818,7 @@ type EditIssueResponse struct {
 
 // CommentRequest is POST /api/v1/projects/{id}/issues/{ref}/comments.
 type CommentRequest struct {
-	ProjectID      int64  `path:"project_id" required:"true"`
+	ProjectTarget
 	Ref            string `path:"ref" required:"true"`
 	IdempotencyKey string `header:"Idempotency-Key"`
 	Body           struct {
@@ -818,6 +840,7 @@ type EditCommentRequest struct {
 
 // CommentResponse mirrors MutationResponse but adds the new comment row.
 type CommentResponse struct {
+	ProjectNameHeader
 	Body struct {
 		Issue   db.Issue   `json:"issue"`
 		Comment db.Comment `json:"comment"`
@@ -1007,9 +1030,9 @@ type DetachProjectAliasResponse struct {
 
 // AddLabelRequest is POST /api/v1/projects/{id}/issues/{ref}/labels.
 type AddLabelRequest struct {
-	ProjectID int64  `path:"project_id" required:"true"`
-	Ref       string `path:"ref" required:"true"`
-	Body      struct {
+	ProjectTarget
+	Ref  string `path:"ref" required:"true"`
+	Body struct {
 		Actor string `json:"actor,omitempty"`
 		Label string `json:"label" required:"true"`
 	}
@@ -1017,6 +1040,7 @@ type AddLabelRequest struct {
 
 // AddLabelResponse extends the standard envelope with the new label row.
 type AddLabelResponse struct {
+	ProjectNameHeader
 	Body struct {
 		Issue   db.Issue      `json:"issue"`
 		Label   db.IssueLabel `json:"label"`

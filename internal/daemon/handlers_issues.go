@@ -75,7 +75,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "createIssue",
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues",
-	}, func(ctx context.Context, in *api.CreateIssueRequest) (*api.MutationResponse, error) {
+	}, withResolvedProject(cfg, func(ctx context.Context, in *api.CreateIssueRequest) (*api.MutationResponse, error) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
@@ -202,7 +202,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Event = &evt
 		out.Body.Changed = true
 		return out, nil
-	})
+	}))
 
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "listIssues",
@@ -395,7 +395,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "editIssue",
 		Method:      "PATCH",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}",
-	}, editIssueHandler(cfg))
+	}, withResolvedProject(cfg, editIssueHandler(cfg)))
 }
 
 // editIssueHandler dispatches a PATCH /issues/{ref} call. It applies any

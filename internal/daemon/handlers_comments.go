@@ -25,7 +25,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "createComment",
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/comments",
-	}, func(ctx context.Context, in *api.CommentRequest) (*api.CommentResponse, error) {
+	}, withResolvedProject(cfg, func(ctx context.Context, in *api.CommentRequest) (*api.CommentResponse, error) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
@@ -107,7 +107,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Event = &evt
 		out.Body.Changed = true
 		return out, nil
-	})
+	}))
 
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "editComment",
