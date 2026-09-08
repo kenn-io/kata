@@ -96,10 +96,16 @@ resolve endpoint; `--comment` adds its own comment request after the mutation.
 Upgrade the remote daemon with the CLI: older daemons reject named project
 selectors rather than silently performing a different operation.
 
-When create resolves a renamed workspace through its alias, the CLI repairs
+When a mutation resolves a renamed workspace through its alias, the CLI repairs
 `.kata.toml` from the successful response. If that local repair fails, the CLI
 reports `workspace_repair_failed` and states that the mutation succeeded. Fix
 the binding without repeating the mutation.
+
+Bare issue references and ULIDs use the workspace alias, including after a
+project rename or merge. An explicit `--project` or qualified issue reference
+selects that project name instead and does not repair the workspace binding.
+Relationship-bearing edits resolve the alias and repair the binding before
+submitting the mutation, because their link checks need canonical identity.
 
 To inspect the endpoint selected by those rules, including its transport and
 canonical request URL, run:

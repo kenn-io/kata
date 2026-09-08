@@ -65,6 +65,10 @@ func prepareIssueMutation(cmd *cobra.Command, ref string, resolveNow bool) (*pro
 		return nil, resolvedIssueRef{}, err
 	}
 	project := strings.TrimSpace(flags.Project)
+	// ResolveRef fills ProjectName for both explicit and inherited names.
+	// Preserve the source so workspace-bound refs retain alias resolution
+	// and binding repair after a project rename or merge.
+	workspaceBound := project == "" && !strings.Contains(ref, "#")
 	if project == "" {
 		project = workspaceProjectName(start)
 	}
@@ -72,7 +76,7 @@ func prepareIssueMutation(cmd *cobra.Command, ref string, resolveNow bool) (*pro
 	if err != nil {
 		return nil, resolvedIssueRef{}, &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
 	}
-	if parsed.ProjectName == "" {
+	if workspaceBound {
 		p, err := prepareProjectMutation(a, start, resolveNow)
 		if err != nil {
 			return nil, resolvedIssueRef{}, err
