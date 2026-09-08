@@ -8,4 +8,4 @@ SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, exp
 	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
 	               OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
 	          LEFT JOIN issues peer ON peer.id = events.related_issue_id
-	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid) WHERE ((events.issue_id IS NULL AND events.issue_uid IS NULL) OR subject_issue.id IS NOT NULL) AND events.project_id = ? ORDER BY events.id ASC
+	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid) WHERE (events.issue_id IS NULL OR subject_issue.id IS NOT NULL) AND events.project_id = ? ORDER BY events.id ASC

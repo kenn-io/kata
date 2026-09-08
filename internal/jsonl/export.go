@@ -2219,20 +2219,15 @@ func (p eventOrphanPolicy) relatedUIDExpr() string {
 	return `CASE WHEN ` + p.scrubCondition(false) + ` THEN NULL ELSE events.related_issue_uid END`
 }
 
-// subjectLiveClause keeps an event whose subject issue is absent from the
-// export out of the output. The two shapes are deliberately different, not an
-// accident of copying: uidAware is the current projection's identity-based
-// join, which resolves the subject by id OR uid and is soft-delete sensitive
-// on live-only export; the legacy shape matches on issue_id alone and relies
-// on the WHERE half for the soft-delete dimension.
+// subjectLiveClause drops ID-keyed orphans but retains UID-only history whose
+// subject lives elsewhere. The current projection's UID-aware join also lets
+// live-only exports exclude a joined soft-deleted subject. Older projections
+// match only on issue_id and rely on whereClauses for soft-delete filtering.
 func (p eventOrphanPolicy) subjectLiveClause(uidAware bool) string {
-	if !uidAware {
+	if !uidAware || p.includeDeleted {
 		return `(events.issue_id IS NULL OR subject_issue.id IS NOT NULL)`
 	}
-	if p.includeDeleted {
-		return `((events.issue_id IS NULL AND events.issue_uid IS NULL) OR subject_issue.id IS NOT NULL)`
-	}
-	return `((events.issue_id IS NULL AND events.issue_uid IS NULL) OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
+	return `((events.issue_id IS NULL AND subject_issue.id IS NULL) OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 }
 
 // whereClauses returns the individual WHERE clauses (not a joined string like
