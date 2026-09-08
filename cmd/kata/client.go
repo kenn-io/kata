@@ -195,14 +195,20 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
 	})
-	return markDaemonHTTPClient(baseURL, hc, err)
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(baseURL, hc)
 }
 
 func httpClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
 	hc, err := client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
 		Timeout: envHTTPTimeout(defaultHTTPTimeout),
 	})
-	return markDaemonHTTPClient(resolved.BaseURL, hc, err)
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(resolved.BaseURL, hc)
 }
 
 // longRunningClientFor builds a variant with no overall Client.Timeout for
@@ -215,12 +221,18 @@ func longRunningClientFor(ctx context.Context, baseURL string) (*http.Client, er
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
 	})
-	return markDaemonHTTPClient(baseURL, hc, err)
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(baseURL, hc)
 }
 
 func longRunningClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
 	hc, err := client.NewHTTPClientForResolved(ctx, resolved, client.Opts{})
-	return markDaemonHTTPClient(resolved.BaseURL, hc, err)
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(resolved.BaseURL, hc)
 }
 
 // streamingClientFor builds the SSE-friendly variant. Body cancellation comes
@@ -235,14 +247,20 @@ func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, erro
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
 	})
-	return markDaemonHTTPClient(baseURL, hc, err)
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(baseURL, hc)
 }
 
 func streamingClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
 	hc, err := client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
 		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
 	})
-	return markDaemonHTTPClient(resolved.BaseURL, hc, err)
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(resolved.BaseURL, hc)
 }
 
 // Embed the operation error to preserve net.Error timeout behavior through
@@ -257,10 +275,7 @@ func (e *daemonDialError) Unwrap() error { return e.cause }
 
 // Only clients built for the selected daemon mark its dial failures. Hub
 // clients and requests redirected to other origins retain their own errors.
-func markDaemonHTTPClient(baseURL string, hc *http.Client, err error) (*http.Client, error) {
-	if err != nil {
-		return nil, err
-	}
+func markDaemonHTTPClient(baseURL string, hc *http.Client) (*http.Client, error) {
 	origin, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, err

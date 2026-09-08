@@ -146,7 +146,7 @@ func TestDaemonDialTimeoutPreservesCreateOutcomeUnknown(t *testing.T) {
 		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTimeout: true}}
 		}),
-	}, nil)
+	})
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://daemon.example/issues", nil)
 	require.NoError(t, err)
