@@ -1576,18 +1576,32 @@ func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		CreatedAt         string          `json:"created_at"`
 	}
 	policy := newEventOrphanPolicy(opts)
+	issueIDExpr := `events.issue_id`
+	scrubCondition := policy.scrubCondition()
+	var selectArgs []any
+	if opts.ProjectID > 0 {
+		// A scoped export omits moved subjects in other projects. Keep
+		// their UID for history without carrying a dangling local row ID.
+		issueIDExpr = `CASE WHEN subject_issue.id IS NOT NULL AND subject_issue.project_id <> ? THEN NULL ELSE events.issue_id END`
+		// Related references to omitted peers follow the storage exporter:
+		// scrub both fields while retaining the payload's historical UIDs.
+		scrubCondition += ` OR (peer.id IS NOT NULL AND peer.project_id <> ?)`
+		selectArgs = append(selectArgs, opts.ProjectID, opts.ProjectID, opts.ProjectID)
+	}
 	// Moving an issue changes its project, but its earlier events retain
 	// their original project. Resolve the subject by identity alone.
-	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, %s, events.issue_id, events.issue_uid,
-	                 `+policy.relatedIDExpr()+`, `+policy.relatedUIDExpr()+`,
+	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, %s, %s, events.issue_uid,
+	                 CASE WHEN `+scrubCondition+` THEN NULL ELSE events.related_issue_id END,
+	                 CASE WHEN `+scrubCondition+` THEN NULL ELSE events.related_issue_uid END,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
 	                 CAST(events.created_at AS TEXT)
 	          FROM events%s
 	          JOIN projects export_project ON export_project.id = events.project_id
 	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
 	               OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
-	          LEFT JOIN issues peer ON peer.id = events.related_issue_id`, projectNameExpr, joinProjects)
+	          LEFT JOIN issues peer ON peer.id = events.related_issue_id`, projectNameExpr, issueIDExpr, joinProjects)
 	clauses, args := policy.whereClauses(opts)
+	args = append(selectArgs, args...)
 	clauses = append([]string{policy.subjectLiveClause(true)}, clauses...)
 	query += whereClause(clauses) + ` ORDER BY events.id ASC`
 	rows, err := d.QueryContext(ctx, query, args...)

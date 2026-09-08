@@ -1354,18 +1354,7 @@ model = "example-model"
 			resetFlags(t)
 			tmp := setupKataEnv(t)
 
-			child := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
-			child.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
-			require.NoError(t, child.Start())
-			exited := make(chan struct{})
-			go func() {
-				_ = child.Wait()
-				close(exited)
-			}()
-			t.Cleanup(func() {
-				_ = child.Process.Kill()
-				<-exited
-			})
+			child := startSleepProcess(t)
 			writeRuntimePID(t, tmp, child.Process.Pid)
 			tt.setup(t, tmp)
 

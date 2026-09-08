@@ -1,5 +1,6 @@
 SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, events.project_name, events.issue_id, events.issue_uid,
-	                 CASE WHEN (peer.id IS NULL AND events.related_issue_id IS NOT NULL) OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL) THEN NULL ELSE events.related_issue_id END, CASE WHEN (peer.id IS NULL AND events.related_issue_id IS NOT NULL) OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL) THEN NULL ELSE events.related_issue_uid END,
+	                 CASE WHEN (peer.id IS NULL AND events.related_issue_id IS NOT NULL) OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL) THEN NULL ELSE events.related_issue_id END,
+	                 CASE WHEN (peer.id IS NULL AND events.related_issue_id IS NOT NULL) OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL) THEN NULL ELSE events.related_issue_uid END,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
 	                 CAST(events.created_at AS TEXT)
 	          FROM events

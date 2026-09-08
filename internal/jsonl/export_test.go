@@ -460,6 +460,72 @@ func TestExportProjectIDFiltersProjectScopedRows(t *testing.T) {
 	assertProjectIDs(t, records, map[int64]bool{p1.ID: true})
 }
 
+func TestLegacyProjectExportPreservesMovedIssueHistory(t *testing.T) {
+	for _, includeDeleted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("include_deleted=%t", includeDeleted), func(t *testing.T) {
+			ctx := context.Background()
+			source := openExportTestDB(t)
+			from, err := source.CreateProject(ctx, "source-project")
+			require.NoError(t, err)
+			to, err := source.CreateProject(ctx, "destination-project")
+			require.NoError(t, err)
+			moved := createTesterIssue(ctx, t, source, from.ID, "Moved issue", "")
+			peer := createTesterIssue(ctx, t, source, from.ID, "Moved peer", "")
+			_, _, err = source.CreateLinkAndEvent(ctx, db.CreateLinkParams{
+				FromIssueID: moved.ID, ToIssueID: peer.ID, Type: "related", Author: "tester",
+			}, db.LinkEventParams{
+				EventType: "issue.linked", EventIssueID: moved.ID,
+				FromShortID: moved.ShortID, FromUID: moved.UID,
+				ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "tester",
+			})
+			require.NoError(t, err)
+			for _, issue := range []db.Issue{moved, peer} {
+				issue, err = source.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				_, err = source.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+					IssueID: issue.ID, FromProjectID: from.ID, ToProjectID: to.ID,
+					IfMatchRev: issue.Revision, Actor: "tester",
+				})
+				require.NoError(t, err)
+			}
+			resident := createTesterIssue(ctx, t, source, from.ID, "Resident issue", "")
+
+			// The legacy export must preserve the same history and portable
+			// subject references as the current-schema storage exporter.
+			var want []db.EventExport
+			for event, err := range source.ExportEvents(ctx, db.ExportFilter{
+				ProjectID: &from.ID, IncludeDeleted: includeDeleted,
+			}) {
+				require.NoError(t, err)
+				want = append(want, event)
+			}
+			_, err = source.ExecContext(ctx,
+				`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+			require.NoError(t, err)
+			var exported bytes.Buffer
+			require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{
+				ProjectID: from.ID, IncludeDeleted: includeDeleted,
+			}))
+
+			target := openImportTargetDB(t)
+			require.NoError(t, jsonl.Import(ctx, bytes.NewReader(exported.Bytes()), target))
+
+			var got []db.EventExport
+			for event, err := range target.ExportEvents(ctx, db.ExportFilter{IncludeDeleted: true}) {
+				require.NoError(t, err)
+				got = append(got, event)
+			}
+			assert.Equal(t, want, got)
+			_, err = target.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
+			assert.ErrorIs(t, err, db.ErrNotFound)
+			_, err = target.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
+			assert.ErrorIs(t, err, db.ErrNotFound)
+			_, err = target.IssueByUID(ctx, resident.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestExportUsesSingleSnapshot(t *testing.T) {
 	ctx, d, p := newExportEnv(t)
 	w := &mutatingExportWriter{
