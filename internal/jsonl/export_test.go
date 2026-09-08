@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
+	"go.kenn.io/kata/internal/uid"
 )
 
 func TestExportWritesOrderedRecordsWithSequenceLast(t *testing.T) {
@@ -460,6 +461,72 @@ func TestExportProjectIDFiltersProjectScopedRows(t *testing.T) {
 	assertProjectIDs(t, records, map[int64]bool{p1.ID: true})
 }
 
+func TestLegacyProjectExportPreservesMovedIssueHistory(t *testing.T) {
+	for _, includeDeleted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("include_deleted=%t", includeDeleted), func(t *testing.T) {
+			ctx := context.Background()
+			source := openExportTestDB(t)
+			from, err := source.CreateProject(ctx, "source-project")
+			require.NoError(t, err)
+			to, err := source.CreateProject(ctx, "destination-project")
+			require.NoError(t, err)
+			moved := createTesterIssue(ctx, t, source, from.ID, "Moved issue", "")
+			peer := createTesterIssue(ctx, t, source, from.ID, "Moved peer", "")
+			_, _, err = source.CreateLinkAndEvent(ctx, db.CreateLinkParams{
+				FromIssueID: moved.ID, ToIssueID: peer.ID, Type: "related", Author: "tester",
+			}, db.LinkEventParams{
+				EventType: "issue.linked", EventIssueID: moved.ID,
+				FromShortID: moved.ShortID, FromUID: moved.UID,
+				ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "tester",
+			})
+			require.NoError(t, err)
+			for _, issue := range []db.Issue{moved, peer} {
+				issue, err = source.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				_, err = source.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+					IssueID: issue.ID, FromProjectID: from.ID, ToProjectID: to.ID,
+					IfMatchRev: issue.Revision, Actor: "tester",
+				})
+				require.NoError(t, err)
+			}
+			resident := createTesterIssue(ctx, t, source, from.ID, "Resident issue", "")
+
+			// The legacy export must preserve the same history and portable
+			// subject references as the current-schema storage exporter.
+			var want []db.EventExport
+			for event, err := range source.ExportEvents(ctx, db.ExportFilter{
+				ProjectID: &from.ID, IncludeDeleted: includeDeleted,
+			}) {
+				require.NoError(t, err)
+				want = append(want, event)
+			}
+			_, err = source.ExecContext(ctx,
+				`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+			require.NoError(t, err)
+			var exported bytes.Buffer
+			require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{
+				ProjectID: from.ID, IncludeDeleted: includeDeleted,
+			}))
+
+			target := openImportTargetDB(t)
+			require.NoError(t, jsonl.Import(ctx, bytes.NewReader(exported.Bytes()), target))
+
+			var got []db.EventExport
+			for event, err := range target.ExportEvents(ctx, db.ExportFilter{IncludeDeleted: true}) {
+				require.NoError(t, err)
+				got = append(got, event)
+			}
+			assert.Equal(t, want, got)
+			_, err = target.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
+			assert.ErrorIs(t, err, db.ErrNotFound)
+			_, err = target.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
+			assert.ErrorIs(t, err, db.ErrNotFound)
+			_, err = target.IssueByUID(ctx, resident.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestExportUsesSingleSnapshot(t *testing.T) {
 	ctx, d, p := newExportEnv(t)
 	w := &mutatingExportWriter{
@@ -473,6 +540,79 @@ func TestExportUsesSingleSnapshot(t *testing.T) {
 
 	records := decodeJSONLLines(t, w.Bytes())
 	assertRecordsDoNotContain(t, records, "created during export")
+}
+
+func TestLegacyExportUIDOnlyPeersMatchStorageExport(t *testing.T) {
+	for _, peerState := range []string{"same-project", "other-project", "missing", "soft-deleted"} {
+		t.Run(peerState, func(t *testing.T) {
+			ctx := context.Background()
+			source := openExportTestDB(t)
+			project, err := source.CreateProject(ctx, "source-project")
+			require.NoError(t, err)
+			peerUID, err := uid.New()
+			require.NoError(t, err)
+			if peerState != "missing" {
+				peerProject := project
+				if peerState == "other-project" {
+					peerProject, err = source.CreateProject(ctx, "peer-project")
+					require.NoError(t, err)
+				}
+				peer := createTesterIssue(ctx, t, source, peerProject.ID, "Peer issue", "")
+				peerUID = peer.UID
+				if peerState == "soft-deleted" {
+					_, _, _, err = source.SoftDeleteIssue(ctx, peer.ID, "tester")
+					require.NoError(t, err)
+				}
+			}
+			// Federation ingestion writes peer UIDs without local row IDs.
+			originUID, err := uid.New()
+			require.NoError(t, err)
+			for i, eventType := range []string{"issue.linked", "issue.links_changed"} {
+				eventUID, err := uid.New()
+				require.NoError(t, err)
+				_, err = source.ExecContext(ctx, `
+					INSERT INTO events(uid, origin_instance_uid, project_id, project_name,
+					                   related_issue_uid, type, actor, payload,
+					                   hlc_physical_ms, hlc_counter, content_hash, created_at)
+					VALUES (?, ?, ?, ?, ?, ?, 'tester', '{}', 1, ?, ?, '2026-05-30T00:00:00.000Z')`,
+					eventUID, originUID,
+					project.ID, project.Name, peerUID, eventType, i, strings.Repeat("0", 64))
+				require.NoError(t, err)
+			}
+
+			for _, includeDeleted := range []bool{false, true} {
+				t.Run(fmt.Sprintf("include_deleted=%t", includeDeleted), func(t *testing.T) {
+					var want []db.EventExport
+					for event, err := range source.ExportEvents(ctx, db.ExportFilter{
+						ProjectID: &project.ID, IncludeDeleted: includeDeleted,
+					}) {
+						require.NoError(t, err)
+						event.ProjectUID = "" // ProjectUID is not serialized in event envelopes.
+						want = append(want, event)
+					}
+					_, err = source.ExecContext(ctx,
+						`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+					require.NoError(t, err)
+					var exported bytes.Buffer
+					require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{
+						ProjectID: project.ID, IncludeDeleted: includeDeleted,
+					}))
+					records, err := jsonl.NewDecoder(&exported).ReadAll(ctx)
+					require.NoError(t, err)
+					var got []db.EventExport
+					for _, record := range records {
+						if record.Kind != jsonl.KindEvent {
+							continue
+						}
+						var event db.EventExport
+						require.NoError(t, json.Unmarshal(record.Data, &event))
+						got = append(got, event)
+					}
+					assert.Equal(t, want, got)
+				})
+			}
+		})
+	}
 }
 
 type mutatingExportWriter struct {

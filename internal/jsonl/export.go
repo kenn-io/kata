@@ -1576,16 +1576,37 @@ func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		CreatedAt         string          `json:"created_at"`
 	}
 	policy := newEventOrphanPolicy(opts)
-	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, %s, events.issue_id, events.issue_uid,
-	                 `+policy.relatedIDExpr()+`, `+policy.relatedUIDExpr()+`,
+	issueIDExpr := `events.issue_id`
+	scrubCondition := policy.scrubCondition(true)
+	var selectArgs []any
+	if opts.ProjectID > 0 {
+		// A scoped export omits moved subjects in other projects. Keep
+		// their UID for history without carrying a dangling local row ID.
+		issueIDExpr = `CASE WHEN subject_issue.id IS NOT NULL AND subject_issue.project_id <> ? THEN NULL ELSE events.issue_id END`
+		// Related references to omitted peers follow the storage exporter:
+		// scrub both fields while retaining the payload's historical UIDs.
+		scrubCondition += ` OR (peer.id IS NOT NULL AND peer.project_id <> ?)`
+		selectArgs = append(selectArgs, opts.ProjectID, opts.ProjectID, opts.ProjectID)
+	}
+	// Moving an issue changes its project, but its earlier events retain
+	// their original project. Resolve the subject by identity alone.
+	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, %s, %s, events.issue_uid,
+	                 CASE WHEN `+scrubCondition+` THEN NULL ELSE events.related_issue_id END,
+	                 CASE WHEN `+scrubCondition+` THEN NULL ELSE events.related_issue_uid END,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
 	                 CAST(events.created_at AS TEXT)
 	          FROM events%s
 	          JOIN projects export_project ON export_project.id = events.project_id
-	          LEFT JOIN issues subject_issue ON subject_issue.project_id = events.project_id
-	               AND (subject_issue.id = events.issue_id OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid))
-	          LEFT JOIN issues peer ON peer.id = events.related_issue_id`, projectNameExpr, joinProjects)
+	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
+	               OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
+	          LEFT JOIN issues peer ON peer.id = events.related_issue_id
+	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)`, projectNameExpr, issueIDExpr, joinProjects)
 	clauses, args := policy.whereClauses(opts)
+	if !opts.IncludeDeleted {
+		// The UID-aware join also resolves soft-deleted federation peers.
+		clauses = append(clauses, `(events.type = 'issue.links_changed' OR peer.deleted_at IS NULL)`)
+	}
+	args = append(selectArgs, args...)
 	clauses = append([]string{policy.subjectLiveClause(true)}, clauses...)
 	query += whereClause(clauses) + ` ORDER BY events.id ASC`
 	rows, err := d.QueryContext(ctx, query, args...)
@@ -2175,9 +2196,13 @@ func newEventOrphanPolicy(opts ExportOptions) eventOrphanPolicy {
 // scrubCondition is true for a peer reference that must not reach the wire:
 // a peer missing entirely (any event type) OR, on live-only export, an
 // issue.links_changed peer that is soft-deleted. Peer-missing is checked
-// first so `peer.deleted_at` never dereferences a NULL row.
-func (p eventOrphanPolicy) scrubCondition() string {
+// first so `peer.deleted_at` never dereferences a NULL row. uidAware is used
+// by the current projection, whose peer join also resolves UID-only references.
+func (p eventOrphanPolicy) scrubCondition(uidAware bool) string {
 	condition := `(peer.id IS NULL AND events.related_issue_id IS NOT NULL)`
+	if uidAware {
+		condition = `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
+	}
 	if !p.includeDeleted {
 		condition += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`
 	}
@@ -2185,29 +2210,24 @@ func (p eventOrphanPolicy) scrubCondition() string {
 }
 
 func (p eventOrphanPolicy) relatedIDExpr() string {
-	return `CASE WHEN ` + p.scrubCondition() + ` THEN NULL ELSE events.related_issue_id END`
+	return `CASE WHEN ` + p.scrubCondition(false) + ` THEN NULL ELSE events.related_issue_id END`
 }
 
 // relatedUIDExpr is not called by the v1 projection: that schema has no
 // related_issue_uid column.
 func (p eventOrphanPolicy) relatedUIDExpr() string {
-	return `CASE WHEN ` + p.scrubCondition() + ` THEN NULL ELSE events.related_issue_uid END`
+	return `CASE WHEN ` + p.scrubCondition(false) + ` THEN NULL ELSE events.related_issue_uid END`
 }
 
-// subjectLiveClause keeps an event whose subject issue is absent from the
-// export out of the output. The two shapes are deliberately different, not an
-// accident of copying: uidAware is the current projection's project-scoped
-// join, which resolves the subject by id OR uid and is soft-delete sensitive
-// on live-only export; the legacy shape matches on issue_id alone and relies
-// on the WHERE half for the soft-delete dimension.
+// subjectLiveClause drops ID-keyed orphans but retains UID-only history whose
+// subject lives elsewhere. The current projection's UID-aware join also lets
+// live-only exports exclude a joined soft-deleted subject. Older projections
+// match only on issue_id and rely on whereClauses for soft-delete filtering.
 func (p eventOrphanPolicy) subjectLiveClause(uidAware bool) string {
-	if !uidAware {
+	if !uidAware || p.includeDeleted {
 		return `(events.issue_id IS NULL OR subject_issue.id IS NOT NULL)`
 	}
-	if p.includeDeleted {
-		return `((events.issue_id IS NULL AND events.issue_uid IS NULL) OR subject_issue.id IS NOT NULL)`
-	}
-	return `((events.issue_id IS NULL AND events.issue_uid IS NULL) OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
+	return `((events.issue_id IS NULL AND subject_issue.id IS NULL) OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 }
 
 // whereClauses returns the individual WHERE clauses (not a joined string like

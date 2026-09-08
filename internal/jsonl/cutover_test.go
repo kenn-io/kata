@@ -29,6 +29,64 @@ func TestAutoCutoverNoopsAtCurrentSchema(t *testing.T) {
 	assertNoCutoverTemps(t, path)
 }
 
+func TestAutoCutoverPreservesMovedIssueHistory(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	source := openCutoverTargetDB(t, ctx, path)
+	from, err := source.CreateProject(ctx, "source-project")
+	require.NoError(t, err)
+	to, err := source.CreateProject(ctx, "destination-project")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: from.ID, Title: "Moved issue", Author: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = source.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{
+		EventType: "issue.labeled", Label: "bug", Actor: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: "Before the move",
+	})
+	require.NoError(t, err)
+	issue, err = source.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = source.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: from.ID, ToProjectID: to.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = source.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: "After the move",
+	})
+	require.NoError(t, err)
+
+	var before []db.EventExport
+	for event, err := range source.ExportEvents(ctx, db.ExportFilter{IncludeDeleted: true}) {
+		require.NoError(t, err)
+		before = append(before, event)
+	}
+	_, err = source.ExecContext(ctx,
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	target, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = target.Close() })
+	var after []db.EventExport
+	for event, err := range target.ExportEvents(ctx, db.ExportFilter{IncludeDeleted: true}) {
+		require.NoError(t, err)
+		after = append(after, event)
+	}
+	assert.Equal(t, before, after, "cutover must preserve event identity, ownership, payload, and timestamps")
+	got, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	assert.Equal(t, to.ID, got.ProjectID)
+}
+
 func TestAutoCutoverRefusesExistingTempFiles(t *testing.T) {
 	ctx, path := setupClosedTestDB(t)
 	require.NoError(t, os.WriteFile(path+".import.tmp.jsonl", []byte("partial"), 0o600))
@@ -37,6 +95,55 @@ func TestAutoCutoverRefusesExistingTempFiles(t *testing.T) {
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, jsonl.ErrCutoverInProgress))
+}
+
+func TestAutoCutoverPreservesUIDOnlyHistory(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	source := openCutoverTargetDB(t, ctx, path)
+	project, err := source.CreateProject(ctx, "source-project")
+	require.NoError(t, err)
+	issue, created, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "History without a local subject", Author: "tester",
+	})
+	require.NoError(t, err)
+	// UID-only history can exist without a local issue, as in a scoped
+	// moved-issue export. It must survive subsequent exports and cutover.
+	_, err = source.ExecContext(ctx, `UPDATE events SET issue_id = NULL WHERE issue_id = ?`, issue.ID)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, issue.ID)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx,
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	for _, includeDeleted := range []bool{false, true} {
+		records := exportAndDecode(ctx, t, source, jsonl.ExportOptions{
+			ProjectID: project.ID, IncludeDeleted: includeDeleted,
+		})
+		var found bool
+		for _, record := range records {
+			if record["kind"] == "event" && record["data"].(map[string]any)["uid"] == created.UID {
+				found = true
+			}
+		}
+		assert.True(t, found, "legacy export must retain UID-only history (include_deleted=%t)", includeDeleted)
+	}
+	require.NoError(t, source.Close())
+
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	target, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = target.Close() })
+	var issueID *int64
+	var issueUID string
+	require.NoError(t, target.QueryRowContext(ctx,
+		`SELECT issue_id, issue_uid FROM events WHERE uid = ?`, created.UID).Scan(&issueID, &issueUID))
+	assert.Nil(t, issueID)
+	assert.Equal(t, issue.UID, issueUID)
+	_, err = target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	assertNoCutoverTemps(t, path)
 }
 
 func TestAutoCutoverFailureLeavesSourceAndRemovesTemps(t *testing.T) {

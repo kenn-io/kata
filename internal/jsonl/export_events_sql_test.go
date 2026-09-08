@@ -61,9 +61,9 @@ func TestEventExportSQLIsPinnedPerVersionBand(t *testing.T) {
 		{"v3_include_deleted", 3, ExportOptions{ProjectID: 7, IncludeDeleted: true}, []any{int64(7)}},
 		{"v8_live_only", 8, ExportOptions{ProjectID: 7}, []any{int64(7)}},
 		{"v8_include_deleted", 8, ExportOptions{ProjectID: 7, IncludeDeleted: true}, []any{int64(7)}},
-		{"current_live_only", db.CurrentSchemaVersion(), ExportOptions{ProjectID: 7}, []any{int64(7)}},
-		{"current_include_deleted", db.CurrentSchemaVersion(), ExportOptions{ProjectID: 7, IncludeDeleted: true}, []any{int64(7)}},
-		{"current_all_projects_live_only", db.CurrentSchemaVersion(), ExportOptions{}, []any{}},
+		{"current_live_only", db.CurrentSchemaVersion(), ExportOptions{ProjectID: 7}, []any{int64(7), int64(7), int64(7), int64(7)}},
+		{"current_include_deleted", db.CurrentSchemaVersion(), ExportOptions{ProjectID: 7, IncludeDeleted: true}, []any{int64(7), int64(7), int64(7), int64(7)}},
+		{"current_all_projects_live_only", db.CurrentSchemaVersion(), ExportOptions{}, nil},
 	}
 
 	for _, tc := range cases {
