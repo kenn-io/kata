@@ -28,15 +28,16 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 	}
 	// Child daemons get only toolchain/OS variables and the test's Kata paths.
 	var childEnv []string
-	allowed := []string{"PATH", "HOME", "USERPROFILE", "SystemRoot", "SYSTEMROOT", "WINDIR", "TMPDIR", "TMP", "TEMP", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOTOOLCHAIN"}
-	for _, key := range allowed {
-		if value, ok := os.LookupEnv(key); ok {
-			childEnv = append(childEnv, key+"="+value)
-		}
-	}
+	allowed := []string{"PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "SYSTEMROOT", "WINDIR", "TMPDIR", "TMP", "TEMP", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOTOOLCHAIN"}
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
-		if !slices.Contains(allowed, key) {
+		lookupKey := key
+		if runtime.GOOS == "windows" {
+			lookupKey = strings.ToUpper(key)
+		}
+		if slices.Contains(allowed, lookupKey) {
+			childEnv = append(childEnv, entry)
+		} else {
 			t.Setenv(key, "")
 		}
 	}
@@ -58,7 +59,7 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 		require.NoError(t, err, "%s", output)
 		binaries[version] = binary
 	}
-	for _, scenario := range []string{"running", "stopped", "check only", "cancelled", "install failure", "restart failure", "read-only TCP"} {
+	for _, scenario := range []string{"running", "stopped", "check only", "cancelled", "install failure", "restart failure", "read-only TCP", "unknown daemon mode"} {
 		t.Run(scenario, func(t *testing.T) {
 			resetFlags(t)
 			fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{CurrentVersion: "v0.1.0", LatestVersion: "v0.2.0"}}}
@@ -92,7 +93,7 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 			})
 			if scenario != "stopped" {
 				args := []string{"daemon", "start", "--foreground"}
-				if scenario == "read-only TCP" {
+				if scenario == "read-only TCP" || scenario == "unknown daemon mode" {
 					args = append(args, "--listen", "127.0.0.1:0", "--insecure-readonly")
 				}
 				process := exec.Command(binary, args...) //nolint:gosec // test-owned binary and fixed arguments
@@ -112,6 +113,12 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				require.Eventually(t, func() bool { return record().PID != 0 }, 10*time.Second, 20*time.Millisecond)
 			}
 			before := record()
+			if scenario == "unknown daemon mode" {
+				// v0.13.0 records contain only db_path, even in read-only mode.
+				before.Metadata = map[string]string{"db_path": before.Metadata["db_path"]}
+				_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(before)
+				require.NoError(t, err)
+			}
 			fake.install = func() error {
 				if scenario == "install failure" {
 					return errors.New("download failed")
@@ -137,6 +144,21 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				return
 			}
 			stdout, stderr, updateErr := executeRootCapture(t, t.Context(), "update", "--yes", "--json")
+			if scenario == "unknown daemon mode" {
+				require.Error(t, updateErr)
+				assert.Contains(t, updateErr.Error(), "installed")
+				assert.Contains(t, updateErr.Error(), "read-only mode")
+				assert.NotEmpty(t, fake.installed)
+				assert.Equal(t, before.PID, record().PID)
+				httpClient, baseURL := client.LocalHTTPClient(before.Endpoint().ConfigAddress())
+				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
+				require.NoError(t, err)
+				assert.Equal(t, http.StatusOK, status)
+				status, _, err = httpDoJSON(t.Context(), httpClient, http.MethodPost, baseURL+"/api/v1/projects", map[string]string{"name": "example-project", "actor": "user-a"})
+				require.NoError(t, err)
+				assert.Equal(t, http.StatusUnauthorized, status)
+				return
+			}
 			if scenario == "restart failure" {
 				require.Error(t, updateErr)
 				assert.Contains(t, updateErr.Error(), "installed")

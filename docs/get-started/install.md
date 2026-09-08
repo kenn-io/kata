@@ -81,7 +81,11 @@ kata update
 replacing the installed binary. After a successful install, it restarts a
 running local daemon with the new binary; a stopped daemon stays stopped.
 If restart fails, the command reports that the binary was installed and returns
-an error. Resolve the reported startup problem, then run `kata daemon restart`.
+an error. Resolve the reported startup problem, then run `kata daemon restart`
+with the daemon's original startup options. If an older daemon does not report
+its read-only mode, the update installs the binary but skips the restart and
+returns an error. Restart it manually, repeating `--listen` and
+`--insecure-readonly` if originally used.
 Reopen `kata ui` to use the replacement daemon's browser address.
 
 Package-managed installations keep

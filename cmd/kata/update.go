@@ -106,10 +106,7 @@ func newUpdateCmd() *cobra.Command {
 					return err
 				}
 			}
-			restart, err := prepareUpdateDaemonRestart(cmd.Context())
-			if err != nil {
-				return fmt.Errorf("prepare daemon restart before update: %w", err)
-			}
+			restart, restartErr := prepareUpdateDaemonRestart(cmd.Context())
 			if err := client.Install(cmd.Context(), info, selfupdate.InstallOptions{}); err != nil {
 				return &cliError{
 					Message:  "install update: " + err.Error(),
@@ -117,12 +114,15 @@ func newUpdateCmd() *cobra.Command {
 					ExitCode: ExitInternal,
 				}
 			}
+			if restartErr != nil {
+				return fmt.Errorf("installed kata %s, but daemon restart was skipped: %w", latestUpdateVersion(info), restartErr)
+			}
 			if restart != nil {
 				// Keep the update's JSON/agent result as a single stdout record.
 				restart.Stdout = cmd.ErrOrStderr()
 				restart.Stderr = cmd.ErrOrStderr()
 				if err := restart.Run(); err != nil {
-					return fmt.Errorf("installed kata %s, but daemon restart failed: %w; run 'kata daemon restart' after resolving the error", latestUpdateVersion(info), err)
+					return fmt.Errorf("installed kata %s, but daemon restart failed: %w; run 'kata daemon restart' with its original startup options after resolving the error", latestUpdateVersion(info), err)
 				}
 			}
 			return printUpdateInstallResult(cmd, info)
@@ -169,9 +169,13 @@ func prepareUpdateDaemonRestart(ctx context.Context) (*exec.Cmd, error) {
 		if endpoint := record.Endpoint(); !endpoint.IsUnix() {
 			args = append(args, "--listen", endpoint.Address)
 		}
-		// Local runtime records advertise polling only for --insecure-readonly.
-		if slices.Contains(strings.Split(record.Metadata["web_capabilities"], ","), "poll") {
+		// Polling identifies --insecure-readonly; SSE identifies its absence.
+		// Missing metadata is not evidence that restarting writable is correct.
+		capabilities := strings.Split(record.Metadata["web_capabilities"], ",")
+		if slices.Contains(capabilities, "poll") {
 			args = append(args, "--insecure-readonly")
+		} else if !slices.Contains(capabilities, "sse") {
+			return nil, fmt.Errorf("running daemon does not report its read-only mode; run 'kata daemon restart' with its original startup options, including --listen and --insecure-readonly if used")
 		}
 		return exec.CommandContext(ctx, destination, args...), nil //nolint:gosec // resolved self-update destination and locally discovered listener, passed without a shell
 	}

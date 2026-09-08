@@ -765,6 +765,10 @@ stays stopped; update checks and failed installs do not restart it. Restart
 output, including the new web UI address, goes to stderr so JSON and agent
 stdout remain a single update result. If restart fails, the command returns an
 error identifying the installed version and directs you to `kata daemon restart`.
+If the running daemon does not report its read-only mode, installation still
+proceeds, but the daemon stays running and the command returns an error explaining
+that automatic restart was skipped. Restart it manually with its original
+startup options, including `--listen` and `--insecure-readonly` if used.
 Remote daemons must be updated on their own hosts.
 
 Local commands auto-start the daemon when appropriate. `daemon start` starts a
