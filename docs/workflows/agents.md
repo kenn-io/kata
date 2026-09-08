@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-27
+last_edited: 2026-09-07
 ---
 
 # Agent workflows
@@ -131,6 +131,15 @@ kata create "fix login race" \
   --agent
 ```
 
+Search results include owner, priority, revision, and a short body excerpt when
+present. Use `kata show <ref> --agent` for the complete record. `list` and
+`show` also report the revision needed for guarded writes.
+
+If creation reports `create_outcome_unknown`, check whether the issue exists
+before retrying. A timeout or lost response does not tell you whether the daemon
+created it. Keep the original idempotency key; use `--force-new` only after
+confirming no issue was created.
+
 Prefer updating existing issues over opening duplicates:
 
 ```sh
@@ -146,12 +155,26 @@ In multi-agent environments, choose one unowned ready issue and claim it:
 
 ```sh
 kata next --unowned --agent
-kata claim abc4 --agent
+kata claim abc4 --if-unowned --agent
 ```
 
 `next` applies the shared priority rules and returns at most one candidate. The
-claim fails if another actor already claimed the issue; treat that as a
-coordination signal and run `next` again.
+`--if-unowned` claim fails if anyone owns the issue, including the same actor.
+This lets workers sharing an identity compete for unowned work. On a conflict,
+run `next` again. Without the flag, claiming an issue you already own succeeds
+as a no-op.
+
+Check the effective identity, issue status, revision, owner, and lease before
+continuing or handing off work:
+
+```sh
+kata status abc4 --agent
+```
+
+Ownership records who is responsible. A federation write lease reserves the
+issue for a holder while the lease is live. They are separate: a local claim
+normally reports `hold=assigned`, without a federation lease. For timed leases,
+see [renewal](../operations/federation.md#leases-and-write-gates).
 
 Use `ready` when you want to inspect a filtered queue instead of choosing one
 issue:
@@ -170,8 +193,13 @@ kata list --all --status open --label handoff --no-label parked --agent
 Release ownership only when you are intentionally giving the work back:
 
 ```sh
-kata unassign abc4 --comment "Releasing; blocked on missing test fixture." --agent
+kata unassign abc4 --expect-owner agent-a \
+  --comment "Releasing; blocked on missing test fixture." --agent
 ```
+
+Use the owner reported by `status` as `--expect-owner`. If ownership changes
+before the command arrives, the unassign fails instead of clearing the new
+owner's assignment.
 
 ## Keep durable notes
 
@@ -213,6 +241,25 @@ kata close abc4 --done \
   --test "make docs-check" \
   --agent
 ```
+
+For a close you may need to retry, add a unique key. To reject changes made
+since your last read, also pass the revision from `kata status` or `kata show`:
+
+```sh
+kata close abc4 --done \
+  --message "Updated the CLI reference and verified docs-check passes." \
+  --commit "$SHA" \
+  --idempotency-key close-abc4-docs \
+  --if-match <revision> \
+  --agent
+```
+
+After a lost response, retry the exact command with the same key and revision.
+For seven days, an exact retry returns the original close result. It also
+avoids duplicate follow-up comments when you use `--comment`. Keep the request
+and comment text unchanged. If the issue changed before the first close,
+`--if-match` returns a conflict; inspect it again before deciding to close.
+See the [CLI close reference](../reference/cli.md#issue-lifecycle).
 
 Close each issue as soon as its work is verified, not in a batch at the end of a
 run. By default the daemon allows sibling close bursts when each close carries

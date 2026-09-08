@@ -108,6 +108,12 @@ response of an older daemon that predates it. Treat an **absent or empty**
 Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
+Kata release 0.17.0 includes API contract changes `0.15.0` through `0.17.0`
+below. API contract versions advance independently of release versions. When
+upgrading a custom client, send array fields as `[]` (or omit optional fields),
+use the exact request field names, and accept empty response collections as
+`[]` or `{}`.
+
 ### Version history
 
 | Version | Change |
@@ -343,6 +349,13 @@ Comments can be appended with `POST
 `PATCH /api/v1/projects/{project_id}/issues/{ref}/comments/{comment_ref}`.
 Use the comment UID as `comment_ref`; numeric comment IDs are local storage
 artifacts.
+
+Send `Idempotency-Key` when creating a comment you may need to retry. For seven
+days, repeating the same issue, actor, body, and key returns the original
+comment. Keys belong to individual issues, so a retry can survive an issue
+move between projects. Reusing the key on that issue with a different actor or
+body returns a conflict. Use the full issue UID to identify the issue across
+moves.
 
 Editing a comment overwrites the current comment body while preserving the
 original author, UID, creation time, and thread position. This is the supported

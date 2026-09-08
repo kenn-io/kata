@@ -194,10 +194,10 @@ Search rows append owner, priority, revision, and a body excerpt when present.
 The excerpt is at most 160 characters and centers the first query match when
 possible, folding case and diacritics like lexical search. `kata show <ref>
 --agent` remains the complete record and emits `Revision:` after `Priority:`.
-List rows append revision after title. Existing row fields keep their names, positions, and
-meanings, so these additions are purely additive and `agent_format` stays `1`.
-A daemon without `[search.embeddings]` always reports `mode=lexical` and never
-sets `degraded=`, so its output is unchanged apart from the appended `mode=`.
+List rows append revision after title. Existing fields keep their names,
+positions, and meanings, so `agent_format` stays `1`.
+A daemon without `[search.embeddings]` reports `mode=lexical` and omits
+`degraded=`. It includes the same added issue context.
 
 #### Single-result `next`
 
@@ -241,7 +241,7 @@ included when present. Their existing ordering and omission rules apply.
 lease state separate on one line:
 
 ```text
-OK status issue=abc4 project=kata issue_status=open revision=4 actor=agent-a actor_source=daemon auth=db_token instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a hold=active holder=agent-a holder_instance=01HZNQ7VFPK1XGD8R5MABCD4AB lease_kind=timed expires_at=2026-09-02T12:30:00Z
+OK status issue=abc4 project=example-project issue_status=open revision=4 actor=agent-a actor_source=daemon auth=db_token instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a hold=active holder=agent-a holder_instance=01HZNQ7VFPK1XGD8R5MABCD4AB lease_kind=timed expires_at=2026-09-02T12:30:00Z
 ```
 
 The fixed field order is `issue`, `project`, `issue_status`, `revision`,

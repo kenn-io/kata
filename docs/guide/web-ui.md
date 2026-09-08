@@ -35,6 +35,12 @@ Release binaries contain the browser assets. A binary installed with
 `go install` does not, because that path does not run the browser build; use a
 [release or `make install`](../get-started/install.md) when you need `kata ui`.
 
+Embedding applications can serve the browser UI below a path such as
+`/tools/tasks/`. Navigation, assets, sessions, API requests, and live updates
+stay below that path. Hosts configure this through
+[`Service.HandlerAt`](../development/embedding.md#mount-below-a-url-path);
+the standalone `kata ui` command keeps its existing route.
+
 ## Navigate projects and collections
 
 The sidebar combines system collections with individual projects:

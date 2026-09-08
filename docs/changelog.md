@@ -1,20 +1,94 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-08-27
+last_edited: 2026-09-07
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
-## Unreleased
+## 0.17.0
+
+kata 0.17.0 helps agents coordinate ownership and retry closes after a lost
+response. CLI commands start faster, simple remote writes need fewer requests,
+and embedding hosts can serve the browser application below a URL path.
+
+**Before upgrading**
+
+- Upgrade remote daemons alongside the CLI. Older daemons reject the project
+  selectors used by the faster remote writes.
+- Update custom API clients for empty collections (`[]` and `{}`),
+  case-sensitive request field names, and rejection of `null` arrays. See the
+  [HTTP API contract](reference/http-api.md#version-history).
+- The SQLite history fix prevents loss during future upgrades. It does not
+  restore history lost during an earlier upgrade. Keep a
+  [backup](operations/backup-restore.md) before upgrading.
+
+**New features**
+
+- Check issue ownership with [`kata status <ref>`](reference/cli.md#issue-lifecycle).
+  It reports the issue's status and revision, your effective identity, the
+  owner, and whether a federation write lease is active, expired, or pending.
+  A lease reserves an issue for a holder while it is live.
+- Extend a timed federation lease without releasing it first with
+  [`kata federation lease renew <issue-ref> --ttl <duration>`](operations/federation.md#leases-and-write-gates).
+  Renewal accepts durations from 60 seconds to 24 hours.
+- Claim an issue only if nobody owns it with `kata claim --if-unowned`. Use
+  `kata unassign --expect-owner <owner>` to remove an assignment only if the
+  owner still matches. See [Claim work](workflows/agents.md#claim-work).
+- Retry an issue close after a lost response with `kata close --idempotency-key`.
+  Reusing the key for the same request returns the original result and avoids
+  duplicate follow-up comments. Add `--if-match` to reject the close if the
+  issue has changed. See [Close only when verified](workflows/agents.md#close-only-when-verified).
+- Mount the browser application below a URL path when
+  [embedding Kata](development/embedding.md#mount-below-a-url-path).
+  Navigation, API requests, sessions, live updates, and assets stay under the
+  selected path.
+- Grant database-backed identity tokens permission to administer connectors
+  and links to external issues with `allow_identity_connector_administration = true`
+  alongside `require_token_identity = true`. This setting defaults to off and
+  grants every active identity token that permission across the daemon. See
+  [Token identity mode](reference/configuration.md#token-identity-mode).
 
 **Improvements**
 
-- Made ordinary API arrays non-null. Empty and nil response slices serialize
-  as `[]`, requests reject `null` for ordinary array fields, and generated Go
-  and TypeScript clients match that contract. JSON object member names are now
-  case-sensitive.
+- Start CLI commands with less delay. In a 200-run cold-start comparison,
+  median time for a validation command fell from 19.8 ms to 8.9 ms.
+- Send simple remote `create`, `edit`, `comment`, and `label add` commands with
+  one HTTP request instead of three. Commands involving relationships still
+  require a separate project lookup. See [Remote daemon](operations/remote-daemon.md).
+- Read more context in `kata search --agent` results, including owner,
+  priority, revision, and a body excerpt. Agent output for `list` and `show`
+  also includes the revision needed for `--if-match` writes. See
+  [Agent output](reference/agent-output.md#reads).
+- Receive empty JSON arrays and objects instead of `null` collections in API
+  responses. Requests now require case-sensitive field names and reject
+  `null` for arrays.
+- Follow the new step-by-step [guide](https://katatracker.com/guide/) or browse
+  [reference documentation](https://katatracker.com/docs/). Existing
+  documentation URLs redirect to their new locations.
+
+**Bug fixes**
+
+- Keep audit history from before an issue move during SQLite upgrades and
+  project-filtered legacy exports. Unexplained missing events stop the upgrade
+  and leave the original database unchanged.
+- Preserve original issue, comment, and relationship authors when adding an
+  existing project to federation across multiple batches, including resumed
+  transfers.
+- Preserve relationship creation dates in new federation snapshots and
+  subsequent rebuilds on SQLite and PostgreSQL. Older snapshots without dates
+  retain their existing behavior.
+- Avoid delaying unrelated PostgreSQL writes by skipping unchanged comments
+  during federation rebuilds.
+- Recognize uncertain issue creation results after timeouts, cancellations,
+  dropped connections, or truncated responses as `create_outcome_unknown`.
+  Check whether the issue exists before retrying, and use `--force-new` only
+  after confirming that no issue was created.
+- Limit similar-issue checks to the first 500 Unicode code points of the title
+  and body, avoiding oversized queries for long issues.
+- Keep comment retries working after an issue moves between projects. Comment
+  idempotency keys now belong to individual issues.
 
 ## 0.16.0
 <small>2026-08-27</small>

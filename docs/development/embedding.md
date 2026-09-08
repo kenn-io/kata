@@ -140,14 +140,23 @@ use `server.ListenAndServeTLS(certFile, keyFile)` with a valid certificate or
 mount the handler behind a TLS-terminating reverse proxy. Never send the bearer
 token over plaintext non-loopback HTTP.
 
-To serve the complete API and browser application below a path, use
-`service.HandlerAt("/tools/tasks")` instead of wrapping `service.Handler()` with
-`http.StripPrefix` yourself. The returned handler redirects the exact path to
-its trailing-slash form and keeps browser assets, deep links, API requests,
-sessions, and event streams below the mount. It returns `404` outside that
-path. The host still owns authentication exactly as described below;
-`HandlerAt` changes routing only. Mounts at `/api` or below it are rejected
-because that namespace belongs to the browser application's API routes.
+## Mount below a URL path
+
+Keep the browser application and API under one path with
+`service.HandlerAt("/tools/tasks")`. Handle its returned error, then mount the
+handler behind the host's authentication middleware. Open `/tools/tasks/` to
+use the application.
+
+The handler redirects `/tools/tasks` to `/tools/tasks/` and keeps navigation,
+assets, API requests, sessions, and live updates below that path. It returns
+`404` outside the mount. Use `HandlerAt` instead of applying `http.StripPrefix`
+to `service.Handler()` yourself.
+
+The mount must be an absolute path without a trailing slash or `.`/`..`
+segments. `/api` and paths below it are reserved for the browser application's
+API routes. `HandlerAt` changes routing only; the host still owns
+[authentication](#authentication-is-explicit).
+
 Standalone `/kata/` redirects to `/kata`, preserving view and filter queries
 so relative assets load from the origin root.
 

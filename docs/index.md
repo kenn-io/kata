@@ -33,6 +33,13 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 ```
 </section>
 
+## New in 0.17.0
+
+Check ownership with `kata status`, claim only unowned work, and retry closes
+with an idempotency key. The [0.17.0 release notes](changelog.md#0170) cover
+these workflows, faster CLI commands, browser embedding below a path, and
+upgrade guidance for remote daemons and custom API clients.
+
 ## Quickstart
 
 ```sh
