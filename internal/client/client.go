@@ -128,6 +128,13 @@ func liveDaemons(ctx context.Context, dataDir string) iter.Seq2[liveDaemon, erro
 				}
 				continue
 			}
+			// A reused PID can keep an old record alive after another daemon
+			// takes over its endpoint. The responding daemon is not this record's
+			// process; keep scanning for its matching record. Do not delete the
+			// PID-named file: startup may have replaced it during the probe.
+			if info.PID != 0 && info.PID != r.PID {
+				continue
+			}
 			candidate := liveDaemon{Record: r, BaseURL: url, Info: info}
 			if ep.IsUnix() {
 				candidate.UnixSocket = ep.Address
