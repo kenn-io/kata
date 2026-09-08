@@ -585,6 +585,40 @@ func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {
 	assert.Equal(t, replacementURL, url)
 }
 
+func TestEnsureRunningStartsAfterLegacyDaemonExits(t *testing.T) {
+	tmp := setupKataEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	unrelated, _ := startLongLivedTestProcess(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "service": "kata", "version": currentVersionForEnsure(), "pid": os.Getpid(),
+		})
+	}))
+	t.Cleanup(server.Close)
+	address := strings.TrimPrefix(server.URL, "http://")
+	// This legacy record predates the unrelated process now holding its PID.
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: unrelated.Process.Pid, Address: address, StartedAt: time.Unix(1, 0),
+	})
+	require.NoError(t, err)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), address))
+	_, found, err := Discover(context.Background(), ns.DataDir)
+	require.NoError(t, err)
+	require.True(t, found)
+
+	// The real daemon exits normally; the stale legacy record remains.
+	server.Close()
+	path, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(path))
+	state := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+	url, err := EnsureLocalRunning(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "http://new-daemon", url)
+	assert.Equal(t, 1, state.startCalls)
+}
+
 func TestDaemonDiscoverySkipsReusedPIDAtSameEndpoint(t *testing.T) {
 	for _, staleFirst := range []bool{true, false} {
 		t.Run(fmt.Sprintf("staleFirst=%t", staleFirst), func(t *testing.T) {
