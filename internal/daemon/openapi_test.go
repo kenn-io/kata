@@ -287,12 +287,6 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsNonNullArrays(t *testing.T) {
-	if APISchemaVersion != "0.16.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.16.0 for non-null API arrays", APISchemaVersion)
-	}
-}
-
 func TestOpenAPIDocumentOrdinarySlicesAreNonNullable(t *testing.T) {
 	doc := OpenAPIDocument()
 	for schemaName, propertyName := range map[string]string{

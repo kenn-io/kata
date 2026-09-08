@@ -19,7 +19,7 @@ func registerLabelsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "addLabel",
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/labels",
-	}, addLabelHandler(cfg))
+	}, withResolvedProject(cfg, addLabelHandler(cfg)))
 
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "removeLabel",

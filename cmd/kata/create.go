@@ -88,14 +88,16 @@ func newCreateCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		baseURL, err := ensureDaemon(ctx)
+		a, err := dialDaemon(ctx)
 		if err != nil {
 			return err
 		}
-		projectID, projectName, err := resolveProjectIDAndName(ctx, baseURL, start)
+		withLinks := len(parentRefSlice)+len(blocks)+len(blockedBy)+len(related) > 0
+		project, err := prepareProjectMutation(a, start, withLinks)
 		if err != nil {
 			return err
 		}
+		projectName := project.name
 		body, err := resolveBody(src, cmd.InOrStdin())
 		if err != nil {
 			code := ExitValidation
@@ -105,10 +107,6 @@ func newCreateCmd() *cobra.Command {
 			return &cliError{Message: err.Error(), Kind: kindForExit(code), ExitCode: code}
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
-		client, err := httpClientFor(ctx, baseURL)
-		if err != nil {
-			return err
-		}
 
 		req := map[string]any{"actor": actor, "title": title, "body": body}
 		if cmd.Flags().Changed("owner") {
@@ -169,14 +167,9 @@ func newCreateCmd() *cobra.Command {
 			headers["Idempotency-Key"] = idempotencyKey
 		}
 
-		status, bs, err := httpDoJSONWithHeader(ctx, client, http.MethodPost,
-			fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, projectID),
-			headers, req)
+		bs, err := project.mutate(http.MethodPost, "/issues", req, headers)
 		if err != nil {
 			return createRequestError(err, forceNew)
-		}
-		if status >= 400 {
-			return apiErrFromBody(status, bs)
 		}
 		// The /issues create response doesn't carry a `changes` block (it
 		// lives on the PATCH path). Synthesize one from the resolved
@@ -186,7 +179,7 @@ func newCreateCmd() *cobra.Command {
 		// direction (`--blocked-by` adding to `blocked_by_added` rather
 		// than `blocks_added`) preserves the user's POV.
 		applied := initialLinksAsChanges(parentRef, blocksRefs, blockedByRefs, relatedRefs)
-		return printMutationWithApplied(cmd, bs, applied, projectName)
+		return printMutationWithApplied(cmd, bs, applied, project.name)
 	}
 	return cmd
 }

@@ -84,6 +84,29 @@ If none of those are set, clients next honor `active_daemon` in
 `<KATA_HOME>/config.toml`; otherwise they use local daemon discovery or
 auto-start.
 
+Ordinary remote CLI commands send their API requests without a preliminary
+ping. Refused connections still report `daemon_unavailable` (exit code 7).
+Explicit health and discovery commands continue to probe the selected daemon.
+
+With API `0.17.0` or later, simple `create`, `edit`, `comment`, and `label add`
+commands also resolve the project within the mutation, so each needs only one
+HTTP request. Relationship flags retain their separate project resolution and
+any necessary target checks. Path-only workspaces still use the explicit
+resolve endpoint; `--comment` adds its own comment request after the mutation.
+Upgrade the remote daemon with the CLI: older daemons reject named project
+selectors rather than silently performing a different operation.
+
+When a mutation resolves a renamed workspace through its alias, the CLI repairs
+`.kata.toml` from the successful response. If that local repair fails, the CLI
+reports `workspace_repair_failed` and states that the mutation succeeded. Fix
+the binding without repeating the mutation.
+
+Bare issue references and ULIDs use the workspace alias, including after a
+project rename or merge. An explicit `--project` or qualified issue reference
+selects that project name instead and does not repair the workspace binding.
+Relationship-bearing edits resolve the alias and repair the binding before
+submitting the mutation, because their link checks need canonical identity.
+
 To inspect the endpoint selected by those rules, including its transport and
 canonical request URL, run:
 

@@ -485,7 +485,7 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		body.Owner = &input.Owner
 	}
 	response, err := h.options.Client.CreateIssue(ctx, &generated.CreateIssueRequestOptions{
-		PathParams: &generated.CreateIssuePath{ProjectID: project.ID},
+		PathParams: &generated.CreateIssuePath{ProjectID: strconv.FormatInt(project.ID, 10)},
 		Body:       &body,
 		Header:     &generated.CreateIssueHeaders{IdempotencyKey: &key},
 	})
@@ -559,7 +559,7 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	}
 	if hasIssueEdit {
 		response, editErr := h.options.Client.EditIssue(ctx, &generated.EditIssueRequestOptions{
-			PathParams: &generated.EditIssuePath{ProjectID: project.ID, Ref: ref},
+			PathParams: &generated.EditIssuePath{ProjectID: strconv.FormatInt(project.ID, 10), Ref: ref},
 			Body:       &body,
 		})
 		if editErr != nil {
@@ -617,7 +617,7 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 		return nil, CommentOutput{}, errors.New("idempotency_key must not be empty")
 	}
 	response, err := h.options.Client.CreateComment(ctx, &generated.CreateCommentRequestOptions{
-		PathParams: &generated.CreateCommentPath{ProjectID: project.ID, Ref: ref},
+		PathParams: &generated.CreateCommentPath{ProjectID: strconv.FormatInt(project.ID, 10), Ref: ref},
 		Body:       &generated.CreateCommentBody{Actor: &h.options.Actor, Body: input.Body},
 		Header:     &generated.CreateCommentHeaders{IdempotencyKey: &key},
 	})
@@ -662,7 +662,7 @@ func (h toolHandlers) setLabel(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	}
 	if input.Present {
 		response, err := h.options.Client.AddLabel(ctx, &generated.AddLabelRequestOptions{
-			PathParams: &generated.AddLabelPath{ProjectID: project.ID, Ref: ref},
+			PathParams: &generated.AddLabelPath{ProjectID: strconv.FormatInt(project.ID, 10), Ref: ref},
 			Body:       &generated.AddLabelBody{Actor: &h.options.Actor, Label: label},
 		})
 		if err != nil {

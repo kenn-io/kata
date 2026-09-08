@@ -96,12 +96,14 @@ func newEditCmd() *cobra.Command {
 			}
 		}
 
-		// Resolve the URL issue early so we have ctx/baseURL/pid available
-		// to resolve link-target refs (short_id, qualified short_id, or ULID).
-		ctx, baseURL, pid, issue, err := resolveIssueRefForCommand(cmd, args[0])
+		// Relationship checks need canonical identity before submission.
+		// Ordinary edits resolve the project inside the mutation instead.
+		withLinks := len(parentRefSlice)+len(removeParentRefSlice)+len(blocks)+len(blockedBy)+len(related)+len(removeBlocks)+len(removeBlockedBy)+len(removeRelated) > 0
+		project, issue, err := prepareIssueMutation(cmd, args[0], withLinks)
 		if err != nil {
 			return err
 		}
+		ctx, baseURL, pid := project.api.ctx, project.api.baseURL, project.id
 
 		// --parent and --remove-parent are at-most-one but accept any of
 		// short_id, qualified ("other#abc4"), or ULID. singletonRefToWire
@@ -148,23 +150,14 @@ func newEditCmd() *cobra.Command {
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
 		payload["actor"] = actor
-		client, err := httpClientFor(ctx, baseURL)
+		bs, err := project.mutate(http.MethodPatch, "/issues/"+url.PathEscape(issue.RefForAPI), payload, nil)
 		if err != nil {
 			return err
 		}
-		status, bs, err := httpDoJSON(ctx, client, http.MethodPatch,
-			fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, pid, url.PathEscape(issue.RefForAPI)),
-			payload)
-		if err != nil {
+		if err := project.comment(bs, issue.RefForAPI, actor, comment); err != nil {
 			return err
 		}
-		if status >= 400 {
-			return apiErrFromBody(status, bs)
-		}
-		if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
-			return err
-		}
-		return printMutationWithApplied(cmd, bs, nil, issue.ProjectName)
+		return printMutationWithApplied(cmd, bs, nil, project.name)
 	}
 	return cmd
 }

@@ -187,6 +187,7 @@ type remoteResolutionMode int
 const (
 	remoteEndpointOnly remoteResolutionMode = iota
 	remoteWithCredentials
+	remoteRequestTarget
 )
 
 func resolveRemoteSelection(
@@ -199,7 +200,7 @@ func resolveRemoteSelection(
 			return ResolvedDaemon{}, false,
 				fmt.Errorf("KATA_SERVER %q: %w", remoteURLForError(value), err)
 		}
-		if !probeRemote(ctx, baseURL) {
+		if mode != remoteRequestTarget && !probeRemote(ctx, baseURL) {
 			return ResolvedDaemon{}, false,
 				fmt.Errorf("%w: %s (KATA_SERVER)", ErrRemoteUnavailable, baseURL)
 		}
@@ -207,7 +208,7 @@ func resolveRemoteSelection(
 			DaemonSourceServerEnv, "", remoteRunningDaemon(baseURL, true),
 		)
 		resolved.AllowInsecure = allowInsecure
-		if mode == remoteWithCredentials {
+		if mode != remoteEndpointOnly {
 			resolved = resolved.withGlobalAuth()
 		}
 		return resolved, true, nil
@@ -235,7 +236,7 @@ func resolveRemoteSelection(
 		return ResolvedDaemon{}, false,
 			fmt.Errorf("%s server.url %q: %w", path, remoteURLForError(cfg.Server.URL), err)
 	}
-	if !probeRemote(ctx, baseURL) {
+	if mode != remoteRequestTarget && !probeRemote(ctx, baseURL) {
 		return ResolvedDaemon{}, false,
 			fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, baseURL, path)
 	}
@@ -243,7 +244,7 @@ func resolveRemoteSelection(
 		DaemonSourceLocalConfig, "", remoteRunningDaemon(baseURL, true),
 	)
 	resolved.AllowInsecure = cfg.Server.AllowInsecure
-	if mode == remoteWithCredentials {
+	if mode != remoteEndpointOnly {
 		resolved = resolved.withGlobalAuth()
 	}
 	return resolved, true, nil
@@ -257,13 +258,13 @@ func resolveActiveRemoteSelection(
 		return ResolvedDaemon{}, false, err
 	}
 	token := target.Token
-	if mode == remoteWithCredentials && !globalAuthTokenOverrideSet() {
+	if mode != remoteEndpointOnly && !globalAuthTokenOverrideSet() {
 		token, err = resolveActiveRemoteTargetToken(target)
 		if err != nil {
 			return ResolvedDaemon{}, false, err
 		}
 	}
-	if !probeRemote(ctx, target.BaseURL) {
+	if mode != remoteRequestTarget && !probeRemote(ctx, target.BaseURL) {
 		return ResolvedDaemon{}, false, fmt.Errorf("%w: %s (%s active_daemon %q)",
 			ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), target.Name)
 	}
@@ -271,7 +272,7 @@ func resolveActiveRemoteSelection(
 		DaemonSourceActiveDaemon, target.Name, remoteRunningDaemon(target.BaseURL, true),
 	)
 	resolved.AllowInsecure = target.AllowInsecure
-	if mode == remoteWithCredentials {
+	if mode != remoteEndpointOnly {
 		resolved = resolved.withRemoteTargetAuth(token, target.AllowInsecure)
 	}
 	return resolved, true, nil
@@ -291,6 +292,7 @@ type namedResolutionMode int
 const (
 	namedDiscoverOnly namedResolutionMode = iota
 	namedEnsureRunning
+	namedRequestTarget
 )
 
 func buildNamedDaemonTarget(
@@ -310,7 +312,7 @@ func buildNamedDaemonTarget(
 		}
 		if d.Local {
 			var running RunningDaemon
-			if mode == namedEnsureRunning {
+			if mode != namedDiscoverOnly {
 				running, err = EnsureLocalRunningTarget(ctx)
 			} else {
 				var ns *daemon.Namespace
@@ -339,7 +341,7 @@ func buildNamedDaemonTarget(
 		if err != nil {
 			return namedDaemonTarget{}, false, err
 		}
-		if !probeRemote(ctx, target.BaseURL) {
+		if mode != namedRequestTarget && !probeRemote(ctx, target.BaseURL) {
 			return namedDaemonTarget{}, false, fmt.Errorf("%w: %s (%s daemon %q)",
 				ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), d.Name)
 		}
@@ -349,7 +351,11 @@ func buildNamedDaemonTarget(
 }
 
 func resolveNamedDaemon(ctx context.Context, name string) (ResolvedDaemon, error) {
-	target, ok, err := buildNamedDaemonTarget(ctx, name, namedEnsureRunning)
+	return resolveNamedDaemonMode(ctx, name, namedEnsureRunning)
+}
+
+func resolveNamedDaemonMode(ctx context.Context, name string, mode namedResolutionMode) (ResolvedDaemon, error) {
+	target, ok, err := buildNamedDaemonTarget(ctx, name, mode)
 	if err != nil {
 		return ResolvedDaemon{}, err
 	}

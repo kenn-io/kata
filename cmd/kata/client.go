@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -38,7 +40,7 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 	return d
 }
 
-// ensureDaemonResolved discovers a live daemon, auto-starting one if none is
+// ensureDaemonResolved selects a daemon, auto-starting a local one if none is
 // found, and carries the source, credentials, and transport policy selected by
 // that resolution. Client construction consumes this value without deriving
 // policy again from its base URL.
@@ -47,19 +49,18 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 // the .kata.local.toml walk so a workspace-local [server] override is
 // honored even when the user is invoking kata from outside the repo.
 //
-// If a daemon is explicitly configured (via --daemon, KATA_SERVER,
-// .kata.local.toml, or active_daemon) but does not respond, the CLI surfaces
-// this as a daemon-unavailable error so callers see a stable exit code and shape.
+// Configured remotes are not pinged before ordinary API requests. Discovery
+// and health commands use discoverDaemonResolved when liveness is the result.
 func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	if flags.Daemon != "" {
-		resolved, err := client.EnsureResolvedNamed(ctx, flags.Daemon)
+		resolved, err := client.PrepareResolvedNamed(ctx, flags.Daemon)
 		if err != nil {
 			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 		}
 		return resolved, nil
 	}
 	workspaceStart := workspaceStartForRemote()
-	resolved, err := client.EnsureResolvedInWorkspace(ctx, workspaceStart)
+	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStart)
 	if err != nil {
 		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 	}
@@ -188,18 +189,26 @@ func cliDaemonTargetError(err error) error {
 // CLI command site is already named for it.
 func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	workspaceStart := workspaceStartForRemote()
-	return client.NewHTTPClient(ctx, baseURL, client.Opts{
+	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
 		Timeout:        envHTTPTimeout(defaultHTTPTimeout),
 		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart), //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(baseURL, hc)
 }
 
 func httpClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
-	return client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
+	hc, err := client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
 		Timeout: envHTTPTimeout(defaultHTTPTimeout),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(resolved.BaseURL, hc)
 }
 
 // longRunningClientFor builds a variant with no overall Client.Timeout for
@@ -207,22 +216,30 @@ func httpClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) 
 // legitimately take longer than the default CLI request budget.
 func longRunningClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	workspaceStart := workspaceStartForRemote()
-	return client.NewHTTPClient(ctx, baseURL, client.Opts{
+	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
 		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart), //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(baseURL, hc)
 }
 
 func longRunningClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
-	return client.NewHTTPClientForResolved(ctx, resolved, client.Opts{})
+	hc, err := client.NewHTTPClientForResolved(ctx, resolved, client.Opts{})
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(resolved.BaseURL, hc)
 }
 
 // streamingClientFor builds the SSE-friendly variant. Body cancellation comes
 // from the request context.
 func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	workspaceStart := workspaceStartForRemote()
-	return client.NewHTTPClient(ctx, baseURL, client.Opts{
+	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
 		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
 		AllowInsecure: client.RemoteAllowInsecureForBaseURL( //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 			baseURL, workspaceStart,
@@ -230,12 +247,60 @@ func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, erro
 		WorkspaceStart: workspaceStart,
 		DaemonName:     flags.Daemon,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(baseURL, hc)
 }
 
 func streamingClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
-	return client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
+	hc, err := client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
 		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return markDaemonHTTPClient(resolved.BaseURL, hc)
+}
+
+// Embed the operation error to preserve net.Error timeout behavior through
+// net/http's url.Error. Retain the full cause for diagnostics and unwrapping.
+type daemonDialError struct {
+	*net.OpError
+	cause error
+}
+
+func (e *daemonDialError) Error() string { return e.cause.Error() }
+func (e *daemonDialError) Unwrap() error { return e.cause }
+
+// Only clients built for the selected daemon mark its dial failures. Hub
+// clients and requests redirected to other origins retain their own errors.
+func markDaemonHTTPClient(baseURL string, hc *http.Client) (*http.Client, error) {
+	origin, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	transport := hc.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	hc.Transport = daemonErrorTransport{RoundTripper: transport, origin: origin}
+	return hc, nil
+}
+
+type daemonErrorTransport struct {
+	http.RoundTripper
+	origin *url.URL
+}
+
+func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.RoundTripper.RoundTrip(req)
+	if req.URL.Scheme == t.origin.Scheme && req.URL.Host == t.origin.Host {
+		if op, ok := errors.AsType[*net.OpError](err); ok && op.Op == "dial" {
+			return resp, &daemonDialError{OpError: op, cause: err}
+		}
+	}
+	return resp, err
 }
 
 // daemonAPI is a resolved connection to one daemon: the base URL, the

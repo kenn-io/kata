@@ -3,6 +3,6 @@
  */
 
 export type CreateCommentPathParameters = {
-  projectId: number
+  projectId: string
   ref: string
 }
