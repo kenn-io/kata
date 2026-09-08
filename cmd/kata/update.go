@@ -188,9 +188,10 @@ func printUpdateInstallResult(cmd *cobra.Command, info *selfupdate.Info) error {
 	out := cmd.OutOrStdout()
 	current := currentUpdateVersion(info)
 	latest := latestUpdateVersion(info)
+	var err error
 	switch currentOutputMode() {
 	case outputAgent:
-		_, err := fmt.Fprintf(out, "OK update installed=true current=%s latest=%s\n",
+		_, err = fmt.Fprintf(out, "OK update installed=true current=%s latest=%s\n",
 			agentValue(current), agentValue(latest))
 		return err
 	case outputJSON:
@@ -203,13 +204,18 @@ func printUpdateInstallResult(cmd *cobra.Command, info *selfupdate.Info) error {
 			"asset_name":       info.AssetName,
 			"is_dev_build":     info.IsDevBuild,
 		}
-		if err := emitJSON(&buf, payload); err != nil {
+		if err = emitJSON(&buf, payload); err != nil {
 			return err
 		}
-		_, err := fmt.Fprint(out, buf.String())
+		_, err = fmt.Fprint(out, buf.String())
 		return err
 	default:
-		_, err := fmt.Fprintf(out, "installed kata %s\n", latest)
+		if _, err = fmt.Fprintf(out, "installed kata %s\n", latest); err != nil {
+			return err
+		}
+		if current != latest {
+			_, err = fmt.Fprint(out, "\nRun 'kata daemon restart' to use the newly installed version\n")
+		}
 		return err
 	}
 }
