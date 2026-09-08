@@ -13,7 +13,6 @@ import (
 	"iter"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -131,17 +130,9 @@ func liveDaemons(ctx context.Context, dataDir string) iter.Seq2[liveDaemon, erro
 			}
 			// A reused PID can keep an old record alive after another daemon
 			// takes over its endpoint. The responding daemon is not this record's
-			// process. Remove the stale record so it cannot appear unreachable
-			// after the responding daemon shuts down during a version restart.
+			// process; keep scanning for its matching record. Do not delete the
+			// PID-named file: startup may have replaced it during the probe.
 			if info.PID != 0 && info.PID != r.PID {
-				recordPath, err := (kitdaemon.RuntimeStore{Dir: dataDir}).Path(r.PID)
-				if err == nil {
-					err = os.Remove(recordPath)
-				}
-				if err != nil && !errors.Is(err, os.ErrNotExist) {
-					yield(liveDaemon{}, fmt.Errorf("remove stale daemon record for pid %d: %w", r.PID, err))
-					return
-				}
 				continue
 			}
 			candidate := liveDaemon{Record: r, BaseURL: url, Info: info}

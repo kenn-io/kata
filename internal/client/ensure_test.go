@@ -553,6 +553,38 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	assert.Equal(t, ns.DBHash, signaledDBHash)
 }
 
+func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {
+	tmp := setupKataEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	other, _ := startLongLivedTestProcess(t)
+	replacementURL, replacementAddress := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": currentVersionForEnsure(), "pid": os.Getpid(),
+	})
+	published := make(chan error, 1)
+	oldServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Startup publishes a fresh record at the reused PID path while
+		// discovery is waiting for the old endpoint's response.
+		_, writeErr := store.Write(kitdaemon.NewRuntimeRecord("kata", currentVersionForEnsure(),
+			kitdaemon.Endpoint{Network: "tcp", Address: replacementAddress}))
+		published <- writeErr
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "service": "kata", "version": "old-version", "pid": other.Process.Pid,
+		})
+	}))
+	t.Cleanup(oldServer.Close)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), strings.TrimPrefix(oldServer.URL, "http://")))
+
+	_, _, err = Discover(context.Background(), ns.DataDir)
+	require.NoError(t, err)
+	require.NoError(t, <-published)
+	url, found, err := Discover(context.Background(), ns.DataDir)
+	require.NoError(t, err)
+	require.True(t, found, "the newly published daemon must remain discoverable")
+	assert.Equal(t, replacementURL, url)
+}
+
 func TestDaemonDiscoverySkipsReusedPIDAtSameEndpoint(t *testing.T) {
 	for _, staleFirst := range []bool{true, false} {
 		t.Run(fmt.Sprintf("staleFirst=%t", staleFirst), func(t *testing.T) {
