@@ -1577,7 +1577,7 @@ func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 	}
 	policy := newEventOrphanPolicy(opts)
 	issueIDExpr := `events.issue_id`
-	scrubCondition := policy.scrubCondition()
+	scrubCondition := policy.scrubCondition(true)
 	var selectArgs []any
 	if opts.ProjectID > 0 {
 		// A scoped export omits moved subjects in other projects. Keep
@@ -1599,8 +1599,13 @@ func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 	          JOIN projects export_project ON export_project.id = events.project_id
 	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
 	               OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
-	          LEFT JOIN issues peer ON peer.id = events.related_issue_id`, projectNameExpr, issueIDExpr, joinProjects)
+	          LEFT JOIN issues peer ON peer.id = events.related_issue_id
+	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)`, projectNameExpr, issueIDExpr, joinProjects)
 	clauses, args := policy.whereClauses(opts)
+	if !opts.IncludeDeleted {
+		// The UID-aware join also resolves soft-deleted federation peers.
+		clauses = append(clauses, `(events.type = 'issue.links_changed' OR peer.deleted_at IS NULL)`)
+	}
 	args = append(selectArgs, args...)
 	clauses = append([]string{policy.subjectLiveClause(true)}, clauses...)
 	query += whereClause(clauses) + ` ORDER BY events.id ASC`
@@ -2191,9 +2196,13 @@ func newEventOrphanPolicy(opts ExportOptions) eventOrphanPolicy {
 // scrubCondition is true for a peer reference that must not reach the wire:
 // a peer missing entirely (any event type) OR, on live-only export, an
 // issue.links_changed peer that is soft-deleted. Peer-missing is checked
-// first so `peer.deleted_at` never dereferences a NULL row.
-func (p eventOrphanPolicy) scrubCondition() string {
+// first so `peer.deleted_at` never dereferences a NULL row. uidAware is used
+// by the current projection, whose peer join also resolves UID-only references.
+func (p eventOrphanPolicy) scrubCondition(uidAware bool) string {
 	condition := `(peer.id IS NULL AND events.related_issue_id IS NOT NULL)`
+	if uidAware {
+		condition = `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
+	}
 	if !p.includeDeleted {
 		condition += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`
 	}
@@ -2201,13 +2210,13 @@ func (p eventOrphanPolicy) scrubCondition() string {
 }
 
 func (p eventOrphanPolicy) relatedIDExpr() string {
-	return `CASE WHEN ` + p.scrubCondition() + ` THEN NULL ELSE events.related_issue_id END`
+	return `CASE WHEN ` + p.scrubCondition(false) + ` THEN NULL ELSE events.related_issue_id END`
 }
 
 // relatedUIDExpr is not called by the v1 projection: that schema has no
 // related_issue_uid column.
 func (p eventOrphanPolicy) relatedUIDExpr() string {
-	return `CASE WHEN ` + p.scrubCondition() + ` THEN NULL ELSE events.related_issue_uid END`
+	return `CASE WHEN ` + p.scrubCondition(false) + ` THEN NULL ELSE events.related_issue_uid END`
 }
 
 // subjectLiveClause keeps an event whose subject issue is absent from the
