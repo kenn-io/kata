@@ -1,11 +1,32 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-09-07
+last_edited: 2026-09-08
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
+
+## 0.17.2
+<small>Unreleased</small>
+
+**Bug fixes**
+
+- Commands such as `kata tui` no longer fail during daemon upgrades or later
+  startup when the operating system reuses an old daemon's process ID for
+  another process.
+
+## 0.17.1
+<small>2026-09-08</small>
+
+**Bug fixes**
+
+- Restore the complete release downloads, including Homebrew archives, Debian
+  and RPM packages, and a source archive with the dependencies and web assets
+  needed to build Kata offline.
+
+This release contains the same application code as 0.17.0. It repairs release
+packaging and includes the finalized 0.17.0 documentation.
 
 ## 0.17.0
 
