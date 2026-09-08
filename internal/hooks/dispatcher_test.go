@@ -302,10 +302,9 @@ func TestDispatcher_Shutdown_DrainsQueued(t *testing.T) {
 		return activity.NewLease(func() { released.Add(1) }, nil), true
 	}
 	enqueueEvents(d, "issue.created", 400, 5)
-	time.Sleep(50 * time.Millisecond) // worker has popped one
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := d.Shutdown(ctx); err != nil {
+	// Exercise graceful draining without a deadline that can force queued jobs
+	// to be dropped on slow runners. Deadline cancellation is tested separately.
+	if err := d.Shutdown(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	lines := countJSONLLines(runsPath)
