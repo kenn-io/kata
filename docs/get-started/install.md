@@ -86,6 +86,11 @@ with the daemon's original startup options. If an older daemon does not report
 its read-only mode, the update installs the binary but skips the restart and
 returns an error. Restart it manually, repeating `--listen` and
 `--insecure-readonly` if originally used.
+
+Automatic restart also requires the updater to have the daemon's authentication
+credentials, if needed. Run the update from the same environment or restart the
+daemon manually from its original environment. Auto-started daemons retain
+their effective idle-shutdown timeout.
 Reopen `kata ui` to use the replacement daemon's browser address.
 
 Package-managed installations keep

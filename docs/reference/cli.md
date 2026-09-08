@@ -760,8 +760,13 @@ manager instead. Ordinary archives retain the self-installing update behavior.
 
 After installing an update, `kata update` restarts a running daemon in the
 current local Kata home and database namespace through the newly installed
-binary. It retains the running TCP listener and read-only mode. A stopped daemon
-stays stopped; update checks and failed installs do not restart it. Restart
+binary. It retains the running TCP listener, read-only mode, and effective
+auto-start idle timeout. Before restarting, it checks the running daemon's
+protected instance endpoint using the replacement's configured token. If that
+check fails, the binary is installed but the daemon stays running; the command
+returns an error so you can restart from the original daemon environment.
+
+A stopped daemon stays stopped; update checks and failed installs do not restart it. Restart
 output, including the new web UI address, goes to stderr so JSON and agent
 stdout remain a single update result. If restart fails, the command returns an
 error identifying the installed version and directs you to `kata daemon restart`.

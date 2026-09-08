@@ -59,7 +59,7 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 		require.NoError(t, err, "%s", output)
 		binaries[version] = binary
 	}
-	for _, scenario := range []string{"running", "stopped", "check only", "cancelled", "install failure", "restart failure", "read-only TCP", "unknown daemon mode"} {
+	for _, scenario := range []string{"running", "stopped", "check only", "cancelled", "install failure", "restart failure", "read-only TCP", "unknown daemon mode", "missing daemon token", "shared daemon token", "idle shutdown"} {
 		t.Run(scenario, func(t *testing.T) {
 			resetFlags(t)
 			fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{CurrentVersion: "v0.1.0", LatestVersion: "v0.2.0"}}}
@@ -72,6 +72,16 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 			updateExecutable = func() (string, error) { return binary, nil }
 			t.Cleanup(func() { updateExecutable = originalExecutable })
 			env := append(append([]string(nil), childEnv...), "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"), "KATA_WORKSPACE="+workspace, "KATA_AUTHOR=user-a")
+			if scenario == "missing daemon token" || scenario == "shared daemon token" {
+				env = append(env, "KATA_AUTH_TOKEN=fixture-token")
+				if scenario == "shared daemon token" {
+					t.Setenv("KATA_AUTH_TOKEN", "fixture-token")
+				}
+			}
+			if scenario == "idle shutdown" {
+				// Neither the auto-start marker nor the timeout is in the updater's environment.
+				env = append(env, "KATA_AUTOSTART=1", "KATA_AUTOSTART_IDLE_TIMEOUT=10s")
+			}
 			ns, err := daemon.NewNamespace()
 			require.NoError(t, err)
 			record := func() kitdaemon.RuntimeRecord {
@@ -93,8 +103,11 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 			})
 			if scenario != "stopped" {
 				args := []string{"daemon", "start", "--foreground"}
-				if scenario == "read-only TCP" || scenario == "unknown daemon mode" {
+				switch scenario {
+				case "read-only TCP", "unknown daemon mode":
 					args = append(args, "--listen", "127.0.0.1:0", "--insecure-readonly")
+				case "missing daemon token", "shared daemon token":
+					args = append(args, "--listen", "127.0.0.1:0")
 				}
 				process := exec.Command(binary, args...) //nolint:gosec // test-owned binary and fixed arguments
 				process.Env = env
@@ -144,6 +157,21 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				return
 			}
 			stdout, stderr, updateErr := executeRootCapture(t, t.Context(), "update", "--yes", "--json")
+			if scenario == "missing daemon token" {
+				require.Error(t, updateErr)
+				assert.Contains(t, updateErr.Error(), "installed")
+				assert.Contains(t, updateErr.Error(), "authentication")
+				assert.NotEmpty(t, fake.installed)
+				assert.Equal(t, before.PID, record().PID)
+				httpClient, baseURL := client.LocalHTTPClient(before.Endpoint().ConfigAddress())
+				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/projects", nil)
+				require.NoError(t, err)
+				assert.Equal(t, http.StatusUnauthorized, status)
+				status, _, err = httpDoJSONHeaders(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/projects", nil, map[string]string{"Authorization": "Bearer fixture-token"})
+				require.NoError(t, err)
+				assert.Equal(t, http.StatusOK, status)
+				return
+			}
 			if scenario == "unknown daemon mode" {
 				require.Error(t, updateErr)
 				assert.Contains(t, updateErr.Error(), "installed")
@@ -190,6 +218,18 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 			status, _, err := httpDoJSON(t.Context(), httpClient, "GET", baseURL+"/api/v1/ping", nil)
 			require.NoError(t, err)
 			assert.Equal(t, 200, status)
+			if scenario == "shared daemon token" {
+				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/projects", nil)
+				require.NoError(t, err)
+				assert.Equal(t, http.StatusUnauthorized, status)
+				status, _, err = httpDoJSONHeaders(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/projects", nil, map[string]string{"Authorization": "Bearer fixture-token"})
+				require.NoError(t, err)
+				assert.Equal(t, http.StatusOK, status)
+			}
+			if scenario == "idle shutdown" {
+				// Observe the actual exit without sending requests that reset the idle timer.
+				require.Eventually(t, func() bool { return record().PID == 0 }, 20*time.Second, 50*time.Millisecond)
+			}
 			if scenario == "read-only TCP" {
 				assert.Equal(t, before.Address, after.Address)
 				// Anonymous read-only mode must survive the automatic restart.

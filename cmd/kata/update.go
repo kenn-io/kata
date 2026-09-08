@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/version"
@@ -177,7 +180,45 @@ func prepareUpdateDaemonRestart(ctx context.Context) (*exec.Cmd, error) {
 		} else if !slices.Contains(capabilities, "sse") {
 			return nil, fmt.Errorf("running daemon does not report its read-only mode; run 'kata daemon restart' with its original startup options, including --listen and --insecure-readonly if used")
 		}
-		return exec.CommandContext(ctx, destination, args...), nil //nolint:gosec // resolved self-update destination and locally discovered listener, passed without a shell
+		cfg, err := config.ReadDaemonConfig()
+		if err != nil {
+			return nil, err
+		}
+		httpClient, baseURL := client.LocalHTTPClient(record.Endpoint().ConfigAddress())
+		httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		defer httpClient.CloseIdleConnections()
+		// Health is public, so use the protected instance endpoint to check that
+		// the updater has the credential needed by the running daemon. Never
+		// copy credentials out of another process's environment or runtime file.
+		headers := make(map[string]string)
+		if cfg.Auth.Token != "" {
+			headers["Authorization"] = "Bearer " + cfg.Auth.Token
+		}
+		status, _, err := httpDoJSONHeaders(ctx, httpClient, http.MethodGet, baseURL+"/api/v1/instance", nil, headers)
+		if err != nil {
+			return nil, fmt.Errorf("check daemon authentication: %w", err)
+		}
+		if status != http.StatusOK {
+			return nil, fmt.Errorf("cannot verify daemon authentication with the update environment (HTTP %d); restart manually from the original daemon environment", status)
+		}
+		status, body, err := httpDoJSON(ctx, httpClient, http.MethodGet, baseURL+"/api/v1/health", nil)
+		if err != nil {
+			return nil, fmt.Errorf("check daemon idle shutdown: %w", err)
+		}
+		if status != http.StatusOK {
+			return nil, fmt.Errorf("check daemon idle shutdown: HTTP %d", status)
+		}
+		var health daemonAPIHealth
+		if err := json.Unmarshal(body, &health); err != nil {
+			return nil, fmt.Errorf("decode daemon idle shutdown: %w", err)
+		}
+		restart := exec.CommandContext(ctx, destination, args...) //nolint:gosec // resolved self-update destination and locally discovered listener, passed without a shell
+		restart.Env = withoutEnvironmentKey(os.Environ(), daemon.AutoStartMarkerEnv)
+		if health.IdleShutdown != nil {
+			restart.Env = append(withoutEnvironmentKey(restart.Env, "KATA_AUTOSTART_IDLE_TIMEOUT"),
+				daemon.AutoStartMarkerEnv+"=1", "KATA_AUTOSTART_IDLE_TIMEOUT="+health.IdleShutdown.Timeout)
+		}
+		return restart, nil
 	}
 	return nil, nil
 }
