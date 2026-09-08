@@ -278,7 +278,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 		targets = append(targets, candidate.Record)
 	}
 	if len(targets) == 0 {
-		return nil
+		return unreachable
 	}
 	// Finish discovery before signaling: a stale record may share a target's
 	// endpoint, and its mismatch is only observable while that endpoint is up.

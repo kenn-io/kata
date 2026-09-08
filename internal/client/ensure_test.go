@@ -386,13 +386,41 @@ func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, cmd.Process.Pid, "127.0.0.1:1"))
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
-	require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash))
+	require.ErrorIs(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash), ErrLocalDaemonUnreachable)
 
 	select {
 	case err := <-waitCh:
 		t.Fatalf("unverified runtime PID was signaled; process exited with %v", err)
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+func TestEnsureLocalRunningDoesNotStartWhenRestartProbeFails(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	var probes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if probes.Add(1) > 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "service": "kata", "version": "old-version", "pid": os.Getpid(),
+		})
+	}))
+	t.Cleanup(server.Close)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), strings.TrimPrefix(server.URL, "http://")))
+	origStart := startDaemonForEnsure
+	startCalls := 0
+	startDaemonForEnsure = func(context.Context, string) (RunningDaemon, error) {
+		startCalls++
+		return RunningDaemon{}, nil
+	}
+	t.Cleanup(func() { startDaemonForEnsure = origStart })
+
+	_, err := EnsureLocalRunning(context.Background())
+	assert.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Zero(t, startCalls)
 }
 
 func TestNewHTTPClientWithoutAuthSkipsDeadRuntimeRecords(t *testing.T) {
