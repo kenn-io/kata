@@ -22,6 +22,8 @@ projects. Before replacing the database, it checks the imported event count
 against the source, allowing only orphan-event drops identified by preflight.
 An unexplained difference stops startup with `cutover event count mismatch`
 and leaves the source database unchanged. Preserve that database for diagnosis.
+The 0.17.0 fix protects future upgrades; it does not restore events lost during
+an earlier upgrade. Recovering those events requires a backup that contains them.
 
 ## Full backup
 
@@ -121,6 +123,11 @@ kata import --input backups/example-project.jsonl \
 
 This is useful for archiving one project, handing history to a collaborator who
 will set up a fresh kata install, or moving one project to another host.
+
+When exporting a legacy SQLite database, project filtering keeps audit events
+in their original project even if the issue later moved elsewhere. References
+to rows outside the export are removed, while issue UIDs retain the historical
+identity. Use a full backup when you need history from every project.
 
 Links may span projects, and a scoped export only contains the named project's
 issues. A fresh restore or project merge skips links whose peer is outside the

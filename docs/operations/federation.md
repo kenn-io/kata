@@ -512,7 +512,11 @@ projects that share links must use the same hub URL origin; different DNS names
 or IP aliases are intentionally separate federation groups. Adoption snapshot
 event actors are the bound federation actor. Snapshot payload authors and
 comment authors are preserved, so adopted issues keep their original displayed
-content authors.
+content authors. New snapshots also preserve relationship creation dates through
+rebuilds on SQLite and PostgreSQL. Older snapshots without those dates keep
+their existing insertion-time behavior; Kata does not invent missing dates.
+PostgreSQL rebuilds skip unchanged comments so they do not delay unrelated
+writes by rewriting the same rows.
 
 > **Preserving the pre-adoption timeline:** Adoption is a cutover, not an
 > in-place history merge. If you need the old local event timeline for audit or
@@ -722,6 +726,18 @@ issue, non-comment mutations are denied until the lease is released or expires.
 Comment creation and comment body edits bypass leases because they remain
 comment-level collaboration and maintenance actions rather than leased issue
 work.
+
+Check the owner and current lease with `kata status <issue-ref> --agent`.
+To keep a timed lease you already hold, renew it before it expires:
+
+```sh
+kata federation lease renew abc4 --ttl 30m
+```
+
+Renewal keeps the same lease and sets its expiry to 30 minutes from the hub's
+current time. It does not add 30 minutes to the old expiry. The duration must
+be a whole number followed by `s`, `m`, or `h`, from `60s` through `24h`
+inclusive. A lease without an expiry does not need timed renewal.
 
 Spokes refresh cached lease state before checking exclusivity when online.
 When offline, cached hard leases can still be used as a continuity hint, but

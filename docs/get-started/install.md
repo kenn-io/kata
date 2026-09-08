@@ -85,6 +85,20 @@ owning package manager. Packagers can read the complete
 remains supported, and building from a clone is still useful for development
 builds.
 
+## Upgrading to 0.17.0
+
+Upgrade the remote daemon alongside the CLI. Simple remote writes now select
+the project in the write request, and older daemons reject those selectors.
+See [remote command behavior](../operations/remote-daemon.md).
+
+Custom API clients must use case-sensitive request field names, send `[]`
+instead of `null` for arrays, and accept empty response collections as `[]` or
+`{}`. See the [HTTP API contract](../reference/http-api.md#version-history).
+
+Keep a [backup](../operations/backup-restore.md) before upgrading. The SQLite
+fix preserves moved-issue history during future upgrades; it cannot restore
+history lost during an earlier upgrade.
+
 ## Install with `go install`
 
 ```sh

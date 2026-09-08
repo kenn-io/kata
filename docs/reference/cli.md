@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-02
+last_edited: 2026-09-07
 ---
 
 # CLI reference
@@ -143,7 +143,7 @@ including closed ones, using the first 500 Unicode code points of the title
 and body. `--force-new` bypasses that check; idempotency still wins
 when an idempotency key matches. If create times out, the request is canceled
 or the connection drops before the response arrives, or the response is cut
-off before it completes, its outcome is unknown: check whether
+off before it completes, the CLI reports `create_outcome_unknown`: check whether
 the issue exists before retrying, and use `--force-new` only after confirming
 that no issue was created.
 
@@ -166,9 +166,9 @@ kata search <query> [--label LABEL] [--no-label LABEL]
 
 `kata show --render` renders Markdown only in issue descriptions and comment
 bodies. Headers, status, claims, labels, links, and metadata remain literal so
-the surrounding issue record stays predictable. The built-in renderer is
-Glamour. Set `KATA_COLOR_MODE=light` or `KATA_COLOR_MODE=dark` to give code
-blocks a background suited to the terminal theme. In the default `auto` mode,
+the surrounding issue record stays predictable. Set `KATA_COLOR_MODE=light`
+or `KATA_COLOR_MODE=dark` to give code blocks a background suited to the
+terminal theme. In the default `auto` mode,
 the one-shot CLI cannot safely determine background brightness, so it leaves
 the code-block background unset instead of guessing. `NO_COLOR` still removes
 rendered color through kata's normal output profile.
@@ -178,7 +178,7 @@ pipelines, including `kata show <issue-ref> --render | less -R`, intentionally
 remain plain text. This version has no force-render option for non-terminal
 output.
 
-`kata status` gives agents a compact view of the daemon identity, effective
+`kata status` reports the issue status and revision, daemon identity, effective
 actor, issue owner, and federation lease. Its `hold` value is `active`,
 `expired`, `pending`, `assigned`, `unassigned`, or `closed`. `assigned` means
 the open issue has an owner without a live or pending lease, which is the
@@ -309,7 +309,9 @@ kata close <ref> --done --message <text> \
 `--idempotency-key` makes a close safe to retry after a lost response. For
 seven days, an exact retry returns the original `issue.closed` event through
 `original_event` and does not close the issue again. Reusing the key with a
-different issue, actor, close payload, or revision returns a conflict.
+different issue, actor, close payload, or revision returns a conflict. The CLI
+also uses the key for its follow-up `--comment`, so an exact retry does not
+post the comment twice. Keep the comment text unchanged when retrying.
 
 `--if-match` accepts `7` or `rev-7`. The daemon checks that revision inside the
 close transaction and returns a revision conflict when it has changed. An
@@ -921,7 +923,8 @@ Issue edits on push-enabled federated spokes remain local-first; use
 issue. A live lease held by another actor blocks non-comment mutations until it
 is released or expires. Renew a timed lease before it expires with
 `kata federation lease renew <issue-ref> --ttl <duration>`. Renewal preserves
-the lease identity and sets a new expiry from the hub's current time.
+the lease identity and sets a new expiry from the hub's current time. Use a
+whole number followed by `s`, `m`, or `h`, from `60s` through `24h` inclusive.
 
 `kata federation quarantine list` reports every active quarantine with its
 project, direction, event range, creation time, and retained error. Use

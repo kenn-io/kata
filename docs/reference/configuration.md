@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-29
+last_edited: 2026-09-07
 ---
 
 # Configuration
@@ -146,7 +146,7 @@ allow_insecure = true
 `[display]` belongs to the client reading `<KATA_HOME>/config.toml`. It is not
 sent to a remote daemon and does not change daemon rendering or API responses.
 
-`kata show --render` uses built-in Glamour rendering when no override is set.
+`kata show --render` uses the built-in terminal Markdown renderer by default.
 To use an external stdin/stdout renderer instead:
 
 ```toml
