@@ -6,12 +6,18 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/version"
+	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/selfupdate"
 )
 
@@ -46,6 +52,8 @@ var newSelfUpdateClient = func(current string) (updateClient, error) {
 var updateInfoNeedsRefetch = func(info *selfupdate.Info) bool {
 	return info.NeedsRefetch()
 }
+
+var updateExecutable = os.Executable
 
 func newUpdateCmd() *cobra.Command {
 	var checkOnly bool
@@ -98,11 +106,23 @@ func newUpdateCmd() *cobra.Command {
 					return err
 				}
 			}
+			restart, err := prepareUpdateDaemonRestart(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("prepare daemon restart before update: %w", err)
+			}
 			if err := client.Install(cmd.Context(), info, selfupdate.InstallOptions{}); err != nil {
 				return &cliError{
 					Message:  "install update: " + err.Error(),
 					Kind:     kindInternal,
 					ExitCode: ExitInternal,
+				}
+			}
+			if restart != nil {
+				// Keep the update's JSON/agent result as a single stdout record.
+				restart.Stdout = cmd.ErrOrStderr()
+				restart.Stderr = cmd.ErrOrStderr()
+				if err := restart.Run(); err != nil {
+					return fmt.Errorf("installed kata %s, but daemon restart failed: %w; run 'kata daemon restart' after resolving the error", latestUpdateVersion(info), err)
 				}
 			}
 			return printUpdateInstallResult(cmd, info)
@@ -112,6 +132,50 @@ func newUpdateCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "force a fresh update check")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install without prompting")
 	return cmd
+}
+
+// Capture the installed executable's destination before Install replaces it.
+// On Linux, os.Executable may refer to a deleted inode after replacement. Run
+// restart through the new binary so validation and startup use the new code.
+func prepareUpdateDaemonRestart(ctx context.Context) (*exec.Cmd, error) {
+	ns, err := daemon.NewNamespace()
+	if err != nil {
+		return nil, err
+	}
+	records, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range records {
+		if !daemon.RuntimeProcessAlive(record) {
+			continue
+		}
+		executable, err := updateExecutable()
+		if err != nil {
+			return nil, err
+		}
+		executable, err = filepath.EvalSymlinks(executable)
+		if err != nil {
+			return nil, err
+		}
+		// Match selfupdate.Client's default destination, including installations
+		// invoked through a symlink or a differently named executable.
+		name := "kata"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		destination := filepath.Join(filepath.Dir(executable), name)
+		args := []string{"daemon", "restart"}
+		if endpoint := record.Endpoint(); !endpoint.IsUnix() {
+			args = append(args, "--listen", endpoint.Address)
+		}
+		// Local runtime records advertise polling only for --insecure-readonly.
+		if slices.Contains(strings.Split(record.Metadata["web_capabilities"], ","), "poll") {
+			args = append(args, "--insecure-readonly")
+		}
+		return exec.CommandContext(ctx, destination, args...), nil //nolint:gosec // resolved self-update destination and locally discovered listener, passed without a shell
+	}
+	return nil, nil
 }
 
 func printUpdateSummary(cmd *cobra.Command, info *selfupdate.Info) error {
