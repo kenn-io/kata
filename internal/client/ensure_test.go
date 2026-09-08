@@ -553,6 +553,52 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	assert.Equal(t, ns.DBHash, signaledDBHash)
 }
 
+func TestDaemonDiscoverySkipsReusedPIDAtSameEndpoint(t *testing.T) {
+	for _, staleFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("staleFirst=%t", staleFirst), func(t *testing.T) {
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			tmp := setupKataEnv(t)
+			unrelated, _ := startLongLivedTestProcess(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok": true, "service": "kata", "version": "old-version", "pid": os.Getpid(),
+				})
+			}))
+			t.Cleanup(server.Close)
+			addr := strings.TrimPrefix(server.URL, "http://")
+			require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
+			ns, err := daemon.NewNamespace()
+			require.NoError(t, err)
+			startedAt := time.Now().Add(time.Hour)
+			if staleFirst {
+				startedAt = time.Now().Add(-time.Hour)
+			}
+			// An old record has no process identity, and its PID now belongs
+			// to another live process. Both records point at the current daemon.
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+				PID: unrelated.Process.Pid, Address: addr, StartedAt: startedAt,
+			})
+			require.NoError(t, err)
+
+			found, err := discoverForEnsure(context.Background(), ns.DataDir)
+			require.NoError(t, err)
+			require.Equal(t, os.Getpid(), found.Daemon.Record.PID)
+
+			origSignal := signalDaemonStopForEnsure
+			var signaled []int
+			signalDaemonStopForEnsure = func(rec kitdaemon.RuntimeRecord, _ string) error {
+				signaled = append(signaled, rec.PID)
+				server.Close()
+				return os.Remove(filepath.Join(ns.DataDir, fmt.Sprintf("daemon.%d.json", rec.PID)))
+			}
+			t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+
+			require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash))
+			assert.Equal(t, []int{os.Getpid()}, signaled)
+		})
+	}
+}
+
 func TestStopRunningDaemonsReportsUnreachableDaemonRemainingAfterSignal(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	tmp := setupKataEnv(t)
