@@ -386,13 +386,41 @@ func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, cmd.Process.Pid, "127.0.0.1:1"))
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
-	require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash))
+	require.ErrorIs(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash), ErrLocalDaemonUnreachable)
 
 	select {
 	case err := <-waitCh:
 		t.Fatalf("unverified runtime PID was signaled; process exited with %v", err)
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+func TestEnsureLocalRunningDoesNotStartWhenRestartProbeFails(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	var probes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if probes.Add(1) > 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "service": "kata", "version": "old-version", "pid": os.Getpid(),
+		})
+	}))
+	t.Cleanup(server.Close)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), strings.TrimPrefix(server.URL, "http://")))
+	origStart := startDaemonForEnsure
+	startCalls := 0
+	startDaemonForEnsure = func(context.Context, string) (RunningDaemon, error) {
+		startCalls++
+		return RunningDaemon{}, nil
+	}
+	t.Cleanup(func() { startDaemonForEnsure = origStart })
+
+	_, err := EnsureLocalRunning(context.Background())
+	assert.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Zero(t, startCalls)
 }
 
 func TestNewHTTPClientWithoutAuthSkipsDeadRuntimeRecords(t *testing.T) {
@@ -551,6 +579,118 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash))
 	assert.Equal(t, os.Getpid(), signaled.PID)
 	assert.Equal(t, ns.DBHash, signaledDBHash)
+}
+
+func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {
+	tmp := setupKataEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	other, _ := startLongLivedTestProcess(t)
+	replacementURL, replacementAddress := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": currentVersionForEnsure(), "pid": os.Getpid(),
+	})
+	published := make(chan error, 1)
+	oldServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Startup publishes a fresh record at the reused PID path while
+		// discovery is waiting for the old endpoint's response.
+		_, writeErr := store.Write(kitdaemon.NewRuntimeRecord("kata", currentVersionForEnsure(),
+			kitdaemon.Endpoint{Network: "tcp", Address: replacementAddress}))
+		published <- writeErr
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "service": "kata", "version": "old-version", "pid": other.Process.Pid,
+		})
+	}))
+	t.Cleanup(oldServer.Close)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), strings.TrimPrefix(oldServer.URL, "http://")))
+
+	_, _, err = Discover(context.Background(), ns.DataDir)
+	require.NoError(t, err)
+	require.NoError(t, <-published)
+	url, found, err := Discover(context.Background(), ns.DataDir)
+	require.NoError(t, err)
+	require.True(t, found, "the newly published daemon must remain discoverable")
+	assert.Equal(t, replacementURL, url)
+}
+
+func TestEnsureRunningStartsAfterLegacyDaemonExits(t *testing.T) {
+	tmp := setupKataEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	unrelated, _ := startLongLivedTestProcess(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true, "service": "kata", "version": currentVersionForEnsure(), "pid": os.Getpid(),
+		})
+	}))
+	t.Cleanup(server.Close)
+	address := strings.TrimPrefix(server.URL, "http://")
+	// This legacy record predates the unrelated process now holding its PID.
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: unrelated.Process.Pid, Address: address, StartedAt: time.Unix(1, 0),
+	})
+	require.NoError(t, err)
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), address))
+	_, found, err := Discover(context.Background(), ns.DataDir)
+	require.NoError(t, err)
+	require.True(t, found)
+
+	// The real daemon exits normally; the stale legacy record remains.
+	server.Close()
+	path, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(path))
+	state := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+	url, err := EnsureLocalRunning(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "http://new-daemon", url)
+	assert.Equal(t, 1, state.startCalls)
+}
+
+func TestDaemonDiscoverySkipsReusedPIDAtSameEndpoint(t *testing.T) {
+	for _, staleFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("staleFirst=%t", staleFirst), func(t *testing.T) {
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			tmp := setupKataEnv(t)
+			unrelated, _ := startLongLivedTestProcess(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok": true, "service": "kata", "version": "old-version", "pid": os.Getpid(),
+				})
+			}))
+			t.Cleanup(server.Close)
+			addr := strings.TrimPrefix(server.URL, "http://")
+			require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
+			ns, err := daemon.NewNamespace()
+			require.NoError(t, err)
+			startedAt := time.Now().Add(time.Hour)
+			if staleFirst {
+				startedAt = time.Now().Add(-time.Hour)
+			}
+			// An old record has no process identity, and its PID now belongs
+			// to another live process. Both records point at the current daemon.
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+				PID: unrelated.Process.Pid, Address: addr, StartedAt: startedAt,
+			})
+			require.NoError(t, err)
+
+			found, err := discoverForEnsure(context.Background(), ns.DataDir)
+			require.NoError(t, err)
+			require.Equal(t, os.Getpid(), found.Daemon.Record.PID)
+
+			origSignal := signalDaemonStopForEnsure
+			var signaled []int
+			signalDaemonStopForEnsure = func(rec kitdaemon.RuntimeRecord, _ string) error {
+				signaled = append(signaled, rec.PID)
+				server.Close()
+				return os.Remove(filepath.Join(ns.DataDir, fmt.Sprintf("daemon.%d.json", rec.PID)))
+			}
+			t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+
+			require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash))
+			assert.Equal(t, []int{os.Getpid()}, signaled)
+		})
+	}
 }
 
 func TestStopRunningDaemonsReportsUnreachableDaemonRemainingAfterSignal(t *testing.T) {

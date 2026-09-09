@@ -1,6 +1,12 @@
 package daemon
 
-import kitdaemon "go.kenn.io/kit/daemon"
+import (
+	"math"
+	"time"
+
+	"github.com/shirou/gopsutil/v4/process"
+	kitdaemon "go.kenn.io/kit/daemon"
+)
 
 // RuntimeRestartMetadataKey marks a runtime record whose daemon re-executes
 // itself, with its own arguments and environment, when it receives the
@@ -9,13 +15,30 @@ import kitdaemon "go.kenn.io/kit/daemon"
 const RuntimeRestartMetadataKey = "restart_signal"
 
 // RuntimeProcessAlive reports whether a runtime record still identifies the
-// process that created it. Records without a verifiable identity retain the
-// legacy PID-only behavior; a definite identity mismatch is stale.
+// process that created it. For legacy records without an identity, a process
+// created after the record was published proves that the PID has been reused.
 func RuntimeProcessAlive(record kitdaemon.RuntimeRecord) bool {
-	if !kitdaemon.ProcessAlive(record.PID) {
+	if record.PID <= 0 || record.PID > math.MaxInt32 || !kitdaemon.ProcessAlive(record.PID) {
 		return false
 	}
-	return kitdaemon.CompareRuntimeProcessIdentity(record) != kitdaemon.ProcessIdentityMismatch
+	switch kitdaemon.CompareRuntimeProcessIdentity(record) {
+	case kitdaemon.ProcessIdentityMatch:
+		return true
+	case kitdaemon.ProcessIdentityMismatch:
+		return false
+	}
+	if record.StartedAt.IsZero() {
+		return true
+	}
+	proc, err := process.NewProcess(int32(record.PID))
+	if err != nil {
+		return true
+	}
+	created, err := proc.CreateTime()
+	if err != nil || created <= 0 {
+		return true
+	}
+	return !time.UnixMilli(created).After(record.StartedAt)
 }
 
 // RuntimeRecordRestartable reports whether the record's daemon handles the

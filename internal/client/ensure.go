@@ -258,10 +258,12 @@ func daemonVersionCompatible(info PingInfo) bool {
 }
 
 func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
-	signaled := false
+	var targets []kitdaemon.RuntimeRecord
+	var unreachable error
 	for candidate, err := range liveDaemons(ctx, dataDir) {
 		if err != nil {
 			if errors.Is(err, ErrLocalDaemonUnreachable) {
+				unreachable = err
 				continue
 			}
 			return err
@@ -273,22 +275,40 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 		if candidate.Info.PID == 0 || candidate.Info.PID != candidate.Record.PID {
 			return fmt.Errorf("daemon at %s is running but its PID could not be verified; stop it manually", address)
 		}
-		if err := signalDaemonStopForEnsure(candidate.Record, dbhash); err != nil {
-			return fmt.Errorf("stop old daemon pid %d: %w", candidate.Record.PID, err)
-		}
-		signaled = true
+		targets = append(targets, candidate.Record)
 	}
-	if !signaled {
-		return nil
+	if len(targets) == 0 {
+		return unreachable
+	}
+	// Finish discovery before signaling: a stale record may share a target's
+	// endpoint, and its mismatch is only observable while that endpoint is up.
+	for _, record := range targets {
+		if err := signalDaemonStopForEnsure(record, dbhash); err != nil {
+			return fmt.Errorf("stop old daemon pid %d: %w", record.PID, err)
+		}
+	}
+	if unreachable != nil {
+		return unreachable
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		found, err := discoverForEnsure(ctx, dataDir)
-		if err != nil {
-			return err
+		// Wait only for verified targets. Reprobing every runtime file here
+		// would turn ignored stale records into unreachable-daemon errors as
+		// soon as the real daemon closes its listener.
+		running := false
+		for _, record := range targets {
+			if !daemon.RuntimeProcessAlive(record) {
+				continue
+			}
+			if _, err := os.Stat(record.SourcePath); errors.Is(err, os.ErrNotExist) {
+				continue
+			} else if err != nil {
+				return fmt.Errorf("check stopping daemon pid %d: %w", record.PID, err)
+			}
+			running = true
 		}
-		if found.Outcome == daemonScanNone {
+		if !running {
 			return nil
 		}
 		select {

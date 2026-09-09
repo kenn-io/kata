@@ -283,14 +283,17 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
 	started := time.Now().Add(-52*time.Minute - 33*time.Second)
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		PID:       os.Getpid(),
-		Network:   "tcp",
-		Address:   "127.0.0.1:7777",
-		Version:   "v-test-status",
-		StartedAt: started,
-		Metadata:  map[string]string{"web_origin": "http://127.0.0.1:28888"},
+		ProcessIdentityV2: identity,
+		PID:               os.Getpid(),
+		Network:           "tcp",
+		Address:           "127.0.0.1:7777",
+		Version:           "v-test-status",
+		StartedAt:         started,
+		Metadata:          map[string]string{"web_origin": "http://127.0.0.1:28888"},
 	})
 	require.NoError(t, err)
 
@@ -310,11 +313,14 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
 	started := time.Date(2026, 5, 4, 1, 2, 3, 0, time.UTC)
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		PID:     os.Getpid(),
-		Network: "unix",
-		Address: "/tmp/kata-test.sock",
+		ProcessIdentityV2: identity,
+		PID:               os.Getpid(),
+		Network:           "unix",
+		Address:           "/tmp/kata-test.sock",
 		Metadata: map[string]string{
 			"db_path":    filepath.Join(tmp, "kata.db"),
 			"web_origin": "http://127.0.0.1:28888",
@@ -355,14 +361,17 @@ func TestDaemonStatus_JSONReportsDBPathFromKitRuntimeMetadata(t *testing.T) {
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
 	started := time.Date(2026, 5, 4, 1, 2, 3, 0, time.UTC)
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		PID:       os.Getpid(),
-		Network:   "unix",
-		Address:   "/tmp/kata-test.sock",
-		Service:   "kata",
-		Version:   "v-test-status",
-		StartedAt: started,
+		ProcessIdentityV2: identity,
+		PID:               os.Getpid(),
+		Network:           "unix",
+		Address:           "/tmp/kata-test.sock",
+		Service:           "kata",
+		Version:           "v-test-status",
+		StartedAt:         started,
 		Metadata: map[string]string{
 			"db_path": filepath.Join(tmp, "kata.db"),
 		},
