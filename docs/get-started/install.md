@@ -78,20 +78,18 @@ kata update
 ```
 
 `kata update` verifies the downloaded archive against `SHA256SUMS` before
-replacing the installed binary. After a successful install, it restarts a
-running local daemon with the new binary; a stopped daemon stays stopped.
-If restart fails, the command reports that the binary was installed and returns
-an error. Resolve the reported startup problem, then run `kata daemon restart`
-with the daemon's original startup options. If an older daemon does not report
-its read-only mode, the update installs the binary but skips the restart and
-returns an error. Restart it manually, repeating `--listen` and
-`--insecure-readonly` if originally used.
+replacing the installed binary. After a successful install, it asks a running
+local daemon to restart itself through the new binary. The daemon restarts
+with its own startup options and environment, so `--listen`,
+`--insecure-readonly`, authentication tokens, and the auto-start idle timeout
+carry over without the updater knowing them. A stopped daemon stays stopped.
+Reopen `kata ui` if the daemon used an ephemeral port, because the replacement
+binds a new one.
 
-Automatic restart also requires the updater to have the daemon's authentication
-credentials, if needed. Run the update from the same environment or restart the
-daemon manually from its original environment. Auto-started daemons retain
-their effective idle-shutdown timeout.
-Reopen `kata ui` to use the replacement daemon's browser address.
+If the daemon does not come back, or it predates automatic restart, the
+command reports that the binary was installed and returns an error. Resolve
+any reported startup problem, then run `kata daemon restart` with the daemon's
+original startup options.
 
 Package-managed installations keep
 `kata update --check`, but install-capable update forms direct you back to the

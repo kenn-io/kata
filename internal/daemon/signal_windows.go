@@ -21,6 +21,12 @@ func ReloadEventName(dbhash string, pid int) string {
 	return fmt.Sprintf(`Local\kata-reload-%s-%d`, dbhash, pid)
 }
 
+// RestartEventName is the named-event endpoint a Windows daemon creates so
+// another kata process can request that it re-execute itself.
+func RestartEventName(dbhash string, pid int) string {
+	return fmt.Sprintf(`Local\kata-restart-%s-%d`, dbhash, pid)
+}
+
 // SignalDaemonStop asks a running daemon to shut down gracefully.
 func SignalDaemonStop(rec kitdaemon.RuntimeRecord, dbhash string) error {
 	return setNamedEvent(StopEventName(dbhash, rec.PID))
@@ -29,6 +35,12 @@ func SignalDaemonStop(rec kitdaemon.RuntimeRecord, dbhash string) error {
 // SignalDaemonReload asks a running daemon to reload hook configuration.
 func SignalDaemonReload(rec kitdaemon.RuntimeRecord, dbhash string) error {
 	return setNamedEvent(ReloadEventName(dbhash, rec.PID))
+}
+
+// SignalDaemonRestart asks a running daemon to start a replacement with its
+// own arguments and environment, then exit.
+func SignalDaemonRestart(rec kitdaemon.RuntimeRecord, dbhash string) error {
+	return setNamedEvent(RestartEventName(dbhash, rec.PID))
 }
 
 func setNamedEvent(name string) error {

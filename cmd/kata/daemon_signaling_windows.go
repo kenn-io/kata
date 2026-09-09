@@ -17,10 +17,11 @@ import (
 //
 //	Local\kata-stop-<dbhash>-<pid>     — set by `kata daemon stop`
 //	Local\kata-reload-<dbhash>-<pid>   — set by `kata daemon reload`
+//	Local\kata-restart-<dbhash>-<pid>  — set by `kata update`
 //
 // The daemon creates the events at startup, waits on them in goroutines,
-// and translates a fire into ctx cancel (stop) or a synthetic reload fed
-// to the existing reload loop.
+// and translates a fire into ctx cancel (stop) or a synthetic signal fed
+// to the reload loop or restart watcher.
 
 // installStopWatcher creates the stop event for this daemon process and
 // spawns a goroutine that waits on it. When the event fires (and we are
@@ -59,17 +60,28 @@ func installStopWatcher(dbhash string, cancel context.CancelFunc) daemonPlatform
 	}
 }
 
-type syntheticReloadSignal struct{}
+type syntheticSignal string
 
-func (syntheticReloadSignal) String() string { return "reload" }
-func (syntheticReloadSignal) Signal()        {}
+func (s syntheticSignal) String() string { return string(s) }
+func (syntheticSignal) Signal()          {}
 
 // installReloadSource creates the reload event and pumps a private synthetic
 // signal onto the returned channel each time it fires, so the existing
 // runReloadLoop machinery works unchanged.
 func installReloadSource(ctx context.Context, dbhash string) (<-chan os.Signal, daemonPlatformCleanup) {
+	return installNamedEventSource(ctx, daemon.ReloadEventName(dbhash, os.Getpid()), syntheticSignal("reload"))
+}
+
+// installRestartSource creates the restart event set by `kata update`.
+func installRestartSource(ctx context.Context, dbhash string) (<-chan os.Signal, daemonPlatformCleanup) {
+	return installNamedEventSource(ctx, daemon.RestartEventName(dbhash, os.Getpid()), syntheticSignal("restart"))
+}
+
+// installNamedEventSource creates a manual-reset named event and pumps sig
+// onto the returned channel each time the event fires.
+func installNamedEventSource(ctx context.Context, name string, sig os.Signal) (<-chan os.Signal, daemonPlatformCleanup) {
 	sigs := make(chan os.Signal, 1)
-	namePtr, err := windows.UTF16PtrFromString(daemon.ReloadEventName(dbhash, os.Getpid()))
+	namePtr, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		return sigs, func(context.Context) bool { return true }
 	}
@@ -95,7 +107,7 @@ func installReloadSource(ctx context.Context, dbhash string) (<-chan os.Signal, 
 			}
 			_ = windows.ResetEvent(h)
 			select {
-			case sigs <- syntheticReloadSignal{}:
+			case sigs <- sig:
 			default:
 			}
 		}
