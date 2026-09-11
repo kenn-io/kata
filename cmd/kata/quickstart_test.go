@@ -22,6 +22,9 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, "kata next --unowned --agent")
 	assert.Contains(t, out, "kata ready --unowned --label bug --no-label blocked --agent")
 	assert.Contains(t, out, `kata events --after 0 --limit 100 --agent`)
+	assert.Contains(t, out, "kata notify <ref> --to <actor> --message")
+	assert.Contains(t, out, "kata inbox --for <actor>")
+	assert.Contains(t, out, "kata notify <ref> --to <actor> --clear")
 }
 
 func TestQuickstart_IncludesScheduleDeadlineAndSomedayCommands(t *testing.T) {
@@ -63,6 +66,9 @@ func TestQuickstart_JSON(t *testing.T) {
 	assert.Contains(t, got.Quickstart, "kata next --unowned --agent")
 	assert.Contains(t, got.Quickstart, "kata ready --unowned --label bug --no-label blocked --agent")
 	assert.Contains(t, got.Quickstart, "kata events --after 0 --limit 100 --agent")
+	assert.Contains(t, got.Quickstart, "kata notify <ref> --to <actor> --message")
+	assert.Contains(t, got.Quickstart, "kata inbox --for <actor>")
+	assert.Contains(t, got.Quickstart, "kata notify <ref> --to <actor> --clear")
 }
 
 func TestQuickstart_AgentOutput(t *testing.T) {
@@ -77,6 +83,9 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "kata next --unowned --agent")
 	assert.Contains(t, out, "kata ready --unowned --label bug --no-label blocked --agent")
 	assert.Contains(t, out, "Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.")
+	assert.Contains(t, out, "kata notify <ref> --to <actor> --message")
+	assert.Contains(t, out, "kata inbox --for <actor>")
+	assert.Contains(t, out, "kata notify <ref> --to <actor> --clear")
 }
 
 func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
