@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/mcpdiscovery"
+
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -90,7 +92,8 @@ func serveMCPHTTP(
 	address string,
 	token string,
 	server *sdkmcp.Server,
-) error {
+	discoveryDirectory, backendURL string,
+) (result error) {
 	listener, err := net.Listen("tcp", strings.TrimSpace(address))
 	if err != nil {
 		return fmt.Errorf("listen for MCP HTTP: %w", err)
@@ -121,6 +124,12 @@ func serveMCPHTTP(
 		}
 		handler = requireMCPHTTPHost(reportedAuthority, handler)
 	}
+
+	cleanup, err := mcpdiscovery.Publish(discoveryDirectory, reportedAuthority, token, backendURL)
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, cleanup()) }()
 
 	serveContext, cancel := context.WithCancel(ctx)
 	defer cancel()

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	mcpserver "go.kenn.io/kata/internal/mcp"
@@ -25,11 +27,12 @@ func newMCPCmd() *cobra.Command {
 		Use:   "mcp",
 		Short: "serve Kata tools through Model Context Protocol",
 	}
-	command.AddCommand(newMCPServeCmd())
+	command.AddCommand(newMCPServeCmd(), newMCPStatusCmd())
 	return command
 }
 
 func newMCPServeCmd() *cobra.Command {
+	var runtimeDirectory string
 	var allProjects bool
 	var projects []string
 	var storageRoot string
@@ -82,13 +85,14 @@ func newMCPServeCmd() *cobra.Command {
 				}
 				defer func() { _ = storage.Close() }()
 			}
-			baseURL, err := ensureDaemon(ctx)
+			resolved, err := resolveMCPRuntime(ctx, runtimeDirectory)
 			if err != nil {
 				return err
 			}
+			baseURL := resolved.BaseURL
 			// Ordinary daemon calls retain the CLI request timeout so a
 			// stalled daemon cannot consume every MCP tool-call slot.
-			httpClient, err := httpClientFor(ctx, baseURL)
+			httpClient, err := httpClientForResolved(ctx, resolved)
 			if err != nil {
 				return err
 			}
@@ -108,7 +112,7 @@ func newMCPServeCmd() *cobra.Command {
 			// Sync passes, bounded waits, and SSE streams use their own
 			// request contexts and may legitimately outlive the ordinary
 			// request budget or delay response headers until completion.
-			longRunningHTTPClient, err := longRunningClientFor(ctx, baseURL)
+			longRunningHTTPClient, err := longRunningClientForResolved(ctx, resolved)
 			if err != nil {
 				return err
 			}
@@ -156,7 +160,15 @@ func newMCPServeCmd() *cobra.Command {
 				return err
 			}
 			if strings.TrimSpace(httpAddress) != "" {
-				return serveMCPHTTP(ctx, command.ErrOrStderr(), httpAddress, httpToken, server)
+				home, err := config.KataHome()
+				if err != nil {
+					return err
+				}
+				backendURL := baseURL
+				if resolved.Network == "unix" {
+					backendURL = "unix://" + resolved.UnixSocket
+				}
+				return serveMCPHTTP(ctx, command.ErrOrStderr(), httpAddress, httpToken, server, filepath.Join(home, "mcp"), backendURL)
 			}
 			transport := mcpserver.NewStdioTransport(
 				asReadCloser(command.InOrStdin()),
@@ -172,6 +184,7 @@ func newMCPServeCmd() *cobra.Command {
 			return err
 		},
 	}
+	command.Flags().StringVar(&runtimeDirectory, "runtime-dir", "", "use an existing daemon runtime directory without starting a daemon")
 	command.Flags().BoolVar(&allProjects, "all-projects", false, "serve every project visible to the selected daemon")
 	command.Flags().StringSliceVar(&projects, "projects", nil, "serve only these project names")
 	command.Flags().StringVar(&storageRoot, "storage-root", "", "enable host-local JSONL artifacts under this directory")
@@ -262,4 +275,20 @@ func asReadCloser(reader io.Reader) io.ReadCloser {
 		return readCloser
 	}
 	return io.NopCloser(reader)
+}
+
+// resolveMCPRuntime lets an embedding client pin the daemon it has already
+// discovered, including a Unix socket behind a separate browser listener.
+func resolveMCPRuntime(ctx context.Context, directory string) (client.ResolvedDaemon, error) {
+	if directory == "" {
+		return ensureDaemonResolved(ctx)
+	}
+	resolved, found, err := client.DiscoverResolved(ctx, directory)
+	if err != nil {
+		return client.ResolvedDaemon{}, err
+	}
+	if !found {
+		return client.ResolvedDaemon{}, fmt.Errorf("no running daemon in runtime directory %q", directory)
+	}
+	return resolved, nil
 }

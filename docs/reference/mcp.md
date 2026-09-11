@@ -32,6 +32,26 @@ no status text or logs to stdout. The actor is fixed when the process starts
 and uses the normal precedence: `--as`, `KATA_AUTHOR`, `USER`, Git `user.name`,
 then `anonymous`.
 
+### Discover running HTTP listeners
+
+Run `kata mcp status --json` to list HTTP MCP listeners started by this
+version. The command reads local runtime records without starting a server.
+Each entry includes `transport`, `url`, `pid`, `backend_url` when known,
+and `token_path` when the listener requires a bearer token. Read the token
+from that private file; the status output does not print it.
+
+The listener publishes its actual bound port after startup, including when
+started with port zero, and removes its record on orderly shutdown. Status
+omits records whose process has exited. Stdio sessions are not listening
+endpoints and do not appear. An empty JSON list means no HTTP listeners were
+found in this application's configured data directory.
+
+For Unix-socket daemons, `backend_url` is the actual `unix:///path` address,
+not the synthetic HTTP request URL. An embedding client that has already
+selected a local runtime can use `kata mcp serve --all-projects --runtime-dir
+/path/to/runtime` to reach that daemon over stdio. This option ignores the
+working directory's server selection and never starts a missing daemon.
+
 ## Transport
 
 The default transport is stdio. Use `--http` to run a Streamable HTTP listener
