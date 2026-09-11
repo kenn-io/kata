@@ -73,13 +73,17 @@ Hint: pass --body, --body-file, or --body-stdin
 ```
 
 - The first line is `ERR <command> <kind>: <message>`.
+- Create idempotency and look-alike conflicts append the existing issues'
+  qualified refs, for example
+  `ERR create conflict: 1 existing issue matches this title (example-project#abc4)`.
 - `<kind>` reuses the CLI error taxonomy: `usage`, `validation`, `not_found`,
   `conflict`, `confirm`, `daemon_unavailable`, `internal`.
 - Optional follow-up lines use fixed field names such as `Hint:`, `Code:`, and
   `Exit-Code:`.
 - A top-level parse error, before any subcommand runs, uses `kata` as the
   command token: `ERR kata usage: unknown command "cretae"`.
-- In `--format json` errors remain the JSON error envelope; in `--format human`
+- In `--format json` errors include daemon-provided details in `error.data`
+  when present; in `--format human`
   they remain the existing human text.
 
 ## Success shapes

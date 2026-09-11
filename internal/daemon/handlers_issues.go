@@ -80,7 +80,8 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
 			return nil, err
 		}
 
@@ -148,7 +149,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		if !in.Body.ForceNew {
-			if err := runLookalikeCheck(ctx, cfg, in); err != nil {
+			if err := runLookalikeCheck(ctx, cfg, in, project.Name); err != nil {
 				return nil, err
 			}
 		}
@@ -1327,7 +1328,7 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 // above the 0.7 threshold. nil means proceed. The OR variant is required
 // because near-duplicates that differ by even one token would be filtered
 // out by SearchFTS's implicit-AND before similarity scoring runs.
-func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssueRequest) error {
+func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssueRequest, projectName string) error {
 	q := similarity.LookalikeQuery(in.Body.Title, in.Body.Body)
 	candidates, err := cfg.DB.SearchFTSAny(ctx, db.SearchFTSParams{
 		ProjectID: in.ProjectID, Query: q, Limit: 20,
@@ -1340,10 +1341,11 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 		score := similarity.Score(in.Body.Title, in.Body.Body, c.Issue.Title, c.Issue.Body)
 		if score >= similarityThreshold {
 			matched = append(matched, map[string]any{
-				"uid":      c.Issue.UID,
-				"short_id": c.Issue.ShortID,
-				"title":    c.Issue.Title,
-				"score":    score,
+				"uid":          c.Issue.UID,
+				"short_id":     c.Issue.ShortID,
+				"qualified_id": qualifiedID(projectName, c.Issue.ShortID),
+				"title":        c.Issue.Title,
+				"score":        score,
 			})
 		}
 	}
