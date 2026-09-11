@@ -52,7 +52,7 @@ func newPurgeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "required to perform the purge")
-	cmd.Flags().StringVar(&confirm, "confirm", "", `exact confirmation string ("PURGE <short_id>")`)
+	cmd.Flags().StringVar(&confirm, "confirm", "", `exact confirmation string ("PURGE <qualified-id>")`)
 	cmd.Flags().StringVar(&reason, "reason", "", "free-text reason recorded in purge_log.reason")
 	return cmd
 }

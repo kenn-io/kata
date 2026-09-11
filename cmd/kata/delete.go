@@ -59,7 +59,7 @@ func newDeleteCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "required to perform the soft delete")
-	cmd.Flags().StringVar(&confirm, "confirm", "", `exact confirmation string ("DELETE <short_id>")`)
+	cmd.Flags().StringVar(&confirm, "confirm", "", `exact confirmation string ("DELETE <qualified-id>")`)
 	return cmd
 }
 
