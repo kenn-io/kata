@@ -905,7 +905,21 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // <KATA_HOME>/config.toml has a `listen = "..."` entry, in which case the
 // config value is used. CLI flag always wins over config.
 // insecureReadonly is the dev escape hatch from --insecure-readonly.
-func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bool) (returnErr error) {
+//
+// When the daemon shuts down because it received the restart signal, it
+// re-executes itself only after every listener and the runtime record have
+// been released.
+func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bool) error {
+	restart := newDaemonRestart(os.Stderr)
+	if err := runDaemonProcess(ctx, listen, insecureReadonly, restart); err != nil {
+		return err
+	}
+	return restart.exec(ctx)
+}
+
+func runDaemonProcess(
+	ctx context.Context, listen string, insecureReadonly bool, restart *daemonRestart,
+) (returnErr error) {
 	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly)
 	if err != nil {
 		return err
@@ -1054,6 +1068,9 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	rec.Address = runtimeEndpoint.ConfigAddress()
 	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
+	if restart != nil {
+		rec.Metadata[daemon.RuntimeRestartMetadataKey] = "1"
+	}
 
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
@@ -1079,6 +1096,14 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	workers.Go(func() {
 		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
 	})
+	restartCleanup := daemonPlatformCleanup(func(context.Context) bool { return true })
+	if restart != nil {
+		var restartSignals <-chan os.Signal
+		restartSignals, restartCleanup = installRestartSource(ctx, ns.DBHash)
+		workers.Go(func() {
+			restart.watch(ctx, restartSignals, shutdownTrigger.Call)
+		})
+	}
 	federationWake := startFederationRunner(
 		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog,
 	)
@@ -1184,6 +1209,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		daemonShutdownDrainTimeout,
 		stopCleanup,
 		reloadCleanup,
+		restartCleanup,
 	)
 	shutdownTrigger.Set(shutdown.Trigger)
 	httpHandlersJoined := true

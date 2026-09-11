@@ -11,13 +11,14 @@ import (
 )
 
 // registerDaemonSignalEndpoints creates the manual-reset named events that a
-// real daemon stands up at startup (installStopWatcher / installReloadSource),
+// real daemon stands up at startup (installStopWatcher / installReloadSource /
+// installRestartSource),
 // so `kata daemon stop`/`reload` can OpenEvent them against a faked daemon PID
 // in tests. The handles are held open until test cleanup, keeping the events
 // alive for the in-process command's OpenEvent call. On Unix this is a no-op.
 func registerDaemonSignalEndpoints(t *testing.T, dbhash string, pid int) {
 	t.Helper()
-	for _, name := range []string{daemon.StopEventName(dbhash, pid), daemon.ReloadEventName(dbhash, pid)} {
+	for _, name := range []string{daemon.StopEventName(dbhash, pid), daemon.ReloadEventName(dbhash, pid), daemon.RestartEventName(dbhash, pid)} {
 		namePtr, err := windows.UTF16PtrFromString(name)
 		if err != nil {
 			t.Fatalf("event name %q: %v", name, err)

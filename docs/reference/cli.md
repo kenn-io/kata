@@ -758,6 +758,23 @@ and install-capable flag combinations fail with exit code 2 before constructing
 the update client; upgrade through Homebrew or the owning system package
 manager instead. Ordinary archives retain the self-installing update behavior.
 
+After installing an update, `kata update` signals a running daemon in the
+current local Kata home and database namespace to restart itself through the
+newly installed binary. The daemon re-executes with its own arguments and
+environment, so its listener, read-only mode, credentials, and effective
+auto-start idle timeout carry over, and the updater needs no daemon token. On
+Unix the daemon keeps its PID, so service managers see the same process; on
+Windows it starts a detached replacement and exits. A daemon started with an
+ephemeral `--listen` port binds a new port.
+
+A stopped daemon stays stopped; update checks and failed installs do not
+restart it. Restart output, including the new web UI address, goes to stderr
+so JSON and agent stdout remain a single update result. If the replacement
+fails to start, or the running daemon does not support automatic restart, the command
+returns an error identifying the installed version and directs you to
+`kata daemon restart` with the daemon's original startup options. Remote
+daemons must be updated on their own hosts.
+
 Local commands auto-start the daemon when appropriate. `daemon start` starts a
 background daemon and returns after startup is confirmed. If the running local
 daemon was auto-started with `autostart_idle_timeout` in effect, `daemon start`

@@ -8,10 +8,13 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/version"
+	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/selfupdate"
 )
 
@@ -105,6 +108,11 @@ func newUpdateCmd() *cobra.Command {
 					ExitCode: ExitInternal,
 				}
 			}
+			// Restart output goes to stderr so JSON and agent stdout stay a
+			// single update record.
+			if err := restartDaemonAfterUpdate(cmd.Context(), cmd.ErrOrStderr()); err != nil {
+				return fmt.Errorf("installed kata %s, but the daemon was not restarted: %w", latestUpdateVersion(info), err)
+			}
 			return printUpdateInstallResult(cmd, info)
 		},
 	}
@@ -112,6 +120,85 @@ func newUpdateCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "force a fresh update check")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install without prompting")
 	return cmd
+}
+
+// restartDaemonAfterUpdate asks a running daemon in the local namespace to
+// re-execute itself through the newly installed binary. The daemon restarts
+// with its own arguments and environment, so the updater needs neither its
+// startup options nor its credentials. A stopped daemon stays stopped.
+func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
+	ns, err := daemon.NewNamespace()
+	if err != nil {
+		return err
+	}
+	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	records, err := store.List()
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if !daemon.RuntimeProcessAlive(record) {
+			continue
+		}
+		if !daemon.RuntimeRecordRestartable(record) {
+			return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon restart' with its original startup options", record.PID)
+		}
+		if err := daemon.SignalDaemonRestart(record, ns.DBHash); err != nil {
+			return fmt.Errorf("signal daemon pid %d: %w", record.PID, err)
+		}
+		replacement, err := waitForDaemonReplacement(ctx, store, record)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(stderr, "restarted daemon pid=%d address=%s\n",
+			replacement.PID, replacement.Endpoint().ConfigAddress()); err != nil {
+			return err
+		}
+		if err := writeDaemonWebURL(stderr, replacement.Metadata["web_origin"]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// updateDaemonReplacementGrace bounds how long a replacement may take to
+// publish its runtime record once the previous daemon process has exited.
+const updateDaemonReplacementGrace = 5 * time.Second
+
+// waitForDaemonReplacement returns the first live runtime record started
+// after previous. On Unix the daemon keeps its PID across re-execution, so a
+// newer record rather than a new PID identifies the replacement.
+func waitForDaemonReplacement(
+	ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord,
+) (kitdaemon.RuntimeRecord, error) {
+	deadline := time.Now().Add(daemonRestartProcessWaitTimeout)
+	var exitedAt time.Time
+	for {
+		records, err := store.List()
+		if err != nil {
+			return kitdaemon.RuntimeRecord{}, err
+		}
+		for _, record := range records {
+			if record.StartedAt.After(previous.StartedAt) && daemon.RuntimeProcessAlive(record) {
+				return record, nil
+			}
+		}
+		now := time.Now()
+		if exitedAt.IsZero() && !kitdaemon.ProcessAlive(previous.PID) {
+			exitedAt = now
+		}
+		switch {
+		case !exitedAt.IsZero() && now.Sub(exitedAt) > updateDaemonReplacementGrace:
+			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log, then run 'kata daemon start' with its original startup options", previous.PID)
+		case now.After(deadline):
+			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return kitdaemon.RuntimeRecord{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func printUpdateSummary(cmd *cobra.Command, info *selfupdate.Info) error {

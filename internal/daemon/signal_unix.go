@@ -27,3 +27,14 @@ func SignalDaemonReload(rec kitdaemon.RuntimeRecord, _ string) error {
 	}
 	return p.Signal(syscall.SIGHUP)
 }
+
+// SignalDaemonRestart asks a running daemon to re-execute itself with its own
+// arguments and environment. Only send it to records that advertise
+// RuntimeRestartMetadataKey: SIGUSR1 terminates older daemons.
+func SignalDaemonRestart(rec kitdaemon.RuntimeRecord, _ string) error {
+	p, err := os.FindProcess(rec.PID)
+	if err != nil {
+		return fmt.Errorf("find pid %d: %w", rec.PID, err)
+	}
+	return p.Signal(syscall.SIGUSR1)
+}

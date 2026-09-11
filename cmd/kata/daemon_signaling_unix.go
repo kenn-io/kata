@@ -27,3 +27,14 @@ func installReloadSource(_ context.Context, _ string) (<-chan os.Signal, daemonP
 		return true
 	}
 }
+
+// installRestartSource hooks SIGUSR1 onto a channel the restart watcher reads
+// from. Cleanup detaches the signal handler.
+func installRestartSource(_ context.Context, _ string) (<-chan os.Signal, daemonPlatformCleanup) {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGUSR1)
+	return sigs, func(context.Context) bool {
+		signal.Stop(sigs)
+		return true
+	}
+}

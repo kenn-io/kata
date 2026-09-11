@@ -20,6 +20,7 @@ type fakeUpdateClient struct {
 	checkErr     error
 	installed    []*selfupdate.Info
 	installErr   error
+	install      func() error
 }
 
 func (f *fakeUpdateClient) Check(_ context.Context, opts selfupdate.CheckOptions) (*selfupdate.Info, error) {
@@ -37,11 +38,15 @@ func (f *fakeUpdateClient) Check(_ context.Context, opts selfupdate.CheckOptions
 
 func (f *fakeUpdateClient) Install(_ context.Context, info *selfupdate.Info, _ selfupdate.InstallOptions) error {
 	f.installed = append(f.installed, info)
+	if f.install != nil {
+		return f.install()
+	}
 	return f.installErr
 }
 
 func stubUpdateClient(t *testing.T, client updateClient) {
 	t.Helper()
+	setupKataEnv(t)
 	orig := newSelfUpdateClient
 	newSelfUpdateClient = func(string) (updateClient, error) {
 		return client, nil

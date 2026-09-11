@@ -8,6 +8,12 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
+// RuntimeRestartMetadataKey marks a runtime record whose daemon re-executes
+// itself, with its own arguments and environment, when it receives the
+// restart signal. Records without it belong to daemons that need a manual
+// restart after an update.
+const RuntimeRestartMetadataKey = "restart_signal"
+
 // RuntimeProcessAlive reports whether a runtime record still identifies the
 // process that created it. For legacy records without an identity, a process
 // created after the record was published proves that the PID has been reused.
@@ -33,4 +39,10 @@ func RuntimeProcessAlive(record kitdaemon.RuntimeRecord) bool {
 		return true
 	}
 	return !time.UnixMilli(created).After(record.StartedAt)
+}
+
+// RuntimeRecordRestartable reports whether the record's daemon handles the
+// restart signal sent by SignalDaemonRestart.
+func RuntimeRecordRestartable(record kitdaemon.RuntimeRecord) bool {
+	return record.Metadata[RuntimeRestartMetadataKey] == "1"
 }

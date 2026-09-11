@@ -78,7 +78,20 @@ kata update
 ```
 
 `kata update` verifies the downloaded archive against `SHA256SUMS` before
-replacing the installed binary. Package-managed installations keep
+replacing the installed binary. After a successful install, it asks a running
+local daemon to restart itself through the new binary. The daemon restarts
+with its own startup options and environment, so `--listen`,
+`--insecure-readonly`, authentication tokens, and the auto-start idle timeout
+carry over without the updater knowing them. A stopped daemon stays stopped.
+Reopen `kata ui` if the daemon used an ephemeral port, because the replacement
+binds a new one.
+
+If the daemon does not come back, or it does not support automatic restart, the
+command reports that the binary was installed and returns an error. Resolve
+any reported startup problem, then run `kata daemon restart` with the daemon's
+original startup options.
+
+Package-managed installations keep
 `kata update --check`, but install-capable update forms direct you back to the
 owning package manager. Packagers can read the complete
 [packaging contract](../development/packaging.md). Installing with `go install`
