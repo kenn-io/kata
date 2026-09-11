@@ -147,6 +147,18 @@ off before it completes, the CLI reports `create_outcome_unknown`: check whether
 the issue exists before retrying, and use `--force-new` only after confirming
 that no issue was created.
 
+Create conflicts identify existing issues. With `--json`, `error.data` carries
+the prior issue's `uid`, `short_id`, and `qualified_id` for an idempotency
+conflict, or a `candidates` list with those fields, titles, and similarity
+scores for a look-alike conflict. With `--agent`, the error line includes the
+qualified refs.
+
+These conflicts come from duplicate prevention. Reusing an idempotency key
+within seven days with the same request fields returns the original issue;
+changing those fields returns `idempotency_mismatch`. The look-alike check
+compares title and body text. Neither conflict means that generated issue
+ULIDs collided.
+
 List and inspect:
 
 ```sh

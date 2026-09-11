@@ -253,16 +253,18 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
 	env := struct {
 		Error struct {
-			Kind     errKind `json:"kind"`
-			Code     string  `json:"code,omitempty"`
-			Message  string  `json:"message"`
-			ExitCode int     `json:"exit_code"`
+			Kind     errKind         `json:"kind"`
+			Code     string          `json:"code,omitempty"`
+			Message  string          `json:"message"`
+			ExitCode int             `json:"exit_code"`
+			Data     json.RawMessage `json:"data,omitempty"`
 		} `json:"error"`
 	}{}
 	env.Error.Kind = cli.Kind
 	env.Error.Code = cli.Code
 	env.Error.Message = cli.Message
 	env.Error.ExitCode = cli.ExitCode
+	env.Error.Data = cli.Data
 	bs, mErr := json.Marshal(env)
 	if mErr == nil {
 		_, _ = fmt.Fprintln(w, string(bs))

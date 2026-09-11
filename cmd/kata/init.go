@@ -52,6 +52,7 @@ type cliError struct {
 	Kind     errKind
 	Code     string
 	ExitCode int
+	Data     json.RawMessage
 }
 
 func (e *cliError) Error() string { return e.Message }
@@ -564,8 +565,9 @@ func resolveStartPath(workspace string) (string, error) {
 func apiErrFromBody(status int, bs []byte) *cliError {
 	var env struct {
 		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
+			Code    string          `json:"code"`
+			Message string          `json:"message"`
+			Data    json.RawMessage `json:"data,omitempty"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(bs, &env); err != nil {
@@ -581,6 +583,7 @@ func apiErrFromBody(status int, bs []byte) *cliError {
 		Code:     env.Error.Code,
 		Kind:     kindForStatus(status),
 		ExitCode: mapStatusToExit(status, env.Error.Code),
+		Data:     env.Error.Data,
 	}
 }
 

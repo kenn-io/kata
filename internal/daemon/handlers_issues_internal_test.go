@@ -28,7 +28,7 @@ func TestRunLookalikeCheckBoundsSearchQuery(t *testing.T) {
 	in.Body.Title = "full issue title"
 	in.Body.Body = strings.Repeat("界", 499) + "留 discard-this-suffix"
 
-	err := runLookalikeCheck(context.Background(), ServerConfig{DB: store}, in)
+	err := runLookalikeCheck(context.Background(), ServerConfig{DB: store}, in, "example-project")
 
 	require.NoError(t, err)
 	assert.Contains(t, store.query, in.Body.Title)
@@ -40,7 +40,7 @@ func TestRunLookalikeCheckBoundsSearchQuery(t *testing.T) {
 	in.Body.Title = strings.Repeat("界", 499) + "留 discarded-title-suffix"
 	in.Body.Body = "plain body"
 
-	err = runLookalikeCheck(context.Background(), ServerConfig{DB: store}, in)
+	err = runLookalikeCheck(context.Background(), ServerConfig{DB: store}, in, "example-project")
 
 	require.NoError(t, err)
 	assert.Contains(t, store.query, "plain body")
@@ -84,7 +84,7 @@ func TestRunLookalikeCheckConflictMessageCountsClosedCandidates(t *testing.T) {
 			closedLookalike(title, body, "01J5EXAMPLE000000000000EXA"),
 		}}
 
-		err := runLookalikeCheck(context.Background(), ServerConfig{DB: store}, in)
+		err := runLookalikeCheck(context.Background(), ServerConfig{DB: store}, in, "example-project")
 
 		require.Error(t, err)
 		var apiErr *api.APIError
@@ -101,7 +101,7 @@ func TestRunLookalikeCheckConflictMessageCountsClosedCandidates(t *testing.T) {
 			closedLookalike(title, body, "01J5EXAMPLE000000000000EXB"),
 		}}
 
-		err := runLookalikeCheck(context.Background(), ServerConfig{DB: store}, in)
+		err := runLookalikeCheck(context.Background(), ServerConfig{DB: store}, in, "example-project")
 
 		require.Error(t, err)
 		var apiErr *api.APIError

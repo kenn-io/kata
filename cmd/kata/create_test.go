@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -361,6 +362,77 @@ func TestCreate_AgentOutputIdempotencyReuse(t *testing.T) {
 	second := runCLI(t, env, dir, "--agent", "create", "first issue", "--idempotency-key", "K")
 
 	assert.Contains(t, second, "reused=true changed=false")
+}
+
+func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
+	for _, conflict := range []string{"idempotency_mismatch", "duplicate_candidates", "multiple_candidates"} {
+		t.Run(conflict, func(t *testing.T) {
+			env := testenv.New(t)
+			dir, _ := initLocalBoundWorkspace(t, env, "example-project")
+			ctx := contextWithBaseURL(t.Context(), env.URL)
+			first := runCLI(t, env, dir, "--json", "--as", "test-agent", "create",
+				"fix login crash", "--body", "login crashes on startup", "--idempotency-key", "request-1")
+			var created struct {
+				Issue struct {
+					UID     string `json:"uid"`
+					ShortID string `json:"short_id"`
+				} `json:"issue"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(first), &created))
+			refs := []string{"example-project#" + created.Issue.ShortID}
+			args := []string{"--workspace", dir, "--as", "test-agent", "create", "fix login crash", "--body", "login crashes on startup"}
+			code := "duplicate_candidates"
+			if conflict == "idempotency_mismatch" {
+				code = conflict
+				args = append(args, "--idempotency-key", "request-1", "--owner", "another-agent")
+			}
+			if conflict == "multiple_candidates" {
+				second := runCLI(t, env, dir, "--quiet", "--as", "test-agent", "create",
+					"fix login crash", "--body", "login crashes on startup", "--force-new")
+				refs = append(refs, "example-project#"+strings.TrimSpace(second))
+			}
+			for _, mode := range []string{"agent", "json"} {
+				t.Run(mode, func(t *testing.T) {
+					stdout, stderr, err := executeRootCapture(t, ctx, append(args, "--"+mode)...)
+					cli := requireCLIError(t, err, ExitConflict)
+					assert.Equal(t, code, cli.Code)
+					assert.Empty(t, stdout)
+					if mode == "agent" {
+						assert.True(t, strings.HasPrefix(stderr, "ERR create conflict: "), stderr)
+						for _, ref := range refs {
+							assert.Contains(t, stderr, ref)
+						}
+						assert.Equal(t, 1, strings.Count(stderr, "\n"))
+						return
+					}
+					var envelope struct {
+						Error struct {
+							Data map[string]any `json:"data"`
+						} `json:"error"`
+					}
+					require.NoError(t, json.Unmarshal([]byte(stderr), &envelope))
+					require.NotEmpty(t, envelope.Error.Data, stderr)
+					if code == "idempotency_mismatch" {
+						assert.Equal(t, created.Issue.UID, envelope.Error.Data["uid"])
+						assert.Equal(t, created.Issue.ShortID, envelope.Error.Data["short_id"])
+						assert.Equal(t, refs[0], envelope.Error.Data["qualified_id"])
+						return
+					}
+					candidates := envelope.Error.Data["candidates"].([]any)
+					var gotRefs []string
+					for _, candidate := range candidates {
+						data := candidate.(map[string]any)
+						assert.NotEmpty(t, data["uid"])
+						assert.NotEmpty(t, data["short_id"])
+						assert.Equal(t, "fix login crash", data["title"])
+						assert.GreaterOrEqual(t, data["score"].(float64), 0.7)
+						gotRefs = append(gotRefs, data["qualified_id"].(string))
+					}
+					assert.ElementsMatch(t, refs, gotRefs)
+				})
+			}
+		})
+	}
 }
 
 // TestCreate_IdempotentReuseHumanModeOmitsLinksSummary pins that a

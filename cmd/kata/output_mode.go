@@ -367,7 +367,31 @@ func emitAgentError(w io.Writer, command string, err error) {
 	if command == "" {
 		command = "kata"
 	}
-	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, firstLine(cli.Message)) //nolint:gosec // G705: CLI stderr error text, not HTML.
+	message := firstLine(cli.Message)
+	switch cli.Code {
+	case "idempotency_mismatch", "idempotency_deleted", "duplicate_candidates":
+		var data struct {
+			QualifiedID string `json:"qualified_id"`
+			Candidates  []struct {
+				QualifiedID string `json:"qualified_id"`
+			} `json:"candidates"`
+		}
+		if json.Unmarshal(cli.Data, &data) == nil {
+			var refs []string
+			if data.QualifiedID != "" {
+				refs = append(refs, agentValue(data.QualifiedID))
+			}
+			for _, candidate := range data.Candidates {
+				if candidate.QualifiedID != "" {
+					refs = append(refs, agentValue(candidate.QualifiedID))
+				}
+			}
+			if len(refs) > 0 {
+				message += " (" + strings.Join(refs, ", ") + ")"
+			}
+		}
+	}
+	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, message) //nolint:gosec // G705: CLI stderr error text, not HTML.
 }
 
 func agentValue(s string) string {
