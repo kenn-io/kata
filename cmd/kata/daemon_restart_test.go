@@ -51,6 +51,9 @@ func TestNewDaemonRestart_ResolvesSymlinkedExecutable(t *testing.T) {
 	var stderr bytes.Buffer
 	restart := newDaemonRestart(&stderr)
 	require.NotNil(t, restart)
-	assert.Equal(t, target, restart.executable)
+	// Windows temp dirs may carry 8.3 short names; resolve the expected path the same way.
+	expected, err := filepath.EvalSymlinks(target)
+	require.NoError(t, err)
+	assert.Equal(t, expected, restart.executable)
 	assert.Empty(t, stderr.String())
 }
