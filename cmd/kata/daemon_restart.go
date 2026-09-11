@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -20,22 +21,27 @@ type daemonRestart struct {
 	requested  atomic.Bool
 }
 
+// resolveDaemonExecutable is swapped in tests that exercise unsupported hosts.
+var resolveDaemonExecutable = os.Executable
+
 // newDaemonRestart resolves the executable to re-execute before any update
-// can replace it: Linux reports a replaced binary as deleted. Ephemeral test
-// and go-build binaries return nil, which disables the restart signal.
-func newDaemonRestart() (*daemonRestart, error) {
-	executable, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("resolve daemon executable: %w", err)
+// can replace it: Linux reports a replaced binary as deleted. A host that
+// cannot resolve the running binary still starts the daemon; it only loses
+// automatic restart, and stderr says so. Ephemeral test and go-build binaries
+// are silently excluded.
+func newDaemonRestart(stderr io.Writer) *daemonRestart {
+	executable, err := resolveDaemonExecutable()
+	if err == nil {
+		executable, err = filepath.EvalSymlinks(executable)
 	}
-	executable, err = filepath.EvalSymlinks(executable)
 	if err != nil {
-		return nil, fmt.Errorf("resolve daemon executable: %w", err)
+		_, _ = fmt.Fprintf(stderr, "kata daemon: automatic restart after updates disabled: %v\n", err)
+		return nil
 	}
 	if kitdaemon.IsEphemeralExecutable(executable) {
-		return nil, nil
+		return nil
 	}
-	return &daemonRestart{executable: executable}, nil
+	return &daemonRestart{executable: executable}
 }
 
 // watch records the first restart signal and triggers daemon shutdown.

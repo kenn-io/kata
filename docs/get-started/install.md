@@ -86,7 +86,7 @@ carry over without the updater knowing them. A stopped daemon stays stopped.
 Reopen `kata ui` if the daemon used an ephemeral port, because the replacement
 binds a new one.
 
-If the daemon does not come back, or it predates automatic restart, the
+If the daemon does not come back, or it does not support automatic restart, the
 command reports that the binary was installed and returns an error. Resolve
 any reported startup problem, then run `kata daemon restart` with the daemon's
 original startup options.

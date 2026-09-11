@@ -770,7 +770,7 @@ ephemeral `--listen` port binds a new port.
 A stopped daemon stays stopped; update checks and failed installs do not
 restart it. Restart output, including the new web UI address, goes to stderr
 so JSON and agent stdout remain a single update result. If the replacement
-fails to start, or the running daemon predates automatic restart, the command
+fails to start, or the running daemon does not support automatic restart, the command
 returns an error identifying the installed version and directs you to
 `kata daemon restart` with the daemon's original startup options. Remote
 daemons must be updated on their own hosts.

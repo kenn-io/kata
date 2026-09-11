@@ -910,10 +910,7 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // re-executes itself only after every listener and the runtime record have
 // been released.
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bool) error {
-	restart, err := newDaemonRestart()
-	if err != nil {
-		return err
-	}
+	restart := newDaemonRestart(os.Stderr)
 	if err := runDaemonProcess(ctx, listen, insecureReadonly, restart); err != nil {
 		return err
 	}

@@ -141,7 +141,7 @@ func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
 			continue
 		}
 		if !daemon.RuntimeRecordRestartable(record) {
-			return fmt.Errorf("daemon pid %d predates automatic restart; run 'kata daemon restart' with its original startup options", record.PID)
+			return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon restart' with its original startup options", record.PID)
 		}
 		if err := daemon.SignalDaemonRestart(record, ns.DBHash); err != nil {
 			return fmt.Errorf("signal daemon pid %d: %w", record.PID, err)
