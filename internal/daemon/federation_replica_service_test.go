@@ -2406,7 +2406,8 @@ func openReplicaServiceStore(t *testing.T) *sqlitestore.Store {
 	ctx := context.Background()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	// This fixture is discarded after the test; it needs no WAL checkpoint.
+	t.Cleanup(func() { require.NoError(t, store.DB.Close()) })
 	return store
 }
 

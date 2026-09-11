@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -594,6 +595,7 @@ func TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout(t *testing.T) {
 // fetch (with no --timeout to bound it) hangs even though the wait is already
 // met.
 func TestWaitAnyInitialPassStopsAfterJoinMet(t *testing.T) {
+	var laterFetches atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/projects/resolve":
@@ -601,12 +603,7 @@ func TestWaitAnyInitialPassStopsAfterJoinMet(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/issues/aaaa"):
 			_, _ = w.Write([]byte(`{"issue":{"short_id":"aaaa","status":"closed","metadata":{},"revision":1}}`))
 		case strings.HasSuffix(r.URL.Path, "/issues/bbbb"):
-			// A stalled later ref: it must never be fetched once aaaa has
-			// already satisfied the --any join.
-			select {
-			case <-r.Context().Done():
-			case <-time.After(5 * time.Second):
-			}
+			laterFetches.Add(1)
 			_, _ = w.Write([]byte(`{"issue":{"short_id":"bbbb","status":"open","metadata":{},"revision":1}}`))
 		default:
 			http.NotFound(w, r)
@@ -615,15 +612,13 @@ func TestWaitAnyInitialPassStopsAfterJoinMet(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	resetFlags(t)
-	start := time.Now()
 	stdout, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
 		"wait", "kata#aaaa", "kata#bbbb", "--any", "--poll-interval", "50ms")
-	elapsed := time.Since(start)
 
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "aaaa")
-	assert.Less(t, elapsed, 2*time.Second,
-		"--any must stop the initial pass once the join is met, not block on a stalled later ref")
+	assert.Zero(t, laterFetches.Load(),
+		"--any must stop fetching once the initial pass satisfies the join")
 }
 
 func TestWaitBadRefFailsFast(t *testing.T) {
