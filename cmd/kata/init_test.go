@@ -604,6 +604,7 @@ func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
 	assert.Contains(t, got, "kata meta set <ref> work.attention stuck|needs-human|ok")
 	assert.Contains(t, got, "kata close <ref> --done")
 	assert.Contains(t, got, "kata label add <ref> needs-review")
+	assert.Contains(t, got, "kata notify <ref> --to <actor> --message <reason>")
 }
 
 func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testing.T) {

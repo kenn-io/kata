@@ -130,13 +130,24 @@ Use kata as the shared issue ledger for this workspace.
    fail loudly. Read parent before asserting a removal. The other
    --remove-* flags are idempotent (no-op when the link is already gone).
 
-9. To leave context alongside a mutation, pass --comment TEXT on
+9. Request review without changing issue ownership:
+
+   kata notify <ref> --to <actor> --message "<reason>"
+   kata inbox --for <actor>
+   kata notify <ref> --to <actor> --clear
+
+   Inbox reads open issues in the selected project. Closing an issue hides
+   its requests; reopening restores uncleared requests. The recipient is
+   explicit: use --for or KATA_INBOX_USER. External harnesses can consume
+   kata inbox --context as transient context.
+
+10. To leave context alongside a mutation, pass --comment TEXT on
    close, reopen, edit, assign, unassign, or label add/rm. The
    mutation lands first; the comment is appended in a follow-up call.
    If the comment call fails, the error names the issue so you can
    retry with kata comment <ref> --body ...
 
-10. Do not run delete or purge unless the user explicitly asks for that exact
+11. Do not run delete or purge unless the user explicitly asks for that exact
    destructive action and issue ref.
 
 For long-running agents, poll events:
@@ -183,6 +194,9 @@ Choose one unclaimed issue with kata next --unowned --agent.
 Inspect a filtered queue with kata ready --unowned --label bug --no-label blocked --agent.
 Default to --agent for ordinary kata reads and mutations in agent logs.
 Use --json only when your script needs complete structured data.
+Request review without changing ownership: kata notify <ref> --to <actor> --message "<reason>".
+Read requests on open issues with kata inbox --for <actor>; --context is for external harnesses.
+Clear a request with kata notify <ref> --to <actor> --clear.
 If work is incomplete, label needs-review and comment with what remains.
 Close only verified work with substantive prose and typed evidence.
 Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.

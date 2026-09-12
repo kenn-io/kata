@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-07
+last_edited: 2026-09-11
 ---
 
 # CLI reference
@@ -445,6 +445,40 @@ kata meta unset abc4 someday
 ```
 
 See the [metadata conventions](metadata.md) for all reserved and standard keys.
+
+## Teammate requests
+
+```sh
+kata notify <ref> --to reviewer --message "Please check the reproduction"
+kata notify <ref> --to reviewer --clear
+kata inbox --for reviewer
+kata inbox --for reviewer --context
+```
+
+`notify` records one request per issue and recipient actor. Repeating it replaces
+that actor's request; `--clear` removes it, including on a closed issue. The
+command rejects an issue it reads as closed and fails on a concurrent metadata
+revision change. Closure can still race with the write; either way, the request
+is hidden while the issue is closed. Requests do not change ownership or readiness.
+
+`inbox` reads requests on open issues in the selected project, including parked
+issues. Closing an issue hides its requests; reopening restores uncleared
+requests. Handles are case-sensitive, at most 128 UTF-8 bytes, and cannot contain
+control characters. `--for` overrides `KATA_INBOX_USER`; neither
+the agent's author nor the OS account supplies a default recipient. Recipient
+filtering is not access control: the existing daemon trust boundary applies.
+
+Normal inbox output includes every matching request and supports `--json` and
+`--agent`. `--context` instead emits bounded, quoted context for a harness, with
+a notice when content is truncated. An empty inbox produces no context. Do not
+combine `--context` with other output selectors. Malformed request metadata is
+skipped with a warning on stderr; ordinary command failures return nonzero.
+
+Requests use existing issue metadata: `notify.` followed by the recipient's
+unpadded base64url encoding, with a JSON value containing `from` and `message`.
+The sender follows normal actor selection. No separate notification service or
+delivery state is involved. See [agent workflows](../workflows/agents.md#teammate-heads-up)
+for the external harness integration contract.
 
 ## Coordination and wait
 

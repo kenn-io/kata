@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-12
+last_edited: 2026-09-11
 ---
 
 # Metadata
@@ -148,6 +148,18 @@ kata list --meta work.attention=needs-human  # issues where it equals this strin
 on **equality against a string value**. Multiple `--meta` filters are ANDed
 together. The filter is project-scoped because `kata list` is project-scoped; for
 cross-project dashboards, poll each project or consume the event stream.
+
+## Review requests (`notify.*` keys)
+
+Use `kata notify <ref> --to <actor> --message <reason>` to write a request,
+and `kata notify <ref> --to <actor> --clear` to remove it. The CLI owns the
+encoding: each key is `notify.` followed by the unpadded base64url encoding of
+the trimmed, case-sensitive recipient actor. Its value is an object containing
+`from` and `message` strings. These keys remain opaque to the daemon.
+
+`kata inbox --for <actor>` reads requests on open issues in the selected
+project. Closing hides requests without deleting them; reopening restores
+uncleared requests. Requests do not change ownership or readiness.
 
 ## Orchestration conventions (`work.*` keys)
 
