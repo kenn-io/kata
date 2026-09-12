@@ -35,16 +35,18 @@ then `anonymous`.
 ### Discover running HTTP listeners
 
 Run `kata mcp status --json` to list HTTP MCP listeners started by this
-version. The command reads local runtime records without starting a server.
+version. `--format=json` selects the same output. The command reads local
+runtime records without starting a server.
 Each entry includes `transport`, `url`, `pid`, `backend_url` when known,
 and `token_path` when the listener requires a bearer token. Read the token
 from that private file; the status output does not print it.
 
 The listener publishes its actual bound port after startup, including when
 started with port zero, and removes its record on orderly shutdown. Status
-omits records whose process has exited. Stdio sessions are not listening
-endpoints and do not appear. An empty JSON list means no HTTP listeners were
-found in this application's configured data directory.
+omits records whose process has exited or whose PID belongs to a different
+process, using the recorded process identity or start time. Stdio sessions are
+not listening endpoints and do not appear. An empty JSON list means no HTTP
+listeners were found in this application's configured data directory.
 
 For Unix-socket daemons, `backend_url` is the actual `unix:///path` address,
 not the synthetic HTTP request URL. An embedding client that has already

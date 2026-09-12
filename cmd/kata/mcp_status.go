@@ -11,12 +11,10 @@ import (
 )
 
 func newMCPStatusCmd() *cobra.Command {
-	var jsonOutput bool
 	command := &cobra.Command{
-		Use:               "status",
-		Short:             "List running HTTP MCP listeners",
-		Args:              cobra.NoArgs,
-		PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+		Use:   "status",
+		Short: "List running HTTP MCP listeners",
+		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			home, err := config.KataHome()
 			if err != nil {
@@ -27,7 +25,7 @@ func newMCPStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if jsonOutput {
+			if currentOutputMode() == outputJSON {
 				return json.MarshalWrite(command.OutOrStdout(), endpoints)
 			}
 			if len(endpoints) == 0 {
@@ -42,6 +40,5 @@ func newMCPStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
-	command.Flags().BoolVar(&jsonOutput, "json", false, "Print listener discovery as JSON")
 	return command
 }

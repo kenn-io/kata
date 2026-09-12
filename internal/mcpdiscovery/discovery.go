@@ -7,7 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"go.kenn.io/kit/daemon"
+	"go.kenn.io/kata/internal/daemon"
+	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/safefileio"
 )
 
@@ -29,8 +30,8 @@ func Publish(directory, address, token, backendURL string) (func() error, error)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, err
 	}
-	store := daemon.RuntimeStore{Dir: directory, Prefix: "mcp"}
-	rec := daemon.NewRuntimeRecord(service, "", daemon.Endpoint{Network: "tcp", Address: address})
+	store := kitdaemon.RuntimeStore{Dir: directory, Prefix: "mcp"}
+	rec := kitdaemon.NewRuntimeRecord(service, "", kitdaemon.Endpoint{Network: "tcp", Address: address})
 	rec.Metadata = map[string]string{"url": "http://" + address + "/mcp", "backend_url": backendURL}
 	tokenPath := ""
 	if token != "" {
@@ -64,7 +65,7 @@ func Publish(directory, address, token, backendURL string) (func() error, error)
 }
 
 // List is observational: it never starts a daemon or prunes another process's
-// records. Dead-process records are omitted, including after an unclean exit.
+// records. Stale process records are omitted, including after PID reuse.
 func List(directory string) ([]Endpoint, error) {
 	endpoints := []Endpoint{}
 	if _, err := os.Stat(directory); errors.Is(err, os.ErrNotExist) {
@@ -75,12 +76,12 @@ func List(directory string) ([]Endpoint, error) {
 	if err := safefileio.ValidatePrivateDir(directory); err != nil {
 		return nil, err
 	}
-	records, err := (daemon.RuntimeStore{Dir: filepath.Clean(directory), Prefix: "mcp"}).List()
+	records, err := (kitdaemon.RuntimeStore{Dir: filepath.Clean(directory), Prefix: "mcp"}).List()
 	if err != nil {
 		return nil, fmt.Errorf("read MCP listener status: %w", err)
 	}
 	for _, rec := range records {
-		if rec.Service != service || !daemon.ProcessAlive(rec.PID) {
+		if rec.Service != service || !daemon.RuntimeProcessAlive(rec) {
 			continue
 		}
 		endpoints = append(endpoints, Endpoint{PID: rec.PID, Transport: "http", URL: rec.Metadata["url"], BackendURL: rec.Metadata["backend_url"], TokenPath: rec.Metadata["token_path"]})
