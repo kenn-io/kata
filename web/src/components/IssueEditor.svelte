@@ -558,6 +558,8 @@
     overflow: auto;
     background: var(--bg-primary);
     padding: 18px 22px;
+    container-type: inline-size;
+    container-name: kata-detail;
   }
 
   .mutation-controls {
@@ -832,5 +834,16 @@
   .accent-button:disabled {
     cursor: default;
     opacity: 0.62;
+  }
+
+  /* Stack the title above the action row once the pane is narrow. The actions
+     never shrink, so in a row the title absorbs the whole squeeze and wraps a
+     word at a time. Keyed to the pane rather than the viewport because the
+     detail pane is a resizable SplitLayout secondary and can be dragged narrow
+     while the window is still wide. */
+  @container kata-detail (max-width: 640px) {
+    .detail-heading {
+      display: grid;
+    }
   }
 </style>
