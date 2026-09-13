@@ -28,7 +28,7 @@ func newNotifyCmd() *cobra.Command {
 	var clearRequest bool
 	cmd := &cobra.Command{
 		Use:   "notify <issue-ref>",
-		Short: "request an actor's attention on an issue",
+		Short: "request a contributor's attention on an issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			to, recipientErr := normalizeNotificationRecipient(recipient)
@@ -87,9 +87,9 @@ func newNotifyCmd() *cobra.Command {
 			return printNotificationMutation(cmd, response, verb, to)
 		},
 	}
-	cmd.Flags().StringVar(&recipient, "to", "", "actor whose attention is requested (max 128 UTF-8 bytes)")
+	cmd.Flags().StringVar(&recipient, "to", "", "contributor whose attention is requested (max 128 UTF-8 bytes)")
 	cmd.Flags().StringVar(&message, "message", "", "reason their attention is needed")
-	cmd.Flags().BoolVar(&clearRequest, "clear", false, "remove this actor's request")
+	cmd.Flags().BoolVar(&clearRequest, "clear", false, "remove this contributor's request")
 	return cmd
 }
 

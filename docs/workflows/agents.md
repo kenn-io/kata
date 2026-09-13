@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-11
+last_edited: 2026-09-13
 ---
 
 # Agent workflows
@@ -90,34 +90,34 @@ hook event yet, so pair the attention hook with a launcher wrapper that runs
 [agent orchestration](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 for the recipe.
 
-## Teammate heads-up
+## Contributor heads-up
 
-Ask for a teammate's attention without assigning the issue to them:
+Ask for a contributor's attention without assigning the issue to them:
 
 ```sh
-kata notify abc4 --to reviewer --message "Please check the reproduction"
-kata inbox --for reviewer
-kata notify abc4 --to reviewer --clear
+kata notify abc4 --to contributor --message "Please check the reproduction"
+kata inbox --for contributor
+kata notify abc4 --to contributor --clear
 ```
 
-The inbox includes that actor's requests on open issues in the current project.
+The inbox includes that contributor's requests on open issues in the current project.
 Closing the issue removes it from the next read. Clearing a request removes only
 that recipient's entry; reopening an issue restores any uncleared requests.
 
 Kata provides live context for separately maintained harness integrations:
 
 ```sh
-export KATA_INBOX_USER=reviewer
+export KATA_INBOX_USER=contributor
 kata inbox --context --workspace /path/to/workspace
 ```
 
-An adapter should run this command before a prompt, with the human's explicit
-identity and the current workspace. Add successful stdout as transient context
+An adapter should run this command before a prompt, with the contributor's explicit
+inbox address and the current workspace. Add successful stdout as transient context
 so the agent can surface requests when relevant. Replace the previous context
 on every read, including empty output, and discard it on command failure. Use
 an argument array and a short timeout. Keep stderr out of injected context.
-The human identity is independent of `KATA_AUTHOR`; leave the adapter inactive
-when no human identity is configured.
+The inbox address is independent of `KATA_AUTHOR`; leave the adapter inactive
+when no inbox address is configured.
 
 Pi extensions and other harness adapters belong outside Kata. Kata does not
 install them or rewrite `AGENTS.md` with live requests. Refresh timing belongs

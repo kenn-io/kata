@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-11
+last_edited: 2026-09-13
 ---
 
 # CLI reference
@@ -434,17 +434,17 @@ kata meta unset abc4 someday
 
 See the [metadata conventions](metadata.md) for all reserved and standard keys.
 
-## Teammate requests
+## Contributor requests
 
 ```sh
-kata notify <ref> --to reviewer --message "Please check the reproduction"
-kata notify <ref> --to reviewer --clear
-kata inbox --for reviewer
-kata inbox --for reviewer --context
+kata notify <ref> --to contributor --message "Please check the reproduction"
+kata notify <ref> --to contributor --clear
+kata inbox --for contributor
+kata inbox --for contributor --context
 ```
 
-`notify` records one request per issue and recipient actor. Repeating it replaces
-that actor's request; `--clear` removes it, including on a closed issue. The
+`notify` records one request per issue and recipient. Repeating it replaces
+that recipient's request; `--clear` removes it, including on a closed issue. The
 command rejects an issue it reads as closed and fails on a concurrent metadata
 revision change. Closure can still race with the write; either way, the request
 is hidden while the issue is closed. Requests do not change ownership or readiness.
@@ -465,7 +465,7 @@ skipped with a warning on stderr; ordinary command failures return nonzero.
 Requests use existing issue metadata: `notify.` followed by the recipient's
 unpadded base64url encoding, with a JSON value containing `from` and `message`.
 The sender follows normal actor selection. No separate notification service or
-delivery state is involved. See [agent workflows](../workflows/agents.md#teammate-heads-up)
+delivery state is involved. See [agent workflows](../workflows/agents.md#contributor-heads-up)
 for the external harness integration contract.
 
 ## Coordination and wait
