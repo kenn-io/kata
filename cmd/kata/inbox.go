@@ -39,7 +39,7 @@ func newInboxCmd() *cobra.Command {
 	var contextOutput bool
 	cmd := &cobra.Command{
 		Use:   "inbox",
-		Short: "list requests for a contributor's attention",
+		Short: "list requests for a teammate's attention",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if contextOutput && (flags.Sel.json || flags.Sel.agent || len(flags.Sel.formats) > 0) {
@@ -67,7 +67,7 @@ func newInboxCmd() *cobra.Command {
 			return printInbox(cmd, forUser, requests)
 		},
 	}
-	cmd.Flags().StringVar(&recipient, "for", "", "contributor whose attention requests to list (or KATA_INBOX_USER)")
+	cmd.Flags().StringVar(&recipient, "for", "", "teammate whose attention requests to list (or KATA_INBOX_USER)")
 	cmd.Flags().BoolVar(&contextOutput, "context", false, "emit bounded context for an agent harness")
 	return cmd
 }

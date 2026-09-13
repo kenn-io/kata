@@ -434,13 +434,13 @@ kata meta unset abc4 someday
 
 See the [metadata conventions](metadata.md) for all reserved and standard keys.
 
-## Contributor requests
+## Teammate requests
 
 ```sh
-kata notify <ref> --to contributor --message "Please check the reproduction"
-kata notify <ref> --to contributor --clear
-kata inbox --for contributor
-kata inbox --for contributor --context
+kata notify <ref> --to teammate --message "Please check the reproduction"
+kata notify <ref> --to teammate --clear
+kata inbox --for teammate
+kata inbox --for teammate --context
 ```
 
 `notify` records one request per issue and recipient. Repeating it replaces
@@ -465,7 +465,7 @@ skipped with a warning on stderr; ordinary command failures return nonzero.
 Requests use existing issue metadata: `notify.` followed by the recipient's
 unpadded base64url encoding, with a JSON value containing `from` and `message`.
 The sender follows normal actor selection. No separate notification service or
-delivery state is involved. See [agent workflows](../workflows/agents.md#contributor-heads-up)
+delivery state is involved. See [agent workflows](../workflows/agents.md#teammate-heads-up)
 for the external harness integration contract.
 
 ## Coordination and wait

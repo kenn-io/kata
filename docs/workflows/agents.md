@@ -90,28 +90,28 @@ hook event yet, so pair the attention hook with a launcher wrapper that runs
 [agent orchestration](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 for the recipe.
 
-## Contributor heads-up
+## Teammate heads-up
 
-Ask for a contributor's attention without assigning the issue to them:
+Ask for a teammate's attention without assigning the issue to them:
 
 ```sh
-kata notify abc4 --to contributor --message "Please check the reproduction"
-kata inbox --for contributor
-kata notify abc4 --to contributor --clear
+kata notify abc4 --to teammate --message "Please check the reproduction"
+kata inbox --for teammate
+kata notify abc4 --to teammate --clear
 ```
 
-The inbox includes that contributor's requests on open issues in the current project.
+The inbox includes that teammate's requests on open issues in the current project.
 Closing the issue removes it from the next read. Clearing a request removes only
 that recipient's entry; reopening an issue restores any uncleared requests.
 
 Kata provides live context for separately maintained harness integrations:
 
 ```sh
-export KATA_INBOX_USER=contributor
+export KATA_INBOX_USER=teammate
 kata inbox --context --workspace /path/to/workspace
 ```
 
-An adapter should run this command before a prompt, with the contributor's explicit
+An adapter should run this command before a prompt, with the teammate's explicit
 inbox address and the current workspace. Add successful stdout as transient context
 so the agent can surface requests when relevant. Replace the previous context
 on every read, including empty output, and discard it on command failure. Use

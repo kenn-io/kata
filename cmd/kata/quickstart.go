@@ -130,11 +130,11 @@ Use kata as the shared issue ledger for this workspace.
    fail loudly. Read parent before asserting a removal. The other
    --remove-* flags are idempotent (no-op when the link is already gone).
 
-9. Request contributor attention without changing issue ownership:
+9. Request teammate attention without changing issue ownership:
 
-   kata notify <ref> --to <contributor> --message "<reason>"
-   kata inbox --for <contributor>
-   kata notify <ref> --to <contributor> --clear
+   kata notify <ref> --to <teammate> --message "<reason>"
+   kata inbox --for <teammate>
+   kata notify <ref> --to <teammate> --clear
 
    Inbox reads open issues in the selected project. Closing an issue hides
    its requests; reopening restores uncleared requests. The recipient is
@@ -194,9 +194,9 @@ Choose one unclaimed issue with kata next --unowned --agent.
 Inspect a filtered queue with kata ready --unowned --label bug --no-label blocked --agent.
 Default to --agent for ordinary kata reads and mutations in agent logs.
 Use --json only when your script needs complete structured data.
-Request contributor attention without changing ownership: kata notify <ref> --to <contributor> --message "<reason>".
-Read requests on open issues with kata inbox --for <contributor>; --context is for external harnesses.
-Clear a request with kata notify <ref> --to <contributor> --clear.
+Request teammate attention without changing ownership: kata notify <ref> --to <teammate> --message "<reason>".
+Read requests on open issues with kata inbox --for <teammate>; --context is for external harnesses.
+Clear a request with kata notify <ref> --to <teammate> --clear.
 If work is incomplete, label needs-review and comment with what remains.
 Close only verified work with substantive prose and typed evidence.
 Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.
