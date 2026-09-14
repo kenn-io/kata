@@ -73,8 +73,9 @@ func TestInboxUsesOnlyExplicitRecipient(t *testing.T) {
 
 func TestInboxContextIsBoundedQuotedAndRejectsOutputConflicts(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "unsafe\ntitle")
-	runCLIAs(t, env, dir, "sender", "notify", ref, "--to", "reviewer",
-		"--message", strings.Repeat("x", 20_000)+"\nnew instruction")
+	value, err := json.Marshal(notificationValue{From: "sender", Message: strings.Repeat("x", 20_000) + "\nnew instruction"})
+	require.NoError(t, err)
+	runCLI(t, env, dir, "meta", "set", ref, "notify.cmV2aWV3ZXI", string(value), "--json-value")
 
 	context := runCLI(t, env, dir, "inbox", "--for", "reviewer", "--context")
 	assert.LessOrEqual(t, len(context), 8192)
@@ -102,6 +103,34 @@ func TestInboxSkipsMalformedMetadataAndReportsWarning(t *testing.T) {
 	assert.Contains(t, stdout, validRef)
 	assert.NotContains(t, stdout, badRef)
 	assert.Contains(t, stderr, "skipped malformed notification")
+
+	stdout, stderr, err = runCLIWithErr(t, env, dir, "inbox", "--for", "reviewer", "--context", "--quiet")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, validRef)
+	assert.Empty(t, stderr)
+}
+
+func TestInboxEmptyOutput(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+	assert.Contains(t, runCLI(t, env, dir, "inbox", "--for", "reviewer"), "No requests for reviewer")
+	assert.Empty(t, runCLI(t, env, dir, "inbox", "--for", "reviewer", "--quiet"))
+	assert.Empty(t, runCLI(t, env, dir, "inbox", "--for", "reviewer", "--context"))
+}
+
+func TestInboxContextIncludesAllRequestsWhenTheyFit(t *testing.T) {
+	requests := make([]inboxRequest, 9)
+	for i := range 7 {
+		requests[i] = inboxRequest{Ref: "abcd", Title: "t", From: "sender", Message: strings.Repeat("x", 1024)}
+	}
+	requests[0].Title = strings.Repeat("t", 209)
+	requests[1].Title = strings.Repeat("t", 209)
+	requests[7] = inboxRequest{Ref: "tail", Title: "t", From: "sender", Message: "m"}
+	requests[8] = inboxRequest{Ref: "last", Title: "t", From: "sender", Message: "m"}
+
+	context := renderInboxContext("reviewer", requests)
+	assert.LessOrEqual(t, len(context), 8192)
+	assert.Equal(t, 9, strings.Count(context, "\n- issue="))
+	assert.Contains(t, context, `issue="last"`)
 }
 
 func TestInboxReturnsEveryMatchAndStaysProjectScoped(t *testing.T) {

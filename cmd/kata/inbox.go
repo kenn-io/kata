@@ -119,8 +119,10 @@ func loadInbox(cmd *cobra.Command, recipient string) ([]inboxRequest, error) {
 		raw, ok := issue.Metadata[key]
 		if !ok || json.Unmarshal(raw, &value) != nil ||
 			strings.TrimSpace(value.From) == "" || strings.TrimSpace(value.Message) == "" {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-				"warning: skipped malformed notification on %s\n", textsafe.Line(issue.ShortID))
+			if !flags.Quiet {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+					"warning: skipped malformed notification on %s\n", textsafe.Line(issue.ShortID))
+			}
 			continue
 		}
 		requests = append(requests, inboxRequest{
@@ -150,6 +152,10 @@ func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest) e
 			}
 		}
 		return nil
+	}
+	if len(requests) == 0 && !flags.Quiet {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "No requests for %s\n", textsafe.Line(recipient))
+		return err
 	}
 	for _, request := range requests {
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  %s\n  from %s: %s\n",
@@ -181,9 +187,7 @@ func renderInboxContext(recipient string, requests []inboxRequest) string {
 	output.WriteString(header)
 	omitted := 0
 	for i, line := range lines {
-		remaining := len(lines) - i - 1
-		footer := inboxContextFooter(remaining, truncated)
-		if output.Len()+len(line)+len(footer) > inboxContextBudget {
+		if output.Len()+len(line) > inboxContextBudget {
 			omitted = len(lines) - i
 			break
 		}

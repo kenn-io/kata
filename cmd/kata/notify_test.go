@@ -123,16 +123,8 @@ func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
 				return
 			}
 
-			cli := requireCLIError(t, notifyResult, ExitConfirm)
-			assert.Contains(t, cli.Message, "revision conflict")
-			assert.Equal(t, int32(1), patchRequests.Load(), "notify must not retry a stale write")
-			assert.NotContains(t, metadata, "notify.cmV2aWV3ZXI")
-			assert.JSONEq(t, `{"from":"agent-b","message":"check rollout"}`, metadata["notify.b3Bz"])
-			runCLIAs(t, env, dir, "agent-a", "notify", ref,
-				"--to", "reviewer", "--message", "review it")
-			stored, err = env.DB.IssueByID(t.Context(), issue.ID)
-			require.NoError(t, err)
-			metadata = notificationMetadata(t, json.RawMessage(stored.Metadata))
+			require.NoError(t, notifyResult)
+			assert.Equal(t, int32(1), patchRequests.Load())
 			assert.JSONEq(t, `{"from":"agent-b","message":"check rollout"}`, metadata["notify.b3Bz"])
 			assert.JSONEq(t, `{"from":"agent-a","message":"review it"}`, metadata["notify.cmV2aWV3ZXI"])
 		})
@@ -199,4 +191,20 @@ func TestNotifyValidatesRecipientAndMessage(t *testing.T) {
 		_, err := runCLICapture(t, env, dir, args...)
 		_ = requireCLIError(t, err, ExitValidation)
 	}
+}
+
+func TestNotifyMessageLimit(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "message limit")
+	message := strings.Repeat("é", 512)
+	runCLIAs(t, env, dir, "sender", "notify", ref,
+		"--to", "reviewer", "--message", message)
+	for _, oversized := range []string{strings.Repeat("x", 1025), message + "é"} {
+		_, err := runCLICapture(t, env, dir, "notify", ref,
+			"--to", "reviewer", "--message", oversized)
+		_ = requireCLIError(t, err, ExitValidation)
+	}
+	var inbox inboxOutput
+	require.NoError(t, json.Unmarshal([]byte(runCLI(t, env, dir, "inbox", "--for", "reviewer", "--json")), &inbox))
+	require.Len(t, inbox.Requests, 1)
+	assert.Equal(t, message, inbox.Requests[0].Message)
 }

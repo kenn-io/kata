@@ -17,6 +17,7 @@ import (
 
 const notificationKeyPrefix = "notify."
 const notificationRecipientMaxBytes = 128
+const notificationMessageMaxBytes = 1024
 
 type notificationValue struct {
 	From    string `json:"from"`
@@ -41,6 +42,9 @@ func newNotifyCmd() *cobra.Command {
 			if !clearRequest && strings.TrimSpace(message) == "" {
 				return notificationValidationError("--message must not be blank")
 			}
+			if len(message) > notificationMessageMaxBytes {
+				return notificationValidationError("--message must be at most 1024 bytes")
+			}
 
 			ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, args[0])
 			if err != nil {
@@ -53,7 +57,6 @@ func newNotifyCmd() *cobra.Command {
 			actor, _ := resolveActor(ctx, flags.As, nil)
 			key := notificationMetadataKey(to)
 			value := json.RawMessage("null")
-			headers := map[string]string{}
 			verb := "cleared"
 			if !clearRequest {
 				issue, _, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI)
@@ -68,16 +71,15 @@ func newNotifyCmd() *cobra.Command {
 					return err
 				}
 				value = encoded
-				headers["If-Match"] = fmt.Sprintf(`"rev-%d"`, issue.Revision)
 				verb = "notified"
 			}
 			body := map[string]any{
 				"actor": actor,
 				"patch": map[string]json.RawMessage{key: value},
 			}
-			status, response, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
+			status, response, err := httpDoJSON(ctx, client, http.MethodPost,
 				fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", baseURL, pid, url.PathEscape(ref.RefForAPI)),
-				body, headers)
+				body)
 			if err != nil {
 				return err
 			}
@@ -88,7 +90,7 @@ func newNotifyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&recipient, "to", "", "teammate whose attention is requested (max 128 UTF-8 bytes)")
-	cmd.Flags().StringVar(&message, "message", "", "reason their attention is needed")
+	cmd.Flags().StringVar(&message, "message", "", "reason their attention is needed (max 1024 bytes)")
 	cmd.Flags().BoolVar(&clearRequest, "clear", false, "remove this teammate's request")
 	return cmd
 }
