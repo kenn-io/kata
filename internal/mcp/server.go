@@ -221,21 +221,23 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 			field.Enum = values
 		}
 	}
+	// Root oneOf/allOf/anyOf make Claude Code drop the tool, so root rules use
+	// only not and if/then/else.
+	var forbidden []*jsonschema.Schema
 	forbidTogether := func(names ...string) {
-		schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
-			Not: &jsonschema.Schema{Required: names},
-		})
+		forbidden = append(forbidden, &jsonschema.Schema{Required: names})
 	}
 	forbidTrueWith := func(booleanName, otherName string) {
 		trueValue := any(true)
-		schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
-			Not: &jsonschema.Schema{
-				Required: []string{booleanName, otherName},
-				Properties: map[string]*jsonschema.Schema{
-					booleanName: {Const: &trueValue},
-				},
+		forbidden = append(forbidden, &jsonschema.Schema{
+			Required: []string{booleanName, otherName},
+			Properties: map[string]*jsonschema.Schema{
+				booleanName: {Const: &trueValue},
 			},
 		})
+	}
+	setCondition := func(condition *jsonschema.Schema) {
+		schema.If, schema.Then, schema.Else = condition.If, condition.Then, condition.Else
 	}
 
 	switch toolName {
@@ -271,7 +273,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setEnum("action", "adopt", "retry", "skip")
 		setStringBounds("external_comment_id", 1, 4096)
 		adopt := any("adopt")
-		schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
+		setCondition(&jsonschema.Schema{
 			If: &jsonschema.Schema{
 				Required: []string{"action"},
 				Properties: map[string]*jsonschema.Schema{
@@ -326,7 +328,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 			minimum := float64(0)
 			field.Minimum = &minimum
 		}
-		schema.OneOf = planningDateSchemas("deadline", "clear_deadline")
+		setCondition(planningDateCondition("deadline", "clear_deadline"))
 	case "kata.set_metadata":
 		setStringBounds("ref", 1, 256)
 		if field := property("revision"); field != nil {
@@ -344,7 +346,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 			minimum := float64(0)
 			field.Minimum = &minimum
 		}
-		schema.OneOf = planningDateSchemas("schedule", "clear_schedule")
+		setCondition(planningDateCondition("schedule", "clear_schedule"))
 	case "kata.recurrence_update":
 		setEnum("action", "create", "patch")
 		if field := property("revision"); field != nil {
@@ -352,7 +354,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 			field.Minimum = &minimum
 		}
 		patchAction := any("patch")
-		schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
+		setCondition(&jsonschema.Schema{
 			If: &jsonschema.Schema{
 				Required: []string{"action"},
 				Properties: map[string]*jsonschema.Schema{
@@ -365,7 +367,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setEnum("phase", "preflight", "prepare", "commit")
 		setEnum("disposition", "detach", "archive")
 		commit := any("commit")
-		schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
+		setCondition(&jsonschema.Schema{
 			If: &jsonschema.Schema{
 				Required: []string{"phase"},
 				Properties: map[string]*jsonschema.Schema{
@@ -379,31 +381,56 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setStringBounds("message", 1, 1<<20)
 		setEnum("reason", "done", "wontfix", "duplicate", "superseded", "audit-no-change")
 		property("evidence").Items = evidenceSchema()
-		schema.OneOf = closeReasonSchemas()
+		setCondition(closeReasonCondition())
 	case "kata.reopen":
 		setStringBounds("ref", 1, 256)
 	case "kata.audit_closes":
 		setNumberBounds("limit", 1, maximumResultLimit)
 		setStringBounds("cursor", 1, 64)
 	}
+	switch len(forbidden) {
+	case 0:
+	case 1:
+		schema.Not = forbidden[0]
+	default:
+		schema.Not = &jsonschema.Schema{AnyOf: forbidden}
+	}
 	return schema
 }
 
-func planningDateSchemas(valueField, clearField string) []*jsonschema.Schema {
+// planningDateCondition accepts exactly one of a value or clearField=true.
+func planningDateCondition(valueField, clearField string) *jsonschema.Schema {
 	trueValue := any(true)
-	return []*jsonschema.Schema{
-		{
-			Required: []string{valueField},
-			Not:      &jsonschema.Schema{Required: []string{clearField}},
-		},
-		{
+	return &jsonschema.Schema{
+		If:   &jsonschema.Schema{Required: []string{valueField}},
+		Then: &jsonschema.Schema{Not: &jsonschema.Schema{Required: []string{clearField}}},
+		Else: &jsonschema.Schema{
 			Required: []string{clearField},
 			Properties: map[string]*jsonschema.Schema{
 				clearField: {Const: &trueValue},
 			},
-			Not: &jsonschema.Schema{Required: []string{valueField}},
 		},
 	}
+}
+
+// closeReasonCondition selects the evidence rules for the given reason. The
+// last variant is the final else, so a missing or unknown reason still fails.
+func closeReasonCondition() *jsonschema.Schema {
+	variants := closeReasonSchemas()
+	condition := variants[len(variants)-1]
+	for i := len(variants) - 2; i >= 0; i-- {
+		condition = &jsonschema.Schema{
+			If: &jsonschema.Schema{
+				Required: []string{"reason"},
+				Properties: map[string]*jsonschema.Schema{
+					"reason": variants[i].Properties["reason"].CloneSchemas(),
+				},
+			},
+			Then: variants[i],
+			Else: condition,
+		}
+	}
+	return condition
 }
 
 func evidenceVariant(kind string) *jsonschema.Schema {

@@ -79,7 +79,7 @@ func TestExternalRootInputSchemasBoundEnumsAndCommentModes(t *testing.T) {
 	require.EqualValues(t, 256, mapProperties["external_field"].(map[string]any)["maxLength"])
 	resolveProperties := schemaObject(t, byName["kata.bridge_resolve_field"].InputSchema)["properties"].(map[string]any)
 	require.ElementsMatch(t, []any{"kata", "external"}, resolveProperties["use"].(map[string]any)["enum"])
-	require.Len(t, schemaObject(t, byName["kata.bridge_resolve_comment"].InputSchema)["allOf"], 1)
+	require.Contains(t, schemaObject(t, byName["kata.bridge_resolve_comment"].InputSchema), "if")
 
 	for _, arguments := range []map[string]any{
 		{"ref": "spoke-project#abc4", "action": "adopt"},

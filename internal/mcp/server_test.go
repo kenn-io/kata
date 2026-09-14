@@ -245,6 +245,10 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		require.Equal(t, "https://json-schema.org/draft/2020-12/schema", input["$schema"], tool.Name)
 		require.Equal(t, "object", input["type"], tool.Name)
 		require.Equal(t, false, input["additionalProperties"], tool.Name)
+		// The Anthropic Messages API rejects these at the top level of input_schema.
+		for _, keyword := range []string{"oneOf", "allOf", "anyOf"} {
+			require.NotContains(t, input, keyword, tool.Name)
+		}
 		properties, _ := input["properties"].(map[string]any)
 		if tool.Name != "kata.audit_closes" {
 			require.NotContains(t, properties, "actor", tool.Name)
@@ -432,11 +436,11 @@ func TestCreateAndCommentRequireIdempotencyKeys(t *testing.T) {
 	require.ElementsMatch(t, []any{"done", "wontfix", "duplicate", "superseded", "audit-no-change"}, closeProperties["reason"].(map[string]any)["enum"])
 	evidenceItems := closeProperties["evidence"].(map[string]any)["items"].(map[string]any)
 	require.Len(t, evidenceItems["oneOf"], 8)
-	require.Len(t, schemaObject(t, byName["kata.close"].InputSchema)["oneOf"], 5)
+	require.Contains(t, schemaObject(t, byName["kata.close"].InputSchema), "if")
 
-	require.Len(t, schemaObject(t, byName["kata.list"].InputSchema)["allOf"], 1)
-	require.Len(t, schemaObject(t, byName["kata.ready"].InputSchema)["allOf"], 1)
-	require.Len(t, schemaObject(t, byName["kata.edit"].InputSchema)["allOf"], 5)
+	require.Contains(t, schemaObject(t, byName["kata.list"].InputSchema), "not")
+	require.Contains(t, schemaObject(t, byName["kata.ready"].InputSchema), "not")
+	require.Len(t, schemaObject(t, byName["kata.edit"].InputSchema)["not"].(map[string]any)["anyOf"], 5)
 
 	labelProperties := schemaObject(t, byName["kata.set_label"].InputSchema)["properties"].(map[string]any)
 	require.EqualValues(t, 64, labelProperties["label"].(map[string]any)["maxLength"])
@@ -520,6 +524,21 @@ func TestSetScheduleInputSchemaRequiresOneMutation(t *testing.T) {
 	require.Error(t, schema.Validate(map[string]any{"ref": "abc1"}))
 	require.Error(t, schema.Validate(map[string]any{"ref": "abc1", "schedule": "2026-09-01", "clear_schedule": true}))
 	require.Error(t, schema.Validate(map[string]any{"ref": "abc1", "clear_schedule": false}))
+}
+
+func TestEditAndListInputSchemasForbidConflictingFields(t *testing.T) {
+	edit, err := inputSchemaFor[EditInput]("kata.edit").Resolve(nil)
+	require.NoError(t, err)
+	require.NoError(t, edit.Validate(map[string]any{"ref": "abc1", "owner": "example-agent"}))
+	require.NoError(t, edit.Validate(map[string]any{"ref": "abc1", "owner": "example-agent", "clear_owner": false}))
+	require.Error(t, edit.Validate(map[string]any{"ref": "abc1", "owner": "example-agent", "clear_owner": true}))
+	require.Error(t, edit.Validate(map[string]any{"ref": "abc1", "priority": 1, "clear_priority": true}))
+	require.Error(t, edit.Validate(map[string]any{"ref": "abc1", "parent": "abc2", "remove_parent": "abc3"}))
+
+	list, err := inputSchemaFor[ListInput]("kata.list").Resolve(nil)
+	require.NoError(t, err)
+	require.NoError(t, list.Validate(map[string]any{"owner": "example-agent"}))
+	require.Error(t, list.Validate(map[string]any{"owner": "example-agent", "unowned": true}))
 }
 
 func TestRecurrencePatchSchemaRequiresRevision(t *testing.T) {
