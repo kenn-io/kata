@@ -54,3 +54,7 @@ func requireProcessClientHelperGone(t *testing.T, observed processClientHelperOb
 	require.NoError(t, waitErr)
 	require.Equal(t, uint32(windows.WAIT_OBJECT_0), waitResult, "connector descendant survived cancellation")
 }
+
+func processClientHelperReadyFilePending(err error) bool {
+	return errors.Is(err, windows.ERROR_SHARING_VIOLATION)
+}

@@ -1567,7 +1567,9 @@ func waitForProcessClientHelperPID(t *testing.T, readyPath string) int {
 			require.NoError(t, err)
 			return pid
 		}
-		require.ErrorIs(t, err, fs.ErrNotExist)
+		if !errors.Is(err, fs.ErrNotExist) && !processClientHelperReadyFilePending(err) {
+			require.NoError(t, err)
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("connector helper did not signal readiness")
