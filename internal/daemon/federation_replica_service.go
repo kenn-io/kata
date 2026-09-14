@@ -171,7 +171,7 @@ func beginFederationReplicaHubOperation(
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 
-	key := federationReplicaTransitionKey(store, projectName)
+	key := federationReplicaOperationKey(store, projectName, baseline.Credential)
 	if err := federationReplicaTransitions.leaveBlockedError(key); err != nil {
 		return nil, err
 	}
@@ -201,9 +201,23 @@ func beginFederationReplicaHubOperation(
 		once.Do(func() {
 			ensureFederationReplicaMu.Lock()
 			defer ensureFederationReplicaMu.Unlock()
-			pendingFound, recordErr := recordFederationReplicaPendingEnrollmentLocked(
-				finishCtx, managed, projectName, enrollmentID,
-			)
+			var pendingFound bool
+			var recordErr error
+			if baseline.Credential.Provider != nil {
+				current, found, err := config.FindProjectManagedCredential(finishCtx, managed, baseline.Credential.Provider.LocalProjectUID, projectName)
+				recordErr = err
+				if err == nil {
+					if !found || current.Credential.Provider == nil || current.Credential.Provider.RequestID != baseline.Credential.Provider.RequestID {
+						recordErr = ErrFederationReplicaReservationChanged
+					} else {
+						pendingFound = current.Credential.LeavePending
+					}
+				}
+			} else {
+				pendingFound, recordErr = recordFederationReplicaPendingEnrollmentLocked(
+					finishCtx, managed, projectName, enrollmentID,
+				)
+			}
 			leavePending = pendingFound
 			finishErr = recordErr
 			if !pendingFound && recordErr == nil {
@@ -252,7 +266,7 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 		)
 	}
 	if found && match.Credential.Provider != nil {
-		key = federationReplicaTransitionKey(store, match.Credential.SpokeProjectName)
+		key = federationReplicaOperationKey(store, project.Name, match.Credential)
 	}
 	if found && !match.Credential.LeavePending {
 		replacement := match
@@ -395,6 +409,15 @@ func federationReplicaTransitionKey(store db.Storage, projectName string) string
 	return store.InstanceUID() + "\x00" + strings.TrimSpace(projectName)
 }
 
+// Provider requests survive renames. Their drain must not stop a different
+// project that later takes the old name.
+func federationReplicaOperationKey(store db.Storage, projectName string, credential config.FederationCredential) string {
+	if credential.Provider != nil {
+		return store.InstanceUID() + "\x00provider\x00" + credential.Provider.RequestID.String()
+	}
+	return federationReplicaTransitionKey(store, projectName)
+}
+
 // FederationReplicaMappingSuppressed reports whether explicit leave was
 // prepared or completed for this mapping in the current daemon process.
 func FederationReplicaMappingSuppressed(store db.Storage, projectName string) bool {
@@ -499,7 +522,7 @@ func leaveFederationReplicaState(
 			)
 		}
 	}
-	federationReplicaTransitions.markLeft(federationReplicaTransitionKey(store, project.Name))
+	federationReplicaTransitions.markLeft(federationReplicaOperationKey(store, project.Name, match.Credential))
 	return result, nil
 }
 
@@ -707,7 +730,7 @@ func ensureFederationReplicaState(
 		}
 	}
 	federationReplicaTransitions.clearLeave(
-		federationReplicaTransitionKey(store, p.ProjectName),
+		federationReplicaOperationKey(store, p.ProjectName, p.Credential),
 	)
 	return result, nil
 }
@@ -724,7 +747,13 @@ func revalidateManagedReservation(
 	if err != nil {
 		return err
 	}
-	match, found, err := managed.FindManagedFederationCredential(ctx, p.ProjectName)
+	var match config.FederationManagedCredentialReservation
+	var found bool
+	if p.ManagedReservation.Expected.Provider != nil {
+		match, found, err = config.FindProjectManagedCredential(ctx, managed, p.ManagedReservation.ProjectUID, p.ProjectName)
+	} else {
+		match, found, err = managed.FindManagedFederationCredential(ctx, p.ProjectName)
+	}
 	if err != nil {
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
 			return federationReplicaError(
@@ -756,7 +785,14 @@ func rejectConflictingManagedReservation(
 	if !ok {
 		return nil
 	}
-	match, found, err := finder.FindManagedFederationCredential(ctx, p.ProjectName)
+	var match config.FederationManagedCredentialReservation
+	var found bool
+	var err error
+	if p.Credential.Provider != nil {
+		match, found, err = config.FindProjectManagedCredential(ctx, finder, p.Credential.Provider.LocalProjectUID, p.ProjectName)
+	} else {
+		match, found, err = finder.FindManagedFederationCredential(ctx, p.ProjectName)
+	}
 	if err != nil {
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
 			return federationReplicaError(

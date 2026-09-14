@@ -84,12 +84,24 @@ func TestReconcileProviderProcess(_ *testing.T) {
 		os.Exit(2)
 	}
 	if request.Operation == "release" {
-		saved, found, err := config.FindManagedFederationCredential("spoke-project")
-		if err != nil || !found || saved.Credential.Provider == nil || !saved.Credential.LeavePending || saved.Credential.Provider.RequestID != request.RequestID {
+		saved, err := config.ReadFederationCredentials()
+		if err != nil {
+			os.Exit(2)
+		}
+		found := false
+		for _, credential := range saved.Projects {
+			if credential.Provider != nil && credential.LeavePending && credential.Provider.RequestID == request.RequestID {
+				found = true
+			}
+		}
+		if !found {
 			os.Exit(2)
 		}
 	}
 	response := federationprovider.Response{Version: 1, Operation: request.Operation, RequestID: request.RequestID, Status: federationprovider.Status(os.Getenv("KATA_TEST_PROVIDER_DECISION"))}
+	if request.Operation == "release" && os.Getenv("KATA_TEST_PROVIDER_RELEASE_DECISION") != "" {
+		response.Status = federationprovider.Status(os.Getenv("KATA_TEST_PROVIDER_RELEASE_DECISION"))
+	}
 	if response.Status == "ready" {
 		response.HubURL, response.ProjectID, response.ProjectUID = request.HubURL, 42, hubProjectUID
 		response.EnrollmentID, response.Actor = 7, "Example User"
@@ -106,6 +118,83 @@ func TestReconcileProviderProcess(_ *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func TestRemovedProviderCleanupDoesNotFollowReusedName(t *testing.T) {
+	for _, tc := range []struct {
+		name                       string
+		rekeyed, createReplacement bool
+	}{
+		{name: "pending attachment", createReplacement: true},
+		{name: "interrupted after rekey", rekeyed: true, createReplacement: true},
+		{name: "replacement created by reconciler"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv("KATA_TEST_RECONCILE_PROVIDER", "1")
+			t.Setenv("KATA_TEST_PROVIDER_DECISION", "ready")
+			store := openReconcileStore(t)
+			credentials := config.DefaultFederationCredentialStore()
+			executable, err := os.Executable()
+			require.NoError(t, err)
+			catalog := config.CatalogDaemonConfig{Name: "team-hub", URL: "https://hub.example/tasks"}
+			mapping := config.FederationProjectConfig{
+				Hub: catalog.Name, SpokeProject: "spoke-project", HubProject: "hub-project", Intent: "collaborate",
+				CredentialProvider: []string{executable, "-test.run=^TestReconcileProviderProcess$"},
+			}
+			original, err := store.CreateProject(t.Context(), mapping.SpokeProject)
+			require.NoError(t, err)
+			saved, err := daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, mapping)
+			require.NoError(t, err)
+			if tc.rekeyed {
+				require.NoError(t, credentials.RekeyFederationCredential(t.Context(), config.FederationCredentialRekey{
+					FromProjectUID: saved.ProjectUID, ToProjectUID: hubProjectUID,
+					Expected: saved.Credential, Replacement: saved.Credential,
+				}))
+				saved.ProjectUID = hubProjectUID
+			}
+			_, _, _, err = store.RenameProjectAndEvent(t.Context(), original.ID, "renamed-project", "Example User")
+			require.NoError(t, err)
+			if tc.createReplacement {
+				_, err = store.CreateProject(t.Context(), mapping.SpokeProject)
+				require.NoError(t, err)
+			}
+			t.Setenv("KATA_TEST_PROVIDER_DECISION", "approval_required")
+			t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "released")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			r := federation.NewReconciler(federation.ReconcilerConfig{
+				Store: store, Credentials: credentials, Targets: []federation.Target{{Catalog: catalog, Mapping: mapping}},
+				Wake: cancel,
+			})
+			done := runReconciler(ctx, t, r)
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(3 * time.Second):
+				cancel()
+				<-done
+				require.FailNow(t, "renamed project's request was not cleaned up", "health: %+v", r.Health())
+			}
+			_, found, err := credentials.FederationCredential(t.Context(), saved.ProjectUID)
+			require.NoError(t, err)
+			assert.False(t, found, "only the original request should be removed")
+			replacement, err := store.ProjectByName(t.Context(), mapping.SpokeProject)
+			require.NoError(t, err)
+			retained, found, err := credentials.FederationCredential(t.Context(), replacement.UID)
+			require.NoError(t, err)
+			require.True(t, found, "the new project's pending request must survive cleanup")
+			next, err := daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, mapping)
+			require.NoError(t, err, "cleanup must not block the project that reused the name")
+			assert.Equal(t, retained.Provider.RequestID, next.Credential.Provider.RequestID)
+			assert.Equal(t, replacement.UID, next.Credential.Provider.LocalProjectUID)
+			assert.NotEqual(t, saved.Credential.Provider.RequestID, next.Credential.Provider.RequestID)
+			assert.Equal(t, federationprovider.StatusApprovalRequired, next.Credential.Provider.Status)
+			assert.False(t, next.Credential.LeavePending)
+			_, err = store.ProjectByID(t.Context(), original.ID)
+			require.NoError(t, err, "cleanup must keep local data")
+		})
+	}
 }
 
 func TestReconcilerRemovesProviderMappingAndRetriesExactCleanup(t *testing.T) {
