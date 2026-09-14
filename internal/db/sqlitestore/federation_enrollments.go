@@ -148,6 +148,20 @@ func (d *Store) createProjectFederationEnrollment(
 	}
 	defer func() { _ = tx.Rollback() }()
 	p := prepared.Params
+	// Exact replay returns retained state without enabling an archived project.
+	if prepared.ExplicitToken {
+		existing, err := scanFederationEnrollment(tx.QueryRowContext(ctx,
+			federationEnrollmentSelect+` WHERE token_hash = ?`, db.FederationTokenHash(p.Token)))
+		if err == nil {
+			if !db.FederationEnrollmentMatchesCreate(existing, p) {
+				return db.CreatedFederationEnrollment{}, db.ErrFederationEnrollmentTokenConflict
+			}
+			return db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}, tx.Commit()
+		}
+		if !errors.Is(err, db.ErrNotFound) {
+			return db.CreatedFederationEnrollment{}, err
+		}
+	}
 	if _, err := d.enableProjectFederationTx(ctx, tx, *p.ProjectID, p.Actor); err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}

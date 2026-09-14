@@ -333,6 +333,21 @@ func (s *Store) CreateProjectFederationEnrollment(
 	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.CreatedFederationEnrollment{}
 		p := prepared.Params
+		// Exact replay returns retained state without enabling an archived project.
+		if prepared.ExplicitToken {
+			existing, err := scanFederationEnrollment(tx.QueryRowContext(ctx,
+				federationEnrollmentSelect+` WHERE token_hash = $1`, db.FederationTokenHash(p.Token)))
+			if err == nil {
+				if !db.FederationEnrollmentMatchesCreate(existing, p) {
+					return db.ErrFederationEnrollmentTokenConflict
+				}
+				output = db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}
+				return nil
+			}
+			if !errors.Is(err, db.ErrNotFound) {
+				return err
+			}
+		}
 		if _, err := s.enableProjectFederationTx(ctx, tx, *p.ProjectID, p.Actor); err != nil {
 			return err
 		}

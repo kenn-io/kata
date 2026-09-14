@@ -90,6 +90,35 @@ func TestServiceEnsureFederationEnrollment(t *testing.T) {
 			history, err = service.ListFederationEnrollments(ctx, project.UID)
 			require.NoError(t, err)
 			assert.Len(t, history, 2, "conflicting retries must not create credentials")
+
+			t.Run("archived replay", func(t *testing.T) {
+				_, err := service.ArchiveProject(ctx, project.UID, spec.Actor)
+				require.NoError(t, err)
+				again, err := service.EnsureFederationEnrollment(ctx, spec, otherToken)
+				require.NoError(t, err)
+				assert.Equal(t, independent, again, "exact replay must return the retained enrollment")
+
+				_, err = service.EnsureFederationEnrollment(ctx, spec, token)
+				require.ErrorIs(t, err, kata.ErrFederationEnrollmentTokenConflict)
+				changed := spec
+				changed.Actor = "Another Operator"
+				_, err = service.EnsureFederationEnrollment(ctx, changed, otherToken)
+				require.ErrorIs(t, err, kata.ErrFederationEnrollmentTokenConflict)
+
+				newSecret := make([]byte, 32)
+				newSecret[0] = 2
+				_, err = service.EnsureFederationEnrollment(ctx, spec, base64.RawURLEncoding.EncodeToString(newSecret))
+				require.ErrorIs(t, err, kata.ErrProjectNotFound)
+				_, err = service.CreateFederationEnrollment(ctx, spec)
+				require.ErrorIs(t, err, kata.ErrProjectNotFound)
+				retained, err := service.ListFederationEnrollments(ctx, project.UID)
+				require.NoError(t, err)
+				assert.Equal(t, history, retained, "archived retries must not change enrollment history")
+				result, err := service.EnsureProject(ctx, kata.ProjectSpec{UID: project.UID, Name: project.Name})
+				require.NoError(t, err)
+				assert.Equal(t, kata.ProjectArchived, result.Project.State)
+				assertFederationTokenStatus(t, service, project.ID, otherToken, http.StatusForbidden)
+			})
 		})
 	}
 }

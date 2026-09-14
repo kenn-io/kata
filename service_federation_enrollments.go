@@ -65,8 +65,9 @@ func (s *Service) CreateFederationEnrollment(
 // EnsureFederationEnrollment accepts a caller-owned token and returns only
 // non-secret metadata. The token must encode 32 bytes as unpadded base64url.
 // The caller must save it before calling and authorize the operation itself.
-// Exact retries return the same active enrollment. Reusing a token with changed
-// scope or after revocation returns ErrFederationEnrollmentTokenConflict.
+// Exact retries return the same active enrollment, even after project archival.
+// Replay does not reactivate the project. Reusing a token with changed scope or
+// after revocation returns ErrFederationEnrollmentTokenConflict.
 // A different token may create another enrollment for the same scope; this
 // method does not replace or revoke an existing credential.
 func (s *Service) EnsureFederationEnrollment(
@@ -101,7 +102,7 @@ func (s *Service) createFederationEnrollment(
 	if err != nil {
 		return CreatedFederationEnrollment{}, err
 	}
-	if !found || project.DeletedAt != nil {
+	if !found {
 		return CreatedFederationEnrollment{}, ErrProjectNotFound
 	}
 	created, err := s.store.CreateProjectFederationEnrollment(callCtx, db.CreateFederationEnrollmentParams{

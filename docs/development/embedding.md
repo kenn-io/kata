@@ -396,6 +396,8 @@ enrollment, err := service.EnsureFederationEnrollment(ctx, kata.FederationEnroll
 - The result contains enrollment metadata, not the token or its hash.
 - Repeating the call with the same token and scope returns the same active
   enrollment. The token authenticates ordinary scoped federation requests.
+- Exact retries also work after project archival. They return the retained
+  enrollment without reactivating the project or creating a credential.
 - Reusing that token with a different project, spoke instance, actor,
   capabilities, or adoption permission returns
   `ErrFederationEnrollmentTokenConflict`. Revoked tokens return the same error;
