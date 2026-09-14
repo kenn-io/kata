@@ -46,8 +46,10 @@ func TestExchangeDomainResults(t *testing.T) {
 					request = federationprovider.Request{Version: 1, Operation: "release", RequestID: request.RequestID}
 				}
 				response, err := federationprovider.Exchange(t.Context(), providerCommand(t, status), request)
-				if operation == "release" && (status == "approval_required" || status == "sign_in_required") {
+				if operation == "release" && (status == "approval_required" || status == "sign_in_required") ||
+					operation == "authorize" && status == "released" {
 					require.ErrorIs(t, err, federationprovider.ErrInvalidResponse)
+					require.Zero(t, response)
 					return
 				}
 				require.NoError(t, err)

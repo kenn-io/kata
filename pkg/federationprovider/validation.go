@@ -112,7 +112,11 @@ func decodeResponse(data []byte, request Request) (Response, error) {
 		}
 	}
 	switch response.Status {
-	case StatusReleased, StatusConflict, StatusDenied, StatusUnavailable:
+	case StatusReleased:
+		if request.Operation == "release" {
+			return response, nil
+		}
+	case StatusConflict, StatusDenied, StatusUnavailable:
 		return response, nil
 	case StatusApprovalRequired, StatusSignInRequired:
 		if request.Operation == "authorize" {

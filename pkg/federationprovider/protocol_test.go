@@ -99,6 +99,11 @@ func TestWriteResponseChecksRequestBeforeWriting(t *testing.T) {
 	response = federationprovider.Response{Version: 1, Operation: "authorize", RequestID: request.RequestID, Status: "approval_required", Message: "Ask a project manager to approve this request."}
 	require.NoError(t, federationprovider.WriteResponse(&out, request, response))
 	require.JSONEq(t, `{"version":1,"operation":"authorize","request_id":"`+requestID+`","status":"approval_required","message":"Ask a project manager to approve this request."}`, out.String())
+
+	response.Status = federationprovider.StatusReleased
+	out.Reset()
+	require.ErrorIs(t, federationprovider.WriteResponse(&out, request, response), federationprovider.ErrInvalidResponse)
+	require.Empty(t, out.String(), "release cannot answer an authorization request")
 }
 
 func TestDecodeResponseChecksRawContractAndTarget(t *testing.T) {

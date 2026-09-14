@@ -574,7 +574,7 @@ Every response echoes `version`, `operation`, and `request_id`, and includes a
 | `denied` | Stop automatic authorization retries for this request. |
 | `conflict` | Keep state and ask for an explicit correction. |
 | `unavailable` | Keep state and retry later. |
-| `released` | Cleanup is complete; the request no longer grants access. |
+| `released` | Release only: cleanup is complete; the request no longer grants access. |
 
 A release returns only `released`, `conflict`, `denied`, or `unavailable`.
 It cannot grant a connection. Only `ready` includes the following fields.
