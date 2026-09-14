@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 func notificationMetadata(t *testing.T, raw json.RawMessage) map[string]string {
@@ -35,6 +36,38 @@ func TestNotifyAgentOutputUsesCommandHeader(t *testing.T) {
 	out := runCLIAs(t, env, dir, "agent-a", "--agent", "notify", ref,
 		"--to", "reviewer", "--message", "review it")
 	assert.Contains(t, out, "OK notify "+ref+" to=reviewer changed=true")
+}
+
+func TestNotifyUsesAuthenticatedActor(t *testing.T) {
+	env, dir, pid := setupCLIWorkspaceOptions(t,
+		testenv.WithAuthToken("bootstrap-token"),
+		testenv.WithRequireTokenIdentity(),
+	)
+	const operatorToken = "operator-bearer"
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{ //nolint:gosec // test-only bearer credential
+		PlaintextToken: operatorToken,
+		Actor:          "operator",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: pid, Title: "attributed request", Author: "operator",
+	})
+	require.NoError(t, err)
+	t.Setenv("KATA_AUTH_TOKEN", operatorToken)
+
+	out := runCLIAs(t, env, dir, "agent-a", "--json", "notify", issue.ShortID,
+		"--to", "reviewer", "--message", "review it")
+	var response struct {
+		Event db.Event `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &response))
+	assert.Equal(t, "operator", response.Event.Actor)
+
+	var inbox inboxOutput
+	require.NoError(t, json.Unmarshal([]byte(runCLI(t, env, dir, "--json", "inbox", "--for", "reviewer")), &inbox))
+	require.Len(t, inbox.Requests, 1)
+	assert.Equal(t, "operator", inbox.Requests[0].From)
 }
 
 func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {

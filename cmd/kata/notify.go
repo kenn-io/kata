@@ -66,6 +66,13 @@ func newNotifyCmd() *cobra.Command {
 				if issue.Status != "open" {
 					return notificationValidationError("cannot notify on a closed issue")
 				}
+				var instance instanceStatusForCLI
+				if err := getStatusPayload(ctx, client, baseURL+"/api/v1/instance", &instance); err != nil {
+					return err
+				}
+				if instance.Auth.Actor != "" {
+					actor = instance.Auth.Actor
+				}
 				encoded, err := json.Marshal(notificationValue{From: actor, Message: message})
 				if err != nil {
 					return err

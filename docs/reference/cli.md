@@ -468,8 +468,9 @@ return nonzero.
 
 Requests use existing issue metadata: `notify.` followed by the recipient's
 unpadded base64url encoding, with a JSON value containing `from` and `message`.
-The sender follows normal actor selection. No separate notification service or
-delivery state is involved. See [agent workflows](../workflows/agents.md#teammate-heads-up)
+The sender uses the daemon's authenticated actor when present; otherwise it follows
+normal CLI actor selection. No separate notification service or delivery state is
+involved. See [agent workflows](../workflows/agents.md#teammate-heads-up)
 for the external harness integration contract.
 
 ## Coordination and wait
