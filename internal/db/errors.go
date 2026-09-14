@@ -260,6 +260,9 @@ var (
 	// ErrFederationRebindConflict is returned when the current binding endpoint
 	// or hub identity no longer matches an endpoint rebind's source snapshot.
 	ErrFederationRebindConflict = errors.New("federation rebind conflict")
+
+	// ErrFederationProjectNotEmpty requires explicit adoption of local data.
+	ErrFederationProjectNotEmpty = errors.New("federation attachment requires an empty project")
 )
 
 // LinkTargetNotFoundError carries the requested issue row id (globally unique

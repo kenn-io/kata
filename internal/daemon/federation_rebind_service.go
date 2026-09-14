@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -253,7 +255,7 @@ func RebindFederationReplica(
 			"",
 		)
 	}
-	if currentCredential != credential && currentCredential != targetCredential {
+	if !currentCredential.Equal(credential) && !currentCredential.Equal(targetCredential) {
 		return RebindFederationReplicaResult{}, federationReplicaError(
 			ErrFederationReplicaCredentialConflict,
 			"federation credential changed during rebind validation",
@@ -487,7 +489,7 @@ func validateFederationRebindBindingState(
 }
 
 func canonicalFederationRebindBaseURL(raw string) (string, error) {
-	return config.CanonicalHTTPBaseURL(raw)
+	return httpurl.CanonicalHTTPBaseURL(raw)
 }
 
 func fetchFederationRebindMetadata(
@@ -511,7 +513,7 @@ func fetchFederationRebindMetadata(
 			"check the HTTPS catalog endpoint",
 		)
 	}
-	requestURL, err := config.AppendHTTPBaseURLPath(
+	requestURL, err := httpurl.AppendHTTPBaseURLPath(
 		hubURL,
 		fmt.Sprintf("/api/v1/projects/%d/federation/metadata", hubProjectID),
 	)
@@ -572,12 +574,12 @@ func configureFederationRebindRedirects(httpClient *http.Client, baseURL string)
 	if httpClient == nil {
 		return errors.New("cannot configure redirects on a nil HTTP client")
 	}
-	origin, err := config.CanonicalHTTPOrigin(baseURL)
+	origin, err := httpurl.CanonicalHTTPOrigin(baseURL)
 	if err != nil {
 		return err
 	}
 	httpClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-		requestOrigin, err := config.CanonicalHTTPOrigin(request.URL.String())
+		requestOrigin, err := httpurl.CanonicalHTTPOrigin(request.URL.String())
 		if err != nil || requestOrigin != origin {
 			return errors.New("redirect crossed the configured HTTP origin")
 		}

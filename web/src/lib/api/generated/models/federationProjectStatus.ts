@@ -10,6 +10,7 @@ export interface FederationProjectStatus {
   allow_insecure?: boolean
   bound_actor?: string
   capabilities?: string
+  credential_expires_at?: string
   credential_status?: string
   enabled: boolean
   enrollment_count: number
@@ -32,6 +33,7 @@ export interface FederationProjectStatus {
   project_id: number
   project_name: string
   project_uid: string
+  provider_status?: string
   pull_cursor_event_id: number
   push_cursor_event_id: number
   push_enabled: boolean

@@ -380,8 +380,13 @@ configuration.
 
 ### Declarative federation mappings
 
-A spoke daemon can enroll and adopt projects automatically at startup by
-mapping local project names to projects on remote daemon-catalog targets:
+A spoke daemon maps local projects to projects on remote daemon-catalog targets.
+Each mapping uses either catalog administration credentials or a local credential
+provider. It cannot mix them.
+
+#### Catalog administration credentials
+
+This form creates projects and enrolls or adopts replicas automatically at startup:
 
 ```toml
 [[daemon]]
@@ -476,6 +481,52 @@ mappings that select the same canonical hub origin and hub project. `actor` is
 required and cannot be the reserved `bootstrap` identity, even when a
 DB-backed token identity will override the requested actor at reconciliation
 time.
+
+#### Credential provider
+
+Use this form when the hub supplies a helper to approve access without giving
+Kata its administration credentials:
+
+```toml
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example/tasks"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+intent = "collaborate"
+credential_provider = ["access-helper", "credentials", "--profile", "work"]
+```
+
+| Field | Rule |
+| --- | --- |
+| `hub` | Names a remote catalog entry with an HTTPS URL. |
+| `spoke_project`, `hub_project` | Required local project name and destination project key. |
+| `intent` | Required: `read_only`, `collaborate`, or `migrate`. |
+| `credential_provider` | Nonempty executable/argument array. Kata executes it directly, without a shell. |
+| `actor` | Must be absent; the provider supplies the approved actor. |
+| Catalog `token`, `token_env` | Must be absent for a provider mapping. |
+
+Provider mappings require HTTPS even if the catalog sets `allow_insecure`.
+The helper approves a credential for an exact HTTPS destination; the catalog's
+plaintext opt-in does not change that contract. Install the hub's CA in the
+daemon's trust store when using a private certificate authority.
+
+`read_only` permits pull only. `collaborate` permits pull and push; the hub may
+also grant task claiming. Both require an empty local project. `migrate` asks
+the hub to approve adoption of an existing project's tasks and authors.
+The helper cannot silently downgrade write access or upgrade read-only access.
+
+Kata retains the request across restarts and failed exchanges. A helper that
+exits `2` reports `configuration_conflict` in reconciliation health; check its
+command and protocol version. Removing a provider mapping releases its saved
+request and detaches the replica on restart, unlike catalog-admin mappings.
+See [External credential providers](../operations/federation.md#external-credential-providers)
+for approval, status, and cleanup, and the
+[helper protocol](../development/embedding.md#federation-credential-providers)
+for the exact exchange.
 
 ## Token identity mode
 

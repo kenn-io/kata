@@ -26,6 +26,46 @@ import (
 
 const federationTestSpokeUID = "01HZNQ7VFPK1XGD8R5MABCD4EA"
 
+func TestProviderStatusReadsOneSnapshotAndKeepsProjectIdentity(t *testing.T) {
+	credentials := newReplicaCredentialStore()
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.FederationCredentials = credentials })
+	original, err := env.DB.CreateProject(t.Context(), "original")
+	require.NoError(t, err)
+	pending, err := env.DB.CreateProject(t.Context(), "pending")
+	require.NoError(t, err)
+	_, _, _, err = env.DB.RenameProjectAndEvent(t.Context(), original.ID, "renamed", "Example User")
+	require.NoError(t, err)
+	_, err = env.DB.CreateProject(t.Context(), "original")
+	require.NoError(t, err)
+	credentials.credentials[original.UID] = config.FederationCredential{
+		ManagedByConfig: true, SpokeProjectName: "original", Token: "synthetic-token",
+		Provider: &config.FederationProviderCredential{LocalProjectUID: original.UID, Status: "approval_required"},
+	}
+	// The credential was rekeyed before local attachment finished.
+	credentials.credentials[replicaHubProjectUID] = config.FederationCredential{
+		ManagedByConfig: true, SpokeProjectName: "pending",
+		Provider: &config.FederationProviderCredential{LocalProjectUID: pending.UID, Status: "ready"},
+	}
+	var body api.FederationStatusBody
+	envGetJSON(t, env, "/api/v1/federation/status", &body)
+	require.Len(t, body.Statuses, 2)
+	assert.ElementsMatch(t, []string{"renamed", "pending"}, []string{body.Statuses[0].ProjectName, body.Statuses[1].ProjectName})
+	assert.Nil(t, body.Statuses[0].CredentialExpiresAt)
+	assert.Nil(t, body.Statuses[1].CredentialExpiresAt)
+	assert.Equal(t, 1, credentials.listCalls)
+	assert.Zero(t, credentials.readCalls, "provider status must not reread each project's secret file")
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
+		ProjectID: original.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example/tasks",
+		HubProjectID: 7, HubProjectUID: original.UID, ReplayHorizonEventID: 1, Enabled: true,
+	})
+	require.NoError(t, err)
+	credentials.listCalls = 0
+	envGetJSON(t, env, "/api/v1/federation/status", &body)
+	require.Len(t, body.Statuses, 2)
+	assert.Equal(t, 1, credentials.listCalls)
+	assert.Zero(t, credentials.readCalls, "bound providers use the same snapshot as pending ones")
+}
+
 type recordingEnrollmentHostAccess struct {
 	requests []daemon.HostAccessRequest
 }

@@ -11,9 +11,10 @@ import (
 	"strconv"
 	"strings"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -36,7 +37,7 @@ type Client struct {
 
 // NewClient builds a bearer-pinned HTTP client for a trusted hub.
 func NewClient(ctx context.Context, baseURL string, token string, opts clientpkg.Opts) (*Client, error) {
-	canonicalBaseURL, err := config.CanonicalHTTPBaseURL(baseURL)
+	canonicalBaseURL, err := httpurl.CanonicalHTTPBaseURL(baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +113,7 @@ func (c *Client) ProjectFederation(ctx context.Context, hubProjectID int64) (api
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
-	requestURL, err := config.AppendHTTPBaseURLPath(c.baseURL, path)
+	requestURL, err := httpurl.AppendHTTPBaseURLPath(c.baseURL, path)
 	if err != nil {
 		return err
 	}
@@ -140,7 +141,7 @@ func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
 	if err != nil {
 		return fmt.Errorf("marshal hub %s request: %w", path, err)
 	}
-	requestURL, err := config.AppendHTTPBaseURLPath(c.baseURL, path)
+	requestURL, err := httpurl.AppendHTTPBaseURLPath(c.baseURL, path)
 	if err != nil {
 		return err
 	}

@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
@@ -57,7 +59,7 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 		out.token = in.hubToken
 		return out, nil
 	}
-	hubOrigin, err := config.CanonicalHTTPOrigin(out.url)
+	hubOrigin, err := httpurl.CanonicalHTTPOrigin(out.url)
 	if err != nil {
 		return hubAdminAuth{}, fmt.Errorf("canonicalize spoke hub origin: %w", err)
 	}
@@ -74,7 +76,7 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 				ExitCode: ExitValidation,
 			}
 		}
-		entryOrigin, err := config.CanonicalHTTPOrigin(e.URL)
+		entryOrigin, err := httpurl.CanonicalHTTPOrigin(e.URL)
 		if err != nil {
 			return hubAdminAuth{}, fmt.Errorf("canonicalize --hub %q catalog origin: %w", name, err)
 		}
@@ -168,7 +170,7 @@ func catalogByOrigin(
 		if strings.TrimSpace(cat.Daemons[i].URL) == "" {
 			continue
 		}
-		entryOrigin, err := config.CanonicalHTTPOrigin(cat.Daemons[i].URL)
+		entryOrigin, err := httpurl.CanonicalHTTPOrigin(cat.Daemons[i].URL)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"canonicalize daemon catalog entry %q origin: %w",
@@ -210,7 +212,7 @@ func canonicalHubBaseURL(raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	origin, err := config.CanonicalHTTPOrigin(raw)
+	origin, err := httpurl.CanonicalHTTPOrigin(raw)
 	if err != nil {
 		return "", err
 	}

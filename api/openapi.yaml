@@ -1467,6 +1467,9 @@ components:
           type: string
         capabilities:
           type: string
+        credential_expires_at:
+          format: date-time
+          type: string
         credential_status:
           type: string
         enabled:
@@ -1525,6 +1528,8 @@ components:
         project_name:
           type: string
         project_uid:
+          type: string
+        provider_status:
           type: string
         pull_cursor_event_id:
           format: int64
@@ -2901,6 +2906,8 @@ components:
           type: string
         hub_url:
           type: string
+        provider_managed:
+          type: boolean
       required:
         - hub_url
         - hub_project_id

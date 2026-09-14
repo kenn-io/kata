@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	hubclient "go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/textsafe"
+	"go.kenn.io/kata/pkg/federationprovider"
 )
 
 func newFederationCmd() *cobra.Command {
@@ -610,6 +611,7 @@ type spokeLeaveTarget struct {
 	allowInsecure     bool
 	standalone        bool
 	pendingEnrollment bool
+	providerManaged   bool
 }
 
 func federationLeaveCmd() *cobra.Command {
@@ -650,7 +652,7 @@ func federationLeaveCmd() *cobra.Command {
 			// discovered only after the revoke would strand the spoke locally
 			// bound with the hub side gone. Advisory only — the authoritative
 			// checks stay inside the daemon's transactions.
-			if !localOnly {
+			{
 				actor, _ := resolveActor(ctx, flags.As, nil)
 				var preflight api.LeaveFederationReplicaResultBody
 				if err := a.decode(http.MethodPost,
@@ -668,6 +670,12 @@ func federationLeaveCmd() *cobra.Command {
 						return err
 					}
 					target.pendingEnrollment = true
+				}
+				if preflight.PendingEnrollment != nil {
+					target.providerManaged = preflight.PendingEnrollment.ProviderManaged
+				}
+				if target.providerManaged && localOnly {
+					return &cliError{Message: "--local-only cannot discard a provider-managed connection; use federation leave without it to retain and retry offline cleanup", Kind: kindValidation, ExitCode: ExitValidation}
 				}
 			}
 			// A truly standalone project has no hub contact. A standalone
@@ -695,6 +703,7 @@ func federationLeaveCmd() *cobra.Command {
 					return err
 				}
 				if prepared.PendingEnrollment != nil {
+					target.providerManaged = prepared.PendingEnrollment.ProviderManaged
 					target.hubURL = strings.TrimRight(prepared.PendingEnrollment.HubURL, "/")
 					target.hubProjectID = prepared.PendingEnrollment.HubProjectID
 					target.allowInsecure = prepared.PendingEnrollment.AllowInsecure
@@ -708,7 +717,7 @@ func federationLeaveCmd() *cobra.Command {
 				}
 			}
 			hasHubEnrollment := !target.standalone || target.pendingEnrollment
-			if hasHubEnrollment {
+			if hasHubEnrollment && !target.providerManaged {
 				if localOnly {
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"warning: --local-only skips hub revoke; the enrollment token remains valid until you run `kata federation revoke <id>` on the hub %s\n",
@@ -785,7 +794,7 @@ func resolveSpokeForLeave(a daemonAPI, args []string) (spokeLeaveTarget, error) 
 	// No binding at all → project is already standalone. Return the standalone
 	// signal so the caller skips hub contact; the daemon leave call still runs
 	// to finish any stale-credential cleanup (plain leave) or archive (--delete).
-	if match == nil {
+	if match == nil || match.Role == "standalone" {
 		return spokeLeaveTarget{
 			projectID:   project.ID,
 			projectName: project.Name,
@@ -1791,6 +1800,16 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			fmt.Sprintf("unresolved violations: %d", status.UnresolvedViolationCount),
 			fmt.Sprintf("recent violations: %d", status.RecentViolationCount),
 		}
+		if status.ProviderStatus != "" {
+			provider := formatProviderStatus(status.ProviderStatus)
+			if federationprovider.Status(status.ProviderStatus) == federationprovider.StatusReleased && status.Role == "spoke" {
+				provider = "released; retry federation leave to finish local teardown"
+			}
+			lines = append(lines, "provider: "+provider)
+		}
+		if status.CredentialExpiresAt != nil {
+			lines = append(lines, "access expires: "+formatFederationStatusTime(status.CredentialExpiresAt))
+		}
 		for _, line := range lines {
 			if _, err := fmt.Fprintf(out, "  %s\n", line); err != nil {
 				return err
@@ -1820,6 +1839,21 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 		}
 	}
 	return nil
+}
+
+func formatProviderStatus(status string) string {
+	switch federationprovider.Status(status) {
+	case federationprovider.StatusApprovalRequired:
+		return "waiting for project approval"
+	case federationprovider.StatusSignInRequired:
+		return "sign in through the configured credential provider"
+	case "cleanup_pending":
+		return "cleanup pending; retry federation leave when the provider is available"
+	case federationprovider.StatusReleased:
+		return "released; remove the federation mapping from config.toml"
+	default:
+		return textsafe.Line(status)
+	}
 }
 
 func formatFederationStatusTime(t *time.Time) string {
@@ -1855,6 +1889,8 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 		if err := writeAgentKVRow(out,
 			agentRowField("project", status.ProjectName),
 			agentRowField("role", status.Role),
+			agentRowField("provider", status.ProviderStatus),
+			agentRowField("access_expires", formatFederationStatusTime(status.CredentialExpiresAt)),
 			agentRowField("enabled", strconv.FormatBool(status.Enabled)),
 			agentRowField("push_enabled", strconv.FormatBool(status.PushEnabled)),
 			agentRowField("pull_cursor", strconv.FormatInt(status.PullCursorEventID, 10)),

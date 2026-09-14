@@ -2566,6 +2566,23 @@ func (d *Store) adoptProjectIntoFederation(
 	if err := rejectExternalRootFederationProject(ctx, tx, p.ProjectID); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
+	if p.EmptyOnly {
+		var metadata map[string]json.RawMessage
+		if len(project.Metadata) > 0 {
+			if err := json.Unmarshal([]byte(project.Metadata), &metadata); err != nil {
+				return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("read project metadata before attachment: %w", err)
+			}
+		}
+		var hasData bool
+		if err := tx.QueryRowContext(ctx, `SELECT
+			EXISTS(SELECT 1 FROM issues WHERE project_id = ?) OR
+			EXISTS(SELECT 1 FROM recurrences WHERE project_id = ?)`, project.ID, project.ID).Scan(&hasData); err != nil {
+			return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("check empty federation project: %w", err)
+		}
+		if hasData || len(metadata) > 0 {
+			return db.AdoptProjectIntoFederationResult{}, db.ErrFederationProjectNotEmpty
+		}
+	}
 
 	issues, err := federationIssuesForSnapshot(ctx, tx, project.ID)
 	if err != nil {
@@ -2591,6 +2608,8 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 	baselineCreatedAt := time.Now().UTC().Format(sqliteTimeFormat)
+	// Old events were hashed with the local UID. Even an empty project's
+	// catalog events must be replaced when it takes the hub identity.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, project.ID); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("delete pre-adoption local events: %w", err)
 	}
@@ -2600,18 +2619,23 @@ func (d *Store) adoptProjectIntoFederation(
 	if p.AllowInsecure {
 		allowInsecure = 1
 	}
+	pushEnabled := 1
+	if p.EmptyOnly {
+		pushEnabled = 0
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO federation_bindings(
 			project_id, role, hub_url, hub_project_id, hub_project_uid,
 			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
 			push_cursor_event_id, bound_actor, allow_insecure, enabled
 		)
-		VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 1)`,
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
 		project.ID, string(db.FederationRoleSpoke), p.HubURL, p.HubProjectID, p.HubProjectUID,
-		p.ReplayHorizonEventID, pullCursor, pushFloor, actor, allowInsecure); err != nil {
+		p.ReplayHorizonEventID, pullCursor, pushEnabled, pushFloor, actor, allowInsecure); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("insert adoption federation binding: %w", err)
 	}
 
+	var createdEvent *db.Event
 	emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
 	if !emitMetadataBaseline && len(issues) == 0 {
 		emitMetadataBaseline = true
@@ -2621,7 +2645,7 @@ func (d *Store) adoptProjectIntoFederation(
 		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
 		}
-		if _, err := d.insertEventTx(ctx, tx, eventInsert{
+		event, err := d.insertEventTx(ctx, tx, eventInsert{
 			ProjectID:   project.ID,
 			ProjectUID:  project.UID,
 			ProjectName: project.Name,
@@ -2630,8 +2654,18 @@ func (d *Store) adoptProjectIntoFederation(
 			Payload:     payload,
 			HLC:         &boundary,
 			CreatedAt:   baselineCreatedAt,
-		}); err != nil {
+		})
+		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
+		}
+		if p.EmptyOnly {
+			// Notify local readers of the new UID without sending local
+			// catalog history or empty metadata to the hub.
+			createdEvent = &event
+			if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings
+				SET push_cursor_event_id = ? WHERE project_id = ?`, event.ID, project.ID); err != nil {
+				return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("set attachment push cursor: %w", err)
+			}
 		}
 	}
 
@@ -2679,6 +2713,7 @@ func (d *Store) adoptProjectIntoFederation(
 		Project:               project,
 		Binding:               binding,
 		AdoptionSnapshotCount: snapshotCount,
+		CreatedEvent:          createdEvent,
 	}, nil
 }
 

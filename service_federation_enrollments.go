@@ -2,6 +2,7 @@ package kata
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,8 +16,13 @@ import (
 // to the requested project or does not exist.
 var ErrFederationEnrollmentNotFound = errors.New("kata: federation enrollment not found")
 
+// ErrFederationEnrollmentTokenConflict reports that a supplied token already
+// belongs to a different enrollment scope or has been revoked.
+var ErrFederationEnrollmentTokenConflict = errors.New("kata: federation enrollment token conflict")
+
 // FederationEnrollmentSpec describes a project-scoped transport credential.
-// Kata generates the plaintext token and returns it only from creation.
+// CreateFederationEnrollment generates a token; EnsureFederationEnrollment
+// accepts a token that the caller has already saved.
 type FederationEnrollmentSpec struct {
 	ProjectUID                   string
 	SpokeInstanceUID             string
@@ -53,6 +59,35 @@ func (s *Service) CreateFederationEnrollment(
 	ctx context.Context,
 	spec FederationEnrollmentSpec,
 ) (CreatedFederationEnrollment, error) {
+	return s.createFederationEnrollment(ctx, spec, "")
+}
+
+// EnsureFederationEnrollment accepts a caller-owned token and returns only
+// non-secret metadata. The token must encode 32 bytes as unpadded base64url.
+// The caller must save it before calling and authorize the operation itself.
+// Exact retries return the same active enrollment, even after project archival.
+// Replay does not reactivate the project. Reusing a token with changed scope or
+// after revocation returns ErrFederationEnrollmentTokenConflict.
+// A different token may create another enrollment for the same scope; this
+// method does not replace or revoke an existing credential.
+func (s *Service) EnsureFederationEnrollment(
+	ctx context.Context,
+	spec FederationEnrollmentSpec,
+	token string,
+) (FederationEnrollment, error) {
+	secret, err := base64.RawURLEncoding.Strict().DecodeString(token)
+	if err != nil || len(secret) != 32 || base64.RawURLEncoding.EncodeToString(secret) != token {
+		return FederationEnrollment{}, errors.New("kata: invalid federation token")
+	}
+	created, err := s.createFederationEnrollment(ctx, spec, token)
+	return created.Enrollment, err
+}
+
+func (s *Service) createFederationEnrollment(
+	ctx context.Context,
+	spec FederationEnrollmentSpec,
+	token string,
+) (CreatedFederationEnrollment, error) {
 	capabilities, actor, err := validateFederationEnrollmentSpec(spec)
 	if err != nil {
 		return CreatedFederationEnrollment{}, err
@@ -67,10 +102,11 @@ func (s *Service) CreateFederationEnrollment(
 	if err != nil {
 		return CreatedFederationEnrollment{}, err
 	}
-	if !found || project.DeletedAt != nil {
+	if !found {
 		return CreatedFederationEnrollment{}, ErrProjectNotFound
 	}
 	created, err := s.store.CreateProjectFederationEnrollment(callCtx, db.CreateFederationEnrollmentParams{
+		Token:                        token,
 		SpokeInstanceUID:             spec.SpokeInstanceUID,
 		ProjectID:                    &project.ID,
 		Capabilities:                 capabilities,
@@ -79,6 +115,9 @@ func (s *Service) CreateFederationEnrollment(
 	})
 	if errors.Is(err, db.ErrNotFound) {
 		return CreatedFederationEnrollment{}, ErrProjectNotFound
+	}
+	if errors.Is(err, db.ErrFederationEnrollmentTokenConflict) {
+		return CreatedFederationEnrollment{}, ErrFederationEnrollmentTokenConflict
 	}
 	if err != nil {
 		return CreatedFederationEnrollment{}, fmt.Errorf("kata: create federation enrollment: %w", err)

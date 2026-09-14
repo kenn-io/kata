@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+
+	"go.kenn.io/kata/internal/httpurl"
 )
 
 // ConfigureClient attaches an origin-pinned bearer transport to c under this
@@ -110,7 +112,7 @@ func (p BearerPolicy) OriginForBaseURL(baseURL string) (string, error) {
 	if err := p.CheckTargetURL(u); err != nil {
 		return "", err
 	}
-	return CanonicalHTTPOrigin(baseURL)
+	return httpurl.CanonicalHTTPOrigin(baseURL)
 }
 
 // Transport wraps base with bearer-token injection when token is non-empty,
@@ -141,11 +143,11 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err := t.policy.CheckTargetURL(req.URL); err != nil {
 		return nil, err
 	}
-	reqOrigin, err := CanonicalHTTPOrigin(req.URL.String())
+	reqOrigin, err := httpurl.CanonicalHTTPOrigin(req.URL.String())
 	if err != nil {
 		return nil, fmt.Errorf("canonicalize bearer request origin: %w", err)
 	}
-	boundOrigin, err := CanonicalHTTPOrigin(t.origin)
+	boundOrigin, err := httpurl.CanonicalHTTPOrigin(t.origin)
 	if err != nil {
 		return nil, fmt.Errorf("canonicalize bound bearer origin: %w", err)
 	}

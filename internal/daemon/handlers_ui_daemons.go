@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
@@ -423,7 +425,7 @@ func resolveWebDaemon(d config.CatalogDaemonConfig) resolvedWebDaemon {
 		parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.Contains(trimmed, "#") {
 		return resolved
 	}
-	canonical, err := config.CanonicalHTTPOrigin(trimmed)
+	canonical, err := httpurl.CanonicalHTTPOrigin(trimmed)
 	if err != nil {
 		return resolved
 	}

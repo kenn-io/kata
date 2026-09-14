@@ -1,4 +1,5 @@
-package config
+// Package httpurl owns canonical HTTP origins and reverse-proxy base URLs.
+package httpurl
 
 import (
 	"fmt"

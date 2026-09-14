@@ -3,6 +3,8 @@ package db
 import (
 	"encoding/json"
 	"time"
+
+	"go.kenn.io/kata/internal/tokenactor"
 )
 
 // IncludeDeleted controls whether a lookup is allowed to return soft-deleted
@@ -690,6 +692,8 @@ type AdoptProjectIntoFederationParams struct {
 	ReplayHorizonEventID int64
 	Actor                string
 	AllowInsecure        bool
+	// EmptyOnly attaches an empty project without importing its local history.
+	EmptyOnly bool
 }
 
 // AdoptProjectIntoFederationResult describes the adopted project, binding, and
@@ -698,6 +702,7 @@ type AdoptProjectIntoFederationResult struct {
 	Project               Project
 	Binding               FederationBinding
 	AdoptionSnapshotCount int64
+	CreatedEvent          *Event
 }
 
 // LeaveFederationResult reports what LeaveFederationReplica removed. ProjectUID
@@ -782,7 +787,7 @@ const (
 	// SystemProjectUID is the stable UID for the hidden system project.
 	SystemProjectUID = "00000000000000000000000000"
 	// BootstrapActor is the audit actor for bootstrap/admin token operations.
-	BootstrapActor = "bootstrap"
+	BootstrapActor = tokenactor.Bootstrap
 	// SystemActor identifies internal project mutations without a user initiator.
 	SystemActor = "system"
 )

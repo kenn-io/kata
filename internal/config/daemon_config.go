@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	"github.com/BurntSushi/toml"
 )
 
@@ -496,7 +498,7 @@ func normalizeWebConfig(cfg *WebConfig, trustPrivateNetwork bool) error {
 	if u.Scheme == "http" && !isLoopbackWebOrigin(u) && !trustPrivateNetwork {
 		return errors.New("web.public_origin: non-loopback HTTP requires auth.trust_private_network = true")
 	}
-	canonical, err := CanonicalHTTPOrigin(u.String())
+	canonical, err := httpurl.CanonicalHTTPOrigin(u.String())
 	if err != nil {
 		return fmt.Errorf("web.public_origin: %w", err)
 	}

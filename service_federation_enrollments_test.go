@@ -2,6 +2,7 @@ package kata_test
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -11,7 +12,145 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata"
+	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestServiceEnsureFederationEnrollment(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			cfg := kata.Config{
+				DSN:     filepath.Join(t.TempDir(), "service.db"),
+				Auth:    kata.AuthConfig{TrustCallerAuthentication: true},
+				Profile: kata.EmbeddingProfileRestricted,
+			}
+			if backend == "postgres" {
+				dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+				t.Cleanup(cleanup)
+				cfg.DSN = dsn
+				cfg.Postgres = kata.PostgresConfig{Schema: "kata", SchemaMode: kata.PostgresSchemaBootstrap}
+			}
+			service, err := kata.New(ctx, cfg)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, service.Close()) })
+			project := ensureEnrollmentTestProject(t, service, "01HZNQ7VFPK1XGD8R5MABCD4EX", "hub-project")
+			other := ensureEnrollmentTestProject(t, service, "01HZNQ7VFPK1XGD8R5MABCD4EY", "other-project")
+			spec := kata.FederationEnrollmentSpec{
+				ProjectUID:       project.UID,
+				SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+				Capabilities:     "push,pull,claim",
+				Actor:            "Example Operator",
+			}
+			token := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+			first, err := service.EnsureFederationEnrollment(ctx, spec, token)
+			require.NoError(t, err)
+			assert.Equal(t, "claim,pull,push", first.Capabilities)
+			assertFederationTokenStatus(t, service, project.ID, token, http.StatusOK)
+			assertFederationTokenStatus(t, service, other.ID, token, http.StatusForbidden)
+
+			spec.Capabilities = "claim,pull,push"
+			again, err := service.EnsureFederationEnrollment(ctx, spec, token)
+			require.NoError(t, err)
+			assert.Equal(t, first, again)
+			history, err := service.ListFederationEnrollments(ctx, project.UID)
+			require.NoError(t, err)
+			require.Len(t, history, 1, "retry must not create another credential")
+
+			for _, change := range []struct {
+				name   string
+				mutate func(*kata.FederationEnrollmentSpec)
+			}{
+				{"project", func(s *kata.FederationEnrollmentSpec) { s.ProjectUID = other.UID }},
+				{"instance", func(s *kata.FederationEnrollmentSpec) { s.SpokeInstanceUID = "01HZNQ7VFPK1XGD8R5MABCD4EB" }},
+				{"capabilities", func(s *kata.FederationEnrollmentSpec) { s.Capabilities = "pull" }},
+				{"actor", func(s *kata.FederationEnrollmentSpec) { s.Actor = "Another Operator" }},
+				{"adoption", func(s *kata.FederationEnrollmentSpec) { s.AllowAdoptionSnapshotAuthors = true }},
+			} {
+				t.Run(change.name, func(t *testing.T) {
+					changed := spec
+					change.mutate(&changed)
+					_, err := service.EnsureFederationEnrollment(ctx, changed, token)
+					require.ErrorIs(t, err, kata.ErrFederationEnrollmentTokenConflict)
+					assertFederationTokenStatus(t, service, project.ID, token, http.StatusOK)
+				})
+			}
+
+			// A host may impose a one-live-credential policy, but Kata does not.
+			otherSecret := make([]byte, 32)
+			otherSecret[0] = 1
+			otherToken := base64.RawURLEncoding.EncodeToString(otherSecret)
+			independent, err := service.EnsureFederationEnrollment(ctx, spec, otherToken)
+			require.NoError(t, err)
+			assert.NotEqual(t, first.ID, independent.ID)
+			require.NoError(t, service.RevokeFederationEnrollment(ctx, project.UID, first.ID))
+			_, err = service.EnsureFederationEnrollment(ctx, spec, token)
+			require.ErrorIs(t, err, kata.ErrFederationEnrollmentTokenConflict)
+			assertFederationTokenStatus(t, service, project.ID, token, http.StatusForbidden)
+			assertFederationTokenStatus(t, service, project.ID, otherToken, http.StatusOK)
+			history, err = service.ListFederationEnrollments(ctx, project.UID)
+			require.NoError(t, err)
+			assert.Len(t, history, 2, "conflicting retries must not create credentials")
+
+			t.Run("archived replay", func(t *testing.T) {
+				_, err := service.ArchiveProject(ctx, project.UID, spec.Actor)
+				require.NoError(t, err)
+				again, err := service.EnsureFederationEnrollment(ctx, spec, otherToken)
+				require.NoError(t, err)
+				assert.Equal(t, independent, again, "exact replay must return the retained enrollment")
+
+				_, err = service.EnsureFederationEnrollment(ctx, spec, token)
+				require.ErrorIs(t, err, kata.ErrFederationEnrollmentTokenConflict)
+				changed := spec
+				changed.Actor = "Another Operator"
+				_, err = service.EnsureFederationEnrollment(ctx, changed, otherToken)
+				require.ErrorIs(t, err, kata.ErrFederationEnrollmentTokenConflict)
+
+				newSecret := make([]byte, 32)
+				newSecret[0] = 2
+				_, err = service.EnsureFederationEnrollment(ctx, spec, base64.RawURLEncoding.EncodeToString(newSecret))
+				require.ErrorIs(t, err, kata.ErrProjectNotFound)
+				_, err = service.CreateFederationEnrollment(ctx, spec)
+				require.ErrorIs(t, err, kata.ErrProjectNotFound)
+				retained, err := service.ListFederationEnrollments(ctx, project.UID)
+				require.NoError(t, err)
+				assert.Equal(t, history, retained, "archived retries must not change enrollment history")
+				result, err := service.EnsureProject(ctx, kata.ProjectSpec{UID: project.UID, Name: project.Name})
+				require.NoError(t, err)
+				assert.Equal(t, kata.ProjectArchived, result.Project.State)
+				assertFederationTokenStatus(t, service, project.ID, otherToken, http.StatusForbidden)
+			})
+		})
+	}
+}
+
+func TestServiceEnsureFederationEnrollmentRejectsInvalidToken(t *testing.T) {
+	service, err := kata.New(t.Context(), kata.Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	project := ensureEnrollmentTestProject(t, service, "01HZNQ7VFPK1XGD8R5MABCD4EX", "hub-project")
+	spec := kata.FederationEnrollmentSpec{
+		ProjectUID:       project.UID,
+		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+		Capabilities:     "pull",
+		Actor:            "Example Operator",
+	}
+	valid := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	for _, token := range []string{"", "invalid", valid + "=", valid + "\n", valid[:42] + "B"} {
+		_, err := service.EnsureFederationEnrollment(t.Context(), spec, token)
+		require.ErrorContains(t, err, "invalid federation token")
+	}
+	history, err := service.ListFederationEnrollments(t.Context(), project.UID)
+	require.NoError(t, err)
+	assert.Empty(t, history)
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/v1/projects/"+strconv.FormatInt(project.ID, 10)+"/federation", nil)
+	response := httptest.NewRecorder()
+	service.Handler().ServeHTTP(response, request)
+	assert.Equal(t, http.StatusNotFound, response.Code, "invalid input must not enable federation")
+}
 
 func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 	service, err := kata.New(context.Background(), kata.Config{

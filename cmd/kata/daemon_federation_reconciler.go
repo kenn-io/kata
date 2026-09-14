@@ -33,7 +33,21 @@ func startFederationConfigReconciler(
 	daemonLog *log.Logger,
 ) func() api.FederationConfigHealth {
 	if len(daemonConfig.Federation.Projects) == 0 {
-		return nil
+		// Removed provider mappings still have exact cleanup work. A plain
+		// daemon with no provider state needs no reconciliation worker.
+		credentials, err := config.ReadFederationCredentials()
+		if err != nil {
+			return func() api.FederationConfigHealth {
+				return api.FederationConfigHealth{Pending: 1, LastErrorCategory: "credential_io"}
+			}
+		}
+		pendingProvider := false
+		for _, credential := range credentials.Projects {
+			pendingProvider = pendingProvider || credential.Provider != nil
+		}
+		if !pendingProvider {
+			return nil
+		}
 	}
 
 	targets := make([]federation.Target, 0, len(daemonConfig.Federation.Projects))

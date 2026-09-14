@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -156,7 +158,7 @@ func federationRebindTestBearerClient(
 	t *testing.T, httpClient *http.Client, baseURL, token string,
 ) *http.Client {
 	t.Helper()
-	origin, err := config.CanonicalHTTPOrigin(baseURL)
+	origin, err := httpurl.CanonicalHTTPOrigin(baseURL)
 	require.NoError(t, err)
 	httpClient.Transport = (config.BearerPolicy{}).Transport(httpClient.Transport, token, origin)
 	return httpClient

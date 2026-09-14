@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
+
+	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -371,11 +374,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, federationReplicaAPIError(err)
 			}
-			oldOrigin, err := config.CanonicalHTTPOrigin(result.PreviousHubURL)
+			oldOrigin, err := httpurl.CanonicalHTTPOrigin(result.PreviousHubURL)
 			if err != nil {
 				return nil, internalAPIError(fmt.Errorf("canonicalize previous federation origin: %w", err))
 			}
-			newOrigin, err := config.CanonicalHTTPOrigin(result.Binding.HubURL)
+			newOrigin, err := httpurl.CanonicalHTTPOrigin(result.Binding.HubURL)
 			if err != nil {
 				return nil, internalAPIError(fmt.Errorf("canonicalize rebound federation origin: %w", err))
 			}
@@ -481,7 +484,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 					found = prepared.ManagedReservationFound
 					findErr = prepareErr
 				} else {
-					match, found, findErr = managed.FindManagedFederationCredential(ctx, project.Name)
+					match, found, findErr = config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 				}
 				switch {
 				case errors.Is(findErr, config.ErrFederationCredentialConflict):
@@ -496,10 +499,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return nil, internalAPIError(findErr)
 				case found:
 					body.PendingEnrollment = &api.PendingFederationEnrollmentCleanup{
-						HubURL:        match.Credential.HubURL,
-						HubProjectID:  match.Credential.HubProjectID,
-						HubProjectUID: match.ProjectUID,
-						AllowInsecure: match.Credential.AllowInsecure,
+						ProviderManaged: match.Credential.Provider != nil,
+						HubURL:          match.Credential.HubURL,
+						HubProjectID:    match.Credential.HubProjectID,
+						HubProjectUID:   match.ProjectUID,
+						AllowInsecure:   match.Credential.AllowInsecure,
 					}
 				}
 			}
@@ -541,6 +545,26 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 
+		if managed, ok := cfg.federationCredentialStore().(config.FederationManagedCredentialStore); ok {
+			project, err := cfg.DB.ProjectByID(ctx, in.ProjectID)
+			if errors.Is(err, db.ErrNotFound) {
+				return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+			}
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			match, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			if found && match.Credential.Provider != nil {
+				if _, err := ReleaseFederationProvider(ctx, cfg.DB, managed, in.ProjectID); err != nil {
+					return nil, api.NewError(http.StatusServiceUnavailable, "federation_cleanup_pending",
+						"provider connection cleanup is pending",
+						"retry kata federation leave when the credential provider is available; the saved request is retained", nil)
+				}
+			}
+		}
 		res, err := LeaveFederationReplica(
 			ctx,
 			cfg.DB,
@@ -862,9 +886,26 @@ func federationStatusBody(
 	if err != nil {
 		return api.FederationStatusBody{}, err
 	}
+	var byUID, byName map[string]config.FederationCredential
+	if managed, ok := credentialStore.(config.FederationManagedCredentialStore); ok {
+		savedCredentials, err := managed.ListManagedFederationCredentials(ctx)
+		if err != nil && len(bindings) == 0 {
+			return api.FederationStatusBody{}, internalAPIError(err)
+		}
+		// A failed snapshot must not hide existing bindings. Their ordinary
+		// credential lookup below reports "unreadable" without default values.
+		byUID = make(map[string]config.FederationCredential, len(savedCredentials))
+		byName = make(map[string]config.FederationCredential, len(savedCredentials))
+		for _, saved := range savedCredentials {
+			if saved.Credential.Provider != nil {
+				byUID[saved.ProjectUID] = saved.Credential
+				byName[saved.Credential.SpokeProjectName] = saved.Credential
+			}
+		}
+	}
 	out := api.FederationStatusBody{Statuses: make([]api.FederationProjectStatus, 0, len(bindings))}
 	for _, binding := range bindings {
-		status, err := federationProjectStatus(ctx, store, credentialStore, binding, includeArchived)
+		status, err := federationProjectStatus(ctx, store, credentialStore, byUID, binding, includeArchived)
 		if err != nil {
 			if projectID == nil && isProjectNotFound(err) {
 				continue
@@ -872,6 +913,35 @@ func federationStatusBody(
 			return api.FederationStatusBody{}, err
 		}
 		out.Statuses = append(out.Statuses, status)
+	}
+	// A provider request can be waiting for approval before a binding exists,
+	// or retained after leave. Both must remain visible in ordinary status.
+	if byUID != nil {
+		projects, err := store.ListProjectsIncludingArchived(ctx)
+		if err != nil {
+			return api.FederationStatusBody{}, internalAPIError(err)
+		}
+		for _, project := range projects {
+			if (projectID != nil && project.ID != *projectID) || (!includeArchived && project.DeletedAt != nil) ||
+				slices.ContainsFunc(bindings, func(b db.FederationBinding) bool { return b.ProjectID == project.ID }) {
+				continue
+			}
+			saved, found := byUID[project.UID]
+			if !found {
+				saved, found = byName[project.Name]
+				// Rekey precedes local attachment. A reused name alone cannot
+				// claim the previous project's pending credential.
+				if !found || saved.Provider.LocalProjectUID != project.UID {
+					continue
+				}
+			}
+			metadata := saved.Metadata()
+			out.Statuses = append(out.Statuses, api.FederationProjectStatus{
+				ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Role: "standalone",
+				HubURL: metadata.HubURL, HubProjectID: metadata.HubProjectID,
+				CredentialStatus: metadata.Status, ProviderStatus: metadata.ProviderStatus, CredentialExpiresAt: metadata.ExpiresAt,
+			})
+		}
 	}
 	return out, nil
 }
@@ -909,6 +979,7 @@ func federationProjectStatus(
 	ctx context.Context,
 	store db.Storage,
 	credentialStore config.FederationCredentialStore,
+	providers map[string]config.FederationCredential,
 	binding db.FederationBinding,
 	includeArchived bool,
 ) (api.FederationProjectStatus, error) {
@@ -958,7 +1029,11 @@ func federationProjectStatus(
 	}
 	var credentialMetadata config.FederationCredentialMetadata
 	if binding.Role == db.FederationRoleSpoke {
-		credentialMetadata = config.FederationCredentialMetadataFromStore(ctx, credentialStore, project.UID)
+		if saved, found := providers[project.UID]; found {
+			credentialMetadata = saved.Metadata()
+		} else {
+			credentialMetadata = config.FederationCredentialMetadataFromStore(ctx, credentialStore, project.UID)
+		}
 	}
 	// The credential's allow_insecure is only meaningful for the hub it was
 	// recorded for: a stale credential from an older enrollment (e.g. a
@@ -985,6 +1060,8 @@ func federationProjectStatus(
 		// keeps bindings recorded before allow_insecure was persisted working.
 		AllowInsecure:               binding.AllowInsecure || credentialAllowInsecure,
 		CredentialStatus:            credentialMetadata.Status,
+		ProviderStatus:              credentialMetadata.ProviderStatus,
+		CredentialExpiresAt:         credentialMetadata.ExpiresAt,
 		PullCursorEventID:           binding.PullCursorEventID,
 		PushCursorEventID:           binding.PushCursorEventID,
 		PendingPushCount:            pendingPush,

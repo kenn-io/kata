@@ -504,6 +504,8 @@ func TestReplaceManagedFederationCredentialRequiresExactCurrentValue(t *testing.
 	replacement := current
 	replacement.Credential.LeavePending = true
 	require.NoError(t, store.ReplaceManagedFederationCredential(ctx, current, replacement))
+	require.NoError(t, store.ReplaceManagedFederationCredential(ctx, current, replacement),
+		"the same completed transition must succeed after an overlapping call or lost reply")
 
 	stale := current
 	stale.Credential.Token = "stale-token"

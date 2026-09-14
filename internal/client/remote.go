@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	gitcmd "go.kenn.io/kit/git/cmd"
@@ -141,7 +143,7 @@ func NormalizeRemoteBaseURL(v string, allowInsecure bool) (string, error) {
 	if err := requireSecureOrPrivate(u, allowInsecure); err != nil {
 		return "", err
 	}
-	return config.CanonicalHTTPBaseURL(u.String())
+	return httpurl.CanonicalHTTPBaseURL(u.String())
 }
 
 // RemoteAllowInsecureForBaseURL reports whether the configured remote source
@@ -828,7 +830,7 @@ func normalizeRemoteURL(v string, allowInsecure bool) (string, error) {
 	if err := requireSecureOrPrivate(u, allowInsecure); err != nil {
 		return "", err
 	}
-	return config.CanonicalHTTPOrigin(u.String())
+	return httpurl.CanonicalHTTPOrigin(u.String())
 }
 
 // requireSecureOrPrivate returns nil when the URL is safe to dial over

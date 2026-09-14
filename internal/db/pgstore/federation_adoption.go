@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -53,6 +54,23 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err := rejectFederationSpokeProjectConflicts(ctx, tx, params.ProjectID); err != nil {
 			return err
 		}
+		if params.EmptyOnly {
+			var metadata map[string]json.RawMessage
+			if len(project.Metadata) > 0 {
+				if err := json.Unmarshal([]byte(project.Metadata), &metadata); err != nil {
+					return fmt.Errorf("read project metadata before attachment: %w", err)
+				}
+			}
+			var hasData bool
+			if err := tx.QueryRowContext(ctx, `SELECT
+				EXISTS(SELECT 1 FROM issues WHERE project_id=$1) OR
+				EXISTS(SELECT 1 FROM recurrences WHERE project_id=$1)`, project.ID).Scan(&hasData); err != nil {
+				return fmt.Errorf("check empty federation project: %w", err)
+			}
+			if hasData || len(metadata) > 0 {
+				return db.ErrFederationProjectNotEmpty
+			}
+		}
 
 		issues, err := federationIssuesForSnapshot(ctx, tx, project.ID)
 		if err != nil {
@@ -80,6 +98,7 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err := clearProjectClaimStateTx(ctx, tx, project.ID); err != nil {
 			return err
 		}
+		// Old catalog events also carry a hash made with the local UID.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, project.ID); err != nil {
 			return fmt.Errorf("delete pre-adoption local events: %w", mapSQLError(err, nil))
 		}
@@ -89,13 +108,17 @@ func (s *Store) AdoptProjectIntoFederation(
 		if params.AllowInsecure {
 			allowInsecure = 1
 		}
+		pushEnabled := 1
+		if params.EmptyOnly {
+			pushEnabled = 0
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_bindings(
 project_id,role,hub_url,hub_project_id,hub_project_uid,
 replay_horizon_event_id,pull_cursor_event_id,push_enabled,
 push_cursor_event_id,bound_actor,allow_insecure,enabled
-) VALUES($1,$2,$3,$4,$5,$6,$7,1,$8,$9,$10,1)`,
+) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1)`,
 			project.ID, string(db.FederationRoleSpoke), params.HubURL, params.HubProjectID,
-			params.HubProjectUID, params.ReplayHorizonEventID, pullCursor, pushFloor,
+			params.HubProjectUID, params.ReplayHorizonEventID, pullCursor, pushEnabled, pushFloor,
 			actor, allowInsecure); err != nil {
 			return fmt.Errorf("insert adoption federation binding: %w", mapSQLError(err, nil))
 		}
@@ -109,12 +132,21 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 			if err != nil {
 				return err
 			}
-			if _, err := s.insertEventTx(ctx, tx, eventInsert{
+			event, err := s.insertEventTx(ctx, tx, eventInsert{
 				ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
 				Type: "project.metadata_updated", Actor: actor, Payload: payload,
 				HLC: &boundary, CreatedAt: baselineCreatedAt,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
+			}
+			if params.EmptyOnly {
+				// Keep this local catalog notification out of federation push.
+				output.CreatedEvent = &event
+				if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings
+					SET push_cursor_event_id=$1 WHERE project_id=$2`, event.ID, project.ID); err != nil {
+					return fmt.Errorf("set attachment push cursor: %w", err)
+				}
 			}
 		}
 

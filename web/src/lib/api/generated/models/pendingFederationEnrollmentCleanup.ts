@@ -7,5 +7,6 @@ export interface PendingFederationEnrollmentCleanup {
   hub_project_id: number
   hub_project_uid: string
   hub_url: string
+  provider_managed?: boolean
   [key: string]: unknown
 }

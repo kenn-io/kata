@@ -1413,6 +1413,7 @@ type FederationProjectStatus struct {
 	AllowInsecure               *bool                         `json:"allow_insecure,omitempty"`
 	BoundActor                  *string                       `json:"bound_actor,omitempty"`
 	Capabilities                *string                       `json:"capabilities,omitempty"`
+	CredentialExpiresAt         *time.Time                    `json:"credential_expires_at,omitempty"`
 	CredentialStatus            *string                       `json:"credential_status,omitempty"`
 	Enabled                     bool                          `json:"enabled"`
 	EnrollmentCount             int64                         `json:"enrollment_count"`
@@ -1435,6 +1436,7 @@ type FederationProjectStatus struct {
 	ProjectID                   int64                         `json:"project_id"`
 	ProjectName                 string                        `json:"project_name" validate:"required"`
 	ProjectUID                  string                        `json:"project_uid" validate:"required"`
+	ProviderStatus              *string                       `json:"provider_status,omitempty"`
 	PullCursorEventID           int64                         `json:"pull_cursor_event_id"`
 	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
 	PushEnabled                 bool                          `json:"push_enabled"`
@@ -2841,10 +2843,11 @@ func (p PendingClaimOut) Validate() error {
 }
 
 type PendingFederationEnrollmentCleanup struct {
-	AllowInsecure *bool  `json:"allow_insecure,omitempty"`
-	HubProjectID  int64  `json:"hub_project_id"`
-	HubProjectUID string `json:"hub_project_uid" validate:"required"`
-	HubURL        string `json:"hub_url" validate:"required"`
+	AllowInsecure   *bool  `json:"allow_insecure,omitempty"`
+	HubProjectID    int64  `json:"hub_project_id"`
+	HubProjectUID   string `json:"hub_project_uid" validate:"required"`
+	HubURL          string `json:"hub_url" validate:"required"`
+	ProviderManaged *bool  `json:"provider_managed,omitempty"`
 }
 
 func (p PendingFederationEnrollmentCleanup) Validate() error {

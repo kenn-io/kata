@@ -458,6 +458,11 @@ var storageScenarios = []scenario{
 		run: checkFederationProjectAdoption,
 	},
 	{
+		name:    "empty federation attachment",
+		methods: []string{"AdoptProjectIntoFederation", "CreateProjectAndEvent", "CreateIssue", "CreateRecurrence", "PatchProjectMetadata", "PendingFederationPushEvents", "EventsAfter", "ImportReplay"},
+		run:     checkEmptyFederationAttachment,
+	},
+	{
 		name: "external import lifecycle",
 		methods: []string{
 			"AddLabel", "ClaimIssueSyncBinding", "CommentsByIssue", "CreateLink", "CreateProject",

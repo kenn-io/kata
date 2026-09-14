@@ -9,11 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
+	"go.kenn.io/kata/pkg/federationprovider"
 )
 
 const configCapabilities = "pull,push,lease"
@@ -57,8 +60,9 @@ type Clock interface {
 // Target binds one normalized project mapping to its selected daemon catalog
 // entry. Authentication remains scoped to that one catalog entry.
 type Target struct {
-	Catalog config.CatalogDaemonConfig
-	Mapping config.FederationProjectConfig
+	Catalog        config.CatalogDaemonConfig
+	Mapping        config.FederationProjectConfig
+	removeProvider bool
 }
 
 // HubFactory constructs an origin-pinned hub client for one attempt.
@@ -94,6 +98,7 @@ type Health struct {
 
 type reconciliationState struct {
 	state             string
+	terminal          bool
 	nextAttempt       time.Time
 	nextDelay         time.Duration
 	lastAttempt       *time.Time
@@ -116,8 +121,9 @@ type Reconciler struct {
 	drainAdmission       activity.WaitableAdmission
 	logger               *log.Logger
 
-	mu     sync.Mutex
-	states []reconciliationState
+	mu           sync.Mutex
+	states       []reconciliationState
+	startupError error
 }
 
 // NewReconciler constructs a process-local federation configuration
@@ -145,6 +151,12 @@ func NewReconciler(cfg ReconcilerConfig) *Reconciler {
 
 // Run attempts due mappings in configuration order until ctx is cancelled.
 func (r *Reconciler) Run(ctx context.Context) error {
+	if err := r.findRemovedProviderMappings(ctx); err != nil {
+		r.mu.Lock()
+		r.startupError = err
+		r.mu.Unlock()
+		return err
+	}
 	for {
 		now := r.clock.Now()
 		attempted := false
@@ -218,6 +230,11 @@ func (r *Reconciler) Health() Health {
 	defer r.mu.Unlock()
 
 	health := Health{Configured: len(r.states)}
+	if r.startupError != nil {
+		health.Pending = max(1, len(r.states))
+		health.LastErrorCategory, health.LastErrorStatus = classifyReconciliationError(r.startupError)
+		return health
+	}
 	var lastErrorAt time.Time
 	for i := range r.states {
 		state := &r.states[i]
@@ -242,12 +259,23 @@ func (r *Reconciler) Health() Health {
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, target Target, drain *activity.Lease) error {
-	if r.hubFactory == nil {
-		return reconcileError(ErrConfigurationConflict, "missing federation hub factory")
-	}
-	hub, err := r.hubFactory(ctx, target.Catalog)
-	if err != nil {
+	if target.removeProvider {
+		_, err := reconcileProviderLeave(ctx, r.store, r.credentials, target.Mapping.SpokeProject, true)
+		if err == nil && r.wake != nil {
+			r.wake()
+		}
 		return err
+	}
+	var hub Hub
+	if target.Mapping.CredentialProvider == nil {
+		if r.hubFactory == nil {
+			return reconcileError(ErrConfigurationConflict, "missing federation hub factory")
+		}
+		var err error
+		hub, err = r.hubFactory(ctx, target.Catalog)
+		if err != nil {
+			return err
+		}
 	}
 	projectEventSink := r.projectEventSink
 	if r.projectEventSinkFrom != nil {
@@ -269,7 +297,7 @@ func (r *Reconciler) due(index int, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state := r.states[index]
-	return state.state != "reconciled" &&
+	return state.state != "reconciled" && !state.terminal &&
 		(state.nextAttempt.IsZero() || !state.nextAttempt.After(now))
 }
 
@@ -279,7 +307,7 @@ func (r *Reconciler) nextDue() (time.Time, bool) {
 	var next time.Time
 	for i := range r.states {
 		state := &r.states[i]
-		if state.state == "reconciled" {
+		if state.state == "reconciled" || state.terminal {
 			continue
 		}
 		if next.IsZero() || state.nextAttempt.Before(next) {
@@ -298,11 +326,17 @@ func (r *Reconciler) markAttemptStarted(index int, attemptAt time.Time) {
 func (r *Reconciler) recordAttempt(index int, attemptAt time.Time, err error) {
 	category, status := classifyReconciliationError(err)
 	stateName := "reconciled"
+	terminal := false
 	completedAt := r.clock.Now()
 	if err != nil {
 		stateName = "pending"
 		if category == "configuration_conflict" || category == "binding_conflict" {
 			stateName = "conflict"
+		}
+		if decision, ok := errors.AsType[*providerDecisionError](err); ok &&
+			(decision.status == federationprovider.StatusDenied || decision.status == federationprovider.StatusConflict) {
+			stateName = "conflict"
+			terminal = true
 		}
 	}
 
@@ -315,11 +349,14 @@ func (r *Reconciler) recordAttempt(index int, attemptAt time.Time, err error) {
 		state.lastErrorCategory != category ||
 		state.lastErrorStatus != status
 	state.state = stateName
+	state.terminal = terminal
 	state.lastAttempt = new(attemptAt)
 	state.lastErrorCategory = category
 	state.lastErrorStatus = status
 	if err == nil {
 		state.lastSuccess = new(completedAt)
+	}
+	if err == nil || terminal {
 		state.nextAttempt = time.Time{}
 		state.nextDelay = initialRetryDelay
 	} else {
@@ -343,6 +380,9 @@ func (r *Reconciler) recordAttempt(index int, attemptAt time.Time, err error) {
 func classifyReconciliationError(err error) (string, int) {
 	if err == nil {
 		return "", 0
+	}
+	if decision, ok := errors.AsType[*providerDecisionError](err); ok {
+		return string(decision.status), 0
 	}
 	var hubErr *HubError
 	status := 0
@@ -404,6 +444,8 @@ func (t wallTimer) Stop() bool          { return t.timer.Stop() }
 // ReconcileMapping performs one restart-safe attempt for a single normalized
 // mapping. Scheduling, retry, and health aggregation are layered on this
 // operation by the process controller.
+// Provider mappings use their configured helper and need no Hub. Other mappings
+// require a Hub with project and enrollment administration access.
 func ReconcileMapping(
 	ctx context.Context,
 	store db.Storage,
@@ -426,6 +468,16 @@ func reconcileMapping(
 	wake func(),
 	projectEventSink func(db.Event),
 ) error {
+	if mapping.CredentialProvider != nil {
+		return reconcileProviderMapping(ctx, store, credentials, catalog, mapping, wake, projectEventSink)
+	}
+	if store == nil || credentials == nil || hub == nil ||
+		mapping.Hub != catalog.Name ||
+		strings.TrimSpace(mapping.SpokeProject) == "" ||
+		strings.TrimSpace(mapping.HubProject) == "" ||
+		strings.TrimSpace(mapping.Actor) == "" {
+		return reconcileError(ErrConfigurationConflict, "invalid federation mapping dependencies")
+	}
 	managed, ok := credentials.(config.FederationManagedCredentialStore)
 	if !ok {
 		return reconcileError(
@@ -624,10 +676,10 @@ func reconcilePendingLeave(
 			"pending federation leave belongs to another mapping",
 		)
 	}
-	storedBaseURL, storedBaseURLErr := config.CanonicalHTTPBaseURL(
+	storedBaseURL, storedBaseURLErr := httpurl.CanonicalHTTPBaseURL(
 		pending.Credential.HubURL,
 	)
-	catalogBaseURL, catalogBaseURLErr := config.CanonicalHTTPBaseURL(catalog.URL)
+	catalogBaseURL, catalogBaseURLErr := httpurl.CanonicalHTTPBaseURL(catalog.URL)
 	if storedBaseURLErr != nil || catalogBaseURLErr != nil ||
 		storedBaseURL != catalogBaseURL {
 		return true, reconcileError(
@@ -783,20 +835,12 @@ func preflightMapping(
 	projectEventSink func(db.Event),
 ) (mappingPreflight, error) {
 	var preflight mappingPreflight
-	if store == nil || credentials == nil || hub == nil ||
-		mapping.Hub != catalog.Name ||
-		strings.TrimSpace(mapping.SpokeProject) == "" ||
-		strings.TrimSpace(mapping.HubProject) == "" ||
-		strings.TrimSpace(mapping.Actor) == "" {
-		return preflight,
-			reconcileError(ErrConfigurationConflict, "invalid federation mapping dependencies")
-	}
-	hubBaseURL, err := config.CanonicalHTTPBaseURL(catalog.URL)
+	hubBaseURL, err := httpurl.CanonicalHTTPBaseURL(catalog.URL)
 	if err != nil {
 		return preflight,
 			reconcileError(ErrConfigurationConflict, "invalid federation hub endpoint")
 	}
-	allowInsecure, err := config.EffectiveHTTPAllowInsecure(catalog.URL, catalog.AllowInsecure)
+	allowInsecure, err := httpurl.EffectiveHTTPAllowInsecure(catalog.URL, catalog.AllowInsecure)
 	if err != nil {
 		return preflight,
 			reconcileError(ErrConfigurationConflict, "invalid federation hub transport policy")
@@ -892,7 +936,7 @@ func preflightMapping(
 		if hasManagedReservation &&
 			(!credentialState.found ||
 				credentialState.key != managedReservation.ProjectUID ||
-				credentialState.credential != managedReservation.Credential) {
+				!credentialState.credential.Equal(managedReservation.Credential)) {
 			return preflight, reconcileError(
 				ErrConfigurationConflict,
 				"managed federation reservation differs from credential state",
@@ -1249,7 +1293,7 @@ func readCompatibleBindingBaseURL(
 		return db.FederationBinding{}, false,
 			reconcileError(ErrBindingConflict, "existing federation binding has another role")
 	}
-	existingBaseURL, err := config.CanonicalHTTPBaseURL(binding.HubURL)
+	existingBaseURL, err := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
 	if err != nil || existingBaseURL != hubBaseURL {
 		return db.FederationBinding{}, false,
 			reconcileError(ErrBindingConflict, "existing federation binding targets another endpoint")
@@ -1314,7 +1358,7 @@ func readCredentialState(
 	if err != nil {
 		return credentialLookup{}, reconcileError(ErrCredentialIO, "read federation credential")
 	}
-	if finalFound && localFound && finalCredential != localCredential {
+	if finalFound && localFound && !finalCredential.Equal(localCredential) {
 		return credentialLookup{}, reconcileError(
 			ErrConfigurationConflict,
 			"multiple federation credentials disagree for one local project",
@@ -1341,8 +1385,8 @@ func credentialMatchesTarget(
 	allowInsecure bool,
 	apiCapabilities string,
 ) bool {
-	credentialBaseURL, err := config.CanonicalHTTPBaseURL(credential.HubURL)
-	credentialAllowInsecure, policyErr := config.EffectiveHTTPAllowInsecure(
+	credentialBaseURL, err := httpurl.CanonicalHTTPBaseURL(credential.HubURL)
+	credentialAllowInsecure, policyErr := httpurl.EffectiveHTTPAllowInsecure(
 		credential.HubURL, credential.AllowInsecure,
 	)
 	if err != nil || credentialBaseURL != hubBaseURL ||

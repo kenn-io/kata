@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/httpurl"
 )
 
 const maxOriginPinnedRedirects = 10
@@ -17,12 +17,12 @@ func ConfigureOriginPinnedRedirects(httpClient *http.Client, baseURL string) err
 	if httpClient == nil {
 		return errors.New("cannot configure redirects on a nil HTTP client")
 	}
-	origin, err := config.CanonicalHTTPOrigin(baseURL)
+	origin, err := httpurl.CanonicalHTTPOrigin(baseURL)
 	if err != nil {
 		return fmt.Errorf("canonicalize redirect origin: %w", err)
 	}
 	httpClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-		requestOrigin, err := config.CanonicalHTTPOrigin(request.URL.String())
+		requestOrigin, err := httpurl.CanonicalHTTPOrigin(request.URL.String())
 		if err != nil || requestOrigin != origin {
 			return errors.New("redirect crossed the configured HTTP origin")
 		}

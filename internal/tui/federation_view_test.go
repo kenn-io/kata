@@ -1041,6 +1041,35 @@ func TestFederationLeavePreviewEscReturnsToList(t *testing.T) {
 	assert.Equal(t, federationModeList, out.federation.mode)
 }
 
+func TestFederationLeaveDelegatesProviderReleaseToSpoke(t *testing.T) {
+	hub := &recordingFederationHubAdmin{}
+	adminOpened := false
+	restoreFederationHubAdminClient(t, func(_ context.Context, target daemonTarget) (federationHubAdminAPI, daemonTarget, error) {
+		adminOpened = true
+		return hub, target, nil
+	})
+	finished := false
+	spoke := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, r *http.Request) {
+			var body LeaveFederationReplicaInput
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			if body.Preflight {
+				respondJSON(t, w, api.LeaveFederationReplicaResultBody{
+					PendingEnrollment: &api.PendingFederationEnrollmentCleanup{ProviderManaged: true},
+				})
+				return
+			}
+			finished = true
+			respondJSON(t, w, api.LeaveFederationReplicaResultBody{Detached: true, Disposition: "detach"})
+		},
+	})
+	result, err := runFederationLeave(t.Context(), federationLeaveDraft{ProjectID: 7, Actor: "Example User"}, daemonTarget{}, NewClient(spoke.URL, spoke.Client()))
+	require.NoError(t, err)
+	assert.True(t, finished)
+	assert.True(t, result.Body.Detached)
+	assert.False(t, adminOpened, "provider leave must not ask for hub admin credentials")
+}
+
 func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T) {
 	hubProject := int64(42)
 	hub := &recordingFederationHubAdmin{

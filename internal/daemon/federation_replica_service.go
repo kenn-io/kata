@@ -7,9 +7,13 @@ import (
 	"strings"
 	"sync"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationcoord"
 	katauid "go.kenn.io/kata/internal/uid"
+	"go.kenn.io/kata/pkg/federationprovider"
 )
 
 var (
@@ -94,6 +98,7 @@ type EnsureFederationReplicaParams struct {
 	ManagedReservation                 *FederationReplicaManagedReservation
 	ProjectEventSink                   func(db.Event)
 	PushEnabled, AdoptExisting         bool
+	AttachEmpty                        bool
 }
 
 // FederationReplicaCredentialRekeySource identifies the standalone credential
@@ -177,7 +182,7 @@ func beginFederationReplicaHubOperation(
 	validPendingState := recoverPendingLeave &&
 		current.LeavePending &&
 		current.PendingEnrollmentID == 0
-	if !found || current != baseline.Credential ||
+	if !found || !current.Equal(baseline.Credential) ||
 		(recoverPendingLeave && !validPendingState) ||
 		(!recoverPendingLeave && current.LeavePending) {
 		return nil, federationReplicaError(
@@ -229,10 +234,14 @@ func PrepareFederationReplicaLeave(
 			"read federation replica project before leave preparation: %w", err,
 		)
 	}
+	return prepareFederationReplicaLeave(ctx, store, managed, project)
+}
+
+func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project) (PrepareFederationReplicaLeaveResult, error) {
 	key := federationReplicaTransitionKey(store, project.Name)
 
 	ensureFederationReplicaMu.Lock()
-	match, found, err := managed.FindManagedFederationCredential(ctx, project.Name)
+	match, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 	if err != nil {
 		ensureFederationReplicaMu.Unlock()
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
@@ -241,6 +250,9 @@ func PrepareFederationReplicaLeave(
 		return PrepareFederationReplicaLeaveResult{}, credentialIOError(
 			"read managed reservation before leave preparation",
 		)
+	}
+	if found && match.Credential.Provider != nil {
+		key = federationReplicaTransitionKey(store, match.Credential.SpokeProjectName)
 	}
 	if found && !match.Credential.LeavePending {
 		replacement := match
@@ -269,7 +281,7 @@ func PrepareFederationReplicaLeave(
 		ensureFederationReplicaMu.Lock()
 		drained, waiting := federationReplicaTransitions.drainSignal(key)
 		if !waiting {
-			match, found, err = managed.FindManagedFederationCredential(ctx, project.Name)
+			match, found, err = config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 			ensureFederationReplicaMu.Unlock()
 			if err != nil {
 				if errors.Is(err, config.ErrFederationCredentialConflict) {
@@ -278,6 +290,11 @@ func PrepareFederationReplicaLeave(
 				return PrepareFederationReplicaLeaveResult{}, credentialIOError(
 					"read prepared managed reservation",
 				)
+			}
+			if found && match.Credential.Provider != nil && project.ID != 0 {
+				if err := stopProviderFederationTransport(ctx, store, project.ID); err != nil {
+					return PrepareFederationReplicaLeaveResult{}, err
+				}
 			}
 			return PrepareFederationReplicaLeaveResult{
 				ManagedReservation:      match,
@@ -291,6 +308,33 @@ func PrepareFederationReplicaLeave(
 		case <-drained:
 		}
 	}
+}
+
+// LeavePending blocks attachment first. Drain the existing project transport
+// gate before disabling the binding, so sync and claim forwarding stay stopped
+// across restarts even while the credential provider is unavailable.
+func stopProviderFederationTransport(ctx context.Context, store db.Storage, projectID int64) error {
+	finish, err := federationcoord.BeginRebind(ctx, federationcoord.Key(store.InstanceUID(), projectID), store, projectID)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	binding, err := store.FederationBindingByProject(ctx, projectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if binding.Role != db.FederationRoleSpoke {
+		return db.ErrFederationNotSpoke
+	}
+	if !binding.Enabled {
+		return nil
+	}
+	binding.Enabled = false
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	return err
 }
 
 // RecordFederationReplicaPendingEnrollment stamps a completed hub enrollment
@@ -399,8 +443,8 @@ func leaveFederationReplicaState(
 			"read federation replica project before leave: %w", err,
 		)
 	}
-	match, managedReservationFound, err := managed.FindManagedFederationCredential(
-		ctx, project.Name,
+	match, managedReservationFound, err := config.FindProjectManagedCredential(
+		ctx, managed, project.UID, project.Name,
 	)
 	if err != nil {
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
@@ -409,6 +453,10 @@ func leaveFederationReplicaState(
 		return db.LeaveFederationResult{}, credentialIOError(
 			"read managed reservation before leave",
 		)
+	}
+
+	if managedReservationFound && match.Credential.Provider != nil && match.Credential.Provider.Status != federationprovider.StatusReleased {
+		return db.LeaveFederationResult{}, ErrFederationReplicaLeavePending
 	}
 
 	// The handler's early role check protects archive-before-detach. Repeat it
@@ -429,13 +477,17 @@ func leaveFederationReplicaState(
 		return db.LeaveFederationResult{}, err
 	}
 	if managedReservationFound {
-		if err := managed.DeleteManagedFederationCredential(ctx, match); err != nil {
-			if errors.Is(err, config.ErrFederationCredentialConflict) {
-				return db.LeaveFederationResult{}, err
+		// Keep a released, secret-free provider reservation until configuration
+		// removal, so restarting cannot reopen a still-configured mapping.
+		if match.Credential.Provider == nil {
+			if err := managed.DeleteManagedFederationCredential(ctx, match); err != nil {
+				if errors.Is(err, config.ErrFederationCredentialConflict) {
+					return db.LeaveFederationResult{}, err
+				}
+				return db.LeaveFederationResult{}, credentialIOError(
+					"delete managed reservation after leave",
+				)
 			}
-			return db.LeaveFederationResult{}, credentialIOError(
-				"delete managed reservation after leave",
-			)
 		}
 	} else if result.ProjectUID != "" {
 		if err := credentials.DeleteFederationCredential(ctx, result.ProjectUID); err != nil {
@@ -509,7 +561,7 @@ func ReserveFederationReplicaCredential(
 	if err := config.ValidateProjectName(p.ProjectName); err != nil {
 		return federationReplicaError(ErrFederationReplicaInvalidInput, err.Error(), "")
 	}
-	if _, err := config.CanonicalHTTPOrigin(p.Credential.HubURL); err != nil {
+	if _, err := httpurl.CanonicalHTTPOrigin(p.Credential.HubURL); err != nil {
 		return federationReplicaError(
 			ErrFederationReplicaInvalidInput,
 			fmt.Sprintf("credential hub_url must be a valid HTTP(S) origin: %v", err),
@@ -685,7 +737,7 @@ func revalidateManagedReservation(
 	}
 	if !found ||
 		match.ProjectUID != p.ManagedReservation.ProjectUID ||
-		match.Credential != p.ManagedReservation.Expected {
+		!match.Credential.Equal(p.ManagedReservation.Expected) {
 		return federationReplicaError(
 			ErrFederationReplicaReservationChanged,
 			"managed federation reservation changed while contacting the hub",
@@ -719,8 +771,8 @@ func rejectConflictingManagedReservation(
 		return nil
 	}
 	reservation := match.Credential
-	reservationOrigin, reservationOriginErr := config.CanonicalHTTPOrigin(reservation.HubURL)
-	requestedOrigin, requestedOriginErr := config.CanonicalHTTPOrigin(p.HubURL)
+	reservationOrigin, reservationOriginErr := httpurl.CanonicalHTTPOrigin(reservation.HubURL)
+	requestedOrigin, requestedOriginErr := httpurl.CanonicalHTTPOrigin(p.HubURL)
 	if reservationOriginErr != nil ||
 		requestedOriginErr != nil ||
 		reservationOrigin != requestedOrigin ||
@@ -801,6 +853,11 @@ func normalizeFederationReplicaParams(
 		)
 	}
 	if p.AdoptExisting {
+		if p.AttachEmpty {
+			return EnsureFederationReplicaParams{}, federationReplicaError(
+				ErrFederationReplicaInvalidInput, "choose empty attachment or adoption, not both", "",
+			)
+		}
 		if !p.PushEnabled {
 			return EnsureFederationReplicaParams{}, federationReplicaError(
 				errFederationReplicaCapabilityMismatch,
@@ -818,12 +875,12 @@ func normalizeFederationReplicaParams(
 		}
 	}
 	if p.CredentialRekey != nil {
-		if !p.AdoptExisting ||
+		if (!p.AdoptExisting && !p.AttachEmpty) ||
 			!katauid.Valid(p.CredentialRekey.ProjectUID) ||
 			p.CredentialRekey.ProjectUID == p.HubProjectUID {
 			return EnsureFederationReplicaParams{}, federationReplicaError(
 				ErrFederationReplicaInvalidInput,
-				"credential rekey requires a distinct valid adoption source project UID",
+				"credential rekey requires a distinct valid attachment source project UID",
 				"",
 			)
 		}
@@ -846,7 +903,7 @@ func normalizeFederationReplicaParams(
 		}
 		p.Credential.HubURL = credentialBaseURL
 	}
-	effectiveAllowInsecure, err := config.EffectiveHTTPAllowInsecure(
+	effectiveAllowInsecure, err := httpurl.EffectiveHTTPAllowInsecure(
 		p.HubURL, p.Credential.AllowInsecure,
 	)
 	if err != nil {
@@ -861,7 +918,7 @@ func normalizeFederationReplicaParams(
 }
 
 func normalizeFederationHubBaseURL(raw string) (string, error) {
-	baseURL, err := config.CanonicalHTTPBaseURL(raw)
+	baseURL, err := httpurl.CanonicalHTTPBaseURL(raw)
 	if err != nil {
 		return "", errors.New(
 			"hub_url must be an HTTP(S) base URL without user info, query, or fragment",
@@ -912,18 +969,24 @@ func ensureFederationReplicaCredentialTarget(
 	if !ok {
 		return nil
 	}
-	existingBaseURL, err := config.CanonicalHTTPBaseURL(existing.HubURL)
+	if existing.Provider != nil && !existing.Equal(p.Credential) {
+		return federationReplicaCredentialTargetConflict(
+			ctx, store, p,
+			"existing provider operation differs from the requested credential",
+		)
+	}
+	existingBaseURL, err := httpurl.CanonicalHTTPBaseURL(existing.HubURL)
 	if err != nil {
 		return federationReplicaCredentialTargetConflict(
 			ctx, store, p,
 			"existing federation credential has an invalid hub_url",
 		)
 	}
-	requestedBaseURL, _ := config.CanonicalHTTPBaseURL(p.Credential.HubURL)
-	existingAllowInsecure, existingPolicyErr := config.EffectiveHTTPAllowInsecure(
+	requestedBaseURL, _ := httpurl.CanonicalHTTPBaseURL(p.Credential.HubURL)
+	existingAllowInsecure, existingPolicyErr := httpurl.EffectiveHTTPAllowInsecure(
 		existing.HubURL, existing.AllowInsecure,
 	)
-	requestedAllowInsecure, requestedPolicyErr := config.EffectiveHTTPAllowInsecure(
+	requestedAllowInsecure, requestedPolicyErr := httpurl.EffectiveHTTPAllowInsecure(
 		p.Credential.HubURL, p.Credential.AllowInsecure,
 	)
 	if existingBaseURL != requestedBaseURL || existingPolicyErr != nil || requestedPolicyErr != nil ||
@@ -987,7 +1050,7 @@ func ensureFederationReplicaCredentialRekey(
 	p EnsureFederationReplicaParams,
 ) error {
 	source := p.CredentialRekey
-	if source == nil && p.AdoptExisting {
+	if source == nil && (p.AdoptExisting || p.AttachEmpty) {
 		project, err := store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return fmt.Errorf("resolve federation credential adoption source: %w", err)
@@ -1004,7 +1067,7 @@ func ensureFederationReplicaCredentialRekey(
 				return credentialIOError("read federation credential adoption source")
 			}
 			if ok {
-				if existing != p.Credential {
+				if !existing.Equal(p.Credential) {
 					return federationReplicaError(
 						ErrFederationReplicaCredentialConflict,
 						"standalone project credential differs from the requested credential",
@@ -1080,15 +1143,16 @@ func ensureReplicaBindingOrAdopt(
 	store db.Storage,
 	p EnsureFederationReplicaParams,
 ) (EnsureFederationReplicaResult, error) {
-	if p.AdoptExisting {
+	if p.AdoptExisting || p.AttachEmpty {
 		if result, adopted, err := adoptExistingReplica(ctx, store, p); err != nil {
 			return EnsureFederationReplicaResult{}, err
 		} else if adopted {
 			return EnsureFederationReplicaResult{
 				Project:               result.Project,
 				Binding:               result.Binding,
-				Adopted:               true,
+				Adopted:               p.AdoptExisting,
 				AdoptionSnapshotCount: result.AdoptionSnapshotCount,
+				CreatedEvent:          result.CreatedEvent,
 			}, nil
 		}
 	}
@@ -1140,6 +1204,7 @@ func adoptExistingReplica(
 					ReplayHorizonEventID: p.ReplayHorizonEventID,
 					Actor:                p.Credential.Actor,
 					AllowInsecure:        p.Credential.AllowInsecure,
+					EmptyOnly:            p.AttachEmpty,
 				})
 				if err != nil {
 					if errors.Is(err, db.ErrIssueSyncFederationBinding) {
@@ -1226,6 +1291,7 @@ func adoptExistingReplica(
 		ReplayHorizonEventID: p.ReplayHorizonEventID,
 		Actor:                p.Credential.Actor,
 		AllowInsecure:        p.Credential.AllowInsecure,
+		EmptyOnly:            p.AttachEmpty,
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrIssueSyncFederationBinding) {
@@ -1416,8 +1482,8 @@ func replicaBindingConflictDetails(
 			"role existing=%s requested=%s", existing.Role, db.FederationRoleSpoke,
 		))
 	}
-	existingBaseURL, existingBaseURLErr := config.CanonicalHTTPBaseURL(existing.HubURL)
-	requestedBaseURL, requestedBaseURLErr := config.CanonicalHTTPBaseURL(p.HubURL)
+	existingBaseURL, existingBaseURLErr := httpurl.CanonicalHTTPBaseURL(existing.HubURL)
+	requestedBaseURL, requestedBaseURLErr := httpurl.CanonicalHTTPBaseURL(p.HubURL)
 	switch {
 	case existingBaseURLErr != nil:
 		details = append(details, fmt.Sprintf("hub_url existing=%s invalid=%v", existing.HubURL, existingBaseURLErr))
@@ -1428,10 +1494,10 @@ func replicaBindingConflictDetails(
 			"hub_url existing=%s requested=%s", existing.HubURL, p.HubURL,
 		))
 	}
-	existingAllowInsecure, existingPolicyErr := config.EffectiveHTTPAllowInsecure(
+	existingAllowInsecure, existingPolicyErr := httpurl.EffectiveHTTPAllowInsecure(
 		existing.HubURL, existing.AllowInsecure,
 	)
-	requestedAllowInsecure, requestedPolicyErr := config.EffectiveHTTPAllowInsecure(
+	requestedAllowInsecure, requestedPolicyErr := httpurl.EffectiveHTTPAllowInsecure(
 		p.HubURL, p.Credential.AllowInsecure,
 	)
 	if existingPolicyErr == nil && requestedPolicyErr == nil &&

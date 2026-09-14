@@ -11,8 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+
+	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/BurntSushi/toml"
+	"go.kenn.io/kata/pkg/federationprovider"
 )
 
 // FederationCredentials is the local secret-bearing credentials.toml shape.
@@ -24,19 +28,20 @@ type FederationCredentials struct {
 // UID. Tokens intentionally live outside SQLite and outside committed
 // workspace config.
 type FederationCredential struct {
-	HubURL              string `toml:"hub_url"`
-	HubProjectID        int64  `toml:"hub_project_id"`
-	Token               string `toml:"token"`
-	Capabilities        string `toml:"capabilities,omitempty"`
-	Actor               string `toml:"actor,omitempty"`
-	AllowInsecure       bool   `toml:"allow_insecure,omitempty"`
-	ManagedByConfig     bool   `toml:"managed_by_config,omitempty"`
-	HubCatalog          string `toml:"hub_catalog,omitempty"`
-	HubProjectName      string `toml:"hub_project_name,omitempty"`
-	RequestedActor      string `toml:"requested_actor,omitempty"`
-	SpokeProjectName    string `toml:"spoke_project_name,omitempty"`
-	LeavePending        bool   `toml:"leave_pending,omitempty"`
-	PendingEnrollmentID int64  `toml:"pending_enrollment_id,omitempty"`
+	HubURL              string                        `toml:"hub_url"`
+	HubProjectID        int64                         `toml:"hub_project_id"`
+	Token               string                        `toml:"token"`
+	Capabilities        string                        `toml:"capabilities,omitempty"`
+	Actor               string                        `toml:"actor,omitempty"`
+	AllowInsecure       bool                          `toml:"allow_insecure,omitempty"`
+	ManagedByConfig     bool                          `toml:"managed_by_config,omitempty"`
+	HubCatalog          string                        `toml:"hub_catalog,omitempty"`
+	HubProjectName      string                        `toml:"hub_project_name,omitempty"`
+	RequestedActor      string                        `toml:"requested_actor,omitempty"`
+	SpokeProjectName    string                        `toml:"spoke_project_name,omitempty"`
+	LeavePending        bool                          `toml:"leave_pending,omitempty"`
+	PendingEnrollmentID int64                         `toml:"pending_enrollment_id,omitempty"`
+	Provider            *FederationProviderCredential `toml:"provider,omitempty"`
 }
 
 // FederationTransportCredential combines secret-bearing credential metadata
@@ -49,8 +54,8 @@ func FederationTransportCredential(
 	allowInsecure bool,
 	credential FederationCredential,
 ) FederationCredential {
-	credentialBaseURL, credentialURLErr := CanonicalHTTPBaseURL(credential.HubURL)
-	bindingBaseURL, bindingURLErr := CanonicalHTTPBaseURL(hubURL)
+	credentialBaseURL, credentialURLErr := httpurl.CanonicalHTTPBaseURL(credential.HubURL)
+	bindingBaseURL, bindingURLErr := httpurl.CanonicalHTTPBaseURL(hubURL)
 	legacyAllowInsecure := credential.AllowInsecure &&
 		credential.HubProjectID == hubProjectID &&
 		credentialURLErr == nil && bindingURLErr == nil &&
@@ -65,6 +70,8 @@ func FederationTransportCredential(
 // FederationCredentialMetadata is the redacted credential information safe
 // to expose in daemon status responses.
 type FederationCredentialMetadata struct {
+	ProviderStatus   string
+	ExpiresAt        *time.Time
 	Status           string
 	HubURL           string
 	HubProjectID     int64
@@ -132,6 +139,7 @@ type FederationCredentialReplacer interface {
 // config-driven federation. Managed credentials have one durable hub UID key.
 type FederationManagedCredentialStore interface {
 	FederationCredentialStore
+	ListManagedFederationCredentials(context.Context) ([]FederationManagedCredentialReservation, error)
 	ReserveManagedFederationCredential(
 		context.Context, FederationManagedCredentialReservation,
 	) error
@@ -152,6 +160,42 @@ type FederationManagedCredentialStore interface {
 // homeFederationCredentialStore uses the standalone daemon's
 // <KATA_HOME>/credentials.toml file.
 type homeFederationCredentialStore struct{}
+
+func (homeFederationCredentialStore) ListManagedFederationCredentials(_ context.Context) ([]FederationManagedCredentialReservation, error) {
+	credentials, err := ReadFederationCredentials()
+	if err != nil {
+		return nil, err
+	}
+	var result []FederationManagedCredentialReservation
+	for uid, credential := range credentials.Projects {
+		if credential.ManagedByConfig {
+			result = append(result, FederationManagedCredentialReservation{ProjectUID: uid, Credential: credential})
+		}
+	}
+	return result, nil
+}
+
+// FindProjectManagedCredential follows a provider's stable project identity
+// after a local rename. Ordinary catalog reservations retain name lookup.
+func FindProjectManagedCredential(ctx context.Context, store FederationManagedCredentialStore, projectUID, projectName string) (FederationManagedCredentialReservation, bool, error) {
+	credential, found, err := store.FederationCredential(ctx, projectUID)
+	if err != nil {
+		return FederationManagedCredentialReservation{}, false, err
+	}
+	if found && credential.ManagedByConfig && credential.Provider != nil {
+		return FederationManagedCredentialReservation{ProjectUID: projectUID, Credential: credential}, true, nil
+	}
+	match, found, err := store.FindManagedFederationCredential(ctx, projectName)
+	if err != nil || !found {
+		return FederationManagedCredentialReservation{}, false, err
+	}
+	// Attachment moves the credential to the hub UID before changing the
+	// local project. Only that retained original UID may use the name match.
+	if match.Credential.Provider != nil && match.Credential.Provider.LocalProjectUID != projectUID {
+		return FederationManagedCredentialReservation{}, false, nil
+	}
+	return match, true, nil
+}
 
 func (homeFederationCredentialStore) FederationCredential(
 	_ context.Context, projectUID string,
@@ -269,7 +313,12 @@ func FederationCredentialMetadataFromStore(
 	if !ok {
 		return FederationCredentialMetadata{Status: "missing"}
 	}
-	return FederationCredentialMetadata{
+	return c.Metadata()
+}
+
+// Metadata returns status fields without exposing the token or helper command.
+func (c FederationCredential) Metadata() FederationCredentialMetadata {
+	metadata := FederationCredentialMetadata{
 		Status:           "present",
 		HubURL:           c.HubURL,
 		HubProjectID:     c.HubProjectID,
@@ -282,6 +331,19 @@ func FederationCredentialMetadataFromStore(
 		RequestedActor:   c.RequestedActor,
 		SpokeProjectName: c.SpokeProjectName,
 	}
+	if c.Provider != nil {
+		metadata.ProviderStatus = string(c.Provider.Status)
+		if metadata.ProviderStatus == "" {
+			metadata.ProviderStatus = "pending"
+		}
+		if c.LeavePending && c.Provider.Status != federationprovider.StatusReleased {
+			metadata.ProviderStatus = "cleanup_pending"
+		}
+		if !c.Provider.ExpiresAt.IsZero() {
+			metadata.ExpiresAt = &c.Provider.ExpiresAt
+		}
+	}
+	return metadata
 }
 
 // DeleteFederationCredential removes one project credential from
@@ -397,7 +459,7 @@ func ReserveManagedFederationCredential(
 	}
 	return updateFederationCredentials(func(creds *FederationCredentials) error {
 		existing, found := creds.Projects[projectUID]
-		if found && existing != reservation.Credential {
+		if found && !existing.Equal(reservation.Credential) {
 			return fmt.Errorf("%w: reservation target credential differs", ErrFederationCredentialConflict)
 		}
 		if !found {
@@ -466,7 +528,7 @@ func DeleteManagedFederationCredential(
 			}
 			return nil
 		}
-		if current != match.Credential || !current.ManagedByConfig {
+		if !current.Equal(match.Credential) || !current.ManagedByConfig {
 			return fmt.Errorf("%w: managed reservation changed before cleanup", ErrFederationCredentialConflict)
 		}
 		delete(creds.Projects, match.ProjectUID)
@@ -492,10 +554,10 @@ func ReplaceFederationCredential(replacement FederationCredentialReplacement) er
 	}
 	before := maps.Clone(creds.Projects)
 	current, found := creds.Projects[projectUID]
-	if found && current == replacement.Replacement {
+	if found && current.Equal(replacement.Replacement) {
 		return nil
 	}
-	if !found || current != replacement.Expected {
+	if !found || !current.Equal(replacement.Expected) {
 		return fmt.Errorf(
 			"%w: credential changed before replacement",
 			ErrFederationCredentialConflict,
@@ -509,22 +571,19 @@ func ReplaceFederationCredential(replacement FederationCredentialReplacement) er
 }
 
 // ReplaceManagedFederationCredential replaces one exact managed reservation
-// without changing its stable hub UID key.
+// without changing its UID key. Repeating an already-completed replacement
+// succeeds without rewriting the credential file.
 func ReplaceManagedFederationCredential(
 	expected FederationManagedCredentialReservation,
 	replacement FederationManagedCredentialReservation,
 ) error {
 	if expected.ProjectUID == "" || replacement.ProjectUID != expected.ProjectUID ||
-		!replacement.Credential.ManagedByConfig {
+		!expected.Credential.ManagedByConfig || !replacement.Credential.ManagedByConfig {
 		return fmt.Errorf("%w: invalid managed reservation replacement", ErrFederationCredentialConflict)
 	}
-	return updateFederationCredentials(func(creds *FederationCredentials) error {
-		current, found := creds.Projects[expected.ProjectUID]
-		if !found || current != expected.Credential || !current.ManagedByConfig {
-			return fmt.Errorf("%w: managed reservation changed before replacement", ErrFederationCredentialConflict)
-		}
-		creds.Projects[expected.ProjectUID] = replacement.Credential
-		return nil
+	return ReplaceFederationCredential(FederationCredentialReplacement{
+		ProjectUID: expected.ProjectUID, Expected: expected.Credential,
+		Replacement: replacement.Credential,
 	})
 }
 
@@ -540,15 +599,15 @@ func RekeyFederationCredential(rekey FederationCredentialRekey) error {
 		source, sourceFound := creds.Projects[rekey.FromProjectUID]
 		target, targetFound := creds.Projects[rekey.ToProjectUID]
 		if !sourceFound {
-			if targetFound && target == rekey.Replacement {
+			if targetFound && target.Equal(rekey.Replacement) {
 				return nil
 			}
 			return fmt.Errorf("%w: source credential is missing", ErrFederationCredentialConflict)
 		}
-		if source != rekey.Expected {
+		if !source.Equal(rekey.Expected) {
 			return fmt.Errorf("%w: source credential changed", ErrFederationCredentialConflict)
 		}
-		if targetFound && target != rekey.Expected && target != rekey.Replacement {
+		if targetFound && !target.Equal(rekey.Expected) && !target.Equal(rekey.Replacement) {
 			return fmt.Errorf("%w: target credential differs", ErrFederationCredentialConflict)
 		}
 		creds.Projects[rekey.ToProjectUID] = rekey.Replacement
@@ -569,7 +628,7 @@ func federationCredentialLeaveConflict(
 		if credential.PendingEnrollmentID == 0 || credential.LeavePending {
 			continue
 		}
-		if previous, found := before[projectUID]; found && previous == credential {
+		if previous, found := before[projectUID]; found && previous.Equal(credential) {
 			continue
 		}
 		return fmt.Errorf(

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/httpurl"
+
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -111,7 +113,7 @@ func NewHubClient(
 	if err != nil {
 		return nil, err
 	}
-	allowInsecure, err := config.EffectiveHTTPAllowInsecure(catalog.URL, catalog.AllowInsecure)
+	allowInsecure, err := httpurl.EffectiveHTTPAllowInsecure(catalog.URL, catalog.AllowInsecure)
 	if err != nil {
 		return nil, hubError(ErrHubValidation, "hub URL validation", 0)
 	}

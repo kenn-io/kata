@@ -378,9 +378,241 @@ so an ID from another project is not accepted; repeating an exact revocation is
 harmless. History remains listable and credentials remain revocable after a
 project is archived, but archived projects cannot receive new enrollments.
 
+### Accept a saved token
+
+Use `EnsureFederationEnrollment` when the caller already owns a token and must
+retry safely after an interrupted request. Generate 32 random bytes, encode
+them as unpadded base64url, and save the token before calling:
+
+```go
+enrollment, err := service.EnsureFederationEnrollment(ctx, kata.FederationEnrollmentSpec{
+	ProjectUID:       "01HZNQ7VFPK1XGD8R5MABCD4EX",
+	SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+	Capabilities:     "claim,pull,push",
+	Actor:            "Example Operator",
+}, savedToken)
+```
+
+- The result contains enrollment metadata, not the token or its hash.
+- Repeating the call with the same token and scope returns the same active
+  enrollment. The token authenticates ordinary scoped federation requests.
+- Exact retries also work after project archival. They return the retained
+  enrollment without reactivating the project or creating a credential.
+- Reusing that token with a different project, spoke instance, actor,
+  capabilities, or adoption permission returns
+  `ErrFederationEnrollmentTokenConflict`. Revoked tokens return the same error;
+  retrying does not restore access.
+- A different token may create another credential for the same project and
+  instance. Hosts that require one live credential must enforce that rule
+  themselves. This method does not rotate or revoke another credential.
+
 Like the project lifecycle methods, these are trusted in-process application
 methods rather than network authentication boundaries. The embedding host must
-authorize create, list, and revoke operations before calling them.
+authorize create, ensure, list, and revoke operations before calling them.
+
+## Federation credential providers
+
+A credential provider lets a host application approve Kata federation using
+its own account and project permissions. The caller supplies a saved token;
+the provider authorizes that exact token for one project and installation.
+The request carries a candidate federation token, not a daemon administration
+token. The helper itself is trusted local code, not a sandboxed process.
+
+**Development branch; not a tagged release.** The Go package
+`go.kenn.io/kata/pkg/federationprovider` handles the helper exchange. Choose the
+entry point for the code you are writing:
+
+| Your code | Entry point | Responsibility |
+| --- | --- | --- |
+| Kata caller | `Exchange` | Run the configured helper with a previously saved request. |
+| Helper | `DecodeRequest`, `WriteResponse` | Read a request, decide access, then write a checked reply. |
+| Helper forwarding another service's reply | `DecodeResponse` | Check that reply against the original request before forwarding it. |
+| Application embedding Kata | `Service.EnsureFederationEnrollment` | Register the exact saved token after approving access. |
+
+Pending approval and denial are normal responses, not Go errors. Errors mean
+the exchange could not finish or a document was invalid. Callers still own
+credential storage and retries; the package does not create either for them.
+
+The reconciler can obtain approval, read federation metadata with the approved
+token, and attach a local replica. Normal leave commands, mapping removal, and
+redacted status use the same saved request. See the
+[operator guide](../operations/federation.md#external-credential-providers)
+for configuration and cleanup instructions.
+
+Kata handles interrupted requests as follows:
+
+- Saves the request and candidate token before running the helper.
+- Reuses them after pending approval, a failed exchange, or restart.
+- Saves confirmed project, actor, permission, and optional expiry details before binding.
+- Reuses a confirmed result without contacting the helper again.
+- Keeps failed releases pending and blocks further authorization for that request.
+
+Provider-backed reconciliation makes no catalog-administration calls. It checks
+the metadata's project ID and UID against the saved approval and retains that
+approval when metadata retrieval or local attachment fails. The provider resolves
+the requested project key to those identifiers. That key need not equal Kata's
+internal project name, and a rename does not change the approved identity.
+
+- `read_only` and `collaborate` attach only an empty local project. Existing
+  tasks, recurring tasks, or project metadata require `migrate` approval.
+- `migrate` uses the existing adoption path to import local data.
+- Push is enabled only when the approved credential permits it.
+- Attachment replaces old local catalog events when the project takes the
+  hub identity. Their checksums name the old identity. One new local event
+  updates browser readers without pushing empty metadata to the hub.
+- Normal leave stops transport and asks the saved provider to release the
+  exact request. Unconfirmed cleanup remains pending rather than deleting its
+  credential. Once confirmed, the secret is removed; a closed marker prevents
+  the still-configured mapping from reopening after restart.
+
+Kata's credential file can retain the provider operation beside its saved
+token. It stores the request UUID, executable arguments, intent, original local
+project and installation identifiers, and any accepted enrollment and expiry.
+Moving a credential to the hub project UID preserves the original request.
+Updates and cleanup compare the whole saved operation by value, so rereading
+the file does not break a retry and stale cleanup cannot delete a newer request.
+The executable arguments remain available for release after a mapping is removed.
+On restart, the reconciler releases removed provider mappings, detaches their
+local replicas, and removes their closed markers. Other credentials are untouched.
+If an explicit leave was interrupted, restart can finish remote release, but the
+user retries the original leave command to finish local teardown. The saved
+marker does not authorize the reconciler to guess whether to archive local data.
+
+### Responsibilities
+
+- The caller saves a random request UUID and a random 32-byte token before
+  calling the provider. Every retry uses the same pair.
+- The provider verifies the person's authority and obtains approval for the
+  project and permissions. It approves the supplied token, not a replacement.
+- The caller saves the accepted project and enrollment identifiers before
+  federation. Later replies for that request must match the saved identifiers.
+  `Exchange` checks the request and target; the caller owns this saved-state
+  comparison.
+- Release cancels or revokes exactly the saved request. Keep that request until
+  the provider confirms `released`, including after a failed exchange.
+- A host that expires credentials supplies and enforces the expiry time.
+  Standalone Kata storage does not enforce expiry.
+
+### Executable exchange
+
+Use a trusted executable and argument array, for example
+`["example-credential-provider", "--profile", "work"]`. `Exchange` runs it
+directly, without a shell, and inherits the caller's environment. A provider can
+use the operator's normal account configuration.
+
+Only configure helpers you trust with the daemon's operating-system account.
+They can read inherited variables, including `KATA_AUTH_TOKEN` if exported,
+and files and sockets available to that account. The protocol's restricted
+credential fields do not isolate a local executable from those resources.
+Kata's federation HTTP requests use the approved project token, not the
+daemon administration token.
+
+- Stdin and stdout each carry one UTF-8 JSON object. No progress text or prompts.
+- Each document is at most 16 KiB, including whitespace. It contains operation
+  metadata, not project data.
+- An invocation lasts at most 60 seconds, or the caller's shorter context
+  deadline. Cancellation and excess output terminate the helper's process tree.
+- Unknown, duplicate, incorrectly cased, or null fields are invalid. So are
+  extra documents and unsupported versions.
+- The client discards stderr and does not include parser details, executable
+  arguments, or helper output in errors. Providers must avoid logging secrets.
+- The package does not retry, store tokens, select an account, or open a browser.
+
+| Exit | Meaning |
+| --- | --- |
+| `0` | One valid response, including pending approval or denial. |
+| `2` | Invalid input. Perform no authorization or release action. |
+| `1` | The provider could not finish a valid exchange. |
+
+Any nonzero exit discards all stdout, even a complete `ready` response. A failed
+exchange does not prove that the host made no changes. Keep the saved request
+and token for retry or release.
+
+Exit `2` returns `ErrInvalidRequest`. Reconciliation reports
+`configuration_conflict` in health so the operator can check the helper command
+and protocol version. Other process failures return `ErrProviderFailed`.
+Retries never replace or forget the saved request.
+
+### Request fields
+
+Both operations require `version` (integer `1`), `operation`, and `request_id`.
+The UUID uses lowercase, hyphenated text and must not be nil. Kata identity
+fields use uppercase ULIDs. String fields must be nonempty when present.
+
+An `authorize` request also requires:
+
+| Field | Meaning |
+| --- | --- |
+| `hub_url` | Expected HTTPS base, including its mount. No user info, query, or fragment. |
+| `project` | Destination project key understood by the host. |
+| `spoke_instance_uid` | The caller's Kata installation identity. |
+| `local_project_uid` | The caller's local project identity. |
+| `intent` | `read_only`, `collaborate`, or `migrate`. |
+| `candidate_token` | The saved 32-byte token encoded as unpadded base64url. |
+
+A minimal `release` request needs only the shared fields:
+
+```json
+{
+  "version": 1,
+  "operation": "release",
+  "request_id": "8b60f249-b495-4f17-8999-c64382e05680"
+}
+```
+
+Release may also repeat `hub_url`, `project`, `spoke_instance_uid`,
+`local_project_uid`, and `intent` from the saved request. These optional fields
+help the provider find that request; they never select a different project or
+enrollment to revoke. Kata sends its saved values, not values from a provider
+response. Release must not include `candidate_token`.
+
+Providers use `DecodeRequest(io.Reader)` and
+`WriteResponse(io.Writer, Request, Response)`. Clients use
+`Exchange(context.Context, []string, Request)`.
+Providers that relay a decision can use `DecodeResponse(io.Reader, Request)`
+to validate the complete response before forwarding it. This checks the raw
+JSON fields and size as well as the requested target and permissions.
+
+### Response fields
+
+Every response echoes `version`, `operation`, and `request_id`, and includes a
+`status`. An optional `message` is non-secret display text, never a command.
+
+| Status | Caller action |
+| --- | --- |
+| `ready` | Save the enrollment and start federation. |
+| `approval_required` | Wait for approval on the hub; retry the same request. |
+| `sign_in_required` | Report that account sign-in is needed. Do not fall back to another credential. |
+| `denied` | Stop automatic authorization retries for this request. |
+| `conflict` | Keep state and ask for an explicit correction. |
+| `unavailable` | Keep state and retry later. |
+| `released` | Release only: cleanup is complete; the request no longer grants access. |
+
+A release returns only `released`, `conflict`, `denied`, or `unavailable`.
+It cannot grant a connection. Only `ready` includes the following fields.
+All except `expires_at` are required:
+
+| Field | Requirement |
+| --- | --- |
+| `hub_url` | Matches the requested base, including its mount. |
+| `project_id`, `enrollment_id` | Positive integers assigned by the host. |
+| `project_uid` | The destination project's uppercase ULID. |
+| `actor` | Nonempty actor name; `bootstrap` is reserved, ignoring case and surrounding spaces. |
+| `capabilities` | Exactly `pull` for `read_only`; `pull,push` or `claim,pull,push` for `collaborate` or `migrate`. |
+| `expires_at` | Optional host expiry as UTC RFC 3339 text ending in `Z`. Omit it when the credential does not expire. |
+
+`claim` is the canonical wire capability. `lease` is a human-facing spelling,
+not a response value. A provider cannot silently change the requested
+permissions and report `ready`. Read-only never permits pushing. Write replicas
+need both pull and push; claiming work is optional. Responses never return a token.
+
+The Go package exports `Intent` and `Status` constants for callers and helpers.
+It shares URL and actor validation with Kata without importing daemon configuration.
+
+URL matching uses Kata's canonical HTTP base rules: normalize host case and
+the default HTTPS port, remove trailing slashes, and preserve the mount path.
+A different host, nondefault port, or mount is rejected. A successful `Exchange`
+returns the canonical base.
 
 ## Storage and PostgreSQL policy
 

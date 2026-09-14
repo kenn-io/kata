@@ -1387,11 +1387,13 @@ model = "example-model"
 
 func TestValidateFederationStartupConfigActors(t *testing.T) {
 	tests := []struct {
-		name    string
-		actor   string
-		wantErr string
+		name     string
+		actor    string
+		provider []string
+		wantErr  string
 	}{
 		{name: "valid", actor: "user-a"},
+		{name: "provider supplies actor after startup", provider: []string{"access-helper", "credentials"}},
 		{name: "empty", actor: "", wantErr: "actor must be non-empty"},
 		{name: "reserved", actor: "BOOTSTRAP", wantErr: `actor "bootstrap" is reserved`},
 	}
@@ -1400,7 +1402,7 @@ func TestValidateFederationStartupConfigActors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.DaemonConfig{
 				Federation: config.FederationConfig{
-					Projects: []config.FederationProjectConfig{{Actor: tt.actor}},
+					Projects: []config.FederationProjectConfig{{Actor: tt.actor, CredentialProvider: tt.provider}},
 				},
 			}
 

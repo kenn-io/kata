@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"go.kenn.io/kata/internal/tokenactor"
 )
 
 // FederationTokenHash returns the SHA-256 hex digest used for enrollment token
@@ -80,12 +82,5 @@ func federationEnrollmentProjectMatches(enrollmentProjectID *int64, projectID in
 
 // ValidateTokenActor rejects empty actors and reserved bootstrap spellings.
 func ValidateTokenActor(actor string) error {
-	trimmed := strings.TrimSpace(actor)
-	if trimmed == "" {
-		return fmt.Errorf("actor must be non-empty")
-	}
-	if strings.EqualFold(trimmed, BootstrapActor) {
-		return fmt.Errorf("actor %q is reserved", BootstrapActor)
-	}
-	return nil
+	return tokenactor.Validate(actor)
 }

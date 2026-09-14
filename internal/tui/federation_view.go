@@ -93,9 +93,10 @@ type federationLeaveDraft struct {
 // federationLeaveResult is the outcome surfaced on the result screen after a
 // successful leave.
 type federationLeaveResult struct {
-	Draft         federationLeaveDraft
-	RevokedCount  int
-	SkippedRevoke bool
+	Draft            federationLeaveDraft
+	RevokedCount     int
+	SkippedRevoke    bool
+	ProviderReleased bool
 	// GlobalEnrollmentIDs are active hub enrollments with global (nil) project
 	// scope for this spoke: they still authorize the left project but are not
 	// auto-revoked, since they may serve other projects.
@@ -756,24 +757,30 @@ func runFederationLeave(
 	if disposition == "" {
 		disposition = "detach"
 	}
-	if !draft.LocalOnly {
+	var providerManaged bool
+	{
 		// Daemon preflight BEFORE the irreversible hub revoke, for every
 		// leave that will contact the hub: the route can refuse a detach too
 		// (role drift, vanished project, actor validation), and the archive
 		// disposition adds the open-issue refusal. A refusal discovered only
 		// after the revoke would strand the spoke locally bound with the hub
 		// side gone.
-		if _, err := spoke.LeaveFederationReplica(ctx, draft.ProjectID, LeaveFederationReplicaInput{
+		preflight, err := spoke.LeaveFederationReplica(ctx, draft.ProjectID, LeaveFederationReplicaInput{
 			Disposition: disposition,
 			Actor:       draft.Actor,
 			Preflight:   true,
-		}); err != nil {
+		})
+		if err != nil {
 			return result, fmt.Errorf("spoke: leave preflight failed: %w", err)
 		}
+		providerManaged = preflight.PendingEnrollment != nil && preflight.PendingEnrollment.ProviderManaged
+	}
+	if providerManaged && draft.LocalOnly {
+		return result, errors.New("provider cleanup cannot be discarded; turn off local-only and retry leave")
 	}
 	if draft.LocalOnly {
 		result.SkippedRevoke = true
-	} else {
+	} else if !providerManaged {
 		revoked, globals, err := revokeFederationLeaveEnrollments(ctx, draft, hubTarget)
 		if err != nil {
 			return result, err
@@ -789,6 +796,7 @@ func runFederationLeave(
 		return result, fmt.Errorf("spoke: leave failed: %w", err)
 	}
 	result.Body = body
+	result.ProviderReleased = providerManaged
 	return result, nil
 }
 

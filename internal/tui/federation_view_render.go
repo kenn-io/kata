@@ -327,6 +327,8 @@ func renderFederationLeaveResult(m Model) string {
 	revoke := fmt.Sprintf("revoked %d enrollment(s) on the hub", result.RevokedCount)
 	if result.SkippedRevoke {
 		revoke = "hub revoke skipped (local-only): the enrollment token remains valid until manually revoked"
+	} else if result.ProviderReleased {
+		revoke = "credential provider confirmed release"
 	}
 	body = append(body,
 		"status: "+status,

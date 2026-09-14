@@ -143,6 +143,68 @@ See [Configuration](../reference/configuration.md#declarative-federation-mapping
 for validation rules and [HTTP API schema](../reference/http-api.md#federation-enrollment-and-health-endpoints)
 for the health and credential-rotation contract.
 
+## External credential providers
+
+A hub may provide a local helper that arranges project access. Kata can use
+that helper instead of asking you to copy a token or supply hub administration
+credentials:
+
+```toml
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example/tasks"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+intent = "collaborate"
+credential_provider = ["access-helper", "credentials", "--profile", "work"]
+```
+
+Use the helper command supplied by your hub operator. Kata runs the listed
+program directly, without a shell. Do not set `actor`, `token`, or `token_env`
+for this mapping; the provider supplies the approved identity and permissions.
+
+- `read_only` starts an empty local replica that can pull tasks.
+- `collaborate` starts an empty replica that can also push work. The hub may
+  additionally allow it to claim tasks.
+- `migrate` requests Kata's adoption workflow: import an existing project's
+  tasks and authors, then use the hub's project identity for federation.
+  It is not an automatic fallback when an ordinary connection finds local data.
+
+Kata saves its candidate credential before asking the helper for approval.
+Pending approval, sign-in waits, and temporary failures retry the same request,
+including after restart. A `denied` or `conflict` decision stops automatic
+authorization retries and appears as a conflict in daemon health. Restarting
+does not clear that decision. Remove the mapping and restart to release the
+saved request before configuring a new one.
+
+Once approved, ordinary synchronization uses the saved credential directly;
+it does not run the helper for every task.
+The provider decides approval and whether credentials expire. Kata displays
+approval status and any supplied expiry in `kata federation status`, without
+displaying credentials or helper arguments.
+
+To disconnect, run `kata federation leave spoke-project`. Kata stops local
+synchronization before asking the provider to release that exact connection.
+If the provider is unavailable, cleanup remains pending. Retry the command
+when it is available. `--local-only` cannot discard a provider-owned request.
+Local tasks remain available after disconnection.
+
+Provider mappings differ from catalog-admin mappings when removed:
+
+- Remove the `[[federation.project]]` block and restart Kata to release its
+  provider connection and detach the replica. Cleanup retries in the background,
+  even when you removed the last mapping.
+- A completed explicit leave keeps a secret-free closed marker until you remove
+  the mapping. Restarting with that same mapping does not request new access.
+- Other projects and manually stored credentials are not removed or revoked.
+- Cleanup follows the saved project identity after a rename or after an
+  unbound project was purged. A temporary database failure retries that cleanup.
+- If startup reports `credential_io`, correct the owner-private credential file
+  and restart the daemon. Kata does not guess how to repair invalid credentials.
+
 ## Move an existing spoke to a new HTTPS endpoint
 
 Catalog edits are intentionally not applied to existing bindings. After

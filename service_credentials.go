@@ -67,6 +67,10 @@ func (serviceCredentialStoreAdapter) FindManagedFederationCredential(
 	return config.FederationManagedCredentialReservation{}, false, nil
 }
 
+func (serviceCredentialStoreAdapter) ListManagedFederationCredentials(context.Context) ([]config.FederationManagedCredentialReservation, error) {
+	return nil, nil
+}
+
 func (serviceCredentialStoreAdapter) ReserveManagedFederationCredential(
 	context.Context, config.FederationManagedCredentialReservation,
 ) error {

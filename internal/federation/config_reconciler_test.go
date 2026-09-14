@@ -427,6 +427,18 @@ func (s *fakeCredentialStore) FindManagedFederationCredential(
 	return match, found, nil
 }
 
+func (s *fakeCredentialStore) ListManagedFederationCredentials(_ context.Context) ([]config.FederationManagedCredentialReservation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result []config.FederationManagedCredentialReservation
+	for uid, credential := range s.credentials {
+		if credential.ManagedByConfig {
+			result = append(result, config.FederationManagedCredentialReservation{ProjectUID: uid, Credential: credential})
+		}
+	}
+	return result, nil
+}
+
 func (s *fakeCredentialStore) DeleteManagedFederationCredential(
 	_ context.Context, reservation config.FederationManagedCredentialReservation,
 ) error {

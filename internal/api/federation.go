@@ -124,6 +124,8 @@ type FederationProjectStatus struct {
 	Capabilities                string                        `json:"capabilities,omitempty"`
 	AllowInsecure               bool                          `json:"allow_insecure,omitempty,omitzero"`
 	CredentialStatus            string                        `json:"credential_status,omitempty"`
+	ProviderStatus              string                        `json:"provider_status,omitempty"`
+	CredentialExpiresAt         *time.Time                    `json:"credential_expires_at,omitempty"`
 	PullCursorEventID           int64                         `json:"pull_cursor_event_id"`
 	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
 	PendingPushCount            int64                         `json:"pending_push_count"`
@@ -526,8 +528,9 @@ type LeaveFederationReplicaRequestBody struct {
 	// stays inside RemoveProject's transaction.
 	Preflight bool `json:"preflight,omitempty,omitzero"`
 	// Prepare durably marks config-managed reconciliation as leaving and
-	// waits for earlier enrollment or rotation calls to drain. It does not
-	// revoke, detach, archive, or delete credentials.
+	// waits for earlier enrollment or rotation calls to drain. Provider-backed
+	// connections also stop local transport. It does not revoke, detach,
+	// archive, or delete credentials.
 	Prepare bool `json:"prepare,omitempty,omitzero"`
 }
 
@@ -547,10 +550,13 @@ type LeaveFederationReplicaResultBody struct {
 // PendingFederationEnrollmentCleanup gives leave clients the non-secret hub
 // coordinates needed to revoke an interrupted config-managed enrollment.
 type PendingFederationEnrollmentCleanup struct {
-	HubURL        string `json:"hub_url"`
-	HubProjectID  int64  `json:"hub_project_id"`
-	HubProjectUID string `json:"hub_project_uid"`
-	AllowInsecure bool   `json:"allow_insecure,omitempty,omitzero"`
+	// ProviderManaged means the daemon owns exact release through the saved
+	// provider; clients must not attempt catalog-admin revocation.
+	ProviderManaged bool   `json:"provider_managed,omitempty,omitzero"`
+	HubURL          string `json:"hub_url"`
+	HubProjectID    int64  `json:"hub_project_id"`
+	HubProjectUID   string `json:"hub_project_uid"`
+	AllowInsecure   bool   `json:"allow_insecure,omitempty,omitzero"`
 }
 
 // LeaveFederationReplicaResponse wraps LeaveFederationReplicaResultBody.
