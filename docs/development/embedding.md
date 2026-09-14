@@ -413,7 +413,8 @@ authorize create, ensure, list, and revoke operations before calling them.
 A credential provider lets a host application approve Kata federation using
 its own account and project permissions. The caller supplies a saved token;
 the provider authorizes that exact token for one project and installation.
-The provider does not receive a daemon administration token.
+The request carries a candidate federation token, not a daemon administration
+token. The helper itself is trusted local code, not a sandboxed process.
 
 **Development branch; not a tagged release.** The Go package
 `go.kenn.io/kata/pkg/federationprovider` handles the helper exchange. Choose the
@@ -445,8 +446,10 @@ Kata handles interrupted requests as follows:
 - Keeps failed releases pending and blocks further authorization for that request.
 
 Provider-backed reconciliation makes no catalog-administration calls. It checks
-the metadata's project against the saved approval and retains that approval
-when metadata retrieval or local attachment fails.
+the metadata's project ID and UID against the saved approval and retains that
+approval when metadata retrieval or local attachment fails. The provider resolves
+the requested project key to those identifiers. That key need not equal Kata's
+internal project name, and a rename does not change the approved identity.
 
 - `read_only` and `collaborate` attach only an empty local project. Existing
   tasks, recurring tasks, or project metadata require `migrate` approval.
@@ -494,6 +497,13 @@ Use a trusted executable and argument array, for example
 `["example-credential-provider", "--profile", "work"]`. `Exchange` runs it
 directly, without a shell, and inherits the caller's environment. A provider can
 use the operator's normal account configuration.
+
+Only configure helpers you trust with the daemon's operating-system account.
+They can read inherited variables, including `KATA_AUTH_TOKEN` if exported,
+and files and sockets available to that account. The protocol's restricted
+credential fields do not isolate a local executable from those resources.
+Kata's federation HTTP requests use the approved project token, not the
+daemon administration token.
 
 - Stdin and stdout each carry one UTF-8 JSON object. No progress text or prompts.
 - Each document is at most 16 KiB, including whitespace. It contains operation

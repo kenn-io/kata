@@ -70,6 +70,8 @@ func reconcileProviderMapping(
 		// A hub's error body is not safe to put in reconciliation logs.
 		return reconcileError(ErrHubUnavailable, "read approved federation metadata")
 	}
+	// The provider resolves the requested key to stable IDs. Its key may differ
+	// from Kata's internal project name, which may also change after approval.
 	if metadata.ProjectID != credential.HubProjectID || metadata.ProjectUID != decision.HubProjectUID || metadata.ReplayHorizonEventID <= 0 {
 		return reconcileError(ErrBindingConflict, "federation metadata differs from the approved project")
 	}

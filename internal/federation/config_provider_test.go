@@ -219,8 +219,10 @@ func TestReconcileProviderUsesApprovedMetadataWithoutCatalogAdministration(t *te
 				if badMetadata {
 					projectUID = recreatedProjectUID
 				}
+				// A host-facing key need not be the embedded project's name.
+				// Identity checks must still reject the changed UID above.
 				assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{
-					"project_id": 42, "project_uid": projectUID, "project_name": "hub-project",
+					"project_id": 42, "project_uid": projectUID, "project_name": "embedded-project",
 					"replay_horizon_event_id": 9, "baseline_through_event_id": 12,
 				}))
 			}))

@@ -12,7 +12,8 @@ import (
 )
 
 // Exchange runs a trusted, configured executable with explicit arguments, not a
-// shell command. The helper inherits the caller's environment. The request is
+// shell command. The helper is trusted same-user code, not a sandbox. It
+// inherits the caller's environment, which may contain credentials. The request is
 // sent only on stdin; stderr is discarded and stdout is bounded. Domain denials
 // return a Response with no error; process errors return no response.
 //
