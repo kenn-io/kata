@@ -115,6 +115,8 @@ func newRootCmd() *cobra.Command {
 		newScheduleCmd(),
 		newDeadlineCmd(),
 		newMetaCmd(),
+		newNotifyCmd(),
+		newInboxCmd(),
 		newMoveCmd(),
 		newCommentCmd(),
 		newCloseCmd(),

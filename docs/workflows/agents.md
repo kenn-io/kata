@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-07
+last_edited: 2026-09-13
 ---
 
 # Agent workflows
@@ -89,6 +89,41 @@ hook event yet, so pair the attention hook with a launcher wrapper that runs
 `kata attention-hook end` after the Codex invocation exits; see
 [agent orchestration](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 for the recipe.
+
+## Teammate heads-up
+
+Ask for a teammate's attention without assigning the issue to them:
+
+```sh
+kata notify abc4 --to teammate --message "Please check the reproduction"
+kata inbox --for teammate
+kata notify abc4 --to teammate --clear
+```
+
+The inbox includes that teammate's requests on open issues in the current project.
+Closing the issue removes it from the next read. Clearing a request removes only
+that recipient's entry; reopening an issue restores any uncleared requests.
+
+Kata provides live context for separately maintained harness integrations:
+
+```sh
+export KATA_INBOX_USER=teammate
+kata inbox --context --workspace /path/to/workspace
+```
+
+An adapter should run this command before a prompt, with the teammate's explicit
+inbox address and the current workspace. Add successful stdout as transient context
+so the agent can surface requests when relevant. Replace the previous context
+on every read, including empty output, and discard it on command failure. Use
+an argument array and a short timeout. Keep stderr out of injected context.
+The inbox address is independent of `KATA_AUTHOR`; leave the adapter inactive
+when no inbox address is configured.
+
+Pi extensions and other harness adapters belong outside Kata. Kata does not
+install them or rewrite `AGENTS.md` with live requests. Refresh timing belongs
+to the adapter: refreshing before each submitted prompt removes closed requests
+on the next prompt, while session-start-only integration waits until the next
+session. Previously discussed requests remain in conversation history.
 
 ## Use Kata through MCP
 
