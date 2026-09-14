@@ -156,7 +156,10 @@ func (d *Store) createProjectFederationEnrollment(
 			if !db.FederationEnrollmentMatchesCreate(existing, p) {
 				return db.CreatedFederationEnrollment{}, db.ErrFederationEnrollmentTokenConflict
 			}
-			return db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}, tx.Commit()
+			if err := tx.Commit(); err != nil {
+				return db.CreatedFederationEnrollment{}, err
+			}
+			return db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}, nil
 		}
 		if !errors.Is(err, db.ErrNotFound) {
 			return db.CreatedFederationEnrollment{}, err
