@@ -71,7 +71,7 @@ func TestFederationProviderProcess(_ *testing.T) {
 		response.ExpiresAt = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	}
 	if err := federationprovider.WriteResponse(os.Stdout, request, response); err != nil {
-		os.Exit(2)
+		os.Exit(1)
 	}
 	os.Exit(0)
 }
@@ -217,7 +217,7 @@ func TestFederationProviderKeepsFailedAndDeniedRequests(t *testing.T) {
 			t.Setenv("KATA_TEST_PROVIDER_STATUS", status)
 			_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, mapping)
 			if status == "invalid-output" {
-				require.ErrorIs(t, err, federationprovider.ErrInvalidRequest)
+				require.ErrorIs(t, err, federationprovider.ErrProviderFailed)
 			} else {
 				require.NoError(t, err)
 			}
@@ -265,7 +265,7 @@ func TestFederationProviderValidatesActorBeforeSavingReady(t *testing.T) {
 	t.Setenv("KATA_TEST_PROVIDER_STATUS", "ready")
 	t.Setenv("KATA_TEST_PROVIDER_ACTOR", " BOOTSTRAP ")
 	_, err = daemon.AuthorizeFederationProvider(t.Context(), store, credentials, catalog, mapping)
-	require.ErrorIs(t, err, federationprovider.ErrInvalidRequest)
+	require.ErrorIs(t, err, federationprovider.ErrProviderFailed)
 	pending, found, err := credentials.FindManagedFederationCredential(t.Context(), mapping.SpokeProject)
 	require.NoError(t, err)
 	require.True(t, found)

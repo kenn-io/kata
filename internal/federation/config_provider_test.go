@@ -103,7 +103,7 @@ func TestReconcileProviderProcess(_ *testing.T) {
 		response.ExpiresAt = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	}
 	if federationprovider.WriteResponse(os.Stdout, request, response) != nil {
-		os.Exit(2)
+		os.Exit(1)
 	}
 	os.Exit(0)
 }

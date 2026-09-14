@@ -13,6 +13,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
 	katauid "go.kenn.io/kata/internal/uid"
+	"go.kenn.io/kata/pkg/federationprovider"
 )
 
 var (
@@ -454,7 +455,7 @@ func leaveFederationReplicaState(
 		)
 	}
 
-	if managedReservationFound && match.Credential.Provider != nil && match.Credential.Provider.Status != "released" {
+	if managedReservationFound && match.Credential.Provider != nil && match.Credential.Provider.Status != federationprovider.StatusReleased {
 		return db.LeaveFederationResult{}, ErrFederationReplicaLeavePending
 	}
 
