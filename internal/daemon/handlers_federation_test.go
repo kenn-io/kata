@@ -46,10 +46,14 @@ func TestProviderStatusReadsOneSnapshotAndKeepsProjectIdentity(t *testing.T) {
 		ManagedByConfig: true, SpokeProjectName: "pending",
 		Provider: &config.FederationProviderCredential{LocalProjectUID: pending.UID, Status: "ready"},
 	}
+	_, _, _, err = env.DB.RenameProjectAndEvent(t.Context(), pending.ID, "renamed-pending", "Example User")
+	require.NoError(t, err)
+	_, err = env.DB.CreateProject(t.Context(), "pending")
+	require.NoError(t, err)
 	var body api.FederationStatusBody
 	envGetJSON(t, env, "/api/v1/federation/status", &body)
 	require.Len(t, body.Statuses, 2)
-	assert.ElementsMatch(t, []string{"renamed", "pending"}, []string{body.Statuses[0].ProjectName, body.Statuses[1].ProjectName})
+	assert.ElementsMatch(t, []string{"renamed", "renamed-pending"}, []string{body.Statuses[0].ProjectName, body.Statuses[1].ProjectName})
 	assert.Nil(t, body.Statuses[0].CredentialExpiresAt)
 	assert.Nil(t, body.Statuses[1].CredentialExpiresAt)
 	assert.Equal(t, 1, credentials.listCalls)

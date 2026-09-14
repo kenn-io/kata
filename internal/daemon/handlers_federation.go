@@ -886,7 +886,7 @@ func federationStatusBody(
 	if err != nil {
 		return api.FederationStatusBody{}, err
 	}
-	var byUID, byName map[string]config.FederationCredential
+	var byUID, byLocalUID map[string]config.FederationCredential
 	if managed, ok := credentialStore.(config.FederationManagedCredentialStore); ok {
 		savedCredentials, err := managed.ListManagedFederationCredentials(ctx)
 		if err != nil && len(bindings) == 0 {
@@ -895,11 +895,11 @@ func federationStatusBody(
 		// A failed snapshot must not hide existing bindings. Their ordinary
 		// credential lookup below reports "unreadable" without default values.
 		byUID = make(map[string]config.FederationCredential, len(savedCredentials))
-		byName = make(map[string]config.FederationCredential, len(savedCredentials))
+		byLocalUID = make(map[string]config.FederationCredential, len(savedCredentials))
 		for _, saved := range savedCredentials {
 			if saved.Credential.Provider != nil {
 				byUID[saved.ProjectUID] = saved.Credential
-				byName[saved.Credential.SpokeProjectName] = saved.Credential
+				byLocalUID[saved.Credential.Provider.LocalProjectUID] = saved.Credential
 			}
 		}
 	}
@@ -928,10 +928,8 @@ func federationStatusBody(
 			}
 			saved, found := byUID[project.UID]
 			if !found {
-				saved, found = byName[project.Name]
-				// Rekey precedes local attachment. A reused name alone cannot
-				// claim the previous project's pending credential.
-				if !found || saved.Provider.LocalProjectUID != project.UID {
+				saved, found = byLocalUID[project.UID]
+				if !found {
 					continue
 				}
 			}

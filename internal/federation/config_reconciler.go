@@ -62,7 +62,7 @@ type Clock interface {
 type Target struct {
 	Catalog        config.CatalogDaemonConfig
 	Mapping        config.FederationProjectConfig
-	removeProvider bool
+	removeProvider *config.FederationManagedCredentialReservation
 }
 
 // HubFactory constructs an origin-pinned hub client for one attempt.
@@ -259,8 +259,11 @@ func (r *Reconciler) Health() Health {
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, target Target, drain *activity.Lease) error {
-	if target.removeProvider {
-		_, err := reconcileProviderLeave(ctx, r.store, r.credentials, target.Mapping.SpokeProject, true)
+	if target.removeProvider != nil {
+		if retained, err := r.providerMappingRetained(ctx, *target.removeProvider); err != nil || retained {
+			return err
+		}
+		_, err := reconcileProviderLeave(ctx, r.store, r.credentials, target.Mapping.SpokeProject, target.removeProvider)
 		if err == nil && r.wake != nil {
 			r.wake()
 		}
