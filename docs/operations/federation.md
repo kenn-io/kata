@@ -173,9 +173,15 @@ for this mapping; the provider supplies the approved identity and permissions.
   tasks and authors, then use the hub's project identity for federation.
   It is not an automatic fallback when an ordinary connection finds local data.
 
-Kata saves its candidate credential before asking the helper for approval. A
-restart retries the same request. Once approved, ordinary synchronization uses
-the saved credential directly; it does not run the helper for every task.
+Kata saves its candidate credential before asking the helper for approval.
+Pending approval, sign-in waits, and temporary failures retry the same request,
+including after restart. A `denied` or `conflict` decision stops automatic
+authorization retries and appears as a conflict in daemon health. Restarting
+does not clear that decision. Remove the mapping and restart to release the
+saved request before configuring a new one.
+
+Once approved, ordinary synchronization uses the saved credential directly;
+it does not run the helper for every task.
 The provider decides approval and whether credentials expire. Kata displays
 approval status and any supplied expiry in `kata federation status`, without
 displaying credentials or helper arguments.

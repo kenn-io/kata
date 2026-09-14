@@ -332,3 +332,107 @@ func TestProviderInputErrorIsVisibleAndRetainsExactRequest(t *testing.T) {
 	assert.Equal(t, saved.Credential.Provider.RequestID, retried.Credential.Provider.RequestID)
 	assert.True(t, saved.Credential.Token == retried.Credential.Token)
 }
+
+func TestReconcilerStopsTerminalProviderDecisionsWithoutDroppingCleanup(t *testing.T) {
+	for _, status := range []string{"denied", "conflict"} {
+		t.Run(status, func(t *testing.T) {
+			t.Setenv("KATA_TEST_RECONCILE_PROVIDER", "1")
+			t.Setenv("KATA_TEST_PROVIDER_DECISION", status)
+			store := openReconcileStore(t)
+			credentials := config.DefaultFederationCredentialStore()
+			executable, err := os.Executable()
+			require.NoError(t, err)
+			target := federation.Target{
+				Catalog: config.CatalogDaemonConfig{Name: "team-hub", URL: "https://hub.example/tasks"},
+				Mapping: config.FederationProjectConfig{
+					Hub: "team-hub", SpokeProject: "spoke-project", HubProject: "hub-project", Intent: "collaborate",
+					CredentialProvider: []string{executable, "-test.run=^TestReconcileProviderProcess$"},
+				},
+			}
+			for range 2 {
+				// Restarting reloads the saved decision, not a new authorization.
+				func() {
+					clock := newManualClock(time.Now())
+					r := federation.NewReconciler(federation.ReconcilerConfig{
+						Store: store, Credentials: credentials, Targets: []federation.Target{target}, Clock: clock,
+					})
+					ctx, cancel := context.WithCancel(t.Context())
+					done := runReconciler(ctx, t, r)
+					defer func() {
+						cancel()
+						require.ErrorIs(t, <-done, context.Canceled)
+					}()
+					require.Eventually(t, func() bool { return r.Health().LastErrorCategory == status }, 3*time.Second, time.Millisecond)
+					assert.Equal(t, 1, r.Health().Conflicted)
+					assert.Zero(t, r.Health().Pending)
+					attemptAt := *r.Health().LastAttemptAt
+					clock.Advance(24 * time.Hour)
+					assert.Never(t, func() bool {
+						return !r.Health().LastAttemptAt.Equal(attemptAt) || len(clock.snapshotDurations()) != 0
+					}, 20*time.Millisecond, time.Millisecond,
+						"terminal authorization must not schedule another attempt")
+				}()
+				t.Setenv("KATA_TEST_PROVIDER_DECISION", "ready")
+			}
+
+			// Removing the mapping still releases the original request. The peer
+			// checks that release carries the saved request ID and a leave fence.
+			saved, found, err := credentials.FindManagedFederationCredential(t.Context(), target.Mapping.SpokeProject)
+			require.NoError(t, err)
+			require.True(t, found)
+			assert.Equal(t, federationprovider.Status(status), saved.Credential.Provider.Status)
+			t.Setenv("KATA_TEST_PROVIDER_DECISION", "released")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			r := federation.NewReconciler(federation.ReconcilerConfig{Store: store, Credentials: credentials, Wake: cancel})
+			require.ErrorIs(t, r.Run(ctx), context.Canceled)
+			_, found, err = credentials.FindManagedFederationCredential(t.Context(), target.Mapping.SpokeProject)
+			require.NoError(t, err)
+			assert.False(t, found)
+		})
+	}
+}
+
+func TestReconcilerRetriesWaitingProviderDecisions(t *testing.T) {
+	for _, status := range []string{"approval_required", "sign_in_required", "unavailable"} {
+		t.Run(status, func(t *testing.T) {
+			t.Setenv("KATA_TEST_RECONCILE_PROVIDER", "1")
+			t.Setenv("KATA_TEST_PROVIDER_DECISION", status)
+			store := openReconcileStore(t)
+			credentials := config.DefaultFederationCredentialStore()
+			executable, err := os.Executable()
+			require.NoError(t, err)
+			clock := newManualClock(time.Now())
+			r := federation.NewReconciler(federation.ReconcilerConfig{
+				Store: store, Credentials: credentials, Clock: clock,
+				Targets: []federation.Target{{
+					Catalog: config.CatalogDaemonConfig{Name: "team-hub", URL: "https://hub.example/tasks"},
+					Mapping: config.FederationProjectConfig{
+						Hub: "team-hub", SpokeProject: "spoke-project", HubProject: "hub-project", Intent: "collaborate",
+						CredentialProvider: []string{executable, "-test.run=^TestReconcileProviderProcess$"},
+					},
+				}},
+			})
+			ctx, cancel := context.WithCancel(t.Context())
+			done := runReconciler(ctx, t, r)
+			defer func() {
+				cancel()
+				require.ErrorIs(t, <-done, context.Canceled)
+			}()
+			require.Eventually(t, func() bool { return r.Health().LastErrorCategory == status }, 3*time.Second, time.Millisecond)
+			waitForTimerCount(t, clock, 1)
+			assert.Equal(t, 1, r.Health().Pending)
+			saved, found, err := credentials.FindManagedFederationCredential(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			require.True(t, found)
+			t.Setenv("KATA_TEST_PROVIDER_DECISION", "denied")
+			clock.Advance(time.Second)
+			require.Eventually(t, func() bool { return r.Health().LastErrorCategory == "denied" }, 3*time.Second, time.Millisecond)
+			retried, found, err := credentials.FindManagedFederationCredential(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			require.True(t, found)
+			assert.Equal(t, saved.Credential.Provider.RequestID, retried.Credential.Provider.RequestID)
+			assert.True(t, saved.Credential.Token == retried.Credential.Token)
+		})
+	}
+}

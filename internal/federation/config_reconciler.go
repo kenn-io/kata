@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
+	"go.kenn.io/kata/pkg/federationprovider"
 )
 
 const configCapabilities = "pull,push,lease"
@@ -97,6 +98,7 @@ type Health struct {
 
 type reconciliationState struct {
 	state             string
+	terminal          bool
 	nextAttempt       time.Time
 	nextDelay         time.Duration
 	lastAttempt       *time.Time
@@ -295,7 +297,7 @@ func (r *Reconciler) due(index int, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state := r.states[index]
-	return state.state != "reconciled" &&
+	return state.state != "reconciled" && !state.terminal &&
 		(state.nextAttempt.IsZero() || !state.nextAttempt.After(now))
 }
 
@@ -305,7 +307,7 @@ func (r *Reconciler) nextDue() (time.Time, bool) {
 	var next time.Time
 	for i := range r.states {
 		state := &r.states[i]
-		if state.state == "reconciled" {
+		if state.state == "reconciled" || state.terminal {
 			continue
 		}
 		if next.IsZero() || state.nextAttempt.Before(next) {
@@ -324,11 +326,17 @@ func (r *Reconciler) markAttemptStarted(index int, attemptAt time.Time) {
 func (r *Reconciler) recordAttempt(index int, attemptAt time.Time, err error) {
 	category, status := classifyReconciliationError(err)
 	stateName := "reconciled"
+	terminal := false
 	completedAt := r.clock.Now()
 	if err != nil {
 		stateName = "pending"
 		if category == "configuration_conflict" || category == "binding_conflict" {
 			stateName = "conflict"
+		}
+		if decision, ok := errors.AsType[*providerDecisionError](err); ok &&
+			(decision.status == federationprovider.StatusDenied || decision.status == federationprovider.StatusConflict) {
+			stateName = "conflict"
+			terminal = true
 		}
 	}
 
@@ -341,11 +349,14 @@ func (r *Reconciler) recordAttempt(index int, attemptAt time.Time, err error) {
 		state.lastErrorCategory != category ||
 		state.lastErrorStatus != status
 	state.state = stateName
+	state.terminal = terminal
 	state.lastAttempt = new(attemptAt)
 	state.lastErrorCategory = category
 	state.lastErrorStatus = status
 	if err == nil {
 		state.lastSuccess = new(completedAt)
+	}
+	if err == nil || terminal {
 		state.nextAttempt = time.Time{}
 		state.nextDelay = initialRetryDelay
 	} else {
