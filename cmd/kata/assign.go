@@ -51,7 +51,7 @@ func newUnassignCmd() *cobra.Command {
 }
 
 func runAssign(cmd *cobra.Command, raw, owner string, unassign bool, expectedOwner *string) error {
-	comment, err := commentFromFlag(cmd)
+	comment, handle, err := prepareFollowupComment(cmd)
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func runAssign(cmd *cobra.Command, raw, owner string, unassign bool, expectedOwn
 	if status >= 400 {
 		return apiErrFromBody(status, bs)
 	}
-	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
+	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, handle); err != nil {
 		return err
 	}
 	return printAssignMutation(cmd, bs, unassign)

@@ -153,7 +153,9 @@
       {#each sortedComments as comment (comment.id)}
         <article class="comment">
           <div class="comment-meta">
-            <span>{comment.author}</span>
+            <span
+              >{comment.teammate ? `${comment.author} / ${comment.teammate}` : comment.author}</span
+            >
             <time datetime={comment.created_at} title={localDateTimeLabel(comment.created_at)}>
               {timeAgo(comment.created_at)}
             </time>

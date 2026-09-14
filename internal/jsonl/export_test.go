@@ -35,6 +35,27 @@ func TestExportWritesOrderedRecordsWithSequenceLast(t *testing.T) {
 	assertKindOrder(t, records)
 }
 
+func TestExportCommentsIncludeTeammateAndOmitLegacyAbsence(t *testing.T) {
+	ctx, d, p := newExportEnv(t)
+	issue := createTesterIssue(ctx, t, d, p.ID, "export teammate", "")
+	_, _, err := d.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "coordinator", Teammate: "reviewer-7", Body: "attributed",
+	})
+	require.NoError(t, err)
+	addTesterComment(ctx, t, d, issue.ID, "legacy")
+
+	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{IncludeDeleted: true})
+	var comments []map[string]any
+	for _, envelope := range records {
+		if envelope["kind"] == "comment" {
+			comments = append(comments, envelope["data"].(map[string]any))
+		}
+	}
+	require.Len(t, comments, 2)
+	assert.Equal(t, "reviewer-7", comments[0]["teammate"])
+	assert.NotContains(t, comments[1], "teammate")
+}
+
 // TestExportIncludesProjectPurgeLog covers the project_purge_log kind end to end
 // through the JSONL export path. The tombstone has no FK to projects, so it must
 // be exported even though the project row is gone — and it must sort between

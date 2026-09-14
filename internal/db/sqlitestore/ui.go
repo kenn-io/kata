@@ -702,7 +702,7 @@ func readUILabelStrings(ctx context.Context, tx *sql.Tx, issueID int64) ([]strin
 
 func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Comment, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, uid, issue_id, author, body, created_at
+		SELECT id, uid, issue_id, author, body, created_at, teammate
 		FROM comments WHERE issue_id = ?`, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("read UI comments: %w", err)
@@ -710,9 +710,8 @@ func readUIComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Commen
 	defer func() { _ = rows.Close() }()
 	comments := []db.Comment{}
 	for rows.Next() {
-		var comment db.Comment
-		if err := rows.Scan(&comment.ID, &comment.UID, &comment.IssueID, &comment.Author,
-			&comment.Body, &comment.CreatedAt); err != nil {
+		comment, err := scanComment(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan UI comment: %w", err)
 		}
 		comments = append(comments, comment)

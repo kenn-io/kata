@@ -17,22 +17,22 @@ digraph kata {
   rankdir=TB; node [shape=box];
 
   arrive   [shape=diamond label="Work arrives"];
-  search   [label="Search first; reuse an open issue\nor create one"];
+  search   [label="Search first:\nkata search \"<terms>\" --agent\nReuse an open issue or create one."];
   route    [shape=diamond label="Work it, or delegate it?"];
 
   subgraph cluster_work {
-    label="Working a kata-tracked issue";
-    claim  [label="On claim or start, mark it actively tracked:\nkata meta set <ref> work.attention ok\nIn-flight work becomes visible to coordinators\nand dashboards from the moment it is grabbed."];
+    label="";
+    claim  [label="On claim or start, mark it tracked:\nkata meta set <ref> work.attention ok"];
     branch [label="If the work happens on a dedicated branch, stamp it once:\nkata meta set <ref> work.branch <branch>\nor bind at creation:\nkata create ... --meta work.branch=<branch> --idempotency-key <key>"];
-    live   [label="Keep your live state truthful on the issue:\nkata meta set <ref> work.attention stuck|needs-human|ok\nwith a one-line kata meta set <ref> work.attention_msg \"<why>\"\nRaise stuck when you cannot proceed, needs-human when you want\ninput or review (you may keep working), and clear back to ok\nwhen unblocked.\nRequest attention from teammate: kata notify <ref> --to <teammate> --message <reason>"];
+    live   [label="Keep state current:\nkata meta set <ref> work.attention stuck|needs-human|ok\nkata meta set <ref> work.attention_msg \"<why>\"\nstuck = blocked; needs-human = input/review; ok = unblocked.\nRequest attention:\nkata notify <ref> --to <actor>[/<teammate>] --message <reason>"];
     claim -> branch -> live;
   }
 
   subgraph cluster_delegate {
-    label="Delegating work as separate issues (fan-out/join)";
-    fanout [label="Create each delegated child with\n--parent <epic-or-coordinating-issue>,\n--meta work.branch=..., and an idempotency key;\ncapture refs from --json (.issue.short_id).\nAdd dependency links only for actual prerequisites."];
+    label="";
+    fanout [label="Tracked children: --parent <ref>, --meta work.branch=<branch>,\n--idempotency-key <key>, --json; capture .issue.short_id.\nSubagents: distinct KATA_TEAMMATE and\nKATA_INBOX_USER=<actor>/<teammate>; keep the actor.\nRead requests: kata inbox --for <actor>[/<teammate>].\nAfter handling: kata notify <ref> --to <actor>[/<teammate>] --clear."];
     join   [label="Join with kata wait <refs> --until attention --any\nMatches needs-human or stuck; a close also completes the wait,\nand the reported reason distinguishes which. Use --timeout so a\nwrapper can tell timeout from satisfaction."];
-    coord  [label="As coordinator you read work.* —\nyou never write it on issues you delegated."];
+    coord  [label="Read delegated work.*; never write it."];
     fanout -> join -> coord;
   }
 
@@ -50,18 +50,14 @@ digraph kata {
   live  -> done;
   coord -> done;
   done -> close    [label="yes"];
-  done -> park     [label="no, stopping"];
+  done -> park     [label="no"];
   park -> schedule [label="start date known"];
-  park -> someday  [label="no date"];
-  park -> review   [label="no"];
-
-  always [shape=note label="Always: one writer per key. work.* on closed issues is meaningless —\nnever write it there, ignore it when reading. Never end a session with\nthe signal stale: before stopping, either close the issue or set the\nattention pair to reflect the hand-off."];
-
-  relationships [shape=note label="Relationships: Parent links express containment and roll-up only;\nthey do not gate readiness, and a parent cannot close with open children.\nUse --blocks <dependent> / --blocked-by <prerequisite>\nonly for real prerequisites; those links gate kata ready.\nUse --related <ref> for context only.\nkata wait observes state; it does not require a dependency edge."];
-
-  gate [shape=note label="A future scheduled_on or someday=true keeps an issue\nout of ready and next. kata deadline <ref> <date-or-time>\nsets deadline_on, which never gates either."];
+  park -> someday  [label="start date unknown"];
+  park -> review   [label="needs review"];
 }
 ~~~
+
+Only write your own work.*; update status before stopping. Schedule/someday defer work; deadlines don’t.
 `
 
 // agentsManagedBlock returns the full marker-delimited block kata writes.

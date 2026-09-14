@@ -116,6 +116,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		Comments []struct {
 			CommentUID string `json:"comment_uid"`
 			Author     string `json:"author"`
+			Teammate   string `json:"teammate,omitempty"`
 			Body       string `json:"body"`
 			CreatedAt  string `json:"created_at"`
 		} `json:"comments"`
@@ -182,7 +183,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt)
 	}
 	for _, comment := range in.Comments {
-		p.setComment(comment.CommentUID, uid, comment.Author, comment.Body, comment.CreatedAt, clockOf(e))
+		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, clockOf(e))
 	}
 }
 
@@ -325,10 +326,11 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]json.RawMe
 		return
 	}
 	author, _ := stringValue(payload["author"])
+	teammate, _ := stringValue(payload["teammate"])
 	body, _ := stringValue(payload["body"])
 	createdAt, _ := stringValue(payload["created_at"])
 	uid := issueUID(e, payload)
-	p.setComment(commentUID, uid, author, body, createdAt, clockOf(e))
+	p.setComment(commentUID, uid, author, teammate, body, createdAt, clockOf(e))
 	if createdAt == "" {
 		createdAt = e.CreatedAt
 	}
@@ -353,16 +355,18 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	p.touchIssue(uid, editedAt)
 }
 
-func (p *FoldProjection) setComment(commentUID, issueUID, author, body, createdAt string, clock FoldClock) {
+func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, body, createdAt string, clock FoldClock) {
 	if commentUID == "" {
 		return
 	}
 	comment := FoldComment{UID: commentUID, IssueUID: issueUID, Clock: clock}
 	comment.Author = author
+	comment.Teammate = teammate
 	comment.Body = body
 	comment.CreatedAt = createdAt
 	if existing, exists := p.Comments[commentUID]; exists {
-		if existing.Author != comment.Author || existing.Body != comment.Body || existing.CreatedAt != comment.CreatedAt {
+		if existing.Author != comment.Author || existing.Teammate != comment.Teammate ||
+			existing.Body != comment.Body || existing.CreatedAt != comment.CreatedAt {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("conflicting duplicate comment %s", commentUID))
 		}
 		return

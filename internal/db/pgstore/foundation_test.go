@@ -2,11 +2,13 @@ package pgstore_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -83,14 +85,17 @@ func TestValidationModeRequiresConfiguredSchemaOwnerBeforeConnecting(t *testing.
 	assert.Contains(t, err.Error(), "postgres schema owner is required in validation mode")
 }
 
-func TestPostgresMigrationRegistryIncludesExternalRootBridges(t *testing.T) {
+func TestPostgresMigrationRegistryIncludesCommentTeammate(t *testing.T) {
 	t.Parallel()
 
 	migrations := pgstore.Migrations()
-	require.Len(t, migrations, 1)
+	require.Len(t, migrations, 2)
 	assert.Equal(t, 25, migrations[0].FromVersion)
 	assert.Equal(t, 26, migrations[0].ToVersion)
 	assert.Equal(t, "000026_external_root_bridges.up.sql", migrations[0].Name)
+	assert.Equal(t, 26, migrations[1].FromVersion)
+	assert.Equal(t, 27, migrations[1].ToVersion)
+	assert.Equal(t, "000027_comment_teammate.up.sql", migrations[1].Name)
 }
 
 func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
@@ -120,7 +125,7 @@ func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 26, version)
+	assert.Equal(t, 27, version)
 
 	project, err := migrated.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -136,6 +141,65 @@ func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, binding.Active)
 	assert.Equal(t, "issue.external_root_bound", event.Type)
+}
+
+func TestCommentTeammateMigrationUpgradesVersion26(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	const schema = "comment_teammate_upgrade"
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Existing issue", Author: "tester",
+	})
+	require.NoError(t, err)
+	legacy, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: "legacy comment",
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	setCommentTeammateMigrationSource(ctx, t, admin, schema)
+	assert.Equal(t, "ac18204f243ce27534e2dc584392492ff0deb4f9bad259b4eb40dc2db2131bd3",
+		columnFingerprint(ctx, t, admin, schema), "fixture must match the released v26 column manifest")
+
+	migrated, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = migrated.Close() })
+	version, err := migrated.SchemaVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 27, version)
+	comments, err := migrated.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	assert.Equal(t, legacy.UID, comments[0].UID)
+	assert.Empty(t, comments[0].Teammate)
+	attributed, _, err := migrated.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Teammate: "reviewer-7", Body: "new comment",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "reviewer-7", attributed.Teammate)
+
+	require.NoError(t, migrated.Close())
+	reopened, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err, "reapplying migrations must be a no-op")
+	t.Cleanup(func() { _ = reopened.Close() })
 }
 
 func TestExternalRootMigrationRollsBackSchemaAndVersionTogether(t *testing.T) {
@@ -189,8 +253,52 @@ func setExternalRootMigrationSource(
 DROP TABLE %s.external_field_states;
 DROP TABLE %s.external_field_mappings;
 DROP TABLE %s.external_root_bindings;
-UPDATE %s.meta SET value='25' WHERE key='schema_version'`, schema, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
+ALTER TABLE %s.comments DROP COLUMN teammate;
+UPDATE %s.meta SET value='25' WHERE key='schema_version'`, schema, schema, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
+}
+
+func setCommentTeammateMigrationSource(
+	ctx context.Context,
+	t *testing.T,
+	admin *sql.DB,
+	schema string,
+) {
+	t.Helper()
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
+ALTER TABLE %s.comments DROP COLUMN teammate;
+UPDATE %s.meta SET value='26' WHERE key='schema_version'`, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
+	require.NoError(t, err)
+}
+
+func columnFingerprint(ctx context.Context, t *testing.T, admin *sql.DB, schema string) string {
+	t.Helper()
+	rows, err := admin.QueryContext(ctx, `
+		SELECT table_name, column_name, udt_schema || '.' || udt_name, is_nullable
+		  FROM information_schema.columns
+		 WHERE table_schema = $1`, schema)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, rows.Close()) }()
+	tables := make(map[string]struct{}, len(expectedTables))
+	for _, table := range expectedTables {
+		tables[table] = struct{}{}
+	}
+	tables["issue_sync_bindings"] = struct{}{}
+	tables["issue_sync_status"] = struct{}{}
+	var records []string
+	for rows.Next() {
+		var table, column, dataType, nullable string
+		require.NoError(t, rows.Scan(&table, &column, &dataType, &nullable))
+		if _, ok := tables[table]; !ok {
+			continue
+		}
+		records = append(records, strings.Join([]string{
+			"COLUMN", table, column, dataType, nullable,
+		}, "\x00"))
+	}
+	require.NoError(t, rows.Err())
+	sort.Strings(records)
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(records, "\n"))))
 }
 
 func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {

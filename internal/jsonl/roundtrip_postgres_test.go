@@ -29,6 +29,7 @@ func TestRoundtripRichDatabaseAcrossPostgres(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, postgresStore.Close()) })
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(sourceJSONL.Bytes()), postgresStore))
+	assertRichTeammateValues(t, postgresStore, fixture.TeammateIssueUID)
 
 	var postgresJSONL bytes.Buffer
 	require.NoError(t, jsonl.Export(ctx, postgresStore, &postgresJSONL,
@@ -38,10 +39,22 @@ func TestRoundtripRichDatabaseAcrossPostgres(t *testing.T) {
 
 	roundTripped := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(postgresJSONL.Bytes()), roundTripped))
+	assertRichTeammateValues(t, roundTripped, fixture.TeammateIssueUID)
 	assertRoundtripTableCounts(t, fixture.DB, roundTripped)
 	assertSearchResultsMatch(t, fixture.DB, roundTripped, fixture.Project.ID, "orchid")
 	assertSearchResultsMatch(t, fixture.DB, roundTripped, fixture.Project.ID, "watermelon")
 	assertSearchResultsMatch(t, fixture.DB, roundTripped, fixture.Project.ID, "soft")
+}
+
+func assertRichTeammateValues(t *testing.T, store db.Storage, issueUID string) {
+	t.Helper()
+	issue, err := store.IssueByUID(t.Context(), issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"teammate":"teammate-1"}`, string(issue.Metadata))
+	comments, err := store.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	assert.Equal(t, "reviewer-7", comments[0].Teammate)
 }
 
 func replayWireRecordsWithoutSequences(t *testing.T, data []byte) []string {

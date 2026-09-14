@@ -822,8 +822,9 @@ type CommentRequest struct {
 	Ref            string `path:"ref" required:"true"`
 	IdempotencyKey string `header:"Idempotency-Key"`
 	Body           struct {
-		Actor string `json:"actor,omitempty"`
-		Body  string `json:"body" required:"true"`
+		Teammate *string `json:"teammate,omitempty"`
+		Actor    string  `json:"actor,omitempty"`
+		Body     string  `json:"body" required:"true"`
 	}
 }
 

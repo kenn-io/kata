@@ -305,3 +305,14 @@ func TestFold_CommentEditOverwritesBodyOnly(t *testing.T) {
 	assert.Equal(t, "2026-05-23T12:00:01.000Z", comment.CreatedAt)
 	assert.Empty(t, got.Warnings)
 }
+
+func TestFoldCommentTeammateSurvivesEdit(t *testing.T) {
+	events := []FoldEvent{
+		testEvent("issue.commented", 1, `{"comment_uid":"comment-1","author":"coordinator","teammate":"reviewer-7","body":"first","created_at":"2026-09-13T12:00:00Z"}`),
+		testEvent("issue.comment_edited", 2, `{"comment_uid":"comment-1","body":"revised"}`),
+	}
+	got := FoldEvents(events).Comments["comment-1"]
+	require.Equal(t, "coordinator", got.Author)
+	require.Equal(t, "reviewer-7", got.Teammate)
+	require.Equal(t, "revised", got.Body)
+}

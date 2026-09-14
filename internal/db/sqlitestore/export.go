@@ -305,16 +305,18 @@ func (d *Store) ExportIssueSyncStatus(ctx context.Context, f db.ExportFilter) it
 // ExportComments streams comments ordered by id, scoped via the parent issue
 // (project + soft-delete rides on issues).
 func (d *Store) ExportComments(ctx context.Context, f db.ExportFilter) iter.Seq2[db.CommentExport, error] {
-	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT)
+	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT), comments.teammate
 	          FROM comments
 	          JOIN issues ON issues.id = comments.issue_id` +
 		exportWhere("issues", f) + ` ORDER BY comments.id ASC`
 	return streamRows(ctx, d.readQ, "comments", query, exportArgs(f),
 		func(rows *sql.Rows) (db.CommentExport, error) {
 			var rec db.CommentExport
-			if err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt); err != nil {
+			var teammate sql.NullString
+			if err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt, &teammate); err != nil {
 				return db.CommentExport{}, scanError("comment", err)
 			}
+			rec.Teammate = teammate.String
 			return rec, nil
 		})
 }

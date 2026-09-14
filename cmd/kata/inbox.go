@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/textsafe"
 )
 
@@ -23,10 +24,11 @@ const (
 )
 
 type inboxRequest struct {
-	Ref     string `json:"ref"`
-	Title   string `json:"title"`
-	From    string `json:"from"`
-	Message string `json:"message"`
+	Ref      string `json:"ref"`
+	Title    string `json:"title"`
+	From     string `json:"from"`
+	Teammate string `json:"teammate,omitempty"`
+	Message  string `json:"message"`
 }
 
 type inboxOutput struct {
@@ -115,7 +117,13 @@ func loadInbox(cmd *cobra.Command, recipient string) ([]inboxRequest, error) {
 	}
 	requests := make([]inboxRequest, 0, len(list.Issues))
 	for _, issue := range list.Issues {
-		var value notificationValue
+		// Decode optional attribution independently so a malformed teammate
+		// cannot hide an otherwise usable attention request.
+		var value struct {
+			From     string          `json:"from"`
+			Message  string          `json:"message"`
+			Teammate json.RawMessage `json:"teammate"`
+		}
 		raw, ok := issue.Metadata[key]
 		if !ok || json.Unmarshal(raw, &value) != nil ||
 			strings.TrimSpace(value.From) == "" || strings.TrimSpace(value.Message) == "" {
@@ -125,8 +133,17 @@ func loadInbox(cmd *cobra.Command, recipient string) ([]inboxRequest, error) {
 			}
 			continue
 		}
+		var handle string
+		if len(value.Teammate) > 0 {
+			if err := json.Unmarshal(value.Teammate, &handle); err != nil || teammate.Validate(handle) != nil {
+				if !flags.Quiet {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: ignored invalid notification teammate on %s\n", textsafe.Line(issue.ShortID))
+				}
+				handle = ""
+			}
+		}
 		requests = append(requests, inboxRequest{
-			Ref: issue.ShortID, Title: issue.Title, From: value.From, Message: value.Message,
+			Ref: issue.ShortID, Title: issue.Title, From: value.From, Teammate: handle, Message: value.Message,
 		})
 	}
 	sort.Slice(requests, func(i, j int) bool { return requests[i].Ref < requests[j].Ref })
@@ -143,11 +160,16 @@ func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest) e
 			return err
 		}
 		for _, request := range requests {
-			if err := writeAgentKVRow(cmd.OutOrStdout(),
+			fields := []agentField{
 				agentRowField("issue", request.Ref),
 				agentRowField("title", request.Title),
 				agentRowField("from", request.From),
-				agentRowField("message", request.Message)); err != nil {
+			}
+			if request.Teammate != "" {
+				fields = append(fields, agentRowField("teammate", request.Teammate))
+			}
+			fields = append(fields, agentRowField("message", request.Message))
+			if err := writeAgentKVRow(cmd.OutOrStdout(), fields...); err != nil {
 				return err
 			}
 		}
@@ -158,9 +180,13 @@ func printInbox(cmd *cobra.Command, recipient string, requests []inboxRequest) e
 		return err
 	}
 	for _, request := range requests {
+		from := request.From
+		if request.Teammate != "" {
+			from += " / " + request.Teammate
+		}
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  %s\n  from %s: %s\n",
 			textsafe.Line(request.Ref), textsafe.Line(request.Title),
-			textsafe.Line(request.From), textsafe.Line(request.Message)); err != nil {
+			textsafe.Line(from), textsafe.Line(request.Message)); err != nil {
 			return err
 		}
 	}
@@ -180,8 +206,14 @@ func renderInboxContext(recipient string, requests []inboxRequest) string {
 		from, cutFrom := truncateInboxField(textsafe.Line(request.From), inboxContextFromLimit)
 		message, cutMessage := truncateInboxField(textsafe.Line(request.Message), inboxContextMsgLimit)
 		truncated = truncated || cutTitle || cutFrom || cutMessage
-		lines[i] = fmt.Sprintf("- issue=%s title=%s from=%s message=%s\n",
-			strconv.Quote(request.Ref), strconv.Quote(title), strconv.Quote(from), strconv.Quote(message))
+		attribution := ""
+		if request.Teammate != "" {
+			handle, cutTeammate := truncateInboxField(textsafe.Line(request.Teammate), 64)
+			truncated = truncated || cutTeammate
+			attribution = " teammate=" + strconv.Quote(handle)
+		}
+		lines[i] = fmt.Sprintf("- issue=%s title=%s from=%s%s message=%s\n",
+			strconv.Quote(request.Ref), strconv.Quote(title), strconv.Quote(from), attribution, strconv.Quote(message))
 	}
 	var output strings.Builder
 	output.WriteString(header)

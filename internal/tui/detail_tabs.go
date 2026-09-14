@@ -27,9 +27,9 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 		return []entryChunk{*placeholder}
 	}
 	chunks := make([]entryChunk, 0, len(cs))
-	authorW := commentAuthorWidth(cs)
+	authorW := commentAuthorWidth(cs, width)
 	for i, c := range cs {
-		author := padToWidth(commentAuthorStyle(c.Author), authorW)
+		author := padToWidth(commentAuthorStyle(commentAttribution(c)), authorW)
 		header := fmt.Sprintf("%s  %s", author, subtleStyle.Render(formatDocumentTime(c.CreatedAt)))
 		lines := []string{applyActivityCursor(header, i == cursor)}
 		for _, ln := range renderMarkdownLines(c.Body, max(1, width-2)) {
@@ -163,14 +163,22 @@ func commentAuthorStyle(author string) string {
 	return titleStyle.Render(sanitizeForDisplay(author))
 }
 
-func commentAuthorWidth(cs []CommentEntry) int {
+func commentAuthorWidth(cs []CommentEntry, availableWidth int) int {
 	width := 0
 	for _, c := range cs {
-		if w := runewidth.StringWidth(sanitizeForDisplay(c.Author)); w > width {
-			width = w
+		w := runewidth.StringWidth(sanitizeForDisplay(commentAttribution(c)))
+		if c.Teammate == "" {
+			w = min(w, 16)
 		}
+		width = max(width, w)
 	}
-	return min(width, 16)
+	return min(width, max(1, availableWidth-16))
+}
+func commentAttribution(c CommentEntry) string {
+	if c.Teammate == "" {
+		return c.Author
+	}
+	return c.Author + " / " + c.Teammate
 }
 
 // applyActivityCursor prefixes activity rows with a text cursor marker

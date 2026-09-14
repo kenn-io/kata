@@ -134,6 +134,7 @@ export interface KataComment {
   id: number
   issue_id: number
   author: string
+  teammate?: string
   body: string
   created_at: string
 }

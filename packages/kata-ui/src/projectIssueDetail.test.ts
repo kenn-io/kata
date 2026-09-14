@@ -15,6 +15,38 @@ describe('projectIssueDetail', () => {
     expect(acceptCanonicalWire).toBeTypeOf('function')
   })
 
+  it('projects an optional teammate without inventing one for legacy comments', () => {
+    const model = projectIssueDetail({
+      issue: { uid: '01TASK', title: 'Review retries', status: 'open' },
+      comments: [
+        {
+          id: 1,
+          author: 'coordinator',
+          teammate: 'teammate-1',
+          body: 'Checked retries',
+          created_at: '2026-09-13T12:00:00Z',
+        },
+        {
+          id: 2,
+          author: 'coordinator',
+          body: 'Coordinator summary',
+          created_at: '2026-09-13T12:01:00Z',
+        },
+      ],
+    })
+
+    expect(model.comments[0]).toMatchObject({
+      author: 'coordinator',
+      teammate: 'teammate-1',
+    })
+    expect(model.comments[1]).toEqual({
+      id: '2',
+      author: 'coordinator',
+      body: 'Coordinator summary',
+      createdAt: '2026-09-13T12:01:00Z',
+    })
+  })
+
   it('accepts a canonical issue without optional project identity', () => {
     const wire: KataIssueDetailWire = {
       issue: {

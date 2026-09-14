@@ -82,6 +82,27 @@ describe('IssueDetail', () => {
     expect(within(region).queryByText(/history/i)).toBeNull()
   })
 
+  it('shows the teammate beside the accountable author', () => {
+    render(IssueDetail, {
+      props: {
+        detail: {
+          ...detail,
+          comments: [
+            {
+              id: '7',
+              author: 'coordinator',
+              teammate: 'reviewer-7',
+              body: 'Check retries',
+              createdAt: '2026-09-13T12:00:00Z',
+            },
+          ],
+        },
+      },
+    })
+
+    expect(screen.getByText('coordinator / reviewer-7')).toBeTruthy()
+  })
+
   it('invokes only host-supplied actions', async () => {
     const invoke = vi.fn()
     render(IssueDetail, {

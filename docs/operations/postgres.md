@@ -86,6 +86,13 @@ pretend migrations for development-only schema versions that were never
 released. That first released version is the migration floor; subsequent
 releases add immutable forward migrations from released versions.
 
+Schema 27 adds nullable `comments.teammate`. The registered 26 to 27 forward
+migration leaves existing comments unattributed and keeps the canonical schema
+aligned for fresh installs. Run the normal offline upgrade before submitting
+attributed comments. If the deployment federates projects, upgrade every hub
+and spoke on that path first so an older participant cannot omit the optional
+field during materialization and re-export.
+
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
 

@@ -139,7 +139,7 @@ func printShowHuman(
 			return err
 		}
 		for i, c := range b.Comments {
-			prefix := showCommentPrefix(c.UID, c.Author)
+			prefix := showCommentPrefix(c.UID, c.Author, c.Teammate)
 			if rendered != nil {
 				if err := writeRenderedPrefixedLines(out, prefix, rendered.comments[i]); err != nil {
 					return err
@@ -257,6 +257,7 @@ type showResponseForCLI struct {
 	Comments []struct {
 		UID       string `json:"uid"`
 		Author    string `json:"author"`
+		Teammate  string `json:"teammate,omitempty"`
 		Body      string `json:"body"`
 		CreatedAt string `json:"created_at"`
 	} `json:"comments"`
@@ -299,7 +300,7 @@ func renderShowFields(
 		if comment.Body == "" {
 			continue
 		}
-		prefix := showCommentPrefix(comment.UID, comment.Author)
+		prefix := showCommentPrefix(comment.UID, comment.Author, comment.Teammate)
 		fieldWidth := max(1, width-ansi.StringWidth(prefix))
 		rendered, err := renderer.Render(
 			ctx, markdownComment, textsafe.Block(comment.Body), fieldWidth,
@@ -327,8 +328,15 @@ func renderAndPrintShowHuman(
 	return printShowHuman(out, response, subjectProject, &rendered)
 }
 
-func showCommentPrefix(uid, author string) string {
-	return textsafe.Line(uid) + " " + textsafe.Line(author) + ": "
+func showCommentPrefix(uid, author, teammate string) string {
+	return textsafe.Line(uid) + " " + textsafe.Line(commentAttribution(author, teammate)) + ": "
+}
+
+func commentAttribution(author, teammate string) string {
+	if teammate == "" {
+		return author
+	}
+	return author + " / " + teammate
 }
 
 func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation string) error {
@@ -392,11 +400,15 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 			return err
 		}
 		for _, c := range b.Comments {
-			if err := writeAgentKVRow(w,
+			fields := []agentField{
 				agentRowField("uid", c.UID),
 				agentRowField("author", c.Author),
-				agentRowField("created_at", c.CreatedAt),
-			); err != nil {
+			}
+			if c.Teammate != "" {
+				fields = append(fields, agentRowField("teammate", c.Teammate))
+			}
+			fields = append(fields, agentRowField("created_at", c.CreatedAt))
+			if err := writeAgentKVRow(w, fields...); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprint(w, agentFencedText(c.Body)); err != nil {

@@ -902,14 +902,19 @@ func exportComments(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 		return exportCommentsV10(ctx, d, enc, opts)
 	}
 	type record struct {
-		ID        int64  `json:"id"`
-		UID       string `json:"uid"`
-		IssueID   int64  `json:"issue_id"`
-		Author    string `json:"author"`
-		Body      string `json:"body"`
-		CreatedAt string `json:"created_at"`
+		ID        int64   `json:"id"`
+		UID       string  `json:"uid"`
+		IssueID   int64   `json:"issue_id"`
+		Author    string  `json:"author"`
+		Body      string  `json:"body"`
+		CreatedAt string  `json:"created_at"`
+		Teammate  *string `json:"teammate,omitempty"`
 	}
-	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT)
+	teammateColumn := "NULL"
+	if sourceSchemaVersion >= 27 {
+		teammateColumn = "comments.teammate"
+	}
+	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT), ` + teammateColumn + `
 	          FROM comments
 	          JOIN issues ON issues.id = comments.issue_id`
 	where, args := issueExportWhere("issues", opts)
@@ -920,20 +925,21 @@ func exportComments(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 	}
 	return scanRecords(rows, KindComment, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
-		err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt)
+		err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt, &rec.Teammate)
 		return rec, err
 	})
 }
 
 func exportCommentsV10(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
-		ID        int64  `json:"id"`
-		IssueID   int64  `json:"issue_id"`
-		Author    string `json:"author"`
-		Body      string `json:"body"`
-		CreatedAt string `json:"created_at"`
+		ID        int64   `json:"id"`
+		IssueID   int64   `json:"issue_id"`
+		Author    string  `json:"author"`
+		Body      string  `json:"body"`
+		CreatedAt string  `json:"created_at"`
+		Teammate  *string `json:"teammate,omitempty"`
 	}
-	query := `SELECT comments.id, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT)
+	query := `SELECT comments.id, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT), NULL
 	          FROM comments
 	          JOIN issues ON issues.id = comments.issue_id`
 	where, args := issueExportWhere("issues", opts)
@@ -944,7 +950,7 @@ func exportCommentsV10(ctx context.Context, d exportQuerier, enc *Encoder, opts 
 	}
 	return scanRecords(rows, KindComment, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
-		err := rows.Scan(&rec.ID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt)
+		err := rows.Scan(&rec.ID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt, &rec.Teammate)
 		return rec, err
 	})
 }

@@ -423,6 +423,14 @@ var storageScenarios = []scenario{
 		run: checkFederationProjectionLifecycle,
 	},
 	{
+		name: "federation teammate remote validation",
+		methods: []string{
+			"CreateProject", "EventsByUIDs", "InsertRemoteEvent", "IssueByUID",
+			"MaterializeFederatedProject", "UpsertFederationBinding",
+		},
+		run: checkFederationTeammateRemoteValidation,
+	},
+	{
 		name: "federation ingest lifecycle",
 		methods: []string{
 			"AcquireClaim", "CommentsByIssue", "CreateProject", "EnableProjectFederation",
@@ -557,6 +565,13 @@ var storageScenarios = []scenario{
 		name:    "snapshot replay rejects unsafe historical project names",
 		methods: []string{"ImportReplay", "ListProjects"},
 		run:     checkSnapshotReplayUnsafeHistoricalProjectName,
+	},
+	{
+		name: "snapshot replay rejects malformed event entries",
+		methods: []string{
+			"EventsByUIDs", "ImportReplay", "ProjectByUID",
+		},
+		run: checkSnapshotReplayRejectsMalformedEventEntries,
 	},
 	{
 		name: "snapshot replay atomic rejection",

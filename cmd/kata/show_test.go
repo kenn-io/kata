@@ -144,6 +144,27 @@ func TestPrintShowHumanIndentsRenderedCommentWithANSIWidth(t *testing.T) {
 	assert.Contains(t, out.String(), "\x1b[31msecond\x1b[0m")
 }
 
+func TestShowCommentTeammatesRemainSeparateAndVisible(t *testing.T) {
+	var response showResponseForCLI
+	require.NoError(t, json.Unmarshal([]byte(`{
+      "issue":{"short_id":"abc4","uid":"01TEST","title":"title","status":"open","author":"coordinator"},
+      "comments":[
+        {"uid":"01COMMENT1","author":"coordinator","teammate":"teammate-1","body":"first","created_at":"2026-09-13T12:00:00Z"},
+        {"uid":"01COMMENT2","author":"coordinator","teammate":"teammate-2","body":"second","created_at":"2026-09-13T12:01:00Z"}
+      ]
+    }`), &response))
+
+	var human bytes.Buffer
+	require.NoError(t, printShowHuman(&human, response, "example-workspace", nil))
+	assert.Contains(t, human.String(), "01COMMENT1 coordinator / teammate-1: first")
+	assert.Contains(t, human.String(), "01COMMENT2 coordinator / teammate-2: second")
+
+	var agent bytes.Buffer
+	require.NoError(t, printShowAgent(&agent, response, "example-workspace", "show"))
+	assert.Contains(t, agent.String(), "author=coordinator teammate=teammate-1 created_at=2026-09-13T12:00:00Z")
+	assert.Contains(t, agent.String(), "author=coordinator teammate=teammate-2 created_at=2026-09-13T12:01:00Z")
+}
+
 func TestRenderAndPrintShowHumanDoesNotPrintPartialRecord(t *testing.T) {
 	var response showResponseForCLI
 	require.NoError(t, json.Unmarshal([]byte(`{

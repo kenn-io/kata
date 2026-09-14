@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 // ReplayEventProjectName selects the durable name covered by an event's
@@ -28,11 +29,8 @@ func ReplayEventProjectName(event *EventExport, currentName string, recomputeHas
 
 // ValidateImportRecords checks the normalized replay union before a backend
 // opens a transaction. A malformed envelope therefore cannot partially mutate
-// either storage implementation. The interface makes kind/payload
-// disagreement unrepresentable, so only two failures remain: a missing
-// payload, and a type outside the replay union (the interface is exported, so
-// an out-of-tree type could implement it and reach a backend's default arm
-// inside the transaction).
+// either storage implementation. It rejects missing or unsupported record
+// payloads, malformed comment and event entries, and inconsistent mappings.
 func ValidateImportRecords(records []ImportRecord) error {
 	for i, record := range records {
 		if err := validateImportRecord(record); err != nil {
@@ -180,7 +178,13 @@ func validateImportRecord(record ImportRecord) error {
 	case *IssueEmbeddingExport:
 		return requireImportPayload(rec, ImportKindIssueEmbedding)
 	case *CommentExport:
-		return requireImportPayload(rec, ImportKindComment)
+		if err := requireImportPayload(rec, ImportKindComment); err != nil {
+			return err
+		}
+		if err := teammate.Validate(rec.Teammate); err != nil {
+			return fmt.Errorf("kind %q: %w", ImportKindComment, err)
+		}
+		return nil
 	case *IssueLabelExport:
 		return requireImportPayload(rec, ImportKindIssueLabel)
 	case *LinkExport:
@@ -206,7 +210,10 @@ func validateImportRecord(record ImportRecord) error {
 	case *PendingClaimRequestExport:
 		return requireImportPayload(rec, ImportKindPendingClaimRequest)
 	case *EventExport:
-		return requireImportPayload(rec, ImportKindEvent)
+		if err := requireImportPayload(rec, ImportKindEvent); err != nil {
+			return err
+		}
+		return ValidateFederationEntries(rec.Type, rec.UID, rec.Payload)
 	case *PurgeLogExport:
 		return requireImportPayload(rec, ImportKindPurgeLog)
 	case *ProjectPurgeLogExport:

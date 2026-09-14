@@ -78,7 +78,7 @@ func TestCommentEndpoint_IdempotencyReplaysCommittedCommentAfterMove(t *testing.
 	h, ts, sourceProjectID, issueID := bootstrapProjectWithIssue(t)
 	issue, err := h.DB().IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
-	body := map[string]any{"actor": "agent", "body": "first comment"}
+	body := map[string]any{"actor": "agent", "body": "first comment", "teammate": "reviewer-7"}
 	headers := map[string]string{"Idempotency-Key": "comment-request-then-move"}
 
 	first := postWithHeader(t, ts, issueURLRef(sourceProjectID, issue.UID, "comments"), headers, body)
@@ -95,6 +95,10 @@ func TestCommentEndpoint_IdempotencyReplaysCommittedCommentAfterMove(t *testing.
 
 	retry := postWithHeader(t, ts, issueURLRef(target.ID, issue.UID, "comments"), headers, body)
 	requireOK(t, retry)
+	assert.Contains(t, string(retry.body), `"teammate":"reviewer-7"`)
+	changedBody := map[string]any{"actor": "agent", "body": "first comment", "teammate": "implementer-3"}
+	mismatch := postWithHeader(t, ts, issueURLRef(target.ID, issue.UID, "comments"), headers, changedBody)
+	assert.Equal(t, 409, mismatch.status, string(mismatch.body))
 	var reused struct {
 		Changed bool `json:"changed"`
 	}
@@ -109,7 +113,7 @@ func TestCommentEndpoint_IdempotencyReauthorizesMovedIssue(t *testing.T) {
 	dbh, initialServer, sourceProjectID, issueID := bootstrapProjectWithIssue(t)
 	issue, err := dbh.DB().IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
-	body := map[string]any{"actor": "agent", "body": "first comment"}
+	body := map[string]any{"actor": "agent", "body": "first comment", "teammate": "reviewer-7"}
 	headers := map[string]string{"Idempotency-Key": "comment-request-before-move"}
 	path := issueURLRef(sourceProjectID, issue.UID, "comments")
 	requireOK(t, postWithHeader(t, initialServer, path, headers, body))
@@ -345,7 +349,7 @@ func TestCommentEndpoint_IdempotencyReplayRejectsArchivedCurrentProject(t *testi
 
 func TestCommentEndpoint_IdempotencyReplaysShortIDRetryAfterMove(t *testing.T) {
 	h, ts, sourceProjectID, issueID := bootstrapProjectWithIssue(t)
-	body := map[string]any{"actor": "agent", "body": "first comment"}
+	body := map[string]any{"actor": "agent", "body": "first comment", "teammate": "reviewer-7"}
 	headers := map[string]string{"Idempotency-Key": "short-id-comment-then-move"}
 	path := issueURL(sourceProjectID, issueID, "comments")
 	requireOK(t, postWithHeader(t, ts, path, headers, body))
@@ -362,6 +366,10 @@ func TestCommentEndpoint_IdempotencyReplaysShortIDRetryAfterMove(t *testing.T) {
 
 	retry := postWithHeader(t, ts, path, headers, body)
 	requireOK(t, retry)
+	assert.Contains(t, string(retry.body), `"teammate":"reviewer-7"`)
+	changedBody := map[string]any{"actor": "agent", "body": "first comment", "teammate": "implementer-3"}
+	mismatch := postWithHeader(t, ts, issueURLRef(target.ID, issue.UID, "comments"), headers, changedBody)
+	assert.Equal(t, 409, mismatch.status, string(mismatch.body))
 	var reused struct {
 		Changed bool `json:"changed"`
 		Issue   struct {

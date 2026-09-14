@@ -18,7 +18,7 @@ func TestPostFollowupCommentFailureRecommendsSafeKeyedRetry(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	err := postFollowupCommentWithKey(t.Context(), server.Client(), server.URL,
-		1, "abc1", "example-agent", "finished work", "close-comment:close-request-1")
+		1, "abc1", "example-agent", "finished work", "", "close-comment:close-request-1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rerun the original kata close command with the same --idempotency-key")
 }

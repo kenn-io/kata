@@ -422,6 +422,7 @@ type Comment struct {
 	UID       string    `json:"uid"`
 	IssueID   int64     `json:"issue_id"`
 	Author    string    `json:"author"`
+	Teammate  string    `json:"teammate,omitempty"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 }

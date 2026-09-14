@@ -60,6 +60,7 @@ type FoldComment struct {
 	UID       string
 	IssueUID  string
 	Author    string
+	Teammate  string
 	Body      string
 	CreatedAt string
 	Clock     FoldClock

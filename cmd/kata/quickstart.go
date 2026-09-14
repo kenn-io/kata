@@ -130,16 +130,43 @@ Use kata as the shared issue ledger for this workspace.
    fail loudly. Read parent before asserting a removal. The other
    --remove-* flags are idempotent (no-op when the link is already gone).
 
-9. Request teammate attention without changing issue ownership:
+9. Attribute swarm contributions and request attention without changing the
+   accountable actor or issue owner. The launcher supplies these variables to
+   this child process, not globally to sibling teammates:
 
-   kata notify <ref> --to <teammate> --message "<reason>"
-   kata inbox --for <teammate>
-   kata notify <ref> --to <teammate> --clear
+   export KATA_TEAMMATE=teammate-1
+   export KATA_INBOX_USER=coordinator/teammate-1
+   kata comment abc4 --body "Checked the retry path"
+   kata create "Check retry behavior" --parent abc4 --idempotency-key retry-teammate-1
+   kata --teammate=teammate-2 comment abc4 --body "Independent review"
+   kata --teammate='' comment abc4 --body "Coordinator summary"
+   kata notify abc4 --to coordinator --message "Please decide"
+   kata notify abc4 --to coordinator/teammate-1 --message "Please check the update"
+   kata inbox --for coordinator/teammate-1
+   kata notify abc4 --to coordinator/teammate-1 --clear
 
-   Inbox reads open issues in the selected project. Closing an issue hides
-   its requests; reopening restores uncleared requests. The recipient is
-   explicit: use --for or KATA_INBOX_USER. External harnesses can consume
-   kata inbox --context as transient context.
+   Comment creation stores the teammate in its dedicated field. New issue
+   creation stores metadata.teammate. The author remains the accountable
+   actor. --teammate overrides KATA_TEAMMATE, including an explicit empty
+   value that suppresses the inherited default. KATA_INBOX_USER only selects
+   an inbox; it does not set comment or create attribution.
+
+   Inbox reads cover open issues in the selected project. Closing an issue hides
+   its requests; reopening restores uncleared requests. The recipient remains
+   explicit: use --for or KATA_INBOX_USER. An external harness must map each
+   exact actor/teammate address to the runtime it launched and poll or watch
+   while that runtime is idle. It wakes an available idle runtime, coalesces a
+   request for one already running, and retains an unavailable teammate's
+   request for the accountable actor. Reading or scheduling work does not clear
+   the request; clear it after handling and read it back. Running quickstart
+   does not install that wakeup integration.
+
+   Requests are replaceable attention signals, not a lossless queue. One issue
+   has one request per exact recipient, and a concurrent replacement and clear
+   can race. A parent harness watches the actor address and each exact child
+   address it allocated; inbox --for coordinator does not aggregate
+   coordinator/*. Shared MCP processes use the per-call teammate on
+   kata.comment and kata.create when siblings cannot have separate environments.
 
 10. To leave context alongside a mutation, pass --comment TEXT on
    close, reopen, edit, assign, unassign, or label add/rm. The
@@ -194,9 +221,12 @@ Choose one unclaimed issue with kata next --unowned --agent.
 Inspect a filtered queue with kata ready --unowned --label bug --no-label blocked --agent.
 Default to --agent for ordinary kata reads and mutations in agent logs.
 Use --json only when your script needs complete structured data.
-Request teammate attention without changing ownership: kata notify <ref> --to <teammate> --message "<reason>".
-Read requests on open issues with kata inbox --for <teammate>; --context is for external harnesses.
-Clear a request with kata notify <ref> --to <teammate> --clear.
+Launch each child with KATA_TEAMMATE=teammate-1 and KATA_INBOX_USER=coordinator/teammate-1.
+Comments store teammate; new issues store metadata.teammate while author remains accountable.
+KATA_INBOX_USER selects an inbox and does not set attribution; --teammate overrides the attribution default.
+Request actor or teammate attention: kata notify <ref> --to <actor>[/<teammate>] --message "<reason>".
+Read exact requests with kata inbox --for <actor>[/<teammate>]; clear after handling with kata notify <ref> --to <actor>[/<teammate>] --clear.
+An external harness polls idle inboxes and wakes the exact mapped runtime; quickstart does not install that integration.
 If work is incomplete, label needs-review and comment with what remains.
 Close only verified work with substantive prose and typed evidence.
 Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.

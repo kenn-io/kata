@@ -153,6 +153,19 @@ close-guard refusal messages (`parent_has_open_children`,
 the daemon prose can name children, siblings, and prior closes in other
 projects.
 
+The process may take `--teammate` or `KATA_TEAMMATE` as its default
+participant attribution. `kata.comment` and `kata.create` also accept an
+optional per-call `teammate`; an explicit empty value suppresses the startup
+default. Use the per-call value when siblings share one MCP process so one
+participant's handle cannot leak into another call. Comment output keeps
+`author` and `teammate` separate. New issues store the teammate in initial
+`metadata.teammate`; comments store it in their dedicated field.
+
+The MCP server still starts against its documented baseline daemon. A
+`kata.comment` call with a nonempty teammate checks for API 0.18.0 before
+mutating and returns a tool error explaining the API requirement against an older daemon.
+Teammate-free calls retain their existing compatibility floor.
+
 ## Progressive tool catalog
 
 The initial catalog contains 14 read-only section loaders. Call the applicable

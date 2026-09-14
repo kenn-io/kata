@@ -167,9 +167,12 @@ func checkComments(t *testing.T, store db.Storage) error {
 	}
 
 	first, createdEvent, err := store.CreateComment(ctx, db.CreateCommentParams{
-		IssueID: primary.Issue.ID,
-		Author:  "original-author",
-		Body:    "first body",
+		IssueID:                primary.Issue.ID,
+		Author:                 "original-author",
+		Teammate:               "reviewer-7",
+		Body:                   "first body",
+		IdempotencyKey:         "comment-teammate-1",
+		IdempotencyFingerprint: "comment-teammate-fingerprint",
 	})
 	if err != nil {
 		return fmt.Errorf("create first comment: %w", err)
@@ -178,6 +181,7 @@ func checkComments(t *testing.T, store db.Storage) error {
 	assert.True(t, uid.Valid(first.UID))
 	assert.Equal(t, primary.Issue.ID, first.IssueID)
 	assert.Equal(t, "original-author", first.Author)
+	assert.Equal(t, "reviewer-7", first.Teammate)
 	assert.Equal(t, "first body", first.Body)
 	assert.False(t, first.CreatedAt.IsZero())
 	assert.Equal(t, "issue.commented", createdEvent.Type)
@@ -187,12 +191,33 @@ func checkComments(t *testing.T, store db.Storage) error {
 	var createdPayload struct {
 		CommentUID string `json:"comment_uid"`
 		Author     string `json:"author"`
+		Teammate   string `json:"teammate"`
 		Body       string `json:"body"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(createdEvent.Payload), &createdPayload))
 	assert.Equal(t, first.UID, createdPayload.CommentUID)
 	assert.Equal(t, "original-author", createdPayload.Author)
+	assert.Equal(t, "reviewer-7", createdPayload.Teammate)
 	assert.Equal(t, "first body", createdPayload.Body)
+	matched, err := store.LookupCommentIdempotency(
+		ctx, primary.Issue.UID, "comment-teammate-1", first.CreatedAt.Add(-time.Minute),
+	)
+	if err != nil {
+		return fmt.Errorf("lookup comment idempotency: %w", err)
+	}
+	require.NotNil(t, matched)
+	assert.Equal(t, "reviewer-7", matched.Comment.Teammate)
+
+	uiStore, ok := store.(db.UIStore)
+	require.True(t, ok)
+	snapshot, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", SelectedIssueUID: primary.Issue.UID,
+	})
+	if err != nil {
+		return fmt.Errorf("read comment UI snapshot: %w", err)
+	}
+	require.Len(t, snapshot.Comments, 1)
+	assert.Equal(t, "reviewer-7", snapshot.Comments[0].Teammate)
 
 	second, _, err := store.CreateComment(ctx, db.CreateCommentParams{
 		IssueID: primary.Issue.ID,
@@ -202,12 +227,15 @@ func checkComments(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create second comment: %w", err)
 	}
+	assert.Empty(t, second.Teammate)
 	comments, err := store.CommentsByIssue(ctx, primary.Issue.ID)
 	if err != nil {
 		return fmt.Errorf("list comments: %w", err)
 	}
 	require.Len(t, comments, 2)
 	assert.Equal(t, []int64{first.ID, second.ID}, []int64{comments[0].ID, comments[1].ID})
+	assert.Equal(t, "reviewer-7", comments[0].Teammate)
+	assert.Empty(t, comments[1].Teammate)
 
 	updated, editedEvent, changed, err := store.EditComment(ctx, db.EditCommentParams{
 		IssueID:    primary.Issue.ID,
@@ -224,6 +252,7 @@ func checkComments(t *testing.T, store db.Storage) error {
 	assert.Equal(t, "comment-editor", editedEvent.Actor)
 	assert.Equal(t, "edited body", updated.Body)
 	assert.Equal(t, first.Author, updated.Author)
+	assert.Equal(t, first.Teammate, updated.Teammate)
 	assert.Equal(t, first.CreatedAt, updated.CreatedAt)
 	body, err := store.CommentBodyByID(ctx, first.ID)
 	if err != nil {
@@ -293,7 +322,9 @@ func checkComments(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, comments, 2)
 	assert.Equal(t, "renamed-author", comments[0].Author)
+	assert.Equal(t, "reviewer-7", comments[0].Teammate)
 	assert.Equal(t, "renamed-author", comments[1].Author)
+	assert.Empty(t, comments[1].Teammate)
 	outsideComments, err := store.CommentsByIssue(ctx, other.Issue.ID)
 	if err != nil {
 		return fmt.Errorf("list out-of-scope comments: %w", err)
@@ -313,6 +344,25 @@ func checkComments(t *testing.T, store db.Storage) error {
 	assert.False(t, noRewrite.Changed)
 	assert.Zero(t, noRewrite.Total())
 	assert.Nil(t, noRewrite.Event)
+
+	cursorBefore, err := uiStore.UIEventCursor(ctx)
+	if err != nil {
+		return fmt.Errorf("read event cursor before invalid comment: %w", err)
+	}
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: primary.Issue.ID, Author: "original-author", Teammate: "reviewer/7", Body: "invalid",
+	})
+	assert.Error(t, err)
+	comments, err = store.CommentsByIssue(ctx, primary.Issue.ID)
+	if err != nil {
+		return fmt.Errorf("list comments after invalid teammate: %w", err)
+	}
+	assert.Len(t, comments, 2)
+	cursorAfter, err := uiStore.UIEventCursor(ctx)
+	if err != nil {
+		return fmt.Errorf("read event cursor after invalid comment: %w", err)
+	}
+	assert.Equal(t, cursorBefore, cursorAfter)
 	return nil
 }
 

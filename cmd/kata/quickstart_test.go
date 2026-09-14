@@ -22,9 +22,29 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, "kata next --unowned --agent")
 	assert.Contains(t, out, "kata ready --unowned --label bug --no-label blocked --agent")
 	assert.Contains(t, out, `kata events --after 0 --limit 100 --agent`)
-	assert.Contains(t, out, "kata notify <ref> --to <teammate> --message")
-	assert.Contains(t, out, "kata inbox --for <teammate>")
-	assert.Contains(t, out, "kata notify <ref> --to <teammate> --clear")
+	assert.Contains(t, out, "kata notify abc4 --to coordinator/teammate-1")
+	assert.Contains(t, out, "kata inbox --for coordinator/teammate-1")
+	assert.Contains(t, out, "kata notify abc4 --to coordinator/teammate-1 --clear")
+}
+
+func TestQuickstartExplainsTeammateFlow(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "quickstart"))
+	for _, text := range []string{
+		"KATA_TEAMMATE=teammate-1",
+		"KATA_INBOX_USER=coordinator/teammate-1",
+		"metadata.teammate",
+		"kata comment abc4 --body \"Checked the retry path\"",
+		"kata create \"Check retry behavior\" --parent abc4 --idempotency-key retry-teammate-1",
+		"kata --teammate=teammate-2 comment abc4 --body \"Independent review\"",
+		"kata --teammate='' comment abc4 --body \"Coordinator summary\"",
+		"kata notify abc4 --to coordinator --message \"Please decide\"",
+		"kata notify abc4 --to coordinator/teammate-1",
+		"kata inbox --for coordinator/teammate-1",
+		"kata notify abc4 --to coordinator/teammate-1 --clear",
+	} {
+		require.Contains(t, out, text)
+	}
 }
 
 func TestQuickstart_IncludesScheduleDeadlineAndSomedayCommands(t *testing.T) {
@@ -66,9 +86,12 @@ func TestQuickstart_JSON(t *testing.T) {
 	assert.Contains(t, got.Quickstart, "kata next --unowned --agent")
 	assert.Contains(t, got.Quickstart, "kata ready --unowned --label bug --no-label blocked --agent")
 	assert.Contains(t, got.Quickstart, "kata events --after 0 --limit 100 --agent")
-	assert.Contains(t, got.Quickstart, "kata notify <ref> --to <teammate> --message")
-	assert.Contains(t, got.Quickstart, "kata inbox --for <teammate>")
-	assert.Contains(t, got.Quickstart, "kata notify <ref> --to <teammate> --clear")
+	assert.Contains(t, got.Quickstart, "kata notify abc4 --to coordinator/teammate-1")
+	assert.Contains(t, got.Quickstart, "kata inbox --for coordinator/teammate-1")
+	assert.Contains(t, got.Quickstart, "kata notify abc4 --to coordinator/teammate-1 --clear")
+	assert.Contains(t, got.Quickstart, "KATA_TEAMMATE=teammate-1")
+	assert.Contains(t, got.Quickstart, "KATA_INBOX_USER=coordinator/teammate-1")
+	assert.Contains(t, got.Quickstart, "metadata.teammate")
 }
 
 func TestQuickstart_AgentOutput(t *testing.T) {
@@ -83,9 +106,12 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "kata next --unowned --agent")
 	assert.Contains(t, out, "kata ready --unowned --label bug --no-label blocked --agent")
 	assert.Contains(t, out, "Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.")
-	assert.Contains(t, out, "kata notify <ref> --to <teammate> --message")
-	assert.Contains(t, out, "kata inbox --for <teammate>")
-	assert.Contains(t, out, "kata notify <ref> --to <teammate> --clear")
+	assert.Contains(t, out, "--to <actor>[/<teammate>]")
+	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>]")
+	assert.Contains(t, out, "--to <actor>[/<teammate>] --clear")
+	assert.Contains(t, out, "KATA_TEAMMATE=teammate-1")
+	assert.Contains(t, out, "KATA_INBOX_USER=coordinator/teammate-1")
+	assert.Contains(t, out, "metadata.teammate")
 }
 
 func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
@@ -108,7 +134,15 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 	assert.Contains(t, out, "kata schedule <ref> <date-or-time>")
 	assert.Contains(t, out, "kata meta set <ref> someday true --json-value")
 	assert.Contains(t, out, "kata meta unset <ref> someday")
-	assert.Contains(t, out, "kata deadline <ref> <date-or-time>")
+	assert.Contains(t, out, "Schedule/someday defer work; deadlines don’t.")
+	assert.Contains(t, out, "KATA_TEAMMATE")
+	assert.Contains(t, out, "KATA_INBOX_USER=<actor>/<teammate>")
+	assert.Contains(t, out, "--parent <ref>")
+	assert.Equal(t, 1, strings.Count(out, "kata notify <ref> --to <actor>[/<teammate>] --message <reason>"),
+		"session injection should teach attention requests once")
+	assert.LessOrEqual(t, len(out), 4000, "keep the per-session briefing compact")
+	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>]")
+	assert.Contains(t, out, "kata notify <ref> --to <actor>[/<teammate>] --clear")
 	assert.NotContains(t, out, "20z0", "a universal contract cannot use a project-scoped issue ref")
 	assert.NotContains(t, out, agentsBlockBegin)
 	assert.NotContains(t, out, agentsBlockEnd)

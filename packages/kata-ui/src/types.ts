@@ -40,6 +40,7 @@ export interface KataIssueDetailWire {
     | Array<{
         id: number
         author: string
+        teammate?: string | undefined
         body: string
         created_at: string
       }>
@@ -102,6 +103,7 @@ export interface KataIssueDetailModel {
   comments: Array<{
     id: string
     author: string
+    teammate?: string
     body: string
     createdAt: string
   }>

@@ -17,6 +17,7 @@ current flag list in your installed binary.
 | `--project <name>` | Select a project explicitly for project-scoped commands. |
 | `--daemon <name>` | Target a named daemon catalog entry for this command. |
 | `--as <actor>` | Override the actor for this command. |
+| `--teammate <handle>` | Attribute supported comments and new issues to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
 | `--agent` | Emit concise agent-readable text. |
 | `--json` | Emit machine-readable JSON. |
 | `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
@@ -302,10 +303,21 @@ kata comment edit <ref> <comment-uid> \
   [--body TEXT | --body-file PATH | --body-stdin]
 ```
 
+`KATA_TEAMMATE` supplies an optional default for comment creation;
+`--teammate` overrides it and `--teammate=''` suppresses it for one
+command. A nonempty teammate requires daemon API 0.18.0 or newer and is
+stored separately from the accountable author. The same default on `kata
+create` writes the string to the new issue's initial `metadata.teammate`.
+Commenting on an existing issue never changes that issue metadata.
+
 `kata comment edit` replaces the current comment body while preserving the
-comment UID, author, creation time, and thread position. Use it for
+comment UID, author, teammate, creation time, and thread position. Use it for
 pre-federation content redaction; it does not rewrite historical events that
 have already been shared.
+
+Human views show attributed comments as `author / teammate`. JSON and agent
+output keep the two fields separate. Teammate-free comments retain the
+existing author-only shape.
 
 Close:
 
@@ -451,25 +463,30 @@ See the [metadata conventions](metadata.md) for all reserved and standard keys.
 ## Teammate requests
 
 ```sh
-kata notify <ref> --to teammate --message "Please check the reproduction"
-kata notify <ref> --to teammate --clear
-kata inbox --for teammate
-kata inbox --for teammate --context
+kata notify abc4 --to coordinator --message "Please decide"
+kata notify abc4 --to coordinator/teammate-1 --message "Please check the reproduction"
+kata inbox --for coordinator/teammate-1
+kata notify abc4 --to coordinator/teammate-1 --clear
+kata inbox --for coordinator/teammate-1 --context
 ```
 
-`notify` records one request per issue and recipient. Repeating it replaces
-that recipient's request; `--clear` removes it, including on a closed issue. The
-command rejects an issue it reads as closed. Concurrent writes preserve other
-recipients' requests; the last write to the same recipient wins. Closure can still
-race with the write; either way, the request is hidden while the issue is closed.
-Messages must be nonblank and at most 1024 bytes. Requests do not change ownership
-or readiness.
+`notify` records one request per issue and exact recipient. Use an actor address
+for the accountable actor or `actor/teammate` for one teammate under that
+actor. Repeating a request replaces that recipient's value; `--clear` removes
+it, including on a closed issue. Replacement and clear can race, so this is an
+attention signal rather than a lossless queue or exactly-once delivery channel.
+The command rejects an issue it reads as closed. Concurrent writes preserve
+other recipients' requests; the last write to the same recipient wins.
+Closure can still race with the write; either way, the request is hidden while
+the issue is closed. Messages must be nonblank and at most 1024 bytes.
+Requests do not change ownership or readiness.
 
 `inbox` reads requests on open issues in the selected project, including parked
 issues. Closing an issue hides its requests; reopening restores uncleared
 requests. Handles are case-sensitive, at most 128 UTF-8 bytes, and cannot contain
-control characters. `--for` overrides `KATA_INBOX_USER`; neither
-the agent's author nor the OS account supplies a default recipient. Recipient
+control characters. `--for` overrides `KATA_INBOX_USER`; an actor inbox does
+not aggregate its `actor/*` teammate addresses. Neither the agent's author nor
+the OS account supplies a default recipient. Recipient
 filtering is not access control: the existing daemon trust boundary applies.
 
 Normal inbox output includes every matching request and supports `--json` and
@@ -477,14 +494,16 @@ Normal inbox output includes every matching request and supports `--json` and
 `--context` instead emits bounded, quoted context for a harness, with
 a notice when content is truncated. An empty inbox produces no context. Do not
 combine `--context` with other output selectors. Malformed request metadata is
-skipped with a warning on stderr unless `--quiet` is set; ordinary command failures
-return nonzero.
+skipped with a warning on stderr unless `--quiet` is set; ordinary command
+failures return nonzero.
 
 Requests use existing issue metadata: `notify.` followed by the recipient's
-unpadded base64url encoding, with a JSON value containing `from` and `message`.
-The sender uses the daemon's authenticated actor when present; otherwise it follows
-normal CLI actor selection. No separate notification service or delivery state is
-involved. See [agent workflows](../workflows/agents.md#teammate-heads-up)
+unpadded base64url encoding, with a JSON value containing `from`, `message`, and
+an optional `teammate`. The sender uses the daemon's authenticated actor when
+present; otherwise it follows normal CLI actor selection. The sender actor
+and teammate remain separate in structured output. No separate notification
+service or delivery state is involved.
+See [agent workflows](../workflows/agents.md#teammate-heads-up)
 for the external harness integration contract.
 
 ## Coordination and wait

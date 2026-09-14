@@ -23,6 +23,18 @@ export KATA_AUTHOR=agent-a
 kata whoami --agent
 ```
 
+When one accountable actor launches several teammates, give each child a
+distinct child-local handle and inbox address:
+
+```sh
+export KATA_TEAMMATE=teammate-1
+export KATA_INBOX_USER=coordinator/teammate-1
+```
+
+`KATA_TEAMMATE` attributes comments and newly created issues.
+`KATA_INBOX_USER` only selects the exact inbox to read. It does not change the
+actor or set attribution.
+
 Default to `--agent` for ordinary reads and mutations in agent logs. Use
 `--json` only when the script needs full structured data.
 
@@ -92,38 +104,71 @@ for the recipe.
 
 ## Teammate heads-up
 
-Ask for a teammate's attention without assigning the issue to them:
+Several teammates can work on the same issue while leaving distinct comment
+attribution. A teammate can also create a separately tracked child issue:
 
 ```sh
-kata notify abc4 --to teammate --message "Please check the reproduction"
-kata inbox --for teammate
-kata notify abc4 --to teammate --clear
+export KATA_TEAMMATE=teammate-1
+export KATA_INBOX_USER=coordinator/teammate-1
+kata comment abc4 --body "Checked the retry path"
+kata create "Check retry behavior" --parent abc4 --idempotency-key retry-teammate-1
+kata --teammate=teammate-2 comment abc4 --body "Independent review"
+kata --teammate='' comment abc4 --body "Coordinator summary"
 ```
 
-The inbox includes that teammate's requests on open issues in the current project.
-Closing the issue removes it from the next read. Clearing a request removes only
-that recipient's entry; reopening an issue restores any uncleared requests.
+Comments store the optional teammate separately from their accountable
+author. New issues store `metadata.teammate` in the creation transaction.
+`--teammate` overrides the environment default, and an explicit empty value
+suppresses it. A comment on an existing issue does not change that issue's
+creating teammate.
 
-Kata provides live context for separately maintained harness integrations:
+Request the actor's attention or one teammate's attention without assigning
+the issue to them:
 
 ```sh
-export KATA_INBOX_USER=teammate
-kata inbox --context --workspace /path/to/workspace
+kata notify abc4 --to coordinator --message "Please decide"
+kata notify abc4 --to coordinator/teammate-1 --message "Please check the update"
+kata inbox --for coordinator/teammate-1
+kata notify abc4 --to coordinator/teammate-1 --clear
 ```
 
-An adapter should run this command before a prompt, with the teammate's explicit
-inbox address and the current workspace. Add successful stdout as transient context
-so the agent can surface requests when relevant. Replace the previous context
-on every read, including empty output, and discard it on command failure. Use
-an argument array and a short timeout. Keep stderr out of injected context.
-The inbox address is independent of `KATA_AUTHOR`; leave the adapter inactive
-when no inbox address is configured.
+The inbox includes that exact recipient's requests on open issues in the current
+project. `inbox --for coordinator` does not aggregate
+`coordinator/*`. Closing an issue removes its requests from the next read;
+reopening restores any uncleared requests.
 
-Pi extensions and other harness adapters belong outside Kata. Kata does not
-install them or rewrite `AGENTS.md` with live requests. Refresh timing belongs
-to the adapter: refreshing before each submitted prompt removes closed requests
-on the next prompt, while session-start-only integration waits until the next
-session. Previously discussed requests remain in conversation history.
+Automatic wakeup belongs to the external harness that launched the runtimes.
+It keeps an exact address-to-runtime map and polls or watches every address it
+allocated even while the teammates are idle. On a pending request it:
+
+- wakes the exact teammate when that runtime is idle and resumable;
+- delivers or coalesces context through its existing mechanism when the runtime
+  is already running;
+- retains the request and surfaces it to the accountable actor when the runtime
+  exited or is unknown;
+- discards a failed inbox fetch rather than treating stale context as a new
+  wakeup signal.
+
+The teammate reads current issue state and applies its normal authorization
+and task instructions before acting. Reading or scheduling does not clear the
+request. Clear after it has been handled, then read back. Repeated requests for
+one issue and recipient replace each other, and a concurrent replacement and
+clear can race. The signal is not a lossless queue or exactly-once execution.
+
+For prompt-time context, the same harness may run:
+
+```sh
+kata inbox --for coordinator/teammate-1 --context --workspace /path/to/workspace
+```
+
+Add successful stdout as transient untrusted task data, replace the previous
+context on every read, and discard it on command failure. Prompt-time injection
+alone does not satisfy automatic wakeup because no human prompt may arrive.
+Use an argument array and a short timeout, and keep stderr out of injected
+context.
+
+Harness adapters live outside Kata. `quickstart`, `--with-agents`, and the hook
+installers do not install a runtime scheduler or wakeup adapter.
 
 ## Use Kata through MCP
 

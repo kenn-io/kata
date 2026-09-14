@@ -32,7 +32,7 @@ func labelAddCmd() *cobra.Command {
 			if strings.TrimSpace(label) == "" {
 				return &cliError{Message: "label must not be empty", Kind: kindValidation, ExitCode: ExitValidation}
 			}
-			comment, err := commentFromFlag(cmd)
+			comment, handle, err := prepareFollowupComment(cmd)
 			if err != nil {
 				return err
 			}
@@ -46,7 +46,7 @@ func labelAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := project.comment(bs, issue.RefForAPI, actor, comment); err != nil {
+			if err := project.comment(bs, issue.RefForAPI, actor, comment, handle); err != nil {
 				return err
 			}
 			return printLabelMutation(cmd, bs)
@@ -70,7 +70,7 @@ func labelRmCmd() *cobra.Command {
 			if strings.TrimSpace(label) == "" {
 				return &cliError{Message: "label must not be empty", Kind: kindValidation, ExitCode: ExitValidation}
 			}
-			comment, err := commentFromFlag(cmd)
+			comment, handle, err := prepareFollowupComment(cmd)
 			if err != nil {
 				return err
 			}
@@ -92,7 +92,7 @@ func labelRmCmd() *cobra.Command {
 			if status >= 400 {
 				return apiErrFromBody(status, bs)
 			}
-			if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
+			if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, handle); err != nil {
 				return err
 			}
 			return printLabelRemoved(cmd, bs, issue.RefForAPI, label)

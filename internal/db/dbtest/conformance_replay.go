@@ -2,13 +2,76 @@ package dbtest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
+
+func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := t.Context()
+	const created = "2026-07-15T12:00:00.000Z"
+	project := &db.ProjectExport{
+		ID: 5, UID: replayProjectUID, Name: "replay-project", CreatedAt: created,
+		Metadata: json.RawMessage(`{}`), Revision: 1,
+	}
+	issue := &db.IssueExport{
+		ID: 6, UID: replayIssueUID, ProjectID: project.ID, ShortID: "zz12",
+		Title: "Replay validation", Status: "open", Author: "fixture-author",
+		CreatedAt: created, UpdatedAt: created, Metadata: json.RawMessage(`{}`), Revision: 1,
+	}
+	for _, fixture := range []struct {
+		eventType string
+		payload   string
+	}{
+		{"issue.commented", `{"teammate":"reviewer-7","body":"checked"}`},
+		{"issue.created", `{"title":"Replay validation","comments":[{"teammate":"reviewer-7","body":"checked"}]}`},
+		{"issue.snapshot", `{"title":"Replay validation","comments":[{"teammate":"reviewer-7","body":"checked"}]}`},
+	} {
+		event := &db.EventExport{
+			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
+			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
+			IssueID: &issue.ID, IssueUID: &issue.UID, Type: fixture.eventType,
+			Actor: "fixture-author", HLCPhysicalMS: 1784102400000, CreatedAt: created,
+		}
+		var acceptedHash string
+		for _, invalid := range []bool{false, true} {
+			payload := fixture.payload
+			if invalid {
+				payload = strings.ReplaceAll(payload, `"reviewer-7"`, `42`)
+			}
+			event.Payload = json.RawMessage(payload)
+			var err error
+			event.ContentHash, err = db.EventContentHash(db.EventHashInput{
+				UID: event.UID, OriginInstanceUID: event.OriginInstanceUID,
+				ProjectUID: project.UID, ProjectName: project.Name, IssueUID: event.IssueUID,
+				Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
+				CreatedAt: created, Payload: event.Payload,
+			})
+			require.NoError(t, err)
+			err = store.ImportReplay(ctx, []db.ImportRecord{project, issue, event}, db.ImportOptions{})
+			if !invalid {
+				require.NoError(t, err, fixture.eventType)
+				acceptedHash = event.ContentHash
+				continue
+			}
+			assert.ErrorIs(t, err, db.ErrFederationIngestValidation, fixture.eventType)
+			_, err = store.ProjectByUID(ctx, project.UID)
+			require.NoError(t, err)
+			stored, err := store.EventsByUIDs(ctx, project.ID, []string{event.UID})
+			require.NoError(t, err)
+			require.Len(t, stored, 1)
+			assert.Equal(t, acceptedHash, stored[0].ContentHash,
+				"%s rejection must preserve the prior event log", fixture.eventType)
+		}
+	}
+	return nil
+}
 
 func checkSnapshotReplayCore(t *testing.T, target db.Storage, backend Backend) error {
 	t.Helper()
@@ -45,9 +108,10 @@ func checkSnapshotReplayCore(t *testing.T, target db.Storage, backend Backend) e
 		return err
 	}
 	comment, _, err := source.CreateComment(ctx, db.CreateCommentParams{
-		IssueID: first.ID,
-		Author:  "reviewer",
-		Body:    "observable replay state",
+		IssueID:  first.ID,
+		Author:   "reviewer",
+		Teammate: "reviewer-7",
+		Body:     "observable replay state",
 	})
 	if err != nil {
 		return err
@@ -153,6 +217,7 @@ func checkSnapshotReplayCore(t *testing.T, target db.Storage, backend Backend) e
 	}
 	require.Len(t, comments, 1)
 	assert.Equal(t, comment.UID, comments[0].UID)
+	assert.Equal(t, "reviewer-7", comments[0].Teammate)
 	assert.Equal(t, "observable replay state", comments[0].Body)
 	labels, err := target.LabelsByIssue(ctx, gotFirst.ID)
 	if err != nil {
@@ -210,6 +275,28 @@ func checkSnapshotReplayCore(t *testing.T, target db.Storage, backend Backend) e
 	}
 	assert.Greater(t, createdAfterReplay.ID, project.ID,
 		"identity sequence must advance past imported project IDs")
+
+	for _, record := range records {
+		commentRecord, ok := record.(*db.CommentExport)
+		if !ok || commentRecord.UID != comment.UID {
+			continue
+		}
+		commentRecord.Teammate = "@invalid"
+		break
+	}
+	err = target.ImportReplay(ctx, records, db.ImportOptions{})
+	require.ErrorContains(t, err, "teammate")
+	gotFirst, err = target.IssueByUID(ctx, first.UID, db.IncludeDeletedNo)
+	if err != nil {
+		return fmt.Errorf("read replay issue after rejected teammate: %w", err)
+	}
+	comments, err = target.CommentsByIssue(ctx, gotFirst.ID)
+	if err != nil {
+		return fmt.Errorf("read replay comments after rejected teammate: %w", err)
+	}
+	require.Len(t, comments, 1)
+	assert.Equal(t, "reviewer-7", comments[0].Teammate,
+		"invalid replay must leave the prior target state intact")
 	return nil
 }
 
