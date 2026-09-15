@@ -5,8 +5,6 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -58,13 +56,21 @@ func newCommentCmd() *cobra.Command {
 			return err
 		}
 		actor, _ := resolveActor(project.api.ctx, flags.As, nil)
-		payload := map[string]any{"actor": actor, "body": body}
+		payload := &generated.CreateCommentBody{Actor: &actor, Body: body}
 		if handle != "" {
-			payload["teammate"] = handle
+			payload.Teammate = &handle
 		}
-		bs, err := project.mutate(http.MethodPost,
-			"/issues/"+url.PathEscape(issue.RefForAPI)+"/comments",
-			payload, nil)
+		apiClient, err := project.generatedClient()
+		if err != nil {
+			return err
+		}
+		response, callErr := apiClient.CreateCommentWithResponse(project.api.ctx, &generated.CreateCommentRequestOptions{
+			PathParams: &generated.CreateCommentPath{ProjectID: project.selector, Ref: issue.RefForAPI}, Body: payload,
+		})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		bs, err := project.finishMutation(response.HTTPResponse, response.Body, callErr)
 		if err != nil {
 			return err
 		}

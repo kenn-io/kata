@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json/v2"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 // projectMutation carries the locally known project selector to the daemon.
@@ -94,34 +93,22 @@ func prepareIssueMutation(cmd *cobra.Command, ref string, resolveNow bool) (*pro
 	return p, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: p.name}, nil
 }
 
-func (p *projectMutation) mutate(method, suffix string, body any, headers map[string]string) ([]byte, error) {
-	encoded, err := json.Marshal(body)
-	if err != nil {
+func (p *projectMutation) generatedClient() (*kataclient.Client, error) {
+	return kataclient.NewWithHTTPClient(p.api.baseURL, p.api.client,
+		kataclient.WithRequestEditor(func(_ context.Context, req *http.Request) error {
+			for key, value := range p.headers {
+				req.Header.Set(key, value)
+			}
+			return nil
+		}))
+}
+
+func (p *projectMutation) finishMutation(resp *http.Response, data []byte, callErr error) ([]byte, error) {
+	if err := externalCLITransportError(resp, callErr); err != nil {
 		return nil, err
 	}
-	endpoint := p.api.url("/api/v1/projects/" + url.PathEscape(p.selector) + suffix)
-	req, err := http.NewRequestWithContext(p.api.ctx, method, endpoint, bytes.NewReader(encoded))
-	if err != nil {
+	if err := externalCLIResponseError(resp.StatusCode, data, callErr); err != nil {
 		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for key, value := range p.headers {
-		req.Header.Set(key, value)
-	}
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-	resp, err := p.api.client.Do(req) //nolint:gosec // selected daemon, with escaped project selector and issue refs
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, &responseBodyReadError{err: err}
-	}
-	if resp.StatusCode >= 400 {
-		return nil, apiErrFromBody(resp.StatusCode, data)
 	}
 	if canonical := resp.Header.Get("X-Kata-Project-Name"); canonical != "" {
 		p.name = canonical

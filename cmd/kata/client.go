@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -297,11 +298,25 @@ type daemonErrorTransport struct {
 func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.RoundTripper.RoundTrip(req)
 	if req.URL.Scheme == t.origin.Scheme && req.URL.Host == t.origin.Host {
+		if resp != nil && resp.Body != nil {
+			resp.Body = daemonResponseBody{resp.Body}
+		}
 		if op, ok := errors.AsType[*net.OpError](err); ok && op.Op == "dial" {
 			return resp, &daemonDialError{OpError: op, cause: err}
 		}
 	}
 	return resp, err
+}
+
+// Keep response-read failures distinct when the generated runtime buffers a body.
+type daemonResponseBody struct{ io.ReadCloser }
+
+func (b daemonResponseBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, &responseBodyReadError{err: err}
+	}
+	return n, err
 }
 
 // daemonAPI is a resolved connection to one daemon: the base URL, the

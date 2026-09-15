@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"net/http"
 	"os"
 	"testing"
 
@@ -11,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func TestCreateRepairsRenamedWorkspaceAfterInlineResolution(t *testing.T) {
@@ -141,7 +141,14 @@ func TestInlineMutationRepairFailureReportsCommittedWrite(t *testing.T) {
 		api: a, selector: itoa(pid), name: "example-project",
 		repair: func(string) error { return os.ErrPermission },
 	}
-	_, err = p.mutate(http.MethodPost, "/issues", map[string]string{"title": "Example task", "actor": "tester"}, nil)
+	apiClient, err := p.generatedClient()
+	require.NoError(t, err)
+	response, err := apiClient.CreateIssueWithResponse(t.Context(), &generated.CreateIssueRequestOptions{
+		PathParams: &generated.CreateIssuePath{ProjectID: p.selector},
+		Body:       &generated.CreateIssueBody{Title: "Example task", Actor: new("tester")},
+	})
+	require.NoError(t, err)
+	_, err = p.finishMutation(response.HTTPResponse, response.Body, nil)
 	require.Error(t, err)
 	var cli *cliError
 	require.True(t, errors.As(err, &cli), "expected explicit post-commit error, got %v", err)
