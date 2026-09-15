@@ -104,6 +104,62 @@ func TestIssueScopedPollResetsForItsProjectRename(t *testing.T) {
 	}
 }
 
+func TestIssueScopedCompoundLinksResetPollAndSSE(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
+	first := createScopedHTTPTestIssue(t, env, project.ID, "First peer", &root)
+	second := createScopedHTTPTestIssue(t, env, project.ID, "Second peer", &root)
+	newScopedTokens(t, env, project, root)
+	afterID, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	query := "after_id=" + strconv.FormatInt(afterID, 10)
+	stream := openSSE(t, env, query, http.Header{"Authorization": {"Bearer worker-token"}})
+	defer func() { _ = stream.Body.Close() }()
+	resp, body := envDoRaw(t, env, http.MethodPatch,
+		scopedProjectPath(project.ID, "issues/"+root.ShortID), map[string]any{
+			"actor":       "coordinator",
+			"links_delta": map[string]any{"add_related": []string{first.ShortID, second.ShortID}},
+		}, map[string]string{"Authorization": "Bearer coordinator-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var mutation struct {
+		Event db.Event `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(body, &mutation))
+	for _, path := range []string{"/api/v1/events", scopedProjectPath(project.ID, "events")} {
+		t.Run(path, func(t *testing.T) {
+			resp, body := envDoRaw(t, env, http.MethodGet, path+"?"+query, nil,
+				map[string]string{"Authorization": "Bearer worker-token"})
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			var polled api.PollEventsResponse
+			require.NoError(t, json.Unmarshal(body, &polled.Body))
+			require.True(t, polled.Body.ResetRequired, "linked peer details need a refresh")
+			require.Equal(t, mutation.Event.ID, polled.Body.ResetAfterID)
+			require.Equal(t, mutation.Event.ID, polled.Body.NextAfterID)
+			require.Empty(t, polled.Body.Events)
+		})
+	}
+	for _, phase := range []string{"live", "replay"} {
+		t.Run(phase, func(t *testing.T) {
+			response := stream
+			if phase == "replay" {
+				response = openSSE(t, env, query, http.Header{"Authorization": {"Bearer worker-token"}})
+				defer func() { _ = response.Body.Close() }()
+			}
+			frame, ok := newSSEFramer(response.Body).Next(t, 2*time.Second)
+			require.True(t, ok)
+			require.Equal(t, "sync.reset_required", frame.event)
+			var reset api.EventReset
+			require.NoError(t, json.Unmarshal([]byte(frame.data), &reset))
+			require.Equal(t, mutation.Event.ID, reset.ResetAfterID)
+			require.NotContains(t, frame.data, root.UID)
+			require.NotContains(t, frame.data, first.UID)
+			require.NotContains(t, frame.data, second.UID)
+		})
+	}
+}
+
 func TestIssueScopedLifecycleEventsSurvivePollHistoryAndDigest(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(t.Context(), "example-project")

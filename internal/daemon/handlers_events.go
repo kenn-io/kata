@@ -195,7 +195,7 @@ func readVisibleEvents(
 			cursor = event.ID
 			scanned++
 			projected, ok := projectIssueScopedEvent(event, allowed, scope.ProjectUID)
-			if ok {
+			if ok && event.Type != "issue.links_changed" {
 				visible = append(visible, projected)
 				if len(visible) == limit {
 					break
@@ -204,9 +204,8 @@ func readVisibleEvents(
 			}
 			if issueScopedEventInScope(event, allowed, scope.ProjectUID) {
 				// The event describes a granted issue but cannot be safely
-				// projected (unknown type or malformed payload). Fail closed so
-				// the client re-syncs instead of silently missing a mutation it
-				// is entitled to see.
+				// projected (unknown type, malformed payload, or omitted compound
+				// link peers). Reset so the client reloads all affected views.
 				return nil, event.ID, event.ID, nil
 			}
 			reset, resetErr := hiddenEventRequiresScopedReset(
@@ -446,11 +445,9 @@ func scopedEventPayload(event db.Event) (string, bool) {
 		"issue.moved": keySet("to_project_uid", "to_short_id", "updated_at"),
 	}
 	if event.Type == "issue.links_changed" {
-		// Compound link edits are emitted hollow to scoped clients: the raw
-		// payload carries peer identities that may live outside the subtree,
-		// and per-edge authorization needs live membership context the stream
-		// projection deliberately avoids. Report projections re-add the
-		// authorized subset (see scoped_authorization.go).
+		// History and mutation responses omit compound peers that may be
+		// outside the subtree. Polling and SSE reset so linked issue views
+		// refresh; reports re-add authorized peers (scoped_authorization.go).
 		return "", true
 	}
 	keys, known := allowedKeys[event.Type]
