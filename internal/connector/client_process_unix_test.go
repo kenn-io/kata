@@ -27,3 +27,7 @@ func requireProcessClientHelperGone(t *testing.T, observed processClientHelperOb
 	}
 	t.Fatalf("connector descendant %d survived cancellation", pid)
 }
+
+func processClientHelperReadyFilePending(error) bool {
+	return false
+}

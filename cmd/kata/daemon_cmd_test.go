@@ -3127,10 +3127,16 @@ command = %q
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
 	var record daemonRuntimeRecordJSON
-	require.Eventually(t, func() bool {
+	// Startup includes creating the database, so allow time for a busy CI runner.
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		body, readErr := os.ReadFile(runtimePath) //nolint:gosec // test-owned KATA_HOME
-		return readErr == nil && json.Unmarshal(body, &record) == nil && record.Address != ""
-	}, 3*time.Second, 10*time.Millisecond)
+		if !assert.NoError(collect, readErr, "read daemon runtime record") {
+			return
+		}
+		if assert.NoError(collect, json.Unmarshal(body, &record), "decode daemon runtime record") {
+			assert.NotEmpty(collect, record.Address, "daemon runtime address")
+		}
+	}, 10*time.Second, 10*time.Millisecond)
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+record.Address+"/api/v1/connectors/example-connector", nil)
 	require.NoError(t, err)
 	response, err := http.DefaultClient.Do(request)
