@@ -450,11 +450,10 @@ func loadLegacyParentsForCloseEvents(
 
 // resolveParentQualifiers gathers every distinct, non-empty parent_uid
 // across the parsed close payloads and asks the db to resolve them to
-// their current project + short_id. Resolution is GLOBAL (not scoped to
-// the audited project) so a parent that lives in another project still
-// resolves — the caller renders it qualified ("project#short_id"). The
-// result map omits UIDs that no longer resolve (parent purged); the audit
-// projection falls back to the close-time parent_short_id for those.
+// their current project + short_id. Unrestricted callers resolve across
+// projects and fall back to the close-time parent_short_id for purged parents.
+// Scoped callers read identities and membership together and reject the
+// response if a parent has left the authorized subtree.
 func resolveParentQualifiers(
 	ctx context.Context, cfg ServerConfig, parsed []closeEventPayload,
 ) (map[string]db.IssueQualifier, error) {
@@ -472,6 +471,23 @@ func resolveParentQualifiers(
 	}
 	if len(uids) == 0 {
 		return map[string]db.IssueQualifier{}, nil
+	}
+	if scope := issueScopeFromContext(ctx); scope != nil {
+		members, err := cfg.DB.IssueScopedMembers(ctx, *scope)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		out := make(map[string]db.IssueQualifier, len(uids))
+		for _, member := range members {
+			if _, requested := seen[member.UID]; requested {
+				out[member.UID] = db.IssueQualifier{ProjectID: member.ProjectID, ShortID: member.ShortID}
+				db.RecordIssueScopeTarget(ctx, member.ID)
+			}
+		}
+		if len(out) != len(uids) {
+			return nil, api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
+		}
+		return out, nil
 	}
 	out, err := cfg.DB.IssueQualifiersByUIDs(ctx, uids)
 	if err != nil {
