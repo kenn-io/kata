@@ -146,7 +146,13 @@ mode:
   (HTTP 503) so a caller that asked for semantic results knows it did not get
   them. They return 400 when embeddings are not configured at all.
 
-Label-filtered vector retrieval is bounded. If filtering exhausts that
+Search accepts `--status open` or `--status closed` in every mode; omitting it
+searches both statuses. Both retrieval legs filter before their result limits.
+The vector leg checks the current issue status, so closing or reopening an
+issue takes effect without waiting for embeddings to refresh. Comments remain
+lexical-only matches.
+
+Status- and label-filtered vector retrieval is bounded. If filtering exhausts that
 candidate ceiling before filling the requested result limit, an auto search
 returns the reachable results with `degraded` set. Explicit `--hybrid` and
 `--semantic` searches return HTTP 503 instead, because they cannot guarantee a

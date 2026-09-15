@@ -7699,6 +7699,16 @@ paths:
     get:
       operationId: searchIssues
       parameters:
+        - description: Issue status; omit to search open and closed issues
+          explode: false
+          in: query
+          name: status
+          schema:
+            description: Issue status; omit to search open and closed issues
+            enum:
+              - open
+              - closed
+            type: string
         - in: path
           name: project_id
           required: true
