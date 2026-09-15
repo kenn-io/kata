@@ -155,7 +155,7 @@ func TestIssueScopedLifecycleEventsSurvivePollHistoryAndDigest(t *testing.T) {
 			payloads[event.Type] = payload
 		}
 		for eventType, keys := range map[string][]string{
-			"issue.moved":        {"updated_at"},
+			"issue.moved":        {"to_project_uid", "to_short_id", "updated_at"},
 			"issue.soft_deleted": {"deleted_at"},
 			"issue.restored":     {"restored_at", "updated_at"},
 		} {
