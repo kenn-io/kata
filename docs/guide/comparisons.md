@@ -1,3 +1,9 @@
+---
+title: Comparisons with SaaS issue trackers
+description: Understand where Kata fits alongside SaaS issue trackers and when to use each.
+last_edited: 2026-09-15
+---
+
 # Comparisons with SaaS issue trackers
 
 kata is local-first, not software-as-a-service. Linear, Jira, GitHub Issues,

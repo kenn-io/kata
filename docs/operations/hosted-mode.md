@@ -1,3 +1,9 @@
+---
+title: Hosted mode
+description: Run the Kata daemon on hosted platforms that provide a Heroku-style PORT environment variable.
+last_edited: 2026-09-15
+---
+
 # Hosted mode
 
 Hosted mode is the `$PORT` convention used by platforms such as Cloud Run,

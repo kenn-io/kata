@@ -1,3 +1,9 @@
+---
+title: PostgreSQL operations
+description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
+last_edited: 2026-09-15
+---
+
 # PostgreSQL operations
 
 PostgreSQL is the shared-daemon storage backend. A production deployment should

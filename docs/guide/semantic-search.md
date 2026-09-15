@@ -1,3 +1,9 @@
+---
+title: Semantic search
+description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
+last_edited: 2026-09-15
+---
+
 # Semantic search
 
 By default `kata search` is lexical: it matches the words you type against issue

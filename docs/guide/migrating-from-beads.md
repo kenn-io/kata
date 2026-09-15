@@ -1,3 +1,9 @@
+---
+title: Migrating from Beads
+description: Compare Kata with Beads and migrate Beads projects while preserving supported issue data.
+last_edited: 2026-09-15
+---
+
 # Migrating from Beads
 
 kata can import an existing [Beads](https://github.com/gastownhall/beads)

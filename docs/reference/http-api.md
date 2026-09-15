@@ -1,5 +1,7 @@
 ---
-last_edited: 2026-09-07
+title: HTTP API schema
+description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
+last_edited: 2026-09-15
 ---
 
 # HTTP API schema

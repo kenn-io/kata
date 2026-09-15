@@ -1,3 +1,9 @@
+---
+title: Concepts
+description: Learn Kata's core model for projects, issues, relationships, workspaces, and output modes.
+last_edited: 2026-09-15
+---
+
 # Concepts
 
 This page defines kata's core model. The terms are deliberately few; the goal

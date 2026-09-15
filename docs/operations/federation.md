@@ -1,3 +1,9 @@
+---
+title: Federation
+description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
+last_edited: 2026-09-15
+---
+
 # Federation
 
 Federation lets multiple kata daemons share selected projects while each user

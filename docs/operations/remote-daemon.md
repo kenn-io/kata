@@ -1,5 +1,7 @@
 ---
-last_edited: 2026-08-29
+title: Remote daemon
+description: Serve Kata to trusted private-network clients with explicit authentication and transport settings.
+last_edited: 2026-09-15
 ---
 
 # Remote daemon

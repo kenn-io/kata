@@ -1,5 +1,7 @@
 ---
-last_edited: 2026-08-27
+title: Connector author contract
+description: Implement external-root connectors with the versioned JSON protocol, Go SDK, and conformance kit.
+last_edited: 2026-09-15
 ---
 
 # Connector author contract

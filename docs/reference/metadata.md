@@ -1,5 +1,7 @@
 ---
-last_edited: 2026-09-13
+title: Metadata
+description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
+last_edited: 2026-09-15
 ---
 
 # Metadata

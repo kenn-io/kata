@@ -1,3 +1,9 @@
+---
+title: Agent orchestration
+description: Coordinate agent work through Kata issues, attention metadata, branches, and fan-out/join workflows.
+last_edited: 2026-09-15
+---
+
 # Agent orchestration
 
 kata is a tracker, not an orchestrator: it does not create worktrees, launch

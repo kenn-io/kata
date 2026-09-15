@@ -1,3 +1,9 @@
+---
+title: GitHub sync
+description: Configure one-way GitHub issue synchronization, credentials, mappings, and operational recovery.
+last_edited: 2026-09-15
+---
+
 # GitHub sync
 
 GitHub sync mirrors GitHub issues into a kata project. It is one-way: kata reads
