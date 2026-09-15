@@ -43,6 +43,10 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	if request.params.IncludeDeleted {
 		rowFilter = ""
 	}
+	if request.params.Status != "" {
+		args = append(args, request.params.Status)
+		rowFilter += fmt.Sprintf("\n   AND i.status = $%d", len(args))
+	}
 	// Label predicates mirror ListIssues (AND across Labels, exclusion for
 	// ExcludeLabels) and live in the candidate row selection, so they narrow
 	// the result set before LIMIT rather than after.

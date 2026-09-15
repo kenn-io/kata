@@ -176,7 +176,7 @@ kata show <issue-ref> [--render]
 kata status <issue-ref>
 kata search <query> [--limit N] [--include-deleted]
 kata search <query> [--lexical | --hybrid | --semantic]
-kata search <query> [--label LABEL] [--no-label LABEL]
+kata search <query> [--status open|closed] [--label LABEL] [--no-label LABEL]
 ```
 
 `kata show --render` renders Markdown only in issue descriptions and comment
@@ -228,6 +228,15 @@ exclusive and force a strategy:
 - `--hybrid`: fuse the lexical and vector legs (reciprocal rank fusion).
 - `--semantic`: vector (embedding) results only.
 
+Search includes open and closed issues by default. Use `--status open` or
+`--status closed` to restrict results before the result limit. Status combines
+with label filters and `--include-deleted`; it does not change deletion policy.
+For a marker that appears only in comments:
+
+```sh
+kata search "runner refused" --lexical --status open --limit 100 --json
+```
+
 Search label matching is case-insensitive. Repeating `--label` requires every
 named label; repeating `--no-label` excludes a result with any named label.
 The filters apply before the lexical limit. Hybrid and semantic searches apply
@@ -235,18 +244,19 @@ the same rules while hydrating vector hits.
 
 `--hybrid` and `--semantic` require `[search.embeddings]`; against a daemon
 without it they return an error rather than silently falling back. If the
-vector leg cannot run, or bounded label filtering exhausts its candidate
+vector leg cannot run, or bounded status or label filtering exhausts its candidate
 ceiling before filling the requested limit, only the default (auto) search
 returns a labeled `degraded` response. An unavailable leg falls back to lexical
-results; a bounded label search returns its reachable hybrid results. `--json`
+results; a bounded filtered search returns its reachable hybrid results. `--json`
 and `--agent` output carry the effective `mode` and the degraded reason so the
 downgrade is never silent. Explicit `--hybrid` and `--semantic` do not degrade:
 they return an error (HTTP 503) when the vector leg cannot run or complete, just
 as they return 400 when embeddings are not configured at all.
 
 Before sending filters that an older daemon could silently ignore, the CLI
-checks `api_schema_version`. Filtered search and filtered `ready --all` require
-API 0.8.0 or newer; filtered `list --all` requires API 0.9.0 or newer. An older
+checks `api_schema_version`. Status-filtered search requires API 0.19.0 or
+newer. Label-filtered search and filtered `ready --all` require API 0.8.0 or
+newer; filtered `list --all` requires API 0.9.0 or newer. An older
 daemon fails before the query with `daemon_api_too_old` and an upgrade message.
 See [HTTP API compatibility](http-api.md#detecting-the-api-version).
 

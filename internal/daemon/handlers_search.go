@@ -44,7 +44,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		res, err := hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, hybridParams{
 			ProjectID: in.ProjectID, Query: in.Query, Limit: limit,
 			IncludeDeleted: in.IncludeDeleted, Requested: mode,
-			Labels: in.Labels, ExcludeLabels: in.ExcludeLabels,
+			Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, Status: in.Status,
 		})
 		if err != nil {
 			if me, ok := errors.AsType[*modeError](err); ok {

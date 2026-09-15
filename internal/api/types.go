@@ -1286,6 +1286,7 @@ type DigestResponse struct {
 // returns 400, and a vector-leg failure returns 503 rather than silently
 // degrading.
 type SearchRequest struct {
+	Status         string   `query:"status,omitempty" enum:"open,closed" doc:"Issue status; omit to search open and closed issues"`
 	ProjectID      int64    `path:"project_id" required:"true"`
 	Query          string   `query:"q" required:"true"`
 	Limit          int      `query:"limit,omitempty"`

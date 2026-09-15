@@ -19,6 +19,7 @@ import (
 // daemon's GET /search endpoint and prints either the JSON envelope (under
 // --json) or one line per hit with short_id, score, status, title, and match fields.
 func newSearchCmd() *cobra.Command {
+	var issueStatus string
 	var limit int
 	var includeDeleted bool
 	var lexical, hybrid, semantic bool
@@ -35,6 +36,9 @@ func newSearchCmd() *cobra.Command {
 			query := strings.Join(args, " ")
 			if strings.TrimSpace(query) == "" {
 				return &cliError{Message: "query must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			if cmd.Flags().Changed("status") && issueStatus != "open" && issueStatus != "closed" {
+				return &cliError{Message: "--status must be open or closed", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			modeFlags := 0
 			for _, b := range []bool{lexical, hybrid, semantic} {
@@ -79,7 +83,11 @@ func newSearchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(labels) > 0 || len(noLabels) > 0 {
+			if issueStatus != "" {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionSearchStatus, "status-filtered search"); err != nil {
+					return err
+				}
+			} else if len(labels) > 0 || len(noLabels) > 0 {
 				if err := requireDaemonAPIVersion(ctx, client, baseURL,
 					apiVersionReadyAndSearchFilters, "filtered search"); err != nil {
 					return err
@@ -94,6 +102,7 @@ func newSearchCmd() *cobra.Command {
 				Mode:           mode,
 				Labels:         labels,
 				NoLabels:       noLabels,
+				Status:         issueStatus,
 			})
 			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, searchURL, nil)
 			if err != nil {
@@ -105,6 +114,7 @@ func newSearchCmd() *cobra.Command {
 			return printSearchResults(cmd, bs)
 		},
 	}
+	cmd.Flags().StringVar(&issueStatus, "status", "", "issue status: open or closed (default both)")
 	cmd.Flags().IntVar(&limit, "limit", 20, "max rows")
 	cmd.Flags().BoolVar(&includeDeleted, "include-deleted", false, "include soft-deleted issues")
 	cmd.Flags().BoolVar(&lexical, "lexical", false, "lexical (FTS) search only")
@@ -119,6 +129,7 @@ func newSearchCmd() *cobra.Command {
 // query, and search options together push past the repo's five-positional-
 // param convention, so they're collected here instead of passed individually.
 type searchURLParams struct {
+	Status         string
 	BaseURL        string
 	PID            int64
 	Query          string
@@ -135,6 +146,9 @@ type searchURLParams struct {
 func buildSearchURL(p searchURLParams) string {
 	q := url.Values{}
 	q.Set("q", p.Query)
+	if p.Status != "" {
+		q.Set("status", p.Status)
+	}
 	if p.Limit > 0 {
 		q.Set("limit", fmt.Sprint(p.Limit))
 	}

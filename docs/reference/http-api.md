@@ -89,13 +89,14 @@ that every part of a generated client matches a different schema version.
 Generated clients should still use the schema from their target release.
 
 The first-party CLI uses this check before requests where an older daemon
-could ignore a filter and return unfiltered rows. Filtered `search` and
-filtered `ready --all` require API `0.8.0`; filtered `list --all` requires API
-`0.9.0`. The CLI stops before the filtered query and tells the operator to
+could ignore a filter and return unfiltered rows. Status-filtered `search`
+requires API `0.19.0`; label-filtered `search` and filtered `ready --all`
+require API `0.8.0`; filtered `list --all` requires API `0.9.0`. The CLI stops before the filtered query and tells the operator to
 upgrade when the daemon is too old. `kata mcp serve` performs the same check
 once at startup and requires API `0.11.0`, because its relationship tools
 always send the pinned-target fields and its close-audit paging relies on
-`event_id`.
+`event_id`. Status-filtered `kata.search` calls additionally check for
+API `0.19.0` before project fanout.
 
 Guarded close requests use a request-local compatibility check instead of a
 separate health probe. A request that sends `Idempotency-Key` or `If-Match`
@@ -120,6 +121,7 @@ use the exact request field names, and accept empty response collections as
 
 | Version | Change |
 | --- | --- |
+| `0.19.0` | Added optional `status=open` or `status=closed` to project search. Omission searches both statuses; explicit empty values are invalid. The predicate applies to lexical candidates and canonical semantic hits before result limits. |
 | `0.17.0` | Create issue, edit issue, create comment, and add label accept a numeric project ID or `name:<project>` in the project path. Optional alias headers use alias-first resolution. Successful responses include `X-Kata-Project-Name`. Generated clients represent these four path parameters as strings. |
 | `0.16.0` | Ordinary API array fields are non-null. Empty and nil Go slices serialize as `[]`, generated clients omit `null` from ordinary array types, and requests reject `null` for those arrays. JSON object member names are case-sensitive. |
 | `0.15.0` | Added close idempotency and revision headers, the `close-v1` request marker, and retry receipt fields. |

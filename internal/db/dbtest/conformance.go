@@ -39,6 +39,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "search status", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchStatus},
 	{
 		name:    "lifecycle",
 		methods: []string{"InstanceUID", "Path", "RefreshInstanceUID", "RetryTransient", "SchemaVersion"},
