@@ -405,7 +405,7 @@ func readUIIssues(
 	statuses := uiFilterValues(query.Statuses, query.Status)
 	if len(statuses) == 0 {
 		switch query.View {
-		case "all-open", "inbox", "today", "upcoming", "deadlines":
+		case "all-open", "inbox", "today", "upcoming", "delegated", "deadlines":
 			statuses = []string{"open"}
 		case "logbook":
 			statuses = []string{"closed"}
@@ -413,6 +413,7 @@ func readUIIssues(
 	}
 	filterReadySchedules := false
 	filterCalendarSchedules := query.View == "today" || query.View == "upcoming" || query.View == "deadlines"
+	filterDelegated := query.View == "delegated"
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
 		statusPredicates := []string{}
 		persistedStatuses := []string{}
@@ -453,6 +454,8 @@ func readUIIssues(
 			` OR json_extract(i.metadata, '$.deadline_on') IS NOT NULL)`
 	case "upcoming":
 		statement += ` AND json_extract(i.metadata, '$.scheduled_on') IS NOT NULL`
+	case "delegated":
+		statement += ` AND json_type(i.metadata, '$.teammate') = 'text'`
 	case "deadlines":
 		statement += ` AND json_extract(i.metadata, '$.deadline_on') IS NOT NULL`
 	}
@@ -484,7 +487,7 @@ func readUIIssues(
 	}
 	limit := min(query.Limit, 1000)
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules {
+	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated {
 		statement += ` LIMIT ?`
 		args = append(args, limit)
 	}
@@ -516,6 +519,11 @@ func readUIIssues(
 				return nil, fmt.Errorf("read UI issue %s schedule: %w", issue.UID, err)
 			}
 			if !due {
+				continue
+			}
+		}
+		if filterDelegated {
+			if _, ok := db.IssueTeammate(issue.Metadata); !ok {
 				continue
 			}
 		}

@@ -146,6 +146,34 @@ function buildInbox(issues: KataTaskSummary[], projects: ProjectLookup): KataTas
   return inboxIssues.length > 0 ? [{ id: 'inbox', title: 'Inbox', issues: inboxIssues }] : []
 }
 
+const teammateHandlePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+
+function buildDelegated(issues: KataTaskSummary[]): KataTaskGroup[] {
+  const groups = new Map<string, KataTaskGroup>()
+  for (const issue of issues) {
+    const teammate = issue.metadata.teammate
+    if (
+      issue.status !== 'open' ||
+      typeof teammate !== 'string' ||
+      !teammateHandlePattern.test(teammate)
+    ) {
+      continue
+    }
+    const attribution = `${issue.author}/${teammate}`
+    const group = groups.get(attribution) ?? {
+      id: attribution,
+      title: attribution,
+      issues: [],
+    }
+    group.issues.push(issue)
+    groups.set(attribution, group)
+  }
+
+  return [...groups.values()]
+    .map((group) => ({ ...group, issues: [...group.issues].sort(compareIssues) }))
+    .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
+}
+
 function buildAll(issues: KataTaskSummary[], projects: ProjectLookup): KataTaskGroup[] {
   return groupByProject(
     issues.filter((issue) => issue.status === 'open'),
@@ -218,6 +246,9 @@ export function buildKataTaskView(options: BuildKataTaskViewOptions): KataTaskVi
       break
     case 'inbox':
       groups = buildInbox(options.issues, projects)
+      break
+    case 'delegated':
+      groups = buildDelegated(options.issues)
       break
     case 'deadlines':
       groups = buildDeadlines(options.issues, today)

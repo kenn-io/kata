@@ -80,14 +80,19 @@ describe('Sidebar', () => {
     renderSidebar()
 
     const navigation = screen.getByRole('region', { name: 'Kata navigation' })
-    const inbox = within(navigation).getByRole('button', { name: 'Inbox 2' })
+    const systemViewLabels = ['Inbox 2', 'Today 0', 'Upcoming', 'Delegated', 'Deadlines']
+    const systemViewButtons = systemViewLabels.map((name) =>
+      within(navigation).getByRole('button', { name }),
+    )
+    expect(within(navigation).queryByRole('button', { name: 'All Open' })).toBeNull()
+    expect(within(navigation).queryByRole('button', { name: 'Logbook' })).toBeNull()
     const personal = within(navigation).getByRole('button', { name: /^Personal\s+1$/ })
     const work = within(navigation).getByRole('button', { name: /^Work\s+1$/ })
     const create = within(navigation).getByRole('button', { name: 'New project' })
 
     expect(personal.getAttribute('aria-expanded')).toBe('true')
     expect(work.getAttribute('aria-expanded')).toBe('true')
-    const ordered = [inbox, personal, work, create]
+    const ordered = [...systemViewButtons, personal, work, create]
     for (let index = 0; index < ordered.length - 1; index += 1) {
       expect(ordered[index]!.compareDocumentPosition(ordered[index + 1]!)).toBe(
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -123,6 +128,9 @@ describe('Sidebar', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Inbox 2' }))
     expect(onOpenView).toHaveBeenCalledWith('inbox')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Delegated' }))
+    expect(onOpenView).toHaveBeenCalledWith('delegated')
 
     await fireEvent.click(screen.getByRole('button', { name: /^example-project\b/ }))
     expect(onOpenProject).toHaveBeenCalledWith('project-example')

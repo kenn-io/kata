@@ -45,6 +45,13 @@ describe('canonical Kata routes', () => {
     })
   })
 
+  it('parses and serializes the Delegated view', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?view=delegated'))
+
+    expect(route).toMatchObject({ kind: 'kata', view: 'delegated' })
+    expect(serializeRoute(route)).toBe('/kata?view=delegated')
+  })
+
   it('keeps invalid issue UIDs routed and gives short refs one search action', () => {
     expect(parseRoute(new URL('https://daemon.example/kata?issue=abc4'))).toEqual({
       kind: 'route-error',

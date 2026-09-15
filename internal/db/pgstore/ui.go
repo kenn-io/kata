@@ -411,7 +411,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	statuses := uiFilterValues(query.Statuses, query.Status)
 	if len(statuses) == 0 {
 		switch query.View {
-		case "all-open", "inbox", "today", "upcoming", "deadlines":
+		case "all-open", "inbox", "today", "upcoming", "delegated", "deadlines":
 			statuses = []string{"open"}
 		case "logbook":
 			statuses = []string{"closed"}
@@ -419,6 +419,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	}
 	filterReadySchedules := false
 	filterCalendarSchedules := query.View == "today" || query.View == "upcoming" || query.View == "deadlines"
+	filterDelegated := query.View == "delegated"
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
 		statusPredicates := []string{}
 		persistedStatuses := []string{}
@@ -456,6 +457,8 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 			` OR i.metadata::jsonb ->> 'deadline_on' IS NOT NULL)`
 	case "upcoming":
 		statement += ` AND i.metadata::jsonb ->> 'scheduled_on' IS NOT NULL`
+	case "delegated":
+		statement += ` AND jsonb_typeof(i.metadata::jsonb -> 'teammate') = 'string'`
 	case "deadlines":
 		statement += ` AND i.metadata::jsonb ->> 'deadline_on' IS NOT NULL`
 	}
@@ -480,7 +483,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	}
 	limit := min(query.Limit, 1000)
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules {
+	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated {
 		args = append(args, limit)
 		statement += fmt.Sprintf(` LIMIT $%d`, len(args)) // #nosec G202 -- only a generated placeholder number is interpolated.
 	}
@@ -513,6 +516,11 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 				return nil, fmt.Errorf("read UI issue %s schedule: %w", issue.UID, err)
 			}
 			if !due {
+				continue
+			}
+		}
+		if filterDelegated {
+			if _, ok := db.IssueTeammate(issue.Metadata); !ok {
 				continue
 			}
 		}
