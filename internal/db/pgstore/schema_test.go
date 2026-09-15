@@ -168,6 +168,21 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 		 ORDER BY column_name`)
 	assert.Contains(t, bindingColumns, "bound_actor")
 	assert.Contains(t, bindingColumns, "allow_insecure")
+	commentColumns := queryStrings(t, s, `
+		SELECT column_name
+		  FROM information_schema.columns
+		 WHERE table_schema = current_schema()
+		   AND table_name = 'comments'
+		 ORDER BY ordinal_position`)
+	assert.Equal(t, []string{"id", "uid", "issue_id", "author", "body", "created_at", "teammate"}, commentColumns)
+	var teammateNullable string
+	require.NoError(t, s.QueryRowContext(ctx, `
+		SELECT is_nullable
+		  FROM information_schema.columns
+		 WHERE table_schema = current_schema()
+		   AND table_name = 'comments'
+		   AND column_name = 'teammate'`).Scan(&teammateNullable))
+	assert.Equal(t, "YES", teammateNullable)
 
 	// --- triggers ---
 	gotTriggers := queryStrings(t, s, `

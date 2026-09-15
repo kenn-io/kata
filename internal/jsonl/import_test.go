@@ -3,6 +3,7 @@ package jsonl_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -26,9 +27,16 @@ func TestImportRoundTripsExportedRows(t *testing.T) {
 		Title:     "round trip",
 		Author:    "tester",
 		Labels:    []string{"bug"},
+		Metadata:  map[string]json.RawMessage{"teammate": json.RawMessage(`"reviewer-7"`)},
 	})
 	require.NoError(t, err)
-	_, _, err = src.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "comment"})
+	created, _, err := src.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Teammate: "reviewer-7", Body: "comment",
+	})
+	require.NoError(t, err)
+	legacy, _, err := src.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: "legacy comment",
+	})
 	require.NoError(t, err)
 
 	var exported bytes.Buffer
@@ -47,6 +55,35 @@ func TestImportRoundTripsExportedRows(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, issue.ShortID, got.ShortID)
 	assert.Equal(t, issue.Title, got.Title)
+	assert.JSONEq(t, `{"teammate":"reviewer-7"}`, string(got.Metadata))
+	comments, err := dst.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 2)
+	assert.Equal(t, created.UID, comments[0].UID)
+	assert.Equal(t, "reviewer-7", comments[0].Teammate)
+	assert.Equal(t, legacy.UID, comments[1].UID)
+	assert.Empty(t, comments[1].Teammate)
+}
+
+func TestImportRejectsInvalidCommentTeammateBeforeReplacingTarget(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+	project, err := target.CreateProject(ctx, "live-project")
+	require.NoError(t, err)
+	issue, _, err := target.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "keep this issue", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	err = importJSONL(ctx, target,
+		validExportVersion,
+		`{"kind":"comment","data":{"id":1,"issue_id":1,"author":"tester","teammate":"reviewer/7","body":"bad","created_at":"2026-09-13T12:00:00Z"}}`,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "teammate")
+	got, readErr := target.IssueByID(ctx, issue.ID)
+	require.NoError(t, readErr)
+	assert.Equal(t, "keep this issue", got.Title)
 }
 
 func TestImportRoundTripsExportedLargeIssueBody(t *testing.T) {

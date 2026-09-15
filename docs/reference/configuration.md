@@ -21,7 +21,8 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_POSTGRES_SCHEMA_OWNER` | Trusted owner role for the selected schema. Required in `validate` mode. |
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
-| `KATA_INBOX_USER` | Teammate inbox handle for `kata inbox` when `--for` is omitted. Independent of `KATA_AUTHOR`. |
+| `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
+| `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
 | `KATA_TRUST_PRIVATE_NETWORK` | Set to `1` to permit trusted plaintext bearer use on private non-loopback HTTP. Without it (or `allow_insecure`), a plaintext non-loopback target fails when the client is built, before any request is sent. |

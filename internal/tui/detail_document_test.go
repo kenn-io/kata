@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDetailDocumentPage80x50LayoutSignals(t *testing.T) {
@@ -226,4 +228,43 @@ func TestDetailDocument_CommentAuthorsAlignTimestamps(t *testing.T) {
 	got := stripANSI(renderCommentsTab(comments, 80, 10, 0, tabState{}))
 	assertStringContains(t, got, "alice  Apr 30 10:00")
 	assertStringContains(t, got, "bob    Apr 30 11:00")
+}
+
+func TestDetailDocument_CommentTeammatesAlignTimestamps(t *testing.T) {
+	defer snapshotInit(t)()
+	when := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	comments := []CommentEntry{
+		{Author: "coordinator", Teammate: "teammate-1", Body: "first", CreatedAt: when},
+		{Author: "coordinator", Teammate: "teammate-2", Body: "second", CreatedAt: when.Add(time.Minute)},
+	}
+
+	got := stripANSI(renderCommentsTab(comments, 80, 10, 0, tabState{}))
+	assertStringContains(t, got, "coordinator / teammate-1  Sep 13 12:00")
+	assertStringContains(t, got, "coordinator / teammate-2  Sep 13 12:01")
+}
+
+func TestDetailDocument_NarrowCommentTeammatePreservesTimestamp(t *testing.T) {
+	defer snapshotInit(t)()
+	when := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	comment := CommentEntry{
+		Author: "coordinator-with-a-long-name", Teammate: "teammate-with-a-long-name",
+		Body: "checked", CreatedAt: when,
+	}
+
+	got := stripANSI(renderCommentsTab([]CommentEntry{comment}, 32, 5, 0, tabState{}))
+	assertStringContains(t, got, "Sep 13 12:00")
+	assert.NotContains(t, got, "teammate-with-a-long-name")
+	assert.LessOrEqual(t, runewidth.StringWidth(strings.Split(got, "\n")[0]), 32)
+}
+
+func TestDetailDocument_CommentAuthorWithoutTeammateStaysCompact(t *testing.T) {
+	defer snapshotInit(t)()
+	comment := CommentEntry{
+		Author: "coordinator-with-a-long-name", Body: "checked",
+		CreatedAt: time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC),
+	}
+	for _, width := range []int{32, 80, 160} {
+		got := stripANSI(renderCommentsTab([]CommentEntry{comment}, width, 5, 0, tabState{}))
+		assert.Contains(t, got, "coordinator-wit…  Sep 13 12:00")
+	}
 }

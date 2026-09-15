@@ -139,7 +139,7 @@ func (p *projectMutation) mutate(method, suffix string, body any, headers map[st
 
 // Follow-up comments use the project ID returned by the successful mutation,
 // not another lookup of the name which might have changed in the meantime.
-func (p *projectMutation) comment(data []byte, ref, actor, body string) error {
+func (p *projectMutation) comment(data []byte, ref, actor, body, teammate string) error {
 	if body == "" {
 		return nil
 	}
@@ -151,5 +151,5 @@ func (p *projectMutation) comment(data []byte, ref, actor, body string) error {
 	if err := json.Unmarshal(data, &response); err != nil {
 		return fmt.Errorf("issue mutation succeeded but reading its project for --comment failed: %w", err)
 	}
-	return postFollowupComment(p.api.ctx, p.api.client, p.api.baseURL, response.Issue.ProjectID, ref, actor, body)
+	return postFollowupComment(p.api.ctx, p.api.client, p.api.baseURL, response.Issue.ProjectID, ref, actor, body, teammate)
 }

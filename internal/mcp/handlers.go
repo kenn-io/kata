@@ -13,10 +13,12 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/shortid"
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -446,6 +448,10 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 }
 
 func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, input CreateInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	handle, err := teammate.Resolve(input.Teammate, h.options.Teammate)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
 		return nil, MutationOutput{}, errors.New("title must not be empty")
@@ -466,6 +472,10 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		return nil, MutationOutput{}, err
 	}
 	issueMetadata, err := createMetadata(input)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
+	issueMetadata, err = teammate.Stamp(issueMetadata, handle)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
@@ -605,6 +615,23 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 }
 
 func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, input CommentInput) (*sdkmcp.CallToolResult, CommentOutput, error) {
+	handle, err := teammate.Resolve(input.Teammate, h.options.Teammate)
+	if err != nil {
+		return nil, CommentOutput{}, err
+	}
+	if handle != "" {
+		health, err := h.options.Client.Health(ctx)
+		if err != nil {
+			return nil, CommentOutput{}, err
+		}
+		reported := ""
+		if health.APISchemaVersion != nil {
+			reported = strings.TrimSpace(*health.APISchemaVersion)
+		}
+		if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.18.0") < 0 {
+			return nil, CommentOutput{}, fmt.Errorf("comment teammate attribution requires daemon API 0.18.0 or newer; this daemon reports %q; upgrade the daemon", reported)
+		}
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, CommentOutput{}, err
@@ -618,7 +645,7 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 	}
 	response, err := h.options.Client.CreateComment(ctx, &generated.CreateCommentRequestOptions{
 		PathParams: &generated.CreateCommentPath{ProjectID: strconv.FormatInt(project.ID, 10), Ref: ref},
-		Body:       &generated.CreateCommentBody{Actor: &h.options.Actor, Body: input.Body},
+		Body:       &generated.CreateCommentBody{Actor: &h.options.Actor, Body: input.Body, Teammate: optionalString(handle)},
 		Header:     &generated.CreateCommentHeaders{IdempotencyKey: &key},
 	})
 	if err != nil {
@@ -1272,7 +1299,12 @@ func eventSummary(event *generated.Event) *EventSummary {
 }
 
 func commentSummary(comment generated.Comment) CommentSummary {
+	handle := ""
+	if comment.Teammate != nil {
+		handle = *comment.Teammate
+	}
 	return CommentSummary{
+		Teammate:  handle,
 		UID:       comment.UID,
 		Author:    comment.Author,
 		Body:      comment.Body,

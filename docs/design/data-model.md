@@ -1,3 +1,7 @@
+---
+last_edited: 2026-09-13
+---
+
 # Data model and durability
 
 This note explains the parts of kata's data model that are easy to get wrong and
@@ -33,8 +37,9 @@ State changes are not just stored; they are recorded. Three rules follow:
 - The **events** table is append-only and is the authoritative record of every
   state change. Each event carries the actor, a stable event `uid`, the
   originating instance UID, and a payload with the field-level diff.
-- The **comments** table stores current comment bodies. Comment bodies can be
-  edited in place for redaction while preserving UID, author, and creation
+- The **comments** table stores current comment bodies plus optional teammate
+  attribution under the accountable author. Comment bodies can be edited in
+  place for redaction while preserving UID, author, teammate, and creation
   time; there is no comment delete short of issue purge.
 - Issues themselves are mutable current-state rows, but every mutation emits an
   event, so the current row is always reconstructable from history.
@@ -167,6 +172,13 @@ are not represented as compatibility migrations. The first released Postgres
 schema is the migration floor. Later releases add immutable forward migration
 assets from released versions; each asset names its exact source and target
 versions, and its version stamp is written in the same transaction as its SQL.
+
+Schema 27 adds nullable `comments.teammate` on both backends. Existing rows
+remain unattributed. JSONL and federation payloads carry the optional field;
+author canonicalization continues to rewrite the accountable actor while
+retaining teammate attribution. Upgrade every hub and spoke on a federation
+path before relying on preservation because an older daemon can omit the field
+while materializing and re-exporting comment state.
 
 Postgres never uses the ambient `public` schema. A standalone open defaults to
 the dedicated `kata` schema; configured opens accept one restricted lowercase

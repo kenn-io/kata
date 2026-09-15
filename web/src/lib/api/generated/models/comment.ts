@@ -8,6 +8,7 @@ export interface Comment {
   created_at: string
   id: number
   issue_id: number
+  teammate?: string
   uid: string
   [key: string]: unknown
 }

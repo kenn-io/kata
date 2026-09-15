@@ -14,6 +14,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/teammate"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -769,6 +770,7 @@ type createdLinkOut struct {
 type issueSnapshotComment struct {
 	CommentUID string `json:"comment_uid"`
 	Author     string `json:"author"`
+	Teammate   string `json:"teammate,omitempty"`
 	Body       string `json:"body"`
 	CreatedAt  string `json:"created_at"`
 }
@@ -1154,20 +1156,19 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 // readCreatedComment is a package-local test seam for post-commit readback
 // failures; production uses the direct comment query through this function.
 var readCreatedComment = func(ctx context.Context, d *Store, commentID int64) (db.Comment, error) {
-	var c db.Comment
-	if err := d.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE id = ?`,
-		commentID).Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt); err != nil {
+	c, err := scanComment(d.QueryRowContext(ctx,
+		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE id = ?`,
+		commentID))
+	if err != nil {
 		return db.Comment{}, fmt.Errorf("read comment: %w", err)
 	}
 	return c, nil
 }
 
 func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, commentUID string) (db.Comment, error) {
-	var c db.Comment
-	err := tx.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ? AND uid = ?`,
-		issueID, commentUID).Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt)
+	c, err := scanComment(tx.QueryRowContext(ctx,
+		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE issue_id = ? AND uid = ?`,
+		issueID, commentUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Comment{}, db.ErrNotFound
 	}
@@ -1178,10 +1179,9 @@ func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, comm
 }
 
 func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment, error) {
-	var c db.Comment
-	err := tx.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE id = ?`,
-		commentID).Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt)
+	c, err := scanComment(tx.QueryRowContext(ctx,
+		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE id = ?`,
+		commentID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Comment{}, db.ErrNotFound
 	}
@@ -1194,6 +1194,9 @@ func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment
 // CreateComment appends a comment + issue.commented event in one tx, bumping
 // issues.updated_at.
 func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db.Comment, db.Event, error) {
+	if err := teammate.Validate(p.Teammate); err != nil {
+		return db.Comment{}, db.Event{}, err
+	}
 	commentID, evt, err := retryWrite2(ctx, d, func() (int64, db.Event, error) {
 		return d.createComment(ctx, p)
 	})
@@ -1240,8 +1243,8 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	createdAt := commentAt.Format(sqliteCommentTimeFormat)
 	mutationAt := commentAt.Format(sqliteTimeFormat)
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO comments(uid, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?)`,
-		commentUID, p.IssueID, p.Author, p.Body, createdAt)
+		`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate) VALUES(?, ?, ?, ?, ?, NULLIF(?, ''))`,
+		commentUID, p.IssueID, p.Author, p.Body, createdAt, p.Teammate)
 	if err != nil {
 		return 0, db.Event{}, fmt.Errorf("insert comment: %w", err)
 	}
@@ -1259,6 +1262,7 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	payloadBytes, err := json.Marshal(struct {
 		CommentUID             string `json:"comment_uid"`
 		Author                 string `json:"author"`
+		Teammate               string `json:"teammate,omitempty"`
 		Body                   string `json:"body"`
 		CreatedAt              string `json:"created_at"`
 		IdempotencyKey         string `json:"idempotency_key,omitempty"`
@@ -1266,6 +1270,7 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 	}{
 		CommentUID:             commentUID,
 		Author:                 p.Author,
+		Teammate:               p.Teammate,
 		Body:                   p.Body,
 		CreatedAt:              createdAt,
 		IdempotencyKey:         p.IdempotencyKey,
@@ -1397,15 +1402,15 @@ func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Com
 // (created_at, then id as a stable tiebreaker).
 func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
 	rows, err := d.QueryContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ?`, issueID)
+		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE issue_id = ?`, issueID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []db.Comment
 	for rows.Next() {
-		var c db.Comment
-		if err := rows.Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt); err != nil {
+		c, err := scanComment(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -1420,6 +1425,19 @@ func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 		return cmp.Compare(a.ID, b.ID)
 	})
 	return out, nil
+}
+
+func scanComment(row rowScanner) (db.Comment, error) {
+	var comment db.Comment
+	var teammate sql.NullString
+	if err := row.Scan(
+		&comment.ID, &comment.UID, &comment.IssueID, &comment.Author, &comment.Body,
+		&comment.CreatedAt, &teammate,
+	); err != nil {
+		return db.Comment{}, err
+	}
+	comment.Teammate = teammate.String
+	return comment, nil
 }
 
 // CloseIssue sets status=closed unless already closed. The message and

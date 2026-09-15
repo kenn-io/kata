@@ -21,7 +21,10 @@
       {#each comments as comment (comment.id)}
         <li>
           <header>
-            <strong>{comment.author}</strong>
+            <strong>{comment.teammate
+                ? `${comment.author} / ${comment.teammate}`
+                : comment.author}</strong
+            >
             <time datetime={comment.createdAt} title={comment.createdAt}
               >{localDateTimeLabel(comment.createdAt)}</time
             >

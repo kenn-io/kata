@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/textsafe"
 )
 
@@ -83,6 +84,14 @@ func newCreateCmd() *cobra.Command {
 			}
 		}
 
+		handle, err := resolveTeammate(cmd)
+		if err != nil {
+			return err
+		}
+		initialMetadata, err := teammate.Stamp(metaMap, handle)
+		if err != nil {
+			return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
+		}
 		ctx := cmd.Context()
 		start, err := resolveStartPath(flags.Workspace)
 		if err != nil {
@@ -118,8 +127,8 @@ func newCreateCmd() *cobra.Command {
 		if len(labels) > 0 {
 			req["labels"] = labels
 		}
-		if len(metaMap) > 0 {
-			req["metadata"] = metaMap
+		if len(initialMetadata) > 0 {
+			req["metadata"] = initialMetadata
 		}
 		// Resolve every link-target ref to its wire ref string before
 		// building the payload. Refs accept the same forms as `kata show`:
@@ -300,11 +309,11 @@ func stringSliceToPeers(refs []string) []linkPeerForCLI {
 // non-empty key; the value is sent as a JSON string. Complex JSON values are
 // out of scope for this flag (use `kata meta set --json-value`). Returns nil
 // for no flags so the caller's omitempty does the right thing.
-func parseCreateMeta(meta []string) (map[string]json.RawMessage, error) {
+func parseCreateMeta(meta []string) (map[string]any, error) {
 	if len(meta) == 0 {
 		return nil, nil
 	}
-	out := make(map[string]json.RawMessage, len(meta))
+	out := make(map[string]any, len(meta))
 	for _, entry := range meta {
 		key, value, ok := strings.Cut(entry, "=")
 		if !ok || key == "" {
@@ -314,11 +323,7 @@ func parseCreateMeta(meta []string) (map[string]json.RawMessage, error) {
 				ExitCode: ExitUsage,
 			}
 		}
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return nil, &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
-		}
-		out[key] = json.RawMessage(raw)
+		out[key] = value
 	}
 	return out, nil
 }

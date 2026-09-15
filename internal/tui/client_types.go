@@ -271,6 +271,7 @@ type ProjectSummaryWithStats struct {
 type CommentEntry struct {
 	ID        int64     `json:"id"`
 	Author    string    `json:"author"`
+	Teammate  string    `json:"teammate,omitempty"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 }

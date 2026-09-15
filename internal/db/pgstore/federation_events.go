@@ -124,6 +124,9 @@ func (s *Store) InsertRemoteEvent(ctx context.Context, projectID int64, remote d
 	if err != nil {
 		return false, err
 	}
+	if err := db.ValidateFederationEntries(remote.Type, remote.EventUID, payload); err != nil {
+		return false, err
+	}
 	inserted := false
 	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		inserted = false

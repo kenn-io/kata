@@ -319,6 +319,7 @@ describe('IssueDetail', () => {
             id: 1,
             issue_id: 1,
             author: 'user-a',
+            teammate: 'teammate-1',
             body: 'Accepted comment',
             created_at: '2026-06-01T12:30:00Z',
           },
@@ -365,6 +366,7 @@ describe('IssueDetail', () => {
     expect(screen.getByRole('region', { name: 'Checklist' })).not.toBeNull()
     expect(screen.getByText('Weekly example')).not.toBeNull()
     expect(screen.getByText('Accepted comment')).not.toBeNull()
+    expect(screen.getByText('user-a / teammate-1')).not.toBeNull()
     expect(screen.getByText('commented')).not.toBeNull()
 
     await fireEvent.input(screen.getByLabelText('Comment'), {

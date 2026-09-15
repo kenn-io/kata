@@ -244,6 +244,7 @@ function normalizeSelectedDetail(
       id: comment.id,
       issue_id: comment.issue_id,
       author: comment.author,
+      ...(comment.teammate === undefined ? {} : { teammate: comment.teammate }),
       body: comment.body,
       created_at: comment.created_at,
     })),

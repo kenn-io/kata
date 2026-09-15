@@ -270,15 +270,17 @@ SELECT DISTINCT recurrence_id FROM issues WHERE recurrence_id IS NOT NULL AND de
 func (s *Store) ExportComments(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.CommentExport, error] {
 	where, args := pgExportWhere("issues", filter)
 	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author,
-       comments.body, comments.created_at
+	       comments.body, comments.created_at, comments.teammate
   FROM comments JOIN issues ON issues.id = comments.issue_id` + where + ` ORDER BY comments.id ASC`
 	return streamExportRows(ctx, s, "comments", query, args,
 		func(rows *sql.Rows) (db.CommentExport, error) {
 			var record db.CommentExport
+			var teammate sql.NullString
 			if err := rows.Scan(&record.ID, &record.UID, &record.IssueID, &record.Author,
-				&record.Body, &record.CreatedAt); err != nil {
+				&record.Body, &record.CreatedAt, &teammate); err != nil {
 				return db.CommentExport{}, pgExportScanError("comment", err)
 			}
+			record.Teammate = teammate.String
 			return record, nil
 		})
 }

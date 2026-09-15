@@ -20,8 +20,9 @@ const notificationRecipientMaxBytes = 128
 const notificationMessageMaxBytes = 1024
 
 type notificationValue struct {
-	From    string `json:"from"`
-	Message string `json:"message"`
+	From     string `json:"from"`
+	Teammate string `json:"teammate,omitempty"`
+	Message  string `json:"message"`
 }
 
 func newNotifyCmd() *cobra.Command {
@@ -44,6 +45,14 @@ func newNotifyCmd() *cobra.Command {
 			}
 			if len(message) > notificationMessageMaxBytes {
 				return notificationValidationError("--message must be at most 1024 bytes")
+			}
+			var senderTeammate string
+			if !clearRequest {
+				var err error
+				senderTeammate, err = resolveTeammate(cmd)
+				if err != nil {
+					return err
+				}
 			}
 
 			ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, args[0])
@@ -73,7 +82,7 @@ func newNotifyCmd() *cobra.Command {
 				if instance.Auth.Actor != "" {
 					actor = instance.Auth.Actor
 				}
-				encoded, err := json.Marshal(notificationValue{From: actor, Message: message})
+				encoded, err := json.Marshal(notificationValue{From: actor, Teammate: senderTeammate, Message: message})
 				if err != nil {
 					return err
 				}

@@ -707,6 +707,9 @@ func (d *Store) insertRemoteEvent(ctx context.Context, projectID int64, ev db.Re
 	if err != nil {
 		return false, err
 	}
+	if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
+		return false, err
+	}
 
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
@@ -1076,6 +1079,11 @@ func (d *Store) materializeFederatedProjectTx(
 	events, err := federationFoldEvents(ctx, tx, projectID)
 	if err != nil {
 		return err
+	}
+	for _, event := range events {
+		if err := db.ValidateFederationEntries(event.Type, event.UID, event.Payload); err != nil {
+			return err
+		}
 	}
 	projection := db.FoldEvents(events)
 	issueIDs, err := reconcileFederatedIssues(ctx, tx, projectID, projection)
@@ -1480,7 +1488,7 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 
 func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]issueSnapshotComment, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT uid, author, body, created_at
+		SELECT uid, author, body, created_at, teammate
 		  FROM comments
 		 WHERE issue_id = ?
 		 ORDER BY id ASC`, issueID)
@@ -1493,13 +1501,15 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 		var (
 			comment   issueSnapshotComment
 			createdAt sql.NullTime
+			teammate  sql.NullString
 		)
-		if err := rows.Scan(&comment.CommentUID, &comment.Author, &comment.Body, &createdAt); err != nil {
+		if err := rows.Scan(&comment.CommentUID, &comment.Author, &comment.Body, &createdAt, &teammate); err != nil {
 			return nil, fmt.Errorf("scan federation snapshot comment: %w", err)
 		}
 		if createdAt.Valid {
 			comment.CreatedAt = createdAt.Time.UTC().Format(sqliteCommentTimeFormat)
 		}
+		comment.Teammate = teammate.String
 		out = append(out, comment)
 	}
 	return out, rows.Err()
@@ -1841,21 +1851,21 @@ func reconcileFederatedComments(
 				return err
 			}
 			if owned {
-				if comment.Body != row.body {
+				if comment.Body != row.body || comment.Teammate != row.teammate {
 					return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
 				}
 				continue
 			}
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE comments SET issue_id = ?, author = ?, body = ?, created_at = ? WHERE id = ?`,
-				issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), row.id); err != nil {
+				`UPDATE comments SET issue_id = ?, author = ?, body = ?, created_at = ?, teammate = NULLIF(?, '') WHERE id = ?`,
+				issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), comment.Teammate, row.id); err != nil {
 				return fmt.Errorf("update federated comment %s: %w", uid, err)
 			}
 			continue
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO comments(uid, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?)`,
-			comment.UID, issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt)); err != nil {
+			`INSERT INTO comments(uid, issue_id, author, body, created_at, teammate) VALUES(?, ?, ?, ?, ?, NULLIF(?, ''))`,
+			comment.UID, issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), comment.Teammate); err != nil {
 			return fmt.Errorf("insert federated comment %s: %w", uid, err)
 		}
 	}
@@ -1863,8 +1873,9 @@ func reconcileFederatedComments(
 }
 
 type federatedCommentRow struct {
-	id   int64
-	body string
+	id       int64
+	body     string
+	teammate string
 }
 
 func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
@@ -1886,7 +1897,7 @@ func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID 
 
 func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]federatedCommentRow, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT c.uid, c.id, c.body
+		SELECT c.uid, c.id, c.body, c.teammate
 		  FROM comments c
 		  JOIN issues i ON i.id = c.issue_id
 		 WHERE i.project_id = ?`, projectID)
@@ -1898,9 +1909,11 @@ func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64)
 	for rows.Next() {
 		var uid string
 		var row federatedCommentRow
-		if err := rows.Scan(&uid, &row.id, &row.body); err != nil {
+		var teammate sql.NullString
+		if err := rows.Scan(&uid, &row.id, &row.body, &teammate); err != nil {
 			return nil, fmt.Errorf("scan federated comment: %w", err)
 		}
+		row.teammate = teammate.String
 		out[uid] = row
 	}
 	return out, rows.Err()

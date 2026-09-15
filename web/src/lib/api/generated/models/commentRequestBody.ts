@@ -5,4 +5,5 @@
 export interface CommentRequestBody {
   actor?: string
   body: string
+  teammate?: string
 }

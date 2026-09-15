@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/shortid"
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -29,6 +30,10 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
+		}
+		handle, err := teammate.Resolve(in.Body.Teammate, "")
+		if err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
 		var issue db.Issue
 		resolved := false
@@ -71,7 +76,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			if match != nil {
-				return replayComment(ctx, cfg, in.ProjectID, match, actor, in.Body.Body)
+				return replayComment(ctx, cfg, in.ProjectID, match, actor, in.Body.Body, handle)
 			}
 		}
 		if !resolved {
@@ -81,11 +86,12 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		if in.IdempotencyKey != "" {
-			fingerprint = commentIdempotencyFingerprint(issue.UID, actor, in.Body.Body)
+			fingerprint = commentIdempotencyFingerprint(issue.UID, actor, in.Body.Body, handle)
 		}
 		c, evt, err := cfg.DB.CreateComment(ctx, db.CreateCommentParams{
 			IssueID:                issue.ID,
 			Author:                 actor,
+			Teammate:               handle,
 			Body:                   in.Body.Body,
 			IdempotencyKey:         in.IdempotencyKey,
 			IdempotencyFingerprint: fingerprint,
@@ -173,9 +179,9 @@ func replayComment(
 	cfg ServerConfig,
 	routeProjectID int64,
 	match *db.CommentIdempotencyMatch,
-	actor, body string,
+	actor, body, teammate string,
 ) (*api.CommentResponse, error) {
-	if match.Fingerprint != commentIdempotencyFingerprint(match.IssueUID, actor, body) {
+	if match.Fingerprint != commentIdempotencyFingerprint(match.IssueUID, actor, body, teammate) {
 		return nil, api.NewError(409, "idempotency_mismatch",
 			"idempotency key matched a prior comment with a different fingerprint",
 			"use a fresh key or send the exact original comment", nil)
@@ -234,12 +240,13 @@ func receiptIssueUID(
 	return match.IssueUID, nil
 }
 
-func commentIdempotencyFingerprint(issueUID, actor, body string) string {
+func commentIdempotencyFingerprint(issueUID, actor, body, teammate string) string {
 	encoded, _ := json.Marshal(struct {
 		IssueUID string `json:"issue_uid"`
 		Actor    string `json:"actor"`
 		Body     string `json:"body"`
-	}{IssueUID: issueUID, Actor: actor, Body: body})
+		Teammate string `json:"teammate,omitempty"`
+	}{IssueUID: issueUID, Actor: actor, Body: body, Teammate: teammate})
 	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:])
 }

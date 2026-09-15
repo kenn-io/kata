@@ -226,11 +226,10 @@ func (d *Store) LookupCommentIdempotency(
 	if err := json.Unmarshal([]byte(evt.Payload), &payload); err != nil {
 		return nil, fmt.Errorf("decode comment idempotency payload: %w", err)
 	}
-	var comment db.Comment
-	err = d.QueryRowContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ? AND uid = ?`,
+	comment, err := scanComment(d.QueryRowContext(ctx,
+		`SELECT id, uid, issue_id, author, body, created_at, teammate FROM comments WHERE issue_id = ? AND uid = ?`,
 		*evt.IssueID, payload.CommentUID,
-	).Scan(&comment.ID, &comment.UID, &comment.IssueID, &comment.Author, &comment.Body, &comment.CreatedAt)
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("comment idempotency match comment: %w", db.ErrNotFound)
 	}

@@ -82,6 +82,7 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&flags.Sel.json, "json", false, "emit machine-readable JSON")
 	cmd.PersistentFlags().BoolVar(&flags.Sel.agent, "agent", false, "emit concise agent-readable text")
 	cmd.PersistentFlags().BoolVarP(&flags.Quiet, "quiet", "q", false, "suppress non-essential output")
+	cmd.PersistentFlags().String("teammate", "", "teammate attribution (default: $KATA_TEAMMATE; empty suppresses inheritance)")
 	cmd.PersistentFlags().StringVar(&flags.As, "as", "", "override actor (default: $KATA_AUTHOR > $USER > git > anonymous)")
 	cmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "path used for project resolution (default: cwd)")
 	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name for project-scoped commands")

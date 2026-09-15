@@ -66,6 +66,7 @@ type createdLink struct {
 type issueSnapshotComment struct {
 	CommentUID string `json:"comment_uid"`
 	Author     string `json:"author"`
+	Teammate   string `json:"teammate,omitempty"`
 	Body       string `json:"body"`
 	CreatedAt  string `json:"created_at"`
 }

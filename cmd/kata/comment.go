@@ -44,14 +44,25 @@ func newCommentCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		handle, err := resolveTeammate(cmd)
+		if err != nil {
+			return err
+		}
+		if err := preflightCommentTeammate(cmd, handle); err != nil {
+			return err
+		}
 		project, issue, err := prepareIssueMutation(cmd, args[0], false)
 		if err != nil {
 			return err
 		}
 		actor, _ := resolveActor(project.api.ctx, flags.As, nil)
+		payload := map[string]any{"actor": actor, "body": body}
+		if handle != "" {
+			payload["teammate"] = handle
+		}
 		bs, err := project.mutate(http.MethodPost,
 			"/issues/"+url.PathEscape(issue.RefForAPI)+"/comments",
-			map[string]any{"actor": actor, "body": body}, nil)
+			payload, nil)
 		if err != nil {
 			return err
 		}

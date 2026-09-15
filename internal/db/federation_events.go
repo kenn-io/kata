@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"go.kenn.io/kata/internal/teammate"
 )
 
 // EventTimestampFormat is the millisecond UTC representation covered by portable event hashes.
@@ -59,26 +61,62 @@ func ValidateRemoteEventContentHash(event RemoteEvent) (json.RawMessage, string,
 	return payload, createdAt, nil
 }
 
-// ValidateFederationSnapshotEntries checks embedded entries without changing
-// historical authors. Author preservation must not bypass payload validation.
-func ValidateFederationSnapshotEntries(event RemoteEvent) error {
+// ValidateFederationEntries checks comment teammate attribution and requires
+// embedded comments and links to be JSON objects on created and snapshot events.
+// Ingest and pull paths must call it before persisting the event.
+func ValidateFederationEntries(eventType, eventUID string, payloadJSON json.RawMessage) error {
+	if eventType == "issue.commented" {
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+			return fmt.Errorf("%w: event %s %s payload is invalid JSON",
+				ErrFederationIngestValidation, eventUID, eventType)
+		}
+		return validateFederationTeammate(payload["teammate"], eventUID, eventType)
+	}
+	if eventType != "issue.snapshot" && eventType != "issue.created" {
+		return nil
+	}
 	var payload struct {
 		Comments []map[string]json.RawMessage `json:"comments"`
 		Links    []map[string]json.RawMessage `json:"links"`
 	}
-	if err := json.Unmarshal(event.Payload, &payload); err != nil {
-		return fmt.Errorf("%w: event %s issue.snapshot entries are invalid JSON",
-			ErrFederationIngestValidation, event.EventUID)
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		return fmt.Errorf("%w: event %s %s entries are invalid JSON",
+			ErrFederationIngestValidation, eventUID, eventType)
 	}
 	for field, entries := range map[string][]map[string]json.RawMessage{
 		"comments": payload.Comments, "links": payload.Links,
 	} {
 		for _, entry := range entries {
 			if entry == nil {
-				return fmt.Errorf("%w: event %s issue.snapshot %s payload entry must be a JSON object",
-					ErrFederationIngestValidation, event.EventUID, field)
+				return fmt.Errorf("%w: event %s %s %s payload entry must be a JSON object",
+					ErrFederationIngestValidation, eventUID, eventType, field)
+			}
+			if field == "comments" {
+				if err := validateFederationTeammate(entry["teammate"], eventUID, eventType); err != nil {
+					return err
+				}
 			}
 		}
+	}
+	return nil
+}
+
+func validateFederationTeammate(raw json.RawMessage, eventUID, eventType string) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value *string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return fmt.Errorf("%w: event %s %s teammate must be a string",
+			ErrFederationIngestValidation, eventUID, eventType)
+	}
+	if value == nil {
+		return nil
+	}
+	if err := teammate.Validate(*value); err != nil {
+		return fmt.Errorf("%w: event %s %s: %v",
+			ErrFederationIngestValidation, eventUID, eventType, err)
 	}
 	return nil
 }

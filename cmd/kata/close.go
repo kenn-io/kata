@@ -247,7 +247,7 @@ func runAction(cmd *cobra.Command, raw, action string, extra map[string]any) err
 func runActionWithHeaders(
 	cmd *cobra.Command, raw, action string, extra map[string]any, headers map[string]string,
 ) error {
-	comment, err := commentFromFlag(cmd)
+	comment, handle, err := prepareFollowupComment(cmd)
 	if err != nil {
 		return err
 	}
@@ -291,7 +291,7 @@ func runActionWithHeaders(
 		commentIssueRef = response.Body.Issue.UID
 	}
 	if err := postFollowupCommentWithKey(
-		ctx, client, baseURL, commentProjectID, commentIssueRef, actor, comment, commentKey,
+		ctx, client, baseURL, commentProjectID, commentIssueRef, actor, comment, handle, commentKey,
 	); err != nil {
 		return err
 	}

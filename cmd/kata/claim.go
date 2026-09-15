@@ -29,7 +29,7 @@ func newClaimCmd() *cobra.Command {
 }
 
 func runClaim(cmd *cobra.Command, raw string, force, ifUnowned bool) error {
-	comment, err := commentFromFlag(cmd)
+	comment, handle, err := prepareFollowupComment(cmd)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func runClaim(cmd *cobra.Command, raw string, force, ifUnowned bool) error {
 	if status >= 400 {
 		return apiErrFromBody(status, bs)
 	}
-	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
+	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, handle); err != nil {
 		return err
 	}
 	return printClaimMutation(cmd, bs)

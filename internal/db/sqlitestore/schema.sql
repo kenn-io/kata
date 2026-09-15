@@ -78,6 +78,7 @@ CREATE TABLE comments (
   author     TEXT NOT NULL,
   body       TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  teammate TEXT,
   CHECK (length(uid) = 26),
   CHECK (length(trim(author)) > 0),
   CHECK (length(trim(body))   > 0)

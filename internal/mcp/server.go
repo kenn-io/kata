@@ -14,6 +14,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"go.kenn.io/kata/internal/storageadmin"
+	"go.kenn.io/kata/internal/teammate"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -32,6 +33,7 @@ type Options struct {
 	Scope             *Scope
 	ProjectID         int64
 	ProjectName       string
+	Teammate          string
 	Actor             string
 	Version           string
 	StorageAdmin      *storageadmin.Admin
@@ -60,6 +62,9 @@ func New(options Options) (*sdkmcp.Server, error) {
 		}
 		options.ProjectID = projects[0].ID
 		options.ProjectName = projects[0].Name
+	}
+	if err := teammate.Validate(options.Teammate); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(options.Actor) == "" {
 		return nil, errors.New("kata actor is required")
@@ -592,6 +597,7 @@ type ShowInput struct {
 
 // CreateInput creates one issue and its initial relationships.
 type CreateInput struct {
+	Teammate       *string        `json:"teammate,omitempty" jsonschema:"Teammate handle; empty suppresses the startup default"`
 	Project        string         `json:"project,omitempty" jsonschema:"Target project; required in multi-project modes"`
 	Title          string         `json:"title" jsonschema:"Concise issue title"`
 	Body           string         `json:"body,omitempty" jsonschema:"Issue context, reason, and acceptance details"`
@@ -635,9 +641,10 @@ type EditInput struct {
 
 // CommentInput appends an idempotent comment.
 type CommentInput struct {
-	Ref            string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
-	Body           string `json:"body" jsonschema:"Comment body"`
-	IdempotencyKey string `json:"idempotency_key" jsonschema:"Stable unique key for safe retries"`
+	Teammate       *string `json:"teammate,omitempty" jsonschema:"Teammate handle; empty suppresses the startup default"`
+	Ref            string  `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
+	Body           string  `json:"body" jsonschema:"Comment body"`
+	IdempotencyKey string  `json:"idempotency_key" jsonschema:"Stable unique key for safe retries"`
 }
 
 // ClaimInput claims an issue, optionally replacing its current owner.
@@ -771,6 +778,7 @@ type LabelsOutput struct {
 
 // CommentSummary is a bounded comment representation.
 type CommentSummary struct {
+	Teammate  string `json:"teammate,omitempty"`
 	UID       string `json:"uid"`
 	Author    string `json:"author"`
 	Body      string `json:"body"`

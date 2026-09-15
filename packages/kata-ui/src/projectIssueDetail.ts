@@ -79,6 +79,7 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
     comments: (wire.comments ?? []).map((comment) => ({
       id: String(comment.id),
       author: comment.author,
+      ...(comment.teammate === undefined ? {} : { teammate: comment.teammate }),
       body: comment.body,
       createdAt: comment.created_at,
     })),

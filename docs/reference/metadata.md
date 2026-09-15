@@ -151,17 +151,32 @@ on **equality against a string value**. Multiple `--meta` filters are ANDed
 together. The filter is project-scoped because `kata list` is project-scoped; for
 cross-project dashboards, poll each project or consume the event stream.
 
+## Issue creation teammate (`metadata.teammate`)
+
+When `kata create` or `kata.create` resolves a nonempty teammate, it stores
+that string in the new issue's initial `metadata.teammate`. It records which
+participant created the issue under the accountable author. The key remains
+ordinary, auditable issue metadata: explicit metadata edits keep their existing
+semantics, and later comments or issue edits do not refresh it.
+
+Comments use their dedicated optional `teammate` field. There is no issue
+teammate column and no arbitrary per-comment metadata object.
+
 ## Teammate requests (`notify.*` keys)
 
-Use `kata notify <ref> --to <teammate> --message <reason>` to write a request,
-and `kata notify <ref> --to <teammate> --clear` to remove it. The CLI owns the
-encoding: each key is `notify.` followed by the unpadded base64url encoding of
-the trimmed, case-sensitive recipient handle. Its value is an object containing
-`from` and `message` strings. These keys remain opaque to the daemon.
+Use `kata notify <ref> --to <actor>[/<teammate>] --message <reason>` to write
+a request, and the same exact address with `--clear` to remove it. The CLI owns
+the encoding: each key is `notify.` followed by the unpadded base64url encoding
+of the trimmed, case-sensitive recipient handle. Its value is an object
+containing `from` and `message` strings plus an optional `teammate` string
+identifying the sender participant. These keys remain opaque to the daemon.
 
-`kata inbox --for <teammate>` reads requests on open issues in the selected
-project. Closing hides requests without deleting them; reopening restores
-uncleared requests. Requests do not change ownership or readiness.
+`kata inbox --for <actor>[/<teammate>]` reads requests on open issues in the
+selected project. Closing hides requests without deleting them; reopening
+restores uncleared requests. The actor address does not aggregate teammate
+addresses. Requests do not change ownership or readiness. A replacement and
+clear can race, so consumers must treat the value as current attention state
+rather than a lossless message queue.
 
 ## Orchestration conventions (`work.*` keys)
 

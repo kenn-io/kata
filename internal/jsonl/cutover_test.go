@@ -66,6 +66,8 @@ func TestAutoCutoverPreservesMovedIssueHistory(t *testing.T) {
 		require.NoError(t, err)
 		before = append(before, event)
 	}
+	_, err = source.ExecContext(ctx, `ALTER TABLE comments DROP COLUMN teammate`)
+	require.NoError(t, err)
 	_, err = source.ExecContext(ctx,
 		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
 	require.NoError(t, err)
@@ -85,6 +87,16 @@ func TestAutoCutoverPreservesMovedIssueHistory(t *testing.T) {
 	got, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	assert.Equal(t, to.ID, got.ProjectID)
+	comments, err := target.CommentsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 2)
+	assert.Empty(t, comments[0].Teammate)
+	assert.Empty(t, comments[1].Teammate)
+	attributed, _, err := target.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: got.ID, Author: "tester", Teammate: "reviewer-7", Body: "After upgrade",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "reviewer-7", attributed.Teammate)
 }
 
 func TestAutoCutoverRefusesExistingTempFiles(t *testing.T) {

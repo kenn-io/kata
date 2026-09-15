@@ -256,6 +256,9 @@ func validateFederationBoundActorPayload(
 	boundActor string,
 	allowSnapshotAuthorPreservation bool,
 ) error {
+	if err := db.ValidateFederationEntries(event.Type, event.EventUID, event.Payload); err != nil {
+		return err
+	}
 	boundActor = strings.TrimSpace(boundActor)
 	if boundActor == "" {
 		return nil
@@ -263,7 +266,7 @@ func validateFederationBoundActorPayload(
 	switch event.Type {
 	case "issue.snapshot":
 		if allowSnapshotAuthorPreservation {
-			return db.ValidateFederationSnapshotEntries(event)
+			return nil
 		}
 		if err := validateFederationPayloadAuthor(event, boundActor); err != nil {
 			return err

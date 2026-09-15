@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -172,8 +173,9 @@ func exportToBuffer(ctx context.Context, t *testing.T, src *sqlitestore.Store) *
 }
 
 type richJSONLFixture struct {
-	DB      *sqlitestore.Store
-	Project db.Project
+	DB               *sqlitestore.Store
+	Project          db.Project
+	TeammateIssueUID string
 }
 
 // createTesterIssue creates an issue authored by "tester" with the given title,
@@ -224,7 +226,15 @@ func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 	attachAlias(ctx, t, d, p1.ID, "kata-local", "local", "/work/kata")
 	attachAlias(ctx, t, d, p2.ID, "github.com/wesm/other", "git", "/tmp/other")
 
-	login := createTesterIssue(ctx, t, d, p1.ID, "orchid login regression", "Safari login fails after the orchid rollout", "bug", "frontend")
+	login, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p1.ID,
+		Title:     "orchid login regression",
+		Body:      "Safari login fails after the orchid rollout",
+		Author:    "tester",
+		Labels:    []string{"bug", "frontend"},
+		Metadata:  map[string]json.RawMessage{"teammate": json.RawMessage(`"teammate-1"`)},
+	})
+	require.NoError(t, err)
 	blocker := createTesterIssue(ctx, t, d, p1.ID, "api blocker", "Backend response blocks login", "backend")
 	softDeleted := createTesterIssue(ctx, t, d, p1.ID, "soft deleted keeps FTS", "deleted but still exportable")
 	purged := createTesterIssue(ctx, t, d, p1.ID, "purged audit trail", "purged body should leave purge_log only", "audit")
@@ -250,7 +260,10 @@ func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 		strings.Repeat("c", 64), "01HZZZZZZZZZZZZZZZZZZZZZ03", p1.ID, "pull,push", "tester")
 	require.NoError(t, err)
 
-	addTesterComment(ctx, t, d, login.ID, "watermelon comment text")
+	_, _, err = d.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: login.ID, Author: "tester", Teammate: "reviewer-7", Body: "watermelon comment text",
+	})
+	require.NoError(t, err)
 	addTesterComment(ctx, t, d, purged.ID, "purged comment text")
 
 	_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{
@@ -273,7 +286,7 @@ func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 	require.NoError(t, err)
 	require.NotNil(t, pl.PurgeResetAfterEventID)
 
-	return richJSONLFixture{DB: d, Project: p1}
+	return richJSONLFixture{DB: d, Project: p1, TeammateIssueUID: login.UID}
 }
 
 // v7Issue is a minimal issue fixture for buildV7Fixture. The fixture emits a

@@ -51,7 +51,7 @@ type moveResponseWire struct {
 }
 
 func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) error {
-	comment, err := commentFromFlag(cmd)
+	comment, handle, err := prepareFollowupComment(cmd)
 	if err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 	if err := json.Unmarshal(bs, &moved); err != nil {
 		return err
 	}
-	if err := postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment); err != nil {
+	if err := postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment, handle); err != nil {
 		return err
 	}
 	return printMove(cmd, bs, ref.ProjectName, sourceIssue.ShortID, target.Name)

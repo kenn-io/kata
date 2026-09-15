@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "ac18204f243ce27534e2dc584392492ff0deb4f9bad259b4eb40dc2db2131bd3"
+	canonicalColumnFingerprint     = "7febbea282618dcf8feaeb7968e8c6abfc898cef5cc55bc1496ca806567eb7eb"
 	canonicalConstraintFingerprint = "622da4ed2d6779e3f627ef3e4c8287ef6d1b4876a139ca9b6f7d8fa11a8192f4"
 	canonicalIndexFingerprint      = "e128126dddd2ce0bc37ac07a4cc98352f556f0e986c34e0e83b73d06594e848b"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
@@ -24,7 +24,7 @@ const (
 
 var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
 	"api_tokens":              "id,token_hash,actor,name,created_at,last_used_at,revoked_at",
-	"comments":                "id,uid,issue_id,author,body,created_at",
+	"comments":                "id,uid,issue_id,author,body,created_at,teammate",
 	"events":                  "id,uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,related_issue_id,related_issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at",
 	"external_field_mappings": "id,connector_instance,kata_field,external_field_id,external_field_name,accepted_kinds_json,nullable,writable,schema_revision,active,created_at,updated_at",
 	"external_field_states":   "binding_id,mapping_id,baseline_json,conflicted,conflict_kata,conflict_external,conflict_at,updated_at",

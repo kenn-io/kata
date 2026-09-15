@@ -62,7 +62,7 @@ func newEditCmd() *cobra.Command {
 
 	// RunE is set after flag registration so we can reference cmd.Flags().Changed.
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		comment, err := commentFromFlag(cmd)
+		comment, handle, err := prepareFollowupComment(cmd)
 		if err != nil {
 			return err
 		}
@@ -154,7 +154,7 @@ func newEditCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if err := project.comment(bs, issue.RefForAPI, actor, comment); err != nil {
+		if err := project.comment(bs, issue.RefForAPI, actor, comment, handle); err != nil {
 			return err
 		}
 		return printMutationWithApplied(cmd, bs, nil, project.name)

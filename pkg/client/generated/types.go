@@ -513,6 +513,7 @@ type Comment struct {
 	CreatedAt time.Time `json:"created_at" validate:"required"`
 	ID        int64     `json:"id"`
 	IssueID   int64     `json:"issue_id"`
+	Teammate  *string   `json:"teammate,omitempty"`
 	UID       string    `json:"uid" validate:"required"`
 }
 
@@ -521,8 +522,9 @@ func (c Comment) Validate() error {
 }
 
 type CommentRequestBody struct {
-	Actor *string `json:"actor,omitempty"`
-	Body  string  `json:"body" validate:"required"`
+	Actor    *string `json:"actor,omitempty"`
+	Body     string  `json:"body" validate:"required"`
+	Teammate *string `json:"teammate,omitempty"`
 }
 
 func (c CommentRequestBody) Validate() error {

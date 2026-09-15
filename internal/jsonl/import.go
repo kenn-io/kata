@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -293,6 +294,9 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return nil, err
 		}
 		if err := normalizeCommentTimes(&rec); err != nil {
+			return nil, err
+		}
+		if err := teammate.Validate(rec.Teammate); err != nil {
 			return nil, err
 		}
 		if err := fillCommentUID(&rec); err != nil {
