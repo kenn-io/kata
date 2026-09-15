@@ -57,7 +57,14 @@ digraph kata {
 }
 ~~~
 
-Only write your own work.*; update status before stopping. Schedule/someday defer work; deadlines don’t.
+Parent links group work; they do not gate readiness, but a parent cannot close with open children.
+Use --blocks <dependent> / --blocked-by <prerequisite> only for real prerequisites; they gate kata ready.
+Use --related <ref> for context only. kata wait observes state without requiring a dependency edge.
+
+One writer per key: only write your own work.*. Ignore work.* on closed issues; never write it there.
+Before stopping, close completed work or update both work.attention and work.attention_msg for the handoff.
+
+Schedule/someday defer work; deadlines don’t. kata deadline <ref> <date-or-time> sets deadline_on without changing readiness.
 `
 
 // agentsManagedBlock returns the full marker-delimited block kata writes.
