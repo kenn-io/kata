@@ -1376,7 +1376,8 @@ func issueWebURL(cfg ServerConfig, uid string) string {
 	if cfg.WebSessions == nil || uid == "" {
 		return ""
 	}
-	return cfg.WebSessions.Origin() + "/kata?issue=" + uid
+	link, _ := safeUILaunchURL(cfg.WebSessions, uid)
+	return link
 }
 
 func addIssueWebURLs(cfg ServerConfig, issues []api.IssueOut) {
