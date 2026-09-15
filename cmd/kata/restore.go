@@ -4,10 +4,10 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // newRestoreCmd returns the cobra.Command for `kata restore`.
@@ -31,15 +31,21 @@ func newRestoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/restore", baseURL, pid, url.PathEscape(issue.RefForAPI)),
-				map[string]any{"actor": actor})
+			apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 			if err != nil {
 				return err
 			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
+			response, callErr := apiClient.RestoreIssueWithResponse(ctx, &generated.RestoreIssueRequestOptions{
+				PathParams: &generated.RestoreIssuePath{ProjectID: pid, Ref: issue.RefForAPI},
+				Body:       &generated.RestoreIssueBody{Actor: actor},
+			})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
 			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			if currentOutputMode() == outputAgent {
 				var m agentIssueMutation
 				if err := json.Unmarshal(bs, &m); err != nil {

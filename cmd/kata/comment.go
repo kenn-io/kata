@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newCommentCmd() *cobra.Command {
@@ -115,16 +117,21 @@ func newCommentEditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPatch,
-				fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/comments/%s",
-					baseURL, pid, url.PathEscape(issue.RefForAPI), url.PathEscape(commentRef)),
-				map[string]any{"actor": actor, "body": body})
+			apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 			if err != nil {
 				return err
 			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
+			response, callErr := apiClient.EditCommentWithResponse(ctx, &generated.EditCommentRequestOptions{
+				PathParams: &generated.EditCommentPath{ProjectID: pid, Ref: issue.RefForAPI, CommentRef: commentRef},
+				Body:       &generated.EditCommentBody{Actor: actor, Body: body},
+			})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
 			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			switch currentOutputMode() {
 			case outputJSON:
 				var buf bytes.Buffer

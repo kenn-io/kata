@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // addCommentFlag registers --comment on a mutation command. Commands that
@@ -61,29 +62,33 @@ func postFollowupCommentWithKey(
 	if body == "" {
 		return nil
 	}
-	headers := map[string]string{}
-	if idempotencyKey != "" {
-		headers["Idempotency-Key"] = idempotencyKey
-	}
+
 	retryInstruction := fmt.Sprintf("retry with: kata comment %s --body ...", issueRef)
 	if idempotencyKey != "" {
 		retryInstruction = "rerun the original kata close command with the same --idempotency-key"
 	}
-	payload := map[string]any{"actor": actor, "body": body}
-	if teammate != "" {
-		payload["teammate"] = teammate
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	if err != nil {
+		return err
 	}
-	status, bs, err := httpDoJSONWithHeader(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/comments", baseURL, projectID, url.PathEscape(issueRef)),
-		headers, payload)
+	options := &generated.CreateCommentRequestOptions{
+		PathParams: &generated.CreateCommentPath{ProjectID: fmt.Sprint(projectID), Ref: issueRef},
+		Body:       &generated.CreateCommentBody{Actor: &actor, Body: body},
+	}
+	if teammate != "" {
+		options.Body.Teammate = &teammate
+	}
+	if idempotencyKey != "" {
+		options.Header = &generated.CreateCommentHeaders{IdempotencyKey: &idempotencyKey}
+	}
+	response, callErr := apiClient.CreateCommentWithResponse(ctx, options)
+	err = externalCLITransportError(response, callErr)
+	if err == nil {
+		err = externalCLIResponseError(response.StatusCode, response.Body, callErr)
+	}
 	if err != nil {
 		return fmt.Errorf("issue mutation succeeded but appending --comment failed: %w "+
 			"(%s)", err, retryInstruction)
-	}
-	if status >= 400 {
-		base := apiErrFromBody(status, bs)
-		return fmt.Errorf("issue mutation succeeded but appending --comment failed: %w "+
-			"(%s)", base, retryInstruction)
 	}
 	return nil
 }

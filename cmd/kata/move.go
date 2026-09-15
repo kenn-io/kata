@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newMoveCmd() *cobra.Command {
@@ -83,19 +84,23 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 		return printMovePreview(cmd, ref.ProjectName, sourceIssue.ShortID, target.Name)
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	status, bs, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/move", baseURL, pid, url.PathEscape(ref.RefForAPI)),
-		map[string]any{
-			"actor":          actor,
-			"to_project_uid": target.UID,
-		},
-		map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)})
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
+	etag := fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)
+	response, callErr := apiClient.MoveIssueWithResponse(ctx, &generated.MoveIssueRequestOptions{
+		PathParams: &generated.MoveIssuePath{ProjectID: pid, Ref: ref.RefForAPI},
+		Body:       &generated.MoveIssueBody{Actor: &actor, ToProjectUID: target.UID},
+		Header:     &generated.MoveIssueHeaders{IfMatch: &etag},
+	})
+	if err := externalCLITransportError(response, callErr); err != nil {
+		return err
 	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return err
+	}
+	bs := response.Body
 	var moved moveResponseWire
 	if err := json.Unmarshal(bs, &moved); err != nil {
 		return err
@@ -107,13 +112,9 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 }
 
 func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, projectID int64, ref string) (moveIssueWire, error) {
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, projectID, url.PathEscape(ref)), nil)
+	_, bs, err := fetchMetaIssue(ctx, client, baseURL, projectID, ref)
 	if err != nil {
 		return moveIssueWire{}, err
-	}
-	if status >= 400 {
-		return moveIssueWire{}, apiErrFromBody(status, bs)
 	}
 	var out struct {
 		Issue moveIssueWire `json:"issue"`
