@@ -36,7 +36,7 @@ type PingResponse struct {
 type HealthResponse struct {
 	Body struct {
 		OK               bool                    `json:"ok"`
-		DBPath           string                  `json:"db_path"`
+		DBPath           string                  `json:"db_path,omitempty"`
 		SchemaVersion    int                     `json:"schema_version"`
 		APISchemaVersion string                  `json:"api_schema_version,omitempty"`
 		Version          string                  `json:"version"`
@@ -70,12 +70,17 @@ type UILoginRequest struct {
 // UISessionResponse contains the non-cookie half of browser authority plus
 // the effective capabilities the SPA must honor.
 type UISessionResponse struct {
-	Session     string `json:"session"`
-	CSRF        string `json:"csrf"`
-	ReturnPath  string `json:"return_path"`
-	Writable    bool   `json:"writable"`
-	Updates     string `json:"updates"`
-	ActorPolicy string `json:"actor_policy"`
+	Session               string         `json:"session"`
+	CSRF                  string         `json:"csrf"`
+	ReturnPath            string         `json:"return_path"`
+	Writable              bool           `json:"writable"`
+	Updates               string         `json:"updates"`
+	ActorPolicy           string         `json:"actor_policy"`
+	Scope                 *TokenScopeOut `json:"scope,omitempty"`
+	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
+	AllowedActions        []string       `json:"allowed_actions,omitempty"`
+	CloseRequiresEvidence bool           `json:"close_requires_evidence,omitempty,omitzero"`
+	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
 }
 
 // EmbeddingsHealth is the semantic-search reconciler's operator-visible state
@@ -121,6 +126,7 @@ type InstanceResponse struct {
 		SchemaVersion        int64          `json:"schema_version"`
 		WebUIContractVersion string         `json:"web_ui_contract_version,omitempty"`
 		WebUICapabilities    UICapabilities `json:"web_ui_capabilities"`
+		IssueSubtreeTokens   bool           `json:"issue_subtree_tokens"`
 		Auth                 AuthInfoOut    `json:"auth"`
 	}
 }
@@ -128,26 +134,52 @@ type InstanceResponse struct {
 // AuthInfoOut is redacted request-auth metadata for the current request.
 // It never includes bearer token plaintext or token hashes.
 type AuthInfoOut struct {
-	Kind  string `json:"kind"`
-	Actor string `json:"actor,omitempty"`
+	Kind                  string         `json:"kind"`
+	Actor                 string         `json:"actor,omitempty"`
+	Scope                 *TokenScopeOut `json:"scope,omitempty"`
+	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
+	AllowedActions        []string       `json:"allowed_actions,omitempty"`
+	CloseRequiresEvidence bool           `json:"close_requires_evidence,omitempty,omitzero"`
+	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
+}
+
+// TokenScopeOut is the immutable, redacted native grant attached to a token.
+type TokenScopeOut struct {
+	Kind         string `json:"kind" enum:"issue_subtree"`
+	ProjectUID   string `json:"project_uid"`
+	RootIssueUID string `json:"root_issue_uid"`
+}
+
+// TokenScopeIn is the strict request form of TokenScopeOut. Response objects
+// remain additive for compatible clients, while credential creation rejects
+// unknown policy fields rather than implying caller-defined permissions.
+type TokenScopeIn struct {
+	Kind         string `json:"kind" enum:"issue_subtree"`
+	ProjectUID   string `json:"project_uid"`
+	RootIssueUID string `json:"root_issue_uid"`
 }
 
 // CreateTokenRequest is POST /api/v1/tokens.
 type CreateTokenRequest struct {
 	Body struct {
-		Actor string `json:"actor" required:"true"`
-		Name  string `json:"name,omitempty"`
+		Actor            string        `json:"actor" required:"true"`
+		Name             string        `json:"name,omitempty"`
+		Scope            *TokenScopeIn `json:"scope,omitempty"`
+		ExpiresInSeconds int64         `json:"expires_in_seconds,omitempty"`
 	}
 }
 
 // TokenOut is the redacted token metadata returned by token-admin endpoints.
 type TokenOut struct {
-	ID         int64      `json:"id"`
-	Actor      string     `json:"actor"`
-	Name       *string    `json:"name"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	RevokedAt  *time.Time `json:"revoked_at"`
+	ID         int64          `json:"id"`
+	Actor      string         `json:"actor"`
+	Name       *string        `json:"name"`
+	Scope      *TokenScopeOut `json:"scope,omitempty"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
+	LastUsedAt *time.Time     `json:"last_used_at"`
+	RevokedAt  *time.Time     `json:"revoked_at"`
+	State      string         `json:"state" enum:"live,expired,revoked"`
 }
 
 // CreateTokenResponse returns the plaintext token exactly once.
@@ -161,7 +193,8 @@ type CreateTokenResponse struct {
 // ListTokensResponse returns redacted token metadata.
 type ListTokensResponse struct {
 	Body struct {
-		Tokens []TokenOut `json:"tokens"`
+		Tokens     []TokenOut `json:"tokens"`
+		ObservedAt time.Time  `json:"observed_at"`
 	}
 }
 
@@ -239,6 +272,7 @@ type ProjectOut struct {
 	Name      string      `json:"name"`
 	Metadata  db.JSONBlob `json:"metadata"`
 	Revision  int64       `json:"revision"`
+	Active    bool        `json:"active"`
 	CreatedAt time.Time   `json:"created_at"`
 	DeletedAt *time.Time  `json:"deleted_at,omitempty"`
 

@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -42,11 +43,13 @@ const (
 
 // Principal is the request-local identity derived by auth middleware.
 type Principal struct {
-	Kind    PrincipalKind
-	Actor   string
-	Subject string
-	TokenID int64
-	Name    *string
+	Kind      PrincipalKind
+	Actor     string
+	Subject   string
+	TokenID   int64
+	Name      *string
+	Scope     *db.APITokenScope
+	ExpiresAt *time.Time
 }
 
 type principalContextKey struct{}
@@ -132,6 +135,23 @@ func ensureTokenAdminAllowed(ctx context.Context) error {
 		"token administration requires the bootstrap token or a local no-auth session", "", nil)
 }
 
+// tokenAuditReadAllowed reports the same effective read authority as
+// GET /api/v1/tokens. It stays separate from ordinary UI writability: a
+// bootstrap browser session is issue-read-only but may inspect the redacted
+// credential ledger, while an owner-local browser session may edit issues but
+// may not administer or inspect credentials.
+func tokenAuditReadAllowed(ctx context.Context) bool {
+	if insecureReadonlyRequest(ctx) || unauthenticatedPrivateNetworkRequest(ctx) {
+		return false
+	}
+	p, ok := PrincipalFromContext(ctx)
+	return !ok || p.Kind == PrincipalBootstrap || p.Kind == PrincipalStaticToken
+}
+
+func principalTokenAuditReadAllowed(principal Principal) bool {
+	return principal.Kind == PrincipalBootstrap || principal.Kind == PrincipalStaticToken
+}
+
 func tokenAdminAuditActor(ctx context.Context, fallback string) string {
 	if p, ok := PrincipalFromContext(ctx); ok &&
 		(p.Kind == PrincipalBootstrap || p.Kind == PrincipalStaticToken) {
@@ -156,6 +176,10 @@ func tuiBypassAllowed(ctx context.Context, source, reason string) bool {
 		}
 	}
 	return ownerLocalTransport(ctx)
+}
+
+func closeRequiresEvidence(ctx context.Context) bool {
+	return !tuiBypassAllowed(ctx, "tui", "done")
 }
 
 // withOwnerLocalTransport derives the local TUI trust fact from the accepted
@@ -198,9 +222,11 @@ func ownerLocalTransport(ctx context.Context) bool {
 
 func principalFromAPIToken(tok db.APIToken) Principal {
 	return Principal{
-		Kind:    PrincipalDBToken,
-		Actor:   tok.Actor,
-		TokenID: tok.ID,
-		Name:    tok.Name,
+		Kind:      PrincipalDBToken,
+		Actor:     tok.Actor,
+		TokenID:   tok.ID,
+		Name:      tok.Name,
+		Scope:     tok.Scope,
+		ExpiresAt: tok.ExpiresAt,
 	}
 }

@@ -166,11 +166,15 @@ func (m *WebSessionManager) IssueSession(principal Principal, returnPath string)
 		return IssuedWebSession{}, err
 	}
 	sessionKey := sha256.Sum256([]byte(session))
+	expiresAt := m.clock().Add(webSessionTTL)
+	if principal.ExpiresAt != nil && principal.ExpiresAt.Before(expiresAt) {
+		expiresAt = *principal.ExpiresAt
+	}
 	m.mu.Lock()
 	m.sessions[sessionKey] = webSessionState{
 		csrfHash:  sha256.Sum256([]byte(csrf)),
 		principal: principal,
-		expiresAt: m.clock().Add(webSessionTTL),
+		expiresAt: expiresAt,
 	}
 	m.mu.Unlock()
 	return IssuedWebSession{
@@ -193,15 +197,15 @@ func (m *WebSessionManager) Authenticate(ctx context.Context, cookie, session st
 		}
 		return Principal{}, ErrWebSessionInvalid
 	}
-	if state.principal.Kind == PrincipalDBToken && !m.databaseTokenActive(ctx, state.principal.TokenID) {
+	if state.principal.Kind == PrincipalDBToken && !m.databaseTokenActive(ctx, state.principal) {
 		m.Logout(session)
 		return Principal{}, ErrWebSessionInvalid
 	}
 	return state.principal, nil
 }
 
-func (m *WebSessionManager) databaseTokenActive(ctx context.Context, tokenID int64) bool {
-	if m.db == nil || tokenID == 0 {
+func (m *WebSessionManager) databaseTokenActive(ctx context.Context, principal Principal) bool {
+	if m.db == nil || principal.TokenID == 0 {
 		return false
 	}
 	tokens, err := m.db.ListAPITokens(ctx)
@@ -209,11 +213,29 @@ func (m *WebSessionManager) databaseTokenActive(ctx context.Context, tokenID int
 		return false
 	}
 	for _, token := range tokens {
-		if token.ID == tokenID {
-			return token.RevokedAt == nil
+		if token.ID == principal.TokenID {
+			if token.RevokedAt != nil || (token.ExpiresAt != nil && !m.clock().Before(*token.ExpiresAt)) {
+				return false
+			}
+			return token.Actor == principal.Actor && sameWebTokenScope(token.Scope, principal.Scope) &&
+				sameWebTokenExpiry(token.ExpiresAt, principal.ExpiresAt)
 		}
 	}
 	return false
+}
+
+func sameWebTokenScope(left, right *db.APITokenScope) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func sameWebTokenExpiry(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
 }
 
 // CheckCSRF validates a CSRF value against an existing session.
@@ -387,6 +409,10 @@ func requireBrowserSession(manager *WebSessionManager, policy ListenerPolicy, ne
 		principal, err := manager.Authenticate(r.Context(), cookie.Value, sessionValue)
 		if err != nil {
 			writeWebSessionError(w, http.StatusUnauthorized, "web_session_required", manager.Origin(), policy)
+			return
+		}
+		if principal.Scope != nil && !issueScopedRouteAllowed(r.Method, r.URL.Path) {
+			writeWebSessionError(w, http.StatusForbidden, "scoped_operation_forbidden", manager.Origin(), policy)
 			return
 		}
 		if principal.Kind == PrincipalWebLocal && !webLocalSPARequestAllowed(r) {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -101,6 +102,13 @@ func (d *Store) createAPIToken(ctx context.Context, p db.CreateAPITokenParams) (
 		}
 		p.Name = &name
 	}
+	if err := db.ValidateAPITokenGrant(p.Scope, p.ExpiresAt); err != nil {
+		return db.APIToken{}, db.Event{}, err
+	}
+	if p.ExpiresAt != nil {
+		expiresAt := p.ExpiresAt.UTC()
+		p.ExpiresAt = &expiresAt
+	}
 	sys, err := d.SystemProject(ctx)
 	if err != nil {
 		return db.APIToken{}, db.Event{}, err
@@ -112,9 +120,18 @@ func (d *Store) createAPIToken(ctx context.Context, p db.CreateAPITokenParams) (
 	defer rollbackUnlessCommitted(tx)
 
 	hash := tokenHash(p.PlaintextToken)
+	var scopeKind, scopeProjectUID, scopeRootIssueUID any
+	if p.Scope != nil {
+		scopeKind = string(p.Scope.Kind)
+		scopeProjectUID = p.Scope.ProjectUID
+		scopeRootIssueUID = p.Scope.RootIssueUID
+	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO api_tokens(token_hash, actor, name) VALUES(?, ?, ?)`,
-		hash, strings.TrimSpace(p.Actor), nullableString(p.Name))
+		`INSERT INTO api_tokens(
+			token_hash, actor, name, scope_kind, scope_project_uid, scope_root_issue_uid, expires_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+		hash, strings.TrimSpace(p.Actor), nullableString(p.Name), scopeKind,
+		scopeProjectUID, scopeRootIssueUID, formatOptionalSQLiteTime(p.ExpiresAt))
 	if err != nil {
 		return db.APIToken{}, db.Event{}, fmt.Errorf("insert api token: %w", err)
 	}
@@ -126,11 +143,13 @@ func (d *Store) createAPIToken(ctx context.Context, p db.CreateAPITokenParams) (
 	if err != nil {
 		return db.APIToken{}, db.Event{}, err
 	}
-	payload, err := json.Marshal(tokenCreatedPayload{
+	payload, err := json.Marshal(db.ReplayTokenCreated{
 		TokenID:     tok.ID,
 		TokenHash:   tok.TokenHash,
 		TargetActor: tok.Actor,
 		Name:        tok.Name,
+		Scope:       tok.Scope,
+		ExpiresAt:   tok.ExpiresAt,
 	})
 	if err != nil {
 		return db.APIToken{}, db.Event{}, fmt.Errorf("marshal token.created payload: %w", err)
@@ -218,16 +237,18 @@ func (d *Store) revokeAPIToken(ctx context.Context, id int64, adminActor string)
 func (d *Store) ResolveAPIToken(ctx context.Context, plaintext string) (db.APIToken, error) {
 	hash := tokenHash(plaintext)
 	tok, err := scanAPIToken(d.QueryRowContext(ctx,
-		apiTokenSelect+` WHERE token_hash = ? AND revoked_at IS NULL`,
+		apiTokenSelect+` WHERE token_hash = ? AND revoked_at IS NULL
+		AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
 		hash))
 	if err != nil {
 		return db.APIToken{}, err
 	}
 	res, err := d.ExecContext(ctx, `
-		UPDATE api_tokens
+		 UPDATE api_tokens
 		   SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		 WHERE token_hash = ?
 		   AND revoked_at IS NULL
+		   AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		   AND (
 		     last_used_at IS NULL OR
 		     last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
@@ -246,6 +267,13 @@ func (d *Store) ResolveAPIToken(ctx context.Context, plaintext string) (db.APITo
 		}
 	}
 	return tok, nil
+}
+
+// APITokenByID reads one credential without scanning unrelated tokens.
+func (d *Store) APITokenByID(ctx context.Context, id int64) (db.APIToken, error) {
+	token, err := scanAPIToken(d.QueryRowContext(ctx, apiTokenSelect+` WHERE id = ?`, id))
+	token.TokenHash = ""
+	return token, err
 }
 
 // ListAPITokens returns redacted token metadata for token-admin listing.
@@ -267,11 +295,60 @@ func (d *Store) ListAPITokens(ctx context.Context) ([]db.APIToken, error) {
 	return out, rows.Err()
 }
 
-const apiTokenSelect = `SELECT id, token_hash, actor, name, created_at, last_used_at, revoked_at FROM api_tokens` //nolint:gosec // SQL projection includes a token_hash column name, not a hardcoded secret.
+// IssueScopedTokenTransactionFence rechecks a scoped credential and its
+// immutable root after a write transaction begins and before its first write.
+func (d *Store) IssueScopedTokenTransactionFence(admitted db.APIToken) db.TransactionFence {
+	return func(ctx context.Context, transaction db.Transaction) error {
+		if admitted.Scope == nil || admitted.ExpiresAt == nil {
+			return db.ErrNotFound
+		}
+		current, err := scanAPIToken(transaction.QueryRowContext(ctx,
+			apiTokenSelect+` WHERE id = ?`, admitted.ID))
+		if err != nil {
+			return err
+		}
+		if !db.ActiveAPITokenGrantMatches(current, admitted, time.Now()) {
+			return db.ErrNotFound
+		}
+		var active int
+		err = transaction.QueryRowContext(ctx, `
+			SELECT 1
+			FROM projects AS project
+			JOIN issues AS root
+			  ON root.uid = ? AND root.project_id = project.id
+			WHERE project.uid = ?
+			  AND project.deleted_at IS NULL
+			  AND root.deleted_at IS NULL
+			  AND NOT EXISTS (
+			    SELECT 1 FROM federation_bindings AS binding
+			    WHERE binding.project_id = project.id AND binding.role = 'spoke'
+			  )`, admitted.Scope.RootIssueUID, admitted.Scope.ProjectUID).Scan(&active)
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if active != 1 {
+			return db.ErrNotFound
+		}
+		if err := checkIssueScopeTargets(ctx, transaction, *admitted.Scope, db.IssueScopeTargets(ctx)); err != nil {
+			return err
+		}
+		if !time.Now().UTC().Before(*admitted.ExpiresAt) {
+			return db.ErrNotFound
+		}
+		return nil
+	}
+}
+
+const apiTokenSelect = `SELECT id, token_hash, actor, name, scope_kind, scope_project_uid, scope_root_issue_uid, expires_at, created_at, last_used_at, revoked_at FROM api_tokens` //nolint:gosec // SQL projection includes a token_hash column name, not a hardcoded secret.
 
 func scanAPIToken(r rowScanner) (db.APIToken, error) {
 	var tok db.APIToken
+	var scopeKind, scopeProjectUID, scopeRootIssueUID sql.NullString
 	err := r.Scan(&tok.ID, &tok.TokenHash, &tok.Actor, &tok.Name,
+		&scopeKind, &scopeProjectUID, &scopeRootIssueUID, &tok.ExpiresAt,
 		&tok.CreatedAt, &tok.LastUsedAt, &tok.RevokedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.APIToken{}, db.ErrNotFound
@@ -279,14 +356,17 @@ func scanAPIToken(r rowScanner) (db.APIToken, error) {
 	if err != nil {
 		return db.APIToken{}, fmt.Errorf("scan api token: %w", err)
 	}
+	if scopeKind.Valid || scopeProjectUID.Valid || scopeRootIssueUID.Valid || tok.ExpiresAt != nil {
+		tok.Scope = &db.APITokenScope{
+			Kind:         db.APITokenScopeKind(scopeKind.String),
+			ProjectUID:   scopeProjectUID.String,
+			RootIssueUID: scopeRootIssueUID.String,
+		}
+	}
+	if err := db.ValidateAPITokenGrant(tok.Scope, tok.ExpiresAt); err != nil {
+		return db.APIToken{}, fmt.Errorf("scan api token grant: %w", err)
+	}
 	return tok, nil
-}
-
-type tokenCreatedPayload struct {
-	TokenID     int64   `json:"token_id"`
-	TokenHash   string  `json:"token_hash"`
-	TargetActor string  `json:"target_actor"`
-	Name        *string `json:"name,omitempty"`
 }
 
 type tokenRevokedPayload struct {

@@ -31,6 +31,9 @@ func activeProjectByID(ctx context.Context, store db.Storage, id int64) (db.Proj
 	if p.DeletedAt != nil {
 		return db.Project{}, api.NewError(404, "project_not_found", "project not found", "", nil)
 	}
+	if err := authorizeIssueScopedProject(ctx, p); err != nil {
+		return db.Project{}, err
+	}
 	return p, nil
 }
 
@@ -40,14 +43,26 @@ func activeProjectByID(ctx context.Context, store db.Storage, id int64) (db.Proj
 // that field is populated only by the list-projects handler when
 // ?include=stats is set (Task 3).
 func dbProjectToOut(p db.Project) api.ProjectOut {
+	metadata := p.Metadata
+	if len(metadata) == 0 {
+		metadata = db.JSONBlob(`{}`)
+	}
 	return api.ProjectOut{
 		ID:        p.ID,
 		UID:       p.UID,
 		Name:      p.Name,
-		Metadata:  p.Metadata,
+		Metadata:  metadata,
 		Revision:  p.Revision,
+		Active:    p.DeletedAt == nil,
 		CreatedAt: p.CreatedAt,
 		DeletedAt: p.DeletedAt,
+	}
+}
+
+func scopedProjectOut(p db.Project) api.ProjectOut {
+	return api.ProjectOut{
+		ID: p.ID, UID: p.UID, Name: p.Name, Revision: p.Revision, Active: p.DeletedAt == nil,
+		Metadata: db.JSONBlob(`{}`),
 	}
 }
 
@@ -72,6 +87,31 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/resolve",
 	}, func(ctx context.Context, in *api.ResolveProjectRequest) (*api.ResolveProjectResponse, error) {
+		if issueScopeFromContext(ctx) != nil {
+			if strings.TrimSpace(in.Body.Name) == "" {
+				return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden",
+					"operation is not available to an issue-scoped credential", "", nil)
+			}
+			project, err := cfg.DB.ProjectByName(ctx, strings.TrimSpace(in.Body.Name))
+			if errors.Is(err, db.ErrNotFound) {
+				return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
+			}
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			if err := authorizeIssueScopedProject(ctx, project); err != nil {
+				return nil, err
+			}
+			_, issueIDs, err := issueScopedMembership(ctx, cfg.DB)
+			if err != nil {
+				return nil, err
+			}
+			if len(issueIDs) == 0 {
+				return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
+			}
+			out := api.ProjectResolveBody{Project: scopedProjectOut(project)}
+			return &api.ResolveProjectResponse{Body: out}, nil
+		}
 		if resolveProjectRequestCanMutate(in) {
 			if err := ensureAttributedWriteAllowed(ctx); err != nil {
 				return nil, err
@@ -113,6 +153,18 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *struct {
 		Include string `query:"include"`
 	}) (*api.ListProjectsResponse, error) {
+		if issueScopeFromContext(ctx) != nil {
+			project, issueIDs, err := issueScopedMembership(ctx, cfg.DB)
+			if err != nil {
+				return nil, err
+			}
+			out := &api.ListProjectsResponse{}
+			out.Body.Projects = []api.ProjectOut{}
+			if len(issueIDs) > 0 {
+				out.Body.Projects = append(out.Body.Projects, scopedProjectOut(project))
+			}
+			return out, nil
+		}
 		var (
 			ps  []db.Project
 			err error
@@ -162,6 +214,18 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		p, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
 		if err != nil {
 			return nil, err
+		}
+		if issueScopeFromContext(ctx) != nil {
+			_, issueIDs, err := issueScopedMembership(ctx, cfg.DB)
+			if err != nil {
+				return nil, err
+			}
+			if len(issueIDs) == 0 {
+				return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
+			}
+			out := &api.ShowProjectResponse{}
+			out.Body.Project = scopedProjectOut(p)
+			return out, nil
 		}
 		aliases, err := cfg.DB.ProjectAliases(ctx, p.ID)
 		if err != nil {

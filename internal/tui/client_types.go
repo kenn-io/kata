@@ -196,6 +196,20 @@ type InstanceInfo struct {
 // AuthInfo is redacted request-auth metadata returned by the daemon.
 type AuthInfo = api.AuthInfoOut
 
+// TokenInfo is the daemon's redacted credential-audit projection.
+type TokenInfo = api.TokenOut
+
+// TokenScopeInfo is the immutable redacted scope attached to a credential.
+type TokenScopeInfo = api.TokenScopeOut
+
+// CloseInput is the evidence-bearing done-close payload collected by the TUI.
+type CloseInput struct {
+	Actor    string
+	Reason   string
+	Message  string
+	Evidence []api.Evidence
+}
+
 // FederationStatusBody is the daemon federation status response.
 type FederationStatusBody = api.FederationStatusBody
 

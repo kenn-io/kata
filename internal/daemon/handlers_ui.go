@@ -26,21 +26,23 @@ const (
 )
 
 type normalizedUISnapshotIntent struct {
-	View             string   `json:"view"`
-	ProjectUID       string   `json:"project_uid,omitempty"`
-	Statuses         []string `json:"statuses,omitempty"`
-	Owners           []string `json:"owners,omitempty"`
-	Labels           []string `json:"labels,omitempty"`
-	Relationships    []string `json:"relationships,omitempty"`
-	Text             string   `json:"text,omitempty"`
-	SelectedIssueUID string   `json:"selected_issue_uid,omitempty"`
-	IncludeGraph     bool     `json:"include_graph"`
-	IncludeHistory   bool     `json:"include_history"`
-	LocalDate        string   `json:"local_date,omitempty"`
-	TimeZone         string   `json:"time_zone,omitempty"`
-	ReadyAt          string   `json:"ready_at,omitempty"`
-	DefaultTimezone  string   `json:"default_timezone,omitempty"`
-	Limit            int      `json:"limit"`
+	View              string   `json:"view"`
+	ProjectUID        string   `json:"project_uid,omitempty"`
+	Statuses          []string `json:"statuses,omitempty"`
+	Owners            []string `json:"owners,omitempty"`
+	Labels            []string `json:"labels,omitempty"`
+	Relationships     []string `json:"relationships,omitempty"`
+	Text              string   `json:"text,omitempty"`
+	SelectedIssueUID  string   `json:"selected_issue_uid,omitempty"`
+	IncludeGraph      bool     `json:"include_graph"`
+	IncludeHistory    bool     `json:"include_history"`
+	LocalDate         string   `json:"local_date,omitempty"`
+	TimeZone          string   `json:"time_zone,omitempty"`
+	ReadyAt           string   `json:"ready_at,omitempty"`
+	DefaultTimezone   string   `json:"default_timezone,omitempty"`
+	Limit             int      `json:"limit"`
+	ScopeProjectUID   string   `json:"scope_project_uid,omitempty"`
+	ScopeRootIssueUID string   `json:"scope_root_issue_uid,omitempty"`
 }
 
 func (in normalizedUISnapshotIntent) storeQuery() db.UISnapshotQuery {
@@ -108,6 +110,9 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := authorizeIssueScopedIssue(ctx, cfg.DB, issue); err != nil {
+			return nil, err
+		}
 		out := &api.UIIssueReferenceResponse{}
 		out.Body.Issue.UID = issue.UID
 		out.Body.Issue.ProjectUID = project.UID
@@ -135,6 +140,9 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			intent.ReadyAt = effectiveUIReadyAt(intent.Statuses, cfg.UIClock)
 			intent.DefaultTimezone = cfg.DefaultTimezone
+			if err := normalizeIssueScopeForUISnapshot(ctx, &intent); err != nil {
+				return nil, err
+			}
 			policy := effectiveUIPolicy(ctx, cfg)
 			var observedCursor *int64
 			if in.IfNoneMatch != "" {
@@ -151,13 +159,25 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 				observedCursor = &cursor
 			}
+			_, scopedIssueIDs, err := applyIssueScopeToUISnapshot(ctx, cfg.DB, &intent)
+			if err != nil {
+				return nil, err
+			}
 
 			authorityKey, err := uiSnapshotAuthorityKey(intent)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
-			cachedAuthority, authorityCached := authorityCache.get(authorityKey)
-			if !authorityCached && intent.ProjectUID != "" && intent.Limit == 0 {
+			cachedAuthority := db.UISnapshotData{}
+			authorityCached := false
+			// Scoped snapshots intentionally bypass shared response caches. The
+			// query candidate set is the authority boundary; keeping its result
+			// request-local prevents a future cache-key cleanup from widening or
+			// narrowing one subtree with another principal's materialized data.
+			if scopedIssueIDs == nil {
+				cachedAuthority, authorityCached = authorityCache.get(authorityKey)
+			}
+			if scopedIssueIDs == nil && !authorityCached && intent.ProjectUID != "" && intent.Limit == 0 {
 				globalIntent := intent
 				globalIntent.ProjectUID = ""
 				globalKey, keyErr := uiSnapshotAuthorityKey(globalIntent)
@@ -174,7 +194,11 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
-			cachedEnrichment, enrichmentCached := enrichmentCache.get(enrichmentKey)
+			cachedEnrichment := db.UISnapshotData{}
+			enrichmentCached := false
+			if scopedIssueIDs == nil {
+				cachedEnrichment, enrichmentCached = enrichmentCache.get(enrichmentKey)
+			}
 			cachedResponse := db.UISnapshotData{}
 			responseCached := false
 			if authorityCached && !uiSnapshotHasEnrichment(intent) {
@@ -203,6 +227,8 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 			}
 			query := intent.storeQuery()
+			query.AllowedIssueIDs = scopedIssueIDs
+			query.IssueScope = issueScopeFromContext(ctx)
 			if authorityCached {
 				cursor := cachedAuthority.Cursor
 				query.ReuseAuthorityCursor = &cursor
@@ -213,10 +239,14 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			if data.AuthorityReused {
 				mergeUISnapshotAuthority(&data, cachedAuthority)
-			} else {
+			}
+			if scopedIssueIDs != nil {
+				filterScopedUISnapshot(&data, scopedIssueIDs, intent.ScopeProjectUID)
+			}
+			if scopedIssueIDs == nil && !data.AuthorityReused {
 				authorityCache.put(authorityKey, data)
 			}
-			if uiSnapshotHasEnrichment(intent) {
+			if scopedIssueIDs == nil && uiSnapshotHasEnrichment(intent) {
 				enrichmentCache.put(enrichmentKey, data)
 			}
 			validator, err := makeUIETag(intent, data.Cursor, policy)
@@ -248,6 +278,12 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				Query: intent.Query, ProjectUID: intent.ProjectUID,
 				IssueUIDs: append([]string(nil), intent.IssueUIDs...), Limit: intent.Limit,
 			}
+			_, scopedIssueIDs, err := applyIssueScopeToUIReferences(ctx, cfg.DB, &intent, &query)
+			if err != nil {
+				return nil, err
+			}
+			query.AllowedIssueIDs = scopedIssueIDs
+			query.IssueScope = issueScopeFromContext(ctx)
 			if len(intent.IssueUIDs) > 0 {
 				capture, err := cfg.UIStore.ReadUIReferenceHydration(ctx, query)
 				if err != nil {
@@ -257,6 +293,9 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return nil, api.NewError(
 						http.StatusNotFound, "not_found", "resource not found", "", nil,
 					)
+				}
+				if scopedIssueIDs != nil {
+					filterScopedUIReferences(&capture.References, intent.ProjectUID)
 				}
 				ctx, err = authorizeHostProjectScope(ctx, capture.ProjectIDs, nil, false)
 				if err != nil {
@@ -295,6 +334,9 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
+			if scopedIssueIDs != nil {
+				filterScopedUIReferences(&data, intent.ProjectUID)
+			}
 			sortUIReferences(&data)
 			validator, err := makeUIETag(intent, data.Cursor, policy)
 			if err != nil {
@@ -302,6 +344,163 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return referencesResponse(data, policy, validator), nil
 		})
+}
+
+func applyIssueScopeToUISnapshot(
+	ctx context.Context, store db.Storage, intent *normalizedUISnapshotIntent,
+) (db.Project, []int64, error) {
+	if err := normalizeIssueScopeForUISnapshot(ctx, intent); err != nil {
+		return db.Project{}, nil, err
+	}
+	scope := issueScopeFromContext(ctx)
+	if scope == nil {
+		return db.Project{}, nil, nil
+	}
+	project, issueIDs, err := issueScopedMembership(ctx, store)
+	if err != nil {
+		return db.Project{}, nil, err
+	}
+	if intent.SelectedIssueUID != "" {
+		issue, err := store.IssueByUID(ctx, intent.SelectedIssueUID, db.IncludeDeletedNo)
+		if err != nil {
+			return db.Project{}, nil, api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
+		}
+		if err := authorizeIssueScopedIssue(ctx, store, issue); err != nil {
+			return db.Project{}, nil, err
+		}
+	}
+	return project, issueIDs, nil
+}
+
+// normalizeIssueScopeForUISnapshot adds the immutable grant identity to the
+// request intent without reading projections. This lets conditional scoped
+// requests derive their exact validator and return 304 after middleware
+// revalidation plus the durable cursor read, before traversing subtree
+// membership or resolving a selected issue.
+func normalizeIssueScopeForUISnapshot(ctx context.Context, intent *normalizedUISnapshotIntent) error {
+	scope := issueScopeFromContext(ctx)
+	if scope == nil {
+		return nil
+	}
+	if intent.ProjectUID != "" && intent.ProjectUID != scope.ProjectUID {
+		return api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+	}
+	intent.ProjectUID = scope.ProjectUID
+	intent.ScopeProjectUID = scope.ProjectUID
+	intent.ScopeRootIssueUID = scope.RootIssueUID
+	return nil
+}
+
+func applyIssueScopeToUIReferences(
+	ctx context.Context,
+	store db.Storage,
+	intent *normalizedUIReferencesIntent,
+	query *db.UIReferencesQuery,
+) (db.Project, []int64, error) {
+	scope := issueScopeFromContext(ctx)
+	if scope == nil {
+		return db.Project{}, nil, nil
+	}
+	if intent.ProjectUID != "" && intent.ProjectUID != scope.ProjectUID {
+		return db.Project{}, nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+	}
+	project, issueIDs, err := issueScopedMembership(ctx, store)
+	if err != nil {
+		return db.Project{}, nil, err
+	}
+	intent.ProjectUID = scope.ProjectUID
+	query.ProjectUID = scope.ProjectUID
+	for _, issueUID := range intent.IssueUIDs {
+		issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+		if err != nil {
+			return db.Project{}, nil, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+		}
+		if err := authorizeIssueScopedIssue(ctx, store, issue); err != nil {
+			return db.Project{}, nil, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+		}
+	}
+	return project, issueIDs, nil
+}
+
+func filterScopedUISnapshot(data *db.UISnapshotData, allowedIDs []int64, projectUID string) {
+	allowed := make(map[int64]struct{}, len(allowedIDs))
+	for _, issueID := range allowedIDs {
+		allowed[issueID] = struct{}{}
+	}
+	allowedUIDs := make(map[string]struct{}, len(allowedIDs))
+	filterIssues := func(issues []db.UIIssue) []db.UIIssue {
+		out := make([]db.UIIssue, 0, len(issues))
+		for _, issue := range issues {
+			if _, ok := allowed[issue.ID]; ok {
+				out = append(out, issue)
+				allowedUIDs[issue.UID] = struct{}{}
+			}
+		}
+		return out
+	}
+	data.Issues = filterIssues(data.Issues)
+	data.GraphIssues = filterIssues(data.GraphIssues)
+	if data.SelectedIssue != nil {
+		allowedUIDs[data.SelectedIssue.UID] = struct{}{}
+	}
+	filterLinks := func(links []db.UILink) []db.UILink {
+		out := make([]db.UILink, 0, len(links))
+		for _, link := range links {
+			_, fromOK := allowed[link.FromIssueID]
+			_, toOK := allowed[link.ToIssueID]
+			if fromOK && toOK {
+				out = append(out, link)
+			}
+		}
+		return out
+	}
+	data.CollectionLinks = filterLinks(data.CollectionLinks)
+	data.SelectedLinks = filterLinks(data.SelectedLinks)
+	data.GraphLinks = filterLinks(data.GraphLinks)
+	edges := make([]db.UIGraphEdge, 0, len(data.GraphEdges))
+	for _, edge := range data.GraphEdges {
+		_, fromOK := allowedUIDs[edge.FromUID]
+		_, toOK := allowedUIDs[edge.ToUID]
+		if fromOK && toOK {
+			edges = append(edges, edge)
+		}
+	}
+	data.GraphEdges = edges
+	data.GraphUnresolvedRefs = []db.UIGraphUnresolvedRef{}
+	data.Recurrences = []db.Recurrence{}
+	history := make([]db.Event, 0, len(data.History))
+	for _, event := range data.History {
+		if projected, ok := projectIssueScopedEvent(event, allowed, projectUID); ok {
+			history = append(history, projected)
+		}
+	}
+	data.History = history
+	projects := make([]db.UIProject, 0, 1)
+	for _, entry := range data.Projects {
+		if entry.Project.UID == projectUID {
+			entry.Project.Metadata = db.JSONBlob("")
+			entry.Project.CreatedAt = time.Time{}
+			entry.Project.DeletedAt = nil
+			entry.Stats = db.ProjectStats{}
+			projects = append(projects, entry)
+			break
+		}
+	}
+	data.Projects = projects
+}
+
+func filterScopedUIReferences(data *db.UIReferencesData, projectUID string) {
+	projects := make([]db.Project, 0, 1)
+	for _, project := range data.Projects {
+		if project.UID == projectUID {
+			project.Metadata = db.JSONBlob("")
+			project.CreatedAt = time.Time{}
+			project.DeletedAt = nil
+			projects = append(projects, project)
+			break
+		}
+	}
+	data.Projects = projects
 }
 
 func normalizeUISnapshotIntent(in *api.UISnapshotRequest) (normalizedUISnapshotIntent, error) {
@@ -496,6 +695,15 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	if principal, ok := PrincipalFromContext(ctx); ok && principal.Actor != "" {
 		policy.Capabilities.ActorPolicy = "identity"
 	}
+	policy.Capabilities.CloseRequiresEvidence = closeRequiresEvidence(ctx)
+	policy.Capabilities.TokenAuditRead = tokenAuditReadAllowed(ctx)
+	if principal, ok := PrincipalFromContext(ctx); ok {
+		if principal.Scope != nil {
+			policy.Capabilities.Scope = tokenScopeOut(principal.Scope)
+			policy.Capabilities.ExpiresAt = principal.ExpiresAt
+			policy.Capabilities.AllowedActions = issueScopedAllowedActions(policy.Capabilities.Writable)
+		}
+	}
 	return policy
 }
 
@@ -532,7 +740,18 @@ func snapshotResponse(data db.UISnapshotData, intent normalizedUISnapshotIntent,
 	out.Body.Capabilities = policy.Capabilities
 	out.Body.Origin = policy.Origin
 	out.Body.OriginStable = policy.OriginStable
-	out.Body.Catalog = nonNil(data.Projects)
+	out.Body.Catalog = make([]api.UIProject, 0, len(data.Projects))
+	for _, entry := range data.Projects {
+		project := dbProjectToOut(entry.Project)
+		var stats *db.ProjectStats
+		if issueScopeFromPolicy(policy) == nil {
+			value := entry.Stats
+			stats = &value
+		} else {
+			project = scopedProjectOut(entry.Project)
+		}
+		out.Body.Catalog = append(out.Body.Catalog, api.UIProject{Project: project, Stats: stats})
+	}
 	out.Body.Collection = nonNil(data.Issues)
 	out.Body.CollectionLinks = nonNil(data.CollectionLinks)
 	if intent.SelectedIssueUID != "" {
@@ -563,11 +782,22 @@ func referencesResponse(data db.UIReferencesData, policy uiPolicy, validator str
 	out.Body.Capabilities = policy.Capabilities
 	out.Body.Origin = policy.Origin
 	out.Body.OriginStable = policy.OriginStable
-	out.Body.Projects = nonNil(data.Projects)
+	out.Body.Projects = make([]api.ProjectOut, 0, len(data.Projects))
+	for _, project := range data.Projects {
+		if issueScopeFromPolicy(policy) != nil {
+			out.Body.Projects = append(out.Body.Projects, scopedProjectOut(project))
+		} else {
+			out.Body.Projects = append(out.Body.Projects, dbProjectToOut(project))
+		}
+	}
 	out.Body.Issues = nonNil(data.Issues)
 	out.Body.Owners = nonNil(data.Owners)
 	out.Body.Labels = nonNil(data.Labels)
 	return out
+}
+
+func issueScopeFromPolicy(policy uiPolicy) *api.TokenScopeOut {
+	return policy.Capabilities.Scope
 }
 
 func sortUIReferences(data *db.UIReferencesData) {

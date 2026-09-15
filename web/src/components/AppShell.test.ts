@@ -97,6 +97,84 @@ describe('AppShell', () => {
     })
   })
 
+  test('gates credential audit navigation on the advertised capability', async () => {
+    const onNavigate = vi.fn()
+    const authorized = snapshot()
+    authorized.capabilities.token_audit_read = true
+    const view = render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: authorized,
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Credentials' }))
+    expect(onNavigate).toHaveBeenCalledWith({
+      kind: 'kata',
+      view: 'credentials',
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    })
+
+    const unauthorized = snapshot()
+    await view.rerender({ snapshot: unauthorized })
+    expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
+  })
+
+  test('renders the credential ledger as a daemon screen and returns to issue navigation', async () => {
+    const onBackFromCredentials = vi.fn()
+    const authorized = snapshot()
+    authorized.capabilities.token_audit_read = true
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'credentials',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: authorized,
+        loading: false,
+        credentialTokens: [
+          {
+            id: 12,
+            name: 'Worker',
+            actor: 'agent-a',
+            state: 'live',
+            created_at: '2026-09-15T09:00:00Z',
+            last_used_at: null,
+            revoked_at: null,
+          },
+        ],
+        credentialObservedAt: '2026-09-15T12:00:00Z',
+        onRefreshCredentials: vi.fn(),
+        onBackFromCredentials,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    expect(screen.getByRole('heading', { name: 'Credentials' })).not.toBeNull()
+    expect(screen.getByText('Worker')).not.toBeNull()
+    expect(screen.queryByLabelText('Search tasks')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Credentials' }).classList).toContain('active')
+    expect(screen.getByRole('button', { name: 'All Open' }).classList).not.toContain('active')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
+    expect(onBackFromCredentials).toHaveBeenCalledOnce()
+  })
+
   test('drops held keyboard selection when sidebar navigation begins', async () => {
     vi.useFakeTimers()
     const onNavigate = vi.fn()
@@ -145,6 +223,7 @@ describe('AppShell', () => {
     const complete = snapshot()
     complete.catalog!.push({
       project: {
+        active: true,
         id: 8,
         uid: '01J00000000000000000000003',
         name: 'other-project',
@@ -438,7 +517,10 @@ describe('AppShell', () => {
   test('quick-captures a new task through the ported workspace action', async () => {
     const onCreateIssue = vi.fn(async () => {})
     const accepted = snapshot()
-    accepted.catalog![0]!.project.metadata.role = 'inbox'
+    accepted.catalog![0]!.project.metadata = {
+      ...(accepted.catalog![0]!.project.metadata ?? {}),
+      role: 'inbox',
+    }
     const { container } = render(AppShell, {
       props: {
         route: {
@@ -602,6 +684,81 @@ describe('AppShell', () => {
 
     expect(within(view.container).getByRole('status').textContent).toContain('archived')
   })
+
+  test('honors issue-scoped allowed actions without exposing project-wide controls', async () => {
+    const onCreateIssue = vi.fn(async () => {})
+    const scoped = snapshot()
+    scoped.capabilities.scope = {
+      kind: 'issue_subtree',
+      project_uid: '01J00000000000000000000002',
+      root_issue_uid: '01J00000000000000000000001',
+    }
+    scoped.capabilities.allowed_actions = [
+      'issue.read',
+      'issue.create_child',
+      'issue.edit',
+      'issue.metadata',
+      'issue.close',
+      'issue.reopen',
+    ]
+    scoped.selected = {
+      state: 'available',
+      issue: { ...scoped.collection![0]!, body: 'Scoped body', revision: 3 },
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          issueUID: '01J00000000000000000000001',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: scoped,
+        loading: false,
+        ...mutationProps({ onCreateIssue }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+    expect(
+      (screen.getByRole('button', { name: 'New project' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect((screen.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit issue' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+
+    expect(screen.getByRole('menuitem', { name: 'Add checklist' })).not.toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Move to another project' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Create recurrence...' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Delete issue' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Recurrences' })).toBeNull()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'New task' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      target: { value: 'Scoped child task' },
+    })
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Quick capture' }), {
+      key: 'Enter',
+    })
+    expect(onCreateIssue).toHaveBeenCalledWith('Scoped child task', {
+      projectID: 7,
+      projectUID: '01J00000000000000000000002',
+      issueUID: '01J00000000000000000000001',
+    })
+  })
 })
 
 function mutationProps(overrides: Record<string, unknown> = {}) {
@@ -643,6 +800,7 @@ function snapshot(): UISnapshot {
     catalog: [
       {
         project: {
+          active: true,
           id: 7,
           uid: '01J00000000000000000000002',
           name: 'example-project',

@@ -3,6 +3,7 @@
   import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days'
   import CheckCircleIcon from '@lucide/svelte/icons/check-circle-2'
   import InboxIcon from '@lucide/svelte/icons/inbox'
+  import KeyRoundIcon from '@lucide/svelte/icons/key-round'
   import LayersIcon from '@lucide/svelte/icons/layers'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import StarIcon from '@lucide/svelte/icons/star'
@@ -27,10 +28,13 @@
     draftFenceGeneration?: number | undefined
     inboxProjectUID?: string | undefined
     inboxDesignationDisabled: boolean
+    credentialAuditAvailable?: boolean | undefined
+    credentialAuditActive?: boolean | undefined
     onOpenView: (name: KataTaskViewName) => void | Promise<void>
     onOpenProject: (projectUID: string) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
     onDesignateInbox: (projectUID: string) => Promise<void>
+    onOpenCredentials?: (() => void | Promise<void>) | undefined
   }
 
   let {
@@ -42,10 +46,13 @@
     draftFenceGeneration = 0,
     inboxProjectUID,
     inboxDesignationDisabled,
+    credentialAuditAvailable = false,
+    credentialAuditActive = false,
     onOpenView,
     onOpenProject,
     onCreateProject,
     onDesignateInbox,
+    onOpenCredentials = () => {},
   }: Props = $props()
 
   const systemViews: Array<{
@@ -153,7 +160,9 @@
         {@const count = viewCount(view.name)}
         <button
           type="button"
-          class:active={searchFilters.scope.kind === 'all' && currentView.name === view.name}
+          class:active={!credentialAuditActive &&
+            searchFilters.scope.kind === 'all' &&
+            currentView.name === view.name}
           aria-label={count !== undefined ? `${view.label} ${count}` : view.label}
           onclick={() => {
             void onOpenView(view.name)
@@ -166,6 +175,17 @@
           {/if}
         </button>
       {/each}
+      {#if credentialAuditAvailable}
+        <button
+          type="button"
+          class:active={credentialAuditActive}
+          aria-label="Credentials"
+          onclick={() => void onOpenCredentials()}
+        >
+          <span class="nav-icon"><KeyRoundIcon size={14} strokeWidth={1.75} /></span>
+          <span class="nav-label">Credentials</span>
+        </button>
+      {/if}
     </nav>
 
     <div class="inbox-project-control">

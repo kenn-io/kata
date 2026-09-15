@@ -23,6 +23,10 @@ var (
 	// its issue moved after the caller resolved the project-scoped route.
 	ErrIssueProjectChanged = errors.New("issue project changed")
 
+	// ErrRecurrenceEffectsForbidden refuses an otherwise-valid close before
+	// it can update recurrence state or create an unscoped next occurrence.
+	ErrRecurrenceEffectsForbidden = errors.New("recurrence effects are forbidden")
+
 	// ErrNoFields is returned by EditIssue when no field changes are
 	// requested.
 	ErrNoFields = errors.New("no fields to update")

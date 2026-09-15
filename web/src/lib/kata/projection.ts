@@ -43,11 +43,11 @@ export function normalizeKataUISnapshot(
     id: project.id,
     uid: project.uid,
     name: project.name,
-    metadata: { ...project.metadata },
+    metadata: { ...(project.metadata ?? {}) },
     revision: project.revision,
-    created_at: project.created_at,
+    created_at: project.created_at ?? undefined,
     deleted_at: project.deleted_at,
-    open_count: stats.Open,
+    open_count: stats?.Open ?? 0,
   }))
   const projectsByID = new Map(projects.map((project) => [project.id, project]))
   const issues = (snapshot.collection ?? []).map((issue) => normalizeIssue(issue, projectsByID))

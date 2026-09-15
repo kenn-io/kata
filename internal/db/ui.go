@@ -37,6 +37,10 @@ type UISnapshotQuery struct {
 	ReadyAt         string
 	DefaultTimezone string
 	Limit           int
+	// AllowedIssueIDs is nil for unrestricted callers. A non-nil slice is
+	// applied before ordering and limiting every issue collection.
+	AllowedIssueIDs []int64
+	IssueScope      *APITokenScope
 	// ReuseAuthorityCursor asks the store to omit catalog and collection rows
 	// only when its consistent read observes this exact durable cursor.
 	ReuseAuthorityCursor *int64
@@ -160,6 +164,9 @@ type UIReferencesQuery struct {
 	ProjectUID string
 	IssueUIDs  []string
 	Limit      int
+	// AllowedIssueIDs has the same nil-versus-empty contract as UISnapshotQuery.
+	AllowedIssueIDs []int64
+	IssueScope      *APITokenScope
 }
 
 // UIReferenceHydration captures bounded issue summaries and the complete

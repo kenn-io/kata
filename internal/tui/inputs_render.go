@@ -88,8 +88,29 @@ func renderCenteredForm(s inputState, width, height int) string {
 		return renderNewIssueForm(s, innerW, innerH)
 	case inputFilterForm:
 		return renderFilterForm(s, innerW)
+	case inputCloseForm:
+		return renderCloseForm(s, innerW, innerH)
 	}
 	return renderSingleFieldForm(s, innerW, innerH)
+}
+
+func renderCloseForm(s inputState, innerW, innerH int) string {
+	statusLine := renderFormStatus(s)
+	footer := renderFormFooter(s, innerW, s.activeFieldIs(fieldCloseMessage))
+	messageRows := max(innerH-10, 3)
+	if message := s.field(fieldCloseMessage); message != nil {
+		message.area.SetWidth(innerW)
+		message.area.SetHeight(messageRows)
+	}
+	parts := []string{titleStyle.Render(s.title)}
+	for idx := range s.fields {
+		parts = append(parts, renderNewIssueField(s, idx, innerW))
+	}
+	if statusLine != "" {
+		parts = append(parts, statusLine)
+	}
+	parts = append(parts, footer)
+	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
 }
 
 // renderFilterForm lays out the four filter axes: Status (radio),
@@ -263,9 +284,12 @@ func renderNewIssueField(s inputState, idx, innerW int) string {
 		label = subtleStyle.Render(label)
 	}
 	var view string
-	if f.kind == fieldMultiLine {
+	switch f.kind {
+	case fieldMultiLine:
 		view = f.area.View()
-	} else {
+	case fieldRadio:
+		view = renderRadio(f.radio, idx == s.active)
+	default:
 		f.input.SetWidth(innerW - 2)
 		view = f.input.View()
 	}
@@ -309,7 +333,7 @@ func renderTinyFormFallback(s inputState) string {
 	if f == nil {
 		return ""
 	}
-	return s.title + "\n" + f.area.View()
+	return s.title + "\n" + f.value()
 }
 
 // formInnerWidth picks the centered form's interior width. ~70% of

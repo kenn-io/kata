@@ -317,6 +317,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 		base = withIdleAdmission(s.cfg.IdleAdmission, base)
 		base = withFederationIngestPreauthorization(s.cfg, base)
 		base = withTrustedProxyActor(s.cfg)(base)
+		base = withScopedPrincipalRevalidation(s.cfg.DB, base)
 		base = requireBearer(s.authPolicy, s.cfg.DB)(base)
 		base = withGzip(base)
 		base = withOwnerLocalTransport(base)

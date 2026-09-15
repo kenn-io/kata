@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -30,6 +31,11 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 		return db.UISnapshotData{}, fmt.Errorf("begin UI snapshot read: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	query.AllowedIssueIDs, err = readIssueScopeIDs(ctx, tx, query.IssueScope, query.AllowedIssueIDs)
+	if err != nil {
+		return db.UISnapshotData{}, err
+	}
+
 	cursor, err := maxUIEventID(ctx, tx)
 	if err != nil {
 		return db.UISnapshotData{}, err
@@ -69,20 +75,24 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
-		data.CollectionLinks, err = readUICollectionLinks(ctx, tx, data.Issues, d.uiLinkDetailRead)
+		data.CollectionLinks, err = readUICollectionLinks(ctx, tx, data.Issues, query.AllowedIssueIDs, d.uiLinkDetailRead)
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
 	}
 	if query.SelectedIssueUID != "" {
-		selected, err := readUIIssueByUID(ctx, tx, query.SelectedIssueUID, projectNames)
+		selected, err := readUIIssueByUID(ctx, tx, query.SelectedIssueUID, projectNames, query.AllowedIssueIDs)
 		if err != nil {
 			if !errors.Is(err, db.ErrNotFound) {
 				return db.UISnapshotData{}, err
 			}
-			data.SelectedState, err = readUISelectedState(ctx, tx, query.SelectedIssueUID)
-			if err != nil {
-				return db.UISnapshotData{}, err
+			if query.AllowedIssueIDs != nil {
+				data.SelectedState = "missing"
+			} else {
+				data.SelectedState, err = readUISelectedState(ctx, tx, query.SelectedIssueUID)
+				if err != nil {
+					return db.UISnapshotData{}, err
+				}
 			}
 		} else {
 			if err := db.ProjectUIDeadlineDate(&selected, query); err != nil {
@@ -100,7 +110,7 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 			if err != nil {
 				return db.UISnapshotData{}, err
 			}
-			data.SelectedLinks, err = readUILinksForIssue(ctx, tx, selected.ID)
+			data.SelectedLinks, err = readUILinksForIssue(ctx, tx, selected.ID, query.AllowedIssueIDs)
 			if err != nil {
 				return db.UISnapshotData{}, err
 			}
@@ -112,18 +122,21 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 			}
 		}
 	}
+	// Scoped requests never display recurrences (the handler clears them),
+	// so hydration is skipped entirely instead of reading rows outside the
+	// authorization candidate set.
 	recurrenceProjectUID := query.ProjectUID
 	if data.SelectedIssue != nil {
 		recurrenceProjectUID = data.SelectedIssue.ProjectUID
 	}
-	if recurrenceProjectUID != "" {
+	if recurrenceProjectUID != "" && query.AllowedIssueIDs == nil {
 		data.Recurrences, err = readUIRecurrences(ctx, tx, recurrenceProjectUID)
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
 	}
 	if query.IncludeGraph {
-		data.GraphIssues, err = readUIGraphIssues(ctx, tx, projectNames)
+		data.GraphIssues, err = readUIGraphIssues(ctx, tx, query, projectNames)
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
@@ -131,9 +144,15 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
-		data.GraphEdges, data.GraphUnresolvedRefs, err = readUIGraphUnresolved(ctx, tx, data.GraphIssues)
-		if err != nil {
-			return db.UISnapshotData{}, err
+		// Graph edges exist only when one endpoint is outside the visible
+		// set. For scoped requests that endpoint is always outside the
+		// authorization candidate set and the handler drops the edge, so the
+		// per-endpoint existence probes are skipped entirely.
+		if query.AllowedIssueIDs == nil {
+			data.GraphEdges, data.GraphUnresolvedRefs, err = readUIGraphUnresolved(ctx, tx, data.GraphIssues)
+			if err != nil {
+				return db.UISnapshotData{}, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -143,11 +162,19 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 }
 
 func readUIGraphIssues(
-	ctx context.Context, tx *sql.Tx, projectNames map[int64]string,
+	ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
+	projectNames map[int64]string,
 ) ([]db.UIIssue, error) {
-	rows, err := tx.QueryContext(ctx, issueSelect+`
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
-		ORDER BY i.uid`, db.SystemProjectName)
+	statement := issueSelect + `
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
+	args := []any{db.SystemProjectName}
+	allowPredicate, allowArgs := uiSQLiteIssueAllowlist(`i.id`, query.AllowedIssueIDs)
+	if allowPredicate != "" {
+		statement += ` AND ` + allowPredicate // #nosec G202 -- the predicate contains only a fixed column name and count-derived ? placeholders; values stay bound.
+		args = append(args, allowArgs...)
+	}
+	statement += ` ORDER BY i.uid`
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI graph issues: %w", err)
 	}
@@ -180,6 +207,11 @@ func (d *Store) ReadUIReferenceHydration(
 		return db.UIReferenceHydration{}, fmt.Errorf("begin UI reference hydration read: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	query.AllowedIssueIDs, err = readIssueScopeIDs(ctx, tx, query.IssueScope, query.AllowedIssueIDs)
+	if err != nil {
+		return db.UIReferenceHydration{}, err
+	}
+
 	limit := query.Limit
 	if limit <= 0 {
 		limit = 100
@@ -217,6 +249,11 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 		return db.UIReferencesData{}, fmt.Errorf("begin UI references read: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	query.AllowedIssueIDs, err = readIssueScopeIDs(ctx, tx, query.IssueScope, query.AllowedIssueIDs)
+	if err != nil {
+		return db.UIReferencesData{}, err
+	}
+
 	limit := query.Limit
 	if limit <= 0 {
 		limit = 100
@@ -248,21 +285,31 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
-	data.Owners, err = readUIReferenceStrings(ctx, tx, `
+	ownerStatement := `
 		SELECT DISTINCT i.owner
 		FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ? AND i.owner IS NOT NULL AND i.owner <> ''
-		ORDER BY i.owner LIMIT ?`, db.SystemProjectName, limit)
+	`
+	ownerArgs := []any{db.SystemProjectName}
+	ownerStatement, ownerArgs = appendUIReferenceIssueScopeSQLite(ownerStatement, ownerArgs, query.AllowedIssueIDs)
+	ownerStatement += ` ORDER BY i.owner LIMIT ?`
+	ownerArgs = append(ownerArgs, limit)
+	data.Owners, err = readUIReferenceStrings(ctx, tx, ownerStatement, ownerArgs...)
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
-	data.Labels, err = readUIReferenceStrings(ctx, tx, `
+	labelStatement := `
 		SELECT DISTINCT il.label
 		FROM issue_labels il
 		JOIN issues i ON i.id = il.issue_id
 		JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
-		ORDER BY il.label LIMIT ?`, db.SystemProjectName, limit)
+	`
+	labelArgs := []any{db.SystemProjectName}
+	labelStatement, labelArgs = appendUIReferenceIssueScopeSQLite(labelStatement, labelArgs, query.AllowedIssueIDs)
+	labelStatement += ` ORDER BY il.label LIMIT ?`
+	labelArgs = append(labelArgs, limit)
+	data.Labels, err = readUIReferenceStrings(ctx, tx, labelStatement, labelArgs...)
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
@@ -274,6 +321,14 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 		return db.UIReferencesData{}, fmt.Errorf("commit UI references read: %w", err)
 	}
 	return data, nil
+}
+
+func appendUIReferenceIssueScopeSQLite(statement string, args []any, issueIDs []int64) (string, []any) {
+	predicate, scopeArgs := uiSQLiteIssueAllowlist("i.id", issueIDs)
+	if predicate != "" {
+		statement += " AND " + predicate
+	}
+	return statement, append(args, scopeArgs...)
 }
 
 type uiQueryer interface {
@@ -401,6 +456,11 @@ func readUIIssues(
 	if query.ProjectUID != "" {
 		statement += ` AND p.uid = ?`
 		args = append(args, query.ProjectUID)
+	}
+	allowPredicate, allowArgs := uiSQLiteIssueAllowlist(`i.id`, query.AllowedIssueIDs)
+	if allowPredicate != "" {
+		statement += ` AND ` + allowPredicate
+		args = append(args, allowArgs...)
 	}
 	statuses := uiFilterValues(query.Statuses, query.Status)
 	if len(statuses) == 0 {
@@ -615,6 +675,21 @@ func uiFilterValues(values []string, single string) []string {
 	return nil
 }
 
+// uiSQLiteIssueAllowlist renders the scoped authorization candidate set as a
+// column predicate. nil means the caller is unrestricted (no predicate); a
+// non-nil slice restricts the column to its members, failing closed when
+// empty.
+func uiSQLiteIssueAllowlist(column string, issueIDs []int64) (string, []any) {
+	if issueIDs == nil {
+		return "", nil
+	}
+	if len(issueIDs) == 0 {
+		return `1 = 0`, nil
+	}
+	encoded, _ := json.Marshal(issueIDs)
+	return column + ` IN (SELECT value FROM json_each(?))`, []any{string(encoded)}
+}
+
 func uiSQLitePlaceholders(count int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
 }
@@ -639,11 +714,11 @@ func uiSQLiteRelationshipPredicates(relationships []string) []string {
 }
 
 func readUIIssueByUID(
-	ctx context.Context, tx *sql.Tx, issueUID string, projectNames map[int64]string,
+	ctx context.Context, tx *sql.Tx, issueUID string, projectNames map[int64]string, allowedIssueIDs []int64,
 ) (db.UIIssue, error) {
-	issue, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+
-		` WHERE i.uid = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`,
-		issueUID, db.SystemProjectName))
+	statement := issueSelect + ` WHERE i.uid = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
+	statement, args := appendUIReferenceIssueScopeSQLite(statement, []any{issueUID, db.SystemProjectName}, allowedIssueIDs)
+	issue, err := scanIssue(tx.QueryRowContext(ctx, statement, args...))
 	if err != nil {
 		return db.UIIssue{}, err
 	}
@@ -751,12 +826,24 @@ func readUIIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.Iss
 	return labels, rows.Err()
 }
 
-func readUILinksForIssue(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.UILink, error) {
-	rows, err := tx.QueryContext(ctx, linkSelect+
-		` WHERE (from_issue_id = ? OR to_issue_id = ?)
+func readUILinksForIssue(ctx context.Context, tx *sql.Tx, issueID int64, allowedIssueIDs []int64) ([]db.UILink, error) {
+	statement := linkSelect + `
+		WHERE (from_issue_id = ? OR to_issue_id = ?)
 		AND from_issue_id IN (SELECT endpoint.id FROM issues endpoint JOIN projects endpoint_project ON endpoint_project.id = endpoint.project_id WHERE endpoint.deleted_at IS NULL AND endpoint_project.deleted_at IS NULL)
-		AND to_issue_id IN (SELECT endpoint.id FROM issues endpoint JOIN projects endpoint_project ON endpoint_project.id = endpoint.project_id WHERE endpoint.deleted_at IS NULL AND endpoint_project.deleted_at IS NULL)
-		ORDER BY id`, issueID, issueID)
+		AND to_issue_id IN (SELECT endpoint.id FROM issues endpoint JOIN projects endpoint_project ON endpoint_project.id = endpoint.project_id WHERE endpoint.deleted_at IS NULL AND endpoint_project.deleted_at IS NULL)`
+	args := []any{issueID, issueID}
+	fromPredicate, fromArgs := uiSQLiteIssueAllowlist(`from_issue_id`, allowedIssueIDs)
+	if fromPredicate != "" {
+		statement += ` AND ` + fromPredicate
+		args = append(args, fromArgs...)
+	}
+	toPredicate, toArgs := uiSQLiteIssueAllowlist(`to_issue_id`, allowedIssueIDs)
+	if toPredicate != "" {
+		statement += ` AND ` + toPredicate // #nosec G202 -- the predicate contains only a fixed column name and count-derived ? placeholders; values stay bound.
+		args = append(args, toArgs...)
+	}
+	statement += ` ORDER BY id`
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read selected UI links: %w", err)
 	}
@@ -917,7 +1004,8 @@ func readUIGraphUnresolved(
 }
 
 func readUICollectionLinks(
-	ctx context.Context, tx *sql.Tx, issues []db.UIIssue, onDetailRead func(),
+	ctx context.Context, tx *sql.Tx, issues []db.UIIssue, allowedIssueIDs []int64,
+	onDetailRead func(),
 ) ([]db.UILink, error) {
 	if len(issues) == 0 {
 		return []db.UILink{}, nil
@@ -929,15 +1017,26 @@ func readUICollectionLinks(
 		placeholders[idx] = "?"
 	}
 	args := append(append([]any{}, ids...), ids...)
+	statement := uiLinkSelect + ` WHERE (l.from_issue_id IN (` +
+		strings.Join(placeholders, ",") + `) OR l.to_issue_id IN (` +
+		strings.Join(placeholders, ",") + `))
+		AND fi.deleted_at IS NULL AND fp.deleted_at IS NULL
+		AND ti.deleted_at IS NULL AND tp.deleted_at IS NULL` // #nosec G202 -- the dynamic fragments contain only count-derived ? placeholders; issue IDs stay bound.
+	fromPredicate, fromArgs := uiSQLiteIssueAllowlist(`l.from_issue_id`, allowedIssueIDs)
+	if fromPredicate != "" {
+		statement += ` AND ` + fromPredicate
+		args = append(args, fromArgs...)
+	}
+	toPredicate, toArgs := uiSQLiteIssueAllowlist(`l.to_issue_id`, allowedIssueIDs)
+	if toPredicate != "" {
+		statement += ` AND ` + toPredicate
+		args = append(args, toArgs...)
+	}
+	statement += ` ORDER BY l.id`
 	if onDetailRead != nil {
 		onDetailRead()
 	}
-	rows, err := tx.QueryContext(ctx, uiLinkSelect+` WHERE (l.from_issue_id IN (`+
-		strings.Join(placeholders, ",")+`) OR l.to_issue_id IN (`+
-		strings.Join(placeholders, ",")+`))
-		AND fi.deleted_at IS NULL AND fp.deleted_at IS NULL
-		AND ti.deleted_at IS NULL AND tp.deleted_at IS NULL
-		ORDER BY l.id`, args...)
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI collection links: %w", err)
 	}
@@ -1059,6 +1158,7 @@ func readUIReferenceIssues(
 		statement += ` AND p.uid = ?`
 		args = append(args, query.ProjectUID)
 	}
+	statement, args = appendUIReferenceIssueScopeSQLite(statement, args, query.AllowedIssueIDs)
 	if len(query.IssueUIDs) > 0 {
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(query.IssueUIDs)), ",")
 		statement += ` AND i.uid IN (` + placeholders + `)` // #nosec G202 -- only SQL placeholders are constructed.

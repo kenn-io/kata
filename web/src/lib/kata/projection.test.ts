@@ -158,6 +158,7 @@ function snapshot(): UISnapshot {
     catalog: [
       {
         project: {
+          active: true,
           id: 7,
           uid: 'project-example',
           name: 'example-project',

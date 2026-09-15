@@ -1209,10 +1209,19 @@ func replayAPITokenProjection(ctx context.Context, tx *sql.Tx) error {
 			if err != nil {
 				return err
 			}
+			var scopeKind, scopeProjectUID, scopeRootIssueUID any
+			if rec.Scope != nil {
+				scopeKind = string(rec.Scope.Kind)
+				scopeProjectUID = rec.Scope.ProjectUID
+				scopeRootIssueUID = rec.Scope.RootIssueUID
+			}
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO api_tokens(id, token_hash, actor, name, created_at)
-				 VALUES(?, ?, ?, ?, ?)`,
-				rec.TokenID, rec.TokenHash, rec.TargetActor, rec.Name, createdAt); err != nil {
+				`INSERT INTO api_tokens(
+					id, token_hash, actor, name, scope_kind, scope_project_uid,
+					scope_root_issue_uid, expires_at, created_at
+				) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				rec.TokenID, rec.TokenHash, rec.TargetActor, rec.Name, scopeKind,
+				scopeProjectUID, scopeRootIssueUID, formatOptionalSQLiteTime(rec.ExpiresAt), createdAt); err != nil {
 				return fmt.Errorf("replay token.created %d: %w", rec.TokenID, err)
 			}
 		case "token.revoked":

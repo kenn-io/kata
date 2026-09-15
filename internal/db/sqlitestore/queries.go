@@ -1020,6 +1020,8 @@ func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Iss
 	var q strings.Builder
 	q.WriteString(issueSelect + ` WHERE i.project_id = ? AND i.deleted_at IS NULL`)
 	args := []any{p.ProjectID}
+	appendAllowedIssueIDsSQLite(&q, &args, p.AllowedIssueIDs)
+	appendIssueScopeSQLite(&q, &args, p.IssueScope)
 	if p.Status != "" {
 		q.WriteString(` AND i.status = ?`)
 		args = append(args, p.Status)
@@ -1094,6 +1096,8 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 	var q strings.Builder
 	q.WriteString(issueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL`)
 	var args []any
+	appendAllowedIssueIDsSQLite(&q, &args, p.AllowedIssueIDs)
+	appendIssueScopeSQLite(&q, &args, p.IssueScope)
 	if p.ProjectID > 0 {
 		q.WriteString(` AND i.project_id = ?`)
 		args = append(args, p.ProjectID)
@@ -1514,6 +1518,9 @@ func (d *Store) closeIssueGuarded(
 			return db.Issue{}, nil, false, err
 		}
 		return issue, nil, false, nil
+	}
+	if p.DisallowRecurrenceEffects && p.Reason == "done" && issue.RecurrenceID != nil && issue.OccurrenceKey != nil {
+		return db.Issue{}, nil, false, db.ErrRecurrenceEffectsForbidden
 	}
 	if hasOpen, err := txHasOpenChildren(ctx, tx, p.IssueID); err != nil {
 		return db.Issue{}, nil, false, err
@@ -2193,6 +2200,8 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 		      AND bp.deleted_at IS NULL
 		  )`)
 	args := []any{projectID}
+	appendAllowedIssueIDsSQLite(&q, &args, filter.AllowedIssueIDs)
+	appendIssueScopeSQLite(&q, &args, filter.IssueScope)
 
 	// Apply owner filters
 	if filter.Unowned {
@@ -2274,6 +2283,8 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		      AND bp.deleted_at IS NULL
 		  )`)
 	args := []any{}
+	appendAllowedIssueIDsSQLite(&q, &args, filter.AllowedIssueIDs)
+	appendIssueScopeSQLite(&q, &args, filter.IssueScope)
 
 	// Apply owner filters (same semantics as ReadyIssues)
 	if filter.Unowned {

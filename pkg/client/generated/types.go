@@ -145,12 +145,31 @@ func (a AuditClosesResponseBody) Validate() error {
 }
 
 type AuthInfoOut struct {
-	Actor *string `json:"actor,omitempty"`
-	Kind  string  `json:"kind" validate:"required"`
+	Actor                 *string        `json:"actor,omitempty"`
+	AllowedActions        []string       `json:"allowed_actions,omitempty"`
+	CloseRequiresEvidence *bool          `json:"close_requires_evidence,omitempty"`
+	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
+	Kind                  string         `json:"kind" validate:"required"`
+	Scope                 *TokenScopeOut `json:"scope,omitempty"`
+	TokenAuditRead        *bool          `json:"token_audit_read,omitempty"`
 }
 
 func (a AuthInfoOut) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(a.Kind, "required"); err != nil {
+		errors = errors.Append("Kind", err)
+	}
+	if a.Scope != nil {
+		if v, ok := any(a.Scope).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Scope", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type BindExternalRootRequestBody struct {
@@ -826,12 +845,28 @@ func (c CreateRecurrenceResponseBody) Validate() error {
 }
 
 type CreateTokenRequestBody struct {
-	Actor string  `json:"actor" validate:"required"`
-	Name  *string `json:"name,omitempty"`
+	Actor            string        `json:"actor" validate:"required"`
+	ExpiresInSeconds *int64        `json:"expires_in_seconds,omitempty"`
+	Name             *string       `json:"name,omitempty"`
+	Scope            *TokenScopeIn `json:"scope,omitempty"`
 }
 
 func (c CreateTokenRequestBody) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Actor, "required"); err != nil {
+		errors = errors.Append("Actor", err)
+	}
+	if c.Scope != nil {
+		if v, ok := any(c.Scope).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Scope", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type CreateTokenResponseBody struct {
@@ -1555,7 +1590,7 @@ func (f FieldDescriptor) Validate() error {
 
 type HealthResponseBody struct {
 	APISchemaVersion *string                 `json:"api_schema_version,omitempty"`
-	DBPath           string                  `json:"db_path" validate:"required"`
+	DBPath           *string                 `json:"db_path,omitempty"`
 	Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 	FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 	IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
@@ -1568,9 +1603,6 @@ type HealthResponseBody struct {
 
 func (h HealthResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
-	if err := typesValidator.Var(h.DBPath, "required"); err != nil {
-		errors = errors.Append("DBPath", err)
-	}
 	if h.Embeddings != nil {
 		if v, ok := any(h.Embeddings).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -1853,6 +1885,7 @@ func (i InitProjectResponseBody) Validate() error {
 type InstanceResponseBody struct {
 	Auth                 AuthInfoOut    `json:"auth"`
 	InstanceUID          string         `json:"instance_uid" validate:"required"`
+	IssueSubtreeTokens   bool           `json:"issue_subtree_tokens"`
 	SchemaVersion        int64          `json:"schema_version"`
 	Version              string         `json:"version" validate:"required"`
 	WebUICapabilities    UICapabilities `json:"web_ui_capabilities"`
@@ -2532,11 +2565,15 @@ func (l ListRecurrencesResponseBody) Validate() error {
 }
 
 type ListTokensResponseBody struct {
-	Tokens []TokenOut `json:"tokens" validate:"required"`
+	ObservedAt time.Time  `json:"observed_at" validate:"required"`
+	Tokens     []TokenOut `json:"tokens" validate:"required"`
 }
 
 func (l ListTokensResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.ObservedAt, "required"); err != nil {
+		errors = errors.Append("ObservedAt", err)
+	}
 	for i, item := range l.Tokens {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -2933,6 +2970,7 @@ func (p ProjectFederationBody) Validate() error {
 }
 
 type ProjectOut struct {
+	Active    bool             `json:"active"`
 	CreatedAt time.Time        `json:"created_at" validate:"required"`
 	DeletedAt *time.Time       `json:"deleted_at,omitempty"`
 	ID        int64            `json:"id"`
@@ -3913,28 +3951,130 @@ func (s SkipFederationQuarantineRequestBody) Validate() error {
 }
 
 type TokenOut struct {
-	Actor      string     `json:"actor" validate:"required"`
-	CreatedAt  time.Time  `json:"created_at" validate:"required"`
-	ID         int64      `json:"id"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty" validate:"required"`
-	Name       *string    `json:"name,omitempty" validate:"required"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty" validate:"required"`
+	Actor      string         `json:"actor" validate:"required"`
+	CreatedAt  time.Time      `json:"created_at" validate:"required"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
+	ID         int64          `json:"id"`
+	LastUsedAt *time.Time     `json:"last_used_at,omitempty" validate:"required"`
+	Name       *string        `json:"name,omitempty" validate:"required"`
+	RevokedAt  *time.Time     `json:"revoked_at,omitempty" validate:"required"`
+	Scope      *TokenScopeOut `json:"scope,omitempty"`
+	State      TokenOutState  `json:"state" validate:"required"`
 }
 
 func (t TokenOut) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(t))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(t.Actor, "required"); err != nil {
+		errors = errors.Append("Actor", err)
+	}
+	if err := typesValidator.Var(t.CreatedAt, "required"); err != nil {
+		errors = errors.Append("CreatedAt", err)
+	}
+	if t.LastUsedAt != nil {
+		if err := typesValidator.Var(t.LastUsedAt, "required"); err != nil {
+			errors = errors.Append("LastUsedAt", err)
+		}
+	}
+	if t.Name != nil {
+		if err := typesValidator.Var(t.Name, "required"); err != nil {
+			errors = errors.Append("Name", err)
+		}
+	}
+	if t.RevokedAt != nil {
+		if err := typesValidator.Var(t.RevokedAt, "required"); err != nil {
+			errors = errors.Append("RevokedAt", err)
+		}
+	}
+	if t.Scope != nil {
+		if v, ok := any(t.Scope).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Scope", err)
+			}
+		}
+	}
+	if v, ok := any(t.State).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("State", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type TokenScopeIn struct {
+	Kind         TokenScopeInKind `json:"kind" validate:"required"`
+	ProjectUID   string           `json:"project_uid" validate:"required"`
+	RootIssueUID string           `json:"root_issue_uid" validate:"required"`
+}
+
+func (t TokenScopeIn) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(t.Kind).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Kind", err)
+		}
+	}
+	if err := typesValidator.Var(t.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if err := typesValidator.Var(t.RootIssueUID, "required"); err != nil {
+		errors = errors.Append("RootIssueUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type TokenScopeOut struct {
+	Kind         TokenScopeOutKind `json:"kind" validate:"required"`
+	ProjectUID   string            `json:"project_uid" validate:"required"`
+	RootIssueUID string            `json:"root_issue_uid" validate:"required"`
+}
+
+func (t TokenScopeOut) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(t.Kind).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Kind", err)
+		}
+	}
+	if err := typesValidator.Var(t.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if err := typesValidator.Var(t.RootIssueUID, "required"); err != nil {
+		errors = errors.Append("RootIssueUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type UICapabilities struct {
-	ActorPolicy string                `json:"actor_policy" validate:"required"`
-	Updates     UICapabilitiesUpdates `json:"updates" validate:"required"`
-	Writable    bool                  `json:"writable"`
+	ActorPolicy           string                `json:"actor_policy" validate:"required"`
+	AllowedActions        []string              `json:"allowed_actions,omitempty"`
+	CloseRequiresEvidence *bool                 `json:"close_requires_evidence,omitempty"`
+	ExpiresAt             *time.Time            `json:"expires_at,omitempty"`
+	Scope                 *TokenScopeOut        `json:"scope,omitempty"`
+	TokenAuditRead        *bool                 `json:"token_audit_read,omitempty"`
+	Updates               UICapabilitiesUpdates `json:"updates" validate:"required"`
+	Writable              bool                  `json:"writable"`
 }
 
 func (u UICapabilities) Validate() error {
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(u.ActorPolicy, "required"); err != nil {
 		errors = errors.Append("ActorPolicy", err)
+	}
+	if u.Scope != nil {
+		if v, ok := any(u.Scope).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Scope", err)
+			}
+		}
 	}
 	if v, ok := any(u.Updates).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
@@ -4116,8 +4256,8 @@ func (u UILink) Validate() error {
 }
 
 type UIProject struct {
-	Project Project      `json:"project"`
-	Stats   ProjectStats `json:"stats"`
+	Project ProjectOut    `json:"project"`
+	Stats   *ProjectStats `json:"stats,omitempty"`
 }
 
 func (u UIProject) Validate() error {
@@ -4127,9 +4267,11 @@ func (u UIProject) Validate() error {
 			errors = errors.Append("Project", err)
 		}
 	}
-	if v, ok := any(u.Stats).(runtime.Validator); ok {
-		if err := v.Validate(); err != nil {
-			errors = errors.Append("Stats", err)
+	if u.Stats != nil {
+		if v, ok := any(u.Stats).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Stats", err)
+			}
 		}
 	}
 	if len(errors) == 0 {
@@ -4147,7 +4289,7 @@ type UIReferencesResponseBody struct {
 	Origin          string             `json:"origin" validate:"required"`
 	OriginStable    bool               `json:"origin_stable"`
 	Owners          []string           `json:"owners" validate:"required"`
-	Projects        []Project          `json:"projects" validate:"required"`
+	Projects        []ProjectOut       `json:"projects" validate:"required"`
 }
 
 func (u UIReferencesResponseBody) Validate() error {

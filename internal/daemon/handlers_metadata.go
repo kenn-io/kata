@@ -97,7 +97,11 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		out.Body.Changed = res.Changed
 		if res.Changed {
 			ev := res.Event
-			out.Body.Event = &ev
+			projected, err := scopedMutationEvent(ctx, cfg.DB, &ev)
+			if err != nil {
+				return nil, err
+			}
+			out.Body.Event = projected
 			// Wake SSE followers (kata events --tail) and hook consumers on
 			// the persisted issue.metadata_updated event. Only broadcast when
 			// the patch actually changed something — a no-op patch persists no

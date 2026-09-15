@@ -37,7 +37,7 @@ func normalizeListenerEntry(s string) string {
 }
 
 // withTrustedProxyActor inspects each request's local address and, on a
-// trusted listener, overwrites the request principal with a
+// trusted listener, overwrites an unscoped request principal with a
 // PrincipalTrustedProxy carrying the header value. A missing or empty
 // header on a trusted listener becomes a PrincipalTrustedProxyAbsent
 // sentinel. The middleware never rejects on its own; rejection is left to
@@ -52,7 +52,7 @@ func withTrustedProxyActor(cfg ServerConfig) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if headerName == "" {
+			if headerName == "" || issueScopeFromContext(r.Context()) != nil {
 				next.ServeHTTP(w, r)
 				return
 			}

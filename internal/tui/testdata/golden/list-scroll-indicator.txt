@@ -26,5 +26,5 @@
     #s025 —    open      issue s025                                                                            1d ago
 ▶   #s026 —    open      issue s026                                                                            1d ago
                                                                                                            [3-26 of 50]
- ↑↓ move   ▕ ↵ open   ▕ n new       ▕ N child ▕ / search▕ f filter▕ s status▕ v view▕ o order▕ c clear▕ x close
- ! priority▕ D daemons▕ F federation▕ L layout▕ ? help  ▕ q quit
+ ↑↓ move   ▕ ↵ open   ▕ n new       ▕ N child      ▕ / search▕ f filter▕ s status▕ v view▕ o order▕ c clear▕ x close
+ ! priority▕ D daemons▕ F federation▕ C credentials▕ L layout▕ ? help  ▕ q quit

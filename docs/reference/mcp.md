@@ -272,12 +272,23 @@ enforce the selected scope. Fixed multi-project allowlists use bounded scoped
 polling. A `sync.reset_required` result returns `reset_after_id`, advances
 `next_after_id` to that reset cursor, and returns no stale events.
 
-`kata.token_create` returns the plaintext token once. `kata.tokens`, status
+Unscoped `kata.token_create` returns the plaintext token once. `kata.tokens`, status
 tools, errors, and later calls never return that secret or its hash. Token
 administration requires both the `--all-projects` daemon-wide startup scope and
 the explicit `--enable-token-admin` startup capability. A default workspace
 server, a one-project server, and a fixed-allowlist server cannot read, create,
 or revoke global daemon tokens.
+
+In daemon-wide token-admin mode, `kata.token_create` also accepts `issue`,
+`expires_in_seconds`, and `token_file` together. This creates an
+`issue_subtree` credential and writes its plaintext once to a new owner-only
+file. The tool withholds the plaintext from its result and attempts immediate
+revocation if delivery or response validation fails. A scoped credential
+cannot mint another credential; it creates delegated work by creating children
+with an accessible parent. The file belongs to the MCP host. See the
+[worker provisioning example](../operations/remote-daemon.md#identity-tokens)
+for consuming it and the [scope guide](../design/issue-scoped-credentials.md)
+for membership and revocation rules.
 
 Federation topology changes stay CLI/operator workflows: MCP has no tool to
 create an enrollment, read its token, or join a hub as a spoke.

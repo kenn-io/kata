@@ -66,6 +66,7 @@ func projectsHelpRows() [][]helpItem {
 		{key: "r", desc: "refresh"},
 		{key: "D", desc: "daemons"},
 		{key: "F", desc: "federation"},
+		{key: "C", desc: "credentials"},
 		{key: "?", desc: "help"},
 		{key: "q", desc: "quit"},
 	}}

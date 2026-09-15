@@ -60,3 +60,30 @@ func HasTransactionFence(ctx context.Context) bool {
 	fence, _ := ctx.Value(transactionFenceContextKey{}).(TransactionFence)
 	return fence != nil
 }
+
+// WithIssueScopeTargets records the issues authorized or exposed by one request.
+// They are rechecked before domain writes and before sending hydrated responses.
+func WithIssueScopeTargets(ctx context.Context) context.Context {
+	return context.WithValue(ctx, issueScopeTargetsKey{}, make(map[int64]struct{}))
+}
+
+type issueScopeTargetsKey struct{}
+
+// RecordIssueScopeTarget retains a target for transaction and response checks.
+func RecordIssueScopeTarget(ctx context.Context, issueID int64) {
+	if targets, ok := ctx.Value(issueScopeTargetsKey{}).(map[int64]struct{}); ok {
+		targets[issueID] = struct{}{}
+	}
+}
+
+// IssueScopeTargets returns the targets admitted so far by this request.
+func IssueScopeTargets(ctx context.Context) []int64 {
+	if targets, ok := ctx.Value(issueScopeTargetsKey{}).(map[int64]struct{}); ok {
+		ids := make([]int64, 0, len(targets))
+		for id := range targets {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}

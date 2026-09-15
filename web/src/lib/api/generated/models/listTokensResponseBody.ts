@@ -4,6 +4,7 @@
 import type { TokenOut } from './tokenOut.ts'
 
 export interface ListTokensResponseBody {
+  observed_at: string
   tokens: TokenOut[]
   [key: string]: unknown
 }

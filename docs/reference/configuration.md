@@ -543,7 +543,8 @@ trust_private_network = true
 require_token_identity = true
 ```
 
-Create per-user tokens before requiring token identity:
+Restart the daemon with this configuration, then create per-user tokens with
+the bootstrap token:
 
 ```sh
 export KATA_AUTH_TOKEN=bootstrap-admin-token
@@ -552,8 +553,18 @@ kata tokens list
 kata tokens revoke 1
 ```
 
-`tokens create` prints plaintext once. The daemon stores only a SHA-256 hash.
+Unscoped `tokens create` prints plaintext once. The daemon stores only a SHA-256 hash.
 Lost tokens must be revoked and recreated.
+
+Kata refuses `tokens create` when a shared token is configured but
+`require_token_identity` is false. This prevents minting a credential that the
+daemon would immediately reject as a bearer token. A local no-auth daemon may
+still pre-provision unscoped tokens before it is restarted in identity mode.
+
+Scoped creation always requires `require_token_identity = true`, even without
+a shared token. `allow_unauthenticated_private_network_writes` is incompatible
+with identity mode and refuses token administration, so it cannot mint scoped
+credentials. See [token CLI usage](cli.md#remote-and-identity-tokens).
 
 In identity mode, the bootstrap/admin token can manage tokens and perform
 reads, but attributed writes require a DB-backed token. The daemon derives the
@@ -607,8 +618,11 @@ message-substance checks, and evidence checks. The TUI close path skips the
 message-substance and evidence checks only when the daemon accepts the request
 over an owner-local Unix socket or direct loopback TCP connection with no
 forwarding headers, because an interactive human confirms each close. Users of
-a forwarded or non-loopback TUI must close through the normal evidence-bearing
-CLI or API flow. Structural guards still apply to every transport.
+a forwarded or non-loopback TUI, including a TUI authenticated with an
+issue-scoped credential, get a completion form for the substantive message and
+typed evidence required by the normal close contract. The TUI discovers that
+requirement from `/instance`; it does not trust its own `source=tui` marker to
+widen authority. Structural guards still apply to every transport.
 
 ## Semantic search
 

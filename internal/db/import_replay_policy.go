@@ -345,10 +345,12 @@ func ValidReplayContentHash(value string) bool {
 // ReplayTokenCreated is the durable token.created event payload used to
 // rebuild the API-token projection during replay.
 type ReplayTokenCreated struct {
-	TokenID     int64   `json:"token_id"`
-	TokenHash   string  `json:"token_hash"`
-	TargetActor string  `json:"target_actor"`
-	Name        *string `json:"name,omitempty"`
+	TokenID     int64          `json:"token_id"`
+	TokenHash   string         `json:"token_hash"`
+	TargetActor string         `json:"target_actor"`
+	Name        *string        `json:"name,omitempty"`
+	Scope       *APITokenScope `json:"scope,omitempty"`
+	ExpiresAt   *time.Time     `json:"expires_at,omitempty"`
 }
 
 // ReplayTokenRevoked is the durable token.revoked projection payload.
@@ -377,6 +379,9 @@ func DecodeReplayTokenCreated(payload []byte) (ReplayTokenCreated, error) {
 		)
 	}
 	if err := ValidateTokenActor(record.TargetActor); err != nil {
+		return ReplayTokenCreated{}, fmt.Errorf("decode token.created payload: %w", err)
+	}
+	if err := ValidateAPITokenGrant(record.Scope, record.ExpiresAt); err != nil {
 		return ReplayTokenCreated{}, fmt.Errorf("decode token.created payload: %w", err)
 	}
 	return record, nil

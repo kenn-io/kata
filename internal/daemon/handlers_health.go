@@ -40,13 +40,22 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		out := &api.HealthResponse{}
 		out.Body.OK = true
-		out.Body.DBPath = cfg.DB.Path()
 		out.Body.SchemaVersion = schema
 		out.Body.APISchemaVersion = APISchemaVersion
 		out.Body.Version = version.Version
 		out.Body.StartedAt = cfg.StartedAt
 		out.Body.Uptime = time.Since(cfg.StartedAt).Round(time.Second).String()
-		if cfg.ReconcilerHealth != nil {
+		principal, authenticated := PrincipalFromContext(ctx)
+		diagnostics := ownerLocalTransport(ctx)
+		if authenticated {
+			// An explicit principal always wins over transport convenience: a
+			// scoped bearer remains scoped even when used from loopback.
+			diagnostics = principal.Scope == nil
+		}
+		if diagnostics {
+			out.Body.DBPath = cfg.DB.Path()
+		}
+		if diagnostics && cfg.ReconcilerHealth != nil {
 			h := cfg.ReconcilerHealth()
 			out.Body.Embeddings = &api.EmbeddingsHealth{
 				Configured:      h.Configured,
@@ -61,7 +70,7 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 				LastProgressAt:  h.LastProgressAt,
 			}
 		}
-		if cfg.FederationConfigHealth != nil {
+		if diagnostics && cfg.FederationConfigHealth != nil {
 			health := cfg.FederationConfigHealth()
 			out.Body.FederationConfig = &health
 		}

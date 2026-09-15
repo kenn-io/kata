@@ -38,7 +38,7 @@ func renderDaemons(m Model) string {
 	}
 	body = append(body, "")
 	body = append(body, renderAuxiliaryFooter(m,
-		"[↑/↓ k/j] move  [enter] switch  [esc] back  [q] quit  [?] help"))
+		"[↑/↓ k/j] move  [enter] switch  [esc] back  [C] credentials  [q] quit  [?] help"))
 	return strings.Join(body, "\n")
 }
 

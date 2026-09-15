@@ -85,17 +85,20 @@ func TestValidationModeRequiresConfiguredSchemaOwnerBeforeConnecting(t *testing.
 	assert.Contains(t, err.Error(), "postgres schema owner is required in validation mode")
 }
 
-func TestPostgresMigrationRegistryIncludesCommentTeammate(t *testing.T) {
+func TestPostgresMigrationRegistryIncludesIssueScopedTokens(t *testing.T) {
 	t.Parallel()
 
 	migrations := pgstore.Migrations()
-	require.Len(t, migrations, 2)
+	require.Len(t, migrations, 3)
 	assert.Equal(t, 25, migrations[0].FromVersion)
 	assert.Equal(t, 26, migrations[0].ToVersion)
 	assert.Equal(t, "000026_external_root_bridges.up.sql", migrations[0].Name)
 	assert.Equal(t, 26, migrations[1].FromVersion)
 	assert.Equal(t, 27, migrations[1].ToVersion)
 	assert.Equal(t, "000027_comment_teammate.up.sql", migrations[1].Name)
+	assert.Equal(t, 27, migrations[2].FromVersion)
+	assert.Equal(t, 28, migrations[2].ToVersion)
+	assert.Equal(t, "000028_issue_scoped_tokens.up.sql", migrations[2].Name)
 }
 
 func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
@@ -125,7 +128,7 @@ func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 27, version)
+	assert.Equal(t, 28, version)
 
 	project, err := migrated.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -182,7 +185,7 @@ func TestCommentTeammateMigrationUpgradesVersion26(t *testing.T) {
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 27, version)
+	assert.Equal(t, 28, version)
 	comments, err := migrated.CommentsByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
@@ -200,6 +203,57 @@ func TestCommentTeammateMigrationUpgradesVersion26(t *testing.T) {
 	})
 	require.NoError(t, err, "reapplying migrations must be a no-op")
 	t.Cleanup(func() { _ = reopened.Close() })
+}
+
+func TestIssueScopedTokensMigrationUpgradesVersion27(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	const schema = "issue_token_upgrade"
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	_, err = admin.ExecContext(ctx, `
+ALTER TABLE issue_token_upgrade.api_tokens DROP CONSTRAINT api_tokens_scope_shape;
+ALTER TABLE issue_token_upgrade.api_tokens DROP COLUMN expires_at;
+ALTER TABLE issue_token_upgrade.api_tokens DROP COLUMN scope_root_issue_uid;
+ALTER TABLE issue_token_upgrade.api_tokens DROP COLUMN scope_project_uid;
+ALTER TABLE issue_token_upgrade.api_tokens DROP COLUMN scope_kind;
+UPDATE issue_token_upgrade.meta SET value='27' WHERE key='schema_version'`)
+	require.NoError(t, err)
+
+	migrated, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = migrated.Close() })
+	version, err := migrated.SchemaVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 28, version)
+
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	token, _, err := migrated.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "migration-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
+		Scope: &db.APITokenScope{
+			Kind:         db.APITokenScopeIssueSubtree,
+			ProjectUID:   "01HZNQ7VFPK1XGD8R5MABCD4EX",
+			RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
+		},
+		ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, token.Scope)
+	assert.Equal(t, db.APITokenScopeIssueSubtree, token.Scope.Kind)
 }
 
 func TestExternalRootMigrationRollsBackSchemaAndVersionTogether(t *testing.T) {
@@ -250,11 +304,16 @@ func setExternalRootMigrationSource(
 ) {
 	t.Helper()
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
+ALTER TABLE %s.api_tokens DROP CONSTRAINT api_tokens_scope_shape;
+ALTER TABLE %s.api_tokens DROP COLUMN expires_at;
+ALTER TABLE %s.api_tokens DROP COLUMN scope_root_issue_uid;
+ALTER TABLE %s.api_tokens DROP COLUMN scope_project_uid;
+ALTER TABLE %s.api_tokens DROP COLUMN scope_kind;
 DROP TABLE %s.external_field_states;
 DROP TABLE %s.external_field_mappings;
 DROP TABLE %s.external_root_bindings;
 ALTER TABLE %s.comments DROP COLUMN teammate;
-UPDATE %s.meta SET value='25' WHERE key='schema_version'`, schema, schema, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
+UPDATE %s.meta SET value='25' WHERE key='schema_version'`, schema, schema, schema, schema, schema, schema, schema, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
 
@@ -266,8 +325,11 @@ func setCommentTeammateMigrationSource(
 ) {
 	t.Helper()
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
+ALTER TABLE %s.api_tokens DROP CONSTRAINT api_tokens_scope_shape,
+  DROP COLUMN expires_at, DROP COLUMN scope_root_issue_uid,
+  DROP COLUMN scope_project_uid, DROP COLUMN scope_kind;
 ALTER TABLE %s.comments DROP COLUMN teammate;
-UPDATE %s.meta SET value='26' WHERE key='schema_version'`, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
+UPDATE %s.meta SET value='26' WHERE key='schema_version'`, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
 

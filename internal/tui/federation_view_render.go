@@ -73,7 +73,7 @@ func renderFederation(m Model) string {
 	}
 	body = append(body, "")
 	body = append(body, renderAuxiliaryFooter(m,
-		"[↑/↓ k/j] move  [enter] detail  [esc] back  [r] refresh  [n] enroll  [x] leave  [b] browse hubs  [?] help"))
+		"[↑/↓ k/j] move  [enter] detail  [esc] back  [r] refresh  [n] enroll  [x] leave  [b] browse hubs  [C] credentials  [?] help"))
 	return strings.Join(body, "\n")
 }
 

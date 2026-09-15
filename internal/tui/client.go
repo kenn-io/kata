@@ -10,13 +10,16 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
 // Client is the typed adapter the TUI uses to talk to the daemon. Errors
@@ -58,8 +61,30 @@ var (
 // GetInstance returns the daemon instance identity and schema version.
 func (c *Client) GetInstance(ctx context.Context) (InstanceInfo, error) {
 	var resp InstanceInfo
-	err := c.do(ctx, http.MethodGet, "/api/v1/instance", nil, &resp)
-	return resp, err
+	if err := c.do(ctx, http.MethodGet, "/api/v1/instance", nil, &resp); err != nil {
+		return InstanceInfo{}, err
+	}
+	if scope := resp.Auth.Scope; scope != nil {
+		if scope.Kind != "issue_subtree" || !katauid.Valid(scope.ProjectUID) || !katauid.Valid(scope.RootIssueUID) ||
+			resp.Auth.ExpiresAt == nil || !time.Now().UTC().Before(*resp.Auth.ExpiresAt) ||
+			!resp.Auth.CloseRequiresEvidence || !slices.Contains(resp.Auth.AllowedActions, "issue.read") {
+			return InstanceInfo{}, fmt.Errorf("incomplete issue-scoped capabilities from daemon")
+		}
+	}
+	return resp, nil
+}
+
+// ListTokens returns the daemon's redacted credential audit inventory and
+// the instant at which the daemon classified each token's state.
+func (c *Client) ListTokens(ctx context.Context) ([]TokenInfo, time.Time, error) {
+	var resp struct {
+		Tokens     []TokenInfo `json:"tokens"`
+		ObservedAt time.Time   `json:"observed_at"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/v1/tokens", nil, &resp); err != nil {
+		return nil, time.Time{}, err
+	}
+	return resp.Tokens, resp.ObservedAt, nil
 }
 
 // ListIssues returns the issues for projectID filtered by f.
@@ -128,6 +153,19 @@ func (c *Client) Close(
 	ctx context.Context, projectID int64, ref, actor string,
 ) (*MutationResp, error) {
 	body := map[string]string{"actor": actor, "source": "tui", "reason": "done"}
+	return c.mutate(ctx, http.MethodPost,
+		issuePath(projectID, ref)+"/actions/close", body)
+}
+
+// CloseWithEvidence performs the authenticated completion contract used when
+// /instance says the current principal cannot use the owner-local shortcut.
+func (c *Client) CloseWithEvidence(
+	ctx context.Context, projectID int64, ref string, in CloseInput,
+) (*MutationResp, error) {
+	body := api.CloseActionRequestBody{ //nolint:modernize // Embedded wire type is required by the current compiler.
+		ActionRequestBody: api.ActionRequestBody{
+			Actor: in.Actor, Reason: in.Reason, Message: in.Message, Source: "tui", Evidence: in.Evidence,
+		}}
 	return c.mutate(ctx, http.MethodPost,
 		issuePath(projectID, ref)+"/actions/close", body)
 }

@@ -75,6 +75,7 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 	}{
 		{name: "snapshot", method: http.MethodGet, path: "/api/v1/ui/snapshot", want: http.StatusNoContent},
 		{name: "daemon roster", method: http.MethodGet, path: "/api/v1/ui/daemons", want: http.StatusNoContent},
+		{name: "credential audit", method: http.MethodGet, path: "/api/v1/tokens", want: http.StatusForbidden},
 		{name: "issue reference", method: http.MethodGet, path: "/api/v1/ui/issue-reference?project_id=7&ref=abc4", want: http.StatusNoContent},
 		{name: "proxied snapshot", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/ui/snapshot", want: http.StatusNoContent},
 		{name: "proxied daemon roster", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/ui/daemons", want: http.StatusForbidden},
@@ -105,6 +106,92 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 			assert.Equal(t, test.want, response.Code)
 		})
 	}
+}
+
+func TestIssueScopedBrowserSessionUsesSameRouteAllowlist(t *testing.T) {
+	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	issued, err := manager.IssueSession(Principal{
+		Kind: PrincipalDBToken, Actor: "worker-a", TokenID: 7,
+		Scope: &db.APITokenScope{
+			Kind: db.APITokenScopeIssueSubtree, ProjectUID: "01HAAAAAAAAAAAAAAAAAAAAAAA",
+			RootIssueUID: "01HBBBBBBBBBBBBBBBBBBBBBBB",
+		},
+		ExpiresAt: &expiresAt,
+	}, "/kata")
+	require.NoError(t, err)
+	manager.db = &webSessionActiveTokenStore{Storage: manager.db, token: db.APIToken{
+		ID: 7, Actor: "worker-a", Scope: &db.APITokenScope{
+			Kind: db.APITokenScopeIssueSubtree, ProjectUID: "01HAAAAAAAAAAAAAAAAAAAAAAA",
+			RootIssueUID: "01HBBBBBBBBBBBBBBBBBBBBBBB",
+		}, ExpiresAt: &expiresAt,
+	}}
+	handler := requireBrowserSession(manager, ListenerPolicy{
+		Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true,
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	for _, tc := range []struct {
+		name, method, path string
+		want               int
+	}{
+		{name: "ordinary issue read", method: http.MethodGet, path: "/api/v1/projects/1/issues/abc4", want: http.StatusNoContent},
+		{name: "recurrence denied", method: http.MethodGet, path: "/api/v1/projects/1/recurrences", want: http.StatusForbidden},
+		{name: "project deletion denied", method: http.MethodDelete, path: "/api/v1/projects/2", want: http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, "http://127.0.0.1:27123"+tc.path, nil)
+			request.AddCookie(manager.Cookie(issued.Cookie))
+			request.Header.Set(webSessionHeader, issued.Session)
+			request.Header.Set(webCSRFHeader, issued.CSRF)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			require.Equal(t, tc.want, response.Code)
+			if tc.want == http.StatusForbidden {
+				require.Contains(t, response.Body.String(), `"scoped_operation_forbidden"`)
+			}
+		})
+	}
+}
+
+func TestIssueScopedBrowserSessionExpiresAtTokenDeadline(t *testing.T) {
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	manager, err := NewWebSessionManager(WebSessionManagerConfig{
+		Origin: "http://127.0.0.1:27123", InstanceID: "instance_a",
+		Entropy: bytes.NewReader(bytes.Repeat([]byte{0x61}, 32*20)), Writable: true,
+		Clock: func() time.Time { return now },
+	})
+	require.NoError(t, err)
+	expiresAt := now.Add(5 * time.Minute)
+	principal := Principal{
+		Kind: PrincipalDBToken, Actor: "worker-a", TokenID: 7,
+		Scope: &db.APITokenScope{
+			Kind: db.APITokenScopeIssueSubtree, ProjectUID: "01HAAAAAAAAAAAAAAAAAAAAAAA",
+			RootIssueUID: "01HBBBBBBBBBBBBBBBBBBBBBBB",
+		},
+		ExpiresAt: &expiresAt,
+	}
+	issued, err := manager.IssueSession(principal, "/kata")
+	require.NoError(t, err)
+	manager.db = &webSessionActiveTokenStore{Storage: manager.db, token: db.APIToken{
+		ID: 7, Actor: principal.Actor, Scope: principal.Scope, ExpiresAt: &expiresAt,
+	}}
+
+	_, err = manager.Authenticate(t.Context(), issued.Cookie, issued.Session)
+	require.NoError(t, err)
+	now = expiresAt
+	_, err = manager.Authenticate(t.Context(), issued.Cookie, issued.Session)
+	require.ErrorIs(t, err, ErrWebSessionInvalid)
+}
+
+type webSessionActiveTokenStore struct {
+	db.Storage
+	token db.APIToken
+}
+
+func (s *webSessionActiveTokenStore) ListAPITokens(context.Context) ([]db.APIToken, error) {
+	return []db.APIToken{s.token}, nil
 }
 
 func TestSharedTCPEventStreamPreservesCLIAuthentication(t *testing.T) {
