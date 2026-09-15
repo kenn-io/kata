@@ -113,8 +113,10 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 			truncated = true
 		}
 		for rank, hit := range response.Results {
+			summary := h.summaryFromIssue(projects[index], hit.Issue)
+			summary.WebURL = hit.WebURL
 			ranked = append(ranked, rankedHit{rank: rank, hit: SearchHit{
-				Issue:     h.summaryFromIssue(projects[index], hit.Issue),
+				Issue:     summary,
 				Score:     hit.Score,
 				MatchedIn: nonNilStrings(hit.MatchedIn),
 			}})
@@ -428,6 +430,7 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		}
 	}
 	summary := h.summaryFromIssue(project, response.Issue)
+	summary.WebURL = response.WebURL
 	metadata := response.Issue.Metadata
 	if metadata == nil {
 		metadata = map[string]any{}
@@ -1234,6 +1237,7 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 		qualified = project.Name + "#" + issue.ShortID
 	}
 	return IssueSummary{
+		WebURL:       issue.WebURL,
 		UID:          issue.UID,
 		Ref:          issue.ShortID,
 		QualifiedRef: qualified,
@@ -1253,7 +1257,8 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 
 func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 	return IssueSummary{
-		UID: issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
+		WebURL: issue.WebURL,
+		UID:    issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
 		Title: issue.Title, Status: issue.Status, Owner: issue.Owner, Priority: issue.Priority,
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
@@ -1264,7 +1269,8 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 
 func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSummary {
 	return IssueSummary{
-		UID: issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
+		WebURL: issue.WebURL,
+		UID:    issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
 		Title: issue.Title, Status: issue.Status, Owner: issue.Owner, Priority: issue.Priority,
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),

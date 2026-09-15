@@ -250,6 +250,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		addIssueWebURLs(cfg, issueOuts)
 		out.Body.Issues = issueOuts
 		return out, nil
 	})
@@ -327,6 +328,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
+			issueOut.WebURL = issueWebURL(cfg, issueOut.UID)
 			out.Body.Issues[i] = api.ListGlobalIssueOut{
 				IssueOut:    issueOut,
 				ProjectName: projectName,
@@ -868,6 +870,8 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	out.Body.Links = links
 	out.Body.Labels = labels
 	out.Body.Parent = parent
+	out.Body.WebURL = issueWebURL(cfg, issue.UID)
+	addIssueWebURLs(cfg, childOuts)
 	out.Body.Children = childOuts
 	claimRelevant, err := showIssueClaimRelevant(ctx, cfg.DB, issue.ProjectID)
 	if err != nil {
@@ -1366,4 +1370,17 @@ func formatDuplicateMessage(matched []map[string]any) string {
 		return "1 existing issue matches this title"
 	}
 	return strconv.Itoa(n) + " existing issues match this title"
+}
+
+func issueWebURL(cfg ServerConfig, uid string) string {
+	if cfg.WebSessions == nil || uid == "" {
+		return ""
+	}
+	return cfg.WebSessions.Origin() + "/kata?issue=" + uid
+}
+
+func addIssueWebURLs(cfg ServerConfig, issues []api.IssueOut) {
+	for i := range issues {
+		issues[i].WebURL = issueWebURL(cfg, issues[i].UID)
+	}
 }

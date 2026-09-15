@@ -65,6 +65,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		for _, c := range res.Hits {
 			out.Body.Results = append(out.Body.Results, api.SearchHit{
 				Issue:     c.Issue,
+				WebURL:    issueWebURL(cfg, c.Issue.UID),
 				Score:     c.Score,
 				MatchedIn: c.MatchedIn,
 			})

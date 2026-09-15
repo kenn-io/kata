@@ -7,5 +7,7 @@ export interface SearchHit {
   issue: Issue
   matched_in: string[]
   score: number
+  /** Browser URL for this issue in the owning daemon. */
+  web_url?: string
   [key: string]: unknown
 }

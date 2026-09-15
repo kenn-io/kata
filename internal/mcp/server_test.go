@@ -1195,3 +1195,22 @@ func schemaObject(t *testing.T, schema any) map[string]any {
 	require.True(t, ok, "schema is %T", schema)
 	return object
 }
+
+func TestListPreservesIssueBrowserURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/projects/42/issues", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issues":[{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","short_id":"5fav","web_url":"https://tasks.example/kata?issue=01ARZ3NDEKTSV4RRFFQ69G5FAV"}]}`))
+	}))
+	t.Cleanup(server.Close)
+	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+	session := connectTestServerWithClient(t, client)
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.list", Arguments: map[string]any{}})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	structured := result.StructuredContent.(map[string]any)
+	rows := structured["issues"].([]any)
+	require.Len(t, rows, 1)
+	require.Equal(t, "https://tasks.example/kata?issue=01ARZ3NDEKTSV4RRFFQ69G5FAV", rows[0].(map[string]any)["web_url"])
+}

@@ -1971,6 +1971,9 @@ type IssueOut struct {
 	Title         string         `json:"title" validate:"required"`
 	UID           string         `json:"uid" validate:"required"`
 	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+
+	// WebURL Browser URL for this issue in the owning daemon.
+	WebURL *string `json:"web_url,omitempty"`
 }
 
 func (i IssueOut) Validate() error {
@@ -2399,6 +2402,9 @@ type ListGlobalIssueOut struct {
 	Title         string         `json:"title" validate:"required"`
 	UID           string         `json:"uid" validate:"required"`
 	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+
+	// WebURL Browser URL for this issue in the owning daemon.
+	WebURL *string `json:"web_url,omitempty"`
 }
 
 func (l ListGlobalIssueOut) Validate() error {
@@ -3268,6 +3274,9 @@ type ReadyGlobalIssueOut struct {
 	Title         string         `json:"title" validate:"required"`
 	UID           string         `json:"uid" validate:"required"`
 	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+
+	// WebURL Browser URL for this issue in the owning daemon.
+	WebURL *string `json:"web_url,omitempty"`
 }
 
 func (r ReadyGlobalIssueOut) Validate() error {
@@ -3705,6 +3714,9 @@ type SearchHit struct {
 	Issue     Issue    `json:"issue"`
 	MatchedIn []string `json:"matched_in" validate:"required"`
 	Score     float64  `json:"score"`
+
+	// WebURL Browser URL for this issue in the owning daemon.
+	WebURL *string `json:"web_url,omitempty"`
 }
 
 func (s SearchHit) Validate() error {
@@ -3769,6 +3781,9 @@ type ShowIssueResponseBody struct {
 	Parent              *IssueRef           `json:"parent,omitempty"`
 	PendingClaims       []PendingClaimOut   `json:"pending_claims,omitempty"`
 	PendingLeases       []PendingClaimOut   `json:"pending_leases,omitempty"`
+
+	// WebURL Browser URL for this issue in the owning daemon.
+	WebURL *string `json:"web_url,omitempty"`
 }
 
 func (s ShowIssueResponseBody) Validate() error {
