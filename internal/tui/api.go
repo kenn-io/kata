@@ -1,6 +1,9 @@
 package tui
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // KataAPI is the daemon surface the TUI consumes. It is owned by this
 // package (the consumer) and covers exactly the methods the TUI calls
@@ -42,4 +45,8 @@ type federationHubAdminAPI interface {
 
 type federationEnrollmentAPI interface {
 	ProjectFederation(ctx context.Context, hubProjectID int64) (ProjectFederationMetadata, error)
+}
+
+type credentialAuditAPI interface {
+	ListTokens(ctx context.Context) ([]TokenInfo, time.Time, error)
 }

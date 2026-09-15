@@ -5,6 +5,8 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -88,6 +90,21 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		links, linkTargets, err := resolveInitialLinks(ctx, cfg.DB, in.ProjectID, in.Body.Links)
 		if err != nil {
 			return nil, err
+		}
+		if issueScopeFromContext(ctx) != nil {
+			parentCount := 0
+			for index, link := range links {
+				if link.Type == "parent" {
+					parentCount++
+				}
+				if err := authorizeIssueScopedIssue(ctx, cfg.DB, linkTargets[index]); err != nil {
+					return nil, err
+				}
+			}
+			if parentCount != 1 {
+				return nil, api.NewError(http.StatusForbidden, "scoped_parent_required",
+					"issue-scoped creation requires exactly one accessible parent", "", nil)
+			}
 		}
 		ctx, err = authorizeHostProjectScope(ctx, issueProjectIDs(linkTargets), nil, false)
 		if err != nil {
@@ -198,9 +215,13 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		cfg.Publish().Event(in.ProjectID, evt)
+		projected, err := scopedMutationEvent(ctx, cfg.DB, &evt)
+		if err != nil {
+			return nil, err
+		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = issue
-		out.Body.Event = &evt
+		out.Body.Event = projected
 		out.Body.Changed = true
 		return out, nil
 	}))
@@ -241,6 +262,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Labels:        in.Labels,
 			ExcludeLabels: in.ExcludeLabels,
 			Meta:          metaFilters,
+			IssueScope:    issueScopeFromContext(ctx),
 		})
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -279,8 +301,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.ProjectID > 0 {
 			projectIDs = []int64{in.ProjectID}
 		}
-		var err error
-		ctx, err = authorizeHostProjectScope(ctx, projectIDs, nil, in.ProjectID == 0)
+		ctx, err := authorizeHostProjectScope(ctx, projectIDs, nil, in.ProjectID == 0)
 		if err != nil {
 			return nil, err
 		}
@@ -312,6 +333,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Labels:        in.Labels,
 			ExcludeLabels: in.ExcludeLabels,
 			Meta:          metaFilters,
+			IssueScope:    issueScopeFromContext(ctx),
 		})
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -375,6 +397,9 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// row regardless of project archive state.
 		if _, perr := activeProjectByID(ctx, cfg.DB, issue.ProjectID); perr != nil {
 			return nil, perr
+		}
+		if err := authorizeIssueScopedIssue(ctx, cfg.DB, issue); err != nil {
+			return nil, err
 		}
 		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted)
 	})
@@ -444,6 +469,11 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			}
 		}
 		if hasLinkChange {
+			if issueScopeFromContext(ctx) != nil &&
+				(in.Body.LinksDelta.SetParent != nil || in.Body.LinksDelta.RemoveParent != nil) {
+				return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden",
+					"issue-scoped credentials cannot change an existing issue parent", "", nil)
+			}
 			if err := validateLinksDelta(in.Body.LinksDelta); err != nil {
 				return nil, err
 			}
@@ -498,10 +528,20 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		// priority transition would otherwise be hidden by an event
 		// emitted later. `event` is retained as a compatibility alias
 		// pointing at the LAST event for callers that only expected one.
-		if len(result.Events) > 0 {
-			out.Body.Events = make([]db.Event, len(result.Events))
-			copy(out.Body.Events, result.Events)
-			last := result.Events[len(result.Events)-1]
+		// Issue-scoped callers receive the typed projection of every event;
+		// unscoped callers keep the raw stored batch.
+		responseEvents := result.Events
+		projectedEvents, scoped, err := scopedMutationEvents(ctx, cfg.DB, result.Events)
+		if err != nil {
+			return nil, err
+		}
+		if scoped {
+			responseEvents = projectedEvents
+		}
+		if len(responseEvents) > 0 {
+			out.Body.Events = make([]db.Event, len(responseEvents))
+			copy(out.Body.Events, responseEvents)
+			last := responseEvents[len(responseEvents)-1]
 			out.Body.Event = &last
 		}
 		// `changes` is only present on relationship-bearing PATCHes — its
@@ -766,6 +806,14 @@ func linksDeltaNonEmpty(d *api.LinksDelta) bool {
 		len(d.RemoveBlocks) > 0 || len(d.RemoveBlockedBy) > 0 || len(d.RemoveRelated) > 0
 }
 
+// uidMissError is the shared 404 envelope for an exact-UID miss. Scoped
+// callers reuse it for hidden issues so unknown and inaccessible resources
+// share one generic not-found response.
+func uidMissError(normalizedUID string) error {
+	return api.NewError(404, "issue_not_found",
+		fmt.Sprintf("no issue matches uid %s", normalizedUID), "", nil)
+}
+
 func resolveIssueByUIDOrPrefix(ctx context.Context, store db.Storage, ref string, include db.IncludeDeleted) (db.Issue, error) {
 	// ULIDs are spec-defined as case-insensitive. Uppercase the ref
 	// before validation/lookup so a user typing the lowercase form
@@ -776,11 +824,25 @@ func resolveIssueByUIDOrPrefix(ctx context.Context, store db.Storage, ref string
 	if uid.Valid(normalized) {
 		issue, err := store.IssueByUID(ctx, normalized, include)
 		if errors.Is(err, db.ErrNotFound) {
-			return db.Issue{}, api.NewError(404, "issue_not_found",
-				fmt.Sprintf("no issue matches uid %s", normalized), "", nil)
+			return db.Issue{}, uidMissError(normalized)
 		}
 		if err != nil {
 			return db.Issue{}, internalAPIError(err)
+		}
+		// A scoped caller must authorize before the issue surfaces, and a
+		// hidden issue must be indistinguishable from a nonexistent one:
+		// translate every scoped 404 denial into the exact-UID miss
+		// envelope so a valid UID cannot probe hidden existence. Other
+		// denial classes (the 401 authentication class, internal errors)
+		// propagate unchanged.
+		if issueScopeFromContext(ctx) != nil {
+			if err := authorizeIssueScopedIssue(ctx, store, issue); err != nil {
+				var apiErr *api.APIError
+				if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+					return db.Issue{}, uidMissError(normalized)
+				}
+				return db.Issue{}, err
+			}
 		}
 		return issue, nil
 	}
@@ -794,7 +856,7 @@ func resolveIssueByUIDOrPrefix(ctx context.Context, store db.Storage, ref string
 			fmt.Sprintf("%q is not a valid ULID prefix (Crockford base32: 0-9, A-Z excluding I/L/O/U; first char 0-7)", ref),
 			"", nil)
 	}
-	matches, err := store.IssueUIDPrefixMatch(ctx, normalized, 20, include)
+	matches, err := issueUIDPrefixMatchesForCaller(ctx, store, normalized, include)
 	if err != nil {
 		return db.Issue{}, internalAPIError(err)
 	}
@@ -814,6 +876,33 @@ func resolveIssueByUIDOrPrefix(ctx context.Context, store db.Storage, ref string
 			"uid prefix is ambiguous: "+strings.Join(candidates, ", "), "",
 			map[string]any{"candidates": candidates})
 	}
+}
+
+func issueUIDPrefixMatchesForCaller(
+	ctx context.Context, store db.Storage, prefix string, include db.IncludeDeleted,
+) ([]db.Issue, error) {
+	if issueScopeFromContext(ctx) == nil {
+		return store.IssueUIDPrefixMatch(ctx, prefix, 20, include)
+	}
+	allowed, _, err := issueScopedAllowedIDSet(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	matches := make([]db.Issue, 0, 2)
+	for issueID := range allowed {
+		issue, err := store.IssueByID(ctx, issueID)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		if strings.HasPrefix(issue.UID, prefix) {
+			matches = append(matches, issue)
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].UID < matches[j].UID })
+	return matches, nil
 }
 
 // buildShowIssueResponse assembles the show-issue payload and mirrors the
@@ -856,6 +945,11 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
+	allowed, scoped, err := issueScopedAllowedIDSet(ctx, cfg.DB)
+	if err != nil {
+		return nil, err
+	}
+	children = filterIssueScopedIssues(children, allowed, scoped)
 	// ChildrenOfIssue returns children from any project (links span projects,
 	// storage v16), so hydrate each child against its OWN project rather than
 	// the parent's — otherwise a cross-project child gets the parent's project
@@ -956,11 +1050,21 @@ func loadParentRef(ctx context.Context, store db.Storage, issue db.Issue) (*api.
 	if err != nil {
 		return nil, err
 	}
+	allowed, scoped, err := issueScopedAllowedIDSet(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
+		if _, ok := allowed[parent.ID]; !ok {
+			return nil, nil
+		}
+	}
 	project, err := store.ProjectByID(ctx, parent.ProjectID)
 	if err != nil {
 		return nil, err
 	}
 	ref := issueRefFromDB(parent, project.Name)
+	db.RecordIssueScopeTarget(ctx, parent.ID)
 	return &ref, nil
 }
 
@@ -1024,6 +1128,7 @@ func (c *projectNames) name(ctx context.Context, id int64) (string, error) {
 // linkPeerFor resolves a db.Issue into a fully-populated api.LinkPeer using a
 // per-request projectNames cache. Project and QualifiedID are always set.
 func linkPeerFor(ctx context.Context, names *projectNames, iss db.Issue) (api.LinkPeer, error) {
+	db.RecordIssueScopeTarget(ctx, iss.ID)
 	project, err := names.name(ctx, iss.ProjectID)
 	if err != nil {
 		return api.LinkPeer{}, err
@@ -1090,6 +1195,7 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 	ids := make([]int64, len(issues))
 	for i, iss := range issues {
 		ids[i] = iss.ID
+		db.RecordIssueScopeTarget(ctx, iss.ID)
 	}
 	labelsByID, err := store.LabelsByIssues(ctx, projectID, ids)
 	if err != nil {
@@ -1098,6 +1204,39 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 	relationships, err := store.RelationshipsByIssues(ctx, ids)
 	if err != nil {
 		return nil, err
+	}
+	allowed, scoped, err := issueScopedAllowedIDSet(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
+		for _, issue := range issues {
+			rel := relationships[issue.ID]
+			rel.Blocks = filterAllowedIssueIDs(rel.Blocks, allowed)
+			rel.BlockedBy = filterAllowedIssueIDs(rel.BlockedBy, allowed)
+			rel.Related = filterAllowedIssueIDs(rel.Related, allowed)
+			if rel.ParentIssueID != nil {
+				if _, ok := allowed[*rel.ParentIssueID]; !ok {
+					rel.ParentIssueID = nil
+				}
+			}
+			children, err := store.ChildrenOfIssue(ctx, issue.ID)
+			if err != nil {
+				return nil, err
+			}
+			rel.Children = db.ChildCounts{}
+			for _, child := range children {
+				if _, ok := allowed[child.ID]; !ok {
+					continue
+				}
+				db.RecordIssueScopeTarget(ctx, child.ID)
+				rel.Children.Total++
+				if child.Status == "open" {
+					rel.Children.Open++
+				}
+			}
+			relationships[issue.ID] = rel
+		}
 	}
 	if err := authorizeHostChildProjects(ctx, store, issues, relationships); err != nil {
 		return nil, err
@@ -1178,6 +1317,16 @@ func peerSlice(cache map[int64]api.LinkPeer, ids []int64) []api.LinkPeer {
 	return out
 }
 
+func filterAllowedIssueIDs(ids []int64, allowed map[int64]struct{}) []int64 {
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := allowed[id]; ok {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // loadLinkOuts fetches every link involving issueID, resolving both endpoint
 // peers so the wire response carries a fully-populated LinkPeer (UID +
 // short_id + project + qualified_id) for each side. One IssueByID call per
@@ -1188,8 +1337,20 @@ func loadLinkOuts(ctx context.Context, store db.Storage, issueID int64) ([]api.L
 		return nil, err
 	}
 	names := &projectNames{store: store}
+	allowed, scoped, err := issueScopedAllowedIDSet(ctx, store)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]api.LinkOut, 0, len(rows))
 	for _, l := range rows {
+		if scoped {
+			if _, ok := allowed[l.FromIssueID]; !ok {
+				continue
+			}
+			if _, ok := allowed[l.ToIssueID]; !ok {
+				continue
+			}
+		}
 		fromIss, err := store.IssueByID(ctx, l.FromIssueID)
 		if err != nil {
 			return nil, err
@@ -1275,13 +1436,17 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 	if match == nil {
 		return fp, nil, nil
 	}
+	matchedIssue, err := cfg.DB.IssueByID(ctx, match.IssueID)
+	if err != nil {
+		return "", nil, internalAPIError(err)
+	}
+	if err := authorizeIssueScopedIssue(ctx, cfg.DB, matchedIssue); err != nil {
+		return "", nil, err
+	}
 	if match.Fingerprint != fp && match.Fingerprint != fpLegacy {
 		// Resolve the prior issue so the mismatch envelope carries UID +
 		// short_id + qualified_id rather than the dropped numeric ref.
-		prior, err := cfg.DB.IssueByID(ctx, match.IssueID)
-		if err != nil {
-			return "", nil, internalAPIError(err)
-		}
+		prior := matchedIssue
 		priorProject, err := cfg.DB.ProjectByID(ctx, prior.ProjectID)
 		if err != nil {
 			return "", nil, internalAPIError(err)
@@ -1295,10 +1460,7 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 				"qualified_id": qualifiedID(priorProject.Name, prior.ShortID),
 			})
 	}
-	existing, err := cfg.DB.IssueByID(ctx, match.IssueID)
-	if err != nil {
-		return "", nil, internalAPIError(err)
-	}
+	existing := matchedIssue
 	if existing.DeletedAt != nil {
 		existingProject, err := cfg.DB.ProjectByID(ctx, existing.ProjectID)
 		if err != nil {
@@ -1316,10 +1478,14 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 	// Copy the Event off the *IdempotencyMatch struct so OriginalEvent has a
 	// stable address that doesn't alias the lookup result.
 	origCopy := match.Event
+	original, err := scopedMutationEvent(ctx, cfg.DB, &origCopy)
+	if err != nil {
+		return "", nil, err
+	}
 	out := &api.MutationResponse{}
 	out.Body.Issue = existing
 	out.Body.Event = nil
-	out.Body.OriginalEvent = &origCopy
+	out.Body.OriginalEvent = original
 	out.Body.Changed = false
 	out.Body.Reused = true
 	return fp, out, nil
@@ -1335,7 +1501,7 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssueRequest, projectName string) error {
 	q := similarity.LookalikeQuery(in.Body.Title, in.Body.Body)
 	candidates, err := cfg.DB.SearchFTSAny(ctx, db.SearchFTSParams{
-		ProjectID: in.ProjectID, Query: q, Limit: 20,
+		ProjectID: in.ProjectID, Query: q, Limit: 20, IssueScope: issueScopeFromContext(ctx),
 	})
 	if err != nil {
 		return internalAPIError(err)

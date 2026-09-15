@@ -56,6 +56,7 @@
     selectedRecurrences?: KataRecurrence[] | undefined
     actionsDisabled?: boolean | undefined
     authorityBlocked?: boolean | undefined
+    administrativeActionsAllowed?: boolean | undefined
     draftResetGeneration?: number | undefined
     draftFenceGeneration?: number | undefined
     movePending?: boolean | undefined
@@ -95,6 +96,7 @@
     selectedRecurrences = [],
     actionsDisabled = false,
     authorityBlocked = undefined,
+    administrativeActionsAllowed = true,
     draftResetGeneration = 0,
     draftFenceGeneration = 0,
     movePending = false,
@@ -400,6 +402,9 @@
             hasChecklist={(issue.issue.metadata.checklist ?? []).length > 0 || checklistRevealed}
             hasRecurrence={!canCreateRecurrence}
             {movePending}
+            allowMove={administrativeActionsAllowed}
+            allowRecurrence={administrativeActionsAllowed}
+            allowDelete={administrativeActionsAllowed}
             {onMoveIssue}
             onAddChecklist={() => {
               checklistRevealed = true
@@ -501,7 +506,7 @@
       }}
     />
 
-    {#if visibleRecurrences.length > 0 || canCreateRecurrence}
+    {#if administrativeActionsAllowed && (visibleRecurrences.length > 0 || canCreateRecurrence)}
       <section class="recurrence-section" aria-label="Recurrence">
         <RecurrencePanel
           recurrences={visibleRecurrences}
@@ -543,7 +548,7 @@
   selectedIssue={issue}
   recurrences={selectedRecurrences}
   actor=""
-  disabled={actionsDisabled}
+  disabled={actionsDisabled || !administrativeActionsAllowed}
   {draftFenceGeneration}
   onCreate={onCreateRecurrence}
   onPatch={onPatchRecurrence}

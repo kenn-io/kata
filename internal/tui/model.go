@@ -23,6 +23,7 @@ const (
 	viewProjects
 	viewDaemons
 	viewFederation
+	viewCredentials
 )
 
 // Model is the top-level Bubble Tea model. Sub-views are embedded by
@@ -144,7 +145,8 @@ type Model struct {
 	daemonCursor   int
 	// federation is every field the federation views own; see
 	// federationState in federation_view.go.
-	federation federationState
+	federation  federationState
+	credentials credentialAuditState
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
@@ -176,6 +178,13 @@ type Model struct {
 	// without firing a fetch the user no longer wants.
 	nextDetailFollowGen int64
 	uidFormat           uidDisplayFormat
+	// Completion and mutation policy comes from initial /instance discovery.
+	closeRequiresEvidence    bool
+	issueScoped              bool
+	scopedWritable           bool
+	authCapabilitiesReady    bool
+	authCapabilitiesRequired bool
+	tokenAuditRead           bool
 }
 
 // initialModel constructs the root Bubble Tea model. Style vars are
@@ -194,22 +203,23 @@ func initialModel(opts Options) Model {
 	lm.actor = resolveTUIActor()
 	uidFormat := parseUIDDisplayFormat(opts.DisplayUIDFormat)
 	return Model{
-		opts:             opts,
-		view:             viewList,
-		keymap:           newKeymap(),
-		list:             lm,
-		detail:           newDetailModel(),
-		sseCh:            make(chan tea.Msg, 16),
-		sseStatus:        sseConnected,
-		cache:            newIssueCache(),
-		toastNow:         time.Now,
-		projectLabels:    newLabelCache(),
-		projectsByID:     map[int64]string{},
-		projectStats:     map[int64]ProjectStatsSummary{},
-		projectIdentByID: map[int64]string{},
-		layout:           layoutStacked,
-		focus:            focusList,
-		uidFormat:        uidFormat,
+		opts:                  opts,
+		view:                  viewList,
+		keymap:                newKeymap(),
+		list:                  lm,
+		detail:                newDetailModel(),
+		sseCh:                 make(chan tea.Msg, 16),
+		sseStatus:             sseConnected,
+		cache:                 newIssueCache(),
+		toastNow:              time.Now,
+		projectLabels:         newLabelCache(),
+		authCapabilitiesReady: true,
+		projectsByID:          map[int64]string{},
+		projectStats:          map[int64]ProjectStatsSummary{},
+		projectIdentByID:      map[int64]string{},
+		layout:                layoutStacked,
+		focus:                 focusList,
+		uidFormat:             uidFormat,
 	}
 }
 
@@ -245,6 +255,9 @@ func (m Model) Init() tea.Cmd {
 	// blocking OSC probe at boot. Update restyles when the
 	// tea.BackgroundColorMsg answer lands.
 	cmds := []tea.Cmd{m.waitForSSE()}
+	if m.api != nil {
+		cmds = append(cmds, m.fetchAuthCapabilities())
+	}
 	if activeColorMode == colorAuto {
 		cmds = append(cmds, tea.RequestBackgroundColor)
 	}
@@ -495,6 +508,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if sw, ok := msg.(daemonSwitchResultMsg); ok {
 		next, cmd := m.handleDaemonSwitchResult(sw)
 		return next, cmd
+	}
+	if capabilities, ok := msg.(authCapabilitiesMsg); ok {
+		return m.handleAuthCapabilities(capabilities)
+	}
+	if loaded, ok := msg.(credentialsLoadedMsg); ok {
+		return m.handleCredentialsLoaded(loaded)
+	}
+	if tick, ok := msg.(credentialsRefreshTickMsg); ok {
+		return m.handleCredentialsRefreshTick(tick)
 	}
 	next, cmd := m.dispatchToView(msg)
 	if postFetchCmd == nil {
@@ -766,6 +788,23 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			next, cmd := m.routeFederationViewKey(msg)
 			return next, cmd, true
 		}
+		if m.view == viewCredentials {
+			next, cmd := m.routeCredentialsViewKey(msg)
+			return next, cmd, true
+		}
+		if withinSubtree, mutation := m.mutationForKey(msg); mutation && !m.mutationAllowed(withinSubtree) {
+			if m.authCapabilitiesRequired && !m.authCapabilitiesReady {
+				m.toast = &toast{
+					text:  "Checking daemon permissions; retry your action when connected",
+					level: toastInfo, expiresAt: m.toastNow().Add(3 * time.Second),
+				}
+				return m, tea.Batch(m.fetchAuthCapabilities(), toastExpireCmd(3*time.Second)), true
+			}
+			return m, nil, true
+		}
+		if next, cmd, ok := m.routeCloseKey(msg); ok {
+			return next, cmd, true
+		}
 		// Detail-view `e` and `c` open M4 centered forms instead of
 		// shelling out to $EDITOR. Routed at the Model level because
 		// the form lives on m.input, which detail.Update can't reach.
@@ -796,6 +835,25 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	return m, nil, false
+}
+
+func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool) {
+	switch {
+	case m.keymap.NewIssue.matches(msg):
+		return false, true
+	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg):
+		return true, true
+	case !m.detailIsActive():
+		return false, false
+	case m.keymap.SetParent.matches(msg):
+		return false, true
+	default:
+		return true, m.keymap.NewChild.matches(msg) || m.keymap.EditBody.matches(msg) ||
+			m.keymap.NewComment.matches(msg) || m.keymap.AddLabel.matches(msg) ||
+			m.keymap.RemoveLabel.matches(msg) || m.keymap.AssignOwner.matches(msg) ||
+			m.keymap.ClearOwner.matches(msg) || m.keymap.AddBlocker.matches(msg) ||
+			m.keymap.AddLink.matches(msg) || m.keymap.SetPriority.matches(msg)
+	}
 }
 
 // applyDetailViewportCache copies the latest terminal dimensions into
@@ -1435,6 +1493,8 @@ func editorKindFor(k inputKind) string {
 		return "edit"
 	case inputNewIssueForm:
 		return "create"
+	case inputCloseForm:
+		return "close"
 	}
 	return ""
 }
@@ -1501,13 +1561,20 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, withConnGen(cmd, m.connGen)
 	}
+	target := m.input.target
+	formKind := m.input.kind
 	m.input = inputState{}
 	// Hand off to the existing per-view mutation routing so the
 	// detail's body / comments list updates. Re-classify as if it
 	// came from detail (gen=current detail gen) so existing
 	// applyMutation logic kicks in.
-	mut.origin = "detail"
-	mut.gen = m.detail.gen
+	if formKind == inputCloseForm {
+		mut.origin = target.origin
+		mut.gen = target.detailGen
+	} else {
+		mut.origin = "detail"
+		mut.gen = m.detail.gen
+	}
 	return m.routeMutation(mut)
 }
 
@@ -1655,6 +1722,16 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 	if kind == inputNewIssueForm {
 		return m.commitNewIssueForm()
+	}
+	if kind == inputCloseForm {
+		in, err := closeInputFromForm(m.input, m.list.actor)
+		if err != nil {
+			m.input.err = err.Error()
+			return m, nil
+		}
+		m.input.saving = true
+		m.input.err = ""
+		return m, withConnGen(dispatchFormClose(m.api, m.input.target, in, m.input.formGen), m.connGen)
 	}
 	rawBuf := ""
 	if f := m.input.activeField(); f != nil {
@@ -1925,11 +2002,17 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if m.keymap.Daemons.matches(msg) {
+		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToDaemons()
 		return next, cmd, true
 	}
 	if m.keymap.Federation.matches(msg) {
+		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToFederation()
+		return next, cmd, true
+	}
+	if m.keymap.Credentials.matches(msg) {
+		next, cmd := m.transitionToCredentials()
 		return next, cmd, true
 	}
 	if m.view == viewEmpty {
@@ -1940,9 +2023,11 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if m.keymap.Help.matches(msg) {
+		m = m.prepareCredentialsGlobalExit()
 		return m.toggleHelp(), nil, true
 	}
 	if m.keymap.Projects.matches(msg) {
+		m = m.prepareCredentialsGlobalExit()
 		next, cmd := m.transitionToProjects()
 		return next, cmd, true
 	}
@@ -2963,7 +3048,7 @@ func (m Model) viewContent() string {
 	// modal would silently disappear and the user would be stuck —
 	// pressing q again would only re-trigger the (invisible) modal.
 	if m.width > 0 && m.width < 80 {
-		// viewProjects/viewFederation render their own narrow-friendly body; every other
+		// Auxiliary inventory views render their own narrow-friendly body; every other
 		// view falls back to the "too narrow" hint. Either way an active
 		// modal/form must layer on top — without that, a quit-confirm
 		// opened at full width would silently disappear under the
@@ -2975,6 +3060,8 @@ func (m Model) viewContent() string {
 			body = renderProjects(m)
 		case viewFederation:
 			body = renderFederation(m)
+		case viewCredentials:
+			body = renderCredentials(m)
 		default:
 			body = renderTooNarrow(m.width, m.height)
 		}
@@ -3107,6 +3194,8 @@ func (m Model) viewBody() string {
 		return renderDaemons(m)
 	case viewFederation:
 		return renderFederation(m)
+	case viewCredentials:
+		return renderCredentials(m)
 	}
 	if m.layout == layoutSplit {
 		return renderSplit(m)

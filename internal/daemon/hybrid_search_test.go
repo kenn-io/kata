@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
@@ -186,6 +188,39 @@ func TestHybridSearchExplicitHybridLegFailureReturns503(t *testing.T) {
 	if me.Status() != 503 {
 		t.Fatalf("leg failure under an explicit mode should be 503, got %d", me.Status())
 	}
+}
+
+func TestHybridSearchScopedSemanticFailsClosedAndAutoUsesLexical(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "delegated login race", Author: "coordinator",
+	})
+	require.NoError(t, err)
+	idx := openTestVectorIndex(t)
+	activateFixedGeneration(ctx, t, store, idx)
+	embedder := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+
+	_, err = hybridSearch(ctx, store, idx, embedder, hybridParams{
+		ProjectID: project.ID, Query: "login", Limit: 10, Requested: "semantic",
+		AllowedIssueIDs: []int64{issue.ID},
+	})
+	var modeErr *modeError
+	require.ErrorAs(t, err, &modeErr)
+	require.Equal(t, 503, modeErr.Status())
+
+	result, err := hybridSearch(ctx, store, idx, embedder, hybridParams{
+		ProjectID: project.ID, Query: "login", Limit: 10, Requested: "auto",
+		AllowedIssueIDs: []int64{issue.ID},
+	})
+	require.NoError(t, err)
+	require.Equal(t, modeLexical, result.Mode)
+	require.True(t, result.Degraded)
+	require.Contains(t, result.DegradedReason, "issue-scoped")
+	require.Len(t, result.Hits, 1)
+	require.Equal(t, issue.ID, result.Hits[0].Issue.ID)
 }
 
 // TestVectorLegExcludesOtherProjectsAndDeleted covers the seam runVectorLeg

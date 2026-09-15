@@ -11,7 +11,7 @@ import (
 // what Update actually handles.
 type keymap struct {
 	Help, Quit                                     key
-	Projects, Daemons, Federation                  key
+	Projects, Daemons, Federation, Credentials     key
 	ToggleLayout                                   key
 	Up, Down, PageUp, PageDown, Home, End          key
 	ScrollUp, ScrollDown                           key
@@ -43,6 +43,7 @@ func newKeymap() keymap {
 		Projects:     key{Keys: []string{"P"}, Help: "projects"},
 		Daemons:      key{Keys: []string{"D"}, Help: "daemons"},
 		Federation:   key{Keys: []string{"F"}, Help: "federation"},
+		Credentials:  key{Keys: []string{"C"}, Help: "credentials"},
 		ToggleLayout: key{Keys: []string{"L"}, Help: "toggle layout"},
 		// Up/Down are the section-cursor bindings: in the detail view
 		// they move the activity tab cursor or the children cursor.

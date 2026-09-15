@@ -14,13 +14,15 @@ import (
 )
 
 type hybridParams struct {
-	ProjectID      int64
-	Query          string
-	Limit          int
-	IncludeDeleted bool
-	Requested      string // raw mode param
-	Labels         []string
-	ExcludeLabels  []string
+	ProjectID       int64
+	Query           string
+	Limit           int
+	IncludeDeleted  bool
+	Requested       string // raw mode param
+	Labels          []string
+	ExcludeLabels   []string
+	AllowedIssueIDs []int64
+	IssueScope      *db.APITokenScope
 }
 
 type hybridResult struct {
@@ -53,6 +55,8 @@ const cosineFloor = 0.3
 // The results returned are real; the caller is told they may be incomplete.
 const labelCeilingReason = "label filters exhausted the semantic candidate ceiling; semantic results may be incomplete"
 
+const scopedSemanticUnavailableReason = "semantic search is unavailable for issue-scoped credentials because the vector index cannot enforce the subtree candidate set"
+
 // knnDeepLimit is the candidate depth of the single retry the vector leg makes
 // when the first fetchCap-deep KNN batch comes back full but yields too few
 // in-project hits (the index is daemon-global, so another project's chunks
@@ -73,6 +77,14 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	if err != nil {
 		return hybridResult{}, &modeError{status: 400, msg: err.Error()}
 	}
+	scopedLexicalFallback := false
+	if (p.AllowedIssueIDs != nil || p.IssueScope != nil) && (mode == modeHybrid || mode == modeSemantic) {
+		if p.Requested == "hybrid" || p.Requested == "semantic" {
+			return hybridResult{}, &modeError{status: 503, msg: scopedSemanticUnavailableReason}
+		}
+		mode = modeLexical
+		scopedLexicalFallback = true
+	}
 	// strict = the caller explicitly asked for a leg that must run; a failure
 	// is 503, not a silent degrade. auto-resolved hybrid is not strict.
 	strict := p.Requested == "hybrid" || p.Requested == "semantic"
@@ -88,6 +100,8 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 			c, e := store.SearchFTS(ctx, db.SearchFTSParams{
 				ProjectID: p.ProjectID, Query: p.Query, Limit: fetch, IncludeDeleted: p.IncludeDeleted,
 				Labels: p.Labels, ExcludeLabels: p.ExcludeLabels,
+				AllowedIssueIDs: p.AllowedIssueIDs,
+				IssueScope:      p.IssueScope,
 			})
 			lexical = c
 			lexErrCh <- e
@@ -131,6 +145,10 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		res = hybridResult{Mode: modeSemantic, Hits: truncate(vector, p.Limit)}
 	default: // hybrid
 		res = hybridResult{Mode: modeHybrid, Hits: mergeRRF(lexical, vector, p.Limit)}
+	}
+	if scopedLexicalFallback {
+		res.Degraded = true
+		res.DegradedReason = scopedSemanticUnavailableReason
 	}
 	// Auto mode may return real but potentially incomplete hits when label
 	// filters exhaust the candidate ceiling. Explicit modes were rejected above
@@ -239,6 +257,13 @@ func hydrateVectorHits(ctx context.Context, store db.Storage, hits []kitvec.Hit[
 	hits = kitvec.RollupByDocument(hits)
 	candidates := make([]db.SearchCandidate, 0, min(fetch, len(hits)))
 	var issueIDs []int64
+	var allowed map[int64]struct{}
+	if p.AllowedIssueIDs != nil {
+		allowed = make(map[int64]struct{}, len(p.AllowedIssueIDs))
+		for _, issueID := range p.AllowedIssueIDs {
+			allowed[issueID] = struct{}{}
+		}
+	}
 	if !labels.empty() {
 		issueIDs = make([]int64, 0, min(fetch, len(hits)))
 	}
@@ -255,6 +280,11 @@ func hydrateVectorHits(ctx context.Context, store db.Storage, hits []kitvec.Hit[
 		}
 		if iss.ProjectID != p.ProjectID {
 			continue
+		}
+		if allowed != nil {
+			if _, ok := allowed[iss.ID]; !ok {
+				continue
+			}
 		}
 		candidates = append(candidates, db.SearchCandidate{
 			Issue: iss, Score: float64(h.Score), MatchedIn: []string{"semantic"},

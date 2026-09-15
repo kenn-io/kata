@@ -29,6 +29,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Labels:          in.Labels,
 			ExcludeLabels:   in.ExcludeLabels,
 			DefaultTimezone: cfg.DefaultTimezone,
+			IssueScope:      issueScopeFromContext(ctx),
 		}
 		issues, err := cfg.DB.ReadyIssues(ctx, in.ProjectID, in.Limit, filter)
 		if err != nil {
@@ -60,6 +61,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Labels:          in.Labels,
 			ExcludeLabels:   in.ExcludeLabels,
 			DefaultTimezone: cfg.DefaultTimezone,
+			IssueScope:      issueScopeFromContext(ctx),
 		}
 		issues, err := cfg.DB.ReadyIssuesGlobal(ctx, in.Limit, filter)
 		if err != nil {

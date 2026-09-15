@@ -43,6 +43,10 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if changed && evt != nil {
 			cfg.Publish().Event(in.ProjectID, *evt)
 		}
+		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
+		if err != nil {
+			return nil, err
+		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
 		out.Body.Event = evt
@@ -94,6 +98,10 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if changed && evt != nil {
 			cfg.Publish().Event(in.ProjectID, *evt)
+		}
+		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
+		if err != nil {
+			return nil, err
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
@@ -154,10 +162,14 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if result.Changed && result.Event != nil {
 			cfg.Publish().Event(in.ProjectID, *result.Event)
 		}
+		claimEvent, err := scopedMutationEvent(ctx, cfg.DB, result.Event)
+		if err != nil {
+			return nil, err
+		}
 
 		out := &api.ClaimResponse{}
 		out.Body.Issue = result.Issue
-		out.Body.Event = result.Event
+		out.Body.Event = claimEvent
 		out.Body.Changed = result.Changed
 		out.Body.PreviousOwner = result.PreviousOwner
 		return out, nil

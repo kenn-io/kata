@@ -200,7 +200,8 @@ var storageScenarios = []scenario{
 	{
 		name: "api tokens and system project",
 		methods: []string{
-			"CreateAPIToken", "EnsureSystemProject", "ListAPITokens", "ListProjects", "ProjectByID",
+			"CreateAPIToken", "CreateComment", "CreateIssue", "CreateProject", "EnsureSystemProject",
+			"APITokenByID", "IssueInScope", "IssueScopedMembers", "IssueScopedTokenTransactionFence", "ListAPITokens", "ListProjects", "ProjectByID",
 			"ResolveAPIToken", "RevokeAPIToken", "SystemProject",
 		},
 		run: checkAPITokensAndSystemProject,

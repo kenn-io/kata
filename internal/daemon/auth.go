@@ -50,8 +50,9 @@ type authPolicy struct {
 //	Token == "" &&  InsecureReadonly  -> GETs pass; mutations + SSE return 401
 //	Token != ""                       -> all non-health paths require Bearer == Token
 //
-// /api/v1/ping and /api/v1/health bypass unconditionally so health-check probes
-// do not need credentials.
+// /api/v1/ping always bypasses. /api/v1/health bypasses only when the request
+// omits Authorization, so public probes remain keyless while an explicit
+// credential is validated before the handler can select owner diagnostics.
 func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) http.Handler {
 	var tokenStore db.Storage
 	if len(tokenStores) > 0 {
@@ -70,9 +71,31 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				next.ServeHTTP(w, r)
 				return
 			}
-			if r.URL.Path == pathPing || r.URL.Path == pathHealth || isWebSessionBootstrapRequest(r) {
+			if r.URL.Path == pathPing ||
+				(r.URL.Path == pathHealth && r.Header.Get(authHeader) == "") ||
+				isWebSessionBootstrapRequest(r) {
 				next.ServeHTTP(w, r)
 				return
+			}
+			if p.RequireTokenIdentity && p.SelfAuthenticatedRoutes.matches(r) &&
+				hasBearerHeader(r.Header.Get(authHeader)) && tokenStore != nil {
+				presented := strings.TrimPrefix(r.Header.Get(authHeader), authBearerPrefix)
+				tok, err := tokenStore.ResolveAPIToken(r.Context(), presented)
+				if err == nil {
+					principal := principalFromAPIToken(tok)
+					if principal.Scope != nil && !issueScopedRouteAllowed(r.Method, r.URL.Path) {
+						api.WriteEnvelope(w, http.StatusForbidden, "scoped_operation_forbidden",
+							"operation is not available to an issue-scoped credential")
+						return
+					}
+					next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principal)))
+					return
+				}
+				if !errors.Is(err, db.ErrNotFound) {
+					api.WriteEnvelope(w, http.StatusInternalServerError, "internal",
+						"token identity lookup failed")
+					return
+				}
 			}
 			if p.SelfAuthenticatedRoutes.matches(r) {
 				next.ServeHTTP(w, r)
@@ -83,6 +106,21 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				return
 			}
 			if p.Token == "" {
+				// Health changes from a public probe response to owner diagnostics
+				// when a principal is present. A keyless daemon cannot validate any
+				// explicit credential, so reject one here instead of silently
+				// selecting the diagnostic handler path. Keep ordinary keyless
+				// routes unchanged: the web daemon credential broker deliberately
+				// carries a target Authorization header through its source handler.
+				if got := r.Header.Get(authHeader); r.URL.Path == pathHealth && got != "" {
+					if !strings.HasPrefix(got, authBearerPrefix) {
+						api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required",
+							"Authorization bearer required")
+						return
+					}
+					api.WriteEnvelope(w, http.StatusForbidden, "token_invalid", "token invalid")
+					return
+				}
 				if p.AllowUnauthenticatedPrivateNetworkWrites && isTokenAdminPath(r.URL.Path) {
 					api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required",
 						"token administration requires authentication; daemon allows unauthenticated private-network writes")
@@ -152,7 +190,13 @@ func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Han
 		api.WriteEnvelope(w, http.StatusForbidden, "token_invalid", "token invalid")
 		return
 	}
-	next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principalFromAPIToken(tok))))
+	principal := principalFromAPIToken(tok)
+	if principal.Scope != nil && !issueScopedRouteAllowed(r.Method, r.URL.Path) {
+		api.WriteEnvelope(w, http.StatusForbidden, "scoped_operation_forbidden",
+			"operation is not available to an issue-scoped credential")
+		return
+	}
+	next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principal)))
 }
 
 func isTokenAdminPath(path string) bool {

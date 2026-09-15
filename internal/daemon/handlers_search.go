@@ -45,6 +45,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			ProjectID: in.ProjectID, Query: in.Query, Limit: limit,
 			IncludeDeleted: in.IncludeDeleted, Requested: mode,
 			Labels: in.Labels, ExcludeLabels: in.ExcludeLabels,
+			IssueScope: issueScopeFromContext(ctx),
 		})
 		if err != nil {
 			if me, ok := errors.AsType[*modeError](err); ok {

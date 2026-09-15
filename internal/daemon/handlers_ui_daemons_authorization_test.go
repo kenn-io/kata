@@ -89,7 +89,7 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 			ContractVersion: api.UISnapshotContractVersion,
 			Cursor:          7,
 			Capabilities: api.UICapabilities{
-				Writable: true, Updates: "sse", ActorPolicy: "request",
+				Writable: true, Updates: "sse", ActorPolicy: "request", TokenAuditRead: true,
 			},
 		})
 	}))
@@ -108,6 +108,7 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &snapshot))
 	assert.False(t, snapshot.Capabilities.Writable)
 	assert.Equal(t, "poll", snapshot.Capabilities.Updates)
+	assert.False(t, snapshot.Capabilities.TokenAuditRead)
 	gatewayETag := first.Header().Get("ETag")
 	require.NotEmpty(t, gatewayETag)
 	assert.NotEqual(t, `"remote-snapshot"`, gatewayETag)

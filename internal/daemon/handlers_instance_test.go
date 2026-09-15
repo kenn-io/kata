@@ -114,3 +114,93 @@ func TestInstanceEndpointIncludesDBTokenActor(t *testing.T) {
 	assert.Equal(t, "operator", out.Auth.Actor)
 	assert.NotContains(t, string(bs), plaintext)
 }
+
+func TestInstanceEndpointAdvertisesIssueSubtreeTokens(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+
+	resp, bs := envDoRaw(t, env, http.MethodGet, "/api/v1/instance", nil,
+		map[string]string{"Authorization": "Bearer bootstrap-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+
+	var out struct {
+		IssueSubtreeTokens bool `json:"issue_subtree_tokens"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	assert.True(t, out.IssueSubtreeTokens)
+}
+
+func TestInstanceEndpointAdvertisesTokenAuditReadIndependentOfIssueWrites(t *testing.T) {
+	ctx := context.Background()
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	_, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "operator-token", Actor: "operator", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		name  string
+		token string
+		want  bool
+	}{
+		{name: "bootstrap administrator", token: "bootstrap-token", want: true},
+		{name: "ordinary identity", token: "operator-token", want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resp, body := envDoRaw(t, env, http.MethodGet, "/api/v1/instance", nil,
+				map[string]string{"Authorization": "Bearer " + test.token})
+			require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(body))
+			var out struct {
+				Auth struct {
+					TokenAuditRead bool `json:"token_audit_read"`
+				} `json:"auth"`
+				WebUI struct {
+					TokenAuditRead bool `json:"token_audit_read"`
+				} `json:"web_ui_capabilities"`
+			}
+			require.NoError(t, json.Unmarshal(body, &out))
+			assert.Equal(t, test.want, out.Auth.TokenAuditRead)
+			assert.Equal(t, test.want, out.WebUI.TokenAuditRead)
+		})
+	}
+}
+
+func TestInstanceEndpointIncludesScopedTokenGrant(t *testing.T) {
+	ctx := context.Background()
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	root, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
+	})
+	require.NoError(t, err)
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	_, _, err = env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
+		Scope: &db.APITokenScope{
+			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
+		},
+		ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+
+	resp, bs := envDoRaw(t, env, http.MethodGet, "/api/v1/instance", nil,
+		map[string]string{"Authorization": "Bearer worker-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+
+	var out struct {
+		Auth struct {
+			Kind      string            `json:"kind"`
+			Actor     string            `json:"actor"`
+			Scope     *db.APITokenScope `json:"scope"`
+			ExpiresAt *time.Time        `json:"expires_at"`
+		} `json:"auth"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	assert.Equal(t, "db_token", out.Auth.Kind)
+	assert.Equal(t, "worker-a", out.Auth.Actor)
+	require.NotNil(t, out.Auth.Scope)
+	assert.Equal(t, root.UID, out.Auth.Scope.RootIssueUID)
+	require.NotNil(t, out.Auth.ExpiresAt)
+	assert.WithinDuration(t, expiresAt, *out.Auth.ExpiresAt, time.Millisecond)
+	assert.NotContains(t, string(bs), "worker-token")
+}

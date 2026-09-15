@@ -222,17 +222,7 @@ clients mint, list, or revoke API tokens.
 
 ## Identity tokens
 
-For stable per-user attribution, mint DB-backed tokens and enable identity
-mode:
-
-```sh
-export KATA_AUTH_TOKEN=bootstrap-admin-token
-kata tokens create --actor wesm --name laptop
-kata tokens list
-kata tokens revoke 1
-```
-
-Then configure:
+For stable per-user attribution, configure identity mode first:
 
 ```toml
 [auth]
@@ -241,6 +231,42 @@ trust_private_network = true
 require_token_identity = true
 ```
 
+Restart the daemon, then use the bootstrap token to mint DB-backed user tokens:
+
+```sh
+export KATA_AUTH_TOKEN=bootstrap-admin-token
+kata tokens create --actor wesm --name laptop
+kata tokens list
+kata tokens revoke 1
+```
+
+For a temporary agent worker, issue a narrower credential instead of copying a
+personal or daemon-wide token into the machine:
+
+```sh
+install -d -m 700 /run/user/1000/kata-worker
+kata tokens create --actor worker-a --issue example-project#abc4 \
+  --expires-in 4h \
+  --token-file /run/user/1000/kata-worker/auth-token
+```
+
+The grant follows the live issue subtree rooted at `abc4`; see the
+[scope guide](../design/issue-scoped-credentials.md) for allowed work and
+membership changes. Scoped creation requires identity mode even when no shared
+token is configured, and a federated project's token must be minted on its hub.
+
+The launcher reads `/run/user/1000/kata-worker/auth-token` and injects its value
+as `KATA_AUTH_TOKEN` only into the worker CLI or MCP process, together with
+`KATA_SERVER` for the issuing daemon's exact origin. The file path is issuance
+output, not an authentication input. A missing or unreadable file must stop
+startup without falling back to a coordinator credential. Supply a local
+workspace binding so the worker does not need project initialization on the
+hub, and revoke the grant during teardown.
+
+When a shared token is configured without `require_token_identity = true`,
+`tokens create` refuses before minting. A token created in that legacy mode
+would not be accepted as a bearer credential.
+
 In identity mode:
 
 - the bootstrap token can create, list, and revoke user tokens;
@@ -248,6 +274,11 @@ In identity mode:
 - attributed writes require a DB-backed token;
 - the daemon derives the actor from the token and ignores body-provided actor
   strings for mutations.
+
+Administrators can inspect retained credentials with `kata tokens list`, press
+`C` in the TUI, or open **Credentials** in the Web UI. See
+[credential auditing](../guide/web-ui.md#audit-provisioned-credentials) for
+access requirements, lifecycle state, and last-use limitations.
 
 Connector administration is denied to database-backed tokens by default.
 Enable it only when every active identity token should administer connectors
@@ -388,10 +419,8 @@ without it, use HTTPS, a loopback address, or an SSH tunnel.
 
 ## What this mode does not provide
 
-Remote daemon mode is not a full authorization system. There is no project ACL
-model, role model, impersonation scope, OAuth provider, or browser-safe daemon
-token flow in the daemon itself. A reverse proxy can still own user
-authentication and assert the actor (see
-[Trusted-proxy actor header](#trusted-proxy-actor-header)), but kata models
-identity, not per-actor permissions. Use it for trusted private deployments where
-single-copy state and attribution are enough.
+Kata provides identity tokens and fixed issue-subtree grants. It has no
+per-actor roles, project ACLs, impersonation scope, or OAuth provider. A reverse
+proxy can own user authentication and assert the actor (see
+[Trusted-proxy actor header](#trusted-proxy-actor-header)). Repository, machine,
+and network isolation remain the operator's responsibility.

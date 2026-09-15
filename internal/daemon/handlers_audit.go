@@ -49,6 +49,12 @@ func doAuditCloses(
 	if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 		return nil, err
 	}
+	if issueScopeFromContext(ctx) != nil && in.Parent != "" {
+		parent, err := resolveLinkTargetRef(ctx, cfg.DB, in.ProjectID, in.Parent, db.IncludeDeletedNo)
+		if err != nil || authorizeIssueScopedIssue(ctx, cfg.DB, parent) != nil {
+			return nil, api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
+		}
+	}
 	since, until, err := parseAuditWindow(in.Since, in.Until)
 	if err != nil {
 		return nil, err
@@ -69,9 +75,21 @@ func doAuditCloses(
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
+	events, allowedUIDs, err := filterIssueScopedReportEvents(ctx, cfg.DB, events)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := buildAuditRows(ctx, cfg, in, events)
 	if err != nil {
 		return nil, err
+	}
+	if allowedUIDs != nil {
+		for index := range rows {
+			if _, ok := allowedUIDs[rows[index].ParentUID]; !ok {
+				rows[index].Parent = ""
+				rows[index].ParentUID = ""
+			}
+		}
 	}
 	out := &api.AuditClosesResponse{}
 	out.Body.Rows = rows

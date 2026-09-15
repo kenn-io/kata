@@ -161,8 +161,9 @@ func (lm listModel) applyNavKey(
 	return lm, nil
 }
 
-// applyMutationKey handles list-side mutation bindings: close (x),
-// reopen (r), and set-priority (!) act on the highlighted row. Empty
+// applyMutationKey handles list-side mutation bindings: reopen (r) and
+// set-priority (!) act on the highlighted row. Close is routed by Model so it
+// can collect the required close reason, message, and evidence. Empty
 // list is a quiet no-op so a stray keystroke on the empty-state hint
 // does nothing. `!` arms pendingPriority; the next 0..4 / `-` keystroke
 // is consumed by applyPendingPriorityKey before it reaches any other
@@ -171,9 +172,6 @@ func (lm listModel) applyMutationKey(
 	msg tea.KeyPressMsg, km keymap, api listAPI, sc scope,
 ) (listModel, tea.Cmd, bool) {
 	switch {
-	case km.Close.matches(msg):
-		next, cmd := lm.dispatchListClose(api, sc)
-		return next, cmd, true
 	case km.Reopen.matches(msg):
 		next, cmd := lm.dispatchListReopen(api, sc)
 		return next, cmd, true
@@ -240,20 +238,7 @@ func (lm listModel) dispatchListSetPriority(
 	return lm, setPriorityListCmd(api, projectIDForRow(iss, sc), iss.ShortID, priority, lm.actor)
 }
 
-// dispatchListClose closes the issue under the cursor. Empty list is a
-// no-op (returns lm unchanged with a nil cmd).
-func (lm listModel) dispatchListClose(
-	api listAPI, sc scope,
-) (listModel, tea.Cmd) {
-	iss, ok := lm.targetRow()
-	if !ok {
-		return lm, nil
-	}
-	lm.status = ""
-	return lm, closeIssueCmd(api, projectIDForRow(iss, sc), iss.ShortID, lm.actor)
-}
-
-// dispatchListReopen mirrors dispatchListClose for the reopen action.
+// dispatchListReopen reopens the issue under the cursor.
 func (lm listModel) dispatchListReopen(
 	api listAPI, sc scope,
 ) (listModel, tea.Cmd) {
@@ -300,18 +285,6 @@ func projectIDForRow(iss Issue, sc scope) int64 {
 		return iss.ProjectID
 	}
 	return sc.projectID
-}
-
-// closeIssueCmd wraps Close into a mutationDoneMsg-emitting tea.Cmd.
-// origin="list" routes the response to listModel.applyMutation even if
-// the user has switched to detail view between dispatch and arrival.
-func closeIssueCmd(api listAPI, pid int64, ref, actor string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		resp, err := api.Close(ctx, pid, ref, actor)
-		return mutationDoneMsg{origin: "list", kind: "close", resp: resp, err: err}
-	}
 }
 
 // reopenIssueCmd is the reopen counterpart of closeIssueCmd.

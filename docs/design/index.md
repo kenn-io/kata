@@ -1,3 +1,7 @@
+---
+last_edited: 2026-09-15
+---
+
 # Design Notes
 
 These notes preserve technical design context that is useful for maintainers and
@@ -15,6 +19,7 @@ constraints that are too detailed for the main documentation.
 - [Federation technical notes](federation.md)
 - [GitHub sync](github-sync.md)
 - [Hosted mode technical notes](hosted-mode.md)
+- [Issue-scoped credentials](issue-scoped-credentials.md)
 - [Semantic search technical notes](semantic-search.md)
 
 These notes are the curated home for kata's design rationale. Earlier planning

@@ -114,6 +114,10 @@ var alreadyImplemented = map[string]bool{
 	"CountLiveClaims":                      true, // claims_core.go
 	"CountPendingClaims":                   true, // claims_core.go
 	"CreateAPIToken":                       true, // tokens.go
+	"APITokenByID":                         true,
+	"IssueScopedMembers":                   true,
+	"IssueInScope":                         true,
+	"IssueScopedTokenTransactionFence":     true, // tokens.go
 	"CreateComment":                        true, // comments.go
 	"CreateExternalRootBinding":            true, // external_roots.go
 	"CreateIssue":                          true, // issues.go

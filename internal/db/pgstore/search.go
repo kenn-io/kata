@@ -56,6 +56,10 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	for _, label := range request.params.ExcludeLabels {
 		addLabelFilter("AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = $%d)", label)
 	}
+	var scopeFilter strings.Builder
+	appendAllowedIssueIDsPostgresBuilder(&scopeFilter, &args, request.params.AllowedIssueIDs)
+	appendIssueScopePostgres(&scopeFilter, &args, request.params.IssueScope)
+	rowFilter += scopeFilter.String()
 
 	// plainto_tsquery provides the all-terms form without interpreting user
 	// input as tsquery syntax. The any-terms form is rebuilt from the normalized

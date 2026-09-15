@@ -280,6 +280,12 @@ func (s *Store) ListIssues(ctx context.Context, params db.ListIssuesParams) ([]d
 		args = append(args, value)
 		conditions = append(conditions, fmt.Sprintf(predicate, len(args)))
 	}
+	appendAllowedIssueIDsPostgres(&conditions, &args, params.AllowedIssueIDs)
+	var scopeFilter strings.Builder
+	appendIssueScopePostgres(&scopeFilter, &args, params.IssueScope)
+	if scopeFilter.Len() > 0 {
+		conditions = append(conditions, strings.TrimPrefix(scopeFilter.String(), " AND "))
+	}
 	if params.Status != "" {
 		add("i.status = $%d", params.Status)
 	}
@@ -345,6 +351,12 @@ func (s *Store) ListAllIssues(ctx context.Context, params db.ListAllIssuesParams
 	add := func(predicate string, value any) {
 		args = append(args, value)
 		conditions = append(conditions, fmt.Sprintf(predicate, len(args)))
+	}
+	appendAllowedIssueIDsPostgres(&conditions, &args, params.AllowedIssueIDs)
+	var scopeFilter strings.Builder
+	appendIssueScopePostgres(&scopeFilter, &args, params.IssueScope)
+	if scopeFilter.Len() > 0 {
+		conditions = append(conditions, strings.TrimPrefix(scopeFilter.String(), " AND "))
 	}
 	if params.ProjectID > 0 {
 		add("i.project_id = $%d", params.ProjectID)

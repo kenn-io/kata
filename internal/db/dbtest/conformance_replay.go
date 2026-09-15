@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -138,11 +139,17 @@ func checkSnapshotReplayCore(t *testing.T, target db.Storage, backend Backend) e
 		return err
 	}
 	tokenName := "replay client"
+	tokenExpiry := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Millisecond)
+	tokenScope := &db.APITokenScope{
+		Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: first.UID,
+	}
 	token, _, err := source.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "replay-token-secret",
 		Actor:          "automation",
 		Name:           &tokenName,
 		AdminActor:     db.BootstrapActor,
+		Scope:          tokenScope,
+		ExpiresAt:      &tokenExpiry,
 	})
 	if err != nil {
 		return err
@@ -254,6 +261,10 @@ func checkSnapshotReplayCore(t *testing.T, target db.Storage, backend Backend) e
 	}
 	assert.Equal(t, token.ID, resolved.ID)
 	assert.Equal(t, "automation", resolved.Actor)
+	require.NotNil(t, resolved.Scope)
+	assert.Equal(t, *tokenScope, *resolved.Scope)
+	require.NotNil(t, resolved.ExpiresAt)
+	assert.WithinDuration(t, tokenExpiry, *resolved.ExpiresAt, time.Millisecond)
 	_, err = target.ResolveAPIToken(ctx, "revoked-replay-token")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	tokens, err := target.ListAPITokens(ctx)

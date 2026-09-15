@@ -316,6 +316,9 @@ func (s *Store) closeIssueWithEvents(
 			issue = current
 			return nil
 		}
+		if p.DisallowRecurrenceEffects && p.Reason == "done" && current.RecurrenceID != nil && current.OccurrenceKey != nil {
+			return db.ErrRecurrenceEffectsForbidden
+		}
 		var hasOpenChildren bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
           SELECT 1 FROM links l JOIN issues child ON child.id = l.from_issue_id

@@ -6,6 +6,7 @@ q/ctrl+c  quit
 P         projects
 D         daemons
 F         federation
+C         credentials
 L         toggle layout
 
 Graph

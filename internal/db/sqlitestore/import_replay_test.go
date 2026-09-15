@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -139,6 +140,32 @@ func TestImportReplayInsertsEveryEntity(t *testing.T) {
 	for _, table := range []string{"projects", "issues", "comments", "issue_labels", "links", "events"} {
 		require.Equalf(t, tableCount(t, ctx, src, table), tableCount(t, ctx, dst, table), "%s row count", table)
 	}
+}
+
+func TestImportReplayStoresTokenExpiryInSortableUTCFormat(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	expiresAt := time.Date(2026, time.September, 15, 12, 34, 56, 789000000, time.FixedZone("test", 2*60*60))
+	token, _, err := src.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "replay-scoped-token",
+		Actor:          "worker-a",
+		AdminActor:     db.BootstrapActor,
+		Scope: &db.APITokenScope{
+			Kind:         db.APITokenScopeIssueSubtree,
+			ProjectUID:   "01HZNQ7VFPK1XGD8R5MABCD4EX",
+			RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
+		},
+		ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+
+	dst := openTestDB(t)
+	require.NoError(t, dst.ImportReplay(ctx, collectImportRecords(t, ctx, src), db.ImportOptions{}))
+
+	var stored string
+	require.NoError(t, dst.QueryRowContext(ctx,
+		`SELECT CAST(expires_at AS TEXT) FROM api_tokens WHERE id = ?`, token.ID).Scan(&stored))
+	assert.Equal(t, "2026-09-15T10:34:56.789Z", stored)
 }
 
 // TestImportReplayRoundTripsProjectPurgeLog pins the project_purge_log cutover

@@ -40,6 +40,10 @@ func registerPriorityHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if changed && evt != nil {
 			cfg.Publish().Event(in.ProjectID, *evt)
 		}
+		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
+		if err != nil {
+			return nil, err
+		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
 		out.Body.Event = evt
