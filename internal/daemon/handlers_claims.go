@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/pkg/client/generated"
 	kitdaemon "go.kenn.io/kit/daemon"
 
 	"go.kenn.io/kata/internal/api"
@@ -618,16 +620,18 @@ func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, e
 }
 
 func claimHubPing(ctx context.Context, client *http.Client) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://kata.invalid/api/v1/ping", nil)
+	apiClient, err := generated.NewDefaultClient("http://kata.invalid", runtime.WithHTTPClient(claimRequestDoer{client}))
 	if err != nil {
 		return false
 	}
-	resp, err := client.Do(req) //nolint:gosec // Unix runtime file target is locally discovered and probed.
-	if err != nil {
-		return false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode == http.StatusOK
+	resp, _ := apiClient.PingWithResponse(ctx)
+	return resp != nil && resp.StatusCode == http.StatusOK
+}
+
+type claimRequestDoer struct{ client *http.Client }
+
+func (d claimRequestDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	return d.client.Do(req.WithContext(ctx))
 }
 
 func claimUnixTransport(path string) *http.Transport {

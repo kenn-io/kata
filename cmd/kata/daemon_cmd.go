@@ -36,6 +36,7 @@ import (
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
+	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
 	kitvec "go.kenn.io/kit/vector"
 )
@@ -300,10 +301,15 @@ func daemonRecordAdvertisesIdleShutdown(ctx context.Context, rec kitdaemon.Runti
 		}
 	}
 	httpClient, baseURL := client.LocalHTTPClient(endpoint.ConfigAddress())
-	status, body, err := httpDoJSON(ctx, httpClient, http.MethodGet, baseURL+"/api/v1/health", nil)
-	if err != nil || status >= http.StatusBadRequest {
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, httpClient)
+	if err != nil {
 		return false
 	}
+	resp, err := apiClient.HealthWithResponse(ctx)
+	if err != nil || resp == nil || resp.StatusCode >= http.StatusBadRequest {
+		return false
+	}
+	body := resp.Body
 	var health daemonAPIHealth
 	if err := json.Unmarshal(body, &health); err != nil {
 		return false

@@ -5,9 +5,9 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"net/http"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func newHealthCmd() *cobra.Command {
@@ -23,10 +23,18 @@ func newHealthCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bs, err := a.do(http.MethodGet, "/api/v1/health", nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 			if err != nil {
 				return err
 			}
+			resp, callErr := apiClient.HealthWithResponse(a.ctx)
+			if err := externalCLITransportError(resp, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(resp.StatusCode, resp.Body, callErr); err != nil {
+				return err
+			}
+			bs := resp.Body
 			var b struct {
 				OK            bool   `json:"ok"`
 				SchemaVersion int    `json:"schema_version"`

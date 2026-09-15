@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 const (
@@ -185,14 +186,14 @@ func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *h
 	// its first real request.
 	url := "http://" + addr
 	deadline := time.Now().Add(daemonReadyTimeout)
-	probeClient := &http.Client{Timeout: daemonReadyTimeout}
+	probeClient, err := kataclient.NewWithHTTPClient(url, &http.Client{Timeout: daemonReadyTimeout})
+	require.NoError(t, err)
 	var lastErr error
 	ready := false
 	for time.Now().Before(deadline) {
-		resp, err := probeClient.Get(url + "/api/v1/ping") //nolint:noctx // polling loop; context would add noise without benefit
+		resp, err := probeClient.PingWithResponse(ctx)
 		if err == nil {
 			status := resp.StatusCode
-			_ = resp.Body.Close()
 			if status == http.StatusOK {
 				ready = true
 				break

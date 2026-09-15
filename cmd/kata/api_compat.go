@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
+	kataclient "go.kenn.io/kata/pkg/client"
 	"net/http"
 	"strconv"
 	"strings"
@@ -42,13 +43,18 @@ func requireDaemonAPIVersionHealth(
 	client *http.Client,
 	baseURL, required, feature string,
 ) (daemonAPIHealth, error) {
-	status, body, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/health", nil)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return daemonAPIHealth{}, err
 	}
-	if status >= http.StatusBadRequest {
-		return daemonAPIHealth{}, apiErrFromBody(status, body)
+	resp, callErr := apiClient.HealthWithResponse(ctx)
+	if err := externalCLITransportError(resp, callErr); err != nil {
+		return daemonAPIHealth{}, err
 	}
+	if err := externalCLIResponseError(resp.StatusCode, resp.Body, callErr); err != nil {
+		return daemonAPIHealth{}, err
+	}
+	body := resp.Body
 	var health daemonAPIHealth
 	if err := json.Unmarshal(body, &health); err != nil {
 		return daemonAPIHealth{}, fmt.Errorf("decode daemon API version: %w", err)
