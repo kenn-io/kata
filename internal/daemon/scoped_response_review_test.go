@@ -104,6 +104,17 @@ type collectionResponseRaceStore struct {
 	db.Storage
 	issueID         int64
 	beforeHydration func() error
+	afterMembership func()
+}
+
+func (s *collectionResponseRaceStore) IssueScopedMembers(ctx context.Context, scope db.APITokenScope) ([]db.Issue, error) {
+	members, err := s.Storage.IssueScopedMembers(ctx, scope)
+	if err == nil && s.afterMembership != nil {
+		fn := s.afterMembership
+		s.afterMembership = nil
+		fn()
+	}
+	return members, err
 }
 
 func (s *collectionResponseRaceStore) LabelsByIssues(ctx context.Context, projectID int64, ids []int64) (map[int64][]string, error) {
@@ -134,4 +145,52 @@ func (s *commentResponseRaceStore) CreateComment(ctx context.Context, p db.Creat
 		err = s.afterComment()
 	}
 	return comment, event, err
+}
+
+func TestScopedAuditRejectsParentMovedDuringHydration(t *testing.T) {
+	var wrapped *collectionResponseRaceStore
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity(),
+		func(cfg *daemon.ServerConfig) {
+			wrapped = &collectionResponseRaceStore{Storage: cfg.DB}
+			cfg.DB = wrapped
+		})
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	hidden, err := env.DB.CreateProject(t.Context(), "hidden-project")
+	require.NoError(t, err)
+	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
+	parent := createScopedHTTPTestIssue(t, env, project.ID, "Parent", &root)
+	child := createScopedHTTPTestIssue(t, env, project.ID, "Child", &parent)
+	newScopedTokens(t, env, project, root)
+	resp, body := envDoRaw(t, env, http.MethodPost,
+		scopedProjectPath(project.ID, "issues/"+child.ShortID+"/actions/close"), map[string]any{
+			"actor": "coordinator", "reason": "done",
+			"message":  "Work landed and was independently verified end to end.",
+			"evidence": []map[string]any{{"type": "test", "command": "go test ./..."}},
+		}, map[string]string{"Authorization": "Bearer coordinator-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	auditPath := "/api/v1/audit/closes?project_id=" + strconv.FormatInt(project.ID, 10)
+	worker := map[string]string{"Authorization": "Bearer worker-token"}
+	resp, body = envDoRaw(t, env, http.MethodGet, auditPath, nil, worker)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Contains(t, string(body), parent.UID, "an authorized parent remains visible")
+
+	// Move the parent after the report captures membership but before it
+	// reads the parent's current project and short ID.
+	wrapped.afterMembership = func() {
+		current, err := env.DB.IssueByID(t.Context(), parent.ID)
+		require.NoError(t, err)
+		resp, body := envDoRaw(t, env, http.MethodPost,
+			scopedProjectPath(project.ID, "issues/"+parent.ShortID+"/actions/move"), map[string]any{
+				"actor": "coordinator", "to_project_uid": hidden.UID,
+			}, map[string]string{
+				"Authorization": "Bearer coordinator-token",
+				"If-Match":      `"rev-` + strconv.FormatInt(current.Revision, 10) + `"`,
+			})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	}
+	resp, body = envDoRaw(t, env, http.MethodGet, auditPath, nil, worker)
+	require.Nil(t, wrapped.afterMembership, "the concurrent move ran")
+	require.NotContains(t, string(body), hidden.Name)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
 }
