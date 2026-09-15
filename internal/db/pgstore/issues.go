@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"sort"
@@ -39,13 +40,13 @@ type issueCreatedPayload struct {
 	ClosedReason           *string                `json:"closed_reason,omitempty"`
 	ClosedAt               *string                `json:"closed_at,omitempty"`
 	DeletedAt              *string                `json:"deleted_at,omitempty"`
-	Metadata               json.RawMessage        `json:"metadata"`
+	Metadata               jsontext.Value         `json:"metadata"`
 	Labels                 []string               `json:"labels,omitempty"`
 	Links                  []createdLink          `json:"links,omitempty"`
 	Comments               []issueSnapshotComment `json:"comments,omitempty"`
 	CreatedAt              string                 `json:"created_at"`
 	UpdatedAt              string                 `json:"updated_at,omitempty"`
-	Revision               int64                  `json:"revision,omitempty"`
+	Revision               int64                  `json:"revision,omitzero"`
 	IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
 	IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
 	RecurrenceUID          string                 `json:"recurrence_uid,omitempty"`
@@ -58,7 +59,7 @@ type createdLink struct {
 	Type       string `json:"type"`
 	ToShortID  string `json:"to_short_id,omitempty"`
 	ToIssueUID string `json:"to_issue_uid,omitempty"`
-	Incoming   bool   `json:"incoming,omitempty"`
+	Incoming   bool   `json:"incoming,omitzero"`
 	Author     string `json:"author,omitempty"`
 	CreatedAt  string `json:"created_at,omitempty"`
 }
@@ -434,9 +435,9 @@ func (s *Store) resolveShortIDTx(ctx context.Context, tx *sql.Tx, projectID int6
 	return "", fmt.Errorf("short_id auto-extend exhausted for uid %s", uid)
 }
 
-func composeCreateMetadata(input map[string]json.RawMessage) (json.RawMessage, error) {
+func composeCreateMetadata(input map[string]jsontext.Value) (jsontext.Value, error) {
 	if len(input) == 0 {
-		return json.RawMessage(`{}`), nil
+		return jsontext.Value(`{}`), nil
 	}
 	for key, value := range input {
 		if err := metadata.ValidateCreateValue(metadata.IssueRegistry, key, value); err != nil {

@@ -2,7 +2,8 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,7 +24,7 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 	}
 	params := db.UpsertIssueSyncBindingParams{
 		ProjectID: project.ID, Provider: "github", SourceKey: "github:owner/repo", RemoteID: "owner/repo",
-		DisplayName: "owner/repo", Config: json.RawMessage(`{"labels":["bug"]}`), IntervalSeconds: 60,
+		DisplayName: "owner/repo", Config: jsontext.Value(`{"labels":["bug"]}`), IntervalSeconds: 60,
 	}
 	binding, err := store.UpsertIssueSyncBinding(ctx, params)
 	if err != nil {
@@ -138,7 +139,7 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 	assert.Equal(t, &cursorAt, byID.LastCursorAt)
 
 	refreshed, err := store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{
-		BindingID: binding.ID, DisplayName: "owner/repo renamed", Config: json.RawMessage(`{"state":"open"}`),
+		BindingID: binding.ID, DisplayName: "owner/repo renamed", Config: jsontext.Value(`{"state":"open"}`),
 	})
 	if err != nil {
 		return fmt.Errorf("refresh issue sync binding: %w", err)
@@ -161,7 +162,7 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 	assert.False(t, claimed)
 
 	params.DisplayName = "owner/repo enabled"
-	params.Config = json.RawMessage(`{"labels":["enhancement"]}`)
+	params.Config = jsontext.Value(`{"labels":["enhancement"]}`)
 	reenabled, err := store.UpsertIssueSyncBinding(ctx, params)
 	if err != nil {
 		return fmt.Errorf("re-enable issue sync binding: %w", err)
@@ -186,9 +187,9 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 		return err
 	}
 
-	issuePatch := map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-07-20"`),
-		"custom":       json.RawMessage(`{"enabled":true}`),
+	issuePatch := map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-07-20"`),
+		"custom":       jsontext.Value(`{"enabled":true}`),
 	}
 	patchedIssue, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: fixture.Issue.ID, IfMatchRev: new(fixture.Issue.Revision), Actor: "metadata-editor",
@@ -204,8 +205,8 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	assert.JSONEq(t, `{"scheduled_on":"2026-07-20","custom":{"enabled":true}}`, string(patchedIssue.Issue.Metadata))
 	var issuePayload struct {
 		Diff map[string]struct {
-			From json.RawMessage `json:"from"`
-			To   json.RawMessage `json:"to"`
+			From jsontext.Value `json:"from"`
+			To   jsontext.Value `json:"to"`
 		} `json:"diff"`
 		RevisionNew int64  `json:"revision_new"`
 		UpdatedAt   string `json:"updated_at"`
@@ -228,7 +229,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	assert.Equal(t, patchedIssue.NewRevision, noIssueChange.NewRevision)
 	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: fixture.Issue.ID, IfMatchRev: new(fixture.Issue.Revision), Actor: "metadata-editor",
-		Patch: map[string]json.RawMessage{"custom": json.RawMessage(`null`)},
+		Patch: map[string]jsontext.Value{"custom": jsontext.Value(`null`)},
 	})
 	var issueConflict *db.RevisionConflictError
 	assert.ErrorAs(t, err, &issueConflict)
@@ -237,12 +238,12 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	}
 	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: fixture.Issue.ID, Actor: "metadata-editor",
-		Patch: map[string]json.RawMessage{"scheduled_on": json.RawMessage(`42`)},
+		Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`42`)},
 	})
 	assert.Error(t, err)
 	clearedIssue, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: fixture.Issue.ID, Actor: "metadata-editor",
-		Patch: map[string]json.RawMessage{"custom": json.RawMessage(`null`)},
+		Patch: map[string]jsontext.Value{"custom": jsontext.Value(`null`)},
 	})
 	if err != nil {
 		return fmt.Errorf("clear issue metadata key: %w", err)
@@ -252,7 +253,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 
 	patchedProject, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: fixture.Project.ID, IfMatchRev: new(fixture.Project.Revision), Actor: "metadata-editor",
-		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"Platform"`)},
+		Patch: map[string]jsontext.Value{"area": jsontext.Value(`"Platform"`)},
 	})
 	if err != nil {
 		return fmt.Errorf("patch project metadata: %w", err)
@@ -263,7 +264,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	assert.JSONEq(t, `{"area":"Platform"}`, string(patchedProject.Project.Metadata))
 	noProjectChange, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: fixture.Project.ID, IfMatchRev: new(patchedProject.NewRevision), Actor: "metadata-editor",
-		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"Platform"`)},
+		Patch: map[string]jsontext.Value{"area": jsontext.Value(`"Platform"`)},
 	})
 	if err != nil {
 		return fmt.Errorf("repeat project metadata patch: %w", err)
@@ -272,7 +273,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	assert.Zero(t, noProjectChange.Event.ID)
 	_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: fixture.Project.ID, IfMatchRev: new(fixture.Project.Revision), Actor: "metadata-editor",
-		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"Other"`)},
+		Patch: map[string]jsontext.Value{"area": jsontext.Value(`"Other"`)},
 	})
 	var projectConflict *db.RevisionConflictError
 	assert.ErrorAs(t, err, &projectConflict)
@@ -284,7 +285,7 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: previousInbox.ID,
 		Actor:     "metadata-editor",
-		Patch:     map[string]json.RawMessage{"role": json.RawMessage(`"inbox"`)},
+		Patch:     map[string]jsontext.Value{"role": jsontext.Value(`"inbox"`)},
 	})
 	if err != nil {
 		return fmt.Errorf("seed previous Inbox role: %w", err)
@@ -526,8 +527,8 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	guardedSet, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: guarded.ID,
 		Actor:   "metadata-editor",
-		Patch: map[string]json.RawMessage{
-			"custom": json.RawMessage(`{"enabled":true,"rank":1}`),
+		Patch: map[string]jsontext.Value{
+			"custom": jsontext.Value(`{"enabled":true,"rank":1}`),
 		},
 		Guard: &db.MetadataPatchGuard{Key: "custom", IfAbsent: true},
 	})
@@ -537,12 +538,12 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	guardedUpdate, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: guarded.ID,
 		Actor:   "metadata-editor",
-		Patch: map[string]json.RawMessage{
-			"custom": json.RawMessage(`{"enabled":false,"rank":2}`),
+		Patch: map[string]jsontext.Value{
+			"custom": jsontext.Value(`{"enabled":false,"rank":2}`),
 		},
 		Guard: &db.MetadataPatchGuard{
 			Key:     "custom",
-			IfValue: json.RawMessage(`{ "rank": 1, "enabled": true }`),
+			IfValue: jsontext.Value(`{ "rank": 1, "enabled": true }`),
 		},
 	})
 	if err != nil {
@@ -553,12 +554,12 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: guarded.ID,
 		Actor:   "metadata-editor",
-		Patch: map[string]json.RawMessage{
-			"custom": json.RawMessage(`{"enabled":true,"rank":3}`),
+		Patch: map[string]jsontext.Value{
+			"custom": jsontext.Value(`{"enabled":true,"rank":3}`),
 		},
 		Guard: &db.MetadataPatchGuard{
 			Key:     "custom",
-			IfValue: json.RawMessage(`{"enabled":true,"rank":1}`),
+			IfValue: jsontext.Value(`{"enabled":true,"rank":1}`),
 		},
 	})
 	var metadataGuardConflict *db.MetadataGuardConflictError
@@ -586,8 +587,8 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 			out, patchErr := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 				IssueID: racing.ID,
 				Actor:   "metadata-editor",
-				Patch: map[string]json.RawMessage{
-					"deck.rank": json.RawMessage(fmt.Sprintf("%q", rank)),
+				Patch: map[string]jsontext.Value{
+					"deck.rank": jsontext.Value(fmt.Sprintf("%q", rank)),
 				},
 				Guard: &db.MetadataPatchGuard{Key: "deck.rank", IfAbsent: true},
 			})

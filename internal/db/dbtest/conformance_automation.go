@@ -2,7 +2,8 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"iter"
@@ -266,7 +267,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	_, _, err = store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: project.ID, Actor: "scheduler", Rule: "FREQ=WEEKLY", DTStart: "2026-05-11",
 		Timezone: "America/New_York", Template: db.RecurrenceTemplate{
-			Title: "Invalid template", Metadata: json.RawMessage(`{"timezone":"Not/AZone"}`),
+			Title: "Invalid template", Metadata: jsontext.Value(`{"timezone":"Not/AZone"}`),
 		},
 	})
 	if err == nil {
@@ -280,7 +281,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 		Timezone:  "America/New_York",
 		Template: db.RecurrenceTemplate{
 			Title: "Weekly review", Body: "What got done?", Owner: &owner, Priority: &priority,
-			Labels: []string{"Recurring", " recurring ", "p2"}, Metadata: json.RawMessage(`{"kind":"weekly"}`),
+			Labels: []string{"Recurring", " recurring ", "p2"}, Metadata: jsontext.Value(`{"kind":"weekly"}`),
 		},
 	})
 	if err != nil {
@@ -315,7 +316,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, listed, 1)
 	assert.Equal(t, rec.ID, listed[0].ID)
-	invalidMetadata := json.RawMessage(`{"timezone":"Not/AZone"}`)
+	invalidMetadata := jsontext.Value(`{"timezone":"Not/AZone"}`)
 	_, err = store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
 		RecurrenceID: rec.ID, IfMatchRev: rec.Revision, Actor: "scheduler",
 		Update: db.RecurrenceUpdate{TemplateMetadata: &invalidMetadata},

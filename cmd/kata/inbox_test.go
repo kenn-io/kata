@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"testing"
@@ -141,8 +142,8 @@ func TestInboxReturnsEveryMatchAndStaysProjectScoped(t *testing.T) {
 			ProjectID: pid,
 			Title:     fmt.Sprintf("request-%03d", i),
 			Author:    "tester",
-			Metadata: map[string]json.RawMessage{
-				key: json.RawMessage(`{"from":"sender","message":"review"}`),
+			Metadata: map[string]jsontext.Value{
+				key: jsontext.Value(`{"from":"sender","message":"review"}`),
 			},
 		})
 		require.NoError(t, err)
@@ -151,7 +152,7 @@ func TestInboxReturnsEveryMatchAndStaysProjectScoped(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: other.ID, Title: "other request", Author: "tester",
-		Metadata: map[string]json.RawMessage{key: json.RawMessage(`{"from":"sender","message":"other"}`)},
+		Metadata: map[string]jsontext.Value{key: jsontext.Value(`{"from":"sender","message":"other"}`)},
 	})
 	require.NoError(t, err)
 
@@ -165,7 +166,7 @@ func TestInboxReturnsEveryMatchAndStaysProjectScoped(t *testing.T) {
 
 	jsonOut := runCLI(t, env, dir, "--json", "inbox", "--for", "reviewer")
 	var response struct {
-		Requests []json.RawMessage `json:"requests"`
+		Requests []jsontext.Value `json:"requests"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(jsonOut), &response))
 	assert.Len(t, response.Requests, 201)

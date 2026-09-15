@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,7 +22,7 @@ func TestCreate_WithMetadataPersists(t *testing.T) {
 	out := runCLI(t, env, dir, "--json", "show", short)
 	var resp struct {
 		Issue struct {
-			Metadata map[string]json.RawMessage `json:"metadata"`
+			Metadata map[string]jsontext.Value `json:"metadata"`
 		} `json:"issue"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &resp))

@@ -1,7 +1,7 @@
 package db_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -87,7 +87,7 @@ func TestFoldingOnlyLinkAffectingEventsPreservesLinks(t *testing.T) {
 			Actor:             "tester",
 			HLCPhysicalMS:     clock,
 			CreatedAt:         "2026-05-23T12:00:00.000Z",
-			Payload:           json.RawMessage(payload),
+			Payload:           jsontext.Value(payload),
 		}
 	}
 

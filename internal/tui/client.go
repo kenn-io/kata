@@ -3,7 +3,7 @@ package tui
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -570,7 +570,7 @@ type eventsPageResp struct {
 	Events        []EventLogEntry `json:"events"`
 	NextAfterID   int64           `json:"next_after_id"`
 	ResetRequired bool            `json:"reset_required"`
-	ResetAfterID  int64           `json:"reset_after_id,omitempty"`
+	ResetAfterID  int64           `json:"reset_after_id,omitzero"`
 }
 
 func (c *Client) listEventsPage(ctx context.Context, projectID, afterID int64) (eventsPageResp, error) {
@@ -664,7 +664,7 @@ func (c *Client) doWithHeaders(
 	if out == nil {
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return json.UnmarshalRead(resp.Body, out)
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -794,7 +794,7 @@ func logTUIClientTransport(phase, method, path, base string, err error) {
 	if err != nil {
 		errText = err.Error()
 	}
-	_ = json.NewEncoder(f).Encode(tuiClientTransportLogEntry{
+	_ = json.MarshalWrite(f, tuiClientTransportLogEntry{
 		Time:   time.Now().UTC().Format(time.RFC3339Nano),
 		Phase:  phase,
 		Method: method,
@@ -838,7 +838,7 @@ func decodeError(resp *http.Response, method, path string) error {
 			Hint    string `json:"hint"`
 		} `json:"error"`
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&env)
+	_ = json.UnmarshalRead(resp.Body, &env)
 	return &APIError{
 		Method:  method,
 		Path:    path,

@@ -2,7 +2,7 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"strings"
@@ -380,7 +380,7 @@ func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store 
 						ID: otherIssueID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2A", ProjectID: projectID,
 						ShortID: "zz2a", Title: "Other replay issue", Status: "open",
 						Author: "fixture-author", CreatedAt: "2026-07-15T12:00:00.000Z",
-						UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+						UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: jsontext.Value(`{}`), Revision: 1,
 					},
 					db.ImportKindIssueEmbedding: &db.CommentExport{
 						ID: otherCommentID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2B", IssueID: otherIssueID,
@@ -411,7 +411,7 @@ func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store 
 						ID: otherIssueID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2A", ProjectID: projectID,
 						ShortID: "zz2a", Title: "Other replay issue", Status: "open",
 						Author: "fixture-author", CreatedAt: "2026-07-15T12:00:00.000Z",
-						UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+						UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: jsontext.Value(`{}`), Revision: 1,
 					},
 					db.ImportKindIssueEmbedding: &db.CommentExport{
 						ID: otherCommentID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2B", IssueID: otherIssueID,
@@ -637,7 +637,7 @@ func installBindingMapping(
 			ID: otherIssueID, UID: "01HZZZZZZZZZZZZZZZZZZZZZ2A", ProjectID: projectID,
 			ShortID: "zz2a", Title: "Other replay issue", Status: "open",
 			Author: "fixture-author", CreatedAt: "2026-07-15T12:00:00.000Z",
-			UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+			UpdatedAt: "2026-07-15T12:00:00.000Z", Metadata: jsontext.Value(`{}`), Revision: 1,
 		}
 	}
 	if withComment {
@@ -714,14 +714,14 @@ func extendedReplayRecords() []db.ImportRecord {
 		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
 		&db.ProjectExport{
 			ID: projectID, UID: projectUID, Name: "extended-replay", CreatedAt: created,
-			Metadata: json.RawMessage(`{"team":"example"}`), Revision: 3,
+			Metadata: jsontext.Value(`{"team":"example"}`), Revision: 3,
 		},
 		&db.AliasExport{
 			ID: 141, ProjectID: projectID, AliasIdentity: "example/extended", AliasKind: "git", CreatedAt: created,
 		},
 		&db.IssueSyncBindingExport{
 			ID: 71, ProjectID: projectID, Provider: "example", SourceKey: "example:42",
-			RemoteID: "42", DisplayName: "Example tracker", Config: json.RawMessage(`{"mode":"mirror"}`),
+			RemoteID: "42", DisplayName: "Example tracker", Config: jsontext.Value(`{"mode":"mirror"}`),
 			Enabled: true, IntervalSeconds: 300, CreatedAt: created, UpdatedAt: created,
 		},
 		&db.IssueSyncStatusExport{
@@ -732,14 +732,14 @@ func extendedReplayRecords() []db.ImportRecord {
 			ID: recurrenceID, UID: replayRecurrenceUID, ProjectID: projectID,
 			RRule: "FREQ=WEEKLY;BYDAY=MO", DTStart: "2026-07-20", Timezone: "UTC",
 			TemplateTitle: "Weekly review", TemplateBody: "Review progress",
-			TemplateLabels: json.RawMessage(`["weekly"]`), TemplateMetadata: json.RawMessage(`{"cadence":"weekly"}`),
+			TemplateLabels: jsontext.Value(`["weekly"]`), TemplateMetadata: jsontext.Value(`{"cadence":"weekly"}`),
 			Author: "scheduler", Revision: 1, CreatedAt: created, UpdatedAt: created,
 		},
 		&db.IssueExport{
 			ID: issueID, UID: issueUID, ProjectID: projectID, ShortID: shortID,
 			Title: "Restored recurring issue", Body: "durable state", Status: "open",
 			Author: "fixture-author", CreatedAt: created, UpdatedAt: created,
-			Metadata: json.RawMessage(`{"source":"snapshot"}`), Revision: 2, ContentRevision: 1,
+			Metadata: jsontext.Value(`{"source":"snapshot"}`), Revision: 2, ContentRevision: 1,
 			RecurrenceID: &recurrenceID, RecurrenceUID: new(replayRecurrenceUID),
 		},
 		&db.IssueEmbeddingExport{
@@ -780,9 +780,9 @@ func extendedReplayRecords() []db.ImportRecord {
 			BindingUID: replayBindingUID, MappingConnectorInstance: "connector-one",
 			MappingKataField: "scheduled_on", MappingExternalFieldID: "schedule-one",
 			MappingSchemaRevision: "schema-one", MappingCreatedAt: mappingCreatedAt,
-			Baseline:         json.RawMessage(`"2026-08-20"`),
-			ConflictKata:     json.RawMessage(`"2026-08-21"`),
-			ConflictExternal: json.RawMessage(`"2026-08-22"`),
+			Baseline:         jsontext.Value(`"2026-08-20"`),
+			ConflictKata:     jsontext.Value(`"2026-08-21"`),
+			ConflictExternal: jsontext.Value(`"2026-08-22"`),
 			Conflicted:       true, ConflictAt: &conflictAt, UpdatedAt: conflictAt,
 		},
 		&db.FederationBindingExport{
@@ -796,7 +796,7 @@ func extendedReplayRecords() []db.ImportRecord {
 		},
 		&db.FederationQuarantineExport{
 			ID: 91, ProjectID: projectID, Direction: "pull", FirstEventID: 20, LastEventID: 21,
-			EventUIDs: json.RawMessage(`["event-one","event-two"]`), Error: "invalid remote event", CreatedAt: created,
+			EventUIDs: jsontext.Value(`["event-one","event-two"]`), Error: "invalid remote event", CreatedAt: created,
 		},
 		&db.FederationEnrollmentExport{
 			ID: 81, TokenHash: strings.Repeat("a", 64), SpokeInstanceUID: replaySpokeUID,
@@ -872,17 +872,17 @@ func checkSnapshotReplayCompatibilityOptions(t *testing.T, store db.Storage) err
 		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
 		&db.ProjectExport{
 			ID: projectID, UID: replayProjectUID, Name: "compatibility-replay", CreatedAt: created,
-			Metadata: json.RawMessage(`{}`), Revision: 1,
+			Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 		&db.IssueSyncBindingExport{
 			ID: 7, ProjectID: projectID, Provider: "example", SourceKey: "example:compat",
-			RemoteID: "compat", DisplayName: "Compatibility source", Config: json.RawMessage(`{}`),
+			RemoteID: "compat", DisplayName: "Compatibility source", Config: jsontext.Value(`{}`),
 			Enabled: true, IntervalSeconds: 60, CreatedAt: created, UpdatedAt: created,
 		},
 		&db.IssueExport{
 			ID: issueID, UID: replayIssueUID, ProjectID: projectID, ShortID: "zz12",
 			Title: "Legacy replay issue", Status: "open", Author: "fixture-author",
-			CreatedAt: created, UpdatedAt: created, Metadata: json.RawMessage(`{}`), Revision: 1,
+			CreatedAt: created, UpdatedAt: created, Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 		&db.CommentExport{
 			ID: 10, UID: replayCommentUID, IssueID: issueID, Author: "fixture-author",
@@ -915,7 +915,7 @@ func checkSnapshotReplayCompatibilityOptions(t *testing.T, store db.Storage) err
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
 			ProjectID: projectID, ProjectUID: replayProjectUID, ProjectName: "compatibility-replay",
 			IssueID: &issueID, Type: "issue.created", Actor: "fixture-author",
-			Payload:       json.RawMessage(`{"title":"Imported replay event"}`),
+			Payload:       jsontext.Value(`{"title":"Imported replay event"}`),
 			HLCPhysicalMS: 1784102400000, HLCCounter: 0, ContentHash: "legacy-hash",
 			CreatedAt: created,
 		},
@@ -974,7 +974,7 @@ func checkSnapshotReplayHistoricalProjectName(t *testing.T, store db.Storage) er
 		historicalName = "original-project"
 		created        = "2026-07-15T12:00:00.000Z"
 	)
-	payload := json.RawMessage(`{"name":"original-project"}`)
+	payload := jsontext.Value(`{"name":"original-project"}`)
 	hash, err := db.EventContentHash(db.EventHashInput{
 		UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
 		ProjectUID: replayProjectUID, ProjectName: historicalName,
@@ -987,7 +987,7 @@ func checkSnapshotReplayHistoricalProjectName(t *testing.T, store db.Storage) er
 	err = store.ImportReplay(ctx, []db.ImportRecord{
 		&db.ProjectExport{
 			ID: 5, UID: replayProjectUID, Name: currentName, CreatedAt: created,
-			Metadata: json.RawMessage(`{}`), Revision: 1,
+			Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 		&db.EventExport{
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
@@ -1021,7 +1021,7 @@ func checkSnapshotReplayUnsafeHistoricalProjectName(t *testing.T, store db.Stora
 		unsafeName = "original\nproject"
 		created    = "2026-07-15T12:00:00.000Z"
 	)
-	payload := json.RawMessage(`{"name":"original project"}`)
+	payload := jsontext.Value(`{"name":"original project"}`)
 	hash, err := db.EventContentHash(db.EventHashInput{
 		UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
 		ProjectUID: replayProjectUID, ProjectName: unsafeName,
@@ -1034,7 +1034,7 @@ func checkSnapshotReplayUnsafeHistoricalProjectName(t *testing.T, store db.Stora
 	err = store.ImportReplay(ctx, []db.ImportRecord{
 		&db.ProjectExport{
 			ID: 5, UID: replayProjectUID, Name: "safe-current-name", CreatedAt: created,
-			Metadata: json.RawMessage(`{}`), Revision: 1,
+			Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 		&db.EventExport{
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
@@ -1062,11 +1062,11 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
 		&db.ProjectExport{
 			ID: 2, UID: replayProjectUID, Name: "first-project", CreatedAt: created,
-			Metadata: json.RawMessage(`{}`), Revision: 1,
+			Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 		&db.ProjectExport{
 			ID: 3, UID: replayProjectUID, Name: "duplicate-project", CreatedAt: created,
-			Metadata: json.RawMessage(`{}`), Revision: 1,
+			Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 	}
 	err := store.ImportReplay(ctx, records, db.ImportOptions{})
@@ -1118,7 +1118,7 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 	err = store.ImportReplay(ctx, []db.ImportRecord{
 		&db.ProjectExport{
 			ID: 4, UID: replayProjectUID, Name: "unsafe\nproject", CreatedAt: created,
-			Metadata: json.RawMessage(`{}`), Revision: 1,
+			Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 	}, db.ImportOptions{})
 	require.Error(t, err)
@@ -1133,18 +1133,18 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 	err = store.ImportReplay(ctx, []db.ImportRecord{
 		&db.ProjectExport{
 			ID: 5, UID: replayProjectUID, Name: "hash-rejection", CreatedAt: created,
-			Metadata: json.RawMessage(`{}`), Revision: 1,
+			Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 		&db.IssueExport{
 			ID: issueID, UID: replayIssueUID, ProjectID: 5, ShortID: "zz12",
 			Title: "Hash rejection", Status: "open", Author: "fixture-author",
-			CreatedAt: created, UpdatedAt: created, Metadata: json.RawMessage(`{}`), Revision: 1,
+			CreatedAt: created, UpdatedAt: created, Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 		&db.EventExport{
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
 			ProjectID: 5, ProjectUID: replayProjectUID, ProjectName: "hash-rejection",
 			IssueID: &issueID, IssueUID: new(replayIssueUID), Type: "issue.created",
-			Actor: "fixture-author", Payload: json.RawMessage(`{"title":"Hash rejection"}`),
+			Actor: "fixture-author", Payload: jsontext.Value(`{"title":"Hash rejection"}`),
 			HLCPhysicalMS: 1784102400000, ContentHash: strings.Repeat("0", 64), CreatedAt: created,
 		},
 	}, db.ImportOptions{})
@@ -1163,7 +1163,7 @@ func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 	err = store.ImportReplay(ctx, []db.ImportRecord{
 		&db.ProjectExport{
 			ID: 8, UID: replayProjectUID, Name: "fresh-only", CreatedAt: created,
-			Metadata: json.RawMessage(`{}`), Revision: 1,
+			Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 	}, db.ImportOptions{RequireFreshTarget: true})
 	require.Error(t, err)

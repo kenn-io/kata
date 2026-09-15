@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -65,7 +66,7 @@ func newNotifyCmd() *cobra.Command {
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
 			key := notificationMetadataKey(to)
-			value := json.RawMessage("null")
+			value := jsontext.Value("null")
 			verb := "cleared"
 			if !clearRequest {
 				issue, _, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI)
@@ -91,7 +92,7 @@ func newNotifyCmd() *cobra.Command {
 			}
 			body := map[string]any{
 				"actor": actor,
-				"patch": map[string]json.RawMessage{key: value},
+				"patch": map[string]jsontext.Value{key: value},
 			}
 			status, response, err := httpDoJSON(ctx, client, http.MethodPost,
 				fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", baseURL, pid, url.PathEscape(ref.RefForAPI)),
@@ -138,7 +139,7 @@ func notificationValidationError(message string) *cliError {
 func printNotificationMutation(cmd *cobra.Command, response []byte, verb, recipient string) error {
 	if currentOutputMode() == outputJSON {
 		var output bytes.Buffer
-		if err := emitJSON(&output, json.RawMessage(response)); err != nil {
+		if err := emitJSON(&output, jsontext.Value(response)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), output.String())

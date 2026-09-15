@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestLinkChangesWithoutParentPeersValidatesAndOmitsParentPeers(t *testing.T)
 
 	out, err := json.Marshal(changes)
 	require.NoError(t, err)
-	var roundTrip map[string]json.RawMessage
+	var roundTrip map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(out, &roundTrip))
 	require.NotContains(t, roundTrip, "parent_set",
 		"absent parent_set must not marshal as an empty object")
@@ -50,7 +51,7 @@ func TestIssueOutWithoutParentValidatesAndOmitsParent(t *testing.T) {
 
 	out, err := json.Marshal(issue)
 	require.NoError(t, err)
-	var roundTrip map[string]json.RawMessage
+	var roundTrip map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(out, &roundTrip))
 	require.NotContains(t, roundTrip, "parent",
 		"absent parent must not marshal as an empty object")
@@ -72,7 +73,7 @@ func TestIssueSyncBodyWithoutBindingValidatesAndOmitsBinding(t *testing.T) {
 
 	out, err := json.Marshal(body)
 	require.NoError(t, err)
-	var roundTrip map[string]json.RawMessage
+	var roundTrip map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(out, &roundTrip))
 	require.NotContains(t, roundTrip, "binding",
 		"absent issue sync binding must not marshal as an empty object")

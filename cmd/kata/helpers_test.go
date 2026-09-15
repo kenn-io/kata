@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"io"
 	"os"
 	"strings"
@@ -175,7 +175,7 @@ func TestEmitJSON_RejectsEscapedReservedKey(t *testing.T) {
 	// Build the escape sequence explicitly — backtick raw strings interpret
 	// the bytes literally, but writing `k` here avoids any rendering
 	// ambiguity in the source file.
-	payload := json.RawMessage([]byte(`{"\u006bata_api_version":"evil"}`))
+	payload := jsontext.Value([]byte(`{"\u006bata_api_version":"evil"}`))
 	require.NotContains(t, string(payload), `"kata_api_version"`,
 		"test fixture itself must contain the escape, not the literal key")
 	_, err := runEmitJSON(t, payload)

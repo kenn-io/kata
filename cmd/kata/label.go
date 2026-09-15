@@ -2,7 +2,8 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -136,7 +137,7 @@ func newLabelsCmd() *cobra.Command {
 			mode := currentOutputMode()
 			if mode == outputJSON {
 				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+				if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -182,7 +183,7 @@ func printLabelMutation(cmd *cobra.Command, bs []byte) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -232,7 +233,7 @@ func printLabelRemoved(cmd *cobra.Command, bs []byte, ref, label string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())

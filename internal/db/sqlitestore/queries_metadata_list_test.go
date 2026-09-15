@@ -2,7 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +12,7 @@ import (
 )
 
 // makeIssueWithMetadata creates an issue with the given metadata blob.
-func makeIssueWithMetadata(t *testing.T, d *sqlitestore.Store, projectID int64, title string, meta map[string]json.RawMessage) db.Issue {
+func makeIssueWithMetadata(t *testing.T, d *sqlitestore.Store, projectID int64, title string, meta map[string]jsontext.Value) db.Issue {
 	t.Helper()
 	issue, _, err := d.CreateIssue(context.Background(), db.CreateIssueParams{
 		ProjectID: projectID,
@@ -28,11 +28,11 @@ func makeIssueWithMetadata(t *testing.T, d *sqlitestore.Store, projectID int64, 
 // where that flat key is present in top-level metadata.
 func TestListIssues_MetaPresenceFilter(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
-	with := makeIssueWithMetadata(t, d, p.ID, "has key", map[string]json.RawMessage{
-		"work.attention": json.RawMessage(`"needs-human"`),
+	with := makeIssueWithMetadata(t, d, p.ID, "has key", map[string]jsontext.Value{
+		"work.attention": jsontext.Value(`"needs-human"`),
 	})
-	_ = makeIssueWithMetadata(t, d, p.ID, "no key", map[string]json.RawMessage{
-		"other": json.RawMessage(`"v"`),
+	_ = makeIssueWithMetadata(t, d, p.ID, "no key", map[string]jsontext.Value{
+		"other": jsontext.Value(`"v"`),
 	})
 
 	got, err := d.ListIssues(ctx, db.ListIssuesParams{
@@ -48,11 +48,11 @@ func TestListIssues_MetaPresenceFilter(t *testing.T) {
 // whose string-valued key equals value.
 func TestListIssues_MetaEqualityFilter(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
-	stuck := makeIssueWithMetadata(t, d, p.ID, "stuck", map[string]json.RawMessage{
-		"work.attention": json.RawMessage(`"stuck"`),
+	stuck := makeIssueWithMetadata(t, d, p.ID, "stuck", map[string]jsontext.Value{
+		"work.attention": jsontext.Value(`"stuck"`),
 	})
-	_ = makeIssueWithMetadata(t, d, p.ID, "ok", map[string]json.RawMessage{
-		"work.attention": json.RawMessage(`"ok"`),
+	_ = makeIssueWithMetadata(t, d, p.ID, "ok", map[string]jsontext.Value{
+		"work.attention": jsontext.Value(`"ok"`),
 	})
 
 	got, err := d.ListIssues(ctx, db.ListIssuesParams{
@@ -70,11 +70,11 @@ func TestListIssues_MetaEqualityFilter(t *testing.T) {
 // nested issue exposes key "work" (an object), never "work.branch".
 func TestListIssues_MetaFlatDottedKeyDoesNotTraverseNested(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
-	flat := makeIssueWithMetadata(t, d, p.ID, "flat", map[string]json.RawMessage{
-		"work.branch": json.RawMessage(`"feature/x"`),
+	flat := makeIssueWithMetadata(t, d, p.ID, "flat", map[string]jsontext.Value{
+		"work.branch": jsontext.Value(`"feature/x"`),
 	})
-	_ = makeIssueWithMetadata(t, d, p.ID, "nested", map[string]json.RawMessage{
-		"work": json.RawMessage(`{"branch":"feature/x"}`),
+	_ = makeIssueWithMetadata(t, d, p.ID, "nested", map[string]jsontext.Value{
+		"work": jsontext.Value(`{"branch":"feature/x"}`),
 	})
 
 	// Presence filter: only the flat issue has the top-level "work.branch" key.
@@ -100,12 +100,12 @@ func TestListIssues_MetaFlatDottedKeyDoesNotTraverseNested(t *testing.T) {
 // and combine with status/label filters.
 func TestListIssues_MetaFiltersAndTogether(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
-	match := makeIssueWithMetadata(t, d, p.ID, "match", map[string]json.RawMessage{
-		"work.attention": json.RawMessage(`"stuck"`),
-		"work.branch":    json.RawMessage(`"feature/x"`),
+	match := makeIssueWithMetadata(t, d, p.ID, "match", map[string]jsontext.Value{
+		"work.attention": jsontext.Value(`"stuck"`),
+		"work.branch":    jsontext.Value(`"feature/x"`),
 	})
-	_ = makeIssueWithMetadata(t, d, p.ID, "partial", map[string]json.RawMessage{
-		"work.attention": json.RawMessage(`"stuck"`),
+	_ = makeIssueWithMetadata(t, d, p.ID, "partial", map[string]jsontext.Value{
+		"work.attention": jsontext.Value(`"stuck"`),
 	})
 
 	got, err := d.ListIssues(ctx, db.ListIssuesParams{

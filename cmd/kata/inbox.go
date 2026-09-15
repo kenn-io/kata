@@ -1,7 +1,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -107,9 +108,9 @@ func loadInbox(cmd *cobra.Command, recipient string) ([]inboxRequest, error) {
 	}
 	var list struct {
 		Issues []struct {
-			ShortID  string                     `json:"short_id"`
-			Title    string                     `json:"title"`
-			Metadata map[string]json.RawMessage `json:"metadata"`
+			ShortID  string                    `json:"short_id"`
+			Title    string                    `json:"title"`
+			Metadata map[string]jsontext.Value `json:"metadata"`
 		} `json:"issues"`
 	}
 	if err := json.Unmarshal(response, &list); err != nil {
@@ -120,9 +121,9 @@ func loadInbox(cmd *cobra.Command, recipient string) ([]inboxRequest, error) {
 		// Decode optional attribution independently so a malformed teammate
 		// cannot hide an otherwise usable attention request.
 		var value struct {
-			From     string          `json:"from"`
-			Message  string          `json:"message"`
-			Teammate json.RawMessage `json:"teammate"`
+			From     string         `json:"from"`
+			Message  string         `json:"message"`
+			Teammate jsontext.Value `json:"teammate"`
 		}
 		raw, ok := issue.Metadata[key]
 		if !ok || json.Unmarshal(raw, &value) != nil ||

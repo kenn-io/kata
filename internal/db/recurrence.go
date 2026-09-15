@@ -1,7 +1,8 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"sort"
 	"strings"
@@ -36,7 +37,7 @@ func RecomputeRecurrenceCursor(rule, dtstart, timezone string, lastOccurrenceKey
 
 // ValidateRecurrenceTemplate enforces the invariants required when a template
 // is materialized into an issue.
-func ValidateRecurrenceTemplate(title string, metadata json.RawMessage) error {
+func ValidateRecurrenceTemplate(title string, metadata jsontext.Value) error {
 	if strings.TrimSpace(title) == "" {
 		return fmt.Errorf("%w: template_title must be non-empty", ErrInvalidRecurrence)
 	}
@@ -49,10 +50,10 @@ func ValidateRecurrenceTemplate(title string, metadata json.RawMessage) error {
 // The order preserves compatibility with templates written by older versions:
 // obsolete values in these two generated fields cannot block materialization.
 func ComposeRecurrenceIssueMetadata(
-	templateMetadata json.RawMessage,
+	templateMetadata jsontext.Value,
 	occurrenceKey string,
 	timezone string,
-) (json.RawMessage, error) {
+) (jsontext.Value, error) {
 	object, err := decodeRecurrenceTemplateMetadata(templateMetadata)
 	if err != nil {
 		return nil, err
@@ -77,7 +78,7 @@ func ComposeRecurrenceIssueMetadata(
 	return value, nil
 }
 
-func validatedRecurrenceTemplateMetadata(value json.RawMessage) (map[string]json.RawMessage, error) {
+func validatedRecurrenceTemplateMetadata(value jsontext.Value) (map[string]jsontext.Value, error) {
 	object, err := decodeRecurrenceTemplateMetadata(value)
 	if err != nil {
 		return nil, err
@@ -88,11 +89,11 @@ func validatedRecurrenceTemplateMetadata(value json.RawMessage) (map[string]json
 	return object, nil
 }
 
-func decodeRecurrenceTemplateMetadata(value json.RawMessage) (map[string]json.RawMessage, error) {
+func decodeRecurrenceTemplateMetadata(value jsontext.Value) (map[string]jsontext.Value, error) {
 	if len(value) == 0 {
-		return map[string]json.RawMessage{}, nil
+		return map[string]jsontext.Value{}, nil
 	}
-	var object map[string]json.RawMessage
+	var object map[string]jsontext.Value
 	if err := json.Unmarshal(value, &object); err != nil {
 		return nil, fmt.Errorf("%w: template_metadata must be a JSON object: %v", ErrInvalidRecurrence, err)
 	}
@@ -102,7 +103,7 @@ func decodeRecurrenceTemplateMetadata(value json.RawMessage) (map[string]json.Ra
 	return object, nil
 }
 
-func validateRecurrenceTemplateMetadataObject(object map[string]json.RawMessage) error {
+func validateRecurrenceTemplateMetadataObject(object map[string]jsontext.Value) error {
 	keys := make([]string, 0, len(object))
 	for key := range object {
 		keys = append(keys, key)

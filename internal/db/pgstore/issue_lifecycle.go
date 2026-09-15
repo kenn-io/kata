@@ -3,7 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -348,8 +348,8 @@ func (s *Store) closeIssueWithEvents(
 			ClosedAt               string        `json:"closed_at"`
 			Message                string        `json:"message,omitempty"`
 			Evidence               []db.Evidence `json:"evidence,omitempty"`
-			ParentUID              *string       `json:"parent_uid,omitempty"`
-			ParentShortID          *string       `json:"parent_short_id,omitempty"`
+			ParentUID              *string       `json:"parent_uid,omitzero"`
+			ParentShortID          *string       `json:"parent_short_id,omitzero"`
 			IdempotencyKey         string        `json:"idempotency_key,omitempty"`
 			IdempotencyFingerprint string        `json:"idempotency_fingerprint,omitempty"`
 		}{

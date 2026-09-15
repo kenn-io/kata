@@ -3,7 +3,8 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"iter"
 	"strings"
@@ -143,10 +144,10 @@ func (d *Store) ExportIssues(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 				&rec.RecurrenceID, &rec.RecurrenceUID, &rec.OccurrenceKey); err != nil {
 				return db.IssueExport{}, scanError("issue", err)
 			}
-			if !json.Valid([]byte(metadata)) {
+			if !jsontext.Value([]byte(metadata)).IsValid() {
 				return db.IssueExport{}, invalidJSONErr("issue", rec.ID, "metadata")
 			}
-			rec.Metadata = json.RawMessage(metadata)
+			rec.Metadata = jsontext.Value(metadata)
 			return rec, nil
 		})
 }
@@ -189,14 +190,14 @@ func (d *Store) ExportRecurrences(ctx context.Context, f db.ExportFilter) iter.S
 				&rec.CreatedAt, &rec.UpdatedAt, &rec.DeletedAt); err != nil {
 				return db.RecurrenceExport{}, scanError("recurrence", err)
 			}
-			if !json.Valid([]byte(labels)) {
+			if !jsontext.Value([]byte(labels)).IsValid() {
 				return db.RecurrenceExport{}, invalidJSONErr("recurrence", rec.ID, "template_labels")
 			}
-			if !json.Valid([]byte(metadata)) {
+			if !jsontext.Value([]byte(metadata)).IsValid() {
 				return db.RecurrenceExport{}, invalidJSONErr("recurrence", rec.ID, "template_metadata")
 			}
-			rec.TemplateLabels = json.RawMessage(labels)
-			rec.TemplateMetadata = json.RawMessage(metadata)
+			rec.TemplateLabels = jsontext.Value(labels)
+			rec.TemplateMetadata = jsontext.Value(metadata)
 			return rec, nil
 		})
 }
@@ -272,7 +273,7 @@ func (d *Store) ExportIssueSyncBindings(ctx context.Context, f db.ExportFilter) 
 				&rec.LastCursorAt, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
 				return db.IssueSyncBindingExport{}, scanError("issue_sync_binding", err)
 			}
-			rec.Config = json.RawMessage(config)
+			rec.Config = jsontext.Value(config)
 			rec.Enabled = enabled == 1
 			return rec, nil
 		})
@@ -510,13 +511,13 @@ func (d *Store) ExportExternalFieldStates(ctx context.Context, f db.ExportFilter
 				return db.ExternalFieldStateExport{}, scanError("external_field_state", err)
 			}
 			if baseline.Valid {
-				rec.Baseline = json.RawMessage(baseline.String)
+				rec.Baseline = jsontext.Value(baseline.String)
 			}
 			if conflictKata.Valid {
-				rec.ConflictKata = json.RawMessage(conflictKata.String)
+				rec.ConflictKata = jsontext.Value(conflictKata.String)
 			}
 			if conflictExternal.Valid {
-				rec.ConflictExternal = json.RawMessage(conflictExternal.String)
+				rec.ConflictExternal = jsontext.Value(conflictExternal.String)
 			}
 			rec.Conflicted = conflicted != 0
 			return rec, nil
@@ -589,10 +590,10 @@ func (d *Store) ExportFederationQuarantine(ctx context.Context, f db.ExportFilte
 				&rec.SkippedAt, &rec.SkippedBy, &rec.SkipReason); err != nil {
 				return db.FederationQuarantineExport{}, scanError("federation_quarantine", err)
 			}
-			if !json.Valid([]byte(eventUIDs)) {
+			if !jsontext.Value([]byte(eventUIDs)).IsValid() {
 				return db.FederationQuarantineExport{}, fmt.Errorf("federation quarantine %d event_uids is invalid JSON", rec.ID)
 			}
-			rec.EventUIDs = json.RawMessage(eventUIDs)
+			rec.EventUIDs = jsontext.Value(eventUIDs)
 			return rec, nil
 		})
 }
@@ -846,10 +847,10 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 				&rec.Type, &rec.Actor, &payload, &rec.HLCPhysicalMS, &rec.HLCCounter, &rec.ContentHash, &rec.CreatedAt); err != nil {
 				return db.EventExport{}, scanError("event", err)
 			}
-			if !json.Valid([]byte(payload)) {
+			if !jsontext.Value([]byte(payload)).IsValid() {
 				return db.EventExport{}, invalidJSONErr("event", rec.ID, "payload")
 			}
-			rec.Payload = json.RawMessage(payload)
+			rec.Payload = jsontext.Value(payload)
 			contentHash, err := db.EventContentHash(db.EventHashInput{
 				UID:               rec.UID,
 				OriginInstanceUID: rec.OriginInstanceUID,
@@ -887,10 +888,10 @@ func (d *Store) ExportProjects(ctx context.Context, f db.ExportFilter) iter.Seq2
 				&metadata, &rec.Revision); err != nil {
 				return db.ProjectExport{}, scanError("project", err)
 			}
-			if !json.Valid([]byte(metadata)) {
+			if !jsontext.Value([]byte(metadata)).IsValid() {
 				return db.ProjectExport{}, invalidJSONErr("project", rec.ID, "metadata")
 			}
-			rec.Metadata = json.RawMessage(metadata)
+			rec.Metadata = jsontext.Value(metadata)
 			return rec, nil
 		})
 }

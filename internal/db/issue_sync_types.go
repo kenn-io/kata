@@ -1,7 +1,7 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"time"
 )
 
@@ -14,7 +14,7 @@ type IssueSyncBinding struct {
 	SourceKey       string
 	RemoteID        string
 	DisplayName     string
-	Config          json.RawMessage
+	Config          jsontext.Value
 	Enabled         bool
 	IntervalSeconds int
 	LastCursorAt    *time.Time
@@ -46,7 +46,7 @@ type UpsertIssueSyncBindingParams struct {
 	SourceKey       string
 	RemoteID        string
 	DisplayName     string
-	Config          json.RawMessage
+	Config          jsontext.Value
 	IntervalSeconds int
 }
 
@@ -77,5 +77,5 @@ type IssueSyncErrorParams struct {
 type IssueSyncBindingUpdateParams struct {
 	BindingID   int64
 	DisplayName string
-	Config      json.RawMessage
+	Config      jsontext.Value
 }

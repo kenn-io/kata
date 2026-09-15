@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"testing"
 
@@ -24,16 +25,16 @@ func TestCreateIssue_AcceptsMetadata(t *testing.T) {
 	resp := envDoJSON(t, env, http.MethodPost, projectPath(projectID)+"/issues", map[string]any{
 		"actor": "tester",
 		"title": "with metadata",
-		"metadata": map[string]json.RawMessage{
-			"work.branch":  json.RawMessage(`"feature/x"`),
-			"scheduled_on": json.RawMessage(`"2026-01-02"`),
+		"metadata": map[string]jsontext.Value{
+			"work.branch":  jsontext.Value(`"feature/x"`),
+			"scheduled_on": jsontext.Value(`"2026-01-02"`),
 		},
 	}, &out)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	got, err := env.DB.IssueByID(context.Background(), out.Issue.ID)
 	require.NoError(t, err)
-	var m map[string]json.RawMessage
+	var m map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(got.Metadata), &m))
 	assert.JSONEq(t, `"feature/x"`, string(m["work.branch"]))
 	assert.JSONEq(t, `"2026-01-02"`, string(m["scheduled_on"]))
@@ -48,8 +49,8 @@ func TestCreateIssue_RejectsInvalidReservedMetadata(t *testing.T) {
 	resp, bs := envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/issues", map[string]any{
 		"actor": "tester",
 		"title": "bad reserved",
-		"metadata": map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"not-a-date"`),
+		"metadata": map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"not-a-date"`),
 		},
 	}, nil)
 	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "invalid_metadata_value")
@@ -64,8 +65,8 @@ func TestCreateIssue_RejectsNullMetadata(t *testing.T) {
 	resp, bs := envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/issues", map[string]any{
 		"actor": "tester",
 		"title": "null value",
-		"metadata": map[string]json.RawMessage{
-			"work.branch": json.RawMessage(`null`),
+		"metadata": map[string]jsontext.Value{
+			"work.branch": jsontext.Value(`null`),
 		},
 	}, nil)
 	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "invalid_metadata_value")
@@ -89,8 +90,8 @@ func TestCreateIssue_IdempotencyFoldsMetadata(t *testing.T) {
 		body := map[string]any{
 			"actor": "tester",
 			"title": "idem",
-			"metadata": map[string]json.RawMessage{
-				"work.branch": json.RawMessage(`"feature/x"`),
+			"metadata": map[string]jsontext.Value{
+				"work.branch": jsontext.Value(`"feature/x"`),
 			},
 		}
 		var out1 struct {
@@ -117,8 +118,8 @@ func TestCreateIssue_IdempotencyFoldsMetadata(t *testing.T) {
 		first := map[string]any{
 			"actor": "tester",
 			"title": "idem",
-			"metadata": map[string]json.RawMessage{
-				"work.branch": json.RawMessage(`"original"`),
+			"metadata": map[string]jsontext.Value{
+				"work.branch": jsontext.Value(`"original"`),
 			},
 		}
 		resp1, bs1 := post(t, env, projectID, "k1", first)
@@ -127,8 +128,8 @@ func TestCreateIssue_IdempotencyFoldsMetadata(t *testing.T) {
 		replay := map[string]any{
 			"actor": "tester",
 			"title": "idem",
-			"metadata": map[string]json.RawMessage{
-				"work.branch": json.RawMessage(`"changed"`),
+			"metadata": map[string]jsontext.Value{
+				"work.branch": jsontext.Value(`"changed"`),
 			},
 		}
 		resp2, bs2 := post(t, env, projectID, "k1", replay)
@@ -174,8 +175,8 @@ func TestListIssues_MetaQueryFilters(t *testing.T) {
 		resp := envDoJSON(t, env, http.MethodPost, projectPath(projectID)+"/issues", map[string]any{
 			"actor": "tester",
 			"title": title,
-			"metadata": map[string]json.RawMessage{
-				"work.attention": json.RawMessage(`"` + attention + `"`),
+			"metadata": map[string]jsontext.Value{
+				"work.attention": jsontext.Value(`"` + attention + `"`),
 			},
 		}, &out)
 		require.Equal(t, http.StatusOK, resp.StatusCode)

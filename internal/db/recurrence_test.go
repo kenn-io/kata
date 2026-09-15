@@ -1,7 +1,7 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,20 +9,20 @@ import (
 )
 
 func TestValidateRecurrenceTemplateValidatesReservedMetadata(t *testing.T) {
-	err := ValidateRecurrenceTemplate("Review", json.RawMessage(`{"timezone":"Not/AZone"}`))
+	err := ValidateRecurrenceTemplate("Review", jsontext.Value(`{"timezone":"Not/AZone"}`))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidRecurrence)
 	assert.Contains(t, err.Error(), `template_metadata "timezone"`)
 
 	assert.NoError(t, ValidateRecurrenceTemplate(
 		"Review",
-		json.RawMessage(`{"timezone":"America/New_York","custom":{"enabled":true}}`),
+		jsontext.Value(`{"timezone":"America/New_York","custom":{"enabled":true}}`),
 	))
 }
 
 func TestComposeRecurrenceIssueMetadataStampsScheduleTimezone(t *testing.T) {
 	value, err := ComposeRecurrenceIssueMetadata(
-		json.RawMessage(`{"kind":"weekly","timezone":"Not/AZone","scheduled_on":"not-a-date"}`),
+		jsontext.Value(`{"kind":"weekly","timezone":"Not/AZone","scheduled_on":"not-a-date"}`),
 		"2026-05-18",
 		"America/New_York",
 	)
@@ -36,7 +36,7 @@ func TestComposeRecurrenceIssueMetadataStampsScheduleTimezone(t *testing.T) {
 
 func TestComposeRecurrenceIssueMetadataDefensivelyRejectsInvalidReservedValue(t *testing.T) {
 	_, err := ComposeRecurrenceIssueMetadata(
-		json.RawMessage(`{"deadline_on":"not-a-date"}`),
+		jsontext.Value(`{"deadline_on":"not-a-date"}`),
 		"2026-05-18",
 		"America/New_York",
 	)

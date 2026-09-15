@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -369,7 +370,7 @@ func printLeaseMutation(cmd *cobra.Command, bs []byte, action, ref, actor string
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprint(cmd.OutOrStdout(), buf.String()); err != nil {
@@ -471,8 +472,8 @@ func printClaimSteal(cmd *cobra.Command, ref string, releasedBS, claimedBS []byt
 		payload := claimStealJSON{
 			ReleasedHolder: releasedHolder,
 			NewHolder:      newHolder,
-			Released:       json.RawMessage(releasedBS),
-			Claimed:        json.RawMessage(claimedBS),
+			Released:       jsontext.Value(releasedBS),
+			Claimed:        jsontext.Value(claimedBS),
 		}
 		if err := emitJSON(&buf, payload); err != nil {
 			return err
@@ -518,11 +519,11 @@ func printClaimStealPartial(cmd *cobra.Command, releasedBS, claimedBS []byte, re
 			PartialSuccess: true,
 			ReleasedHolder: releasedHolder,
 			NewHolder:      strings.TrimSpace(flags.As),
-			Released:       json.RawMessage(releasedBS),
+			Released:       jsontext.Value(releasedBS),
 			ClaimError:     errorPayload,
 		}
 		if len(claimedBS) > 0 {
-			payload.Claimed = json.RawMessage(claimedBS)
+			payload.Claimed = jsontext.Value(claimedBS)
 		}
 		if err := emitJSON(&buf, payload); err != nil {
 			return err
@@ -535,12 +536,12 @@ func printClaimStealPartial(cmd *cobra.Command, releasedBS, claimedBS []byte, re
 }
 
 type claimStealJSON struct {
-	PartialSuccess bool            `json:"partial_success,omitempty"`
-	ReleasedHolder string          `json:"released_holder,omitempty"`
-	NewHolder      string          `json:"new_holder,omitempty"`
-	Released       json.RawMessage `json:"released,omitempty"`
-	Claimed        json.RawMessage `json:"claimed,omitempty"`
-	ClaimError     any             `json:"claim_error,omitempty"`
+	PartialSuccess bool           `json:"partial_success,omitzero"`
+	ReleasedHolder string         `json:"released_holder,omitempty"`
+	NewHolder      string         `json:"new_holder,omitempty"`
+	Released       jsontext.Value `json:"released,omitempty"`
+	Claimed        jsontext.Value `json:"claimed,omitempty"`
+	ClaimError     any            `json:"claim_error,omitempty"`
 }
 
 func claimStealPartialErr(cause error) error {

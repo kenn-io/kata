@@ -3,7 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"strings"
@@ -371,7 +371,7 @@ func (d *Store) RecordIssueSyncError(ctx context.Context, p db.IssueSyncErrorPar
 
 // RefreshIssueSyncBinding updates mutable provider display/config metadata.
 func (d *Store) RefreshIssueSyncBinding(ctx context.Context, p db.IssueSyncBindingUpdateParams) (db.IssueSyncBinding, error) {
-	if strings.TrimSpace(p.DisplayName) == "" || !json.Valid(p.Config) {
+	if strings.TrimSpace(p.DisplayName) == "" || !jsontext.Value(p.Config).IsValid() {
 		return db.IssueSyncBinding{}, fmt.Errorf("%w: issue sync binding requires display name and valid config JSON", db.ErrImportValidation)
 	}
 	return retryWrite1(ctx, d, func() (db.IssueSyncBinding, error) {
@@ -413,7 +413,7 @@ func validateIssueSyncBindingParams(p db.UpsertIssueSyncBindingParams) error {
 		strings.TrimSpace(p.RemoteID) == "" ||
 		strings.TrimSpace(p.DisplayName) == "" ||
 		p.IntervalSeconds <= 0 ||
-		!json.Valid(p.Config) {
+		!jsontext.Value(p.Config).IsValid() {
 		return fmt.Errorf("%w: invalid issue sync binding", db.ErrImportValidation)
 	}
 	return nil
@@ -486,7 +486,7 @@ func scanIssueSyncBinding(r rowScanner) (db.IssueSyncBinding, error) {
 	if err != nil {
 		return db.IssueSyncBinding{}, fmt.Errorf("scan issue sync binding: %w", err)
 	}
-	binding.Config = json.RawMessage(config)
+	binding.Config = jsontext.Value(config)
 	binding.Enabled = enabled == 1
 	if lastCursorAt.Valid {
 		binding.LastCursorAt = &lastCursorAt.Time

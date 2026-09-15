@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"net/http"
@@ -1512,9 +1513,9 @@ func TestEditIssue_AggregatedEvent_OnePerEdit(t *testing.T) {
 // the wire (see api.EventOut), so we hold it as RawMessage and convert
 // to string only for substring assertions.
 type eventTransport struct {
-	ID      int64           `json:"id"`
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+	ID      int64          `json:"id"`
+	Type    string         `json:"type"`
+	Payload jsontext.Value `json:"payload"`
 }
 
 func (e eventTransport) PayloadString() string { return string(e.Payload) }

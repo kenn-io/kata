@@ -2,6 +2,7 @@ package identityaudit
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"testing"
 )
@@ -37,7 +38,7 @@ func TestValidateRejectsForbiddenKeyVariantsInsideFieldValues(t *testing.T) {
 }
 
 func TestValidateAllowsOpaqueFieldIDs(t *testing.T) {
-	raw := json.RawMessage(`{"root_key":"root-example","fields":{"kata_uid":{"kind":"date","value":"2026-08-20"},"katakana_start":{"kind":"null"}},"expected":{"kata_uid":{"kind":"null"},"katakana_start":{"kind":"date","value":"2026-08-19"}}}`)
+	raw := jsontext.Value(`{"root_key":"root-example","fields":{"kata_uid":{"kind":"date","value":"2026-08-20"},"katakana_start":{"kind":"null"}},"expected":{"kata_uid":{"kind":"null"},"katakana_start":{"kind":"date","value":"2026-08-19"}}}`)
 	if err := Validate("write_fields", raw, Options{ExternalRootKey: "root-example"}); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func TestValidateRejectsArbitraryStructuralKataKeys(t *testing.T) {
 		}
 	}
 
-	raw := json.RawMessage(`{"root_key":"root-example","fields":{"katakana_start":{"kind":"null"}},"expected":{"katakana_start":{"kind":"date","value":"2026-08-20"}}}`)
+	raw := jsontext.Value(`{"root_key":"root-example","fields":{"katakana_start":{"kind":"null"}},"expected":{"katakana_start":{"kind":"date","value":"2026-08-20"}}}`)
 	if err := Validate("write_fields", raw, Options{ExternalRootKey: "root-example"}); err != nil {
 		t.Fatalf("katakana field rejected: %v", err)
 	}
@@ -71,26 +72,26 @@ func TestValidateRejectsArbitraryStructuralKataKeys(t *testing.T) {
 func TestValidateRejectsWrongParameterTypes(t *testing.T) {
 	tests := []struct {
 		method string
-		raw    json.RawMessage
+		raw    jsontext.Value
 	}{
-		{method: "resolve_root", raw: json.RawMessage(`{"locator":7}`)},
-		{method: "read_root", raw: json.RawMessage(`{"root_key":false}`)},
-		{method: "list_comments", raw: json.RawMessage(`{"root_key":[]}`)},
-		{method: "publish_comment", raw: json.RawMessage(`{"root_key":"root-example","body":{},"operation_id":"operation-example"}`)},
-		{method: "publish_comment", raw: json.RawMessage(`{"root_key":3,"body":"example","operation_id":"operation-example"}`)},
-		{method: "publish_comment", raw: json.RawMessage(`{"root_key":"root-example","body":"example","operation_id":3}`)},
-		{method: "complete_root", raw: json.RawMessage(`{"root_key":null}`)},
-		{method: "read_fields", raw: json.RawMessage(`{"root_key":{},"field_ids":[]}`)},
-		{method: "read_fields", raw: json.RawMessage(`{"root_key":"root-example","field_ids":"field-example"}`)},
-		{method: "read_fields", raw: json.RawMessage(`{"root_key":"root-example","field_ids":[3]}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":true,"fields":{},"expected":{}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":"field-example","expected":{}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":null},"expected":{}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{}},"expected":{}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":4}},"expected":{}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"date","value":{}}},"expected":{}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"instant","timezone":[]}},"expected":{}}`)},
-		{method: "write_fields", raw: json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"null","metadata":"unexpected"}},"expected":{}}`)},
+		{method: "resolve_root", raw: jsontext.Value(`{"locator":7}`)},
+		{method: "read_root", raw: jsontext.Value(`{"root_key":false}`)},
+		{method: "list_comments", raw: jsontext.Value(`{"root_key":[]}`)},
+		{method: "publish_comment", raw: jsontext.Value(`{"root_key":"root-example","body":{},"operation_id":"operation-example"}`)},
+		{method: "publish_comment", raw: jsontext.Value(`{"root_key":3,"body":"example","operation_id":"operation-example"}`)},
+		{method: "publish_comment", raw: jsontext.Value(`{"root_key":"root-example","body":"example","operation_id":3}`)},
+		{method: "complete_root", raw: jsontext.Value(`{"root_key":null}`)},
+		{method: "read_fields", raw: jsontext.Value(`{"root_key":{},"field_ids":[]}`)},
+		{method: "read_fields", raw: jsontext.Value(`{"root_key":"root-example","field_ids":"field-example"}`)},
+		{method: "read_fields", raw: jsontext.Value(`{"root_key":"root-example","field_ids":[3]}`)},
+		{method: "write_fields", raw: jsontext.Value(`{"root_key":true,"fields":{},"expected":{}}`)},
+		{method: "write_fields", raw: jsontext.Value(`{"root_key":"root-example","fields":"field-example","expected":{}}`)},
+		{method: "write_fields", raw: jsontext.Value(`{"root_key":"root-example","fields":{"field-example":null},"expected":{}}`)},
+		{method: "write_fields", raw: jsontext.Value(`{"root_key":"root-example","fields":{"field-example":{}},"expected":{}}`)},
+		{method: "write_fields", raw: jsontext.Value(`{"root_key":"root-example","fields":{"field-example":{"kind":4}},"expected":{}}`)},
+		{method: "write_fields", raw: jsontext.Value(`{"root_key":"root-example","fields":{"field-example":{"kind":"date","value":{}}},"expected":{}}`)},
+		{method: "write_fields", raw: jsontext.Value(`{"root_key":"root-example","fields":{"field-example":{"kind":"instant","timezone":[]}},"expected":{}}`)},
+		{method: "write_fields", raw: jsontext.Value(`{"root_key":"root-example","fields":{"field-example":{"kind":"null","metadata":"unexpected"}},"expected":{}}`)},
 	}
 	for _, test := range tests {
 		err := Validate(test.method, test.raw, Options{ExternalRootKey: "root-example"})
@@ -107,14 +108,14 @@ func TestValidateTreatsReadFieldSelectorsAsOpaque(t *testing.T) {
 		LongUIDs:        []string{"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
 		ShortIDs:        []string{"root-short"},
 	}
-	raw := json.RawMessage(`{"root_key":"root-example","field_ids":["root-short","prefix-01ARZ3NDEKTSV4RRFFQ69G5FAV-suffix","kataOwnerId"]}`)
+	raw := jsontext.Value(`{"root_key":"root-example","field_ids":["root-short","prefix-01ARZ3NDEKTSV4RRFFQ69G5FAV-suffix","kataOwnerId"]}`)
 	if err := Validate("read_fields", raw, options); err != nil {
 		t.Fatalf("opaque field selectors rejected: %v", err)
 	}
 
-	for _, invalid := range []json.RawMessage{
-		json.RawMessage(`{"root_key":"root-short","field_ids":[]}`),
-		json.RawMessage(`{"root_key":"root-example","field_ids":[],"kataOwnerId":"neutral-forbidden"}`),
+	for _, invalid := range []jsontext.Value{
+		jsontext.Value(`{"root_key":"root-short","field_ids":[]}`),
+		jsontext.Value(`{"root_key":"root-example","field_ids":[],"kataOwnerId":"neutral-forbidden"}`),
 	} {
 		if err := Validate("read_fields", invalid, options); err == nil {
 			t.Fatalf("surrounding identity channel accepted: %s", invalid)
@@ -148,28 +149,28 @@ func TestValidateLocalIdentityMatching(t *testing.T) {
 }
 
 func TestValidateAllMethodShapesAndExactEOF(t *testing.T) {
-	valid := map[string]json.RawMessage{
-		"describe":        json.RawMessage(`{}`),
-		"resolve_root":    json.RawMessage(`{"locator":"fixture-root"}`),
-		"read_root":       json.RawMessage(`{"root_key":"root-example"}`),
-		"list_comments":   json.RawMessage(`{"root_key":"root-example"}`),
-		"publish_comment": json.RawMessage(`{"root_key":"root-example","body":"Example","operation_id":"operation-example"}`),
-		"complete_root":   json.RawMessage(`{"root_key":"root-example"}`),
-		"list_fields":     json.RawMessage(`{}`),
-		"read_fields":     json.RawMessage(`{"root_key":"root-example","field_ids":["field-example"]}`),
-		"write_fields":    json.RawMessage(`{"root_key":"root-example","fields":{"field-example":{"kind":"null"}},"expected":{"field-example":{"kind":"date","value":"2026-08-20"}}}`),
+	valid := map[string]jsontext.Value{
+		"describe":        jsontext.Value(`{}`),
+		"resolve_root":    jsontext.Value(`{"locator":"fixture-root"}`),
+		"read_root":       jsontext.Value(`{"root_key":"root-example"}`),
+		"list_comments":   jsontext.Value(`{"root_key":"root-example"}`),
+		"publish_comment": jsontext.Value(`{"root_key":"root-example","body":"Example","operation_id":"operation-example"}`),
+		"complete_root":   jsontext.Value(`{"root_key":"root-example"}`),
+		"list_fields":     jsontext.Value(`{}`),
+		"read_fields":     jsontext.Value(`{"root_key":"root-example","field_ids":["field-example"]}`),
+		"write_fields":    jsontext.Value(`{"root_key":"root-example","fields":{"field-example":{"kind":"null"}},"expected":{"field-example":{"kind":"date","value":"2026-08-20"}}}`),
 	}
 	for method, raw := range valid {
 		if err := Validate(method, raw, Options{ExternalRootKey: "root-example"}); err != nil {
 			t.Fatalf("%s valid params rejected: %v", method, err)
 		}
 	}
-	err := Validate("read_root", json.RawMessage(`{"root_key":"root-example"} {}`), Options{ExternalRootKey: "root-example"})
+	err := Validate("read_root", jsontext.Value(`{"root_key":"root-example"} {}`), Options{ExternalRootKey: "root-example"})
 	var auditErr *Error
 	if !errors.As(err, &auditErr) || auditErr.Code != CodeTrailingJSON {
 		t.Fatalf("trailing JSON error = %#v, want trailing-json error", err)
 	}
-	err = Validate("describe", json.RawMessage(`null`), Options{})
+	err = Validate("describe", jsontext.Value(`null`), Options{})
 	if !errors.As(err, &auditErr) || auditErr.Code != CodeInvalidJSON {
 		t.Fatalf("null parameter error = %#v, want invalid-json error", err)
 	}

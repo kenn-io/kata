@@ -3,7 +3,8 @@ package connector
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -23,13 +24,13 @@ func ServeOne(ctx context.Context, in io.Reader, out io.Writer, handler Handler)
 	if !utf8.Valid(encoded) {
 		return errors.New("decode connector request: request is not valid UTF-8")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder := jsontext.NewDecoder(bytes.NewReader(encoded))
 	var request Request
-	if err := decoder.Decode(&request); err != nil {
+	if err := json.UnmarshalDecode(decoder, &request); err != nil {
 		return fmt.Errorf("decode connector request: %w", err)
 	}
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+	var extra jsontext.Value
+	if err := json.UnmarshalDecode(decoder, &extra); !errors.Is(err, io.EOF) {
 		if err == nil {
 			return errors.New("connector request contains trailing JSON")
 		}
@@ -48,7 +49,7 @@ func ServeOne(ctx context.Context, in io.Reader, out io.Writer, handler Handler)
 		return err
 	}
 	response := Response{Protocol: ProtocolVersion, ID: request.ID, Result: result, Error: callErr}
-	if err := json.NewEncoder(out).Encode(response); err != nil {
+	if err := json.MarshalWrite(out, response); err != nil {
 		return fmt.Errorf("encode connector response: %w", err)
 	}
 	return nil
@@ -62,14 +63,14 @@ func validateRequestEnvelope(request Request) error {
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return errors.New("settings must be a JSON object")
 	}
-	var settings map[string]json.RawMessage
+	var settings map[string]jsontext.Value
 	if err := json.Unmarshal(trimmed, &settings); err != nil || settings == nil {
 		return errors.New("settings must be a JSON object")
 	}
 	return nil
 }
 
-func dispatch(ctx context.Context, handler Handler, request Request) (json.RawMessage, *Error, error) {
+func dispatch(ctx context.Context, handler Handler, request Request) (jsontext.Value, *Error, error) {
 	switch request.Method {
 	case "describe":
 		return call(request.Params, func(params DescribeParams) (Description, *Error) { return handler.Describe(ctx, params) })
@@ -102,22 +103,21 @@ func dispatch(ctx context.Context, handler Handler, request Request) (json.RawMe
 	}
 }
 
-func call[P any, R any](raw json.RawMessage, fn func(P) (R, *Error)) (json.RawMessage, *Error, error) {
+func call[P any, R any](raw jsontext.Value, fn func(P) (R, *Error)) (jsontext.Value, *Error, error) {
 	return callValidated(raw, nil, fn)
 }
 
-func callValidated[P any, R any](raw json.RawMessage, validate func(P) error, fn func(P) (R, *Error)) (json.RawMessage, *Error, error) {
+func callValidated[P any, R any](raw jsontext.Value, validate func(P) error, fn func(P) (R, *Error)) (jsontext.Value, *Error, error) {
 	var params P
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil, nil, errors.New("decode connector parameters: parameters must be a JSON object")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(trimmed))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&params); err != nil {
+	decoder := jsontext.NewDecoder(bytes.NewReader(trimmed))
+	if err := json.UnmarshalDecode(decoder, &params, json.RejectUnknownMembers(true)); err != nil {
 		return nil, nil, fmt.Errorf("decode connector parameters: %w", err)
 	}
-	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+	if err := json.UnmarshalDecode(decoder, new(jsontext.Value)); !errors.Is(err, io.EOF) {
 		if err == nil {
 			return nil, nil, errors.New("decode connector parameters: trailing JSON")
 		}

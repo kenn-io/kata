@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,7 +29,7 @@ type issueStatusProjection struct {
 	HolderInstance    string     `json:"holder_instance,omitempty"`
 	LeaseKind         string     `json:"lease_kind,omitempty"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
-	PendingLeaseCount int        `json:"pending_lease_count,omitempty"`
+	PendingLeaseCount int        `json:"pending_lease_count,omitzero"`
 }
 
 type instanceStatusForCLI struct {

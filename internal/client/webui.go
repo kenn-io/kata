@@ -2,7 +2,8 @@ package client
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -280,8 +281,8 @@ func probeAnonymousReadonlyWebUI(
 		Capabilities api.UICapabilities `json:"capabilities"`
 		Origin       string             `json:"origin"`
 	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
-	if err := decoder.Decode(&snapshot); err != nil {
+	decoder := jsontext.NewDecoder(io.LimitReader(response.Body, 1<<20))
+	if err := json.UnmarshalDecode(decoder, &snapshot); err != nil {
 		return nil, errors.New("anonymous web UI snapshot was invalid")
 	}
 	if snapshot.Capabilities.Writable || snapshot.Capabilities.Updates != "poll" {

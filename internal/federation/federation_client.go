@@ -3,7 +3,7 @@ package federation
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -130,7 +130,7 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := json.UnmarshalRead(resp.Body, out); err != nil {
 		return fmt.Errorf("decode hub %s response: %w", req.URL.Path, err)
 	}
 	return nil
@@ -159,7 +159,7 @@ func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := json.UnmarshalRead(resp.Body, out); err != nil {
 		return fmt.Errorf("decode hub %s response: %w", req.URL.Path, err)
 	}
 	return nil

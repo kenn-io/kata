@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -408,7 +409,7 @@ func TestGeneratedPollEventsPreservesPayload(t *testing.T) {
 }
 
 func TestGeneratedFederationIngestEventPreservesPayload(t *testing.T) {
-	payload := json.RawMessage(`{"items":[{"id":1}],"source":"hub-project"}`)
+	payload := jsontext.Value(`{"items":[{"id":1}],"source":"hub-project"}`)
 	event := generated.FederationIngestEventEnvelope{
 		Actor:             "tester",
 		ContentHash:       "hash",
@@ -425,7 +426,7 @@ func TestGeneratedFederationIngestEventPreservesPayload(t *testing.T) {
 
 	raw, err := json.Marshal(event)
 	require.NoError(t, err)
-	var encoded map[string]json.RawMessage
+	var encoded map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &encoded))
 	assert.JSONEq(t, string(payload), string(encoded["payload"]))
 

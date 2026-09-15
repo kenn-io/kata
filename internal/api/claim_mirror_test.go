@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -127,7 +128,7 @@ func assertJSONHasKeys(t *testing.T, value any, keys ...string) {
 	t.Helper()
 	raw, err := json.Marshal(value)
 	require.NoError(t, err)
-	var decoded map[string]json.RawMessage
+	var decoded map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 	for _, key := range keys {
 		require.Contains(t, decoded, key, "response must still carry %q", key)

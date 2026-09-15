@@ -3,7 +3,8 @@ package federation
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -278,7 +279,7 @@ type enrollmentWireRequest struct {
 	Token                        string `json:"token"`
 	Capabilities                 string `json:"capabilities"`
 	Actor                        string `json:"actor,omitempty"`
-	AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty"`
+	AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitzero"`
 }
 
 type enrollmentWireResponse struct {
@@ -363,8 +364,8 @@ func (c *HubClient) doJSON(
 	if output == nil {
 		return nil
 	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, maxHubResponseBytes))
-	if err := decoder.Decode(output); err != nil {
+	decoder := jsontext.NewDecoder(io.LimitReader(response.Body, maxHubResponseBytes))
+	if err := json.UnmarshalDecode(decoder, output); err != nil {
 		return hubError(ErrHubValidation, operation, response.StatusCode)
 	}
 	return nil

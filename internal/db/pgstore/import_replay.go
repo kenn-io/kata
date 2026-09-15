@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -560,7 +561,7 @@ func pgReplayExternalFieldState(ctx context.Context, tx *sql.Tx, state *db.Exter
 	return pgReplayError(db.ImportKindExternalFieldState, err)
 }
 
-func pgNullableRawJSON(value json.RawMessage) any {
+func pgNullableRawJSON(value jsontext.Value) any {
 	if len(value) == 0 {
 		return nil
 	}

@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,7 +73,7 @@ func newMetaUnsetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runMetaPatchGuarded(cmd, args[0], args[1], json.RawMessage("null"), ifMatch, "unset", guard)
+			return runMetaPatchGuarded(cmd, args[0], args[1], jsontext.Value("null"), ifMatch, "unset", guard)
 		},
 	}
 	cmd.Flags().StringVar(&ifMatch, "if-match", "", "expected issue revision (N or rev-N)")
@@ -115,10 +116,10 @@ func newMetaGetCmd() *cobra.Command {
 // is unused by meta but lets waitFetchState and liveAttnDaemon.lookup decode the
 // lifecycle status through the same struct instead of anonymous copies.
 type metaIssueWire struct {
-	ShortID  string                     `json:"short_id"`
-	Status   string                     `json:"status"`
-	Metadata map[string]json.RawMessage `json:"metadata"`
-	Revision int64                      `json:"revision"`
+	ShortID  string                    `json:"short_id"`
+	Status   string                    `json:"status"`
+	Metadata map[string]jsontext.Value `json:"metadata"`
+	Revision int64                     `json:"revision"`
 }
 
 type metaShowResponse struct {
@@ -135,39 +136,38 @@ type metaPatchResponse struct {
 // convention (see helpers.go: emitJSON) even though this payload is
 // assembled client-side rather than re-emitted from a daemon response body.
 type metaGetWholeJSON struct {
-	Ref      string                     `json:"ref"`
-	Revision int64                      `json:"revision"`
-	Metadata map[string]json.RawMessage `json:"metadata"`
+	Ref      string                    `json:"ref"`
+	Revision int64                     `json:"revision"`
+	Metadata map[string]jsontext.Value `json:"metadata"`
 }
 
 // metaGetKeyJSON is the CLI-composed --json envelope for `kata meta get
 // <ref> <key>`.
 type metaGetKeyJSON struct {
-	Ref      string          `json:"ref"`
-	Revision int64           `json:"revision"`
-	Key      string          `json:"key"`
-	Value    json.RawMessage `json:"value"`
+	Ref      string         `json:"ref"`
+	Revision int64          `json:"revision"`
+	Key      string         `json:"key"`
+	Value    jsontext.Value `json:"value"`
 }
 
-func parseMetaSetValue(raw string, asJSON bool) (json.RawMessage, error) {
+func parseMetaSetValue(raw string, asJSON bool) (jsontext.Value, error) {
 	return parseMetaValue(raw, asJSON,
 		"null is not allowed with --json-value; use `kata meta unset` to clear a key")
 }
 
-func parseMetaGuardValue(raw string, asJSON bool) (json.RawMessage, error) {
+func parseMetaGuardValue(raw string, asJSON bool) (jsontext.Value, error) {
 	return parseMetaValue(raw, asJSON,
 		"null is not allowed for --if-value; use --if-absent to match a missing key")
 }
 
-func parseMetaValue(raw string, asJSON bool, nullMessage string) (json.RawMessage, error) {
+func parseMetaValue(raw string, asJSON bool, nullMessage string) (jsontext.Value, error) {
 	if !asJSON {
 		bs, err := json.Marshal(raw)
-		return json.RawMessage(bs), err
+		return jsontext.Value(bs), err
 	}
-	dec := json.NewDecoder(strings.NewReader(raw))
-	dec.UseNumber()
-	var v any
-	if err := dec.Decode(&v); err != nil {
+	dec := jsontext.NewDecoder(strings.NewReader(raw))
+	var v jsontext.Value
+	if err := json.UnmarshalDecode(dec, &v); err != nil {
 		return nil, &cliError{
 			Message:  "invalid JSON for --json-value: " + err.Error(),
 			Kind:     kindValidation,
@@ -175,7 +175,7 @@ func parseMetaValue(raw string, asJSON bool, nullMessage string) (json.RawMessag
 		}
 	}
 	var extra any
-	if err := dec.Decode(&extra); err == nil {
+	if err := json.UnmarshalDecode(dec, &extra); err == nil {
 		return nil, &cliError{
 			Message:  "invalid JSON for --json-value: trailing data",
 			Kind:     kindValidation,
@@ -188,22 +188,22 @@ func parseMetaValue(raw string, asJSON bool, nullMessage string) (json.RawMessag
 			ExitCode: ExitValidation,
 		}
 	}
-	if v == nil {
+	if v.Kind() == 'n' {
 		return nil, &cliError{
 			Message:  nullMessage,
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
 		}
 	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, []byte(raw)); err != nil {
+	compact := jsontext.Value(raw)
+	if err := compact.Compact(); err != nil {
 		return nil, &cliError{
 			Message:  "invalid JSON for --json-value: " + err.Error(),
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
 		}
 	}
-	return json.RawMessage(compact.Bytes()), nil
+	return compact, nil
 }
 
 type metaPatchGuard struct {
@@ -285,14 +285,14 @@ func validateMetaIfMatchFlag(cmd *cobra.Command, ifMatch string) error {
 	return nil
 }
 
-func runMetaPatch(cmd *cobra.Command, rawRef, key string, value json.RawMessage, ifMatch, verb string) error {
+func runMetaPatch(cmd *cobra.Command, rawRef, key string, value jsontext.Value, ifMatch, verb string) error {
 	return runMetaPatchGuarded(cmd, rawRef, key, value, ifMatch, verb, nil)
 }
 
 func runMetaPatchGuarded(
 	cmd *cobra.Command,
 	rawRef, key string,
-	value json.RawMessage,
+	value jsontext.Value,
 	ifMatch, verb string,
 	guard *metaPatchGuard,
 ) error {
@@ -321,7 +321,7 @@ func runMetaPatchGuarded(
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	body := map[string]any{
 		"actor": actor,
-		"patch": map[string]json.RawMessage{key: value},
+		"patch": map[string]jsontext.Value{key: value},
 	}
 	if guard != nil {
 		body["guard"] = guard
@@ -353,7 +353,7 @@ func fetchMetaIssue(ctx context.Context, client *http.Client, baseURL string, pi
 		return metaIssueWire{}, nil, err
 	}
 	if out.Issue.Metadata == nil {
-		out.Issue.Metadata = map[string]json.RawMessage{}
+		out.Issue.Metadata = map[string]jsontext.Value{}
 	}
 	return out.Issue, bs, nil
 }
@@ -388,7 +388,7 @@ func printMetaPatch(cmd *cobra.Command, bs []byte, verb, key string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -475,7 +475,7 @@ func printMetaGet(cmd *cobra.Command, issue metaIssueWire, key string) error {
 	return nil
 }
 
-func printMetaValue(cmd *cobra.Command, key string, value json.RawMessage, issue metaIssueWire, mode outputMode) error {
+func printMetaValue(cmd *cobra.Command, key string, value jsontext.Value, issue metaIssueWire, mode outputMode) error {
 	compact := compactRaw(value)
 	if mode == outputJSON {
 		var buf bytes.Buffer
@@ -506,7 +506,7 @@ func printMetaValue(cmd *cobra.Command, key string, value json.RawMessage, issue
 	return err
 }
 
-func writeMetaAgentRow(cmd *cobra.Command, key string, value json.RawMessage) error {
+func writeMetaAgentRow(cmd *cobra.Command, key string, value jsontext.Value) error {
 	// Route both fields through agent quoting so a JSON value containing
 	// spaces, quotes, or backslashes stays a single unambiguous token that a
 	// whitespace-splitting agent parser cannot break apart.
@@ -515,7 +515,7 @@ func writeMetaAgentRow(cmd *cobra.Command, key string, value json.RawMessage) er
 		agentRowField("value", string(value)))
 }
 
-func sortedMetaKeys(values map[string]json.RawMessage) []string {
+func sortedMetaKeys(values map[string]jsontext.Value) []string {
 	keys := make([]string, 0, len(values))
 	for k := range values {
 		keys = append(keys, k)
@@ -524,10 +524,10 @@ func sortedMetaKeys(values map[string]json.RawMessage) []string {
 	return keys
 }
 
-func compactRaw(raw json.RawMessage) json.RawMessage {
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, raw); err != nil {
+func compactRaw(raw jsontext.Value) jsontext.Value {
+	buf := raw.Clone()
+	if err := buf.Compact(); err != nil {
 		return raw
 	}
-	return json.RawMessage(buf.Bytes())
+	return buf
 }

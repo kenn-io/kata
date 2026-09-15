@@ -5,7 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -719,7 +719,7 @@ func (c *claimHubClient) getJSON(ctx context.Context, path string, out any) erro
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &claimHubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return json.UnmarshalRead(resp.Body, out)
 }
 
 func (c *claimHubClient) postJSON(ctx context.Context, path string, in, out any) error {
@@ -744,7 +744,7 @@ func (c *claimHubClient) postJSON(ctx context.Context, path string, in, out any)
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &claimHubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return json.UnmarshalRead(resp.Body, out)
 }
 
 func claimHubPath(hubProjectID int64, ref, suffix string) string {

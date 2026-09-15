@@ -1,7 +1,7 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"time"
 
 	"go.kenn.io/kata/internal/tokenactor"
@@ -81,7 +81,7 @@ type CreateIssueParams struct {
 	// through their type validator; unknown keys pass opaquely). JSON null
 	// values are rejected — there is nothing to clear at creation. Absent or
 	// empty leaves the schema's '{}' default.
-	Metadata map[string]json.RawMessage
+	Metadata map[string]jsontext.Value
 }
 
 // CloseIssueParams carries optional retry and concurrency guards for one close.
@@ -496,7 +496,7 @@ type PatchIssueMetadataIn struct {
 	IssueID    int64
 	IfMatchRev *int64
 	Actor      string
-	Patch      map[string]json.RawMessage
+	Patch      map[string]jsontext.Value
 	Guard      *MetadataPatchGuard
 }
 
@@ -506,7 +506,7 @@ type PatchIssueMetadataIn struct {
 // transaction, after acquiring the same row lock used by the write.
 type MetadataPatchGuard struct {
 	Key      string
-	IfValue  json.RawMessage
+	IfValue  jsontext.Value
 	IfAbsent bool
 }
 
@@ -524,7 +524,7 @@ type PatchProjectMetadataIn struct {
 	ProjectID  int64
 	IfMatchRev *int64
 	Actor      string
-	Patch      map[string]json.RawMessage
+	Patch      map[string]jsontext.Value
 }
 
 // PatchProjectMetadataOut carries results from a successful PatchProjectMetadata call.
@@ -561,7 +561,7 @@ type RecurrenceTemplate struct {
 	Owner    *string
 	Priority *int64
 	Labels   []string
-	Metadata json.RawMessage
+	Metadata jsontext.Value
 }
 
 // CreateRecurrenceIn holds the inputs for CreateRecurrence.
@@ -601,7 +601,7 @@ type RecurrenceUpdate struct {
 	ClearTemplateOwner    bool
 	ClearTemplatePriority bool
 	TemplateLabels        *[]string
-	TemplateMetadata      *json.RawMessage
+	TemplateMetadata      *jsontext.Value
 }
 
 // PatchRecurrenceIn holds the inputs for PatchRecurrence.

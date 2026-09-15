@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -2384,7 +2385,7 @@ func ingestCLIClaimViolation(
 	require.NoError(t, err)
 	eventUID, err := katauid.New()
 	require.NoError(t, err)
-	payload := json.RawMessage(`{"issue_uid":"` + issue.UID + `","title":"remote update"}`)
+	payload := jsontext.Value(`{"issue_uid":"` + issue.UID + `","title":"remote update"}`)
 	createdAt := time.Date(2026, 5, 24, 12, int(sourceEventID), 0, 0, time.UTC)
 	ev := db.RemoteEvent{
 		EventUID:          eventUID,

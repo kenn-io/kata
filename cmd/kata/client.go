@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net"
@@ -420,7 +421,7 @@ func (a daemonAPI) passthrough(cmd *cobra.Command, method, path string, body any
 		return bs, false, nil
 	}
 	var buf bytes.Buffer
-	if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+	if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 		return nil, false, err
 	}
 	if _, err := fmt.Fprint(cmd.OutOrStdout(), buf.String()); err != nil {

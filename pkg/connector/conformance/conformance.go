@@ -6,7 +6,7 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -56,8 +56,8 @@ type RootState struct {
 // mutating v1 call. Params must preserve every nested key so Run can audit the
 // candidate's actual external mutation surface.
 type Mutation struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
+	Method string         `json:"method"`
+	Params jsontext.Value `json:"params"`
 }
 
 // Run executes the protocol-v1 behavioral contract against a disposable
@@ -89,6 +89,6 @@ func Run(t *testing.T, fixture Fixture) {
 	})
 }
 
-func auditMutationParams(method string, raw json.RawMessage, rootKey string) error {
+func auditMutationParams(method string, raw jsontext.Value, rootKey string) error {
 	return identityaudit.Validate(method, raw, identityaudit.Options{ExternalRootKey: rootKey})
 }

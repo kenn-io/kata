@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -619,7 +620,7 @@ func classifyFetchErr(err error) (permanent bool) {
 
 // decodeJSONString unwraps a JSON string metadata value, returning "" for
 // absent, null, or non-string values (attention values are opaque strings).
-func decodeJSONString(raw json.RawMessage) string {
+func decodeJSONString(raw jsontext.Value) string {
 	if len(raw) == 0 {
 		return ""
 	}

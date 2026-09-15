@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -127,7 +127,7 @@ func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, pr
 func httpDoJSONHeaders(ctx context.Context, client *http.Client, method, path string, body any, headers map[string]string) (int, []byte, error) {
 	var rdr io.Reader
 	if body != nil {
-		bs, err := jsonv2.Marshal(body)
+		bs, err := json.Marshal(body)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -159,7 +159,7 @@ func printMove(cmd *cobra.Command, bs []byte, sourceProject, oldShortID, targetP
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())

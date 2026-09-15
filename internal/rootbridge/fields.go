@@ -1,7 +1,8 @@
 package rootbridge
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -157,7 +158,7 @@ func canonicalMappedFieldValue(
 }
 
 func decodeCanonicalStoredFieldValue(
-	raw json.RawMessage,
+	raw jsontext.Value,
 	mapping db.ExternalFieldMapping,
 ) (connector.FieldValue, bool, error) {
 	if len(raw) == 0 {
@@ -174,7 +175,7 @@ func decodeCanonicalStoredFieldValue(
 	return canonical, true, nil
 }
 
-func marshalCanonicalFieldValue(value connector.FieldValue) (json.RawMessage, error) {
+func marshalCanonicalFieldValue(value connector.FieldValue) (jsontext.Value, error) {
 	canonical, err := canonicalFieldValue(value)
 	if err != nil {
 		return nil, err

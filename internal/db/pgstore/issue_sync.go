@@ -3,7 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"strings"
@@ -328,7 +328,7 @@ func (s *Store) RefreshIssueSyncBinding(
 	ctx context.Context,
 	params db.IssueSyncBindingUpdateParams,
 ) (db.IssueSyncBinding, error) {
-	if strings.TrimSpace(params.DisplayName) == "" || !json.Valid(params.Config) {
+	if strings.TrimSpace(params.DisplayName) == "" || !jsontext.Value(params.Config).IsValid() {
 		return db.IssueSyncBinding{}, fmt.Errorf(
 			"%w: issue sync binding requires display name and valid config JSON", db.ErrImportValidation,
 		)
@@ -358,7 +358,7 @@ display_name=$1, config_json=$2, updated_at=$3 WHERE id=$4`,
 func validateIssueSyncBindingParams(params db.UpsertIssueSyncBindingParams) error {
 	if params.ProjectID <= 0 || strings.TrimSpace(params.Provider) == "" ||
 		strings.TrimSpace(params.SourceKey) == "" || strings.TrimSpace(params.RemoteID) == "" ||
-		strings.TrimSpace(params.DisplayName) == "" || params.IntervalSeconds <= 0 || !json.Valid(params.Config) {
+		strings.TrimSpace(params.DisplayName) == "" || params.IntervalSeconds <= 0 || !jsontext.Value(params.Config).IsValid() {
 		return fmt.Errorf("%w: invalid issue sync binding", db.ErrImportValidation)
 	}
 	return nil
@@ -393,7 +393,7 @@ func scanIssueSyncBinding(row rowScanner) (db.IssueSyncBinding, error) {
 	if err != nil {
 		return db.IssueSyncBinding{}, fmt.Errorf("scan issue sync binding: %w", mapSQLError(err, nil))
 	}
-	binding.Config = json.RawMessage(config)
+	binding.Config = jsontext.Value(config)
 	binding.LastCursorAt = lastCursorAt.Time
 	return binding, nil
 }

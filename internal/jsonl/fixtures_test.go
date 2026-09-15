@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -232,7 +232,7 @@ func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 		Body:      "Safari login fails after the orchid rollout",
 		Author:    "tester",
 		Labels:    []string{"bug", "frontend"},
-		Metadata:  map[string]json.RawMessage{"teammate": json.RawMessage(`"teammate-1"`)},
+		Metadata:  map[string]jsontext.Value{"teammate": jsontext.Value(`"teammate-1"`)},
 	})
 	require.NoError(t, err)
 	blocker := createTesterIssue(ctx, t, d, p1.ID, "api blocker", "Backend response blocks login", "backend")

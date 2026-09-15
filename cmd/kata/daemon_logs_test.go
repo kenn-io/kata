@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
 	"os"
@@ -209,10 +210,10 @@ func TestDaemonLogs_Hooks_AgentOutputOneLinePerRecord(t *testing.T) {
 }
 
 func TestFormatAgentHookLogRecordFormatsDecodedRecord(t *testing.T) {
-	got := formatAgentHookLogRecord(map[string]json.RawMessage{
-		"event_id":   json.RawMessage(`1`),
-		"event_type": json.RawMessage(`"issue.created"`),
-		"stderr":     json.RawMessage(`"first line\nsecond line"`),
+	got := formatAgentHookLogRecord(map[string]jsontext.Value{
+		"event_id":   jsontext.Value(`1`),
+		"event_type": jsontext.Value(`"issue.created"`),
+		"stderr":     jsontext.Value(`"first line\nsecond line"`),
 	})
 
 	assert.Equal(t, `OK daemon_log event_id=1 event_type=issue.created stderr="first line\nsecond line"`, got)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"testing"
@@ -258,9 +259,9 @@ func seedExternalRootFixture(
 	conflictAt := mustParseTime(t, "2026-08-20T10:01:00Z")
 	_, _, err = source.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
 		BindingID: binding.ID, MappingID: mapping.ID, ClaimToken: claimToken,
-		Baseline:         json.RawMessage(`"2026-08-20"`),
-		ConflictKata:     json.RawMessage(`"2026-08-21"`),
-		ConflictExternal: json.RawMessage(`"2026-08-22"`),
+		Baseline:         jsontext.Value(`"2026-08-20"`),
+		ConflictKata:     jsontext.Value(`"2026-08-21"`),
+		ConflictExternal: jsontext.Value(`"2026-08-22"`),
 		Conflicted:       true, At: conflictAt, Actor: "fixture-author",
 	})
 	require.NoError(t, err)
@@ -282,13 +283,13 @@ func seedExternalRootFixture(
 	}
 }
 
-func externalRootRecordsByKind(t *testing.T, exported []byte) map[string][]map[string]json.RawMessage {
+func externalRootRecordsByKind(t *testing.T, exported []byte) map[string][]map[string]jsontext.Value {
 	t.Helper()
-	records := make(map[string][]map[string]json.RawMessage)
+	records := make(map[string][]map[string]jsontext.Value)
 	for line := range bytes.SplitSeq(bytes.TrimSpace(exported), []byte{'\n'}) {
 		var envelope struct {
-			Kind string                     `json:"kind"`
-			Data map[string]json.RawMessage `json:"data"`
+			Kind string                    `json:"kind"`
+			Data map[string]jsontext.Value `json:"data"`
 		}
 		require.NoError(t, json.Unmarshal(line, &envelope))
 		if strings.HasPrefix(envelope.Kind, "external_") {
@@ -324,8 +325,8 @@ func assertExternalRootRecordsExcludeRuntimeSecrets(t *testing.T, exported []byt
 	t.Helper()
 	for line := range bytes.SplitSeq(bytes.TrimSpace(exported), []byte{'\n'}) {
 		var envelope struct {
-			Kind string                     `json:"kind"`
-			Data map[string]json.RawMessage `json:"data"`
+			Kind string                    `json:"kind"`
+			Data map[string]jsontext.Value `json:"data"`
 		}
 		require.NoError(t, json.Unmarshal(line, &envelope))
 		if !strings.HasPrefix(envelope.Kind, "external_") {
@@ -426,7 +427,7 @@ func TestRoundtrip_DuplicateTokenRevokedEventsKeepFirstRevokedAt(t *testing.T) {
 		HLCPhysicalMS:     hlcPhysicalMS,
 		HLCCounter:        hlcCounter,
 		CreatedAt:         createdAt,
-		Payload:           json.RawMessage(payload),
+		Payload:           jsontext.Value(payload),
 	})
 	require.NoError(t, err)
 	_, err = src.ExecContext(ctx, `
@@ -1187,7 +1188,7 @@ func TestExport_SoftDeletedRecurrenceWithNoLiveIssues_Excluded(t *testing.T) {
 // New event types (issue.metadata_updated, issue.moved, recurrence.materialized)
 // rely on this so consumers reading raw payloads see exactly what the producer
 // wrote. The guarantee depends on the export-side eventRecord using
-// json.RawMessage (not interface{} / map[string]any, which would re-marshal
+// jsontext.Value (not interface{} / map[string]any, which would re-marshal
 // and reorder keys).
 // TestRoundtrip_MultipleRecurrencesAndInstances locks in the multi-row
 // UID→ID resolution path: two recurrences (Weekly + Monthly) with five

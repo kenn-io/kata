@@ -2,7 +2,8 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -109,7 +110,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 }
 
 func parseMetadataPatchGuard(
-	patch map[string]json.RawMessage,
+	patch map[string]jsontext.Value,
 	guard *api.MetadataPatchGuard,
 ) (*db.MetadataPatchGuard, error) {
 	if guard == nil {
@@ -129,10 +130,10 @@ func parseMetadataPatchGuard(
 	if hasAbsent && !*guard.IfAbsent {
 		return nil, api.NewError(400, "invalid_metadata_guard", "metadata guard if_absent must be true", "", nil)
 	}
-	var ifValue json.RawMessage
+	var ifValue jsontext.Value
 	if hasValue {
-		ifValue = json.RawMessage(*guard.IfValue)
-		if !json.Valid(ifValue) {
+		ifValue = jsontext.Value(*guard.IfValue)
+		if !jsontext.Value(ifValue).IsValid() {
 			return nil, api.NewError(400, "invalid_metadata_guard", "metadata guard if_value must be valid JSON text", "", nil)
 		}
 	}
@@ -227,7 +228,7 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 	}
 }
 
-func inboxDesignationPatch(patch map[string]json.RawMessage) bool {
+func inboxDesignationPatch(patch map[string]jsontext.Value) bool {
 	role, ok := patch["role"]
 	if !ok {
 		return false

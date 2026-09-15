@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -1333,25 +1334,25 @@ func serveProcessClientHelper() {
 			response.Result = mustJSON(protocol.WriteFieldsResult{Fields: params.Fields})
 		}
 	case "write-raw-result":
-		response.Result = json.RawMessage(os.Getenv("RESULT"))
+		response.Result = jsontext.Value(os.Getenv("RESULT"))
 	case "write-empty-result":
 	case "wrong-id":
 		response.ID = "other"
 	case "unsupported-version":
 		response.Protocol = "unsupported.connector.protocol"
 	case "both":
-		response.Result = json.RawMessage(`{}`)
+		response.Result = jsontext.Value(`{}`)
 		response.Error = &protocol.Error{Code: "bad", Message: "bad"}
 	case "neither":
 	case "null-result":
-		response.Result = json.RawMessage(`null`)
+		response.Result = jsontext.Value(`null`)
 	case "raw-result":
-		response.Result = json.RawMessage(os.Getenv("RESULT"))
+		response.Result = jsontext.Value(os.Getenv("RESULT"))
 	case "publication-result":
 		if request.Method == "describe" {
 			response.Result = publicationDescriptionResult()
 		} else {
-			response.Result = json.RawMessage(os.Getenv("RESULT"))
+			response.Result = jsontext.Value(os.Getenv("RESULT"))
 		}
 	case "native-runtime-paths":
 		home, err := os.UserHomeDir()
@@ -1393,9 +1394,9 @@ func serveProcessClientHelper() {
 		_, _ = os.Stdout.WriteString("{}")
 		return
 	case "non-object-result":
-		response.Result = json.RawMessage(`[]`)
+		response.Result = jsontext.Value(`[]`)
 	case "empty-result":
-		response.Result = json.RawMessage(`{}`)
+		response.Result = jsontext.Value(`{}`)
 	case "invalid-root-actor":
 		response.Result = rootResult(protocol.Actor{})
 	case "invalid-root-field":
@@ -1456,7 +1457,7 @@ func serveProcessClientHelper() {
 			UpdatedAt: time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
 		})
 	case "oversized":
-		response.Result = json.RawMessage(`"` + strings.Repeat("x", 4<<20) + `"`)
+		response.Result = jsontext.Value(`"` + strings.Repeat("x", 4<<20) + `"`)
 	case "invalid-error-code":
 		response.Error = &protocol.Error{Code: "Bad Code", Message: "connector unavailable"}
 	case "empty-error-message":
@@ -1602,7 +1603,7 @@ func killProcessClientHelper(pid int) {
 	_ = process.Release()
 }
 
-func describeResult() json.RawMessage {
+func describeResult() jsontext.Value {
 	b, err := json.Marshal(protocol.Description{
 		ConnectorID: "fake.connector", DisplayName: "Fake", Protocol: protocol.ProtocolVersion,
 		Capabilities: []protocol.Capability{}, AccountIdentity: "account-1", ConfigSchema: mustJSON(map[string]any{"type": "object"}),
@@ -1613,7 +1614,7 @@ func describeResult() json.RawMessage {
 	return b
 }
 
-func conditionalDescriptionResult() json.RawMessage {
+func conditionalDescriptionResult() jsontext.Value {
 	b, err := json.Marshal(protocol.Description{
 		ConnectorID: "fake.connector", DisplayName: "Fake", Protocol: protocol.ProtocolVersion,
 		Capabilities:    []protocol.Capability{protocol.CapabilityConditionalFields, protocol.CapabilityFields},
@@ -1625,7 +1626,7 @@ func conditionalDescriptionResult() json.RawMessage {
 	return b
 }
 
-func publicationDescriptionResult() json.RawMessage {
+func publicationDescriptionResult() jsontext.Value {
 	b, err := json.Marshal(protocol.Description{
 		ConnectorID: "fake.connector", DisplayName: "Fake", Protocol: protocol.ProtocolVersion,
 		Capabilities: []protocol.Capability{protocol.CapabilityPublishComment}, SelfActorID: "actor-self",
@@ -1637,7 +1638,7 @@ func publicationDescriptionResult() json.RawMessage {
 	return b
 }
 
-func rootResult(actor protocol.Actor) json.RawMessage {
+func rootResult(actor protocol.Actor) jsontext.Value {
 	root := protocol.Root{
 		Key: "root", IdentityKey: "account", Title: "Title", State: "open", Revision: "revision",
 		UpdatedAt:  time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
@@ -1655,7 +1656,7 @@ func rootResult(actor protocol.Actor) json.RawMessage {
 	return encoded
 }
 
-func mustJSON(v any) json.RawMessage {
+func mustJSON(v any) jsontext.Value {
 	b, err := json.Marshal(v)
 	if err != nil {
 		panic(err)

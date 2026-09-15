@@ -1,7 +1,7 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"testing"
 
@@ -20,7 +20,7 @@ func testEvent(eventType string, n int64, payload string) FoldEvent {
 		HLCPhysicalMS:     n,
 		HLCCounter:        0,
 		CreatedAt:         "2026-05-23T12:00:00.000Z",
-		Payload:           json.RawMessage(payload),
+		Payload:           jsontext.Value(payload),
 	}
 }
 

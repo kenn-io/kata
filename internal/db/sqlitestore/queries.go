@@ -4,7 +4,8 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -25,11 +26,11 @@ import (
 // is rejected — at creation there is nothing to clear, so null is a caller
 // error rather than a delete. An absent/empty map yields '{}' so the schema
 // default behavior is preserved.
-func composeCreateMetadata(in map[string]json.RawMessage) (json.RawMessage, error) {
+func composeCreateMetadata(in map[string]jsontext.Value) (jsontext.Value, error) {
 	if len(in) == 0 {
-		return json.RawMessage(`{}`), nil
+		return jsontext.Value(`{}`), nil
 	}
-	m := make(map[string]json.RawMessage, len(in))
+	m := make(map[string]jsontext.Value, len(in))
 	for key, raw := range in {
 		if err := metadata.ValidateCreateValue(metadata.IssueRegistry, key, raw); err != nil {
 			return nil, fmt.Errorf("metadata %q: %w", key, err)
@@ -762,7 +763,7 @@ type createdLinkOut struct {
 	Type       string `json:"type"`
 	ToShortID  string `json:"to_short_id,omitempty"`
 	ToIssueUID string `json:"to_issue_uid,omitempty"`
-	Incoming   bool   `json:"incoming,omitempty"`
+	Incoming   bool   `json:"incoming,omitzero"`
 	Author     string `json:"author,omitempty"`
 	CreatedAt  string `json:"created_at,omitempty"`
 }
@@ -787,13 +788,13 @@ type issueCreatedPayload struct {
 	ClosedReason           *string                `json:"closed_reason,omitempty"`
 	ClosedAt               *string                `json:"closed_at,omitempty"`
 	DeletedAt              *string                `json:"deleted_at,omitempty"`
-	Metadata               json.RawMessage        `json:"metadata"`
+	Metadata               jsontext.Value         `json:"metadata"`
 	Labels                 []string               `json:"labels,omitempty"`
 	Links                  []createdLinkOut       `json:"links,omitempty"`
 	Comments               []issueSnapshotComment `json:"comments,omitempty"`
 	CreatedAt              string                 `json:"created_at"`
 	UpdatedAt              string                 `json:"updated_at,omitempty"`
-	Revision               int64                  `json:"revision,omitempty"`
+	Revision               int64                  `json:"revision,omitzero"`
 	IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
 	IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
 	RecurrenceUID          string                 `json:"recurrence_uid,omitempty"`
@@ -825,7 +826,7 @@ func createdLinkPayloads(links []db.InitialLink, targets []createdLinkTarget, au
 
 func buildIssueCreatedPayload(p issueCreatedPayload) (string, error) {
 	if len(p.Metadata) == 0 {
-		p.Metadata = json.RawMessage(`{}`)
+		p.Metadata = jsontext.Value(`{}`)
 	}
 	bs, err := json.Marshal(p)
 	if err != nil {
@@ -1554,8 +1555,8 @@ func (d *Store) closeIssueGuarded(
 		ClosedAt               string        `json:"closed_at"`
 		Message                string        `json:"message,omitempty"`
 		Evidence               []db.Evidence `json:"evidence,omitempty"`
-		ParentUID              *string       `json:"parent_uid,omitempty"`
-		ParentShortID          *string       `json:"parent_short_id,omitempty"`
+		ParentUID              *string       `json:"parent_uid,omitzero"`
+		ParentShortID          *string       `json:"parent_short_id,omitzero"`
 		IdempotencyKey         string        `json:"idempotency_key,omitempty"`
 		IdempotencyFingerprint string        `json:"idempotency_fingerprint,omitempty"`
 	}{
@@ -2401,7 +2402,7 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 			HLCPhysicalMS:     eventHLC.PhysicalMS,
 			HLCCounter:        eventHLC.Counter,
 			CreatedAt:         createdAt,
-			Payload:           json.RawMessage(in.Payload),
+			Payload:           jsontext.Value(in.Payload),
 		})
 		if err != nil {
 			return db.Event{}, fmt.Errorf("content hash: %w", err)

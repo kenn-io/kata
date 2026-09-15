@@ -1,7 +1,8 @@
 package jsonl
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"sort"
 	"strings"
@@ -87,18 +88,18 @@ func deriveShortIDsForIssues(envs []Envelope) (map[issueLookupKey]issueLookupInf
 	// so we can process them in cross-envelope ULID order without losing the
 	// slot to write back to, and build the lookup keyed by the v7 number.
 	type pendingIssue struct {
-		envIdx    int                        // index into envs
-		uid       string                     // backfilled if missing
-		projectID int64                      // for grouping
-		number    int64                      // v7 per-project number (0 if absent)
-		raw       map[string]json.RawMessage // decoded data, mutated in place
+		envIdx    int                       // index into envs
+		uid       string                    // backfilled if missing
+		projectID int64                     // for grouping
+		number    int64                     // v7 per-project number (0 if absent)
+		raw       map[string]jsontext.Value // decoded data, mutated in place
 	}
 	pending := []pendingIssue{}
 	for i, env := range envs {
 		if env.Kind != KindIssue {
 			continue
 		}
-		var raw map[string]json.RawMessage
+		var raw map[string]jsontext.Value
 		if err := json.Unmarshal(env.Data, &raw); err != nil {
 			return nil, fmt.Errorf("decode issue for cutover: %w", err)
 		}
@@ -149,8 +150,8 @@ func deriveShortIDsForIssues(envs []Envelope) (map[issueLookupKey]issueLookupInf
 			// Rewrite envelope data in place: drop `number`, set
 			// `short_id`, set `uid` (in case it was backfilled for v1).
 			delete(p.raw, "number")
-			p.raw["short_id"] = json.RawMessage(`"` + short + `"`)
-			p.raw["uid"] = json.RawMessage(`"` + p.uid + `"`)
+			p.raw["short_id"] = jsontext.Value(`"` + short + `"`)
+			p.raw["uid"] = jsontext.Value(`"` + p.uid + `"`)
 			data, err := json.Marshal(p.raw)
 			if err != nil {
 				return nil, fmt.Errorf("re-marshal cutover issue: %w", err)
@@ -183,7 +184,7 @@ func rewriteV7EventPayloads(envs []Envelope, lookup map[issueLookupKey]issueLook
 		if env.Kind != KindEvent {
 			continue
 		}
-		var raw map[string]json.RawMessage
+		var raw map[string]jsontext.Value
 		if err := json.Unmarshal(env.Data, &raw); err != nil {
 			return fmt.Errorf("decode event %d for cutover: %w", i, err)
 		}
@@ -203,7 +204,7 @@ func rewriteV7EventPayloads(envs []Envelope, lookup map[issueLookupKey]issueLook
 		if !ok {
 			continue
 		}
-		var payload map[string]json.RawMessage
+		var payload map[string]jsontext.Value
 		if err := json.Unmarshal(payloadRaw, &payload); err != nil {
 			// Payload isn't an object (e.g., legacy empty payload or scalar) —
 			// nothing to rewrite.
@@ -242,7 +243,7 @@ func rewriteV7EventPayloads(envs []Envelope, lookup map[issueLookupKey]issueLook
 // rewriteLinkEventPayload converts the v7 issue.linked / issue.unlinked
 // payload (from_number / to_number) to v8 shape (from_short_id, from_uid,
 // to_short_id, to_uid). Returns true if any rewrite happened.
-func rewriteLinkEventPayload(payload map[string]json.RawMessage, projectID int64, lookup map[issueLookupKey]issueLookupInfo) bool {
+func rewriteLinkEventPayload(payload map[string]jsontext.Value, projectID int64, lookup map[issueLookupKey]issueLookupInfo) bool {
 	changed := false
 	if info, ok := resolveNumberRef(payload, "from_number", projectID, lookup); ok {
 		setStringField(payload, "from_short_id", info.shortID)
@@ -263,12 +264,12 @@ func rewriteLinkEventPayload(payload map[string]json.RawMessage, projectID int64
 // payload: each {type, to_number} entry becomes {type, to_short_id,
 // to_issue_uid}. Other top-level fields (labels, idempotency_key, etc.) are
 // untouched.
-func rewriteCreatedEventPayload(payload map[string]json.RawMessage, projectID int64, lookup map[issueLookupKey]issueLookupInfo) bool {
+func rewriteCreatedEventPayload(payload map[string]jsontext.Value, projectID int64, lookup map[issueLookupKey]issueLookupInfo) bool {
 	linksRaw, ok := payload["links"]
 	if !ok {
 		return false
 	}
-	var links []map[string]json.RawMessage
+	var links []map[string]jsontext.Value
 	if err := json.Unmarshal(linksRaw, &links); err != nil {
 		return false
 	}
@@ -299,7 +300,7 @@ func rewriteCreatedEventPayload(payload map[string]json.RawMessage, projectID in
 
 // rewriteLinksChangedPayload converts v7 numeric parent/blocks/related fields
 // to v8 string short_ids paired with parallel *_uid / *_uids arrays.
-func rewriteLinksChangedPayload(payload map[string]json.RawMessage, projectID int64, lookup map[issueLookupKey]issueLookupInfo) bool {
+func rewriteLinksChangedPayload(payload map[string]jsontext.Value, projectID int64, lookup map[issueLookupKey]issueLookupInfo) bool {
 	changed := false
 	scalar := []struct{ from, uidKey string }{
 		{"parent_set", "parent_set_uid"},
@@ -331,7 +332,7 @@ func rewriteLinksChangedPayload(payload map[string]json.RawMessage, projectID in
 // resolveNumberRef reads a numeric peer-ref field from payload and looks up
 // its (short_id, uid). Returns (info, true) on success. Returns (zero, false)
 // when the field is absent, isn't a number, or the lookup misses.
-func resolveNumberRef(payload map[string]json.RawMessage, field string, projectID int64, lookup map[issueLookupKey]issueLookupInfo) (issueLookupInfo, bool) {
+func resolveNumberRef(payload map[string]jsontext.Value, field string, projectID int64, lookup map[issueLookupKey]issueLookupInfo) (issueLookupInfo, bool) {
 	v, ok := payload[field]
 	if !ok {
 		return issueLookupInfo{}, false
@@ -350,7 +351,7 @@ func resolveNumberRef(payload map[string]json.RawMessage, field string, projectI
 // rewriteNumberArray converts a []int64 field of v7 peer numbers into a
 // []string of short_ids in place, and writes the parallel []string of UIDs
 // into uidsKey. Returns true if a rewrite occurred.
-func rewriteNumberArray(payload map[string]json.RawMessage, field, uidsKey string, projectID int64, lookup map[issueLookupKey]issueLookupInfo) bool {
+func rewriteNumberArray(payload map[string]jsontext.Value, field, uidsKey string, projectID int64, lookup map[issueLookupKey]issueLookupInfo) bool {
 	raw, ok := payload[field]
 	if !ok {
 		return false
@@ -392,10 +393,10 @@ func rewriteNumberArray(payload map[string]json.RawMessage, field, uidsKey strin
 	return true
 }
 
-// setStringField writes a string value into a json.RawMessage map. The
+// setStringField writes a string value into a jsontext.Value map. The
 // quoted/escaped path goes through json.Marshal so unusual characters are
 // handled correctly.
-func setStringField(m map[string]json.RawMessage, key, value string) {
+func setStringField(m map[string]jsontext.Value, key, value string) {
 	bs, err := json.Marshal(value)
 	if err != nil {
 		return
@@ -407,7 +408,7 @@ func setStringField(m map[string]json.RawMessage, key, value string) {
 // FromStableSeed when absent (pre-v2 envelopes carried `(project_id, number,
 // created_at)` and no UID). The backfill rule mirrors fillIssueUID so the
 // cutover and the per-envelope import path agree on UIDs.
-func issueUIDFromRaw(raw map[string]json.RawMessage) (string, error) {
+func issueUIDFromRaw(raw map[string]jsontext.Value) (string, error) {
 	if v, ok := raw["uid"]; ok {
 		var u string
 		if err := json.Unmarshal(v, &u); err != nil {

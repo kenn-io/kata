@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -308,7 +309,7 @@ func githubSyncPrintBindingBody(w io.Writer, bs []byte, action string) error {
 	switch currentOutputMode() {
 	case outputJSON:
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(w, buf.String())
@@ -328,7 +329,7 @@ func githubSyncPrintOnceBody(w io.Writer, bs []byte) error {
 	switch currentOutputMode() {
 	case outputJSON:
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(w, buf.String())

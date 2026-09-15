@@ -2,7 +2,7 @@ package rootbridge
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"strings"
@@ -736,9 +736,9 @@ func (r *Reconciler) storeFieldConflict(
 	if err != nil {
 		return result, err
 	}
-	var baselineJSON json.RawMessage
+	var baselineJSON jsontext.Value
 	if hasBaseline {
-		baselineJSON = append(json.RawMessage(nil), state.Baseline...)
+		baselineJSON = append(jsontext.Value(nil), state.Baseline...)
 	}
 	_, event, err := r.store.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
 		BindingID: snapshot.binding.ID, MappingID: mapping.ID, ClaimToken: claimToken,

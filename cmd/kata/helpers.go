@@ -4,8 +4,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -146,7 +146,7 @@ func emitJSON(w io.Writer, v any) error {
 	// so "kata_api_version" is caught the same as a literal
 	// "kata_api_version". A raw bytes.Contains check would miss the escaped
 	// form and let the splice produce a duplicate key downstream.
-	var keys map[string]json.RawMessage
+	var keys map[string]jsontext.Value
 	if err := json.Unmarshal(payload, &keys); err != nil {
 		return fmt.Errorf("emitJSON: payload must be a JSON object: %w", err)
 	}
@@ -169,7 +169,7 @@ func emitJSON(w io.Writer, v any) error {
 func httpDoJSON(ctx context.Context, client *http.Client, method, url string, body any) (int, []byte, error) {
 	var rdr io.Reader
 	if body != nil {
-		bs, err := jsonv2.Marshal(body)
+		bs, err := json.Marshal(body)
 		if err != nil {
 			return 0, nil, err
 		}

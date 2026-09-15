@@ -1,7 +1,7 @@
 package fakeconnector
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 
 	"go.kenn.io/kata/internal/connector/identityaudit"
@@ -26,7 +26,7 @@ func AuditExternalSurface(current State, externalRootKey string, longUIDs, short
 type recordedParams struct {
 	kind   string
 	method string
-	params json.RawMessage
+	params jsontext.Value
 }
 
 func recordedExternalParams(current State) []recordedParams {

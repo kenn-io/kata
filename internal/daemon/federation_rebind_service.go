@@ -2,7 +2,8 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -559,8 +560,8 @@ func fetchFederationRebindMetadata(
 		)
 	}
 	var metadata api.ProjectFederationBody
-	decoder := json.NewDecoder(io.LimitReader(response.Body, federationRebindResponseLimit))
-	if err := decoder.Decode(&metadata); err != nil {
+	decoder := jsontext.NewDecoder(io.LimitReader(response.Body, federationRebindResponseLimit))
+	if err := json.UnmarshalDecode(decoder, &metadata); err != nil {
 		return api.ProjectFederationBody{}, federationReplicaError(
 			ErrFederationReplicaHubUnavailable,
 			"replacement hub returned invalid federation metadata",

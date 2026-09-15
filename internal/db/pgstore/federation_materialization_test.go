@@ -2,7 +2,7 @@ package pgstore
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,7 +59,7 @@ func (f *federationGroupFixture) seedIssue(t *testing.T, project db.Project, cou
 	t.Helper()
 	issueUID, err := uid.New()
 	require.NoError(t, err)
-	payload := json.RawMessage(`{"uid":"` + issueUID + `","title":"seeded","body":"",` +
+	payload := jsontext.Value(`{"uid":"` + issueUID + `","title":"seeded","body":"",` +
 		`"author":"remote","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 	event := projectionSnapshotEvent(t, project, issueUID, f.origin, counter, payload)
 	inserted, err := f.store.InsertRemoteEvent(context.Background(), project.ID, event)

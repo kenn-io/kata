@@ -3,6 +3,7 @@ package sqlitestore_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func TestReadyIssuesAppliesScheduleBeforeLimit(t *testing.T) {
 		{issueID: due.ID, raw: `{"scheduled_on":"2026-09-01T09:00","timezone":"Asia/Tokyo"}`},
 		{issueID: parked.ID, raw: `{"scheduled_on":"2026-09-01T09:00","timezone":"America/Los_Angeles"}`},
 	} {
-		var patch map[string]json.RawMessage
+		var patch map[string]jsontext.Value
 		require.NoError(t, json.Unmarshal([]byte(fixture.raw), &patch))
 		_, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID: fixture.issueID,

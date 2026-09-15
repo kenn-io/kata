@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -95,7 +95,7 @@ func newConfiguredGitHubSyncFetcher(cfg config.GitHubSyncConfig) githubsync.Fetc
 type daemonStartOutput struct {
 	Action      string `json:"action"`
 	PID         int    `json:"pid"`
-	ReplacedPID int    `json:"replaced_pid,omitempty"`
+	ReplacedPID int    `json:"replaced_pid,omitzero"`
 	Address     string `json:"address"`
 	DBPath      string `json:"db_path,omitempty"`
 	WebURL      string `json:"web_url,omitempty"`

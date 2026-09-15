@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -52,7 +53,7 @@ type cliError struct {
 	Kind     errKind
 	Code     string
 	ExitCode int
-	Data     json.RawMessage
+	Data     jsontext.Value
 }
 
 func (e *cliError) Error() string { return e.Message }
@@ -533,7 +534,7 @@ func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed
 	switch currentOutputMode() {
 	case outputJSON:
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return "", fmt.Errorf("emit json: %w", err)
 		}
 		return buf.String(), nil
@@ -565,9 +566,9 @@ func resolveStartPath(workspace string) (string, error) {
 func apiErrFromBody(status int, bs []byte) *cliError {
 	var env struct {
 		Error struct {
-			Code    string          `json:"code"`
-			Message string          `json:"message"`
-			Data    json.RawMessage `json:"data,omitempty"`
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Data    jsontext.Value `json:"data,omitempty"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(bs, &env); err != nil {

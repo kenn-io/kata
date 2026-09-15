@@ -1,7 +1,7 @@
 package jsonl
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -240,7 +240,7 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			var raw json.RawMessage = []byte(tt.data)
+			var raw jsontext.Value = []byte(tt.data)
 			rec, err := toImportRecord(
 				Envelope{Kind: tt.kind, Data: raw},
 				db.CurrentSchemaVersion(),

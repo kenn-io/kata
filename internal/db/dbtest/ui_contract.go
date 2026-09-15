@@ -2,7 +2,7 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"testing"
 	"time"
@@ -162,7 +162,7 @@ func RunUISnapshotMutationCursorContract(t *testing.T, open func(*testing.T) db.
 		requireCursorUnchanged(ctx, t, uiStore, before)
 
 		out, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-			IssueID: issue.ID, Actor: "user-a", Patch: map[string]json.RawMessage{},
+			IssueID: issue.ID, Actor: "user-a", Patch: map[string]jsontext.Value{},
 		})
 		require.NoError(t, err)
 		require.False(t, out.Changed)
@@ -170,7 +170,7 @@ func RunUISnapshotMutationCursorContract(t *testing.T, open func(*testing.T) db.
 
 		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID: issue.ID, Actor: "user-a",
-			Patch: map[string]json.RawMessage{"checklist": json.RawMessage(`{"invalid":true}`)},
+			Patch: map[string]jsontext.Value{"checklist": jsontext.Value(`{"invalid":true}`)},
 		})
 		require.Error(t, err)
 		requireCursorUnchanged(ctx, t, uiStore, before)
@@ -191,7 +191,7 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	blocker := createCursorIssue(ctx, t, store, project.ID, "Blocker issue")
 	blocked := createCursorIssue(ctx, t, store, project.ID, "Blocked issue")
 	removed := createCursorIssue(ctx, t, store, project.ID, "Removed child issue")
-	createWithMetadata := func(title string, metadata map[string]json.RawMessage) db.Issue {
+	createWithMetadata := func(title string, metadata map[string]jsontext.Value) db.Issue {
 		issue, _, createErr := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: title, Author: "user-a", Metadata: metadata,
 		})
@@ -199,20 +199,20 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 		return issue
 	}
 	today := time.Now().UTC()
-	someday := createWithMetadata("Someday issue", map[string]json.RawMessage{
-		"someday": json.RawMessage(`true`),
+	someday := createWithMetadata("Someday issue", map[string]jsontext.Value{
+		"someday": jsontext.Value(`true`),
 	})
-	futureScheduled := createWithMetadata("Future scheduled issue", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.AddDate(0, 0, 1).Format(time.DateOnly))),
+	futureScheduled := createWithMetadata("Future scheduled issue", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(fmt.Sprintf("%q", today.AddDate(0, 0, 1).Format(time.DateOnly))),
 	})
-	somedayFalse := createWithMetadata("Someday false issue", map[string]json.RawMessage{
-		"someday": json.RawMessage(`false`),
+	somedayFalse := createWithMetadata("Someday false issue", map[string]jsontext.Value{
+		"someday": jsontext.Value(`false`),
 	})
-	todayScheduled := createWithMetadata("Today scheduled issue", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.Format(time.DateOnly))),
+	todayScheduled := createWithMetadata("Today scheduled issue", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(fmt.Sprintf("%q", today.Format(time.DateOnly))),
 	})
-	pastScheduled := createWithMetadata("Past scheduled issue", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.AddDate(-1, 0, 0).Format(time.DateOnly))),
+	pastScheduled := createWithMetadata("Past scheduled issue", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(fmt.Sprintf("%q", today.AddDate(-1, 0, 0).Format(time.DateOnly))),
 	})
 	createCursorLink(ctx, t, store, child, parent, "parent")
 	createCursorLink(ctx, t, store, blocker, blocked, "blocks")
@@ -240,19 +240,19 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	require.NotContains(t, uiIssueUIDs(rolled.Issues), someday.UID)
 
 	readyAt := time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
-	westScheduled := createWithMetadata("West-zone scheduled issue", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T09:00"`),
-		"timezone":     json.RawMessage(`"America/Los_Angeles"`),
+	westScheduled := createWithMetadata("West-zone scheduled issue", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T09:00"`),
+		"timezone":     jsontext.Value(`"America/Los_Angeles"`),
 	})
-	eastScheduled := createWithMetadata("East-zone scheduled issue", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T09:00"`),
-		"timezone":     json.RawMessage(`"Asia/Tokyo"`),
+	eastScheduled := createWithMetadata("East-zone scheduled issue", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T09:00"`),
+		"timezone":     jsontext.Value(`"Asia/Tokyo"`),
 	})
-	dueInstant := createWithMetadata("Due instant", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+	dueInstant := createWithMetadata("Due instant", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
 	})
-	futureInstant := createWithMetadata("Future instant", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T00:31:00Z"`),
+	futureInstant := createWithMetadata("Future instant", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T00:31:00Z"`),
 	})
 	timed, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
 		View: "all-open", Statuses: []string{"ready"}, ReadyAt: readyAt.Format(time.RFC3339Nano),
@@ -262,8 +262,8 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	require.Contains(t, uiIssueUIDs(timed.Issues), eastScheduled.UID)
 	require.Contains(t, uiIssueUIDs(timed.Issues), dueInstant.UID)
 	require.NotContains(t, uiIssueUIDs(timed.Issues), futureInstant.UID)
-	defaultScheduled := createWithMetadata("Default-zone scheduled issue", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01"`),
+	defaultScheduled := createWithMetadata("Default-zone scheduled issue", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01"`),
 	})
 	defaultZoned, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
 		View: "all-open", Statuses: []string{"ready"}, ReadyAt: readyAt.Format(time.RFC3339Nano),
@@ -274,11 +274,11 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	require.Contains(t, uiIssueUIDs(defaultZoned.Issues), eastScheduled.UID,
 		"an issue timezone must override the daemon default")
 
-	limitDue := createWithMetadata("Limit due issue", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+	limitDue := createWithMetadata("Limit due issue", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
 	})
-	createWithMetadata("Limit parked issue", map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T00:31:00Z"`),
+	createWithMetadata("Limit parked issue", map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T00:31:00Z"`),
 	})
 	limited, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
 		View: "all-open", Statuses: []string{"ready"}, ReadyAt: readyAt.Format(time.RFC3339Nano), Limit: 1,
@@ -327,16 +327,16 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	for _, test := range []struct {
 		name     string
 		view     string
-		metadata map[string]json.RawMessage
+		metadata map[string]jsontext.Value
 	}{
-		{name: "today", view: "today", metadata: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-08-01"`),
+		{name: "today", view: "today", metadata: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-08-01"`),
 		}},
-		{name: "upcoming", view: "upcoming", metadata: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-08-02"`),
+		{name: "upcoming", view: "upcoming", metadata: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-08-02"`),
 		}},
-		{name: "deadlines", view: "deadlines", metadata: map[string]json.RawMessage{
-			"deadline_on": json.RawMessage(`"2026-08-03"`),
+		{name: "deadlines", view: "deadlines", metadata: map[string]jsontext.Value{
+			"deadline_on": jsontext.Value(`"2026-08-03"`),
 		}},
 	} {
 		t.Run(test.name+" filters before limit", func(t *testing.T) {
@@ -368,15 +368,15 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		project := createCursorProject(ctx, t, store)
 		previousDay, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Previous browser day", Author: "user-a",
-			Metadata: map[string]json.RawMessage{
-				"scheduled_on": json.RawMessage(`"2026-08-01T00:30:00Z"`),
+			Metadata: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2026-08-01T00:30:00Z"`),
 			},
 		})
 		require.NoError(t, err)
 		nextDay, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Next browser day", Author: "user-a",
-			Metadata: map[string]json.RawMessage{
-				"scheduled_on": json.RawMessage(`"2026-08-01T07:30:00Z"`),
+			Metadata: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2026-08-01T07:30:00Z"`),
 			},
 		})
 		require.NoError(t, err)
@@ -405,15 +405,15 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		project := createCursorProject(ctx, t, store)
 		previousDay, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Previous browser deadline", Author: "user-a",
-			Metadata: map[string]json.RawMessage{
-				"deadline_on": json.RawMessage(`"2026-08-01T00:30:00Z"`),
+			Metadata: map[string]jsontext.Value{
+				"deadline_on": jsontext.Value(`"2026-08-01T00:30:00Z"`),
 			},
 		})
 		require.NoError(t, err)
 		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Next browser deadline", Author: "user-a",
-			Metadata: map[string]json.RawMessage{
-				"deadline_on": json.RawMessage(`"2026-08-01T07:30:00Z"`),
+			Metadata: map[string]jsontext.Value{
+				"deadline_on": jsontext.Value(`"2026-08-01T07:30:00Z"`),
 			},
 		})
 		require.NoError(t, err)
@@ -434,8 +434,8 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		project := createCursorProject(ctx, t, store)
 		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Recurrence deadline", Author: "user-a",
-			Metadata: map[string]json.RawMessage{
-				"deadline_on": json.RawMessage(`"2026-08-01T23:30"`),
+			Metadata: map[string]jsontext.Value{
+				"deadline_on": jsontext.Value(`"2026-08-01T23:30"`),
 			},
 		})
 		require.NoError(t, err)
@@ -450,9 +450,9 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		require.NoError(t, err)
 		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID: issue.ID, Actor: "user-a",
-			Patch: map[string]json.RawMessage{
-				"scheduled_on": json.RawMessage(`null`),
-				"timezone":     json.RawMessage(`null`),
+			Patch: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`null`),
+				"timezone":     jsontext.Value(`null`),
 			},
 		})
 		require.NoError(t, err)
@@ -482,8 +482,8 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		project := createCursorProject(ctx, t, store)
 		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "All-open deadline", Author: "user-a",
-			Metadata: map[string]json.RawMessage{
-				"deadline_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+			Metadata: map[string]jsontext.Value{
+				"deadline_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
 			},
 		})
 		require.NoError(t, err)
@@ -501,14 +501,14 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("selected issues project timed deadline dates", func(t *testing.T) {
 		for _, test := range []struct {
 			name     string
-			metadata map[string]json.RawMessage
+			metadata map[string]jsontext.Value
 		}{
-			{name: "UTC instant", metadata: map[string]json.RawMessage{
-				"deadline_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+			{name: "UTC instant", metadata: map[string]jsontext.Value{
+				"deadline_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
 			}},
-			{name: "local time", metadata: map[string]json.RawMessage{
-				"deadline_on": json.RawMessage(`"2026-09-01T09:00"`),
-				"timezone":    json.RawMessage(`"Asia/Tokyo"`),
+			{name: "local time", metadata: map[string]jsontext.Value{
+				"deadline_on": jsontext.Value(`"2026-09-01T09:00"`),
+				"timezone":    jsontext.Value(`"Asia/Tokyo"`),
 			}},
 		} {
 			t.Run(test.name, func(t *testing.T) {
@@ -550,7 +550,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		require.NoError(t, err)
 		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID: issue.ID, Actor: "user-a",
-			Patch: map[string]json.RawMessage{"timezone": json.RawMessage(`null`)},
+			Patch: map[string]jsontext.Value{"timezone": jsontext.Value(`null`)},
 		})
 		require.NoError(t, err)
 
@@ -570,7 +570,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		inbox := createCursorProject(ctx, t, store)
 		_, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 			ProjectID: inbox.ID, Actor: "user-a",
-			Patch: map[string]json.RawMessage{"role": json.RawMessage(`"inbox"`)},
+			Patch: map[string]jsontext.Value{"role": jsontext.Value(`"inbox"`)},
 		})
 		require.NoError(t, err)
 		matching := createCursorIssue(ctx, t, store, inbox.ID, "Inbox issue")
@@ -598,13 +598,13 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		selectedRecurrence, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 			ProjectID: selectedProject.ID, Actor: "user-a", Rule: "FREQ=WEEKLY",
 			DTStart: "2026-08-01", Timezone: "UTC",
-			Template: db.RecurrenceTemplate{Title: "Selected recurrence", Metadata: json.RawMessage(`{}`)},
+			Template: db.RecurrenceTemplate{Title: "Selected recurrence", Metadata: jsontext.Value(`{}`)},
 		})
 		require.NoError(t, err)
 		_, _, err = store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 			ProjectID: otherProject.ID, Actor: "user-a", Rule: "FREQ=DAILY",
 			DTStart: "2026-08-01", Timezone: "UTC",
-			Template: db.RecurrenceTemplate{Title: "Other recurrence", Metadata: json.RawMessage(`{}`)},
+			Template: db.RecurrenceTemplate{Title: "Other recurrence", Metadata: jsontext.Value(`{}`)},
 		})
 		require.NoError(t, err)
 
@@ -717,7 +717,7 @@ func cursorMetadata(ctx context.Context, t *testing.T, store db.Storage) {
 	issue := createCursorFixtureIssue(ctx, t, store)
 	out, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: issue.ID, Actor: "user-a",
-		Patch: map[string]json.RawMessage{"scheduled_on": json.RawMessage(`"2026-08-01"`)},
+		Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-01"`)},
 	})
 	require.NoError(t, err)
 	require.True(t, out.Changed)
@@ -770,8 +770,8 @@ func cursorChecklist(ctx context.Context, t *testing.T, store db.Storage) {
 	issue := createCursorFixtureIssue(ctx, t, store)
 	out, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: issue.ID, Actor: "user-a",
-		Patch: map[string]json.RawMessage{
-			"checklist": json.RawMessage(`[{"id":"01K1KATA000000000000000001","text":"Review","done":false}]`),
+		Patch: map[string]jsontext.Value{
+			"checklist": jsontext.Value(`[{"id":"01K1KATA000000000000000001","text":"Review","done":false}]`),
 		},
 	})
 	require.NoError(t, err)
@@ -820,7 +820,7 @@ func cursorRecurrence(ctx context.Context, t *testing.T, store db.Storage) {
 	_, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: project.ID, Actor: "user-a", Rule: "FREQ=WEEKLY",
 		DTStart: "2026-08-01", Timezone: "UTC",
-		Template: db.RecurrenceTemplate{Title: "Weekly review", Metadata: json.RawMessage(`{}`)},
+		Template: db.RecurrenceTemplate{Title: "Weekly review", Metadata: jsontext.Value(`{}`)},
 	})
 	require.NoError(t, err)
 }

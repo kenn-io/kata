@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,7 +11,7 @@ import (
 )
 
 // TestJSONRawObjectRoundTripsVerbatim pins that the opaque raw-object wire
-// type keeps json.RawMessage's exact behavior: bytes in, same bytes out, no
+// type keeps jsontext.Value's exact behavior: bytes in, same bytes out, no
 // base64 and no re-encoding. A defined type over []byte that forgot its own
 // MarshalJSON would silently base64-encode every recurrence template
 // metadata blob.

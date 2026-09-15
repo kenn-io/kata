@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,7 +74,7 @@ func TestExportSnapshotCarriesExternalRootStateWithoutLiveClaim(t *testing.T) {
 	require.True(t, claimed)
 	_, _, err = source.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
 		BindingID: binding.ID, MappingID: mapping.ID, ClaimToken: claimToken,
-		Baseline: json.RawMessage(`"2026-08-20"`), At: frontier.Add(time.Hour),
+		Baseline: jsontext.Value(`"2026-08-20"`), At: frontier.Add(time.Hour),
 		Actor: "tester",
 	})
 	require.NoError(t, err)

@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -144,7 +145,7 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "private, no-store")
-	if err := json.NewEncoder(w).Encode(out); err != nil {
+	if err := json.MarshalWrite(w, out); err != nil {
 		slog.Debug("write web daemon roster", "err", err)
 	}
 }
@@ -238,7 +239,7 @@ func rejectWebDaemonTUIClose(w http.ResponseWriter, r *http.Request) bool {
 		Source string `json:"source"`
 		Reason string `json:"reason"`
 	}
-	if json.Unmarshal(body, &input) == nil && input.Source == "tui" &&
+	if json.Unmarshal(body, &input, json.MatchCaseInsensitiveNames(true)) == nil && input.Source == "tui" &&
 		(input.Reason == "" || input.Reason == "done") {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_operation_forbidden")
 		return true
@@ -266,7 +267,7 @@ func classifyWebDaemonProjectRequest(w http.ResponseWriter, r *http.Request) (re
 	}
 	if r.URL.Path == "/api/v1/projects/resolve" {
 		var input api.ResolveProjectRequest
-		if json.Unmarshal(body, &input.Body) != nil {
+		if json.Unmarshal(body, &input.Body, json.MatchCaseInsensitiveNames(true)) != nil {
 			return false, false
 		}
 		if strings.TrimSpace(input.Body.Name) != "" && input.Body.Alias == nil &&
@@ -277,7 +278,7 @@ func classifyWebDaemonProjectRequest(w http.ResponseWriter, r *http.Request) (re
 		return false, true
 	}
 	var input api.InitProjectRequest
-	if json.Unmarshal(body, &input.Body) != nil {
+	if json.Unmarshal(body, &input.Body, json.MatchCaseInsensitiveNames(true)) != nil {
 		return false, false
 	}
 	if webProjectInitFieldsAllowed(&input) {
@@ -356,7 +357,7 @@ func (g *webDaemonGateway) targetAllowsWebDaemonMutation(
 		ContractVersion string             `json:"web_ui_contract_version"`
 		Capabilities    api.UICapabilities `json:"web_ui_capabilities"`
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&instance); err != nil {
+	if err := json.UnmarshalRead(io.LimitReader(response.Body, 64<<10), &instance); err != nil {
 		return false, err
 	}
 	if instance.ContractVersion != api.UISnapshotContractVersion {
@@ -529,7 +530,7 @@ func probeWebDaemon(parent context.Context, d resolvedWebDaemon, trustPrivateNet
 		var instance struct {
 			WebUIContractVersion string `json:"web_ui_contract_version"`
 		}
-		if err := json.NewDecoder(io.LimitReader(response.Body, 16<<10)).Decode(&instance); err != nil ||
+		if err := json.UnmarshalRead(io.LimitReader(response.Body, 16<<10), &instance); err != nil ||
 			instance.WebUIContractVersion != api.UISnapshotContractVersion {
 			return "upgrade_required"
 		}
@@ -655,7 +656,7 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 		return fmt.Errorf("read daemon capability response: %w", err)
 	}
 	_ = response.Body.Close()
-	var envelope map[string]json.RawMessage
+	var envelope map[string]jsontext.Value
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return fmt.Errorf("decode daemon capability response: %w", err)
 	}
@@ -765,5 +766,5 @@ func writeWebDaemonError(w http.ResponseWriter, status int, code string) {
 		} `json:"error"`
 	}{}
 	payload.Error.Code = code
-	_ = json.NewEncoder(w).Encode(payload)
+	_ = json.MarshalWrite(w, payload)
 }

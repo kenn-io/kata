@@ -3,7 +3,8 @@
 package rootbridge
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"time"
@@ -27,7 +28,7 @@ const (
 type FieldCodec interface {
 	KataField() string
 	ReadKata(db.Issue) (connector.FieldValue, error)
-	KataPatch(db.Issue, connector.FieldValue) (map[string]json.RawMessage, error)
+	KataPatch(db.Issue, connector.FieldValue) (map[string]jsontext.Value, error)
 	ValidateExternalDescriptor(connector.FieldDescriptor) error
 }
 
@@ -77,7 +78,7 @@ func (c scheduleCodec) ReadKata(issue db.Issue) (connector.FieldValue, error) {
 	return field, nil
 }
 
-func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (map[string]json.RawMessage, error) {
+func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (map[string]jsontext.Value, error) {
 	return c.kataPatch(issue, value, "")
 }
 
@@ -85,12 +86,12 @@ func (c scheduleCodec) kataPatch(
 	issue db.Issue,
 	value connector.FieldValue,
 	coordinatedTimezone string,
-) (map[string]json.RawMessage, error) {
+) (map[string]jsontext.Value, error) {
 	canonical, err := canonicalFieldValue(value)
 	if err != nil {
 		return nil, err
 	}
-	patch := map[string]json.RawMessage{c.key: mustJSON(canonicalScheduleValue(canonical))}
+	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
 	if canonical.Kind != fieldKindLocalDateTime {
 		return patch, nil
 	}
@@ -127,7 +128,7 @@ func kataPatchWithCoordinatedTimezone(
 	issue db.Issue,
 	value connector.FieldValue,
 	coordinatedTimezone string,
-) (map[string]json.RawMessage, error) {
+) (map[string]jsontext.Value, error) {
 	if schedule, ok := codec.(scheduleCodec); ok {
 		return schedule.kataPatch(issue, value, coordinatedTimezone)
 	}
@@ -164,23 +165,23 @@ func (c scheduleCodec) ValidateExternalDescriptor(descriptor connector.FieldDesc
 	return nil
 }
 
-func metadataObject(raw db.JSONBlob) (map[string]json.RawMessage, error) {
+func metadataObject(raw db.JSONBlob) (map[string]jsontext.Value, error) {
 	if raw == "" {
-		return map[string]json.RawMessage{}, nil
+		return map[string]jsontext.Value{}, nil
 	}
-	var values map[string]json.RawMessage
+	var values map[string]jsontext.Value
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
 		return nil, fmt.Errorf("decode issue metadata: %w", err)
 	}
 	if values == nil {
-		return map[string]json.RawMessage{}, nil
+		return map[string]jsontext.Value{}, nil
 	}
 	return values, nil
 }
 
 func kataScheduleFieldValue(
 	value string,
-	metadataValues map[string]json.RawMessage,
+	metadataValues map[string]jsontext.Value,
 	defaultTimezone string,
 ) (connector.FieldValue, error) {
 	field := connector.FieldValue{Value: value}
@@ -204,7 +205,7 @@ func kataScheduleFieldValue(
 
 func kataScheduleFieldValueFromMetadata(
 	key string,
-	values map[string]json.RawMessage,
+	values map[string]jsontext.Value,
 	defaultTimezone string,
 ) (connector.FieldValue, error) {
 	raw, ok := values[key]
@@ -221,7 +222,7 @@ func kataScheduleFieldValueFromMetadata(
 	return kataScheduleFieldValue(value, values, defaultTimezone)
 }
 
-func metadataTimezone(values map[string]json.RawMessage, defaultTimezone string) (string, error) {
+func metadataTimezone(values map[string]jsontext.Value, defaultTimezone string) (string, error) {
 	timezone, present, err := optionalMetadataTimezone(values)
 	if err != nil {
 		return "", err
@@ -236,7 +237,7 @@ func metadataTimezone(values map[string]json.RawMessage, defaultTimezone string)
 	return timezone, nil
 }
 
-func optionalMetadataTimezone(values map[string]json.RawMessage) (string, bool, error) {
+func optionalMetadataTimezone(values map[string]jsontext.Value) (string, bool, error) {
 	raw, ok := values["timezone"]
 	if !ok || string(raw) == "null" {
 		return "", false, nil
@@ -332,7 +333,7 @@ func nullFieldValue() connector.FieldValue {
 	return connector.FieldValue{Kind: fieldKindNull}
 }
 
-func mustJSON(value any) json.RawMessage {
+func mustJSON(value any) jsontext.Value {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		panic(err)

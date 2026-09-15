@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -55,7 +56,7 @@ func (s *Store) AdoptProjectIntoFederation(
 			return err
 		}
 		if params.EmptyOnly {
-			var metadata map[string]json.RawMessage
+			var metadata map[string]jsontext.Value
 			if len(project.Metadata) > 0 {
 				if err := json.Unmarshal([]byte(project.Metadata), &metadata); err != nil {
 					return fmt.Errorf("read project metadata before attachment: %w", err)

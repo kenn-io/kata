@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -64,7 +65,7 @@ func (c *beadsComment) UnmarshalJSON(data []byte) error {
 	type commentAlias beadsComment
 	var raw struct {
 		commentAlias
-		ID json.RawMessage `json:"id"`
+		ID jsontext.Value `json:"id"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -76,9 +77,8 @@ func (c *beadsComment) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(raw.ID, &c.ID); err == nil {
 		return nil
 	}
-	var number json.Number
-	if err := json.Unmarshal(raw.ID, &number); err == nil && number != "" {
-		c.ID = number.String()
+	if raw.ID.Kind() == '0' {
+		c.ID = string(raw.ID)
 		return nil
 	}
 	return fmt.Errorf("beads comment id must be a string or number")

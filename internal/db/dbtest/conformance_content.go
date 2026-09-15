@@ -2,7 +2,8 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"testing"
 	"time"
@@ -814,8 +815,8 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: primary.Issue.ID,
 		Actor:   "discovery-author",
-		Patch: map[string]json.RawMessage{
-			"lane": json.RawMessage(`"deploy"`),
+		Patch: map[string]jsontext.Value{
+			"lane": jsontext.Value(`"deploy"`),
 		},
 	})
 	if err != nil {
@@ -910,12 +911,12 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	}
 	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: legacyRecurrenceIssue.ID, Actor: "discovery-author",
-		Patch: map[string]json.RawMessage{"timezone": json.RawMessage(`null`)},
+		Patch: map[string]jsontext.Value{"timezone": jsontext.Value(`null`)},
 	})
 	if err != nil {
 		return fmt.Errorf("remove legacy recurrence issue timezone: %w", err)
 	}
-	patchMetadata := func(issue db.Issue, patch map[string]json.RawMessage) error {
+	patchMetadata := func(issue db.Issue, patch map[string]jsontext.Value) error {
 		_, patchErr := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID: issue.ID,
 			Actor:   "discovery-author",
@@ -925,46 +926,46 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	}
 	now := time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
 	today := now.UTC()
-	if err := patchMetadata(someday, map[string]json.RawMessage{"someday": json.RawMessage(`true`)}); err != nil {
+	if err := patchMetadata(someday, map[string]jsontext.Value{"someday": jsontext.Value(`true`)}); err != nil {
 		return fmt.Errorf("park someday issue: %w", err)
 	}
-	if err := patchMetadata(somedayFalse, map[string]json.RawMessage{"someday": json.RawMessage(`false`)}); err != nil {
+	if err := patchMetadata(somedayFalse, map[string]jsontext.Value{"someday": jsontext.Value(`false`)}); err != nil {
 		return fmt.Errorf("set false someday metadata: %w", err)
 	}
-	if err := patchMetadata(futureScheduled, map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.AddDate(1, 0, 0).Format(time.DateOnly))),
+	if err := patchMetadata(futureScheduled, map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(fmt.Sprintf("%q", today.AddDate(1, 0, 0).Format(time.DateOnly))),
 	}); err != nil {
 		return fmt.Errorf("schedule future issue: %w", err)
 	}
-	if err := patchMetadata(todayScheduled, map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.Format(time.DateOnly))),
+	if err := patchMetadata(todayScheduled, map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(fmt.Sprintf("%q", today.Format(time.DateOnly))),
 	}); err != nil {
 		return fmt.Errorf("schedule today issue: %w", err)
 	}
-	if err := patchMetadata(pastScheduled, map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.AddDate(-1, 0, 0).Format(time.DateOnly))),
+	if err := patchMetadata(pastScheduled, map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(fmt.Sprintf("%q", today.AddDate(-1, 0, 0).Format(time.DateOnly))),
 	}); err != nil {
 		return fmt.Errorf("schedule past issue: %w", err)
 	}
-	if err := patchMetadata(westScheduled, map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T09:00"`),
-		"timezone":     json.RawMessage(`"America/Los_Angeles"`),
+	if err := patchMetadata(westScheduled, map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T09:00"`),
+		"timezone":     jsontext.Value(`"America/Los_Angeles"`),
 	}); err != nil {
 		return fmt.Errorf("schedule west-zone issue: %w", err)
 	}
-	if err := patchMetadata(eastScheduled, map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T09:00"`),
-		"timezone":     json.RawMessage(`"Asia/Tokyo"`),
+	if err := patchMetadata(eastScheduled, map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T09:00"`),
+		"timezone":     jsontext.Value(`"Asia/Tokyo"`),
 	}); err != nil {
 		return fmt.Errorf("schedule east-zone issue: %w", err)
 	}
-	if err := patchMetadata(pastInstant, map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+	if err := patchMetadata(pastInstant, map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
 	}); err != nil {
 		return fmt.Errorf("schedule due instant: %w", err)
 	}
-	if err := patchMetadata(futureInstant, map[string]json.RawMessage{
-		"scheduled_on": json.RawMessage(`"2026-09-01T00:31:00Z"`),
+	if err := patchMetadata(futureInstant, map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-09-01T00:31:00Z"`),
 	}); err != nil {
 		return fmt.Errorf("schedule future instant: %w", err)
 	}

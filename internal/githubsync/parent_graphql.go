@@ -3,7 +3,7 @@ package githubsync
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -181,7 +181,7 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 	}
 
 	var out parentGraphQLResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.UnmarshalRead(resp.Body, &out); err != nil {
 		return parentGraphQLIssues{}, gitHubRetry{}, fmt.Errorf("decode %s: %w", parentGraphQLResource, err)
 	}
 	if len(out.Errors) > 0 {

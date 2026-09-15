@@ -1,7 +1,7 @@
 package dbtest
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,7 +50,7 @@ func checkEmptyFederationAttachment(t *testing.T, store db.Storage) error {
 			case "issue":
 				_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: local.ID, Title: "Keep this task", Author: "user-a"})
 			case "metadata":
-				_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: local.ID, Actor: "user-a", Patch: map[string]json.RawMessage{"purpose": json.RawMessage(`"keep this"`)}})
+				_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: local.ID, Actor: "user-a", Patch: map[string]jsontext.Value{"purpose": jsontext.Value(`"keep this"`)}})
 			case "recurrence":
 				_, _, err = store.CreateRecurrence(ctx, db.CreateRecurrenceIn{ProjectID: local.ID, Actor: "user-a", Rule: "FREQ=DAILY", DTStart: "2030-01-01", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "Keep this schedule"}})
 			}
@@ -71,7 +71,7 @@ func checkEmptyFederationAttachment(t *testing.T, store db.Storage) error {
 	// Restored empty metadata need not use the writer's compact JSON spelling.
 	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{&db.ProjectExport{
 		ID: 5, UID: replayProjectUID, Name: "restored-empty", CreatedAt: "2026-07-15T12:00:00.000Z",
-		Metadata: json.RawMessage(`{ }`), Revision: 1,
+		Metadata: jsontext.Value(`{ }`), Revision: 1,
 	}}, db.ImportOptions{}))
 	params.ProjectID = 5
 	_, err = store.AdoptProjectIntoFederation(ctx, params)

@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"os"
@@ -965,7 +966,7 @@ func resolveYesNo(cmd *cobra.Command, prompt string) error {
 func printFederationLeave(cmd *cobra.Command, bs []byte) error {
 	if currentOutputMode() == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -1038,14 +1039,14 @@ type federationJoinBundle struct {
 	HubProjectUID          string `json:"hub_project_uid"`
 	ProjectName            string `json:"project_name"`
 	ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
-	BaselineThroughEventID int64  `json:"baseline_through_event_id,omitempty"`
+	BaselineThroughEventID int64  `json:"baseline_through_event_id,omitzero"`
 	Token                  string `json:"token"`
 	Capabilities           string `json:"capabilities,omitempty"`
 	DisplayCapabilities    string `json:"-"`
 	Actor                  string `json:"actor,omitempty"`
-	AllowInsecure          bool   `json:"allow_insecure,omitempty"`
-	PushEnabled            bool   `json:"push_enabled,omitempty"`
-	AdoptExisting          bool   `json:"adopt_existing,omitempty"`
+	AllowInsecure          bool   `json:"allow_insecure,omitzero"`
+	PushEnabled            bool   `json:"push_enabled,omitzero"`
+	AdoptExisting          bool   `json:"adopt_existing,omitzero"`
 }
 
 var fetchFederationJoinMetadata = func(ctx context.Context, bundle federationJoinBundle) (api.ProjectFederationBody, error) {
@@ -1204,7 +1205,7 @@ func printFederationEnrollment(
 func printFederationEnrollments(cmd *cobra.Command, bs []byte) error {
 	if currentOutputMode() == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -1267,7 +1268,7 @@ func printFederationEnrollments(cmd *cobra.Command, bs []byte) error {
 func printFederationRevoke(cmd *cobra.Command, bs []byte) error {
 	if currentOutputMode() == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -1293,7 +1294,7 @@ func printFederationRevoke(cmd *cobra.Command, bs []byte) error {
 func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 	if currentOutputMode() == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -1736,7 +1737,7 @@ func runFederationQuarantineAction(ctx context.Context, cmd *cobra.Command, id i
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())

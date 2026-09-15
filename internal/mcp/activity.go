@@ -3,7 +3,7 @@ package mcpserver
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +24,7 @@ import (
 type NextInput struct {
 	Project       string   `json:"project,omitempty"`
 	Owner         string   `json:"owner,omitempty"`
-	Unowned       bool     `json:"unowned,omitempty"`
+	Unowned       bool     `json:"unowned,omitzero"`
 	Labels        []string `json:"labels,omitempty"`
 	ExcludeLabels []string `json:"exclude_labels,omitempty"`
 }
@@ -54,7 +54,7 @@ type EditCommentOutput struct {
 type GraphInput struct {
 	Ref      string `json:"ref"`
 	Depth    string `json:"depth,omitempty"`
-	HideDone bool   `json:"hide_done,omitempty"`
+	HideDone bool   `json:"hide_done,omitzero"`
 }
 
 // GraphOutput contains the reachable issue graph.
@@ -116,8 +116,8 @@ type PurgeOutput struct {
 type WaitInput struct {
 	Refs           []string `json:"refs"`
 	Status         string   `json:"status,omitempty"`
-	Any            bool     `json:"any,omitempty"`
-	TimeoutSeconds int      `json:"timeout_seconds,omitempty"`
+	Any            bool     `json:"any,omitzero"`
+	TimeoutSeconds int      `json:"timeout_seconds,omitzero"`
 }
 
 // WaitState reports one observed issue state.
@@ -141,8 +141,8 @@ type AuditClosesInput struct {
 	Actor      string `json:"actor,omitempty"`
 	Parent     string `json:"parent,omitempty"`
 	Reason     string `json:"reason,omitempty"`
-	NoEvidence bool   `json:"no_evidence,omitempty"`
-	Limit      int64  `json:"limit,omitempty" jsonschema:"Maximum rows from 1 through 100; default 20"`
+	NoEvidence bool   `json:"no_evidence,omitzero"`
+	Limit      int64  `json:"limit,omitzero" jsonschema:"Maximum rows from 1 through 100; default 20"`
 	Cursor     string `json:"cursor,omitempty" jsonschema:"Opaque pagination cursor from the previous result's next_cursor; keep the other filters identical and omit for the first page"`
 }
 
@@ -150,7 +150,7 @@ type AuditClosesInput struct {
 type AuditClosesOutput struct {
 	Project    ProjectIdentity           `json:"project"`
 	Rows       []generated.AuditCloseRow `json:"rows"`
-	Truncated  bool                      `json:"truncated,omitempty"`
+	Truncated  bool                      `json:"truncated,omitzero"`
 	NextCursor *string                   `json:"next_cursor,omitempty"`
 }
 
@@ -177,9 +177,9 @@ type DigestOutput struct {
 type EventsInput struct {
 	Project     string `json:"project,omitempty"`
 	Mode        string `json:"mode,omitempty"`
-	After       int64  `json:"after,omitempty"`
-	Limit       int64  `json:"limit,omitempty"`
-	WaitSeconds int64  `json:"wait_seconds,omitempty"`
+	After       int64  `json:"after,omitzero"`
+	Limit       int64  `json:"limit,omitzero"`
+	WaitSeconds int64  `json:"wait_seconds,omitzero"`
 }
 
 // EventsOutput contains events and the next resume cursor.
@@ -188,7 +188,7 @@ type EventsOutput struct {
 	NextAfterID   int64         `json:"next_after_id"`
 	ResetRequired bool          `json:"reset_required"`
 	ResetAfterID  *int64        `json:"reset_after_id,omitempty"`
-	TimedOut      bool          `json:"timed_out,omitempty"`
+	TimedOut      bool          `json:"timed_out,omitzero"`
 }
 
 // StreamEvent is the MCP-safe event envelope.

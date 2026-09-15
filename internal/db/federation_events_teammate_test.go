@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func TestCanonicalizeFederationSnapshotAuthorsPreservesCommentTeammate(t *testin
 		Actor:             "original-author",
 		HLCPhysicalMS:     1,
 		CreatedAt:         time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC),
-		Payload:           json.RawMessage(`{"author":"original-author","comments":[{"comment_uid":"comment-1","author":"original-author","teammate":"reviewer-7","body":"review","created_at":"2026-09-13T12:00:00Z"}]}`),
+		Payload:           jsontext.Value(`{"author":"original-author","comments":[{"comment_uid":"comment-1","author":"original-author","teammate":"reviewer-7","body":"review","created_at":"2026-09-13T12:00:00Z"}]}`),
 	}
 	var err error
 	event.ContentHash, err = EventContentHash(EventHashInput{
@@ -81,7 +82,7 @@ func TestValidateFederationEntries(t *testing.T) {
 		{name: "created non-string", eventType: "issue.created", payload: `{"comments":[{"teammate":42}]}`, wantError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := ValidateFederationEntries(test.eventType, "event-1", json.RawMessage(test.payload))
+			err := ValidateFederationEntries(test.eventType, "event-1", jsontext.Value(test.payload))
 			if test.wantError {
 				assert.ErrorIs(t, err, ErrFederationIngestValidation)
 				assert.ErrorContains(t, err, "teammate")

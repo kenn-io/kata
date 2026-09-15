@@ -7,7 +7,7 @@ package client
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"iter"
@@ -58,7 +58,7 @@ type PingInfo struct {
 	OK      bool   `json:"ok"`
 	Service string `json:"service"`
 	Version string `json:"version"`
-	PID     int    `json:"pid,omitempty"`
+	PID     int    `json:"pid,omitzero"`
 }
 
 // ErrLocalDaemonUnreachable identifies a live local daemon process whose
@@ -212,7 +212,7 @@ func Probe(ctx context.Context, client *http.Client, base string) (PingInfo, err
 		return PingInfo{}, fmt.Errorf("daemon ping returned %d", resp.StatusCode)
 	}
 	var info PingInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+	if err := json.UnmarshalRead(resp.Body, &info); err != nil {
 		return PingInfo{}, fmt.Errorf("decode daemon ping: %w", err)
 	}
 	if !info.OK {

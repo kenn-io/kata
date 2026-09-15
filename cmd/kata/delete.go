@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"maps"
@@ -139,7 +139,7 @@ func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -262,7 +262,7 @@ func httpDoJSONWithHeader(ctx context.Context, client *http.Client,
 	method, url string, headers map[string]string, body any) (int, []byte, error) {
 	var rdr io.Reader
 	if body != nil {
-		bs, err := jsonv2.Marshal(body)
+		bs, err := json.Marshal(body)
 		if err != nil {
 			return 0, nil, err
 		}

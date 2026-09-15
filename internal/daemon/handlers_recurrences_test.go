@@ -377,11 +377,11 @@ func TestPatchRecurrence_InvalidInputsReturn400(t *testing.T) {
 		{"blank_title", `{"actor":"tester","template":{"title":"   "}}`},
 		{"non_object_metadata", `{"actor":"tester","template":{"metadata":[1,2,3]}}`},
 		// "metadata":null is intentionally NOT tested here: the patch
-		// shape uses *json.RawMessage, and encoding/json decodes a JSON
+		// shape uses *jsontext.Value, and encoding/json decodes a JSON
 		// null into a nil pointer — so the daemon treats it as "no
 		// metadata patch supplied" and the validation branch never runs.
 		// The create-side equivalent IS rejected (see the create test
-		// table) because that field is a value-type json.RawMessage.
+		// table) because that field is a value-type jsontext.Value.
 		// TestPatchRecurrence_NullMetadata_NoOp pins the no-op contract.
 	}
 	for _, tc := range cases {
@@ -399,7 +399,7 @@ func TestPatchRecurrence_InvalidInputsReturn400(t *testing.T) {
 }
 
 // TestPatchRecurrence_NullMetadata_NoOp pins the null-as-absent semantics
-// for the *json.RawMessage Metadata field on RecurrenceTemplateUpdateInput.
+// for the *jsontext.Value Metadata field on RecurrenceTemplateUpdateInput.
 // Sending `{"template":{"metadata":null}}` decodes the pointer to nil, which
 // the handler treats identically to omitting the field — the row is not
 // touched and the revision is not bumped. Codified so a future tri-state

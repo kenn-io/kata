@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"net/http"
@@ -356,7 +357,7 @@ func TestFederationRebindHandlerUsesNamedServerCatalog(t *testing.T) {
 	assert.Equal(t, "https://hub.example", output.NewOrigin)
 	assert.Equal(t, "rebound", output.State)
 	var rawOutput struct {
-		Project map[string]json.RawMessage `json:"project"`
+		Project map[string]jsontext.Value `json:"project"`
 	}
 	require.NoError(t, json.Unmarshal(body, &rawOutput))
 	assert.ElementsMatch(t, []string{"id", "uid", "name"}, mapKeys(rawOutput.Project))
@@ -2991,7 +2992,7 @@ func federationRemoteIssueCreatedEvent(t *testing.T, project db.Project, spokeUI
 	t.Helper()
 	issueUID := "01HZNQ7VFPK1XGD8R5MABCD4EC"
 	createdAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
-	payload := json.RawMessage(`{"uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","short_id":"cd4ec","title":"spoke work","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	payload := jsontext.Value(`{"uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","short_id":"cd4ec","title":"spoke work","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 	ev := db.RemoteEvent{
 		EventUID:          "01HZNQ7VFPK1XGD8R5MABCD4EB",
 		OriginInstanceUID: spokeUID,
@@ -3033,7 +3034,7 @@ func federationRemoteIssueSnapshotEvent(
 	t.Helper()
 	issueUID := "01HZNQ7VFPK1XGD8R5MABCD4EE"
 	createdAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
-	payload := json.RawMessage(`{"uid":"` + issueUID + `","short_id":"cd4ee","title":"spoke snapshot","body":"","author":"` + payloadAuthor + `","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	payload := jsontext.Value(`{"uid":"` + issueUID + `","short_id":"cd4ee","title":"spoke snapshot","body":"","author":"` + payloadAuthor + `","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 	ev := db.RemoteEvent{
 		EventUID:          "01HZNQ7VFPK1XGD8R5MABCD4ED",
 		OriginInstanceUID: spokeUID,

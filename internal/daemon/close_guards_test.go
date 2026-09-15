@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"net"
 	"net/http"
@@ -23,10 +24,10 @@ import (
 // throttledEventRecord captures the close.throttled events returned by the
 // polling endpoint: only the fields the tests care about are decoded.
 type throttledEventRecord struct {
-	Type         string          `json:"type"`
-	Actor        string          `json:"actor"`
-	IssueShortID *string         `json:"issue_short_id"`
-	Payload      json.RawMessage `json:"payload"`
+	Type         string         `json:"type"`
+	Actor        string         `json:"actor"`
+	IssueShortID *string        `json:"issue_short_id"`
+	Payload      jsontext.Value `json:"payload"`
 }
 
 func TestCloseIssue_RejectsWrongCaseDryRunField(t *testing.T) {

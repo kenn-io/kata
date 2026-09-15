@@ -1,7 +1,7 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"math"
 	"testing"
 	"time"
@@ -450,7 +450,7 @@ func TestPrepareProjectMergeRecordsPreservesExternalRootRecords(t *testing.T) {
 			BindingUID: bindingUID, MappingConnectorInstance: "connector-one",
 			MappingKataField: "scheduled_on", MappingExternalFieldID: "schedule-one",
 			MappingSchemaRevision: "schema-one", MappingCreatedAt: createdAt,
-			Baseline: json.RawMessage(`"2026-08-20"`), UpdatedAt: createdAt,
+			Baseline: jsontext.Value(`"2026-08-20"`), UpdatedAt: createdAt,
 		},
 	}
 

@@ -3,6 +3,7 @@ package rootbridge
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -1067,9 +1068,9 @@ func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *t
 			h.mapField(t, "scheduled_on", "start-date")
 			h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
 			_, err := h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-				IssueID: h.issue.ID, Actor: "tester", Patch: map[string]json.RawMessage{
-					"scheduled_on": json.RawMessage(`"2026-08-20"`),
-					"timezone":     json.RawMessage(`"America/New_York"`),
+				IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
+					"scheduled_on": jsontext.Value(`"2026-08-20"`),
+					"timezone":     jsontext.Value(`"America/New_York"`),
 				},
 			})
 			require.NoError(t, err)
@@ -1094,8 +1095,8 @@ func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *t
 			h.mapField(t, "scheduled_on", "start-date")
 			h.setKataField(t, "deadline_on", sibling)
 			_, err := h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-				IssueID: h.issue.ID, Actor: "tester", Patch: map[string]json.RawMessage{
-					"timezone": json.RawMessage(`"America/New_York"`),
+				IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
+					"timezone": jsontext.Value(`"America/New_York"`),
 				},
 			})
 			require.NoError(t, err)
@@ -1578,8 +1579,8 @@ func (s *editBeforeFieldProjectionStorage) ApplyExternalFieldProjection(
 	if !s.edited {
 		s.edited = true
 		if _, err := s.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-			IssueID: s.issueID, Actor: "local-operator", Patch: map[string]json.RawMessage{
-				"scheduled_on": json.RawMessage(`"2026-08-22"`),
+			IssueID: s.issueID, Actor: "local-operator", Patch: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2026-08-22"`),
 			},
 		}); err != nil {
 			return db.Issue{}, nil, false, err
@@ -1701,9 +1702,9 @@ func newReconcileHarnessWithOptions(t *testing.T, initialClaim string, publishCo
 func (h *reconcileHarness) setAttention(t *testing.T) db.JSONBlob {
 	t.Helper()
 	out, err := h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-		IssueID: h.issue.ID, Actor: "tester", Patch: map[string]json.RawMessage{
-			"work.attention":     json.RawMessage(`"ok"`),
-			"work.attention_msg": json.RawMessage(`"Continue implementation"`),
+		IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
+			"work.attention":     jsontext.Value(`"ok"`),
+			"work.attention_msg": jsontext.Value(`"Continue implementation"`),
 		},
 	})
 	require.NoError(t, err)
@@ -1841,7 +1842,7 @@ func eventTypes(events []db.Event) []string {
 	return types
 }
 
-func decodeStoredFieldValue(t *testing.T, raw json.RawMessage) connector.FieldValue {
+func decodeStoredFieldValue(t *testing.T, raw jsontext.Value) connector.FieldValue {
 	t.Helper()
 	var value connector.FieldValue
 	require.NoError(t, json.Unmarshal(raw, &value))

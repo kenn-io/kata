@@ -3,6 +3,7 @@ package rootbridge
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -702,7 +703,7 @@ func TestRegistrySnapshotOmitsPrivateDescriptionAndValidationValues(t *testing.T
 	)
 	description := testDescription(accountIdentity)
 	description.SelfActorID = opaqueValue + "-actor"
-	description.ConfigSchema = json.RawMessage(`{"default":"` + opaqueValue + `-schema"}`)
+	description.ConfigSchema = jsontext.Value(`{"default":"` + opaqueValue + `-schema"}`)
 	client := &fakeConnectorClient{description: description}
 	registry, err := NewRegistry(t.Context(), []config.ConnectorConfig{{
 		ID: "notes", Command: filepath.Join(t.TempDir(), "connector"),

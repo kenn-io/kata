@@ -1,7 +1,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -208,13 +209,13 @@ func (l *liveAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, 
 		return attnWriteFailed
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	rawPatch := make(map[string]json.RawMessage, len(patch))
+	rawPatch := make(map[string]jsontext.Value, len(patch))
 	for key, value := range patch {
 		valueJSON, err := json.Marshal(value)
 		if err != nil {
 			return attnWriteFailed
 		}
-		rawPatch[key] = json.RawMessage(valueJSON)
+		rawPatch[key] = jsontext.Value(valueJSON)
 	}
 	status, _, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", baseURL, pid, url.PathEscape(resolved.RefForAPI)),

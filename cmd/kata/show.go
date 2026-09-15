@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,7 +69,7 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -214,7 +215,7 @@ type metadataKV struct {
 
 // sortedMetadata returns the metadata map's entries sorted by key for a stable
 // render order, each value rendered as compact JSON.
-func sortedMetadata(md map[string]json.RawMessage) []metadataKV {
+func sortedMetadata(md map[string]jsontext.Value) []metadataKV {
 	keys := make([]string, 0, len(md))
 	for k := range md {
 		keys = append(keys, k)
@@ -230,9 +231,9 @@ func sortedMetadata(md map[string]json.RawMessage) []metadataKV {
 // compactJSON renders raw as compact JSON, falling back to the verbatim bytes
 // when compaction fails (raw is always valid JSON from the daemon, so the
 // fallback is defensive).
-func compactJSON(raw json.RawMessage) string {
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, raw); err != nil {
+func compactJSON(raw jsontext.Value) string {
+	buf := raw.Clone()
+	if err := buf.Compact(); err != nil {
 		return string(raw)
 	}
 	return buf.String()
@@ -243,16 +244,16 @@ func compactJSON(raw json.RawMessage) string {
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
 	Issue struct {
-		ShortID  string                     `json:"short_id"`
-		UID      string                     `json:"uid"`
-		Title    string                     `json:"title"`
-		Body     string                     `json:"body"`
-		Status   string                     `json:"status"`
-		Author   string                     `json:"author"`
-		Owner    *string                    `json:"owner"`
-		Priority *int64                     `json:"priority"`
-		Revision int64                      `json:"revision"`
-		Metadata map[string]json.RawMessage `json:"metadata"`
+		ShortID  string                    `json:"short_id"`
+		UID      string                    `json:"uid"`
+		Title    string                    `json:"title"`
+		Body     string                    `json:"body"`
+		Status   string                    `json:"status"`
+		Author   string                    `json:"author"`
+		Owner    *string                   `json:"owner"`
+		Priority *int64                    `json:"priority"`
+		Revision int64                     `json:"revision"`
+		Metadata map[string]jsontext.Value `json:"metadata"`
 	} `json:"issue"`
 	Comments []struct {
 		UID       string `json:"uid"`

@@ -5,6 +5,7 @@ package e2e_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"strconv"
 	"testing"
@@ -143,7 +144,7 @@ func foldEvents(events []db.Event) []db.FoldEvent {
 			HLCPhysicalMS:     ev.HLCPhysicalMS,
 			HLCCounter:        ev.HLCCounter,
 			CreatedAt:         ev.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-			Payload:           json.RawMessage(ev.Payload),
+			Payload:           jsontext.Value(ev.Payload),
 		})
 	}
 	return out

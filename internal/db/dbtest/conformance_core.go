@@ -2,7 +2,8 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -394,7 +395,7 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	}
 	if _, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: staleIssue.ID, Actor: "conformance-agent",
-		Patch: map[string]json.RawMessage{"work.state": json.RawMessage(`"ready"`)},
+		Patch: map[string]jsontext.Value{"work.state": jsontext.Value(`"ready"`)},
 	}); err != nil {
 		return fmt.Errorf("advance close revision: %w", err)
 	}
@@ -916,15 +917,15 @@ func checkIssueCreateEnvelope(t *testing.T, store db.Storage) error {
 	require.NotNil(t, issue.Priority)
 	assert.Equal(t, priority, *issue.Priority)
 	var payload struct {
-		UID      string `json:"uid"`
-		ShortID  string `json:"short_id"`
-		Title    string `json:"title"`
-		Body     string `json:"body"`
-		Owner    string `json:"owner"`
-		Priority int64  `json:"priority"`
-		Status   string `json:"status"`
-		Metadata any    `json:"metadata"`
-		Labels   []string
+		UID      string   `json:"uid"`
+		ShortID  string   `json:"short_id"`
+		Title    string   `json:"title"`
+		Body     string   `json:"body"`
+		Owner    string   `json:"owner"`
+		Priority int64    `json:"priority"`
+		Status   string   `json:"status"`
+		Metadata any      `json:"metadata"`
+		Labels   []string `json:"labels"`
 		Links    []struct {
 			Type       string `json:"type"`
 			ToIssueUID string `json:"to_issue_uid"`
@@ -954,14 +955,14 @@ func checkIssueCreateEnvelope(t *testing.T, store db.Storage) error {
 	}
 	stringMetadataIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID, Title: "string metadata", Author: "conformance-agent",
-		Metadata: map[string]json.RawMessage{"estimate": json.RawMessage(`"3"`)},
+		Metadata: map[string]jsontext.Value{"estimate": jsontext.Value(`"3"`)},
 	})
 	if err != nil {
 		return fmt.Errorf("create string metadata issue: %w", err)
 	}
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID, Title: "numeric metadata", Author: "conformance-agent",
-		Metadata: map[string]json.RawMessage{"estimate": json.RawMessage(`3`)},
+		Metadata: map[string]jsontext.Value{"estimate": jsontext.Value(`3`)},
 	})
 	if err != nil {
 		return fmt.Errorf("create numeric metadata issue: %w", err)

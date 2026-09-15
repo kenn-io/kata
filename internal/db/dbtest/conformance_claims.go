@@ -2,7 +2,8 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"testing"
@@ -719,7 +720,7 @@ func checkClaimViolationQueries(t *testing.T, store db.Storage, backend Backend)
 		return err
 	}
 	if err := backend.SeedClaimViolation(ctx, store, project, issue, firstUID,
-		json.RawMessage(`{"offending_event_uid":"event-current","offending_event_type":"issue.updated","offending_origin_instance_uid":"`+firstOrigin+`","actor":"remote-agent","reason":"uncovered_work"}`)); err != nil {
+		jsontext.Value(`{"offending_event_uid":"event-current","offending_event_type":"issue.updated","offending_origin_instance_uid":"`+firstOrigin+`","actor":"remote-agent","reason":"uncovered_work"}`)); err != nil {
 		return err
 	}
 	secondUID, err := uid.New()
@@ -731,7 +732,7 @@ func checkClaimViolationQueries(t *testing.T, store db.Storage, backend Backend)
 		return err
 	}
 	if err := backend.SeedClaimViolation(ctx, store, project, issue, secondUID,
-		json.RawMessage(`{"event_uid":"event-legacy","event_type":"issue.commented","origin_instance_uid":"`+legacyOrigin+`","actor":"legacy-agent","reason":"uncovered_work"}`)); err != nil {
+		jsontext.Value(`{"event_uid":"event-legacy","event_type":"issue.commented","origin_instance_uid":"`+legacyOrigin+`","actor":"legacy-agent","reason":"uncovered_work"}`)); err != nil {
 		return err
 	}
 	violations, count, err := store.UnresolvedClaimViolationsForIssue(ctx, project.ID, issue.UID, 1)

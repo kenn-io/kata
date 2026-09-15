@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,14 +13,14 @@ import (
 )
 
 type readyIssueForCLI struct {
-	Raw         json.RawMessage `json:"-"`
-	ProjectID   int64           `json:"project_id"`
-	ProjectName string          `json:"project_name"`
-	ShortID     string          `json:"short_id"`
-	Title       string          `json:"title"`
-	Owner       *string         `json:"owner,omitempty"`
-	Priority    *int64          `json:"priority,omitempty"`
-	Labels      []string        `json:"labels"`
+	Raw         jsontext.Value `json:"-"`
+	ProjectID   int64          `json:"project_id"`
+	ProjectName string         `json:"project_name"`
+	ShortID     string         `json:"short_id"`
+	Title       string         `json:"title"`
+	Owner       *string        `json:"owner,omitempty"`
+	Priority    *int64         `json:"priority,omitzero"`
+	Labels      []string       `json:"labels"`
 }
 
 type readyOptions struct {
@@ -32,7 +33,7 @@ type readyOptions struct {
 }
 
 type readyResultForCLI struct {
-	Raw    json.RawMessage
+	Raw    jsontext.Value
 	Issues []readyIssueForCLI
 }
 
@@ -129,14 +130,14 @@ func (o readyOptions) endpoint(ctx context.Context, baseURL string) (string, err
 
 func decodeReadyResult(body []byte) (readyResultForCLI, error) {
 	var envelope struct {
-		Issues []json.RawMessage `json:"issues"`
+		Issues []jsontext.Value `json:"issues"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return readyResultForCLI{}, err
 	}
 
 	result := readyResultForCLI{
-		Raw:    json.RawMessage(body),
+		Raw:    jsontext.Value(body),
 		Issues: make([]readyIssueForCLI, 0, len(envelope.Issues)),
 	}
 	for _, raw := range envelope.Issues {

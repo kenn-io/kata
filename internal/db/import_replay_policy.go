@@ -2,7 +2,7 @@ package db
 
 import (
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"sort"

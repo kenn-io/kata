@@ -2,7 +2,7 @@ package pgstore
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -41,9 +41,9 @@ func TestMaterializeFederatedProjectPrunesLinkedIssueMissingFromProjection(t *te
 	secondUID, err := uid.New()
 	require.NoError(t, err)
 	second := projectionSnapshotEvent(t, project, secondUID, origin, 1,
-		json.RawMessage(`{"uid":"`+secondUID+`","title":"second","body":"","author":"remote","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+		jsontext.Value(`{"uid":"`+secondUID+`","title":"second","body":"","author":"remote","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
 	first := projectionSnapshotEvent(t, project, firstUID, origin, 2,
-		json.RawMessage(`{"uid":"`+firstUID+`","title":"first","body":"","author":"remote","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+secondUID+`","author":"remote"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
+		jsontext.Value(`{"uid":"`+firstUID+`","title":"first","body":"","author":"remote","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+secondUID+`","author":"remote"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
 	inserted, err := store.InsertRemoteEvent(ctx, project.ID, second)
 	require.NoError(t, err)
 	assert.True(t, inserted)
@@ -94,7 +94,7 @@ func TestMaterializeFederatedProjectLeavesUnchangedCommentsUnwritten(t *testing.
 	commentUID, err := uid.New()
 	require.NoError(t, err)
 	snapshot := projectionSnapshotEvent(t, project, issueUID, origin, 1,
-		json.RawMessage(`{"uid":"`+issueUID+`","title":"original issue","author":"remote","status":"open","comments":[{"comment_uid":"`+commentUID+`","author":"reviewer","body":"original comment","created_at":"2026-05-20T10:00:00.000Z"}],"created_at":"2026-05-20T09:00:00.000Z"}`))
+		jsontext.Value(`{"uid":"`+issueUID+`","title":"original issue","author":"remote","status":"open","comments":[{"comment_uid":"`+commentUID+`","author":"reviewer","body":"original comment","created_at":"2026-05-20T10:00:00.000Z"}],"created_at":"2026-05-20T09:00:00.000Z"}`))
 	_, err = store.InsertRemoteEvent(ctx, project.ID, snapshot)
 	require.NoError(t, err)
 	require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
@@ -110,7 +110,7 @@ func TestMaterializeFederatedProjectLeavesUnchangedCommentsUnwritten(t *testing.
 	edit.EventUID, err = uid.New()
 	require.NoError(t, err)
 	edit.Type, edit.HLCCounter = "issue.comment_edited", 2
-	edit.Payload = json.RawMessage(`{"comment_uid":"` + commentUID + `","body":"revised comment"}`)
+	edit.Payload = jsontext.Value(`{"comment_uid":"` + commentUID + `","body":"revised comment"}`)
 	edit.ContentHash, err = db.EventContentHash(db.EventHashInput{
 		UID: edit.EventUID, OriginInstanceUID: edit.OriginInstanceUID,
 		ProjectUID: edit.ProjectUID, ProjectName: edit.ProjectName,
@@ -134,7 +134,7 @@ func projectionSnapshotEvent(
 	issueUID string,
 	origin string,
 	counter int64,
-	payload json.RawMessage,
+	payload jsontext.Value,
 ) db.RemoteEvent {
 	t.Helper()
 	eventUID, err := uid.New()

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,7 +11,7 @@ func TestSelectNextReadyIssue(t *testing.T) {
 	priority := func(value int64) *int64 { return &value }
 	candidate := func(shortID string, p *int64) readyIssueForCLI {
 		return readyIssueForCLI{
-			Raw:      json.RawMessage(`{"short_id":"` + shortID + `"}`),
+			Raw:      jsontext.Value(`{"short_id":"` + shortID + `"}`),
 			ShortID:  shortID,
 			Priority: p,
 		}

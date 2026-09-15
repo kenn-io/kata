@@ -1,7 +1,8 @@
 package metadata
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"regexp"
@@ -24,7 +25,7 @@ var reULID = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
 // values delegate to Validate. Callers add their own framing/context; the
 // returned error carries only the "null values are not allowed at creation"
 // phrasing, no per-key prefix.
-func ValidateCreateValue(registry map[string]Entry, key string, raw json.RawMessage) error {
+func ValidateCreateValue(registry map[string]Entry, key string, raw jsontext.Value) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		return fmt.Errorf("%w: null values are not allowed at creation", ErrInvalidValue)
 	}
@@ -35,7 +36,7 @@ func ValidateCreateValue(registry map[string]Entry, key string, raw json.RawMess
 // (those present in registry) go through their type-specific validator; any
 // other key is accepted as an opaque pass-through value and Validate returns
 // nil. A JSON null value is always accepted and signals "clear this key".
-func Validate(registry map[string]Entry, key string, raw json.RawMessage) error {
+func Validate(registry map[string]Entry, key string, raw jsontext.Value) error {
 	entry, ok := registry[key]
 	if !ok {
 		// Unknown / unreserved keys are accepted opaquely. The daemon stores
@@ -64,7 +65,7 @@ func Validate(registry map[string]Entry, key string, raw json.RawMessage) error 
 	}
 }
 
-func validateSchedule(raw json.RawMessage) error {
+func validateSchedule(raw jsontext.Value) error {
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return fmt.Errorf("%w: schedule must be a JSON string: %v", ErrInvalidValue, err)
@@ -75,7 +76,7 @@ func validateSchedule(raw json.RawMessage) error {
 	return nil
 }
 
-func validateDate(raw json.RawMessage) error {
+func validateDate(raw jsontext.Value) error {
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return fmt.Errorf("%w: date must be a JSON string: %v", ErrInvalidValue, err)
@@ -86,7 +87,7 @@ func validateDate(raw json.RawMessage) error {
 	return nil
 }
 
-func validateBool(raw json.RawMessage) error {
+func validateBool(raw jsontext.Value) error {
 	var b bool
 	if err := json.Unmarshal(raw, &b); err != nil {
 		return fmt.Errorf("%w: value must be a JSON boolean: %v", ErrInvalidValue, err)
@@ -94,7 +95,7 @@ func validateBool(raw json.RawMessage) error {
 	return nil
 }
 
-func validateString(raw json.RawMessage) error {
+func validateString(raw jsontext.Value) error {
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return fmt.Errorf("%w: value must be a JSON string: %v", ErrInvalidValue, err)
@@ -109,7 +110,7 @@ type checklistItem struct {
 	Done *bool   `json:"done"`
 }
 
-func validateChecklist(raw json.RawMessage) error {
+func validateChecklist(raw jsontext.Value) error {
 	var items []checklistItem
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return fmt.Errorf("%w: checklist must be an array of items: %v", ErrInvalidValue, err)
@@ -129,7 +130,7 @@ func validateChecklist(raw json.RawMessage) error {
 	return nil
 }
 
-func validateTimezoneIANA(raw json.RawMessage) error {
+func validateTimezoneIANA(raw jsontext.Value) error {
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return fmt.Errorf("%w: timezone must be a JSON string: %v", ErrInvalidValue, err)
