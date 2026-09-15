@@ -62,7 +62,7 @@ func TestSyncFederationOncePullsAndAdvancesCursor(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -257,7 +257,7 @@ func TestSyncFederationOnceDuplicateOnlyPullMaterializesStaleProjection(t *testi
 		Actor:            "tester",
 	})
 	require.NoError(t, err)
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2303,7 +2303,7 @@ func TestSyncFederationOncePushesAdoptedIssueSnapshotsAndLinks(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2461,7 +2461,7 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 proxy.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2643,7 +2643,7 @@ func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T
 		issueUIDs = append(issueUIDs, issue.UID)
 	}
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 proxy.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2730,7 +2730,7 @@ func TestSyncFederationOncePushesLargeAdoptionMetadataWithHistoricalSnapshots(t 
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2795,7 +2795,7 @@ func TestSyncFederationOnceConsumesAdoptionMarkerForMetadataOnlyProject(t *testi
 	require.NoError(t, err)
 	localProject = metadataOut.Project
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2847,7 +2847,7 @@ func TestSyncFederationOnceConsumesAdoptionMarkerForEmptyProject(t *testing.T) {
 
 	localProject, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -3636,7 +3636,7 @@ func TestPendingClaimRetryUnknownCapabilitiesTransportFailureRetriesAfterReconne
 		Actor:            "tester",
 	})
 	require.NoError(t, err)
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,

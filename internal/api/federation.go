@@ -287,17 +287,17 @@ type CreateFederationReplicaRequest struct {
 	}
 }
 
-// CreateFederationReplicaBody is returned after binding a local spoke project.
-type CreateFederationReplicaBody struct {
+// CreateFederationReplicaResponseBody is returned after binding a local spoke project.
+type CreateFederationReplicaResponseBody struct {
 	Project               ProjectOut           `json:"project"`
 	Binding               FederationBindingOut `json:"binding"`
 	Adopted               bool                 `json:"adopted,omitempty,omitzero"`
 	AdoptionSnapshotCount int64                `json:"adoption_snapshot_count,omitempty,omitzero"`
 }
 
-// CreateFederationReplicaResponse wraps CreateFederationReplicaBody.
+// CreateFederationReplicaResponse wraps CreateFederationReplicaResponseBody.
 type CreateFederationReplicaResponse struct {
-	Body CreateFederationReplicaBody
+	Body CreateFederationReplicaResponseBody
 }
 
 // RebindFederationReplicaRequest selects a daemon-owned catalog entry as the

@@ -59,7 +59,7 @@ func TestSmoke_FederationPhase1PullReplication(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	decodePOST(t, spokeHTTP, spokeURL+"/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,

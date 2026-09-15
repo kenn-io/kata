@@ -79,7 +79,7 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/federation/replicas":
 			spokeJoinAuth = r.Header.Get("Authorization")
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&joinBody))
-			respondJSON(t, w, api.CreateFederationReplicaBody{})
+			respondJSON(t, w, api.CreateFederationReplicaResponseBody{})
 		default:
 			t.Fatalf("unexpected spoke request: %s %s", r.Method, r.URL.Path)
 		}

@@ -194,7 +194,7 @@ type FederationEnrollment = api.FederationEnrollmentOut
 type ProjectFederationMetadata = api.ProjectFederationBody
 
 // FederationReplicaResult is the spoke join/adoption result response.
-type FederationReplicaResult = api.CreateFederationReplicaBody
+type FederationReplicaResult = api.CreateFederationReplicaResponseBody
 
 // LeaveFederationReplicaResult is the spoke leave (detach/archive) response.
 type LeaveFederationReplicaResult = api.LeaveFederationReplicaResultBody

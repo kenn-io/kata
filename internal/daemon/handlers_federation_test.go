@@ -224,7 +224,7 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
 	defer sub.Unsub()
 
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 "http://127.0.0.1:7373",
 		"hub_project_id":          42,
@@ -269,7 +269,7 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 func TestCreateFederationReplicaRoutePreservesHubURLPathPrefix(t *testing.T) {
 	env := testenv.New(t)
 
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 "https://daemon.example/kata/hub/",
 		"hub_project_id":          42,
@@ -545,7 +545,7 @@ func TestFederationReplicaSetupIsIdempotentAndUsesJSONTags(t *testing.T) {
 		"replay_horizon_event_id": 9,
 		"actor":                   "tester",
 	}
-	var first api.CreateFederationReplicaBody
+	var first api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &first)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -575,14 +575,14 @@ func TestFederationReplicaSetupRejoinWithNewReplayHorizonPreservesExistingBindin
 		"actor":                   "tester",
 		"token":                   "first-token",
 	}
-	var first api.CreateFederationReplicaBody
+	var first api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &first)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.NoError(t, env.DB.AdvanceFederationPullCursor(context.Background(), first.Project.ID, 11))
 
 	body["replay_horizon_event_id"] = int64(12)
 	body["token"] = "second-token"
-	var second api.CreateFederationReplicaBody
+	var second api.CreateFederationReplicaResponseBody
 	resp = envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &second)
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -622,7 +622,7 @@ func TestFederationReplicaSetupRejectsIncompatibleRetry(t *testing.T) {
 func TestFederationReplicaSetupPushEnabledWritesCredentialAndEnablesPush(t *testing.T) {
 	env := testenv.New(t)
 
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 "http://127.0.0.1:7373",
 		"hub_project_id":          42,
@@ -689,7 +689,7 @@ func TestFederationReplicaSetupAdoptsExistingProject(t *testing.T) {
 		"push_enabled":            true,
 		"adopt_existing":          true,
 	}
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &out)
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -708,7 +708,7 @@ func TestFederationReplicaSetupAdoptsExistingProject(t *testing.T) {
 	assert.True(t, binding.PushEnabled)
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", binding.HubProjectUID)
 
-	var retry api.CreateFederationReplicaBody
+	var retry api.CreateFederationReplicaResponseBody
 	resp = envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &retry)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.False(t, retry.Adopted)
@@ -779,7 +779,7 @@ func TestFederationReplicaSetupAdoptExistingBindsUnboundProjectWithHubUID(t *tes
 	})
 	require.NoError(t, err)
 
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 "http://127.0.0.1:7373",
 		"hub_project_id":          42,
@@ -967,7 +967,7 @@ func TestFederationReplicaSetupRejectsCredentialDowngradeOnPushBinding(t *testin
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
 	}
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &out)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -996,7 +996,7 @@ func TestFederationReplicaSetupPushRetryPreservesHigherCursors(t *testing.T) {
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
 	}
-	var first api.CreateFederationReplicaBody
+	var first api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &first)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.NoError(t, env.DB.AdvanceFederationPullCursor(context.Background(), first.Project.ID, 99))
@@ -1018,7 +1018,7 @@ func TestFederationReplicaSetupPushRetryPreservesHigherCursors(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, pendingEventID, int64(0))
 
-	var second api.CreateFederationReplicaBody
+	var second api.CreateFederationReplicaResponseBody
 	resp = envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &second)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -1030,7 +1030,7 @@ func TestFederationReplicaSetupPushRetryPreservesHigherCursors(t *testing.T) {
 func TestFederationReplicaSetupPushDisabledRemainsReadOnly(t *testing.T) {
 	env := testenv.New(t)
 
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 "http://127.0.0.1:7373",
 		"hub_project_id":          42,
@@ -1069,7 +1069,7 @@ func TestFederationReplicaSetupCanRepairLegacyBlankActorBinding(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 "http://127.0.0.1:7373",
 		"hub_project_id":          42,
@@ -1102,7 +1102,7 @@ func TestFederationReplicaSetupCanUpgradePhase1BindingToPush(t *testing.T) {
 		"actor":                   "wesm",
 		"token":                   "push-token",
 	}
-	var first api.CreateFederationReplicaBody
+	var first api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &first)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.False(t, first.Binding.PushEnabled)
@@ -1124,7 +1124,7 @@ func TestFederationReplicaSetupCanUpgradePhase1BindingToPush(t *testing.T) {
 	body["push_enabled"] = true
 	body["capabilities"] = "pull,push"
 
-	var upgraded api.CreateFederationReplicaBody
+	var upgraded api.CreateFederationReplicaResponseBody
 	resp = envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &upgraded)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -1142,7 +1142,7 @@ func TestFederationReplicaSetupRebindsUnboundUIDHolder(t *testing.T) {
 	holder, err := env.DB.CreateProjectWithUID(ctx, "hub", "01HZNQ7VFPK1XGD8R5MABCD4EX")
 	require.NoError(t, err)
 
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 "http://127.0.0.1:7373",
 		"hub_project_id":          42,
@@ -3439,7 +3439,7 @@ func TestLeaveFederationReplicaWaitsForEnsureCredentialPersistence(t *testing.T)
 func TestFederationReplicaPersistsAllowInsecureOnBinding(t *testing.T) {
 	env := testenv.New(t)
 
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 "http://hub.internal:7373",
 		"hub_project_id":          42,
@@ -3759,7 +3759,7 @@ func TestCreateFederationReplicaRejoinsAfterLeave(t *testing.T) {
 		map[string]any{"disposition": "detach", "actor": "wesm"}, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "leave: %s", raw)
 
-	var out api.CreateFederationReplicaBody
+	var out api.CreateFederationReplicaResponseBody
 	jresp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 binding.HubURL,
 		"hub_project_id":          binding.HubProjectID,

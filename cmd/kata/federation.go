@@ -1300,7 +1300,7 @@ func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 		return err
 	}
-	var body api.CreateFederationReplicaBody
+	var body api.CreateFederationReplicaResponseBody
 	if err := json.Unmarshal(bs, &body); err != nil {
 		return err
 	}
