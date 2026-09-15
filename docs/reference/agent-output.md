@@ -1,3 +1,9 @@
+---
+title: Agent output format
+description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
+last_edited: 2026-09-15
+---
+
 # Agent output format
 
 Agent mode (`--agent`, or `--format agent`) is a compact, stable text contract

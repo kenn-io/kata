@@ -49,11 +49,15 @@ name = "kata-docs"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "pyyaml" },
     { name = "zensical" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "zensical", specifier = "==0.0.43" }]
+requires-dist = [
+    { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "zensical", specifier = "==0.0.43" },
+]
 
 [[package]]
 name = "markdown"

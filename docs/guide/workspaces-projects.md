@@ -1,3 +1,9 @@
+---
+title: Workspaces and projects
+description: Understand how workspaces resolve Kata projects and configure local or remote daemon targets.
+last_edited: 2026-09-15
+---
+
 # Workspaces and projects
 
 kata separates repository files from issue data. Repositories and workspaces

@@ -1,3 +1,9 @@
+---
+title: Backup and restore
+description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
+last_edited: 2026-09-15
+---
+
 # Backup and restore
 
 `kata export` writes the host-local database as JSONL. It is an offline storage

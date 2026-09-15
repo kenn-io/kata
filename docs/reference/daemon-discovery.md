@@ -1,3 +1,9 @@
+---
+title: Daemon discovery
+description: Discover and select the same Kata daemon endpoint and transport precedence used by the CLI.
+last_edited: 2026-09-15
+---
+
 # Daemon discovery
 
 External clients can use `kata daemon locate` to select the same daemon as the

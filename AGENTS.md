@@ -49,6 +49,8 @@
 
 ## Documentation
 
+- Follow the [page frontmatter policy](docs/development/contributing.md#page-frontmatter)
+  when creating or editing guide, operations, and reference pages.
 - Write for the person trying to use or maintain Kata. Lead with the outcome,
   name who does what, use short sentences, and explain unfamiliar terms.
 - Organize around reader questions. Put purpose and current capabilities first;

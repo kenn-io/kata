@@ -30,6 +30,8 @@ required_files=(
   "docs/zensical-docs.sh"
   "docs/scripts/check_vercel_redirects.py"
   "docs/scripts/check_built_site.py"
+  "docs/scripts/check_frontmatter.py"
+  "docs/scripts/test_check_frontmatter.py"
   "docs/scripts/check_public_markdown_sources.py"
   "docs/llms.txt"
   "docs/overrides/main.html"
@@ -106,6 +108,8 @@ if [[ "$missing" -ne 0 ]]; then
 fi
 
 python3 docs/scripts/check_vercel_redirects.py
+(cd docs && uv run --frozen python -m unittest scripts.test_check_frontmatter)
+(cd docs && uv run --frozen python scripts/check_frontmatter.py)
 
 stale_config="docs/.zensical-build.XXXXXX.toml"
 stale_docs="docs/zensical-public-docs.XXXXXX"

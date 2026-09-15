@@ -1,6 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
+last_edited: 2026-09-15
 ---
 
 # Web UI

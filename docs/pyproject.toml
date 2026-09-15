@@ -3,6 +3,7 @@ name = "kata-docs"
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
+  "pyyaml==6.0.3",
   "zensical==0.0.43",
 ]
 

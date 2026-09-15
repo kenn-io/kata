@@ -1,5 +1,7 @@
 ---
-last_edited: 2026-09-14
+title: CLI reference
+description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
+last_edited: 2026-09-15
 ---
 
 # CLI reference

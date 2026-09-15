@@ -145,6 +145,27 @@ When changing behavior:
 - record durable design rationale in `docs/design/` when the "why" is not
   obvious from the code.
 
+### Page frontmatter
+
+Every Markdown page under `docs/guide/`, `docs/operations/`, and
+`docs/reference/`, including subdirectories, must start with YAML frontmatter.
+`README.md` files are exempt. Use this format:
+
+```yaml
+---
+title: Configuration reference
+description: "Configure Kata's daemon and clients."
+last_edited: 2026-09-15
+---
+```
+
+- Set `title` to the page heading and `description` to a short sentence about
+  what the reader can learn or do. Both must be non-empty strings.
+- Set `last_edited` to the creation date in `YYYY-MM-DD` format. Update it when
+  the page content changes; do not bump dates on unchanged pages.
+- Run `make docs-check` before submitting. It checks these required fields
+  with `docs/scripts/check_frontmatter.py`.
+
 ## Commit discipline
 
 Do not leave accepted repository changes uncommitted at the end of a task.
