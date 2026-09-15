@@ -159,6 +159,48 @@ describe('kata task view builder', () => {
     ])
   })
 
+  test('builds Delegated from open teammate issues grouped by author and teammate', () => {
+    const view = buildKataTaskView({
+      view: 'delegated',
+      issues: [
+        {
+          ...issue('issue-3', 'Second task', 'project-workspace', { teammate: 'reviewer-7' }),
+          author: 'coordinator',
+          priority: 2,
+        },
+        {
+          ...issue('issue-1', 'First task', 'project-health', { teammate: 'reviewer-7' }),
+          author: 'coordinator',
+          priority: 0,
+        },
+        {
+          ...issue('issue-2', 'Another pair', 'project-health', { teammate: 'agent-2' }),
+          author: 'another-author',
+        },
+        issue('issue-4', 'Unassigned', 'project-workspace'),
+        issue('issue-5', 'Invalid teammate', 'project-workspace', { teammate: 'reviewer/7' }),
+        issue('issue-6', 'Non-string teammate', 'project-workspace', { teammate: 7 }),
+        issue(
+          'issue-7',
+          'Closed delegated task',
+          'project-workspace',
+          { teammate: 'reviewer-7' },
+          'closed',
+        ),
+      ],
+      projects,
+      today,
+      fetched_at: fetchedAt,
+    })
+
+    expect(
+      view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
+    ).toEqual([
+      ['another-author/agent-2', 'another-author/agent-2', ['Another pair']],
+      ['coordinator/reviewer-7', 'coordinator/reviewer-7', ['First task', 'Second task']],
+    ])
+  })
+
   test('uses the server-projected browser date for timed schedules', () => {
     const previousBrowserDay = {
       ...issue('issue-1', 'Previous browser day', 'project-health', {

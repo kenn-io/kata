@@ -1,4 +1,11 @@
-export type KataTaskViewName = 'inbox' | 'today' | 'upcoming' | 'deadlines' | 'all' | 'logbook'
+export type KataTaskViewName =
+  | 'inbox'
+  | 'today'
+  | 'upcoming'
+  | 'delegated'
+  | 'deadlines'
+  | 'all'
+  | 'logbook'
 
 export interface KataTaskChecklistItem {
   id: string

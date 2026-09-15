@@ -49,8 +49,9 @@ The sidebar combines system collections with individual projects:
 - **Inbox** shows the designated inbox project. If none exists, the first new
   task asks you to choose one.
 - **Today**, **Upcoming**, and **Deadlines** organize scheduled work.
-- **All Open** shows active work across projects; **Logbook** shows completed
-  work.
+- **Delegated** groups open teammate work by its `author/teammate` attribution.
+- **All Open** and **Logbook** remain available as bookmarkable views for
+  active and completed work.
 - Project entries scope the collection to one project. **New project** creates
   a daemon project without changing any workspace files.
 

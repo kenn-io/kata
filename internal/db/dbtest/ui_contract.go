@@ -324,6 +324,40 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 // the selected issue's project.
 func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Storage) {
 	t.Helper()
+	t.Run("delegated filters valid teammates before limit", func(t *testing.T) {
+		store := open(t)
+		uiStore := store.(db.UIStore)
+		ctx := context.Background()
+		project := createCursorProject(ctx, t, store)
+		matching, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Delegated issue", Author: "coordinator",
+			Metadata: map[string]json.RawMessage{"teammate": json.RawMessage(`"reviewer-7"`)},
+		})
+		require.NoError(t, err)
+		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Invalid teammate issue", Author: "coordinator",
+			Metadata: map[string]json.RawMessage{"teammate": json.RawMessage(`"reviewer/7"`)},
+		})
+		require.NoError(t, err)
+		createCursorIssue(ctx, t, store, project.ID, "Newer unassigned issue")
+		closed, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Closed delegated issue", Author: "coordinator",
+			Metadata: map[string]json.RawMessage{"teammate": json.RawMessage(`"reviewer-7"`)},
+		})
+		require.NoError(t, err)
+		_, _, changed, err := store.CloseIssue(
+			ctx, closed.ID, "done", "coordinator", "Completed delegated work", nil,
+		)
+		require.NoError(t, err)
+		require.True(t, changed)
+
+		snapshot, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "delegated", Limit: 1,
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{matching.UID}, uiIssueUIDs(snapshot.Issues))
+	})
+
 	for _, test := range []struct {
 		name     string
 		view     string

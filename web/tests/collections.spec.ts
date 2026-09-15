@@ -39,7 +39,7 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   await expect(page).toHaveURL(/text=child/)
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
-  for (const view of ['Inbox', 'Today', 'Upcoming', 'Deadlines', 'All Open', 'Logbook']) {
+  for (const view of ['Inbox', 'Today', 'Upcoming', 'Delegated', 'Deadlines']) {
     await page
       .getByRole('button', { name: view === 'Inbox' ? /^Inbox \d+$/ : view, exact: true })
       .click()

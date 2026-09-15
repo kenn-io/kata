@@ -4,6 +4,7 @@ export const systemViews = [
   'inbox',
   'today',
   'upcoming',
+  'delegated',
   'deadlines',
   'all-open',
   'logbook',
