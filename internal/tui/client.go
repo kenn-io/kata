@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,8 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // Client is the typed adapter the TUI uses to talk to the daemon. Errors
@@ -36,6 +39,44 @@ func NewClient(base string, hc *http.Client) *Client {
 		hc:                     hc,
 		refreshLocalHTTPClient: refreshLocalHTTPClientForTUI,
 	}
+}
+
+func (c *Client) generatedClient() (*generated.Client, error) {
+	return generated.NewDefaultClient(c.base, runtime.WithHTTPClient(tuiRequestDoer{c}))
+}
+
+type tuiRequestDoer struct{ client *Client }
+
+func (d tuiRequestDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	return d.client.sendRequest(ctx, req)
+}
+
+func (c *Client) sendRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
+	hc := c.httpClient()
+	if hc == nil {
+		return nil, fmt.Errorf("%s %s: daemon client is not initialized", req.Method, req.URL.RequestURI())
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		resp, err = c.retryLocalTransportFailure(ctx, req, err)
+	}
+	if resp != nil && resp.Request == nil {
+		resp.Request = req
+	}
+	return resp, err
+}
+
+func decodeGeneratedResponse(resp *http.Response, body []byte, callErr error, out any) error {
+	if resp.StatusCode >= 400 {
+		return decodeError(body, resp.StatusCode, resp.Request.Method, resp.Request.URL.RequestURI())
+	}
+	if callErr != nil {
+		return callErr
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(body, out)
 }
 
 var (
@@ -58,33 +99,67 @@ var (
 // GetInstance returns the daemon instance identity and schema version.
 func (c *Client) GetInstance(ctx context.Context) (InstanceInfo, error) {
 	var resp InstanceInfo
-	err := c.do(ctx, http.MethodGet, "/api/v1/instance", nil, &resp)
-	return resp, err
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return resp, err
+	}
+	wire, callErr := apiClient.InstanceWithResponse(ctx)
+	if wire == nil {
+		return resp, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
 }
 
 // ListIssues returns the issues for projectID filtered by f.
 func (c *Client) ListIssues(ctx context.Context, projectID int64, f ListFilter) ([]Issue, error) {
-	return c.listIssuesAt(ctx, fmt.Sprintf("/api/v1/projects/%d/issues", projectID), f)
+	return c.listIssuesAt(ctx, &projectID, f)
 }
 
 // ListAllIssues lists issues across every project. The daemon may not yet
 // implement /api/v1/issues; in that case the request surfaces as a 404
 // APIError that callers can downgrade.
 func (c *Client) ListAllIssues(ctx context.Context, f ListFilter) ([]Issue, error) {
-	return c.listIssuesAt(ctx, "/api/v1/issues", f)
+	return c.listIssuesAt(ctx, nil, f)
 }
 
-func (c *Client) listIssuesAt(ctx context.Context, path string, f ListFilter) ([]Issue, error) {
-	if vals := f.values().Encode(); vals != "" {
-		path += "?" + vals
+func (c *Client) listIssuesAt(ctx context.Context, projectID *int64, f ListFilter) ([]Issue, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	params := &generated.ListIssuesQuery{}
+	if f.Status != "" {
+		params.Status = new(generated.ListIssuesQueryStatus(f.Status))
+	}
+	if f.Limit > 0 {
+		params.Limit = new(int64(f.Limit))
 	}
 	var resp struct {
 		Issues []Issue `json:"issues"`
 	}
-	if err := c.do(ctx, http.MethodGet, path, nil, &resp); err != nil {
-		return nil, err
+	if projectID != nil {
+		wire, callErr := apiClient.ListIssuesWithResponse(ctx, &generated.ListIssuesRequestOptions{
+			PathParams: &generated.ListIssuesPath{ProjectID: *projectID}, Query: params,
+		})
+		if wire == nil {
+			return nil, callErr
+		}
+		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp)
+	} else {
+		query := &generated.ListAllIssuesQuery{Limit: params.Limit}
+		if f.Status != "" {
+			query.Status = new(generated.ListAllIssuesQueryStatus(f.Status))
+		}
+		wire, callErr := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: query})
+		if wire == nil {
+			return nil, callErr
+		}
+		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp)
 	}
-	return resp.Issues, nil
+	return resp.Issues, err
 }
 
 // GetIssueDetail fetches a single issue plus hierarchy metadata by ref.
@@ -385,11 +460,18 @@ func aliasInputBody(info config.AliasInfo) map[string]any {
 // daemon's GET /api/v1/projects/{id}/labels endpoint backs the +
 // suggestion menu; counts drive the "most-used first" sort.
 func (c *Client) ListLabels(ctx context.Context, projectID int64) ([]LabelCount, error) {
-	path := fmt.Sprintf("/api/v1/projects/%d/labels", projectID)
 	var resp struct {
 		Labels []LabelCount `json:"labels"`
 	}
-	if err := c.do(ctx, http.MethodGet, path, nil, &resp); err != nil {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.ListLabelsWithResponse(ctx, &generated.ListLabelsRequestOptions{PathParams: &generated.ListLabelsPath{ProjectID: projectID}})
+	if wire == nil {
+		return nil, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Labels, nil
@@ -400,7 +482,15 @@ func (c *Client) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 	var resp struct {
 		Projects []ProjectSummary `json:"projects"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/api/v1/projects", nil, &resp); err != nil {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.ListProjectsWithResponse(ctx, nil)
+	if wire == nil {
+		return nil, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Projects, nil
@@ -420,8 +510,18 @@ func (c *Client) EnsureProject(ctx context.Context, name, actor string) (Project
 // FederationStatus returns redacted federation status for all local bindings.
 func (c *Client) FederationStatus(ctx context.Context) (FederationStatusBody, error) {
 	var resp FederationStatusBody
-	err := c.do(ctx, http.MethodGet, "/api/v1/federation/status", nil, &resp)
-	return resp, err
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return resp, err
+	}
+	wire, callErr := apiClient.GetFederationStatusWithResponse(ctx, nil)
+	if wire == nil {
+		return resp, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
 }
 
 // EnableFederation enables federation metadata for an existing project.
@@ -464,7 +564,15 @@ func (c *Client) ListFederationEnrollments(ctx context.Context) ([]FederationEnr
 	var resp struct {
 		Enrollments []FederationEnrollment `json:"enrollments"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/api/v1/federation/enrollments", nil, &resp); err != nil {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.ListFederationEnrollmentsWithResponse(ctx)
+	if wire == nil {
+		return nil, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Enrollments, nil
@@ -498,7 +606,15 @@ func (c *Client) ListProjectsWithStats(ctx context.Context) ([]ProjectSummaryWit
 	var resp struct {
 		Projects []ProjectSummaryWithStats `json:"projects"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/api/v1/projects?include=stats", nil, &resp); err != nil {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.ListProjectsWithResponse(ctx, &generated.ListProjectsRequestOptions{Query: &generated.ListProjectsQuery{Include: new("stats")}})
+	if wire == nil {
+		return nil, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Projects == nil {
@@ -574,13 +690,23 @@ type eventsPageResp struct {
 }
 
 func (c *Client) listEventsPage(ctx context.Context, projectID, afterID int64) (eventsPageResp, error) {
-	path := fmt.Sprintf("/api/v1/projects/%d/events?limit=1000", projectID)
-	if afterID > 0 {
-		path += fmt.Sprintf("&after_id=%d", afterID)
-	}
 	var resp eventsPageResp
-	err := c.do(ctx, http.MethodGet, path, nil, &resp)
-	return resp, err
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return resp, err
+	}
+	params := &generated.PollProjectEventsQuery{Limit: new(int64(1000))}
+	if afterID > 0 {
+		params.AfterID = &afterID
+	}
+	wire, callErr := apiClient.PollProjectEventsWithResponse(ctx, &generated.PollProjectEventsRequestOptions{PathParams: &generated.PollProjectEventsPath{ProjectID: projectID}, Query: params})
+	if wire == nil {
+		return resp, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
 }
 
 // ListLinks returns the links tab data for one issue.
@@ -594,7 +720,15 @@ func (c *Client) ListLinks(ctx context.Context, projectID int64, ref string) ([]
 
 func (c *Client) showIssue(ctx context.Context, projectID int64, ref string) (*showIssueBody, error) {
 	var resp showIssueBody
-	if err := c.do(ctx, http.MethodGet, issuePath(projectID, ref), nil, &resp); err != nil {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: projectID, Ref: ref}})
+	if wire == nil {
+		return nil, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
 	// Lift the sibling labels slice onto resp.Issue.Labels so detail
@@ -646,20 +780,17 @@ func (c *Client) doWithHeaders(
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	hc := c.httpClient()
-	if hc == nil {
-		return fmt.Errorf("%s %s: daemon client is not initialized", method, path)
-	}
-	resp, err := hc.Do(req) //nolint:gosec // G704: c.base built from our own daemon discovery
+	resp, err := c.sendRequest(ctx, req)
 	if err != nil {
-		resp, err = c.retryLocalTransportFailure(ctx, method, path, body, headers, err)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
-		return decodeError(resp, method, path)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		return decodeError(body, resp.StatusCode, method, path)
 	}
 	if out == nil {
 		return nil
@@ -694,14 +825,9 @@ func (c *Client) localHTTPClientRefresh() func(context.Context) (*http.Client, e
 	return c.refreshLocalHTTPClient
 }
 
-func (c *Client) retryLocalTransportFailure(
-	ctx context.Context,
-	method, path string,
-	body any,
-	headers map[string]string,
-	err error,
-) (*http.Response, error) {
-	canReplay := canRetryLocalTransport(method, headers)
+func (c *Client) retryLocalTransportFailure(ctx context.Context, original *http.Request, err error) (*http.Response, error) {
+	method, path := original.Method, original.URL.RequestURI()
+	canReplay := canRetryLocalTransport(method, map[string]string{"Idempotency-Key": original.Header.Get("Idempotency-Key")})
 	phase := "request failed"
 	if c.base == clientpkg.UnixBase && ctx.Err() == nil {
 		if canReplay {
@@ -723,12 +849,13 @@ func (c *Client) retryLocalTransportFailure(
 	if !canReplay {
 		return nil, transportError(method, path, c.base, err)
 	}
-	req, reqErr := buildRequest(ctx, method, c.base+path, body)
-	if reqErr != nil {
-		return nil, reqErr
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
+	req := original.Clone(ctx)
+	if original.GetBody != nil {
+		var reqErr error
+		req.Body, reqErr = original.GetBody()
+		if reqErr != nil {
+			return nil, reqErr
+		}
 	}
 	resp, retryErr := hc.Do(req) //nolint:gosec // G704: c.base built from our own daemon discovery
 	if retryErr != nil {
@@ -829,7 +956,7 @@ func buildRequest(ctx context.Context, method, fullURL string, body any) (*http.
 	return req, nil
 }
 
-func decodeError(resp *http.Response, method, path string) error {
+func decodeError(body []byte, status int, method, path string) error {
 	var env struct {
 		Status int `json:"status"`
 		Error  struct {
@@ -838,11 +965,11 @@ func decodeError(resp *http.Response, method, path string) error {
 			Hint    string `json:"hint"`
 		} `json:"error"`
 	}
-	_ = json.UnmarshalRead(resp.Body, &env)
+	_ = json.Unmarshal(body, &env)
 	return &APIError{
 		Method:  method,
 		Path:    path,
-		Status:  resp.StatusCode,
+		Status:  status,
 		Code:    env.Error.Code,
 		Message: env.Error.Message,
 		Hint:    env.Error.Hint,

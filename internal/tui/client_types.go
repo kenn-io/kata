@@ -2,8 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -86,19 +84,6 @@ type ListFilter struct {
 	Status, Owner, Author, Search string
 	Labels                        []string
 	Limit                         int
-}
-
-// values returns the query params the daemon honors for the TUI queue
-// fetch path.
-func (f ListFilter) values() url.Values {
-	v := url.Values{}
-	if f.Status != "" {
-		v.Set("status", f.Status)
-	}
-	if f.Limit > 0 {
-		v.Set("limit", strconv.Itoa(f.Limit))
-	}
-	return v
 }
 
 // CreateInitialLinkBody requests a link created atomically with a new
