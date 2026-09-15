@@ -77,7 +77,7 @@ func prepareFederationProvider(
 	if err != nil {
 		return empty, err
 	}
-	previous, found, err := managed.FindManagedFederationCredential(ctx, mapping.SpokeProject)
+	previous, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 	if err != nil {
 		return empty, err
 	}
@@ -120,7 +120,7 @@ func matchFederationProvider(
 	c := reservation.Credential
 	p := c.Provider
 	if p == nil || c.HubURL != base || c.HubCatalog != catalog.Name || c.HubProjectName != mapping.HubProject ||
-		c.SpokeProjectName != mapping.SpokeProject || p.Intent != mapping.Intent || p.SpokeInstanceUID != instance ||
+		p.Intent != mapping.Intent || p.SpokeInstanceUID != instance ||
 		!slices.Equal(p.Command, mapping.CredentialProvider) ||
 		(project.UID != p.LocalProjectUID && project.UID != p.HubProjectUID) ||
 		(reservation.ProjectUID != p.LocalProjectUID && reservation.ProjectUID != p.HubProjectUID) {
@@ -185,28 +185,34 @@ func ReleaseFederationProvider(
 	if err != nil {
 		return config.FederationManagedCredentialReservation{}, err
 	}
-	return releaseFederationProvider(ctx, store, managed, project)
+	return releaseFederationProvider(ctx, store, managed, project, uuid.UUID{})
 }
 
 // ReleaseRemovedFederationProvider resolves retained identity even when the
 // project's local name changed or its unbound row was purged.
 func ReleaseRemovedFederationProvider(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, saved config.FederationManagedCredentialReservation) (config.FederationManagedCredentialReservation, db.Project, error) {
+	if saved.Credential.Provider == nil {
+		return saved, db.Project{}, ErrFederationReplicaCredentialConflict
+	}
 	project, err := store.ProjectByUID(ctx, saved.ProjectUID)
+	if errors.Is(err, db.ErrNotFound) {
+		project, err = store.ProjectByUID(ctx, saved.Credential.Provider.LocalProjectUID)
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		project = db.Project{UID: saved.ProjectUID, Name: saved.Credential.SpokeProjectName}
 	} else if err != nil {
 		return saved, project, errors.Join(ErrFederationProviderStorage, err)
 	}
-	closed, err := releaseFederationProvider(ctx, store, managed, project)
+	closed, err := releaseFederationProvider(ctx, store, managed, project, saved.Credential.Provider.RequestID)
 	return closed, project, err
 }
 
-func releaseFederationProvider(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project) (config.FederationManagedCredentialReservation, error) {
+func releaseFederationProvider(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project, expectedRequest uuid.UUID) (config.FederationManagedCredentialReservation, error) {
 	previous, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 	if err != nil {
 		return previous, err
 	}
-	if !found || previous.Credential.Provider == nil {
+	if !found || previous.Credential.Provider == nil || (expectedRequest != (uuid.UUID{}) && previous.Credential.Provider.RequestID != expectedRequest) {
 		return previous, ErrFederationReplicaCredentialConflict
 	}
 	prepared, err := prepareFederationReplicaLeave(ctx, store, managed, project)

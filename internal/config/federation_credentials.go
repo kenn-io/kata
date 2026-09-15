@@ -178,21 +178,29 @@ func (homeFederationCredentialStore) ListManagedFederationCredentials(_ context.
 // FindProjectManagedCredential follows a provider's stable project identity
 // after a local rename. Ordinary catalog reservations retain name lookup.
 func FindProjectManagedCredential(ctx context.Context, store FederationManagedCredentialStore, projectUID, projectName string) (FederationManagedCredentialReservation, bool, error) {
-	credential, found, err := store.FederationCredential(ctx, projectUID)
+	reservations, err := store.ListManagedFederationCredentials(ctx)
 	if err != nil {
 		return FederationManagedCredentialReservation{}, false, err
 	}
-	if found && credential.ManagedByConfig && credential.Provider != nil {
-		return FederationManagedCredentialReservation{ProjectUID: projectUID, Credential: credential}, true, nil
+	var match FederationManagedCredentialReservation
+	found := false
+	for _, saved := range reservations {
+		provider := saved.Credential.Provider
+		// Attachment rekeys the credential before changing the local row.
+		if provider == nil || (saved.ProjectUID != projectUID && provider.LocalProjectUID != projectUID) {
+			continue
+		}
+		if found {
+			return FederationManagedCredentialReservation{}, false, ErrFederationCredentialConflict
+		}
+		match, found = saved, true
 	}
-	match, found, err := store.FindManagedFederationCredential(ctx, projectName)
-	if err != nil || !found {
+	if found {
+		return match, true, nil
+	}
+	match, found, err = store.FindManagedFederationCredential(ctx, projectName)
+	if err != nil || !found || match.Credential.Provider != nil {
 		return FederationManagedCredentialReservation{}, false, err
-	}
-	// Attachment moves the credential to the hub UID before changing the
-	// local project. Only that retained original UID may use the name match.
-	if match.Credential.Provider != nil && match.Credential.Provider.LocalProjectUID != projectUID {
-		return FederationManagedCredentialReservation{}, false, nil
 	}
 	return match, true, nil
 }

@@ -31,7 +31,7 @@ func reconcileProviderMapping(
 	if err := config.ValidateFederationAuthentication(mapping, catalog); err != nil {
 		return reconcileError(ErrConfigurationConflict, "invalid federation provider configuration")
 	}
-	if leaving, err := reconcileProviderLeave(ctx, store, credentials, mapping.SpokeProject, false); leaving || err != nil {
+	if leaving, err := reconcileProviderLeave(ctx, store, credentials, mapping.SpokeProject, nil); leaving || err != nil {
 		return err
 	}
 	if daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) {
@@ -105,38 +105,79 @@ func (r *Reconciler) findRemovedProviderMappings(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, saved := range reservations {
-		name := saved.Credential.SpokeProjectName
-		if saved.Credential.Provider == nil || slices.ContainsFunc(r.targets, func(t Target) bool { return t.Mapping.SpokeProject == name }) {
+		if saved.Credential.Provider == nil {
 			continue
 		}
+		retained, err := r.providerMappingRetained(ctx, saved)
+		if err == nil && retained {
+			continue
+		}
+		// Retry an unreadable project in its cleanup attempt, not by stopping
+		// the controller. Each attempt rechecks that the mapping is absent.
 		r.targets = append(r.targets, Target{
-			Mapping: config.FederationProjectConfig{SpokeProject: name}, removeProvider: true,
+			Mapping: config.FederationProjectConfig{SpokeProject: saved.Credential.SpokeProjectName}, removeProvider: &saved,
 		})
 		r.states = append(r.states, reconciliationState{})
 	}
 	return nil
 }
 
+func (r *Reconciler) providerMappingRetained(ctx context.Context, saved config.FederationManagedCredentialReservation) (bool, error) {
+	for _, target := range r.targets {
+		if target.removeProvider != nil {
+			continue
+		}
+		project, err := r.store.ProjectByNameIncludingArchived(ctx, target.Mapping.SpokeProject)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return false, reconcileError(ErrLocalStorage, "read configured provider project")
+		}
+		if project.UID == saved.ProjectUID || project.UID == saved.Credential.Provider.LocalProjectUID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func reconcileProviderLeave(
 	ctx context.Context, store db.Storage, credentials config.FederationCredentialStore,
-	projectName string, removed bool,
+	projectName string, removed *config.FederationManagedCredentialReservation,
 ) (bool, error) {
 	managed, ok := credentials.(config.FederationManagedCredentialStore)
 	if !ok {
 		return false, nil
 	}
-	saved, found, err := managed.FindManagedFederationCredential(ctx, projectName)
+	var saved config.FederationManagedCredentialReservation
+	var found bool
+	var err error
+	if removed != nil {
+		saved, found, err = config.FindProjectManagedCredential(ctx, managed, removed.Credential.Provider.LocalProjectUID, removed.Credential.SpokeProjectName)
+		if err == nil && found && (saved.Credential.Provider == nil || saved.Credential.Provider.RequestID != removed.Credential.Provider.RequestID) {
+			return true, providerReconciliationError(config.ErrFederationCredentialConflict)
+		}
+	} else {
+		project, projectErr := store.ProjectByNameIncludingArchived(ctx, projectName)
+		if errors.Is(projectErr, db.ErrNotFound) {
+			return false, nil
+		}
+		if projectErr != nil {
+			return true, reconcileError(ErrLocalStorage, "read configured provider project")
+		}
+		saved, found, err = config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
+	}
 	if err != nil {
 		return true, providerReconciliationError(err)
 	}
-	if !found || saved.Credential.Provider == nil || (!removed && !saved.Credential.LeavePending) {
+	if !found || saved.Credential.Provider == nil || (removed == nil && !saved.Credential.LeavePending) {
 		return false, nil
 	}
 	closed, project, err := daemon.ReleaseRemovedFederationProvider(ctx, store, managed, saved)
 	if err != nil {
 		return true, providerReconciliationError(err)
 	}
-	if removed {
+	if removed != nil {
 		if project.ID != 0 {
 			if _, err := daemon.LeaveFederationReplica(ctx, store, managed, nil, project.ID); err != nil {
 				return true, providerReconciliationError(err)

@@ -474,6 +474,8 @@ the file does not break a retry and stale cleanup cannot delete a newer request.
 The executable arguments remain available for release after a mapping is removed.
 On restart, the reconciler releases removed provider mappings, detaches their
 local replicas, and removes their closed markers. Other credentials are untouched.
+It matches projects by their saved identifiers, not their names. Renaming a
+project or reusing its old name cannot redirect cleanup to another request.
 If an explicit leave was interrupted, restart can finish remote release, but the
 user retries the original leave command to finish local teardown. The saved
 marker does not authorize the reconciler to guess whether to archive local data.
