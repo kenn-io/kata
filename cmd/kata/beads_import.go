@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,6 +16,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/importlabels"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const (
@@ -156,15 +157,26 @@ func runBeadsImport(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/imports", baseURL, projectID), req)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
+	data, err := json.Marshal(req)
+	if err != nil {
+		return err
 	}
-	return printBeadsImportResult(cmd, bs, projectID)
+	var body generated.ImportIssuesBody
+	if err := json.Unmarshal(data, &body); err != nil {
+		return err
+	}
+	response, callErr := apiClient.ImportIssuesWithResponse(ctx, &generated.ImportIssuesRequestOptions{PathParams: &generated.ImportIssuesPath{ProjectID: projectID}, Body: &body})
+	if err := externalCLITransportError(response, callErr); err != nil {
+		return err
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return err
+	}
+	return printBeadsImportResult(cmd, response.Body, projectID)
 }
 
 func collectBeadsImportRequest(ctx context.Context, workspace, actor string) (beadsImportRequest, error) {

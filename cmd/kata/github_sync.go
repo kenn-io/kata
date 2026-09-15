@@ -7,13 +7,14 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type githubSyncOptions struct {
@@ -104,22 +105,24 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			body := map[string]any{
-				"config": map[string]any{
-					"host":         binding.Host,
-					"owner":        binding.Owner,
-					"repo":         binding.Repo,
-					"title_prefix": opts.titlePrefix,
-				},
-			}
+			body := &generated.EnableIssueSyncBody{Config: map[string]any{
+				"host": binding.Host, "owner": binding.Owner, "repo": binding.Repo, "title_prefix": opts.titlePrefix,
+			}}
 			if strings.TrimSpace(opts.interval) != "" {
-				body["interval"] = strings.TrimSpace(opts.interval)
+				body.Interval = new(strings.TrimSpace(opts.interval))
 			}
-			bs, err := a.do(http.MethodPost,
-				issueSyncEndpointPath(projectID, "github", "enable"), body)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 			if err != nil {
 				return err
 			}
+			response, callErr := apiClient.EnableIssueSyncWithResponse(a.ctx, &generated.EnableIssueSyncRequestOptions{PathParams: &generated.EnableIssueSyncPath{ProjectID: projectID, Provider: "github"}, Body: body})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, "enabled")
 		},
 	}
@@ -136,7 +139,7 @@ func newGitHubSyncDisableCmd() *cobra.Command {
 		Short: "disable GitHub sync for this project",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return githubSyncPostEmpty(cmd, "disable", "disabled")
+			return githubSyncDisable(cmd)
 		},
 	}
 }
@@ -152,11 +155,18 @@ func newIssueSyncStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bs, err := a.do(http.MethodGet,
-				issueSyncEndpointPath(projectID, "github", "status"), nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 			if err != nil {
 				return err
 			}
+			response, callErr := apiClient.GetIssueSyncStatusWithResponse(a.ctx, &generated.GetIssueSyncStatusRequestOptions{PathParams: &generated.GetIssueSyncStatusPath{ProjectID: projectID, Provider: "github"}})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, "status")
 		},
 	}
@@ -177,32 +187,42 @@ func newGitHubSyncOnceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bs, err := a.do(http.MethodPost,
-				issueSyncEndpointPath(projectID, "github", "once"), map[string]any{})
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 			if err != nil {
 				return err
 			}
+			response, callErr := apiClient.RunIssueSyncOnceWithResponse(a.ctx, &generated.RunIssueSyncOnceRequestOptions{PathParams: &generated.RunIssueSyncOncePath{ProjectID: projectID, Provider: "github"}, Body: &generated.RunIssueSyncOnceBody{}})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			return githubSyncPrintOnceBody(cmd.OutOrStdout(), bs)
 		},
 	}
 }
 
-func githubSyncPostEmpty(cmd *cobra.Command, endpoint, action string) error {
+func githubSyncDisable(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	a, projectID, err := githubSyncProjectAPI(ctx)
 	if err != nil {
 		return err
 	}
-	bs, err := a.do(http.MethodPost,
-		issueSyncEndpointPath(projectID, "github", endpoint), map[string]any{})
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 	if err != nil {
 		return err
 	}
-	return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, action)
-}
-
-func issueSyncEndpointPath(projectID int64, provider, action string) string {
-	return fmt.Sprintf("/api/v1/projects/%d/issue-sync/%s/%s", projectID, provider, action)
+	response, callErr := apiClient.DisableIssueSyncWithResponse(a.ctx, &generated.DisableIssueSyncRequestOptions{PathParams: &generated.DisableIssueSyncPath{ProjectID: projectID, Provider: "github"}, Body: &generated.DisableIssueSyncBody{}})
+	if err := externalCLITransportError(response, callErr); err != nil {
+		return err
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return err
+	}
+	bs := response.Body
+	return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, "disabled")
 }
 
 // githubSyncProjectAPI is the connected daemon plus the workspace's project
@@ -257,10 +277,18 @@ func parseGitHubSyncRepo(repo string) (string, string, error) {
 
 func inferIssueSyncBinding(a daemonAPI, projectID int64, requestedHost string) (githubsync.Binding, error) {
 	requestedHost = strings.ToLower(strings.TrimSpace(requestedHost))
-	bs, err := a.do(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d", projectID), nil)
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 	if err != nil {
 		return githubsync.Binding{}, err
 	}
+	response, callErr := apiClient.ShowProjectWithResponse(a.ctx, &generated.ShowProjectRequestOptions{PathParams: &generated.ShowProjectPath{ProjectID: projectID}})
+	if err := externalCLITransportError(response, callErr); err != nil {
+		return githubsync.Binding{}, err
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return githubsync.Binding{}, err
+	}
+	bs := response.Body
 	var out struct {
 		Aliases []projectAliasRef `json:"aliases"`
 	}

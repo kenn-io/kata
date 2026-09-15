@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
@@ -507,14 +509,26 @@ func postProjects(ctx context.Context, baseURL string, reqBody any) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("client: %w", err)
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, baseURL+"/api/v1/projects", reqBody)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	var body generated.InitProjectBody
+	if err := json.Unmarshal(data, &body); err != nil {
+		return nil, err
+	}
+	response, callErr := apiClient.InitProjectWithResponse(ctx, &generated.InitProjectRequestOptions{Body: &body})
+	if err := externalCLITransportError(response, callErr); err != nil {
 		return nil, fmt.Errorf("POST /api/v1/projects: %w", err)
 	}
-	if status >= 300 {
-		return nil, apiErrFromBody(status, bs)
+	if response.StatusCode >= 300 {
+		return nil, apiErrFromBody(response.StatusCode, response.Body)
 	}
-	return bs, nil
+	return response.Body, nil
 }
 
 // needsTomlWrite reports whether .kata.toml needs to be written: true
