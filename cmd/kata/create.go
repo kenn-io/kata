@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -425,10 +426,32 @@ func resolveProjectIDAndNameWithDaemonHeaders(
 	if err != nil {
 		return 0, "", err
 	}
-	bs, err := a.doWithHeaders(http.MethodPost, "/api/v1/projects/resolve", headers, body)
+	encoded, err := json.Marshal(body)
 	if err != nil {
 		return 0, "", err
 	}
+	var payload generated.ResolveProjectBody
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return 0, "", err
+	}
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return 0, "", err
+	}
+	response, callErr := apiClient.ResolveProjectWithResponse(a.ctx, &generated.ResolveProjectRequestOptions{Body: &payload},
+		func(_ context.Context, request *http.Request) error {
+			for key, value := range headers {
+				request.Header.Set(key, value)
+			}
+			return nil
+		})
+	if err := externalCLITransportError(response, callErr); err != nil {
+		return 0, "", err
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return 0, "", err
+	}
+	bs := response.Body
 	var b struct {
 		Project struct {
 			ID   int64  `json:"id"`

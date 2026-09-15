@@ -5,14 +5,14 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -57,7 +57,7 @@ func newSearchCmd() *cobra.Command {
 			}
 			// Mirror list / ready / events validation (hammer-test
 			// finding #5): --limit 0/-1 used to be silently treated
-			// as "no limit" because buildSearchURL only set the param
+			// as "no limit" because the request only set the param
 			// when limit > 0. Reject with kindValidation so the user
 			// sees what actually happened.
 			if limit <= 0 {
@@ -86,23 +86,27 @@ func newSearchCmd() *cobra.Command {
 					return err
 				}
 			}
-			searchURL := buildSearchURL(searchURLParams{
-				BaseURL:        baseURL,
-				PID:            pid,
-				Query:          query,
-				Limit:          limit,
-				IncludeDeleted: includeDeleted,
-				Mode:           mode,
-				Labels:         labels,
-				NoLabels:       noLabels,
-			})
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, searchURL, nil)
+			apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 			if err != nil {
 				return err
 			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
+			params := &generated.SearchIssuesQuery{Q: query, Limit: new(int64(limit)), Label: labels, ExcludeLabel: noLabels}
+			if includeDeleted {
+				params.IncludeDeleted = &includeDeleted
 			}
+			if mode != "" {
+				params.Mode = new(generated.SearchIssuesQueryMode(mode))
+			}
+			response, callErr := apiClient.SearchIssuesWithResponse(ctx, &generated.SearchIssuesRequestOptions{
+				PathParams: &generated.SearchIssuesPath{ProjectID: pid}, Query: params,
+			})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			return printSearchResults(cmd, bs)
 		},
 	}
@@ -114,44 +118,6 @@ func newSearchCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
 	cmd.Flags().StringSliceVar(&noLabels, "no-label", nil, "exclude issues with this label (repeatable)")
 	return cmd
-}
-
-// searchURLParams bundles buildSearchURL's inputs; the daemon URL, project ID,
-// query, and search options together push past the repo's five-positional-
-// param convention, so they're collected here instead of passed individually.
-type searchURLParams struct {
-	BaseURL        string
-	PID            int64
-	Query          string
-	Limit          int
-	IncludeDeleted bool
-	Mode           string
-	Labels         []string
-	NoLabels       []string
-}
-
-// buildSearchURL assembles the GET /search request URL with q, optional limit,
-// optional include_deleted, optional mode, and repeated label/exclude_label
-// query params.
-func buildSearchURL(p searchURLParams) string {
-	q := url.Values{}
-	q.Set("q", p.Query)
-	if p.Limit > 0 {
-		q.Set("limit", fmt.Sprint(p.Limit))
-	}
-	if p.IncludeDeleted {
-		q.Set("include_deleted", "true")
-	}
-	if p.Mode != "" {
-		q.Set("mode", p.Mode)
-	}
-	for _, l := range p.Labels {
-		q.Add("label", l)
-	}
-	for _, l := range p.NoLabels {
-		q.Add("exclude_label", l)
-	}
-	return fmt.Sprintf("%s/api/v1/projects/%d/search?%s", p.BaseURL, p.PID, q.Encode())
 }
 
 // printSearchResults renders a search response in the active output mode:

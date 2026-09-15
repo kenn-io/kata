@@ -6,11 +6,11 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newListCmd() *cobra.Command {
@@ -68,8 +68,40 @@ func newListCmd() *cobra.Command {
 			if all && !cmd.Flags().Changed("limit") {
 				requestLimit = 0
 			}
-			getURL := baseURL + "/api/v1/issues"
-			if !all {
+			apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+			if err != nil {
+				return err
+			}
+			params := &generated.ListIssuesQuery{Status: new(generated.ListIssuesQueryStatus(apiStatus)), Label: labels, ExcludeLabel: noLabels, Meta: meta}
+			if requestLimit > 0 {
+				params.Limit = new(int64(requestLimit))
+			}
+			if cmd.Flags().Changed("priority") {
+				params.Priority = new(fmt.Sprint(priority))
+			}
+			if cmd.Flags().Changed("max-priority") {
+				params.MaxPriority = new(fmt.Sprint(maxPriority))
+			}
+			if unowned {
+				params.Unowned = &unowned
+			}
+			if owner != "" {
+				params.Owner = &owner
+			}
+			var bs []byte
+			if all {
+				response, callErr := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{
+					Status: new(generated.ListAllIssuesQueryStatus(apiStatus)), Priority: params.Priority, MaxPriority: params.MaxPriority,
+					Limit: params.Limit, Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
+				}})
+				if err := externalCLITransportError(response, callErr); err != nil {
+					return err
+				}
+				if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+					return err
+				}
+				bs = response.Body
+			} else {
 				start, err := resolveStartPath(flags.Workspace)
 				if err != nil {
 					return err
@@ -78,47 +110,16 @@ func newListCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				getURL = fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, pid)
-			}
-
-			// Build query parameters
-			params := url.Values{}
-			params.Set("status", apiStatus)
-			if requestLimit > 0 {
-				params.Set("limit", fmt.Sprintf("%d", requestLimit))
-			}
-			if cmd.Flags().Changed("priority") {
-				params.Set("priority", fmt.Sprintf("%d", priority))
-			}
-			if cmd.Flags().Changed("max-priority") {
-				params.Set("max_priority", fmt.Sprintf("%d", maxPriority))
-			}
-			if unowned {
-				params.Set("unowned", "true")
-			}
-			if owner != "" {
-				params.Set("owner", owner)
-			}
-			for _, l := range labels {
-				params.Add("label", l)
-			}
-			for _, l := range noLabels {
-				params.Add("exclude_label", l)
-			}
-			// Metadata filters are forwarded verbatim as repeated meta params;
-			// the daemon splits each on the first "=" into key / key=value.
-			for _, m := range meta {
-				params.Add("meta", m)
-			}
-
-			// Append query string
-			getURL += "?" + params.Encode()
-			httpStatus, bs, err := httpDoJSON(ctx, client, http.MethodGet, getURL, nil)
-			if err != nil {
-				return err
-			}
-			if httpStatus >= 400 {
-				return apiErrFromBody(httpStatus, bs)
+				response, callErr := apiClient.ListIssuesWithResponse(ctx, &generated.ListIssuesRequestOptions{
+					PathParams: &generated.ListIssuesPath{ProjectID: pid}, Query: params,
+				})
+				if err := externalCLITransportError(response, callErr); err != nil {
+					return err
+				}
+				if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+					return err
+				}
+				bs = response.Body
 			}
 			mode := currentOutputMode()
 			if mode == outputJSON {

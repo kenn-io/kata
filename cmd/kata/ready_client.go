@@ -1,15 +1,13 @@
 package main
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type readyIssueForCLI struct {
@@ -54,26 +52,6 @@ func (o readyOptions) validate() error {
 	return nil
 }
 
-func (o readyOptions) query() url.Values {
-	params := url.Values{}
-	if o.Limit > 0 {
-		params.Set("limit", fmt.Sprintf("%d", o.Limit))
-	}
-	if o.Unowned {
-		params.Set("unowned", "true")
-	}
-	if o.Owner != "" {
-		params.Set("owner", o.Owner)
-	}
-	for _, label := range o.Labels {
-		params.Add("label", label)
-	}
-	for _, label := range o.NoLabels {
-		params.Add("exclude_label", label)
-	}
-	return params
-}
-
 func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 	if err := o.validate(); err != nil {
 		return readyResultForCLI{}, err
@@ -95,37 +73,50 @@ func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 		}
 	}
 
-	getURL, err := o.endpoint(ctx, baseURL)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return readyResultForCLI{}, err
 	}
-	if params := o.query(); len(params) > 0 {
-		getURL += "?" + params.Encode()
+	params := &generated.ReadyIssuesQuery{Label: o.Labels, ExcludeLabel: o.NoLabels}
+	if o.Limit > 0 {
+		params.Limit = new(int64(o.Limit))
 	}
-
-	status, body, err := httpDoJSON(ctx, client, http.MethodGet, getURL, nil)
-	if err != nil {
-		return readyResultForCLI{}, err
+	if o.Unowned {
+		params.Unowned = &o.Unowned
 	}
-	if status >= 400 {
-		return readyResultForCLI{}, apiErrFromBody(status, body)
+	if o.Owner != "" {
+		params.Owner = &o.Owner
 	}
-	return decodeReadyResult(body)
-}
-
-func (o readyOptions) endpoint(ctx context.Context, baseURL string) (string, error) {
 	if o.All {
-		return baseURL + "/api/v1/ready", nil
+		response, callErr := apiClient.ReadyIssuesGlobalWithResponse(ctx, &generated.ReadyIssuesGlobalRequestOptions{
+			Query: (*generated.ReadyIssuesGlobalQuery)(params),
+		})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return readyResultForCLI{}, err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return readyResultForCLI{}, err
+		}
+		return decodeReadyResult(response.Body)
 	}
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
-		return "", err
+		return readyResultForCLI{}, err
 	}
 	projectID, err := resolveProjectID(ctx, baseURL, start)
 	if err != nil {
-		return "", err
+		return readyResultForCLI{}, err
 	}
-	return fmt.Sprintf("%s/api/v1/projects/%d/ready", baseURL, projectID), nil
+	response, callErr := apiClient.ReadyIssuesWithResponse(ctx, &generated.ReadyIssuesRequestOptions{
+		PathParams: &generated.ReadyIssuesPath{ProjectID: projectID}, Query: params,
+	})
+	if err := externalCLITransportError(response, callErr); err != nil {
+		return readyResultForCLI{}, err
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return readyResultForCLI{}, err
+	}
+	return decodeReadyResult(response.Body)
 }
 
 func decodeReadyResult(body []byte) (readyResultForCLI, error) {
