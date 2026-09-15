@@ -529,6 +529,7 @@ type ListAllIssuesRequest struct {
 // payload doesn't carry an empty array per row on label-sparse
 // projects.
 type IssueOut struct {
+	WebURL string `json:"web_url,omitempty" doc:"Browser URL for this issue in the owning daemon."`
 	db.Issue
 	QualifiedID string          `json:"qualified_id"`
 	Labels      []string        `json:"labels,omitempty"`
@@ -693,6 +694,7 @@ type ShowIssueResponse struct {
 // this component as "ShowIssueResponseBody", so renaming the Go type renames
 // the published component and breaks every generated client.
 type ShowIssueResponseBody struct {
+	WebURL              string              `json:"web_url,omitempty" doc:"Browser URL for this issue in the owning daemon."`
 	Issue               db.Issue            `json:"issue"`
 	Comments            []db.Comment        `json:"comments"`
 	Links               []LinkOut           `json:"links"`
@@ -1300,6 +1302,7 @@ type SearchRequest struct {
 // cosine similarity (semantic). MatchedIn lists the contributing sources: FTS
 // column names for the lexical leg plus "semantic" when the vector leg matched.
 type SearchHit struct {
+	WebURL    string   `json:"web_url,omitempty" doc:"Browser URL for this issue in the owning daemon."`
 	Issue     db.Issue `json:"issue"`
 	Score     float64  `json:"score"`
 	MatchedIn []string `json:"matched_in"`

@@ -83,7 +83,7 @@ func New(options Options) (*sdkmcp.Server, error) {
 		Description: "Scoped Kata data and administration tools for coding agents.",
 		Version:     options.Version,
 	}, &sdkmcp.ServerOptions{
-		Instructions: "Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + ".",
+		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + ".",
 		Capabilities: &sdkmcp.ServerCapabilities{
 			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
@@ -720,6 +720,7 @@ type ProjectIdentity struct {
 
 // IssueSummary is the compact issue form used by list-like tools.
 type IssueSummary struct {
+	WebURL       *string   `json:"web_url,omitempty" jsonschema:"Browser URL for this issue; use this URL when linking to it."`
 	UID          string    `json:"uid"`
 	Ref          string    `json:"ref"`
 	QualifiedRef string    `json:"qualified_ref"`

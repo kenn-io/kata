@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
@@ -2747,4 +2749,36 @@ func TestIssueResponses_PATCHChangesCarryProjectAndQualifiedID(t *testing.T) {
 	assert.Equal(t, target, out.Changes.BlocksAdded[0].ShortID)
 	assert.Equal(t, project.Name, out.Changes.BlocksAdded[0].Project)
 	assert.Equal(t, project.Name+"#"+target, out.Changes.BlocksAdded[0].QualifiedID)
+}
+
+func TestIssueBrowserURLs(t *testing.T) {
+	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: "https://tasks.example", InstanceID: "browser_links"})
+	require.NoError(t, err)
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.WebSessions = manager
+		cfg.ActiveWebDaemon = "example-remote"
+		cfg.WebDaemons = []config.CatalogDaemonConfig{{Name: "example-local", Local: true}, {Name: "example-remote", URL: "https://remote.example"}}
+	})
+	pid, parent, _ := setupTwoIssues(t, env)
+	var show struct {
+		WebURL string `json:"web_url"`
+		Issue  struct {
+			UID string `json:"uid"`
+		} `json:"issue"`
+	}
+	envGetJSON(t, env, issuePath(pid, parent, ""), &show)
+	assert.Equal(t, "https://tasks.example/kata?issue="+show.Issue.UID+"#direct=1", show.WebURL)
+	for _, path := range []string{projectPath(pid) + "/issues", "/api/v1/issues", projectPath(pid) + "/ready", "/api/v1/ready"} {
+		var list struct {
+			Issues []struct {
+				UID    string `json:"uid"`
+				WebURL string `json:"web_url"`
+			} `json:"issues"`
+		}
+		envGetJSON(t, env, path, &list)
+		require.NotEmpty(t, list.Issues)
+		for _, issue := range list.Issues {
+			assert.Equal(t, "https://tasks.example/kata?issue="+issue.UID+"#direct=1", issue.WebURL)
+		}
+	}
 }

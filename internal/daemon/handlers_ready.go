@@ -39,6 +39,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		out := &api.ReadyResponse{}
+		addIssueWebURLs(cfg, issueOuts)
 		out.Body.Issues = issueOuts
 		return out, nil
 	})
@@ -74,6 +75,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		rows := make([]api.ReadyGlobalIssueOut, len(issueOuts))
 		for i, io := range issueOuts {
+			io.WebURL = issueWebURL(cfg, io.UID)
 			rows[i] = api.ReadyGlobalIssueOut{IssueOut: io, ProjectName: issues[i].ProjectName}
 		}
 		out := &api.ReadyGlobalResponse{}

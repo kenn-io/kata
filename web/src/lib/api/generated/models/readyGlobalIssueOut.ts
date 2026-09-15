@@ -35,5 +35,7 @@ export interface ReadyGlobalIssueOut {
   title: string
   uid: string
   updated_at: string
+  /** Browser URL for this issue in the owning daemon. */
+  web_url?: string
   [key: string]: unknown
 }

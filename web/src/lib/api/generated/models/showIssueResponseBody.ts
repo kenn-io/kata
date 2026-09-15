@@ -28,5 +28,7 @@ export interface ShowIssueResponseBody {
   parent?: IssueRef
   pending_claims?: PendingClaimOut[]
   pending_leases?: PendingClaimOut[]
+  /** Browser URL for this issue in the owning daemon. */
+  web_url?: string
   [key: string]: unknown
 }

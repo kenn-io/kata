@@ -2118,6 +2118,9 @@ components:
         updated_at:
           format: date-time
           type: string
+        web_url:
+          description: Browser URL for this issue in the owning daemon.
+          type: string
       required:
         - qualified_id
         - id
@@ -2523,6 +2526,9 @@ components:
           type: string
         updated_at:
           format: date-time
+          type: string
+        web_url:
+          description: Browser URL for this issue in the owning daemon.
           type: string
       required:
         - project_name
@@ -3413,6 +3419,9 @@ components:
         updated_at:
           format: date-time
           type: string
+        web_url:
+          description: Browser URL for this issue in the owning daemon.
+          type: string
       required:
         - project_name
         - qualified_id
@@ -3794,6 +3803,9 @@ components:
         score:
           format: double
           type: number
+        web_url:
+          description: Browser URL for this issue in the owning daemon.
+          type: string
       required:
         - issue
         - score
@@ -3872,6 +3884,9 @@ components:
           items:
             $ref: "#/components/schemas/PendingClaimOut"
           type: array
+        web_url:
+          description: Browser URL for this issue in the owning daemon.
+          type: string
       required:
         - issue
         - comments
