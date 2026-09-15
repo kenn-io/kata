@@ -1,12 +1,10 @@
 package tui
 
 import (
-	"bytes"
 	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -179,16 +177,35 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 
 // CreateIssue posts a new issue. body.IdempotencyKey rides the
 // Idempotency-Key header per spec §4.4 when non-empty.
-func (c *Client) CreateIssue(
-	ctx context.Context, projectID int64, body CreateIssueBody,
-) (*MutationResp, error) {
-	headers := map[string]string{}
+func (c *Client) CreateIssue(ctx context.Context, projectID int64, body CreateIssueBody) (*MutationResp, error) {
+	payload := &generated.CreateIssueBody{Title: body.Title, Actor: &body.Actor, Owner: body.Owner, Labels: body.Labels}
+	if body.Body != "" {
+		payload.Body = &body.Body
+	}
+	if body.ForceNew {
+		payload.ForceNew = &body.ForceNew
+	}
+	for _, link := range body.Links {
+		item := generated.CreateInitialLinkBody{Type: generated.CreateInitialLinkBodyType(link.Type), ToRef: link.ToRef}
+		if link.Incoming {
+			item.Incoming = new(true)
+		}
+		payload.Links = append(payload.Links, item)
+	}
+	options := &generated.CreateIssueRequestOptions{PathParams: &generated.CreateIssuePath{ProjectID: fmt.Sprint(projectID)}, Body: payload}
 	if body.IdempotencyKey != "" {
-		headers["Idempotency-Key"] = body.IdempotencyKey
+		options.Header = &generated.CreateIssueHeaders{IdempotencyKey: &body.IdempotencyKey}
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.CreateIssueWithResponse(ctx, options)
+	if wire == nil {
+		return nil, callErr
 	}
 	var resp MutationResp
-	path := fmt.Sprintf("/api/v1/projects/%d/issues", projectID)
-	if err := c.doWithHeaders(ctx, http.MethodPost, path, body, &resp, headers); err != nil {
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -199,106 +216,202 @@ func (c *Client) CreateIssue(
 // CLI-side closes; forwarded and non-loopback requests reject that exemption.
 // The structural guards (parent-close completeness, sibling throttle,
 // repeated-message) still apply.
-func (c *Client) Close(
-	ctx context.Context, projectID int64, ref, actor string,
-) (*MutationResp, error) {
-	body := map[string]string{"actor": actor, "source": "tui", "reason": "done"}
-	return c.mutate(ctx, http.MethodPost,
-		issuePath(projectID, ref)+"/actions/close", body)
+func (c *Client) Close(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error) {
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.CloseIssueWithResponse(ctx, &generated.CloseIssueRequestOptions{PathParams: &generated.CloseIssuePath{ProjectID: projectID, Ref: ref}, Body: &generated.CloseIssueBody{Actor: &actor, Source: new(generated.CloseActionRequestBodySource("tui")), Reason: new(generated.CloseActionRequestBodyReason("done"))}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // Reopen transitions the issue back to status=open.
-func (c *Client) Reopen(
-	ctx context.Context, projectID int64, ref, actor string,
-) (*MutationResp, error) {
-	return c.mutate(ctx, http.MethodPost,
-		issuePath(projectID, ref)+"/actions/reopen", actorBody(actor))
+func (c *Client) Reopen(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error) {
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.ReopenIssueWithResponse(ctx, &generated.ReopenIssueRequestOptions{PathParams: &generated.ReopenIssuePath{ProjectID: projectID, Ref: ref}, Body: &generated.ReopenIssueBody{Actor: &actor}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // AddComment appends a new comment to the issue.
-func (c *Client) AddComment(
-	ctx context.Context, projectID int64, ref, body, actor string,
-) (*MutationResp, error) {
-	return c.mutate(ctx, http.MethodPost, issuePath(projectID, ref)+"/comments",
-		map[string]string{"body": body, "actor": actor})
+func (c *Client) AddComment(ctx context.Context, projectID int64, ref, body, actor string) (*MutationResp, error) {
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.CreateCommentWithResponse(ctx, &generated.CreateCommentRequestOptions{PathParams: &generated.CreateCommentPath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.CreateCommentBody{Actor: &actor, Body: body}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // AddLabel attaches a label to the issue.
-func (c *Client) AddLabel(
-	ctx context.Context, projectID int64, ref, label, actor string,
-) (*MutationResp, error) {
-	return c.mutate(ctx, http.MethodPost, issuePath(projectID, ref)+"/labels",
-		map[string]string{"label": label, "actor": actor})
+func (c *Client) AddLabel(ctx context.Context, projectID int64, ref, label, actor string) (*MutationResp, error) {
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.AddLabelWithResponse(ctx, &generated.AddLabelRequestOptions{PathParams: &generated.AddLabelPath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.AddLabelBody{Actor: &actor, Label: label}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // RemoveLabel sends actor in the query string because DELETE bodies are
 // non-portable; the label is path-escaped to survive '/' and similar.
-func (c *Client) RemoveLabel(
-	ctx context.Context, projectID int64, ref, label, actor string,
-) (*MutationResp, error) {
-	path := fmt.Sprintf("%s/labels/%s?actor=%s",
-		issuePath(projectID, ref), url.PathEscape(label), url.QueryEscape(actor))
-	return c.mutate(ctx, http.MethodDelete, path, nil)
+func (c *Client) RemoveLabel(ctx context.Context, projectID int64, ref, label, actor string) (*MutationResp, error) {
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.RemoveLabelWithResponse(ctx, &generated.RemoveLabelRequestOptions{PathParams: &generated.RemoveLabelPath{ProjectID: projectID, Ref: ref, Label: label}, Query: &generated.RemoveLabelQuery{Actor: &actor}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // Assign sets the issue owner. Empty owner routes to /actions/unassign
 // because the daemon's PATCH endpoint cannot represent the clear case
 // (string vs null) and /actions/assign rejects empty owners with 400.
-func (c *Client) Assign(
-	ctx context.Context, projectID int64, ref, owner, actor string,
-) (*MutationResp, error) {
-	if owner == "" {
-		return c.mutate(ctx, http.MethodPost,
-			issuePath(projectID, ref)+"/actions/unassign", actorBody(actor))
+func (c *Client) Assign(ctx context.Context, projectID int64, ref, owner, actor string) (*MutationResp, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
 	}
-	return c.mutate(ctx, http.MethodPost,
-		issuePath(projectID, ref)+"/actions/assign",
-		map[string]string{"owner": owner, "actor": actor})
+	var resp MutationResp
+	if owner == "" {
+		wire, callErr := apiClient.UnassignIssueWithResponse(ctx, &generated.UnassignIssueRequestOptions{PathParams: &generated.UnassignIssuePath{ProjectID: projectID, Ref: ref}, Body: &generated.UnassignIssueBody{Actor: &actor}})
+		if wire == nil {
+			return nil, callErr
+		}
+		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp)
+	} else {
+		wire, callErr := apiClient.AssignIssueWithResponse(ctx, &generated.AssignIssueRequestOptions{PathParams: &generated.AssignIssuePath{ProjectID: projectID, Ref: ref}, Body: &generated.AssignIssueBody{Actor: &actor, Owner: owner}})
+		if wire == nil {
+			return nil, callErr
+		}
+		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // SetPriority sends the issue's priority through /actions/priority. A
 // nil priority clears the field. Mirrors Assign's pattern of routing
 // the optional/clear case through the same endpoint with a nil body
 // field; the daemon distinguishes set-vs-clear from the JSON shape.
-func (c *Client) SetPriority(
-	ctx context.Context, projectID int64, ref string, priority *int64, actor string,
-) (*MutationResp, error) {
-	body := map[string]any{"actor": actor}
-	if priority != nil {
-		body["priority"] = *priority
+func (c *Client) SetPriority(ctx context.Context, projectID int64, ref string, priority *int64, actor string) (*MutationResp, error) {
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
 	}
-	return c.mutate(ctx, http.MethodPost,
-		issuePath(projectID, ref)+"/actions/priority", body)
+	wire, callErr := apiClient.SetIssuePriorityWithResponse(ctx, &generated.SetIssuePriorityRequestOptions{PathParams: &generated.SetIssuePriorityPath{ProjectID: projectID, Ref: ref}, Body: &generated.SetIssuePriorityBody{Actor: &actor, Priority: priority}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // AddLink creates a typed link from this issue to body.ToRef. The
 // daemon's CreateLinkRequest.Body is {actor, type, to_ref}; ToRef
 // accepts a short_id, qualified short_id ("kata#abc4"), or a 26-char
 // ULID.
-func (c *Client) AddLink(
-	ctx context.Context, projectID int64, ref string, body LinkBody, actor string,
-) (*MutationResp, error) {
-	return c.mutate(ctx, http.MethodPost, issuePath(projectID, ref)+"/links",
-		map[string]any{"type": body.Type, "to_ref": body.ToRef, "actor": actor})
+func (c *Client) AddLink(ctx context.Context, projectID int64, ref string, body LinkBody, actor string) (*MutationResp, error) {
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.CreateLinkWithResponse(ctx, &generated.CreateLinkRequestOptions{PathParams: &generated.CreateLinkPath{ProjectID: projectID, Ref: ref}, Body: &generated.CreateLinkBody{Actor: &actor, Type: generated.CreateLinkRequestBodyType(body.Type), ToRef: body.ToRef}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // RemoveLink deletes a link by id. actor rides the query string per the
 // DELETE-body portability convention.
-func (c *Client) RemoveLink(
-	ctx context.Context, projectID int64, ref string, linkID int64, actor string,
-) (*MutationResp, error) {
-	path := fmt.Sprintf("%s/links/%d?actor=%s",
-		issuePath(projectID, ref), linkID, url.QueryEscape(actor))
-	return c.mutate(ctx, http.MethodDelete, path, nil)
+func (c *Client) RemoveLink(ctx context.Context, projectID int64, ref string, linkID int64, actor string) (*MutationResp, error) {
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.DeleteLinkWithResponse(ctx, &generated.DeleteLinkRequestOptions{PathParams: &generated.DeleteLinkPath{ProjectID: projectID, Ref: ref, LinkID: linkID}, Query: &generated.DeleteLinkQuery{Actor: actor}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // EditBody replaces issue.body via PATCH. v1 only supports body edits
 // from the TUI; title edits would reuse the same endpoint.
-func (c *Client) EditBody(
-	ctx context.Context, projectID int64, ref, body, actor string,
-) (*MutationResp, error) {
-	return c.mutate(ctx, http.MethodPatch, issuePath(projectID, ref),
-		map[string]any{"body": body, "actor": actor})
+func (c *Client) EditBody(ctx context.Context, projectID int64, ref, body, actor string) (*MutationResp, error) {
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.EditIssueWithResponse(ctx, &generated.EditIssueRequestOptions{PathParams: &generated.EditIssuePath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.EditIssueBody{Actor: &actor, Body: &body}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // ResolveProject runs the §4.2 resolution flow against startPath.
@@ -336,8 +449,24 @@ func (c *Client) resolveProject(
 			return nil, err
 		}
 	}
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	var payload generated.ResolveProjectBody
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return nil, err
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.ResolveProjectWithResponse(ctx, &generated.ResolveProjectRequestOptions{Body: &payload})
+	if wire == nil {
+		return nil, callErr
+	}
 	var resp ResolveResp
-	if err := c.do(ctx, http.MethodPost, "/api/v1/projects/resolve", req, &resp); err != nil {
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return nil, err
 	}
 	if repair != nil {
@@ -501,10 +630,19 @@ func (c *Client) EnsureProject(ctx context.Context, name, actor string) (Project
 	var resp struct {
 		Project ProjectSummary `json:"project"`
 	}
-	err := c.do(ctx, http.MethodPost, "/api/v1/projects", map[string]string{
-		"name": name, "actor": actor,
-	}, &resp)
-	return resp.Project, err
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return resp.Project, err
+	}
+	wire, callErr := apiClient.InitProjectWithResponse(ctx, &generated.InitProjectRequestOptions{Body: &generated.InitProjectBody{Name: &name, Actor: &actor}})
+	if wire == nil {
+		return resp.Project, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return resp.Project, err
+	}
+	return resp.Project, nil
 }
 
 // FederationStatus returns redacted federation status for all local bindings.
@@ -525,36 +663,71 @@ func (c *Client) FederationStatus(ctx context.Context) (FederationStatusBody, er
 }
 
 // EnableFederation enables federation metadata for an existing project.
-func (c *Client) EnableFederation(
-	ctx context.Context,
-	projectID int64,
-	actor string,
-) (ProjectFederationMetadata, error) {
+func (c *Client) EnableFederation(ctx context.Context, projectID int64, actor string) (ProjectFederationMetadata, error) {
 	var resp ProjectFederationMetadata
-	err := c.do(ctx, http.MethodPost,
-		fmt.Sprintf("/api/v1/projects/%d/federation/enable", projectID),
-		map[string]string{"actor": actor}, &resp)
-	return resp, err
+
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return resp, err
+	}
+	wire, callErr := apiClient.EnableProjectFederationWithResponse(ctx, &generated.EnableProjectFederationRequestOptions{PathParams: &generated.EnableProjectFederationPath{ProjectID: projectID}, Body: &generated.EnableProjectFederationBody{Actor: &actor}})
+	if wire == nil {
+		return resp, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
 }
 
 // CreateFederationEnrollment creates a temporary hub enrollment token.
-func (c *Client) CreateFederationEnrollment(
-	ctx context.Context,
-	body CreateFederationEnrollmentInput,
-) (FederationEnrollment, error) {
+func (c *Client) CreateFederationEnrollment(ctx context.Context, body CreateFederationEnrollmentInput) (FederationEnrollment, error) {
 	var resp FederationEnrollment
-	err := c.do(ctx, http.MethodPost, "/api/v1/federation/enrollments", body, &resp)
-	return resp, err
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return resp, err
+	}
+	var payload generated.CreateFederationEnrollmentBody
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return resp, err
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return resp, err
+	}
+	wire, callErr := apiClient.CreateFederationEnrollmentWithResponse(ctx, &generated.CreateFederationEnrollmentRequestOptions{Body: &payload})
+	if wire == nil {
+		return resp, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
 }
 
 // CreateFederationReplica joins or adopts a local project as a spoke.
-func (c *Client) CreateFederationReplica(
-	ctx context.Context,
-	body CreateFederationReplicaInput,
-) (FederationReplicaResult, error) {
+func (c *Client) CreateFederationReplica(ctx context.Context, body CreateFederationReplicaInput) (FederationReplicaResult, error) {
 	var resp FederationReplicaResult
-	err := c.do(ctx, http.MethodPost, "/api/v1/federation/replicas", body, &resp)
-	return resp, err
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return resp, err
+	}
+	var payload generated.CreateFederationReplicaBody
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return resp, err
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return resp, err
+	}
+	wire, callErr := apiClient.CreateFederationReplicaWithResponse(ctx, &generated.CreateFederationReplicaRequestOptions{Body: &payload})
+	if wire == nil {
+		return resp, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
 }
 
 // ListFederationEnrollments lists the hub's federation transport grants. Used
@@ -581,22 +754,42 @@ func (c *Client) ListFederationEnrollments(ctx context.Context) ([]FederationEnr
 // RevokeFederationEnrollment revokes one hub enrollment by ID. Revocation is
 // idempotent at the daemon; an already-revoked row still reports revoked.
 func (c *Client) RevokeFederationEnrollment(ctx context.Context, enrollmentID int64) error {
-	path := fmt.Sprintf("/api/v1/federation/enrollments/%d/revoke", enrollmentID)
-	return c.do(ctx, http.MethodPost, path, map[string]any{}, nil)
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return err
+	}
+	wire, callErr := apiClient.RevokeFederationEnrollmentWithResponse(ctx, &generated.RevokeFederationEnrollmentRequestOptions{PathParams: &generated.RevokeFederationEnrollmentPath{EnrollmentID: enrollmentID}})
+	if wire == nil {
+		return callErr
+	}
+	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
 }
 
 // LeaveFederationReplica tears down a local spoke replica (detach or archive).
 // This is the local-only daemon primitive; the hub revoke is composed by the
 // caller before invoking it, mirroring the CLI leave orchestration.
-func (c *Client) LeaveFederationReplica(
-	ctx context.Context,
-	projectID int64,
-	body LeaveFederationReplicaInput,
-) (LeaveFederationReplicaResult, error) {
+func (c *Client) LeaveFederationReplica(ctx context.Context, projectID int64, body LeaveFederationReplicaInput) (LeaveFederationReplicaResult, error) {
 	var resp LeaveFederationReplicaResult
-	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", projectID)
-	err := c.do(ctx, http.MethodPost, path, body, &resp)
-	return resp, err
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return resp, err
+	}
+	var payload generated.LeaveFederationReplicaBody
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return resp, err
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return resp, err
+	}
+	wire, callErr := apiClient.LeaveFederationReplicaWithResponse(ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: projectID}, Body: &payload})
+	if wire == nil {
+		return resp, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
 }
 
 // ListProjectsWithStats returns every active project with per-project
@@ -750,54 +943,6 @@ func (c *Client) showIssue(ctx context.Context, projectID int64, ref string) (*s
 	return &resp, nil
 }
 
-func issuePath(projectID int64, ref string) string {
-	return fmt.Sprintf("/api/v1/projects/%d/issues/%s", projectID, url.PathEscape(ref))
-}
-
-func actorBody(actor string) map[string]string { return map[string]string{"actor": actor} }
-
-// mutate is the shared shape of every mutation method: encode body,
-// dispatch, decode the §4.5 envelope.
-func (c *Client) mutate(ctx context.Context, method, path string, body any) (*MutationResp, error) {
-	var resp MutationResp
-	if err := c.do(ctx, method, path, body, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
-func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
-	return c.doWithHeaders(ctx, method, path, body, out, nil)
-}
-
-func (c *Client) doWithHeaders(
-	ctx context.Context, method, path string, body, out any, headers map[string]string,
-) error {
-	req, err := buildRequest(ctx, method, c.base+path, body)
-	if err != nil {
-		return err
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := c.sendRequest(ctx, req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 400 {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
-		return decodeError(body, resp.StatusCode, method, path)
-	}
-	if out == nil {
-		return nil
-	}
-	return json.UnmarshalRead(resp.Body, out)
-}
-
 func (c *Client) httpClient() *http.Client {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -938,22 +1083,6 @@ func redactURLUserinfo(raw string) string {
 	}
 	u.User = url.User("***")
 	return u.String()
-}
-
-func buildRequest(ctx context.Context, method, fullURL string, body any) (*http.Request, error) {
-	if body == nil {
-		return http.NewRequestWithContext(ctx, method, fullURL, nil)
-	}
-	b, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, method, fullURL, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	return req, nil
 }
 
 func decodeError(body []byte, status int, method, path string) error {
