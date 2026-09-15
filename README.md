@@ -75,6 +75,41 @@ Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin` (often
 [Install](docs/get-started/install.md) for package downloads, manual release
 downloads, and build-from-source steps.
 
+```mermaid
+flowchart TB
+  arrive{"Work arrives"} --> search["Search first:<br/>kata search #34;#60;terms#62;#34; --agent<br/>Reuse an open issue or create one."]
+  search --> route{"Work it, or delegate it?"}
+
+  subgraph workside[" "]
+    direction TB
+    claim["On claim or start, mark it tracked:<br/>kata meta set #60;ref#62; work.attention ok"]
+    branch["If the work happens on a dedicated branch, stamp it once:<br/>kata meta set #60;ref#62; work.branch #60;branch#62;<br/>or bind at creation:<br/>kata create ... --meta work.branch=#60;branch#62; --idempotency-key #60;key#62;"]
+    live["Keep state current:<br/>kata meta set #60;ref#62; work.attention stuck#124;needs-human#124;ok<br/>kata meta set #60;ref#62; work.attention_msg #34;#60;why#62;#34;<br/>stuck = blocked; needs-human = input/review; ok = unblocked.<br/>Request attention:<br/>kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --message #60;reason#62;"]
+    claim --> branch --> live
+  end
+
+  subgraph delegateside[" "]
+    direction TB
+    fanout["Tracked children: --parent #60;ref#62;, --meta work.branch=#60;branch#62;,<br/>--idempotency-key #60;key#62;, --json; capture .issue.short_id.<br/>Subagents: distinct KATA_TEAMMATE and<br/>KATA_INBOX_USER=#60;actor#62;/#60;teammate#62;; keep the actor.<br/>Read requests: kata inbox --for #60;actor#62;[/#60;teammate#62;].<br/>After handling: kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --clear."]
+    join["Join with kata wait #60;refs#62; --until attention --any<br/>Matches needs-human or stuck; a close also completes the wait,<br/>and the reported reason distinguishes which. Use --timeout so a<br/>wrapper can tell timeout from satisfaction."]
+    coord["Read delegated work.*; never write it."]
+    fanout --> join --> coord
+  end
+
+  route -->|work it| claim
+  route -->|delegate it| fanout
+  route -->|record only| park
+  live --> done
+  coord --> done
+
+  done{"Verified complete?"}
+  done -->|yes| close["kata close #60;ref#62; --done<br/>with a message and evidence"]
+  done -->|no| park{"Park it?"}
+  park -->|start date known| schedule["kata schedule #60;ref#62; #60;date-or-time#62;<br/>sets scheduled_on; clear with -"]
+  park -->|start date unknown| someday["kata meta set #60;ref#62; someday true --json-value<br/>clear with kata meta unset #60;ref#62; someday"]
+  park -->|needs review| review["kata label add #60;ref#62; needs-review<br/>plus a comment on what remains"]
+```
+
 ## Quickstart
 
 ```sh
