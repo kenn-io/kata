@@ -1022,7 +1022,7 @@ func TestSearchLabelCeilingHonorsModeStrictness(t *testing.T) {
 	if !res.Degraded {
 		t.Fatalf("auto search must report filters that consume the candidate ceiling, got %d hits and no signal", len(res.Hits))
 	}
-	const want = "label filters exhausted the semantic candidate ceiling; semantic results may be incomplete"
+	const want = "search filters exhausted the semantic candidate ceiling; semantic results may be incomplete"
 	if res.DegradedReason != want {
 		t.Fatalf("degraded reason = %q, want %q", res.DegradedReason, want)
 	}

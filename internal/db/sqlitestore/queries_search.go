@@ -94,14 +94,18 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	// Label predicates mirror ListIssues (AND across Labels, exclusion for
 	// ExcludeLabels) and live in the candidate row selection, so they narrow
 	// the result set before LIMIT rather than after.
-	var labelArgs []any
+	var filterArgs []any
+	if r.params.Status != "" {
+		rowFilter += "\n\t\t  AND i.status = ?"
+		filterArgs = append(filterArgs, r.params.Status)
+	}
 	for _, label := range r.params.Labels {
 		rowFilter += "\n\t\t  AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)"
-		labelArgs = append(labelArgs, strings.ToLower(label))
+		filterArgs = append(filterArgs, strings.ToLower(label))
 	}
 	for _, label := range r.params.ExcludeLabels {
 		rowFilter += "\n\t\t  AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)"
-		labelArgs = append(labelArgs, strings.ToLower(label))
+		filterArgs = append(filterArgs, strings.ToLower(label))
 	}
 	// Per-column MATCH subqueries replace highlight() because issues_fts is
 	// declared content='' (contentless), and highlight() returns NULL for every
@@ -127,9 +131,9 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 
 	// Bind order: colPhrase (×3 — title MATCH, body MATCH, comments MATCH),
 	// then topPhrase (top-level MATCH), then projectID, then one bind per
-	// label predicate in rowFilter. Reordering the SELECT/WHERE clauses
+	// filter predicate in rowFilter. Reordering the SELECT/WHERE clauses
 	// without updating the bind list will silently transpose binds.
-	args := append([]any{colPhrase, colPhrase, colPhrase, topPhrase, r.params.ProjectID}, labelArgs...)
+	args := append([]any{colPhrase, colPhrase, colPhrase, topPhrase, r.params.ProjectID}, filterArgs...)
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
