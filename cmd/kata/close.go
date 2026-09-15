@@ -4,11 +4,11 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"maps"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
 )
@@ -265,14 +265,56 @@ func runActionWithHeaders(
 	if err != nil {
 		return err
 	}
-	status, bs, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", baseURL, pid, url.PathEscape(issue.RefForAPI), action),
-		body, headers)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	var bs []byte
+	switch action {
+	case "close":
+		var payload generated.CloseIssueBody
+		if err := json.Unmarshal(encoded, &payload); err != nil {
+			return err
+		}
+		options := &generated.CloseIssueRequestOptions{
+			PathParams: &generated.CloseIssuePath{ProjectID: pid, Ref: issue.RefForAPI}, Body: &payload,
+			Header: &generated.CloseIssueHeaders{},
+		}
+		if value, ok := headers["Idempotency-Key"]; ok {
+			options.Header.IdempotencyKey = &value
+		}
+		if value, ok := headers["If-Match"]; ok {
+			options.Header.IfMatch = &value
+		}
+		response, callErr := apiClient.CloseIssueWithResponse(ctx, options)
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		bs = response.Body
+	case "reopen":
+		var payload generated.ReopenIssueBody
+		if err := json.Unmarshal(encoded, &payload); err != nil {
+			return err
+		}
+		response, callErr := apiClient.ReopenIssueWithResponse(ctx, &generated.ReopenIssueRequestOptions{
+			PathParams: &generated.ReopenIssuePath{ProjectID: pid, Ref: issue.RefForAPI}, Body: &payload,
+		})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		bs = response.Body
+	default:
+		return fmt.Errorf("unknown issue action %q", action)
 	}
 	commentKey := ""
 	if key := headers["Idempotency-Key"]; key != "" {

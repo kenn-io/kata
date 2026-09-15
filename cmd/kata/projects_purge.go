@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	"fmt"
-	"net/http"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // projectsPurgeCmd permanently deletes an archived project and frees its name.
@@ -46,16 +47,25 @@ func projectsPurgeCmd() *cobra.Command {
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			body := map[string]any{"actor": actor}
-			if reason != "" {
-				body["reason"] = reason
-			}
-			bs, err := a.doWithHeaders(http.MethodPost,
-				fmt.Sprintf("/api/v1/projects/%d/actions/purge", project.ID),
-				map[string]string{"X-Kata-Confirm": confirm}, body)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 			if err != nil {
 				return err
 			}
+			body := &generated.PurgeProjectBody{Actor: actor}
+			if reason != "" {
+				body.Reason = &reason
+			}
+			response, callErr := apiClient.PurgeProjectWithResponse(ctx, &generated.PurgeProjectRequestOptions{
+				PathParams: &generated.PurgeProjectPath{ProjectID: project.ID}, Body: body,
+				Header: &generated.PurgeProjectHeaders{XKataConfirm: &confirm},
+			})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			return printProjectPurge(cmd, project.Name, bs)
 		},
 	}

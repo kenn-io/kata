@@ -8,13 +8,13 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // newDeleteCmd returns the cobra.Command for `kata delete`.
@@ -112,23 +112,46 @@ func runDestructive(cmd *cobra.Command, baseURL string, pid int64, pathRef, disp
 	extraBody map[string]any) error {
 	ctx := cmd.Context()
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	// Build body from extraBody first so a future caller can't overwrite the
-	// resolved actor with a stray map key.
-	body := map[string]any{}
-	maps.Copy(body, extraBody)
-	body["actor"] = actor
+	body := &generated.DestructiveActionRequestBody{Actor: actor}
+	if reason, ok := extraBody["reason"].(string); ok {
+		body.Reason = &reason
+	}
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return err
 	}
-	postURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", baseURL, pid, url.PathEscape(pathRef), verb)
-	status, bs, err := httpDoJSONWithHeader(ctx, client, http.MethodPost, postURL,
-		map[string]string{"X-Kata-Confirm": confirm}, body)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
+	var bs []byte
+	switch verb {
+	case "delete":
+		response, callErr := apiClient.DeleteIssueWithResponse(ctx, &generated.DeleteIssueRequestOptions{
+			PathParams: &generated.DeleteIssuePath{ProjectID: pid, Ref: pathRef}, Body: body,
+			Header: &generated.DeleteIssueHeaders{XKataConfirm: &confirm},
+		})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		bs = response.Body
+	case "purge":
+		response, callErr := apiClient.PurgeIssueWithResponse(ctx, &generated.PurgeIssueRequestOptions{
+			PathParams: &generated.PurgeIssuePath{ProjectID: pid, Ref: pathRef}, Body: body,
+			Header: &generated.PurgeIssueHeaders{XKataConfirm: &confirm},
+		})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		bs = response.Body
+	default:
+		return fmt.Errorf("unknown destructive action %q", verb)
 	}
 	return printDestructive(cmd, displayRef, verb, bs)
 }

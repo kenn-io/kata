@@ -6,11 +6,11 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newAssignCmd() *cobra.Command {
@@ -65,22 +65,35 @@ func runAssign(cmd *cobra.Command, raw, owner string, unassign bool, expectedOwn
 	if err != nil {
 		return err
 	}
-	action := "assign"
-	body := map[string]any{"actor": actor, "owner": owner}
-	if unassign {
-		action = "unassign"
-		body = map[string]any{"actor": actor}
-		if expectedOwner != nil {
-			body["expected_owner"] = *expectedOwner
-		}
-	}
-	postURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", baseURL, pid, url.PathEscape(issue.RefForAPI), action)
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, postURL, body)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
+	var bs []byte
+	if unassign {
+		response, callErr := apiClient.UnassignIssueWithResponse(ctx, &generated.UnassignIssueRequestOptions{
+			PathParams: &generated.UnassignIssuePath{ProjectID: pid, Ref: issue.RefForAPI},
+			Body:       &generated.UnassignIssueBody{Actor: &actor, ExpectedOwner: expectedOwner},
+		})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		bs = response.Body
+	} else {
+		response, callErr := apiClient.AssignIssueWithResponse(ctx, &generated.AssignIssueRequestOptions{
+			PathParams: &generated.AssignIssuePath{ProjectID: pid, Ref: issue.RefForAPI},
+			Body:       &generated.AssignIssueBody{Actor: &actor, Owner: owner},
+		})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		bs = response.Body
 	}
 	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, handle); err != nil {
 		return err
