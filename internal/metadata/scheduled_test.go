@@ -225,3 +225,32 @@ func TestDeadlineOnCalendarDateWithoutDeadline(t *testing.T) {
 	assert.False(t, present)
 	assert.Empty(t, date)
 }
+
+func TestScheduleFieldDueEvaluatesEitherPlanningField(t *testing.T) {
+	now := time.Date(2026, 9, 16, 9, 0, 0, 0, time.UTC)
+	raw := `{"scheduled_on":"2026-09-16T09:01","deadline_on":"2026-09-16T09:00"}`
+
+	value, present, due, err := ScheduleFieldDue(raw, "scheduled_on", now, "UTC")
+	require.NoError(t, err)
+	assert.Equal(t, "2026-09-16T09:01", value)
+	assert.True(t, present)
+	assert.False(t, due)
+
+	value, present, due, err = ScheduleFieldDue(raw, "deadline_on", now, "UTC")
+	require.NoError(t, err)
+	assert.Equal(t, "2026-09-16T09:00", value)
+	assert.True(t, present)
+	assert.True(t, due)
+
+	value, present, due, err = ScheduleFieldDue(`{"timezone":"UTC"}`, "deadline_on", now, "")
+	require.NoError(t, err)
+	assert.Empty(t, value)
+	assert.False(t, present)
+	assert.False(t, due)
+}
+
+func TestScheduleFieldDueRejectsUnknownField(t *testing.T) {
+	_, _, _, err := ScheduleFieldDue(`{}`, "reminder_on", time.Now(), "UTC")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "planning field")
+}

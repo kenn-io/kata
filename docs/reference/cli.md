@@ -447,7 +447,10 @@ revision behavior as the metadata commands.
 
 Use `scheduled_on` to keep an issue out of `ready` and `next` until a date or
 time. Use `someday=true` to park it with no date. A deadline value is only a
-deadline; it does not park the issue:
+deadline; it does not park the issue. When either date is reached, the daemon
+writes an ordinary inbox request for the current owner, or the author when the
+issue is unowned. A request already in that recipient's slot takes precedence;
+the date remains eligible after that request is cleared:
 
 ```sh
 kata schedule abc4 2026-09-01T09:30
@@ -488,6 +491,13 @@ control characters. `--for` overrides `KATA_INBOX_USER`; an actor inbox does
 not aggregate its `actor/*` teammate addresses. Neither the agent's author nor
 the OS account supplies a default recipient. Recipient
 filtering is not access control: the existing daemon trust boundary applies.
+
+The daemon also uses these same request slots when `scheduled_on` or
+`deadline_on` is reached. These requests come from `system`, keep the planning
+field and its original value in the message, and follow the same inbox and clear
+commands. Clearing a generated request acknowledges that exact field value for
+that recipient. Changing the date or recipient makes the new combination
+eligible. No reminder object or separate delivery queue is involved.
 
 Normal inbox output includes every matching request and supports `--json` and
 `--agent`. Human output reports an empty inbox unless `--quiet` is set.
