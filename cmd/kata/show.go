@@ -7,8 +7,6 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -58,13 +56,9 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err != nil {
 		return err
 	}
-	httpStatus, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, pid, url.PathEscape(ref.RefForAPI)), nil)
+	_, bs, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI)
 	if err != nil {
 		return err
-	}
-	if httpStatus >= 400 {
-		return apiErrFromBody(httpStatus, bs)
 	}
 	mode := currentOutputMode()
 	if mode == outputJSON {

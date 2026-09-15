@@ -8,13 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newMetaCmd() *cobra.Command {
@@ -310,44 +311,62 @@ func runMetaPatchGuarded(
 	// Without --if-match the patch is deliberately unconditional:
 	// last-write-wins is the intended default for convention keys like
 	// work.attention, so no revision is fetched and no If-Match is sent.
-	headers := map[string]string{}
+	options := &generated.PatchIssueMetadataRequestOptions{
+		PathParams: &generated.PatchIssueMetadataPath{ProjectID: pid, Ref: ref.RefForAPI},
+		Body:       &generated.PatchIssueMetadataBody{Patch: map[string]any{key: value}},
+	}
 	if strings.TrimSpace(ifMatch) != "" {
 		etag, err := normalizeMetaIfMatch(ifMatch)
 		if err != nil {
 			return err
 		}
-		headers["If-Match"] = etag
+		options.Header = &generated.PatchIssueMetadataHeaders{IfMatch: &etag}
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	body := map[string]any{
-		"actor": actor,
-		"patch": map[string]jsontext.Value{key: value},
-	}
+	options.Body.Actor = &actor
 	if guard != nil {
-		body["guard"] = guard
+		encoded, err := json.Marshal(guard)
+		if err != nil {
+			return err
+		}
+		options.Body.Guard = new(generated.MetadataPatchGuard)
+		if err := json.Unmarshal(encoded, options.Body.Guard); err != nil {
+			return err
+		}
 	}
-	status, bs, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", baseURL, pid, url.PathEscape(ref.RefForAPI)),
-		body,
-		headers)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return metaAPIError(status, bs)
+	response, callErr := apiClient.PatchIssueMetadataWithResponse(ctx, options)
+	if response == nil {
+		return callErr
 	}
+	if response.StatusCode >= 400 {
+		return metaAPIError(response.StatusCode, response.Body)
+	}
+	if callErr != nil {
+		return callErr
+	}
+	bs := response.Body
 	return printMetaPatch(cmd, bs, verb, key)
 }
 
 func fetchMetaIssue(ctx context.Context, client *http.Client, baseURL string, pid int64, ref string) (metaIssueWire, []byte, error) {
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, pid, url.PathEscape(ref)), nil)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return metaIssueWire{}, nil, err
 	}
-	if status >= 400 {
-		return metaIssueWire{}, nil, apiErrFromBody(status, bs)
+	response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
+		PathParams: &generated.ShowIssuePath{ProjectID: pid, Ref: ref},
+	})
+	if err := externalCLITransportError(response, callErr); err != nil {
+		return metaIssueWire{}, nil, err
 	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return metaIssueWire{}, nil, err
+	}
+	bs := response.Body
 	var out metaShowResponse
 	if err := json.Unmarshal(bs, &out); err != nil {
 		return metaIssueWire{}, nil, err

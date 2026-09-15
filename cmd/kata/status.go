@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 type issueStatusProjection struct {
@@ -61,14 +61,16 @@ func runIssueStatus(cmd *cobra.Command, issueRef string) error {
 		return err
 	}
 
+	_, body, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI)
+	if err != nil {
+		return err
+	}
 	var show showResponseForCLI
-	if err := getStatusPayload(ctx, client,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, pid, url.PathEscape(ref.RefForAPI)),
-		&show); err != nil {
+	if err := json.Unmarshal(body, &show); err != nil {
 		return err
 	}
 	var instance instanceStatusForCLI
-	if err := getStatusPayload(ctx, client, baseURL+"/api/v1/instance", &instance); err != nil {
+	if err := getInstanceStatus(ctx, client, baseURL, &instance); err != nil {
 		return err
 	}
 
@@ -107,15 +109,19 @@ func runIssueStatus(cmd *cobra.Command, issueRef string) error {
 	return printIssueStatus(cmd, projection)
 }
 
-func getStatusPayload(ctx context.Context, client *http.Client, target string, out any) error {
-	status, body, err := httpDoJSON(ctx, client, http.MethodGet, target, nil)
+func getInstanceStatus(ctx context.Context, client *http.Client, baseURL string, out any) error {
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= http.StatusBadRequest {
-		return apiErrFromBody(status, body)
+	response, callErr := apiClient.InstanceWithResponse(ctx)
+	if err := externalCLITransportError(response, callErr); err != nil {
+		return err
 	}
-	return json.Unmarshal(body, out)
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return err
+	}
+	return json.Unmarshal(response.Body, out)
 }
 
 func projectedHoldState(

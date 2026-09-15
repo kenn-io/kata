@@ -5,11 +5,12 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // `kata attention-hook <start|end>` is launcher-only lifecycle plumbing for
@@ -171,15 +172,21 @@ func (l *liveAttnDaemon) lookup(ref string) attnLookup {
 	if err != nil {
 		return attnLookup{kind: lookupTransient}
 	}
-	status, body, err := httpDoJSON(ctx, client, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, pid, url.PathEscape(resolved.RefForAPI)), nil)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return attnLookup{kind: lookupTransient}
 	}
+	wire, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
+		PathParams: &generated.ShowIssuePath{ProjectID: pid, Ref: resolved.RefForAPI},
+	})
+	if wire == nil {
+		return attnLookup{kind: lookupTransient}
+	}
+	status, body := wire.StatusCode, wire.Body
 	if status == http.StatusNotFound {
 		return attnLookup{kind: lookupGone}
 	}
-	if status >= http.StatusBadRequest {
+	if status >= http.StatusBadRequest || callErr != nil {
 		return attnLookup{kind: lookupTransient}
 	}
 	var response metaShowResponse
@@ -209,7 +216,7 @@ func (l *liveAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, 
 		return attnWriteFailed
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	rawPatch := make(map[string]jsontext.Value, len(patch))
+	rawPatch := make(map[string]any, len(patch))
 	for key, value := range patch {
 		valueJSON, err := json.Marshal(value)
 		if err != nil {
@@ -217,19 +224,24 @@ func (l *liveAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, 
 		}
 		rawPatch[key] = jsontext.Value(valueJSON)
 	}
-	status, _, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", baseURL, pid, url.PathEscape(resolved.RefForAPI)),
-		map[string]any{
-			"actor": actor,
-			"patch": rawPatch,
-		}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, revision)})
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return attnWriteFailed
 	}
+	etag := fmt.Sprintf(`"rev-%d"`, revision)
+	response, callErr := apiClient.PatchIssueMetadataWithResponse(ctx, &generated.PatchIssueMetadataRequestOptions{
+		PathParams: &generated.PatchIssueMetadataPath{ProjectID: pid, Ref: resolved.RefForAPI},
+		Body:       &generated.PatchIssueMetadataBody{Actor: &actor, Patch: rawPatch},
+		Header:     &generated.PatchIssueMetadataHeaders{IfMatch: &etag},
+	})
+	if response == nil {
+		return attnWriteFailed
+	}
+	status := response.StatusCode
 	if status == http.StatusPreconditionFailed {
 		return attnWriteConflict
 	}
-	if status >= http.StatusBadRequest {
+	if status >= http.StatusBadRequest || callErr != nil {
 		return attnWriteFailed
 	}
 	return attnWriteApplied

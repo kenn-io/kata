@@ -417,6 +417,10 @@ func (a daemonAPI) passthrough(cmd *cobra.Command, method, path string, body any
 	if err != nil {
 		return nil, false, err
 	}
+	return emitPassthrough(cmd, bs)
+}
+
+func emitPassthrough(cmd *cobra.Command, bs []byte) ([]byte, bool, error) {
 	if currentOutputMode() != outputJSON {
 		return bs, false, nil
 	}
