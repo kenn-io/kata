@@ -126,6 +126,37 @@ class CheckFrontmatterTest(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_aggregates_impossible_yaml_date_with_other_page_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docs_root = Path(temp_dir)
+            self.make_docs_root(docs_root)
+            (docs_root / "guide" / "impossible-date.md").write_text(
+                "---\n"
+                "title: Impossible date\n"
+                "description: Exercises an invalid calendar date.\n"
+                "last_edited: 2026-02-29\n"
+                "---\n\n"
+                "# Impossible date\n",
+                encoding="utf-8",
+            )
+            (docs_root / "reference" / "missing.md").write_text(
+                "# Missing metadata\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_check(docs_root)
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(
+                "guide/impossible-date.md: invalid YAML frontmatter",
+                result.stderr,
+            )
+            self.assertIn(
+                "reference/missing.md: missing YAML frontmatter",
+                result.stderr,
+            )
+            self.assertNotIn("Traceback", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

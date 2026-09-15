@@ -25,7 +25,7 @@ def parse_frontmatter(path: pathlib.Path) -> tuple[dict[str, Any] | None, str | 
         return None, "unterminated YAML frontmatter"
     try:
         metadata = yaml.safe_load("\n".join(lines[1:closing_index]))
-    except yaml.YAMLError:
+    except (ValueError, yaml.YAMLError):
         return None, "invalid YAML frontmatter"
     if not isinstance(metadata, dict):
         return None, "YAML frontmatter must be a mapping"
