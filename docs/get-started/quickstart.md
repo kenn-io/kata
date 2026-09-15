@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-16
+last_edited: 2026-09-15
 ---
 
 # Quickstart
@@ -165,6 +165,11 @@ kata meta set abc4 someday true --json-value
 A future `scheduled_on` value and `someday=true` keep the issue out of `ready`
 and `next`. A deadline does not. Clear these values with `kata schedule abc4 -`,
 `kata deadline abc4 -`, and `kata meta unset abc4 someday`.
+
+When a schedule or deadline is reached, the daemon adds an ordinary inbox
+request for the issue owner, or for the author when the issue is unowned. Read
+it with `kata inbox --for <actor>` and acknowledge it with `kata notify <ref>
+--to <actor> --clear`. An existing request in that slot remains in place first.
 
 Human `kata list` output groups fetched children beneath their fetched parents
 with tree connectors. A child remains a top-level row when its parent is outside

@@ -38,7 +38,7 @@ type Storage interface { Only(context.Context) error }
 func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 	methods, err := CollectStorageMethodInventory("../../storage.go")
 	require.NoError(t, err)
-	require.Len(t, methods, 251)
+	require.Len(t, methods, 253)
 
 	var implemented []string
 	var stubbed []string
@@ -196,6 +196,7 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"ListAllIssues",
 		"ListDueExternalRootBindings",
 		"ListDueIssueSyncBindings",
+		"ListDueNotificationIssueIDs",
 		"ListExternalFieldMappings",
 		"ListFederationBindings",
 		"ListFederationEnrollments",
@@ -243,6 +244,7 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"RebindFederationBinding",
 		"RecentSameMessageClose",
 		"RecentSiblingCloses",
+		"ReconcileDueNotification",
 		"ReconcileLocalFederationEcho",
 		"RecordExternalRootError",
 		"RecordExternalRootSuccess",

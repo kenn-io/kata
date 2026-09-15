@@ -196,6 +196,7 @@ var alreadyImplemented = map[string]bool{
 	"ListAllIssues":                        true, // issues.go
 	"ListDueIssueSyncBindings":             true, // issue_sync.go
 	"ListDueExternalRootBindings":          true, // external_roots.go
+	"ListDueNotificationIssueIDs":          true, // due_notifications.go
 	"ListExternalFieldMappings":            true, // external_roots.go
 	"ListIssueContent":                     true, // discovery.go
 	"ListIssues":                           true, // issues.go
@@ -240,6 +241,7 @@ var alreadyImplemented = map[string]bool{
 	"ReadyIssuesGlobal":                    true, // discovery.go
 	"RecentSameMessageClose":               true, // events.go
 	"RecentSiblingCloses":                  true, // events.go
+	"ReconcileDueNotification":             true, // due_notifications.go
 	"ReconcileLocalFederationEcho":         true, // federation_events.go
 	"RecordIssueSyncError":                 true, // issue_sync.go
 	"RecordIssueSyncSuccess":               true, // issue_sync.go
