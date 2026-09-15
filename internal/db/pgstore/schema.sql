@@ -335,13 +335,23 @@ CREATE TABLE api_tokens (
   token_hash   TEXT NOT NULL UNIQUE,
   actor        TEXT NOT NULL,
   name         TEXT,
+  scope_kind   TEXT,
+  scope_project_uid TEXT,
+  scope_root_issue_uid TEXT,
+  expires_at   TEXT,
   created_at   TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   last_used_at TEXT,
   revoked_at   TEXT,
   CHECK (length(token_hash) = 64),
   CHECK (length(trim(actor)) > 0),
   CHECK (actor <> 'bootstrap'),
-  CHECK (name IS NULL OR length(trim(name)) > 0)
+  CHECK (name IS NULL OR length(trim(name)) > 0),
+  CONSTRAINT api_tokens_scope_shape CHECK (
+    (scope_kind IS NULL AND scope_project_uid IS NULL AND scope_root_issue_uid IS NULL AND expires_at IS NULL)
+    OR
+    (scope_kind = 'issue_subtree' AND length(scope_project_uid) = 26
+      AND length(scope_root_issue_uid) = 26 AND expires_at IS NOT NULL)
+  )
 );
 
 CREATE TABLE purge_log (

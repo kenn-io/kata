@@ -392,6 +392,44 @@ func TestRoundtrip_ReplaysAPITokensFromTokenEvents(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
+func TestRoundtrip_ReplaysIssueScopedAPITokenGrant(t *testing.T) {
+	ctx := context.Background()
+	src := openExportTestDB(t)
+	project, err := src.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	root, _, err := src.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "Delegated work",
+		Author:    "coordinator",
+	})
+	require.NoError(t, err)
+	expiresAt := time.Now().UTC().Add(time.Hour).Truncate(time.Millisecond)
+	created, _, err := src.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "scoped-worker-token",
+		Actor:          "worker-a",
+		AdminActor:     db.BootstrapActor,
+		Scope: &db.APITokenScope{
+			Kind:         db.APITokenScopeIssueSubtree,
+			ProjectUID:   project.UID,
+			RootIssueUID: root.UID,
+		},
+		ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, src, &buf, jsonl.ExportOptions{}))
+	dst := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, &buf, dst))
+
+	replayed, err := dst.ResolveAPIToken(ctx, "scoped-worker-token")
+	require.NoError(t, err)
+	require.Equal(t, created.ID, replayed.ID)
+	require.Equal(t, created.Scope, replayed.Scope)
+	require.NotNil(t, replayed.ExpiresAt)
+	require.True(t, expiresAt.Equal(*replayed.ExpiresAt))
+}
+
 func TestRoundtrip_DuplicateTokenRevokedEventsKeepFirstRevokedAt(t *testing.T) {
 	ctx := context.Background()
 	src := openExportTestDB(t)

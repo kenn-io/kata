@@ -7,7 +7,7 @@
   import MoonIcon from '@lucide/svelte/icons/moon'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SunIcon from '@lucide/svelte/icons/sun'
-  import type { UIIssueReference } from '../lib/api/generated'
+  import type { TokenOut, UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
   import type { KataRoute, ShareableFilters, SystemView } from '../lib/router'
   import {
@@ -27,6 +27,7 @@
   } from '../lib/kata/types'
   import type { UISnapshot } from '../lib/state/snapshot'
   import { defaultPreferences, type Preferences } from '../lib/state/preferences'
+  import CredentialAudit from './CredentialAudit.svelte'
   import IssueCollection from './IssueCollection.svelte'
   import IssueDetail from './IssueDetail.svelte'
   import IssueFilters from './IssueFilters.svelte'
@@ -38,6 +39,7 @@
   import SplitLayout from './SplitLayout.svelte'
 
   type AppRoute = Exclude<KataRoute, { kind: 'route-error' }>
+  type ChildParent = { projectID: number; projectUID: string; issueUID: string }
 
   interface Props {
     route: AppRoute
@@ -57,12 +59,18 @@
     stale?: boolean | undefined
     readOnly?: boolean | undefined
     daemonError?: string | undefined
+    credentialTokens?: readonly TokenOut[] | undefined
+    credentialObservedAt?: string | undefined
+    credentialLoading?: boolean | undefined
+    credentialError?: string | undefined
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
     onSelectDaemon?: ((id: string) => void) | undefined
+    onRefreshCredentials?: (() => void | Promise<void>) | undefined
+    onBackFromCredentials?: (() => void | Promise<void>) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
     onDesignateInbox: (projectUID: string) => Promise<void>
-    onCreateIssue: (title: string) => void | Promise<void>
+    onCreateIssue: (title: string, parent?: ChildParent) => void | Promise<void>
     searchReferences: (query: string) => Promise<UIIssueReference[]>
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
@@ -106,8 +114,14 @@
     stale = false,
     readOnly = false,
     daemonError = undefined,
+    credentialTokens = [],
+    credentialObservedAt = undefined,
+    credentialLoading = false,
+    credentialError = undefined,
     onPreferencesChange = () => {},
     onSelectDaemon = () => {},
+    onRefreshCredentials = () => {},
+    onBackFromCredentials = () => {},
     onNavigate,
     onCreateProject,
     onDesignateInbox,
@@ -135,6 +149,7 @@
   let mobileNavigationOpen = $state(false)
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
+  let credentialRoute = $derived(route.view === 'credentials')
   let graphSelectedUID = $derived<string | null>(
     route.issueUID && route.graph ? route.issueUID : null,
   )
@@ -162,6 +177,18 @@
       : undefined
   })
   let selectedIssueUID = $derived(route.issueUID ?? null)
+  let scopedAuthority = $derived(snapshot.capabilities.scope !== undefined)
+  let projectWideMutationAllowed = $derived(canMutate && !scopedAuthority)
+  let childParent = $derived.by<ChildParent | undefined>(() => {
+    const issue = projection.selected_detail?.issue
+    if (!issue) return undefined
+    return {
+      projectID: issue.project_id,
+      projectUID: issue.project_uid,
+      issueUID: issue.uid,
+    }
+  })
+  let newTaskAllowed = $derived(canMutate && (!scopedAuthority || childParent !== undefined))
 
   function navigate(next: AppRoute): void {
     navigationGeneration += 1
@@ -183,6 +210,16 @@
     navigate({
       kind: 'kata',
       projectUID,
+      graph: false,
+      filters: emptyShareableFilters(),
+    })
+  }
+
+  function openCredentials(): void {
+    mobileNavigationOpen = false
+    navigate({
+      kind: 'kata',
+      view: 'credentials',
       graph: false,
       filters: emptyShareableFilters(),
     })
@@ -243,7 +280,11 @@
   }
 
   function beginNewTask(): void {
-    if (!canMutate || mutationPending) return
+    if (!newTaskAllowed || mutationPending) return
+    if (scopedAuthority) {
+      captureOpen = true
+      return
+    }
     if (hasInbox) captureOpen = true
     else inboxChooserOpen = true
   }
@@ -254,11 +295,16 @@
     captureOpen = true
   }
 
+  function submitCapture(title: string): void | Promise<void> {
+    return scopedAuthority && childParent ? onCreateIssue(title, childParent) : onCreateIssue(title)
+  }
+
   function themeLabel(): string {
     return preferences.theme[0]!.toUpperCase() + preferences.theme.slice(1)
   }
 
   function viewNameForRoute(current: AppRoute): KataTaskViewName {
+    if (current.view === 'credentials') return 'all'
     if (current.view) return current.view === 'all-open' ? 'all' : current.view
     return current.projectUID || current.issueUID ? 'all' : 'inbox'
   }
@@ -355,14 +401,17 @@
       fetched_at: currentView.fetched_at,
     }}
     {searchFilters}
-    projectCreationDisabled={!canMutate || mutationPending}
+    projectCreationDisabled={!projectWideMutationAllowed || mutationPending}
     {draftFenceGeneration}
     inboxProjectUID={inboxProject?.uid}
-    inboxDesignationDisabled={!canMutate || mutationPending}
+    inboxDesignationDisabled={!projectWideMutationAllowed || mutationPending}
+    credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
+    credentialAuditActive={credentialRoute}
     onOpenView={openView}
     onOpenProject={openProject}
     {onCreateProject}
     {onDesignateInbox}
+    onOpenCredentials={openCredentials}
   />
 {/snippet}
 
@@ -412,31 +461,33 @@
             <MonitorIcon size={15} strokeWidth={1.8} aria-hidden="true" />
           {/if}
         </IconButton>
-        <IconButton
-          ariaLabel={preferences.splitDirection === 'vertical'
-            ? 'Switch to side-by-side layout'
-            : 'Switch to stacked layout'}
-          title={preferences.splitDirection === 'vertical'
-            ? 'Side-by-side (list left, detail right)'
-            : 'Stacked (list top, detail bottom)'}
-          onclick={toggleSplitDirection}
-        >
-          {#if preferences.splitDirection === 'vertical'}
-            <LayoutPanelLeftIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          {:else}
-            <LayoutPanelTopIcon size={15} strokeWidth={1.8} aria-hidden="true" />
-          {/if}
-        </IconButton>
-        <button
-          type="button"
-          class="accent-button header-action"
-          disabled={!canMutate || mutationPending}
-          title="New task"
-          onclick={beginNewTask}
-        >
-          <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
-          <span>New task</span>
-        </button>
+        {#if !credentialRoute}
+          <IconButton
+            ariaLabel={preferences.splitDirection === 'vertical'
+              ? 'Switch to side-by-side layout'
+              : 'Switch to stacked layout'}
+            title={preferences.splitDirection === 'vertical'
+              ? 'Side-by-side (list left, detail right)'
+              : 'Stacked (list top, detail bottom)'}
+            onclick={toggleSplitDirection}
+          >
+            {#if preferences.splitDirection === 'vertical'}
+              <LayoutPanelLeftIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+            {:else}
+              <LayoutPanelTopIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+            {/if}
+          </IconButton>
+          <button
+            type="button"
+            class="accent-button header-action"
+            disabled={!newTaskAllowed || mutationPending}
+            title="New task"
+            onclick={beginNewTask}
+          >
+            <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
+            <span>New task</span>
+          </button>
+        {/if}
       </div>
     {/snippet}
   </TopBar>
@@ -457,23 +508,36 @@
     </div>
 
     <div class="kata-main">
-      {#if mutationMessage}
-        <p class="mutation-message" role="alert">{mutationMessage}</p>
-      {/if}
-      {#if route.issueUID}
-        <SplitLayout
-          orientation={preferences.splitDirection}
-          primarySize={preferences.splitSize}
-          minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
-          minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
-          responsiveBreakpoint={700}
-          ariaLabel="Resize Kata panes"
-          onResize={resizeSplit}
-          primary={listPane}
-          secondary={detailPane}
+      {#if credentialRoute}
+        <CredentialAudit
+          tokens={credentialTokens}
+          observedAt={credentialObservedAt}
+          loading={credentialLoading}
+          error={snapshot.capabilities.token_audit_read
+            ? credentialError
+            : 'Credential inventory is unavailable for this session.'}
+          onRefresh={onRefreshCredentials}
+          onBack={onBackFromCredentials}
         />
       {:else}
-        {@render listPane()}
+        {#if mutationMessage}
+          <p class="mutation-message" role="alert">{mutationMessage}</p>
+        {/if}
+        {#if route.issueUID}
+          <SplitLayout
+            orientation={preferences.splitDirection}
+            primarySize={preferences.splitSize}
+            minPrimary={preferences.splitDirection === 'vertical' ? 220 : 320}
+            minSecondary={preferences.splitDirection === 'vertical' ? 220 : 360}
+            responsiveBreakpoint={700}
+            ariaLabel="Resize Kata panes"
+            onResize={resizeSplit}
+            primary={listPane}
+            secondary={detailPane}
+          />
+        {:else}
+          {@render listPane()}
+        {/if}
       {/if}
     </div>
   </div>
@@ -554,6 +618,7 @@
         selectedRecurrences={[...projection.selected_recurrences]}
         actionsDisabled={!canMutate || mutationPending}
         authorityBlocked={!canMutate}
+        administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}
         {draftFenceGeneration}
         movePending={mutationPending}
@@ -587,12 +652,12 @@
 
 <QuickCapture
   open={captureOpen}
-  disabled={!canMutate || mutationPending}
+  disabled={!newTaskAllowed || mutationPending}
   {draftFenceGeneration}
   onClose={() => {
     captureOpen = false
   }}
-  onSubmit={onCreateIssue}
+  onSubmit={submitCapture}
 />
 
 <InboxProjectChooser

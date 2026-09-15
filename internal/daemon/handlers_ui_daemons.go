@@ -675,6 +675,9 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 		capabilities.ActorPolicy == policy.actorPolicy
 	capabilities.Updates = "poll"
 	capabilities.ActorPolicy = policy.actorPolicy
+	// Target credentials stay server-side and may not upgrade the source
+	// browser into a token-audit principal.
+	capabilities.TokenAuditRead = false
 	encodedCapabilities, err := json.Marshal(capabilities)
 	if err != nil {
 		return fmt.Errorf("encode daemon capabilities: %w", err)

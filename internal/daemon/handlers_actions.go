@@ -126,7 +126,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		if err := CheckParentCloseCompleteness(ctx, cfg.DB, issue.ID, issue.ShortID, issue.ProjectID); err != nil {
-			return nil, api.NewError(409, "parent_has_open_children", err.Error(), "", nil)
+			return nil, api.NewError(409, "parent_has_open_children",
+				scopedCloseRefusal(ctx, err.Error(), "issue has open children; close them before closing the parent"), "", nil)
 		}
 		now := time.Now()
 		dbEvidence := evidenceToDB(in.Body.Evidence)
@@ -148,7 +149,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 						return nil, internalAPIError(err)
 					}
 				}
-				return nil, api.NewError(429, "sibling_throttle", refusal.Error(), "", nil)
+				return nil, api.NewError(429, "sibling_throttle",
+					scopedCloseRefusal(ctx, refusal.Error(), "close temporarily refused by sibling completion policy"), "", nil)
 			}
 			if priorRef, parentRef, refusal := CheckRepeatedMessageGuard(
 				ctx, cfg.DB, issue,
@@ -163,7 +165,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 						return nil, internalAPIError(err)
 					}
 				}
-				return nil, api.NewError(429, "duplicate_message", refusal.Error(), "", nil)
+				return nil, api.NewError(429, "duplicate_message",
+					scopedCloseRefusal(ctx, refusal.Error(), "close temporarily refused by repeated-message policy"), "", nil)
 			}
 		}
 		// Dry-run: report what would happen after all guards run, but
@@ -189,6 +192,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
 				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
+				DisallowRecurrenceEffects: issueScopeFromContext(ctx) != nil,
 			})
 			if len(events) > 0 {
 				evt = &events[0]
@@ -231,12 +235,17 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 					issue.ID, issue.ShortID, issue.ProjectID); listErr != nil {
 					detail = listErr.Error()
 				}
-				return nil, api.NewError(409, "parent_has_open_children", detail, "", nil)
+				return nil, api.NewError(409, "parent_has_open_children",
+					scopedCloseRefusal(ctx, detail, "issue has open children; close them before closing the parent"), "", nil)
 			}
 			if errors.Is(err, db.ErrIssueProjectChanged) {
 				return nil, api.NewError(409, "issue_moved",
 					"issue moved to another project before the close committed",
 					"resolve the issue in its current project and retry with a fresh idempotency key", nil)
+			}
+			if errors.Is(err, db.ErrRecurrenceEffectsForbidden) {
+				return nil, api.NewError(409, "scoped_effect_forbidden",
+					"operation would affect resources outside the credential scope", "", nil)
 			}
 			if errors.Is(err, db.ErrFederatedReadOnly) {
 				return nil, federationReadOnlyError(err)
@@ -258,6 +267,10 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "issue_already_closed",
 				"issue was closed by another request before this close committed",
 				"retry after reopening, or omit the idempotency key to accept the current state", nil)
+		}
+		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
+		if err != nil {
+			return nil, err
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
@@ -304,6 +317,10 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if changed && evt != nil {
 			cfg.Publish().Event(in.ProjectID, *evt)
 		}
+		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
+		if err != nil {
+			return nil, err
+		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
 		out.Body.Event = evt
@@ -342,11 +359,6 @@ func lookupCloseIdempotencyMatch(
 func closeIdempotencyResponse(
 	ctx context.Context, cfg ServerConfig, match *db.IdempotencyMatch, fingerprint string,
 ) (*api.MutationResponse, error) {
-	if match.Fingerprint != fingerprint {
-		return nil, api.NewError(409, "idempotency_mismatch",
-			"idempotency key matched a prior close with a different fingerprint",
-			"use a fresh key or send the exact original close request", nil)
-	}
 	current, err := cfg.DB.IssueByID(ctx, match.IssueID)
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -360,12 +372,74 @@ func closeIdempotencyResponse(
 	if _, err := authorizeHostProjectScope(ctx, []int64{current.ProjectID}, nil, false); err != nil {
 		return nil, err
 	}
-	original := match.Event
+	if err := authorizeIssueScopedIssue(ctx, cfg.DB, current); err != nil {
+		return nil, err
+	}
+	if match.Fingerprint != fingerprint {
+		return nil, api.NewError(409, "idempotency_mismatch",
+			"idempotency key matched a prior close with a different fingerprint",
+			"use a fresh key or send the exact original close request", nil)
+	}
+	original, err := scopedMutationEvent(ctx, cfg.DB, &match.Event)
+	if err != nil {
+		return nil, err
+	}
 	out := &api.MutationResponse{}
 	out.Body.Issue = current
-	out.Body.OriginalEvent = &original
+	out.Body.OriginalEvent = original
 	out.Body.Reused = true
 	return out, nil
+}
+
+func scopedCloseRefusal(ctx context.Context, unrestricted, scoped string) string {
+	if issueScopeFromContext(ctx) != nil {
+		return scoped
+	}
+	return unrestricted
+}
+
+func scopedMutationEvent(
+	ctx context.Context, store db.Storage, event *db.Event,
+) (*db.Event, error) {
+	scope := issueScopeFromContext(ctx)
+	if event == nil || scope == nil {
+		return event, nil
+	}
+	allowed, _, err := issueScopedAllowedIDSet(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	projected, ok := projectIssueScopedEvent(*event, allowed, scope.ProjectUID)
+	if !ok {
+		return nil, nil
+	}
+	return &projected, nil
+}
+
+// scopedMutationEvents is the multi-event form of scopedMutationEvent for
+// responses that carry an ordered batch (e.g. the atomic edit response).
+// The second return reports whether the caller is issue-scoped: unscoped
+// callers get their slice back untouched so raw responses never change.
+func scopedMutationEvents(
+	ctx context.Context, store db.Storage, events []db.Event,
+) ([]db.Event, bool, error) {
+	scope := issueScopeFromContext(ctx)
+	if scope == nil || len(events) == 0 {
+		return events, false, nil
+	}
+	allowed, _, err := issueScopedAllowedIDSet(ctx, store)
+	if err != nil {
+		return nil, true, err
+	}
+	projectedEvents := make([]db.Event, 0, len(events))
+	for _, event := range events {
+		projected, ok := projectIssueScopedEvent(event, allowed, scope.ProjectUID)
+		if !ok {
+			continue
+		}
+		projectedEvents = append(projectedEvents, projected)
+	}
+	return projectedEvents, true, nil
 }
 
 func closeIdempotencyFingerprint(
@@ -414,6 +488,10 @@ func validateEvidenceTargets(
 		}
 		target, err := resolveIssueRef(ctx, store, projectID, e.IssueRef, db.IncludeDeletedNo)
 		if err != nil {
+			return fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
+				i, e.Type, e.IssueRef)
+		}
+		if err := authorizeIssueScopedIssue(ctx, store, target); err != nil {
 			return fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
 				i, e.Type, e.IssueRef)
 		}

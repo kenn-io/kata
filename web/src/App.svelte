@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Button, cleanupTheme, initTheme, setThemeMode } from '@kenn-io/kit-ui'
   import { onMount } from 'svelte'
+  import { SvelteMap } from 'svelte/reactivity'
 
   import AppShell from './components/AppShell.svelte'
   import KataDaemonSwitcher from './components/KataDaemonSwitcher.svelte'
@@ -20,6 +21,7 @@
     deleteRecurrence as deleteRecurrenceRequest,
     editIssue as editIssueRequest,
     initProject,
+    listTokens,
     moveIssue as moveIssueRequest,
     patchIssueMetadata,
     patchProjectMetadata,
@@ -35,6 +37,7 @@
     type RecurrenceTemplateUpdateInput,
     type UIIssueReference,
     type UIReferencesResponseBody,
+    type TokenOut,
   } from './lib/api/generated'
   import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
   import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
@@ -108,7 +111,7 @@
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let draftFenceGeneration = $state(0)
-  let pendingCreate: { title: string; key: string } | undefined
+  let pendingCreate: { title: string; parentIssueUID?: string; key: string } | undefined
   let pendingComment: { issueUID: string; body: string; key: string } | undefined
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
   let advertisedAuthentication: 'loopback' | 'login' | 'proxy' | 'unavailable' | undefined
@@ -124,6 +127,13 @@
   let daemonError = $state<string | undefined>()
   let referenceAbort: AbortController | undefined
   let referenceGeneration = 0
+  let credentialTokens = $state<TokenOut[]>([])
+  let credentialObservedAt = $state<string | undefined>()
+  let credentialLoading = $state(false)
+  let credentialError = $state<string | undefined>()
+  let credentialAbort: AbortController | undefined
+  let credentialGeneration = 0
+  const credentialReturnRoutes = new SvelteMap<string, AppRoute>()
   let destroyed = false
   const observedFetch: typeof fetch = async (input, init) => {
     const response = await fetch(input, init)
@@ -188,7 +198,10 @@
   })
 
   onMount(() => {
-    const visibility = () => scheduler.visibilityChanged(!document.hidden)
+    const visibility = () => {
+      scheduler.visibilityChanged(!document.hidden)
+      if (!document.hidden && !credentialLoading) void refreshCredentials()
+    }
     const focus = () => scheduler.focused()
     const environment = () => scheduler.environmentChanged()
     const showVersionMismatch = () => {
@@ -196,6 +209,7 @@
     }
     const popstate = () => {
       const next = parseRoute(new URL(window.location.href))
+      if (route.kind !== 'route-error' && route.view === 'credentials') fenceCredentialAudit()
       route = next
       if (next.kind === 'route-error') {
         mode = 'route-error'
@@ -209,6 +223,9 @@
     window.addEventListener('pageshow', environment)
     window.addEventListener('popstate', popstate)
     window.addEventListener('kata:versionMismatch', showVersionMismatch)
+    const credentialRefreshTimer = window.setInterval(() => {
+      if (!document.hidden && !credentialLoading) void refreshCredentials()
+    }, 30_000)
     if (route.kind !== 'route-error' && launch.kind !== 'login') {
       if (loadSessionCredentials() !== undefined) {
         void startAuthority()
@@ -223,12 +240,14 @@
       window.removeEventListener('pageshow', environment)
       window.removeEventListener('popstate', popstate)
       window.removeEventListener('kata:versionMismatch', showVersionMismatch)
+      window.clearInterval(credentialRefreshTimer)
       scheduler.stop()
       stream.stop()
       invalidations.stop()
       snapshots.abort()
       referenceGeneration += 1
       referenceAbort?.abort()
+      fenceCredentialAudit()
       unsubscribe()
       cleanupTheme()
     }
@@ -271,11 +290,43 @@
   }
 
   function navigate(next: AppRoute): void {
-    history.pushState(null, '', serializeRoute(next))
+    const opensCredentials =
+      route.kind !== 'route-error' && route.view !== 'credentials' && next.view === 'credentials'
+    if (opensCredentials && route.kind !== 'route-error') {
+      credentialReturnRoutes.set(credentialRouteKey(activeDaemonID), route)
+    }
+    if (
+      route.kind !== 'route-error' &&
+      route.view === 'credentials' &&
+      next.view !== 'credentials'
+    ) {
+      fenceCredentialAudit()
+    }
+    history.pushState(
+      opensCredentials ? { kataCredentialReturn: credentialRouteKey(activeDaemonID) } : null,
+      '',
+      serializeRoute(next),
+    )
     route = next
     if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
     mode = authority?.snapshot ? 'ready' : 'loading'
     void startAuthority()
+  }
+
+  function returnFromCredentials(): void {
+    const state = history.state as { kataCredentialReturn?: unknown } | null
+    if (state?.kataCredentialReturn === credentialRouteKey(activeDaemonID)) {
+      history.back()
+      return
+    }
+    navigate(
+      credentialReturnRoutes.get(credentialRouteKey(activeDaemonID)) ?? {
+        kind: 'kata',
+        view: 'all-open',
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      },
+    )
   }
 
   async function createProject(name: string): Promise<{ changed: boolean }> {
@@ -293,7 +344,7 @@
     const projects = authority?.snapshot?.catalog?.map(({ project }) => project) ?? []
     const target = projects.find((project) => project.uid === projectUID)
     if (!target) throw new Error('Inbox project is not available.')
-    if (target.metadata.role === 'inbox') return
+    if (target.metadata?.role === 'inbox') return
 
     const accepted = await runMutation(
       { draft: projectUID, revision: `"rev-${target.revision}"` },
@@ -309,21 +360,48 @@
     }
   }
 
-  async function createIssue(title: string): Promise<void> {
-    const inbox = authority?.snapshot?.catalog?.find(
-      ({ project }) => project.metadata.role === 'inbox',
-    )?.project
-    if (!inbox) throw new Error('Task inbox project is not available.')
+  async function createIssue(
+    title: string,
+    parent?: { projectID: number; projectUID: string; issueUID: string },
+  ): Promise<void> {
+    const project = parent
+      ? authority?.snapshot?.catalog?.find(({ project }) => project.id === parent.projectID)
+          ?.project
+      : authority?.snapshot?.catalog?.find(({ project }) => project.metadata?.role === 'inbox')
+          ?.project
+    if (!project) throw new Error('Task project is not available.')
 
     const create =
-      pendingCreate?.title === title
+      pendingCreate?.title === title && pendingCreate.parentIssueUID === parent?.issueUID
         ? pendingCreate
-        : { title, key: globalThis.crypto.randomUUID() }
+        : {
+            title,
+            ...(parent ? { parentIssueUID: parent.issueUID } : {}),
+            key: globalThis.crypto.randomUUID(),
+          }
     pendingCreate = create
     const accepted = await runMutation({ draft: title, createKey: create.key }, (context) =>
-      createIssueRequest({ projectId: String(inbox.id) }, context.body({ title }, requestActor), {
-        headers: { 'Idempotency-Key': create.key },
-      }),
+      createIssueRequest(
+        { projectId: String(project.id) },
+        context.body(
+          {
+            title,
+            ...(parent
+              ? {
+                  links: [
+                    {
+                      type: 'parent' as const,
+                      to_ref: parent.issueUID,
+                      to_project_uid: parent.projectUID,
+                    },
+                  ],
+                }
+              : {}),
+          },
+          requestActor,
+        ),
+        { headers: { 'Idempotency-Key': create.key } },
+      ),
     )
     if (!accepted) throw new Error(mutationMessage(mutationState) ?? 'Could not create task.')
     pendingCreate = undefined
@@ -690,6 +768,7 @@
   }
 
   function rejectCredentialsAndRequireAuthentication(): boolean {
+    fenceCredentialAudit()
     clearSessionCredentials()
     draftFenceGeneration += 1
     return requireAuthentication()
@@ -697,6 +776,7 @@
 
   function requireAuthentication(): boolean {
     if (authenticationRecoveryPending || loadSessionCredentials() !== undefined) return false
+    fenceCredentialAudit()
     scheduler.stop()
     stream.stop()
     invalidations.pause()
@@ -757,6 +837,7 @@
     if (authority?.snapshot) automaticSessionAttempted = undefined
     if (authority?.snapshot) void loadReferences()
     if (authority?.snapshot) scheduler.start(authority.snapshot.capabilities.updates)
+    if (authority?.snapshot) void refreshCredentials()
     return accepted
   }
 
@@ -842,6 +923,7 @@
     scheduler.stop()
     stream.stop()
     invalidations.pause()
+    fenceCredentialAudit()
     snapshots.clear()
     referenceGeneration += 1
     referenceAbort?.abort()
@@ -901,6 +983,77 @@
       return accepted
     }
     return false
+  }
+
+  async function refreshCredentials(): Promise<void> {
+    if (
+      destroyed ||
+      document.hidden ||
+      route.kind === 'route-error' ||
+      route.view !== 'credentials' ||
+      authority?.snapshot?.capabilities.token_audit_read !== true
+    ) {
+      return
+    }
+    const generation = credentialGeneration + 1
+    credentialGeneration = generation
+    credentialAbort?.abort()
+    const abort = new AbortController()
+    credentialAbort = abort
+    const daemonID = activeDaemonID
+    credentialLoading = true
+    credentialError = undefined
+    try {
+      const result = await listTokens({ signal: abort.signal })
+      if (
+        destroyed ||
+        abort.signal.aborted ||
+        generation !== credentialGeneration ||
+        daemonID !== activeDaemonID
+      ) {
+        return
+      }
+      if (result.status === 200) {
+        credentialTokens = result.data.tokens
+        credentialObservedAt = result.data.observed_at
+        credentialError = undefined
+      } else if (result.status === 401) {
+        fenceCredentialAudit()
+        requireAuthentication()
+      } else {
+        credentialTokens = []
+        credentialObservedAt = undefined
+        credentialError = 'Credential inventory is unavailable.'
+      }
+    } catch {
+      if (
+        !destroyed &&
+        !abort.signal.aborted &&
+        generation === credentialGeneration &&
+        daemonID === activeDaemonID
+      ) {
+        credentialTokens = []
+        credentialObservedAt = undefined
+        credentialError = 'Credential inventory is unavailable.'
+      }
+    } finally {
+      if (generation === credentialGeneration) credentialLoading = false
+      if (credentialAbort === abort) credentialAbort = undefined
+    }
+  }
+
+  function fenceCredentialAudit(): void {
+    credentialGeneration += 1
+    credentialAbort?.abort()
+    credentialAbort = undefined
+    credentialTokens = []
+    credentialObservedAt = undefined
+    credentialLoading = false
+    credentialError = undefined
+  }
+
+  function credentialRouteKey(daemonID: string | undefined): string {
+    return daemonID ?? '__direct__'
   }
 </script>
 
@@ -978,6 +1131,12 @@
         stale={authority.stale}
         readOnly={!authority.snapshot.capabilities.writable}
         {daemonError}
+        {credentialTokens}
+        {credentialObservedAt}
+        {credentialLoading}
+        {credentialError}
+        onRefreshCredentials={refreshCredentials}
+        onBackFromCredentials={returnFromCredentials}
         onSelectDaemon={(id) => void switchDaemon(id)}
         onPreferencesChange={updatePreferences}
         ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}

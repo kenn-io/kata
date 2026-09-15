@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -74,6 +75,10 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err != nil {
 			return nil, err
 		}
+		if issueScopeFromContext(ctx) != nil && in.Body.Type == "parent" {
+			return nil, api.NewError(403, "scoped_operation_forbidden",
+				"issue-scoped credentials cannot change an existing issue parent", "", nil)
+		}
 		if in.Body.Type == "parent" {
 			ctx, err = authorizeHostProjectScope(ctx, nil, nil, true)
 			if err != nil {
@@ -82,6 +87,9 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		}
 		to, err := resolveLinkTargetRef(ctx, cfg.DB, in.ProjectID, in.Body.ToRef, db.IncludeDeletedNo)
 		if err != nil {
+			return nil, err
+		}
+		if err := authorizeIssueScopedIssue(ctx, cfg.DB, to); err != nil {
 			return nil, err
 		}
 		ctx, err = authorizeHostProjectScope(ctx, []int64{to.ProjectID}, nil, false)
@@ -241,7 +249,11 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			return nil, internalAPIError(err)
 		}
 		cfg.Publish().Event(in.ProjectID, evt)
-		return mutationLinkResponse(updatedIssue, link, canonicalFromPeer, canonicalToPeer, &evt, true), nil
+		projected, err := scopedMutationEvent(ctx, cfg.DB, &evt)
+		if err != nil {
+			return nil, err
+		}
+		return mutationLinkResponse(updatedIssue, link, canonicalFromPeer, canonicalToPeer, projected, true), nil
 	}
 }
 
@@ -307,7 +319,6 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if link.FromIssueID != from.ID && link.ToIssueID != from.ID {
 			return nil, api.NewError(404, "link_not_found", "link not attached to this issue", "", nil)
 		}
-
 		// Resolve the link's storage endpoints so the payload carries each
 		// peer's short_id + UID. For parent/blocks links the URL issue is
 		// always the link's stored from side; for canonicalized related
@@ -326,6 +337,13 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		}
 		if link.FromIssueID != from.ID {
 			linkFrom, linkTo = linkTo, linkFrom
+		}
+		if err := authorizeIssueScopedIssue(ctx, cfg.DB, linkTo); err != nil {
+			return nil, err
+		}
+		if issueScopeFromContext(ctx) != nil && link.Type == "parent" {
+			return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden",
+				"issue-scoped credentials cannot change existing parent links", "", nil)
 		}
 		if err := requireFederatedLinkClaims(ctx, cfg, actor, linkFrom, linkTo); err != nil {
 			return nil, err
@@ -359,9 +377,13 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 			return nil, internalAPIError(err)
 		}
 		cfg.Publish().Event(in.ProjectID, evt)
+		projected, perr := scopedMutationEvent(ctx, cfg.DB, &evt)
+		if perr != nil {
+			return nil, perr
+		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updatedIssue
-		out.Body.Event = &evt
+		out.Body.Event = projected
 		out.Body.Changed = true
 		return out, nil
 	}

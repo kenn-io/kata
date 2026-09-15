@@ -46,11 +46,10 @@ The schema carries a version in its `info.version` field
 ```json
 {
   "ok": true,
-  "schema_version": 7,
-  "api_schema_version": "0.17.0",
+  "schema_version": 28,
+  "api_schema_version": "0.19.0",
   "version": "1.4.2",
   "uptime": "5m0s",
-  "db_path": "/path/to/kata.db",
   "idle_shutdown": {
     "timeout": "15m0s",
     "state": "armed",
@@ -120,6 +119,8 @@ use the exact request field names, and accept empty response collections as
 
 | Version | Change |
 | --- | --- |
+| `0.19.0` | Added issue-subtree token scope and expiration, capability discovery, and redacted credential lifecycle state with a server observation time. Health storage, embedding, and federation diagnostics are optional and depend on caller authority. |
+| `0.18.0` | Comments accept optional `teammate` attribution and preserve it in responses and retry fingerprints. |
 | `0.17.0` | Create issue, edit issue, create comment, and add label accept a numeric project ID or `name:<project>` in the project path. Optional alias headers use alias-first resolution. Successful responses include `X-Kata-Project-Name`. Generated clients represent these four path parameters as strings. |
 | `0.16.0` | Ordinary API array fields are non-null. Empty and nil Go slices serialize as `[]`, generated clients omit `null` from ordinary array types, and requests reject `null` for those arrays. JSON object member names are case-sensitive. |
 | `0.15.0` | Added close idempotency and revision headers, the `close-v1` request marker, and retry receipt fields. |
@@ -143,6 +144,79 @@ this means nil maps encode as `{}`, duplicate object member names and invalid
 UTF-8 are rejected, and struct field names match case-sensitively. JSON object
 member order is unspecified. Unknown request members remain governed by the
 request schema and are rejected for strict request objects.
+
+## Health diagnostics
+
+`GET /api/v1/health` without credentials provides liveness and version fields.
+`db_path`, `embeddings`, and `federation_config` are optional diagnostics:
+authenticated unscoped principals and the owner-local transport receive them
+when configured. Public remote probes and scoped credentials do not. An
+explicit scoped bearer remains scoped over loopback; an invalid bearer returns
+an authentication error. Clients must handle the public response without these
+fields. `idle_shutdown` keeps its availability rules described above.
+
+## Issue-scoped credentials
+
+`POST /api/v1/tokens` accepts `scope` and `expires_in_seconds` together:
+
+```json
+{
+  "actor": "worker-a",
+  "name": "worktree-a",
+  "scope": {
+    "kind": "issue_subtree",
+    "project_uid": "01J00000000000000000000002",
+    "root_issue_uid": "01J00000000000000000000001"
+  },
+  "expires_in_seconds": 14400
+}
+```
+
+The scope kind is fixed, both UIDs identify an active issue in its active
+project, and expiration is a positive whole number of seconds within the
+server's duration range. The server calculates the deadline. Identity mode and
+token-administration authority are required; a spoke project is refused with
+`scoped_token_spoke_forbidden`. Scope, actor, and expiration are immutable.
+There is no renewal or worker-issued delegation endpoint.
+
+Authenticated `GET /api/v1/instance` advertises `issue_subtree_tokens`. Clients
+check it before minting; a missing or false field means the request is
+unsupported. Token creation returns one-time `plaintext` and redacted token
+metadata. CLI and MCP provisioners write scoped plaintext to a protected file
+and withhold it from output; see [token CLI usage](cli.md#remote-and-identity-tokens).
+
+The instance `auth` object defines caller authority. Browser session responses,
+UI snapshot capabilities, and UI reference capabilities carry the same fields:
+
+| Field | Meaning |
+| --- | --- |
+| `scope` | `kind`, `project_uid`, and `root_issue_uid`; absent for an unscoped principal. |
+| `expires_at` | The scoped token's absolute RFC 3339 UTC deadline. |
+| `allowed_actions` | A fixed set derived from daemon policy; callers cannot select individual permissions. |
+| `close_requires_evidence` | Requires the normal close message and typed evidence contract, including for TUI requests. |
+| `token_audit_read` | Allows the redacted token inventory, independently of ordinary issue write access. |
+
+Writable scoped credentials receive `issue.read`, `issue.create_child`,
+`issue.edit`, `issue.comment`, `issue.labels`, `issue.metadata`, `issue.assign`,
+`issue.claim`, `issue.close`, `issue.reopen`, `issue.link`, `issue.lease`, and
+`activity.read`. Read-only policy retains only `issue.read` and `activity.read`.
+Browser `writable`, `updates`, and `actor_policy` retain their existing meaning.
+Clients reject unknown or incomplete scoped authority. Scope support alone
+grants no token-administration permission, and domain constraints can still
+refuse an otherwise allowed action.
+
+`GET /api/v1/tokens` returns `observed_at` and redacted token rows, including
+`scope`, `expires_at`, and `state`. States use that one observation time:
+`revoked` takes precedence over `expired`, and all remaining rows are `live`.
+A live row does not prove the worker is running or its root remains usable.
+See [credential auditing](../guide/web-ui.md#audit-provisioned-credentials) for
+operator access and last-use limitations.
+
+Scoped project responses retain required field types: `metadata` is an empty
+object and `created_at` is a zero timestamp. An alias-resolution response retains
+an empty alias object. These placeholders do not expose private project data.
+The [scope guide](../design/issue-scoped-credentials.md) owns membership,
+operation constraints, and [event invalidation and revocation](../design/issue-scoped-credentials.md#events-concurrency-and-revocation).
 
 ## Resolving projects inside mutations
 
@@ -320,7 +394,8 @@ Before local convergence, the action drains project-scoped federation
 transport using the old endpoint and prevents new transport from starting
 until both stores name the target.
 
-When config-driven mappings are present, `GET /api/v1/health` adds an optional
+When config-driven mappings are present and the caller may read
+[health diagnostics](#health-diagnostics), `GET /api/v1/health` adds an optional
 `federation_config` object:
 
 | Field | Meaning |

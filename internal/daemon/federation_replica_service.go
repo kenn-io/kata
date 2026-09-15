@@ -552,7 +552,6 @@ func EnsureFederationReplica(
 		return EnsureFederationReplicaResult{}, err
 	}
 	p = normalized
-
 	result, err := ensureFederationReplicaState(ctx, store, credentials, p)
 	if err != nil {
 		return result, err

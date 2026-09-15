@@ -50,6 +50,8 @@ type graphWalk struct {
 	projectByID  map[int64]db.Project
 	linksByIssue map[int64][]db.Link
 	hidden       map[int64]struct{}
+	allowed      map[int64]struct{}
+	scoped       bool
 }
 
 func buildReachableIssueGraph(
@@ -62,6 +64,10 @@ func buildReachableIssueGraph(
 	if err != nil {
 		return nil, err
 	}
+	allowed, scoped, err := issueScopedAllowedIDSet(ctx, store)
+	if err != nil {
+		return nil, err
+	}
 	w := &graphWalk{
 		store:        store,
 		sourceID:     source.ID,
@@ -70,6 +76,8 @@ func buildReachableIssueGraph(
 		projectByID:  map[int64]db.Project{},
 		linksByIssue: map[int64][]db.Link{},
 		hidden:       map[int64]struct{}{},
+		allowed:      allowed,
+		scoped:       scoped,
 	}
 
 	dist, err := w.traverse(ctx, depth)
@@ -125,6 +133,12 @@ func (w *graphWalk) issue(ctx context.Context, issueID int64) (db.Issue, bool, e
 	if _, ok := w.hidden[issueID]; ok {
 		return db.Issue{}, false, nil
 	}
+	if w.scoped {
+		if _, ok := w.allowed[issueID]; !ok {
+			w.hidden[issueID] = struct{}{}
+			return db.Issue{}, false, nil
+		}
+	}
 	issue, err := w.store.IssueByID(ctx, issueID)
 	if errors.Is(err, db.ErrNotFound) {
 		return db.Issue{}, false, nil
@@ -152,6 +166,7 @@ func (w *graphWalk) issue(ctx context.Context, issueID int64) (db.Issue, bool, e
 		return db.Issue{}, false, nil
 	}
 	w.issueByID[issueID] = issue
+	db.RecordIssueScopeTarget(ctx, issueID)
 	return issue, true, nil
 }
 

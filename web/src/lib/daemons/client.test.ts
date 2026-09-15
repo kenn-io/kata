@@ -52,6 +52,18 @@ describe('web daemon transport', () => {
     expect(paths).toEqual(['/api/v1/ui/daemons', '/api/v1/ui/session/local'])
   })
 
+  test('keeps credential audit on the source daemon', async () => {
+    const upstream = vi.fn<typeof fetch>(async () => new Response('{}'))
+    const fetcher = createDaemonFetch(() => 'example-remote', upstream)
+
+    await fetcher('/api/v1/tokens')
+
+    const [input, init] = upstream.mock.calls[0]!
+    const request = new Request(new URL(String(input), window.location.origin), init)
+    expect(new URL(request.url).pathname).toBe('/api/v1/tokens')
+    expect(request.headers.has('X-Kata-Web-Daemon')).toBe(false)
+  })
+
   test('accepts only a sanitized daemon roster', async () => {
     const fetcher = vi.fn(async () =>
       Response.json({

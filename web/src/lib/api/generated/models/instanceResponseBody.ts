@@ -7,6 +7,7 @@ import type { UICapabilities } from './uICapabilities.ts'
 export interface InstanceResponseBody {
   auth: AuthInfoOut
   instance_uid: string
+  issue_subtree_tokens: boolean
   schema_version: number
   version: string
   web_ui_capabilities: UICapabilities

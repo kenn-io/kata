@@ -226,10 +226,17 @@ WHERE e.type IN ('token.created','token.revoked') ORDER BY e.id ASC`)
 			if err != nil {
 				return err
 			}
+			var scopeKind, scopeProjectUID, scopeRootIssueUID any
+			if record.Scope != nil {
+				scopeKind = string(record.Scope.Kind)
+				scopeProjectUID = record.Scope.ProjectUID
+				scopeRootIssueUID = record.Scope.RootIssueUID
+			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO api_tokens(
-id,token_hash,actor,name,created_at
-) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5)`, record.TokenID,
-				record.TokenHash, record.TargetActor, record.Name, event.createdAt)
+id,token_hash,actor,name,scope_kind,scope_project_uid,scope_root_issue_uid,expires_at,created_at
+) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, record.TokenID,
+				record.TokenHash, record.TargetActor, record.Name, scopeKind, scopeProjectUID,
+				scopeRootIssueUID, storedNullTime{Time: record.ExpiresAt}, event.createdAt)
 			if err != nil {
 				return fmt.Errorf("replay token.created %d: %w", record.TokenID, mapSQLError(err, nil))
 			}

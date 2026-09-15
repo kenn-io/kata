@@ -98,6 +98,9 @@ type CloseIssueParams struct {
 	IfMatchRev             *int64
 	IdempotencyKey         string
 	IdempotencyFingerprint string
+	// DisallowRecurrenceEffects rejects a done-close whose transaction would
+	// advance a recurrence or materialize another issue.
+	DisallowRecurrenceEffects bool
 }
 
 // ListIssuesParams filters single-project list output.
@@ -112,6 +115,10 @@ type ListIssuesParams struct {
 	Labels        []string     // issues must have ALL these labels (AND logic)
 	ExcludeLabels []string     // issues must NOT have any of these labels
 	Meta          []MetaFilter // metadata key-presence / key=value filters (AND logic)
+	// AllowedIssueIDs is nil for unrestricted callers. A non-nil slice is an
+	// authorization candidate set applied in SQL before ordering and LIMIT.
+	AllowedIssueIDs []int64
+	IssueScope      *APITokenScope
 }
 
 // MetaFilter is one parsed metadata filter for ListIssues. Key is the flat
@@ -130,16 +137,18 @@ type MetaFilter struct {
 // "every project"; >0 narrows to a single project. Status="" → all statuses.
 // All other filters use the same semantics as ListIssuesParams.
 type ListAllIssuesParams struct {
-	ProjectID     int64
-	Status        string
-	Priority      *int64
-	MaxPriority   *int64
-	Limit         int
-	Unowned       bool
-	Owner         string
-	Labels        []string
-	ExcludeLabels []string
-	Meta          []MetaFilter
+	ProjectID       int64
+	Status          string
+	Priority        *int64
+	MaxPriority     *int64
+	Limit           int
+	Unowned         bool
+	Owner           string
+	Labels          []string
+	ExcludeLabels   []string
+	Meta            []MetaFilter
+	AllowedIssueIDs []int64
+	IssueScope      *APITokenScope
 }
 
 // CreateCommentParams carries inputs for CreateComment.
@@ -241,18 +250,22 @@ type ReadyIssuesFilter struct {
 	// DefaultTimezone applies to civil schedules without issue timezone.
 	// Empty means UTC.
 	DefaultTimezone string
+	AllowedIssueIDs []int64
+	IssueScope      *APITokenScope
 }
 
 // SearchFTSParams parameterizes full-text search candidate retrieval. The
 // label filters run inside the backend's SQL, before LIMIT, so a narrow
 // filter still fills the requested number of rows.
 type SearchFTSParams struct {
-	ProjectID      int64
-	Query          string
-	Limit          int
-	IncludeDeleted bool
-	Labels         []string // issues must have ALL these labels (AND logic)
-	ExcludeLabels  []string // issues must NOT have any of these labels
+	ProjectID       int64
+	Query           string
+	Limit           int
+	IncludeDeleted  bool
+	Labels          []string // issues must have ALL these labels (AND logic)
+	ExcludeLabels   []string // issues must NOT have any of these labels
+	AllowedIssueIDs []int64
+	IssueScope      *APITokenScope
 }
 
 // EditIssueAtomicParams carries the full set of mutations to apply to one
@@ -799,6 +812,8 @@ type APIToken struct {
 	TokenHash  string
 	Actor      string
 	Name       *string
+	Scope      *APITokenScope
+	ExpiresAt  *time.Time
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
@@ -810,6 +825,8 @@ type CreateAPITokenParams struct {
 	Actor          string
 	Name           *string
 	AdminActor     string
+	Scope          *APITokenScope
+	ExpiresAt      *time.Time
 }
 
 // ClaimViolationSummary is the display-ready shape for unresolved

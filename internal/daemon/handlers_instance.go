@@ -38,18 +38,30 @@ func registerInstanceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.SchemaVersion = sv
 		out.Body.WebUIContractVersion = api.UISnapshotContractVersion
 		out.Body.WebUICapabilities = effectiveUIPolicy(ctx, cfg).Capabilities
-		out.Body.Auth = instanceAuthInfo(ctx)
+		out.Body.IssueSubtreeTokens = true
+		out.Body.Auth = instanceAuthInfo(ctx, cfg)
 		return out, nil
 	})
 }
 
-func instanceAuthInfo(ctx context.Context) api.AuthInfoOut {
+func instanceAuthInfo(ctx context.Context, cfg ServerConfig) api.AuthInfoOut {
 	principal, ok := PrincipalFromContext(ctx)
 	if !ok {
-		return api.AuthInfoOut{Kind: "none"}
+		return api.AuthInfoOut{
+			Kind: "none", CloseRequiresEvidence: closeRequiresEvidence(ctx),
+			TokenAuditRead: tokenAuditReadAllowed(ctx),
+		}
 	}
-	return api.AuthInfoOut{
+	out := api.AuthInfoOut{
 		Kind:  string(principal.Kind),
 		Actor: principal.Actor,
 	}
+	if principal.Scope != nil {
+		out.Scope = tokenScopeOut(principal.Scope)
+		out.ExpiresAt = principal.ExpiresAt
+		out.AllowedActions = issueScopedAllowedActions(effectiveUIPolicy(ctx, cfg).Capabilities.Writable)
+	}
+	out.CloseRequiresEvidence = closeRequiresEvidence(ctx)
+	out.TokenAuditRead = tokenAuditReadAllowed(ctx)
+	return out
 }

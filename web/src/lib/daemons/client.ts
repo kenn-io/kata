@@ -78,6 +78,7 @@ function proxyablePath(raw: string): boolean {
   const path = new URL(raw).pathname
   if (!path.startsWith('/api/v1/')) return false
   if (path === '/api/v1/ui/daemons' || path.startsWith('/api/v1/ui/session')) return false
+  if (path === '/api/v1/tokens' || path.startsWith('/api/v1/tokens/')) return false
   return !path.startsWith(daemonProxyPrefix)
 }
 

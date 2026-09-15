@@ -164,11 +164,18 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.projectsCursor = 0
 	m.projectsGen = 0
 	m.federation = federationState{}
+	m.credentials = credentialAuditState{}
 	m.pendingRefetch = false
 	m.projectsStale = false
 	m.projectsRefetchPending = false
 	m.input = inputState{}
 	m.modal = modalNone
+	m.closeRequiresEvidence = false
+	m.issueScoped = false
+	m.scopedWritable = false
+	m.authCapabilitiesReady = false
+	m.authCapabilitiesRequired = true
+	m.tokenAuditRead = false
 	m.sseStatus = sseConnected
 	m.nextGen++
 	m.nextDetailFollowGen++
@@ -191,6 +198,9 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 		if cmd := m.sseRestart(conn, m.connGen, m.sseCh); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	}
+	if m.view != viewEmpty {
+		cmds = append(cmds, m.fetchAuthCapabilities())
 	}
 	if m.view == viewList && !m.scope.empty {
 		cmds = append(cmds, m.fetchInitial(), m.fetchProjects())

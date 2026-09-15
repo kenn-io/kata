@@ -1,4 +1,5 @@
 import { applicationRequest, applicationRoutePath } from '../applicationBase'
+import { assertValidIssueScopedCapabilities } from './scopedAuthority'
 
 export const sessionStorageKey = 'kata.web.session.v1'
 export const authenticationModeStorageKey = 'kata.web.authentication-mode.v1'
@@ -67,6 +68,10 @@ interface SessionResponse {
   writable: boolean
   updates: 'sse' | 'poll'
   actor_policy: string
+  scope?: unknown
+  expires_at?: unknown
+  allowed_actions?: unknown
+  close_requires_evidence?: unknown
 }
 
 export function consumeLaunchFragment(
@@ -200,6 +205,7 @@ async function acceptSessionResponse(
   ) {
     throw new Error(failureMessage)
   }
+  assertValidIssueScopedCapabilities(body, failureMessage)
   const credentials = { session: body.session, csrf: body.csrf }
   storage.setItem(sessionStorageKey, JSON.stringify(credentials))
   return {

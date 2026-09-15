@@ -1,4 +1,5 @@
 ---
+last_edited: 2026-09-15
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
 last_edited: 2026-09-15
@@ -111,6 +112,24 @@ directly instead. See [Configuration](../reference/configuration.md#daemon-confi
 for catalog settings and [Remote daemon](../operations/remote-daemon.md) for
 network, authentication, and proxy setup.
 
+## Audit provisioned credentials
+
+An administrator session can open **Credentials** to inspect the daemon's
+read-only credential ledger. The screen keeps live, expired, and revoked rows,
+shows their actor, name, issue-subtree scope, and lifecycle timestamps, and can
+be filtered without sending credential metadata to browser storage. Last
+observed use is best-effort rather than a request-by-request access log. The
+screen never receives a bearer value, token hash, or provisioned token-file
+path.
+
+The navigation entry appears only when the daemon advertises
+`token_audit_read`. That capability is deliberately separate from ordinary
+issue write access: a bootstrap/static administrator can audit credentials even
+when its browser session cannot mutate issues, while a normal local-web,
+identity-token, scoped-worker, or proxy session cannot inspect them. Switching
+through the local daemon gateway cannot borrow a target's configured credential
+to gain this view.
+
 ## Browser authority and deployment
 
 The default local experience is intentionally simple: a browser connecting
@@ -132,7 +151,9 @@ trusted private network; otherwise terminate HTTPS at the same origin.
 `--insecure-readonly` can serve an anonymous browser but never grants mutation
 authority.
 
-The Web UI exposes ordinary issue and project workflows, not token,
-federation, integration, purge, or owner-filesystem administration. For the
+The Web UI exposes ordinary issue and project workflows plus the capability-
+gated, read-only credential ledger. It does not create or revoke tokens and
+does not expose federation, integration, purge, or owner-filesystem
+administration. For the
 full boundary and reverse-proxy requirements, see [Remote daemon](../operations/remote-daemon.md)
 and the [HTTP API browser-session reference](../reference/http-api.md#browser-ui-endpoints).

@@ -48,6 +48,29 @@ func TestCloseDone_MaterializesNextRecurrence(t *testing.T) {
 		"next_occurrence_key should advance two steps past the closed instance")
 }
 
+func TestCloseDone_DisallowsRecurrenceEffectsAtomically(t *testing.T) {
+	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
+		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
+		Template: db.RecurrenceTemplate{Title: "Delegated recurring work"},
+	})
+	firstID, _ := seedRecurrenceInstance(t, d, p.ID, rec.ID, "2026-05-11", "Delegated recurring work")
+
+	_, _, _, err := d.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: firstID, ExpectedProjectID: p.ID, Reason: "done", Actor: "worker-a",
+		Message: "Completed delegated work", DisallowRecurrenceEffects: true,
+	})
+	require.ErrorIs(t, err, db.ErrRecurrenceEffectsForbidden)
+	issue, err := d.IssueByID(ctx, firstID)
+	require.NoError(t, err)
+	require.Equal(t, "open", issue.Status)
+
+	var n int
+	require.NoError(t, d.QueryRow(`
+		SELECT COUNT(*) FROM issues
+		 WHERE recurrence_id = ? AND occurrence_key = ?`, rec.ID, "2026-05-18").Scan(&n))
+	require.Zero(t, n)
+}
+
 func TestCloseDone_ClaimAuditEventsAreReturnedOnceBeforeMaterialization(t *testing.T) {
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",

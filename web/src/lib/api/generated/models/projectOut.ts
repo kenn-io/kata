@@ -5,6 +5,7 @@ import type { ProjectOutMetadata } from './projectOutMetadata.ts'
 import type { ProjectStatsOut } from './projectStatsOut.ts'
 
 export interface ProjectOut {
+  active: boolean
   created_at: string
   deleted_at?: string
   id: number

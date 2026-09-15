@@ -375,7 +375,8 @@ func (h toolHandlers) system(ctx context.Context, _ *sdkmcp.CallToolRequest, _ S
 }
 
 func projectSummaryOut(project generated.ProjectOut) ProjectSummary {
-	result := ProjectSummary{ID: project.ID, UID: project.UID, Name: project.Name, Revision: project.Revision, Metadata: project.Metadata, CreatedAt: formatTime(project.CreatedAt), Archived: project.DeletedAt != nil}
+	result := ProjectSummary{ID: project.ID, UID: project.UID, Name: project.Name, Revision: project.Revision, Metadata: project.Metadata, Archived: project.DeletedAt != nil}
+	result.CreatedAt = formatTime(project.CreatedAt)
 	if project.DeletedAt != nil {
 		result.DeletedAt = formatTime(*project.DeletedAt)
 	}

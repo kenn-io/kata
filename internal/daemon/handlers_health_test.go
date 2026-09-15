@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 )
@@ -24,7 +25,9 @@ func TestHealth_ReportsSchemaAndUptime(t *testing.T) {
 		Uptime           string `json:"uptime"`
 		DBPath           string `json:"db_path"`
 	}
-	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &body))
 	assert.True(t, body.OK)
 	assert.Equal(t, db.CurrentSchemaVersion(), body.SchemaVersion)
 	assert.Equal(t, daemon.APISchemaVersion, body.APISchemaVersion)
@@ -39,6 +42,7 @@ func TestHealthIncludesEffectiveIdleShutdownCapability(t *testing.T) {
 	ts := startTestServer(t, daemon.ServerConfig{
 		DB:        d.db,
 		StartedAt: d.now,
+		Auth:      config.AuthConfig{Token: "operator-token"},
 		IdleShutdownHealth: func() daemon.IdleSnapshot {
 			return daemon.IdleSnapshot{
 				Timeout:  15 * time.Minute,
@@ -52,7 +56,10 @@ func TestHealthIncludesEffectiveIdleShutdownCapability(t *testing.T) {
 		IdleShutdown *api.IdleShutdownHealth `json:"idle_shutdown"`
 		LegacyIdle   json.RawMessage         `json:"idle"`
 	}
-	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil,
+		map[string]string{"Authorization": "Bearer operator-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &body))
 	require.NotNil(t, body.IdleShutdown)
 	assert.Nil(t, body.LegacyIdle)
 	assert.Equal(t, "15m0s", body.IdleShutdown.Timeout)
@@ -91,6 +98,7 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 	ts := startTestServer(t, daemon.ServerConfig{
 		DB:        d.db,
 		StartedAt: d.now,
+		Auth:      config.AuthConfig{Token: "operator-token"},
 		ReconcilerHealth: func() daemon.ReconcilerHealth {
 			return daemon.ReconcilerHealth{
 				Configured:      true,
@@ -111,7 +119,10 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 	var body struct {
 		Embeddings *api.EmbeddingsHealth `json:"embeddings"`
 	}
-	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil,
+		map[string]string{"Authorization": "Bearer operator-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &body))
 	require.NotNil(t, body.Embeddings, "embeddings health must surface when ReconcilerHealth is wired")
 	assert.True(t, body.Embeddings.Configured)
 	assert.Equal(t, int64(7), body.Embeddings.Embedded)
@@ -145,17 +156,25 @@ func TestHealth_DoesNotExposeEmbeddingProviderDiagnostics(t *testing.T) {
 		},
 	})
 
-	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/health", nil,
+		map[string]string{"Forwarded": "for=198.51.100.1"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
 	assert.NotContains(t, string(bs), "reflected issue title")
 
-	var body struct {
-		Embeddings map[string]json.RawMessage `json:"embeddings"`
-	}
+	var body map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(bs, &body))
-	_, hasLastError := body.Embeddings["last_error"]
-	assert.False(t, hasLastError, "unauthenticated health must omit raw embedding provider diagnostics")
-	assert.Contains(t, body.Embeddings, "last_error_status")
+	assert.NotContains(t, body, "embeddings")
+}
+
+func TestHealth_KeylessDaemonRejectsExplicitInvalidAuthorizationBeforeDiagnostics(t *testing.T) {
+	ts, _ := startDefaultTestServer(t)
+
+	resp, body := doReq(t, ts, http.MethodGet, "/api/v1/health", nil,
+		map[string]string{"Authorization": "Bearer unknown-token"})
+	require.Equal(t, http.StatusForbidden, resp.StatusCode, string(body))
+	assert.Contains(t, string(body), `"token_invalid"`)
+	assert.NotContains(t, string(body), "db_path")
+	assert.NotContains(t, string(body), "federation")
 }
 
 func TestHealthFederationConfigOmitsBlockWhenUnconfigured(t *testing.T) {
@@ -175,6 +194,7 @@ func TestHealthFederationConfigIncludesSanitizedAggregate(t *testing.T) {
 	ts := startTestServer(t, daemon.ServerConfig{
 		DB:        d.db,
 		StartedAt: d.now,
+		Auth:      config.AuthConfig{Token: "operator-token"},
 		FederationConfigHealth: func() api.FederationConfigHealth {
 			return api.FederationConfigHealth{
 				Configured:        4,
@@ -189,7 +209,8 @@ func TestHealthFederationConfigIncludesSanitizedAggregate(t *testing.T) {
 		},
 	})
 
-	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/health", nil,
+		map[string]string{"Authorization": "Bearer operator-token"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
 	var body struct {
 		OK               bool                        `json:"ok"`

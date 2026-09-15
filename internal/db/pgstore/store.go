@@ -71,7 +71,12 @@ func (s *Store) Close() error {
 		federationLockErr = s.federationLockDB.Close()
 		s.federationLockDB = nil
 	}
-	return errors.Join(leaseErr, idempotencyErr, federationLockErr, s.DB.Close())
+	return errors.Join(
+		leaseErr,
+		idempotencyErr,
+		federationLockErr,
+		s.DB.Close(),
+	)
 }
 
 type exportQueryer interface {

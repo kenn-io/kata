@@ -17,6 +17,9 @@ var externalRootBridgesMigrationSQL string
 //go:embed migrations/000027_comment_teammate.up.sql
 var commentTeammateMigrationSQL string
 
+//go:embed migrations/000028_issue_scoped_tokens.up.sql
+var issueScopedTokensMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -42,6 +45,12 @@ var migrationAssets = []Migration{
 		ToVersion:   27,
 		Name:        "000027_comment_teammate.up.sql",
 		SQL:         commentTeammateMigrationSQL,
+	},
+	{
+		FromVersion: 27,
+		ToVersion:   28,
+		Name:        "000028_issue_scoped_tokens.up.sql",
+		SQL:         issueScopedTokensMigrationSQL,
 	},
 }
 

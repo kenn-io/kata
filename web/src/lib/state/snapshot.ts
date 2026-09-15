@@ -1,6 +1,7 @@
 import type { UISnapshotResponseBody } from '../api/generated'
 import { readUISnapshot, type ReadUISnapshotParams } from '../api/generated'
 import { AuthenticationRequiredError, isAuthenticationRequiredError } from '../auth/session'
+import { assertValidIssueScopedCapabilities } from '../auth/scopedAuthority'
 import type { KataRoute } from '../router'
 
 export interface SnapshotAuthority {
@@ -223,6 +224,18 @@ export function snapshotIntentForRoute(
   now: Date = new Date(),
   timeZone: string = Intl.DateTimeFormat().resolvedOptions().timeZone,
 ): UISnapshotIntent {
+  if (route.view === 'credentials') {
+    return {
+      view: 'all-open',
+      statuses: [],
+      owners: [],
+      labels: [],
+      relationships: [],
+      includeGraph: false,
+      includeHistory: false,
+      timeZone,
+    }
+  }
   const view = route.view ?? (route.projectUID || route.issueUID ? 'all-open' : 'inbox')
   const intent: UISnapshotIntent = {
     view,
@@ -278,6 +291,10 @@ export function createUISnapshotRequest(
     }
     if (status === 401) throw new AuthenticationRequiredError('Snapshot unavailable')
     if (status !== 200) throw new Error('Snapshot unavailable')
+    assertValidIssueScopedCapabilities(
+      (response.data as UISnapshot).capabilities,
+      'Invalid issue-scoped authority',
+    )
     return {
       status: 200,
       etag: response.headers.get('ETag') ?? '',

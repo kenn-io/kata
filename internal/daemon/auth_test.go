@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -119,6 +120,59 @@ func TestAuthMiddleware_IdentityModeDBTokenSetsPrincipal(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestAuthMiddleware_IssueScopedTokenUsesExplicitRouteAllowlist(t *testing.T) {
+	d := openAuthTestDB(t)
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	_, _, err := d.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "scoped-token",
+		Actor:          "worker-a",
+		AdminActor:     db.BootstrapActor,
+		Scope: &db.APITokenScope{
+			Kind: db.APITokenScopeIssueSubtree, ProjectUID: "01HAAAAAAAAAAAAAAAAAAAAAAA",
+			RootIssueUID: "01HBBBBBBBBBBBBBBBBBBBBBBB",
+		},
+		ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+
+	mw := requireBearer(authPolicy{Token: "bootstrap-token", RequireTokenIdentity: true}, d)
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		want   int
+	}{
+		{name: "instance", method: http.MethodGet, path: "/api/v1/instance", want: http.StatusNoContent},
+		{name: "project catalog", method: http.MethodGet, path: "/api/v1/projects", want: http.StatusNoContent},
+		{name: "create child", method: http.MethodPost, path: "/api/v1/projects/1/issues", want: http.StatusNoContent},
+		{name: "edit issue", method: http.MethodPatch, path: "/api/v1/projects/1/issues/abc4", want: http.StatusNoContent},
+		{name: "link issues", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/links", want: http.StatusNoContent},
+		{name: "renew lease", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/lease/actions/renew", want: http.StatusNoContent},
+		{name: "stream activity", method: http.MethodGet, path: "/api/v1/events/stream", want: http.StatusNoContent},
+		{name: "token administration", method: http.MethodGet, path: "/api/v1/tokens", want: http.StatusForbidden},
+		{name: "project administration", method: http.MethodPatch, path: "/api/v1/projects/1", want: http.StatusForbidden},
+		{name: "recurrence", method: http.MethodGet, path: "/api/v1/projects/1/recurrences", want: http.StatusForbidden},
+		{name: "force release", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/lease/actions/force_release", want: http.StatusForbidden},
+		{name: "delete issue", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/actions/delete", want: http.StatusForbidden},
+		{name: "unknown route", method: http.MethodGet, path: "/api/v1/future-surface", want: http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer scoped-token")
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+			assert.Equal(t, tc.want, rr.Code)
+			if tc.want == http.StatusForbidden {
+				assert.Contains(t, rr.Body.String(), `"scoped_operation_forbidden"`)
+				assert.NotContains(t, rr.Body.String(), tc.path)
+			}
+		})
+	}
 }
 
 func TestAuthMiddleware_IdentityModeMissingBearer401(t *testing.T) {
@@ -274,6 +328,54 @@ func TestAuthMiddleware_UnauthenticatedPathsAlwaysPass(t *testing.T) {
 		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, p, nil))
 		assert.Equal(t, http.StatusOK, rr.Code, "unauthenticated path %s should pass", p)
 	}
+}
+
+func TestAuthMiddleware_HealthValidatesAnExplicitBearer(t *testing.T) {
+	mw := requireBearer(authPolicy{Token: "expected-token"})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	assert.Contains(t, rr.Body.String(), `"auth_invalid"`)
+}
+
+func TestAuthMiddleware_KeylessHealthRejectsExplicitAuthorization(t *testing.T) {
+	mw := requireBearer(authPolicy{})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for _, tc := range []struct {
+		name   string
+		header string
+		status int
+		code   string
+	}{
+		{name: "unknown bearer", header: "Bearer unknown-token", status: http.StatusForbidden, code: "token_invalid"},
+		{name: "malformed scheme", header: "Basic dXNlcjpwYXNz", status: http.StatusUnauthorized, code: "auth_required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, pathHealth, nil)
+			req.Header.Set(authHeader, tc.header)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+			assert.Equal(t, tc.status, rr.Code)
+			assert.Contains(t, rr.Body.String(), `"`+tc.code+`"`)
+		})
+	}
+
+	// Ordinary keyless requests keep their established local authority. The
+	// credential-broker proxy relies on this path while forwarding a target
+	// Authorization header through its self-authenticated handler.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req.Header.Set(authHeader, "Bearer target-token")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
 func TestAuthMiddleware_FederationTransportPathsBypassAdminBearer(t *testing.T) {

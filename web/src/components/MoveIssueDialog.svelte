@@ -12,6 +12,9 @@
     hasChecklist: boolean
     hasRecurrence: boolean
     movePending?: boolean | undefined
+    allowMove?: boolean | undefined
+    allowRecurrence?: boolean | undefined
+    allowDelete?: boolean | undefined
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onAddChecklist: () => void
     onCreateRecurrence: () => void
@@ -24,6 +27,9 @@
     hasChecklist,
     hasRecurrence,
     movePending = false,
+    allowMove = true,
+    allowRecurrence = true,
+    allowDelete = true,
     onMoveIssue,
     onAddChecklist,
     onCreateRecurrence,
@@ -48,10 +54,11 @@
   const movingProjectUID = $derived(activeMove?.project.uid ?? null)
   const pendingProject = $derived(activeMove?.project ?? null)
   const canAddChecklist = $derived(!hasChecklist)
-  const canCreateRecurrence = $derived(!hasRecurrence)
-  const canDeleteIssue = $derived(issue.issue.status !== 'closed')
-  const eligibleProjects = $derived.by(() =>
-    projects
+  const canCreateRecurrence = $derived(allowRecurrence && !hasRecurrence)
+  const canDeleteIssue = $derived(allowDelete && issue.issue.status !== 'closed')
+  const eligibleProjects = $derived.by(() => {
+    if (!allowMove) return []
+    return projects
       .filter(
         (project) => project.uid !== issue.issue.project_uid && project.metadata.role !== 'inbox',
       )
@@ -59,8 +66,8 @@
         (a, b) =>
           a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) ||
           a.uid.localeCompare(b.uid),
-      ),
-  )
+      )
+  })
   const duplicateContexts = $derived.by(() => {
     const groups = new Map<string, KataProjectSummary[]>()
     for (const project of eligibleProjects) {

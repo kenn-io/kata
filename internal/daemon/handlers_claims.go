@@ -24,6 +24,22 @@ import (
 	"go.kenn.io/kata/internal/federationcoord"
 )
 
+// projectScopedClaimActionEvent rewrites the lease action response's event
+// through the typed issue-scoped projection. Unscoped callers are untouched.
+func projectScopedClaimActionEvent(
+	ctx context.Context, store db.Storage, body *api.ClaimActionResponseBody,
+) error {
+	if issueScopeFromContext(ctx) == nil || body == nil || body.Event == nil {
+		return nil
+	}
+	projected, err := scopedMutationEvent(ctx, store, body.Event)
+	if err != nil {
+		return err
+	}
+	body.Event = projected
+	return nil
+}
+
 func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "acquireIssueLease",
@@ -35,8 +51,14 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if _, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo); err != nil {
+			return nil, err
+		}
 		body, err := handleClaimAcquire(ctx, cfg, in.ProjectID, in.Ref, in.Body, principal.ClaimPrincipal)
 		if err != nil {
+			return nil, err
+		}
+		if err := projectScopedClaimActionEvent(ctx, cfg.DB, &body); err != nil {
 			return nil, err
 		}
 		return &api.ClaimActionResponse{Body: body}, nil
@@ -52,8 +74,14 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if _, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo); err != nil {
+			return nil, err
+		}
 		body, err := handleClaimRenew(ctx, cfg, in.ProjectID, in.Ref, in.Body, principal.ClaimPrincipal)
 		if err != nil {
+			return nil, err
+		}
+		if err := projectScopedClaimActionEvent(ctx, cfg.DB, &body); err != nil {
 			return nil, err
 		}
 		return &api.ClaimActionResponse{Body: body}, nil
@@ -69,8 +97,14 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if _, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo); err != nil {
+			return nil, err
+		}
 		body, err := handleClaimRelease(ctx, cfg, in.ProjectID, in.Ref, in.Body, principal.ClaimPrincipal)
 		if err != nil {
+			return nil, err
+		}
+		if err := projectScopedClaimActionEvent(ctx, cfg.DB, &body); err != nil {
 			return nil, err
 		}
 		return &api.ClaimActionResponse{Body: body}, nil
@@ -85,6 +119,10 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 			federationTransportOperation("forceReleaseIssueLease"), false)
 		if err != nil {
 			return nil, err
+		}
+		if issueScopeFromContext(ctx) != nil {
+			return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden",
+				"operation is not available to an issue-scoped credential", "", nil)
 		}
 		if err := requireHubClaimBinding(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
@@ -128,6 +166,9 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		var err error
 		ctx, err = authorizeClaimStatusRead(ctx, cfg, in.ProjectID, in.Authorization)
 		if err != nil {
+			return nil, err
+		}
+		if _, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo); err != nil {
 			return nil, err
 		}
 		body, err := handleClaimStatus(ctx, cfg, in.ProjectID, in.Ref)

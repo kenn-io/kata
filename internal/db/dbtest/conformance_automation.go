@@ -157,12 +157,101 @@ func checkAPITokensAndSystemProject(t *testing.T, store db.Storage) error {
 	_, _, err = store.RevokeAPIToken(ctx, token.ID, db.BootstrapActor)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 
+	expiresAt := time.Now().UTC().Add(8 * time.Hour).Truncate(time.Millisecond)
+	scopeProject, err := store.CreateProject(ctx, "scoped-token-project")
+	if err != nil {
+		return fmt.Errorf("create scoped token project: %w", err)
+	}
+	scopeRoot, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: scopeProject.ID, Title: "Delegated work", Author: "coordinator",
+	})
+	if err != nil {
+		return fmt.Errorf("create scoped token root: %w", err)
+	}
+	scope := &db.APITokenScope{
+		Kind:         db.APITokenScopeIssueSubtree,
+		ProjectUID:   scopeProject.UID,
+		RootIssueUID: scopeRoot.UID,
+	}
+	scoped, scopedEvent, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "scoped-secret-token",
+		Actor:          "worker-a",
+		AdminActor:     db.BootstrapActor,
+		Scope:          scope,
+		ExpiresAt:      &expiresAt,
+	})
+	if err != nil {
+		return fmt.Errorf("create scoped api token: %w", err)
+	}
+	require.NotNil(t, scoped.Scope)
+	assert.Equal(t, *scope, *scoped.Scope)
+	require.NotNil(t, scoped.ExpiresAt)
+	assert.WithinDuration(t, expiresAt, *scoped.ExpiresAt, time.Millisecond)
+	assert.Contains(t, scopedEvent.Payload, `"kind":"issue_subtree"`)
+	assert.Contains(t, scopedEvent.Payload, scope.ProjectUID)
+	assert.Contains(t, scopedEvent.Payload, scope.RootIssueUID)
+
+	resolvedScoped, err := store.ResolveAPIToken(ctx, "scoped-secret-token")
+	if err != nil {
+		return fmt.Errorf("resolve scoped api token: %w", err)
+	}
+	require.NotNil(t, resolvedScoped.Scope)
+	assert.Equal(t, *scope, *resolvedScoped.Scope)
+	require.NotNil(t, resolvedScoped.ExpiresAt)
+	assert.WithinDuration(t, expiresAt, *resolvedScoped.ExpiresAt, time.Millisecond)
+	fetched, err := store.APITokenByID(ctx, scoped.ID)
+	require.NoError(t, err)
+	require.Equal(t, scoped.ID, fetched.ID)
+	require.Empty(t, fetched.TokenHash)
+	members, err := store.IssueScopedMembers(ctx, *scope)
+	require.NoError(t, err)
+	require.Equal(t, []int64{scopeRoot.ID}, issueIDs(members))
+	allowed, err := store.IssueInScope(ctx, *scope, scopeRoot.ID)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	fenced := db.WithIssueScopeTargets(ctx)
+	db.RecordIssueScopeTarget(fenced, scopeRoot.ID)
+	fenced = db.WithTransactionFence(fenced, store.IssueScopedTokenTransactionFence(resolvedScoped))
+	_, _, err = store.CreateComment(fenced, db.CreateCommentParams{
+		IssueID: scopeRoot.ID, Body: "Authorized work", Author: resolvedScoped.Actor,
+	})
+	require.NoError(t, err)
+	_, _, err = store.RevokeAPIToken(ctx, resolvedScoped.ID, db.BootstrapActor)
+	require.NoError(t, err)
+	_, _, err = store.CreateComment(fenced, db.CreateCommentParams{
+		IssueID: scopeRoot.ID, Body: "Revoked work", Author: resolvedScoped.Actor,
+	})
+	assert.ErrorIs(t, err, db.ErrNotFound)
+
+	expiredAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Millisecond)
+	expired, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{ //nolint:gosec // Deterministic test credential.
+		PlaintextToken: "expired-scoped-token",
+		Actor:          "worker-b",
+		AdminActor:     db.BootstrapActor,
+		Scope:          scope,
+		ExpiresAt:      &expiredAt,
+	})
+	if err != nil {
+		return fmt.Errorf("create expired api token fixture: %w", err)
+	}
+	_, err = store.ResolveAPIToken(ctx, "expired-scoped-token")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	expiredFence := db.WithTransactionFence(ctx, store.IssueScopedTokenTransactionFence(expired))
+	_, _, err = store.CreateComment(expiredFence, db.CreateCommentParams{
+		IssueID: scopeRoot.ID, Body: "Expired work", Author: expired.Actor,
+	})
+	assert.ErrorIs(t, err, db.ErrNotFound)
+
 	blankName := "  "
 	invalid := []db.CreateAPITokenParams{
 		{Actor: "actor", AdminActor: db.BootstrapActor},
 		{PlaintextToken: "another-token", Actor: "bootstrap", AdminActor: db.BootstrapActor},
 		{PlaintextToken: "another-token", Actor: "actor"},
 		{PlaintextToken: "another-token", Actor: "actor", AdminActor: db.BootstrapActor, Name: &blankName},
+		{PlaintextToken: "another-token", Actor: "actor", AdminActor: db.BootstrapActor, Scope: scope},
+		{PlaintextToken: "another-token", Actor: "actor", AdminActor: db.BootstrapActor, ExpiresAt: &expiresAt},
+		{PlaintextToken: "another-token", Actor: "actor", AdminActor: db.BootstrapActor,
+			Scope: &db.APITokenScope{Kind: "unknown", ProjectUID: scope.ProjectUID, RootIssueUID: scope.RootIssueUID}, ExpiresAt: &expiresAt},
 	}
 	for _, params := range invalid {
 		_, _, err := store.CreateAPIToken(ctx, params)

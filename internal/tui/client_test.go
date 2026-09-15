@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -221,6 +222,38 @@ func TestClientGetInstanceDecodesAuthPrincipal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "db_token", instance.Auth.Kind)
 	assert.Equal(t, "operator", instance.Auth.Actor)
+}
+
+func TestClientListTokensDecodesRedactedAuditInventory(t *testing.T) {
+	created := time.Date(2026, 9, 15, 10, 0, 0, 0, time.UTC)
+	observed := created.Add(time.Hour)
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/api/v1/tokens", r.URL.Path)
+		respondJSON(t, w, map[string]any{
+			"tokens": []map[string]any{{
+				"id": 41, "actor": "operator", "name": "automation",
+				"scope": map[string]any{
+					"kind": "issue_subtree", "project_uid": "01PROJECT",
+					"root_issue_uid": "01ROOT",
+				},
+				"created_at": created, "state": "live",
+			}},
+			"observed_at": observed,
+		})
+	})
+
+	tokens, gotObserved, err := c.ListTokens(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, tokens, 1)
+	assert.Equal(t, int64(41), tokens[0].ID)
+	assert.Equal(t, "automation", *tokens[0].Name)
+	require.NotNil(t, tokens[0].Scope)
+	assert.Equal(t, "01PROJECT", tokens[0].Scope.ProjectUID)
+	assert.Equal(t, "01ROOT", tokens[0].Scope.RootIssueUID)
+	assert.Equal(t, "live", tokens[0].State)
+	assert.Equal(t, observed, gotObserved)
 }
 
 func TestTUIHubAdminClientRejectsPlainHTTPHostnameWithoutAllowInsecure(t *testing.T) {

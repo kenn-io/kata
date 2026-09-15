@@ -302,6 +302,24 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	require.NoError(t, err)
 	require.Len(t, collection.CollectionLinks, 2)
 
+	bounded, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", AllowedIssueIDs: []int64{parent.ID}, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{parent.UID}, uiIssueUIDs(bounded.Issues),
+		"authorization candidates must be applied before the collection limit")
+	empty, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", AllowedIssueIDs: []int64{}, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Empty(t, empty.Issues)
+	references, err := uiStore.ReadUIReferences(ctx, db.UIReferencesQuery{
+		AllowedIssueIDs: []int64{child.ID}, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, references.Issues, 1)
+	require.Equal(t, child.UID, references.Issues[0].UID)
+
 	closedLinked := createCursorIssue(ctx, t, store, project.ID, "Closed linked issue")
 	createCursorLink(ctx, t, store, parent, closedLinked, "blocks")
 	_, _, changed, err = store.CloseIssue(

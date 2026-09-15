@@ -93,6 +93,11 @@ attributed comments. If the deployment federates projects, upgrade every hub
 and spoke on that path first so an older participant cannot omit the optional
 field during materialization and re-export.
 
+Schema 28 adds issue-scoped token fields and expiration through the registered
+27 to 28 migration. Existing tokens remain unscoped. Run the same offline
+upgrade before creating scoped credentials; rollback requires the pre-upgrade
+backup and its matching binary.
+
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
 
