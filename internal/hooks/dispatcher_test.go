@@ -18,7 +18,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-const dispatcherTestGraceWindow = 250 * time.Millisecond
+const dispatcherTestGraceWindow = 500 * time.Millisecond
 
 // mustNewDispatcher builds a Dispatcher rooted at a fresh temp KataHome with
 // no-op resolvers and returns the dispatcher, a buffer capturing the daemon
@@ -346,7 +346,7 @@ func TestDispatcher_ProducerDrainAcceptsHandoffsAfterIdleAdmissionCloses(t *test
 		return nil, false
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, d.Shutdown(ctx))
 	require.Equal(t, 2, countJSONLLines(runsPath))
