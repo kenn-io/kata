@@ -70,8 +70,7 @@ func (t *platformTree) failStart(cmd *exec.Cmd, cause error) error {
 			cleanupErrs = append(cleanupErrs, err)
 		}
 		if err := cmd.Wait(); err != nil {
-			var exitErr *exec.ExitError
-			if !errors.As(err, &exitErr) {
+			if _, ok := errors.AsType[*exec.ExitError](err); !ok {
 				cleanupErrs = append(cleanupErrs, err)
 			}
 		}
@@ -158,10 +157,6 @@ type jobObjectBasicAccountingInformation struct {
 	TotalTerminatedProcesses  uint32
 }
 
-func prepare(_ *exec.Cmd) {}
-
-func terminate(_ *exec.Cmd) error { return nil }
-
 func kill(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
@@ -197,11 +192,4 @@ func processExited(cmd *exec.Cmd) (bool, error) {
 		return false, statusErr
 	}
 	return waitResult == windows.WAIT_OBJECT_0, nil
-}
-
-func alive(cmd *exec.Cmd) bool {
-	if cmd.Process == nil {
-		return false
-	}
-	return cmd.ProcessState == nil
 }
