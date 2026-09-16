@@ -370,7 +370,7 @@ func webLaunchURLAt(base *url.URL, returnPath string) string {
 type webUIProbeDoer struct{ client *http.Client }
 
 func (d webUIProbeDoer) Do(ctx context.Context, request *http.Request) (*http.Response, error) {
-	response, err := d.client.Do(request.WithContext(ctx))
+	response, err := d.client.Do(request.WithContext(ctx)) //nolint:gosec // G704: generated snapshot route uses the validated operator-configured daemon origin.
 	if err != nil {
 		return nil, err
 	}

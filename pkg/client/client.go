@@ -253,7 +253,7 @@ type streamingAPIClient struct {
 }
 
 func (c streamingAPIClient) ExecuteRequest(ctx context.Context, req *http.Request, _ string) (*runtime.Response, error) {
-	resp, err := c.client.Do(req.WithContext(ctx))
+	resp, err := c.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated stream route uses the caller-selected daemon and its configured transport.
 	if err != nil {
 		return nil, err
 	}

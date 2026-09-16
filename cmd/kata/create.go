@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -131,10 +132,7 @@ func newCreateCmd() *cobra.Command {
 			req.Labels = labels
 		}
 		if len(initialMetadata) > 0 {
-			req.Metadata = make(map[string]any, len(initialMetadata))
-			for key, value := range initialMetadata {
-				req.Metadata[key] = value
-			}
+			req.Metadata = maps.Clone(initialMetadata)
 		}
 		// Resolve every link-target ref to its wire ref string before
 		// building the payload. Refs accept the same forms as `kata show`:

@@ -441,5 +441,5 @@ func unixClient(socket string, opts Opts) *http.Client {
 type probeRequestDoer struct{ client *http.Client }
 
 func (d probeRequestDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return d.client.Do(req.WithContext(ctx))
+	return d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated probe routes use the daemon selected by local discovery.
 }
