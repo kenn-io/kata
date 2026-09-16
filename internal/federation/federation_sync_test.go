@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -3068,33 +3069,39 @@ func TestFederationRunnerSkipsSpokeWhenDrainAdmissionIsClosed(t *testing.T) {
 }
 
 func TestFederationRunnerRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.T) {
-	store, _ := openDaemonclientTestDB(t)
-	reopened := make(chan struct{})
-	completed := make(chan struct{})
-	var attempts atomic.Int32
-	runner := &Runner{
-		DB:       store,
-		Interval: time.Hour,
-		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
-			if attempts.Add(1) == 1 {
-				return nil, false, reopened
-			}
-			return activity.NewLease(func() { close(completed) }, nil), true, nil
-		},
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
-	require.Eventually(t, func() bool { return attempts.Load() == 1 }, time.Second, time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		store, _ := openDaemonclientTestDB(t)
+		reopened := make(chan struct{})
+		completed := make(chan struct{})
+		var attempts atomic.Int32
+		runner := &Runner{
+			DB:       store,
+			Interval: time.Hour,
+			DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+				if attempts.Add(1) == 1 {
+					return nil, false, reopened
+				}
+				return activity.NewLease(func() { close(completed) }, nil), true, nil
+			},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
+		defer func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		}()
+		synctest.Wait()
+		require.Equal(t, int32(1), attempts.Load())
 
-	close(reopened)
-	select {
-	case <-completed:
-	case <-time.After(time.Second):
-		t.Fatal("federation scan did not complete after drain admission reopened")
-	}
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		close(reopened)
+		synctest.Wait()
+		select {
+		case <-completed:
+		default:
+			t.Fatal("federation scan did not complete after drain admission reopened")
+		}
+	})
 }
 
 func TestFederationRunnerRetriesWhenSpokeAdmissionReopens(t *testing.T) {
@@ -3141,23 +3148,27 @@ func TestFederationRunnerRetriesWhenSpokeAdmissionReopens(t *testing.T) {
 }
 
 func TestFederationRunnerWaitsForCancellationAfterTerminalDrainDenial(t *testing.T) {
-	var attempts atomic.Int32
-	runner := &Runner{
-		Interval: 5 * time.Millisecond,
-		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
-			attempts.Add(1)
-			return nil, false, nil
-		},
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
-	require.Eventually(t, func() bool { return attempts.Load() >= 1 }, time.Second, time.Millisecond)
-	time.Sleep(20 * time.Millisecond)
-	require.Equal(t, int32(1), attempts.Load(), "terminal denial must not be polled")
-
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int32
+		runner := &Runner{
+			Interval: 5 * time.Millisecond,
+			DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+				attempts.Add(1)
+				return nil, false, nil
+			},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
+		defer func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		}()
+		synctest.Wait()
+		require.GreaterOrEqual(t, attempts.Load(), int32(1))
+		synctest.Sleep(20 * time.Millisecond)
+		require.Equal(t, int32(1), attempts.Load(), "terminal denial must not be polled")
+	})
 }
 
 func TestFederationRunnerNoBindingsNoNetwork(t *testing.T) {
