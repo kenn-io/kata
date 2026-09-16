@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"sort"
@@ -96,7 +96,7 @@ func fingerprintCore(title, body string, owner *string, labels []string, sortedL
 	type linkRec struct {
 		Type        string `json:"type"`
 		OtherNumber int64  `json:"other_number"`
-		Incoming    bool   `json:"incoming,omitempty"`
+		Incoming    bool   `json:"incoming,omitzero"`
 	}
 	linkRecs := make([]linkRec, 0, len(sortedLinks))
 	for _, l := range sortedLinks {

@@ -2,7 +2,7 @@ package hooks
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"maps"
 	"strings"
 	"time"

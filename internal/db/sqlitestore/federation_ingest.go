@@ -3,7 +3,8 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -75,7 +76,7 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		ev := in.Event
 		if len(ev.Payload) == 0 {
-			ev.Payload = json.RawMessage(`{}`)
+			ev.Payload = jsontext.Value(`{}`)
 		}
 		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs); err != nil {
 			return db.FederationIngestResult{}, err
@@ -960,7 +961,7 @@ func rejectFreshCreateSnapshotForKnownIssue(ev db.RemoteEvent, knownIssueUIDs ma
 	return nil
 }
 
-func payloadIssueUID(ev db.RemoteEvent, payload map[string]json.RawMessage) (string, error) {
+func payloadIssueUID(ev db.RemoteEvent, payload map[string]jsontext.Value) (string, error) {
 	var payloadUID string
 	if uid, ok := db.StringValue(payload["issue_uid"]); ok {
 		payloadUID = uid
@@ -980,7 +981,7 @@ func payloadIssueUID(ev db.RemoteEvent, payload map[string]json.RawMessage) (str
 	return payloadUID, nil
 }
 
-func payloadReferencedIssueUIDs(ev db.RemoteEvent, payload map[string]json.RawMessage) ([]string, error) {
+func payloadReferencedIssueUIDs(ev db.RemoteEvent, payload map[string]jsontext.Value) ([]string, error) {
 	var refs []string
 	if ev.RelatedIssueUID != nil && *ev.RelatedIssueUID != "" {
 		refs = append(refs, *ev.RelatedIssueUID)
@@ -1011,7 +1012,7 @@ func payloadReferencedIssueUIDs(ev db.RemoteEvent, payload map[string]json.RawMe
 
 func payloadDeferredLinkIssueUIDs(
 	ev db.RemoteEvent,
-	payload map[string]json.RawMessage,
+	payload map[string]jsontext.Value,
 	primaryIssueUID string,
 ) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
@@ -1103,7 +1104,7 @@ func payloadDeferredLinkIssueUIDs(
 
 func payloadLinksChangedIssueUIDs(
 	ev db.RemoteEvent,
-	payload map[string]json.RawMessage,
+	payload map[string]jsontext.Value,
 ) ([]string, error) {
 	if ev.Type != "issue.links_changed" {
 		return nil, nil
@@ -1146,7 +1147,7 @@ func payloadLinksChangedIssueUIDs(
 
 func validateFederationUnlinkStorageEndpoints(
 	ev db.RemoteEvent,
-	payload map[string]json.RawMessage,
+	payload map[string]jsontext.Value,
 	linkType, fromUID, toUID string,
 ) error {
 	if ev.Type != "issue.unlinked" {
@@ -1203,7 +1204,7 @@ func validateFederationLinkPeer(primaryIssueUID, peerUID string) error {
 }
 
 func payloadLinkEndpointUID(
-	payload map[string]json.RawMessage,
+	payload map[string]jsontext.Value,
 	canonicalKey, alternateKey string,
 ) (string, bool, error) {
 	canonical, canonicalOK := db.StringValue(payload[canonicalKey])

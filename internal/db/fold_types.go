@@ -1,6 +1,6 @@
 package db
 
-import "encoding/json"
+import "encoding/json/jsontext"
 
 // FoldEvent is the portable event shape consumed by the fold engine. It excludes
 // backend-local row IDs by design.
@@ -15,7 +15,7 @@ type FoldEvent struct {
 	HLCPhysicalMS     int64
 	HLCCounter        int64
 	CreatedAt         string
-	Payload           json.RawMessage
+	Payload           jsontext.Value
 }
 
 // FoldClock is an event's deterministic last-writer timestamp.
@@ -32,8 +32,8 @@ type FoldProjection struct {
 	Comments        map[string]FoldComment
 	Labels          map[FoldLabelKey]FoldElementState
 	Links           map[FoldLinkKey]FoldElementState
-	IssueMetadata   map[string]json.RawMessage
-	ProjectMetadata map[string]json.RawMessage
+	IssueMetadata   map[string]jsontext.Value
+	ProjectMetadata map[string]jsontext.Value
 	Warnings        []string
 }
 

@@ -3,7 +3,7 @@ package pgstore_test
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"testing"
@@ -62,7 +62,7 @@ func TestStorageConformance(t *testing.T) {
 			project db.Project,
 			issue db.Issue,
 			eventUID string,
-			payload json.RawMessage,
+			payload jsontext.Value,
 		) error {
 			postgresStore := store.(*pgstore.Store)
 			_, err := postgresStore.ExecContext(ctx, `INSERT INTO events(

@@ -28,8 +28,8 @@ import type {
   ConnectorOut,
   CreateCommentPathParameters,
   CreateFederationEnrollmentRequestBody,
-  CreateFederationReplicaBody,
   CreateFederationReplicaRequestBody,
+  CreateFederationReplicaResponseBody,
   CreateIssuePathParameters,
   CreateIssueRequestBody,
   CreateLinkPathParameters,
@@ -822,7 +822,7 @@ export const revokeFederationEnrollment = async (
 }
 
 export type createFederationReplicaResponse200 = {
-  data: CreateFederationReplicaBody
+  data: CreateFederationReplicaResponseBody
   status: 200
 }
 

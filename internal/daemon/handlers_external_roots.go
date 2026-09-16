@@ -2,7 +2,8 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -470,7 +471,7 @@ func externalRootBridgeOut(ctx context.Context, store db.Storage, binding db.Ext
 	return out, nil
 }
 
-func externalFieldCandidateOut(raw json.RawMessage) (*api.ExternalFieldCandidateOut, error) {
+func externalFieldCandidateOut(raw jsontext.Value) (*api.ExternalFieldCandidateOut, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}

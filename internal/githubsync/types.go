@@ -1,7 +1,8 @@
 package githubsync
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"time"
@@ -76,7 +77,7 @@ type Config struct {
 	Repo               string `json:"repo"`
 	RepoID             int64  `json:"repo_id"`
 	TitlePrefix        *bool  `json:"title_prefix"`
-	ParentLinksVersion int    `json:"parent_links_version,omitempty"`
+	ParentLinksVersion int    `json:"parent_links_version,omitzero"`
 }
 
 const currentParentLinksVersion = 1
@@ -125,7 +126,7 @@ func (c Config) Validate() error {
 
 // EncodeConfig validates and marshals a GitHub sync config for storage in an
 // issue sync binding.
-func EncodeConfig(c Config) (json.RawMessage, error) {
+func EncodeConfig(c Config) (jsontext.Value, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -139,7 +140,7 @@ func EncodeConfig(c Config) (json.RawMessage, error) {
 
 // DecodeConfig unmarshals and validates a GitHub sync config from an issue sync
 // binding.
-func DecodeConfig(raw json.RawMessage) (Config, error) {
+func DecodeConfig(raw jsontext.Value) (Config, error) {
 	var c Config
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return Config{}, fmt.Errorf("decode GitHub sync config: %w", err)

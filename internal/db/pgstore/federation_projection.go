@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -263,7 +264,7 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 		UID: issue.UID, ShortID: issue.ShortID, Title: issue.Title, Body: issue.Body,
 		Author: issue.Author, Owner: issue.Owner, Priority: issue.Priority, Status: issue.Status,
 		ClosedReason: issue.ClosedReason, ClosedAt: optionalStoredTime(issue.ClosedAt),
-		DeletedAt: optionalStoredTime(issue.DeletedAt), Metadata: json.RawMessage(issue.Metadata),
+		DeletedAt: optionalStoredTime(issue.DeletedAt), Metadata: jsontext.Value(issue.Metadata),
 		Labels: labels, Links: links, Comments: comments,
 		CreatedAt: formatStoredTime(issue.CreatedAt), UpdatedAt: formatStoredTime(issue.UpdatedAt),
 		Revision: issue.Revision, RecurrenceUID: recurrenceUID, OccurrenceKey: occurrenceKey,
@@ -500,7 +501,7 @@ func (s *Store) reconcileFederatedIssues(
 		if err != nil {
 			return nil, err
 		}
-		metadata := json.RawMessage(`{}`)
+		metadata := jsontext.Value(`{}`)
 		if value := projection.IssueMetadata[issueUID]; len(value) > 0 {
 			metadata = value
 		}

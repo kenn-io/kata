@@ -2,7 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -82,7 +82,7 @@ func TestReplayInvariant_ProjectProjectionMatchesDirectWrites(t *testing.T) {
 		IssueID:    a.ID,
 		IfMatchRev: new(int64(1)),
 		Actor:      "agent",
-		Patch:      map[string]json.RawMessage{"area": json.RawMessage(`"api"`)},
+		Patch:      map[string]jsontext.Value{"area": jsontext.Value(`"api"`)},
 	})
 	require.NoError(t, err)
 	require.True(t, metadataOut.Changed)
@@ -151,7 +151,7 @@ func loadFoldEventsForProject(ctx context.Context, t *testing.T, d *sqlitestore.
 			HLCPhysicalMS:     ev.HLCPhysicalMS,
 			HLCCounter:        ev.HLCCounter,
 			CreatedAt:         ev.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-			Payload:           json.RawMessage(ev.Payload),
+			Payload:           jsontext.Value(ev.Payload),
 		})
 	}
 	return out

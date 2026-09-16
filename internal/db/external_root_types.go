@@ -3,7 +3,8 @@ package db
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"regexp"
 	"sort"
@@ -169,9 +170,9 @@ type ExternalFieldMapping struct {
 type ExternalFieldState struct {
 	BindingID        int64
 	MappingID        int64
-	Baseline         json.RawMessage
-	ConflictKata     json.RawMessage
-	ConflictExternal json.RawMessage
+	Baseline         jsontext.Value
+	ConflictKata     jsontext.Value
+	ConflictExternal jsontext.Value
 	Conflicted       bool
 	ConflictAt       *time.Time
 	UpdatedAt        time.Time
@@ -361,9 +362,9 @@ type ExternalFieldStateParams struct {
 	BindingID        int64
 	MappingID        int64
 	ClaimToken       string
-	Baseline         json.RawMessage
-	ConflictKata     json.RawMessage
-	ConflictExternal json.RawMessage
+	Baseline         jsontext.Value
+	ConflictKata     jsontext.Value
+	ConflictExternal jsontext.Value
 	Conflicted       bool
 	At               time.Time
 	Actor            string
@@ -378,7 +379,7 @@ type ExternalFieldProjectionParams struct {
 	MappingID             int64
 	ClaimToken            string
 	KataField             string
-	Patch                 map[string]json.RawMessage
+	Patch                 map[string]jsontext.Value
 	ExpectedIssueRevision int64
 	IntegrationActor      string
 }
@@ -388,7 +389,7 @@ type ResolveExternalFieldConflictParams struct {
 	BindingID  int64
 	MappingID  int64
 	ClaimToken string
-	Baseline   json.RawMessage
+	Baseline   jsontext.Value
 	Actor      string
 	At         time.Time
 }
@@ -406,7 +407,7 @@ type ExternalProjectionSource struct {
 	CreatedAt         string `json:"created_at,omitempty"`
 	UpdatedAt         string `json:"updated_at,omitempty"`
 	ObservedAt        string `json:"observed_at,omitempty"`
-	Deleted           bool   `json:"deleted,omitempty"`
+	Deleted           bool   `json:"deleted,omitzero"`
 }
 
 type externalRootProjectionPayload struct {
@@ -801,7 +802,7 @@ func ValidateExternalFieldProjectionParams(params ExternalFieldProjectionParams)
 		if key != params.KataField && key != "timezone" {
 			return fmt.Errorf("%w: field projection patch contains unsupported key %q", ErrExternalRootValidation, key)
 		}
-		if !json.Valid(raw) {
+		if !jsontext.Value(raw).IsValid() {
 			return fmt.Errorf("%w: field projection patch contains invalid JSON", ErrExternalRootValidation)
 		}
 	}
@@ -817,8 +818,8 @@ func ValidateResolveExternalFieldConflictParams(params ResolveExternalFieldConfl
 	return validateOptionalJSON("baseline", params.Baseline)
 }
 
-func validateOptionalJSON(name string, raw json.RawMessage) error {
-	if len(raw) != 0 && !json.Valid(raw) {
+func validateOptionalJSON(name string, raw jsontext.Value) error {
+	if len(raw) != 0 && !jsontext.Value(raw).IsValid() {
 		return fmt.Errorf("%w: %s is invalid JSON", ErrExternalRootValidation, name)
 	}
 	return nil

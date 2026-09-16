@@ -1,7 +1,7 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -23,27 +23,27 @@ func TestValidateExternalFieldProjectionParamsRejectsNoncanonicalPatch(t *testin
 	tests := []struct {
 		name      string
 		kataField string
-		patch     map[string]json.RawMessage
+		patch     map[string]jsontext.Value
 	}{
 		{
 			name: "padded Kata field", kataField: " scheduled_on",
-			patch: map[string]json.RawMessage{"scheduled_on": json.RawMessage(`"2026-08-21"`)},
+			patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-21"`)},
 		},
 		{
 			name: "disallowed key", kataField: "scheduled_on",
-			patch: map[string]json.RawMessage{
-				"scheduled_on": json.RawMessage(`"2026-08-21"`),
-				"title":        json.RawMessage(`"not allowed"`),
+			patch: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2026-08-21"`),
+				"title":        jsontext.Value(`"not allowed"`),
 			},
 		},
 		{
 			name: "missing mapped key", kataField: "scheduled_on",
-			patch: map[string]json.RawMessage{"timezone": json.RawMessage(`"Etc/UTC"`)},
+			patch: map[string]jsontext.Value{"timezone": jsontext.Value(`"Etc/UTC"`)},
 		},
-		{name: "empty patch", kataField: "scheduled_on", patch: map[string]json.RawMessage{}},
+		{name: "empty patch", kataField: "scheduled_on", patch: map[string]jsontext.Value{}},
 		{
 			name: "invalid JSON", kataField: "scheduled_on",
-			patch: map[string]json.RawMessage{"scheduled_on": json.RawMessage(`{"unfinished"`)},
+			patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`{"unfinished"`)},
 		},
 	}
 	for _, test := range tests {

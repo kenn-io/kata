@@ -100,6 +100,9 @@ jobs:
           go-version-file: go.mod
           cache: ${{ github.repository == 'kenn-io/kata' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository)) && 'false' || 'true' }}
 
+      - name: Check Huma API conventions
+        run: go run go.kenn.io/kit/cmd/huma-check@3e1f59e9011e878ec595aa04aebc8a77c5292c4d ./...
+
       - name: Run tests
         env:
           KATA_TEST_POSTGRES_AUTO_CONTAINER: "0"

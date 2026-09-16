@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"sort"
@@ -224,9 +225,9 @@ func externalCLIResponseError(status int, body []byte, callErr error) error {
 		if err := json.Unmarshal(body, &envelope); err == nil && envelope.Error.Code != "" && envelope.Error.Message != "" {
 			return apiErrFromBody(status, body)
 		}
-		message := fmt.Sprintf("external root request failed (HTTP %d)", status)
+		message := fmt.Sprintf("daemon request failed (HTTP %d)", status)
 		if statusText := http.StatusText(status); statusText != "" {
-			message = fmt.Sprintf("external root request failed (HTTP %d %s)", status, statusText)
+			message = fmt.Sprintf("daemon request failed (HTTP %d %s)", status, statusText)
 		}
 		return &cliError{
 			Message: message, Kind: kindForStatus(status), ExitCode: mapStatusToExit(status, ""),
@@ -241,7 +242,7 @@ func externalCLIValidation(message string) error {
 
 func printConnectorList(cmd *cobra.Command, raw []byte, connectors []generated.ConnectorOut) error {
 	if currentOutputMode() == outputJSON {
-		return emitJSON(cmd.OutOrStdout(), json.RawMessage(raw))
+		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
 	}
 	if flags.Quiet {
 		return nil
@@ -258,7 +259,7 @@ func printConnectorList(cmd *cobra.Command, raw []byte, connectors []generated.C
 
 func printConnector(cmd *cobra.Command, raw []byte, connector generated.ConnectorOut, compact bool) error {
 	if currentOutputMode() == outputJSON {
-		return emitJSON(cmd.OutOrStdout(), json.RawMessage(raw))
+		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
 	}
 	if flags.Quiet {
 		return nil
@@ -292,7 +293,7 @@ func printConnector(cmd *cobra.Command, raw []byte, connector generated.Connecto
 
 func printConnectorFields(cmd *cobra.Command, raw []byte, instance string, fields []generated.FieldDescriptor) error {
 	if currentOutputMode() == outputJSON {
-		return emitJSON(cmd.OutOrStdout(), json.RawMessage(raw))
+		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
 	}
 	if flags.Quiet {
 		return nil
@@ -322,7 +323,7 @@ func printConnectorFields(cmd *cobra.Command, raw []byte, instance string, field
 
 func printConnectorMapping(cmd *cobra.Command, raw []byte, instance string, mapping generated.ExternalFieldMappingOut) error {
 	if currentOutputMode() == outputJSON {
-		return emitJSON(cmd.OutOrStdout(), json.RawMessage(raw))
+		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
 	}
 	if flags.Quiet {
 		return nil

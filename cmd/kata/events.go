@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newEventsCmd() *cobra.Command {
@@ -105,21 +108,14 @@ func runEventsPoll(cmd *cobra.Command, opts eventsPollOptions) error {
 	if err != nil {
 		return err
 	}
-	url, err := pollURL(ctx, baseURL, opts)
+	bs, err := pollEvents(ctx, client, baseURL, opts)
 	if err != nil {
 		return err
-	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
 	}
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -131,25 +127,40 @@ func runEventsPoll(cmd *cobra.Command, opts eventsPollOptions) error {
 	return printEventsHuman(cmd, bs)
 }
 
-func pollURL(ctx context.Context, baseURL string, opts eventsPollOptions) (string, error) {
-	switch {
-	case opts.AllProjects:
-		return fmt.Sprintf("%s/api/v1/events?after_id=%d&limit=%d", baseURL, opts.AfterID, opts.Limit), nil
-	case opts.ProjectIDArg != 0:
-		return fmt.Sprintf("%s/api/v1/projects/%d/events?after_id=%d&limit=%d",
-			baseURL, opts.ProjectIDArg, opts.AfterID, opts.Limit), nil
-	default:
+func pollEvents(ctx context.Context, client *http.Client, baseURL string, opts eventsPollOptions) ([]byte, error) {
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	if err != nil {
+		return nil, err
+	}
+	if opts.AllProjects {
+		response, callErr := apiClient.PollEventsWithResponse(ctx, &generated.PollEventsRequestOptions{Query: &generated.PollEventsQuery{AfterID: &opts.AfterID, Limit: new(int64(opts.Limit))}})
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+	}
+	pid := opts.ProjectIDArg
+	if pid == 0 {
 		start, err := resolveStartPath(flags.Workspace)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		pid, err := resolveProjectID(ctx, baseURL, start)
+		pid, err = resolveProjectID(ctx, baseURL, start)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return fmt.Sprintf("%s/api/v1/projects/%d/events?after_id=%d&limit=%d",
-			baseURL, pid, opts.AfterID, opts.Limit), nil
 	}
+	response, callErr := apiClient.PollProjectEventsWithResponse(ctx, &generated.PollProjectEventsRequestOptions{PathParams: &generated.PollProjectEventsPath{ProjectID: pid}, Query: &generated.PollProjectEventsQuery{AfterID: &opts.AfterID, Limit: new(int64(opts.Limit))}})
+	if response == nil {
+		return nil, externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return nil, err
+	}
+	return response.Body, nil
 }
 
 func printEventsHuman(cmd *cobra.Command, bs []byte) error {
@@ -274,7 +285,11 @@ func runEventsTail(cmd *cobra.Command, opts eventsTailOptions) error {
 	if err != nil {
 		return err
 	}
-	url, err := tailURL(ctx, baseURL, opts)
+	query, err := tailQuery(ctx, baseURL, opts)
+	if err != nil {
+		return err
+	}
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
@@ -286,7 +301,7 @@ func runEventsTail(cmd *cobra.Command, opts eventsTailOptions) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		res, sErr := streamOnce(ctx, client, url, cursor, out, mode)
+		res, sErr := streamOnce(ctx, apiClient, query, cursor, out, mode)
 		if errors.Is(sErr, errTerminalHTTP) {
 			return sErr
 		}
@@ -436,33 +451,22 @@ func (f *frameState) flushAgentEvent(out io.Writer) (streamResult, error) {
 	return streamResult{Progress: streamProgress{lastID: progressID}}, nil
 }
 
-func streamOnce(ctx context.Context, client *http.Client, baseURL string, cursor int64, out io.Writer, mode outputMode) (streamResult, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
+func streamOnce(ctx context.Context, client *kataclient.Client, query *generated.StreamEventsQuery, cursor int64, out io.Writer, mode outputMode) (streamResult, error) {
+	options := &generated.StreamEventsRequestOptions{Query: query}
+	resp, err := client.StreamEventsRaw(ctx, options, func(_ context.Context, req *http.Request) error {
+		if cursor > 0 {
+			req.Header.Set("Last-Event-ID", strconv.FormatInt(cursor, 10))
+		}
+		return nil
+	})
 	if err != nil {
-		return streamResult{Progress: streamProgress{lastID: cursor}}, err
-	}
-	req.Header.Set("Accept", "text/event-stream")
-	if cursor > 0 {
-		req.Header.Set("Last-Event-ID", strconv.FormatInt(cursor, 10))
-	}
-	resp, err := client.Do(req) //nolint:gosec // baseURL comes from daemon discovery
-	if err != nil {
+		var status interface{ StatusCode() int }
+		if errors.As(err, &status) && status.StatusCode() >= 400 && status.StatusCode() < 500 {
+			return streamResult{Progress: streamProgress{lastID: cursor}}, fmt.Errorf("%w: %w", errTerminalHTTP, err)
+		}
 		return streamResult{Progress: streamProgress{lastID: cursor}}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
-		bs, _ := io.ReadAll(resp.Body)
-		// 4xx responses are terminal: a malformed cursor, missing project,
-		// or method/Accept negotiation failure will not be cured by a
-		// reconnect. Wrap with errTerminalHTTP so the caller bails out.
-		// 5xx responses are transient; let the caller back off and retry.
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return streamResult{Progress: streamProgress{lastID: cursor}},
-				fmt.Errorf("%w: http %d: %s", errTerminalHTTP, resp.StatusCode, string(bs))
-		}
-		return streamResult{Progress: streamProgress{lastID: cursor}},
-			fmt.Errorf("http %d: %s", resp.StatusCode, string(bs))
-	}
 	return parseSSEStream(bufio.NewReader(resp.Body), cursor, out, mode)
 }
 
@@ -510,21 +514,22 @@ func parseSSEStream(rd *bufio.Reader, cursor int64, out io.Writer, mode outputMo
 	}
 }
 
-func tailURL(ctx context.Context, baseURL string, opts eventsTailOptions) (string, error) {
-	switch {
-	case opts.AllProjects:
-		return baseURL + "/api/v1/events/stream", nil
-	case opts.ProjectIDArg != 0:
-		return fmt.Sprintf("%s/api/v1/events/stream?project_id=%d", baseURL, opts.ProjectIDArg), nil
-	default:
+func tailQuery(ctx context.Context, baseURL string, opts eventsTailOptions) (*generated.StreamEventsQuery, error) {
+	query := &generated.StreamEventsQuery{}
+	if opts.AllProjects {
+		return query, nil
+	}
+	pid := opts.ProjectIDArg
+	if pid == 0 {
 		start, err := resolveStartPath(flags.Workspace)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		pid, err := resolveProjectID(ctx, baseURL, start)
+		pid, err = resolveProjectID(ctx, baseURL, start)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return fmt.Sprintf("%s/api/v1/events/stream?project_id=%d", baseURL, pid), nil
 	}
+	query.ProjectID = &pid
+	return query, nil
 }

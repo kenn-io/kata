@@ -2,14 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newEditCmd() *cobra.Command {
@@ -150,7 +151,25 @@ func newEditCmd() *cobra.Command {
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
 		payload["actor"] = actor
-		bs, err := project.mutate(http.MethodPatch, "/issues/"+url.PathEscape(issue.RefForAPI), payload, nil)
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		var request generated.EditIssueBody
+		if err := json.Unmarshal(encoded, &request); err != nil {
+			return err
+		}
+		apiClient, err := project.generatedClient()
+		if err != nil {
+			return err
+		}
+		response, callErr := apiClient.EditIssueWithResponse(ctx, &generated.EditIssueRequestOptions{
+			PathParams: &generated.EditIssuePath{ProjectID: project.selector, Ref: issue.RefForAPI}, Body: &request,
+		})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		bs, err := project.finishMutation(response.HTTPResponse, response.Body, callErr)
 		if err != nil {
 			return err
 		}
@@ -358,21 +377,27 @@ func refsToUIDs(ctx context.Context, baseURL string, projectID int64, refs []str
 	if err != nil {
 		return nil, err
 	}
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	if err != nil {
+		return nil, err
+	}
 	for _, ref := range refs {
 		if _, seen := out[ref]; seen {
 			continue
 		}
-		path := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, projectID, url.PathEscape(ref))
-		status, bs, err := httpDoJSON(ctx, client, http.MethodGet, path, nil)
-		if err != nil {
-			return nil, err
+		response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
+			PathParams: &generated.ShowIssuePath{ProjectID: projectID, Ref: ref},
+		})
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
+		status, bs := response.StatusCode, response.Body
 		if status == http.StatusNotFound {
 			out[ref] = ""
 			continue
 		}
-		if status >= 400 {
-			return nil, apiErrFromBody(status, bs)
+		if err := externalCLIResponseError(status, bs, callErr); err != nil {
+			return nil, err
 		}
 		var body struct {
 			Issue struct {

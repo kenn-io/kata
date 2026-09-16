@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -175,10 +177,71 @@ func TestEmitJSON_RejectsEscapedReservedKey(t *testing.T) {
 	// Build the escape sequence explicitly — backtick raw strings interpret
 	// the bytes literally, but writing `k` here avoids any rendering
 	// ambiguity in the source file.
-	payload := json.RawMessage([]byte(`{"\u006bata_api_version":"evil"}`))
+	payload := jsontext.Value([]byte(`{"\u006bata_api_version":"evil"}`))
 	require.NotContains(t, string(payload), `"kata_api_version"`,
 		"test fixture itself must contain the escape, not the literal key")
 	_, err := runEmitJSON(t, payload)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "kata_api_version")
+}
+
+// httpDoJSON sends a request body, returns (status, response body bytes).
+func httpDoJSON(ctx context.Context, client *http.Client, method, url string, body any) (int, []byte, error) {
+	var rdr io.Reader
+	if body != nil {
+		bs, err := json.Marshal(body)
+		if err != nil {
+			return 0, nil, err
+		}
+		rdr = bytes.NewReader(bs)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, rdr) //nolint:gosec // daemon targets come from trusted routing; external refs are path-escaped
+	if err != nil {
+		return 0, nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	//nolint:gosec // G107: callers in cmd/kata/* always pass daemon-local URLs; this helper is package-internal.
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	bs, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return resp.StatusCode, bs, nil
+}
+
+func httpDoJSONHeaders(ctx context.Context, client *http.Client, method, path string, body any, headers map[string]string) (int, []byte, error) {
+	var rdr io.Reader
+	if body != nil {
+		bs, err := json.Marshal(body)
+		if err != nil {
+			return 0, nil, err
+		}
+		rdr = bytes.NewReader(bs)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, path, rdr) //nolint:gosec // daemon targets come from trusted routing; external refs are path-escaped
+	if err != nil {
+		return 0, nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := client.Do(req) //nolint:gosec // daemon-local URL, same as httpDoJSON.
+	if err != nil {
+		return 0, nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	bs, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return resp.StatusCode, bs, nil
 }

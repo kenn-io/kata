@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -921,7 +922,7 @@ func TestShowProject_EmptyAliasesAreAnArray(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	body := getBody(t, ts, "/api/v1/projects/"+strconv.FormatInt(project.ID, 10))
-	var parsed map[string]json.RawMessage
+	var parsed map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(body), &parsed))
 	assert.JSONEq(t, `[]`, string(parsed["aliases"]))
 }
@@ -974,7 +975,7 @@ func TestListAndShowProject_SurfaceMetadata(t *testing.T) {
 		ProjectID:  p.ID,
 		IfMatchRev: new(p.Revision),
 		Actor:      "tester",
-		Patch:      map[string]json.RawMessage{"area": json.RawMessage(`"Personal"`)},
+		Patch:      map[string]jsontext.Value{"area": jsontext.Value(`"Personal"`)},
 	})
 	require.NoError(t, err)
 
@@ -985,9 +986,9 @@ func TestListAndShowProject_SurfaceMetadata(t *testing.T) {
 	listBody := getBody(t, ts, "/api/v1/projects")
 	var listParsed struct {
 		Projects []struct {
-			Name     string          `json:"name"`
-			Metadata json.RawMessage `json:"metadata"`
-			Revision int64           `json:"revision"`
+			Name     string         `json:"name"`
+			Metadata jsontext.Value `json:"metadata"`
+			Revision int64          `json:"revision"`
 		} `json:"projects"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(listBody), &listParsed))
@@ -1000,8 +1001,8 @@ func TestListAndShowProject_SurfaceMetadata(t *testing.T) {
 	showBody := getBody(t, ts, "/api/v1/projects/"+strconv.FormatInt(p.ID, 10))
 	var showParsed struct {
 		Project struct {
-			Metadata json.RawMessage `json:"metadata"`
-			Revision int64           `json:"revision"`
+			Metadata jsontext.Value `json:"metadata"`
+			Revision int64          `json:"revision"`
 		} `json:"project"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(showBody), &showParsed))

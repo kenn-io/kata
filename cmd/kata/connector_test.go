@@ -357,13 +357,13 @@ func TestExternalCommandsRedactMalformedErrorBodiesInEveryOutputMode(t *testing.
 		{
 			name: "connector", method: http.MethodGet, path: "/api/v1/connectors/example-connector", status: http.StatusBadGateway,
 			body: `{"error":{"message":"` + rawDiagnostic,
-			args: []string{"connector", "status", "example-connector"}, message: "external root request failed (HTTP 502 Bad Gateway)",
+			args: []string{"connector", "status", "example-connector"}, message: "daemon request failed (HTTP 502 Bad Gateway)",
 			kind: kindInternal, exit: ExitInternal,
 		},
 		{
 			name: "bridge", method: http.MethodGet, path: "/api/v1/projects/42/issues/abc4/bridge", status: http.StatusNotFound,
 			body: rawDiagnostic,
-			args: []string{"bridge", "show", "example-project#abc4"}, message: "external root request failed (HTTP 404 Not Found)",
+			args: []string{"bridge", "show", "example-project#abc4"}, message: "daemon request failed (HTTP 404 Not Found)",
 			kind: kindNotFound, exit: ExitNotFound,
 		},
 	}

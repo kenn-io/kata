@@ -2,7 +2,8 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"testing"
 	"time"
@@ -22,8 +23,8 @@ type externalRootSafetyFixture struct {
 
 type metadataUpdatePayload struct {
 	Diff map[string]struct {
-		From json.RawMessage `json:"from"`
-		To   json.RawMessage `json:"to"`
+		From jsontext.Value `json:"from"`
+		To   jsontext.Value `json:"to"`
 	} `json:"diff"`
 	RevisionNew int64  `json:"revision_new"`
 	UpdatedAt   string `json:"updated_at"`
@@ -1034,9 +1035,9 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		})
 		require.NoError(t, err)
 		fixture := newExternalRootSafetyFixture(t, store, "field-projection")
-		patch := map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-08-21T09:30"`),
-			"timezone":     json.RawMessage(`"America/Los_Angeles"`),
+		patch := map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-08-21T09:30"`),
+			"timezone":     jsontext.Value(`"America/Los_Angeles"`),
 		}
 		nativeIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: fixture.project.ID, Title: "Native metadata parity", Author: "tester",
@@ -1057,7 +1058,7 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		require.NotNil(t, event)
 		assert.Equal(t, "issue.metadata_updated", event.Type)
 		assert.Equal(t, "connector:notes", event.Actor)
-		var metadata map[string]json.RawMessage
+		var metadata map[string]jsontext.Value
 		require.NoError(t, json.Unmarshal([]byte(projected.Metadata), &metadata))
 		assert.JSONEq(t, `"2026-08-21T09:30"`, string(metadata["scheduled_on"]))
 		assert.JSONEq(t, `"America/Los_Angeles"`, string(metadata["timezone"]))
@@ -1076,7 +1077,7 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		assert.Equal(t, projected.Revision, repeated.Revision)
 
 		params.ClaimToken = "wrong-claim"
-		params.Patch["scheduled_on"] = json.RawMessage(`"2026-08-22"`)
+		params.Patch["scheduled_on"] = jsontext.Value(`"2026-08-22"`)
 		_, _, _, err = store.ApplyExternalFieldProjection(ctx, params)
 		assert.ErrorIs(t, err, db.ErrExternalRootClaimLost)
 		afterRejected, readErr := store.IssueByID(ctx, fixture.issue.ID)
@@ -1092,12 +1093,12 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		params.ClaimToken = fixture.token
 		params.ExpectedIssueRevision = projected.Revision
 		local, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-			IssueID: fixture.issue.ID, Actor: "tester", Patch: map[string]json.RawMessage{
-				"scheduled_on": json.RawMessage(`"2026-08-23"`),
+			IssueID: fixture.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2026-08-23"`),
 			},
 		})
 		require.NoError(t, err)
-		params.Patch["scheduled_on"] = json.RawMessage(`"2026-08-24"`)
+		params.Patch["scheduled_on"] = jsontext.Value(`"2026-08-24"`)
 		_, _, _, err = store.ApplyExternalFieldProjection(ctx, params)
 		var revisionConflict *db.RevisionConflictError
 		assert.ErrorAs(t, err, &revisionConflict)
@@ -1137,7 +1138,7 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		_, _, _, err = store.ApplyExternalFieldProjection(ctx, db.ExternalFieldProjectionParams{
 			BindingID: fixture.binding.ID, MappingID: mapping.ID, ClaimToken: fixture.token,
 			KataField: "scheduled_on", ExpectedIssueRevision: before.Revision,
-			Patch:            map[string]json.RawMessage{"scheduled_on": json.RawMessage(`"2026-08-24"`)},
+			Patch:            map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-24"`)},
 			IntegrationActor: "connector:notes",
 		})
 		assert.ErrorIs(t, err, db.ErrExternalRootClaimLost)
@@ -1161,14 +1162,14 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		fixture := newExternalRootSafetyFixture(t, store, "field-conflict")
 		_, _, err = store.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
 			BindingID: fixture.binding.ID, MappingID: mapping.ID, ClaimToken: fixture.token,
-			Baseline:     json.RawMessage(`"2026-08-20"`),
-			ConflictKata: json.RawMessage(`"2026-08-21"`), ConflictExternal: json.RawMessage(`"2026-08-22"`),
+			Baseline:     jsontext.Value(`"2026-08-20"`),
+			ConflictKata: jsontext.Value(`"2026-08-21"`), ConflictExternal: jsontext.Value(`"2026-08-22"`),
 			Conflicted: true, At: fixture.now.Add(time.Minute), Actor: "tester",
 		})
 		require.NoError(t, err)
 		_, _, clearErr := store.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
 			BindingID: fixture.binding.ID, MappingID: mapping.ID, ClaimToken: fixture.token,
-			Baseline:   json.RawMessage(`"2026-08-23"`),
+			Baseline:   jsontext.Value(`"2026-08-23"`),
 			Conflicted: false, At: fixture.now.Add(2 * time.Minute), Actor: "tester",
 		})
 		assert.ErrorIs(t, clearErr, db.ErrExternalRootValidation)
@@ -1181,7 +1182,7 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		}
 		resolved, event, err := store.ResolveExternalFieldConflict(ctx, db.ResolveExternalFieldConflictParams{
 			BindingID: fixture.binding.ID, MappingID: mapping.ID, ClaimToken: fixture.token,
-			Baseline: json.RawMessage(`"2026-08-23"`), Actor: "tester", At: fixture.now.Add(3 * time.Minute),
+			Baseline: jsontext.Value(`"2026-08-23"`), Actor: "tester", At: fixture.now.Add(3 * time.Minute),
 		})
 		require.NoError(t, err)
 		assert.False(t, resolved.Conflicted)
@@ -1667,8 +1668,8 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		projected, fieldEvent, changed, err := store.ApplyExternalFieldProjection(ctx, db.ExternalFieldProjectionParams{
 			BindingID: binding.ID, MappingID: mapping.ID, ClaimToken: binding.ClaimToken,
 			KataField: "scheduled_on", ExpectedIssueRevision: projected.Revision,
-			Patch: map[string]json.RawMessage{
-				"scheduled_on": json.RawMessage(`"2026-08-24"`),
+			Patch: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2026-08-24"`),
 			},
 			IntegrationActor: integrationActor,
 		})
@@ -1679,8 +1680,8 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 
 		_, auditEvent, err := store.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
 			BindingID: binding.ID, MappingID: mapping.ID, ClaimToken: binding.ClaimToken,
-			Baseline:     json.RawMessage(`"2026-08-23"`),
-			ConflictKata: json.RawMessage(`"2026-08-24"`), ConflictExternal: json.RawMessage(`"2026-08-25"`),
+			Baseline:     jsontext.Value(`"2026-08-23"`),
+			ConflictKata: jsontext.Value(`"2026-08-24"`), ConflictExternal: jsontext.Value(`"2026-08-25"`),
 			Conflicted: true, At: observedAt.Add(time.Minute), Actor: integrationActor,
 		})
 		require.NoError(t, err)
@@ -1707,7 +1708,7 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		require.NoError(t, err)
 		assert.Equal(t, "Provider title", hubIssue.Title)
 		assert.Equal(t, "Provider body", hubIssue.Body)
-		var metadata map[string]json.RawMessage
+		var metadata map[string]jsontext.Value
 		require.NoError(t, json.Unmarshal([]byte(hubIssue.Metadata), &metadata))
 		assert.JSONEq(t, `"2026-08-24"`, string(metadata["scheduled_on"]))
 	})
@@ -1851,7 +1852,7 @@ func requireCanonicalMetadataUpdatePayload(
 	issue db.Issue,
 ) metadataUpdatePayload {
 	t.Helper()
-	var envelope map[string]json.RawMessage
+	var envelope map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(event.Payload), &envelope))
 	assert.ElementsMatch(t, []string{"diff", "revision_new", "updated_at"}, mapKeys(envelope))
 	var payload metadataUpdatePayload
@@ -1869,16 +1870,16 @@ func requireCanonicalMetadataUpdatePayload(
 		require.True(t, ok, "missing diff for %s", key)
 		assert.JSONEq(t, "null", string(diff.From))
 		assert.JSONEq(t, want, string(diff.To))
-		var entry map[string]json.RawMessage
+		var entry map[string]jsontext.Value
 		require.NoError(t, json.Unmarshal(envelopeDiffEntry(t, envelope["diff"], key), &entry))
 		assert.ElementsMatch(t, []string{"from", "to"}, mapKeys(entry))
 	}
 	return payload
 }
 
-func envelopeDiffEntry(t *testing.T, raw json.RawMessage, key string) []byte {
+func envelopeDiffEntry(t *testing.T, raw jsontext.Value, key string) []byte {
 	t.Helper()
-	var entries map[string]json.RawMessage
+	var entries map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &entries))
 	entry, ok := entries[key]
 	require.True(t, ok, "missing raw diff for %s", key)

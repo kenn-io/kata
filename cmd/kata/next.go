@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 
@@ -37,8 +37,8 @@ func newNextCmd() *cobra.Command {
 				switch mode {
 				case outputJSON:
 					return emitJSON(cmd.OutOrStdout(), struct {
-						Issue json.RawMessage `json:"issue"`
-					}{Issue: json.RawMessage("null")})
+						Issue jsontext.Value `json:"issue"`
+					}{Issue: jsontext.Value("null")})
 				case outputAgent:
 					_, err := fmt.Fprintln(cmd.OutOrStdout(), "OK next found=false")
 					return err
@@ -58,7 +58,7 @@ func newNextCmd() *cobra.Command {
 			switch mode {
 			case outputJSON:
 				return emitJSON(cmd.OutOrStdout(), struct {
-					Issue json.RawMessage `json:"issue"`
+					Issue jsontext.Value `json:"issue"`
 				}{Issue: selected.Raw})
 			case outputAgent:
 				return writeNextAgent(cmd.OutOrStdout(), issueRef, selected)

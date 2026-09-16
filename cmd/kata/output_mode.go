@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -41,7 +41,7 @@ type agentIssueMutation struct {
 		Label string `json:"label"`
 	} `json:"label"`
 	Changed       bool    `json:"changed"`
-	Reused        bool    `json:"reused,omitempty"`
+	Reused        bool    `json:"reused,omitzero"`
 	PreviousOwner *string `json:"previous_owner,omitempty"`
 }
 

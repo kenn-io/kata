@@ -2,7 +2,7 @@ package pgstore_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -102,7 +102,7 @@ func requireEventHashValid(t *testing.T, event db.Event) {
 		IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID,
 		Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
 		HLCCounter: event.HLCCounter, ContentHash: event.ContentHash,
-		Payload: json.RawMessage(event.Payload), CreatedAt: event.CreatedAt,
+		Payload: jsontext.Value(event.Payload), CreatedAt: event.CreatedAt,
 	})
 	require.NoError(t, err)
 }

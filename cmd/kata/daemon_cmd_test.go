@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -397,8 +398,8 @@ func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) {
 	out := executeRoot(t, newRootCmd(), "daemon", "status", "--json")
 
 	var got struct {
-		KataAPIVersion int             `json:"kata_api_version"`
-		Daemons        json.RawMessage `json:"daemons"`
+		KataAPIVersion int            `json:"kata_api_version"`
+		Daemons        jsontext.Value `json:"daemons"`
 	}
 	require.NoError(t, json.Unmarshal(out, &got))
 	assert.Equal(t, 1, got.KataAPIVersion)

@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
+
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
@@ -117,17 +118,18 @@ func hydrateRefWithQualified(ctx context.Context, baseURL string, pid int64, ref
 	if err != nil {
 		return ref, err
 	}
-	path := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, pid, url.PathEscape(ref.RefForAPI))
-	if includeDeleted {
-		path += "?include_deleted=true"
-	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, path, nil)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return ref, err
 	}
-	if status >= 400 {
-		return ref, apiErrFromBody(status, bs)
+	response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: pid, Ref: ref.RefForAPI}, Query: &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted}})
+	if response == nil {
+		return ref, externalCLITransportError(response, callErr)
 	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return ref, err
+	}
+	bs := response.Body
 	var out struct {
 		Issue struct {
 			ShortID string `json:"short_id"`

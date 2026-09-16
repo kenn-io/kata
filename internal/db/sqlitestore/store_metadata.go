@@ -3,7 +3,8 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 
@@ -12,8 +13,8 @@ import (
 )
 
 type metadataKeyDiffPayload struct {
-	From json.RawMessage `json:"from"`
-	To   json.RawMessage `json:"to"`
+	From jsontext.Value `json:"from"`
+	To   jsontext.Value `json:"to"`
 }
 
 type issueMetadataUpdatePayload struct {
@@ -91,18 +92,18 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 	if in.IfMatchRev != nil && *in.IfMatchRev != curRevision {
 		return out, &db.RevisionConflictError{CurrentRevision: curRevision}
 	}
-	if err := db.CheckMetadataPatchGuard(json.RawMessage(curMetadata), in.Patch, in.Guard); err != nil {
+	if err := db.CheckMetadataPatchGuard(jsontext.Value(curMetadata), in.Patch, in.Guard); err != nil {
 		return out, err
 	}
 
 	// Apply the patch onto the current metadata to produce the new blob,
 	// then diff old vs new to detect no-ops and build the event payload.
-	newBlob, err := db.ApplyMetadataPatch(json.RawMessage(curMetadata), in.Patch)
+	newBlob, err := db.ApplyMetadataPatch(jsontext.Value(curMetadata), in.Patch)
 	if err != nil {
 		return out, fmt.Errorf("apply patch: %w", err)
 	}
 
-	diff, err := metadata.Diff(json.RawMessage(curMetadata), newBlob)
+	diff, err := metadata.Diff(jsontext.Value(curMetadata), newBlob)
 	if err != nil {
 		return out, fmt.Errorf("compute diff: %w", err)
 	}
@@ -222,12 +223,12 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 
 	// Apply the patch onto the current metadata to produce the new blob,
 	// then diff old vs new to detect no-ops and build the event payload.
-	newBlob, err := db.ApplyMetadataPatch(json.RawMessage(curMetadata), in.Patch)
+	newBlob, err := db.ApplyMetadataPatch(jsontext.Value(curMetadata), in.Patch)
 	if err != nil {
 		return out, fmt.Errorf("apply patch: %w", err)
 	}
 
-	diff, err := metadata.Diff(json.RawMessage(curMetadata), newBlob)
+	diff, err := metadata.Diff(jsontext.Value(curMetadata), newBlob)
 	if err != nil {
 		return out, fmt.Errorf("compute diff: %w", err)
 	}
@@ -260,8 +261,8 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 
 	// Build a serializable diff for the event payload: {key: {from, to}}.
 	type keyDiffPayload struct {
-		From json.RawMessage `json:"from"`
-		To   json.RawMessage `json:"to"`
+		From jsontext.Value `json:"from"`
+		To   jsontext.Value `json:"to"`
 	}
 	diffPayload := make(map[string]keyDiffPayload, len(diff))
 	for k, kd := range diff {
@@ -362,14 +363,14 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 		return out, &db.RevisionConflictError{CurrentRevision: target.revision}
 	}
 
-	roleInbox := json.RawMessage(`"inbox"`)
-	roleClear := json.RawMessage(`null`)
+	roleInbox := jsontext.Value(`"inbox"`)
+	roleClear := jsontext.Value(`null`)
 	for _, project := range projects {
 		role := roleClear
 		if project.id == in.ProjectID {
 			role = roleInbox
 		} else {
-			var current map[string]json.RawMessage
+			var current map[string]jsontext.Value
 			if err := json.Unmarshal([]byte(project.metadata), &current); err != nil {
 				return out, fmt.Errorf("decode project %d metadata: %w", project.id, err)
 			}
@@ -380,8 +381,8 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 		if err := ensureProjectWritableTx(ctx, tx, project.id); err != nil {
 			return out, err
 		}
-		currentMetadata := json.RawMessage(project.metadata)
-		updated, err := db.ApplyMetadataPatch(currentMetadata, map[string]json.RawMessage{"role": role})
+		currentMetadata := jsontext.Value(project.metadata)
+		updated, err := db.ApplyMetadataPatch(currentMetadata, map[string]jsontext.Value{"role": role})
 		if err != nil {
 			return out, err
 		}
@@ -399,8 +400,8 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 			return out, fmt.Errorf("update project metadata: %w", err)
 		}
 		type keyDiffPayload struct {
-			From json.RawMessage `json:"from"`
-			To   json.RawMessage `json:"to"`
+			From jsontext.Value `json:"from"`
+			To   jsontext.Value `json:"to"`
 		}
 		diffPayload := make(map[string]keyDiffPayload, len(diff))
 		for key, value := range diff {

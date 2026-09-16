@@ -2,7 +2,7 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"testing"
@@ -18,12 +18,12 @@ func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Stor
 	const created = "2026-07-15T12:00:00.000Z"
 	project := &db.ProjectExport{
 		ID: 5, UID: replayProjectUID, Name: "replay-project", CreatedAt: created,
-		Metadata: json.RawMessage(`{}`), Revision: 1,
+		Metadata: jsontext.Value(`{}`), Revision: 1,
 	}
 	issue := &db.IssueExport{
 		ID: 6, UID: replayIssueUID, ProjectID: project.ID, ShortID: "zz12",
 		Title: "Replay validation", Status: "open", Author: "fixture-author",
-		CreatedAt: created, UpdatedAt: created, Metadata: json.RawMessage(`{}`), Revision: 1,
+		CreatedAt: created, UpdatedAt: created, Metadata: jsontext.Value(`{}`), Revision: 1,
 	}
 	for _, fixture := range []struct {
 		eventType string
@@ -45,7 +45,7 @@ func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Stor
 			if invalid {
 				payload = strings.ReplaceAll(payload, `"reviewer-7"`, `42`)
 			}
-			event.Payload = json.RawMessage(payload)
+			event.Payload = jsontext.Value(payload)
 			var err error
 			event.ContentHash, err = db.EventContentHash(db.EventHashInput{
 				UID: event.UID, OriginInstanceUID: event.OriginInstanceUID,

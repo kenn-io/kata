@@ -1,7 +1,7 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,9 +21,9 @@ func TestContentHashCanonicalizesPayloadJSON(t *testing.T) {
 		CreatedAt:         "2026-05-23T12:00:00.000Z",
 	}
 	a := base
-	a.Payload = json.RawMessage(`{"title":"new","body":"text"}`)
+	a.Payload = jsontext.Value(`{"title":"new","body":"text"}`)
 	b := base
-	b.Payload = json.RawMessage(`{ "body" : "text", "title" : "new" }`)
+	b.Payload = jsontext.Value(`{ "body" : "text", "title" : "new" }`)
 
 	hashA, err := EventContentHash(a)
 	require.NoError(t, err)
@@ -45,7 +45,7 @@ func TestContentHashChangesWhenPortableContentChanges(t *testing.T) {
 		HLCPhysicalMS:     1,
 		HLCCounter:        0,
 		CreatedAt:         "2026-05-23T12:00:00.000Z",
-		Payload:           json.RawMessage(`{"title":"new"}`),
+		Payload:           jsontext.Value(`{"title":"new"}`),
 	}
 	changed := base
 	changed.Actor = "other"
@@ -69,7 +69,7 @@ func TestContentHashIgnoresProjectName(t *testing.T) {
 		HLCPhysicalMS:     1,
 		HLCCounter:        0,
 		CreatedAt:         "2026-05-23T12:00:00.000Z",
-		Payload:           json.RawMessage(`{"title":"new"}`),
+		Payload:           jsontext.Value(`{"title":"new"}`),
 	}
 	renamed := base
 	renamed.ProjectName = "new-name"
@@ -94,9 +94,9 @@ func TestContentHashPreservesLargeJSONNumbers(t *testing.T) {
 		CreatedAt:         "2026-05-23T12:00:00.000Z",
 	}
 	a := base
-	a.Payload = json.RawMessage(`{"n":9007199254740992}`)
+	a.Payload = jsontext.Value(`{"n":9007199254740992}`)
 	b := base
-	b.Payload = json.RawMessage(`{"n":9007199254740993}`)
+	b.Payload = jsontext.Value(`{"n":9007199254740993}`)
 
 	hashA, err := EventContentHash(a)
 	require.NoError(t, err)

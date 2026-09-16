@@ -3,7 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"time"
@@ -74,7 +74,7 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		payload, err := json.Marshal(struct {
 			AliasCount int64 `json:"alias_count"`
 			OpenIssues int64 `json:"open_issues"`
-			Force      bool  `json:"force,omitempty"`
+			Force      bool  `json:"force,omitzero"`
 		}{AliasCount: aliasCount, OpenIssues: openIssues, Force: params.Force})
 		if err != nil {
 			return err
@@ -170,8 +170,8 @@ func (s *Store) DetachProjectAlias(ctx context.Context, params db.DetachAliasPar
 		payload, err := json.Marshal(struct {
 			AliasIdentity string `json:"alias_identity"`
 			AliasKind     string `json:"alias_kind"`
-			WasLast       bool   `json:"was_last,omitempty"`
-			Force         bool   `json:"force,omitempty"`
+			WasLast       bool   `json:"was_last,omitzero"`
+			Force         bool   `json:"force,omitzero"`
 		}{AliasIdentity: alias.AliasIdentity, AliasKind: alias.AliasKind, WasLast: siblings <= 1, Force: params.Force})
 		if err != nil {
 			return err

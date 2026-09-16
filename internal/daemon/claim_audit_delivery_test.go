@@ -2,7 +2,7 @@ package daemon_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"testing"
 	"time"
@@ -185,9 +185,9 @@ func claimAuditDeliveryRemoteEvent(
 	hlcPhysicalMS int64,
 ) db.RemoteEvent {
 	t.Helper()
-	payload := json.RawMessage(`{"issue_uid":"` + issueUID + `","title":"remote title"}`)
+	payload := jsontext.Value(`{"issue_uid":"` + issueUID + `","title":"remote title"}`)
 	if eventType == "issue.closed" {
-		payload = json.RawMessage(`{"issue_uid":"` + issueUID + `","reason":"done","closed_at":"2026-05-23T12:00:00.000Z"}`)
+		payload = jsontext.Value(`{"issue_uid":"` + issueUID + `","reason":"done","closed_at":"2026-05-23T12:00:00.000Z"}`)
 	}
 	ev := db.RemoteEvent{
 		EventUID:          eventUID,

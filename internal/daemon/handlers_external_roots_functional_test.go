@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -307,7 +308,7 @@ func TestExternalRootHandlersFullLifecycleAndDelivery(t *testing.T) {
 	require.Greater(t, len(hookSink.snapshot()), beforeRetained, "committed projection events must survive a later connector error")
 	client.listFieldsErr = nil
 	_, err = database.db.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-		IssueID: issue.ID, Actor: "operator", Patch: map[string]json.RawMessage{"scheduled_on": json.RawMessage(`"2026-08-21"`)},
+		IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-21"`)},
 	})
 	require.NoError(t, err)
 	client.fieldValues["start-date"] = connector.FieldValue{Kind: "date", Value: "2026-08-22"}
@@ -319,9 +320,9 @@ func TestExternalRootHandlersFullLifecycleAndDelivery(t *testing.T) {
 	require.True(t, ok)
 	_, _, err = database.db.UpsertExternalFieldState(t.Context(), db.ExternalFieldStateParams{
 		BindingID: binding.ID, MappingID: activeMapping.ID, ClaimToken: claimed.ClaimToken,
-		Baseline:         json.RawMessage(`{"kind":"date","value":"2026-08-20"}`),
-		ConflictKata:     json.RawMessage(`{"kind":"date","value":"2026-08-21"}`),
-		ConflictExternal: json.RawMessage(`{"kind":"date","value":"2026-08-22"}`),
+		Baseline:         jsontext.Value(`{"kind":"date","value":"2026-08-20"}`),
+		ConflictKata:     jsontext.Value(`{"kind":"date","value":"2026-08-21"}`),
+		ConflictExternal: jsontext.Value(`{"kind":"date","value":"2026-08-22"}`),
 		Conflicted:       true, At: now, Actor: "connector:example-connector",
 	})
 	require.NoError(t, err)
@@ -349,9 +350,9 @@ func TestExternalRootHandlersFullLifecycleAndDelivery(t *testing.T) {
 	require.True(t, ok)
 	_, _, err = database.db.UpsertExternalFieldState(t.Context(), db.ExternalFieldStateParams{
 		BindingID: binding.ID, MappingID: activeMapping.ID, ClaimToken: claimed.ClaimToken,
-		Baseline:         json.RawMessage(`{"kind":"date","value":"2026-08-20"}`),
-		ConflictKata:     json.RawMessage(`{"kind":"date","value":"2026-08-21"}`),
-		ConflictExternal: json.RawMessage(`{"kind":"date","value":"2026-08-22"}`),
+		Baseline:         jsontext.Value(`{"kind":"date","value":"2026-08-20"}`),
+		ConflictKata:     jsontext.Value(`{"kind":"date","value":"2026-08-21"}`),
+		ConflictExternal: jsontext.Value(`{"kind":"date","value":"2026-08-22"}`),
 		Conflicted:       true, At: now, Actor: "connector:example-connector",
 	})
 	require.NoError(t, err)
@@ -565,7 +566,7 @@ func TestExternalRootHandlersClassifyConnectorAndInternalFailures(t *testing.T) 
 			name: "malformed persisted field candidate",
 			states: []db.ExternalFieldState{{
 				BindingID: 1, MappingID: 1, Conflicted: true,
-				ConflictKata: json.RawMessage(`{"kind":`),
+				ConflictKata: jsontext.Value(`{"kind":`),
 			}},
 			private: `{"kind":`,
 		},

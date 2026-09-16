@@ -1,7 +1,7 @@
 package db_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"strings"
 	"testing"
 
@@ -193,7 +193,7 @@ func TestFingerprint_EmptyMetadataPreservesPreChangeLayout(t *testing.T) {
 		db.Fingerprint("", "", nil, nil, nil, nil, nil),
 		"nil metadata must reproduce the pre-change fingerprint")
 	assert.Equal(t, preChange,
-		db.Fingerprint("", "", nil, nil, nil, nil, map[string]json.RawMessage{}),
+		db.Fingerprint("", "", nil, nil, nil, nil, map[string]jsontext.Value{}),
 		"empty (non-nil) metadata must also omit the metadata section")
 }
 
@@ -204,20 +204,20 @@ func TestFingerprint_EmptyMetadataPreservesPreChangeLayout(t *testing.T) {
 func TestFingerprint_MetadataChangesFingerprint(t *testing.T) {
 	base := db.Fingerprint("t", "b", nil, nil, nil, nil, nil)
 	withMeta := db.Fingerprint("t", "b", nil, nil, nil, nil,
-		map[string]json.RawMessage{"work.branch": json.RawMessage(`"feature/x"`)})
+		map[string]jsontext.Value{"work.branch": jsontext.Value(`"feature/x"`)})
 	assert.NotEqual(t, base, withMeta,
 		"adding metadata must change the fingerprint")
 
 	changed := db.Fingerprint("t", "b", nil, nil, nil, nil,
-		map[string]json.RawMessage{"work.branch": json.RawMessage(`"feature/y"`)})
+		map[string]jsontext.Value{"work.branch": jsontext.Value(`"feature/y"`)})
 	assert.NotEqual(t, withMeta, changed,
 		"a different metadata value must change the fingerprint")
 
 	// Insignificant whitespace and nested-object key order must collapse.
 	a := db.Fingerprint("t", "b", nil, nil, nil, nil,
-		map[string]json.RawMessage{"work.cfg": json.RawMessage(`{"a":1,"b":2}`)})
+		map[string]jsontext.Value{"work.cfg": jsontext.Value(`{"a":1,"b":2}`)})
 	b := db.Fingerprint("t", "b", nil, nil, nil, nil,
-		map[string]json.RawMessage{"work.cfg": json.RawMessage(`{ "b": 2, "a": 1 }`)})
+		map[string]jsontext.Value{"work.cfg": jsontext.Value(`{ "b": 2, "a": 1 }`)})
 	assert.Equal(t, a, b,
 		"whitespace- and key-order-equivalent metadata must hash identically")
 }
@@ -229,9 +229,9 @@ func TestFingerprint_MetadataChangesFingerprint(t *testing.T) {
 // making the daemon silently reuse the first issue instead of returning 409.
 func TestFingerprint_LargeIntMetadataDistinct(t *testing.T) {
 	a := db.Fingerprint("t", "b", nil, nil, nil, nil,
-		map[string]json.RawMessage{"work.n": json.RawMessage(`9223372036854775807`)})
+		map[string]jsontext.Value{"work.n": jsontext.Value(`9223372036854775807`)})
 	b := db.Fingerprint("t", "b", nil, nil, nil, nil,
-		map[string]json.RawMessage{"work.n": json.RawMessage(`9223372036854775806`)})
+		map[string]jsontext.Value{"work.n": jsontext.Value(`9223372036854775806`)})
 	assert.NotEqual(t, a, b,
 		"large-integer metadata values must not collapse to the same fingerprint")
 }
@@ -240,14 +240,14 @@ func TestFingerprint_LargeIntMetadataDistinct(t *testing.T) {
 // order of metadata does not affect the hash (keys are sorted canonically).
 func TestFingerprint_MetadataOrderIndependent(t *testing.T) {
 	a := db.Fingerprint("t", "b", nil, nil, nil, nil,
-		map[string]json.RawMessage{
-			"work.branch": json.RawMessage(`"x"`),
-			"work.area":   json.RawMessage(`"y"`),
+		map[string]jsontext.Value{
+			"work.branch": jsontext.Value(`"x"`),
+			"work.area":   jsontext.Value(`"y"`),
 		})
 	b := db.Fingerprint("t", "b", nil, nil, nil, nil,
-		map[string]json.RawMessage{
-			"work.area":   json.RawMessage(`"y"`),
-			"work.branch": json.RawMessage(`"x"`),
+		map[string]jsontext.Value{
+			"work.area":   jsontext.Value(`"y"`),
+			"work.branch": jsontext.Value(`"x"`),
 		})
 	assert.Equal(t, a, b, "metadata fingerprint must be independent of map key order")
 }
@@ -258,7 +258,7 @@ func TestFingerprint_MetadataOrderIndependent(t *testing.T) {
 func TestFingerprintLegacy_MetadataParticipates(t *testing.T) {
 	base := db.FingerprintLegacy("t", "b", nil, nil, nil, nil, nil)
 	withMeta := db.FingerprintLegacy("t", "b", nil, nil, nil, nil,
-		map[string]json.RawMessage{"work.branch": json.RawMessage(`"feature/x"`)})
+		map[string]jsontext.Value{"work.branch": jsontext.Value(`"feature/x"`)})
 	assert.NotEqual(t, base, withMeta,
 		"legacy fingerprint must also fold in metadata")
 }

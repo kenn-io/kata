@@ -3,7 +3,8 @@ package db
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"sort"
 	"strings"
@@ -45,7 +46,7 @@ import (
 // `[a-z0-9._:-]` (see the labels CHECK constraint in schema.sql), so the `,`
 // separator can never collide with a label byte. Bypassing API validation
 // before calling Fingerprint may break this contract.
-func Fingerprint(title, body string, owner *string, labels []string, links []InitialLink, priority *int64, metadata map[string]json.RawMessage) string {
+func Fingerprint(title, body string, owner *string, labels []string, links []InitialLink, priority *int64, metadata map[string]jsontext.Value) string {
 	return fingerprintCore(title, body, owner, labels, DedupeLinks(links), priority, metadata)
 }
 
@@ -54,7 +55,7 @@ func Fingerprint(title, body string, owner *string, labels []string, links []Ini
 // idempotency events written before the dedupe-in-Fingerprint change still
 // match a retry under the new code. New writes always use Fingerprint
 // (deduped); FingerprintLegacy is read-only at the lookup boundary.
-func FingerprintLegacy(title, body string, owner *string, labels []string, links []InitialLink, priority *int64, metadata map[string]json.RawMessage) string {
+func FingerprintLegacy(title, body string, owner *string, labels []string, links []InitialLink, priority *int64, metadata map[string]jsontext.Value) string {
 	// Pass links through unchanged so the canonical form preserves any
 	// duplicate / Incoming=true entries the caller emitted at create time.
 	// The metadata section is layout-identical to Fingerprint: it is omitted
@@ -63,7 +64,7 @@ func FingerprintLegacy(title, body string, owner *string, labels []string, links
 	return fingerprintCore(title, body, owner, labels, append([]InitialLink(nil), links...), priority, metadata)
 }
 
-func fingerprintCore(title, body string, owner *string, labels []string, sortedLinks []InitialLink, priority *int64, metadata map[string]json.RawMessage) string {
+func fingerprintCore(title, body string, owner *string, labels []string, sortedLinks []InitialLink, priority *int64, metadata map[string]jsontext.Value) string {
 	ownerStr := ""
 	if owner != nil {
 		ownerStr = *owner
@@ -93,13 +94,13 @@ func fingerprintCore(title, body string, owner *string, labels []string, sortedL
 	type linkRec struct {
 		Type        string `json:"type"`
 		OtherNumber int64  `json:"other_number"`
-		Incoming    bool   `json:"incoming,omitempty"`
+		Incoming    bool   `json:"incoming,omitzero"`
 	}
 	linkRecs := make([]linkRec, 0, len(sortedLinks))
 	for _, l := range sortedLinks {
 		linkRecs = append(linkRecs, linkRec{Type: l.Type, OtherNumber: l.ToNumber, Incoming: l.Incoming})
 	}
-	linksJSON, _ := json.Marshal(linkRecs) // never errors on this shape
+	linksJSON, _ := json.Marshal(linkRecs, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)) // never errors on this shape
 
 	var b strings.Builder
 	b.WriteString("title=")
@@ -134,21 +135,21 @@ func fingerprintCore(title, body string, owner *string, labels []string, sortedL
 // 2^53) stay distinct. Serialized as an array of {key,value} records
 // rather than a JSON object so the ordering is explicit and not dependent on
 // any encoder's map-key behavior for the outer shape.
-func canonicalMetadata(md map[string]json.RawMessage) string {
+func canonicalMetadata(md map[string]jsontext.Value) string {
 	keys := make([]string, 0, len(md))
 	for k := range md {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	type metaRec struct {
-		Key   string          `json:"key"`
-		Value json.RawMessage `json:"value"`
+		Key   string         `json:"key"`
+		Value jsontext.Value `json:"value"`
 	}
 	recs := make([]metaRec, 0, len(keys))
 	for _, k := range keys {
-		recs = append(recs, metaRec{Key: k, Value: json.RawMessage(metadata.NormalizeJSON(md[k]))})
+		recs = append(recs, metaRec{Key: k, Value: jsontext.Value(metadata.NormalizeJSON(md[k]))})
 	}
-	out, _ := json.Marshal(recs) // never errors: values are pre-normalized JSON
+	out, _ := json.Marshal(recs, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true)) // never errors: values are pre-normalized JSON
 	return string(out)
 }
 

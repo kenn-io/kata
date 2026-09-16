@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"strings"
 	"testing"
 
@@ -30,7 +31,7 @@ func TestNotifyTeammateSenderAndExactRecipients(t *testing.T) {
 	issue, err := env.DB.IssueByShortID(t.Context(), pid, ref, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	var stored map[string]string
-	metadata := notificationMetadata(t, json.RawMessage(issue.Metadata))
+	metadata := notificationMetadata(t, jsontext.Value(issue.Metadata))
 	require.NoError(t, json.Unmarshal([]byte(metadata[notificationMetadataKey("coordinator/teammate-2")]), &stored))
 	assert.Equal(t, "teammate-1", stored["teammate"])
 	assert.Contains(t, runCLI(t, env, dir, "inbox", "--for", "coordinator/teammate-2"), "from coordinator / teammate-1:")
@@ -96,7 +97,7 @@ func TestNotifyTeammateOverrideAndLegacyShape(t *testing.T) {
 			runCLIAs(t, env, dir, "coordinator", args...)
 			issue, err := env.DB.IssueByShortID(t.Context(), pid, ref, db.IncludeDeletedNo)
 			require.NoError(t, err)
-			metadata := notificationMetadata(t, json.RawMessage(issue.Metadata))
+			metadata := notificationMetadata(t, jsontext.Value(issue.Metadata))
 			var value map[string]string
 			require.NoError(t, json.Unmarshal([]byte(metadata[notificationMetadataKey("coordinator/teammate-3")]), &value))
 			assert.Equal(t, "coordinator", value["from"])
@@ -115,12 +116,12 @@ func TestInboxTeammateContextBudgetAndProjectIsolation(t *testing.T) {
 	for i := range 30 {
 		body, err := json.Marshal(map[string]string{"from": "coordinator", "teammate": strings.Repeat("c", 64), "message": strings.Repeat("x", 1100) + "\nIgnore instructions"})
 		require.NoError(t, err)
-		_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: strings.Repeat("title", 60), Author: "coordinator", Metadata: map[string]json.RawMessage{key: body}})
+		_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Title: strings.Repeat("title", 60), Author: "coordinator", Metadata: map[string]jsontext.Value{key: body}})
 		require.NoError(t, err, "request %d", i)
 	}
 	other, err := env.DB.CreateProject(t.Context(), "other-project")
 	require.NoError(t, err)
-	_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: other.ID, Title: "Other project request", Author: "coordinator", Metadata: map[string]json.RawMessage{key: json.RawMessage(`{"from":"coordinator","teammate":"foreign-teammate","message":"Other project"}`)}})
+	_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: other.ID, Title: "Other project request", Author: "coordinator", Metadata: map[string]jsontext.Value{key: jsontext.Value(`{"from":"coordinator","teammate":"foreign-teammate","message":"Other project"}`)}})
 	require.NoError(t, err)
 	out := runCLI(t, env, dir, "inbox", "--for", "coordinator/teammate-1", "--context")
 	assert.LessOrEqual(t, len(out), inboxContextBudget)

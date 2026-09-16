@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"os"
 	"os/exec"
@@ -31,8 +32,8 @@ func TestPublishCommentRetryAfterCrashCreatesOneComment(t *testing.T) {
 		ID:       "request-1",
 		Method:   "publish_comment",
 		Instance: "example-instance",
-		Settings: json.RawMessage(`{}`),
-		Params:   json.RawMessage(`{"root_key":"root-example","body":"publish once","operation_id":"publication-1"}`),
+		Settings: jsontext.Value(`{}`),
+		Params:   jsontext.Value(`{"root_key":"root-example","body":"publish once","operation_id":"publication-1"}`),
 	})
 	require.NoError(t, err)
 

@@ -627,31 +627,6 @@ func (c CreateFederationEnrollmentRequestBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
-type CreateFederationReplicaBody struct {
-	Adopted               *bool                `json:"adopted,omitempty"`
-	AdoptionSnapshotCount *int64               `json:"adoption_snapshot_count,omitempty"`
-	Binding               FederationBindingOut `json:"binding"`
-	Project               ProjectOut           `json:"project"`
-}
-
-func (c CreateFederationReplicaBody) Validate() error {
-	var errors runtime.ValidationErrors
-	if v, ok := any(c.Binding).(runtime.Validator); ok {
-		if err := v.Validate(); err != nil {
-			errors = errors.Append("Binding", err)
-		}
-	}
-	if v, ok := any(c.Project).(runtime.Validator); ok {
-		if err := v.Validate(); err != nil {
-			errors = errors.Append("Project", err)
-		}
-	}
-	if len(errors) == 0 {
-		return nil
-	}
-	return errors
-}
-
 type CreateFederationReplicaRequestBody struct {
 	Actor                  *string `json:"actor,omitempty"`
 	AdoptExisting          *bool   `json:"adopt_existing,omitempty"`
@@ -669,6 +644,31 @@ type CreateFederationReplicaRequestBody struct {
 
 func (c CreateFederationReplicaRequestBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CreateFederationReplicaResponseBody struct {
+	Adopted               *bool                `json:"adopted,omitempty"`
+	AdoptionSnapshotCount *int64               `json:"adoption_snapshot_count,omitempty"`
+	Binding               FederationBindingOut `json:"binding"`
+	Project               ProjectOut           `json:"project"`
+}
+
+func (c CreateFederationReplicaResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(c.Binding).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Binding", err)
+		}
+	}
+	if v, ok := any(c.Project).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Project", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type CreateInitialLinkBody struct {

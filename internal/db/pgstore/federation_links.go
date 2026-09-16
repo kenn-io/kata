@@ -3,7 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"maps"
@@ -334,7 +334,7 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE e.project_id=$1`
 		if relatedIssueUID.Valid {
 			event.RelatedIssueUID = relatedIssueUID.String
 		}
-		event.Payload = json.RawMessage(payload)
+		event.Payload = jsontext.Value(payload)
 		event.CreatedAt = createdAt
 		output = append(output, event)
 	}

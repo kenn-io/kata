@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,6 +16,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/importlabels"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const (
@@ -64,7 +66,7 @@ func (c *beadsComment) UnmarshalJSON(data []byte) error {
 	type commentAlias beadsComment
 	var raw struct {
 		commentAlias
-		ID json.RawMessage `json:"id"`
+		ID jsontext.Value `json:"id"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -76,9 +78,8 @@ func (c *beadsComment) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(raw.ID, &c.ID); err == nil {
 		return nil
 	}
-	var number json.Number
-	if err := json.Unmarshal(raw.ID, &number); err == nil && number != "" {
-		c.ID = number.String()
+	if raw.ID.Kind() == '0' {
+		c.ID = string(raw.ID)
 		return nil
 	}
 	return fmt.Errorf("beads comment id must be a string or number")
@@ -156,15 +157,26 @@ func runBeadsImport(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/imports", baseURL, projectID), req)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
+	data, err := json.Marshal(req)
+	if err != nil {
+		return err
 	}
-	return printBeadsImportResult(cmd, bs, projectID)
+	var body generated.ImportIssuesBody
+	if err := json.Unmarshal(data, &body); err != nil {
+		return err
+	}
+	response, callErr := apiClient.ImportIssuesWithResponse(ctx, &generated.ImportIssuesRequestOptions{PathParams: &generated.ImportIssuesPath{ProjectID: projectID}, Body: &body})
+	if response == nil {
+		return externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return err
+	}
+	return printBeadsImportResult(cmd, response.Body, projectID)
 }
 
 func collectBeadsImportRequest(ctx context.Context, workspace, actor string) (beadsImportRequest, error) {

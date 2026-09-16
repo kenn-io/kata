@@ -7,7 +7,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -140,9 +141,8 @@ func WriteSourceArchiveMetadata(metadataPath string, meta SourceArchiveMetadata)
 		return fmt.Errorf("create metadata directory: %w", err)
 	}
 	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(meta); err != nil {
+	enc := jsontext.NewEncoder(&buf, jsontext.WithIndent("  "))
+	if err := json.MarshalEncode(enc, meta); err != nil {
 		return fmt.Errorf("encode source archive metadata: %w", err)
 	}
 	if err := os.WriteFile(metadataPath, buf.Bytes(), 0o600); err != nil {

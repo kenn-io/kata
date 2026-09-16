@@ -3,14 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
+
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
@@ -578,14 +581,18 @@ func evalTarget(run waitRun, t *waitTarget, st issueState, msg string) bool {
 // the attention message. A 4xx/5xx status becomes a *cliError (so a bad ref
 // keeps the daemon's exit code); transport errors propagate for retry.
 func waitFetchState(ctx context.Context, client *http.Client, baseURL string, t *waitTarget) (issueState, string, error) {
-	getURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, t.pid, url.PathEscape(t.refForAPI))
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, getURL, nil)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return issueState{}, "", err
 	}
-	if status >= 400 {
-		return issueState{}, "", apiErrFromBody(status, bs)
+	response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: t.pid, Ref: t.refForAPI}})
+	if response == nil {
+		return issueState{}, "", externalCLITransportError(response, callErr)
 	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return issueState{}, "", err
+	}
+	bs := response.Body
 	var out metaShowResponse
 	if err := json.Unmarshal(bs, &out); err != nil {
 		return issueState{}, "", err
@@ -619,7 +626,7 @@ func classifyFetchErr(err error) (permanent bool) {
 
 // decodeJSONString unwraps a JSON string metadata value, returning "" for
 // absent, null, or non-string values (attention values are opaque strings).
-func decodeJSONString(raw json.RawMessage) string {
+func decodeJSONString(raw jsontext.Value) string {
 	if len(raw) == 0 {
 		return ""
 	}

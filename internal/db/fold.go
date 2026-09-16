@@ -1,7 +1,8 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"sort"
 )
@@ -14,8 +15,8 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 		Comments:        map[string]FoldComment{},
 		Labels:          map[FoldLabelKey]FoldElementState{},
 		Links:           map[FoldLinkKey]FoldElementState{},
-		IssueMetadata:   map[string]json.RawMessage{},
-		ProjectMetadata: map[string]json.RawMessage{},
+		IssueMetadata:   map[string]jsontext.Value{},
+		ProjectMetadata: map[string]jsontext.Value{},
 	}
 	ordered := append([]FoldEvent(nil), events...)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -93,19 +94,19 @@ func (p *FoldProjection) apply(e FoldEvent) {
 
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	var in struct {
-		UID          string          `json:"uid"`
-		ShortID      string          `json:"short_id"`
-		Title        string          `json:"title"`
-		Body         string          `json:"body"`
-		Author       string          `json:"author"`
-		Owner        *string         `json:"owner"`
-		Priority     *int64          `json:"priority"`
-		Status       string          `json:"status"`
-		ClosedReason *string         `json:"closed_reason"`
-		ClosedAt     *string         `json:"closed_at"`
-		DeletedAt    *string         `json:"deleted_at"`
-		Metadata     json.RawMessage `json:"metadata"`
-		Labels       []string        `json:"labels"`
+		UID          string         `json:"uid"`
+		ShortID      string         `json:"short_id"`
+		Title        string         `json:"title"`
+		Body         string         `json:"body"`
+		Author       string         `json:"author"`
+		Owner        *string        `json:"owner"`
+		Priority     *int64         `json:"priority"`
+		Status       string         `json:"status"`
+		ClosedReason *string        `json:"closed_reason"`
+		ClosedAt     *string        `json:"closed_at"`
+		DeletedAt    *string        `json:"deleted_at"`
+		Metadata     jsontext.Value `json:"metadata"`
+		Labels       []string       `json:"labels"`
 		Links        []struct {
 			Type       string `json:"type"`
 			ToIssueUID string `json:"to_issue_uid"`
@@ -187,7 +188,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	}
 }
 
-func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsontext.Value) {
 	uid := issueUID(e, payload)
 	if uid == "" {
 		return
@@ -232,7 +233,7 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]json.
 	p.Issues[uid] = issue
 }
 
-func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]jsontext.Value) {
 	uid := issueUID(e, payload)
 	if uid == "" {
 		return
@@ -247,7 +248,7 @@ func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]json.RawMess
 	p.Issues[uid] = issue
 }
 
-func (p *FoldProjection) applyPriority(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyPriority(e FoldEvent, payload map[string]jsontext.Value) {
 	uid := issueUID(e, payload)
 	if uid == "" {
 		return
@@ -262,7 +263,7 @@ func (p *FoldProjection) applyPriority(e FoldEvent, payload map[string]json.RawM
 	p.Issues[uid] = issue
 }
 
-func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]jsontext.Value) {
 	uid := issueUID(e, payload)
 	if uid == "" {
 		return
@@ -281,7 +282,7 @@ func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]json.RawMes
 	p.Issues[uid] = issue
 }
 
-func (p *FoldProjection) applyReopened(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyReopened(e FoldEvent, payload map[string]jsontext.Value) {
 	uid := issueUID(e, payload)
 	if uid == "" {
 		return
@@ -294,7 +295,7 @@ func (p *FoldProjection) applyReopened(e FoldEvent, payload map[string]json.RawM
 	p.Issues[uid] = issue
 }
 
-func (p *FoldProjection) applyDeleted(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyDeleted(e FoldEvent, payload map[string]jsontext.Value) {
 	uid := issueUID(e, payload)
 	if uid == "" {
 		return
@@ -309,7 +310,7 @@ func (p *FoldProjection) applyDeleted(e FoldEvent, payload map[string]json.RawMe
 	p.Issues[uid] = issue
 }
 
-func (p *FoldProjection) applyRestored(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyRestored(e FoldEvent, payload map[string]jsontext.Value) {
 	uid := issueUID(e, payload)
 	if uid == "" {
 		return
@@ -320,7 +321,7 @@ func (p *FoldProjection) applyRestored(e FoldEvent, payload map[string]json.RawM
 	p.Issues[uid] = issue
 }
 
-func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]jsontext.Value) {
 	commentUID, ok := stringValue(payload["comment_uid"])
 	if !ok || commentUID == "" {
 		return
@@ -337,7 +338,7 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]json.RawMe
 	p.touchIssue(uid, createdAt)
 }
 
-func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]jsontext.Value) {
 	commentUID, ok := stringValue(payload["comment_uid"])
 	if !ok || commentUID == "" {
 		return
@@ -390,7 +391,7 @@ func (p *FoldProjection) editCommentBody(commentUID, issueUID, body string, cloc
 	p.Comments[commentUID] = comment
 }
 
-func (p *FoldProjection) applyLabel(e FoldEvent, payload map[string]json.RawMessage, present bool) {
+func (p *FoldProjection) applyLabel(e FoldEvent, payload map[string]jsontext.Value, present bool) {
 	uid := issueUID(e, payload)
 	label, ok := stringValue(payload["label"])
 	if !ok || uid == "" {
@@ -400,7 +401,7 @@ func (p *FoldProjection) applyLabel(e FoldEvent, payload map[string]json.RawMess
 	p.touchIssue(uid, issueUpdatedAt(e, payload))
 }
 
-func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]json.RawMessage, present bool) {
+func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]jsontext.Value, present bool) {
 	typ, ok := stringValue(payload["type"])
 	if !ok {
 		return
@@ -421,7 +422,7 @@ func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]json.Raw
 	p.touchIssue(issueUID(e, payload), issueUpdatedAt(e, payload))
 }
 
-func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsontext.Value) {
 	base := issueUID(e, payload)
 	if base == "" {
 		return
@@ -449,7 +450,7 @@ func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]json.
 	}
 }
 
-func (p *FoldProjection) applyMoved(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyMoved(e FoldEvent, payload map[string]jsontext.Value) {
 	uid := issueUID(e, payload)
 	if uid == "" {
 		return
@@ -465,7 +466,7 @@ func (p *FoldProjection) applyMoved(e FoldEvent, payload map[string]json.RawMess
 	p.Issues[uid] = issue
 }
 
-func (p *FoldProjection) applyAuthorRewritten(e FoldEvent, payload map[string]json.RawMessage) {
+func (p *FoldProjection) applyAuthorRewritten(e FoldEvent, payload map[string]jsontext.Value) {
 	from, fromOK := stringValue(payload["from"])
 	to, toOK := stringValue(payload["to"])
 	if !fromOK || !toOK || from == "" || to == "" {
@@ -518,7 +519,7 @@ func (p *FoldProjection) applyAuthorRewritten(e FoldEvent, payload map[string]js
 	}
 }
 
-func (p *FoldProjection) applyUIDList(base string, raw json.RawMessage, typ string, present, incoming bool, clock FoldClock, author string) {
+func (p *FoldProjection) applyUIDList(base string, raw jsontext.Value, typ string, present, incoming bool, clock FoldClock, author string) {
 	uid, ok := stringValue(raw)
 	if !ok || uid == "" {
 		return
@@ -577,7 +578,7 @@ func advanceIssueUpdatedAt(issue *FoldIssue, updatedAt string) {
 	}
 }
 
-func issueUID(e FoldEvent, payload map[string]json.RawMessage) string {
+func issueUID(e FoldEvent, payload map[string]jsontext.Value) string {
 	if e.IssueUID != "" {
 		return e.IssueUID
 	}
@@ -590,7 +591,7 @@ func issueUID(e FoldEvent, payload map[string]json.RawMessage) string {
 	return ""
 }
 
-func issueUpdatedAt(e FoldEvent, payload map[string]json.RawMessage) string {
+func issueUpdatedAt(e FoldEvent, payload map[string]jsontext.Value) string {
 	if updatedAt, ok := stringValue(payload["updated_at"]); ok && updatedAt != "" {
 		return updatedAt
 	}
@@ -600,8 +601,8 @@ func issueUpdatedAt(e FoldEvent, payload map[string]json.RawMessage) string {
 // PayloadMap decodes the event payload bytes into a map of raw JSON fields.
 // It returns an empty map on empty input or parse failures; the fold/replay
 // paths treat missing fields the same as nil entries.
-func PayloadMap(raw json.RawMessage) map[string]json.RawMessage {
-	out := map[string]json.RawMessage{}
+func PayloadMap(raw jsontext.Value) map[string]jsontext.Value {
+	out := map[string]jsontext.Value{}
 	if len(raw) == 0 {
 		return out
 	}
@@ -611,7 +612,7 @@ func PayloadMap(raw json.RawMessage) map[string]json.RawMessage {
 
 // StringValue decodes a JSON string field. It returns ok=false when raw is
 // empty, JSON null, or not a string.
-func StringValue(raw json.RawMessage) (string, bool) {
+func StringValue(raw jsontext.Value) (string, bool) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", false
 	}
@@ -623,9 +624,9 @@ func StringValue(raw json.RawMessage) (string, bool) {
 }
 
 // stringValue is the internal alias for fold.go's existing callers.
-func stringValue(raw json.RawMessage) (string, bool) { return StringValue(raw) }
+func stringValue(raw jsontext.Value) (string, bool) { return StringValue(raw) }
 
-func optionalString(raw json.RawMessage) (*string, bool) {
+func optionalString(raw jsontext.Value) (*string, bool) {
 	if len(raw) == 0 {
 		return nil, false
 	}
@@ -639,7 +640,7 @@ func optionalString(raw json.RawMessage) (*string, bool) {
 	return &v, true
 }
 
-func int64Value(raw json.RawMessage) (int64, bool) {
+func int64Value(raw jsontext.Value) (int64, bool) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return 0, false
 	}
@@ -650,7 +651,7 @@ func int64Value(raw json.RawMessage) (int64, bool) {
 	return v, true
 }
 
-func optionalInt64(raw json.RawMessage) (*int64, bool) {
+func optionalInt64(raw jsontext.Value) (*int64, bool) {
 	if len(raw) == 0 {
 		return nil, false
 	}
@@ -666,7 +667,7 @@ func optionalInt64(raw json.RawMessage) (*int64, bool) {
 
 // StringSlice decodes a JSON array of strings. It returns nil on empty input,
 // null, or a non-array payload.
-func StringSlice(raw json.RawMessage) []string {
+func StringSlice(raw jsontext.Value) []string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
 	}
@@ -676,19 +677,19 @@ func StringSlice(raw json.RawMessage) []string {
 }
 
 // stringSlice is the internal alias for fold.go's existing callers.
-func stringSlice(raw json.RawMessage) []string { return StringSlice(raw) }
+func stringSlice(raw jsontext.Value) []string { return StringSlice(raw) }
 
-func applyMetadataDiff(current json.RawMessage, diffRaw json.RawMessage) json.RawMessage {
-	var currentMap map[string]json.RawMessage
+func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.Value {
+	var currentMap map[string]jsontext.Value
 	if len(current) > 0 && string(current) != "null" {
 		_ = json.Unmarshal(current, &currentMap)
 	}
 	if currentMap == nil {
-		currentMap = map[string]json.RawMessage{}
+		currentMap = map[string]jsontext.Value{}
 	}
 	var diff map[string]struct {
-		From json.RawMessage `json:"from"`
-		To   json.RawMessage `json:"to"`
+		From jsontext.Value `json:"from"`
+		To   jsontext.Value `json:"to"`
 	}
 	_ = json.Unmarshal(diffRaw, &diff)
 	for key, d := range diff {
@@ -698,14 +699,14 @@ func applyMetadataDiff(current json.RawMessage, diffRaw json.RawMessage) json.Ra
 		}
 		currentMap[key] = applyMetadataValueDiff(currentMap[key], d.From, d.To)
 	}
-	out, err := json.Marshal(currentMap)
+	out, err := json.Marshal(currentMap, json.Deterministic(true))
 	if err != nil {
-		return json.RawMessage(`{}`)
+		return jsontext.Value(`{}`)
 	}
 	return out
 }
 
-func applyMetadataValueDiff(current, from, to json.RawMessage) json.RawMessage {
+func applyMetadataValueDiff(current, from, to jsontext.Value) jsontext.Value {
 	if !metadataObjectMergeable(current, from, to) {
 		return canonicalJSON(to)
 	}
@@ -713,14 +714,14 @@ func applyMetadataValueDiff(current, from, to json.RawMessage) json.RawMessage {
 	fromObj := parseRawObject(from)
 	toObj := parseRawObject(to)
 	merged := mergeMetadataObject(currentObj, fromObj, toObj)
-	out, err := json.Marshal(merged)
+	out, err := json.Marshal(merged, json.Deterministic(true))
 	if err != nil {
 		return canonicalJSON(to)
 	}
 	return out
 }
 
-func metadataObjectMergeable(current, from, to json.RawMessage) bool {
+func metadataObjectMergeable(current, from, to jsontext.Value) bool {
 	if !rawJSONObject(to) {
 		return false
 	}
@@ -731,12 +732,12 @@ func metadataObjectMergeable(current, from, to json.RawMessage) bool {
 }
 
 func mergeMetadataObject(
-	current map[string]json.RawMessage,
-	from map[string]json.RawMessage,
-	to map[string]json.RawMessage,
-) map[string]json.RawMessage {
+	current map[string]jsontext.Value,
+	from map[string]jsontext.Value,
+	to map[string]jsontext.Value,
+) map[string]jsontext.Value {
 	if current == nil {
-		current = map[string]json.RawMessage{}
+		current = map[string]jsontext.Value{}
 	}
 	seen := map[string]struct{}{}
 	for key, fromVal := range from {
@@ -771,38 +772,38 @@ func mergeMetadataObject(
 	return current
 }
 
-func parseRawObject(raw json.RawMessage) map[string]json.RawMessage {
-	out := map[string]json.RawMessage{}
+func parseRawObject(raw jsontext.Value) map[string]jsontext.Value {
+	out := map[string]jsontext.Value{}
 	if len(raw) == 0 || string(raw) == "null" {
 		return out
 	}
 	_ = json.Unmarshal(raw, &out)
 	if out == nil {
-		return map[string]json.RawMessage{}
+		return map[string]jsontext.Value{}
 	}
 	return out
 }
 
-func rawJSONObject(raw json.RawMessage) bool {
+func rawJSONObject(raw jsontext.Value) bool {
 	if len(raw) == 0 || string(raw) == "null" {
 		return false
 	}
-	var obj map[string]json.RawMessage
+	var obj map[string]jsontext.Value
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return false
 	}
 	return obj != nil
 }
 
-func mustMarshalRawObject(obj map[string]json.RawMessage) json.RawMessage {
-	out, err := json.Marshal(obj)
+func mustMarshalRawObject(obj map[string]jsontext.Value) jsontext.Value {
+	out, err := json.Marshal(obj, json.Deterministic(true))
 	if err != nil {
-		return json.RawMessage(`{}`)
+		return jsontext.Value(`{}`)
 	}
 	return out
 }
 
-func jsonRawEqual(a, b json.RawMessage) bool {
+func jsonRawEqual(a, b jsontext.Value) bool {
 	ca, errA := canonicalJSONPreserveNumbers(a)
 	cb, errB := canonicalJSONPreserveNumbers(b)
 	if errA != nil || errB != nil {
@@ -811,9 +812,9 @@ func jsonRawEqual(a, b json.RawMessage) bool {
 	return string(ca) == string(cb)
 }
 
-func canonicalJSON(raw json.RawMessage) json.RawMessage {
+func canonicalJSON(raw jsontext.Value) jsontext.Value {
 	if len(raw) == 0 {
-		return json.RawMessage(`{}`)
+		return jsontext.Value(`{}`)
 	}
 	out, err := canonicalJSONPreserveNumbers(raw)
 	if err != nil {

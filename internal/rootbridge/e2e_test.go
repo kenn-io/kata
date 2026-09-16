@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"os"
 	"os/exec"
@@ -74,7 +75,7 @@ func TestRecordedExternalSurfaceRejectsLocalIdentityValues(t *testing.T) {
 	} {
 		current := fakeconnector.State{Calls: []fakeconnector.Call{{
 			Method: "publish_comment",
-			Params: json.RawMessage(`{"root_key":"root-example","body":` + strconv.Quote(test.localIdentity) + `}`),
+			Params: jsontext.Value(`{"root_key":"root-example","body":` + strconv.Quote(test.localIdentity) + `}`),
 		}}}
 		if test.long {
 			require.Error(t, fakeconnector.AuditExternalSurface(current, "root-example", []string{test.localIdentity}, nil))
@@ -90,7 +91,7 @@ func TestRecordedExternalSurfaceRejectsEmbeddedLongUIDsOnly(t *testing.T) {
 	for _, uid := range []string{rootUID, childUID} {
 		current := fakeconnector.State{Calls: []fakeconnector.Call{{
 			Method: "publish_comment",
-			Params: json.RawMessage(`{"root_key":"root-example","body":` + strconv.Quote("prefix-"+uid+"-suffix") + `,"operation_id":"operation-example"}`),
+			Params: jsontext.Value(`{"root_key":"root-example","body":` + strconv.Quote("prefix-"+uid+"-suffix") + `,"operation_id":"operation-example"}`),
 		}}}
 		require.Error(t, fakeconnector.AuditExternalSurface(current, "root-example", []string{uid}, nil))
 	}
@@ -101,7 +102,7 @@ func TestRecordedExternalSurfaceRejectsEmbeddedLongUIDsOnly(t *testing.T) {
 	} {
 		current := fakeconnector.State{Calls: []fakeconnector.Call{{
 			Method: "publish_comment",
-			Params: json.RawMessage(`{"root_key":"root-example","body":` + strconv.Quote(body) + `,"operation_id":"operation-example"}`),
+			Params: jsontext.Value(`{"root_key":"root-example","body":` + strconv.Quote(body) + `,"operation_id":"operation-example"}`),
 		}}}
 		require.NoError(t, fakeconnector.AuditExternalSurface(current, "root-example", []string{rootUID, childUID}, []string{"root-short"}))
 	}
@@ -151,8 +152,8 @@ func testE2ERestartInboundCompletion(t *testing.T, executable string, backend e2
 	})
 	require.NoError(t, err)
 	_, err = h.database.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-		IssueID: child.ID, Actor: "operator", Patch: map[string]json.RawMessage{
-			"work.attention": json.RawMessage(`"ok"`),
+		IssueID: child.ID, Actor: "operator", Patch: map[string]jsontext.Value{
+			"work.attention": jsontext.Value(`"ok"`),
 		},
 	})
 	require.NoError(t, err)
@@ -391,9 +392,9 @@ func testE2EPlanningFields(t *testing.T, executable string, backend e2eBackend) 
 	assert.JSONEq(t, `{"scheduled_on":"2026-08-21T09:00:00","timezone":"Europe/Paris"}`, string(issue.Metadata))
 
 	_, err = h.database.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-		IssueID: h.issue.ID, Actor: "operator", Patch: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-08-22T09:00:00"`),
-			"timezone":     json.RawMessage(`"Europe/Paris"`),
+		IssueID: h.issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-08-22T09:00:00"`),
+			"timezone":     jsontext.Value(`"Europe/Paris"`),
 		},
 	})
 	require.NoError(t, err)
@@ -457,9 +458,9 @@ func testE2EPlanningFieldShapes(t *testing.T, executable string, backend e2eBack
 			require.NoError(t, err)
 			assert.JSONEq(t, test.metadata, string(issue.Metadata))
 
-			patch := map[string]json.RawMessage{test.kataField: json.RawMessage("null")}
+			patch := map[string]jsontext.Value{test.kataField: jsontext.Value("null")}
 			if test.kind == "local" {
-				patch["timezone"] = json.RawMessage("null")
+				patch["timezone"] = jsontext.Value("null")
 			}
 			_, err = h.database.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 				IssueID: h.issue.ID, Actor: "operator", Patch: patch,

@@ -340,7 +340,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, federationReplicaAPIError(err)
 		}
-		return &api.CreateFederationReplicaResponse{Body: api.CreateFederationReplicaBody{
+		return &api.CreateFederationReplicaResponse{Body: api.CreateFederationReplicaResponseBody{
 			Project:               dbProjectToOut(result.Project),
 			Binding:               federationBindingToOut(result.Binding),
 			Adopted:               result.Adopted,

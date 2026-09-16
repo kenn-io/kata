@@ -245,17 +245,14 @@ func startMCPIdleKeepaliveLoop(
 }
 
 func sendMCPIdleKeepalive(ctx context.Context, client *http.Client, baseURL string) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/ping", nil)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return
 	}
-	request.Header.Set(daemon.IdleKeepaliveHeader, "1")
-	response, err := client.Do(request)
-	if err != nil {
-		return
-	}
-	_, _ = io.Copy(io.Discard, response.Body)
-	_ = response.Body.Close()
+	_, _ = apiClient.PingWithResponse(ctx, func(_ context.Context, request *http.Request) error {
+		request.Header.Set(daemon.IdleKeepaliveHeader, "1")
+		return nil
+	})
 }
 
 func parseMCPStorageTargets(values []string) (map[string]string, error) {

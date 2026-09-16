@@ -2,12 +2,11 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +15,8 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type projectAliasRef struct {
@@ -74,7 +75,7 @@ func projectsCreateCmd() *cobra.Command {
 			}
 			if currentOutputMode() == outputJSON {
 				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+				if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -117,11 +118,22 @@ func projectsListCmd() *cobra.Command {
 				return err
 			}
 			mode := currentOutputMode()
-			path := "/api/v1/projects"
+			query := &generated.ListProjectsQuery{}
 			if mode == outputAgent {
-				path += "?include=stats"
+				query.Include = new("stats")
 			}
-			bs, emitted, err := a.passthrough(cmd, http.MethodGet, path, nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			response, callErr := apiClient.ListProjectsWithResponse(a.ctx, &generated.ListProjectsRequestOptions{Query: query})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, response.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -192,9 +204,18 @@ func projectsRenameCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bs, emitted, err := a.passthrough(cmd, http.MethodPatch,
-				fmt.Sprintf("/api/v1/projects/%d", project.ID),
-				map[string]string{"name": name, "actor": actor})
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			response, callErr := apiClient.RenameProjectWithResponse(a.ctx, &generated.RenameProjectRequestOptions{PathParams: &generated.RenameProjectPath{ProjectID: project.ID}, Body: &generated.RenameProjectBody{Name: name, Actor: &actor}})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, response.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -244,16 +265,18 @@ func projectsRewriteAuthorCmd() *cobra.Command {
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			bs, err := a.do(http.MethodPost,
-				fmt.Sprintf("/api/v1/projects/%d/actions/rewrite-author", project.ID),
-				map[string]any{
-					"actor": actor,
-					"from":  from,
-					"to":    to,
-				})
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 			if err != nil {
 				return err
 			}
+			response, callErr := apiClient.RewriteAuthorIdentityWithResponse(a.ctx, &generated.RewriteAuthorIdentityRequestOptions{PathParams: &generated.RewriteAuthorIdentityPath{ProjectID: project.ID}, Body: &generated.RewriteAuthorIdentityBody{Actor: &actor, From: from, To: to}})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			var result db.RewriteAuthorIdentityResult
 			if err := json.Unmarshal(bs, &result); err != nil {
 				return err
@@ -318,15 +341,22 @@ func projectsMergeCmd() *cobra.Command {
 					ExitCode: ExitValidation,
 				}
 			}
-			body := map[string]any{"source_project_id": source.ID, "actor": actor}
+			body := &generated.MergeProjectBody{SourceProjectID: source.ID, Actor: &actor}
 			if strings.TrimSpace(targetName) != "" {
-				body["target_name"] = strings.TrimSpace(targetName)
+				body.TargetName = new(strings.TrimSpace(targetName))
 			}
-			bs, err := a.do(http.MethodPost,
-				fmt.Sprintf("/api/v1/projects/%d/merge", target.ID), body)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 			if err != nil {
 				return err
 			}
+			response, callErr := apiClient.MergeProjectWithResponse(a.ctx, &generated.MergeProjectRequestOptions{PathParams: &generated.MergeProjectPath{ProjectID: target.ID}, Body: body})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			var b struct {
 				Source            projectRef             `json:"source"`
 				Target            projectRef             `json:"target"`
@@ -343,7 +373,7 @@ func projectsMergeCmd() *cobra.Command {
 			}
 			if currentOutputMode() == outputJSON {
 				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+				if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -455,8 +485,18 @@ func projectsShowCmd() *cobra.Command {
 					return err
 				}
 			}
-			bs, emitted, err := a.passthrough(cmd, http.MethodGet,
-				fmt.Sprintf("/api/v1/projects/%d", project.ID), nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			response, callErr := apiClient.ShowProjectWithResponse(a.ctx, &generated.ShowProjectRequestOptions{PathParams: &generated.ShowProjectPath{ProjectID: project.ID}})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, response.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -563,14 +603,22 @@ func loadProjectRefsIncludingArchived(a daemonAPI) ([]projectRef, error) {
 }
 
 func loadProjectRefsWithArchived(a daemonAPI, includeArchived bool) ([]projectRef, error) {
-	path := "/api/v1/projects"
+	query := &generated.ListProjectsQuery{}
 	if includeArchived {
-		path += "?include=archived"
+		query.Include = new("archived")
 	}
-	bs, err := a.do(http.MethodGet, path, nil)
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 	if err != nil {
 		return nil, err
 	}
+	response, callErr := apiClient.ListProjectsWithResponse(a.ctx, &generated.ListProjectsRequestOptions{Query: query})
+	if response == nil {
+		return nil, externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return nil, err
+	}
+	bs := response.Body
 	var list struct {
 		Projects []projectRef `json:"projects"`
 	}
@@ -581,11 +629,14 @@ func loadProjectRefsWithArchived(a daemonAPI, includeArchived bool) ([]projectRe
 		if list.Projects[i].DeletedAt != nil {
 			continue
 		}
-		detail, err := a.do(http.MethodGet,
-			fmt.Sprintf("/api/v1/projects/%d", list.Projects[i].ID), nil)
-		if err != nil {
+		response, callErr := apiClient.ShowProjectWithResponse(a.ctx, &generated.ShowProjectRequestOptions{PathParams: &generated.ShowProjectPath{ProjectID: list.Projects[i].ID}})
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
 		}
+		detail := response.Body
 		var show struct {
 			Aliases []projectAliasRef `json:"aliases"`
 		}
@@ -700,12 +751,18 @@ func projectsRemoveCmd() *cobra.Command {
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			path := fmt.Sprintf("/api/v1/projects/%d?actor=%s",
-				project.ID, url.QueryEscape(actor))
-			if force {
-				path += "&force=true"
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
 			}
-			_, emitted, err := a.passthrough(cmd, http.MethodDelete, path, nil)
+			response, callErr := apiClient.RemoveProjectWithResponse(a.ctx, &generated.RemoveProjectRequestOptions{PathParams: &generated.RemoveProjectPath{ProjectID: project.ID}, Query: &generated.RemoveProjectQuery{Actor: actor, Force: &force}})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			_, emitted, err := emitPassthrough(cmd, response.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -741,9 +798,18 @@ func projectsRestoreCmd() *cobra.Command {
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			path := fmt.Sprintf("/api/v1/projects/%d/restore?actor=%s",
-				project.ID, url.QueryEscape(actor))
-			bs, emitted, err := a.passthrough(cmd, http.MethodPost, path, nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			response, callErr := apiClient.RestoreProjectWithResponse(a.ctx, &generated.RestoreProjectRequestOptions{PathParams: &generated.RestoreProjectPath{ProjectID: project.ID}, Query: &generated.RestoreProjectQuery{Actor: actor}})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, response.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -808,12 +874,18 @@ func projectsDetachCmd() *cobra.Command {
 				}
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			path := fmt.Sprintf("/api/v1/projects/%d/aliases/%d?actor=%s",
-				projectID, aliasID, url.QueryEscape(actor))
-			if force {
-				path += "&force=true"
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
 			}
-			_, emitted, err := a.passthrough(cmd, http.MethodDelete, path, nil)
+			response, callErr := apiClient.DetachProjectAliasWithResponse(a.ctx, &generated.DetachProjectAliasRequestOptions{PathParams: &generated.DetachProjectAliasPath{ProjectID: projectID, AliasID: aliasID}, Query: &generated.DetachProjectAliasQuery{Actor: actor, Force: &force}})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			_, emitted, err := emitPassthrough(cmd, response.Body)
 			if err != nil || emitted {
 				return err
 			}

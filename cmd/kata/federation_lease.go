@@ -3,16 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const (
@@ -290,16 +292,59 @@ func postClaimAction(cmd *cobra.Command, rawRef, action string, body map[string]
 }
 
 func postClaimActionResolved(ctx context.Context, client *http.Client, baseURL string, pid int64, ref, action string, body map[string]any) ([]byte, error) {
-	postURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/lease/actions/%s",
-		baseURL, pid, url.PathEscape(ref), action)
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, postURL, body)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return nil, err
 	}
-	if status >= 400 {
-		return nil, apiErrFromBody(status, bs)
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
 	}
-	return bs, nil
+	var payload generated.ClaimActionBody
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	switch action {
+	case "acquire":
+		response, callErr := apiClient.AcquireIssueLeaseWithResponse(ctx, &generated.AcquireIssueLeaseRequestOptions{PathParams: &generated.AcquireIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+	case "release":
+		response, callErr := apiClient.ReleaseIssueLeaseWithResponse(ctx, &generated.ReleaseIssueLeaseRequestOptions{PathParams: &generated.ReleaseIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+	case "renew":
+		response, callErr := apiClient.RenewIssueLeaseWithResponse(ctx, &generated.RenewIssueLeaseRequestOptions{PathParams: &generated.RenewIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+	case "force_release":
+		response, callErr := apiClient.ForceReleaseIssueLeaseWithResponse(ctx, &generated.ForceReleaseIssueLeaseRequestOptions{PathParams: &generated.ForceReleaseIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+
+	default:
+		return nil, fmt.Errorf("unknown claim action %q", action)
+	}
 }
 
 func explicitClaimAdminActor(cmd *cobra.Command) (string, error) {
@@ -369,7 +414,7 @@ func printLeaseMutation(cmd *cobra.Command, bs []byte, action, ref, actor string
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprint(cmd.OutOrStdout(), buf.String()); err != nil {
@@ -471,8 +516,8 @@ func printClaimSteal(cmd *cobra.Command, ref string, releasedBS, claimedBS []byt
 		payload := claimStealJSON{
 			ReleasedHolder: releasedHolder,
 			NewHolder:      newHolder,
-			Released:       json.RawMessage(releasedBS),
-			Claimed:        json.RawMessage(claimedBS),
+			Released:       jsontext.Value(releasedBS),
+			Claimed:        jsontext.Value(claimedBS),
 		}
 		if err := emitJSON(&buf, payload); err != nil {
 			return err
@@ -518,11 +563,11 @@ func printClaimStealPartial(cmd *cobra.Command, releasedBS, claimedBS []byte, re
 			PartialSuccess: true,
 			ReleasedHolder: releasedHolder,
 			NewHolder:      strings.TrimSpace(flags.As),
-			Released:       json.RawMessage(releasedBS),
+			Released:       jsontext.Value(releasedBS),
 			ClaimError:     errorPayload,
 		}
 		if len(claimedBS) > 0 {
-			payload.Claimed = json.RawMessage(claimedBS)
+			payload.Claimed = jsontext.Value(claimedBS)
 		}
 		if err := emitJSON(&buf, payload); err != nil {
 			return err
@@ -535,12 +580,12 @@ func printClaimStealPartial(cmd *cobra.Command, releasedBS, claimedBS []byte, re
 }
 
 type claimStealJSON struct {
-	PartialSuccess bool            `json:"partial_success,omitempty"`
-	ReleasedHolder string          `json:"released_holder,omitempty"`
-	NewHolder      string          `json:"new_holder,omitempty"`
-	Released       json.RawMessage `json:"released,omitempty"`
-	Claimed        json.RawMessage `json:"claimed,omitempty"`
-	ClaimError     any             `json:"claim_error,omitempty"`
+	PartialSuccess bool           `json:"partial_success,omitzero"`
+	ReleasedHolder string         `json:"released_holder,omitempty"`
+	NewHolder      string         `json:"new_holder,omitempty"`
+	Released       jsontext.Value `json:"released,omitempty"`
+	Claimed        jsontext.Value `json:"claimed,omitempty"`
+	ClaimError     any            `json:"claim_error,omitempty"`
 }
 
 func claimStealPartialErr(cause error) error {

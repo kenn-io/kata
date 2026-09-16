@@ -3,7 +3,7 @@ package githubsync
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"log/slog"
 	"maps"
@@ -601,7 +601,7 @@ func TestRunnerLegacyTitlePrefixConfigReconcilesExistingImportedTitles(t *testin
 	assert.Equal(t, "legacy title", issueTitleByID(h.ctx, t, h.db, *mapping.IssueID))
 	lastCursor := h.now.Add(-10 * time.Minute)
 	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
-	legacyConfig := json.RawMessage(`{"host":"github.com","owner":"example-owner","repo":"example-repo","repo_id":101}`)
+	legacyConfig := jsontext.Value(`{"host":"github.com","owner":"example-owner","repo":"example-repo","repo_id":101}`)
 	_, err = h.db.ExecContext(h.ctx, `UPDATE issue_sync_bindings SET config_json = ? WHERE id = ?`, string(legacyConfig), h.binding.ID)
 	require.NoError(t, err)
 	h.fetcher.issues = []Issue{exactTitle}

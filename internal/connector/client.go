@@ -6,7 +6,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -345,7 +346,7 @@ func requiredText(value string) bool {
 }
 
 func (p *processClient) call(ctx context.Context, method string, params any, result any) error {
-	settings := json.RawMessage(`{}`)
+	settings := jsontext.Value(`{}`)
 	if p.config.Settings != nil {
 		encodedSettings, err := json.Marshal(p.config.Settings)
 		if err != nil {
@@ -434,13 +435,13 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	if !utf8.Valid(stdout.Bytes()) {
 		return newCallFailure(ErrProtocolFailure, errors.New("connector response is not valid UTF-8"))
 	}
-	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
+	decoder := jsontext.NewDecoder(bytes.NewReader(stdout.Bytes()))
 	var response protocol.Response
-	if err := decoder.Decode(&response); err != nil {
+	if err := json.UnmarshalDecode(decoder, &response); err != nil {
 		return newCallFailure(ErrProtocolFailure, err)
 	}
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+	var extra jsontext.Value
+	if err := json.UnmarshalDecode(decoder, &extra); !errors.Is(err, io.EOF) {
 		if err == nil {
 			return newCallFailure(ErrProtocolFailure, errors.New("connector response contains trailing JSON"))
 		}
@@ -834,7 +835,7 @@ func normalizeRedactions(values []string) []string {
 	return normalized
 }
 
-func (p *processClient) environment(settings json.RawMessage) ([]string, []string, error) {
+func (p *processClient) environment(settings jsontext.Value) ([]string, []string, error) {
 	env := minimalRuntimeEnv(runtime.GOOS)
 	redactions := make([]string, 0, len(p.config.Env))
 	for target, source := range p.config.Env {
@@ -849,7 +850,7 @@ func (p *processClient) environment(settings json.RawMessage) ([]string, []strin
 	return env, normalizeRedactions(redactions), nil
 }
 
-func stringValues(raw json.RawMessage) []string {
+func stringValues(raw jsontext.Value) []string {
 	if len(raw) == 0 {
 		return nil
 	}

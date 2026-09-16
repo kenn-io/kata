@@ -2,7 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,7 +39,7 @@ func TestStorageConformance(t *testing.T) {
 			project db.Project,
 			issue db.Issue,
 			eventUID string,
-			payload json.RawMessage,
+			payload jsontext.Value,
 		) error {
 			sqlStore := store.(*sqlitestore.Store)
 			_, err := sqlStore.ExecContext(ctx, `INSERT INTO events(

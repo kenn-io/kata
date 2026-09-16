@@ -1,7 +1,8 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 
@@ -14,15 +15,15 @@ const EventTimestampFormat = "2006-01-02T15:04:05.000Z"
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a
 // synthetic from-empty diff for a federation adoption baseline.
 func ProjectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {
-	current := map[string]json.RawMessage{}
+	current := map[string]jsontext.Value{}
 	if len(metadata) > 0 {
 		if err := json.Unmarshal([]byte(metadata), &current); err != nil {
 			return "", fmt.Errorf("decode adopted project metadata: %w", err)
 		}
 	}
 	type diffEntry struct {
-		From any             `json:"from"`
-		To   json.RawMessage `json:"to"`
+		From any            `json:"from"`
+		To   jsontext.Value `json:"to"`
 	}
 	diff := make(map[string]diffEntry, len(current))
 	for key, value := range current {
@@ -39,10 +40,10 @@ func ProjectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {
 
 // ValidateRemoteEventContentHash canonicalizes an incoming payload and verifies
 // the portable event hash before a backend persists it.
-func ValidateRemoteEventContentHash(event RemoteEvent) (json.RawMessage, string, error) {
+func ValidateRemoteEventContentHash(event RemoteEvent) (jsontext.Value, string, error) {
 	payload := event.Payload
 	if len(payload) == 0 {
-		payload = json.RawMessage(`{}`)
+		payload = jsontext.Value(`{}`)
 	}
 	createdAt := event.CreatedAt.UTC().Format(EventTimestampFormat)
 	expectedHash, err := EventContentHash(EventHashInput{
@@ -64,9 +65,9 @@ func ValidateRemoteEventContentHash(event RemoteEvent) (json.RawMessage, string,
 // ValidateFederationEntries checks comment teammate attribution and requires
 // embedded comments and links to be JSON objects on created and snapshot events.
 // Ingest and pull paths must call it before persisting the event.
-func ValidateFederationEntries(eventType, eventUID string, payloadJSON json.RawMessage) error {
+func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value) error {
 	if eventType == "issue.commented" {
-		var payload map[string]json.RawMessage
+		var payload map[string]jsontext.Value
 		if err := json.Unmarshal(payloadJSON, &payload); err != nil {
 			return fmt.Errorf("%w: event %s %s payload is invalid JSON",
 				ErrFederationIngestValidation, eventUID, eventType)
@@ -77,14 +78,14 @@ func ValidateFederationEntries(eventType, eventUID string, payloadJSON json.RawM
 		return nil
 	}
 	var payload struct {
-		Comments []map[string]json.RawMessage `json:"comments"`
-		Links    []map[string]json.RawMessage `json:"links"`
+		Comments []map[string]jsontext.Value `json:"comments"`
+		Links    []map[string]jsontext.Value `json:"links"`
 	}
 	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
 		return fmt.Errorf("%w: event %s %s entries are invalid JSON",
 			ErrFederationIngestValidation, eventUID, eventType)
 	}
-	for field, entries := range map[string][]map[string]json.RawMessage{
+	for field, entries := range map[string][]map[string]jsontext.Value{
 		"comments": payload.Comments, "links": payload.Links,
 	} {
 		for _, entry := range entries {
@@ -102,7 +103,7 @@ func ValidateFederationEntries(eventType, eventUID string, payloadJSON json.RawM
 	return nil
 }
 
-func validateFederationTeammate(raw json.RawMessage, eventUID, eventType string) error {
+func validateFederationTeammate(raw jsontext.Value, eventUID, eventType string) error {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -128,7 +129,7 @@ func CanonicalizeFederationSnapshotAuthors(event RemoteEvent, boundActor string)
 	if event.Type != "issue.snapshot" || boundActor == "" {
 		return event, nil
 	}
-	var payload map[string]json.RawMessage
+	var payload map[string]jsontext.Value
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return RemoteEvent{}, fmt.Errorf("%w: event %s issue.snapshot payload is invalid JSON",
 			ErrFederationIngestValidation, event.EventUID)
@@ -147,7 +148,7 @@ func CanonicalizeFederationSnapshotAuthors(event RemoteEvent, boundActor string)
 		if !ok || len(raw) == 0 || string(raw) == "null" {
 			continue
 		}
-		var entries []map[string]json.RawMessage
+		var entries []map[string]jsontext.Value
 		if err := json.Unmarshal(raw, &entries); err != nil {
 			return RemoteEvent{}, fmt.Errorf("%w: event %s issue.snapshot %s payload is invalid JSON",
 				ErrFederationIngestValidation, event.EventUID, field)
@@ -207,7 +208,7 @@ func LocalEchoMatchesCanonicalSnapshot(existing Event, remote RemoteEvent) (bool
 		IssueUID: existing.IssueUID, RelatedIssueUID: existing.RelatedIssueUID,
 		Type: existing.Type, Actor: existing.Actor, HLCPhysicalMS: existing.HLCPhysicalMS,
 		HLCCounter: existing.HLCCounter, ContentHash: existing.ContentHash,
-		Payload: json.RawMessage(existing.Payload), CreatedAt: existing.CreatedAt,
+		Payload: jsontext.Value(existing.Payload), CreatedAt: existing.CreatedAt,
 	}
 	canonical, err := CanonicalizeFederationSnapshotAuthors(local, remote.Actor)
 	if err != nil {

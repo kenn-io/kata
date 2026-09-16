@@ -3,6 +3,7 @@ package sqlitestore_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,7 +19,7 @@ const updatedAtLayout = "2006-01-02T15:04:05.000Z"
 // written timestamp instead of falling back to the event's created_at.
 func assertEventCarriesUpdatedAt(t *testing.T, evt db.Event, issue db.Issue) {
 	t.Helper()
-	var p map[string]json.RawMessage
+	var p map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(evt.Payload), &p))
 	raw, ok := p["updated_at"]
 	require.Truef(t, ok, "%s payload missing updated_at: %s", evt.Type, evt.Payload)
@@ -33,7 +34,7 @@ func assertEventCarriesUpdatedAt(t *testing.T, evt db.Event, issue db.Issue) {
 // instead of keeping a stale synthetic value.
 func assertEventCarriesCreatedAt(t *testing.T, evt db.Event, issue db.Issue) {
 	t.Helper()
-	var p map[string]json.RawMessage
+	var p map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(evt.Payload), &p))
 	raw, ok := p["created_at"]
 	require.Truef(t, ok, "%s payload missing created_at: %s", evt.Type, evt.Payload)
@@ -123,7 +124,7 @@ func TestIssueMutationsCarryUpdatedAt(t *testing.T) {
 
 	metaOut, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: a.ID, IfMatchRev: new(int64(1)), Actor: "agent",
-		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"api"`)},
+		Patch: map[string]jsontext.Value{"area": jsontext.Value(`"api"`)},
 	})
 	require.NoError(t, err)
 	require.True(t, metaOut.Changed)

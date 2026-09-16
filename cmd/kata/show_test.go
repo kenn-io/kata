@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
 	"net/http"
@@ -420,7 +421,7 @@ func TestShow_JSONIncludesClaimFields(t *testing.T) {
 
 	out := runCLI(t, env, dir, "--json", "show", ref)
 
-	var body map[string]json.RawMessage
+	var body map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(out), &body))
 	assert.Contains(t, body, "lease")
 	assert.Contains(t, body, "pending_leases")

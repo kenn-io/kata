@@ -2,7 +2,8 @@ package federation
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -533,7 +534,7 @@ func federationIngestEnvelope(ev db.Event) api.FederationIngestEventEnvelope {
 		HLCPhysicalMS:     ev.HLCPhysicalMS,
 		HLCCounter:        ev.HLCCounter,
 		ContentHash:       ev.ContentHash,
-		Payload:           json.RawMessage(ev.Payload),
+		Payload:           jsontext.Value(ev.Payload),
 		CreatedAt:         ev.CreatedAt,
 	}
 }
@@ -588,7 +589,7 @@ func federationQuarantineEventDefersLinkPeer(event db.Event, peerUID string) boo
 	if event.IssueUID == nil || *event.IssueUID == "" || *event.IssueUID == peerUID {
 		return false
 	}
-	var payload map[string]json.RawMessage
+	var payload map[string]jsontext.Value
 	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
 		return false
 	}
@@ -667,7 +668,7 @@ func federationQuarantineEventDefersLinkPeer(event db.Event, peerUID string) boo
 	return false
 }
 
-func federationQuarantinePayloadString(payload map[string]json.RawMessage, keys ...string) (string, bool) {
+func federationQuarantinePayloadString(payload map[string]jsontext.Value, keys ...string) (string, bool) {
 	for _, key := range keys {
 		if value, ok := db.StringValue(payload[key]); ok {
 			return value, true

@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"context"
 	"embed"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -31,13 +32,13 @@ type protocolTranscript struct {
 	Schema       string                   `json:"schema"`
 	Protocol     string                   `json:"protocol"`
 	Name         string                   `json:"name"`
-	FieldSamples []json.RawMessage        `json:"field_samples,omitempty"`
+	FieldSamples []jsontext.Value         `json:"field_samples,omitempty"`
 	Steps        []protocolTranscriptStep `json:"steps"`
 }
 
 type protocolTranscriptStep struct {
 	Name          string                    `json:"name"`
-	Request       json.RawMessage           `json:"request,omitempty"`
+	Request       jsontext.Value            `json:"request,omitempty"`
 	RawRequest    string                    `json:"raw_request,omitempty"`
 	Observe       string                    `json:"observe,omitempty"`
 	Fault         Fault                     `json:"fault,omitempty"`
@@ -71,13 +72,13 @@ type transcriptAssertion struct {
 	By               []string              `json:"by,omitempty"`
 	As               string                `json:"as,omitempty"`
 	Assert           []transcriptAssertion `json:"assert,omitempty"`
-	ToleranceSeconds int                   `json:"tolerance_seconds,omitempty"`
+	ToleranceSeconds int                   `json:"tolerance_seconds,omitzero"`
 }
 
 type transcriptValue struct {
-	Path    string          `json:"path,omitempty"`
-	Literal json.RawMessage `json:"literal,omitempty"`
-	Last    bool            `json:"last,omitempty"`
+	Path    string         `json:"path,omitempty"`
+	Literal jsontext.Value `json:"literal,omitempty"`
+	Last    bool           `json:"last,omitzero"`
 }
 
 type transcriptRuntime struct {
@@ -181,10 +182,9 @@ func loadProtocolV1Transcripts() ([]protocolTranscript, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
-		decoder := json.NewDecoder(bytes.NewReader(encoded))
-		decoder.DisallowUnknownFields()
+		decoder := jsontext.NewDecoder(bytes.NewReader(encoded))
 		var transcript protocolTranscript
-		if err := decoder.Decode(&transcript); err != nil {
+		if err := json.UnmarshalDecode(decoder, &transcript, json.RejectUnknownMembers(true)); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", path, err)
 		}
 		if err := requireTranscriptEOF(decoder); err != nil {
@@ -377,15 +377,15 @@ func validateTranscriptValue(value transcriptValue) error {
 			return err
 		}
 	}
-	if len(value.Literal) != 0 && !json.Valid(value.Literal) {
+	if len(value.Literal) != 0 && !jsontext.Value(value.Literal).IsValid() {
 		return errors.New("literal is not valid JSON")
 	}
 	return nil
 }
 
-func requireTranscriptEOF(decoder *json.Decoder) error {
-	var extra json.RawMessage
-	err := decoder.Decode(&extra)
+func requireTranscriptEOF(decoder *jsontext.Decoder) error {
+	var extra jsontext.Value
+	err := json.UnmarshalDecode(decoder, &extra)
 	if errors.Is(err, io.EOF) {
 		return nil
 	}
@@ -550,7 +550,7 @@ func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protoco
 	} else {
 		documents, decodeErr = decodeTranscriptJSONDocuments(output)
 	}
-	exchange["response_count"] = json.Number(strconv.Itoa(len(documents)))
+	exchange["response_count"] = jsontext.Value(strconv.Itoa(len(documents)))
 	exchange["decode_error"] = decodeErr != nil
 	if decodeErr != nil {
 		exchange["decode_error_message"] = decodeErr.Error()
@@ -563,10 +563,16 @@ func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protoco
 }
 
 func decodeTranscriptJSON(encoded []byte) (any, error) {
-	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.UseNumber()
+	decoder := jsontext.NewDecoder(bytes.NewReader(encoded))
 	var value any
-	if err := decoder.Decode(&value); err != nil {
+	if err := json.UnmarshalDecode(decoder, &value, json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, value *any) error {
+		if dec.PeekKind() != '0' {
+			return errors.ErrUnsupported
+		}
+		raw, err := dec.ReadValue()
+		*value = raw.Clone()
+		return err
+	}))); err != nil {
 		return nil, err
 	}
 	if err := requireTranscriptEOF(decoder); err != nil {
@@ -576,12 +582,18 @@ func decodeTranscriptJSON(encoded []byte) (any, error) {
 }
 
 func decodeTranscriptJSONDocuments(encoded []byte) ([]any, error) {
-	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.UseNumber()
+	decoder := jsontext.NewDecoder(bytes.NewReader(encoded))
 	var documents []any
 	for {
 		var value any
-		err := decoder.Decode(&value)
+		err := json.UnmarshalDecode(decoder, &value, json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, value *any) error {
+			if dec.PeekKind() != '0' {
+				return errors.ErrUnsupported
+			}
+			raw, err := dec.ReadValue()
+			*value = raw.Clone()
+			return err
+		})))
 		if errors.Is(err, io.EOF) {
 			return documents, nil
 		}
@@ -1118,7 +1130,7 @@ func transcriptType(value any) string {
 		return "null"
 	case bool:
 		return "boolean"
-	case json.Number:
+	case jsontext.Value:
 		return "number"
 	case string:
 		return "string"
@@ -1165,7 +1177,7 @@ func transcriptLength(value any) int {
 }
 
 func transcriptInteger(value any) (int, error) {
-	number, ok := value.(json.Number)
+	number, ok := value.(jsontext.Value)
 	if !ok {
 		return 0, fmt.Errorf("value is %T, want number", value)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"testing"
@@ -284,7 +285,7 @@ func TestMetaSetAndGetJSONOutput(t *testing.T) {
 	ref := createIssue(t, env, pid, "json metadata issue")
 
 	setOut := runCLI(t, env, dir, "--json", "meta", "set", ref, "work.attention", "ok")
-	var setPayload map[string]json.RawMessage
+	var setPayload map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(setOut), &setPayload))
 	assert.Contains(t, string(setPayload["issue"]), `"short_id":"`+ref+`"`)
 	assert.Contains(t, string(setPayload["issue"]), `"revision":2`)
@@ -320,9 +321,9 @@ func TestMetaUnsetIfMatchStaleRevisionConflictsAndCorrectRevisionSucceeds(t *tes
 
 type metaIssueResponse struct {
 	Issue struct {
-		ShortID  string          `json:"short_id"`
-		Metadata json.RawMessage `json:"metadata"`
-		Revision int64           `json:"revision"`
+		ShortID  string         `json:"short_id"`
+		Metadata jsontext.Value `json:"metadata"`
+		Revision int64          `json:"revision"`
 	} `json:"issue"`
 }
 
@@ -330,7 +331,7 @@ func fetchMetaIssueViaHTTP(t *testing.T, env *testenv.Env, pid int64, ref string
 	t.Helper()
 	issue := getJSON[metaIssueResponse](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues/"+ref)
 	if len(strings.TrimSpace(string(issue.Issue.Metadata))) == 0 {
-		issue.Issue.Metadata = json.RawMessage(`{}`)
+		issue.Issue.Metadata = jsontext.Value(`{}`)
 	}
 	return issue
 }

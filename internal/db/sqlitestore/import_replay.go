@@ -3,7 +3,8 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -432,7 +433,7 @@ func importProject(ctx context.Context, tx *sql.Tx, p *db.ProjectExport) error {
 	if p.UID == db.SystemProjectUID && p.Name == db.SystemProjectName {
 		metadata := p.Metadata
 		if len(metadata) == 0 {
-			metadata = json.RawMessage(`{}`)
+			metadata = jsontext.Value(`{}`)
 		}
 		revision := p.Revision
 		if revision == 0 {
@@ -454,7 +455,7 @@ func importProject(ctx context.Context, tx *sql.Tx, p *db.ProjectExport) error {
 	}
 	metadata := p.Metadata
 	if len(metadata) == 0 {
-		metadata = json.RawMessage(`{}`)
+		metadata = jsontext.Value(`{}`)
 	}
 	revision := p.Revision
 	if revision == 0 {
@@ -509,11 +510,11 @@ func importIssueSyncStatus(ctx context.Context, tx *sql.Tx, s *db.IssueSyncStatu
 func importRecurrence(ctx context.Context, tx *sql.Tx, rc *db.RecurrenceExport) error {
 	labels := rc.TemplateLabels
 	if len(labels) == 0 {
-		labels = json.RawMessage(`[]`)
+		labels = jsontext.Value(`[]`)
 	}
 	metadata := rc.TemplateMetadata
 	if len(metadata) == 0 {
-		metadata = json.RawMessage(`{}`)
+		metadata = jsontext.Value(`{}`)
 	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO recurrences
@@ -537,7 +538,7 @@ func importIssue(ctx context.Context, tx *sql.Tx, i *db.IssueExport) error {
 	}
 	metadata := i.Metadata
 	if len(metadata) == 0 {
-		metadata = json.RawMessage(`{}`)
+		metadata = jsontext.Value(`{}`)
 	}
 	revision := i.Revision
 	if revision == 0 {
@@ -903,7 +904,7 @@ func importExternalFieldState(ctx context.Context, tx *sql.Tx, s *db.ExternalFie
 	return wrapImportErr(db.ImportKindExternalFieldState, err)
 }
 
-func nullableRawJSON(value json.RawMessage) any {
+func nullableRawJSON(value jsontext.Value) any {
 	if len(value) == 0 {
 		return nil
 	}

@@ -1,7 +1,7 @@
 package jsonl
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 )

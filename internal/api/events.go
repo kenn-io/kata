@@ -5,7 +5,7 @@
 package api //nolint:revive // package name "api" is fixed by Plan 1 §4 wire-types layout.
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"reflect"
 	"time"
 
@@ -61,8 +61,8 @@ type EventEnvelope struct {
 	ContentHash         string  `json:"content_hash"`
 	// Payload is the event-type-specific JSON object. Always valid JSON
 	// because the schema enforces json_valid(payload) at write time.
-	Payload   json.RawMessage `json:"payload,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
+	Payload   jsontext.Value `json:"payload,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 // EventReset is the data: payload of a sync.reset_required SSE frame and the

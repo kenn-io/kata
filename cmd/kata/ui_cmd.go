@@ -2,17 +2,18 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/internal/web"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 var (
@@ -101,17 +102,25 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 	if err != nil {
 		return "", err
 	}
-	status, body, err := httpDoJSONHeaders(cmd.Context(), httpClient, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/ui/issue-reference?%s", resolutionBaseURL, url.Values{
-			"project_id": {fmt.Sprintf("%d", projectID)},
-			"ref":        {parsed.RefForAPI},
-		}.Encode()), nil, gatewayHeaders)
+	apiClient, err := kataclient.NewWithHTTPClient(resolutionBaseURL, httpClient)
 	if err != nil {
 		return "", err
 	}
-	if status >= http.StatusBadRequest {
-		return "", apiErrFromBody(status, body)
+	wire, callErr := apiClient.ResolveUIIssueReferenceWithResponse(cmd.Context(), &generated.ResolveUIIssueReferenceRequestOptions{
+		Query: &generated.ResolveUIIssueReferenceQuery{ProjectID: projectID, Ref: parsed.RefForAPI},
+	}, func(_ context.Context, request *http.Request) error {
+		for key, value := range gatewayHeaders {
+			request.Header.Set(key, value)
+		}
+		return nil
+	})
+	if wire == nil {
+		return "", externalCLITransportError(wire, callErr)
 	}
+	if err := externalCLIResponseError(wire.StatusCode, wire.Body, callErr); err != nil {
+		return "", err
+	}
+	body := wire.Body
 	var response struct {
 		Issue struct {
 			UID        string `json:"uid"`

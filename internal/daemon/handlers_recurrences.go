@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"strconv"
@@ -124,7 +124,7 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 				Owner:    in.Body.Template.Owner,
 				Priority: in.Body.Template.Priority,
 				Labels:   in.Body.Template.Labels,
-				Metadata: json.RawMessage(in.Body.Template.Metadata),
+				Metadata: jsontext.Value(in.Body.Template.Metadata),
 			},
 		}
 		var rec db.Recurrence
@@ -222,7 +222,7 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 			update.TemplatePriority = in.Body.Template.Priority
 			update.ClearTemplatePriority = in.Body.Template.ClearPriority
 			update.TemplateLabels = in.Body.Template.Labels
-			update.TemplateMetadata = (*json.RawMessage)(in.Body.Template.Metadata)
+			update.TemplateMetadata = (*jsontext.Value)(in.Body.Template.Metadata)
 		}
 		res, err := cfg.DB.PatchRecurrence(ctx, db.PatchRecurrenceIn{
 			RecurrenceID: rec.ID,

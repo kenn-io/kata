@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"regexp"
 	"strings"
 	"testing"
@@ -85,7 +86,7 @@ func TestNext_JSONWrapsSelectedRawIssue(t *testing.T) {
 	ref := createNextTestIssue(t, env, pid, "json candidate", nil)
 
 	out := runCLI(t, env, dir, "--json", "next")
-	var got map[string]json.RawMessage
+	var got map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 	require.Contains(t, got, "issue")
 	assert.NotContains(t, got, "issues")
@@ -114,7 +115,7 @@ func TestNext_EmptyOutputs(t *testing.T) {
 	t.Run("json", func(t *testing.T) {
 		env, dir, _ := setupCLIWorkspace(t)
 		out := runCLI(t, env, dir, "--json", "next")
-		var got map[string]json.RawMessage
+		var got map[string]jsontext.Value
 		require.NoError(t, json.Unmarshal([]byte(out), &got))
 		assert.Equal(t, "null", string(got["issue"]))
 		assert.NotContains(t, got, "issues")
@@ -160,7 +161,7 @@ func TestNext_JSONFullUsesShowEnvelope(t *testing.T) {
 	ref := createFullNextTestIssue(t, env, dir, "json full candidate")
 
 	out := runCLI(t, env, dir, "--json", "next", "--full")
-	var got map[string]json.RawMessage
+	var got map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(out), &got))
 
 	for _, key := range []string{"issue", "comments", "labels", "links"} {

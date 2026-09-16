@@ -3,7 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -53,7 +53,7 @@ func pgReplayFederationQuarantine(
 ) error {
 	eventUIDs := quarantine.EventUIDs
 	if len(eventUIDs) == 0 {
-		eventUIDs = json.RawMessage(`[]`)
+		eventUIDs = jsontext.Value(`[]`)
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO federation_quarantine(
 id,project_id,direction,first_event_id,last_event_id,event_uids,error,created_at,

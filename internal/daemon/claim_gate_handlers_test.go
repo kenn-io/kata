@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -846,7 +847,7 @@ func claimGateMetadataRequest(t *testing.T, federated bool) (*testenv.Env, claim
 		headers: map[string]string{"If-Match": `"rev-` + strconv.FormatInt(issue.Revision, 10) + `"`},
 		body: map[string]any{
 			"actor": "agent",
-			"patch": map[string]json.RawMessage{"custom": json.RawMessage(`"value"`)},
+			"patch": map[string]jsontext.Value{"custom": jsontext.Value(`"value"`)},
 		},
 	}
 }

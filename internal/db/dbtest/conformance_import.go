@@ -2,7 +2,7 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -284,7 +284,7 @@ func checkImportPresentationAndLegacyKeys(ctx context.Context, t *testing.T, sto
 	assert.Equal(t, 1, result.Updated)
 	require.Len(t, events, 1)
 	assert.Equal(t, "issue.updated", events[0].Type)
-	payload := db.PayloadMap(json.RawMessage(events[0].Payload))
+	payload := db.PayloadMap(jsontext.Value(events[0].Payload))
 	title, _ := db.StringValue(payload["title"])
 	oldTitle, _ := db.StringValue(payload["old_title"])
 	assert.Equal(t, "[External 1] Original title", title)
@@ -393,7 +393,7 @@ func checkImportCorrectedCreationTime(ctx context.Context, t *testing.T, store d
 	require.NotNil(t, issue.ClosedAt)
 	assert.True(t, issue.ClosedAt.Equal(realClosed))
 	require.NotEmpty(t, events)
-	payload := db.PayloadMap(json.RawMessage(events[0].Payload))
+	payload := db.PayloadMap(jsontext.Value(events[0].Payload))
 	createdValue, _ := db.StringValue(payload["created_at"])
 	assert.Equal(t, "2026-07-01T10:00:00.000Z", createdValue)
 	return nil
@@ -613,7 +613,7 @@ func checkImportIssueSyncGuard(ctx context.Context, t *testing.T, store db.Stora
 	}
 	binding, err := store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
 		ProjectID: project.ID, Provider: "example", SourceKey: "example:guard",
-		RemoteID: "guard", DisplayName: "Guarded import", Config: json.RawMessage(`{}`),
+		RemoteID: "guard", DisplayName: "Guarded import", Config: jsontext.Value(`{}`),
 		IntervalSeconds: 60,
 	})
 	if err != nil {
@@ -767,7 +767,7 @@ func checkImportCommentTimestampPrecision(t *testing.T, store db.Storage) error 
 			HLCPhysicalMS:     event.HLCPhysicalMS,
 			HLCCounter:        event.HLCCounter,
 			CreatedAt:         event.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-			Payload:           json.RawMessage(event.Payload),
+			Payload:           jsontext.Value(event.Payload),
 		})
 	}
 	folded := db.FoldEvents(foldEvents)

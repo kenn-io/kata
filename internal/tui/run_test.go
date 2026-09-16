@@ -480,7 +480,7 @@ func TestSSERestartIgnoresStaleGeneration(t *testing.T) {
 	var started []uint64
 	state := newSSERestartState(root, func() {
 		cancelled++
-	}, func(_ context.Context, _ sseClient, _ string, _ *int64, _ chan tea.Msg, gen uint64) {
+	}, func(_ context.Context, _ *http.Client, _ string, _ *int64, _ chan tea.Msg, gen uint64) {
 		started = append(started, gen)
 	})
 	conn := daemonConnection{

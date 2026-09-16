@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"maps"
@@ -40,7 +41,7 @@ func TestTranscriptConditionalWritesFollowAdvertisedCapabilities(t *testing.T) {
 		response, err := json.Marshal(connector.Response{
 			Protocol: connector.ProtocolVersion,
 			ID:       "conditional-write",
-			Result:   json.RawMessage(`{"fields":{"field-1":{"kind":"date","value":"2026-08-21"}}}`),
+			Result:   jsontext.Value(`{"fields":{"field-1":{"kind":"date","value":"2026-08-21"}}}`),
 		})
 		return append(response, '\n'), err
 	}
@@ -50,7 +51,7 @@ func TestTranscriptConditionalWritesFollowAdvertisedCapabilities(t *testing.T) {
 		}},
 		"steps": map[string]any{},
 	}}
-	step := protocolTranscriptStep{Request: json.RawMessage(`{
+	step := protocolTranscriptStep{Request: jsontext.Value(`{
 		"protocol":"kata.connector.v1",
 		"id":"conditional-write",
 		"method":"write_fields",
@@ -124,7 +125,7 @@ type memoryFixture struct {
 }
 
 func newFixture() *memoryFixture {
-	fixture := &memoryFixture{invocation: connector.Invocation{Instance: "example-instance", Settings: json.RawMessage(`{}`)}}
+	fixture := &memoryFixture{invocation: connector.Invocation{Instance: "example-instance", Settings: jsontext.Value(`{}`)}}
 	_ = fixture.Reset(context.Background())
 	return fixture
 }
@@ -134,7 +135,7 @@ func (f *memoryFixture) RootLocator() string { return f.rootLocator }
 func (f *memoryFixture) Invocation() connector.Invocation {
 	return connector.Invocation{
 		Instance: f.invocation.Instance,
-		Settings: append(json.RawMessage(nil), f.invocation.Settings...),
+		Settings: append(jsontext.Value(nil), f.invocation.Settings...),
 	}
 }
 
@@ -171,7 +172,7 @@ func TestRunPropagatesFixtureInvocation(t *testing.T) {
 	fixture := newFixture()
 	fixture.invocation = connector.Invocation{
 		Instance: "configured-instance",
-		Settings: json.RawMessage(`{"workspace":"example-workspace"}`),
+		Settings: jsontext.Value(`{"workspace":"example-workspace"}`),
 	}
 	fixture.requireInvocation = true
 	Run(t, fixture)
@@ -334,8 +335,8 @@ func TestProtocolV1TranscriptFixturesAreDeclarative(t *testing.T) {
 		var document struct {
 			Schema string `json:"schema"`
 			Steps  []struct {
-				Assert []json.RawMessage `json:"assert"`
-				Expect json.RawMessage   `json:"expect"`
+				Assert []jsontext.Value `json:"assert"`
+				Expect jsontext.Value   `json:"expect"`
 			} `json:"steps"`
 		}
 		if err := json.Unmarshal(encoded, &document); err != nil {
@@ -618,7 +619,7 @@ func TestRunAllowsDateOnlyFieldsFixture(t *testing.T) {
 }
 
 func TestMutationAuditTreatsFieldIDsAsOpaque(t *testing.T) {
-	raw := json.RawMessage(`{"root_key":"root-example","fields":{"issueId":{"kind":"date","value":"2026-08-26"},"katakana_start":{"kind":"null"},"kata_uid":{"kind":"null"}},"expected":{"issueId":{"kind":"null"},"katakana_start":{"kind":"null"},"kata_uid":{"kind":"null"}}}`)
+	raw := jsontext.Value(`{"root_key":"root-example","fields":{"issueId":{"kind":"date","value":"2026-08-26"},"katakana_start":{"kind":"null"},"kata_uid":{"kind":"null"}},"expected":{"issueId":{"kind":"null"},"katakana_start":{"kind":"null"},"kata_uid":{"kind":"null"}}}`)
 	if err := auditMutationParams("write_fields", raw, "root-example"); err != nil {
 		t.Fatalf("opaque external field IDs were treated as structural identity channels: %v", err)
 	}
@@ -648,10 +649,10 @@ func TestMutationAuditRejectsForbiddenKataKeysInsideFieldValues(t *testing.T) {
 }
 
 func TestMutationAuditRejectsWrongTypesAndArbitraryKataChannels(t *testing.T) {
-	for _, raw := range []json.RawMessage{
-		json.RawMessage(`{"root_key":"root-example","body":{}}`),
-		json.RawMessage(`{"root_key":"root-example","fields":"field-example"}`),
-		json.RawMessage(`{"root_key":"root-example","fields":{"katakana_start":{"kind":"date","value":"2026-08-20","kataOwnerId":"neutral-forbidden"}}}`),
+	for _, raw := range []jsontext.Value{
+		jsontext.Value(`{"root_key":"root-example","body":{}}`),
+		jsontext.Value(`{"root_key":"root-example","fields":"field-example"}`),
+		jsontext.Value(`{"root_key":"root-example","fields":{"katakana_start":{"kind":"date","value":"2026-08-20","kataOwnerId":"neutral-forbidden"}}}`),
 	} {
 		method := "write_fields"
 		if bytes.Contains(raw, []byte(`"body"`)) {
@@ -939,7 +940,7 @@ func (f *memoryFixture) CompleteRoot(_ context.Context, params connector.Complet
 		})
 	}
 	if f.trailingMutation {
-		f.mutations = append(f.mutations, Mutation{Method: "complete_root", Params: json.RawMessage(`{"root_key":"root-example"} {"issueId":"neutral-forbidden"}`)})
+		f.mutations = append(f.mutations, Mutation{Method: "complete_root", Params: jsontext.Value(`{"root_key":"root-example"} {"issueId":"neutral-forbidden"}`)})
 	}
 	return f.root, nil
 }
@@ -976,7 +977,7 @@ func (f *memoryFixture) PublishComment(_ context.Context, params connector.Publi
 	if f.wrongMutationType {
 		f.mutations = append(f.mutations, Mutation{
 			Method: "publish_comment",
-			Params: json.RawMessage(`{"root_key":"root-example","body":{}}`),
+			Params: jsontext.Value(`{"root_key":"root-example","body":{}}`),
 		})
 	}
 	return created, nil

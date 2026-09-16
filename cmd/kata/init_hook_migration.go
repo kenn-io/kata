@@ -2,7 +2,8 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -30,14 +31,20 @@ func migrateLegacyAgentHooks(configPath string, legacy []legacyAgentHook) (bool,
 	if err != nil {
 		return false, err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
+	decoder := jsontext.NewDecoder(bytes.NewReader(data))
 	var root map[string]any
-	if err := decoder.Decode(&root); err != nil {
+	if err := json.UnmarshalDecode(decoder, &root, json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, value *any) error {
+		if dec.PeekKind() != '0' {
+			return errors.ErrUnsupported
+		}
+		raw, err := dec.ReadValue()
+		*value = raw.Clone()
+		return err
+	}))); err != nil {
 		return false, err
 	}
 	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+	if err := json.UnmarshalDecode(decoder, &trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
 			err = errors.New("multiple JSON values")
 		}
@@ -55,7 +62,7 @@ func migrateLegacyAgentHooks(configPath string, legacy []legacyAgentHook) (bool,
 	if !changed {
 		return false, nil
 	}
-	encoded, err := json.MarshalIndent(root, "", "  ")
+	encoded, err := json.Marshal(root, jsontext.WithIndent("  "))
 	if err != nil {
 		return false, err
 	}

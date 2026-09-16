@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,7 +62,7 @@ func TestSyncFederationOncePullsAndAdvancesCursor(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -256,7 +257,7 @@ func TestSyncFederationOnceDuplicateOnlyPullMaterializesStaleProjection(t *testi
 		Actor:            "tester",
 	})
 	require.NoError(t, err)
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -1629,7 +1630,7 @@ func TestSyncFederationOnceRejectsLocalPushEchoHashMismatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	envelope := eventEnvelopeForSyncTest(localEvent, 100)
-	envelope.Payload = json.RawMessage(strings.Replace(string(envelope.Payload), `"title":"from spoke"`, `"title":"from hub"`, 1))
+	envelope.Payload = jsontext.Value(strings.Replace(string(envelope.Payload), `"title":"from spoke"`, `"title":"from hub"`, 1))
 	rehashEventEnvelope(t, &envelope)
 	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            project.ID,
@@ -1702,7 +1703,7 @@ func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
 	require.NotEmpty(t, snapshot.UID)
 	assert.Contains(t, snapshot.Payload, `"author":"historical-author"`)
 	envelope := eventEnvelopeForSyncTest(snapshot, 100)
-	envelope.Payload = json.RawMessage(strings.Replace(string(envelope.Payload), `"author":"historical-author"`, `"author":"agent"`, 1))
+	envelope.Payload = jsontext.Value(strings.Replace(string(envelope.Payload), `"author":"historical-author"`, `"author":"agent"`, 1))
 	rehashEventEnvelope(t, &envelope)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1836,8 +1837,8 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 		ProjectID:  project.ID,
 		IfMatchRev: new(project.Revision),
 		Actor:      "tester",
-		Patch: map[string]json.RawMessage{
-			"area": json.RawMessage(`"ops"`),
+		Patch: map[string]jsontext.Value{
+			"area": jsontext.Value(`"ops"`),
 		},
 	})
 	require.NoError(t, err)
@@ -1945,8 +1946,8 @@ func TestSyncFederationOnceRecoveredResetDoesNotDeliverLocalProjectPushEcho(t *t
 		ProjectID:  project.ID,
 		IfMatchRev: new(project.Revision),
 		Actor:      "tester",
-		Patch: map[string]json.RawMessage{
-			"area": json.RawMessage(`"ops"`),
+		Patch: map[string]jsontext.Value{
+			"area": jsontext.Value(`"ops"`),
 		},
 	})
 	require.NoError(t, err)
@@ -2010,8 +2011,8 @@ func TestSyncFederationOncePendingResetDoesNotDeliverPostResetLocalProjectPushEc
 		ProjectID:  project.ID,
 		IfMatchRev: new(project.Revision),
 		Actor:      "tester",
-		Patch: map[string]json.RawMessage{
-			"area": json.RawMessage(`"ops"`),
+		Patch: map[string]jsontext.Value{
+			"area": jsontext.Value(`"ops"`),
 		},
 	})
 	require.NoError(t, err)
@@ -2302,7 +2303,7 @@ func TestSyncFederationOncePushesAdoptedIssueSnapshotsAndLinks(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2460,7 +2461,7 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 proxy.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2642,7 +2643,7 @@ func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T
 		issueUIDs = append(issueUIDs, issue.UID)
 	}
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 proxy.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2715,7 +2716,7 @@ func TestSyncFederationOncePushesLargeAdoptionMetadataWithHistoricalSnapshots(t 
 		ProjectID:  localProject.ID,
 		IfMatchRev: new(localProject.Revision),
 		Actor:      "agent",
-		Patch: map[string]json.RawMessage{
+		Patch: map[string]jsontext.Value{
 			"large": metadataValue,
 		},
 	})
@@ -2729,7 +2730,7 @@ func TestSyncFederationOncePushesLargeAdoptionMetadataWithHistoricalSnapshots(t 
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2787,14 +2788,14 @@ func TestSyncFederationOnceConsumesAdoptionMarkerForMetadataOnlyProject(t *testi
 		ProjectID:  localProject.ID,
 		IfMatchRev: new(localProject.Revision),
 		Actor:      "agent",
-		Patch: map[string]json.RawMessage{
-			"area": json.RawMessage(`"docs"`),
+		Patch: map[string]jsontext.Value{
+			"area": jsontext.Value(`"docs"`),
 		},
 	})
 	require.NoError(t, err)
 	localProject = metadataOut.Project
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -2846,7 +2847,7 @@ func TestSyncFederationOnceConsumesAdoptionMarkerForEmptyProject(t *testing.T) {
 
 	localProject, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -3635,7 +3636,7 @@ func TestPendingClaimRetryUnknownCapabilitiesTransportFailureRetriesAfterReconne
 		Actor:            "tester",
 	})
 	require.NoError(t, err)
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,
@@ -3993,8 +3994,8 @@ func matrixCreateInitialState(t *testing.T, store *sqlitestore.Store, project db
 		Labels:    []string{tag + "-initial-label"},
 		Owner:     &owner,
 		Priority:  &priority,
-		Metadata: map[string]json.RawMessage{
-			"phase": json.RawMessage(`"initial"`),
+		Metadata: map[string]jsontext.Value{
+			"phase": jsontext.Value(`"initial"`),
 		},
 	})
 	require.NoError(t, err)
@@ -4013,8 +4014,8 @@ func matrixCreateInitialState(t *testing.T, store *sqlitestore.Store, project db
 	_, err = store.PatchProjectMetadata(context.Background(), db.PatchProjectMetadataIn{
 		ProjectID: project.ID,
 		Actor:     "tester",
-		Patch: map[string]json.RawMessage{
-			"phase": json.RawMessage(`"` + tag + `-initial"`),
+		Patch: map[string]jsontext.Value{
+			"phase": jsontext.Value(`"` + tag + `-initial"`),
 		},
 	})
 	require.NoError(t, err)
@@ -4089,8 +4090,8 @@ func matrixApplyPostEnrollmentState(
 	_, err = store.PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
 		IssueID: issue.ID,
 		Actor:   "tester",
-		Patch: map[string]json.RawMessage{
-			"phase": json.RawMessage(`"final"`),
+		Patch: map[string]jsontext.Value{
+			"phase": jsontext.Value(`"final"`),
 		},
 	})
 	require.NoError(t, err)
@@ -4313,7 +4314,7 @@ func eventsToFold(events []db.Event) []db.FoldEvent {
 			HLCPhysicalMS:     ev.HLCPhysicalMS,
 			HLCCounter:        ev.HLCCounter,
 			CreatedAt:         ev.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-			Payload:           json.RawMessage(ev.Payload),
+			Payload:           jsontext.Value(ev.Payload),
 		})
 	}
 	return out
@@ -4332,7 +4333,7 @@ func syncTestEnvelope(
 	t.Helper()
 	createdAt := time.Date(2026, 5, 23, 12, 0, int(eventID), 0, time.UTC)
 	eventUID := mustTestUID(t)
-	raw := json.RawMessage(payload)
+	raw := jsontext.Value(payload)
 	const originInstanceUID = "01HZNQ7VFPK1XGD8R5MABCD4EZ"
 	hash, err := db.EventContentHash(db.EventHashInput{
 		UID:               eventUID,
@@ -4380,7 +4381,7 @@ func syncTestEvent(
 	t.Helper()
 	createdAt := time.Date(2026, 5, 23, 12, 0, int(eventID), 0, time.UTC)
 	eventUID := mustTestUID(t)
-	raw := json.RawMessage(payload)
+	raw := jsontext.Value(payload)
 	const originInstanceUID = "01HZNQ7VFPK1XGD8R5MABCD4EY"
 	hash, err := db.EventContentHash(db.EventHashInput{
 		UID:               eventUID,
@@ -4415,9 +4416,9 @@ func syncTestEvent(
 }
 
 func eventEnvelopeForSyncTest(event db.Event, eventID int64) api.EventEnvelope {
-	var payload json.RawMessage
+	var payload jsontext.Value
 	if event.Payload != "" {
-		payload = json.RawMessage(event.Payload)
+		payload = jsontext.Value(event.Payload)
 	}
 	return api.EventEnvelope{
 		EventID:           eventID,
@@ -4445,7 +4446,7 @@ func rehashEventEnvelope(t *testing.T, ev *api.EventEnvelope) {
 	t.Helper()
 	payload := ev.Payload
 	if len(payload) == 0 {
-		payload = json.RawMessage(`{}`)
+		payload = jsontext.Value(`{}`)
 	}
 	hash, err := db.EventContentHash(db.EventHashInput{
 		UID:               ev.EventUID,

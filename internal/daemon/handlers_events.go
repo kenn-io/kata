@@ -3,7 +3,8 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -134,9 +135,9 @@ func toEnvelopes(rows []db.Event) []api.EventEnvelope {
 }
 
 func eventToEnvelope(e db.Event) api.EventEnvelope {
-	var payload json.RawMessage
+	var payload jsontext.Value
 	if e.Payload != "" {
-		payload = json.RawMessage(e.Payload)
+		payload = jsontext.Value(e.Payload)
 	}
 	return api.EventEnvelope{
 		EventID:           e.ID,

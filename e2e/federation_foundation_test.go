@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"strconv"
 	"strings"
@@ -117,8 +118,8 @@ func TestSmoke_FederationFoundationV3(t *testing.T) {
 	var sawInstanceMeta, sawEvent, sawPurgeLog bool
 	for line := range strings.SplitSeq(strings.TrimRight(buf.String(), "\n"), "\n") {
 		var env struct {
-			Kind string          `json:"kind"`
-			Data json.RawMessage `json:"data"`
+			Kind string         `json:"kind"`
+			Data jsontext.Value `json:"data"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(line), &env))
 		switch env.Kind {

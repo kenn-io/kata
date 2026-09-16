@@ -2,7 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"strconv"
@@ -1531,8 +1531,8 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 	require.NoError(t, err)
 	metaOut, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: active.ID, IfMatchRev: new(active.Revision), Actor: "alice",
-		Patch: map[string]json.RawMessage{
-			"definitely_not_a_key": json.RawMessage(`"yellow"`),
+		Patch: map[string]jsontext.Value{
+			"definitely_not_a_key": jsontext.Value(`"yellow"`),
 		},
 	})
 	require.NoError(t, err)
@@ -1541,8 +1541,8 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 		ProjectID:  p.ID,
 		IfMatchRev: new(p.Revision),
 		Actor:      "alice",
-		Patch: map[string]json.RawMessage{
-			"area": json.RawMessage(`"federation"`),
+		Patch: map[string]jsontext.Value{
+			"area": jsontext.Value(`"federation"`),
 		},
 	})
 	require.NoError(t, err)
@@ -1575,7 +1575,7 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 	}
 	require.NotNil(t, enableEvent)
 	enablePayload := unmarshalPayload[struct {
-		Metadata json.RawMessage `json:"metadata"`
+		Metadata jsontext.Value `json:"metadata"`
 	}](t, enableEvent.Payload)
 	assert.JSONEq(t, `{"area":"federation"}`, string(enablePayload.Metadata))
 	assert.Equal(t, binding.ReplayHorizonEventID, enableEvent.ID)
@@ -3692,7 +3692,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		issueUID := newTestUID(t)
 		ev := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, issueUID, 101)
 		ev.Actor = "bound-agent"
-		ev.Payload = json.RawMessage(`{"uid":"` + issueUID + `","short_id":"` + shortID(issueUID) + `","title":"normal","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		ev.Payload = jsontext.Value(`{"uid":"` + issueUID + `","short_id":"` + shortID(issueUID) + `","title":"normal","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 		ev.ContentHash = remoteEventHash(t, ev)
 
 		res, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
@@ -3832,7 +3832,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		firstIssueUID := newTestUID(t)
 		first := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, firstIssueUID, 100)
 		first.Actor = "bound-agent"
-		first.Payload = json.RawMessage(`{"uid":"` + firstIssueUID + `","short_id":"` + shortID(firstIssueUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		first.Payload = jsontext.Value(`{"uid":"` + firstIssueUID + `","short_id":"` + shortID(firstIssueUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 		first.ContentHash = remoteEventHash(t, first)
 
 		res, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
@@ -3874,7 +3874,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		firstIssueUID := newTestUID(t)
 		first := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, firstIssueUID, 100)
 		first.Actor = "bound-agent"
-		first.Payload = json.RawMessage(`{"uid":"` + firstIssueUID + `","short_id":"` + shortID(firstIssueUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		first.Payload = jsontext.Value(`{"uid":"` + firstIssueUID + `","short_id":"` + shortID(firstIssueUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 		first.ContentHash = remoteEventHash(t, first)
 		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID:        p.ID,
@@ -3907,7 +3907,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		firstIssueUID := newTestUID(t)
 		first := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, firstIssueUID, 100)
 		first.Actor = "bound-agent"
-		first.Payload = json.RawMessage(`{"uid":"` + firstIssueUID + `","short_id":"` + shortID(firstIssueUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		first.Payload = jsontext.Value(`{"uid":"` + firstIssueUID + `","short_id":"` + shortID(firstIssueUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 		first.ContentHash = remoteEventHash(t, first)
 		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID:        p.ID,
@@ -3941,7 +3941,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		peerUID := newTestUID(t)
 		peer := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, peerUID, 100)
 		peer.Actor = "bound-agent"
-		peer.Payload = json.RawMessage(`{"uid":"` + peerUID + `","short_id":"` + shortID(peerUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		peer.Payload = jsontext.Value(`{"uid":"` + peerUID + `","short_id":"` + shortID(peerUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 		peer.ContentHash = remoteEventHash(t, peer)
 		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID:        p.ID,
@@ -4829,8 +4829,8 @@ func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *test
 				IssueID:    issue.ID,
 				IfMatchRev: new(issue.Revision),
 				Actor:      "tester",
-				Patch: map[string]json.RawMessage{
-					"definitely_not_a_key": json.RawMessage(`"value"`),
+				Patch: map[string]jsontext.Value{
+					"definitely_not_a_key": jsontext.Value(`"value"`),
 				},
 			})
 			return err
@@ -4861,8 +4861,8 @@ func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *test
 				ProjectID:  p.ID,
 				IfMatchRev: new(p.Revision),
 				Actor:      "tester",
-				Patch: map[string]json.RawMessage{
-					"definitely_not_a_key": json.RawMessage(`"value"`),
+				Patch: map[string]jsontext.Value{
+					"definitely_not_a_key": jsontext.Value(`"value"`),
 				},
 			})
 			return err
@@ -5101,19 +5101,19 @@ func TestBoundFederationActor_OverridesEditIssueAtomicLinkAuthor(t *testing.T) {
 }
 
 type federationSnapshotPayload struct {
-	UID          string          `json:"uid"`
-	ShortID      string          `json:"short_id"`
-	Title        string          `json:"title"`
-	Body         string          `json:"body"`
-	Author       string          `json:"author"`
-	Owner        *string         `json:"owner"`
-	Priority     *int64          `json:"priority"`
-	Status       string          `json:"status"`
-	ClosedReason *string         `json:"closed_reason"`
-	ClosedAt     *string         `json:"closed_at"`
-	DeletedAt    *string         `json:"deleted_at"`
-	Metadata     json.RawMessage `json:"metadata"`
-	Labels       []string        `json:"labels"`
+	UID          string         `json:"uid"`
+	ShortID      string         `json:"short_id"`
+	Title        string         `json:"title"`
+	Body         string         `json:"body"`
+	Author       string         `json:"author"`
+	Owner        *string        `json:"owner"`
+	Priority     *int64         `json:"priority"`
+	Status       string         `json:"status"`
+	ClosedReason *string        `json:"closed_reason"`
+	ClosedAt     *string        `json:"closed_at"`
+	DeletedAt    *string        `json:"deleted_at"`
+	Metadata     jsontext.Value `json:"metadata"`
+	Labels       []string       `json:"labels"`
 	Links        []struct {
 		Type       string `json:"type"`
 		ToIssueUID string `json:"to_issue_uid"`
@@ -5370,7 +5370,7 @@ func remoteEvent(
 		RelatedIssueUID:   relatedIssueUID,
 		Type:              eventType,
 		Actor:             actor,
-		Payload:           json.RawMessage(payload),
+		Payload:           jsontext.Value(payload),
 		HLCPhysicalMS:     hlcPhysicalMS,
 		HLCCounter:        0,
 		CreatedAt:         time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC),
@@ -5719,7 +5719,7 @@ func remoteEventFromStored(event db.Event) db.RemoteEvent {
 		HLCPhysicalMS:     event.HLCPhysicalMS,
 		HLCCounter:        event.HLCCounter,
 		ContentHash:       event.ContentHash,
-		Payload:           json.RawMessage(event.Payload),
+		Payload:           jsontext.Value(event.Payload),
 		CreatedAt:         event.CreatedAt,
 	}
 }

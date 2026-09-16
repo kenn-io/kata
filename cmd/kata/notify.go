@@ -3,16 +3,17 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const notificationKeyPrefix = "notify."
@@ -65,7 +66,7 @@ func newNotifyCmd() *cobra.Command {
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
 			key := notificationMetadataKey(to)
-			value := json.RawMessage("null")
+			value := jsontext.Value("null")
 			verb := "cleared"
 			if !clearRequest {
 				issue, _, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI)
@@ -76,7 +77,7 @@ func newNotifyCmd() *cobra.Command {
 					return notificationValidationError("cannot notify on a closed issue")
 				}
 				var instance instanceStatusForCLI
-				if err := getStatusPayload(ctx, client, baseURL+"/api/v1/instance", &instance); err != nil {
+				if err := getInstanceStatus(ctx, client, baseURL, &instance); err != nil {
 					return err
 				}
 				if instance.Auth.Actor != "" {
@@ -89,20 +90,24 @@ func newNotifyCmd() *cobra.Command {
 				value = encoded
 				verb = "notified"
 			}
-			body := map[string]any{
-				"actor": actor,
-				"patch": map[string]json.RawMessage{key: value},
-			}
-			status, response, err := httpDoJSON(ctx, client, http.MethodPost,
-				fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", baseURL, pid, url.PathEscape(ref.RefForAPI)),
-				body)
+			apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 			if err != nil {
 				return err
 			}
-			if status >= 400 {
-				return metaAPIError(status, response)
+			response, callErr := apiClient.PatchIssueMetadataWithResponse(ctx, &generated.PatchIssueMetadataRequestOptions{
+				PathParams: &generated.PatchIssueMetadataPath{ProjectID: pid, Ref: ref.RefForAPI},
+				Body:       &generated.PatchIssueMetadataBody{Actor: &actor, Patch: map[string]any{key: value}},
+			})
+			if response == nil {
+				return callErr
 			}
-			return printNotificationMutation(cmd, response, verb, to)
+			if response.StatusCode >= 400 {
+				return metaAPIError(response.StatusCode, response.Body)
+			}
+			if callErr != nil {
+				return callErr
+			}
+			return printNotificationMutation(cmd, response.Body, verb, to)
 		},
 	}
 	cmd.Flags().StringVar(&recipient, "to", "", "teammate whose attention is requested (max 128 UTF-8 bytes)")
@@ -138,7 +143,7 @@ func notificationValidationError(message string) *cliError {
 func printNotificationMutation(cmd *cobra.Command, response []byte, verb, recipient string) error {
 	if currentOutputMode() == outputJSON {
 		var output bytes.Buffer
-		if err := emitJSON(&output, json.RawMessage(response)); err != nil {
+		if err := emitJSON(&output, jsontext.Value(response)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), output.String())

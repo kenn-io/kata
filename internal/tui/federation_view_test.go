@@ -1725,7 +1725,7 @@ func setupFederationExecutionPreview(
 				return
 			}
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&joinBody))
-			respondJSON(t, w, api.CreateFederationReplicaBody{
+			respondJSON(t, w, api.CreateFederationReplicaResponseBody{
 				Adopted:               true,
 				AdoptionSnapshotCount: 5,
 			})

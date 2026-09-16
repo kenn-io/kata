@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -78,7 +79,7 @@ func TestShowIssueClaimInsecureReadonlyOmitsUnauthenticatedClaimHydration(t *tes
 
 	resp, raw := envDoRaw(t, hub, http.MethodGet, issuePathRef(project.ID, issue.ShortID, ""), nil, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	var rawBody map[string]json.RawMessage
+	var rawBody map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &rawBody))
 	assert.NotContains(t, rawBody, "claim")
 	assert.NotContains(t, rawBody, "pending_claims")
@@ -296,7 +297,7 @@ func TestShowIssueClaimNonFederatedUnclaimedIssueOmitsClaimFields(t *testing.T) 
 
 	resp, raw := envDoRaw(t, env, http.MethodGet, issuePathRef(project.ID, issue.ShortID, ""), nil, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	var rawBody map[string]json.RawMessage
+	var rawBody map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &rawBody))
 	assert.NotContains(t, rawBody, "claim")
 	assert.NotContains(t, rawBody, "pending_claims")
@@ -335,7 +336,7 @@ func TestShowIssueClaimNonFederatedShowDoesNotExpireFederatedClaims(t *testing.T
 
 	resp, raw := envDoRaw(t, env, http.MethodGet, issuePathRef(plainProject.ID, plainIssue.ShortID, ""), nil, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	var rawBody map[string]json.RawMessage
+	var rawBody map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &rawBody))
 	assert.NotContains(t, rawBody, "claim")
 	assert.NotContains(t, rawBody, "pending_claims")
@@ -366,7 +367,7 @@ func TestShowIssueClaimIncludeDeletedSkipsClaimHydration(t *testing.T) {
 
 	resp, raw := envDoRaw(t, env, http.MethodGet, issuePathRef(project.ID, issue.ShortID, "")+"?include_deleted=true", nil, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	var rawBody map[string]json.RawMessage
+	var rawBody map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &rawBody))
 	assert.NotContains(t, rawBody, "claim")
 	assert.NotContains(t, rawBody, "pending_claims")

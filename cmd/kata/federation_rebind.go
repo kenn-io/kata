@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"fmt"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +12,8 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type federationRebindCLIResult struct {
@@ -98,7 +100,18 @@ func federationRebindTargets(
 	// Archived projects can retain live spoke bindings, so endpoint migrations
 	// must discover them for both explicit selectors and --all.
 	var federationStatus api.FederationStatusBody
-	if err := a.decode(http.MethodGet, "/api/v1/federation/status?include=archived", nil, &federationStatus); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return nil, err
+	}
+	callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{Query: &generated.GetFederationStatusQuery{Include: new("archived")}})
+	if callResp == nil {
+		return nil, externalCLITransportError(callResp, callErr)
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(callResp.Body, &federationStatus); err != nil {
 		return nil, err
 	}
 	if all {
@@ -158,9 +171,18 @@ func executeFederationRebind(
 	hubCatalog string,
 ) (federationRebindCLIResult, error) {
 	var response api.RebindFederationReplicaResponseBody
-	if err := a.decode(http.MethodPost,
-		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/rebind", target.ProjectID),
-		map[string]any{"hub_catalog": strings.TrimSpace(hubCatalog)}, &response); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return federationRebindCLIResult{}, err
+	}
+	callResp, callErr := apiClient.RebindFederationReplicaWithResponse(a.ctx, &generated.RebindFederationReplicaRequestOptions{PathParams: &generated.RebindFederationReplicaPath{ProjectID: target.ProjectID}, Body: &generated.RebindFederationReplicaBody{HubCatalog: strings.TrimSpace(hubCatalog)}})
+	if callResp == nil {
+		return federationRebindCLIResult{}, externalCLITransportError(callResp, callErr)
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return federationRebindCLIResult{}, err
+	}
+	if err := json.Unmarshal(callResp.Body, &response); err != nil {
 		return federationRebindCLIResult{}, err
 	}
 	return federationRebindCLIResult{

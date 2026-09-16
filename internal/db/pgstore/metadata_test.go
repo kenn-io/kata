@@ -3,7 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,7 +31,7 @@ func TestMetadataRetryClearsRolledBackAttemptOutput(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	issuePatch := map[string]json.RawMessage{"custom": json.RawMessage(`{"ready":true}`)}
+	issuePatch := map[string]jsontext.Value{"custom": jsontext.Value(`{"ready":true}`)}
 	issueOut, err := store.patchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: issue.ID, Actor: "tester", Patch: issuePatch,
 	}, rollbackThenRetry(t, store, func() {
@@ -47,7 +47,7 @@ func TestMetadataRetryClearsRolledBackAttemptOutput(t *testing.T) {
 
 	projectOut, err := store.patchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: project.ID, Actor: "tester",
-		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"runtime"`)},
+		Patch: map[string]jsontext.Value{"area": jsontext.Value(`"runtime"`)},
 	}, rollbackThenRetry(t, store, func() {
 		_, updateErr := store.ExecContext(ctx,
 			`UPDATE projects SET metadata = $1, revision = revision + 1 WHERE id = $2`,

@@ -2,6 +2,7 @@ package sqlitestore_test
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,16 +21,16 @@ func TestCreateIssue_MetadataPersistsAndRoundTrips(t *testing.T) {
 		ProjectID: p.ID,
 		Title:     "with metadata",
 		Author:    "tester",
-		Metadata: map[string]json.RawMessage{
-			"work.branch":  json.RawMessage(`"feature/x"`),
-			"scheduled_on": json.RawMessage(`"2026-01-02"`),
+		Metadata: map[string]jsontext.Value{
+			"work.branch":  jsontext.Value(`"feature/x"`),
+			"scheduled_on": jsontext.Value(`"2026-01-02"`),
 		},
 	})
 	require.NoError(t, err)
 
 	got, err := d.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
-	var m map[string]json.RawMessage
+	var m map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(got.Metadata), &m))
 	assert.JSONEq(t, `"feature/x"`, string(m["work.branch"]))
 	assert.JSONEq(t, `"2026-01-02"`, string(m["scheduled_on"]))
@@ -37,7 +38,7 @@ func TestCreateIssue_MetadataPersistsAndRoundTrips(t *testing.T) {
 	// The issue.created event payload carries the same metadata (not the
 	// hardcoded empty object).
 	var payload struct {
-		Metadata map[string]json.RawMessage `json:"metadata"`
+		Metadata map[string]jsontext.Value `json:"metadata"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(evt.Payload), &payload))
 	assert.JSONEq(t, `"feature/x"`, string(payload.Metadata["work.branch"]))
@@ -69,8 +70,8 @@ func TestCreateIssue_RejectsInvalidReservedValue(t *testing.T) {
 		ProjectID: p.ID,
 		Title:     "bad reserved",
 		Author:    "tester",
-		Metadata: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"not-a-date"`),
+		Metadata: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"not-a-date"`),
 		},
 	})
 	require.Error(t, err)
@@ -91,8 +92,8 @@ func TestCreateIssue_RejectsNullMetadataValue(t *testing.T) {
 		ProjectID: p.ID,
 		Title:     "null value",
 		Author:    "tester",
-		Metadata: map[string]json.RawMessage{
-			"work.branch": json.RawMessage(`null`),
+		Metadata: map[string]jsontext.Value{
+			"work.branch": jsontext.Value(`null`),
 		},
 	})
 	require.Error(t, err)

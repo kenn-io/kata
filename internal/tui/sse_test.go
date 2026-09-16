@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -555,12 +556,19 @@ func drainOne(t *testing.T, ch <-chan tea.Msg) tea.Msg {
 	return nil
 }
 
-// TestSSE_BuildRequest_AllProjectsOmitsQuery: nil projectID leaves the
+// TestSSE_StreamRequest_AllProjectsOmitsQuery: nil projectID leaves the
 // URL clean.
-func TestSSE_BuildRequest_AllProjectsOmitsQuery(t *testing.T) {
-	req, err := buildSSERequest(context.Background(), "http://x", nil, 0)
-	if err != nil {
-		t.Fatal(err)
+func TestSSE_StreamRequest_AllProjectsOmitsQuery(t *testing.T) {
+	var req *http.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req = r.Clone(r.Context())
+		w.Header().Set("Content-Type", "text/event-stream")
+	}))
+	defer server.Close()
+	var cursor int64
+	_, err := readSSEStream(t.Context(), server.Client(), server.URL, nil, 0, make(chan tea.Msg, 1), &cursor, nil)
+	if !errors.Is(err, errSSEEOF) {
+		t.Fatalf("stream: %v", err)
 	}
 	if strings.Contains(req.URL.RawQuery, "project_id") {
 		t.Fatalf("URL = %s, must not include project_id in all-projects mode",
@@ -571,13 +579,20 @@ func TestSSE_BuildRequest_AllProjectsOmitsQuery(t *testing.T) {
 	}
 }
 
-// TestSSE_BuildRequest_SingleProjectAddsQuery: project scope adds the
+// TestSSE_StreamRequest_SingleProjectAddsQuery: project scope adds the
 // query param; lastID > 0 sets Last-Event-ID.
-func TestSSE_BuildRequest_SingleProjectAddsQuery(t *testing.T) {
+func TestSSE_StreamRequest_SingleProjectAddsQuery(t *testing.T) {
 	pid := int64(7)
-	req, err := buildSSERequest(context.Background(), "http://x", &pid, 9)
-	if err != nil {
-		t.Fatal(err)
+	var req *http.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req = r.Clone(r.Context())
+		w.Header().Set("Content-Type", "text/event-stream")
+	}))
+	defer server.Close()
+	var cursor int64
+	_, err := readSSEStream(t.Context(), server.Client(), server.URL, &pid, 9, make(chan tea.Msg, 1), &cursor, nil)
+	if !errors.Is(err, errSSEEOF) {
+		t.Fatalf("stream: %v", err)
 	}
 	if !strings.Contains(req.URL.RawQuery, "project_id=7") {
 		t.Fatalf("URL = %s, want project_id=7", req.URL.String())

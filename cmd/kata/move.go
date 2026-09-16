@@ -3,16 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newMoveCmd() *cobra.Command {
@@ -83,19 +83,23 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 		return printMovePreview(cmd, ref.ProjectName, sourceIssue.ShortID, target.Name)
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	status, bs, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/move", baseURL, pid, url.PathEscape(ref.RefForAPI)),
-		map[string]any{
-			"actor":          actor,
-			"to_project_uid": target.UID,
-		},
-		map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)})
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
+	etag := fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)
+	response, callErr := apiClient.MoveIssueWithResponse(ctx, &generated.MoveIssueRequestOptions{
+		PathParams: &generated.MoveIssuePath{ProjectID: pid, Ref: ref.RefForAPI},
+		Body:       &generated.MoveIssueBody{Actor: &actor, ToProjectUID: target.UID},
+		Header:     &generated.MoveIssueHeaders{IfMatch: &etag},
+	})
+	if response == nil {
+		return externalCLITransportError(response, callErr)
 	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return err
+	}
+	bs := response.Body
 	var moved moveResponseWire
 	if err := json.Unmarshal(bs, &moved); err != nil {
 		return err
@@ -107,13 +111,9 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 }
 
 func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, projectID int64, ref string) (moveIssueWire, error) {
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, projectID, url.PathEscape(ref)), nil)
+	_, bs, err := fetchMetaIssue(ctx, client, baseURL, projectID, ref)
 	if err != nil {
 		return moveIssueWire{}, err
-	}
-	if status >= 400 {
-		return moveIssueWire{}, apiErrFromBody(status, bs)
 	}
 	var out struct {
 		Issue moveIssueWire `json:"issue"`
@@ -124,42 +124,11 @@ func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, pr
 	return out.Issue, nil
 }
 
-func httpDoJSONHeaders(ctx context.Context, client *http.Client, method, path string, body any, headers map[string]string) (int, []byte, error) {
-	var rdr io.Reader
-	if body != nil {
-		bs, err := jsonv2.Marshal(body)
-		if err != nil {
-			return 0, nil, err
-		}
-		rdr = bytes.NewReader(bs)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, path, rdr) //nolint:gosec // daemon targets come from trusted routing; external refs are path-escaped
-	if err != nil {
-		return 0, nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := client.Do(req) //nolint:gosec // daemon-local URL, same as httpDoJSON.
-	if err != nil {
-		return 0, nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	bs, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-	return resp.StatusCode, bs, nil
-}
-
 func printMove(cmd *cobra.Command, bs []byte, sourceProject, oldShortID, targetProject string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())

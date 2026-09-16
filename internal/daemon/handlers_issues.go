@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"strconv"
@@ -24,7 +24,7 @@ const minIssueUIDPrefixLen = 8
 // Reserved keys go through their type validator; unknown keys pass opaquely.
 // A JSON null value is rejected (nothing to clear at creation). Errors surface
 // as 400 invalid_metadata_value, matching the patch endpoint.
-func validateCreateMetadata(md map[string]json.RawMessage) error {
+func validateCreateMetadata(md map[string]jsontext.Value) error {
 	for key, raw := range md {
 		if err := metadata.ValidateCreateValue(metadata.IssueRegistry, key, raw); err != nil {
 			return api.NewError(400, "invalid_metadata_value",

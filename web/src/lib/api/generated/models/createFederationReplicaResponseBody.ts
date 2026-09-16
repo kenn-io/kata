@@ -4,7 +4,7 @@
 import type { FederationBindingOut } from './federationBindingOut.ts'
 import type { ProjectOut } from './projectOut.ts'
 
-export interface CreateFederationReplicaBody {
+export interface CreateFederationReplicaResponseBody {
   adopted?: boolean
   adoption_snapshot_count?: number
   binding: FederationBindingOut

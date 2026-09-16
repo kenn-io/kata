@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -241,7 +242,7 @@ func TestProtocolServeOneDispatchesStablePublicationOperationID(t *testing.T) {
 
 func TestProtocolServeOneAttachesImmutableInvocation(t *testing.T) {
 	handler := &invocationTestHandler{}
-	settings := json.RawMessage(`{"enabled":true}`)
+	settings := jsontext.Value(`{"enabled":true}`)
 	requests := []string{
 		`{"protocol":"kata.connector.v1","id":"request-1","method":"describe","instance":"notes","settings":{"enabled":true},"params":{}}`,
 		`{"protocol":"kata.connector.v1","id":"request-2","method":"read_root","instance":"notes","settings":{"enabled":true},"params":{"root_key":"root-1"}}`,
@@ -263,7 +264,7 @@ func TestInvocationFromContextRejectsForgedPublicInvocation(t *testing.T) {
 		Context: t.Context(),
 		invocation: Invocation{
 			Instance: "forged",
-			Settings: json.RawMessage(`{"forged":true}`),
+			Settings: jsontext.Value(`{"forged":true}`),
 		},
 	}
 
@@ -417,7 +418,7 @@ func (h *invocationTestHandler) capture(ctx context.Context) *Error {
 	}
 	h.invocations = append(h.invocations, Invocation{
 		Instance: invocation.Instance,
-		Settings: append(json.RawMessage(nil), invocation.Settings...),
+		Settings: append(jsontext.Value(nil), invocation.Settings...),
 	})
 	if len(h.invocations) == 1 {
 		h.immutable = true

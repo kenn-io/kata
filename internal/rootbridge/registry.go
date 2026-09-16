@@ -2,7 +2,7 @@ package rootbridge
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"sort"
@@ -250,7 +250,7 @@ func snapshotOf(instance Instance) InstanceSnapshot {
 
 func cloneDescription(description connector.Description) connector.Description {
 	description.Capabilities = append([]connector.Capability(nil), description.Capabilities...)
-	description.ConfigSchema = append(json.RawMessage(nil), description.ConfigSchema...)
+	description.ConfigSchema = append(jsontext.Value(nil), description.ConfigSchema...)
 	return description
 }
 
@@ -261,7 +261,7 @@ func validateDescription(description connector.Description) error {
 	if description.Protocol != connector.ProtocolVersion {
 		return errors.New("connector description is invalid")
 	}
-	if len(description.ConfigSchema) != 0 && !json.Valid(description.ConfigSchema) {
+	if len(description.ConfigSchema) != 0 && !jsontext.Value(description.ConfigSchema).IsValid() {
 		return errors.New("connector description is invalid")
 	}
 	return nil

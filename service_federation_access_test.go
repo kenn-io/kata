@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
 	"net/http"
@@ -527,7 +528,7 @@ func federationIssueIngestBody(t *testing.T, project kata.Project) []byte {
 	t.Helper()
 	createdAt := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 	issueUID := "01HZNQ7VFPK1XGD8R5MABCD4EC"
-	payload := json.RawMessage(`{"uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","short_id":"cd4ec","title":"remote work","body":"","author":"Example Operator","status":"open","metadata":{},"created_at":"2026-07-22T12:00:00.000Z"}`)
+	payload := jsontext.Value(`{"uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","short_id":"cd4ec","title":"remote work","body":"","author":"Example Operator","status":"open","metadata":{},"created_at":"2026-07-22T12:00:00.000Z"}`)
 	hash, err := db.EventContentHash(db.EventHashInput{
 		UID:               "01HZNQ7VFPK1XGD8R5MABCD4EB",
 		OriginInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
@@ -549,7 +550,7 @@ func federationIssueIngestBody(t *testing.T, project kata.Project) []byte {
 			"project_uid":         project.UID, "project_name": project.Name,
 			"issue_uid": issueUID, "type": "issue.created", "actor": "Example Operator",
 			"hlc_physical_ms": 1, "hlc_counter": 0, "content_hash": hash,
-			"payload": json.RawMessage(payload), "created_at": createdAt,
+			"payload": jsontext.Value(payload), "created_at": createdAt,
 		}},
 	})
 	require.NoError(t, err)

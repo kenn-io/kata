@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json/v2"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 // projectMutation carries the locally known project selector to the daemon.
@@ -94,45 +93,35 @@ func prepareIssueMutation(cmd *cobra.Command, ref string, resolveNow bool) (*pro
 	return p, resolvedIssueRef{RefForAPI: parsed.RefForAPI, ProjectName: p.name}, nil
 }
 
-func (p *projectMutation) mutate(method, suffix string, body any, headers map[string]string) ([]byte, error) {
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
+func (p *projectMutation) generatedClient() (*kataclient.Client, error) {
+	return kataclient.NewWithHTTPClient(p.api.baseURL, p.api.client,
+		kataclient.WithRequestEditor(func(_ context.Context, req *http.Request) error {
+			for key, value := range p.headers {
+				req.Header.Set(key, value)
+			}
+			return nil
+		}))
+}
+
+func (p *projectMutation) finishMutation(resp *http.Response, data []byte, callErr error) ([]byte, error) {
+	if resp == nil {
+		return nil, externalCLITransportError(resp, callErr)
 	}
-	endpoint := p.api.url("/api/v1/projects/" + url.PathEscape(p.selector) + suffix)
-	req, err := http.NewRequestWithContext(p.api.ctx, method, endpoint, bytes.NewReader(encoded))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for key, value := range p.headers {
-		req.Header.Set(key, value)
-	}
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-	resp, err := p.api.client.Do(req) //nolint:gosec // selected daemon, with escaped project selector and issue refs
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, &responseBodyReadError{err: err}
-	}
-	if resp.StatusCode >= 400 {
-		return nil, apiErrFromBody(resp.StatusCode, data)
-	}
-	if canonical := resp.Header.Get("X-Kata-Project-Name"); canonical != "" {
-		p.name = canonical
-	}
-	if p.repair != nil {
-		if err := p.repair(p.name); err != nil {
-			return nil, &cliError{
-				Message: fmt.Sprintf("issue mutation succeeded but workspace binding repair failed: %v; do not repeat the mutation", err),
-				Kind:    kindInternal, Code: "workspace_repair_failed", ExitCode: ExitInternal,
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		if canonical := resp.Header.Get("X-Kata-Project-Name"); canonical != "" {
+			p.name = canonical
+		}
+		if p.repair != nil {
+			if err := p.repair(p.name); err != nil {
+				return nil, &cliError{
+					Message: fmt.Sprintf("issue mutation succeeded but workspace binding repair failed: %v; do not repeat the mutation", err),
+					Kind:    kindInternal, Code: "workspace_repair_failed", ExitCode: ExitInternal,
+				}
 			}
 		}
+	}
+	if err := externalCLIResponseError(resp.StatusCode, data, callErr); err != nil {
+		return nil, err
 	}
 	return data, nil
 }
