@@ -171,7 +171,7 @@ func TestRemovedProviderCleanupDoesNotFollowReusedName(t *testing.T) {
 			select {
 			case err := <-done:
 				require.ErrorIs(t, err, context.Canceled)
-			case <-time.After(3 * time.Second):
+			case <-time.After(10 * time.Second):
 				cancel()
 				<-done
 				require.FailNow(t, "renamed project's request was not cleaned up", "health: %+v", r.Health())

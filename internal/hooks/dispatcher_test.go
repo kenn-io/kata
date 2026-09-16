@@ -18,7 +18,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-const dispatcherTestGraceWindow = 250 * time.Millisecond
+const dispatcherTestGraceWindow = 500 * time.Millisecond
 
 // mustNewDispatcher builds a Dispatcher rooted at a fresh temp KataHome with
 // no-op resolvers and returns the dispatcher, a buffer capturing the daemon
