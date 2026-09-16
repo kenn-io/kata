@@ -22,6 +22,8 @@ import (
 	"go.kenn.io/kata/internal/db"
 	hubclient "go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
 
@@ -57,7 +59,18 @@ func federationIdentityCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bs, emitted, err := a.passthrough(cmd, http.MethodGet, "/api/v1/instance", nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			callResp, callErr := apiClient.InstanceWithResponse(a.ctx)
+			if err := externalCLITransportError(callResp, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, callResp.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -177,18 +190,18 @@ func federationEnrollCmd() *cobra.Command {
 					adoptExisting = spokeUID == "" || spokeUID != metadata.ProjectUID
 				}
 			}
-			bs, err := hub.do(http.MethodPost, "/api/v1/federation/enrollments",
-				map[string]any{
-					"spoke_instance_uid":              spokeInstance,
-					"project_id":                      project.ID,
-					"capabilities":                    internalCaps,
-					"token":                           token,
-					"actor":                           requestActor,
-					"allow_adoption_snapshot_authors": adoptExisting,
-				})
+			apiClient, err := kataclient.NewWithHTTPClient(hub.baseURL, hub.client)
 			if err != nil {
 				return err
 			}
+			callResp, callErr := apiClient.CreateFederationEnrollmentWithResponse(hub.ctx, &generated.CreateFederationEnrollmentRequestOptions{Body: &generated.CreateFederationEnrollmentBody{SpokeInstanceUID: spokeInstance, ProjectID: project.ID, Capabilities: internalCaps, Token: &token, Actor: &requestActor, AllowAdoptionSnapshotAuthors: &adoptExisting}})
+			if err := externalCLITransportError(callResp, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				return err
+			}
+			bs := callResp.Body
 			var enrollment api.FederationEnrollmentOut
 			if err := json.Unmarshal(bs, &enrollment); err != nil {
 				return err
@@ -406,7 +419,18 @@ func federationSpokeInstanceUID(a daemonAPI) (string, error) {
 	var body struct {
 		InstanceUID string `json:"instance_uid"`
 	}
-	if err := a.decode(http.MethodGet, "/api/v1/instance", nil, &body); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return "", err
+	}
+	callResp, callErr := apiClient.InstanceWithResponse(a.ctx)
+	if err := externalCLITransportError(callResp, callErr); err != nil {
+		return "", err
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return "", err
+	}
+	if err := json.Unmarshal(callResp.Body, &body); err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(body.InstanceUID), nil
@@ -423,7 +447,18 @@ func federationSpokeProjectNameExists(a daemonAPI, projectName string) (string, 
 			UID  string `json:"uid"`
 		} `json:"projects"`
 	}
-	if err := a.decode(http.MethodGet, "/api/v1/projects", nil, &body); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return "", false, err
+	}
+	callResp, callErr := apiClient.ListProjectsWithResponse(a.ctx, &generated.ListProjectsRequestOptions{})
+	if err := externalCLITransportError(callResp, callErr); err != nil {
+		return "", false, err
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return "", false, err
+	}
+	if err := json.Unmarshal(callResp.Body, &body); err != nil {
 		return "", false, err
 	}
 	for _, project := range body.Projects {
@@ -448,8 +483,18 @@ func federationEnrollmentsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bs, emitted, err := a.passthrough(
-				cmd, http.MethodGet, "/api/v1/federation/enrollments", nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			callResp, callErr := apiClient.ListFederationEnrollmentsWithResponse(a.ctx)
+			if err := externalCLITransportError(callResp, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, callResp.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -473,8 +518,18 @@ func federationRevokeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bs, emitted, err := a.passthrough(cmd, http.MethodPost,
-				fmt.Sprintf("/api/v1/federation/enrollments/%d/revoke", id), map[string]any{})
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			callResp, callErr := apiClient.RevokeFederationEnrollmentWithResponse(a.ctx, &generated.RevokeFederationEnrollmentRequestOptions{PathParams: &generated.RevokeFederationEnrollmentPath{EnrollmentID: id}})
+			if err := externalCLITransportError(callResp, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, callResp.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -537,22 +592,18 @@ func federationJoinCmd() *cobra.Command {
 			if err := clientpkg.ConfigureOriginPinnedRedirects(a.client, a.baseURL); err != nil {
 				return err
 			}
-			bs, emitted, err := a.passthrough(cmd, http.MethodPost,
-				"/api/v1/federation/replicas",
-				map[string]any{
-					"hub_url":                   strings.TrimRight(bundle.HubURL, "/"),
-					"hub_project_id":            bundle.HubProjectID,
-					"hub_project_uid":           bundle.HubProjectUID,
-					"project_name":              bundle.ProjectName,
-					"replay_horizon_event_id":   bundle.ReplayHorizonEventID,
-					"baseline_through_event_id": bundle.BaselineThroughEventID,
-					"token":                     bundle.Token,
-					"capabilities":              internalCaps,
-					"actor":                     strings.TrimSpace(bundle.Actor),
-					"allow_insecure":            bundle.AllowInsecure,
-					"push_enabled":              bundle.PushEnabled,
-					"adopt_existing":            bundle.AdoptExisting,
-				})
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			callResp, callErr := apiClient.CreateFederationReplicaWithResponse(a.ctx, &generated.CreateFederationReplicaRequestOptions{Body: &generated.CreateFederationReplicaBody{HubURL: strings.TrimRight(bundle.HubURL, "/"), HubProjectID: bundle.HubProjectID, HubProjectUID: bundle.HubProjectUID, ProjectName: bundle.ProjectName, ReplayHorizonEventID: bundle.ReplayHorizonEventID, BaselineThroughEventID: &bundle.BaselineThroughEventID, Token: &bundle.Token, Capabilities: &internalCaps, Actor: new(strings.TrimSpace(bundle.Actor)), AllowInsecure: &bundle.AllowInsecure, PushEnabled: &bundle.PushEnabled, AdoptExisting: &bundle.AdoptExisting}})
+			if err := externalCLITransportError(callResp, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, callResp.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -656,10 +707,18 @@ func federationLeaveCmd() *cobra.Command {
 			{
 				actor, _ := resolveActor(ctx, flags.As, nil)
 				var preflight api.LeaveFederationReplicaResultBody
-				if err := a.decode(http.MethodPost,
-					fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.projectID),
-					map[string]any{"disposition": disposition, "force": force, "actor": actor, "preflight": true},
-					&preflight); err != nil {
+				apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+				if err != nil {
+					return err
+				}
+				callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(a.ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: target.projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Force: &force, Actor: &actor, Preflight: new(true)}})
+				if err := externalCLITransportError(callResp, callErr); err != nil {
+					return err
+				}
+				if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+					return err
+				}
+				if err := json.Unmarshal(callResp.Body, &preflight); err != nil {
 					return err
 				}
 				if target.standalone && preflight.PendingEnrollment != nil {
@@ -697,10 +756,18 @@ func federationLeaveCmd() *cobra.Command {
 			if !localOnly {
 				actor, _ := resolveActor(ctx, flags.As, nil)
 				var prepared api.LeaveFederationReplicaResultBody
-				if err := a.decode(http.MethodPost,
-					fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.projectID),
-					map[string]any{"disposition": disposition, "force": force, "actor": actor, "prepare": true},
-					&prepared); err != nil {
+				apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+				if err != nil {
+					return err
+				}
+				callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(a.ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: target.projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Force: &force, Actor: &actor, Prepare: new(true)}})
+				if err := externalCLITransportError(callResp, callErr); err != nil {
+					return err
+				}
+				if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+					return err
+				}
+				if err := json.Unmarshal(callResp.Body, &prepared); err != nil {
 					return err
 				}
 				if prepared.PendingEnrollment != nil {
@@ -744,9 +811,18 @@ func federationLeaveCmd() *cobra.Command {
 				}
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			bs, emitted, err := a.passthrough(cmd, http.MethodPost,
-				fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.projectID),
-				map[string]any{"disposition": disposition, "force": force, "actor": actor})
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			callResp, callErr := apiClient.LeaveFederationReplicaWithResponse(a.ctx, &generated.LeaveFederationReplicaRequestOptions{PathParams: &generated.LeaveFederationReplicaPath{ProjectID: target.projectID}, Body: &generated.LeaveFederationReplicaBody{Disposition: &disposition, Force: &force, Actor: &actor}})
+			if err := externalCLITransportError(callResp, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, callResp.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -782,7 +858,18 @@ func resolveSpokeForLeave(a daemonAPI, args []string) (spokeLeaveTarget, error) 
 	// never-revoked remove case gets its enrollment revoked instead of
 	// silently stranded.
 	var body api.FederationStatusBody
-	if err := a.decode(http.MethodGet, "/api/v1/federation/status?include=archived", nil, &body); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return spokeLeaveTarget{}, err
+	}
+	callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{Query: &generated.GetFederationStatusQuery{Include: new("archived")}})
+	if err := externalCLITransportError(callResp, callErr); err != nil {
+		return spokeLeaveTarget{}, err
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return spokeLeaveTarget{}, err
+	}
+	if err := json.Unmarshal(callResp.Body, &body); err != nil {
 		return spokeLeaveTarget{}, err
 	}
 	var match *api.FederationProjectStatus
@@ -855,7 +942,18 @@ func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, i
 	}
 	hub := hubAPI(ctx, auth.url, hubClient)
 	var list api.ListFederationEnrollmentsBody
-	if err := hub.decode(http.MethodGet, "/api/v1/federation/enrollments", nil, &list); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(hub.baseURL, hub.client)
+	if err != nil {
+		return nil, federationLeaveHubError(err)
+	}
+	callResp, callErr := apiClient.ListFederationEnrollmentsWithResponse(hub.ctx)
+	if err := externalCLITransportError(callResp, callErr); err != nil {
+		return nil, federationLeaveHubError(err)
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return nil, federationLeaveHubError(err)
+	}
+	if err := json.Unmarshal(callResp.Body, &list); err != nil {
 		return nil, federationLeaveHubError(err)
 	}
 	var globals, matched, foreignScoped []int64
@@ -889,8 +987,11 @@ func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, i
 		}
 	}
 	for _, id := range matched {
-		if _, err := hub.do(http.MethodPost,
-			fmt.Sprintf("/api/v1/federation/enrollments/%d/revoke", id), map[string]any{}); err != nil {
+		callResp, callErr := apiClient.RevokeFederationEnrollmentWithResponse(hub.ctx, &generated.RevokeFederationEnrollmentRequestOptions{PathParams: &generated.RevokeFederationEnrollmentPath{EnrollmentID: id}})
+		if err := externalCLITransportError(callResp, callErr); err != nil {
+			return nil, federationLeaveHubError(err)
+		}
+		if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 			return nil, federationLeaveHubError(err)
 		}
 	}
@@ -1015,8 +1116,18 @@ func federationStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bs, emitted, err := a.passthrough(
-				cmd, http.MethodGet, "/api/v1/federation/status", nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
+			if err := externalCLITransportError(callResp, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, callResp.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -1111,8 +1222,18 @@ func resolveFederationProjectByName(a daemonAPI, name string) (projectRef, error
 			Name string `json:"name"`
 		} `json:"project"`
 	}
-	if err := a.decode(http.MethodPost, "/api/v1/projects/resolve",
-		map[string]any{"name": name}, &resp); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return projectRef{}, err
+	}
+	callResp, callErr := apiClient.ResolveProjectWithResponse(a.ctx, &generated.ResolveProjectRequestOptions{Body: &generated.ResolveProjectBody{Name: &name}})
+	if err := externalCLITransportError(callResp, callErr); err != nil {
+		return projectRef{}, err
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return projectRef{}, err
+	}
+	if err := json.Unmarshal(callResp.Body, &resp); err != nil {
 		return projectRef{}, err
 	}
 	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil
@@ -1121,13 +1242,17 @@ func resolveFederationProjectByName(a daemonAPI, name string) (projectRef, error
 func ensureFederationProjectByName(
 	a daemonAPI, name, actor string,
 ) (projectRef, error) {
-	status, bs, err := a.status(http.MethodPost, "/api/v1/projects",
-		map[string]any{"name": name, "actor": actor})
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 	if err != nil {
-		return projectRef{}, fmt.Errorf("POST /api/v1/projects: %w", err)
+		return projectRef{}, err
 	}
-	if status >= 300 {
-		return projectRef{}, apiErrFromBody(status, bs)
+	callResp, callErr := apiClient.InitProjectWithResponse(a.ctx, &generated.InitProjectRequestOptions{Body: &generated.InitProjectBody{Name: &name, Actor: &actor}})
+	if err := externalCLITransportError(callResp, callErr); err != nil {
+		return projectRef{}, err
+	}
+	bs := callResp.Body
+	if callResp.StatusCode >= 300 {
+		return projectRef{}, apiErrFromBody(callResp.StatusCode, bs)
 	}
 	var resp struct {
 		Project struct {
@@ -1143,9 +1268,18 @@ func ensureFederationProjectByName(
 
 func enableAndReadFederationMetadata(a daemonAPI, projectID int64, actor string) (api.ProjectFederationBody, error) {
 	var metadata api.ProjectFederationBody
-	if err := a.decode(http.MethodPost,
-		fmt.Sprintf("/api/v1/projects/%d/federation/enable", projectID),
-		map[string]string{"actor": actor}, &metadata); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return api.ProjectFederationBody{}, err
+	}
+	callResp, callErr := apiClient.EnableProjectFederationWithResponse(a.ctx, &generated.EnableProjectFederationRequestOptions{PathParams: &generated.EnableProjectFederationPath{ProjectID: projectID}, Body: &generated.EnableProjectFederationBody{Actor: &actor}})
+	if err := externalCLITransportError(callResp, callErr); err != nil {
+		return api.ProjectFederationBody{}, err
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return api.ProjectFederationBody{}, err
+	}
+	if err := json.Unmarshal(callResp.Body, &metadata); err != nil {
 		return api.ProjectFederationBody{}, err
 	}
 	return metadata, nil
@@ -1518,7 +1652,18 @@ func loadFederationStatus(ctx context.Context) (api.FederationStatusBody, error)
 		return api.FederationStatusBody{}, err
 	}
 	var body api.FederationStatusBody
-	if err := a.decode(http.MethodGet, "/api/v1/federation/status", nil, &body); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return api.FederationStatusBody{}, err
+	}
+	callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
+	if err := externalCLITransportError(callResp, callErr); err != nil {
+		return api.FederationStatusBody{}, err
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return api.FederationStatusBody{}, err
+	}
+	if err := json.Unmarshal(callResp.Body, &body); err != nil {
 		return api.FederationStatusBody{}, err
 	}
 	return body, nil
@@ -1719,7 +1864,18 @@ func runFederationQuarantineAction(ctx context.Context, cmd *cobra.Command, id i
 		return err
 	}
 	var body api.FederationStatusBody
-	if err := a.decode(http.MethodGet, "/api/v1/federation/status", nil, &body); err != nil {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return err
+	}
+	callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
+	if err := externalCLITransportError(callResp, callErr); err != nil {
+		return err
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(callResp.Body, &body); err != nil {
 		return err
 	}
 	projectID, err := federationProjectForQuarantine(body, id)
@@ -1727,12 +1883,25 @@ func runFederationQuarantineAction(ctx context.Context, cmd *cobra.Command, id i
 		return err
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	bs, err := a.doWithHeaders(http.MethodPost,
-		fmt.Sprintf("/api/v1/projects/%d/federation/quarantine/%d/%s", projectID, id, action),
-		map[string]string{"X-Kata-Confirm": confirm},
-		map[string]any{"actor": actor, "reason": reason})
-	if err != nil {
-		return err
+	var bs []byte
+	if action == "retry" {
+		callResp, callErr := apiClient.RetryFederationQuarantineWithResponse(a.ctx, &generated.RetryFederationQuarantineRequestOptions{PathParams: &generated.RetryFederationQuarantinePath{ProjectID: projectID, QuarantineID: id}, Header: &generated.RetryFederationQuarantineHeaders{XKataConfirm: &confirm}, Body: &generated.RetryFederationQuarantineBody{Actor: actor, Reason: &reason}})
+		if err := externalCLITransportError(callResp, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+			return err
+		}
+		bs = callResp.Body
+	} else {
+		callResp, callErr := apiClient.SkipFederationQuarantineWithResponse(a.ctx, &generated.SkipFederationQuarantineRequestOptions{PathParams: &generated.SkipFederationQuarantinePath{ProjectID: projectID, QuarantineID: id}, Header: &generated.SkipFederationQuarantineHeaders{XKataConfirm: &confirm}, Body: &generated.SkipFederationQuarantineBody{Actor: actor, Reason: &reason}})
+		if err := externalCLITransportError(callResp, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+			return err
+		}
+		bs = callResp.Body
 	}
 	mode := currentOutputMode()
 	if mode == outputJSON {

@@ -1,21 +1,20 @@
 package federation
 
 import (
-	"bytes"
 	"context"
 	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"go.kenn.io/kata/internal/httpurl"
 
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // HubStatusError reports a non-2xx response from the configured hub.
@@ -55,14 +54,20 @@ func NewClient(ctx context.Context, baseURL string, token string, opts clientpkg
 func (c *Client) PollProjectEvents(
 	ctx context.Context, hubProjectID, afterID int64, limit int,
 ) (api.PollEventsBody, error) {
-	q := url.Values{}
-	q.Set("after_id", strconv.FormatInt(afterID, 10))
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return api.PollEventsBody{}, err
 	}
+	query := &generated.PollFederationProjectEventsQuery{AfterID: &afterID}
+	if limit > 0 {
+		query.Limit = new(int64(limit))
+	}
+	response, callErr := apiClient.PollFederationProjectEventsWithResponse(ctx, &generated.PollFederationProjectEventsRequestOptions{PathParams: &generated.PollFederationProjectEventsPath{ProjectID: hubProjectID}, Query: query})
 	var body api.PollEventsBody
-	err := c.getJSON(ctx,
-		fmt.Sprintf("/api/v1/projects/%d/federation/events?%s", hubProjectID, q.Encode()), &body)
+	if response == nil {
+		return body, callErr
+	}
+	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &body)
 	if body.Events == nil {
 		body.Events = []api.EventEnvelope{}
 	}
@@ -93,74 +98,64 @@ func (c *Client) IngestProjectEventsWithOptions(
 	events []api.FederationIngestEventEnvelope,
 	opts IngestProjectEventsOptions,
 ) (api.FederationIngestEventsBody, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return api.FederationIngestEventsBody{}, err
+	}
+	data, err := json.Marshal(api.FederationIngestEventsRequestBody{
+		SchemaVersion: db.CurrentSchemaVersion(), AdoptionBaseline: opts.AdoptionBaseline,
+		AdoptionBaselineEndEventID: opts.AdoptionBaselineEndEventID, Events: events,
+	})
+	if err != nil {
+		return api.FederationIngestEventsBody{}, err
+	}
+	var payload generated.IngestFederationProjectEventsBody
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return api.FederationIngestEventsBody{}, err
+	}
+	response, callErr := apiClient.IngestFederationProjectEventsWithResponse(ctx, &generated.IngestFederationProjectEventsRequestOptions{PathParams: &generated.IngestFederationProjectEventsPath{ProjectID: hubProjectID}, Body: &payload})
 	var body api.FederationIngestEventsBody
-	err := c.postJSON(ctx,
-		fmt.Sprintf("/api/v1/projects/%d/federation/events:ingest", hubProjectID),
-		api.FederationIngestEventsRequestBody{
-			SchemaVersion:              db.CurrentSchemaVersion(),
-			AdoptionBaseline:           opts.AdoptionBaseline,
-			AdoptionBaselineEndEventID: opts.AdoptionBaselineEndEventID,
-			Events:                     events,
-		}, &body)
+	if response == nil {
+		return body, callErr
+	}
+	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &body)
 	return body, err
 }
 
 // ProjectFederation fetches the hub metadata needed to bind a spoke replica.
 func (c *Client) ProjectFederation(ctx context.Context, hubProjectID int64) (api.ProjectFederationBody, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return api.ProjectFederationBody{}, err
+	}
+	response, callErr := apiClient.GetFederationProjectMetadataWithResponse(ctx, &generated.GetFederationProjectMetadataRequestOptions{PathParams: &generated.GetFederationProjectMetadataPath{ProjectID: hubProjectID}})
 	var body api.ProjectFederationBody
-	err := c.getJSON(ctx, fmt.Sprintf("/api/v1/projects/%d/federation/metadata", hubProjectID), &body)
+	if response == nil {
+		return body, callErr
+	}
+	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &body)
 	return body, err
 }
 
-func (c *Client) getJSON(ctx context.Context, path string, out any) error {
-	requestURL, err := httpurl.AppendHTTPBaseURLPath(c.baseURL, path)
+// Keep the replication error body bounded before the generated runtime reads it.
+type replicationDoer struct{ client *http.Client }
+
+func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	resp, err := d.client.Do(req.WithContext(ctx))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil) //nolint:gosec // baseURL is caller-supplied hub config.
-	if err != nil {
-		return err
-	}
-	resp, err := c.client.Do(req) //nolint:gosec // request target is built from explicit hub config.
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		return nil, &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
-	if err := json.UnmarshalRead(resp.Body, out); err != nil {
-		return fmt.Errorf("decode hub %s response: %w", req.URL.Path, err)
-	}
-	return nil
+	return resp, nil
 }
 
-func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
-	body, err := json.Marshal(in)
-	if err != nil {
-		return fmt.Errorf("marshal hub %s request: %w", path, err)
-	}
-	requestURL, err := httpurl.AppendHTTPBaseURLPath(c.baseURL, path)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body)) //nolint:gosec // baseURL is caller-supplied hub config.
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req) //nolint:gosec // request target is built from explicit hub config.
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
-	}
-	if err := json.UnmarshalRead(resp.Body, out); err != nil {
-		return fmt.Errorf("decode hub %s response: %w", req.URL.Path, err)
+func decodeReplicationResponse(resp *http.Response, body []byte, out any) error {
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("decode hub %s response: %w", resp.Request.URL.Path, err)
 	}
 	return nil
 }

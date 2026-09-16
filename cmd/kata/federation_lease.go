@@ -8,12 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const (
@@ -291,16 +292,59 @@ func postClaimAction(cmd *cobra.Command, rawRef, action string, body map[string]
 }
 
 func postClaimActionResolved(ctx context.Context, client *http.Client, baseURL string, pid int64, ref, action string, body map[string]any) ([]byte, error) {
-	postURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/lease/actions/%s",
-		baseURL, pid, url.PathEscape(ref), action)
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, postURL, body)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return nil, err
 	}
-	if status >= 400 {
-		return nil, apiErrFromBody(status, bs)
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
 	}
-	return bs, nil
+	var payload generated.ClaimActionBody
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	switch action {
+	case "acquire":
+		response, callErr := apiClient.AcquireIssueLeaseWithResponse(ctx, &generated.AcquireIssueLeaseRequestOptions{PathParams: &generated.AcquireIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return nil, err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+	case "release":
+		response, callErr := apiClient.ReleaseIssueLeaseWithResponse(ctx, &generated.ReleaseIssueLeaseRequestOptions{PathParams: &generated.ReleaseIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return nil, err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+	case "renew":
+		response, callErr := apiClient.RenewIssueLeaseWithResponse(ctx, &generated.RenewIssueLeaseRequestOptions{PathParams: &generated.RenewIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return nil, err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+	case "force_release":
+		response, callErr := apiClient.ForceReleaseIssueLeaseWithResponse(ctx, &generated.ForceReleaseIssueLeaseRequestOptions{PathParams: &generated.ForceReleaseIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return nil, err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+
+	default:
+		return nil, fmt.Errorf("unknown claim action %q", action)
+	}
 }
 
 func explicitClaimAdminActor(cmd *cobra.Command) (string, error) {

@@ -1,20 +1,19 @@
 package federation
 
 import (
-	"bytes"
 	"context"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/internal/httpurl"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
@@ -172,16 +171,17 @@ func (c *HubClient) EnsureProject(
 	}
 
 	var enabled projectFederationResponse
-	err = c.doJSON(ctx, http.MethodPost,
-		"/api/v1/projects/"+strconv.FormatInt(project.ID, 10)+"/federation/enable",
-		struct {
-			Actor string `json:"actor,omitempty"`
-		}{Actor: actor},
-		&enabled,
-		"enable project federation",
-	)
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(hubDoer{client: c.http, operation: "enable project federation"}))
 	if err != nil {
-		return HubProject{}, err
+		return HubProject{}, hubError(ErrHubValidation, "enable project federation", 0)
+	}
+	responseHTTP, callErr := apiClient.EnableProjectFederationWithResponse(ctx, &generated.EnableProjectFederationRequestOptions{PathParams: &generated.EnableProjectFederationPath{ProjectID: project.ID}, Body: &generated.EnableProjectFederationBody{Actor: &actor}})
+	if responseHTTP == nil {
+		return HubProject{}, hubCallError(callErr, "enable project federation")
+	}
+	err = json.Unmarshal(responseHTTP.Body, &enabled)
+	if err != nil {
+		return HubProject{}, hubError(ErrHubValidation, "enable project federation", responseHTTP.StatusCode)
 	}
 	result := HubProject{
 		ID:                     enabled.ProjectID,
@@ -218,15 +218,17 @@ func (c *HubClient) resolveProject(ctx context.Context, name string) (projectRes
 	var response struct {
 		Project projectResponse `json:"project"`
 	}
-	err := c.doJSON(ctx, http.MethodPost, "/api/v1/projects/resolve",
-		struct {
-			Name string `json:"name"`
-		}{Name: name},
-		&response,
-		"resolve project",
-	)
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(hubDoer{client: c.http, operation: "resolve project"}))
 	if err != nil {
-		return projectResponse{}, err
+		return projectResponse{}, hubError(ErrHubValidation, "resolve project", 0)
+	}
+	responseHTTP, callErr := apiClient.ResolveProjectWithResponse(ctx, &generated.ResolveProjectRequestOptions{Body: &generated.ResolveProjectBody{Name: &name}})
+	if responseHTTP == nil {
+		return projectResponse{}, hubCallError(callErr, "resolve project")
+	}
+	err = json.Unmarshal(responseHTTP.Body, &response)
+	if err != nil {
+		return projectResponse{}, hubError(ErrHubValidation, "resolve project", responseHTTP.StatusCode)
 	}
 	if response.Project.ID <= 0 ||
 		!katauid.Valid(response.Project.UID) ||
@@ -240,16 +242,17 @@ func (c *HubClient) createProject(ctx context.Context, name, actor string) (proj
 	var response struct {
 		Project projectResponse `json:"project"`
 	}
-	err := c.doJSON(ctx, http.MethodPost, "/api/v1/projects",
-		struct {
-			Name  string `json:"name"`
-			Actor string `json:"actor"`
-		}{Name: name, Actor: actor},
-		&response,
-		"create project",
-	)
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(hubDoer{client: c.http, operation: "create project"}))
 	if err != nil {
-		return projectResponse{}, err
+		return projectResponse{}, hubError(ErrHubValidation, "create project", 0)
+	}
+	responseHTTP, callErr := apiClient.InitProjectWithResponse(ctx, &generated.InitProjectRequestOptions{Body: &generated.InitProjectBody{Name: &name, Actor: &actor}})
+	if responseHTTP == nil {
+		return projectResponse{}, hubCallError(callErr, "create project")
+	}
+	err = json.Unmarshal(responseHTTP.Body, &response)
+	if err != nil {
+		return projectResponse{}, hubError(ErrHubValidation, "create project", responseHTTP.StatusCode)
 	}
 	if response.Project.ID <= 0 ||
 		!katauid.Valid(response.Project.UID) ||
@@ -273,15 +276,6 @@ type projectFederationResponse struct {
 	BaselineThroughEventID int64  `json:"baseline_through_event_id"`
 }
 
-type enrollmentWireRequest struct {
-	ProjectID                    int64  `json:"project_id"`
-	SpokeInstanceUID             string `json:"spoke_instance_uid"`
-	Token                        string `json:"token"`
-	Capabilities                 string `json:"capabilities"`
-	Actor                        string `json:"actor,omitempty"`
-	AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitzero"`
-}
-
 type enrollmentWireResponse struct {
 	ID    int64  `json:"id"`
 	Actor string `json:"actor"`
@@ -291,7 +285,7 @@ type enrollmentWireResponse struct {
 func (c *HubClient) EnsureEnrollment(
 	ctx context.Context, request EnrollmentRequest,
 ) (Enrollment, error) {
-	return c.enrollmentRequest(ctx, "/api/v1/federation/enrollments",
+	return c.enrollmentRequest(ctx, false,
 		"ensure enrollment", request)
 }
 
@@ -299,7 +293,7 @@ func (c *HubClient) EnsureEnrollment(
 func (c *HubClient) RotateEnrollment(
 	ctx context.Context, request EnrollmentRequest,
 ) (Enrollment, error) {
-	return c.enrollmentRequest(ctx, "/api/v1/federation/enrollments/actions/rotate",
+	return c.enrollmentRequest(ctx, true,
 		"rotate enrollment", request)
 }
 
@@ -309,25 +303,46 @@ func (c *HubClient) RevokeEnrollment(ctx context.Context, enrollmentID int64) er
 	if enrollmentID <= 0 {
 		return hubError(ErrHubValidation, "revoke enrollment", 0)
 	}
-	return c.doJSON(
-		ctx,
-		http.MethodPost,
-		"/api/v1/federation/enrollments/"+strconv.FormatInt(enrollmentID, 10)+"/revoke",
-		nil,
-		nil,
-		"revoke enrollment",
-	)
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(hubDoer{client: c.http, operation: "revoke enrollment"}))
+	if err != nil {
+		return hubError(ErrHubValidation, "revoke enrollment", 0)
+	}
+	response, callErr := apiClient.RevokeFederationEnrollmentWithResponse(ctx, &generated.RevokeFederationEnrollmentRequestOptions{PathParams: &generated.RevokeFederationEnrollmentPath{EnrollmentID: enrollmentID}})
+	if response == nil {
+		return hubCallError(callErr, "revoke enrollment")
+	}
+	return nil
 }
 
 func (c *HubClient) enrollmentRequest(
-	ctx context.Context, path, operation string, request EnrollmentRequest,
+	ctx context.Context, rotate bool, operation string, request EnrollmentRequest,
 ) (Enrollment, error) {
 	var response enrollmentWireResponse
-	err := c.doJSON(
-		ctx, http.MethodPost, path, enrollmentWireRequest(request), &response, operation,
-	)
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(hubDoer{client: c.http, operation: operation}))
 	if err != nil {
-		return Enrollment{}, err
+		return Enrollment{}, hubError(ErrHubValidation, operation, 0)
+	}
+	payload := generated.CreateFederationEnrollmentBody{
+		ProjectID: request.ProjectID, SpokeInstanceUID: request.SpokeInstanceUID,
+		Token: &request.Token, Capabilities: request.Capabilities, Actor: &request.Actor,
+		AllowAdoptionSnapshotAuthors: &request.AllowAdoptionSnapshotAuthors,
+	}
+	var data []byte
+	if rotate {
+		result, callErr := apiClient.RotateFederationEnrollmentWithResponse(ctx, &generated.RotateFederationEnrollmentRequestOptions{Body: &generated.RotateFederationEnrollmentBody{ProjectID: request.ProjectID, SpokeInstanceUID: request.SpokeInstanceUID, Token: request.Token, Capabilities: request.Capabilities, Actor: &request.Actor, AllowAdoptionSnapshotAuthors: &request.AllowAdoptionSnapshotAuthors}})
+		if result == nil {
+			return Enrollment{}, hubCallError(callErr, operation)
+		}
+		data = result.Body
+	} else {
+		result, callErr := apiClient.CreateFederationEnrollmentWithResponse(ctx, &generated.CreateFederationEnrollmentRequestOptions{Body: &payload})
+		if result == nil {
+			return Enrollment{}, hubCallError(callErr, operation)
+		}
+		data = result.Body
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return Enrollment{}, hubError(ErrHubValidation, operation, http.StatusOK)
 	}
 	actor := strings.TrimSpace(response.Actor)
 	if response.ID <= 0 || db.ValidateTokenActor(actor) != nil {
@@ -336,39 +351,37 @@ func (c *HubClient) enrollmentRequest(
 	return Enrollment{ID: response.ID, Actor: actor}, nil
 }
 
-func (c *HubClient) doJSON(
-	ctx context.Context,
-	method, path string,
-	input, output any,
-	operation string,
-) error {
-	body, err := json.Marshal(input)
-	if err != nil {
-		return hubError(ErrHubValidation, operation, 0)
-	}
-	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
-	if err != nil {
-		return hubError(ErrHubValidation, operation, 0)
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
+// hubDoer applies the catalog client's bounded, secret-free response policy
+// before the generated runtime buffers or decodes a response.
+type hubDoer struct {
+	client    *http.Client
+	operation string
+}
 
-	response, err := c.http.Do(request)
+func (d hubDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	req.Header.Set("Accept", "application/json")
+	response, err := d.client.Do(req.WithContext(ctx))
 	if err != nil {
-		return hubError(ErrHubUnavailable, operation, 0)
+		return nil, hubError(ErrHubUnavailable, d.operation, 0)
 	}
-	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return hubError(hubStatusKind(response.StatusCode), operation, response.StatusCode)
+		_ = response.Body.Close()
+		return nil, hubError(hubStatusKind(response.StatusCode), d.operation, response.StatusCode)
 	}
-	if output == nil {
-		return nil
+	response.Body = limitedHubBody{Reader: io.LimitReader(response.Body, maxHubResponseBytes), Closer: response.Body}
+	return response, nil
+}
+
+type limitedHubBody struct {
+	io.Reader
+	io.Closer
+}
+
+func hubCallError(err error, operation string) error {
+	if hubErr, ok := errors.AsType[*HubError](err); ok {
+		return hubErr
 	}
-	decoder := jsontext.NewDecoder(io.LimitReader(response.Body, maxHubResponseBytes))
-	if err := json.UnmarshalDecode(decoder, output); err != nil {
-		return hubError(ErrHubValidation, operation, response.StatusCode)
-	}
-	return nil
+	return hubError(ErrHubValidation, operation, 0)
 }
 
 func hubStatusKind(status int) error {
