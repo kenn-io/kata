@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -776,57 +776,66 @@ func TestReconcileMappingLeaveDuringConvergenceRevokesTheStampedEnrollment(t *te
 }
 
 func TestReconcileMappingSuppressedLeaveToleratesFailedRevocation(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	store := openReconcileStore(t)
-	credentials := newFakeCredentialStore()
-	hub := newFakeHub()
-	hub.revokeErr = &federation.HubError{
-		Kind: federation.ErrHubUnavailable, Operation: "revoke enrollment",
-	}
-	hub.ensureEnrollmentStarted = make(chan struct{})
-	hub.releaseEnsureEnrollment = make(chan struct{})
-	result := make(chan error, 1)
-	go func() {
-		result <- federation.ReconcileMapping(
-			ctx, store, credentials, hub, testCatalog(), testMapping(), nil,
-		)
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		store := openReconcileStore(t)
+		credentials := newFakeCredentialStore()
+		hub := newFakeHub()
+		hub.revokeErr = &federation.HubError{
+			Kind: federation.ErrHubUnavailable, Operation: "revoke enrollment",
+		}
+		hub.ensureEnrollmentStarted = make(chan struct{})
+		hub.releaseEnsureEnrollment = make(chan struct{})
+		result := make(chan error, 1)
+		go func() {
+			result <- federation.ReconcileMapping(
+				ctx, store, credentials, hub, testCatalog(), testMapping(), nil,
+			)
+		}()
+		resultDone := readWorkerResult(result)
+		t.Cleanup(func() {
+			cancel()
+			_ = resultDone()
+		})
 
-	select {
-	case <-hub.ensureEnrollmentStarted:
-	case <-ctx.Done():
-		require.FailNow(t, "wait for paused enrollment", "error: %v", ctx.Err())
-	}
-	localProject, err := store.ProjectByName(ctx, "spoke-project")
-	require.NoError(t, err)
-	prepared := make(chan error, 1)
-	go func() {
-		_, prepareErr := daemon.PrepareFederationReplicaLeave(
-			ctx, store, credentials, localProject.ID,
-		)
-		prepared <- prepareErr
-	}()
-	require.Eventually(t, func() bool {
+		select {
+		case <-hub.ensureEnrollmentStarted:
+		case <-ctx.Done():
+			require.FailNow(t, "wait for paused enrollment", "error: %v", ctx.Err())
+		}
+		localProject, err := store.ProjectByName(ctx, "spoke-project")
+		require.NoError(t, err)
+		prepared := make(chan error, 1)
+		go func() {
+			_, prepareErr := daemon.PrepareFederationReplicaLeave(
+				ctx, store, credentials, localProject.ID,
+			)
+			prepared <- prepareErr
+		}()
+		preparedDone := readWorkerResult(prepared)
+		t.Cleanup(func() {
+			cancel()
+			_ = preparedDone()
+		})
+		synctest.Wait()
 		credential, found := credentials.get(hubProjectUID)
-		return found && credential.LeavePending
-	}, time.Second, time.Millisecond)
-	close(hub.releaseEnsureEnrollment)
+		require.True(t, found)
+		require.True(t, credential.LeavePending)
+		close(hub.releaseEnsureEnrollment)
 
-	select {
-	case err = <-result:
-	case <-ctx.Done():
-		require.FailNow(t, "wait for reconciliation after leave", "error: %v", ctx.Err())
-	}
-	require.NoError(t, err,
-		"a suppressed mapping must not fail reconciliation for an unreachable hub")
-	require.NoError(t, <-prepared)
-	assert.Equal(t, []int64{hub.enrollment.ID}, hub.revokeCalls)
-	retained, found := credentials.get(hubProjectUID)
-	require.True(t, found)
-	assert.True(t, retained.LeavePending)
-	assert.Equal(t, hub.enrollment.ID, retained.PendingEnrollmentID,
-		"the enrollment stays recorded so durable cleanup can retry the revocation")
+		synctest.Wait()
+		err = resultDone()
+		require.NoError(t, err,
+			"a suppressed mapping must not fail reconciliation for an unreachable hub")
+		require.NoError(t, preparedDone())
+		assert.Equal(t, []int64{hub.enrollment.ID}, hub.revokeCalls)
+		retained, found := credentials.get(hubProjectUID)
+		require.True(t, found)
+		assert.True(t, retained.LeavePending)
+		assert.Equal(t, hub.enrollment.ID, retained.PendingEnrollmentID,
+			"the enrollment stays recorded so durable cleanup can retry the revocation")
+	})
 }
 
 func TestReconcileMappingUnsuppressedLeaveSurfacesFailedRevocation(t *testing.T) {
@@ -1644,125 +1653,143 @@ func TestPrepareLeaveDrainsPendingEnrollmentRecovery(t *testing.T) {
 }
 
 func TestReconcileMappingLeaveDuringEnrollmentDoesNotResurrectCredential(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	store := openReconcileStore(t)
-	credentials := newFakeCredentialStore()
-	hub := newFakeHub()
-	hub.ensureEnrollmentStarted = make(chan struct{})
-	hub.releaseEnsureEnrollment = make(chan struct{})
-	result := make(chan error, 1)
-	go func() {
-		result <- federation.ReconcileMapping(
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		store := openReconcileStore(t)
+		credentials := newFakeCredentialStore()
+		hub := newFakeHub()
+		hub.ensureEnrollmentStarted = make(chan struct{})
+		hub.releaseEnsureEnrollment = make(chan struct{})
+		result := make(chan error, 1)
+		go func() {
+			result <- federation.ReconcileMapping(
+				ctx, store, credentials, hub,
+				testCatalog(), testMapping(), nil,
+			)
+		}()
+		resultDone := readWorkerResult(result)
+		t.Cleanup(func() {
+			cancel()
+			_ = resultDone()
+		})
+
+		select {
+		case <-hub.ensureEnrollmentStarted:
+		case <-ctx.Done():
+			require.FailNow(t, "wait for paused enrollment", "error: %v", ctx.Err())
+		}
+		localProject, err := store.ProjectByName(ctx, "spoke-project")
+		require.NoError(t, err)
+		prepared := make(chan error, 1)
+		go func() {
+			_, prepareErr := daemon.PrepareFederationReplicaLeave(
+				ctx, store, credentials, localProject.ID,
+			)
+			prepared <- prepareErr
+		}()
+		preparedDone := readWorkerResult(prepared)
+		t.Cleanup(func() {
+			cancel()
+			_ = preparedDone()
+		})
+		synctest.Wait()
+		credential, found := credentials.get(hubProjectUID)
+		require.True(t, found)
+		require.True(t, credential.LeavePending)
+		close(hub.releaseEnsureEnrollment)
+
+		synctest.Wait()
+		err = resultDone()
+		require.NoError(t, err)
+		require.NoError(t, preparedDone())
+		assert.Equal(t, []int64{hub.enrollment.ID}, hub.revokeCalls)
+		_, err = daemon.LeaveFederationReplica(
+			ctx, store, credentials, nil, localProject.ID,
+		)
+		require.NoError(t, err)
+		_, found, readErr := credentials.FederationCredential(ctx, hubProjectUID)
+		require.NoError(t, readErr)
+		assert.False(t, found)
+		_, bindingErr := store.FederationBindingByProject(ctx, localProject.ID)
+		require.ErrorIs(t, bindingErr, db.ErrNotFound)
+
+		require.NoError(t, federation.ReconcileMapping(
 			ctx, store, credentials, hub,
 			testCatalog(), testMapping(), nil,
-		)
-	}()
-
-	select {
-	case <-hub.ensureEnrollmentStarted:
-	case <-ctx.Done():
-		require.FailNow(t, "wait for paused enrollment", "error: %v", ctx.Err())
-	}
-	localProject, err := store.ProjectByName(ctx, "spoke-project")
-	require.NoError(t, err)
-	prepared := make(chan error, 1)
-	go func() {
-		_, prepareErr := daemon.PrepareFederationReplicaLeave(
-			ctx, store, credentials, localProject.ID,
-		)
-		prepared <- prepareErr
-	}()
-	require.Eventually(t, func() bool {
-		credential, found := credentials.get(hubProjectUID)
-		return found && credential.LeavePending
-	}, time.Second, time.Millisecond)
-	close(hub.releaseEnsureEnrollment)
-
-	select {
-	case err = <-result:
-	case <-ctx.Done():
-		require.FailNow(t, "wait for reconciliation after leave", "error: %v", ctx.Err())
-	}
-	require.NoError(t, err)
-	require.NoError(t, <-prepared)
-	assert.Equal(t, []int64{hub.enrollment.ID}, hub.revokeCalls)
-	_, err = daemon.LeaveFederationReplica(
-		ctx, store, credentials, nil, localProject.ID,
-	)
-	require.NoError(t, err)
-	_, found, readErr := credentials.FederationCredential(ctx, hubProjectUID)
-	require.NoError(t, readErr)
-	assert.False(t, found)
-	_, bindingErr := store.FederationBindingByProject(ctx, localProject.ID)
-	require.ErrorIs(t, bindingErr, db.ErrNotFound)
-
-	require.NoError(t, federation.ReconcileMapping(
-		ctx, store, credentials, hub,
-		testCatalog(), testMapping(), nil,
-	))
-	assert.Len(t, hub.enrollmentCalls, 1, "explicit leave suppresses retries until restart")
+		))
+		assert.Len(t, hub.enrollmentCalls, 1, "explicit leave suppresses retries until restart")
+	})
 }
 
 func TestReconcileMappingLeaveDuringRotationDoesNotResurrectCredential(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	store := openReconcileStore(t)
-	localProject := createMatchingBoundProject(t, store)
-	credentials := newFakeCredentialStore()
-	hub := newFakeHub()
-	hub.rotateEnrollmentStarted = make(chan struct{})
-	hub.releaseRotateEnrollment = make(chan struct{})
-	result := make(chan error, 1)
-	go func() {
-		result <- federation.ReconcileMapping(
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		store := openReconcileStore(t)
+		localProject := createMatchingBoundProject(t, store)
+		credentials := newFakeCredentialStore()
+		hub := newFakeHub()
+		hub.rotateEnrollmentStarted = make(chan struct{})
+		hub.releaseRotateEnrollment = make(chan struct{})
+		result := make(chan error, 1)
+		go func() {
+			result <- federation.ReconcileMapping(
+				ctx, store, credentials, hub,
+				testCatalog(), testMapping(), nil,
+			)
+		}()
+		resultDone := readWorkerResult(result)
+		t.Cleanup(func() {
+			cancel()
+			_ = resultDone()
+		})
+
+		select {
+		case <-hub.rotateEnrollmentStarted:
+		case <-ctx.Done():
+			require.FailNow(t, "wait for paused rotation", "error: %v", ctx.Err())
+		}
+		prepared := make(chan error, 1)
+		go func() {
+			_, prepareErr := daemon.PrepareFederationReplicaLeave(
+				ctx, store, credentials, localProject.ID,
+			)
+			prepared <- prepareErr
+		}()
+		preparedDone := readWorkerResult(prepared)
+		t.Cleanup(func() {
+			cancel()
+			_ = preparedDone()
+		})
+		synctest.Wait()
+		credential, found := credentials.get(hubProjectUID)
+		require.True(t, found)
+		require.True(t, credential.LeavePending)
+		close(hub.releaseRotateEnrollment)
+
+		synctest.Wait()
+		var err error
+		err = resultDone()
+		require.NoError(t, err)
+		require.NoError(t, preparedDone())
+		assert.Equal(t, []int64{hub.enrollment.ID}, hub.revokeCalls)
+		_, err = daemon.LeaveFederationReplica(
+			ctx, store, credentials, nil, localProject.ID,
+		)
+		require.NoError(t, err)
+		_, found, readErr := credentials.FederationCredential(ctx, hubProjectUID)
+		require.NoError(t, readErr)
+		assert.False(t, found)
+		_, bindingErr := store.FederationBindingByProject(ctx, localProject.ID)
+		require.ErrorIs(t, bindingErr, db.ErrNotFound)
+
+		require.NoError(t, federation.ReconcileMapping(
 			ctx, store, credentials, hub,
 			testCatalog(), testMapping(), nil,
-		)
-	}()
-
-	select {
-	case <-hub.rotateEnrollmentStarted:
-	case <-ctx.Done():
-		require.FailNow(t, "wait for paused rotation", "error: %v", ctx.Err())
-	}
-	prepared := make(chan error, 1)
-	go func() {
-		_, prepareErr := daemon.PrepareFederationReplicaLeave(
-			ctx, store, credentials, localProject.ID,
-		)
-		prepared <- prepareErr
-	}()
-	require.Eventually(t, func() bool {
-		credential, found := credentials.get(hubProjectUID)
-		return found && credential.LeavePending
-	}, time.Second, time.Millisecond)
-	close(hub.releaseRotateEnrollment)
-
-	var err error
-	select {
-	case err = <-result:
-	case <-ctx.Done():
-		require.FailNow(t, "wait for reconciliation after leave", "error: %v", ctx.Err())
-	}
-	require.NoError(t, err)
-	require.NoError(t, <-prepared)
-	assert.Equal(t, []int64{hub.enrollment.ID}, hub.revokeCalls)
-	_, err = daemon.LeaveFederationReplica(
-		ctx, store, credentials, nil, localProject.ID,
-	)
-	require.NoError(t, err)
-	_, found, readErr := credentials.FederationCredential(ctx, hubProjectUID)
-	require.NoError(t, readErr)
-	assert.False(t, found)
-	_, bindingErr := store.FederationBindingByProject(ctx, localProject.ID)
-	require.ErrorIs(t, bindingErr, db.ErrNotFound)
-
-	require.NoError(t, federation.ReconcileMapping(
-		ctx, store, credentials, hub,
-		testCatalog(), testMapping(), nil,
-	))
-	assert.Len(t, hub.rotationCalls, 1, "explicit leave suppresses retries until restart")
+		))
+		assert.Len(t, hub.rotationCalls, 1, "explicit leave suppresses retries until restart")
+	})
 }
 
 func TestReconcileMappingMissingCredentialRotatesEnrollment(t *testing.T) {
@@ -2524,89 +2551,98 @@ func TestReconcileMappingHubUIDOwnedByAnotherLocalProjectConflictsBeforeEnable(t
 }
 
 func TestFederationConfigReconcilerProcessesDueMappingsInConfigOrder(t *testing.T) {
-	clock := newManualClock(time.Date(2026, 7, 23, 1, 0, 0, 0, time.UTC))
-	factory := newScriptedHubFactory(clock, map[string][]error{
-		"hub-a": {federation.ErrHubUnavailable},
-		"hub-b": {federation.ErrConfigurationConflict},
-		"hub-c": {&federation.HubError{
-			Kind:       federation.ErrHubAuthentication,
-			Operation:  "authenticate",
-			StatusCode: http.StatusUnauthorized,
-		}},
+	synctest.Test(t, func(t *testing.T) {
+		clock := newManualClock(time.Date(2026, 7, 23, 1, 0, 0, 0, time.UTC))
+		factory := newScriptedHubFactory(clock, map[string][]error{
+			"hub-a": {federation.ErrHubUnavailable},
+			"hub-b": {federation.ErrConfigurationConflict},
+			"hub-c": {&federation.HubError{
+				Kind:       federation.ErrHubAuthentication,
+				Operation:  "authenticate",
+				StatusCode: http.StatusUnauthorized,
+			}},
+		})
+		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(),
+			schedulerTarget("hub-a"), schedulerTarget("hub-b"), schedulerTarget("hub-c"))
+		ctx, cancel := context.WithCancel(context.Background())
+		done := runReconciler(ctx, t, reconciler)
+		t.Cleanup(func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		})
+
+		synctest.Wait()
+		require.Len(t, factory.snapshotCalls(), 3)
+		health := reconciler.Health()
+		require.Equal(t, "hub_authentication", health.LastErrorCategory)
+		calls := factory.snapshotCalls()
+		require.Len(t, calls, 3)
+		assert.Equal(t, []string{"hub-a", "hub-b", "hub-c"},
+			[]string{calls[0].name, calls[1].name, calls[2].name})
+		assert.True(t, calls[0].at.Equal(clock.start))
+		assert.True(t, calls[1].at.Equal(clock.start))
+		assert.True(t, calls[2].at.Equal(clock.start))
+
+		assert.Equal(t, 3, health.Configured)
+		assert.Zero(t, health.Reconciled)
+		assert.Equal(t, 2, health.Pending)
+		assert.Equal(t, 1, health.Conflicted)
+		require.NotNil(t, health.LastAttemptAt)
+		assert.True(t, health.LastAttemptAt.Equal(clock.start))
+		assert.Equal(t, http.StatusUnauthorized, health.LastErrorStatus)
 	})
-	reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(),
-		schedulerTarget("hub-a"), schedulerTarget("hub-b"), schedulerTarget("hub-c"))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := runReconciler(ctx, t, reconciler)
-
-	require.Eventually(t, func() bool {
-		return len(factory.snapshotCalls()) == 3
-	}, time.Second, time.Millisecond)
-	require.Eventually(t, func() bool {
-		return reconciler.Health().LastErrorCategory == "hub_authentication"
-	}, time.Second, time.Millisecond)
-	calls := factory.snapshotCalls()
-	require.Len(t, calls, 3)
-	assert.Equal(t, []string{"hub-a", "hub-b", "hub-c"},
-		[]string{calls[0].name, calls[1].name, calls[2].name})
-	assert.True(t, calls[0].at.Equal(clock.start))
-	assert.True(t, calls[1].at.Equal(clock.start))
-	assert.True(t, calls[2].at.Equal(clock.start))
-
-	health := reconciler.Health()
-	assert.Equal(t, 3, health.Configured)
-	assert.Zero(t, health.Reconciled)
-	assert.Equal(t, 2, health.Pending)
-	assert.Equal(t, 1, health.Conflicted)
-	require.NotNil(t, health.LastAttemptAt)
-	assert.True(t, health.LastAttemptAt.Equal(clock.start))
-	assert.Equal(t, "hub_authentication", health.LastErrorCategory)
-	assert.Equal(t, http.StatusUnauthorized, health.LastErrorStatus)
-
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestFederationConfigReconcilerDeliversExactCreatedProjectEvent(t *testing.T) {
-	store := openReconcileStore(t)
-	type delivery struct {
-		event     db.Event
-		persisted []db.Event
-		forked    bool
-		err       error
-	}
-	events := make(chan delivery, 1)
-	parentReleased := make(chan struct{})
-	childReleased := make(chan struct{})
-	reconciler := federation.NewReconciler(federation.ReconcilerConfig{
-		Store:       store,
-		Credentials: newFakeCredentialStore(),
-		Targets:     []federation.Target{{Catalog: testCatalog(), Mapping: testMapping()}},
-		HubFactory: func(context.Context, config.CatalogDaemonConfig) (federation.Hub, error) {
-			return newFakeHub(), nil
-		},
-		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
-			return activity.NewLease(func() { close(parentReleased) }, func() (*activity.Lease, bool) {
-				return activity.NewLease(func() { close(childReleased) }, nil), true
-			}), true, nil
-		},
-		ProjectEventSinkFrom: func(event db.Event, fork activity.Admission) {
-			require.NotNil(t, fork)
-			child, admitted := fork()
-			require.True(t, admitted)
-			child.Release()
-			persisted, err := store.EventsAfter(context.Background(), db.EventsAfterParams{
-				ProjectID: event.ProjectID, Limit: 10,
-			})
-			events <- delivery{event: event, persisted: persisted, forked: true, err: err}
-		},
-		Logger: ioDiscardLogger(),
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	done := runReconciler(ctx, t, reconciler)
+	synctest.Test(t, func(t *testing.T) {
+		store := openReconcileStore(t)
+		type delivery struct {
+			event     db.Event
+			persisted []db.Event
+			forked    bool
+			err       error
+		}
+		events := make(chan delivery, 1)
+		parentReleased := make(chan struct{})
+		childReleased := make(chan struct{})
+		reconciler := federation.NewReconciler(federation.ReconcilerConfig{
+			Store:       store,
+			Credentials: newFakeCredentialStore(),
+			Targets:     []federation.Target{{Catalog: testCatalog(), Mapping: testMapping()}},
+			HubFactory: func(context.Context, config.CatalogDaemonConfig) (federation.Hub, error) {
+				return newFakeHub(), nil
+			},
+			DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+				return activity.NewLease(func() { close(parentReleased) }, func() (*activity.Lease, bool) {
+					return activity.NewLease(func() { close(childReleased) }, nil), true
+				}), true, nil
+			},
+			ProjectEventSinkFrom: func(event db.Event, fork activity.Admission) {
+				require.NotNil(t, fork)
+				child, admitted := fork()
+				require.True(t, admitted)
+				child.Release()
+				persisted, err := store.EventsAfter(context.Background(), db.EventsAfterParams{
+					ProjectID: event.ProjectID, Limit: 10,
+				})
+				events <- delivery{event: event, persisted: persisted, forked: true, err: err}
+			},
+			Logger: ioDiscardLogger(),
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := runReconciler(ctx, t, reconciler)
+		t.Cleanup(func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		})
 
-	select {
-	case delivered := <-events:
+		synctest.Wait()
+		var delivered delivery
+		select {
+		case delivered = <-events:
+		default:
+			t.Fatal("project creation event was not delivered")
+		}
 		event := delivered.event
 		assert.Positive(t, event.ID)
 		assert.NotEmpty(t, event.UID)
@@ -2617,135 +2653,144 @@ func TestFederationConfigReconcilerDeliversExactCreatedProjectEvent(t *testing.T
 		require.Len(t, delivered.persisted, 1)
 		assert.Equal(t, event, delivered.persisted[0])
 		assert.True(t, delivered.forked)
-	case <-time.After(time.Second):
-		t.Fatal("project creation event was not delivered")
-	}
-	select {
-	case <-childReleased:
-	case <-time.After(time.Second):
-		t.Fatal("child hook lease was not released")
-	}
-	select {
-	case <-parentReleased:
-	case <-time.After(time.Second):
-		t.Fatal("parent reconciliation lease was not released")
-	}
 
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		synctest.Wait()
+		select {
+		case <-childReleased:
+		default:
+			t.Fatal("child hook lease was not released")
+		}
+		synctest.Wait()
+		select {
+		case <-parentReleased:
+		default:
+			t.Fatal("parent reconciliation lease was not released")
+		}
+	})
 }
 
 func TestFederationConfigReconcilerMaintainsIndependentBackoffAndQuietsSuccess(t *testing.T) {
-	clock := newManualClock(time.Date(2026, 7, 23, 1, 30, 0, 0, time.UTC))
-	factory := newScriptedHubFactory(clock, map[string][]error{
-		"hub-a": {
-			federation.ErrHubUnavailable,
-			federation.ErrHubUnavailable,
-			nil,
-		},
-		"hub-b": {
-			federation.ErrHubUnavailable,
-			nil,
-		},
+	synctest.Test(t, func(t *testing.T) {
+		clock := newManualClock(time.Date(2026, 7, 23, 1, 30, 0, 0, time.UTC))
+		factory := newScriptedHubFactory(clock, map[string][]error{
+			"hub-a": {
+				federation.ErrHubUnavailable,
+				federation.ErrHubUnavailable,
+				nil,
+			},
+			"hub-b": {
+				federation.ErrHubUnavailable,
+				nil,
+			},
+		})
+		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(),
+			schedulerTarget("hub-a"), schedulerTarget("hub-b"))
+		ctx, cancel := context.WithCancel(context.Background())
+		done := runReconciler(ctx, t, reconciler)
+		t.Cleanup(func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		})
+
+		waitForFactoryCalls(t, factory, 2)
+		synctest.Wait()
+		require.Len(t, clock.snapshotDurations(), 1)
+		clock.Advance(time.Second)
+		waitForFactoryCalls(t, factory, 4)
+		synctest.Wait()
+		require.Len(t, clock.snapshotDurations(), 2)
+		clock.Advance(2 * time.Second)
+		waitForFactoryCalls(t, factory, 5)
+		waitForReconciled(t, reconciler, 2)
+
+		calls := factory.snapshotCalls()
+		require.Len(t, calls, 5)
+		assert.Equal(t,
+			[]string{"hub-a", "hub-b", "hub-a", "hub-b", "hub-a"},
+			[]string{calls[0].name, calls[1].name, calls[2].name, calls[3].name, calls[4].name})
+		assert.True(t, calls[0].at.Equal(clock.start))
+		assert.True(t, calls[1].at.Equal(clock.start))
+		assert.True(t, calls[2].at.Equal(clock.start.Add(time.Second)))
+		assert.True(t, calls[3].at.Equal(clock.start.Add(time.Second)))
+		assert.True(t, calls[4].at.Equal(clock.start.Add(3*time.Second)))
+
+		health := reconciler.Health()
+		assert.Equal(t, federation.Health{
+			Configured:    2,
+			Reconciled:    2,
+			LastAttemptAt: new(clock.start.Add(3 * time.Second)),
+			LastSuccessAt: new(clock.start.Add(3 * time.Second)),
+		}, health)
+
+		clock.Advance(24 * time.Hour)
+		synctest.Wait()
+		assert.Len(t, factory.snapshotCalls(), 5)
 	})
-	reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(),
-		schedulerTarget("hub-a"), schedulerTarget("hub-b"))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := runReconciler(ctx, t, reconciler)
-
-	waitForFactoryCalls(t, factory, 2)
-	waitForTimerCount(t, clock, 1)
-	clock.Advance(time.Second)
-	waitForFactoryCalls(t, factory, 4)
-	waitForTimerCount(t, clock, 2)
-	clock.Advance(2 * time.Second)
-	waitForFactoryCalls(t, factory, 5)
-	waitForReconciled(t, reconciler, 2)
-
-	calls := factory.snapshotCalls()
-	require.Len(t, calls, 5)
-	assert.Equal(t,
-		[]string{"hub-a", "hub-b", "hub-a", "hub-b", "hub-a"},
-		[]string{calls[0].name, calls[1].name, calls[2].name, calls[3].name, calls[4].name})
-	assert.True(t, calls[0].at.Equal(clock.start))
-	assert.True(t, calls[1].at.Equal(clock.start))
-	assert.True(t, calls[2].at.Equal(clock.start.Add(time.Second)))
-	assert.True(t, calls[3].at.Equal(clock.start.Add(time.Second)))
-	assert.True(t, calls[4].at.Equal(clock.start.Add(3*time.Second)))
-
-	health := reconciler.Health()
-	assert.Equal(t, federation.Health{
-		Configured:    2,
-		Reconciled:    2,
-		LastAttemptAt: new(clock.start.Add(3 * time.Second)),
-		LastSuccessAt: new(clock.start.Add(3 * time.Second)),
-	}, health)
-
-	clock.Advance(24 * time.Hour)
-	assert.Never(t, func() bool {
-		return len(factory.snapshotCalls()) != 5
-	}, 20*time.Millisecond, time.Millisecond)
-
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestFederationConfigReconcilerRecordsSuccessAtCompletion(t *testing.T) {
-	clock := newManualClock(time.Date(2026, 7, 23, 1, 45, 0, 0, time.UTC))
-	store := openReconcileStore(t)
-	reconciler := federation.NewReconciler(federation.ReconcilerConfig{
-		Store:       store,
-		Credentials: newFakeCredentialStore(),
-		Targets:     []federation.Target{schedulerTarget("hub-a")},
-		HubFactory: func(
-			_ context.Context, _ config.CatalogDaemonConfig,
-		) (federation.Hub, error) {
-			clock.Advance(2 * time.Second)
-			hub := newFakeHub()
-			hub.project.UID = "01HZNQ7VFPK1XGD8R5MABCD4E1"
-			return hub, nil
-		},
-		Clock:  clock,
-		Logger: ioDiscardLogger(),
+	synctest.Test(t, func(t *testing.T) {
+		clock := newManualClock(time.Date(2026, 7, 23, 1, 45, 0, 0, time.UTC))
+		store := openReconcileStore(t)
+		reconciler := federation.NewReconciler(federation.ReconcilerConfig{
+			Store:       store,
+			Credentials: newFakeCredentialStore(),
+			Targets:     []federation.Target{schedulerTarget("hub-a")},
+			HubFactory: func(
+				_ context.Context, _ config.CatalogDaemonConfig,
+			) (federation.Hub, error) {
+				clock.Advance(2 * time.Second)
+				hub := newFakeHub()
+				hub.project.UID = "01HZNQ7VFPK1XGD8R5MABCD4E1"
+				return hub, nil
+			},
+			Clock:  clock,
+			Logger: ioDiscardLogger(),
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := runReconciler(ctx, t, reconciler)
+		t.Cleanup(func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		})
+
+		waitForReconciled(t, reconciler, 1)
+		health := reconciler.Health()
+		require.NotNil(t, health.LastAttemptAt)
+		assert.True(t, health.LastAttemptAt.Equal(clock.start))
+		require.NotNil(t, health.LastSuccessAt)
+		assert.True(t, health.LastSuccessAt.Equal(clock.start.Add(2*time.Second)))
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	done := runReconciler(ctx, t, reconciler)
-
-	waitForReconciled(t, reconciler, 1)
-	health := reconciler.Health()
-	require.NotNil(t, health.LastAttemptAt)
-	assert.True(t, health.LastAttemptAt.Equal(clock.start))
-	require.NotNil(t, health.LastSuccessAt)
-	assert.True(t, health.LastSuccessAt.Equal(clock.start.Add(2*time.Second)))
-
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestFederationConfigReconcilerCapsBackoffAtFiveMinutes(t *testing.T) {
-	clock := newManualClock(time.Date(2026, 7, 23, 2, 0, 0, 0, time.UTC))
-	factory := newScriptedHubFactory(clock, map[string][]error{
-		"hub-a": repeatError(federation.ErrHubUnavailable, 20),
+	synctest.Test(t, func(t *testing.T) {
+		clock := newManualClock(time.Date(2026, 7, 23, 2, 0, 0, 0, time.UTC))
+		factory := newScriptedHubFactory(clock, map[string][]error{
+			"hub-a": repeatError(federation.ErrHubUnavailable, 20),
+		})
+		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
+		ctx, cancel := context.WithCancel(context.Background())
+		done := runReconciler(ctx, t, reconciler)
+		t.Cleanup(func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		})
+
+		wantDelays := []time.Duration{
+			time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
+			16 * time.Second, 32 * time.Second, 64 * time.Second, 128 * time.Second,
+			256 * time.Second, 5 * time.Minute, 5 * time.Minute,
+		}
+		waitForFactoryCalls(t, factory, 1)
+		for i, delay := range wantDelays {
+			synctest.Wait()
+			require.Len(t, clock.snapshotDurations(), i+1)
+			clock.Advance(delay)
+			waitForFactoryCalls(t, factory, i+2)
+		}
+		assert.Equal(t, wantDelays, clock.snapshotDurations()[:len(wantDelays)])
 	})
-	reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := runReconciler(ctx, t, reconciler)
-
-	wantDelays := []time.Duration{
-		time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
-		16 * time.Second, 32 * time.Second, 64 * time.Second, 128 * time.Second,
-		256 * time.Second, 5 * time.Minute, 5 * time.Minute,
-	}
-	waitForFactoryCalls(t, factory, 1)
-	for i, delay := range wantDelays {
-		waitForTimerCount(t, clock, i+1)
-		clock.Advance(delay)
-		waitForFactoryCalls(t, factory, i+2)
-	}
-	assert.Equal(t, wantDelays, clock.snapshotDurations()[:len(wantDelays)])
-
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestFederationConfigReconcilerRetriesEveryErrorCategory(t *testing.T) {
@@ -2776,180 +2821,197 @@ func TestFederationConfigReconcilerRetriesEveryErrorCategory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			clock := newManualClock(time.Date(2026, 7, 23, 2, 30, 0, 0, time.UTC))
-			factory := newScriptedHubFactory(clock, map[string][]error{
-				"hub-a": {tt.err, nil},
+			synctest.Test(t, func(t *testing.T) {
+				clock := newManualClock(time.Date(2026, 7, 23, 2, 30, 0, 0, time.UTC))
+				factory := newScriptedHubFactory(clock, map[string][]error{
+					"hub-a": {tt.err, nil},
+				})
+				reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
+				ctx, cancel := context.WithCancel(context.Background())
+				done := runReconciler(ctx, t, reconciler)
+				t.Cleanup(func() {
+					cancel()
+					require.ErrorIs(t, <-done, context.Canceled)
+				})
+
+				waitForFactoryCalls(t, factory, 1)
+				synctest.Wait()
+				health := reconciler.Health()
+				require.Equal(t, tt.wantCategory, health.LastErrorCategory)
+				assert.Equal(t, tt.wantStatus, health.LastErrorStatus)
+				assert.Equal(t, tt.wantConflict, health.Conflicted)
+				assert.Equal(t, 1-tt.wantConflict, health.Pending)
+
+				synctest.Wait()
+				require.Len(t, clock.snapshotDurations(), 1)
+				clock.Advance(time.Second)
+				waitForFactoryCalls(t, factory, 2)
+				waitForReconciled(t, reconciler, 1)
+				health = reconciler.Health()
+				assert.Equal(t, 1, health.Reconciled)
+				assert.Zero(t, health.Pending)
+				assert.Zero(t, health.Conflicted)
+				assert.Empty(t, health.LastErrorCategory)
+				assert.Zero(t, health.LastErrorStatus)
 			})
-			reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
-			ctx, cancel := context.WithCancel(context.Background())
-			done := runReconciler(ctx, t, reconciler)
-
-			waitForFactoryCalls(t, factory, 1)
-			require.Eventually(t, func() bool {
-				return reconciler.Health().LastErrorCategory == tt.wantCategory
-			}, time.Second, time.Millisecond)
-			health := reconciler.Health()
-			assert.Equal(t, tt.wantCategory, health.LastErrorCategory)
-			assert.Equal(t, tt.wantStatus, health.LastErrorStatus)
-			assert.Equal(t, tt.wantConflict, health.Conflicted)
-			assert.Equal(t, 1-tt.wantConflict, health.Pending)
-
-			waitForTimerCount(t, clock, 1)
-			clock.Advance(time.Second)
-			waitForFactoryCalls(t, factory, 2)
-			waitForReconciled(t, reconciler, 1)
-			health = reconciler.Health()
-			assert.Equal(t, 1, health.Reconciled)
-			assert.Zero(t, health.Pending)
-			assert.Zero(t, health.Conflicted)
-			assert.Empty(t, health.LastErrorCategory)
-			assert.Zero(t, health.LastErrorStatus)
-
-			cancel()
-			require.ErrorIs(t, <-done, context.Canceled)
 		})
 	}
 }
 
 func TestClassifyReconciliationErrorUsesInternalForUnknown(t *testing.T) {
-	clock := newManualClock(time.Date(2026, 7, 23, 3, 15, 0, 0, time.UTC))
-	factory := newScriptedHubFactory(clock, map[string][]error{
-		"hub-a": {errors.New("planted internal failure")},
+	synctest.Test(t, func(t *testing.T) {
+		clock := newManualClock(time.Date(2026, 7, 23, 3, 15, 0, 0, time.UTC))
+		factory := newScriptedHubFactory(clock, map[string][]error{
+			"hub-a": {errors.New("planted internal failure")},
+		})
+		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
+		ctx, cancel := context.WithCancel(context.Background())
+		done := runReconciler(ctx, t, reconciler)
+		t.Cleanup(func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		})
+
+		waitForFactoryCalls(t, factory, 1)
+		synctest.Wait()
+		health := reconciler.Health()
+		require.NotEmpty(t, health.LastErrorCategory)
+		assert.Equal(t, "internal", health.LastErrorCategory)
+		assert.Zero(t, health.LastErrorStatus)
 	})
-	reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := runReconciler(ctx, t, reconciler)
-
-	waitForFactoryCalls(t, factory, 1)
-	require.Eventually(t, func() bool {
-		return reconciler.Health().LastErrorCategory != ""
-	}, time.Second, time.Millisecond)
-	health := reconciler.Health()
-	assert.Equal(t, "internal", health.LastErrorCategory)
-	assert.Zero(t, health.LastErrorStatus)
-
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestFederationConfigReconcilerCancellationStopsTimerAndRun(t *testing.T) {
-	clock := newManualClock(time.Date(2026, 7, 23, 3, 0, 0, 0, time.UTC))
-	factory := newScriptedHubFactory(clock, map[string][]error{
-		"hub-a": {federation.ErrHubUnavailable},
-	})
-	reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := runReconciler(ctx, t, reconciler)
+	synctest.Test(t, func(t *testing.T) {
+		clock := newManualClock(time.Date(2026, 7, 23, 3, 0, 0, 0, time.UTC))
+		factory := newScriptedHubFactory(clock, map[string][]error{
+			"hub-a": {federation.ErrHubUnavailable},
+		})
+		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
+		ctx, cancel := context.WithCancel(context.Background())
+		done := runReconciler(ctx, t, reconciler)
+		t.Cleanup(func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		})
 
-	waitForFactoryCalls(t, factory, 1)
-	waitForTimerCount(t, clock, 1)
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
-	assert.Equal(t, 1, clock.stoppedTimerCount())
+		waitForFactoryCalls(t, factory, 1)
+		synctest.Wait()
+		require.Len(t, clock.snapshotDurations(), 1)
+		cancel()
+		synctest.Wait()
+		assert.Equal(t, 1, clock.stoppedTimerCount())
+	})
 }
 
 func TestFederationConfigReconcilerLogsOnlySanitizedTransitions(t *testing.T) {
-	clock := newManualClock(time.Date(2026, 7, 23, 3, 30, 0, 0, time.UTC))
-	var logs bytes.Buffer
-	logger := log.New(&logs, "", 0)
-	factory := newScriptedHubFactory(clock, map[string][]error{
-		"hub-a": {
-			&federation.HubError{
-				Kind:       federation.ErrHubUnavailable,
-				Operation:  "response reflected secret-body",
-				StatusCode: http.StatusServiceUnavailable,
+	synctest.Test(t, func(t *testing.T) {
+		clock := newManualClock(time.Date(2026, 7, 23, 3, 30, 0, 0, time.UTC))
+		var logs bytes.Buffer
+		logger := log.New(&logs, "", 0)
+		factory := newScriptedHubFactory(clock, map[string][]error{
+			"hub-a": {
+				&federation.HubError{
+					Kind:       federation.ErrHubUnavailable,
+					Operation:  "response reflected secret-body",
+					StatusCode: http.StatusServiceUnavailable,
+				},
+				&federation.HubError{
+					Kind:       federation.ErrHubUnavailable,
+					Operation:  "response reflected secret-body",
+					StatusCode: http.StatusServiceUnavailable,
+				},
+				&federation.HubError{
+					Kind:       federation.ErrHubAuthentication,
+					Operation:  "response reflected secret-body",
+					StatusCode: http.StatusUnauthorized,
+				},
+				nil,
 			},
-			&federation.HubError{
-				Kind:       federation.ErrHubUnavailable,
-				Operation:  "response reflected secret-body",
-				StatusCode: http.StatusServiceUnavailable,
-			},
-			&federation.HubError{
-				Kind:       federation.ErrHubAuthentication,
-				Operation:  "response reflected secret-body",
-				StatusCode: http.StatusUnauthorized,
-			},
-			nil,
-		},
+		})
+		target := schedulerTarget("hub-a")
+		target.Catalog.URL = "https://sensitive-hub.example/private"
+		target.Catalog.Token = "catalog-secret"
+		target.Mapping.Actor = "sensitive-actor"
+		reconciler := newTestReconciler(t, clock, factory, logger, target)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := runReconciler(ctx, t, reconciler)
+		t.Cleanup(func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		})
+
+		waitForFactoryCalls(t, factory, 1)
+		synctest.Wait()
+		require.Len(t, clock.snapshotDurations(), 1)
+		clock.Advance(time.Second)
+		waitForFactoryCalls(t, factory, 2)
+		synctest.Wait()
+		require.Len(t, clock.snapshotDurations(), 2)
+		clock.Advance(2 * time.Second)
+		waitForFactoryCalls(t, factory, 3)
+		synctest.Wait()
+		require.Len(t, clock.snapshotDurations(), 3)
+		clock.Advance(4 * time.Second)
+		waitForFactoryCalls(t, factory, 4)
+		waitForReconciled(t, reconciler, 1)
+
+		got := logs.String()
+		assert.Equal(t, 3, bytes.Count([]byte(got), []byte("\n")))
+		assert.Contains(t, got, "state=pending category=hub_unavailable status=503")
+		assert.Contains(t, got, "state=pending category=hub_authentication status=401")
+		assert.Contains(t, got, "state=reconciled category= status=0")
+		for _, secret := range []string{
+			"secret-body", "sensitive-hub.example", "catalog-secret",
+			"sensitive-actor",
+		} {
+			assert.NotContains(t, got, secret)
+		}
 	})
-	target := schedulerTarget("hub-a")
-	target.Catalog.URL = "https://sensitive-hub.example/private"
-	target.Catalog.Token = "catalog-secret"
-	target.Mapping.Actor = "sensitive-actor"
-	reconciler := newTestReconciler(t, clock, factory, logger, target)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := runReconciler(ctx, t, reconciler)
-
-	waitForFactoryCalls(t, factory, 1)
-	waitForTimerCount(t, clock, 1)
-	clock.Advance(time.Second)
-	waitForFactoryCalls(t, factory, 2)
-	waitForTimerCount(t, clock, 2)
-	clock.Advance(2 * time.Second)
-	waitForFactoryCalls(t, factory, 3)
-	waitForTimerCount(t, clock, 3)
-	clock.Advance(4 * time.Second)
-	waitForFactoryCalls(t, factory, 4)
-	waitForReconciled(t, reconciler, 1)
-
-	got := logs.String()
-	assert.Equal(t, 3, bytes.Count([]byte(got), []byte("\n")))
-	assert.Contains(t, got, "state=pending category=hub_unavailable status=503")
-	assert.Contains(t, got, "state=pending category=hub_authentication status=401")
-	assert.Contains(t, got, "state=reconciled category= status=0")
-	for _, secret := range []string{
-		"secret-body", "sensitive-hub.example", "catalog-secret",
-		"sensitive-actor",
-	} {
-		assert.NotContains(t, got, secret)
-	}
-
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestReconcilerTransitionLogsIncludeMappingCoordinatesWithoutSecrets(t *testing.T) {
-	clock := newManualClock(time.Date(2026, 7, 23, 3, 45, 0, 0, time.UTC))
-	var logs synchronizedLogCapture
-	logger := log.New(&logs, "", 0)
-	factory := newScriptedHubFactory(clock, map[string][]error{
-		"primary": {
-			&federation.HubError{
-				Kind:      federation.ErrConfigurationConflict,
-				Operation: "raw-body-marker header-marker token-marker url-marker actor-marker",
+	synctest.Test(t, func(t *testing.T) {
+		clock := newManualClock(time.Date(2026, 7, 23, 3, 45, 0, 0, time.UTC))
+		var logs synchronizedLogCapture
+		logger := log.New(&logs, "", 0)
+		factory := newScriptedHubFactory(clock, map[string][]error{
+			"primary": {
+				&federation.HubError{
+					Kind:      federation.ErrConfigurationConflict,
+					Operation: "raw-body-marker header-marker token-marker url-marker actor-marker",
+				},
 			},
-		},
-		"secondary": {federation.ErrConfigurationConflict},
+			"secondary": {federation.ErrConfigurationConflict},
+		})
+		primary := federation.Target{
+			Catalog: config.CatalogDaemonConfig{
+				Name: "primary", URL: "https://url-marker.example/private", Token: "token-marker",
+			},
+			Mapping: config.FederationProjectConfig{
+				Hub: "primary", SpokeProject: "spoke-project", HubProject: "hub-project", Actor: "actor-marker",
+			},
+		}
+		secondary := schedulerTarget("secondary")
+		reconciler := newTestReconciler(t, clock, factory, logger, primary, secondary)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := runReconciler(ctx, t, reconciler)
+		t.Cleanup(func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		})
+
+		waitForFactoryCalls(t, factory, 2)
+		synctest.Wait()
+		got := logs.String()
+		assert.Contains(t, got,
+			"hub=primary spoke_project=spoke-project hub_project=hub-project state=conflict category=configuration_conflict status=0")
+		for _, secret := range []string{
+			"url-marker", "token-marker", "actor-marker", "header-marker", "raw-body-marker",
+		} {
+			assert.NotContains(t, got, secret)
+		}
 	})
-	primary := federation.Target{
-		Catalog: config.CatalogDaemonConfig{
-			Name: "primary", URL: "https://url-marker.example/private", Token: "token-marker",
-		},
-		Mapping: config.FederationProjectConfig{
-			Hub: "primary", SpokeProject: "spoke-project", HubProject: "hub-project", Actor: "actor-marker",
-		},
-	}
-	secondary := schedulerTarget("secondary")
-	reconciler := newTestReconciler(t, clock, factory, logger, primary, secondary)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := runReconciler(ctx, t, reconciler)
-
-	waitForFactoryCalls(t, factory, 2)
-	require.Eventually(t, func() bool {
-		return strings.Contains(logs.String(), "hub=primary")
-	}, time.Second, time.Millisecond)
-
-	got := logs.String()
-	assert.Contains(t, got,
-		"hub=primary spoke_project=spoke-project hub_project=hub-project state=conflict category=configuration_conflict status=0")
-	for _, secret := range []string{
-		"url-marker", "token-marker", "actor-marker", "header-marker", "raw-body-marker",
-	} {
-		assert.NotContains(t, got, secret)
-	}
-
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 type synchronizedLogCapture struct {
@@ -3153,9 +3215,8 @@ func runReconciler(
 
 func waitForFactoryCalls(t *testing.T, factory *scriptedHubFactory, count int) {
 	t.Helper()
-	require.Eventually(t, func() bool {
-		return len(factory.snapshotCalls()) == count
-	}, time.Second, time.Millisecond)
+	synctest.Wait()
+	require.Len(t, factory.snapshotCalls(), count)
 }
 
 func waitForTimerCount(t *testing.T, clock *manualClock, count int) {
@@ -3169,9 +3230,17 @@ func waitForReconciled(
 	t *testing.T, reconciler *federation.Reconciler, count int,
 ) {
 	t.Helper()
-	require.Eventually(t, func() bool {
-		return reconciler.Health().Reconciled == count
-	}, time.Second, time.Millisecond)
+	synctest.Wait()
+	require.Equal(t, count, reconciler.Health().Reconciled)
+}
+
+func readWorkerResult(done <-chan error) func() error {
+	var once sync.Once
+	var result error
+	return func() error {
+		once.Do(func() { result = <-done })
+		return result
+	}
 }
 
 func repeatError(err error, count int) []error {
