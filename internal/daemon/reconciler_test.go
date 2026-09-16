@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
@@ -571,56 +573,68 @@ func (f *flakyEmbedder) callCount() int {
 }
 
 func TestRunDrainsAfterTransientFailureThenExitsOnCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	store := newReconcilerTestStore(t)
-	proj, _ := store.CreateProject(ctx, "spoke-project")
-	for range 3 {
-		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
-			t.Fatal(err)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		store := newReconcilerTestStore(t)
+		proj, _ := store.CreateProject(ctx, "spoke-project")
+		for range 3 {
+			if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-	// Fail the first EncodeFunc call (transient), then succeed. With tiny
-	// backoffs the retry happens almost immediately, so the loop drains the
-	// backlog quickly.
-	idx := openTestVectorIndex(t)
-	emb := &flakyEmbedder{model: "m1", dims: 2, failUntil: 1, err: errors.New("connection refused")}
-	r := NewReconciler(store, idx, emb, ReconcilerConfig{
-		BatchSize:  64,
-		MinBackoff: time.Millisecond,
-		MaxBackoff: 5 * time.Millisecond,
-		SweepEvery: time.Millisecond,
+		// Fail the first EncodeFunc call (transient), then succeed. With tiny
+		// backoffs the retry happens almost immediately, so the loop drains the
+		// backlog quickly.
+		idx := openTestVectorIndex(t)
+		emb := &flakyEmbedder{model: "m1", dims: 2, failUntil: 1, err: errors.New("connection refused")}
+		r := NewReconciler(store, idx, emb, ReconcilerConfig{
+			BatchSize:  64,
+			MinBackoff: time.Millisecond,
+			MaxBackoff: 5 * time.Millisecond,
+			SweepEvery: time.Millisecond,
+		})
+
+		done := make(chan error, 1)
+		go func() { done <- r.Run(ctx) }()
+		joined := false
+		defer func() {
+			if joined {
+				return
+			}
+			cancel()
+			synctest.Wait()
+			err := <-done
+			joined = true
+			require.ErrorIs(t, err, context.Canceled)
+		}()
+
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, 1, emb.callCount())
+		firstHealth := r.Health()
+		assert.Contains(t, firstHealth.LastError, "connection refused")
+		assert.Nil(t, firstHealth.LastSuccessAt)
+		assert.Equal(t, int64(3), firstHealth.Backlog)
+
+		time.Sleep(2 * time.Millisecond)
+		synctest.Wait()
+		assert.Equal(t, 3, emb.embeddedCount())
+		health := r.Health()
+		require.NotNil(t, health.LastSuccessAt)
+		assert.Empty(t, health.LastError)
+		assert.Equal(t, int64(0), health.Backlog)
+
+		_, _, createErr := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "wake", Body: "b", Author: "x"})
+		require.NoError(t, createErr)
+		r.Wake()
+		synctest.Wait()
+		assert.Equal(t, 4, emb.embeddedCount())
+
+		cancel()
+		synctest.Wait()
+		err := <-done
+		joined = true
+		require.ErrorIs(t, err, context.Canceled)
+		assert.GreaterOrEqual(t, emb.callCount(), 2)
 	})
-
-	done := make(chan error, 1)
-	go func() { done <- r.Run(ctx) }()
-	r.Wake()
-
-	// Poll until all three targets are embedded and the backoff has reset on
-	// success (LastError cleared, LastSuccessAt set). Poll rather than sleep so
-	// the test is robust against scheduling jitter.
-	require.Eventually(t, func() bool {
-		if emb.embeddedCount() < 3 {
-			return false
-		}
-		h := r.Health()
-		return h.LastSuccessAt != nil && h.LastError == "" && h.Backlog == 0
-	}, 2*time.Second, time.Millisecond, "reconciler did not drain the backlog after a transient failure")
-
-	// Cancelling ctx must make Run return promptly with the ctx error.
-	cancel()
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("Run returned %v, want context.Canceled", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not exit after ctx cancel")
-	}
-
-	// The failed first attempt must have set LastError at the time; the later
-	// success cleared it (backoff-reset-on-success), proving recovery.
-	if c := emb.callCount(); c < 2 {
-		t.Fatalf("expected at least one retry after the transient failure, got %d EncodeFunc calls", c)
-	}
 }
