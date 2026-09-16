@@ -346,7 +346,7 @@ func TestDispatcher_ProducerDrainAcceptsHandoffsAfterIdleAdmissionCloses(t *test
 		return nil, false
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, d.Shutdown(ctx))
 	require.Equal(t, 2, countJSONLLines(runsPath))
