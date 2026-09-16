@@ -769,7 +769,7 @@ type boundedProbeDoer struct {
 }
 
 func (d boundedProbeDoer) Do(ctx context.Context, request *http.Request) (*http.Response, error) {
-	response, err := d.client.Do(request.WithContext(ctx))
+	response, err := d.client.Do(request.WithContext(ctx)) //nolint:gosec // G704: generated probes use operator-configured daemon targets and their validated transports.
 	if err != nil {
 		return nil, err
 	}

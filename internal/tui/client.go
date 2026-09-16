@@ -54,7 +54,7 @@ func (c *Client) sendRequest(ctx context.Context, req *http.Request) (*http.Resp
 	if hc == nil {
 		return nil, fmt.Errorf("%s %s: daemon client is not initialized", req.Method, req.URL.RequestURI())
 	}
-	resp, err := hc.Do(req)
+	resp, err := hc.Do(req) //nolint:gosec // G704: generated requests use the daemon selected by the local TUI.
 	if err != nil {
 		resp, err = c.retryLocalTransportFailure(ctx, req, err)
 	}

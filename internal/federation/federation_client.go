@@ -141,7 +141,7 @@ func (c *Client) ProjectFederation(ctx context.Context, hubProjectID int64) (api
 type replicationDoer struct{ client *http.Client }
 
 func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	resp, err := d.client.Do(req.WithContext(ctx))
+	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated replication routes use the explicitly configured trusted federation hub.
 	if err != nil {
 		return nil, err
 	}

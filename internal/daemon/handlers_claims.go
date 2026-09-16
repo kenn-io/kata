@@ -629,7 +629,7 @@ func claimHubPing(ctx context.Context, client *http.Client) bool {
 type claimRequestDoer struct{ client *http.Client }
 
 func (d claimRequestDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return d.client.Do(req.WithContext(ctx))
+	return d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: this generated ping probes only the discovered local daemon socket.
 }
 
 func claimUnixTransport(path string) *http.Transport {
@@ -755,7 +755,7 @@ func normalizeForwardedClaimStatus(body *api.ClaimStatusBody) {
 type claimHubDoer struct{ client *http.Client }
 
 func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	resp, err := d.client.Do(req.WithContext(ctx))
+	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
 	if err != nil {
 		return nil, err
 	}
