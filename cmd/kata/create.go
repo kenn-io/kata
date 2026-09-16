@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -16,6 +18,8 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newCreateCmd() *cobra.Command {
@@ -117,24 +121,24 @@ func newCreateCmd() *cobra.Command {
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
 
-		req := map[string]any{"actor": actor, "title": title, "body": body}
+		req := &generated.CreateIssueBody{Actor: &actor, Title: title, Body: &body}
 		if cmd.Flags().Changed("owner") {
-			req["owner"] = owner
+			req.Owner = &owner
 		}
 		if cmd.Flags().Changed("priority") {
-			req["priority"] = priority
+			req.Priority = new(int64(priority))
 		}
 		if len(labels) > 0 {
-			req["labels"] = labels
+			req.Labels = labels
 		}
 		if len(initialMetadata) > 0 {
-			req["metadata"] = initialMetadata
+			req.Metadata = maps.Clone(initialMetadata)
 		}
 		// Resolve every link-target ref to its wire ref string before
 		// building the payload. Refs accept the same forms as `kata show`:
 		// bare short_id, qualified ("kata#abc4"), or full ULID. The daemon
 		// resolves each ref against the project at request time.
-		var links []map[string]any
+		var links []generated.CreateInitialLinkBody
 		var parentRef string
 		if cmd.Flags().Changed("parent") {
 			r, err := singletonRefToWire(parentRefSlice, "--parent", projectName)
@@ -142,41 +146,50 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 			parentRef = r
-			links = append(links, map[string]any{"type": "parent", "to_ref": r})
+			links = append(links, generated.CreateInitialLinkBody{Type: "parent", ToRef: r})
 		}
 		blocksRefs, err := refsToWire(blocks, "--blocks", projectName)
 		if err != nil {
 			return err
 		}
 		for _, r := range blocksRefs {
-			links = append(links, map[string]any{"type": "blocks", "to_ref": r})
+			links = append(links, generated.CreateInitialLinkBody{Type: "blocks", ToRef: r})
 		}
 		blockedByRefs, err := refsToWire(blockedBy, "--blocked-by", projectName)
 		if err != nil {
 			return err
 		}
 		for _, r := range blockedByRefs {
-			links = append(links, map[string]any{"type": "blocks", "to_ref": r, "incoming": true})
+			links = append(links, generated.CreateInitialLinkBody{Type: "blocks", ToRef: r, Incoming: new(true)})
 		}
 		relatedRefs, err := refsToWire(related, "--related", projectName)
 		if err != nil {
 			return err
 		}
 		for _, r := range relatedRefs {
-			links = append(links, map[string]any{"type": "related", "to_ref": r})
+			links = append(links, generated.CreateInitialLinkBody{Type: "related", ToRef: r})
 		}
 		if len(links) > 0 {
-			req["links"] = links
+			req.Links = links
 		}
 		if forceNew {
-			req["force_new"] = true
+			req.ForceNew = &forceNew
 		}
-		headers := map[string]string{}
+		apiClient, err := project.generatedClient()
+		if err != nil {
+			return err
+		}
+		options := &generated.CreateIssueRequestOptions{
+			PathParams: &generated.CreateIssuePath{ProjectID: project.selector}, Body: req,
+		}
 		if idempotencyKey != "" {
-			headers["Idempotency-Key"] = idempotencyKey
+			options.Header = &generated.CreateIssueHeaders{IdempotencyKey: &idempotencyKey}
 		}
-
-		bs, err := project.mutate(http.MethodPost, "/issues", req, headers)
+		response, callErr := apiClient.CreateIssueWithResponse(ctx, options)
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return createRequestError(err, forceNew)
+		}
+		bs, err := project.finishMutation(response.HTTPResponse, response.Body, callErr)
 		if err != nil {
 			return createRequestError(err, forceNew)
 		}
@@ -411,10 +424,32 @@ func resolveProjectIDAndNameWithDaemonHeaders(
 	if err != nil {
 		return 0, "", err
 	}
-	bs, err := a.doWithHeaders(http.MethodPost, "/api/v1/projects/resolve", headers, body)
+	encoded, err := json.Marshal(body)
 	if err != nil {
 		return 0, "", err
 	}
+	var payload generated.ResolveProjectBody
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return 0, "", err
+	}
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return 0, "", err
+	}
+	response, callErr := apiClient.ResolveProjectWithResponse(a.ctx, &generated.ResolveProjectRequestOptions{Body: &payload},
+		func(_ context.Context, request *http.Request) error {
+			for key, value := range headers {
+				request.Header.Set(key, value)
+			}
+			return nil
+		})
+	if response == nil {
+		return 0, "", externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return 0, "", err
+	}
+	bs := response.Body
 	var b struct {
 		Project struct {
 			ID   int64  `json:"id"`
@@ -575,7 +610,7 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 	verb := commandLeaf(cmd)
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())

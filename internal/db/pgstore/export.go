@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"iter"
 	"strings"
@@ -190,10 +191,10 @@ func (s *Store) ExportProjects(ctx context.Context, filter db.ExportFilter) iter
 				&record.DeletedAt, &metadata, &record.Revision); err != nil {
 				return db.ProjectExport{}, pgExportScanError("project", err)
 			}
-			if !json.Valid([]byte(metadata)) {
+			if !jsontext.Value([]byte(metadata)).IsValid() {
 				return db.ProjectExport{}, pgInvalidJSONError("project", record.ID, "metadata")
 			}
-			record.Metadata = json.RawMessage(metadata)
+			record.Metadata = jsontext.Value(metadata)
 			return record, nil
 		})
 }
@@ -218,10 +219,10 @@ func (s *Store) ExportIssues(ctx context.Context, filter db.ExportFilter) iter.S
 				&record.OccurrenceKey); err != nil {
 				return db.IssueExport{}, pgExportScanError("issue", err)
 			}
-			if !json.Valid([]byte(metadata)) {
+			if !jsontext.Value([]byte(metadata)).IsValid() {
 				return db.IssueExport{}, pgInvalidJSONError("issue", record.ID, "metadata")
 			}
-			record.Metadata = json.RawMessage(metadata)
+			record.Metadata = jsontext.Value(metadata)
 			return record, nil
 		})
 }
@@ -254,14 +255,14 @@ SELECT DISTINCT recurrence_id FROM issues WHERE recurrence_id IS NOT NULL AND de
 				&record.Revision, &record.CreatedAt, &record.UpdatedAt, &record.DeletedAt); err != nil {
 				return db.RecurrenceExport{}, pgExportScanError("recurrence", err)
 			}
-			if !json.Valid([]byte(labels)) {
+			if !jsontext.Value([]byte(labels)).IsValid() {
 				return db.RecurrenceExport{}, pgInvalidJSONError("recurrence", record.ID, "template_labels")
 			}
-			if !json.Valid([]byte(metadata)) {
+			if !jsontext.Value([]byte(metadata)).IsValid() {
 				return db.RecurrenceExport{}, pgInvalidJSONError("recurrence", record.ID, "template_metadata")
 			}
-			record.TemplateLabels = json.RawMessage(labels)
-			record.TemplateMetadata = json.RawMessage(metadata)
+			record.TemplateLabels = jsontext.Value(labels)
+			record.TemplateMetadata = jsontext.Value(metadata)
 			return record, nil
 		})
 }
@@ -565,13 +566,13 @@ func (s *Store) ExportExternalFieldStates(ctx context.Context, filter db.ExportF
 				record.ConflictAt = &parsed
 			}
 			if baseline.Valid {
-				record.Baseline = json.RawMessage(baseline.String)
+				record.Baseline = jsontext.Value(baseline.String)
 			}
 			if conflictKata.Valid {
-				record.ConflictKata = json.RawMessage(conflictKata.String)
+				record.ConflictKata = jsontext.Value(conflictKata.String)
 			}
 			if conflictExternal.Valid {
-				record.ConflictExternal = json.RawMessage(conflictExternal.String)
+				record.ConflictExternal = jsontext.Value(conflictExternal.String)
 			}
 			record.Conflicted = conflicted != 0
 			return record, nil
@@ -595,10 +596,10 @@ func (s *Store) ExportIssueSyncBindings(ctx context.Context, filter db.ExportFil
 				&record.UpdatedAt); err != nil {
 				return db.IssueSyncBindingExport{}, pgExportScanError("issue_sync_binding", err)
 			}
-			if !json.Valid([]byte(config)) {
+			if !jsontext.Value([]byte(config)).IsValid() {
 				return db.IssueSyncBindingExport{}, pgInvalidJSONError("issue_sync_binding", record.ID, "config_json")
 			}
-			record.Config = json.RawMessage(config)
+			record.Config = jsontext.Value(config)
 			record.Enabled = enabled == 1
 			return record, nil
 		})
@@ -682,10 +683,10 @@ func (s *Store) ExportFederationQuarantine(ctx context.Context, filter db.Export
 				&record.SkipReason); err != nil {
 				return db.FederationQuarantineExport{}, pgExportScanError("federation_quarantine", err)
 			}
-			if !json.Valid([]byte(eventUIDs)) {
+			if !jsontext.Value([]byte(eventUIDs)).IsValid() {
 				return db.FederationQuarantineExport{}, pgInvalidJSONError("federation_quarantine", record.ID, "event_uids")
 			}
-			record.EventUIDs = json.RawMessage(eventUIDs)
+			record.EventUIDs = jsontext.Value(eventUIDs)
 			return record, nil
 		})
 }
@@ -843,10 +844,10 @@ AND (events.related_issue_uid IS NULL OR NOT EXISTS (
 				&record.HLCCounter, &record.ContentHash, &record.CreatedAt); err != nil {
 				return db.EventExport{}, pgExportScanError("event", err)
 			}
-			if !json.Valid([]byte(payload)) {
+			if !jsontext.Value([]byte(payload)).IsValid() {
 				return db.EventExport{}, pgInvalidJSONError("event", record.ID, "payload")
 			}
-			record.Payload = json.RawMessage(payload)
+			record.Payload = jsontext.Value(payload)
 			contentHash, err := db.EventContentHash(db.EventHashInput{
 				UID: record.UID, OriginInstanceUID: record.OriginInstanceUID,
 				ProjectUID: record.ProjectUID, ProjectName: record.ProjectName,

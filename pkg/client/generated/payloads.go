@@ -10,6 +10,8 @@ type CreateFederationEnrollmentBody = CreateFederationEnrollmentRequestBody
 
 type RotateFederationEnrollmentBody = RotateFederationEnrollmentRequestBody
 
+type CreateFederationReplicaBody = CreateFederationReplicaRequestBody
+
 type LeaveFederationReplicaBody = LeaveFederationReplicaRequestBody
 
 type RebindFederationReplicaBody = RebindFederationReplicaRequestBody

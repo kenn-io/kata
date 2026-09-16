@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -57,7 +58,7 @@ func (s *Store) IngestFederationEvents(
 			}
 			event := input.Event
 			if len(event.Payload) == 0 {
-				event.Payload = json.RawMessage(`{}`)
+				event.Payload = jsontext.Value(`{}`)
 			}
 			if err := validateFederationProjectEvent(
 				projectUID, params.SpokeInstanceUID, event, knownIssueUIDs,
@@ -439,7 +440,7 @@ func rejectFreshCreateSnapshotForKnownIssue(
 	return nil
 }
 
-func payloadIssueUID(event db.RemoteEvent, payload map[string]json.RawMessage) (string, error) {
+func payloadIssueUID(event db.RemoteEvent, payload map[string]jsontext.Value) (string, error) {
 	payloadUID, _ := db.StringValue(payload["issue_uid"])
 	if value, ok := db.StringValue(payload["uid"]); ok {
 		if payloadUID != "" && payloadUID != value {
@@ -459,7 +460,7 @@ func payloadIssueUID(event db.RemoteEvent, payload map[string]json.RawMessage) (
 
 func payloadReferencedIssueUIDs(
 	event db.RemoteEvent,
-	payload map[string]json.RawMessage,
+	payload map[string]jsontext.Value,
 ) ([]string, error) {
 	var references []string
 	if event.RelatedIssueUID != nil && *event.RelatedIssueUID != "" {
@@ -489,7 +490,7 @@ func payloadReferencedIssueUIDs(
 
 func payloadDeferredLinkIssueUIDs(
 	event db.RemoteEvent,
-	payload map[string]json.RawMessage,
+	payload map[string]jsontext.Value,
 	primaryIssueUID string,
 ) (map[string]struct{}, error) {
 	deferred := map[string]struct{}{}
@@ -584,7 +585,7 @@ func payloadDeferredLinkIssueUIDs(
 
 func validateFederationUnlinkStorageEndpoints(
 	event db.RemoteEvent,
-	payload map[string]json.RawMessage,
+	payload map[string]jsontext.Value,
 	linkType string,
 	fromUID string,
 	toUID string,
@@ -626,7 +627,7 @@ func validateFederationUnlinkStorageEndpoints(
 
 func payloadLinksChangedIssueUIDs(
 	event db.RemoteEvent,
-	payload map[string]json.RawMessage,
+	payload map[string]jsontext.Value,
 ) ([]string, error) {
 	if event.Type != "issue.links_changed" {
 		return nil, nil
@@ -687,7 +688,7 @@ func validateFederationLinkPeer(primaryIssueUID, peerUID string) error {
 }
 
 func payloadLinkEndpointUID(
-	payload map[string]json.RawMessage,
+	payload map[string]jsontext.Value,
 	canonicalKey string,
 	alternateKey string,
 ) (string, bool, error) {

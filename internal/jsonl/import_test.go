@@ -3,7 +3,7 @@ package jsonl_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -27,7 +27,7 @@ func TestImportRoundTripsExportedRows(t *testing.T) {
 		Title:     "round trip",
 		Author:    "tester",
 		Labels:    []string{"bug"},
-		Metadata:  map[string]json.RawMessage{"teammate": json.RawMessage(`"reviewer-7"`)},
+		Metadata:  map[string]jsontext.Value{"teammate": jsontext.Value(`"reviewer-7"`)},
 	})
 	require.NoError(t, err)
 	created, _, err := src.CreateComment(ctx, db.CreateCommentParams{

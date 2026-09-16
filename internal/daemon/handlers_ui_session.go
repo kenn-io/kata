@@ -1,7 +1,8 @@
 package daemon
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -81,12 +82,11 @@ func issueHTTPSession(w http.ResponseWriter, manager *WebSessionManager, issued 
 
 func decodeUIJSON(r *http.Request, target any) error {
 	defer func() { _ = r.Body.Close() }()
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 16<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
+	decoder := jsontext.NewDecoder(io.LimitReader(r.Body, 16<<10))
+	if err := json.UnmarshalDecode(decoder, target, json.RejectUnknownMembers(true)); err != nil {
 		return err
 	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+	if err := json.UnmarshalDecode(decoder, &struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("request body must contain one JSON value")
 	}
 	return nil
@@ -96,5 +96,5 @@ func writeUIJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	_ = json.MarshalWrite(w, value)
 }

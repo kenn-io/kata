@@ -3,7 +3,8 @@ package jsonl
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"strconv"
@@ -217,13 +218,13 @@ func exportProjects(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 		return exportProjectsV8(ctx, d, enc, opts)
 	}
 	type record struct {
-		ID        int64           `json:"id"`
-		UID       string          `json:"uid"`
-		Name      string          `json:"name"`
-		CreatedAt string          `json:"created_at"`
-		DeletedAt *string         `json:"deleted_at,omitempty"`
-		Metadata  json.RawMessage `json:"metadata"`
-		Revision  int64           `json:"revision"`
+		ID        int64          `json:"id"`
+		UID       string         `json:"uid"`
+		Name      string         `json:"name"`
+		CreatedAt string         `json:"created_at"`
+		DeletedAt *string        `json:"deleted_at,omitempty"`
+		Metadata  jsontext.Value `json:"metadata"`
+		Revision  int64          `json:"revision"`
 	}
 	query := `SELECT id, uid, name, CAST(created_at AS TEXT),
 	                 CAST(deleted_at AS TEXT), metadata, revision FROM projects`
@@ -245,10 +246,10 @@ func exportProjects(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 		if err != nil {
 			return rec, err
 		}
-		if !json.Valid([]byte(metadata)) {
+		if !jsontext.Value([]byte(metadata)).IsValid() {
 			return rec, fmt.Errorf("project %d metadata is invalid JSON", rec.ID)
 		}
-		rec.Metadata = json.RawMessage(metadata)
+		rec.Metadata = jsontext.Value(metadata)
 		return rec, nil
 	})
 }
@@ -456,7 +457,7 @@ func exportIssueSyncBindings(ctx context.Context, d exportQuerier, enc *Encoder,
 		err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.Provider, &rec.SourceKey,
 			&rec.RemoteID, &rec.DisplayName, &config, &enabled,
 			&rec.IntervalSeconds, &rec.LastCursorAt, &rec.CreatedAt, &rec.UpdatedAt)
-		rec.Config = json.RawMessage(config)
+		rec.Config = jsontext.Value(config)
 		rec.Enabled = enabled == 1
 		return rec, err
 	})
@@ -495,13 +496,13 @@ func exportLegacyGitHubSyncBindings(ctx context.Context, d exportQuerier, enc *E
 	})
 }
 
-func mustMarshalGitHubSyncConfig(host, owner, repo string, repoID int64) json.RawMessage {
+func mustMarshalGitHubSyncConfig(host, owner, repo string, repoID int64) jsontext.Value {
 	bs, err := json.Marshal(map[string]any{
 		"host":    host,
 		"owner":   owner,
 		"repo":    repo,
 		"repo_id": repoID,
-	})
+	}, json.Deterministic(true))
 	if err != nil {
 		panic(err)
 	}
@@ -599,25 +600,25 @@ func exportIssueSyncStatusFromTableV17(ctx context.Context, d exportQuerier, enc
 
 func exportRecurrences(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
-		ID                  int64           `json:"id"`
-		UID                 string          `json:"uid"`
-		ProjectID           int64           `json:"project_id"`
-		RRule               string          `json:"rrule"`
-		DTStart             string          `json:"dtstart"`
-		Timezone            string          `json:"timezone"`
-		TemplateTitle       string          `json:"template_title"`
-		TemplateBody        string          `json:"template_body"`
-		TemplateOwner       *string         `json:"template_owner,omitempty"`
-		TemplatePriority    *int64          `json:"template_priority,omitempty"`
-		TemplateLabels      json.RawMessage `json:"template_labels"`
-		TemplateMetadata    json.RawMessage `json:"template_metadata"`
-		NextOccurrenceKey   *string         `json:"next_occurrence_key,omitempty"`
-		LastMaterializedUID *string         `json:"last_materialized_uid,omitempty"`
-		Author              string          `json:"author"`
-		Revision            int64           `json:"revision"`
-		CreatedAt           string          `json:"created_at"`
-		UpdatedAt           string          `json:"updated_at"`
-		DeletedAt           *string         `json:"deleted_at,omitempty"`
+		ID                  int64          `json:"id"`
+		UID                 string         `json:"uid"`
+		ProjectID           int64          `json:"project_id"`
+		RRule               string         `json:"rrule"`
+		DTStart             string         `json:"dtstart"`
+		Timezone            string         `json:"timezone"`
+		TemplateTitle       string         `json:"template_title"`
+		TemplateBody        string         `json:"template_body"`
+		TemplateOwner       *string        `json:"template_owner,omitempty"`
+		TemplatePriority    *int64         `json:"template_priority,omitzero"`
+		TemplateLabels      jsontext.Value `json:"template_labels"`
+		TemplateMetadata    jsontext.Value `json:"template_metadata"`
+		NextOccurrenceKey   *string        `json:"next_occurrence_key,omitempty"`
+		LastMaterializedUID *string        `json:"last_materialized_uid,omitempty"`
+		Author              string         `json:"author"`
+		Revision            int64          `json:"revision"`
+		CreatedAt           string         `json:"created_at"`
+		UpdatedAt           string         `json:"updated_at"`
+		DeletedAt           *string        `json:"deleted_at,omitempty"`
 	}
 	query := `SELECT id, uid, project_id, rrule, dtstart, timezone,
 	                 template_title, template_body, template_owner, template_priority,
@@ -661,14 +662,14 @@ func exportRecurrences(ctx context.Context, d exportQuerier, enc *Encoder, opts 
 		if err != nil {
 			return rec, err
 		}
-		if !json.Valid([]byte(labels)) {
+		if !jsontext.Value([]byte(labels)).IsValid() {
 			return rec, fmt.Errorf("recurrence %d template_labels is invalid JSON", rec.ID)
 		}
-		if !json.Valid([]byte(metadata)) {
+		if !jsontext.Value([]byte(metadata)).IsValid() {
 			return rec, fmt.Errorf("recurrence %d template_metadata is invalid JSON", rec.ID)
 		}
-		rec.TemplateLabels = json.RawMessage(labels)
-		rec.TemplateMetadata = json.RawMessage(metadata)
+		rec.TemplateLabels = jsontext.Value(labels)
+		rec.TemplateMetadata = jsontext.Value(metadata)
 		return rec, nil
 	})
 }
@@ -687,26 +688,26 @@ func exportIssues(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		return exportIssuesV8(ctx, d, enc, opts)
 	}
 	type record struct {
-		ID            int64           `json:"id"`
-		UID           string          `json:"uid"`
-		ProjectID     int64           `json:"project_id"`
-		ShortID       string          `json:"short_id"`
-		Title         string          `json:"title"`
-		Body          string          `json:"body"`
-		Status        string          `json:"status"`
-		ClosedReason  *string         `json:"closed_reason"`
-		Owner         *string         `json:"owner"`
-		Priority      *int64          `json:"priority,omitempty"`
-		Author        string          `json:"author"`
-		CreatedAt     string          `json:"created_at"`
-		UpdatedAt     string          `json:"updated_at"`
-		ClosedAt      *string         `json:"closed_at"`
-		DeletedAt     *string         `json:"deleted_at"`
-		Metadata      json.RawMessage `json:"metadata"`
-		Revision      int64           `json:"revision"`
-		RecurrenceID  *int64          `json:"recurrence_id,omitempty"`
-		RecurrenceUID *string         `json:"recurrence_uid,omitempty"`
-		OccurrenceKey *string         `json:"occurrence_key,omitempty"`
+		ID            int64          `json:"id"`
+		UID           string         `json:"uid"`
+		ProjectID     int64          `json:"project_id"`
+		ShortID       string         `json:"short_id"`
+		Title         string         `json:"title"`
+		Body          string         `json:"body"`
+		Status        string         `json:"status"`
+		ClosedReason  *string        `json:"closed_reason"`
+		Owner         *string        `json:"owner"`
+		Priority      *int64         `json:"priority,omitzero"`
+		Author        string         `json:"author"`
+		CreatedAt     string         `json:"created_at"`
+		UpdatedAt     string         `json:"updated_at"`
+		ClosedAt      *string        `json:"closed_at"`
+		DeletedAt     *string        `json:"deleted_at"`
+		Metadata      jsontext.Value `json:"metadata"`
+		Revision      int64          `json:"revision"`
+		RecurrenceID  *int64         `json:"recurrence_id,omitzero"`
+		RecurrenceUID *string        `json:"recurrence_uid,omitempty"`
+		OccurrenceKey *string        `json:"occurrence_key,omitempty"`
 	}
 	query := `SELECT i.id, i.uid, i.project_id, i.short_id, i.title, i.body,
 	                 i.status, i.closed_reason, i.owner, i.priority, i.author,
@@ -732,10 +733,10 @@ func exportIssues(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		if err != nil {
 			return rec, err
 		}
-		if !json.Valid([]byte(metadata)) {
+		if !jsontext.Value([]byte(metadata)).IsValid() {
 			return rec, fmt.Errorf("issue %d metadata is invalid JSON", rec.ID)
 		}
-		rec.Metadata = json.RawMessage(metadata)
+		rec.Metadata = jsontext.Value(metadata)
 		return rec, nil
 	})
 }
@@ -1225,13 +1226,13 @@ func exportExternalFieldStates(ctx context.Context, d exportQuerier, enc *Encode
 			return db.ExternalFieldStateExport{}, err
 		}
 		if baseline.Valid {
-			rec.Baseline = json.RawMessage(baseline.String)
+			rec.Baseline = jsontext.Value(baseline.String)
 		}
 		if conflictKata.Valid {
-			rec.ConflictKata = json.RawMessage(conflictKata.String)
+			rec.ConflictKata = jsontext.Value(conflictKata.String)
 		}
 		if conflictExternal.Valid {
-			rec.ConflictExternal = json.RawMessage(conflictExternal.String)
+			rec.ConflictExternal = jsontext.Value(conflictExternal.String)
 		}
 		rec.Conflicted = conflicted != 0
 		return rec, nil
@@ -1256,7 +1257,7 @@ func exportFederationBindings(
 		PushEnabled          bool    `json:"push_enabled"`
 		PushCursorEventID    int64   `json:"push_cursor_event_id"`
 		Actor                string  `json:"bound_actor,omitempty"`
-		AllowInsecure        bool    `json:"allow_insecure,omitempty"`
+		AllowInsecure        bool    `json:"allow_insecure,omitzero"`
 		Enabled              bool    `json:"enabled"`
 		CreatedAt            string  `json:"created_at"`
 		UpdatedAt            string  `json:"updated_at"`
@@ -1337,17 +1338,17 @@ func exportFederationSyncStatus(ctx context.Context, d exportQuerier, enc *Encod
 
 func exportFederationQuarantine(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
-		ID           int64           `json:"id"`
-		ProjectID    int64           `json:"project_id"`
-		Direction    string          `json:"direction"`
-		FirstEventID int64           `json:"first_event_id"`
-		LastEventID  int64           `json:"last_event_id"`
-		EventUIDs    json.RawMessage `json:"event_uids"`
-		Error        string          `json:"error"`
-		CreatedAt    string          `json:"created_at"`
-		SkippedAt    *string         `json:"skipped_at,omitempty"`
-		SkippedBy    *string         `json:"skipped_by,omitempty"`
-		SkipReason   *string         `json:"skip_reason,omitempty"`
+		ID           int64          `json:"id"`
+		ProjectID    int64          `json:"project_id"`
+		Direction    string         `json:"direction"`
+		FirstEventID int64          `json:"first_event_id"`
+		LastEventID  int64          `json:"last_event_id"`
+		EventUIDs    jsontext.Value `json:"event_uids"`
+		Error        string         `json:"error"`
+		CreatedAt    string         `json:"created_at"`
+		SkippedAt    *string        `json:"skipped_at,omitempty"`
+		SkippedBy    *string        `json:"skipped_by,omitempty"`
+		SkipReason   *string        `json:"skip_reason,omitempty"`
 	}
 	query := `SELECT id, project_id, direction, first_event_id, last_event_id,
 	                 event_uids, error, CAST(created_at AS TEXT),
@@ -1372,10 +1373,10 @@ func exportFederationQuarantine(ctx context.Context, d exportQuerier, enc *Encod
 		if err != nil {
 			return rec, err
 		}
-		if !json.Valid([]byte(eventUIDs)) {
+		if !jsontext.Value([]byte(eventUIDs)).IsValid() {
 			return rec, fmt.Errorf("federation quarantine %d event_uids is invalid JSON", rec.ID)
 		}
-		rec.EventUIDs = json.RawMessage(eventUIDs)
+		rec.EventUIDs = jsontext.Value(eventUIDs)
 		return rec, nil
 	})
 }
@@ -1394,10 +1395,10 @@ func exportFederationEnrollments(
 		ProjectID                         *int64  `json:"project_id,omitempty"`
 		Capabilities                      string  `json:"capabilities"`
 		Actor                             string  `json:"bound_actor,omitempty"`
-		AllowAdoptionSnapshotAuthors      bool    `json:"allow_adoption_snapshot_authors,omitempty"`
-		AdoptionBaselineOpen              bool    `json:"adoption_baseline_open,omitempty"`
-		AdoptionBaselineNextSourceEventID int64   `json:"adoption_baseline_next_source_event_id,omitempty"`
-		AdoptionBaselineEndSourceEventID  int64   `json:"adoption_baseline_end_source_event_id,omitempty"`
+		AllowAdoptionSnapshotAuthors      bool    `json:"allow_adoption_snapshot_authors,omitzero"`
+		AdoptionBaselineOpen              bool    `json:"adoption_baseline_open,omitzero"`
+		AdoptionBaselineNextSourceEventID int64   `json:"adoption_baseline_next_source_event_id,omitzero"`
+		AdoptionBaselineEndSourceEventID  int64   `json:"adoption_baseline_end_source_event_id,omitzero"`
 		CreatedAt                         string  `json:"created_at"`
 		UpdatedAt                         string  `json:"updated_at"`
 		RevokedAt                         *string `json:"revoked_at,omitempty"`
@@ -1563,23 +1564,23 @@ func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		return exportEventsV8(ctx, d, enc, opts, projectNameExpr, joinProjects)
 	}
 	type record struct {
-		ID                int64           `json:"id"`
-		UID               string          `json:"uid"`
-		OriginInstanceUID string          `json:"origin_instance_uid"`
-		ProjectID         int64           `json:"project_id"`
-		ProjectUID        string          `json:"-"`
-		ProjectName       string          `json:"project_name"`
-		IssueID           *int64          `json:"issue_id"`
-		IssueUID          *string         `json:"issue_uid"`
-		RelatedIssueID    *int64          `json:"related_issue_id"`
-		RelatedIssueUID   *string         `json:"related_issue_uid"`
-		Type              string          `json:"type"`
-		Actor             string          `json:"actor"`
-		Payload           json.RawMessage `json:"payload"`
-		HLCPhysicalMS     int64           `json:"hlc_physical_ms"`
-		HLCCounter        int64           `json:"hlc_counter"`
-		ContentHash       string          `json:"content_hash"`
-		CreatedAt         string          `json:"created_at"`
+		ID                int64          `json:"id"`
+		UID               string         `json:"uid"`
+		OriginInstanceUID string         `json:"origin_instance_uid"`
+		ProjectID         int64          `json:"project_id"`
+		ProjectUID        string         `json:"-"`
+		ProjectName       string         `json:"project_name"`
+		IssueID           *int64         `json:"issue_id"`
+		IssueUID          *string        `json:"issue_uid"`
+		RelatedIssueID    *int64         `json:"related_issue_id"`
+		RelatedIssueUID   *string        `json:"related_issue_uid"`
+		Type              string         `json:"type"`
+		Actor             string         `json:"actor"`
+		Payload           jsontext.Value `json:"payload"`
+		HLCPhysicalMS     int64          `json:"hlc_physical_ms"`
+		HLCCounter        int64          `json:"hlc_counter"`
+		ContentHash       string         `json:"content_hash"`
+		CreatedAt         string         `json:"created_at"`
 	}
 	policy := newEventOrphanPolicy(opts)
 	issueIDExpr := `events.issue_id`
@@ -1628,10 +1629,10 @@ func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		if err != nil {
 			return rec, err
 		}
-		if !json.Valid([]byte(payload)) {
+		if !jsontext.Value([]byte(payload)).IsValid() {
 			return rec, fmt.Errorf("event %d payload is invalid JSON", rec.ID)
 		}
-		rec.Payload = json.RawMessage(payload)
+		rec.Payload = jsontext.Value(payload)
 		contentHash, err := db.EventContentHash(db.EventHashInput{
 			UID:               rec.UID,
 			OriginInstanceUID: rec.OriginInstanceUID,
@@ -1656,19 +1657,19 @@ func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 
 func exportEventsV8(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
-		ID                int64           `json:"id"`
-		UID               string          `json:"uid"`
-		OriginInstanceUID string          `json:"origin_instance_uid"`
-		ProjectID         int64           `json:"project_id"`
-		ProjectName       string          `json:"project_name"`
-		IssueID           *int64          `json:"issue_id"`
-		IssueUID          *string         `json:"issue_uid"`
-		RelatedIssueID    *int64          `json:"related_issue_id"`
-		RelatedIssueUID   *string         `json:"related_issue_uid"`
-		Type              string          `json:"type"`
-		Actor             string          `json:"actor"`
-		Payload           json.RawMessage `json:"payload"`
-		CreatedAt         string          `json:"created_at"`
+		ID                int64          `json:"id"`
+		UID               string         `json:"uid"`
+		OriginInstanceUID string         `json:"origin_instance_uid"`
+		ProjectID         int64          `json:"project_id"`
+		ProjectName       string         `json:"project_name"`
+		IssueID           *int64         `json:"issue_id"`
+		IssueUID          *string        `json:"issue_uid"`
+		RelatedIssueID    *int64         `json:"related_issue_id"`
+		RelatedIssueUID   *string        `json:"related_issue_uid"`
+		Type              string         `json:"type"`
+		Actor             string         `json:"actor"`
+		Payload           jsontext.Value `json:"payload"`
+		CreatedAt         string         `json:"created_at"`
 	}
 	policy := newEventOrphanPolicy(opts)
 	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, %s, events.issue_id, events.issue_uid,
@@ -1693,10 +1694,10 @@ func exportEventsV8(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 		if err != nil {
 			return rec, err
 		}
-		if !json.Valid([]byte(payload)) {
+		if !jsontext.Value([]byte(payload)).IsValid() {
 			return rec, fmt.Errorf("event %d payload is invalid JSON", rec.ID)
 		}
-		rec.Payload = json.RawMessage(payload)
+		rec.Payload = jsontext.Value(payload)
 		return rec, nil
 	})
 }
@@ -1705,20 +1706,20 @@ func exportEventsV8(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 // issue_number column). Cutover from a pre-short_id source DB lands here.
 func exportEventsV3(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
-		ID                int64           `json:"id"`
-		UID               string          `json:"uid"`
-		OriginInstanceUID string          `json:"origin_instance_uid"`
-		ProjectID         int64           `json:"project_id"`
-		ProjectName       string          `json:"project_name"`
-		IssueID           *int64          `json:"issue_id"`
-		IssueUID          *string         `json:"issue_uid"`
-		IssueNumber       *int64          `json:"issue_number"`
-		RelatedIssueID    *int64          `json:"related_issue_id"`
-		RelatedIssueUID   *string         `json:"related_issue_uid"`
-		Type              string          `json:"type"`
-		Actor             string          `json:"actor"`
-		Payload           json.RawMessage `json:"payload"`
-		CreatedAt         string          `json:"created_at"`
+		ID                int64          `json:"id"`
+		UID               string         `json:"uid"`
+		OriginInstanceUID string         `json:"origin_instance_uid"`
+		ProjectID         int64          `json:"project_id"`
+		ProjectName       string         `json:"project_name"`
+		IssueID           *int64         `json:"issue_id"`
+		IssueUID          *string        `json:"issue_uid"`
+		IssueNumber       *int64         `json:"issue_number"`
+		RelatedIssueID    *int64         `json:"related_issue_id"`
+		RelatedIssueUID   *string        `json:"related_issue_uid"`
+		Type              string         `json:"type"`
+		Actor             string         `json:"actor"`
+		Payload           jsontext.Value `json:"payload"`
+		CreatedAt         string         `json:"created_at"`
 	}
 	policy := newEventOrphanPolicy(opts)
 	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, %s, events.issue_id, events.issue_uid,
@@ -1743,28 +1744,28 @@ func exportEventsV3(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 		if err != nil {
 			return rec, err
 		}
-		if !json.Valid([]byte(payload)) {
+		if !jsontext.Value([]byte(payload)).IsValid() {
 			return rec, fmt.Errorf("event %d payload is invalid JSON", rec.ID)
 		}
-		rec.Payload = json.RawMessage(payload)
+		rec.Payload = jsontext.Value(payload)
 		return rec, nil
 	})
 }
 
 func exportEventsV2(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
-		ID              int64           `json:"id"`
-		ProjectID       int64           `json:"project_id"`
-		ProjectName     string          `json:"project_name"`
-		IssueID         *int64          `json:"issue_id"`
-		IssueUID        *string         `json:"issue_uid"`
-		IssueNumber     *int64          `json:"issue_number"`
-		RelatedIssueID  *int64          `json:"related_issue_id"`
-		RelatedIssueUID *string         `json:"related_issue_uid"`
-		Type            string          `json:"type"`
-		Actor           string          `json:"actor"`
-		Payload         json.RawMessage `json:"payload"`
-		CreatedAt       string          `json:"created_at"`
+		ID              int64          `json:"id"`
+		ProjectID       int64          `json:"project_id"`
+		ProjectName     string         `json:"project_name"`
+		IssueID         *int64         `json:"issue_id"`
+		IssueUID        *string        `json:"issue_uid"`
+		IssueNumber     *int64         `json:"issue_number"`
+		RelatedIssueID  *int64         `json:"related_issue_id"`
+		RelatedIssueUID *string        `json:"related_issue_uid"`
+		Type            string         `json:"type"`
+		Actor           string         `json:"actor"`
+		Payload         jsontext.Value `json:"payload"`
+		CreatedAt       string         `json:"created_at"`
 	}
 	policy := newEventOrphanPolicy(opts)
 	query := fmt.Sprintf(`SELECT events.id, events.project_id, %s, events.issue_id, events.issue_uid,
@@ -1789,26 +1790,26 @@ func exportEventsV2(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 		if err != nil {
 			return rec, err
 		}
-		if !json.Valid([]byte(payload)) {
+		if !jsontext.Value([]byte(payload)).IsValid() {
 			return rec, fmt.Errorf("event %d payload is invalid JSON", rec.ID)
 		}
-		rec.Payload = json.RawMessage(payload)
+		rec.Payload = jsontext.Value(payload)
 		return rec, nil
 	})
 }
 
 func exportEventsV1(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
-		ID             int64           `json:"id"`
-		ProjectID      int64           `json:"project_id"`
-		ProjectName    string          `json:"project_name"`
-		IssueID        *int64          `json:"issue_id"`
-		IssueNumber    *int64          `json:"issue_number"`
-		RelatedIssueID *int64          `json:"related_issue_id"`
-		Type           string          `json:"type"`
-		Actor          string          `json:"actor"`
-		Payload        json.RawMessage `json:"payload"`
-		CreatedAt      string          `json:"created_at"`
+		ID             int64          `json:"id"`
+		ProjectID      int64          `json:"project_id"`
+		ProjectName    string         `json:"project_name"`
+		IssueID        *int64         `json:"issue_id"`
+		IssueNumber    *int64         `json:"issue_number"`
+		RelatedIssueID *int64         `json:"related_issue_id"`
+		Type           string         `json:"type"`
+		Actor          string         `json:"actor"`
+		Payload        jsontext.Value `json:"payload"`
+		CreatedAt      string         `json:"created_at"`
 	}
 	// V1 has no related_issue_uid column, so only related_issue_id is
 	// scrubbed; see eventOrphanPolicy for the rule itself.
@@ -1834,10 +1835,10 @@ func exportEventsV1(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 		if err != nil {
 			return rec, err
 		}
-		if !json.Valid([]byte(payload)) {
+		if !jsontext.Value([]byte(payload)).IsValid() {
 			return rec, fmt.Errorf("event %d payload is invalid JSON", rec.ID)
 		}
-		rec.Payload = json.RawMessage(payload)
+		rec.Payload = jsontext.Value(payload)
 		return rec, nil
 	})
 }
@@ -2309,7 +2310,7 @@ func scanRecords[T any](rows *sql.Rows, kind Kind, enc *Encoder, scan func(*sql.
 }
 
 func writeRecord(enc *Encoder, kind Kind, data any) error {
-	bs, err := json.Marshal(data)
+	bs, err := json.Marshal(data, json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", kind, err)
 	}

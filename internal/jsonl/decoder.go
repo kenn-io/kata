@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -81,7 +82,7 @@ func (d *Decoder) ReadAll(ctx context.Context) ([]Envelope, error) {
 	return out, nil
 }
 
-func isExportVersion(data json.RawMessage) bool {
+func isExportVersion(data jsontext.Value) bool {
 	var meta struct {
 		Key string `json:"key"`
 	}

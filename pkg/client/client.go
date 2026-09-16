@@ -231,20 +231,12 @@ func (c *Client) StreamEventsRaw(ctx context.Context, options *generated.StreamE
 	if options == nil {
 		options = &generated.StreamEventsRequestOptions{}
 	}
-	req, err := c.apiClient.CreateRequest(ctx, runtime.RequestOptionsParameters{
-		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/events/stream",
-		Method:     http.MethodGet,
-		Options:    options,
-	}, reqEditors...)
-	if err != nil {
-		return nil, err
+	streamClient := generated.NewClient(streamingAPIClient{APIClient: c.apiClient, client: c.httpClient})
+	response, callErr := streamClient.StreamEventsWithResponse(ctx, options, withSSEAccept(reqEditors)...)
+	if response == nil {
+		return nil, callErr
 	}
-	req.Header.Set("Accept", "text/event-stream")
-
-	resp, err := c.httpClient.Do(req.WithContext(ctx)) //nolint:gosec // request URL is built by the generated client from the caller-selected base URL
-	if err != nil {
-		return nil, err
-	}
+	resp := response.HTTPResponse
 	if resp.StatusCode != http.StatusOK {
 		if resp.Body != nil {
 			_ = resp.Body.Close()
@@ -252,6 +244,20 @@ func (c *Client) StreamEventsRaw(ctx context.Context, options *generated.StreamE
 		return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
 	}
 	return resp, nil
+}
+
+// Streaming responses must reach the caller without the default runtime's ReadAll.
+type streamingAPIClient struct {
+	runtime.APIClient
+	client *http.Client
+}
+
+func (c streamingAPIClient) ExecuteRequest(ctx context.Context, req *http.Request, _ string) (*runtime.Response, error) {
+	resp, err := c.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated stream route uses the caller-selected daemon and its configured transport.
+	if err != nil {
+		return nil, err
+	}
+	return &runtime.Response{Raw: resp, StatusCode: resp.StatusCode, Headers: resp.Header}, nil
 }
 
 func withSSEAccept(reqEditors []RequestEditorFn) []RequestEditorFn {

@@ -2,7 +2,7 @@
 package jsonl
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 )
 
@@ -79,8 +79,8 @@ var kindOrder = map[Kind]int{
 
 // Envelope is one NDJSON record.
 type Envelope struct {
-	Kind Kind            `json:"kind"`
-	Data json.RawMessage `json:"data"`
+	Kind Kind           `json:"kind"`
+	Data jsontext.Value `json:"data"`
 }
 
 func kindRank(k Kind) (int, bool) {

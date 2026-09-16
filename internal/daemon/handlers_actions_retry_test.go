@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"net/http"
 	"testing"
@@ -449,8 +450,8 @@ func TestClose_IfMatchRejectsStaleRevision(t *testing.T) {
 	_, err := h.DB().PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
 		IssueID: issueID,
 		Actor:   "coordinator",
-		Patch: map[string]json.RawMessage{
-			"work.state": json.RawMessage(`"ready"`),
+		Patch: map[string]jsontext.Value{
+			"work.state": jsontext.Value(`"ready"`),
 		},
 	})
 	require.NoError(t, err)
@@ -496,8 +497,8 @@ func TestClose_IfMatchRejectsStaleRevisionAfterAnotherClose(t *testing.T) {
 	_, err := h.DB().PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
 		IssueID: issueID,
 		Actor:   "coordinator",
-		Patch: map[string]json.RawMessage{
-			"work.state": json.RawMessage(`"ready"`),
+		Patch: map[string]jsontext.Value{
+			"work.state": jsontext.Value(`"ready"`),
 		},
 	})
 	require.NoError(t, err)

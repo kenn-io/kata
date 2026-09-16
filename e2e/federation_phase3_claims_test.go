@@ -172,7 +172,7 @@ type federationClaimSpoke struct {
 	http    *http.Client
 	db      *sqlitestore.Store
 	stderr  *safeBuffer
-	replica api.CreateFederationReplicaBody
+	replica api.CreateFederationReplicaResponseBody
 }
 
 func setupFederationClaimE2E(t *testing.T, name string) federationClaimFixture {
@@ -232,7 +232,7 @@ func enrollFederationClaimSpoke(
 	spoke federationClaimSpoke,
 	token string,
 	actor string,
-) api.CreateFederationReplicaBody {
+) api.CreateFederationReplicaResponseBody {
 	t.Helper()
 	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
 		Token:            token,
@@ -243,7 +243,7 @@ func enrollFederationClaimSpoke(
 	})
 	require.NoError(t, err)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	decodePOST(t, spoke.http, spoke.url+"/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 hub.URL,
 		"hub_project_id":          hubProject.ID,

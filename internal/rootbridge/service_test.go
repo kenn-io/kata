@@ -3,6 +3,7 @@ package rootbridge
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -1268,9 +1269,9 @@ type cancelAfterFieldResolutionStorage struct {
 type refreshConflictAfterClaimStorage struct {
 	db.Storage
 	mappingID int64
-	baseline  json.RawMessage
-	kata      json.RawMessage
-	external  json.RawMessage
+	baseline  jsontext.Value
+	kata      jsontext.Value
+	external  jsontext.Value
 }
 
 func (s *refreshConflictAfterClaimStorage) ClaimExternalRootBindingForManualReconcile(

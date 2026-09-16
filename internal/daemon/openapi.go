@@ -1,8 +1,7 @@
 package daemon
 
 import (
-	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -130,12 +129,11 @@ func OpenAPIJSONVersion(version string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, raw, "", "  "); err != nil {
+	pretty := jsontext.Value(raw)
+	if err := pretty.Indent(jsontext.WithIndent("  ")); err != nil {
 		return nil, err
 	}
-	pretty.WriteByte('\n')
-	return pretty.Bytes(), nil
+	return append(pretty, '\n'), nil
 }
 
 // relaxResponseAdditionalProperties lets response bodies carry fields a client's

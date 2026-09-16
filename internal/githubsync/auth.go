@@ -3,7 +3,8 @@ package githubsync
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -326,8 +327,8 @@ func isGitHubRESTPath(segments []string, offset int, binding Binding) bool {
 }
 
 type graphQLRequestBody struct {
-	Query     string                     `json:"query"`
-	Variables map[string]json.RawMessage `json:"variables"`
+	Query     string                    `json:"query"`
+	Variables map[string]jsontext.Value `json:"variables"`
 }
 
 func scopedGraphQLRequest(req *http.Request, binding Binding) (bool, error) {
@@ -379,7 +380,7 @@ func readAndRestoreRequestBody(req *http.Request) ([]byte, error) {
 	return body, nil
 }
 
-func graphQLStringVariable(variables map[string]json.RawMessage, name string) (string, bool) {
+func graphQLStringVariable(variables map[string]jsontext.Value, name string) (string, bool) {
 	raw, ok := variables[name]
 	if !ok {
 		return "", false

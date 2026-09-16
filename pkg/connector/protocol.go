@@ -3,7 +3,7 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"strings"
 	"time"
@@ -30,19 +30,19 @@ const (
 
 // Request is one versioned connector invocation.
 type Request struct {
-	Protocol string          `json:"protocol"`
-	ID       string          `json:"id"`
-	Method   string          `json:"method"`
-	Instance string          `json:"instance"`
-	Settings json.RawMessage `json:"settings,omitempty"`
-	Params   json.RawMessage `json:"params,omitempty"`
+	Protocol string         `json:"protocol"`
+	ID       string         `json:"id"`
+	Method   string         `json:"method"`
+	Instance string         `json:"instance"`
+	Settings jsontext.Value `json:"settings,omitzero"`
+	Params   jsontext.Value `json:"params,omitzero"`
 }
 
 // Invocation identifies the configured connector instance and settings for a
 // handler call. Settings is a copy of the request's raw JSON settings.
 type Invocation struct {
 	Instance string
-	Settings json.RawMessage
+	Settings jsontext.Value
 }
 
 type invocationContextKey struct{}
@@ -61,7 +61,7 @@ func InvocationFromContext(ctx context.Context) (Invocation, bool) {
 	}
 	return Invocation{
 		Instance: stored.instance,
-		Settings: json.RawMessage(stored.settings),
+		Settings: jsontext.Value(stored.settings),
 	}, true
 }
 
@@ -74,10 +74,10 @@ func withInvocation(ctx context.Context, request Request) context.Context {
 
 // Response is one versioned connector result or structured error.
 type Response struct {
-	Protocol string          `json:"protocol"`
-	ID       string          `json:"id"`
-	Result   json.RawMessage `json:"result,omitempty"`
-	Error    *Error          `json:"error,omitempty"`
+	Protocol string         `json:"protocol"`
+	ID       string         `json:"id"`
+	Result   jsontext.Value `json:"result,omitzero"`
+	Error    *Error         `json:"error,omitzero"`
 }
 
 // Error is a connector-supplied structured protocol error.
@@ -103,13 +103,13 @@ func (e *Error) Error() string {
 
 // Description identifies a connector instance and its current capabilities.
 type Description struct {
-	ConnectorID     string          `json:"connector_id"`
-	DisplayName     string          `json:"display_name"`
-	Protocol        string          `json:"protocol"`
-	Capabilities    []Capability    `json:"capabilities"`
-	ConfigSchema    json.RawMessage `json:"config_schema,omitempty"`
-	SelfActorID     string          `json:"self_actor_id,omitempty"`
-	AccountIdentity string          `json:"account_identity"`
+	ConnectorID     string         `json:"connector_id"`
+	DisplayName     string         `json:"display_name"`
+	Protocol        string         `json:"protocol"`
+	Capabilities    []Capability   `json:"capabilities"`
+	ConfigSchema    jsontext.Value `json:"config_schema,omitzero"`
+	SelfActorID     string         `json:"self_actor_id,omitempty"`
+	AccountIdentity string         `json:"account_identity"`
 }
 
 // FieldDescriptor describes one externally addressable field.
@@ -132,7 +132,7 @@ type Root struct {
 	Revision    string                `json:"revision"`
 	UpdatedAt   time.Time             `json:"updated_at"`
 	ObservedAt  time.Time             `json:"observed_at"`
-	Actor       *Actor                `json:"actor,omitempty"`
+	Actor       *Actor                `json:"actor,omitzero"`
 	Fields      map[string]FieldValue `json:"fields,omitempty"`
 }
 

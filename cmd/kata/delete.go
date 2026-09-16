@@ -3,18 +3,15 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
-	"io"
-	"maps"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // newDeleteCmd returns the cobra.Command for `kata delete`.
@@ -112,23 +109,46 @@ func runDestructive(cmd *cobra.Command, baseURL string, pid int64, pathRef, disp
 	extraBody map[string]any) error {
 	ctx := cmd.Context()
 	actor, _ := resolveActor(ctx, flags.As, nil)
-	// Build body from extraBody first so a future caller can't overwrite the
-	// resolved actor with a stray map key.
-	body := map[string]any{}
-	maps.Copy(body, extraBody)
-	body["actor"] = actor
+	body := &generated.DestructiveActionRequestBody{Actor: actor}
+	if reason, ok := extraBody["reason"].(string); ok {
+		body.Reason = &reason
+	}
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return err
 	}
-	postURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/%s", baseURL, pid, url.PathEscape(pathRef), verb)
-	status, bs, err := httpDoJSONWithHeader(ctx, client, http.MethodPost, postURL,
-		map[string]string{"X-Kata-Confirm": confirm}, body)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
+	var bs []byte
+	switch verb {
+	case "delete":
+		response, callErr := apiClient.DeleteIssueWithResponse(ctx, &generated.DeleteIssueRequestOptions{
+			PathParams: &generated.DeleteIssuePath{ProjectID: pid, Ref: pathRef}, Body: body,
+			Header: &generated.DeleteIssueHeaders{XKataConfirm: &confirm},
+		})
+		if response == nil {
+			return externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		bs = response.Body
+	case "purge":
+		response, callErr := apiClient.PurgeIssueWithResponse(ctx, &generated.PurgeIssueRequestOptions{
+			PathParams: &generated.PurgeIssuePath{ProjectID: pid, Ref: pathRef}, Body: body,
+			Header: &generated.PurgeIssueHeaders{XKataConfirm: &confirm},
+		})
+		if response == nil {
+			return externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		bs = response.Body
+	default:
+		return fmt.Errorf("unknown destructive action %q", verb)
 	}
 	return printDestructive(cmd, displayRef, verb, bs)
 }
@@ -139,7 +159,7 @@ func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -254,38 +274,3 @@ func (e *responseBodyReadError) Error() string {
 }
 
 func (e *responseBodyReadError) Unwrap() error { return e.err }
-
-// httpDoJSONWithHeader mirrors httpDoJSON but lets callers attach extra
-// request headers (notably X-Kata-Confirm). Defined here so delete and the
-// upcoming purge command don't have to extend the helpers.go signature.
-func httpDoJSONWithHeader(ctx context.Context, client *http.Client,
-	method, url string, headers map[string]string, body any) (int, []byte, error) {
-	var rdr io.Reader
-	if body != nil {
-		bs, err := jsonv2.Marshal(body)
-		if err != nil {
-			return 0, nil, err
-		}
-		rdr = bytes.NewReader(bs)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
-	if err != nil {
-		return 0, nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := client.Do(req) //nolint:gosec // G107: daemon-local URL controlled by ensureDaemon.
-	if err != nil {
-		return 0, nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	out, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, &responseBodyReadError{err: err}
-	}
-	return resp.StatusCode, out, nil
-}

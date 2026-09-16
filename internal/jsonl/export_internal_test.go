@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,6 +38,21 @@ func TestExportSnapshotV14FederationEnrollmentPreservesAdoptionMarker(t *testing
 
 	assert.Contains(t, out.String(), `"allow_adoption_snapshot_authors":true`)
 	assert.Contains(t, out.String(), `"bound_actor":"tester"`)
+}
+
+func TestWriteRecordUsesDeterministicJSON(t *testing.T) {
+	for range 100 {
+		var out bytes.Buffer
+		require.NoError(t, writeRecord(NewEncoder(&out), KindMeta, map[string]any{"z": 1, "a": 2}))
+		assert.Equal(t, "{\"kind\":\"meta\",\"data\":{\"a\":2,\"z\":1}}\n", out.String())
+	}
+}
+
+func TestMarshalLegacyGitHubSyncConfigUsesDeterministicJSON(t *testing.T) {
+	for range 100 {
+		got := mustMarshalGitHubSyncConfig("github.example", "owner", "repo", 7)
+		assert.Equal(t, `{"host":"github.example","owner":"owner","repo":"repo","repo_id":7}`, string(got))
+	}
 }
 
 func TestExportSnapshotCarriesExternalRootStateWithoutLiveClaim(t *testing.T) {
@@ -73,7 +89,7 @@ func TestExportSnapshotCarriesExternalRootStateWithoutLiveClaim(t *testing.T) {
 	require.True(t, claimed)
 	_, _, err = source.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
 		BindingID: binding.ID, MappingID: mapping.ID, ClaimToken: claimToken,
-		Baseline: json.RawMessage(`"2026-08-20"`), At: frontier.Add(time.Hour),
+		Baseline: jsontext.Value(`"2026-08-20"`), At: frontier.Add(time.Hour),
 		Actor: "tester",
 	})
 	require.NoError(t, err)

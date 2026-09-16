@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -310,7 +311,7 @@ func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert
 			IssueUID: input.IssueUID, RelatedIssueUID: input.RelatedIssueUID,
 			Type: input.Type, Actor: actor, HLCPhysicalMS: hlc.PhysicalMS,
 			HLCCounter: hlc.Counter, CreatedAt: createdAt,
-			Payload: json.RawMessage(input.Payload),
+			Payload: jsontext.Value(input.Payload),
 		})
 		if err != nil {
 			return db.Event{}, fmt.Errorf("hash event content: %w", err)

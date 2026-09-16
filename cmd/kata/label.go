@@ -2,15 +2,16 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newLabelCmd() *cobra.Command {
@@ -41,8 +42,18 @@ func labelAddCmd() *cobra.Command {
 				return err
 			}
 			actor, _ := resolveActor(project.api.ctx, flags.As, nil)
-			payload := map[string]string{"actor": actor, "label": label}
-			bs, err := project.mutate(http.MethodPost, "/issues/"+url.PathEscape(issue.RefForAPI)+"/labels", payload, nil)
+			apiClient, err := project.generatedClient()
+			if err != nil {
+				return err
+			}
+			response, callErr := apiClient.AddLabelWithResponse(project.api.ctx, &generated.AddLabelRequestOptions{
+				PathParams: &generated.AddLabelPath{ProjectID: project.selector, Ref: issue.RefForAPI},
+				Body:       &generated.AddLabelBody{Actor: &actor, Label: label},
+			})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			bs, err := project.finishMutation(response.HTTPResponse, response.Body, callErr)
 			if err != nil {
 				return err
 			}
@@ -83,15 +94,21 @@ func labelRmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			deleteURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/labels/%s?actor=%s",
-				baseURL, pid, url.PathEscape(issue.RefForAPI), url.PathEscape(label), url.QueryEscape(actor))
-			status, bs, err := httpDoJSON(ctx, client, http.MethodDelete, deleteURL, nil)
+			apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 			if err != nil {
 				return err
 			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
+			response, callErr := apiClient.RemoveLabelWithResponse(ctx, &generated.RemoveLabelRequestOptions{
+				PathParams: &generated.RemoveLabelPath{ProjectID: pid, Ref: issue.RefForAPI, Label: label},
+				Query:      &generated.RemoveLabelQuery{Actor: &actor},
+			})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
 			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, handle); err != nil {
 				return err
 			}
@@ -125,18 +142,24 @@ func newLabelsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-				fmt.Sprintf("%s/api/v1/projects/%d/labels", baseURL, pid), nil)
+			apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 			if err != nil {
 				return err
 			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
+			response, callErr := apiClient.ListLabelsWithResponse(ctx, &generated.ListLabelsRequestOptions{
+				PathParams: &generated.ListLabelsPath{ProjectID: pid},
+			})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
 			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			mode := currentOutputMode()
 			if mode == outputJSON {
 				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+				if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -182,7 +205,7 @@ func printLabelMutation(cmd *cobra.Command, bs []byte) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -232,7 +255,7 @@ func printLabelRemoved(cmd *cobra.Command, bs []byte, ref, label string) error {
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())

@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"time"
@@ -20,8 +21,8 @@ const recurrenceSelect = `SELECT r.id, r.uid, r.project_id, r.rrule, r.dtstart, 
   FROM recurrences r`
 
 type recurrenceDiffEntry struct {
-	From json.RawMessage `json:"from"`
-	To   json.RawMessage `json:"to"`
+	From jsontext.Value `json:"from"`
+	To   jsontext.Value `json:"to"`
 }
 
 // CreateRecurrence persists a validated recurrence and returns it with the
@@ -42,7 +43,7 @@ func (s *Store) CreateRecurrence(ctx context.Context, input db.CreateRecurrenceI
 	if err != nil {
 		return db.Recurrence{}, db.Event{}, fmt.Errorf("marshal recurrence labels: %w", err)
 	}
-	metadataJSON := json.RawMessage(`{}`)
+	metadataJSON := jsontext.Value(`{}`)
 	if len(input.Template.Metadata) > 0 {
 		metadataJSON = input.Template.Metadata
 	}
@@ -76,17 +77,17 @@ func (s *Store) CreateRecurrence(ctx context.Context, input db.CreateRecurrenceI
 			return mapSQLError(err, nil)
 		}
 		payload, err := json.Marshal(struct {
-			RecurrenceUID     string          `json:"recurrence_uid"`
-			RRule             string          `json:"rrule"`
-			DTStart           string          `json:"dtstart"`
-			Timezone          string          `json:"timezone"`
-			TemplateTitle     string          `json:"template_title"`
-			TemplateBody      string          `json:"template_body"`
-			TemplateOwner     *string         `json:"template_owner"`
-			TemplatePriority  *int64          `json:"template_priority"`
-			TemplateLabels    []string        `json:"template_labels"`
-			TemplateMetadata  json.RawMessage `json:"template_metadata"`
-			NextOccurrenceKey *string         `json:"next_occurrence_key"`
+			RecurrenceUID     string         `json:"recurrence_uid"`
+			RRule             string         `json:"rrule"`
+			DTStart           string         `json:"dtstart"`
+			Timezone          string         `json:"timezone"`
+			TemplateTitle     string         `json:"template_title"`
+			TemplateBody      string         `json:"template_body"`
+			TemplateOwner     *string        `json:"template_owner"`
+			TemplatePriority  *int64         `json:"template_priority"`
+			TemplateLabels    []string       `json:"template_labels"`
+			TemplateMetadata  jsontext.Value `json:"template_metadata"`
+			NextOccurrenceKey *string        `json:"next_occurrence_key"`
 		}{
 			RecurrenceUID: recurrenceUID, RRule: input.Rule, DTStart: input.DTStart,
 			Timezone: input.Timezone, TemplateTitle: input.Template.Title, TemplateBody: input.Template.Body,
@@ -135,7 +136,7 @@ func (s *Store) CreateRecurrenceForIssue(
 	if err != nil {
 		return db.CreateRecurrenceForIssueOut{}, fmt.Errorf("marshal recurrence labels: %w", err)
 	}
-	metadataJSON := json.RawMessage(`{}`)
+	metadataJSON := jsontext.Value(`{}`)
 	if len(create.Template.Metadata) > 0 {
 		metadataJSON = create.Template.Metadata
 	}
@@ -181,17 +182,17 @@ func (s *Store) CreateRecurrenceForIssue(
 			return mapSQLError(err, nil)
 		}
 		createdPayload, err := json.Marshal(struct {
-			RecurrenceUID     string          `json:"recurrence_uid"`
-			RRule             string          `json:"rrule"`
-			DTStart           string          `json:"dtstart"`
-			Timezone          string          `json:"timezone"`
-			TemplateTitle     string          `json:"template_title"`
-			TemplateBody      string          `json:"template_body"`
-			TemplateOwner     *string         `json:"template_owner"`
-			TemplatePriority  *int64          `json:"template_priority"`
-			TemplateLabels    []string        `json:"template_labels"`
-			TemplateMetadata  json.RawMessage `json:"template_metadata"`
-			NextOccurrenceKey *string         `json:"next_occurrence_key"`
+			RecurrenceUID     string         `json:"recurrence_uid"`
+			RRule             string         `json:"rrule"`
+			DTStart           string         `json:"dtstart"`
+			Timezone          string         `json:"timezone"`
+			TemplateTitle     string         `json:"template_title"`
+			TemplateBody      string         `json:"template_body"`
+			TemplateOwner     *string        `json:"template_owner"`
+			TemplatePriority  *int64         `json:"template_priority"`
+			TemplateLabels    []string       `json:"template_labels"`
+			TemplateMetadata  jsontext.Value `json:"template_metadata"`
+			NextOccurrenceKey *string        `json:"next_occurrence_key"`
 		}{
 			RecurrenceUID: recurrenceUID, RRule: create.Rule, DTStart: create.DTStart,
 			Timezone: create.Timezone, TemplateTitle: create.Template.Title,
@@ -215,7 +216,7 @@ func (s *Store) CreateRecurrenceForIssue(
 			return fmt.Errorf("walk after initial occurrence: %w", err)
 		}
 		updatedMetadata, err := db.ComposeRecurrenceIssueMetadata(
-			json.RawMessage(issue.Metadata), *firstOccurrence, create.Timezone,
+			jsontext.Value(issue.Metadata), *firstOccurrence, create.Timezone,
 		)
 		if err != nil {
 			return fmt.Errorf("compose initial recurrence issue metadata: %w", err)
@@ -376,15 +377,15 @@ func (s *Store) PatchRecurrence(ctx context.Context, input db.PatchRecurrenceIn)
 				return fmt.Errorf("marshal recurrence labels: %w", err)
 			}
 			if string(labelsJSON) != string(current.TemplateLabels) {
-				addDiff("template_labels", json.RawMessage(current.TemplateLabels), json.RawMessage(labelsJSON))
+				addDiff("template_labels", jsontext.Value(current.TemplateLabels), jsontext.Value(labelsJSON))
 				next.TemplateLabels = db.JSONStringArray(labelsJSON)
 			}
 		}
 		if value := input.Update.TemplateMetadata; value != nil && string(*value) != string(current.TemplateMetadata) {
-			addDiff("template_metadata", json.RawMessage(current.TemplateMetadata), *value)
+			addDiff("template_metadata", jsontext.Value(current.TemplateMetadata), *value)
 			next.TemplateMetadata = db.JSONBlob(*value)
 		}
-		if err := db.ValidateRecurrenceTemplate(next.TemplateTitle, json.RawMessage(next.TemplateMetadata)); err != nil {
+		if err := db.ValidateRecurrenceTemplate(next.TemplateTitle, jsontext.Value(next.TemplateMetadata)); err != nil {
 			return err
 		}
 		if input.Update.Rule != nil || input.Update.DTStart != nil || input.Update.Timezone != nil {
@@ -574,7 +575,7 @@ func (s *Store) materializeOccurrenceTx(
 	actor string,
 ) (db.MaterializeNextOut, error) {
 	issueMetadata, err := db.ComposeRecurrenceIssueMetadata(
-		json.RawMessage(current.TemplateMetadata), occurrenceKey, current.Timezone,
+		jsontext.Value(current.TemplateMetadata), occurrenceKey, current.Timezone,
 	)
 	if err != nil {
 		return db.MaterializeNextOut{}, fmt.Errorf("compose recurrence issue metadata: %w", err)

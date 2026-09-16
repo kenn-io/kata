@@ -164,7 +164,7 @@ func TestServicesIsolateFederationCredentialsForSharedProjectUID(t *testing.T) {
 		response := httptest.NewRecorder()
 		service.Handler().ServeHTTP(response, request)
 		require.Equal(t, http.StatusOK, response.Code)
-		var created api.CreateFederationReplicaBody
+		var created api.CreateFederationReplicaResponseBody
 		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &created))
 		projectIDs[i] = created.Project.ID
 	}

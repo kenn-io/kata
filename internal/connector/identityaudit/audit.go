@@ -4,7 +4,8 @@ package identityaudit
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -62,18 +63,17 @@ type Options struct {
 
 // Validate checks one raw protocol parameter object and requires exactly one
 // JSON value followed by EOF.
-func Validate(method string, raw json.RawMessage, options Options) error {
+func Validate(method string, raw jsontext.Value, options Options) error {
 	var params map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	if err := decoder.Decode(&params); err != nil {
+	decoder := jsontext.NewDecoder(bytes.NewReader(raw))
+	if err := json.UnmarshalDecode(decoder, &params); err != nil {
 		return &Error{Code: CodeInvalidJSON, Method: method, Path: "params", Cause: err}
 	}
 	if params == nil {
 		return &Error{Code: CodeInvalidJSON, Method: method, Path: "params", Cause: errors.New("parameters must be a JSON object")}
 	}
-	var trailing json.RawMessage
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+	var trailing jsontext.Value
+	if err := json.UnmarshalDecode(decoder, &trailing); !errors.Is(err, io.EOF) {
 		return &Error{Code: CodeTrailingJSON, Method: method, Path: "params", Cause: err}
 	}
 	if path, found := forbiddenPath(params, "params", method); found {
@@ -109,7 +109,7 @@ func Validate(method string, raw json.RawMessage, options Options) error {
 	return nil
 }
 
-func validateParameterTypes(method string, raw json.RawMessage, params map[string]any) error {
+func validateParameterTypes(method string, raw jsontext.Value, params map[string]any) error {
 	var target any
 	switch method {
 	case "describe":
@@ -133,9 +133,8 @@ func validateParameterTypes(method string, raw json.RawMessage, params map[strin
 	default:
 		return &Error{Code: CodeUnsupportedMethod, Method: method}
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
+	decoder := jsontext.NewDecoder(bytes.NewReader(raw))
+	if err := json.UnmarshalDecode(decoder, target, json.RejectUnknownMembers(true)); err != nil {
 		return &Error{Code: CodeInvalidJSON, Method: method, Path: "params", Cause: err}
 	}
 

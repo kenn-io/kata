@@ -1,10 +1,9 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -14,6 +13,8 @@ import (
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const (
@@ -92,27 +93,29 @@ func loadInbox(cmd *cobra.Command, recipient string) ([]inboxRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	params := url.Values{}
-	params.Set("status", "open")
-	params.Set("limit", "0")
 	key := notificationMetadataKey(recipient)
-	params.Set("meta", key)
-	status, response, err := httpDoJSON(ctx, client, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues?%s", baseURL, pid, params.Encode()), nil)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return nil, err
 	}
-	if status >= 400 {
-		return nil, apiErrFromBody(status, response)
+	response, callErr := apiClient.ListIssuesWithResponse(ctx, &generated.ListIssuesRequestOptions{
+		PathParams: &generated.ListIssuesPath{ProjectID: pid},
+		Query:      &generated.ListIssuesQuery{Status: new(generated.ListIssuesQueryStatus("open")), Limit: new(int64(0)), Meta: []string{key}},
+	})
+	if response == nil {
+		return nil, externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return nil, err
 	}
 	var list struct {
 		Issues []struct {
-			ShortID  string                     `json:"short_id"`
-			Title    string                     `json:"title"`
-			Metadata map[string]json.RawMessage `json:"metadata"`
+			ShortID  string                    `json:"short_id"`
+			Title    string                    `json:"title"`
+			Metadata map[string]jsontext.Value `json:"metadata"`
 		} `json:"issues"`
 	}
-	if err := json.Unmarshal(response, &list); err != nil {
+	if err := json.Unmarshal(response.Body, &list); err != nil {
 		return nil, err
 	}
 	requests := make([]inboxRequest, 0, len(list.Issues))
@@ -120,9 +123,9 @@ func loadInbox(cmd *cobra.Command, recipient string) ([]inboxRequest, error) {
 		// Decode optional attribution independently so a malformed teammate
 		// cannot hide an otherwise usable attention request.
 		var value struct {
-			From     string          `json:"from"`
-			Message  string          `json:"message"`
-			Teammate json.RawMessage `json:"teammate"`
+			From     string         `json:"from"`
+			Message  string         `json:"message"`
+			Teammate jsontext.Value `json:"teammate"`
 		}
 		raw, ok := issue.Metadata[key]
 		if !ok || json.Unmarshal(raw, &value) != nil ||

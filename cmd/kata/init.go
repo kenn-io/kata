@@ -3,7 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
@@ -52,7 +55,7 @@ type cliError struct {
 	Kind     errKind
 	Code     string
 	ExitCode int
-	Data     json.RawMessage
+	Data     jsontext.Value
 }
 
 func (e *cliError) Error() string { return e.Message }
@@ -506,14 +509,26 @@ func postProjects(ctx context.Context, baseURL string, reqBody any) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("client: %w", err)
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, baseURL+"/api/v1/projects", reqBody)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
-		return nil, fmt.Errorf("POST /api/v1/projects: %w", err)
+		return nil, err
 	}
-	if status >= 300 {
-		return nil, apiErrFromBody(status, bs)
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
 	}
-	return bs, nil
+	var body generated.InitProjectBody
+	if err := json.Unmarshal(data, &body); err != nil {
+		return nil, err
+	}
+	response, callErr := apiClient.InitProjectWithResponse(ctx, &generated.InitProjectRequestOptions{Body: &body})
+	if response == nil {
+		return nil, fmt.Errorf("POST /api/v1/projects: %w", externalCLITransportError(response, callErr))
+	}
+	if response.StatusCode >= 300 {
+		return nil, apiErrFromBody(response.StatusCode, response.Body)
+	}
+	return response.Body, nil
 }
 
 // needsTomlWrite reports whether .kata.toml needs to be written: true
@@ -533,7 +548,7 @@ func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed
 	switch currentOutputMode() {
 	case outputJSON:
 		var buf bytes.Buffer
-		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return "", fmt.Errorf("emit json: %w", err)
 		}
 		return buf.String(), nil
@@ -565,9 +580,9 @@ func resolveStartPath(workspace string) (string, error) {
 func apiErrFromBody(status int, bs []byte) *cliError {
 	var env struct {
 		Error struct {
-			Code    string          `json:"code"`
-			Message string          `json:"message"`
-			Data    json.RawMessage `json:"data,omitempty"`
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Data    jsontext.Value `json:"data,omitempty"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(bs, &env); err != nil {

@@ -3,7 +3,8 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -316,7 +317,7 @@ func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 		Status:       item.Status,
 		ClosedReason: item.ClosedReason,
 		ClosedAt:     formatOptionalSQLiteTime(item.ClosedAt),
-		Metadata:     json.RawMessage(`{}`),
+		Metadata:     jsontext.Value(`{}`),
 		CreatedAt:    item.CreatedAt.UTC().Format(sqliteTimeFormat),
 		UpdatedAt:    item.UpdatedAt.UTC().Format(sqliteTimeFormat),
 		Source:       p.Source,

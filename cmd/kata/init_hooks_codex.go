@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,13 +34,13 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 		{
 			"type":    "command",
 			"command": "kata attention-hook start",
-			"timeout": json.Number("10"),
+			"timeout": jsontext.Value("10"),
 		},
 		{
 			"type":           "command",
 			"command":        "kata attention-hook start",
 			"commandWindows": "kata attention-hook start",
-			"timeout":        json.Number("10"),
+			"timeout":        jsontext.Value("10"),
 		},
 	}
 	migrated, err := migrateLegacyAgentHooks(configPath, []legacyAgentHook{

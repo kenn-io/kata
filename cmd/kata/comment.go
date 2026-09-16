@@ -2,14 +2,14 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newCommentCmd() *cobra.Command {
@@ -56,20 +56,28 @@ func newCommentCmd() *cobra.Command {
 			return err
 		}
 		actor, _ := resolveActor(project.api.ctx, flags.As, nil)
-		payload := map[string]any{"actor": actor, "body": body}
+		payload := &generated.CreateCommentBody{Actor: &actor, Body: body}
 		if handle != "" {
-			payload["teammate"] = handle
+			payload.Teammate = &handle
 		}
-		bs, err := project.mutate(http.MethodPost,
-			"/issues/"+url.PathEscape(issue.RefForAPI)+"/comments",
-			payload, nil)
+		apiClient, err := project.generatedClient()
+		if err != nil {
+			return err
+		}
+		response, callErr := apiClient.CreateCommentWithResponse(project.api.ctx, &generated.CreateCommentRequestOptions{
+			PathParams: &generated.CreateCommentPath{ProjectID: project.selector, Ref: issue.RefForAPI}, Body: payload,
+		})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		bs, err := project.finishMutation(response.HTTPResponse, response.Body, callErr)
 		if err != nil {
 			return err
 		}
 		switch currentOutputMode() {
 		case outputJSON:
 			var buf bytes.Buffer
-			if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+			if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 				return err
 			}
 			_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -115,20 +123,25 @@ func newCommentEditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPatch,
-				fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/comments/%s",
-					baseURL, pid, url.PathEscape(issue.RefForAPI), url.PathEscape(commentRef)),
-				map[string]any{"actor": actor, "body": body})
+			apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 			if err != nil {
 				return err
 			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
+			response, callErr := apiClient.EditCommentWithResponse(ctx, &generated.EditCommentRequestOptions{
+				PathParams: &generated.EditCommentPath{ProjectID: pid, Ref: issue.RefForAPI, CommentRef: commentRef},
+				Body:       &generated.EditCommentBody{Actor: actor, Body: body},
+			})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
 			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			switch currentOutputMode() {
 			case outputJSON:
 				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+				if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())

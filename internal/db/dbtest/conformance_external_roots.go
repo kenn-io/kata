@@ -2,7 +2,7 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"sync"
@@ -348,7 +348,7 @@ func checkExternalRootBindings(t *testing.T, store db.Storage, backend Backend) 
 	require.True(t, ok)
 	deadlineState, event, err := store.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
 		BindingID: binding.ID, MappingID: deadlineMapping.ID, ClaimToken: fieldClaimToken,
-		Baseline: json.RawMessage(`"2026-08-21T12:00:00Z"`), At: stateAt, Actor: "tester",
+		Baseline: jsontext.Value(`"2026-08-21T12:00:00Z"`), At: stateAt, Actor: "tester",
 	})
 	require.NoError(t, err)
 	assert.Nil(t, event)
@@ -357,9 +357,9 @@ func checkExternalRootBindings(t *testing.T, store db.Storage, backend Backend) 
 	conflictAt := stateAt.Add(time.Minute)
 	conflicted, event, err := store.UpsertExternalFieldState(ctx, db.ExternalFieldStateParams{
 		BindingID: binding.ID, MappingID: mappingTwo.ID, ClaimToken: fieldClaimToken,
-		Baseline:         json.RawMessage(`"2026-08-20"`),
-		ConflictKata:     json.RawMessage(`"2026-08-21"`),
-		ConflictExternal: json.RawMessage(`"2026-08-22"`),
+		Baseline:         jsontext.Value(`"2026-08-20"`),
+		ConflictKata:     jsontext.Value(`"2026-08-21"`),
+		ConflictExternal: jsontext.Value(`"2026-08-22"`),
 		Conflicted:       true, At: conflictAt, Actor: "tester",
 	})
 	require.NoError(t, err)
@@ -379,7 +379,7 @@ func checkExternalRootBindings(t *testing.T, store db.Storage, backend Backend) 
 
 	resolvedState, fieldResolved, err := store.ResolveExternalFieldConflict(ctx, db.ResolveExternalFieldConflictParams{
 		BindingID: binding.ID, MappingID: mappingTwo.ID, ClaimToken: fieldClaimToken,
-		Baseline: json.RawMessage(`"2026-08-21"`), Actor: "tester", At: conflictAt.Add(time.Minute),
+		Baseline: jsontext.Value(`"2026-08-21"`), Actor: "tester", At: conflictAt.Add(time.Minute),
 	})
 	require.NoError(t, err)
 	assert.False(t, resolvedState.Conflicted)

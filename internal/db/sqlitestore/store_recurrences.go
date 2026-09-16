@@ -3,7 +3,8 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -134,7 +135,7 @@ func (d *Store) createRecurrenceTx(
 		"template_owner":      in.Template.Owner,
 		"template_priority":   in.Template.Priority,
 		"template_labels":     templateLabels,
-		"template_metadata":   json.RawMessage(metaJSON),
+		"template_metadata":   jsontext.Value(metaJSON),
 		"next_occurrence_key": firstNext,
 	})
 	if err != nil {
@@ -212,7 +213,7 @@ func (d *Store) createRecurrenceForIssue(
 		return out, fmt.Errorf("walk after initial occurrence: %w", err)
 	}
 	updatedMetadata, err := db.ComposeRecurrenceIssueMetadata(
-		json.RawMessage(metadataJSON), *requireFirst, rec.Timezone,
+		jsontext.Value(metadataJSON), *requireFirst, rec.Timezone,
 	)
 	if err != nil {
 		return out, fmt.Errorf("compose initial recurrence issue metadata: %w", err)
@@ -312,11 +313,11 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		if in.Update.TemplateTitle != nil {
 			nextTitle = *in.Update.TemplateTitle
 		}
-		var nextMeta json.RawMessage
+		var nextMeta jsontext.Value
 		if in.Update.TemplateMetadata != nil {
 			nextMeta = *in.Update.TemplateMetadata
 		} else {
-			nextMeta = json.RawMessage(cur.TemplateMetadata)
+			nextMeta = jsontext.Value(cur.TemplateMetadata)
 		}
 		if err := db.ValidateRecurrenceTemplate(nextTitle, nextMeta); err != nil {
 			return out, err
@@ -346,8 +347,8 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 	}
 
 	type diffEntry struct {
-		From json.RawMessage `json:"from"`
-		To   json.RawMessage `json:"to"`
+		From jsontext.Value `json:"from"`
+		To   jsontext.Value `json:"to"`
 	}
 	diff := map[string]diffEntry{}
 	var sets []string
@@ -423,7 +424,7 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		}
 		if string(nextLabels) != string(cur.TemplateLabels) {
 			addDiff("template_labels",
-				json.RawMessage(cur.TemplateLabels), json.RawMessage(nextLabels))
+				jsontext.Value(cur.TemplateLabels), jsontext.Value(nextLabels))
 			sets = append(sets, "template_labels = ?")
 			args = append(args, string(nextLabels))
 		}
@@ -431,7 +432,7 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 	if in.Update.TemplateMetadata != nil {
 		if string(*in.Update.TemplateMetadata) != string(cur.TemplateMetadata) {
 			addDiff("template_metadata",
-				json.RawMessage(cur.TemplateMetadata), *in.Update.TemplateMetadata)
+				jsontext.Value(cur.TemplateMetadata), *in.Update.TemplateMetadata)
 			sets = append(sets, "template_metadata = ?")
 			args = append(args, string(*in.Update.TemplateMetadata))
 		}
@@ -773,7 +774,7 @@ func (d *Store) materializeNextTx(
 	nextKey := *next
 
 	issueMetadata, err := db.ComposeRecurrenceIssueMetadata(
-		json.RawMessage(r.TemplateMetadata), nextKey, r.Timezone,
+		jsontext.Value(r.TemplateMetadata), nextKey, r.Timezone,
 	)
 	if err != nil {
 		return out, fmt.Errorf("compose recurrence issue metadata: %w", err)
@@ -864,7 +865,7 @@ func (d *Store) materializeNextTx(
 		Owner:         r.TemplateOwner,
 		Priority:      r.TemplatePriority,
 		Status:        "open",
-		Metadata:      json.RawMessage(issueMetadata),
+		Metadata:      jsontext.Value(issueMetadata),
 		Labels:        labels,
 		CreatedAt:     createdAt,
 		RecurrenceUID: r.UID,

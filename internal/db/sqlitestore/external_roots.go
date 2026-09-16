@@ -4,7 +4,8 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -1748,11 +1749,11 @@ func (d *Store) ApplyExternalFieldProjection(
 		if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
 			return db.Issue{}, nil, false, err
 		}
-		updated, err := db.ApplyMetadataPatch(json.RawMessage(issue.Metadata), params.Patch)
+		updated, err := db.ApplyMetadataPatch(jsontext.Value(issue.Metadata), params.Patch)
 		if err != nil {
 			return db.Issue{}, nil, false, fmt.Errorf("apply external field projection: %w", err)
 		}
-		diff, err := metadata.Diff(json.RawMessage(issue.Metadata), updated)
+		diff, err := metadata.Diff(jsontext.Value(issue.Metadata), updated)
 		if err != nil {
 			return db.Issue{}, nil, false, fmt.Errorf("diff external field projection: %w", err)
 		}
@@ -2216,13 +2217,13 @@ func scanExternalFieldState(row rowScanner) (db.ExternalFieldState, error) {
 		return db.ExternalFieldState{}, fmt.Errorf("scan external field state: %w", err)
 	}
 	if baseline.Valid {
-		state.Baseline = json.RawMessage(baseline.String)
+		state.Baseline = jsontext.Value(baseline.String)
 	}
 	if conflictKata.Valid {
-		state.ConflictKata = json.RawMessage(conflictKata.String)
+		state.ConflictKata = jsontext.Value(conflictKata.String)
 	}
 	if conflictExternal.Valid {
-		state.ConflictExternal = json.RawMessage(conflictExternal.String)
+		state.ConflictExternal = jsontext.Value(conflictExternal.String)
 	}
 	state.Conflicted = conflicted == 1
 	assignNullTime(&state.ConflictAt, conflictAt)

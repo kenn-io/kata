@@ -3,15 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func newDigestCmd() *cobra.Command {
@@ -86,7 +88,7 @@ cross-project digest.`,
 			if err != nil {
 				return err
 			}
-			getURL, err := digestURL(ctx, baseURL, digestURLOpts{
+			bs, err := fetchDigest(ctx, client, baseURL, digestURLOpts{
 				ProjectIDArg: projectIDArg,
 				AllProjects:  allProjects,
 				Since:        since,
@@ -96,17 +98,11 @@ cross-project digest.`,
 			if err != nil {
 				return err
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, getURL, nil)
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
+
 			mode := currentOutputMode()
 			if mode == outputJSON {
 				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+				if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
@@ -160,32 +156,42 @@ type digestURLOpts struct {
 	Actors       []string
 }
 
-func digestURL(ctx context.Context, baseURL string, opts digestURLOpts) (string, error) {
-	q := url.Values{}
-	// RFC3339Nano (not plain RFC3339) so the daemon's millisecond-precision
-	// `created_at <= until` doesn't truncate the just-emitted event out of
-	// the window when --until defaults to "now".
-	q.Set("since", opts.Since.UTC().Format(time.RFC3339Nano))
-	q.Set("until", opts.Until.UTC().Format(time.RFC3339Nano))
-	for _, a := range opts.Actors {
-		q.Add("actor", a)
+func fetchDigest(ctx context.Context, client *http.Client, baseURL string, opts digestURLOpts) ([]byte, error) {
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	if err != nil {
+		return nil, err
 	}
-	switch {
-	case opts.AllProjects:
-		return baseURL + "/api/v1/digest?" + q.Encode(), nil
-	case opts.ProjectIDArg != 0:
-		return fmt.Sprintf("%s/api/v1/projects/%d/digest?%s", baseURL, opts.ProjectIDArg, q.Encode()), nil
-	default:
+	// Keep subsecond precision so the window includes events just emitted.
+	since, until := opts.Since.UTC().Format(time.RFC3339Nano), opts.Until.UTC().Format(time.RFC3339Nano)
+	if opts.AllProjects {
+		response, callErr := apiClient.DigestGlobalWithResponse(ctx, &generated.DigestGlobalRequestOptions{Query: &generated.DigestGlobalQuery{Since: since, Until: &until, Actor: opts.Actors}})
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return nil, err
+		}
+		return response.Body, nil
+	}
+	pid := opts.ProjectIDArg
+	if pid == 0 {
 		start, err := resolveStartPath(flags.Workspace)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		pid, err := resolveProjectID(ctx, baseURL, start)
+		pid, err = resolveProjectID(ctx, baseURL, start)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return fmt.Sprintf("%s/api/v1/projects/%d/digest?%s", baseURL, pid, q.Encode()), nil
 	}
+	response, callErr := apiClient.DigestProjectWithResponse(ctx, &generated.DigestProjectRequestOptions{PathParams: &generated.DigestProjectPath{ProjectID: pid}, Query: &generated.DigestProjectQuery{Since: since, Until: &until, Actor: opts.Actors}})
+	if response == nil {
+		return nil, externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return nil, err
+	}
+	return response.Body, nil
 }
 
 func printDigestHuman(cmd *cobra.Command, bs []byte) error {

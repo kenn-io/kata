@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -80,7 +81,7 @@ func TestServiceAccessControllerScopesStableUIReferenceHydration(t *testing.T) {
 	filtered, err := server.Client().Get(server.URL + "/api/v1/ui/references?" + query.Encode())
 	require.NoError(t, err)
 	var filteredBody struct {
-		Projects []json.RawMessage `json:"projects"`
+		Projects []jsontext.Value `json:"projects"`
 		Issues   []struct {
 			UID string `json:"uid"`
 		} `json:"issues"`

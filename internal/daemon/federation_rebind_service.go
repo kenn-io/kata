@@ -2,14 +2,16 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/httpurl"
 
@@ -513,30 +515,15 @@ func fetchFederationRebindMetadata(
 			"check the HTTPS catalog endpoint",
 		)
 	}
-	requestURL, err := httpurl.AppendHTTPBaseURLPath(
-		hubURL,
-		fmt.Sprintf("/api/v1/projects/%d/federation/metadata", hubProjectID),
-	)
+	apiClient, err := generated.NewDefaultClient(hubURL, runtime.WithHTTPClient(boundedProbeDoer{client: httpClient, limit: federationRebindResponseLimit}))
 	if err != nil {
-		return api.ProjectFederationBody{}, federationReplicaError(
-			ErrFederationReplicaInvalidInput, "build replacement hub metadata URL", "",
-		)
+		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaInvalidInput, "build replacement hub metadata request", "")
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
-	if err != nil {
-		return api.ProjectFederationBody{}, federationReplicaError(
-			ErrFederationReplicaInvalidInput, "build replacement hub metadata request", "",
-		)
+	result, _ := apiClient.GetFederationProjectMetadataWithResponse(ctx, &generated.GetFederationProjectMetadataRequestOptions{PathParams: &generated.GetFederationProjectMetadataPath{ProjectID: hubProjectID}})
+	if result == nil {
+		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaHubUnavailable, "replacement hub metadata request failed", "check the HTTPS catalog endpoint and retry")
 	}
-	response, err := httpClient.Do(request) //nolint:gosec // target is the operator-selected daemon catalog entry.
-	if err != nil {
-		return api.ProjectFederationBody{}, federationReplicaError(
-			ErrFederationReplicaHubUnavailable,
-			"replacement hub metadata request failed",
-			"check the HTTPS catalog endpoint and retry",
-		)
-	}
-	defer func() { _ = response.Body.Close() }()
+	response := result.HTTPResponse
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 		return api.ProjectFederationBody{}, federationReplicaError(
 			ErrFederationReplicaCredentialConflict,
@@ -559,8 +546,7 @@ func fetchFederationRebindMetadata(
 		)
 	}
 	var metadata api.ProjectFederationBody
-	decoder := json.NewDecoder(io.LimitReader(response.Body, federationRebindResponseLimit))
-	if err := decoder.Decode(&metadata); err != nil {
+	if err := json.Unmarshal(result.Body, &metadata); err != nil {
 		return api.ProjectFederationBody{}, federationReplicaError(
 			ErrFederationReplicaHubUnavailable,
 			"replacement hub returned invalid federation metadata",

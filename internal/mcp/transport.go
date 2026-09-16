@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -152,7 +153,7 @@ func (c *stdioConnection) admit(line []byte) (jsonrpc.Message, bool, error) {
 	if len(trimmed) == 0 {
 		return nil, false, c.writeError(context.Background(), jsonrpc.ID{}, jsonrpc.CodeParseError, "parse error", nil)
 	}
-	if trimmed[0] == '[' && json.Valid(trimmed) {
+	if trimmed[0] == '[' && jsontext.Value(trimmed).IsValid() {
 		return nil, false, c.writeError(context.Background(), jsonrpc.ID{}, jsonrpc.CodeInvalidRequest, "JSON-RPC batches are not supported", nil)
 	}
 
@@ -160,7 +161,7 @@ func (c *stdioConnection) admit(line []byte) (jsonrpc.Message, bool, error) {
 	if err != nil {
 		code := int64(jsonrpc.CodeInvalidRequest)
 		message := "invalid request"
-		if !json.Valid(trimmed) {
+		if !jsontext.Value(trimmed).IsValid() {
 			code = jsonrpc.CodeParseError
 			message = "parse error"
 		}
@@ -221,7 +222,7 @@ func (c *stdioConnection) Write(ctx context.Context, message jsonrpc.Message) er
 	return c.writeLineLocked(ctx, encoded)
 }
 
-func (c *stdioConnection) recordCancellation(params json.RawMessage) {
+func (c *stdioConnection) recordCancellation(params jsontext.Value) {
 	var value sdkmcp.CancelledParams
 	if json.Unmarshal(params, &value) != nil {
 		return
@@ -266,7 +267,7 @@ func (c *stdioConnection) writeError(
 	id jsonrpc.ID,
 	code int64,
 	message string,
-	data json.RawMessage,
+	data jsontext.Value,
 ) error {
 	wireError := &jsonrpc.Error{
 		Code:    code,

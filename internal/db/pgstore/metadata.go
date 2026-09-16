@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 
 	"go.kenn.io/kata/internal/db"
@@ -11,8 +12,8 @@ import (
 )
 
 type metadataKeyDiffPayload struct {
-	From json.RawMessage `json:"from"`
-	To   json.RawMessage `json:"to"`
+	From jsontext.Value `json:"from"`
+	To   jsontext.Value `json:"to"`
 }
 
 type metadataTxRunner func(context.Context, transactionFunc) error
@@ -46,7 +47,7 @@ func (s *Store) patchIssueMetadata(
 		if input.IfMatchRev != nil && *input.IfMatchRev != current.Revision {
 			return &db.RevisionConflictError{CurrentRevision: current.Revision}
 		}
-		if err := db.CheckMetadataPatchGuard(json.RawMessage(current.Metadata), input.Patch, input.Guard); err != nil {
+		if err := db.CheckMetadataPatchGuard(jsontext.Value(current.Metadata), input.Patch, input.Guard); err != nil {
 			return err
 		}
 		updated, diff, err := patchedMetadata(current.Metadata, input.Patch)
@@ -194,11 +195,11 @@ func (s *Store) DesignateInboxProject(ctx context.Context, input db.DesignateInb
 		}
 
 		for _, project := range projects {
-			role := json.RawMessage(`null`)
+			role := jsontext.Value(`null`)
 			if project.ID == input.ProjectID {
-				role = json.RawMessage(`"inbox"`)
+				role = jsontext.Value(`"inbox"`)
 			} else {
-				var current map[string]json.RawMessage
+				var current map[string]jsontext.Value
 				if err := json.Unmarshal([]byte(project.Metadata), &current); err != nil {
 					return fmt.Errorf("decode project %d metadata: %w", project.ID, err)
 				}
@@ -210,7 +211,7 @@ func (s *Store) DesignateInboxProject(ctx context.Context, input db.DesignateInb
 				return err
 			}
 			updated, diff, err := patchedMetadata(project.Metadata,
-				map[string]json.RawMessage{"role": role})
+				map[string]jsontext.Value{"role": role})
 			if err != nil {
 				return err
 			}
@@ -254,13 +255,13 @@ func (s *Store) DesignateInboxProject(ctx context.Context, input db.DesignateInb
 
 func patchedMetadata(
 	current db.JSONBlob,
-	patch map[string]json.RawMessage,
-) (json.RawMessage, map[string]metadataKeyDiffPayload, error) {
-	updated, err := db.ApplyMetadataPatch(json.RawMessage(current), patch)
+	patch map[string]jsontext.Value,
+) (jsontext.Value, map[string]metadataKeyDiffPayload, error) {
+	updated, err := db.ApplyMetadataPatch(jsontext.Value(current), patch)
 	if err != nil {
 		return nil, nil, fmt.Errorf("apply metadata patch: %w", err)
 	}
-	diff, err := metadata.Diff(json.RawMessage(current), updated)
+	diff, err := metadata.Diff(jsontext.Value(current), updated)
 	if err != nil {
 		return nil, nil, fmt.Errorf("compute metadata diff: %w", err)
 	}

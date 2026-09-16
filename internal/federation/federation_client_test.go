@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -70,7 +71,7 @@ func TestFederationClientIngestProjectEvents(t *testing.T) {
 		HLCPhysicalMS:     1,
 		HLCCounter:        0,
 		ContentHash:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		Payload:           json.RawMessage(`{"title":"pushed"}`),
+		Payload:           jsontext.Value(`{"title":"pushed"}`),
 	}}
 
 	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})

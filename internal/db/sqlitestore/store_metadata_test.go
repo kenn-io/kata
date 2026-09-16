@@ -2,7 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"testing"
 
@@ -17,8 +17,8 @@ func TestPatchIssueMetadata_HappyPath(t *testing.T) {
 
 	res, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(iss.Revision), Actor: "tester",
-		Patch: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-05-20"`),
+		Patch: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-05-20"`),
 		},
 	})
 	require.NoError(t, err)
@@ -34,8 +34,8 @@ func TestPatchIssueMetadata_StaleRevisionReturns409(t *testing.T) {
 
 	_, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(int64(99)), Actor: "tester",
-		Patch: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-05-20"`),
+		Patch: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-05-20"`),
 		},
 	})
 	require.Error(t, err)
@@ -50,8 +50,8 @@ func TestPatchIssueMetadata_ValueGuardRejectsStaleValueWithoutMutation(t *testin
 	seed, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID,
 		Actor:   "tester",
-		Patch: map[string]json.RawMessage{
-			"deck.rank": json.RawMessage(`"current"`),
+		Patch: map[string]jsontext.Value{
+			"deck.rank": jsontext.Value(`"current"`),
 		},
 	})
 	require.NoError(t, err)
@@ -59,12 +59,12 @@ func TestPatchIssueMetadata_ValueGuardRejectsStaleValueWithoutMutation(t *testin
 	_, err = d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID,
 		Actor:   "tester",
-		Patch: map[string]json.RawMessage{
-			"deck.rank": json.RawMessage(`"replacement"`),
+		Patch: map[string]jsontext.Value{
+			"deck.rank": jsontext.Value(`"replacement"`),
 		},
 		Guard: &db.MetadataPatchGuard{
 			Key:     "deck.rank",
-			IfValue: json.RawMessage(`"stale"`),
+			IfValue: jsontext.Value(`"stale"`),
 		},
 	})
 	var conflict *db.MetadataGuardConflictError
@@ -83,8 +83,8 @@ func TestPatchIssueMetadata_AbsentGuardIsCheckedInsideMutation(t *testing.T) {
 	first, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID,
 		Actor:   "tester",
-		Patch: map[string]json.RawMessage{
-			"deck.rank": json.RawMessage(`"first"`),
+		Patch: map[string]jsontext.Value{
+			"deck.rank": jsontext.Value(`"first"`),
 		},
 		Guard: &db.MetadataPatchGuard{Key: "deck.rank", IfAbsent: true},
 	})
@@ -94,8 +94,8 @@ func TestPatchIssueMetadata_AbsentGuardIsCheckedInsideMutation(t *testing.T) {
 	_, err = d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID,
 		Actor:   "tester",
-		Patch: map[string]json.RawMessage{
-			"deck.rank": json.RawMessage(`"second"`),
+		Patch: map[string]jsontext.Value{
+			"deck.rank": jsontext.Value(`"second"`),
 		},
 		Guard: &db.MetadataPatchGuard{Key: "deck.rank", IfAbsent: true},
 	})
@@ -114,8 +114,8 @@ func TestPatchIssueMetadata_EmptyDiffNoEvent(t *testing.T) {
 	// First patch sets the key (revision bumps).
 	res1, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(iss.Revision), Actor: "tester",
-		Patch: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-05-20"`),
+		Patch: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-05-20"`),
 		},
 	})
 	require.NoError(t, err)
@@ -124,8 +124,8 @@ func TestPatchIssueMetadata_EmptyDiffNoEvent(t *testing.T) {
 	// Re-applying the same value is a no-op.
 	res2, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(res1.NewRevision), Actor: "tester",
-		Patch: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-05-20"`),
+		Patch: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-05-20"`),
 		},
 	})
 	require.NoError(t, err)
@@ -146,8 +146,8 @@ func TestPatchIssueMetadata_InvalidKeyValueRejected(t *testing.T) {
 
 	_, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(iss.Revision), Actor: "tester",
-		Patch: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`123`), // reserved key, wrong JSON type
+		Patch: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`123`), // reserved key, wrong JSON type
 		},
 	})
 	require.Error(t, err)
@@ -160,8 +160,8 @@ func TestPatchIssueMetadata_UnknownKeyAccepted(t *testing.T) {
 
 	res, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(iss.Revision), Actor: "tester",
-		Patch: map[string]json.RawMessage{
-			"definitely_not_a_key": json.RawMessage(`"yellow"`),
+		Patch: map[string]jsontext.Value{
+			"definitely_not_a_key": jsontext.Value(`"yellow"`),
 		},
 	})
 	require.NoError(t, err)
@@ -177,8 +177,8 @@ func TestPatchProjectMetadata_HappyPath(t *testing.T) {
 
 	res, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: p.ID, IfMatchRev: new(p.Revision), Actor: "tester",
-		Patch: map[string]json.RawMessage{
-			"area": json.RawMessage(`"Personal"`),
+		Patch: map[string]jsontext.Value{
+			"area": jsontext.Value(`"Personal"`),
 		},
 	})
 	require.NoError(t, err)
@@ -195,7 +195,7 @@ func TestPatchProjectMetadata_StaleRevisionReturns409(t *testing.T) {
 	p, _ := d.CreateProject(ctx, "p")
 	_, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: p.ID, IfMatchRev: new(int64(99)), Actor: "tester",
-		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"X"`)},
+		Patch: map[string]jsontext.Value{"area": jsontext.Value(`"X"`)},
 	})
 	var conflict *db.RevisionConflictError
 	require.ErrorAs(t, err, &conflict)
@@ -209,7 +209,7 @@ func TestPatchProjectMetadata_UnknownKeyAccepted(t *testing.T) {
 	p, _ := d.CreateProject(ctx, "p")
 	res, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: p.ID, IfMatchRev: new(p.Revision), Actor: "tester",
-		Patch: map[string]json.RawMessage{"definitely_not_a_key": json.RawMessage(`"yellow"`)},
+		Patch: map[string]jsontext.Value{"definitely_not_a_key": jsontext.Value(`"yellow"`)},
 	})
 	require.NoError(t, err)
 	assert.True(t, res.Changed)
@@ -223,13 +223,13 @@ func TestPatchProjectMetadata_EmptyDiffNoEvent(t *testing.T) {
 
 	res1, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: p.ID, IfMatchRev: new(p.Revision), Actor: "tester",
-		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"X"`)},
+		Patch: map[string]jsontext.Value{"area": jsontext.Value(`"X"`)},
 	})
 	require.NoError(t, err)
 
 	res2, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: p.ID, IfMatchRev: new(res1.NewRevision), Actor: "tester",
-		Patch: map[string]json.RawMessage{"area": json.RawMessage(`"X"`)},
+		Patch: map[string]jsontext.Value{"area": jsontext.Value(`"X"`)},
 	})
 	require.NoError(t, err)
 	assert.False(t, res2.Changed)
@@ -247,7 +247,7 @@ func TestDesignateInboxProject_RollsBackWhenAssignmentFails(t *testing.T) {
 	_, err = d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: previous.ID,
 		Actor:     "user-a",
-		Patch:     map[string]json.RawMessage{"role": json.RawMessage(`"inbox"`)},
+		Patch:     map[string]jsontext.Value{"role": jsontext.Value(`"inbox"`)},
 	})
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `
@@ -279,8 +279,8 @@ func TestPatchIssueMetadata_ClearKeyWithNull(t *testing.T) {
 	// Set a key first.
 	res1, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(iss.Revision), Actor: "tester",
-		Patch: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-05-20"`),
+		Patch: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-05-20"`),
 		},
 	})
 	require.NoError(t, err)
@@ -288,8 +288,8 @@ func TestPatchIssueMetadata_ClearKeyWithNull(t *testing.T) {
 	// Clear it with null.
 	res2, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(res1.NewRevision), Actor: "tester",
-		Patch: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`null`),
+		Patch: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`null`),
 		},
 	})
 	require.NoError(t, err)

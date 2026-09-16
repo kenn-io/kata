@@ -3,7 +3,7 @@ package pgstore_test
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -43,7 +43,7 @@ func TestImportReplayFreshTargetRejectsConcurrentWriter(t *testing.T) {
 		result <- store.ImportReplay(ctx, []db.ImportRecord{
 			&db.ProjectExport{
 				ID: 3, UID: "01KATA00000000000000000002", Name: "restored-project",
-				CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+				CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: jsontext.Value(`{}`), Revision: 1,
 			},
 		}, db.ImportOptions{RequireFreshTarget: true})
 	}()
@@ -109,7 +109,7 @@ func TestImportReplayWaitsForConcurrentSchemaMigration(t *testing.T) {
 		result <- store.ImportReplay(ctx, []db.ImportRecord{
 			&db.ProjectExport{
 				ID: 2, UID: "01KATA00000000000000000003", Name: "restored-project",
-				CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+				CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: jsontext.Value(`{}`), Revision: 1,
 			},
 		}, db.ImportOptions{})
 	}()
@@ -208,7 +208,7 @@ func TestImportReplayRefusesCrossSchemaCascade(t *testing.T) {
 	err = store.ImportReplay(ctx, []db.ImportRecord{
 		&db.ProjectExport{
 			ID: 9, UID: "01KATA00000000000000000009", Name: "replacement",
-			CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+			CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 	}, db.ImportOptions{})
 	require.Error(t, err)
@@ -268,7 +268,7 @@ func TestImportReplayPreservesHistoricalEventProjectName(t *testing.T) {
 		instanceUID = "01KATA00000000000000000014"
 		createdAt   = "2026-07-15T12:00:00.000Z"
 	)
-	payload := json.RawMessage(`{"name":"old-name"}`)
+	payload := jsontext.Value(`{"name":"old-name"}`)
 	hash, err := db.EventContentHash(db.EventHashInput{
 		UID: eventUID, OriginInstanceUID: instanceUID, ProjectUID: projectUID,
 		ProjectName: "old-name", Type: "project.created", Actor: "operator",
@@ -279,7 +279,7 @@ func TestImportReplayPreservesHistoricalEventProjectName(t *testing.T) {
 		&db.MetaKV{Key: "instance_uid", Value: instanceUID},
 		&db.ProjectExport{
 			ID: 12, UID: projectUID, Name: "new-name", CreatedAt: createdAt,
-			Metadata: json.RawMessage(`{}`), Revision: 1,
+			Metadata: jsontext.Value(`{}`), Revision: 1,
 		},
 		&db.EventExport{
 			ID: 13, UID: eventUID, OriginInstanceUID: instanceUID, ProjectID: 12,

@@ -3,7 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 
 	"go.kenn.io/kata/internal/db"
@@ -50,7 +50,7 @@ SELECT e.uid, e.origin_instance_uid, p.uid, e.project_name,
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
-		input.Payload = json.RawMessage(payload)
+		input.Payload = jsontext.Value(payload)
 		hash, err := db.EventContentHash(input)
 		if err != nil {
 			return fmt.Errorf("rehash retained event %d: %w", id, err)

@@ -1,7 +1,7 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -457,19 +457,19 @@ type Event struct {
 // RemoteEvent is the portable event shape accepted from a federation hub.
 // Backend-local row IDs and display-only short IDs are intentionally excluded.
 type RemoteEvent struct {
-	EventUID          string          `json:"event_uid"`
-	OriginInstanceUID string          `json:"origin_instance_uid"`
-	ProjectUID        string          `json:"project_uid"`
-	ProjectName       string          `json:"project_name"`
-	IssueUID          *string         `json:"issue_uid,omitempty"`
-	RelatedIssueUID   *string         `json:"related_issue_uid,omitempty"`
-	Type              string          `json:"type"`
-	Actor             string          `json:"actor"`
-	HLCPhysicalMS     int64           `json:"hlc_physical_ms"`
-	HLCCounter        int64           `json:"hlc_counter"`
-	ContentHash       string          `json:"content_hash"`
-	Payload           json.RawMessage `json:"payload,omitempty"`
-	CreatedAt         time.Time       `json:"created_at"`
+	EventUID          string         `json:"event_uid"`
+	OriginInstanceUID string         `json:"origin_instance_uid"`
+	ProjectUID        string         `json:"project_uid"`
+	ProjectName       string         `json:"project_name"`
+	IssueUID          *string        `json:"issue_uid,omitempty"`
+	RelatedIssueUID   *string        `json:"related_issue_uid,omitempty"`
+	Type              string         `json:"type"`
+	Actor             string         `json:"actor"`
+	HLCPhysicalMS     int64          `json:"hlc_physical_ms"`
+	HLCCounter        int64          `json:"hlc_counter"`
+	ContentHash       string         `json:"content_hash"`
+	Payload           jsontext.Value `json:"payload,omitempty"`
+	CreatedAt         time.Time      `json:"created_at"`
 }
 
 // Link mirrors a row in links.

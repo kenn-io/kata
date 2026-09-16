@@ -1,7 +1,8 @@
 package api //nolint:revive // package name "api" is fixed by Plan 1 §4 wire-types layout.
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
@@ -109,7 +110,7 @@ type RunIssueSyncOnceResponse struct {
 }
 
 // DecodeJSONMap decodes a durable provider config blob into an API object.
-func DecodeJSONMap(raw json.RawMessage) (JSONMap, error) {
+func DecodeJSONMap(raw jsontext.Value) (JSONMap, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}

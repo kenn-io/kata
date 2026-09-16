@@ -3,7 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"testing"
 
@@ -163,8 +163,8 @@ func TestReadUISnapshotConsistent(t *testing.T) {
 		Body:      "Parent details",
 		Author:    "user-a",
 		Owner:     &owner,
-		Metadata: map[string]json.RawMessage{
-			"scheduled_on": json.RawMessage(`"2026-08-01"`),
+		Metadata: map[string]jsontext.Value{
+			"scheduled_on": jsontext.Value(`"2026-08-01"`),
 		},
 	})
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestReadUISnapshotConsistent(t *testing.T) {
 		DTStart:   "2026-08-01",
 		Timezone:  "America/Chicago",
 		Template: db.RecurrenceTemplate{
-			Title: "Weekly review", Labels: []string{"ready"}, Metadata: json.RawMessage(`{}`),
+			Title: "Weekly review", Labels: []string{"ready"}, Metadata: jsontext.Value(`{}`),
 		},
 	})
 	require.NoError(t, err)

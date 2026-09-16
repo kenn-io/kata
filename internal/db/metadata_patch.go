@@ -2,7 +2,8 @@ package db
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,15 +13,15 @@ import (
 
 // ApplyMetadataPatch merges patch keys into an existing metadata object.
 // JSON null removes a key; an empty or null current value is treated as {}.
-func ApplyMetadataPatch(current json.RawMessage, patch map[string]json.RawMessage) (json.RawMessage, error) {
-	var values map[string]json.RawMessage
+func ApplyMetadataPatch(current jsontext.Value, patch map[string]jsontext.Value) (jsontext.Value, error) {
+	var values map[string]jsontext.Value
 	if len(current) > 0 && string(current) != "null" {
 		if err := json.Unmarshal(current, &values); err != nil {
 			return nil, fmt.Errorf("unmarshal current metadata: %w", err)
 		}
 	}
 	if values == nil {
-		values = make(map[string]json.RawMessage)
+		values = make(map[string]jsontext.Value)
 	}
 	for key, value := range patch {
 		if string(value) == "null" {
@@ -39,7 +40,7 @@ func ApplyMetadataPatch(current json.RawMessage, patch map[string]json.RawMessag
 // CheckMetadataPatchGuard compares one guard with the current metadata blob.
 // Callers must invoke it after reading the row inside the same transaction as
 // the subsequent write. A nil guard leaves the patch unconditional.
-func CheckMetadataPatchGuard(current json.RawMessage, patch map[string]json.RawMessage, guard *MetadataPatchGuard) error {
+func CheckMetadataPatchGuard(current jsontext.Value, patch map[string]jsontext.Value, guard *MetadataPatchGuard) error {
 	if guard == nil {
 		return nil
 	}
@@ -57,7 +58,7 @@ func CheckMetadataPatchGuard(current json.RawMessage, patch map[string]json.RawM
 		return errors.New("metadata guard if_value must not be null")
 	}
 
-	var values map[string]json.RawMessage
+	var values map[string]jsontext.Value
 	if len(current) > 0 && string(current) != "null" {
 		if err := json.Unmarshal(current, &values); err != nil {
 			return fmt.Errorf("unmarshal current metadata for guard: %w", err)

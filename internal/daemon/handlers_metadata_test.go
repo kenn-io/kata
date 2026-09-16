@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,11 +67,11 @@ func metadataSubjects() []metadataSubject {
 // string for substring assertions on the well-formed marshal output).
 func decodeMetadataEnvelope(t *testing.T, raw []byte, envKey string) (metadata string, rev int64) {
 	t.Helper()
-	var envelope map[string]json.RawMessage
+	var envelope map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &envelope))
 	var inner struct {
-		Metadata json.RawMessage `json:"metadata"`
-		Revision int64           `json:"revision"`
+		Metadata jsontext.Value `json:"metadata"`
+		Revision int64          `json:"revision"`
 	}
 	require.NoError(t, json.Unmarshal(envelope[envKey], &inner))
 	return string(inner.Metadata), inner.Revision
@@ -219,8 +220,8 @@ func TestPatchIssueMetadata_UnknownKey_Accepted(t *testing.T) {
 
 	var out struct {
 		Issue struct {
-			Metadata json.RawMessage `json:"metadata"`
-			Revision int64           `json:"revision"`
+			Metadata jsontext.Value `json:"metadata"`
+			Revision int64          `json:"revision"`
 		} `json:"issue"`
 		Changed bool `json:"changed"`
 	}
@@ -242,7 +243,7 @@ func TestPatchIssueMetadata_UnknownKey_Accepted(t *testing.T) {
 
 	var view struct {
 		Issue struct {
-			Metadata json.RawMessage `json:"metadata"`
+			Metadata jsontext.Value `json:"metadata"`
 		} `json:"issue"`
 	}
 	require.NoError(t, json.Unmarshal(getBody, &view))
@@ -256,8 +257,8 @@ func TestPatchIssueMetadata_GuardFailureReturnsConflictWithoutMutation(t *testin
 	_, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 		IssueID: iss.ID,
 		Actor:   "tester",
-		Patch: map[string]json.RawMessage{
-			"deck.rank": json.RawMessage(`"current"`),
+		Patch: map[string]jsontext.Value{
+			"deck.rank": jsontext.Value(`"current"`),
 		},
 	})
 	require.NoError(t, err)
@@ -364,8 +365,8 @@ func TestPatchProjectMetadata_UnknownKey_Accepted(t *testing.T) {
 
 	var out struct {
 		Project struct {
-			Metadata json.RawMessage `json:"metadata"`
-			Revision int64           `json:"revision"`
+			Metadata jsontext.Value `json:"metadata"`
+			Revision int64          `json:"revision"`
 		} `json:"project"`
 		Changed bool `json:"changed"`
 	}
@@ -448,7 +449,7 @@ func TestPatchProjectMetadata_DesignatesInboxAtomically(t *testing.T) {
 	_, err := env.DB.PatchProjectMetadata(t.Context(), db.PatchProjectMetadataIn{
 		ProjectID: previous.ID,
 		Actor:     "user-a",
-		Patch:     map[string]json.RawMessage{"role": json.RawMessage(`"inbox"`)},
+		Patch:     map[string]jsontext.Value{"role": jsontext.Value(`"inbox"`)},
 	})
 	require.NoError(t, err)
 	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
@@ -482,7 +483,7 @@ func TestPatchProjectMetadata_RejectsCombinedInboxDesignation(t *testing.T) {
 	_, err := env.DB.PatchProjectMetadata(t.Context(), db.PatchProjectMetadataIn{
 		ProjectID: previous.ID,
 		Actor:     "user-a",
-		Patch:     map[string]json.RawMessage{"role": json.RawMessage(`"inbox"`)},
+		Patch:     map[string]jsontext.Value{"role": jsontext.Value(`"inbox"`)},
 	})
 	require.NoError(t, err)
 

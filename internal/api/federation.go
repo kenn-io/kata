@@ -1,7 +1,7 @@
 package api //nolint:revive // package name "api" is fixed by Plan 1 §4 wire-types layout.
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
@@ -287,17 +287,17 @@ type CreateFederationReplicaRequest struct {
 	}
 }
 
-// CreateFederationReplicaBody is returned after binding a local spoke project.
-type CreateFederationReplicaBody struct {
+// CreateFederationReplicaResponseBody is returned after binding a local spoke project.
+type CreateFederationReplicaResponseBody struct {
 	Project               ProjectOut           `json:"project"`
 	Binding               FederationBindingOut `json:"binding"`
 	Adopted               bool                 `json:"adopted,omitempty,omitzero"`
 	AdoptionSnapshotCount int64                `json:"adoption_snapshot_count,omitempty,omitzero"`
 }
 
-// CreateFederationReplicaResponse wraps CreateFederationReplicaBody.
+// CreateFederationReplicaResponse wraps CreateFederationReplicaResponseBody.
 type CreateFederationReplicaResponse struct {
-	Body CreateFederationReplicaBody
+	Body CreateFederationReplicaResponseBody
 }
 
 // RebindFederationReplicaRequest selects a daemon-owned catalog entry as the
@@ -375,20 +375,20 @@ const (
 // spoke. Source EventID is the spoke-local row cursor; local hub IDs and
 // display-only short IDs are intentionally excluded.
 type FederationIngestEventEnvelope struct {
-	EventID           int64           `json:"event_id"`
-	EventUID          string          `json:"event_uid"`
-	OriginInstanceUID string          `json:"origin_instance_uid"`
-	ProjectUID        string          `json:"project_uid"`
-	ProjectName       string          `json:"project_name"`
-	IssueUID          *string         `json:"issue_uid,omitempty"`
-	RelatedIssueUID   *string         `json:"related_issue_uid,omitempty"`
-	Type              string          `json:"type"`
-	Actor             string          `json:"actor"`
-	HLCPhysicalMS     int64           `json:"hlc_physical_ms"`
-	HLCCounter        int64           `json:"hlc_counter"`
-	ContentHash       string          `json:"content_hash"`
-	Payload           json.RawMessage `json:"payload,omitempty"`
-	CreatedAt         time.Time       `json:"created_at"`
+	EventID           int64          `json:"event_id"`
+	EventUID          string         `json:"event_uid"`
+	OriginInstanceUID string         `json:"origin_instance_uid"`
+	ProjectUID        string         `json:"project_uid"`
+	ProjectName       string         `json:"project_name"`
+	IssueUID          *string        `json:"issue_uid,omitempty"`
+	RelatedIssueUID   *string        `json:"related_issue_uid,omitempty"`
+	Type              string         `json:"type"`
+	Actor             string         `json:"actor"`
+	HLCPhysicalMS     int64          `json:"hlc_physical_ms"`
+	HLCCounter        int64          `json:"hlc_counter"`
+	ContentHash       string         `json:"content_hash"`
+	Payload           jsontext.Value `json:"payload,omitempty"`
+	CreatedAt         time.Time      `json:"created_at"`
 }
 
 // FederationIngestEventsBody summarizes an accepted push batch. Duplicates are

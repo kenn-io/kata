@@ -91,7 +91,7 @@ type federationStressNode struct {
 	projectID int64
 	running   bool
 	cred      config.FederationCredential
-	replica   api.CreateFederationReplicaBody
+	replica   api.CreateFederationReplicaResponseBody
 }
 
 type federationStressIssue struct {
@@ -221,7 +221,7 @@ func (fx *federationStressFixture) enrollSpoke(t federationStressTB, spoke *fede
 		"actor":              "stress",
 	}, &created)
 
-	var replica api.CreateFederationReplicaBody
+	var replica api.CreateFederationReplicaResponseBody
 	stressDecodePOST(t, spoke.http, spoke.url+"/api/v1/federation/replicas", map[string]any{
 		"hub_url":                   fx.hub.url,
 		"hub_project_id":            fx.hub.projectID,

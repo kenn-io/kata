@@ -3,7 +3,7 @@ package fakeconnector
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -23,7 +23,7 @@ type conformanceFixture struct{ path string }
 func (f *conformanceFixture) RootLocator() string { return "fixture-root" }
 
 func (f *conformanceFixture) Invocation() connector.Invocation {
-	return connector.Invocation{Instance: "example-instance", Settings: json.RawMessage(`{}`)}
+	return connector.Invocation{Instance: "example-instance", Settings: jsontext.Value(`{}`)}
 }
 
 func (f *conformanceFixture) Exchange(_ context.Context, request []byte) ([]byte, error) {

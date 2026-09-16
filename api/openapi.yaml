@@ -450,22 +450,6 @@ components:
         - project_id
         - capabilities
       type: object
-    CreateFederationReplicaBody:
-      additionalProperties: true
-      properties:
-        adopted:
-          type: boolean
-        adoption_snapshot_count:
-          format: int64
-          type: integer
-        binding:
-          $ref: "#/components/schemas/FederationBindingOut"
-        project:
-          $ref: "#/components/schemas/ProjectOut"
-      required:
-        - project
-        - binding
-      type: object
     CreateFederationReplicaRequestBody:
       additionalProperties: false
       properties:
@@ -502,6 +486,22 @@ components:
         - hub_project_uid
         - project_name
         - replay_horizon_event_id
+      type: object
+    CreateFederationReplicaResponseBody:
+      additionalProperties: true
+      properties:
+        adopted:
+          type: boolean
+        adoption_snapshot_count:
+          format: int64
+          type: integer
+        binding:
+          $ref: "#/components/schemas/FederationBindingOut"
+        project:
+          $ref: "#/components/schemas/ProjectOut"
+      required:
+        - project
+        - binding
       type: object
     CreateInitialLinkBody:
       additionalProperties: false
@@ -4876,7 +4876,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreateFederationReplicaBody"
+                $ref: "#/components/schemas/CreateFederationReplicaResponseBody"
           description: OK
         default:
           content:

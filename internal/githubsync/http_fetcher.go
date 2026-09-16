@@ -3,7 +3,7 @@ package githubsync
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -335,7 +335,7 @@ func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request g
 			return nil, statusErr
 		}
 		headers := resp.Header.Clone()
-		if err := json.NewDecoder(resp.Body).Decode(request.Out); err != nil {
+		if err := json.UnmarshalRead(resp.Body, request.Out); err != nil {
 			_ = resp.Body.Close()
 			return nil, fmt.Errorf("decode %s: %w", request.Resource, err)
 		}

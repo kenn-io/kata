@@ -3,7 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"os"
@@ -45,7 +45,7 @@ func pgReplayProject(ctx context.Context, tx *sql.Tx, project *db.ProjectExport)
 	}
 	metadata := project.Metadata
 	if len(metadata) == 0 {
-		metadata = json.RawMessage(`{}`)
+		metadata = jsontext.Value(`{}`)
 	}
 	revision := project.Revision
 	if revision == 0 {
@@ -102,7 +102,7 @@ func pgReplayIssueSyncBinding(
 	enabled := preserveEnabled && binding.Enabled
 	configJSON := binding.Config
 	if len(configJSON) == 0 {
-		configJSON = json.RawMessage(`{}`)
+		configJSON = jsontext.Value(`{}`)
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO issue_sync_bindings(
 id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,
@@ -127,11 +127,11 @@ last_created,last_updated,last_unchanged,last_comments
 func pgReplayRecurrence(ctx context.Context, tx *sql.Tx, recurrence *db.RecurrenceExport) error {
 	labels := recurrence.TemplateLabels
 	if len(labels) == 0 {
-		labels = json.RawMessage(`[]`)
+		labels = jsontext.Value(`[]`)
 	}
 	metadata := recurrence.TemplateMetadata
 	if len(metadata) == 0 {
-		metadata = json.RawMessage(`{}`)
+		metadata = jsontext.Value(`{}`)
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO recurrences(
 id,uid,project_id,rrule,dtstart,timezone,template_title,template_body,template_owner,
@@ -152,7 +152,7 @@ func pgReplayIssue(ctx context.Context, tx *sql.Tx, issue *db.IssueExport) error
 	}
 	metadata := issue.Metadata
 	if len(metadata) == 0 {
-		metadata = json.RawMessage(`{}`)
+		metadata = jsontext.Value(`{}`)
 	}
 	revision := issue.Revision
 	if revision == 0 {

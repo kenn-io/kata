@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -73,8 +74,8 @@ type hookLogFilter struct {
 	hookIndex  int
 }
 
-func (f *hookLogFilter) accept(line []byte) (json.RawMessage, bool) {
-	var rec map[string]json.RawMessage
+func (f *hookLogFilter) accept(line []byte) (jsontext.Value, bool) {
+	var rec map[string]jsontext.Value
 	if err := json.Unmarshal(line, &rec); err != nil {
 		return nil, false
 	}
@@ -87,21 +88,21 @@ func (f *hookLogFilter) accept(line []byte) (json.RawMessage, bool) {
 	if f.hookIndex >= 0 && jsonInt(rec, "hook_index") != f.hookIndex {
 		return nil, false
 	}
-	return json.RawMessage(line), true
+	return jsontext.Value(line), true
 }
 
 // isOK returns true when result == "ok" and exit_code == 0.
-func isOK(rec map[string]json.RawMessage) bool {
+func isOK(rec map[string]jsontext.Value) bool {
 	return jsonString(rec, "result") == "ok" && jsonInt(rec, "exit_code") == 0
 }
 
-func jsonString(rec map[string]json.RawMessage, key string) string {
+func jsonString(rec map[string]jsontext.Value, key string) string {
 	var s string
 	_ = json.Unmarshal(rec[key], &s)
 	return s
 }
 
-func jsonInt(rec map[string]json.RawMessage, key string) int {
+func jsonInt(rec map[string]jsontext.Value, key string) int {
 	var n int
 	_ = json.Unmarshal(rec[key], &n)
 	return n
@@ -176,14 +177,14 @@ func writeHookLogRecord(w io.Writer, raw []byte) {
 		writeLine(w, string(raw))
 		return
 	}
-	var rec map[string]json.RawMessage
+	var rec map[string]jsontext.Value
 	if err := json.Unmarshal(raw, &rec); err != nil {
 		return
 	}
 	writeLine(w, formatAgentHookLogRecord(rec))
 }
 
-func formatAgentHookLogRecord(rec map[string]json.RawMessage) string {
+func formatAgentHookLogRecord(rec map[string]jsontext.Value) string {
 	keys := make([]string, 0, len(rec))
 	for k := range rec {
 		keys = append(keys, k)
@@ -200,13 +201,13 @@ func formatAgentHookLogRecord(rec map[string]json.RawMessage) string {
 	return b.String()
 }
 
-func agentLogValue(raw json.RawMessage) string {
+func agentLogValue(raw jsontext.Value) string {
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		return agentValue(s)
 	}
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, raw); err != nil {
+	buf := raw.Clone()
+	if err := buf.Compact(); err != nil {
 		return agentValue(string(raw))
 	}
 	return agentValue(buf.String())
@@ -244,7 +245,7 @@ func readMatchesFromFile(path string, stderr io.Writer, f *hookLogFilter) ([]str
 		}
 		rec, ok := f.accept(append([]byte(nil), line...))
 		if !ok {
-			if !json.Valid(line) {
+			if !jsontext.Value(line).IsValid() {
 				_, _ = fmt.Fprintf(stderr, "kata: skipping malformed line %d in %s\n", lineNo, path)
 			}
 			continue
@@ -408,7 +409,7 @@ func emitOne(content []byte, lineNo int, path string, stdout, stderr io.Writer, 
 	}
 	rec, ok := f.accept(append([]byte(nil), content...))
 	if !ok {
-		if !json.Valid(content) {
+		if !jsontext.Value(content).IsValid() {
 			_, _ = fmt.Fprintf(stderr, "kata: skipping malformed line %d in %s\n", lineNo, path)
 		}
 		return

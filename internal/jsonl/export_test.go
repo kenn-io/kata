@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -736,7 +737,7 @@ func TestExportNoIncludeDeletedNullsAggregatedEnvelopePeerOnSoftDelete(t *testin
 	bs, _ := json.Marshal(aggregated["payload"])
 	assert.Contains(t, string(bs), target.UID,
 		"payload must keep the orphan UID for historical context")
-	payload := json.RawMessage(bs)
+	payload := jsontext.Value(bs)
 	expectedHash, err := db.EventContentHash(db.EventHashInput{
 		UID:               aggregated["uid"].(string),
 		OriginInstanceUID: aggregated["origin_instance_uid"].(string),

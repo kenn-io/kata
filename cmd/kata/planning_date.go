@@ -1,7 +1,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 
 	"github.com/spf13/cobra"
 )
@@ -24,7 +25,7 @@ func newPlanningDateCmd(name, metadataKey, noun string) *cobra.Command {
 			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
 				return err
 			}
-			value := json.RawMessage("null")
+			value := jsontext.Value("null")
 			verb := "unset"
 			if args[1] != "-" {
 				encoded, err := json.Marshal(args[1])

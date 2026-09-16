@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
 	"sort"
@@ -336,7 +336,7 @@ func resolveBridgeTargetWithOptions(
 
 func printBridgeResponse(cmd *cobra.Command, raw []byte, bridge *generated.ExternalRootBridgeOut, action string, extra map[string]string) error {
 	if currentOutputMode() == outputJSON {
-		return emitJSON(cmd.OutOrStdout(), json.RawMessage(raw))
+		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
 	}
 	if bridge == nil {
 		return fmt.Errorf("bridge %s: empty response", action)
@@ -420,7 +420,7 @@ func printBridgeAgent(cmd *cobra.Command, bridge generated.ExternalRootBridgeOut
 
 func printBridgeRun(cmd *cobra.Command, raw []byte, run generated.ExternalRootRunOut) error {
 	if currentOutputMode() == outputJSON {
-		return emitJSON(cmd.OutOrStdout(), json.RawMessage(raw))
+		return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
 	}
 	if flags.Quiet {
 		return nil

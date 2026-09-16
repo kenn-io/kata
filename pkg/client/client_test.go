@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -408,7 +409,7 @@ func TestGeneratedPollEventsPreservesPayload(t *testing.T) {
 }
 
 func TestGeneratedFederationIngestEventPreservesPayload(t *testing.T) {
-	payload := json.RawMessage(`{"items":[{"id":1}],"source":"hub-project"}`)
+	payload := jsontext.Value(`{"items":[{"id":1}],"source":"hub-project"}`)
 	event := generated.FederationIngestEventEnvelope{
 		Actor:             "tester",
 		ContentHash:       "hash",
@@ -425,7 +426,7 @@ func TestGeneratedFederationIngestEventPreservesPayload(t *testing.T) {
 
 	raw, err := json.Marshal(event)
 	require.NoError(t, err)
-	var encoded map[string]json.RawMessage
+	var encoded map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &encoded))
 	assert.JSONEq(t, string(payload), string(encoded["payload"]))
 
@@ -461,3 +462,24 @@ func (b *closeTrackingBody) Close() error {
 }
 
 const testStreamTimeout = 2 * time.Second
+
+func TestGeneratedReplicaCreationSendsRequestFields(t *testing.T) {
+	var received struct {
+		HubURL      string `json:"hub_url"`
+		ProjectName string `json:"project_name"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&received))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"project":{},"binding":{}}`)
+	}))
+	defer server.Close()
+	apiClient, err := NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+	var request generated.CreateFederationReplicaBody
+	require.NoError(t, json.Unmarshal([]byte(`{"hub_url":"https://hub.example","hub_project_id":7,"hub_project_uid":"example-uid","project_name":"spoke-project","replay_horizon_event_id":0}`), &request))
+	_, err = apiClient.CreateFederationReplicaWithResponse(t.Context(), &generated.CreateFederationReplicaRequestOptions{Body: &request})
+	require.NoError(t, err)
+	assert.Equal(t, "https://hub.example", received.HubURL)
+	assert.Equal(t, "spoke-project", received.ProjectName)
+}

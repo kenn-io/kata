@@ -19,7 +19,7 @@ import (
 
 const defaultHTTPTimeout = 5 * time.Second
 
-type sseStarter func(context.Context, sseClient, string, *int64, chan tea.Msg, uint64)
+type sseStarter func(context.Context, *http.Client, string, *int64, chan tea.Msg, uint64)
 
 type sseRestartState struct {
 	root   context.Context
@@ -108,7 +108,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	m := buildRunModel(opts, c, bi, conn)
 	sseCtx, cancelSSE := context.WithCancel(ctx)
-	startSSE := func(ctx context.Context, hc sseClient, endpoint string, projectID *int64, ch chan tea.Msg, gen uint64) {
+	startSSE := func(ctx context.Context, hc *http.Client, endpoint string, projectID *int64, ch chan tea.Msg, gen uint64) {
 		go startSSEForConnection(ctx, hc, endpoint, projectID, ch, gen)
 	}
 	sseRestart := newSSERestartState(ctx, cancelSSE, startSSE)

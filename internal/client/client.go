@@ -7,7 +7,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -15,6 +14,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -58,7 +60,7 @@ type PingInfo struct {
 	OK      bool   `json:"ok"`
 	Service string `json:"service"`
 	Version string `json:"version"`
-	PID     int    `json:"pid,omitempty"`
+	PID     int    `json:"pid,omitzero"`
 }
 
 // ErrLocalDaemonUnreachable identifies a live local daemon process whose
@@ -199,22 +201,25 @@ func Ping(ctx context.Context, client *http.Client, base string) bool {
 
 // Probe returns the daemon identity from GET base+/api/v1/ping.
 func Probe(ctx context.Context, client *http.Client, base string) (PingInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/ping", nil) //nolint:gosec // G704: base built from our own runtime file
+	apiClient, err := generated.NewDefaultClient(base, runtime.WithHTTPClient(probeRequestDoer{client}))
 	if err != nil {
 		return PingInfo{}, err
 	}
-	resp, err := client.Do(req) //nolint:gosec // G704: base built from our own runtime file
-	if err != nil {
+	resp, err := apiClient.PingWithResponse(ctx)
+	if resp == nil {
 		return PingInfo{}, err
 	}
-	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return PingInfo{}, fmt.Errorf("daemon ping returned %d", resp.StatusCode)
 	}
-	var info PingInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+	if err != nil {
 		return PingInfo{}, fmt.Errorf("decode daemon ping: %w", err)
 	}
+	info := PingInfo{OK: resp.JSON200.Ok, Service: resp.JSON200.Service, Version: resp.JSON200.Version}
+	if resp.JSON200.Pid != nil {
+		info.PID = int(*resp.JSON200.Pid)
+	}
+
 	if !info.OK {
 		return PingInfo{}, errors.New("daemon ping returned ok=false")
 	}
@@ -430,4 +435,11 @@ func unixClient(socket string, opts Opts) *http.Client {
 		t.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
 	}
 	return &http.Client{Transport: t, Timeout: opts.Timeout}
+}
+
+// probeRequestDoer preserves the transport selected by daemon discovery.
+type probeRequestDoer struct{ client *http.Client }
+
+func (d probeRequestDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	return d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated probe routes use the daemon selected by local discovery.
 }

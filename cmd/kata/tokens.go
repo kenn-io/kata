@@ -1,15 +1,16 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type tokenCLIOut struct {
@@ -58,11 +59,22 @@ func tokensCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			payload := map[string]string{"actor": actor}
-			if trimmed := strings.TrimSpace(name); trimmed != "" {
-				payload["name"] = trimmed
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
 			}
-			bs, emitted, err := a.passthrough(cmd, http.MethodPost, "/api/v1/tokens", payload)
+			payload := &generated.CreateTokenBody{Actor: actor}
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				payload.Name = &trimmed
+			}
+			response, callErr := apiClient.CreateTokenWithResponse(a.ctx, &generated.CreateTokenRequestOptions{Body: payload})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, response.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -88,7 +100,18 @@ func tokensListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bs, emitted, err := a.passthrough(cmd, http.MethodGet, "/api/v1/tokens", nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			response, callErr := apiClient.ListTokensWithResponse(a.ctx)
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, response.Body)
 			if err != nil || emitted {
 				return err
 			}
@@ -115,8 +138,20 @@ func tokensRevokeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path := fmt.Sprintf("/api/v1/tokens/%d/actions/revoke", id)
-			bs, emitted, err := a.passthrough(cmd, http.MethodPost, path, nil)
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			response, callErr := apiClient.RevokeTokenWithResponse(a.ctx, &generated.RevokeTokenRequestOptions{
+				PathParams: &generated.RevokeTokenPath{ID: id},
+			})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs, emitted, err := emitPassthrough(cmd, response.Body)
 			if err != nil || emitted {
 				return err
 			}

@@ -1,7 +1,7 @@
 package db
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"math"
 	"time"
@@ -431,9 +431,9 @@ func cloneImportRecord(rec ImportRecord) ImportRecord {
 		return &v
 	case *ExternalFieldStateExport:
 		v := *rec
-		v.Baseline = append(json.RawMessage(nil), rec.Baseline...)
-		v.ConflictKata = append(json.RawMessage(nil), rec.ConflictKata...)
-		v.ConflictExternal = append(json.RawMessage(nil), rec.ConflictExternal...)
+		v.Baseline = append(jsontext.Value(nil), rec.Baseline...)
+		v.ConflictKata = append(jsontext.Value(nil), rec.ConflictKata...)
+		v.ConflictExternal = append(jsontext.Value(nil), rec.ConflictExternal...)
 		v.ConflictAt = cloneTimePtr(rec.ConflictAt)
 		return &v
 	case *FederationBindingExport:

@@ -1,21 +1,21 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/pkg/client/generated"
 	kitdaemon "go.kenn.io/kit/daemon"
 
 	"go.kenn.io/kata/internal/api"
@@ -618,16 +618,18 @@ func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, e
 }
 
 func claimHubPing(ctx context.Context, client *http.Client) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://kata.invalid/api/v1/ping", nil)
+	apiClient, err := generated.NewDefaultClient("http://kata.invalid", runtime.WithHTTPClient(claimRequestDoer{client}))
 	if err != nil {
 		return false
 	}
-	resp, err := client.Do(req) //nolint:gosec // Unix runtime file target is locally discovered and probed.
-	if err != nil {
-		return false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode == http.StatusOK
+	resp, _ := apiClient.PingWithResponse(ctx)
+	return resp != nil && resp.StatusCode == http.StatusOK
+}
+
+type claimRequestDoer struct{ client *http.Client }
+
+func (d claimRequestDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	return d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: this generated ping probes only the discovered local daemon socket.
 }
 
 func claimUnixTransport(path string) *http.Transport {
@@ -665,8 +667,19 @@ func (c *claimHubClient) ReleaseClaim(
 }
 
 func (c *claimHubClient) ClaimStatus(ctx context.Context, hubProjectID int64, ref string) (api.ClaimStatusBody, error) {
+	if c.transportErr != nil {
+		return api.ClaimStatusBody{}, c.transportErr
+	}
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{c.client}))
+	if err != nil {
+		return api.ClaimStatusBody{}, err
+	}
+	response, callErr := apiClient.GetIssueLeaseStatusWithResponse(ctx, &generated.GetIssueLeaseStatusRequestOptions{PathParams: &generated.GetIssueLeaseStatusPath{ProjectID: hubProjectID, Ref: ref}})
 	var body api.ClaimStatusBody
-	err := c.getJSON(ctx, claimHubPath(hubProjectID, ref, "lease"), &body)
+	if response == nil {
+		return body, callErr
+	}
+	err = json.Unmarshal(response.Body, &body)
 	if err == nil {
 		normalizeForwardedClaimStatus(&body)
 	}
@@ -680,8 +693,44 @@ func (c *claimHubClient) claimAction(
 	action string,
 	req api.ClaimActionBody,
 ) (api.ClaimActionResponseBody, error) {
+	if c.transportErr != nil {
+		return api.ClaimActionResponseBody{}, c.transportErr
+	}
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{c.client}))
+	if err != nil {
+		return api.ClaimActionResponseBody{}, err
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, err
+	}
+	var payload generated.ClaimActionBody
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return api.ClaimActionResponseBody{}, err
+	}
 	var body api.ClaimActionResponseBody
-	err := c.postJSON(ctx, claimHubPath(hubProjectID, ref, "lease/actions/"+action), req, &body)
+	switch action {
+	case "acquire":
+		response, callErr := apiClient.AcquireIssueLeaseWithResponse(ctx, &generated.AcquireIssueLeaseRequestOptions{PathParams: &generated.AcquireIssueLeasePath{ProjectID: hubProjectID, Ref: ref}, Body: &payload})
+		if response == nil {
+			return body, callErr
+		}
+		err = json.Unmarshal(response.Body, &body)
+	case "renew":
+		response, callErr := apiClient.RenewIssueLeaseWithResponse(ctx, &generated.RenewIssueLeaseRequestOptions{PathParams: &generated.RenewIssueLeasePath{ProjectID: hubProjectID, Ref: ref}, Body: &payload})
+		if response == nil {
+			return body, callErr
+		}
+		err = json.Unmarshal(response.Body, &body)
+	case "release":
+		response, callErr := apiClient.ReleaseIssueLeaseWithResponse(ctx, &generated.ReleaseIssueLeaseRequestOptions{PathParams: &generated.ReleaseIssueLeasePath{ProjectID: hubProjectID, Ref: ref}, Body: &payload})
+		if response == nil {
+			return body, callErr
+		}
+		err = json.Unmarshal(response.Body, &body)
+	default:
+		return body, fmt.Errorf("unknown claim action %q", action)
+	}
 	if err == nil {
 		normalizeForwardedClaimActionResponse(&body)
 	}
@@ -702,53 +751,20 @@ func normalizeForwardedClaimStatus(body *api.ClaimStatusBody) {
 	body.MirrorDeprecatedClaimFields()
 }
 
-func (c *claimHubClient) getJSON(ctx context.Context, path string, out any) error {
-	if c.transportErr != nil {
-		return c.transportErr
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil) //nolint:gosec // hub URL comes from local federation config.
-	if err != nil {
-		return err
-	}
-	resp, err := c.client.Do(req) //nolint:gosec // request target is an explicit configured hub.
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &claimHubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
-}
+// claimHubDoer keeps error bodies bounded while generated operations own requests.
+type claimHubDoer struct{ client *http.Client }
 
-func (c *claimHubClient) postJSON(ctx context.Context, path string, in, out any) error {
-	if c.transportErr != nil {
-		return c.transportErr
-	}
-	body, err := json.Marshal(in)
+func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
 	if err != nil {
-		return err
+		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body)) //nolint:gosec // hub URL comes from local federation config.
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req) //nolint:gosec // request target is an explicit configured hub.
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &claimHubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		return nil, &claimHubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-func claimHubPath(hubProjectID int64, ref, suffix string) string {
-	return fmt.Sprintf("/api/v1/projects/%d/issues/%s/%s", hubProjectID, url.PathEscape(ref), suffix)
+	return resp, nil
 }
 
 func requireHubClaimBinding(ctx context.Context, store db.Storage, projectID int64) error {

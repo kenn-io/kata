@@ -5,7 +5,8 @@ package fakeconnector
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"maps"
@@ -47,29 +48,29 @@ type StoredRoot struct {
 
 // Mutation records one provider-side mutation and its raw parameters.
 type Mutation struct {
-	Sequence int             `json:"sequence"`
-	Method   string          `json:"method"`
-	Params   json.RawMessage `json:"params"`
+	Sequence int            `json:"sequence"`
+	Method   string         `json:"method"`
+	Params   jsontext.Value `json:"params"`
 }
 
 // Call records one protocol request and its raw parameters.
 type Call struct {
-	Sequence int             `json:"sequence"`
-	Method   string          `json:"method"`
-	Params   json.RawMessage `json:"params"`
+	Sequence int            `json:"sequence"`
+	Method   string         `json:"method"`
+	Params   jsontext.Value `json:"params"`
 }
 
 // Behavior configures deterministic crash and error responses.
 type Behavior struct {
-	CrashBeforeReply   map[string]int             `json:"crash_before_reply,omitempty"`
-	CrashAfterMutation map[string]int             `json:"crash_after_mutation,omitempty"`
+	CrashBeforeReply   map[string]int             `json:"crash_before_reply,omitzero"`
+	CrashAfterMutation map[string]int             `json:"crash_after_mutation,omitzero"`
 	Errors             map[string]connector.Error `json:"errors,omitempty"`
 	ResponseProtocol   string                     `json:"response_protocol,omitempty"`
 }
 
 type handler struct {
 	path       string
-	params     json.RawMessage
+	params     jsontext.Value
 	crashAfter bool
 }
 
@@ -97,14 +98,14 @@ func Run(path string, in io.Reader, out io.Writer) int {
 		current.Calls = append(current.Calls, Call{
 			Sequence: len(current.Calls) + 1,
 			Method:   request.Method,
-			Params:   append(json.RawMessage(nil), request.Params...),
+			Params:   append(jsontext.Value(nil), request.Params...),
 		})
 		return nil
 	}); err != nil {
 		return exitFailure
 	}
 
-	h := &handler{path: path, params: append(json.RawMessage(nil), request.Params...)}
+	h := &handler{path: path, params: append(jsontext.Value(nil), request.Params...)}
 	var response bytes.Buffer
 	if err := connector.ServeOne(context.Background(), bytes.NewReader(requestBytes), &response, h); err != nil {
 		return exitFailure
@@ -123,7 +124,7 @@ func Run(path string, in io.Reader, out io.Writer) int {
 		}
 		decoded.Protocol = override
 		response.Reset()
-		if err := json.NewEncoder(&response).Encode(decoded); err != nil {
+		if err := json.MarshalWrite(&response, decoded); err != nil {
 			return exitFailure
 		}
 	}
@@ -140,7 +141,7 @@ func (h *handler) Describe(context.Context, connector.DescribeParams) (connector
 	}
 	description := current.Description
 	description.Capabilities = append([]connector.Capability(nil), description.Capabilities...)
-	description.ConfigSchema = append(json.RawMessage(nil), description.ConfigSchema...)
+	description.ConfigSchema = append(jsontext.Value(nil), description.ConfigSchema...)
 	slices.Sort(description.Capabilities)
 	return description, nil
 }
@@ -364,7 +365,7 @@ func (h *handler) mutate(method string, apply func(*State) *connector.Error) *co
 }
 
 func (h *handler) recordedMutation(method string, fallback any) Mutation {
-	params := append(json.RawMessage(nil), h.params...)
+	params := append(jsontext.Value(nil), h.params...)
 	if len(params) == 0 {
 		params, _ = json.Marshal(fallback)
 	}
@@ -507,9 +508,8 @@ func Write(path string, current State) error {
 		_ = temporary.Close()
 		return err
 	}
-	encoder := json.NewEncoder(temporary)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(current); err != nil {
+	encoder := jsontext.NewEncoder(temporary, jsontext.WithIndent("  "))
+	if err := json.MarshalEncode(encoder, current); err != nil {
 		_ = temporary.Close()
 		return err
 	}

@@ -1,7 +1,7 @@
 package api //nolint:revive // package name "api" is fixed by Plan 1 §4 wire-types layout.
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -40,16 +40,16 @@ func (JSONMap) Schema(huma.Registry) *huma.Schema { return jsonObjectSchema() }
 // JSONRawMap is an opaque JSON object whose values stay undecoded, so each
 // key can be validated (or passed through) on its own terms. Used by the
 // create-issue metadata body and by both metadata patch bodies.
-type JSONRawMap map[string]json.RawMessage
+type JSONRawMap map[string]jsontext.Value
 
 // Schema implements huma.SchemaProvider.
 func (JSONRawMap) Schema(huma.Registry) *huma.Schema { return jsonObjectSchema() }
 
 // JSONRawObject is an opaque JSON object carried as undecoded bytes.
-// MarshalJSON/UnmarshalJSON reproduce json.RawMessage's behavior exactly — a
+// MarshalJSON/UnmarshalJSON reproduce jsontext.Value's behavior exactly — a
 // defined type over []byte inherits no methods, so without these the value
 // would be base64-encoded on the wire.
-type JSONRawObject json.RawMessage
+type JSONRawObject jsontext.Value
 
 // MarshalJSON emits the stored bytes verbatim; the empty value emits null.
 func (m JSONRawObject) MarshalJSON() ([]byte, error) {
@@ -75,7 +75,7 @@ func (JSONRawObject) Schema(huma.Registry) *huma.Schema { return jsonObjectSchem
 // an explicit JSON null. It is a distinct type because huma resolves a
 // SchemaProvider on the dereferenced type, so pointer-ness alone cannot make
 // a self-describing schema nullable.
-type JSONNullableRawObject json.RawMessage
+type JSONNullableRawObject jsontext.Value
 
 // MarshalJSON emits the stored bytes verbatim; the empty value emits null.
 func (m JSONNullableRawObject) MarshalJSON() ([]byte, error) {

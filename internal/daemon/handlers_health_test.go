@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func TestHealthIncludesEffectiveIdleShutdownCapability(t *testing.T) {
 
 	var body struct {
 		IdleShutdown *api.IdleShutdownHealth `json:"idle_shutdown"`
-		LegacyIdle   json.RawMessage         `json:"idle"`
+		LegacyIdle   jsontext.Value          `json:"idle"`
 	}
 	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
 	require.NotNil(t, body.IdleShutdown)
@@ -150,7 +151,7 @@ func TestHealth_DoesNotExposeEmbeddingProviderDiagnostics(t *testing.T) {
 	assert.NotContains(t, string(bs), "reflected issue title")
 
 	var body struct {
-		Embeddings map[string]json.RawMessage `json:"embeddings"`
+		Embeddings map[string]jsontext.Value `json:"embeddings"`
 	}
 	require.NoError(t, json.Unmarshal(bs, &body))
 	_, hasLastError := body.Embeddings["last_error"]
@@ -219,9 +220,9 @@ func TestHealthFederationConfigIncludesSanitizedAggregate(t *testing.T) {
 	} {
 		assert.NotContains(t, string(bs), privateValue)
 	}
-	var fields map[string]json.RawMessage
+	var fields map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(bs, &fields))
-	var federationFields map[string]json.RawMessage
+	var federationFields map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(fields["federation_config"], &federationFields))
 	assert.ElementsMatch(t, []string{
 		"configured", "reconciled", "pending", "conflicted",
@@ -229,7 +230,7 @@ func TestHealthFederationConfigIncludesSanitizedAggregate(t *testing.T) {
 	}, mapKeys(federationFields))
 }
 
-func mapKeys(values map[string]json.RawMessage) []string {
+func mapKeys(values map[string]jsontext.Value) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)

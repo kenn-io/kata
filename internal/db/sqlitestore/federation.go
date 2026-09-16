@@ -3,7 +3,8 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net"
@@ -810,7 +811,7 @@ func (d *Store) reconcileLocalFederationEcho(ctx context.Context, projectID int6
 	return true, nil
 }
 
-func validateRemoteEventContentHash(ev db.RemoteEvent) (json.RawMessage, string, error) {
+func validateRemoteEventContentHash(ev db.RemoteEvent) (jsontext.Value, string, error) {
 	return db.ValidateRemoteEventContentHash(ev)
 }
 
@@ -1424,7 +1425,7 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 		ClosedReason:  issue.ClosedReason,
 		ClosedAt:      formatOptionalSQLiteTime(issue.ClosedAt),
 		DeletedAt:     formatOptionalSQLiteTime(issue.DeletedAt),
-		Metadata:      json.RawMessage(issue.Metadata),
+		Metadata:      jsontext.Value(issue.Metadata),
 		Labels:        labels,
 		Links:         links,
 		Comments:      comments,
@@ -1588,7 +1589,7 @@ func federationFoldEventsOfTypes(
 		if relatedIssueUID.Valid {
 			e.RelatedIssueUID = relatedIssueUID.String
 		}
-		e.Payload = json.RawMessage(payload)
+		e.Payload = jsontext.Value(payload)
 		e.CreatedAt = createdAt.UTC().Format(sqliteTimeFormat)
 		out = append(out, e)
 	}
@@ -1653,7 +1654,7 @@ func reconcileFederatedIssues(
 		if err != nil {
 			return nil, fmt.Errorf("resolve federated issue short_id %s: %w", uid, err)
 		}
-		metadata := json.RawMessage(`{}`)
+		metadata := jsontext.Value(`{}`)
 		if raw := projection.IssueMetadata[uid]; len(raw) > 0 {
 			metadata = raw
 		}
@@ -2580,7 +2581,7 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 	if p.EmptyOnly {
-		var metadata map[string]json.RawMessage
+		var metadata map[string]jsontext.Value
 		if len(project.Metadata) > 0 {
 			if err := json.Unmarshal([]byte(project.Metadata), &metadata); err != nil {
 				return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("read project metadata before attachment: %w", err)

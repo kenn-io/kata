@@ -1,8 +1,7 @@
 package daemon
 
 import (
-	jsonv1 "encoding/json"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/v2"
 	"fmt"
 	"reflect"
 	"strings"
@@ -21,7 +20,7 @@ type apiSchemaRegistry struct {
 }
 
 func (r *apiSchemaRegistry) MarshalJSON() ([]byte, error) {
-	return jsonv1.Marshal(r.Registry)
+	return json.Marshal(r.Registry)
 }
 
 func (r *apiSchemaRegistry) MarshalYAML() (any, error) {
@@ -65,7 +64,7 @@ func makeArraysNonNullable(schema *huma.Schema, seen map[*huma.Schema]bool) {
 }
 
 func unmarshalAPIJSON(data []byte, value any) error {
-	if err := jsonv2.Unmarshal(data, value); err != nil {
+	if err := json.Unmarshal(data, value); err != nil {
 		return err
 	}
 
@@ -81,7 +80,7 @@ func unmarshalAPIJSON(data []byte, value any) error {
 	}
 
 	var decoded any
-	if err := jsonv2.Unmarshal(data, &decoded); err != nil {
+	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
 	return rejectNullArrays(decoded, target, "body")

@@ -2,7 +2,7 @@ package jsonl
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"strconv"
@@ -116,14 +116,14 @@ type projectImport struct {
 	Identity string `json:"identity,omitempty"`
 	// NextIssueNumber was the legacy per-project counter; pre-v8 envelopes
 	// carry it but the field is decoded-and-ignored at insert time.
-	NextIssueNumber int64 `json:"next_issue_number,omitempty"`
+	NextIssueNumber int64 `json:"next_issue_number,omitzero"`
 }
 
 // issueImport embeds the current-shape IssueExport and adds the legacy
 // `number` field still consumed by the pre-v2 UID fill.
 type issueImport struct {
 	db.IssueExport
-	Number int64 `json:"number,omitempty"`
+	Number int64 `json:"number,omitzero"`
 }
 
 type legacyGitHubSyncBindingImport struct {
@@ -156,7 +156,7 @@ type eventImport struct {
 type purgeLogImport struct {
 	db.PurgeLogExport
 	LegacyProjectName string `json:"project_identity,omitempty"`
-	IssueNumber       int64  `json:"issue_number,omitempty"`
+	IssueNumber       int64  `json:"issue_number,omitzero"`
 }
 
 // collectProjectUIDs walks the envelope stream once and returns a project_id
@@ -501,7 +501,7 @@ func decodeLegacyGitHubSyncBinding(env Envelope) (db.IssueSyncBindingExport, err
 		"owner":   old.Owner,
 		"repo":    old.Repo,
 		"repo_id": old.RepoID,
-	})
+	}, json.Deterministic(true))
 	if err != nil {
 		return db.IssueSyncBindingExport{}, fmt.Errorf("encode legacy github sync config: %w", err)
 	}

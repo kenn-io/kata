@@ -2,7 +2,8 @@ package tui
 
 import (
 	"bufio"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"strconv"
@@ -35,13 +36,13 @@ type frame struct {
 // inspects. Lives here so the parser does not pull internal/api into
 // the TUI tree.
 type sseEventPayload struct {
-	Type            string          `json:"type"`
-	ProjectID       int64           `json:"project_id"`
-	ProjectUID      string          `json:"project_uid,omitempty"`
-	IssueShortID    *string         `json:"issue_short_id,omitempty"`
-	IssueUID        string          `json:"issue_uid,omitempty"`
-	RelatedIssueUID string          `json:"related_issue_uid,omitempty"`
-	Payload         json.RawMessage `json:"payload,omitempty"`
+	Type            string         `json:"type"`
+	ProjectID       int64          `json:"project_id"`
+	ProjectUID      string         `json:"project_uid,omitempty"`
+	IssueShortID    *string        `json:"issue_short_id,omitempty"`
+	IssueUID        string         `json:"issue_uid,omitempty"`
+	RelatedIssueUID string         `json:"related_issue_uid,omitempty"`
+	Payload         jsontext.Value `json:"payload,omitempty"`
 }
 
 // errSSEEOF is the sentinel readNextFrame returns when the underlying

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -260,29 +259,9 @@ func TestSearch_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
 	assert.NotContains(t, out, "widget beta candidate")
 }
 
-// TestBuildSearchURLEncodesLabelFilters verifies buildSearchURL emits a
-// repeated "label" param per --label value and a repeated "exclude_label"
-// param per --no-label value, order-insensitive.
-func TestBuildSearchURLEncodesLabelFilters(t *testing.T) {
-	got := buildSearchURL(searchURLParams{
-		BaseURL:  "http://example.test",
-		PID:      1,
-		Query:    "q",
-		Limit:    20,
-		Labels:   []string{"bug", "urgent"},
-		NoLabels: []string{"wip"},
-	})
-	idx := strings.Index(got, "?")
-	require.NotEqual(t, -1, idx, "expected a query string: %s", got)
-	values, err := url.ParseQuery(got[idx+1:])
-	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"bug", "urgent"}, values["label"])
-	assert.ElementsMatch(t, []string{"wip"}, values["exclude_label"])
-}
-
 // TestSearch_RejectsNonPositiveLimit covers hammer-test #5: --limit
 // 0/-1 used to be silently treated as "no limit" because
-// buildSearchURL only set the param when limit > 0. Now mirrors
+// the request only set the param when limit > 0. Now mirrors
 // list/ready/events/daemon-logs validation.
 func TestSearch_RejectsNonPositiveLimit(t *testing.T) {
 	for _, lim := range []string{"0", "-1"} {

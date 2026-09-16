@@ -3,7 +3,8 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -327,7 +328,7 @@ created_at,updated_at,closed_at,priority
 		UID: issueUID, ShortID: shortID, Title: item.Title, Body: item.Body,
 		Author: item.Author, Owner: db.NormalizeImportOwner(item.Owner), Priority: item.Priority,
 		Status: item.Status, ClosedReason: item.ClosedReason, ClosedAt: optionalStoredTime(item.ClosedAt),
-		Metadata: json.RawMessage(`{}`), CreatedAt: createdAt, UpdatedAt: updatedAt,
+		Metadata: jsontext.Value(`{}`), CreatedAt: createdAt, UpdatedAt: updatedAt,
 		Source: params.Source, ExternalID: item.ExternalID,
 	})
 	if err != nil {

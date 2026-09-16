@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,7 +18,7 @@ func TestAgentContractHook_EmitsCodexSessionStartContext(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
 
-	var envelope map[string]json.RawMessage
+	var envelope map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(stdout), &envelope))
 	require.Len(t, envelope, 1, "Codex rejects unknown top-level hook response fields")
 	var specific struct {

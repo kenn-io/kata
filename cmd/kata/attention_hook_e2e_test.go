@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func attnMetaValue(t *testing.T, env *testenv.Env, pid int64, ref, key string) (
 	t.Helper()
 	type resp struct {
 		Issue struct {
-			Metadata map[string]json.RawMessage `json:"metadata"`
+			Metadata map[string]jsontext.Value `json:"metadata"`
 		} `json:"issue"`
 	}
 	got := getJSON[resp](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues/"+ref)

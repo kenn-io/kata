@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -238,12 +239,12 @@ func TestAttnEnd_WriteFailureDoesNotRetry(t *testing.T) {
 func TestLiveAttnDaemon_LookupTreatsNonStringAttentionAsAbsent(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		raw  json.RawMessage
+		raw  jsontext.Value
 	}{
-		{name: "number", raw: json.RawMessage(`7`)},
-		{name: "null", raw: json.RawMessage(`null`)},
-		{name: "object", raw: json.RawMessage(`{"state":"ok"}`)},
-		{name: "array", raw: json.RawMessage(`["ok"]`)},
+		{name: "number", raw: jsontext.Value(`7`)},
+		{name: "null", raw: jsontext.Value(`null`)},
+		{name: "object", raw: jsontext.Value(`{"state":"ok"}`)},
+		{name: "array", raw: jsontext.Value(`["ok"]`)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetFlags(t)
@@ -261,7 +262,7 @@ func TestLiveAttnDaemon_LookupTreatsNonStringAttentionAsAbsent(t *testing.T) {
 						"issue": map[string]any{
 							"short_id": "abc4",
 							"status":   "open",
-							"metadata": map[string]json.RawMessage{attentionKey: tc.raw},
+							"metadata": map[string]jsontext.Value{attentionKey: tc.raw},
 							"revision": int64(17),
 						},
 					}))
@@ -300,11 +301,11 @@ func TestLiveAttnDaemon_ConditionalSetSendsOnlyActorPatchAndIfMatch(t *testing.T
 			requestSeen = true
 			require.Equal(t, http.MethodPost, r.Method)
 			assert.Equal(t, `"rev-17"`, r.Header.Get("If-Match"))
-			var body map[string]json.RawMessage
+			var body map[string]jsontext.Value
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			assert.ElementsMatch(t, []string{"actor", "patch"}, mapKeys(body))
 			assert.JSONEq(t, `"agent-a"`, string(body["actor"]))
-			var patch map[string]json.RawMessage
+			var patch map[string]jsontext.Value
 			require.NoError(t, json.Unmarshal(body["patch"], &patch))
 			assert.ElementsMatch(t, []string{attentionKey, attentionMsgKey}, mapKeys(patch))
 			assert.JSONEq(t, `"needs-human"`, string(patch[attentionKey]))

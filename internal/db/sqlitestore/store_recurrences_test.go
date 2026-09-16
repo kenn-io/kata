@@ -3,6 +3,7 @@ package sqlitestore_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,7 +24,7 @@ func TestCreateRecurrence_HappyPath(t *testing.T) {
 			Owner:    &owner,
 			Priority: &priority,
 			Labels:   []string{"recurring"},
-			Metadata: json.RawMessage(`{"kind":"weekly"}`),
+			Metadata: jsontext.Value(`{"kind":"weekly"}`),
 		},
 	})
 	assert.Len(t, rec.UID, 26)
@@ -36,17 +37,17 @@ func TestCreateRecurrence_HappyPath(t *testing.T) {
 	require.NoError(t, d.QueryRow(`SELECT payload FROM events
         WHERE type='recurrence.created' ORDER BY id DESC LIMIT 1`).Scan(&payload))
 	createdPayload := unmarshalPayload[struct {
-		RecurrenceUID     string          `json:"recurrence_uid"`
-		RRule             string          `json:"rrule"`
-		DTStart           string          `json:"dtstart"`
-		Timezone          string          `json:"timezone"`
-		TemplateTitle     string          `json:"template_title"`
-		TemplateBody      string          `json:"template_body"`
-		TemplateOwner     *string         `json:"template_owner"`
-		TemplatePriority  *int64          `json:"template_priority"`
-		TemplateLabels    []string        `json:"template_labels"`
-		TemplateMetadata  json.RawMessage `json:"template_metadata"`
-		NextOccurrenceKey string          `json:"next_occurrence_key"`
+		RecurrenceUID     string         `json:"recurrence_uid"`
+		RRule             string         `json:"rrule"`
+		DTStart           string         `json:"dtstart"`
+		Timezone          string         `json:"timezone"`
+		TemplateTitle     string         `json:"template_title"`
+		TemplateBody      string         `json:"template_body"`
+		TemplateOwner     *string        `json:"template_owner"`
+		TemplatePriority  *int64         `json:"template_priority"`
+		TemplateLabels    []string       `json:"template_labels"`
+		TemplateMetadata  jsontext.Value `json:"template_metadata"`
+		NextOccurrenceKey string         `json:"next_occurrence_key"`
 	}](t, payload)
 	assert.Equal(t, rec.UID, createdPayload.RecurrenceUID)
 	assert.Equal(t, "FREQ=WEEKLY;BYDAY=MO", createdPayload.RRule)
@@ -85,7 +86,7 @@ func TestPatchRecurrence_BumpsRevisionAndEmitsDiff(t *testing.T) {
         WHERE type='recurrence.updated' ORDER BY id DESC LIMIT 1`).Scan(&payload))
 	var p2 struct {
 		Diff map[string]struct {
-			From, To json.RawMessage
+			From, To jsontext.Value
 		} `json:"diff"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(payload), &p2))

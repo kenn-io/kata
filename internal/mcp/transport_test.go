@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
 	"strings"
@@ -377,10 +378,10 @@ func currentMeta() map[string]any {
 }
 
 type wireResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      any             `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *jsonrpc.Error  `json:"error,omitempty"`
+	JSONRPC string         `json:"jsonrpc"`
+	ID      any            `json:"id"`
+	Result  jsontext.Value `json:"result,omitempty"`
+	Error   *jsonrpc.Error `json:"error,omitempty"`
 }
 
 func decodeResponse(t *testing.T, line string) *wireResponse {

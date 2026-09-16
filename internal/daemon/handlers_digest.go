@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"sort"
 	"strings"
@@ -412,7 +412,7 @@ func createdInitialState(payload string) ([]string, string, []createdLink) {
 type createdLink struct {
 	Type      string `json:"type"`
 	ToShortID string `json:"to_short_id"`
-	Incoming  bool   `json:"incoming,omitempty"`
+	Incoming  bool   `json:"incoming,omitzero"`
 }
 
 // linkSummary extracts the (type, to_short_id) pair from an

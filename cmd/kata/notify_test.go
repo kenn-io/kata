@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,9 +21,9 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func notificationMetadata(t *testing.T, raw json.RawMessage) map[string]string {
+func notificationMetadata(t *testing.T, raw jsontext.Value) map[string]string {
 	t.Helper()
-	var metadata map[string]json.RawMessage
+	var metadata map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(raw, &metadata))
 	values := make(map[string]string, len(metadata))
 	for key, value := range metadata {
@@ -115,8 +116,8 @@ func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
 						_, interleaveErr = env.DB.PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
 							IssueID: issue.ID,
 							Actor:   "agent-b",
-							Patch: map[string]json.RawMessage{
-								"notify.b3Bz": json.RawMessage(`{"from":"agent-b","message":"check rollout"}`),
+							Patch: map[string]jsontext.Value{
+								"notify.b3Bz": jsontext.Value(`{"from":"agent-b","message":"check rollout"}`),
 							},
 						})
 					}
@@ -141,7 +142,7 @@ func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
 			notifyResult := cmd.Execute()
 			stored, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
-			metadata := notificationMetadata(t, json.RawMessage(stored.Metadata))
+			metadata := notificationMetadata(t, jsontext.Value(stored.Metadata))
 			if kind == "close" {
 				require.NoError(t, notifyResult)
 				assert.Equal(t, int32(1), patchRequests.Load())
@@ -164,11 +165,11 @@ func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
 	}
 }
 
-func issueMetadataJSON(t *testing.T, out string) json.RawMessage {
+func issueMetadataJSON(t *testing.T, out string) jsontext.Value {
 	t.Helper()
 	var response struct {
 		Issue struct {
-			Metadata json.RawMessage `json:"metadata"`
+			Metadata jsontext.Value `json:"metadata"`
 		} `json:"issue"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &response))

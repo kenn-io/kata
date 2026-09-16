@@ -2,7 +2,8 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"testing"
@@ -317,7 +318,7 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	const syncMoveSourceKey = "example-sync:move-target"
 	_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
 		ProjectID: syncMoveTarget.ID, Provider: "example-sync", SourceKey: syncMoveSourceKey,
-		RemoteID: "move-target", DisplayName: "Move target", Config: json.RawMessage(`{}`), IntervalSeconds: 300,
+		RemoteID: "move-target", DisplayName: "Move target", Config: jsontext.Value(`{}`), IntervalSeconds: 300,
 	})
 	if err != nil {
 		return err
@@ -678,7 +679,7 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 	}
 	_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
 		ProjectID: syncSource.ID, Provider: "github", SourceKey: "github:merge/source",
-		RemoteID: "merge/source", DisplayName: "merge/source", Config: json.RawMessage(`{}`), IntervalSeconds: 60,
+		RemoteID: "merge/source", DisplayName: "merge/source", Config: jsontext.Value(`{}`), IntervalSeconds: 60,
 	})
 	if err != nil {
 		return fmt.Errorf("create merge-blocking sync binding: %w", err)
@@ -771,7 +772,7 @@ func checkActiveProjectionExports(t *testing.T, store db.Storage) error {
 	}
 	binding, err := store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
 		ProjectID: project.ID, Provider: "github", SourceKey: "github:export/repo",
-		RemoteID: "export/repo", DisplayName: "export/repo", Config: json.RawMessage(`{}`),
+		RemoteID: "export/repo", DisplayName: "export/repo", Config: jsontext.Value(`{}`),
 		IntervalSeconds: 60,
 	})
 	if err != nil {

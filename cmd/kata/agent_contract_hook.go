@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 
 	"github.com/spf13/cobra"
 )
@@ -28,7 +28,7 @@ func newAgentContractHookCmd() *cobra.Command {
 			}{}
 			response.HookSpecificOutput.HookEventName = "SessionStart"
 			response.HookSpecificOutput.AdditionalContext = agentContractText
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(response)
+			return json.MarshalWrite(cmd.OutOrStdout(), response)
 		},
 	}
 }

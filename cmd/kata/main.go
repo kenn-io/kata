@@ -3,7 +3,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -256,11 +257,11 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
 	env := struct {
 		Error struct {
-			Kind     errKind         `json:"kind"`
-			Code     string          `json:"code,omitempty"`
-			Message  string          `json:"message"`
-			ExitCode int             `json:"exit_code"`
-			Data     json.RawMessage `json:"data,omitempty"`
+			Kind     errKind        `json:"kind"`
+			Code     string         `json:"code,omitempty"`
+			Message  string         `json:"message"`
+			ExitCode int            `json:"exit_code"`
+			Data     jsontext.Value `json:"data,omitempty"`
 		} `json:"error"`
 	}{}
 	env.Error.Kind = cli.Kind

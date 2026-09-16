@@ -3,7 +3,8 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -1440,7 +1441,7 @@ func (d *Store) insertClaimEventTx(ctx context.Context, tx claimStore, in claimE
 		HLCPhysicalMS:     clock.PhysicalMS,
 		HLCCounter:        clock.Counter,
 		CreatedAt:         createdAt,
-		Payload:           json.RawMessage(b),
+		Payload:           jsontext.Value(b),
 	})
 	if err != nil {
 		return db.Event{}, fmt.Errorf("content hash: %w", err)

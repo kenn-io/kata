@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
+
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"github.com/spf13/cobra"
 
@@ -51,38 +53,22 @@ analysis. The text output is a wide table; pass --json for tooling.`,
 			if err != nil {
 				return err
 			}
-			q := url.Values{}
-			q.Set("project_id", fmt.Sprintf("%d", pid))
-			if since != "" {
-				q.Set("since", since)
-			}
-			if until != "" {
-				q.Set("until", until)
-			}
-			if actor != "" {
-				q.Set("actor", actor)
-			}
-			if parent != "" {
-				q.Set("parent", parent)
-			}
-			if reason != "" {
-				q.Set("reason", reason)
-			}
-			if noEvidence {
-				q.Set("no_evidence", "true")
-			}
-			getURL := fmt.Sprintf("%s/api/v1/audit/closes?%s", baseURL, q.Encode())
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, getURL, nil)
+			apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 			if err != nil {
 				return err
 			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
+			response, callErr := apiClient.AuditClosesWithResponse(ctx, &generated.AuditClosesRequestOptions{Query: &generated.AuditClosesQuery{ProjectID: pid, Since: &since, Until: &until, Actor: &actor, Parent: &parent, Reason: &reason, NoEvidence: &noEvidence}})
+			if err := externalCLITransportError(response, callErr); err != nil {
+				return err
 			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			bs := response.Body
 			mode := currentOutputMode()
 			if mode == outputJSON {
 				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+				if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())

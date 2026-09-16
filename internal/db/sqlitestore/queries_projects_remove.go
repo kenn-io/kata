@@ -3,7 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"time"
 
@@ -84,7 +84,7 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 	payload, err := json.Marshal(struct {
 		AliasCount int64 `json:"alias_count"`
 		OpenIssues int64 `json:"open_issues"`
-		Force      bool  `json:"force,omitempty"`
+		Force      bool  `json:"force,omitzero"`
 	}{AliasCount: aliasCount, OpenIssues: openIssues, Force: p.Force})
 	if err != nil {
 		return db.Project{}, nil, fmt.Errorf("marshal project.removed payload: %w", err)
@@ -231,8 +231,8 @@ func (d *Store) detachProjectAlias(ctx context.Context, p db.DetachAliasParams) 
 	payload, err := json.Marshal(struct {
 		AliasIdentity string `json:"alias_identity"`
 		AliasKind     string `json:"alias_kind"`
-		WasLast       bool   `json:"was_last,omitempty"`
-		Force         bool   `json:"force,omitempty"`
+		WasLast       bool   `json:"was_last,omitzero"`
+		Force         bool   `json:"force,omitzero"`
 	}{
 		AliasIdentity: alias.AliasIdentity,
 		AliasKind:     alias.AliasKind,

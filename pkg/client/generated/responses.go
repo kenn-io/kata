@@ -61,7 +61,7 @@ type RevokeFederationEnrollmentResponse = RevokeFederationEnrollmentBody
 
 type RevokeFederationEnrollmentErrorResponse = ErrorEnvelope
 
-type CreateFederationReplicaResponse = CreateFederationReplicaBody
+type CreateFederationReplicaResponse = CreateFederationReplicaResponseBody
 
 type CreateFederationReplicaErrorResponse = ErrorEnvelope
 
