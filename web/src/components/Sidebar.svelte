@@ -1,11 +1,10 @@
 <script lang="ts">
   import AlarmClockIcon from '@lucide/svelte/icons/alarm-clock'
   import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days'
-  import CheckCircleIcon from '@lucide/svelte/icons/check-circle-2'
   import InboxIcon from '@lucide/svelte/icons/inbox'
-  import LayersIcon from '@lucide/svelte/icons/layers'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import StarIcon from '@lucide/svelte/icons/star'
+  import UsersIcon from '@lucide/svelte/icons/users'
   import { ScrollBox, showFlash, Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
 
   import GroupedSidebarSection from './GroupedSidebarSection.svelte'
@@ -56,9 +55,8 @@
     { name: 'inbox', label: 'Inbox', icon: InboxIcon },
     { name: 'today', label: 'Today', icon: StarIcon },
     { name: 'upcoming', label: 'Upcoming', icon: CalendarDaysIcon },
+    { name: 'delegated', label: 'Delegated', icon: UsersIcon },
     { name: 'deadlines', label: 'Deadlines', icon: AlarmClockIcon },
-    { name: 'all', label: 'All Open', icon: LayersIcon },
-    { name: 'logbook', label: 'Logbook', icon: CheckCircleIcon },
   ]
 
   let creatingProject = $state(false)

@@ -337,6 +337,7 @@
         { name: 'inbox', label: 'Inbox' },
         { name: 'today', label: 'Today' },
         { name: 'upcoming', label: 'Upcoming' },
+        { name: 'delegated', label: 'Delegated' },
         { name: 'deadlines', label: 'Deadlines' },
         { name: 'all', label: 'All Open' },
         { name: 'logbook', label: 'Logbook' },
