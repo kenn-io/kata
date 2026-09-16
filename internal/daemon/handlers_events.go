@@ -160,15 +160,15 @@ func readVisibleEvents(
 	scanProjectID := int64(0)
 	visible := make([]db.Event, 0, limit)
 	cursor := afterID
-	// Polling spends at most one maximum page of global rows per request.
-	// A partial cursor lets clients resume past hidden rows without requiring
-	// one request to inspect the daemon's entire event history.
+	// Count hidden rows against each scan budget. Polling returns a partial
+	// cursor; an exhausted SSE window resets to its captured high-water mark.
+	scanLimit := pollLimitMax
+	if throughID > 0 {
+		scanLimit = limit
+	}
 	scanned := 0
-	for len(visible) < limit && (throughID > 0 || scanned < pollLimitMax) {
-		batchLimit := min(pollLimitMax, max(limit-len(visible), 100))
-		if throughID == 0 {
-			batchLimit = min(batchLimit, pollLimitMax-scanned)
-		}
+	for len(visible) < limit && scanned < scanLimit {
+		batchLimit := min(pollLimitMax, max(limit-len(visible), 100), scanLimit-scanned)
 		rows, err := store.EventsAfter(ctx, db.EventsAfterParams{
 			AfterID: cursor, ProjectID: scanProjectID, ThroughID: throughID, Limit: batchLimit,
 		})
@@ -225,6 +225,9 @@ func readVisibleEvents(
 			}
 			break
 		}
+	}
+	if throughID > cursor && scanned == scanLimit {
+		return nil, throughID, throughID, nil
 	}
 	return visible, cursor, 0, nil
 }
@@ -378,6 +381,11 @@ func projectIssueScopedEvent(
 	event db.Event, allowed map[int64]struct{}, projectUID string,
 ) (db.Event, bool) {
 	if !issueScopedEventInScope(event, allowed, projectUID) {
+		return db.Event{}, false
+	}
+	if (event.Type == "issue.linked" || event.Type == "issue.unlinked") && event.RelatedIssueID == nil {
+		// Project-only export/restore can omit the peer identity while keeping
+		// its payload. Without an authorized peer, clients must reload instead.
 		return db.Event{}, false
 	}
 	payload, projectable := scopedEventPayload(event)

@@ -269,6 +269,9 @@ volume; hiding that traffic metadata is outside this authorization contract.
 A scoped poll scans at most 1,000 global event rows. If `next_after_id` advances,
 continue from that cursor even when `events` is empty; the response may cover
 only part of the backlog.
+SSE counts hidden rows toward its replay and live-drain limits. When a scan
+reaches its limit before the captured cursor, the daemon sends a reset at that
+cursor and closes the stream.
 Polling, reconnect replay, and live SSE use the same projection and
 invalidation rule. Each event, reset frame, and heartbeat revalidates token
 lifetime, revocation, root validity, and membership. A dead credential ends an
@@ -284,15 +287,20 @@ current authority. Failed refreshes retry; cached data never authorizes writes.
 This uses the existing durable event cursor, with no separate membership or
 dependency subscription protocol.
 
-Reads use a consistent database view for membership and domain data. Mutations
-recheck credential activity and every affected endpoint's membership inside the
-domain write transaction. They must serialize against token revocation and
-membership-changing operations, including changes by unscoped operators and
+Reads use a consistent database view for membership and domain data. A response
+built from one authorized SQL statement or read transaction may finish returning
+that snapshot after a concurrent membership move. If response hydration fetches
+additional data outside that authorized snapshot, recheck every endpoint exposed
+by those later reads before sending the buffered body. If membership changed,
+return a not-found error; an authorized mutation that already committed remains
+committed. SSE performs its existing per-frame checks instead of buffering the
+stream.
+
+Mutations recheck credential activity and every affected endpoint's membership
+inside the domain write transaction. They must serialize against token revocation
+and membership-changing operations, including changes by unscoped operators and
 federation ingest. A request-context cache or pre-handler check alone is not
-sufficient. After response hydration, recheck every exposed endpoint before
-sending the buffered body. If membership changed, return a not-found error;
-an authorized mutation that already committed remains committed. SSE performs
-its existing per-frame checks instead of buffering the stream.
+sufficient.
 
 Recursive SQL queries evaluate current parent containment. The write transaction
 rechecks every authorized target along with the token and root. SQLite uses

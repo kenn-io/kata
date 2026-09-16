@@ -455,3 +455,58 @@ func TestScopedPollAuthorizesMembershipAfterReadingEvents(t *testing.T) {
 	require.Empty(t, response.Body.Events, "events written after a child leaves the subtree must stay hidden")
 	require.True(t, response.Body.ResetRequired)
 }
+
+func TestReadVisibleEventsBudgetsHiddenRows(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	hiddenProject, err := store.CreateProject(t.Context(), "hidden-project")
+	require.NoError(t, err)
+	root := createScopedAuthIssue(t, store, project.ID, "Granted root", nil)
+	hidden := createScopedAuthIssue(t, store, hiddenProject.ID, "Unrelated issue", nil)
+	ctx := withScopedAuthorizationTestPrincipal(t, store, project, root)
+	_, event, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: hidden.ID, Author: "coordinator", Body: "Unrelated update",
+	})
+	require.NoError(t, err)
+
+	// Repeat a real emitter's hidden event in one fixture write so replay
+	// exceeds its 10k-row budget without thousands of mutation transactions.
+	_, err = store.ExecContext(t.Context(), `
+		WITH RECURSIVE copies(n) AS (
+			VALUES(1) UNION ALL SELECT n + 1 FROM copies WHERE n < ?
+		)
+		INSERT INTO events(uid, origin_instance_uid, project_id, project_name,
+			issue_id, issue_uid, type, actor, payload, hlc_physical_ms, hlc_counter, content_hash)
+		SELECT printf('%026d', n), origin_instance_uid, project_id, project_name,
+			issue_id, issue_uid, type, actor, payload, hlc_physical_ms, hlc_counter, content_hash
+		FROM events CROSS JOIN copies WHERE events.id = ?`, sseDrainCap+2, event.ID)
+	require.NoError(t, err)
+	through, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name       string
+		after      int64
+		through    int64
+		limit      int
+		wantCursor int64
+		wantReset  int64
+	}{
+		{"poll partial cursor", event.ID, 0, pollLimitDefault, event.ID + pollLimitMax, 0},
+		{"poll resumes", event.ID + pollLimitMax, 0, pollLimitDefault, event.ID + 2*pollLimitMax, 0},
+		{"SSE replay resets", event.ID, through, sseDrainCap + 1, through, through},
+		{"SSE live resets", event.ID, through, sseLiveBatch, through, through},
+		{"SSE completed window", through - sseLiveBatch, through, sseLiveBatch, through, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, cursor, resetTo, err := readVisibleEvents(ctx, store, tc.after, project.ID, tc.through, tc.limit)
+			require.NoError(t, err)
+			require.Empty(t, rows)
+			require.Equal(t, tc.wantCursor, cursor)
+			require.Equal(t, tc.wantReset, resetTo)
+		})
+	}
+}

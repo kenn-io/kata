@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,8 +14,66 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestIssueScopedRestoredLinkResetsPollAndSSE(t *testing.T) {
+	source := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := source.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	hiddenProject, err := source.DB.CreateProject(t.Context(), "hidden-project")
+	require.NoError(t, err)
+	root := createScopedHTTPTestIssue(t, source, project.ID, "Root", nil)
+	hidden := createScopedHTTPTestIssue(t, source, hiddenProject.ID, "Hidden peer", nil)
+	newScopedTokens(t, source, project, root)
+	resp, body := envDoRaw(t, source, http.MethodPost,
+		scopedProjectPath(project.ID, "issues/"+root.ShortID+"/links"),
+		map[string]any{"actor": "coordinator", "type": "blocks", "to_ref": hidden.UID},
+		map[string]string{"Authorization": "Bearer coordinator-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	linkCursor, err := source.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	query := "after_id=" + strconv.FormatInt(linkCursor-1, 10)
+
+	// A project-only export omits the peer and clears its envelope identity,
+	// while preserving the original link payload for replay.
+	var exported bytes.Buffer
+	require.NoError(t, jsonl.Export(t.Context(), source.DB, &exported,
+		jsonl.ExportOptions{ProjectID: project.ID, IncludeDeleted: true}))
+	target := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	require.NoError(t, jsonl.Import(t.Context(), &exported, target.DB))
+	restoredRoot, err := target.DB.IssueByID(t.Context(), root.ID)
+	require.NoError(t, err)
+	restoredProject, err := target.DB.ProjectByID(t.Context(), project.ID)
+	require.NoError(t, err)
+	newScopedTokens(t, target, restoredProject, restoredRoot)
+
+	for name, env := range map[string]*testenv.Env{"original": source, "restored": target} {
+		t.Run(name, func(t *testing.T) {
+			resp, body := envDoRaw(t, env, http.MethodGet,
+				scopedProjectPath(project.ID, "events")+"?"+query, nil,
+				map[string]string{"Authorization": "Bearer worker-token"})
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			var polled api.PollEventsResponse
+			require.NoError(t, json.Unmarshal(body, &polled.Body))
+			require.True(t, polled.Body.ResetRequired, string(body))
+			require.Equal(t, linkCursor, polled.Body.ResetAfterID)
+			require.Empty(t, polled.Body.Events)
+			require.NotContains(t, string(body), hidden.UID)
+			require.NotContains(t, string(body), hidden.ShortID)
+
+			stream := openSSE(t, env, query, http.Header{"Authorization": {"Bearer worker-token"}})
+			defer func() { _ = stream.Body.Close() }()
+			frame, ok := newSSEFramer(stream.Body).Next(t, 2*time.Second)
+			require.True(t, ok)
+			require.Equal(t, "sync.reset_required", frame.event)
+			require.Equal(t, strconv.FormatInt(linkCursor, 10), frame.id)
+			require.NotContains(t, frame.data, hidden.UID)
+			require.NotContains(t, frame.data, hidden.ShortID)
+		})
+	}
+}
 
 // scopedEnvelope is the wire shape of one event envelope shared by poll
 // responses and SSE frames.
