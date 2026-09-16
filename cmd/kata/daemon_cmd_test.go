@@ -2346,6 +2346,7 @@ func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testi
 		for range 5 {
 			wake()
 		}
+		time.Sleep(50 * time.Millisecond)
 		synctest.Wait()
 		require.Equal(t, int64(1), fetcher.repositoryCallCount())
 
@@ -2923,7 +2924,7 @@ func TestExternalRootEventWakeReconnectsAfterBroadcasterOverflow(t *testing.T) {
 		select {
 		case <-firstWake:
 		default:
-			t.Fatal("timed out waiting for blocked external root wake")
+			t.Fatal("external root wake was not delivered")
 		}
 		for range 300 {
 			broadcaster.Broadcast(msg)
@@ -2990,7 +2991,7 @@ func TestExternalRootEventWakeReconnectsAndDiscardsQueuedEventsAfterReset(t *tes
 		select {
 		case <-firstWake:
 		default:
-			t.Fatal("timed out waiting for blocked external root wake")
+			t.Fatal("external root wake was not delivered")
 		}
 		broadcaster.Broadcast(daemon.StreamMsg{Kind: "reset", ResetID: 101, ProjectID: project.ID})
 		broadcaster.Broadcast(msg)

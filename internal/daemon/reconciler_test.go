@@ -624,6 +624,12 @@ func TestRunDrainsAfterTransientFailureThenExitsOnCancel(t *testing.T) {
 		assert.Empty(t, health.LastError)
 		assert.Equal(t, int64(0), health.Backlog)
 
+		_, _, createErr := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "wake", Body: "b", Author: "x"})
+		require.NoError(t, createErr)
+		r.Wake()
+		synctest.Wait()
+		assert.Equal(t, 4, emb.embeddedCount())
+
 		cancel()
 		synctest.Wait()
 		err := <-done
