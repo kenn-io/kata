@@ -3237,13 +3237,6 @@ func waitForFactoryCalls(t *testing.T, factory *scriptedHubFactory, count int) {
 	require.Len(t, factory.snapshotCalls(), count)
 }
 
-func waitForTimerCount(t *testing.T, clock *manualClock, count int) {
-	t.Helper()
-	require.Eventually(t, func() bool {
-		return len(clock.snapshotDurations()) == count
-	}, time.Second, time.Millisecond)
-}
-
 func waitForReconciled(
 	t *testing.T, reconciler *federation.Reconciler, count int,
 ) {

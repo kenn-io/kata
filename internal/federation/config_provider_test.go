@@ -120,6 +120,13 @@ func TestReconcileProviderProcess(_ *testing.T) {
 	os.Exit(0)
 }
 
+func waitForTimerCount(t *testing.T, clock *manualClock, count int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return len(clock.snapshotDurations()) == count
+	}, time.Second, time.Millisecond)
+}
+
 func TestRemovedProviderCleanupDoesNotFollowReusedName(t *testing.T) {
 	for _, tc := range []struct {
 		name                       string
