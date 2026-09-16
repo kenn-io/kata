@@ -183,8 +183,8 @@ func TestDetailRedesign_ExplicitTabPickStaysSticky(t *testing.T) {
 // TestDetailRedesign_FooterHintsAreComprehensive ensures the
 // persistent detail footer surfaces every detail-mode action so the
 // user is never stranded looking for a binding. The footer is
-// expected to wrap across multiple rows on narrow terminals via
-// reflowHelpRows; this test only checks the row content, not the
+// expected to wrap across multiple rows on narrow terminals; this test
+// only checks the row content, not the
 // rendered width.
 func TestDetailRedesign_FooterHintsAreComprehensive(t *testing.T) {
 	dm := detailModel{
@@ -196,7 +196,7 @@ func TestDetailRedesign_FooterHintsAreComprehensive(t *testing.T) {
 	keys := map[string]bool{}
 	for _, row := range rows {
 		for _, item := range row {
-			keys[item.key+" "+item.desc] = true
+			keys[item.Key+" "+item.Description] = true
 		}
 	}
 	for _, want := range []string{

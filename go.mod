@@ -30,7 +30,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
 	github.com/yuin/goldmark v1.8.5
-	go.kenn.io/kit v0.22.0
+	go.kenn.io/kit v0.25.1-0.20260916162410-e9840a327158
 	golang.org/x/mod v0.36.0
 	golang.org/x/sync v0.21.0
 	golang.org/x/sys v0.46.0

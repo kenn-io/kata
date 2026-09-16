@@ -4,14 +4,11 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/table"
-	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kit/tui/helplayout"
+	"go.kenn.io/kit/tui/helprender"
 )
 
-// helpItem is a footer/help binding row: key + concise description.
-type helpItem struct{ key, desc string }
-
-func (m Model) helpRows() [][]helpItem {
+func (m Model) helpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
 		return modalHelpRows(m.modal)
 	}
@@ -32,7 +29,7 @@ func (m Model) helpRows() [][]helpItem {
 	return globalHelpRows()
 }
 
-func (m Model) queueHelpRows() [][]helpItem {
+func (m Model) queueHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
 		return modalHelpRows(m.modal)
 	}
@@ -42,7 +39,7 @@ func (m Model) queueHelpRows() [][]helpItem {
 	return m.list.queueHelpRows()
 }
 
-func (m Model) detailHelpRows() [][]helpItem {
+func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
 		return modalHelpRows(m.modal)
 	}
@@ -52,7 +49,7 @@ func (m Model) detailHelpRows() [][]helpItem {
 	return m.detail.detailHelpRows()
 }
 
-func (m Model) splitHelpRows() [][]helpItem {
+func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
 		return modalHelpRows(m.modal)
 	}
@@ -65,7 +62,7 @@ func (m Model) splitHelpRows() [][]helpItem {
 	return m.list.queueHelpRows()
 }
 
-func listHelpRows(lm listModel, chrome viewChrome) [][]helpItem {
+func listHelpRows(lm listModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.modal != modalNone {
 		return modalHelpRows(chrome.modal)
 	}
@@ -75,7 +72,7 @@ func listHelpRows(lm listModel, chrome viewChrome) [][]helpItem {
 	return lm.queueHelpRows()
 }
 
-func detailHelpRows(dm detailModel, chrome viewChrome) [][]helpItem {
+func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.modal != modalNone {
 		return modalHelpRows(chrome.modal)
 	}
@@ -85,85 +82,85 @@ func detailHelpRows(dm detailModel, chrome viewChrome) [][]helpItem {
 	return dm.detailHelpRows()
 }
 
-func inputHelpRows(input inputState) [][]helpItem {
+func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 	if input.kind == inputSearchBar && input.searchFocus == searchFocusResults {
-		return [][]helpItem{{
-			{key: "↑↓", desc: "move"},
-			{key: "enter", desc: "apply"},
-			{key: "esc", desc: "query"},
-			{key: "/", desc: "query"},
+		return [][]helplayout.HelpItem{{
+			{Key: "↑↓", Description: "move"},
+			{Key: "enter", Description: "apply"},
+			{Key: "esc", Description: "query"},
+			{Key: "/", Description: "query"},
 		}}
 	}
 	if input.kind == inputSearchBar {
-		return [][]helpItem{{
-			{key: "↑↓/enter", desc: "results"},
-			{key: "esc", desc: "cancel"},
-			{key: "ctrl+u", desc: "clear"},
+		return [][]helplayout.HelpItem{{
+			{Key: "↑↓/enter", Description: "results"},
+			{Key: "esc", Description: "cancel"},
+			{Key: "ctrl+u", Description: "clear"},
 		}}
 	}
 	kind := input.kind
 	switch {
 	case kind.isPanelPrompt():
-		return [][]helpItem{{
-			{key: "enter", desc: "commit"},
-			{key: "esc", desc: "cancel"},
+		return [][]helplayout.HelpItem{{
+			{Key: "enter", Description: "commit"},
+			{Key: "esc", Description: "cancel"},
 		}}
 	case kind == inputFilterForm:
-		return [][]helpItem{{
-			{key: "ctrl+o", desc: "apply"},
-			{key: "esc", desc: "cancel"},
-			{key: "ctrl+r", desc: "reset"},
+		return [][]helplayout.HelpItem{{
+			{Key: "ctrl+o", Description: "apply"},
+			{Key: "esc", Description: "cancel"},
+			{Key: "ctrl+r", Description: "reset"},
 		}}
 	case kind == inputNewIssueForm:
-		return [][]helpItem{{
-			{key: "ctrl+o", desc: "create"},
-			{key: "esc", desc: "cancel"},
-			{key: "tab", desc: "field"},
-			{key: "ctrl+e", desc: "editor"},
+		return [][]helplayout.HelpItem{{
+			{Key: "ctrl+o", Description: "create"},
+			{Key: "esc", Description: "cancel"},
+			{Key: "tab", Description: "field"},
+			{Key: "ctrl+e", Description: "editor"},
 		}}
 	case kind.isCenteredForm():
-		return [][]helpItem{{
-			{key: "ctrl+o", desc: "save"},
-			{key: "esc", desc: "cancel"},
-			{key: "ctrl+e", desc: "editor"},
+		return [][]helplayout.HelpItem{{
+			{Key: "ctrl+o", Description: "save"},
+			{Key: "esc", Description: "cancel"},
+			{Key: "ctrl+e", Description: "editor"},
 		}}
 	}
 	return nil
 }
 
-func (lm listModel) queueHelpRows() [][]helpItem {
+func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 	row, ok := lm.targetQueueRow()
-	items := []helpItem{
-		{key: "↑↓", desc: "move"},
-		{key: "↵", desc: "open"},
+	items := []helplayout.HelpItem{
+		{Key: "↑↓", Description: "move"},
+		{Key: "↵", Description: "open"},
 	}
 	if ok && row.hasChildren {
-		items = append(items, helpItem{key: "space", desc: "expand"})
+		items = append(items, helplayout.HelpItem{Key: "space", Description: "expand"})
 	}
 	if lm.viewMode != issueListViewFlat && len(lm.expandableKeys()) > 0 {
-		items = append(items, helpItem{key: "E", desc: "all"})
+		items = append(items, helplayout.HelpItem{Key: "E", Description: "all"})
 	}
-	items = append(items, helpItem{key: "n", desc: "new"})
+	items = append(items, helplayout.HelpItem{Key: "n", Description: "new"})
 	if ok {
-		items = append(items, helpItem{key: "N", desc: "child"})
+		items = append(items, helplayout.HelpItem{Key: "N", Description: "child"})
 	}
 	items = append(items,
-		helpItem{key: "/", desc: "search"},
-		helpItem{key: "f", desc: "filter"},
-		helpItem{key: "s", desc: "status"},
-		helpItem{key: "v", desc: "view"},
-		helpItem{key: "o", desc: "order"},
-		helpItem{key: "c", desc: "clear"},
-		helpItem{key: "x", desc: "close"},
-		helpItem{key: "!", desc: "priority"},
-		helpItem{key: "D", desc: "daemons"},
-		helpItem{key: "F", desc: "federation"},
-		helpItem{key: "C", desc: "credentials"},
-		helpItem{key: "L", desc: "layout"},
-		helpItem{key: "?", desc: "help"},
-		helpItem{key: "q", desc: "quit"},
+		helplayout.HelpItem{Key: "/", Description: "search"},
+		helplayout.HelpItem{Key: "f", Description: "filter"},
+		helplayout.HelpItem{Key: "s", Description: "status"},
+		helplayout.HelpItem{Key: "v", Description: "view"},
+		helplayout.HelpItem{Key: "o", Description: "order"},
+		helplayout.HelpItem{Key: "c", Description: "clear"},
+		helplayout.HelpItem{Key: "x", Description: "close"},
+		helplayout.HelpItem{Key: "!", Description: "priority"},
+		helplayout.HelpItem{Key: "D", Description: "daemons"},
+		helplayout.HelpItem{Key: "F", Description: "federation"},
+		helplayout.HelpItem{Key: "C", Description: "credentials"},
+		helplayout.HelpItem{Key: "L", Description: "layout"},
+		helplayout.HelpItem{Key: "?", Description: "help"},
+		helplayout.HelpItem{Key: "q", Description: "quit"},
 	)
-	return [][]helpItem{items}
+	return [][]helplayout.HelpItem{items}
 }
 
 // detailHelpRows is the persistent footer for the detail view. The
@@ -171,73 +168,73 @@ func (lm listModel) queueHelpRows() [][]helpItem {
 // blocker/link/close/reopen) and the user explicitly asked for the
 // footer to be comprehensive — every key handled by the detail
 // view's Update loop appears here so the user is never stranded
-// looking for an action. The reflowHelpRows packer wraps the row
+// looking for an action. The footer adapter wraps the row
 // across multiple lines when the terminal is too narrow.
 //
 // Children focus swaps the navigation header (↑↓ child / ↵ open
 // child / N new child / p parent) but keeps the same action surface
 // because the same mutations apply to the parent issue regardless
 // of which section the cursor is on.
-func (dm detailModel) detailHelpRows() [][]helpItem {
-	actions := []helpItem{
-		{key: "e", desc: "edit"},
-		{key: "c", desc: "comment"},
-		{key: "+", desc: "label"},
-		{key: "-", desc: "unlabel"},
-		{key: "a", desc: "owner"},
-		{key: "A", desc: "unassign"},
-		{key: "x", desc: "close"},
-		{key: "r", desc: "reopen"},
-		{key: "p", desc: "parent"},
-		{key: "b", desc: "block"},
-		{key: "l", desc: "related"},
-		{key: "!", desc: "priority"},
-		{key: "D", desc: "daemons"},
-		{key: "F", desc: "federation"},
-		{key: "C", desc: "credentials"},
-		{key: "N", desc: "child"},
-		{key: "L", desc: "layout"},
-		{key: "esc", desc: "back"},
-		{key: "?", desc: "help"},
-		{key: "q", desc: "quit"},
+func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
+	actions := []helplayout.HelpItem{
+		{Key: "e", Description: "edit"},
+		{Key: "c", Description: "comment"},
+		{Key: "+", Description: "label"},
+		{Key: "-", Description: "unlabel"},
+		{Key: "a", Description: "owner"},
+		{Key: "A", Description: "unassign"},
+		{Key: "x", Description: "close"},
+		{Key: "r", Description: "reopen"},
+		{Key: "p", Description: "parent"},
+		{Key: "b", Description: "block"},
+		{Key: "l", Description: "related"},
+		{Key: "!", Description: "priority"},
+		{Key: "D", Description: "daemons"},
+		{Key: "F", Description: "federation"},
+		{Key: "C", Description: "credentials"},
+		{Key: "N", Description: "child"},
+		{Key: "L", Description: "layout"},
+		{Key: "esc", Description: "back"},
+		{Key: "?", Description: "help"},
+		{Key: "q", Description: "quit"},
 	}
 	if dm.detailFocus == focusChildren && len(dm.children) > 0 {
-		nav := []helpItem{
-			{key: "↑↓", desc: "scroll"},
-			{key: "j/k", desc: "child"},
-			{key: "↵", desc: "open child"},
-			{key: "↹", desc: "section"},
-			{key: "pgup/pgdn", desc: "page"},
+		nav := []helplayout.HelpItem{
+			{Key: "↑↓", Description: "scroll"},
+			{Key: "j/k", Description: "child"},
+			{Key: "↵", Description: "open child"},
+			{Key: "↹", Description: "section"},
+			{Key: "pgup/pgdn", Description: "page"},
 		}
-		return [][]helpItem{append(nav, actions...)}
+		return [][]helplayout.HelpItem{append(nav, actions...)}
 	}
-	nav := []helpItem{
-		{key: "↑↓", desc: "scroll"},
-		{key: "j/k", desc: "row"},
-		{key: "↹", desc: "section"},
-		{key: "↵", desc: "open"},
-		{key: "pgup/pgdn", desc: "page"},
+	nav := []helplayout.HelpItem{
+		{Key: "↑↓", Description: "scroll"},
+		{Key: "j/k", Description: "row"},
+		{Key: "↹", Description: "section"},
+		{Key: "↵", Description: "open"},
+		{Key: "pgup/pgdn", Description: "page"},
 	}
-	return [][]helpItem{append(nav, actions...)}
+	return [][]helplayout.HelpItem{append(nav, actions...)}
 }
 
-func modalHelpRows(kind modalKind) [][]helpItem {
+func modalHelpRows(kind modalKind) [][]helplayout.HelpItem {
 	switch kind {
 	case modalQuitConfirm:
-		return [][]helpItem{{
-			{key: "y", desc: "confirm"},
-			{key: "n/esc", desc: "cancel"},
+		return [][]helplayout.HelpItem{{
+			{Key: "y", Description: "confirm"},
+			{Key: "n/esc", Description: "cancel"},
 		}}
 	case modalDiscardComment, modalDiscardNewIssue:
-		return [][]helpItem{{
-			{key: "y", desc: "discard"},
-			{key: "n/esc", desc: "keep editing"},
+		return [][]helplayout.HelpItem{{
+			{Key: "y", Description: "discard"},
+			{Key: "n/esc", Description: "keep editing"},
 		}}
 	}
 	return nil
 }
 
-func modalFirstHelpRows(kind modalKind, fallback [][]helpItem) [][]helpItem {
+func modalFirstHelpRows(kind modalKind, fallback [][]helplayout.HelpItem) [][]helplayout.HelpItem {
 	if kind != modalNone {
 		return modalHelpRows(kind)
 	}
@@ -251,16 +248,24 @@ func renderAuxiliaryFooter(m Model, ordinary string) string {
 	return subtleStyle.Render(ordinary)
 }
 
-func globalHelpRows() [][]helpItem {
-	return [][]helpItem{{
-		{key: "?", desc: "help"},
-		{key: "q", desc: "quit"},
+func globalHelpRows() [][]helplayout.HelpItem {
+	return [][]helplayout.HelpItem{{
+		{Key: "?", Description: "help"},
+		{Key: "q", Description: "quit"},
 	}}
 }
 
-func renderFooterHelpTable(rows [][]helpItem, width int) string {
+func renderFooterHelpTable(rows [][]helplayout.HelpItem, width int) string {
 	innerWidth := titleBarInnerWidth(width)
-	body := renderHelpTable(rows, innerWidth)
+	body := helprender.RenderHelpTable(
+		convertAndReflowHelpRows(rows, innerWidth),
+		helprender.Styles{
+			Key:         helpKeyStyle,
+			Description: helpDescStyle,
+			BorderColor: lipgloss.LightDark(activeHasDarkBackground)(
+				lipgloss.Color("248"), lipgloss.Color("242")),
+		},
+	)
 	if body == "" {
 		return footerBarStyle.Render(padToWidth("", innerWidth))
 	}
@@ -271,145 +276,18 @@ func renderFooterHelpTable(rows [][]helpItem, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func helpLines(rows [][]helpItem, width int) int {
-	lines := len(reflowHelpRows(rows, titleBarInnerWidth(width)))
+func helpLines(rows [][]helplayout.HelpItem, width int) int {
+	innerWidth := titleBarInnerWidth(width)
+	lines := len(convertAndReflowHelpRows(rows, innerWidth))
 	if lines < 1 {
 		return 1
 	}
 	return lines
 }
 
-// Adapted from roborev cmd/roborev/tui/tui.go.
-func reflowHelpRows(rows [][]helpItem, width int) [][]helpItem {
-	if width <= 0 {
-		return rows
-	}
-
-	cellWidth := func(item helpItem) int {
-		w := runewidth.StringWidth(item.key)
-		if item.desc != "" {
-			w += 1 + runewidth.StringWidth(item.desc)
-		}
-		return w
-	}
-
-	maxItemsPerRow := 0
-	for _, row := range rows {
-		if len(row) > maxItemsPerRow {
-			maxItemsPerRow = len(row)
-		}
-	}
-
-	for ncols := maxItemsPerRow; ncols >= 1; ncols-- {
-		var candidate [][]helpItem
-		for _, row := range rows {
-			for i := 0; i < len(row); i += ncols {
-				end := min(i+ncols, len(row))
-				candidate = append(candidate, row[i:end])
-			}
-		}
-
-		colW := make([]int, ncols)
-		for _, crow := range candidate {
-			for c, item := range crow {
-				if w := cellWidth(item); w > colW[c] {
-					colW[c] = w
-				}
-			}
-		}
-
-		total := 0
-		for c, w := range colW {
-			total += w
-			if c > 0 {
-				total += 2
-			}
-		}
-		if total <= width {
-			return candidate
-		}
-	}
-
-	var result [][]helpItem
-	for _, row := range rows {
-		for _, item := range row {
-			result = append(result, []helpItem{item})
-		}
-	}
-	return result
-}
-
-func renderHelpTable(rows [][]helpItem, width int) string {
-	rows = reflowHelpRows(rows, width)
-	if len(rows) == 0 {
-		return ""
-	}
-
-	borderColor := lipgloss.LightDark(activeHasDarkBackground)(
-		lipgloss.Color("248"), lipgloss.Color("242"))
-	cellStyle := lipgloss.NewStyle()
-	cellWithBorder := lipgloss.NewStyle().
-		PaddingLeft(1).
-		Border(lipgloss.Border{Left: "▕"}, false, false, false, true).
-		BorderForeground(borderColor)
-
-	maxCols := 0
-	for _, row := range rows {
-		if len(row) > maxCols {
-			maxCols = len(row)
-		}
-	}
-
-	colMinW := make([]int, maxCols)
-	for _, row := range rows {
-		for c, item := range row {
-			w := runewidth.StringWidth(item.key)
-			if item.desc != "" {
-				w += 1 + runewidth.StringWidth(item.desc)
-			}
-			if w > colMinW[c] {
-				colMinW[c] = w
-			}
-		}
-	}
-
-	empty := make([][]bool, len(rows))
-	t := table.New().
-		BorderTop(false).
-		BorderBottom(false).
-		BorderLeft(false).
-		BorderRight(false).
-		BorderColumn(false).
-		BorderRow(false).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			minW := 0
-			if col < len(colMinW) {
-				minW = colMinW[col]
-			}
-			if col == 0 || (row < len(empty) && col < len(empty[row]) && empty[row][col]) {
-				return cellStyle.Width(minW)
-			}
-			// minW content + 1 padding + 1 for the left border (width is
-			// border-box in Lip Gloss v2).
-			return cellWithBorder.Width(minW + 2)
-		}).
-		Wrap(false)
-
-	for ri, row := range rows {
-		styled := make([]string, maxCols)
-		empty[ri] = make([]bool, maxCols)
-		for i, item := range row {
-			if item.desc != "" {
-				styled[i] = helpKeyStyle.Render(item.key) + " " + helpDescStyle.Render(item.desc)
-			} else {
-				styled[i] = helpKeyStyle.Render(item.key)
-			}
-		}
-		for i := len(row); i < maxCols; i++ {
-			empty[ri][i] = true
-		}
-		t = t.Row(styled...)
-	}
-
-	return t.Render()
+func convertAndReflowHelpRows(
+	rows [][]helplayout.HelpItem,
+	width int,
+) [][]helplayout.HelpItem {
+	return helplayout.ReflowRows(rows, width, helprender.ColumnGap)
 }

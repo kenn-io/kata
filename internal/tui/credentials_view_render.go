@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"go.kenn.io/kit/tui/helplayout"
 )
 
 const credentialCardRows = 5
@@ -114,15 +115,15 @@ func formatOptionalCredentialTime(value *time.Time) string {
 	return formatCredentialTime(*value)
 }
 
-func credentialsHelpRows() [][]helpItem {
-	return [][]helpItem{{
-		{key: "↑↓", desc: "move"},
-		{key: "r", desc: "refresh"},
-		{key: "esc", desc: "back"},
-		{key: "D", desc: "daemons"},
-		{key: "F", desc: "federation"},
-		{key: "P", desc: "projects"},
-		{key: "?", desc: "help"},
-		{key: "q", desc: "quit"},
+func credentialsHelpRows() [][]helplayout.HelpItem {
+	return [][]helplayout.HelpItem{{
+		{Key: "↑↓", Description: "move"},
+		{Key: "r", Description: "refresh"},
+		{Key: "esc", Description: "back"},
+		{Key: "D", Description: "daemons"},
+		{Key: "F", Description: "federation"},
+		{Key: "P", Description: "projects"},
+		{Key: "?", Description: "help"},
+		{Key: "q", Description: "quit"},
 	}}
 }
