@@ -25,7 +25,7 @@ func TestSearchStatusValidation(t *testing.T) {
 }
 
 func TestSearchStatusDaemonCompatibility(t *testing.T) {
-	for _, version := range []string{"", "nonsense", "0.18.0", "0.19.0"} {
+	for _, version := range []string{"", "nonsense", "0.18.0", "0.19.0", "0.20.0"} {
 		t.Run(version, func(t *testing.T) {
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,12 +44,12 @@ func TestSearchStatusDaemonCompatibility(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), server.URL), "--project", "spoke-project", "search", "work", "--status", "open")
-			if version == "0.19.0" {
+			if version == "0.20.0" {
 				require.NoError(t, err)
 				assert.EqualValues(t, 1, calls.Load())
 			} else {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "requires daemon API 0.19.0 or newer")
+				assert.Contains(t, err.Error(), "requires daemon API 0.20.0 or newer")
 				assert.Zero(t, calls.Load())
 			}
 		})

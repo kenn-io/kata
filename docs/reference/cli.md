@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-15
+last_edited: 2026-09-16
 ---
 
 # CLI reference
@@ -254,7 +254,7 @@ they return an error (HTTP 503) when the vector leg cannot run or complete, just
 as they return 400 when embeddings are not configured at all.
 
 Before sending filters that an older daemon could silently ignore, the CLI
-checks `api_schema_version`. Status-filtered search requires API 0.19.0 or
+checks `api_schema_version`. Status-filtered search requires API 0.20.0 or
 newer. Label-filtered search and filtered `ready --all` require API 0.8.0 or
 newer; filtered `list --all` requires API 0.9.0 or newer. An older
 daemon fails before the query with `daemon_api_too_old` and an upgrade message.

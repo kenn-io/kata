@@ -71,8 +71,8 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		if health.APISchemaVersion != nil {
 			reported = strings.TrimSpace(*health.APISchemaVersion)
 		}
-		if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.19.0") < 0 {
-			return nil, SearchOutput{}, fmt.Errorf("status-filtered search requires daemon API 0.19.0 or newer; this daemon reports %q; upgrade the daemon", reported)
+		if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.20.0") < 0 {
+			return nil, SearchOutput{}, fmt.Errorf("status-filtered search requires daemon API 0.20.0 or newer; this daemon reports %q; upgrade the daemon", reported)
 		}
 	}
 	projects, err := h.readProjects(ctx, input.Project)

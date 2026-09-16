@@ -126,7 +126,7 @@ func TestIssueScopedTokenNarrowsListBeforeLimitAndHidesDirectLookups(t *testing.
 	require.Equal(t, child.UID, listed.Issues[0].UID)
 
 	resp, body = envDoRaw(t, env, http.MethodGet,
-		"/api/v1/projects/"+strconv.FormatInt(project.ID, 10)+"/search?q=Outside&mode=lexical", nil, headers)
+		"/api/v1/projects/"+strconv.FormatInt(project.ID, 10)+"/search?q=Outside&mode=lexical&status=open", nil, headers)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
 	var searched struct {
 		Results []any `json:"results"`

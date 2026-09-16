@@ -14,7 +14,7 @@ import (
 )
 
 func TestMCPSearchStatusCompatibilityAndForwarding(t *testing.T) {
-	for _, version := range []string{"", "invalid", "0.18.0", "0.19.0"} {
+	for _, version := range []string{"", "invalid", "0.18.0", "0.19.0", "0.20.0"} {
 		t.Run(version, func(t *testing.T) {
 			var searches atomic.Int32
 			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -37,12 +37,12 @@ func TestMCPSearchStatusCompatibilityAndForwarding(t *testing.T) {
 			session := connectTestServerWithClient(t, client)
 			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "work", "status": "closed", "limit": 3, "labels": []string{"bug"}}})
 			require.NoError(t, err)
-			if version == "0.19.0" {
+			if version == "0.20.0" {
 				require.False(t, result.IsError, "%s", mustJSON(t, result))
 				assert.EqualValues(t, 1, searches.Load())
 			} else {
 				require.True(t, result.IsError)
-				assert.Contains(t, string(mustJSON(t, result)), "requires daemon API 0.19.0 or newer")
+				assert.Contains(t, string(mustJSON(t, result)), "requires daemon API 0.20.0 or newer")
 				assert.Zero(t, searches.Load())
 			}
 		})

@@ -76,7 +76,7 @@ func TestSearchFanoutUsesStableGlobalOrdering(t *testing.T) {
 		t.Run("status="+status, func(t *testing.T) {
 			session, _ := connectMultiProjectServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
 				if request.URL.Path == "/api/v1/health" {
-					writeJSON(writer, map[string]any{"ok": true, "api_schema_version": "0.19.0"})
+					writeJSON(writer, map[string]any{"ok": true, "api_schema_version": "0.20.0"})
 					return true
 				}
 				if !strings.HasSuffix(request.URL.Path, "/search") {
