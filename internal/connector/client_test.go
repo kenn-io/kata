@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -714,95 +715,105 @@ func TestAwaitCommandOutcomePreservesRecordedProcessResultAfterParentEnds(t *tes
 }
 
 func TestAwaitCommandOutcomeContextWinnerKillsAndWaitsOnce(t *testing.T) {
-	parent, cancel := context.WithCancel(t.Context())
-	waitResult := make(chan error, 1)
-	killed := make(chan struct{}, 1)
-	killCalls := 0
-	type result struct {
-		runErr       error
-		contextCause error
-	}
-	finished := make(chan result, 1)
-	go func() {
-		runErr, contextCause := awaitCommandOutcome(parent, waitResult, func() error {
-			killCalls++
-			killed <- struct{}{}
-			return nil
-		})
-		finished <- result{runErr: runErr, contextCause: contextCause}
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		parent, cancel := context.WithCancel(t.Context())
+		waitResult := make(chan error, 1)
+		killed := make(chan struct{}, 1)
+		killCalls := 0
+		type result struct {
+			runErr       error
+			contextCause error
+		}
+		finished := make(chan result, 1)
+		go func() {
+			runErr, contextCause := awaitCommandOutcome(parent, waitResult, func() error {
+				killCalls++
+				killed <- struct{}{}
+				return nil
+			})
+			finished <- result{runErr: runErr, contextCause: contextCause}
+		}()
 
-	cancel()
-	select {
-	case <-killed:
-	case <-time.After(time.Second):
-		t.Fatal("context winner did not kill the child")
-	}
-	select {
-	case <-finished:
-		t.Fatal("context winner returned before the child was reaped")
-	default:
-	}
-	waitResult <- errors.New("synthetic killed process result")
-	got := <-finished
-	assert.NoError(t, got.runErr)
-	assert.ErrorIs(t, got.contextCause, context.Canceled)
-	assert.Equal(t, 1, killCalls)
+		cancel()
+		synctest.Wait()
+		select {
+		case <-killed:
+		default:
+			t.Fatal("context winner did not kill the child")
+		}
+		select {
+		case <-finished:
+			t.Fatal("context winner returned before the child was reaped")
+		default:
+		}
+		waitResult <- errors.New("synthetic killed process result")
+		synctest.Wait()
+		got := <-finished
+		assert.NoError(t, got.runErr)
+		assert.ErrorIs(t, got.contextCause, context.Canceled)
+		assert.Equal(t, 1, killCalls)
+	})
 }
 
 func TestAwaitCommandOutcomeTerminationFailureIsBounded(t *testing.T) {
-	parent, cancel := context.WithCancel(t.Context())
-	waitResult := make(chan error, 1)
-	terminationErr := errors.New("opaque termination failure")
-	finished := make(chan struct {
-		runErr       error
-		contextCause error
-	}, 1)
-	go func() {
-		runErr, contextCause := awaitCommandOutcome(parent, waitResult, func() error {
-			return terminationErr
-		})
-		finished <- struct {
+	synctest.Test(t, func(t *testing.T) {
+		parent, cancel := context.WithCancel(t.Context())
+		waitResult := make(chan error, 1)
+		terminationErr := errors.New("opaque termination failure")
+		finished := make(chan struct {
 			runErr       error
 			contextCause error
-		}{runErr: runErr, contextCause: contextCause}
-	}()
-	cancel()
+		}, 1)
+		go func() {
+			runErr, contextCause := awaitCommandOutcome(parent, waitResult, func() error {
+				return terminationErr
+			})
+			finished <- struct {
+				runErr       error
+				contextCause error
+			}{runErr: runErr, contextCause: contextCause}
+		}()
+		cancel()
+		synctest.Wait()
 
-	select {
-	case result := <-finished:
-		assert.ErrorIs(t, result.runErr, terminationErr)
-		assert.ErrorIs(t, result.contextCause, context.Canceled)
-	case <-time.After(3 * connectorProcessCleanupGrace):
-		waitResult <- errors.New("cleanup after failed bounded assertion")
-		t.Fatal("termination failure left connector cleanup waiting indefinitely")
-	}
+		select {
+		case result := <-finished:
+			assert.ErrorIs(t, result.runErr, terminationErr)
+			assert.ErrorIs(t, result.contextCause, context.Canceled)
+		case <-time.After(3 * connectorProcessCleanupGrace):
+			waitResult <- errors.New("cleanup after failed bounded assertion")
+			t.Fatal("termination failure left connector cleanup waiting indefinitely")
+		}
+	})
 }
 
 func TestAwaitCommandOutcomeReapWaitIsBounded(t *testing.T) {
-	parent, cancel := context.WithCancel(t.Context())
-	waitResult := make(chan error, 1)
-	finished := make(chan struct {
-		runErr       error
-		contextCause error
-	}, 1)
-	go func() {
-		runErr, contextCause := awaitCommandOutcome(parent, waitResult, func() error { return nil })
-		finished <- struct {
+	synctest.Test(t, func(t *testing.T) {
+		parent, cancel := context.WithCancel(t.Context())
+		waitResult := make(chan error, 1)
+		finished := make(chan struct {
 			runErr       error
 			contextCause error
-		}{runErr: runErr, contextCause: contextCause}
-	}()
-	cancel()
+		}, 1)
+		go func() {
+			runErr, contextCause := awaitCommandOutcome(parent, waitResult, func() error { return nil })
+			finished <- struct {
+				runErr       error
+				contextCause error
+			}{runErr: runErr, contextCause: contextCause}
+		}()
+		cancel()
+		synctest.Wait()
 
-	select {
-	case result := <-finished:
-		require.ErrorIs(t, result.runErr, errConnectorCleanupWait)
-		assert.ErrorIs(t, result.contextCause, context.Canceled)
-	case <-time.After(3 * connectorProcessCleanupGrace):
-		waitResult <- errors.New("cleanup after failed bounded assertion")
-		t.Fatal("connector cleanup waited indefinitely for process reap")
-	}
+		select {
+		case result := <-finished:
+			require.ErrorIs(t, result.runErr, errConnectorCleanupWait)
+			assert.ErrorIs(t, result.contextCause, context.Canceled)
+		case <-time.After(3 * connectorProcessCleanupGrace):
+			waitResult <- errors.New("cleanup after failed bounded assertion")
+			t.Fatal("connector cleanup waited indefinitely for process reap")
+		}
+	})
 }
 
 func TestConnectorContextErrorKeepsChildTimeoutAfterParentEnds(t *testing.T) {
