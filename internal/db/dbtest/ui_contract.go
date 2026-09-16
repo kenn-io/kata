@@ -2,7 +2,6 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
 	"testing"
@@ -332,18 +331,18 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		project := createCursorProject(ctx, t, store)
 		matching, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Delegated issue", Author: "coordinator",
-			Metadata: map[string]json.RawMessage{"teammate": json.RawMessage(`"reviewer-7"`)},
+			Metadata: map[string]jsontext.Value{"teammate": jsontext.Value(`"reviewer-7"`)},
 		})
 		require.NoError(t, err)
 		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Invalid teammate issue", Author: "coordinator",
-			Metadata: map[string]json.RawMessage{"teammate": json.RawMessage(`"reviewer/7"`)},
+			Metadata: map[string]jsontext.Value{"teammate": jsontext.Value(`"reviewer/7"`)},
 		})
 		require.NoError(t, err)
 		createCursorIssue(ctx, t, store, project.ID, "Newer unassigned issue")
 		closed, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Closed delegated issue", Author: "coordinator",
-			Metadata: map[string]json.RawMessage{"teammate": json.RawMessage(`"reviewer-7"`)},
+			Metadata: map[string]jsontext.Value{"teammate": jsontext.Value(`"reviewer-7"`)},
 		})
 		require.NoError(t, err)
 		_, _, changed, err := store.CloseIssue(
