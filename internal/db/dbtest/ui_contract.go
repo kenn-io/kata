@@ -2,7 +2,6 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
 	"testing"
