@@ -279,6 +279,18 @@ func TestFold_MetadataDiffsMergeNestedObjectPaths(t *testing.T) {
 	require.JSONEq(t, `{"settings":{"theme":"dark","size":2}}`, string(got.IssueMetadata["issue-1"]))
 }
 
+func TestFold_MetadataDiffsProduceDeterministicJSON(t *testing.T) {
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{"z":1},"created_at":"2026-05-23T12:00:00.000Z"}`),
+		testEvent("issue.metadata_updated", 2, `{"diff":{"a":{"from":null,"to":{"z":2,"a":1}},"m":{"from":null,"to":3}}}`),
+	}
+
+	for range 100 {
+		got := FoldEvents(events)
+		assert.Equal(t, `{"a":{"a":1,"z":2},"m":3,"z":1}`, string(got.IssueMetadata["issue-1"]))
+	}
+}
+
 func TestFold_CommentDuplicateKeepsFirstAndWarns(t *testing.T) {
 	events := []FoldEvent{
 		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),

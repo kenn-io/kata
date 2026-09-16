@@ -2,6 +2,7 @@ package jsonl
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,20 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
+
+func TestRewriteV7EventPayloadsUsesDeterministicJSON(t *testing.T) {
+	lookup := map[issueLookupKey]issueLookupInfo{
+		{projectID: 7, number: 1}: {shortID: "one", uid: "uid-one"},
+		{projectID: 7, number: 2}: {shortID: "two", uid: "uid-two"},
+	}
+	want := `{"payload":{"from_short_id":"one","from_uid":"uid-one","to_short_id":"two","to_uid":"uid-two","type":"related","z":1},"project_id":7,"type":"issue.linked","z":1}`
+
+	for range 100 {
+		envs := []Envelope{{Kind: KindEvent, Data: jsontext.Value(`{"z":1,"project_id":7,"type":"issue.linked","payload":{"z":1,"from_number":1,"to_number":2,"type":"related"}}`)}}
+		require.NoError(t, rewriteV7EventPayloads(envs, lookup))
+		require.Equal(t, want, string(envs[0].Data))
+	}
+}
 
 func TestImportCutoverTargetRejectsMissingExportEvent(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())

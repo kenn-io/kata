@@ -225,9 +225,9 @@ func externalCLIResponseError(status int, body []byte, callErr error) error {
 		if err := json.Unmarshal(body, &envelope); err == nil && envelope.Error.Code != "" && envelope.Error.Message != "" {
 			return apiErrFromBody(status, body)
 		}
-		message := fmt.Sprintf("external root request failed (HTTP %d)", status)
+		message := fmt.Sprintf("daemon request failed (HTTP %d)", status)
 		if statusText := http.StatusText(status); statusText != "" {
-			message = fmt.Sprintf("external root request failed (HTTP %d %s)", status, statusText)
+			message = fmt.Sprintf("daemon request failed (HTTP %d %s)", status, statusText)
 		}
 		return &cliError{
 			Message: message, Kind: kindForStatus(status), ExitCode: mapStatusToExit(status, ""),

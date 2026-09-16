@@ -501,7 +501,7 @@ func decodeLegacyGitHubSyncBinding(env Envelope) (db.IssueSyncBindingExport, err
 		"owner":   old.Owner,
 		"repo":    old.Repo,
 		"repo_id": old.RepoID,
-	})
+	}, json.Deterministic(true))
 	if err != nil {
 		return db.IssueSyncBindingExport{}, fmt.Errorf("encode legacy github sync config: %w", err)
 	}

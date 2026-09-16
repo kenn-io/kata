@@ -152,7 +152,7 @@ func deriveShortIDsForIssues(envs []Envelope) (map[issueLookupKey]issueLookupInf
 			delete(p.raw, "number")
 			p.raw["short_id"] = jsontext.Value(`"` + short + `"`)
 			p.raw["uid"] = jsontext.Value(`"` + p.uid + `"`)
-			data, err := json.Marshal(p.raw)
+			data, err := json.Marshal(p.raw, json.Deterministic(true))
 			if err != nil {
 				return nil, fmt.Errorf("re-marshal cutover issue: %w", err)
 			}
@@ -226,12 +226,12 @@ func rewriteV7EventPayloads(envs []Envelope, lookup map[issueLookupKey]issueLook
 		if !changed {
 			continue
 		}
-		newPayload, err := json.Marshal(payload)
+		newPayload, err := json.Marshal(payload, json.Deterministic(true))
 		if err != nil {
 			return fmt.Errorf("re-marshal event payload: %w", err)
 		}
 		raw["payload"] = newPayload
-		data, err := json.Marshal(raw)
+		data, err := json.Marshal(raw, json.Deterministic(true))
 		if err != nil {
 			return fmt.Errorf("re-marshal event envelope: %w", err)
 		}
@@ -290,7 +290,7 @@ func rewriteCreatedEventPayload(payload map[string]jsontext.Value, projectID int
 	if !changed {
 		return false
 	}
-	out, err := json.Marshal(links)
+	out, err := json.Marshal(links, json.Deterministic(true))
 	if err != nil {
 		return false
 	}

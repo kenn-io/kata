@@ -40,6 +40,21 @@ func TestExportSnapshotV14FederationEnrollmentPreservesAdoptionMarker(t *testing
 	assert.Contains(t, out.String(), `"bound_actor":"tester"`)
 }
 
+func TestWriteRecordUsesDeterministicJSON(t *testing.T) {
+	for range 100 {
+		var out bytes.Buffer
+		require.NoError(t, writeRecord(NewEncoder(&out), KindMeta, map[string]any{"z": 1, "a": 2}))
+		assert.Equal(t, "{\"kind\":\"meta\",\"data\":{\"a\":2,\"z\":1}}\n", out.String())
+	}
+}
+
+func TestMarshalLegacyGitHubSyncConfigUsesDeterministicJSON(t *testing.T) {
+	for range 100 {
+		got := mustMarshalGitHubSyncConfig("github.example", "owner", "repo", 7)
+		assert.Equal(t, `{"host":"github.example","owner":"owner","repo":"repo","repo_id":7}`, string(got))
+	}
+}
+
 func TestExportSnapshotCarriesExternalRootStateWithoutLiveClaim(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()

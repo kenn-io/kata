@@ -699,7 +699,7 @@ func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.
 		}
 		currentMap[key] = applyMetadataValueDiff(currentMap[key], d.From, d.To)
 	}
-	out, err := json.Marshal(currentMap)
+	out, err := json.Marshal(currentMap, json.Deterministic(true))
 	if err != nil {
 		return jsontext.Value(`{}`)
 	}
@@ -714,7 +714,7 @@ func applyMetadataValueDiff(current, from, to jsontext.Value) jsontext.Value {
 	fromObj := parseRawObject(from)
 	toObj := parseRawObject(to)
 	merged := mergeMetadataObject(currentObj, fromObj, toObj)
-	out, err := json.Marshal(merged)
+	out, err := json.Marshal(merged, json.Deterministic(true))
 	if err != nil {
 		return canonicalJSON(to)
 	}
@@ -796,7 +796,7 @@ func rawJSONObject(raw jsontext.Value) bool {
 }
 
 func mustMarshalRawObject(obj map[string]jsontext.Value) jsontext.Value {
-	out, err := json.Marshal(obj)
+	out, err := json.Marshal(obj, json.Deterministic(true))
 	if err != nil {
 		return jsontext.Value(`{}`)
 	}

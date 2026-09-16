@@ -502,7 +502,7 @@ func mustMarshalGitHubSyncConfig(host, owner, repo string, repoID int64) jsontex
 		"owner":   owner,
 		"repo":    repo,
 		"repo_id": repoID,
-	})
+	}, json.Deterministic(true))
 	if err != nil {
 		panic(err)
 	}
@@ -2310,7 +2310,7 @@ func scanRecords[T any](rows *sql.Rows, kind Kind, enc *Encoder, scan func(*sql.
 }
 
 func writeRecord(enc *Encoder, kind Kind, data any) error {
-	bs, err := json.Marshal(data)
+	bs, err := json.Marshal(data, json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", kind, err)
 	}

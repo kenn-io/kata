@@ -104,22 +104,24 @@ func (p *projectMutation) generatedClient() (*kataclient.Client, error) {
 }
 
 func (p *projectMutation) finishMutation(resp *http.Response, data []byte, callErr error) ([]byte, error) {
-	if err := externalCLITransportError(resp, callErr); err != nil {
-		return nil, err
+	if resp == nil {
+		return nil, externalCLITransportError(resp, callErr)
+	}
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		if canonical := resp.Header.Get("X-Kata-Project-Name"); canonical != "" {
+			p.name = canonical
+		}
+		if p.repair != nil {
+			if err := p.repair(p.name); err != nil {
+				return nil, &cliError{
+					Message: fmt.Sprintf("issue mutation succeeded but workspace binding repair failed: %v; do not repeat the mutation", err),
+					Kind:    kindInternal, Code: "workspace_repair_failed", ExitCode: ExitInternal,
+				}
+			}
+		}
 	}
 	if err := externalCLIResponseError(resp.StatusCode, data, callErr); err != nil {
 		return nil, err
-	}
-	if canonical := resp.Header.Get("X-Kata-Project-Name"); canonical != "" {
-		p.name = canonical
-	}
-	if p.repair != nil {
-		if err := p.repair(p.name); err != nil {
-			return nil, &cliError{
-				Message: fmt.Sprintf("issue mutation succeeded but workspace binding repair failed: %v; do not repeat the mutation", err),
-				Kind:    kindInternal, Code: "workspace_repair_failed", ExitCode: ExitInternal,
-			}
-		}
 	}
 	return data, nil
 }

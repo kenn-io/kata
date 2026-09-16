@@ -1066,7 +1066,7 @@ func logTUIClientTransport(phase, method, path, base string, err error) {
 	if err != nil {
 		errText = err.Error()
 	}
-	_ = json.MarshalWrite(f, tuiClientTransportLogEntry{
+	entry, marshalErr := json.Marshal(tuiClientTransportLogEntry{
 		Time:   time.Now().UTC().Format(time.RFC3339Nano),
 		Phase:  phase,
 		Method: method,
@@ -1074,6 +1074,10 @@ func logTUIClientTransport(phase, method, path, base string, err error) {
 		Base:   redactURLUserinfo(base),
 		Error:  errText,
 	})
+	if marshalErr != nil {
+		return
+	}
+	_, _ = f.Write(append(entry, '\n'))
 }
 
 func redactURLUserinfo(raw string) string {

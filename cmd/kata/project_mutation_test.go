@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net/http"
 	"os"
 	"testing"
 
@@ -12,6 +13,23 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
 )
+
+func TestFinishMutationRepairsBindingBeforeReportingDecodeError(t *testing.T) {
+	decodeErr := errors.New("decode response")
+	repaired := ""
+	p := &projectMutation{name: "old-project", repair: func(name string) error {
+		repaired = name
+		return nil
+	}}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"X-Kata-Project-Name": []string{"renamed-project"}},
+	}
+
+	_, err := p.finishMutation(resp, nil, decodeErr)
+	require.ErrorIs(t, err, decodeErr)
+	assert.Equal(t, "renamed-project", repaired)
+}
 
 func TestCreateRepairsRenamedWorkspaceAfterInlineResolution(t *testing.T) {
 	env := testenv.New(t)

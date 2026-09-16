@@ -560,6 +560,12 @@ func TestClient_LocalUnixTransportFailureLogsAndHidesSyntheticHost(t *testing.T)
 	assert.Contains(t, logged, "/api/v1/projects/7/issues?limit=2001")
 	assert.Contains(t, logged, "dial unix /tmp/missing.sock")
 	assert.Contains(t, logged, "retry")
+	lines := strings.Split(strings.TrimSpace(logged), "\n")
+	require.GreaterOrEqual(t, len(lines), 2)
+	for _, line := range lines {
+		var entry tuiClientTransportLogEntry
+		require.NoError(t, json.Unmarshal([]byte(line), &entry))
+	}
 }
 
 func TestModel_FetchInitialUsesQueueFetchFilter(t *testing.T) {
