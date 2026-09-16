@@ -142,8 +142,9 @@ func TestDispatcherEnqueueLeasesEachAcceptedHookJob(t *testing.T) {
 
 	d.Enqueue(db.Event{ID: 1, Type: "issue.created", ProjectID: 1, ProjectName: "x"})
 	require.True(t, waitForLines(t, runsPath, 2, 5*time.Second))
-	require.Eventually(t, func() bool { return released.Load() == 2 }, time.Second, time.Millisecond)
+	cleanupDispatcher(t, d)
 	require.Equal(t, int32(2), acquired.Load())
+	require.Equal(t, int32(2), released.Load())
 }
 
 func TestDispatcherEnqueueFromUsesAdmittedParentFork(t *testing.T) {
@@ -160,7 +161,8 @@ func TestDispatcherEnqueueFromUsesAdmittedParentFork(t *testing.T) {
 	})
 
 	require.True(t, waitForLines(t, runsPath, 1, 5*time.Second))
-	require.Eventually(t, func() bool { return released.Load() == 1 }, time.Second, time.Millisecond)
+	cleanupDispatcher(t, d)
+	require.Equal(t, int32(1), released.Load())
 }
 
 func TestDispatcherAttemptsAdmissionForEachMatchingHook(t *testing.T) {
@@ -376,21 +378,16 @@ func TestDispatcher_AliasResolverContext_CancelsOnShutdown(t *testing.T) {
 	cfg.QueueCap = 1
 
 	// Capture the ctx the resolver was given.
-	var (
-		capturedCtx context.Context
-		captureMu   sync.Mutex
-		captured    sync.Once
-	)
+	captured := make(chan context.Context, 1)
 	deps := DispatcherDeps{
 		DBHash:    "testdbhash01",
 		KataHome:  t.TempDir(),
 		DaemonLog: log.New(&strings.Builder{}, "", 0),
 		AliasResolver: func(ctx context.Context, _ db.Event) (AliasSnapshot, bool, error) {
-			captured.Do(func() {
-				captureMu.Lock()
-				capturedCtx = ctx
-				captureMu.Unlock()
-			})
+			select {
+			case captured <- ctx:
+			default:
+			}
 			return AliasSnapshot{}, false, nil
 		},
 		IssueResolver:   func(_ context.Context, _ int64) (IssueSnapshot, error) { return IssueSnapshot{}, nil },
@@ -407,21 +404,10 @@ func TestDispatcher_AliasResolverContext_CancelsOnShutdown(t *testing.T) {
 	t.Cleanup(func() { cleanupDispatcher(t, d) })
 
 	enqueueEvents(d, "issue.created", 500, 1)
-	// Wait briefly for the worker to invoke the resolver.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		captureMu.Lock()
-		got := capturedCtx
-		captureMu.Unlock()
-		if got != nil {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	captureMu.Lock()
-	got := capturedCtx
-	captureMu.Unlock()
-	if got == nil {
+	var got context.Context
+	select {
+	case got = <-captured:
+	case <-time.After(2 * time.Second):
 		t.Fatal("alias resolver was never invoked")
 	}
 
