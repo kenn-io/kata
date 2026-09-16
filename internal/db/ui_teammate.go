@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 
 	"go.kenn.io/kata/internal/teammate"
@@ -9,7 +10,7 @@ import (
 // IssueTeammate returns the valid, non-empty teammate attribution in issue metadata.
 func IssueTeammate(raw JSONBlob) (string, bool) {
 	var metadata struct {
-		Teammate json.RawMessage `json:"teammate"`
+		Teammate jsontext.Value `json:"teammate"`
 	}
 	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || len(metadata.Teammate) == 0 {
 		return "", false

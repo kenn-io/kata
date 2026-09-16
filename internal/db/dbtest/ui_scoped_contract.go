@@ -2,7 +2,7 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json/v2"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,7 +44,7 @@ func RunUISnapshotScopedAuthorityContract(t *testing.T, open func(*testing.T) db
 		_, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 			ProjectID: project.ID, Actor: "user-a", Rule: "FREQ=WEEKLY",
 			DTStart: "2026-08-01", Timezone: "UTC",
-			Template: db.RecurrenceTemplate{Title: "Weekly review", Metadata: json.RawMessage(`{}`)},
+			Template: db.RecurrenceTemplate{Title: "Weekly review", Metadata: jsontext.Value(`{}`)},
 		})
 		require.NoError(t, err)
 	}

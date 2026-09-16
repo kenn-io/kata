@@ -140,8 +140,8 @@ func createScopedToken(cmd *cobra.Command, actor, name, issue, expiresIn, tokenP
 		return err
 	}
 	instance, callErr := apiClient.InstanceWithResponse(a.ctx)
-	if err := externalCLITransportError(instance, callErr); err != nil {
-		return err
+	if instance == nil {
+		return externalCLITransportError(instance, callErr)
 	}
 	if err := externalCLIResponseError(instance.StatusCode, instance.Body, callErr); err != nil {
 		return err
@@ -173,8 +173,8 @@ func createScopedToken(cmd *cobra.Command, actor, name, issue, expiresIn, tokenP
 		payload.Name = &trimmed
 	}
 	wire, callErr := apiClient.CreateTokenWithResponse(a.ctx, &generated.CreateTokenRequestOptions{Body: payload})
-	if err := externalCLITransportError(wire, callErr); err != nil {
-		return fmt.Errorf("scoped token creation response was lost; outcome is ambiguous: %w", err)
+	if wire == nil {
+		return fmt.Errorf("scoped token creation response was lost; outcome is ambiguous: %w", externalCLITransportError(wire, callErr))
 	}
 	if wire.StatusCode >= http.StatusBadRequest {
 		return externalCLIResponseError(wire.StatusCode, wire.Body, callErr)
@@ -247,8 +247,8 @@ func resolveScopedTokenIssue(_ *cobra.Command, a daemonAPI, raw string) (tokenSc
 	wire, callErr := apiClient.ShowIssueWithResponse(a.ctx, &generated.ShowIssueRequestOptions{
 		PathParams: &generated.ShowIssuePath{ProjectID: projectID, Ref: parsed.RefForAPI},
 	})
-	if err := externalCLITransportError(wire, callErr); err != nil {
-		return tokenScopeCLIOut{}, "", err
+	if wire == nil {
+		return tokenScopeCLIOut{}, "", externalCLITransportError(wire, callErr)
 	}
 	if err := externalCLIResponseError(wire.StatusCode, wire.Body, callErr); err != nil {
 		return tokenScopeCLIOut{}, "", err
@@ -277,8 +277,9 @@ func cleanupScopedTokenCreation(a daemonAPI, tokenID int64, cause error) error {
 	wire, callErr := apiClient.RevokeTokenWithResponse(cleanupCtx, &generated.RevokeTokenRequestOptions{
 		PathParams: &generated.RevokeTokenPath{ID: tokenID},
 	})
-	err = externalCLITransportError(wire, callErr)
-	if err == nil {
+	if wire == nil {
+		err = externalCLITransportError(wire, callErr)
+	} else {
 		err = externalCLIResponseError(wire.StatusCode, wire.Body, callErr)
 	}
 	if err != nil {
