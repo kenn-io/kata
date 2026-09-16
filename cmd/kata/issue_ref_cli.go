@@ -123,8 +123,8 @@ func hydrateRefWithQualified(ctx context.Context, baseURL string, pid int64, ref
 		return ref, err
 	}
 	response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: pid, Ref: ref.RefForAPI}, Query: &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted}})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return ref, err
+	if response == nil {
+		return ref, externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return ref, err

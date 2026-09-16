@@ -49,8 +49,8 @@ func runClaim(cmd *cobra.Command, raw string, force, ifUnowned bool) error {
 		return err
 	}
 	response, callErr := apiClient.ClaimIssueWithResponse(ctx, &generated.ClaimIssueRequestOptions{PathParams: &generated.ClaimIssuePath{ProjectID: pid, Ref: issue.RefForAPI}, Body: &generated.ClaimIssueBody{Actor: actor, Force: &force, IfUnowned: &ifUnowned}})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return err
+	if response == nil {
+		return externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return err

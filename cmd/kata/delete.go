@@ -128,8 +128,8 @@ func runDestructive(cmd *cobra.Command, baseURL string, pid int64, pathRef, disp
 			PathParams: &generated.DeleteIssuePath{ProjectID: pid, Ref: pathRef}, Body: body,
 			Header: &generated.DeleteIssueHeaders{XKataConfirm: &confirm},
 		})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return err
+		if response == nil {
+			return externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return err
@@ -140,8 +140,8 @@ func runDestructive(cmd *cobra.Command, baseURL string, pid int64, pathRef, disp
 			PathParams: &generated.PurgeIssuePath{ProjectID: pid, Ref: pathRef}, Body: body,
 			Header: &generated.PurgeIssueHeaders{XKataConfirm: &confirm},
 		})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return err
+		if response == nil {
+			return externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return err

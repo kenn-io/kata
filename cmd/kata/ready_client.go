@@ -91,8 +91,8 @@ func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 		response, callErr := apiClient.ReadyIssuesGlobalWithResponse(ctx, &generated.ReadyIssuesGlobalRequestOptions{
 			Query: (*generated.ReadyIssuesGlobalQuery)(params),
 		})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return readyResultForCLI{}, err
+		if response == nil {
+			return readyResultForCLI{}, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return readyResultForCLI{}, err
@@ -110,8 +110,8 @@ func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 	response, callErr := apiClient.ReadyIssuesWithResponse(ctx, &generated.ReadyIssuesRequestOptions{
 		PathParams: &generated.ReadyIssuesPath{ProjectID: projectID}, Query: params,
 	})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return readyResultForCLI{}, err
+	if response == nil {
+		return readyResultForCLI{}, externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return readyResultForCLI{}, err

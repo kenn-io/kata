@@ -522,8 +522,8 @@ func postProjects(ctx context.Context, baseURL string, reqBody any) ([]byte, err
 		return nil, err
 	}
 	response, callErr := apiClient.InitProjectWithResponse(ctx, &generated.InitProjectRequestOptions{Body: &body})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return nil, fmt.Errorf("POST /api/v1/projects: %w", err)
+	if response == nil {
+		return nil, fmt.Errorf("POST /api/v1/projects: %w", externalCLITransportError(response, callErr))
 	}
 	if response.StatusCode >= 300 {
 		return nil, apiErrFromBody(response.StatusCode, response.Body)

@@ -134,8 +134,8 @@ func pollEvents(ctx context.Context, client *http.Client, baseURL string, opts e
 	}
 	if opts.AllProjects {
 		response, callErr := apiClient.PollEventsWithResponse(ctx, &generated.PollEventsRequestOptions{Query: &generated.PollEventsQuery{AfterID: &opts.AfterID, Limit: new(int64(opts.Limit))}})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
@@ -154,8 +154,8 @@ func pollEvents(ctx context.Context, client *http.Client, baseURL string, opts e
 		}
 	}
 	response, callErr := apiClient.PollProjectEventsWithResponse(ctx, &generated.PollProjectEventsRequestOptions{PathParams: &generated.PollProjectEventsPath{ProjectID: pid}, Query: &generated.PollProjectEventsQuery{AfterID: &opts.AfterID, Limit: new(int64(opts.Limit))}})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return nil, err
+	if response == nil {
+		return nil, externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return nil, err

@@ -83,7 +83,7 @@ func postFollowupCommentWithKey(
 	}
 	response, callErr := apiClient.CreateCommentWithResponse(ctx, options)
 	err = externalCLITransportError(response, callErr)
-	if err == nil {
+	if response != nil {
 		err = externalCLIResponseError(response.StatusCode, response.Body, callErr)
 	}
 	if err != nil {

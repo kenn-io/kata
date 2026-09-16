@@ -215,8 +215,8 @@ func githubSyncDisable(cmd *cobra.Command) error {
 		return err
 	}
 	response, callErr := apiClient.DisableIssueSyncWithResponse(a.ctx, &generated.DisableIssueSyncRequestOptions{PathParams: &generated.DisableIssueSyncPath{ProjectID: projectID, Provider: "github"}, Body: &generated.DisableIssueSyncBody{}})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return err
+	if response == nil {
+		return externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return err
@@ -282,8 +282,8 @@ func inferIssueSyncBinding(a daemonAPI, projectID int64, requestedHost string) (
 		return githubsync.Binding{}, err
 	}
 	response, callErr := apiClient.ShowProjectWithResponse(a.ctx, &generated.ShowProjectRequestOptions{PathParams: &generated.ShowProjectPath{ProjectID: projectID}})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return githubsync.Binding{}, err
+	if response == nil {
+		return githubsync.Binding{}, externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return githubsync.Binding{}, err

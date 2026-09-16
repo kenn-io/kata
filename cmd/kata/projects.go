@@ -612,8 +612,8 @@ func loadProjectRefsWithArchived(a daemonAPI, includeArchived bool) ([]projectRe
 		return nil, err
 	}
 	response, callErr := apiClient.ListProjectsWithResponse(a.ctx, &generated.ListProjectsRequestOptions{Query: query})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return nil, err
+	if response == nil {
+		return nil, externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return nil, err
@@ -630,8 +630,8 @@ func loadProjectRefsWithArchived(a daemonAPI, includeArchived bool) ([]projectRe
 			continue
 		}
 		response, callErr := apiClient.ShowProjectWithResponse(a.ctx, &generated.ShowProjectRequestOptions{PathParams: &generated.ShowProjectPath{ProjectID: list.Projects[i].ID}})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err

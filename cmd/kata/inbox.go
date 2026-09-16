@@ -102,8 +102,8 @@ func loadInbox(cmd *cobra.Command, recipient string) ([]inboxRequest, error) {
 		PathParams: &generated.ListIssuesPath{ProjectID: pid},
 		Query:      &generated.ListIssuesQuery{Status: new(generated.ListIssuesQueryStatus("open")), Limit: new(int64(0)), Meta: []string{key}},
 	})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return nil, err
+	if response == nil {
+		return nil, externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return nil, err

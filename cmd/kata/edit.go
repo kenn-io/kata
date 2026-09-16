@@ -388,8 +388,8 @@ func refsToUIDs(ctx context.Context, baseURL string, projectID int64, refs []str
 		response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
 			PathParams: &generated.ShowIssuePath{ProjectID: projectID, Ref: ref},
 		})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		status, bs := response.StatusCode, response.Body
 		if status == http.StatusNotFound {

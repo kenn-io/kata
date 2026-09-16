@@ -424,8 +424,8 @@ func federationSpokeInstanceUID(a daemonAPI) (string, error) {
 		return "", err
 	}
 	callResp, callErr := apiClient.InstanceWithResponse(a.ctx)
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return "", err
+	if callResp == nil {
+		return "", externalCLITransportError(callResp, callErr)
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return "", err
@@ -452,8 +452,8 @@ func federationSpokeProjectNameExists(a daemonAPI, projectName string) (string, 
 		return "", false, err
 	}
 	callResp, callErr := apiClient.ListProjectsWithResponse(a.ctx, &generated.ListProjectsRequestOptions{})
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return "", false, err
+	if callResp == nil {
+		return "", false, externalCLITransportError(callResp, callErr)
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return "", false, err
@@ -863,8 +863,8 @@ func resolveSpokeForLeave(a daemonAPI, args []string) (spokeLeaveTarget, error) 
 		return spokeLeaveTarget{}, err
 	}
 	callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{Query: &generated.GetFederationStatusQuery{Include: new("archived")}})
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return spokeLeaveTarget{}, err
+	if callResp == nil {
+		return spokeLeaveTarget{}, externalCLITransportError(callResp, callErr)
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return spokeLeaveTarget{}, err
@@ -947,8 +947,8 @@ func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, i
 		return nil, federationLeaveHubError(err)
 	}
 	callResp, callErr := apiClient.ListFederationEnrollmentsWithResponse(hub.ctx)
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return nil, federationLeaveHubError(err)
+	if callResp == nil {
+		return nil, federationLeaveHubError(externalCLITransportError(callResp, callErr))
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return nil, federationLeaveHubError(err)
@@ -988,8 +988,8 @@ func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, i
 	}
 	for _, id := range matched {
 		callResp, callErr := apiClient.RevokeFederationEnrollmentWithResponse(hub.ctx, &generated.RevokeFederationEnrollmentRequestOptions{PathParams: &generated.RevokeFederationEnrollmentPath{EnrollmentID: id}})
-		if err := externalCLITransportError(callResp, callErr); err != nil {
-			return nil, federationLeaveHubError(err)
+		if callResp == nil {
+			return nil, federationLeaveHubError(externalCLITransportError(callResp, callErr))
 		}
 		if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 			return nil, federationLeaveHubError(err)
@@ -1227,8 +1227,8 @@ func resolveFederationProjectByName(a daemonAPI, name string) (projectRef, error
 		return projectRef{}, err
 	}
 	callResp, callErr := apiClient.ResolveProjectWithResponse(a.ctx, &generated.ResolveProjectRequestOptions{Body: &generated.ResolveProjectBody{Name: &name}})
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return projectRef{}, err
+	if callResp == nil {
+		return projectRef{}, externalCLITransportError(callResp, callErr)
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return projectRef{}, err
@@ -1247,8 +1247,8 @@ func ensureFederationProjectByName(
 		return projectRef{}, err
 	}
 	callResp, callErr := apiClient.InitProjectWithResponse(a.ctx, &generated.InitProjectRequestOptions{Body: &generated.InitProjectBody{Name: &name, Actor: &actor}})
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return projectRef{}, err
+	if callResp == nil {
+		return projectRef{}, externalCLITransportError(callResp, callErr)
 	}
 	bs := callResp.Body
 	if callResp.StatusCode >= 300 {
@@ -1273,8 +1273,8 @@ func enableAndReadFederationMetadata(a daemonAPI, projectID int64, actor string)
 		return api.ProjectFederationBody{}, err
 	}
 	callResp, callErr := apiClient.EnableProjectFederationWithResponse(a.ctx, &generated.EnableProjectFederationRequestOptions{PathParams: &generated.EnableProjectFederationPath{ProjectID: projectID}, Body: &generated.EnableProjectFederationBody{Actor: &actor}})
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return api.ProjectFederationBody{}, err
+	if callResp == nil {
+		return api.ProjectFederationBody{}, externalCLITransportError(callResp, callErr)
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return api.ProjectFederationBody{}, err
@@ -1657,8 +1657,8 @@ func loadFederationStatus(ctx context.Context) (api.FederationStatusBody, error)
 		return api.FederationStatusBody{}, err
 	}
 	callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return api.FederationStatusBody{}, err
+	if callResp == nil {
+		return api.FederationStatusBody{}, externalCLITransportError(callResp, callErr)
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return api.FederationStatusBody{}, err
@@ -1869,8 +1869,8 @@ func runFederationQuarantineAction(ctx context.Context, cmd *cobra.Command, id i
 		return err
 	}
 	callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return err
+	if callResp == nil {
+		return externalCLITransportError(callResp, callErr)
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return err
@@ -1886,8 +1886,8 @@ func runFederationQuarantineAction(ctx context.Context, cmd *cobra.Command, id i
 	var bs []byte
 	if action == "retry" {
 		callResp, callErr := apiClient.RetryFederationQuarantineWithResponse(a.ctx, &generated.RetryFederationQuarantineRequestOptions{PathParams: &generated.RetryFederationQuarantinePath{ProjectID: projectID, QuarantineID: id}, Header: &generated.RetryFederationQuarantineHeaders{XKataConfirm: &confirm}, Body: &generated.RetryFederationQuarantineBody{Actor: actor, Reason: &reason}})
-		if err := externalCLITransportError(callResp, callErr); err != nil {
-			return err
+		if callResp == nil {
+			return externalCLITransportError(callResp, callErr)
 		}
 		if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 			return err
@@ -1895,8 +1895,8 @@ func runFederationQuarantineAction(ctx context.Context, cmd *cobra.Command, id i
 		bs = callResp.Body
 	} else {
 		callResp, callErr := apiClient.SkipFederationQuarantineWithResponse(a.ctx, &generated.SkipFederationQuarantineRequestOptions{PathParams: &generated.SkipFederationQuarantinePath{ProjectID: projectID, QuarantineID: id}, Header: &generated.SkipFederationQuarantineHeaders{XKataConfirm: &confirm}, Body: &generated.SkipFederationQuarantineBody{Actor: actor, Reason: &reason}})
-		if err := externalCLITransportError(callResp, callErr); err != nil {
-			return err
+		if callResp == nil {
+			return externalCLITransportError(callResp, callErr)
 		}
 		if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 			return err

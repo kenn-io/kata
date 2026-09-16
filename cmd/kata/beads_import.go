@@ -170,8 +170,8 @@ func runBeadsImport(cmd *cobra.Command) error {
 		return err
 	}
 	response, callErr := apiClient.ImportIssuesWithResponse(ctx, &generated.ImportIssuesRequestOptions{PathParams: &generated.ImportIssuesPath{ProjectID: projectID}, Body: &body})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return err
+	if response == nil {
+		return externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return err

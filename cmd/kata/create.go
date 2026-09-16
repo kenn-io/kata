@@ -443,8 +443,8 @@ func resolveProjectIDAndNameWithDaemonHeaders(
 			}
 			return nil
 		})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return 0, "", err
+	if response == nil {
+		return 0, "", externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return 0, "", err

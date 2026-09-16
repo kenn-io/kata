@@ -114,8 +114,8 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 		}
 		return nil
 	})
-	if err := externalCLITransportError(wire, callErr); err != nil {
-		return "", err
+	if wire == nil {
+		return "", externalCLITransportError(wire, callErr)
 	}
 	if err := externalCLIResponseError(wire.StatusCode, wire.Body, callErr); err != nil {
 		return "", err

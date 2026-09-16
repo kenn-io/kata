@@ -75,8 +75,8 @@ func runAssign(cmd *cobra.Command, raw, owner string, unassign bool, expectedOwn
 			PathParams: &generated.UnassignIssuePath{ProjectID: pid, Ref: issue.RefForAPI},
 			Body:       &generated.UnassignIssueBody{Actor: &actor, ExpectedOwner: expectedOwner},
 		})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return err
+		if response == nil {
+			return externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return err
@@ -87,8 +87,8 @@ func runAssign(cmd *cobra.Command, raw, owner string, unassign bool, expectedOwn
 			PathParams: &generated.AssignIssuePath{ProjectID: pid, Ref: issue.RefForAPI},
 			Body:       &generated.AssignIssueBody{Actor: &actor, Owner: owner},
 		})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return err
+		if response == nil {
+			return externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return err

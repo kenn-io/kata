@@ -93,8 +93,8 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 		Body:       &generated.MoveIssueBody{Actor: &actor, ToProjectUID: target.UID},
 		Header:     &generated.MoveIssueHeaders{IfMatch: &etag},
 	})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return err
+	if response == nil {
+		return externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return err

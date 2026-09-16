@@ -291,8 +291,8 @@ func runActionWithHeaders(
 			options.Header.IfMatch = &value
 		}
 		response, callErr := apiClient.CloseIssueWithResponse(ctx, options)
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return err
+		if response == nil {
+			return externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return err
@@ -306,8 +306,8 @@ func runActionWithHeaders(
 		response, callErr := apiClient.ReopenIssueWithResponse(ctx, &generated.ReopenIssueRequestOptions{
 			PathParams: &generated.ReopenIssuePath{ProjectID: pid, Ref: issue.RefForAPI}, Body: &payload,
 		})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return err
+		if response == nil {
+			return externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return err

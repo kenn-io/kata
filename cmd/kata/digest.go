@@ -165,8 +165,8 @@ func fetchDigest(ctx context.Context, client *http.Client, baseURL string, opts 
 	since, until := opts.Since.UTC().Format(time.RFC3339Nano), opts.Until.UTC().Format(time.RFC3339Nano)
 	if opts.AllProjects {
 		response, callErr := apiClient.DigestGlobalWithResponse(ctx, &generated.DigestGlobalRequestOptions{Query: &generated.DigestGlobalQuery{Since: since, Until: &until, Actor: opts.Actors}})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
@@ -185,8 +185,8 @@ func fetchDigest(ctx context.Context, client *http.Client, baseURL string, opts 
 		}
 	}
 	response, callErr := apiClient.DigestProjectWithResponse(ctx, &generated.DigestProjectRequestOptions{PathParams: &generated.DigestProjectPath{ProjectID: pid}, Query: &generated.DigestProjectQuery{Since: since, Until: &until, Actor: opts.Actors}})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return nil, err
+	if response == nil {
+		return nil, externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return nil, err

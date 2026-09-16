@@ -586,8 +586,8 @@ func waitFetchState(ctx context.Context, client *http.Client, baseURL string, t 
 		return issueState{}, "", err
 	}
 	response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: t.pid, Ref: t.refForAPI}})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return issueState{}, "", err
+	if response == nil {
+		return issueState{}, "", externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return issueState{}, "", err

@@ -360,8 +360,8 @@ func fetchMetaIssue(ctx context.Context, client *http.Client, baseURL string, pi
 	response, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
 		PathParams: &generated.ShowIssuePath{ProjectID: pid, Ref: ref},
 	})
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return metaIssueWire{}, nil, err
+	if response == nil {
+		return metaIssueWire{}, nil, externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return metaIssueWire{}, nil, err

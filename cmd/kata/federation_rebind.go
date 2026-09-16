@@ -105,8 +105,8 @@ func federationRebindTargets(
 		return nil, err
 	}
 	callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{Query: &generated.GetFederationStatusQuery{Include: new("archived")}})
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return nil, err
+	if callResp == nil {
+		return nil, externalCLITransportError(callResp, callErr)
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return nil, err
@@ -176,8 +176,8 @@ func executeFederationRebind(
 		return federationRebindCLIResult{}, err
 	}
 	callResp, callErr := apiClient.RebindFederationReplicaWithResponse(a.ctx, &generated.RebindFederationReplicaRequestOptions{PathParams: &generated.RebindFederationReplicaPath{ProjectID: target.ProjectID}, Body: &generated.RebindFederationReplicaBody{HubCatalog: strings.TrimSpace(hubCatalog)}})
-	if err := externalCLITransportError(callResp, callErr); err != nil {
-		return federationRebindCLIResult{}, err
+	if callResp == nil {
+		return federationRebindCLIResult{}, externalCLITransportError(callResp, callErr)
 	}
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return federationRebindCLIResult{}, err

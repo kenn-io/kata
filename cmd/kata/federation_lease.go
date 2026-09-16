@@ -307,8 +307,8 @@ func postClaimActionResolved(ctx context.Context, client *http.Client, baseURL s
 	switch action {
 	case "acquire":
 		response, callErr := apiClient.AcquireIssueLeaseWithResponse(ctx, &generated.AcquireIssueLeaseRequestOptions{PathParams: &generated.AcquireIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
@@ -316,8 +316,8 @@ func postClaimActionResolved(ctx context.Context, client *http.Client, baseURL s
 		return response.Body, nil
 	case "release":
 		response, callErr := apiClient.ReleaseIssueLeaseWithResponse(ctx, &generated.ReleaseIssueLeaseRequestOptions{PathParams: &generated.ReleaseIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
@@ -325,8 +325,8 @@ func postClaimActionResolved(ctx context.Context, client *http.Client, baseURL s
 		return response.Body, nil
 	case "renew":
 		response, callErr := apiClient.RenewIssueLeaseWithResponse(ctx, &generated.RenewIssueLeaseRequestOptions{PathParams: &generated.RenewIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
@@ -334,8 +334,8 @@ func postClaimActionResolved(ctx context.Context, client *http.Client, baseURL s
 		return response.Body, nil
 	case "force_release":
 		response, callErr := apiClient.ForceReleaseIssueLeaseWithResponse(ctx, &generated.ForceReleaseIssueLeaseRequestOptions{PathParams: &generated.ForceReleaseIssueLeasePath{ProjectID: pid, Ref: ref}, Body: &payload})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return nil, err
+		if response == nil {
+			return nil, externalCLITransportError(response, callErr)
 		}
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err

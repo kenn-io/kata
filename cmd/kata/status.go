@@ -115,8 +115,8 @@ func getInstanceStatus(ctx context.Context, client *http.Client, baseURL string,
 		return err
 	}
 	response, callErr := apiClient.InstanceWithResponse(ctx)
-	if err := externalCLITransportError(response, callErr); err != nil {
-		return err
+	if response == nil {
+		return externalCLITransportError(response, callErr)
 	}
 	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 		return err
