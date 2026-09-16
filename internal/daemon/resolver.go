@@ -74,7 +74,14 @@ func activeIssueByRef(ctx context.Context, store db.Storage, projectID int64, re
 	if _, err := activeProjectByID(ctx, store, projectID); err != nil {
 		return db.Issue{}, err
 	}
-	return resolveIssueRef(ctx, store, projectID, ref, include)
+	issue, err := resolveIssueRef(ctx, store, projectID, ref, include)
+	if err != nil {
+		return db.Issue{}, err
+	}
+	if err := authorizeIssueScopedIssue(ctx, store, issue); err != nil {
+		return db.Issue{}, err
+	}
+	return issue, nil
 }
 
 // qualifiedID renders the cross-project canonical form "project#short_id".
@@ -263,6 +270,9 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 		if _, err := authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false); err != nil {
 			return db.Issue{}, err
 		}
+		if err := authorizeIssueScopedIssue(ctx, store, issue); err != nil {
+			return db.Issue{}, err
+		}
 		if expected, ok := d.ExpectedProjectUIDs[issue.UID]; ok {
 			if params.ExpectedLinkProjectUIDs == nil {
 				params.ExpectedLinkProjectUIDs = make(map[int64]string)
@@ -310,6 +320,9 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 		for _, r := range refs {
 			issue, err := resolve(r, include)
 			if err != nil {
+				if issueScopeFromContext(ctx) != nil {
+					return nil, err
+				}
 				var ae *api.APIError
 				if errors.As(err, &ae) && ae.Status == 404 {
 					continue

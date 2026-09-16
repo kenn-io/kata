@@ -76,6 +76,10 @@ func doDigest(
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
+	rows, _, err = filterIssueScopedReportEvents(ctx, cfg.DB, rows)
+	if err != nil {
+		return nil, err
+	}
 
 	out := &api.DigestResponse{}
 	out.Body.Since = since.UTC()

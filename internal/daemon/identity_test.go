@@ -157,3 +157,21 @@ func TestTUIBypassAllowed_RequiresOwnerLocalTransport(t *testing.T) {
 		})
 	}
 }
+
+func TestCloseRequiresEvidenceMatchesEffectiveTUIBypass(t *testing.T) {
+	ownerLocal := context.WithValue(context.Background(), ownerLocalTransportContextKey{}, true)
+	require.False(t, closeRequiresEvidence(ownerLocal))
+	require.True(t, closeRequiresEvidence(context.Background()))
+	require.True(t, closeRequiresEvidence(WithPrincipal(ownerLocal, Principal{Kind: PrincipalDBToken})))
+	require.True(t, closeRequiresEvidence(WithPrincipal(context.Background(), Principal{Kind: PrincipalStaticToken})))
+}
+
+func TestCapabilityCloseRequirementDoesNotDependOnPrincipal(t *testing.T) {
+	remote := context.Background()
+	ownerLocal := context.WithValue(remote, ownerLocalTransportContextKey{}, true)
+
+	require.True(t, instanceAuthInfo(remote, ServerConfig{}).CloseRequiresEvidence)
+	require.True(t, effectiveUIPolicy(remote, ServerConfig{}).Capabilities.CloseRequiresEvidence)
+	require.False(t, instanceAuthInfo(ownerLocal, ServerConfig{}).CloseRequiresEvidence)
+	require.False(t, effectiveUIPolicy(ownerLocal, ServerConfig{}).Capabilities.CloseRequiresEvidence)
+}

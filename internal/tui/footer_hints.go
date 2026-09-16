@@ -26,6 +26,8 @@ func (m Model) helpRows() [][]helpItem {
 		return m.detail.detailHelpRows()
 	case viewList:
 		return m.list.queueHelpRows()
+	case viewCredentials:
+		return credentialsHelpRows()
 	}
 	return globalHelpRows()
 }
@@ -156,6 +158,7 @@ func (lm listModel) queueHelpRows() [][]helpItem {
 		helpItem{key: "!", desc: "priority"},
 		helpItem{key: "D", desc: "daemons"},
 		helpItem{key: "F", desc: "federation"},
+		helpItem{key: "C", desc: "credentials"},
 		helpItem{key: "L", desc: "layout"},
 		helpItem{key: "?", desc: "help"},
 		helpItem{key: "q", desc: "quit"},
@@ -191,6 +194,7 @@ func (dm detailModel) detailHelpRows() [][]helpItem {
 		{key: "!", desc: "priority"},
 		{key: "D", desc: "daemons"},
 		{key: "F", desc: "federation"},
+		{key: "C", desc: "credentials"},
 		{key: "N", desc: "child"},
 		{key: "L", desc: "layout"},
 		{key: "esc", desc: "back"},

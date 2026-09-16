@@ -68,8 +68,9 @@ func TestAutoCutoverPreservesMovedIssueHistory(t *testing.T) {
 	}
 	_, err = source.ExecContext(ctx, `ALTER TABLE comments DROP COLUMN teammate`)
 	require.NoError(t, err)
+	// Version 26 is the last schema without comment teammate attribution.
 	_, err = source.ExecContext(ctx,
-		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, 26)
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
 

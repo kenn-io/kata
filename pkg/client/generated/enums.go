@@ -281,6 +281,56 @@ func (r ReachableGraphUnresolvedRefSide) Validate() error {
 	}
 }
 
+type TokenOutState string
+
+const (
+	Expired TokenOutState = "expired"
+	Live    TokenOutState = "live"
+	Revoked TokenOutState = "revoked"
+)
+
+// Validate checks if the TokenOutState value is valid
+func (t TokenOutState) Validate() error {
+	switch t {
+	case Expired, Live, Revoked:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid TokenOutState value, got: %v", t))
+	}
+}
+
+type TokenScopeInKind string
+
+const (
+	IssueSubtree TokenScopeInKind = "issue_subtree"
+)
+
+// Validate checks if the TokenScopeInKind value is valid
+func (t TokenScopeInKind) Validate() error {
+	switch t {
+	case IssueSubtree:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid TokenScopeInKind value, got: %v", t))
+	}
+}
+
+type TokenScopeOutKind string
+
+const (
+	TokenScopeOutKindIssueSubtree TokenScopeOutKind = "issue_subtree"
+)
+
+// Validate checks if the TokenScopeOutKind value is valid
+func (t TokenScopeOutKind) Validate() error {
+	switch t {
+	case TokenScopeOutKindIssueSubtree:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid TokenScopeOutKind value, got: %v", t))
+	}
+}
+
 type UICapabilitiesUpdates string
 
 const (

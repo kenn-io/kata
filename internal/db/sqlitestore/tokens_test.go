@@ -17,9 +17,10 @@ func TestAPITokensTableExists(t *testing.T) {
 	var n int
 	require.NoError(t, d.QueryRow(`
 		SELECT COUNT(*) FROM pragma_table_info('api_tokens')
-		WHERE name IN ('id','token_hash','actor','name','created_at','last_used_at','revoked_at')
+		WHERE name IN ('id','token_hash','actor','name','scope_kind','scope_project_uid',
+		               'scope_root_issue_uid','expires_at','created_at','last_used_at','revoked_at')
 	`).Scan(&n))
-	assert.Equal(t, 7, n)
+	assert.Equal(t, 11, n)
 }
 
 func TestHashTokenSHA256Hex(t *testing.T) {
@@ -104,6 +105,30 @@ func TestCreateAPITokenStoresHashAndEmitsEvent(t *testing.T) {
 	assert.NotContains(t, evt.Payload, "secret-token")
 }
 
+func TestCreateAPITokenStoresExpiryInSortableUTCFormat(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	expiresAt := time.Date(2026, time.September, 15, 12, 34, 56, 789000000, time.FixedZone("test", 2*60*60))
+
+	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "scoped-secret-token",
+		Actor:          "worker-a",
+		AdminActor:     db.BootstrapActor,
+		Scope: &db.APITokenScope{
+			Kind:         db.APITokenScopeIssueSubtree,
+			ProjectUID:   "01HZNQ7VFPK1XGD8R5MABCD4EX",
+			RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
+		},
+		ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+
+	var stored string
+	require.NoError(t, d.QueryRowContext(ctx,
+		`SELECT CAST(expires_at AS TEXT) FROM api_tokens WHERE id = ?`, tok.ID).Scan(&stored))
+	assert.Equal(t, "2026-09-15T10:34:56.789Z", stored)
+}
+
 func TestRevokeAPITokenSetsRevokedAtAndEmitsEvent(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
@@ -164,6 +189,41 @@ func TestResolveAPITokenReturnsActiveToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, tok.ID, got.ID)
 	assert.Equal(t, "wesm", got.Actor)
+}
+
+func TestResolveAPITokenEnforcesExpiry(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	scope := &db.APITokenScope{
+		Kind:         db.APITokenScopeIssueSubtree,
+		ProjectUID:   "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
+	}
+
+	futureExpiry := time.Now().UTC().Add(time.Hour)
+	active, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "active-scoped-token",
+		Actor:          "worker-a",
+		AdminActor:     db.BootstrapActor,
+		Scope:          scope,
+		ExpiresAt:      &futureExpiry,
+	})
+	require.NoError(t, err)
+	resolved, err := d.ResolveAPIToken(ctx, "active-scoped-token")
+	require.NoError(t, err)
+	assert.Equal(t, active.ID, resolved.ID)
+
+	pastExpiry := time.Now().UTC().Add(-time.Hour)
+	_, _, err = d.CreateAPIToken(ctx, db.CreateAPITokenParams{ //nolint:gosec // Deterministic test credential.
+		PlaintextToken: "expired-scoped-token",
+		Actor:          "worker-b",
+		AdminActor:     db.BootstrapActor,
+		Scope:          scope,
+		ExpiresAt:      &pastExpiry,
+	})
+	require.NoError(t, err)
+	_, err = d.ResolveAPIToken(ctx, "expired-scoped-token")
+	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestResolveAPITokenLazilyUpdatesLastUsedAt(t *testing.T) {

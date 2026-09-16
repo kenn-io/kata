@@ -560,6 +560,18 @@ func TestImportRejectsMalformedTokenReplayFields(t *testing.T) {
 			payload:     `{"token_id":1,"token_hash":"` + sqlitestore.HashTokenForTest("secret-token") + `","target_actor":"bootstrap"}`,
 			wantMessage: "reserved",
 		},
+		{
+			name: "incomplete scope",
+			payload: `{"token_id":1,"token_hash":"` + sqlitestore.HashTokenForTest("secret-token") +
+				`","target_actor":"worker-a","scope":{"kind":"issue_subtree","project_uid":"01HZNQ7VFPK1XGD8R5MABCD4EX"},"expires_at":"2026-09-16T12:34:56Z"}`,
+			wantMessage: "scope",
+		},
+		{
+			name: "unknown scope kind",
+			payload: `{"token_id":1,"token_hash":"` + sqlitestore.HashTokenForTest("secret-token") +
+				`","target_actor":"worker-a","scope":{"kind":"project_admin","project_uid":"01HZNQ7VFPK1XGD8R5MABCD4EX","root_issue_uid":"01HZNQ7VFPK1XGD8R5MABCD5YZ"},"expires_at":"2026-09-16T12:34:56Z"}`,
+			wantMessage: "scope",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()

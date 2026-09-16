@@ -45,6 +45,22 @@ func TestIssueLocalUISession(t *testing.T) {
 	assert.NotEmpty(t, session.CSRF)
 	assert.Equal(t, "/kata?view=today", session.ReturnPath)
 	assert.True(t, session.Writable)
+	assert.False(t, session.TokenAuditRead)
+}
+
+func TestBootstrapUISessionAdvertisesCredentialAuditWithoutIssueWrites(t *testing.T) {
+	manager := newDeterministicSessionManager(t, "https://daemon.example", "instance_a")
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalBootstrap}, "/kata?view=credentials")
+	require.NoError(t, err)
+	response := httptest.NewRecorder()
+
+	issueHTTPSession(response, manager, issued)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	var session uiSessionResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &session))
+	assert.False(t, session.Writable)
+	assert.True(t, session.TokenAuditRead)
 }
 
 func TestIssueTrustedProxyUISession(t *testing.T) {

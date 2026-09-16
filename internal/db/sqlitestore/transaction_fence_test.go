@@ -6,11 +6,41 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
+
+func TestIssueScopedTokenTransactionFenceRejectsExpiryBeforeFirstWrite(t *testing.T) {
+	d, ctx, project, _ := setupSoftDeletedIssue(t)
+	root, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
+	})
+	require.NoError(t, err)
+	expiresAt := time.Now().UTC().Add(75 * time.Millisecond)
+	token, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "scoped-worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
+		Scope: &db.APITokenScope{
+			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
+		},
+		ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+
+	time.Sleep(time.Until(expiresAt) + 20*time.Millisecond)
+	fenced := db.WithTransactionFence(ctx, d.IssueScopedTokenTransactionFence(token))
+	_, _, err = d.CreateIssue(fenced, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Too late", Author: token.Actor,
+	})
+	require.ErrorIs(t, err, db.ErrNotFound)
+	issues, err := d.ListIssues(ctx, db.ListIssuesParams{ProjectID: project.ID})
+	require.NoError(t, err)
+	for _, issue := range issues {
+		assert.NotEqual(t, "Too late", issue.Title)
+	}
+}
 
 func TestTransactionFenceSkipsExplicitReadOnlyTransactions(t *testing.T) {
 	d, ctx, _, _ := setupSoftDeletedIssue(t)
@@ -59,4 +89,20 @@ func TestTransactionFenceRollsBackAutocommitAndImmediateMutations(t *testing.T) 
 	require.NoError(t, d.QueryRowContext(ctx,
 		`SELECT count(*) FROM fence_markers`).Scan(&markerCount))
 	assert.Zero(t, markerCount)
+}
+
+func TestLargeScopeAllowlistUsesBoundedSQLParameters(t *testing.T) {
+	store, ctx, project, _ := setupSoftDeletedIssue(t)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Needle", Author: "worker"})
+	require.NoError(t, err)
+	ids := make([]int64, 40000)
+	for i := range ids {
+		ids[i] = issue.ID
+	}
+	listed, err := store.ListIssues(ctx, db.ListIssuesParams{ProjectID: project.ID, AllowedIssueIDs: ids})
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	hits, err := store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: "Needle", AllowedIssueIDs: ids})
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,7 +27,8 @@ const (
 	sseDrainCap = 10000
 	// sseLiveBatch caps each live-phase re-query at this many rows. A single
 	// wakeup typically returns 1; we still cap to avoid pathological cases.
-	sseLiveBatch = 1000
+	sseLiveBatch    = 1000
+	sseWriteTimeout = 10 * time.Second
 
 	// heartbeatInterval is the SSE keepalive period. Comments are no-ops per the
 	// SSE spec; their purpose is to keep TCP connections alive through middleboxes.
@@ -97,7 +97,11 @@ func doPollEvents(
 		return nil, err
 	}
 
-	resetTo, err := cfg.DB.PurgeResetCheck(ctx, afterID, projectID)
+	resetProjectID := projectID
+	if issueScopeFromContext(ctx) != nil {
+		resetProjectID = 0
+	}
+	resetTo, err := cfg.DB.PurgeResetCheck(ctx, afterID, resetProjectID)
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
@@ -110,20 +114,408 @@ func doPollEvents(
 		return out, nil
 	}
 
-	rows, err := cfg.DB.EventsAfter(ctx, db.EventsAfterParams{
-		AfterID:   afterID,
-		ProjectID: projectID,
-		Limit:     limit,
-	})
+	rows, nextCursor, scopedResetTo, err := readVisibleEvents(ctx, cfg.DB, afterID, projectID, 0, limit)
 	if err != nil {
-		return nil, internalAPIError(err)
+		return nil, err
+	}
+	if scopedResetTo > 0 {
+		out := &api.PollEventsResponse{}
+		out.Body.ResetRequired = true
+		out.Body.ResetAfterID = scopedResetTo
+		out.Body.Events = []api.EventEnvelope{}
+		out.Body.NextAfterID = scopedResetTo
+		return out, nil
 	}
 
 	out := &api.PollEventsResponse{}
 	out.Body.ResetRequired = false
 	out.Body.Events = toEnvelopes(rows)
-	out.Body.NextAfterID = nextAfterID(rows, afterID)
+	out.Body.NextAfterID = nextCursor
 	return out, nil
+}
+
+func readVisibleEvents(
+	ctx context.Context, store db.Storage, afterID, projectID, throughID int64, limit int,
+) ([]db.Event, int64, int64, error) {
+	scope := issueScopeFromContext(ctx)
+	if scope == nil {
+		rows, err := store.EventsAfter(ctx, db.EventsAfterParams{
+			AfterID: afterID, ProjectID: projectID, ThroughID: throughID, Limit: limit,
+		})
+		if err != nil {
+			return nil, afterID, 0, internalAPIError(err)
+		}
+		next := nextAfterID(rows, afterID)
+		if len(rows) == 0 && throughID > next {
+			next = throughID
+		}
+		return rows, next, 0, nil
+	}
+	if err := revalidateIssueScopedPrincipal(ctx, store); err != nil {
+		return nil, afterID, 0, err
+	}
+	// Scoped project streams still scan the global durable cursor so a hidden
+	// blocker or project lifecycle change outside the granted project can
+	// invalidate derived readiness without disclosing the triggering identity.
+	scanProjectID := int64(0)
+	visible := make([]db.Event, 0, limit)
+	cursor := afterID
+	// Count hidden rows against each scan budget. Polling returns a partial
+	// cursor; an exhausted SSE window resets to its captured high-water mark.
+	scanLimit := pollLimitMax
+	if throughID > 0 {
+		scanLimit = limit
+	}
+	scanned := 0
+	for len(visible) < limit && scanned < scanLimit {
+		batchLimit := min(pollLimitMax, max(limit-len(visible), 100), scanLimit-scanned)
+		rows, err := store.EventsAfter(ctx, db.EventsAfterParams{
+			AfterID: cursor, ProjectID: scanProjectID, ThroughID: throughID, Limit: batchLimit,
+		})
+		if err != nil {
+			return nil, cursor, 0, internalAPIError(err)
+		}
+		if len(rows) == 0 {
+			// A concurrent purge can delete every event in (cursor, throughID]
+			// after the caller's reset check but before this read. Mirroring the
+			// unscoped branch, an empty window still advances the cursor to
+			// throughID so the SSE live drain loop terminates instead of
+			// re-querying the vanished range forever.
+			if throughID > cursor {
+				cursor = throughID
+			}
+			break
+		}
+		// Read membership after the durable page: a child that leaves the
+		// subtree must not expose a later comment through cached authorization.
+		allowed, allowedUIDs, err := issueScopedEventMembership(ctx, store, *scope)
+		if err != nil {
+			return nil, cursor, 0, err
+		}
+		for _, event := range rows {
+			cursor = event.ID
+			scanned++
+			projected, ok := projectIssueScopedEvent(event, allowed, scope.ProjectUID)
+			if ok && event.Type != "issue.links_changed" {
+				visible = append(visible, projected)
+				if len(visible) == limit {
+					break
+				}
+				continue
+			}
+			if issueScopedEventInScope(event, allowed, scope.ProjectUID) {
+				// The event describes a granted issue but cannot be safely
+				// projected (unknown type, malformed payload, or omitted compound
+				// link peers). Reset so the client reloads all affected views.
+				return nil, event.ID, event.ID, nil
+			}
+			reset, resetErr := hiddenEventRequiresScopedReset(
+				ctx, store, event, allowed, allowedUIDs, scope.ProjectUID,
+			)
+			if resetErr != nil {
+				return nil, cursor, 0, internalAPIError(resetErr)
+			}
+			if reset {
+				return nil, event.ID, event.ID, nil
+			}
+		}
+		if len(rows) < batchLimit || (throughID > 0 && cursor >= throughID) {
+			if throughID > cursor {
+				cursor = throughID
+			}
+			break
+		}
+	}
+	if throughID > cursor && scanned == scanLimit {
+		return nil, throughID, throughID, nil
+	}
+	return visible, cursor, 0, nil
+}
+
+func hiddenEventRequiresScopedReset(
+	ctx context.Context,
+	store db.Storage,
+	event db.Event,
+	allowed map[int64]struct{},
+	allowedUIDs map[string]struct{},
+	projectUID string,
+) (bool, error) {
+	directlyAllowed := eventIssueIDsTouchScope(event, allowed)
+
+	switch event.Type {
+	case "issue.created":
+		var created struct {
+			Links []struct {
+				ToIssueUID string `json:"to_issue_uid"`
+			} `json:"links"`
+		}
+		if json.Unmarshal([]byte(event.Payload), &created) != nil {
+			return true, nil
+		}
+		for _, link := range created.Links {
+			if _, ok := allowedUIDs[link.ToIssueUID]; ok {
+				return true, nil
+			}
+		}
+		return false, nil
+	case "issue.linked", "issue.unlinked":
+		return directlyAllowed, nil
+	case "issue.links_changed":
+		return directlyAllowed || compoundLinkEventTouchesScope(event.Payload, allowedUIDs), nil
+	case "issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored":
+		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
+	case "issue.moved":
+		if movedEventTouchesProject(event.Payload, projectUID) {
+			return true, nil
+		}
+		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
+	case "issue.snapshot":
+		// Federation snapshots establish an issue baseline. Later relationship
+		// changes arrive as link events, so only a currently related hidden
+		// snapshot can affect the scoped projection.
+		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
+	case "project.removed", "project.restored", "project.merged":
+		// Project lifecycle events are rare and may invalidate issue membership
+		// or cross-project relationships without naming every affected issue.
+		return true, nil
+	case "project.renamed":
+		return event.ProjectUID == projectUID, nil
+	default:
+		return false, nil
+	}
+}
+
+func eventIssueIDsTouchScope(event db.Event, allowed map[int64]struct{}) bool {
+	if event.IssueID != nil {
+		if _, ok := allowed[*event.IssueID]; ok {
+			return true
+		}
+	}
+	if event.RelatedIssueID != nil {
+		_, ok := allowed[*event.RelatedIssueID]
+		return ok
+	}
+	return false
+}
+
+func issueScopedEventMembership(
+	ctx context.Context, store db.Storage, scope db.APITokenScope,
+) (map[int64]struct{}, map[string]struct{}, error) {
+	members, err := store.IssueScopedMembers(ctx, scope)
+	if err != nil {
+		return nil, nil, internalAPIError(err)
+	}
+	ids := make(map[int64]struct{}, len(members))
+	uids := make(map[string]struct{}, len(members))
+	for _, issue := range members {
+		ids[issue.ID] = struct{}{}
+		uids[issue.UID] = struct{}{}
+	}
+	return ids, uids, nil
+}
+
+func compoundLinkEventTouchesScope(payload string, allowedUIDs map[string]struct{}) bool {
+	var changed struct {
+		ParentSetUID         string   `json:"parent_set_uid"`
+		ParentRemovedUID     string   `json:"parent_removed_uid"`
+		BlocksAddedUIDs      []string `json:"blocks_added_uids"`
+		BlocksRemovedUIDs    []string `json:"blocks_removed_uids"`
+		BlockedByAddedUIDs   []string `json:"blocked_by_added_uids"`
+		BlockedByRemovedUIDs []string `json:"blocked_by_removed_uids"`
+		RelatedAddedUIDs     []string `json:"related_added_uids"`
+		RelatedRemovedUIDs   []string `json:"related_removed_uids"`
+	}
+	if json.Unmarshal([]byte(payload), &changed) != nil {
+		return true
+	}
+	peers := []string{changed.ParentSetUID, changed.ParentRemovedUID}
+	peers = append(peers, changed.BlocksAddedUIDs...)
+	peers = append(peers, changed.BlocksRemovedUIDs...)
+	peers = append(peers, changed.BlockedByAddedUIDs...)
+	peers = append(peers, changed.BlockedByRemovedUIDs...)
+	peers = append(peers, changed.RelatedAddedUIDs...)
+	peers = append(peers, changed.RelatedRemovedUIDs...)
+	for _, peerUID := range peers {
+		if _, ok := allowedUIDs[peerUID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func hiddenIssueTouchesScope(
+	ctx context.Context, store db.Storage, issueID *int64, allowed map[int64]struct{},
+) (bool, error) {
+	if issueID == nil {
+		return false, nil
+	}
+	links, err := store.LinksByIssue(ctx, *issueID)
+	if err != nil {
+		return false, err
+	}
+	for _, link := range links {
+		if _, ok := allowed[link.FromIssueID]; ok {
+			return true, nil
+		}
+		if _, ok := allowed[link.ToIssueID]; ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func movedEventTouchesProject(payload, projectUID string) bool {
+	var moved struct {
+		FromProjectUID string `json:"from_project_uid"`
+		ToProjectUID   string `json:"to_project_uid"`
+	}
+	if json.Unmarshal([]byte(payload), &moved) != nil {
+		// Malformed durable events are unexpected; fail closed so a scoped
+		// client refreshes rather than retaining a possibly stale projection.
+		return true
+	}
+	return moved.FromProjectUID == projectUID || moved.ToProjectUID == projectUID
+}
+
+func projectIssueScopedEvent(
+	event db.Event, allowed map[int64]struct{}, projectUID string,
+) (db.Event, bool) {
+	if !issueScopedEventInScope(event, allowed, projectUID) {
+		return db.Event{}, false
+	}
+	if (event.Type == "issue.linked" || event.Type == "issue.unlinked") && event.RelatedIssueID == nil {
+		// Project-only export/restore can omit the peer identity while keeping
+		// its payload. Without an authorized peer, clients must reload instead.
+		return db.Event{}, false
+	}
+	payload, projectable := scopedEventPayload(event)
+	if !projectable {
+		// In-scope but not safely projectable (unknown issue.* type, malformed
+		// payload, or a marshal failure): fail closed. Callers treat this like
+		// a hidden event so clients re-sync instead of trusting a hollow frame.
+		return db.Event{}, false
+	}
+	event.Payload = payload
+	event.ContentHash = ""
+	// OriginInstanceUID is infrastructure identity (which federated instance
+	// produced the row). It stays internal to the daemon; scoped clients only
+	// ever see the zero value.
+	event.OriginInstanceUID = ""
+	return event, true
+}
+
+// issueScopedEventInScope reports whether the event describes a granted
+// issue inside the scoped project, independent of payload redactability.
+func issueScopedEventInScope(event db.Event, allowed map[int64]struct{}, projectUID string) bool {
+	if event.IssueID == nil || !strings.HasPrefix(event.Type, "issue.") {
+		return false
+	}
+	if event.ProjectUID != projectUID {
+		return false
+	}
+	if _, ok := allowed[*event.IssueID]; !ok {
+		return false
+	}
+	if event.RelatedIssueID != nil {
+		if _, ok := allowed[*event.RelatedIssueID]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func scopedEventPayload(event db.Event) (string, bool) {
+	allowedKeys := map[string]map[string]struct{}{
+		"issue.created":          keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
+		"issue.updated":          keySet("title", "body", "owner", "changes", "updated_at"),
+		"issue.commented":        keySet("comment_uid", "author", "teammate", "body", "created_at"),
+		"issue.comment_edited":   keySet("comment_uid", "body", "edited_at"),
+		"issue.assigned":         keySet("owner"),
+		"issue.unassigned":       keySet("owner"),
+		"issue.priority_set":     keySet("priority"),
+		"issue.priority_cleared": keySet("old_priority", "updated_at"),
+		"issue.labeled":          keySet("label"),
+		"issue.unlabeled":        keySet("label"),
+		"issue.metadata_updated": keySet("diff", "revision_new", "updated_at"),
+		"issue.linked":           keySet("type", "from_short_id", "from_uid", "to_short_id", "to_uid", "incoming"),
+		"issue.unlinked":         keySet("type", "from_short_id", "from_uid", "to_short_id", "to_uid", "incoming"),
+		"issue.closed":           keySet("reason", "closed_at", "message", "evidence"),
+		"issue.reopened":         keySet("reopened_at"),
+		// Ladder verbs carry only mutation timestamps.
+		"issue.soft_deleted": keySet("deleted_at"),
+		"issue.restored":     keySet("restored_at", "updated_at"),
+		// Moves are recorded in the target project, so a scoped client only
+		// ever sees arrivals into its own project. The projection keeps the
+		// arrival identity (to_project_uid equals the granted project, and
+		// to_short_id is the granted issue's new ref) plus the timestamp, and
+		// strips the source project's UID and short id — coordinates of a
+		// project the scope cannot see. The issue's own UID already travels
+		// on the envelope (IssueUID).
+		"issue.moved": keySet("to_project_uid", "to_short_id", "updated_at"),
+	}
+	if event.Type == "issue.links_changed" {
+		// History and mutation responses omit compound peers that may be
+		// outside the subtree. Polling and SSE reset so linked issue views
+		// refresh; reports re-add authorized peers (scoped_authorization.go).
+		return "", true
+	}
+	keys, known := allowedKeys[event.Type]
+	if !known {
+		return "", false
+	}
+	if event.Payload == "" {
+		return "", true
+	}
+	var raw map[string]jsontext.Value
+	if json.Unmarshal([]byte(event.Payload), &raw) != nil {
+		return "", false
+	}
+	projected := make(map[string]jsontext.Value, len(keys))
+	for key := range keys {
+		if value, ok := raw[key]; ok {
+			projected[key] = value
+		}
+	}
+	if event.Type == "issue.closed" {
+		projected["evidence"] = scopedCloseEvidence(projected["evidence"])
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil {
+		return "", false
+	}
+	return string(encoded), true
+}
+
+func keySet(keys ...string) map[string]struct{} {
+	out := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
+func scopedCloseEvidence(raw jsontext.Value) jsontext.Value {
+	if len(raw) == 0 {
+		return nil
+	}
+	var entries []map[string]jsontext.Value
+	if json.Unmarshal(raw, &entries) != nil {
+		return nil
+	}
+	filtered := entries[:0]
+	for _, entry := range entries {
+		var kind string
+		_ = json.Unmarshal(entry["type"], &kind)
+		if kind == "duplicate-of" || kind == "superseded-by" {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	encoded, err := json.Marshal(filtered)
+	if err != nil {
+		return nil
+	}
+	return encoded
 }
 
 func toEnvelopes(rows []db.Event) []api.EventEnvelope {
@@ -295,7 +687,10 @@ func registerEventsStreamMethodGuards(mux *http.ServeMux) {
 // cursor parse and Subscribe lands on sub.Ch via the live channel; one
 // committed before parse is captured by PurgeResetCheck. See spec §5.3.
 func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) {
-	w := hctx.BodyWriter()
+	w, ok := hctx.BodyWriter().(http.ResponseWriter)
+	if !ok {
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return
@@ -303,12 +698,18 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 	hctx.SetHeader("Content-Type", "text/event-stream")
 	hctx.SetHeader("Cache-Control", "private, no-cache")
 	hctx.SetHeader("Connection", "keep-alive")
-	if _, err := io.WriteString(w, ": connected\n\n"); err != nil {
+	if !writeSSEFrame(w, flusher, []byte(": connected\n\n")) {
 		return
 	}
-	flusher.Flush()
 
-	sub := cfg.Broadcaster.Subscribe(SubFilter{ProjectID: projectID})
+	subscriptionProjectID := projectID
+	if issueScopeFromContext(hctx.Context()) != nil {
+		// Hidden blockers can live in another project. Scoped filtering still
+		// happens against the durable log; the global subscription is only the
+		// wakeup needed to notice an identity-free invalidation promptly.
+		subscriptionProjectID = 0
+	}
+	sub := cfg.Broadcaster.Subscribe(SubFilter{ProjectID: subscriptionProjectID})
 	defer sub.Unsub()
 
 	ctx := hctx.Context()
@@ -316,11 +717,10 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 		project, projectErr := cfg.DB.ProjectByID(ctx, projectID)
 		if errors.Is(projectErr, db.ErrNotFound) || (projectErr == nil && project.DeletedAt != nil) {
 			resetID, resetErr := cfg.DB.MaxEventID(ctx)
-			if resetErr != nil || revalidateSSEAuthority(ctx) != nil {
+			if resetErr != nil || revalidateEventStreamAuthority(ctx, cfg.DB) != nil {
 				return
 			}
-			writeResetFrame(w, resetID)
-			flusher.Flush()
+			_ = writeSSEFrame(w, flusher, resetFrameBytes(resetID))
 			return
 		}
 		if projectErr != nil {
@@ -332,43 +732,49 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 		return
 	}
 
-	resetTo, err := cfg.DB.PurgeResetCheck(ctx, cursor, projectID)
+	resetProjectID := projectID
+	if issueScopeFromContext(ctx) != nil {
+		resetProjectID = 0
+	}
+	resetTo, err := cfg.DB.PurgeResetCheck(ctx, cursor, resetProjectID)
 	if err != nil {
 		return
 	}
 	if resetTo > 0 {
-		if revalidateSSEAuthority(ctx) != nil {
+		if revalidateEventStreamAuthority(ctx, cfg.DB) != nil {
 			return
 		}
-		writeResetFrame(w, resetTo)
-		flusher.Flush()
+		_ = writeSSEFrame(w, flusher, resetFrameBytes(resetTo))
 		return
 	}
 
-	rows, err := cfg.DB.EventsAfter(ctx, db.EventsAfterParams{
-		AfterID: cursor, ProjectID: projectID, ThroughID: hwm, Limit: sseDrainCap + 1,
-	})
+	rows, scannedTo, scopedResetTo, err := readVisibleEvents(
+		ctx, cfg.DB, cursor, projectID, hwm, sseDrainCap+1,
+	)
 	if err != nil {
+		return
+	}
+	if scopedResetTo > 0 {
+		if revalidateEventStreamAuthority(ctx, cfg.DB) != nil {
+			return
+		}
+		_ = writeSSEFrame(w, flusher, resetFrameBytes(scopedResetTo))
 		return
 	}
 
 	if len(rows) == sseDrainCap+1 {
-		if revalidateSSEAuthority(ctx) != nil {
+		if revalidateEventStreamAuthority(ctx, cfg.DB) != nil {
 			return
 		}
-		writeResetFrame(w, hwm)
-		flusher.Flush()
+		_ = writeSSEFrame(w, flusher, resetFrameBytes(hwm))
 		return
 	}
 
-	lastSent := cursor
+	lastSent := scannedTo
 	for _, ev := range rows {
-		if revalidateSSEAuthority(ctx) != nil {
+		if !writeRevalidatedEventFrame(ctx, cfg.DB, w, flusher, ev) {
 			return
 		}
-		writeEventFrame(w, ev)
-		flusher.Flush()
-		lastSent = ev.ID
 	}
 
 	runLivePhase(ctx, livePhaseDeps{w: w, flusher: flusher, cfg: cfg, ch: sub.Ch}, projectID, lastSent)
@@ -435,7 +841,7 @@ func parseSSEProjectID(query map[string][]string) (int64, error) {
 // livePhaseDeps bundles the long-lived SSE writer state so runLivePhase stays
 // within the project's positional-parameter limit.
 type livePhaseDeps struct {
-	w       io.Writer
+	w       http.ResponseWriter
 	flusher http.Flusher
 	cfg     ServerConfig
 	ch      <-chan StreamMsg
@@ -459,24 +865,22 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if revalidateSSEAuthority(ctx) != nil {
+			if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
 				return
 			}
-			if _, err := io.WriteString(deps.w, ": keepalive\n\n"); err != nil {
+			if !writeSSEFrame(deps.w, deps.flusher, []byte(": keepalive\n\n")) {
 				return
 			}
-			deps.flusher.Flush()
 		case msg, ok := <-deps.ch:
 			if !ok {
 				return // overflow disconnect
 			}
 			switch msg.Kind {
 			case StreamKindReset:
-				if revalidateSSEAuthority(ctx) != nil {
+				if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
 					return
 				}
-				writeResetFrame(deps.w, msg.ResetID)
-				deps.flusher.Flush()
+				_ = writeSSEFrame(deps.w, deps.flusher, resetFrameBytes(msg.ResetID))
 				return
 			case StreamKindEvent:
 				// StreamMsg is exported with exported fields, so "constructed only
@@ -492,16 +896,19 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 				// post-purge frame, disconnect, and reconnect with
 				// Last-Event-ID past the reset cursor — which would
 				// permanently silence sync.reset_required.
-				resetTo, err := deps.cfg.DB.PurgeResetCheck(ctx, lastSent, projectID)
+				resetProjectID := projectID
+				if issueScopeFromContext(ctx) != nil {
+					resetProjectID = 0
+				}
+				resetTo, err := deps.cfg.DB.PurgeResetCheck(ctx, lastSent, resetProjectID)
 				if err != nil {
 					return
 				}
 				if resetTo > 0 {
-					if revalidateSSEAuthority(ctx) != nil {
+					if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
 						return
 					}
-					writeResetFrame(deps.w, resetTo)
-					deps.flusher.Flush()
+					_ = writeSSEFrame(deps.w, deps.flusher, resetFrameBytes(resetTo))
 					return
 				}
 				// Loop until we've drained every row at or below the wakeup's
@@ -510,30 +917,85 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 				// wakeup, leaving consumers indefinitely behind.
 				through := msg.Event.ID
 				for {
-					rows, err := deps.cfg.DB.EventsAfter(ctx, db.EventsAfterParams{
-						AfterID:   lastSent,
-						ProjectID: projectID,
-						ThroughID: through,
-						Limit:     sseLiveBatch,
-					})
+					rows, scannedTo, scopedResetTo, err := readVisibleEvents(
+						ctx, deps.cfg.DB, lastSent, projectID, through, sseLiveBatch,
+					)
 					if err != nil {
 						return
 					}
-					for _, ev := range rows {
-						if revalidateSSEAuthority(ctx) != nil {
+					lastSent = scannedTo
+					if scopedResetTo > 0 {
+						if revalidateEventStreamAuthority(ctx, deps.cfg.DB) != nil {
 							return
 						}
-						writeEventFrame(deps.w, ev)
-						deps.flusher.Flush()
-						lastSent = ev.ID
+						_ = writeSSEFrame(deps.w, deps.flusher, resetFrameBytes(scopedResetTo))
+						return
 					}
-					if len(rows) < sseLiveBatch {
+					for _, ev := range rows {
+						if !writeRevalidatedEventFrame(ctx, deps.cfg.DB, deps.w, deps.flusher, ev) {
+							return
+						}
+					}
+					if scannedTo >= through {
 						break
 					}
 				}
 			}
 		}
 	}
+}
+
+func writeRevalidatedEventFrame(
+	ctx context.Context, store db.Storage, w http.ResponseWriter, flusher http.Flusher, event db.Event,
+) bool {
+	if revalidateEventStreamAuthority(ctx, store) != nil {
+		return false
+	}
+	visible, err := scopedEventStillVisible(ctx, store, event)
+	if err != nil {
+		return false
+	}
+	frame := eventFrameBytes(event)
+	if !visible {
+		frame = resetFrameBytes(event.ID)
+	}
+	return writeSSEFrame(w, flusher, frame) && visible
+}
+
+func scopedEventStillVisible(ctx context.Context, store db.Storage, event db.Event) (bool, error) {
+	if issueScopeFromContext(ctx) == nil {
+		return true, nil
+	}
+	if event.IssueID == nil {
+		return false, nil
+	}
+	ids := []*int64{event.IssueID}
+	if event.RelatedIssueID != nil {
+		ids = append(ids, event.RelatedIssueID)
+	}
+	for _, issueID := range ids {
+		issue, err := store.IssueByID(ctx, *issueID)
+		if errors.Is(err, db.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, internalAPIError(err)
+		}
+		if err := authorizeIssueScopedIssue(ctx, store, issue); err != nil {
+			if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound {
+				return false, nil
+			}
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func revalidateEventStreamAuthority(ctx context.Context, store db.Storage) error {
+	if err := revalidateSSEAuthority(ctx); err != nil {
+		return err
+	}
+	return revalidateIssueScopedPrincipal(ctx, store)
 }
 
 func acceptableForSSE(accept string) bool {
@@ -549,14 +1011,32 @@ func acceptableForSSE(accept string) bool {
 	return false
 }
 
-func writeEventFrame(w io.Writer, e db.Event) {
+func eventFrameBytes(e db.Event) []byte {
 	body, _ := json.Marshal(eventToEnvelope(e))
-	_, _ = w.Write(sseFrameBytes(e.ID, e.Type, body))
+	return sseFrameBytes(e.ID, e.Type, body)
 }
 
-func writeResetFrame(w io.Writer, resetID int64) {
+func resetFrameBytes(resetID int64) []byte {
 	body, _ := json.Marshal(api.EventReset{EventID: resetID, ResetAfterID: resetID})
-	_, _ = w.Write(sseFrameBytes(resetID, "sync.reset_required", body))
+	return sseFrameBytes(resetID, "sync.reset_required", body)
+}
+
+func writeSSEFrame(w http.ResponseWriter, flusher http.Flusher, frame []byte) bool {
+	controller := http.NewResponseController(w)
+	deadlineSet := false
+	if err := controller.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err == nil {
+		deadlineSet = true
+	} else if !errors.Is(err, http.ErrNotSupported) {
+		return false
+	}
+	if deadlineSet {
+		defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
+	}
+	if _, err := w.Write(frame); err != nil {
+		return false
+	}
+	flusher.Flush()
+	return true
 }
 
 // sseFrameBytes builds an SSE frame as raw bytes. Routed through []byte +

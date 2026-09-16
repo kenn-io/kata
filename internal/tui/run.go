@@ -130,6 +130,8 @@ func Run(ctx context.Context, opts Options) error {
 // frame renders with stats.
 func buildRunModel(opts Options, c *Client, bi bootInit, conns ...daemonConnection) Model {
 	m := initialModel(opts)
+	m.authCapabilitiesRequired = true
+	m.authCapabilitiesReady = false
 	// Guard against a typed-nil *Client becoming a non-nil KataAPI:
 	// only assign when c carries a value, so m.api stays a true nil
 	// interface otherwise and m.api != nil checks remain correct.

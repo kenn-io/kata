@@ -109,6 +109,36 @@ describe('browser session bootstrap', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects an expired scoped session before persisting browser authority', async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            session: 'expired-session',
+            csrf: 'expired-csrf',
+            return_path: '/kata',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'identity',
+            scope: {
+              kind: 'issue_subtree',
+              project_uid: '01HZNQ7VFPK1XGD8R5MABCD4EX',
+              root_issue_uid: '01HZNQ7VFPK1XGD8R5MABCD5YZ',
+            },
+            expires_at: '2000-01-01T00:00:00Z',
+            allowed_actions: ['issue.read'],
+            close_requires_evidence: true,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    )
+
+    await expect(
+      exchangeLoginToken('direct-bearer-value', '/kata', fetcher, sessionStorage),
+    ).rejects.toThrow('Login failed')
+    expect(loadSessionCredentials(sessionStorage)).toBeUndefined()
+  })
+
   it('preserves a login return path without putting credentials in the URL', async () => {
     history.replaceState(
       null,

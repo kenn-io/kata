@@ -74,9 +74,17 @@ func issueHTTPSession(w http.ResponseWriter, manager *WebSessionManager, issued 
 	if issued.Principal.Actor != "" {
 		actorPolicy = "identity"
 	}
+	var allowedActions []string
+	if issued.Principal.Scope != nil {
+		allowedActions = issueScopedAllowedActions(issued.Writable)
+	}
 	writeUIJSON(w, http.StatusOK, uiSessionResponse{
 		Session: issued.Session, CSRF: issued.CSRF, ReturnPath: issued.ReturnPath,
 		Writable: issued.Writable, Updates: issued.Updates, ActorPolicy: actorPolicy,
+		Scope: tokenScopeOut(issued.Principal.Scope), ExpiresAt: issued.Principal.ExpiresAt,
+		AllowedActions:        allowedActions,
+		CloseRequiresEvidence: issued.Principal.Kind == PrincipalDBToken,
+		TokenAuditRead:        principalTokenAuditReadAllowed(issued.Principal),
 	})
 }
 

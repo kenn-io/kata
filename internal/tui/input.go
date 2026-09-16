@@ -33,6 +33,7 @@ const (
 	inputBodyEditForm      // detail `e` — centered multi-line body editor
 	inputCommentForm       // detail `c` — centered multi-line comment editor
 	inputFilterForm        // list `f` — multi-axis filter modal: Status/Owner/Search
+	inputCloseForm         // list/detail `x` — authenticated close message + evidence
 )
 
 type searchFocus int
@@ -72,7 +73,7 @@ func (k inputKind) isCommandBar() bool {
 // branch that keeps it out of commitFormInput.
 func (k inputKind) isCenteredForm() bool {
 	switch k {
-	case inputBodyEditForm, inputCommentForm, inputNewIssueForm, inputFilterForm:
+	case inputBodyEditForm, inputCommentForm, inputNewIssueForm, inputFilterForm, inputCloseForm:
 		return true
 	}
 	return false
@@ -108,6 +109,10 @@ const (
 	fieldSearch
 	fieldComment
 	fieldPrompt
+	fieldCloseReason
+	fieldCloseMessage
+	fieldEvidenceType
+	fieldEvidenceValue
 )
 
 // radioField backs a fieldRadio inputField: a finite set of choices
@@ -354,6 +359,7 @@ type formTarget struct {
 	projectID    int64
 	issueShortID string
 	detailGen    int64
+	origin       string
 }
 
 // inputAction names what the caller should do after Update. Actions
@@ -648,6 +654,8 @@ func (s inputState) ctrlEAllowed() bool {
 		return false
 	case inputNewIssueForm:
 		return s.activeFieldIs(fieldBody)
+	case inputCloseForm:
+		return s.activeFieldIs(fieldCloseMessage)
 	}
 	return true
 }
@@ -661,7 +669,7 @@ func (s inputState) shouldCycleFields() bool {
 	if len(s.fields) <= 1 {
 		return false
 	}
-	return s.kind == inputNewIssueForm || s.kind == inputFilterForm
+	return s.kind == inputNewIssueForm || s.kind == inputFilterForm || s.kind == inputCloseForm
 }
 
 // shouldAdvanceOnEnter reports whether enter on the active single-
@@ -675,7 +683,7 @@ func (s inputState) shouldAdvanceOnEnter() bool {
 		return false
 	}
 	switch s.kind {
-	case inputFilterForm:
+	case inputFilterForm, inputCloseForm:
 		return true
 	case inputNewIssueForm:
 		return !s.activeFieldIs(fieldBody)
@@ -819,6 +827,40 @@ func newCommentForm(target formTarget) inputState {
 		kind:   inputCommentForm,
 		title:  fmt.Sprintf("comment on #%s", target.issueShortID),
 		fields: []inputField{newFormTextarea(fieldComment, "")},
+		target: target,
+	}
+}
+
+var closeReasonChoices = []string{"done", "wontfix", "duplicate", "superseded", "audit-no-change"}
+
+var closeEvidenceTypeChoices = []string{
+	"commit", "pr", "test", "reviewed-paths", "external",
+	"no-change-audit", "duplicate-of", "superseded-by",
+}
+
+func newCloseForm(target formTarget) inputState {
+	message := newFormTextarea(fieldCloseMessage, "")
+	message.label = "Completion message"
+	message.required = true
+	reason := inputField{
+		id: fieldCloseReason, label: "Reason", kind: fieldRadio,
+		radio: radioField{choices: closeReasonChoices},
+	}
+	evidenceType := inputField{
+		id: fieldEvidenceType, label: "Evidence type", kind: fieldRadio,
+		radio: radioField{choices: closeEvidenceTypeChoices},
+	}
+	evidenceValue := textinput.New()
+	evidenceValue.Prompt = ""
+	return inputState{
+		kind:  inputCloseForm,
+		title: fmt.Sprintf("complete #%s", target.issueShortID),
+		fields: []inputField{
+			reason,
+			message,
+			evidenceType,
+			{id: fieldEvidenceValue, label: "Evidence value", kind: fieldSingleLine, input: evidenceValue, required: true},
+		},
 		target: target,
 	}
 }

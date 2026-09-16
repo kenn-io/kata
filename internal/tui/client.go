@@ -9,14 +9,17 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -108,7 +111,35 @@ func (c *Client) GetInstance(ctx context.Context) (InstanceInfo, error) {
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
 		return resp, err
 	}
+	if scope := resp.Auth.Scope; scope != nil {
+		if scope.Kind != "issue_subtree" || !katauid.Valid(scope.ProjectUID) || !katauid.Valid(scope.RootIssueUID) ||
+			resp.Auth.ExpiresAt == nil || !time.Now().UTC().Before(*resp.Auth.ExpiresAt) ||
+			!resp.Auth.CloseRequiresEvidence || !slices.Contains(resp.Auth.AllowedActions, "issue.read") {
+			return InstanceInfo{}, fmt.Errorf("incomplete issue-scoped capabilities from daemon")
+		}
+	}
 	return resp, nil
+}
+
+// ListTokens returns the daemon's redacted credential audit inventory and
+// the instant at which the daemon classified each token's state.
+func (c *Client) ListTokens(ctx context.Context) ([]TokenInfo, time.Time, error) {
+	var resp struct {
+		Tokens     []TokenInfo `json:"tokens"`
+		ObservedAt time.Time   `json:"observed_at"`
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	wire, callErr := apiClient.ListTokensWithResponse(ctx)
+	if wire == nil {
+		return nil, time.Time{}, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, time.Time{}, err
+	}
+	return resp.Tokens, resp.ObservedAt, nil
 }
 
 // ListIssues returns the issues for projectID filtered by f.
@@ -223,6 +254,40 @@ func (c *Client) Close(ctx context.Context, projectID int64, ref, actor string) 
 		return nil, err
 	}
 	wire, callErr := apiClient.CloseIssueWithResponse(ctx, &generated.CloseIssueRequestOptions{PathParams: &generated.CloseIssuePath{ProjectID: projectID, Ref: ref}, Body: &generated.CloseIssueBody{Actor: &actor, Source: new(generated.CloseActionRequestBodySource("tui")), Reason: new(generated.CloseActionRequestBodyReason("done"))}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CloseWithEvidence performs the authenticated completion contract used when
+// /instance says the current principal cannot use the owner-local shortcut.
+func (c *Client) CloseWithEvidence(
+	ctx context.Context, projectID int64, ref string, in CloseInput,
+) (*MutationResp, error) {
+	body := api.CloseActionRequestBody{ //nolint:modernize // Embedded wire type is required by the current compiler.
+		ActionRequestBody: api.ActionRequestBody{
+			Actor: in.Actor, Reason: in.Reason, Message: in.Message, Source: "tui", Evidence: in.Evidence,
+		}}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	var payload generated.CloseIssueBody
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return nil, err
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.CloseIssueWithResponse(ctx, &generated.CloseIssueRequestOptions{
+		PathParams: &generated.CloseIssuePath{ProjectID: projectID, Ref: ref}, Body: &payload,
+	})
 	if wire == nil {
 		return nil, callErr
 	}

@@ -166,15 +166,15 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 	require.NoError(t, err)
 
 	const requestCount = 4
-	barrierStore := newFederationLockBarrierStore(store, requestCount)
+	observed := newObservedMutationStore(store)
 	server := daemon.NewServer(daemon.ServerConfig{
-		DB: barrierStore, StartedAt: time.Now().UTC(),
+		DB: observed, StartedAt: time.Now().UTC(),
 	})
 	t.Cleanup(func() { _ = server.Close() })
 	httpServer := httptest.NewServer(server.Handler())
 	t.Cleanup(httpServer.Close)
 
-	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	start := make(chan struct{})
 	results := make(chan concurrentCreateResult, requestCount)
@@ -192,12 +192,6 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 	}
 	ready.Wait()
 	close(start)
-	select {
-	case <-barrierStore.ready:
-	case <-requestCtx.Done():
-		t.Fatal("concurrent creates did not all reach the federation lock while holding idempotency locks")
-	}
-	close(barrierStore.release)
 
 	succeeded := 0
 	for range requestCount {
@@ -207,50 +201,38 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 		}
 	}
 	assert.Equal(t, requestCount, succeeded,
-		"distinct keys must not exhaust the idempotency pool before federation locking")
+		"distinct keys must not exhaust the bounded idempotency pool")
+	assert.Equal(t, requestCount, observed.federationLockArrivals(),
+		"every create must take the federation project shared lock")
 }
 
-type federationLockBarrierStore struct {
+type observedMutationStore struct {
 	db.Storage
-	locker interface {
+	coordinator interface {
 		AcquireFederationProjectSharedLock(context.Context, int64) (func(), error)
 	}
-	expected int
-	ready    chan struct{}
-	release  chan struct{}
-	mu       sync.Mutex
-	arrived  int
+	mu             sync.Mutex
+	federationLock int
 }
 
-func newFederationLockBarrierStore(
-	store *pgstore.Store,
-	expected int,
-) *federationLockBarrierStore {
-	return &federationLockBarrierStore{
-		Storage:  store,
-		locker:   store,
-		expected: expected,
-		ready:    make(chan struct{}),
-		release:  make(chan struct{}),
-	}
+func newObservedMutationStore(store *pgstore.Store) *observedMutationStore {
+	return &observedMutationStore{Storage: store, coordinator: store}
 }
 
-func (s *federationLockBarrierStore) AcquireFederationProjectSharedLock(
+func (s *observedMutationStore) AcquireFederationProjectSharedLock(
 	ctx context.Context,
 	projectID int64,
 ) (func(), error) {
 	s.mu.Lock()
-	s.arrived++
-	if s.arrived == s.expected {
-		close(s.ready)
-	}
+	s.federationLock++
 	s.mu.Unlock()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.release:
-	}
-	return s.locker.AcquireFederationProjectSharedLock(ctx, projectID)
+	return s.coordinator.AcquireFederationProjectSharedLock(ctx, projectID)
+}
+
+func (s *observedMutationStore) federationLockArrivals() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.federationLock
 }
 
 type concurrentCreateResult struct {

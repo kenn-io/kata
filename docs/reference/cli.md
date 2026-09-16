@@ -879,6 +879,13 @@ such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
+Press `C` to open the read-only credential ledger when the selected daemon
+advertises `token_audit_read`. It lists live, expired, and revoked credentials
+with redacted scope and lifecycle metadata. `r` refreshes the view and `Esc`
+returns to the issue browser. The TUI never displays token plaintext or hashes
+and never substitutes a different administrator credential when access is
+denied.
+
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list
 order. Returning from flat to nested starts with parents collapsed. In nested
@@ -945,12 +952,40 @@ Beads](../guide/migrating-from-beads.md).
 
 ```sh
 kata tokens create --actor <actor> [--name <name>]
+kata tokens create --actor <actor> --issue <project#ref> \
+  --expires-in <duration> --token-file <new-private-path>
 kata tokens list
 kata tokens revoke <id>
 ```
 
 Identity tokens are used when a remote/shared daemon has
-`require_token_identity = true`.
+`require_token_identity = true`. Configure and restart the daemon in that mode
+before creating a token. A shared-token daemon with identity mode disabled
+refuses creation rather than minting a bearer credential it will not accept.
+
+The `--issue` form creates a finite-lived credential for that issue and its
+current descendants. Scoped creation always requires identity mode, including
+on a daemon with no shared token. The credential permits ordinary issue work
+and explicitly parented children. See the [scope guide](../design/issue-scoped-credentials.md)
+for allowed operations and membership changes.
+
+All three flags, `--issue`, `--expires-in`, and `--token-file`, are required
+together. `--expires-in` accepts a positive whole-second duration such as `4h`;
+zero, negative, fractional-second, and overflowing values are refused. `--issue`
+accepts a bare, qualified, or full UID ref on the selected daemon. A conflicting
+explicit `--project` fails with `conflicting_project_selector`.
+
+A spoke replica cannot mint this credential: `scoped_token_spoke_forbidden`
+means the coordinator must select the authoritative hub daemon and resolve the
+issue there. A daemon without the `issue_subtree_tokens` capability returns
+`issue_subtree_tokens_unsupported` before minting.
+
+Plaintext is written once to `--token-file` and is never printed. The destination
+must be new and its parent directory owner-only; the path belongs to the CLI
+host. Provisioning returns the absolute output path and redacted metadata. The
+file is issuance output, not a worker authentication input. Follow the
+[worker provisioning example](../operations/remote-daemon.md#identity-tokens)
+to inject its value into the consuming process. Revoke the token during teardown.
 
 ## Federation
 

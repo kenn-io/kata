@@ -107,10 +107,14 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		projected, err := scopedMutationEvent(ctx, cfg.DB, &evt)
+		if err != nil {
+			return nil, err
+		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated
 		out.Body.Comment = c
-		out.Body.Event = &evt
+		out.Body.Event = projected
 		out.Body.Changed = true
 		return out, nil
 	}))
@@ -161,6 +165,10 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
+		if err != nil {
+			return nil, err
+		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated
 		out.Body.Comment = c
@@ -181,11 +189,6 @@ func replayComment(
 	match *db.CommentIdempotencyMatch,
 	actor, body, teammate string,
 ) (*api.CommentResponse, error) {
-	if match.Fingerprint != commentIdempotencyFingerprint(match.IssueUID, actor, body, teammate) {
-		return nil, api.NewError(409, "idempotency_mismatch",
-			"idempotency key matched a prior comment with a different fingerprint",
-			"use a fresh key or send the exact original comment", nil)
-	}
 	current, err := cfg.DB.IssueByID(ctx, match.Comment.IssueID)
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -199,6 +202,14 @@ func replayComment(
 	}
 	if _, err := authorizeHostProjectScope(ctx, []int64{current.ProjectID}, nil, false); err != nil {
 		return nil, err
+	}
+	if err := authorizeIssueScopedIssue(ctx, cfg.DB, current); err != nil {
+		return nil, err
+	}
+	if match.Fingerprint != commentIdempotencyFingerprint(match.IssueUID, actor, body, teammate) {
+		return nil, api.NewError(409, "idempotency_mismatch",
+			"idempotency key matched a prior comment with a different fingerprint",
+			"use a fresh key or send the exact original comment", nil)
 	}
 	out := &api.CommentResponse{}
 	out.Body.Issue = current

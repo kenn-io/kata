@@ -151,6 +151,26 @@ describe('snapshotIntentForRoute', () => {
     expect(intent.timeZone).toBe('America/Los_Angeles')
     expect(intent.localDate).toBeUndefined()
   })
+
+  it('maps the credentials screen to an unselected ordinary authority snapshot', () => {
+    const route = parseRoute(
+      new URL(
+        'https://daemon.example/kata?view=credentials&issue=01HZNQ7VFPK1XGD8R5MABCD4EX&owner=private-actor',
+      ),
+    )
+    if (route.kind === 'route-error') throw new Error('expected credentials route')
+
+    expect(snapshotIntentForRoute(route, new Date('2026-09-15T12:00:00Z'), 'UTC')).toEqual({
+      view: 'all-open',
+      statuses: [],
+      owners: [],
+      labels: [],
+      relationships: [],
+      includeGraph: false,
+      includeHistory: false,
+      timeZone: 'UTC',
+    })
+  })
 })
 
 describe('createUISnapshotRequest', () => {
@@ -198,6 +218,86 @@ describe('createUISnapshotRequest', () => {
       etag: '"snapshot"',
       snapshot: expect.objectContaining({ cursor: 9 }),
     })
+  })
+
+  it.each([
+    {
+      label: 'unknown scope kind',
+      capabilities: {
+        writable: true,
+        updates: 'poll',
+        actor_policy: 'token',
+        scope: {
+          kind: 'project',
+          project_uid: '01HZNQ7VFPK1XGD8R5MABCD4EX',
+          root_issue_uid: '01HZNQ7VFPK1XGD8R5MABCD5YZ',
+        },
+        expires_at: '2099-01-01T00:00:00Z',
+        allowed_actions: ['issue.read'],
+        close_requires_evidence: true,
+      },
+    },
+    {
+      label: 'expired scope',
+      capabilities: {
+        writable: true,
+        updates: 'poll',
+        actor_policy: 'token',
+        scope: {
+          kind: 'issue_subtree',
+          project_uid: '01HZNQ7VFPK1XGD8R5MABCD4EX',
+          root_issue_uid: '01HZNQ7VFPK1XGD8R5MABCD5YZ',
+        },
+        expires_at: '2000-01-01T00:00:00Z',
+        allowed_actions: ['issue.read'],
+        close_requires_evidence: true,
+      },
+    },
+    {
+      label: 'partial scope capabilities',
+      capabilities: {
+        writable: true,
+        updates: 'poll',
+        actor_policy: 'token',
+        scope: {
+          kind: 'issue_subtree',
+          project_uid: '01HZNQ7VFPK1XGD8R5MABCD4EX',
+          root_issue_uid: '01HZNQ7VFPK1XGD8R5MABCD5YZ',
+        },
+        expires_at: '2099-01-01T00:00:00Z',
+      },
+    },
+  ])('rejects $label before accepting browser authority', async ({ capabilities }) => {
+    const generatedRequest = vi.fn(async () => ({
+      status: 200 as const,
+      headers: new Headers({ ETag: '"snapshot"' }),
+      data: {
+        contract_version: '2',
+        cursor: 9,
+        capabilities,
+        catalog: [],
+        collection: [],
+        collection_links: [],
+        origin: 'https://daemon.example',
+        origin_stable: true,
+      } as unknown as UISnapshot,
+    }))
+    const request = createUISnapshotRequest(generatedRequest)
+
+    await expect(
+      request(
+        {
+          view: 'all-open',
+          statuses: [],
+          owners: [],
+          labels: [],
+          relationships: [],
+          includeGraph: false,
+          includeHistory: false,
+        },
+        { signal: new AbortController().signal, full: false },
+      ),
+    ).rejects.toThrow('Invalid issue-scoped authority')
   })
 })
 

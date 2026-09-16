@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"sort"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -81,10 +82,14 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		projected, err := scopedMutationEvent(ctx, cfg.DB, &evt)
+		if err != nil {
+			return nil, err
+		}
 		out := &api.AddLabelResponse{}
 		out.Body.Issue = updatedIssue
 		out.Body.Label = row
-		out.Body.Event = &evt
+		out.Body.Event = projected
 		out.Body.Changed = true
 		return out, nil
 	}
@@ -130,9 +135,13 @@ func removeLabelHandler(cfg ServerConfig) func(context.Context, *api.RemoveLabel
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		projected, perr := scopedMutationEvent(ctx, cfg.DB, &evt)
+		if perr != nil {
+			return nil, perr
+		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updatedIssue
-		out.Body.Event = &evt
+		out.Body.Event = projected
 		out.Body.Changed = true
 		return out, nil
 	}
@@ -143,7 +152,28 @@ func listLabelsHandler(cfg ServerConfig) func(context.Context, *api.LabelsListRe
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		counts, err := cfg.DB.LabelCounts(ctx, in.ProjectID)
+		var counts []db.LabelCount
+		_, issueIDs, err := issueScopedMembership(ctx, cfg.DB)
+		if err != nil {
+			return nil, err
+		}
+		if issueIDs == nil {
+			counts, err = cfg.DB.LabelCounts(ctx, in.ProjectID)
+		} else {
+			labelsByIssue, labelsErr := cfg.DB.LabelsByIssues(ctx, in.ProjectID, issueIDs)
+			err = labelsErr
+			byLabel := map[string]int64{}
+			for issueID, labels := range labelsByIssue {
+				db.RecordIssueScopeTarget(ctx, issueID)
+				for _, label := range labels {
+					byLabel[label]++
+				}
+			}
+			for label, count := range byLabel {
+				counts = append(counts, db.LabelCount{Label: label, Count: count})
+			}
+			sort.Slice(counts, func(i, j int) bool { return counts[i].Label < counts[j].Label })
+		}
 		if err != nil {
 			return nil, internalAPIError(err)
 		}

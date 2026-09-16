@@ -1,25 +1,38 @@
 package main
 
 import (
+	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	"go.kenn.io/kata/internal/tokenfile"
+	"go.kenn.io/kata/internal/tokenissuance"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+type tokenScopeCLIOut struct {
+	Kind         string `json:"kind"`
+	ProjectUID   string `json:"project_uid"`
+	RootIssueUID string `json:"root_issue_uid"`
+}
+
 type tokenCLIOut struct {
-	ID         int64      `json:"id"`
-	Actor      string     `json:"actor"`
-	Name       *string    `json:"name"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	RevokedAt  *time.Time `json:"revoked_at"`
+	ID         int64             `json:"id"`
+	Actor      string            `json:"actor"`
+	Name       *string           `json:"name"`
+	Scope      *tokenScopeCLIOut `json:"scope,omitempty"`
+	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
+	CreatedAt  time.Time         `json:"created_at"`
+	LastUsedAt *time.Time        `json:"last_used_at"`
+	RevokedAt  *time.Time        `json:"revoked_at"`
 }
 
 type createTokenCLIResponse struct {
@@ -45,15 +58,19 @@ func newTokensCmd() *cobra.Command {
 }
 
 func tokensCreateCmd() *cobra.Command {
-	var actor, name string
+	var actor, name, issue, expiresIn, tokenFile string
 	cmd := &cobra.Command{
-		Use:   "create --actor <actor> [--name <name>]",
+		Use:   "create --actor <actor> [--name <name>] [--issue <ref> --expires-in <duration> --token-file <path>]",
 		Short: "create an identity token",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			actor = strings.TrimSpace(actor)
 			if actor == "" {
 				return &cliError{Message: "actor is required", Kind: kindUsage, ExitCode: ExitUsage}
+			}
+			scoped := strings.TrimSpace(issue) != "" || strings.TrimSpace(expiresIn) != "" || strings.TrimSpace(tokenFile) != ""
+			if scoped {
+				return createScopedToken(cmd, actor, name, issue, expiresIn, tokenFile)
 			}
 			a, err := dialDaemon(cmd.Context())
 			if err != nil {
@@ -87,7 +104,212 @@ func tokensCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&actor, "actor", "", "actor this token identifies")
 	cmd.Flags().StringVar(&name, "name", "", "human label for the token")
+	cmd.Flags().StringVar(&issue, "issue", "", "limit the token to this issue subtree")
+	cmd.Flags().StringVar(&expiresIn, "expires-in", "", "required lifetime for a scoped token")
+	cmd.Flags().StringVar(&tokenFile, "token-file", "", "new owner-only file for scoped token plaintext")
 	return cmd
+}
+
+func createScopedToken(cmd *cobra.Command, actor, name, issue, expiresIn, tokenPath string) (retErr error) {
+	issue = strings.TrimSpace(issue)
+	expiresIn = strings.TrimSpace(expiresIn)
+	tokenPath = strings.TrimSpace(tokenPath)
+	if issue == "" || expiresIn == "" || tokenPath == "" {
+		return &cliError{
+			Message:  "scoped token creation requires --issue, --expires-in, and --token-file together",
+			Kind:     kindUsage,
+			Code:     "scoped_token_arguments_required",
+			ExitCode: ExitUsage,
+		}
+	}
+	duration, err := time.ParseDuration(expiresIn)
+	if err != nil || duration <= 0 || duration < time.Second || duration%time.Second != 0 {
+		return &cliError{
+			Message:  "--expires-in must be a positive whole-second duration",
+			Kind:     kindValidation,
+			Code:     "invalid_token_expiration",
+			ExitCode: ExitValidation,
+		}
+	}
+	a, err := dialDaemon(cmd.Context())
+	if err != nil {
+		return err
+	}
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return err
+	}
+	instance, callErr := apiClient.InstanceWithResponse(a.ctx)
+	if instance == nil {
+		return externalCLITransportError(instance, callErr)
+	}
+	if err := externalCLIResponseError(instance.StatusCode, instance.Body, callErr); err != nil {
+		return err
+	}
+	if instance.JSON200 == nil || !instance.JSON200.IssueSubtreeTokens {
+		return &cliError{
+			Message:  "the selected daemon does not support issue-scoped tokens",
+			Kind:     kindConflict,
+			Code:     "issue_subtree_tokens_unsupported",
+			ExitCode: ExitConflict,
+		}
+	}
+	scope, qualifiedIssue, err := resolveScopedTokenIssue(cmd, a, issue)
+	if err != nil {
+		return err
+	}
+	reservation, err := tokenfile.Reserve(tokenPath)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, reservation.Abort()) }()
+
+	payload := &generated.CreateTokenBody{
+		Actor:            actor,
+		Scope:            &generated.TokenScopeIn{Kind: generated.IssueSubtree, ProjectUID: scope.ProjectUID, RootIssueUID: scope.RootIssueUID},
+		ExpiresInSeconds: new(int64(duration / time.Second)),
+	}
+	if trimmed := strings.TrimSpace(name); trimmed != "" {
+		payload.Name = &trimmed
+	}
+	wire, callErr := apiClient.CreateTokenWithResponse(a.ctx, &generated.CreateTokenRequestOptions{Body: payload})
+	if wire == nil {
+		return fmt.Errorf("scoped token creation response was lost; outcome is ambiguous: %w", externalCLITransportError(wire, callErr))
+	}
+	if wire.StatusCode >= http.StatusBadRequest {
+		return externalCLIResponseError(wire.StatusCode, wire.Body, callErr)
+	}
+	if callErr != nil {
+		return fmt.Errorf("scoped token creation response could not be decoded; outcome is ambiguous: %w", callErr)
+	}
+	var response createTokenCLIResponse
+	if err := json.Unmarshal(wire.Body, &response); err != nil {
+		return fmt.Errorf("scoped token creation response could not be decoded; outcome is ambiguous: %w", err)
+	}
+	responseScope := (*tokenissuance.Scope)(nil)
+	if response.Token.Scope != nil {
+		responseScope = &tokenissuance.Scope{
+			Kind: response.Token.Scope.Kind, ProjectUID: response.Token.Scope.ProjectUID,
+			RootIssueUID: response.Token.Scope.RootIssueUID,
+		}
+	}
+	if err := tokenissuance.Validate(tokenissuance.Response{
+		ID: response.Token.ID, Actor: response.Token.Actor, Scope: responseScope,
+		CreatedAt: response.Token.CreatedAt, ExpiresAt: response.Token.ExpiresAt,
+		Plaintext: response.Plaintext,
+	}, actor, tokenissuance.Scope{
+		Kind: scope.Kind, ProjectUID: scope.ProjectUID, RootIssueUID: scope.RootIssueUID,
+	}, duration); err != nil {
+		return cleanupScopedTokenCreation(a, response.Token.ID, err)
+	}
+	if err := reservation.Commit(response.Plaintext); err != nil {
+		return cleanupScopedTokenCreation(a, response.Token.ID, err)
+	}
+	return printScopedTokenCreated(cmd, response.Token, qualifiedIssue, reservation.Path())
+}
+
+func resolveScopedTokenIssue(_ *cobra.Command, a daemonAPI, raw string) (tokenScopeCLIOut, string, error) {
+	start, err := resolveStartPath(flags.Workspace)
+	if err != nil {
+		return tokenScopeCLIOut{}, "", err
+	}
+	fallback := strings.TrimSpace(flags.Project)
+	if fallback == "" {
+		fallback = workspaceProjectName(start)
+	}
+	parsed, err := ResolveRef(raw, fallback)
+	if err != nil {
+		return tokenScopeCLIOut{}, "", &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
+	}
+	if explicit := strings.TrimSpace(flags.Project); explicit != "" && parsed.ProjectName != explicit {
+		return tokenScopeCLIOut{}, "", &cliError{
+			Message:  fmt.Sprintf("--project %q conflicts with issue project %q", explicit, parsed.ProjectName),
+			Kind:     kindValidation,
+			Code:     "conflicting_project_selector",
+			ExitCode: ExitValidation,
+		}
+	}
+	projectID, projectName, err := resolveProjectIDAndNameForRef(a, start, parsed.ProjectName, false)
+	if err != nil {
+		return tokenScopeCLIOut{}, "", err
+	}
+	var shown struct {
+		Issue struct {
+			UID        string `json:"uid"`
+			ProjectUID string `json:"project_uid"`
+			ShortID    string `json:"short_id"`
+		} `json:"issue"`
+	}
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return tokenScopeCLIOut{}, "", err
+	}
+	wire, callErr := apiClient.ShowIssueWithResponse(a.ctx, &generated.ShowIssueRequestOptions{
+		PathParams: &generated.ShowIssuePath{ProjectID: projectID, Ref: parsed.RefForAPI},
+	})
+	if wire == nil {
+		return tokenScopeCLIOut{}, "", externalCLITransportError(wire, callErr)
+	}
+	if err := externalCLIResponseError(wire.StatusCode, wire.Body, callErr); err != nil {
+		return tokenScopeCLIOut{}, "", err
+	}
+	if err := json.Unmarshal(wire.Body, &shown); err != nil {
+		return tokenScopeCLIOut{}, "", err
+	}
+	if shown.Issue.UID == "" || shown.Issue.ProjectUID == "" || shown.Issue.ShortID == "" {
+		return tokenScopeCLIOut{}, "", errors.New("daemon returned incomplete issue identity for scoped token creation")
+	}
+	return tokenScopeCLIOut{
+		Kind: "issue_subtree", ProjectUID: shown.Issue.ProjectUID, RootIssueUID: shown.Issue.UID,
+	}, projectName + "#" + shown.Issue.ShortID, nil
+}
+
+func cleanupScopedTokenCreation(a daemonAPI, tokenID int64, cause error) error {
+	if tokenID <= 0 {
+		return fmt.Errorf("scoped token delivery failed; creation outcome is ambiguous: %w", cause)
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(a.ctx), 10*time.Second)
+	defer cancel()
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	wire, callErr := apiClient.RevokeTokenWithResponse(cleanupCtx, &generated.RevokeTokenRequestOptions{
+		PathParams: &generated.RevokeTokenPath{ID: tokenID},
+	})
+	if wire == nil {
+		err = externalCLITransportError(wire, callErr)
+	} else {
+		err = externalCLIResponseError(wire.StatusCode, wire.Body, callErr)
+	}
+	if err != nil {
+		return fmt.Errorf("scoped token delivery failed and token %d could not be revoked: %v: %w", tokenID, err, cause)
+	}
+	return fmt.Errorf("scoped token delivery failed; token %d was revoked: %w", tokenID, cause)
+}
+
+func printScopedTokenCreated(cmd *cobra.Command, token tokenCLIOut, issue, path string) error {
+	if currentOutputMode() == outputJSON {
+		return emitJSON(cmd.OutOrStdout(), struct {
+			Token     tokenCLIOut `json:"token"`
+			Issue     string      `json:"issue"`
+			TokenFile string      `json:"token_file"`
+		}{Token: token, Issue: issue, TokenFile: path})
+	}
+	if currentOutputMode() == outputAgent {
+		return writeAgentKVRow(cmd.OutOrStdout(),
+			agentRowField("id", strconv.FormatInt(token.ID, 10)),
+			agentRowField("actor", token.Actor),
+			agentRowField("issue", issue),
+			agentRowField("expires_at", token.ExpiresAt.UTC().Format(time.RFC3339)),
+			agentRowField("token_file", path),
+		)
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(),
+		"created scoped token id=%d actor=%s issue=%s expires_at=%s token_file=%s\n",
+		token.ID, textsafe.Line(token.Actor), textsafe.Line(issue),
+		token.ExpiresAt.UTC().Format(time.RFC3339), textsafe.Line(path))
+	return err
 }
 
 func tokensListCmd() *cobra.Command {
@@ -227,13 +449,23 @@ func printTokensList(cmd *cobra.Command, out listTokensCLIResponse) error {
 				agentOptionalRowField("name", tok.Name),
 				agentRowField("revoked", strconv.FormatBool(tok.RevokedAt != nil)),
 			}
+			if tok.Scope != nil {
+				fields = append(fields,
+					agentRowField("scope", tok.Scope.Kind),
+					agentRowField("project_uid", tok.Scope.ProjectUID),
+					agentRowField("root_issue_uid", tok.Scope.RootIssueUID),
+				)
+			}
+			if tok.ExpiresAt != nil {
+				fields = append(fields, agentRowField("expires_at", tok.ExpiresAt.UTC().Format(time.RFC3339)))
+			}
 			if err := writeAgentKVRow(cmd.OutOrStdout(), fields...); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	if _, err := fmt.Fprintln(cmd.OutOrStdout(), "id  actor  name  revoked"); err != nil {
+	if _, err := fmt.Fprintln(cmd.OutOrStdout(), "id  actor  name  scope  project_uid  root_issue_uid  expires_at  revoked"); err != nil {
 		return err
 	}
 	for _, tok := range out.Tokens {
@@ -245,8 +477,19 @@ func printTokensList(cmd *cobra.Command, out listTokensCLIResponse) error {
 		if tok.RevokedAt != nil {
 			revoked = tok.RevokedAt.Format(time.RFC3339)
 		}
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%d  %s  %s  %s\n",
-			tok.ID, textsafe.Line(tok.Actor), textsafe.Line(name), textsafe.Line(revoked)); err != nil {
+		scopeKind, projectUID, rootIssueUID, expiresAt := "", "", "", ""
+		if tok.Scope != nil {
+			scopeKind = tok.Scope.Kind
+			projectUID = tok.Scope.ProjectUID
+			rootIssueUID = tok.Scope.RootIssueUID
+		}
+		if tok.ExpiresAt != nil {
+			expiresAt = tok.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%d  %s  %s  %s  %s  %s  %s  %s\n",
+			tok.ID, textsafe.Line(tok.Actor), textsafe.Line(name), textsafe.Line(scopeKind),
+			textsafe.Line(projectUID), textsafe.Line(rootIssueUID), textsafe.Line(expiresAt),
+			textsafe.Line(revoked)); err != nil {
 			return err
 		}
 	}

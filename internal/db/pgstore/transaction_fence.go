@@ -11,6 +11,11 @@ import (
 // transaction to storage code. Contexts without a host fence retain the
 // ordinary standalone behavior.
 func (s *Store) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	if db.IssueScopeTargets(ctx) != nil && (opts == nil || !opts.ReadOnly) {
+		// A scope fence must reject a parent edge or target changed after its
+		// snapshot, including otherwise-autocommit mutations.
+		opts = &sql.TxOptions{Isolation: sql.LevelSerializable}
+	}
 	tx, err := s.DB.BeginTx(ctx, opts)
 	if err != nil {
 		return nil, err

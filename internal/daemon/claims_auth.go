@@ -15,7 +15,8 @@ import (
 
 type claimPrincipal struct {
 	db.ClaimPrincipal
-	IdentityToken bool
+	IdentityToken    bool
+	RequestPrincipal *Principal
 }
 
 const hostClaimClientKind = "host:v1"
@@ -45,7 +46,7 @@ func resolveClaimPrincipal(
 	}
 	if cfg.Auth.Token != "" {
 		if principal, ok, err := resolveLocalClaimPrincipal(ctx, cfg, authz, body, false); ok || err != nil {
-			return ctx, principal, err
+			return claimRequestContext(ctx, principal), principal, err
 		}
 		if allowEnrollment && hasBearerHeader(authz) {
 			return resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body, operation)
@@ -135,8 +136,8 @@ func authorizeClaimStatusRead(
 		}
 		return ctx, nil
 	}
-	if _, ok, err := resolveLocalClaimPrincipal(ctx, cfg, authz, api.ClaimActionBody{}, true); ok || err != nil {
-		return ctx, err
+	if principal, ok, err := resolveLocalClaimPrincipal(ctx, cfg, authz, api.ClaimActionBody{}, true); ok || err != nil {
+		return claimRequestContext(ctx, principal), err
 	}
 	authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
 		federationTransportOperation("getIssueLeaseStatus"))
@@ -178,10 +179,19 @@ func resolveLocalClaimPrincipal(
 		}
 		principal := localClaimPrincipalWithHolder(cfg, body, token.Actor)
 		principal.IdentityToken = true
+		nativePrincipal := principalFromAPIToken(token)
+		principal.RequestPrincipal = &nativePrincipal
 		return principal, true, nil
 	default:
 		return claimPrincipal{}, false, nil
 	}
+}
+
+func claimRequestContext(ctx context.Context, principal claimPrincipal) context.Context {
+	if principal.RequestPrincipal == nil {
+		return ctx
+	}
+	return WithPrincipal(ctx, *principal.RequestPrincipal)
 }
 
 func localClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody) claimPrincipal {

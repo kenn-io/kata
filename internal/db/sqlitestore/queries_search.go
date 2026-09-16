@@ -103,6 +103,13 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		rowFilter += "\n\t\t  AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)"
 		labelArgs = append(labelArgs, strings.ToLower(label))
 	}
+	var scopeFilter strings.Builder
+	appendAllowedIssueIDsSQLite(&scopeFilter, &labelArgs, r.params.AllowedIssueIDs)
+	if scope := r.params.IssueScope; scope != nil {
+		scopeFilter.WriteString(" AND i.id IN (" + strings.NewReplacer("$1", "?", "$2", "?").Replace(issueScopeMembersCTE) + " SELECT id FROM scope_members)")
+		labelArgs = append(labelArgs, scope.RootIssueUID, scope.ProjectUID, scope.ProjectUID)
+	}
+	rowFilter += scopeFilter.String()
 	// Per-column MATCH subqueries replace highlight() because issues_fts is
 	// declared content='' (contentless), and highlight() returns NULL for every
 	// column on contentless tables. Each subquery returns 1 if the row's

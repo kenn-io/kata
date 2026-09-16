@@ -1269,43 +1269,9 @@ func TestList_AuthorFilter_NarrowsDisplay(t *testing.T) {
 	}
 }
 
-// TestList_Close_DispatchesAPI: j to row 2, 'x' calls api.Close with
-// the row 2 issue's number, threading the actor through. The fixture
-// uses two rows so cursor!=0 is observable.
-func TestList_Close_DispatchesAPI(t *testing.T) {
-	api, km, sc := newListEnv()
-	api.closeResult = &MutationResp{Issue: &Issue{UID: "01TEST-bbb2", ShortID: "bbb2", Status: "closed"}}
-	lm := listModel{
-		actor: "tester",
-		issues: []Issue{
-			{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "first"},
-			{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "second"},
-		},
-	}
-
-	lm, _ = lm.Update(runeKey('j'), km, api, sc)
-	if lm.cursor != 1 {
-		t.Fatalf("cursor = %d, want 1 after j", lm.cursor)
-	}
-	lm, cmd := lm.Update(runeKey('x'), km, api, sc)
-	if cmd == nil {
-		t.Fatal("expected close cmd from x")
-	}
-	_ = drainCmd(t, lm, cmd, km, api, sc)
-	if api.closeCalls != 1 {
-		t.Fatalf("closeCalls = %d, want 1", api.closeCalls)
-	}
-	if api.lastCloseProjectID != 7 || api.lastCloseRef != "bbb2" {
-		t.Fatalf("close args wrong: pid=%d ref=%q",
-			api.lastCloseProjectID, api.lastCloseRef)
-	}
-	if api.lastCloseActor != "tester" {
-		t.Fatalf("lastCloseActor = %q, want tester", api.lastCloseActor)
-	}
-}
-
-// TestList_Reopen_DispatchesAPI mirrors TestList_Close_DispatchesAPI for
-// the 'r' binding.
+// TestList_Reopen_DispatchesAPI covers the list-local 'r' binding. Close is
+// intentionally tested through Model because it first resolves the daemon's
+// evidence requirement and opens the close form.
 func TestList_Reopen_DispatchesAPI(t *testing.T) {
 	api, km, sc := newListEnv()
 	api.reopenResult = &MutationResp{Issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Status: "open"}}

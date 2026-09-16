@@ -7,7 +7,7 @@ import type { IdleShutdownHealth } from './idleShutdownHealth.ts'
 
 export interface HealthResponseBody {
   api_schema_version?: string
-  db_path: string
+  db_path?: string
   embeddings?: EmbeddingsHealth
   federation_config?: FederationConfigHealth
   idle_shutdown?: IdleShutdownHealth

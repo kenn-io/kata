@@ -43,6 +43,8 @@ func (s *Store) ReadyIssues(
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
+	appendAllowedIssueIDsPostgresBuilder(&query, &args, filter.AllowedIssueIDs)
+	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
 		query.WriteString(` AND i.owner IS NULL`)
@@ -123,6 +125,8 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
+	appendAllowedIssueIDsPostgresBuilder(&query, &args, filter.AllowedIssueIDs)
+	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
 		query.WriteString(` AND i.owner IS NULL`)

@@ -227,6 +227,10 @@ type Storage interface {
 	RevokeAPIToken(ctx context.Context, id int64, adminActor string) (APIToken, Event, error)
 	ResolveAPIToken(ctx context.Context, plaintext string) (APIToken, error)
 	ListAPITokens(ctx context.Context) ([]APIToken, error)
+	IssueScopedTokenTransactionFence(admitted APIToken) TransactionFence
+	APITokenByID(context.Context, int64) (APIToken, error)
+	IssueScopedMembers(context.Context, APITokenScope) ([]Issue, error)
+	IssueInScope(context.Context, APITokenScope, ...int64) (bool, error)
 
 	// claims
 	AcquireClaim(ctx context.Context, p AcquireClaimParams) (LeaseResult, error)

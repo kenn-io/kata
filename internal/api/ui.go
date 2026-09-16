@@ -1,6 +1,8 @@
 package api //nolint:revive // package name "api" is the public wire namespace.
 
 import (
+	"time"
+
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/db"
@@ -11,9 +13,14 @@ const UISnapshotContractVersion = "2"
 
 // UICapabilities describes the browser behavior authorized for this request.
 type UICapabilities struct {
-	Writable    bool   `json:"writable"`
-	Updates     string `json:"updates" enum:"sse,poll"`
-	ActorPolicy string `json:"actor_policy"`
+	Writable              bool           `json:"writable"`
+	Updates               string         `json:"updates" enum:"sse,poll"`
+	ActorPolicy           string         `json:"actor_policy"`
+	Scope                 *TokenScopeOut `json:"scope,omitempty"`
+	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
+	AllowedActions        []string       `json:"allowed_actions,omitempty"`
+	CloseRequiresEvidence bool           `json:"close_requires_evidence,omitempty,omitzero"`
+	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
 }
 
 // UISnapshotRequest is the normalized route and projection intent accepted by
@@ -67,6 +74,13 @@ type UIGraph struct {
 	UnresolvedRefs []db.UIGraphUnresolvedRef `json:"unresolved_refs"`
 }
 
+// UIProject is the browser catalog shape. Scoped callers receive Project with
+// only its identity fields and no project-wide statistics.
+type UIProject struct {
+	Project ProjectOut       `json:"project"`
+	Stats   *db.ProjectStats `json:"stats,omitempty"`
+}
+
 // UISnapshotResponseBody is the coherent browser read envelope.
 type UISnapshotResponseBody struct {
 	ContractVersion string               `json:"contract_version"`
@@ -74,7 +88,7 @@ type UISnapshotResponseBody struct {
 	Capabilities    UICapabilities       `json:"capabilities"`
 	Origin          string               `json:"origin"`
 	OriginStable    bool                 `json:"origin_stable"`
-	Catalog         []db.UIProject       `json:"catalog"`
+	Catalog         []UIProject          `json:"catalog"`
 	Collection      []db.UIIssue         `json:"collection"`
 	CollectionLinks []db.UILink          `json:"collection_links"`
 	Selected        *UISelectedAuthority `json:"selected,omitempty"`
@@ -111,7 +125,7 @@ type UIReferencesResponseBody struct {
 	Capabilities    UICapabilities        `json:"capabilities"`
 	Origin          string                `json:"origin"`
 	OriginStable    bool                  `json:"origin_stable"`
-	Projects        []db.Project          `json:"projects"`
+	Projects        []ProjectOut          `json:"projects"`
 	Issues          []db.UIIssueReference `json:"issues"`
 	Owners          []string              `json:"owners"`
 	Labels          []string              `json:"labels"`

@@ -52,6 +52,20 @@ describe('canonical Kata routes', () => {
     expect(serializeRoute(route)).toBe('/kata?view=delegated')
   })
 
+  it('parses credentials as a daemon route without carrying issue workspace state', () => {
+    const route = parseRoute(
+      new URL(`https://daemon.example/kata?view=credentials&issue=${issueUID}&label=private-actor`),
+    )
+
+    expect(route).toEqual({
+      kind: 'kata',
+      view: 'credentials',
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    })
+    expect(serializeRoute(route)).toBe('/kata?view=credentials')
+  })
+
   it('keeps invalid issue UIDs routed and gives short refs one search action', () => {
     expect(parseRoute(new URL('https://daemon.example/kata?issue=abc4'))).toEqual({
       kind: 'route-error',

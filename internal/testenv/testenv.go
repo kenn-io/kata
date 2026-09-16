@@ -123,6 +123,16 @@ func NewFromDB(t *testing.T, dbPath string) *Env {
 	return &Env{URL: url, HTTP: client, DB: d, Home: filepath.Dir(dbPath), Broadcaster: bcast}
 }
 
+// PhysicalPath returns path with its parent directory spelled the way the
+// filesystem canonically reports it. On Windows this expands 8.3 short names,
+// such as RUNNER~1, to the long spelling returned by tokenfile.Reserve.
+func PhysicalPath(t *testing.T, path string) string {
+	t.Helper()
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	require.NoError(t, err)
+	return filepath.Join(parent, filepath.Base(path))
+}
+
 // Get issues GET env.URL+path, reads and closes the response body, and returns
 // the status code paired with the body bytes. Errors fail the test.
 func (e *Env) Get(t *testing.T, path string) (int, []byte) {

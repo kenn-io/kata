@@ -19,6 +19,7 @@ describe('App', () => {
     cleanup()
     document.documentElement.classList.remove('dark')
     vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   it('renders the Kata application shell while loading', () => {
@@ -1165,6 +1166,323 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'All Open' })).not.toBeNull()
   })
 
+  it('loads credential audit metadata without sending the credential route to snapshots and returns to the issue route', async () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001&graph=1#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'admin-session', csrf: 'admin-csrf' }),
+    )
+    const snapshotViews: Array<string | null> = []
+    let tokenReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotViews.push(target.searchParams.get('view'))
+          const body = snapshot()
+          body.capabilities = { ...body.capabilities, token_audit_read: true }
+          return Response.json(body, { headers: { ETag: `"snapshot-${snapshotViews.length}"` } })
+        }
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/tokens') {
+          tokenReads += 1
+          return Response.json({
+            observed_at: '2026-09-15T12:00:00Z',
+            tokens: [
+              {
+                id: 7,
+                name: 'Build worker',
+                actor: 'agent-a',
+                state: 'live',
+                created_at: '2026-09-14T10:00:00Z',
+                last_used_at: null,
+                revoked_at: null,
+              },
+            ],
+          })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Credentials' }))
+
+    expect(await screen.findByText('Build worker')).not.toBeNull()
+    expect(snapshotViews).toEqual(['all-open', 'all-open'])
+    expect(tokenReads).toBe(1)
+    expect(window.location.search).toBe('?view=credentials')
+
+    cleanup()
+    render(App)
+    expect(await screen.findByRole('heading', { name: 'Credentials' })).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Back to issues' }))
+    await waitFor(() =>
+      expect(window.location.search).toBe('?issue=01J00000000000000000000001&graph=1'),
+    )
+  })
+
+  it('aborts and fences a delayed credential response after leaving the route', async () => {
+    history.replaceState(null, '', '/kata?view=credentials#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'admin-session', csrf: 'admin-csrf' }),
+    )
+    let credentialRequest: Request | undefined
+    let releaseCredentials!: (response: Response) => void
+    const delayedCredentials = new Promise<Response>((resolve) => {
+      releaseCredentials = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          const body = snapshot()
+          body.capabilities = { ...body.capabilities, token_audit_read: true }
+          return Response.json(body, { headers: { ETag: '"snapshot"' } })
+        }
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/tokens') {
+          credentialRequest = request
+          return delayedCredentials
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByRole('heading', { name: 'Credentials' })).not.toBeNull()
+    await waitFor(() => expect(credentialRequest).toBeDefined())
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+
+    expect(credentialRequest?.signal.aborted).toBe(true)
+    releaseCredentials(
+      Response.json({
+        observed_at: '2026-09-15T12:00:00Z',
+        tokens: [
+          {
+            id: 99,
+            name: 'Stale worker',
+            actor: 'stale-agent',
+            state: 'live',
+            created_at: '2026-09-15T10:00:00Z',
+            last_used_at: null,
+            revoked_at: null,
+          },
+        ],
+      }),
+    )
+    await tick()
+    expect(screen.queryByText('Stale worker')).toBeNull()
+  })
+
+  it('clears credential data on forbidden refresh without retrying under different authority', async () => {
+    history.replaceState(null, '', '/kata?view=credentials#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'admin-session', csrf: 'admin-csrf' }),
+    )
+    let tokenReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          const body = snapshot()
+          body.capabilities = { ...body.capabilities, token_audit_read: true }
+          return Response.json(body, { headers: { ETag: '"snapshot"' } })
+        }
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/tokens') {
+          tokenReads += 1
+          if (tokenReads > 1) return new Response('', { status: 403 })
+          return Response.json({
+            observed_at: '2026-09-15T12:00:00Z',
+            tokens: [
+              {
+                id: 7,
+                name: 'Build worker',
+                actor: 'agent-a',
+                state: 'live',
+                created_at: '2026-09-14T10:00:00Z',
+                last_used_at: null,
+                revoked_at: null,
+              },
+            ],
+          })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByText('Build worker')).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh credentials' }))
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Credential inventory is unavailable.',
+    )
+    expect(screen.queryByText('Build worker')).toBeNull()
+    expect(tokenReads).toBe(2)
+    expect(sessionStorage.getItem('kata.web.session.v1')).toContain('admin-session')
+  })
+
+  it('routes a credential-list 401 through the existing authentication-loss transition', async () => {
+    history.replaceState(null, '', '/kata?view=credentials#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          const body = snapshot()
+          body.capabilities = { ...body.capabilities, token_audit_read: true }
+          return Response.json(body, { headers: { ETag: '"snapshot"' } })
+        }
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/tokens') {
+          return new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'login' },
+          })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
+  })
+
+  it('refreshes credential metadata periodically only while the page is visible', async () => {
+    vi.useFakeTimers()
+    history.replaceState(null, '', '/kata?view=credentials#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'admin-session', csrf: 'admin-csrf' }),
+    )
+    let tokenReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          const body = snapshot()
+          body.capabilities = { ...body.capabilities, token_audit_read: true }
+          return Response.json(body, { headers: { ETag: '"snapshot"' } })
+        }
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/tokens') {
+          tokenReads += 1
+          return Response.json({ observed_at: '2026-09-15T12:00:00Z', tokens: [] })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(tokenReads).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    await tick()
+    expect(tokenReads).toBe(2)
+
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    await vi.advanceTimersByTimeAsync(30_000)
+    await tick()
+    expect(tokenReads).toBe(2)
+    hidden.mockRestore()
+  })
+
+  it('does not let the periodic refresh abort a slow credential read', async () => {
+    vi.useFakeTimers()
+    history.replaceState(null, '', '/kata?view=credentials#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'admin-session', csrf: 'admin-csrf' }),
+    )
+    const credentialRequests: Request[] = []
+    let releaseCredentials!: (response: Response) => void
+    const delayedCredentials = new Promise<Response>((resolve) => {
+      releaseCredentials = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          const body = snapshot()
+          body.capabilities = { ...body.capabilities, token_audit_read: true }
+          return Response.json(body, { headers: { ETag: '"snapshot"' } })
+        }
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/tokens') {
+          credentialRequests.push(request)
+          return delayedCredentials
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(credentialRequests).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await tick()
+    expect(credentialRequests).toHaveLength(1)
+    expect(credentialRequests[0]?.signal.aborted).toBe(false)
+
+    releaseCredentials(Response.json({ observed_at: '2026-09-15T12:00:00Z', tokens: [] }))
+  })
+
   it('switches configured daemons in place and restores each daemon route', async () => {
     history.replaceState(null, '', '/kata?view=all-open')
     sessionStorage.setItem(
@@ -1433,6 +1751,7 @@ describe('App', () => {
     accepted.catalog[0]!.project.metadata.role = 'inbox'
     accepted.catalog.push({
       project: {
+        active: true,
         id: 8,
         uid: '01J00000000000000000000008',
         name: 'example-workspace',
@@ -1865,12 +2184,18 @@ function snapshot() {
   return {
     contract_version: '2',
     cursor: 12,
-    capabilities: { writable: true, updates: 'poll', actor_policy: 'identity' },
+    capabilities: {
+      writable: true,
+      updates: 'poll',
+      actor_policy: 'identity',
+      token_audit_read: false,
+    },
     origin: 'https://daemon.example',
     origin_stable: true,
     catalog: [
       {
         project: {
+          active: true,
           id: 7,
           uid: '01J00000000000000000000002',
           name: 'example-project',

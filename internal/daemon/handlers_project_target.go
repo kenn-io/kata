@@ -34,6 +34,14 @@ func withResolvedProject[I any, O any, PI interface {
 		if named {
 			var alias *api.AliasInput
 			if target.ProjectAlias != "" || target.ProjectAliasKind != "" {
+				// Alias resolution mutates: a first-seen alias attaches to the
+				// matched project. Issue-scoped credentials must be refused
+				// before that resolution runs, or a rejected request could
+				// leave an alias attached to an out-of-scope project.
+				if issueScopeFromContext(ctx) != nil {
+					return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden",
+						"operation is not available to an issue-scoped credential", "", nil)
+				}
 				if err := ensureAttributedWriteAllowed(ctx); err != nil {
 					return nil, err
 				}
