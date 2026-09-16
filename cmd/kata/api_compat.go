@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
-	kataclient "go.kenn.io/kata/pkg/client"
 	"net/http"
 	"strconv"
 	"strings"
+
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 const (

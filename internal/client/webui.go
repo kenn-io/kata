@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -13,6 +12,9 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
@@ -226,28 +228,23 @@ func probeAnonymousReadonlyWebUI(
 	if client == nil {
 		return nil, errors.New("remote web UI probe requires an anonymous HTTP client")
 	}
-	target := *base
-	target.Path = "/api/v1/ui/snapshot"
-	target.RawQuery = url.Values{
-		"view": {"all-open"}, "include_graph": {"false"},
-		"include_history": {"false"}, "limit": {"1"},
-	}.Encode()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("build anonymous web UI probe: %w", err)
-	}
-	request.Header.Set("Accept", "application/json")
 	probeClient := *client
 	probeClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	response, err := probeClient.Do(request) //nolint:gosec // Target is the validated configured daemon URL.
+	apiClient, err := generated.NewDefaultClient(base.Scheme+"://"+base.Host, runtime.WithHTTPClient(webUIProbeDoer{client: &probeClient}))
 	if err != nil {
-		return nil, fmt.Errorf("probe anonymous web UI: %w", err)
+		return nil, fmt.Errorf("build anonymous web UI probe: %w", err)
 	}
-	defer func() { _ = response.Body.Close() }()
+	result, callErr := apiClient.ReadUISnapshotWithResponse(ctx, &generated.ReadUISnapshotRequestOptions{Query: &generated.ReadUISnapshotQuery{View: new("all-open"), IncludeGraph: new(false), IncludeHistory: new(false), Limit: new(int64(1))}}, func(_ context.Context, request *http.Request) error {
+		request.Header.Set("Accept", "application/json")
+		return nil
+	})
+	if result == nil {
+		return nil, fmt.Errorf("probe anonymous web UI: %w", callErr)
+	}
+	response := result.HTTPResponse
 	if response.StatusCode == http.StatusUnauthorized {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
 		canonicalOrigin := response.Header.Get(daemon.WebOriginHeader)
 		if canonicalOrigin == "" {
 			return nil, errors.New("remote daemon did not advertise its canonical browser origin")
@@ -274,15 +271,13 @@ func probeAnonymousReadonlyWebUI(
 		}
 	}
 	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
 		return nil, fmt.Errorf("probe anonymous web UI returned HTTP %d", response.StatusCode)
 	}
 	var snapshot struct {
 		Capabilities api.UICapabilities `json:"capabilities"`
 		Origin       string             `json:"origin"`
 	}
-	decoder := jsontext.NewDecoder(io.LimitReader(response.Body, 1<<20))
-	if err := json.UnmarshalDecode(decoder, &snapshot); err != nil {
+	if err := json.Unmarshal(result.Body, &snapshot); err != nil {
 		return nil, errors.New("anonymous web UI snapshot was invalid")
 	}
 	if snapshot.Capabilities.Writable || snapshot.Capabilities.Updates != "poll" {
@@ -370,4 +365,24 @@ func webLaunchURLAt(base *url.URL, returnPath string) string {
 	launchURL.Fragment = ""
 	launchURL.RawFragment = ""
 	return launchURL.String()
+}
+
+type webUIProbeDoer struct{ client *http.Client }
+
+func (d webUIProbeDoer) Do(ctx context.Context, request *http.Request) (*http.Response, error) {
+	response, err := d.client.Do(request.WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	limit := int64(1 << 20)
+	if response.StatusCode != http.StatusOK {
+		limit = 16 << 10
+	}
+	response.Body = webUIProbeBody{Reader: io.LimitReader(response.Body, limit), Closer: response.Body}
+	return response, nil
+}
+
+type webUIProbeBody struct {
+	io.Reader
+	io.Closer
 }

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 
@@ -163,34 +162,4 @@ func emitJSON(w io.Writer, v any) error {
 	buf.WriteString("}\n")
 	_, err = w.Write(buf.Bytes())
 	return err
-}
-
-// httpDoJSON sends a request body, returns (status, response body bytes).
-func httpDoJSON(ctx context.Context, client *http.Client, method, url string, body any) (int, []byte, error) {
-	var rdr io.Reader
-	if body != nil {
-		bs, err := json.Marshal(body)
-		if err != nil {
-			return 0, nil, err
-		}
-		rdr = bytes.NewReader(bs)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, url, rdr) //nolint:gosec // daemon targets come from trusted routing; external refs are path-escaped
-	if err != nil {
-		return 0, nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	//nolint:gosec // G107: callers in cmd/kata/* always pass daemon-local URLs; this helper is package-internal.
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	bs, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-	return resp.StatusCode, bs, nil
 }

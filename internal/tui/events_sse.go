@@ -11,14 +11,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
-
-// sseClient is the subset of *http.Client startSSE needs. Defining it
-// as an interface lets sse_test.go drive readSSEStream against an
-// httptest.Server-built client without exposing http.Client internals.
-type sseClient interface {
-	Do(req *http.Request) (*http.Response, error)
-}
 
 // reconnectStatusGrace defers surfacing sseReconnecting to the UI for
 // this long after a disconnect. Brief outages (daemon restarts, transient
@@ -55,13 +50,13 @@ var reconnectStatusGrace = 1500 * time.Millisecond
 // the final state correct (connected wins, reconnecting was a brief
 // flash that the consumer overwrites).
 func startSSE(
-	ctx context.Context, hc sseClient, base string, projectID *int64, sseCh chan<- tea.Msg,
+	ctx context.Context, hc *http.Client, base string, projectID *int64, sseCh chan<- tea.Msg,
 ) {
 	startSSEForConnection(ctx, hc, base, projectID, sseCh, 0)
 }
 
 func startSSEForConnection(
-	ctx context.Context, hc sseClient, base string, projectID *int64, sseCh chan<- tea.Msg, gen uint64,
+	ctx context.Context, hc *http.Client, base string, projectID *int64, sseCh chan<- tea.Msg, gen uint64,
 ) {
 	const maxBackoff = 30 * time.Second
 	backoff := time.Second
@@ -175,14 +170,20 @@ func notifyStatus(ctx context.Context, sseCh chan<- tea.Msg, st sseConnState, ge
 // is nil readSSEStream emits sseConnected directly — the path tests
 // take when driving readSSEStream without the startSSE wrapper.
 func readSSEStream(
-	ctx context.Context, hc sseClient, base string, projectID *int64,
+	ctx context.Context, hc *http.Client, base string, projectID *int64,
 	lastID int64, sseCh chan<- tea.Msg, updateLastID *int64, onConnect func(), gen ...uint64,
 ) (bool, error) {
-	req, err := buildSSERequest(ctx, base, projectID, lastID)
+	apiClient, err := kataclient.NewWithHTTPClient(base, hc)
 	if err != nil {
 		return false, err
 	}
-	resp, err := hc.Do(req)
+	options := &generated.StreamEventsRequestOptions{Query: &generated.StreamEventsQuery{ProjectID: projectID}}
+	resp, err := apiClient.StreamEventsRaw(ctx, options, func(_ context.Context, req *http.Request) error {
+		if lastID > 0 {
+			req.Header.Set("Last-Event-ID", strconv.FormatInt(lastID, 10))
+		}
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
@@ -220,26 +221,6 @@ func firstGen(gen []uint64) uint64 {
 		return 0
 	}
 	return gen[0]
-}
-
-// buildSSERequest composes the streaming request. project_id is omitted
-// in all-projects mode; Last-Event-ID is omitted on first connect.
-func buildSSERequest(
-	ctx context.Context, base string, projectID *int64, lastID int64,
-) (*http.Request, error) {
-	url := base + "/api/v1/events/stream"
-	if projectID != nil {
-		url += "?project_id=" + strconv.FormatInt(*projectID, 10)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "text/event-stream")
-	if lastID > 0 {
-		req.Header.Set("Last-Event-ID", strconv.FormatInt(lastID, 10))
-	}
-	return req, nil
 }
 
 // forwardFrame dispatches the parsed frame as the matching tea.Msg.

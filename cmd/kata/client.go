@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -321,7 +320,6 @@ func (b daemonResponseBody) Read(p []byte) (int, error) {
 
 // daemonAPI is a resolved connection to one daemon: the base URL, the
 // *http.Client configured for it, and the resolution provenance behind both.
-// Paths passed to its methods are API-relative ("/api/v1/…").
 //
 // The ctx field is deliberate: a daemonAPI is built inside a command's RunE
 // and discarded when it returns, so it carries that invocation's context
@@ -379,60 +377,6 @@ func discoverDaemonAPI(ctx context.Context) (daemonAPI, error) {
 // from local daemon resolution.
 func hubAPI(ctx context.Context, hubBaseURL string, hc *http.Client) daemonAPI {
 	return daemonAPI{ctx: ctx, baseURL: strings.TrimRight(hubBaseURL, "/"), client: hc}
-}
-
-func (a daemonAPI) url(path string) string {
-	return strings.TrimRight(a.baseURL, "/") + path
-}
-
-// status is the raw form: the HTTP status and body with no error mapping. Use
-// it only where a call site deliberately diverges from the >= 400 rule.
-func (a daemonAPI) status(method, path string, body any) (int, []byte, error) {
-	return httpDoJSON(a.ctx, a.client, method, a.url(path), body)
-}
-
-// do performs the request and maps any status >= 400 to a cliError.
-func (a daemonAPI) do(method, path string, body any) ([]byte, error) {
-	status, bs, err := a.status(method, path, body)
-	if err != nil {
-		return nil, err
-	}
-	if status >= 400 {
-		return nil, apiErrFromBody(status, bs)
-	}
-	return bs, nil
-}
-
-func (a daemonAPI) doWithHeaders(method, path string, headers map[string]string, body any) ([]byte, error) {
-	status, bs, err := httpDoJSONWithHeader(a.ctx, a.client, method, a.url(path), headers, body)
-	if err != nil {
-		return nil, err
-	}
-	if status >= 400 {
-		return nil, apiErrFromBody(status, bs)
-	}
-	return bs, nil
-}
-
-// decode performs the request and unmarshals a successful body into out.
-func (a daemonAPI) decode(method, path string, body, out any) error {
-	bs, err := a.do(method, path, body)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(bs, out)
-}
-
-// passthrough performs the request and, in JSON output mode, writes the
-// daemon's response body straight through. The bool reports whether output was
-// written, so callers can return immediately in JSON mode and fall through to
-// their human/agent rendering otherwise.
-func (a daemonAPI) passthrough(cmd *cobra.Command, method, path string, body any) ([]byte, bool, error) {
-	bs, err := a.do(method, path, body)
-	if err != nil {
-		return nil, false, err
-	}
-	return emitPassthrough(cmd, bs)
 }
 
 func emitPassthrough(cmd *cobra.Command, bs []byte) ([]byte, bool, error) {

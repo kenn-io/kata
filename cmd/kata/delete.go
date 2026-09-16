@@ -3,12 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 
@@ -277,38 +274,3 @@ func (e *responseBodyReadError) Error() string {
 }
 
 func (e *responseBodyReadError) Unwrap() error { return e.err }
-
-// httpDoJSONWithHeader mirrors httpDoJSON but lets callers attach extra
-// request headers (notably X-Kata-Confirm). Defined here so delete and the
-// upcoming purge command don't have to extend the helpers.go signature.
-func httpDoJSONWithHeader(ctx context.Context, client *http.Client,
-	method, url string, headers map[string]string, body any) (int, []byte, error) {
-	var rdr io.Reader
-	if body != nil {
-		bs, err := json.Marshal(body)
-		if err != nil {
-			return 0, nil, err
-		}
-		rdr = bytes.NewReader(bs)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
-	if err != nil {
-		return 0, nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := client.Do(req) //nolint:gosec // G107: daemon-local URL controlled by ensureDaemon.
-	if err != nil {
-		return 0, nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	out, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, &responseBodyReadError{err: err}
-	}
-	return resp.StatusCode, out, nil
-}

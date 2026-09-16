@@ -6,7 +6,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 
@@ -123,37 +122,6 @@ func fetchMoveIssue(ctx context.Context, client *http.Client, baseURL string, pr
 		return moveIssueWire{}, err
 	}
 	return out.Issue, nil
-}
-
-func httpDoJSONHeaders(ctx context.Context, client *http.Client, method, path string, body any, headers map[string]string) (int, []byte, error) {
-	var rdr io.Reader
-	if body != nil {
-		bs, err := json.Marshal(body)
-		if err != nil {
-			return 0, nil, err
-		}
-		rdr = bytes.NewReader(bs)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, path, rdr) //nolint:gosec // daemon targets come from trusted routing; external refs are path-escaped
-	if err != nil {
-		return 0, nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := client.Do(req) //nolint:gosec // daemon-local URL, same as httpDoJSON.
-	if err != nil {
-		return 0, nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	bs, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-	return resp.StatusCode, bs, nil
 }
 
 func printMove(cmd *cobra.Command, bs []byte, sourceProject, oldShortID, targetProject string) error {

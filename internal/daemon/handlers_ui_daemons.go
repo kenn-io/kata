@@ -20,7 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/internal/httpurl"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
@@ -327,16 +329,6 @@ func (g *webDaemonGateway) targetAllowsWebDaemonMutation(
 ) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, webDaemonProbeTimeout)
 	defer cancel()
-	target, err := url.JoinPath(daemon.baseURL, "api/v1/instance")
-	if err != nil {
-		return false, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return false, err
-	}
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Cache-Control", "no-cache")
 	transport, err := webDaemonBearerTransport(daemon, g.trustPrivateNetwork)
 	if err != nil {
 		return false, err
@@ -344,20 +336,27 @@ func (g *webDaemonGateway) targetAllowsWebDaemonMutation(
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return errWebDaemonRedirectForbidden
 	}}
-	response, err := client.Do(request)
+	apiClient, err := generated.NewDefaultClient(daemon.baseURL, runtime.WithHTTPClient(boundedProbeDoer{client: client, limit: 64 << 10}))
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = response.Body.Close() }()
+	result, callErr := apiClient.InstanceWithResponse(ctx, func(_ context.Context, request *http.Request) error {
+		request.Header.Set("Accept", "application/json")
+		request.Header.Set("Cache-Control", "no-cache")
+		return nil
+	})
+	if result == nil {
+		return false, callErr
+	}
+	response := result.HTTPResponse
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
 		return false, fmt.Errorf("target capability response status %d", response.StatusCode)
 	}
 	var instance struct {
 		ContractVersion string             `json:"web_ui_contract_version"`
 		Capabilities    api.UICapabilities `json:"web_ui_capabilities"`
 	}
-	if err := json.UnmarshalRead(io.LimitReader(response.Body, 64<<10), &instance); err != nil {
+	if err := json.Unmarshal(result.Body, &instance); err != nil {
 		return false, err
 	}
 	if instance.ContractVersion != api.UISnapshotContractVersion {
@@ -505,14 +504,6 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 func probeWebDaemon(parent context.Context, d resolvedWebDaemon, trustPrivateNetwork bool) string {
 	ctx, cancel := context.WithTimeout(parent, webDaemonProbeTimeout)
 	defer cancel()
-	target, err := url.JoinPath(d.baseURL, "api/v1/instance")
-	if err != nil {
-		return "down"
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return "down"
-	}
 	transport, err := webDaemonBearerTransport(d, trustPrivateNetwork)
 	if err != nil {
 		return "down"
@@ -520,26 +511,28 @@ func probeWebDaemon(parent context.Context, d resolvedWebDaemon, trustPrivateNet
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	response, err := client.Do(request)
+	apiClient, err := generated.NewDefaultClient(d.baseURL, runtime.WithHTTPClient(boundedProbeDoer{client: client, limit: 16 << 10}))
 	if err != nil {
 		return "down"
 	}
-	defer func() { _ = response.Body.Close() }()
+	result, _ := apiClient.InstanceWithResponse(ctx)
+	if result == nil {
+		return "down"
+	}
+	response := result.HTTPResponse
 	switch {
 	case response.StatusCode >= 200 && response.StatusCode < 300:
 		var instance struct {
 			WebUIContractVersion string `json:"web_ui_contract_version"`
 		}
-		if err := json.UnmarshalRead(io.LimitReader(response.Body, 16<<10), &instance); err != nil ||
+		if err := json.Unmarshal(result.Body, &instance); err != nil ||
 			instance.WebUIContractVersion != api.UISnapshotContractVersion {
 			return "upgrade_required"
 		}
 		return "connected"
 	case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
 		return "auth_required"
 	default:
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
 		return "down"
 	}
 }
@@ -767,4 +760,28 @@ func writeWebDaemonError(w http.ResponseWriter, status int, code string) {
 	}{}
 	payload.Error.Code = code
 	_ = json.MarshalWrite(w, payload)
+}
+
+// boundedProbeDoer retains probe body limits before generated response parsing.
+type boundedProbeDoer struct {
+	client *http.Client
+	limit  int64
+}
+
+func (d boundedProbeDoer) Do(ctx context.Context, request *http.Request) (*http.Response, error) {
+	response, err := d.client.Do(request.WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	limit := d.limit
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		limit = 16 << 10
+	}
+	response.Body = boundedProbeBody{Reader: io.LimitReader(response.Body, limit), Closer: response.Body}
+	return response, nil
+}
+
+type boundedProbeBody struct {
+	io.Reader
+	io.Closer
 }

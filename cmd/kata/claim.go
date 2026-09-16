@@ -6,8 +6,9 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
+
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"github.com/spf13/cobra"
 )
@@ -43,18 +44,18 @@ func runClaim(cmd *cobra.Command, raw string, force, ifUnowned bool) error {
 	if err != nil {
 		return err
 	}
-	body := map[string]any{"actor": actor, "force": force}
-	if ifUnowned {
-		body["if_unowned"] = true
-	}
-	postURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/claim", baseURL, pid, url.PathEscape(issue.RefForAPI))
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, postURL, body)
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	if status >= 400 {
-		return apiErrFromBody(status, bs)
+	response, callErr := apiClient.ClaimIssueWithResponse(ctx, &generated.ClaimIssueRequestOptions{PathParams: &generated.ClaimIssuePath{ProjectID: pid, Ref: issue.RefForAPI}, Body: &generated.ClaimIssueBody{Actor: actor, Force: &force, IfUnowned: &ifUnowned}})
+	if err := externalCLITransportError(response, callErr); err != nil {
+		return err
 	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return err
+	}
+	bs := response.Body
 	if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment, handle); err != nil {
 		return err
 	}

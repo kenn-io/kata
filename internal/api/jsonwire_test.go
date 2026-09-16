@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"encoding/json"
-	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

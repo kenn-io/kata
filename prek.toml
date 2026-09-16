@@ -4,6 +4,7 @@ default_stages = ["pre-commit"]
 [[repos]]
 repo = "local"
 hooks = [
+  { id = "huma-check", name = "huma-check", entry = "go run go.kenn.io/kit/cmd/huma-check@3e1f59e9011e878ec595aa04aebc8a77c5292c4d ./...", language = "system", stages = ["pre-commit"], pass_filenames = false, always_run = true },
   { id = "migration-history", name = "check PostgreSQL migration history", entry = "go run ./tools/migrationhistorycheck", language = "system", stages = ["pre-commit"], pass_filenames = false, always_run = true },
   { id = "api-check", name = "make api-check", entry = "make api-check", language = "system", stages = ["pre-push"], pass_filenames = false, always_run = true },
   { id = "make-lint", name = "make lint", entry = "make lint", language = "system", stages = ["pre-push"], pass_filenames = false, always_run = true },
