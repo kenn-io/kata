@@ -3087,10 +3087,10 @@ func TestFederationRunnerRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() { done <- runner.Run(ctx) }()
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 		synctest.Wait()
 		require.Equal(t, int32(1), attempts.Load())
 
@@ -3160,10 +3160,10 @@ func TestFederationRunnerWaitsForCancellationAfterTerminalDrainDenial(t *testing
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() { done <- runner.Run(ctx) }()
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 		synctest.Wait()
 		require.GreaterOrEqual(t, attempts.Load(), int32(1))
 		synctest.Sleep(20 * time.Millisecond)

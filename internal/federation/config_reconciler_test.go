@@ -787,6 +787,10 @@ func TestReconcileMappingSuppressedLeaveToleratesFailedRevocation(t *testing.T) 
 		}
 		hub.ensureEnrollmentStarted = make(chan struct{})
 		hub.releaseEnsureEnrollment = make(chan struct{})
+		var releaseEnrollment sync.Once
+		release := func() {
+			releaseEnrollment.Do(func() { close(hub.releaseEnsureEnrollment) })
+		}
 		result := make(chan error, 1)
 		go func() {
 			result <- federation.ReconcileMapping(
@@ -794,10 +798,11 @@ func TestReconcileMappingSuppressedLeaveToleratesFailedRevocation(t *testing.T) 
 			)
 		}()
 		resultDone := readWorkerResult(result)
-		t.Cleanup(func() {
+		defer func() {
+			release()
 			cancel()
 			_ = resultDone()
-		})
+		}()
 
 		select {
 		case <-hub.ensureEnrollmentStarted:
@@ -814,15 +819,16 @@ func TestReconcileMappingSuppressedLeaveToleratesFailedRevocation(t *testing.T) 
 			prepared <- prepareErr
 		}()
 		preparedDone := readWorkerResult(prepared)
-		t.Cleanup(func() {
+		defer func() {
+			release()
 			cancel()
 			_ = preparedDone()
-		})
+		}()
 		synctest.Wait()
 		credential, found := credentials.get(hubProjectUID)
 		require.True(t, found)
 		require.True(t, credential.LeavePending)
-		close(hub.releaseEnsureEnrollment)
+		release()
 
 		synctest.Wait()
 		err = resultDone()
@@ -1661,6 +1667,10 @@ func TestReconcileMappingLeaveDuringEnrollmentDoesNotResurrectCredential(t *test
 		hub := newFakeHub()
 		hub.ensureEnrollmentStarted = make(chan struct{})
 		hub.releaseEnsureEnrollment = make(chan struct{})
+		var releaseEnrollment sync.Once
+		release := func() {
+			releaseEnrollment.Do(func() { close(hub.releaseEnsureEnrollment) })
+		}
 		result := make(chan error, 1)
 		go func() {
 			result <- federation.ReconcileMapping(
@@ -1669,10 +1679,11 @@ func TestReconcileMappingLeaveDuringEnrollmentDoesNotResurrectCredential(t *test
 			)
 		}()
 		resultDone := readWorkerResult(result)
-		t.Cleanup(func() {
+		defer func() {
+			release()
 			cancel()
 			_ = resultDone()
-		})
+		}()
 
 		select {
 		case <-hub.ensureEnrollmentStarted:
@@ -1689,15 +1700,16 @@ func TestReconcileMappingLeaveDuringEnrollmentDoesNotResurrectCredential(t *test
 			prepared <- prepareErr
 		}()
 		preparedDone := readWorkerResult(prepared)
-		t.Cleanup(func() {
+		defer func() {
+			release()
 			cancel()
 			_ = preparedDone()
-		})
+		}()
 		synctest.Wait()
 		credential, found := credentials.get(hubProjectUID)
 		require.True(t, found)
 		require.True(t, credential.LeavePending)
-		close(hub.releaseEnsureEnrollment)
+		release()
 
 		synctest.Wait()
 		err = resultDone()
@@ -1732,6 +1744,10 @@ func TestReconcileMappingLeaveDuringRotationDoesNotResurrectCredential(t *testin
 		hub := newFakeHub()
 		hub.rotateEnrollmentStarted = make(chan struct{})
 		hub.releaseRotateEnrollment = make(chan struct{})
+		var releaseRotation sync.Once
+		release := func() {
+			releaseRotation.Do(func() { close(hub.releaseRotateEnrollment) })
+		}
 		result := make(chan error, 1)
 		go func() {
 			result <- federation.ReconcileMapping(
@@ -1740,10 +1756,11 @@ func TestReconcileMappingLeaveDuringRotationDoesNotResurrectCredential(t *testin
 			)
 		}()
 		resultDone := readWorkerResult(result)
-		t.Cleanup(func() {
+		defer func() {
+			release()
 			cancel()
 			_ = resultDone()
-		})
+		}()
 
 		select {
 		case <-hub.rotateEnrollmentStarted:
@@ -1758,15 +1775,16 @@ func TestReconcileMappingLeaveDuringRotationDoesNotResurrectCredential(t *testin
 			prepared <- prepareErr
 		}()
 		preparedDone := readWorkerResult(prepared)
-		t.Cleanup(func() {
+		defer func() {
+			release()
 			cancel()
 			_ = preparedDone()
-		})
+		}()
 		synctest.Wait()
 		credential, found := credentials.get(hubProjectUID)
 		require.True(t, found)
 		require.True(t, credential.LeavePending)
-		close(hub.releaseRotateEnrollment)
+		release()
 
 		synctest.Wait()
 		var err error
@@ -2566,10 +2584,10 @@ func TestFederationConfigReconcilerProcessesDueMappingsInConfigOrder(t *testing.
 			schedulerTarget("hub-a"), schedulerTarget("hub-b"), schedulerTarget("hub-c"))
 		ctx, cancel := context.WithCancel(context.Background())
 		done := runReconciler(ctx, t, reconciler)
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 
 		synctest.Wait()
 		require.Len(t, factory.snapshotCalls(), 3)
@@ -2631,10 +2649,10 @@ func TestFederationConfigReconcilerDeliversExactCreatedProjectEvent(t *testing.T
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		done := runReconciler(ctx, t, reconciler)
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 
 		synctest.Wait()
 		var delivered delivery
@@ -2687,10 +2705,10 @@ func TestFederationConfigReconcilerMaintainsIndependentBackoffAndQuietsSuccess(t
 			schedulerTarget("hub-a"), schedulerTarget("hub-b"))
 		ctx, cancel := context.WithCancel(context.Background())
 		done := runReconciler(ctx, t, reconciler)
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 
 		waitForFactoryCalls(t, factory, 2)
 		synctest.Wait()
@@ -2749,10 +2767,10 @@ func TestFederationConfigReconcilerRecordsSuccessAtCompletion(t *testing.T) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		done := runReconciler(ctx, t, reconciler)
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 
 		waitForReconciled(t, reconciler, 1)
 		health := reconciler.Health()
@@ -2772,10 +2790,10 @@ func TestFederationConfigReconcilerCapsBackoffAtFiveMinutes(t *testing.T) {
 		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
 		ctx, cancel := context.WithCancel(context.Background())
 		done := runReconciler(ctx, t, reconciler)
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 
 		wantDelays := []time.Duration{
 			time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
@@ -2829,10 +2847,10 @@ func TestFederationConfigReconcilerRetriesEveryErrorCategory(t *testing.T) {
 				reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
 				ctx, cancel := context.WithCancel(context.Background())
 				done := runReconciler(ctx, t, reconciler)
-				t.Cleanup(func() {
+				defer func() {
 					cancel()
 					require.ErrorIs(t, <-done, context.Canceled)
-				})
+				}()
 
 				waitForFactoryCalls(t, factory, 1)
 				synctest.Wait()
@@ -2867,10 +2885,10 @@ func TestClassifyReconciliationErrorUsesInternalForUnknown(t *testing.T) {
 		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
 		ctx, cancel := context.WithCancel(context.Background())
 		done := runReconciler(ctx, t, reconciler)
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 
 		waitForFactoryCalls(t, factory, 1)
 		synctest.Wait()
@@ -2890,10 +2908,10 @@ func TestFederationConfigReconcilerCancellationStopsTimerAndRun(t *testing.T) {
 		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
 		ctx, cancel := context.WithCancel(context.Background())
 		done := runReconciler(ctx, t, reconciler)
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 
 		waitForFactoryCalls(t, factory, 1)
 		synctest.Wait()
@@ -2936,10 +2954,10 @@ func TestFederationConfigReconcilerLogsOnlySanitizedTransitions(t *testing.T) {
 		reconciler := newTestReconciler(t, clock, factory, logger, target)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := runReconciler(ctx, t, reconciler)
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 
 		waitForFactoryCalls(t, factory, 1)
 		synctest.Wait()
@@ -2996,10 +3014,10 @@ func TestReconcilerTransitionLogsIncludeMappingCoordinatesWithoutSecrets(t *test
 		reconciler := newTestReconciler(t, clock, factory, logger, primary, secondary)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := runReconciler(ctx, t, reconciler)
-		t.Cleanup(func() {
+		defer func() {
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
-		})
+		}()
 
 		waitForFactoryCalls(t, factory, 2)
 		synctest.Wait()
