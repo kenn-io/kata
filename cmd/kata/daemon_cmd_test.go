@@ -2184,143 +2184,178 @@ private_key_path = "/secure/example.pem"
 }
 
 func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *testing.T) {
-	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
-	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
-	defer func() { _ = store.Close() }()
-	fetcher := &daemonGitHubSyncFetcher{}
-	bcast := daemon.NewEventBroadcaster()
-	runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
-	var configs []githubsync.RunnerConfig
-	orig := newGitHubSyncDaemonRunner
-	newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
-		configs = append(configs, cfg)
-		return runner
-	}
-	t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
+		store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+		defer func() { _ = store.Close() }()
+		fetcher := &daemonGitHubSyncFetcher{}
+		bcast := daemon.NewEventBroadcaster()
+		runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
+		var configs []githubsync.RunnerConfig
+		orig := newGitHubSyncDaemonRunner
+		newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
+			configs = append(configs, cfg)
+			return runner
+		}
+		t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
 
-	ctx, cancel := context.WithCancel(context.Background())
-	wake := startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0))
-	defer cancel()
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0))
+		defer func() {
+			cancel()
+			require.True(t, workers.Wait(context.Background()))
+		}()
 
-	require.Eventually(t, func() bool {
-		return runner.wasRun()
-	}, time.Second, time.Millisecond)
-	require.Len(t, configs, 1)
-	assert.Same(t, store, configs[0].Store)
-	assert.Same(t, fetcher, configs[0].Fetcher)
-	assert.Equal(t, 25*time.Millisecond, configs[0].Interval)
-	assert.NotNil(t, configs[0].Wake)
-	assert.NotNil(t, configs[0].EventSinkFrom)
-	assert.NotNil(t, configs[0].Logger)
-	require.NotNil(t, wake)
-	require.NotPanics(t, wake)
+		synctest.Wait()
+		require.True(t, runner.wasRun())
+		require.Len(t, configs, 1)
+		assert.Same(t, store, configs[0].Store)
+		assert.Same(t, fetcher, configs[0].Fetcher)
+		assert.Equal(t, 25*time.Millisecond, configs[0].Interval)
+		assert.NotNil(t, configs[0].Wake)
+		assert.NotNil(t, configs[0].EventSinkFrom)
+		assert.NotNil(t, configs[0].Logger)
+		require.NotNil(t, wake)
+		require.NotPanics(t, wake)
+	})
 }
 
 func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
-	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
-	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
-	defer func() { _ = store.Close() }()
-	runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
-	var configs []githubsync.RunnerConfig
-	orig := newGitHubSyncDaemonRunner
-	newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
-		configs = append(configs, cfg)
-		return runner
-	}
-	t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
+		store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+		defer func() { _ = store.Close() }()
+		runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
+		var configs []githubsync.RunnerConfig
+		orig := newGitHubSyncDaemonRunner
+		newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
+			configs = append(configs, cfg)
+			return runner
+		}
+		t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
 
-	ctx := t.Context()
-	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, nil, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0))
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		startGitHubSyncRunner(ctx, workers, nil, store, nil, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0))
+		defer func() {
+			cancel()
+			require.True(t, workers.Wait(context.Background()))
+		}()
 
-	require.Eventually(t, func() bool {
-		return runner.wasRun()
-	}, time.Second, time.Millisecond)
-	require.Len(t, configs, 1)
-	require.IsType(t, &githubsync.HTTPFetcher{}, configs[0].Fetcher)
+		synctest.Wait()
+		require.True(t, runner.wasRun())
+		require.Len(t, configs, 1)
+		require.IsType(t, &githubsync.HTTPFetcher{}, configs[0].Fetcher)
+	})
 }
 
 func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing.T) {
-	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
-	store, project, binding := newDaemonGitHubSyncStore(t)
-	fetcher := newDaemonGitHubSyncFetcher(binding)
-	fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
-	bcast := daemon.NewEventBroadcaster()
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
+		store, project, binding := newDaemonGitHubSyncStore(t)
+		fetcher := newDaemonGitHubSyncFetcher(binding)
+		fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
+		bcast := daemon.NewEventBroadcaster()
 
-	ctx := t.Context()
-	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0))
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0))
+		defer func() {
+			cancel()
+			require.True(t, workers.Wait(context.Background()))
+		}()
 
-	require.Eventually(t, func() bool {
-		got, err := store.IssueSyncBindingByID(context.Background(), binding.ID)
-		return err == nil && got.LastCursorAt != nil
-	}, time.Second, time.Millisecond)
-	status, err := store.IssueSyncStatusByProject(context.Background(), project.ID)
-	require.NoError(t, err)
-	assert.Equal(t, 1, status.LastCreated)
-	assert.Equal(t, int64(1), fetcher.repositoryCallCount())
+		synctest.Wait()
+		got, err := store.IssueSyncBindingByID(ctx, binding.ID)
+		require.NoError(t, err)
+		require.NotNil(t, got.LastCursorAt)
+		status, err := store.IssueSyncStatusByProject(ctx, project.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 1, status.LastCreated)
+		assert.Equal(t, int64(1), fetcher.repositoryCallCount())
+	})
 }
 
 func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
-	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
-	store, project, binding := newDaemonGitHubSyncStore(t)
-	fetcher := newDaemonGitHubSyncFetcher(binding)
-	fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
-	bcast := daemon.NewEventBroadcaster()
-	sub := bcast.Subscribe(daemon.SubFilter{ProjectID: project.ID})
-	defer sub.Unsub()
-	hookSink := &recordingDaemonHookSink{}
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
+		store, project, binding := newDaemonGitHubSyncStore(t)
+		fetcher := newDaemonGitHubSyncFetcher(binding)
+		fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
+		bcast := daemon.NewEventBroadcaster()
+		sub := bcast.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+		defer sub.Unsub()
+		hookSink := &recordingDaemonHookSink{}
 
-	ctx := t.Context()
-	startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventPublisher(bcast, hookSink), log.New(io.Discard, "", 0))
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hookSink), log.New(io.Discard, "", 0))
+		defer func() {
+			cancel()
+			require.True(t, workers.Wait(context.Background()))
+		}()
 
-	var msg daemon.StreamMsg
-	select {
-	case msg = <-sub.Ch:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for GitHub sync import event")
-	}
-	require.Equal(t, daemon.StreamKindEvent, msg.Kind)
-	require.NotNil(t, msg.Event)
-	assert.Equal(t, project.ID, msg.ProjectID)
-	require.Eventually(t, func() bool {
-		return assert.ObjectsAreEqual([]int64{msg.Event.ID}, hookSink.eventIDs())
-	}, time.Second, time.Millisecond, "GitHub sync import event was not enqueued")
+		synctest.Wait()
+		var msg daemon.StreamMsg
+		select {
+		case msg = <-sub.Ch:
+		default:
+			t.Fatal("GitHub sync import event was not published")
+		}
+		require.Equal(t, daemon.StreamKindEvent, msg.Kind)
+		require.NotNil(t, msg.Event)
+		assert.Equal(t, project.ID, msg.ProjectID)
+		require.Equal(t, []int64{msg.Event.ID}, hookSink.eventIDs())
 
-	select {
-	case extra := <-sub.Ch:
-		t.Fatalf("unexpected duplicate GitHub sync event: %#v", extra)
-	case <-time.After(50 * time.Millisecond):
-	}
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+		select {
+		case extra := <-sub.Ch:
+			t.Fatalf("unexpected duplicate GitHub sync event: %#v", extra)
+		default:
+		}
+	})
 }
 
 func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testing.T) {
-	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
-	store, _, binding := newDaemonGitHubSyncStore(t)
-	fetcher := newDaemonGitHubSyncFetcher(binding)
-	fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
-	fetcher.blockRepository = make(chan struct{})
-	fetcher.releaseRepository = make(chan struct{})
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
+		store, _, binding := newDaemonGitHubSyncStore(t)
+		fetcher := newDaemonGitHubSyncFetcher(binding)
+		fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
+		fetcher.blockRepository = make(chan struct{})
+		fetcher.releaseRepository = make(chan struct{})
 
-	ctx := t.Context()
-	wake := startGitHubSyncRunner(ctx, newDaemonWorkerGroup(), nil, store, fetcher, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0))
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0))
+		defer func() {
+			cancel()
+			require.True(t, workers.Wait(context.Background()))
+		}()
 
-	select {
-	case <-fetcher.blockRepository:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for repository fetch")
-	}
-	for range 5 {
-		wake()
-	}
-	require.Never(t, func() bool {
-		return fetcher.repositoryCallCount() > 1
-	}, 50*time.Millisecond, time.Millisecond)
+		synctest.Wait()
+		select {
+		case <-fetcher.blockRepository:
+		default:
+			t.Fatal("repository fetch did not start")
+		}
+		synctest.Wait()
+		require.Equal(t, int64(1), fetcher.repositoryCallCount())
+		for range 5 {
+			wake()
+		}
+		synctest.Wait()
+		require.Equal(t, int64(1), fetcher.repositoryCallCount())
 
-	close(fetcher.releaseRepository)
-	require.Eventually(t, func() bool {
-		got, err := store.IssueSyncBindingByID(context.Background(), binding.ID)
-		return err == nil && got.LastCursorAt != nil
-	}, time.Second, time.Millisecond)
-	assert.Equal(t, int64(1), fetcher.repositoryCallCount())
+		close(fetcher.releaseRepository)
+		synctest.Wait()
+		got, err := store.IssueSyncBindingByID(ctx, binding.ID)
+		require.NoError(t, err)
+		require.NotNil(t, got.LastCursorAt)
+		assert.Equal(t, int64(1), fetcher.repositoryCallCount())
+	})
 }
 
 func TestDefaultEndpointForOS(t *testing.T) {
@@ -2842,133 +2877,136 @@ func TestExternalRootEventWakeUsesActualNativeEventsAndSkipsProjectionLoops(t *t
 }
 
 func TestExternalRootEventWakeReconnectsAfterBroadcasterOverflow(t *testing.T) {
-	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	project, err := store.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
-		ProjectID: project.ID, Title: "External root", Author: "tester",
-	})
-	require.NoError(t, err)
-	binding, _, err := store.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
-		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
-		ExternalRootKey: "root-1", ExternalAccountKey: "account-1", Actor: "tester",
-		ReceiveCommentsAfter: time.Now().UTC(),
-	})
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+		project, err := store.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: project.ID, Title: "External root", Author: "tester",
+		})
+		require.NoError(t, err)
+		binding, _, err := store.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+			ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
+			ExternalRootKey: "root-1", ExternalAccountKey: "account-1", Actor: "tester",
+			ReceiveCommentsAfter: time.Now().UTC(),
+		})
+		require.NoError(t, err)
 
-	broadcaster := daemon.NewEventBroadcaster()
-	firstWake := make(chan struct{})
-	release := make(chan struct{})
-	var wakeCount atomic.Int64
-	ctx, cancel := context.WithCancel(t.Context())
-	workers := newDaemonWorkerGroup()
-	t.Cleanup(func() {
-		cancel()
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
-		defer waitCancel()
-		require.True(t, workers.Wait(waitCtx))
-	})
-	startExternalRootEventWake(ctx, workers, store, broadcaster, func(id int64) {
-		if id != binding.ID {
-			return
-		}
-		if wakeCount.Add(1) == 1 {
-			close(firstWake)
-			<-release
-		}
-	})
-	issueID := issue.ID
-	msg := daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
-		Type: "issue.updated", IssueID: &issueID, Actor: "operator",
-	}}
-	broadcaster.Broadcast(msg)
-	select {
-	case <-firstWake:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for blocked external root wake")
-	}
-	for range 300 {
+		broadcaster := daemon.NewEventBroadcaster()
+		firstWake := make(chan struct{})
+		release := make(chan struct{})
+		var wakeCount atomic.Int64
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		defer func() {
+			cancel()
+			synctest.Wait()
+			require.True(t, workers.Wait(context.Background()))
+		}()
+		startExternalRootEventWake(ctx, workers, store, broadcaster, func(id int64) {
+			if id != binding.ID {
+				return
+			}
+			if wakeCount.Add(1) == 1 {
+				close(firstWake)
+				<-release
+			}
+		})
+		issueID := issue.ID
+		msg := daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
+			Type: "issue.updated", IssueID: &issueID, Actor: "operator",
+		}}
 		broadcaster.Broadcast(msg)
-	}
-	close(release)
-	require.Eventually(t, func() bool { return wakeCount.Load() >= 257 }, 5*time.Second, time.Millisecond)
+		synctest.Wait()
+		select {
+		case <-firstWake:
+		default:
+			t.Fatal("timed out waiting for blocked external root wake")
+		}
+		for range 300 {
+			broadcaster.Broadcast(msg)
+		}
+		close(release)
+		synctest.Wait()
+		require.GreaterOrEqual(t, wakeCount.Load(), int64(257))
 
-	before := wakeCount.Load()
-	require.Eventually(t, func() bool {
+		before := wakeCount.Load()
 		broadcaster.Broadcast(msg)
-		return wakeCount.Load() > before
-	}, time.Second, time.Millisecond, "event wake subscriber did not reconnect after overflow")
+		synctest.Wait()
+		require.Greater(t, wakeCount.Load(), before)
+	})
 }
 
 func TestExternalRootEventWakeReconnectsAndDiscardsQueuedEventsAfterReset(t *testing.T) {
-	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	project, err := store.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
-		ProjectID: project.ID, Title: "External root", Author: "tester",
-	})
-	require.NoError(t, err)
-	binding, _, err := store.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
-		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
-		ExternalRootKey: "root-1", ExternalAccountKey: "account-1", Actor: "tester",
-		ReceiveCommentsAfter: time.Now().UTC(),
-	})
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+		project, err := store.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: project.ID, Title: "External root", Author: "tester",
+		})
+		require.NoError(t, err)
+		binding, _, err := store.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+			ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
+			ExternalRootKey: "root-1", ExternalAccountKey: "account-1", Actor: "tester",
+			ReceiveCommentsAfter: time.Now().UTC(),
+		})
+		require.NoError(t, err)
 
-	broadcaster := daemon.NewEventBroadcaster()
-	firstWake := make(chan struct{})
-	secondWake := make(chan struct{})
-	release := make(chan struct{})
-	var wakeCount atomic.Int64
-	ctx, cancel := context.WithCancel(t.Context())
-	workers := newDaemonWorkerGroup()
-	t.Cleanup(func() {
-		cancel()
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
-		defer waitCancel()
-		require.True(t, workers.Wait(waitCtx))
-	})
-	startExternalRootEventWake(ctx, workers, store, broadcaster, func(id int64) {
-		if id != binding.ID {
-			return
-		}
-		switch wakeCount.Add(1) {
-		case 1:
-			close(firstWake)
-			<-release
-		case 2:
-			close(secondWake)
-		}
-	})
-	issueID := issue.ID
-	msg := daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
-		Type: "issue.updated", IssueID: &issueID, Actor: "operator",
-	}}
-	broadcaster.Broadcast(msg)
-	select {
-	case <-firstWake:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for blocked external root wake")
-	}
-	broadcaster.Broadcast(daemon.StreamMsg{Kind: "reset", ResetID: 101, ProjectID: project.ID})
-	broadcaster.Broadcast(msg)
-	close(release)
-	time.Sleep(50 * time.Millisecond)
-	assert.Equal(t, int64(1), wakeCount.Load(), "queued pre-reset event must not cross the reset boundary")
-
-	require.Eventually(t, func() bool {
+		broadcaster := daemon.NewEventBroadcaster()
+		firstWake := make(chan struct{})
+		secondWake := make(chan struct{})
+		release := make(chan struct{})
+		var wakeCount atomic.Int64
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		defer func() {
+			cancel()
+			synctest.Wait()
+			require.True(t, workers.Wait(context.Background()))
+		}()
+		startExternalRootEventWake(ctx, workers, store, broadcaster, func(id int64) {
+			if id != binding.ID {
+				return
+			}
+			switch wakeCount.Add(1) {
+			case 1:
+				close(firstWake)
+				<-release
+			case 2:
+				close(secondWake)
+			}
+		})
+		issueID := issue.ID
+		msg := daemon.StreamMsg{Kind: "event", ProjectID: project.ID, Event: &db.Event{
+			Type: "issue.updated", IssueID: &issueID, Actor: "operator",
+		}}
 		broadcaster.Broadcast(msg)
+		synctest.Wait()
+		select {
+		case <-firstWake:
+		default:
+			t.Fatal("timed out waiting for blocked external root wake")
+		}
+		broadcaster.Broadcast(daemon.StreamMsg{Kind: "reset", ResetID: 101, ProjectID: project.ID})
+		broadcaster.Broadcast(msg)
+		close(release)
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+		assert.Equal(t, int64(1), wakeCount.Load(), "queued pre-reset event must not cross the reset boundary")
+
+		broadcaster.Broadcast(msg)
+		synctest.Wait()
 		select {
 		case <-secondWake:
-			return true
 		default:
-			return false
+			t.Fatal("event wake subscriber did not reconnect after reset")
 		}
-	}, time.Second, time.Millisecond, "event wake subscriber did not reconnect after reset")
+	})
 }
 
 func TestDaemonStartupFailureStopsExternalRootRunnerBeforeReturning(t *testing.T) {
