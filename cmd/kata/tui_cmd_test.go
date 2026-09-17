@@ -121,6 +121,65 @@ func TestTUI_RejectsMoreThanOneIssueRef(t *testing.T) {
 	}
 }
 
+func TestTUI_ConfirmQuitConfigAccepted(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[tui]\nconfirm_quit = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run := false
+	old := runTUI
+	runTUI = func(_ context.Context, _ tui.Options) error {
+		run = true
+		return nil
+	}
+	t.Cleanup(func() { runTUI = old })
+
+	_, err := runCmdOutput(t, nil, "tui")
+	require.NoError(t, err)
+	assert.True(t, run, "runTUI hook did not run")
+}
+
+func TestTUI_ConfirmQuitConfigModes(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    string
+		wantSkip  bool
+		wantMouse bool
+	}{
+		{name: "missing config"},
+		{name: "missing key", config: "[tui]\nmouse = true\n", wantMouse: true},
+		{name: "true", config: "[tui]\nconfirm_quit = true\n"},
+		{name: "false", config: "[tui]\nconfirm_quit = false\n", wantSkip: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			if tt.config != "" {
+				if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(tt.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			var got tui.Options
+			old := runTUI
+			runTUI = func(_ context.Context, opts tui.Options) error {
+				got = opts
+				return nil
+			}
+			t.Cleanup(func() { runTUI = old })
+
+			_, err := runCmdOutput(t, nil, "tui")
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantSkip, got.SkipQuitConfirm)
+			assert.Equal(t, tt.wantMouse, got.Mouse)
+		})
+	}
+}
+
 func TestTUI_MouseOptionReadsConfigToml(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -128,11 +187,11 @@ func TestTUI_MouseOptionReadsConfigToml(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := newTUICmd()
-	got, err := resolveTUIMouseOption(cmd, false)
+	got, err := resolveTUIConfig(cmd, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got {
+	if !got.Mouse {
 		t.Fatal("mouse option = false, want true from [tui] mouse")
 	}
 }
@@ -147,11 +206,11 @@ func TestTUI_MouseFlagOverridesConfigToml(t *testing.T) {
 	if err := cmd.Flags().Set("mouse", "true"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := resolveTUIMouseOption(cmd, true)
+	got, err := resolveTUIConfig(cmd, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got {
+	if !got.Mouse {
 		t.Fatal("mouse option = false, want true from --mouse")
 	}
 }

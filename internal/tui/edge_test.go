@@ -387,20 +387,56 @@ func TestQuit_QPressed_OpensConfirm(t *testing.T) {
 	}
 }
 
+func TestQuit_ConfirmationDisabled(t *testing.T) {
+	m := initialModel(Options{SkipQuitConfirm: true})
+	m.list.loading = false
+	nm, cmd := updateModel(m, runeKey('q'))
+	if nm.modal != modalNone {
+		t.Fatalf("q opened modal: %v", nm.modal)
+	}
+	if cmd == nil {
+		t.Fatal("q produced no cmd; expected tea.Quit")
+	}
+	if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
+		t.Fatalf("q cmd = %T, want tea.QuitMsg", cmd())
+	}
+}
+
 // TestQuit_CtrlCFastQuits: ctrl+c bypasses the confirm modal and
 // triggers tea.Quit immediately. Power-user escape hatch.
 func TestQuit_CtrlCFastQuits(t *testing.T) {
-	m := initialModel(Options{})
-	m.list.loading = false
-	nm, cmd := updateModel(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
-	if nm.modal != modalNone {
-		t.Fatalf("ctrl+c opened a modal: %v", nm.modal)
+	for _, skipQuitConfirm := range []bool{false, true} {
+		t.Run(fmt.Sprintf("skip=%t", skipQuitConfirm), func(t *testing.T) {
+			m := initialModel(Options{SkipQuitConfirm: skipQuitConfirm})
+			m.list.loading = false
+			nm, cmd := updateModel(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+			if nm.modal != modalNone {
+				t.Fatalf("ctrl+c opened a modal: %v", nm.modal)
+			}
+			if cmd == nil {
+				t.Fatal("ctrl+c produced no cmd; expected tea.Quit")
+			}
+			if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
+				t.Fatalf("ctrl+c cmd = %T, want tea.QuitMsg", cmd())
+			}
+		})
 	}
-	if cmd == nil {
-		t.Fatal("ctrl+c produced no cmd; expected tea.Quit")
+}
+
+func TestQuit_InputOpenPreserved(t *testing.T) {
+	m := newTestModel()
+	m.opts.SkipQuitConfirm = true
+	m = openBarFromCmd(t, m, '/')
+
+	nm, cmd := updateModel(m, runeKey('q'))
+	if cmd != nil {
+		t.Fatalf("q in search input returned cmd %T; expected input handling", cmd)
 	}
-	if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
-		t.Fatalf("ctrl+c cmd = %T, want tea.QuitMsg", cmd())
+	if nm.input.kind != inputSearchBar {
+		t.Fatalf("q closed search input: %v", nm.input.kind)
+	}
+	if got := nm.input.activeField().value(); got != "q" {
+		t.Fatalf("search value = %q, want q", got)
 	}
 }
 

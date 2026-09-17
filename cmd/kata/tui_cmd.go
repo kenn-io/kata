@@ -30,7 +30,9 @@ Press ? for help, q to quit.
 
 Mouse support is opt-in. Set [tui] mouse = true in <KATA_HOME>/config.toml
 or pass --mouse for one run. Hold Option (macOS) or Shift (Linux) for native
-terminal text selection while mouse tracking is enabled.`,
+terminal text selection while mouse tracking is enabled.
+
+Set [tui] confirm_quit = false in <KATA_HOME>/config.toml to make q quit immediately.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if currentOutputMode() == outputAgent {
@@ -47,7 +49,7 @@ terminal text selection while mouse tracking is enabled.`,
 					ExitCode: ExitValidation,
 				}
 			}
-			mouseEnabled, err := resolveTUIMouseOption(cmd, mouse)
+			tuiConfig, err := resolveTUIConfig(cmd, mouse)
 			if err != nil {
 				return err
 			}
@@ -67,7 +69,8 @@ terminal text selection while mouse tracking is enabled.`,
 				Stderr:           cmd.ErrOrStderr(),
 				DisplayUIDFormat: uidFormat,
 				DaemonName:       flags.Daemon,
-				Mouse:            mouseEnabled,
+				Mouse:            tuiConfig.Mouse,
+				SkipQuitConfirm:  tuiConfig.ConfirmQuit != nil && !*tuiConfig.ConfirmQuit,
 				InitialIssueRef:  initialIssueRef,
 				ProjectName:      strings.TrimSpace(flags.Project),
 				Workspace:        workspace,
@@ -79,15 +82,15 @@ terminal text selection while mouse tracking is enabled.`,
 	return cmd
 }
 
-func resolveTUIMouseOption(cmd *cobra.Command, flagValue bool) (bool, error) {
+func resolveTUIConfig(cmd *cobra.Command, flagValue bool) (config.TUIConfig, error) {
 	cfg, err := config.ReadDaemonConfig()
 	if err != nil {
-		return false, err
+		return config.TUIConfig{}, err
 	}
 	if cmd.Flags().Changed("mouse") {
-		return flagValue, nil
+		cfg.TUI.Mouse = flagValue
 	}
-	return cfg.TUI.Mouse, nil
+	return cfg.TUI, nil
 }
 
 func validTUIUIDFormat(v string) bool {
