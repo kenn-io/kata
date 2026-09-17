@@ -103,6 +103,8 @@ kata [--workspace PATH | --project NAME] [--daemon NAME] [--as ACTOR] mcp serve
 kata mcp serve --projects NAME[,NAME...]
 kata mcp serve --all-projects [--enable-token-admin]
 kata mcp serve --http HOST:PORT --http-token-env ENV_NAME
+kata mcp serve --all-projects --runtime-dir /path/to/runtime
+kata mcp status --json
 ```
 
 `kata mcp serve` starts Kata's native MCP server over stdio by default.
@@ -119,6 +121,11 @@ alias=path-or-DSN` enable the otherwise absent host-local JSONL tools. See the
 [MCP reference](mcp.md) for transport configuration, the complete catalog,
 scheduling formats, safety rules, and limits. Daemon-wide token tools are
 absent unless `--enable-token-admin` is explicit.
+
+`kata mcp status --json` lists running HTTP MCP listeners without starting
+one. `--runtime-dir` selects an already running local daemon and never starts
+a missing one. See [MCP listener discovery](mcp.md#discover-running-http-listeners)
+for the reported endpoints and token-file paths.
 
 ## Issue lifecycle
 
@@ -239,6 +246,9 @@ exclusive and force a strategy:
 Search includes open and closed issues by default. Use `--status open` or
 `--status closed` to restrict results before the result limit. Status combines
 with label filters and `--include-deleted`; it does not change deletion policy.
+Status-filtered searches require daemon API `0.20.0` or newer. Searches without
+that filter keep their existing compatibility requirements.
+
 For a marker that appears only in comments:
 
 ```sh
@@ -819,6 +829,10 @@ kata --version
 kata update [--check] [--force] [--yes]
 kata tui [issue-ref]
 ```
+
+`kata tui` asks for confirmation when you press `q`. To quit immediately,
+set `[tui] confirm_quit = false`; see
+[TUI preferences](configuration.md#tui-preferences).
 
 `kata version --json` is a local-only machine-readable version check. It does
 not require a workspace or a running daemon. The output is a single JSON object:

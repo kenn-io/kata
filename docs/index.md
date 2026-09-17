@@ -33,12 +33,14 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 ```
 </section>
 
-## New in 0.17.0
+## New in 0.18.0
 
-Check ownership with `kata status`, claim only unowned work, and retry closes
-with an idempotency key. The [0.17.0 release notes](changelog.md#0170) cover
-these workflows, faster CLI commands, browser embedding below a path, and
-upgrade guidance for remote daemons and custom API clients.
+Request a teammate's attention, read an inbox, and delegate an issue with
+expiring credentials. The [0.18.0 release notes](changelog.md#0180) cover
+these workflows, planning-date notifications, search filters, oldest-first
+lists, and contributor credits. Read the
+[upgrade guidance](get-started/install.md#upgrading-to-0180) when updating
+remote or federated daemons.
 
 ## Quickstart
 

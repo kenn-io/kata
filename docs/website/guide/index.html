@@ -149,7 +149,8 @@
             <h2>Fan out, then join on the event stream.</h2>
             <p>An orchestrator, agent or human, creates child issues under a tracking parent and launches workers on their own branches. Workers claim, comment, and close against the same ledger. The orchestrator follows <code>kata events --tail</code> and returns the moment a sub-task closes or needs a human.</p>
             <p>Every mutation lands on a durable, cursor-addressable stream, so a supervisor that was away replays exactly what it missed. Session hooks keep attention truthful: the ledger knows which issues have an agent on them right now.</p>
-            <p><a href="/docs/operations/agent-orchestration/">Agent orchestration</a> · <a href="/docs/workflows/agents/#poll-events-during-long-runs">Event polling</a></p>
+            <p>Give workers distinct teammate handles to record their contributions under the coordinating actor. Use <code>kata notify</code> to request attention and <code>kata inbox</code> to read requests; clear each request after handling it. For a worker that should access only its assigned issue and descendants, create an expiring issue-scoped credential on a daemon in token identity mode.</p>
+            <p><a href="/docs/operations/agent-orchestration/">Agent orchestration</a> · <a href="/docs/workflows/agents/#poll-events-during-long-runs">Event polling</a> · <a href="/docs/workflows/agents/#teammate-heads-up">Teammate requests</a> · <a href="/docs/operations/remote-daemon/#identity-tokens">Worker credentials</a></p>
           </div>
           <div class="guide-media">
             <figure class="diagram">
