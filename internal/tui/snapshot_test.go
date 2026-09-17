@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // updateGoldens enables `go test ./internal/tui/ -update-goldens` so the
@@ -743,7 +745,7 @@ func TestSnapshot_LabelPrompt_Scroll(t *testing.T) {
 // snapSplitModel builds the M6 split-mode Model used by the split
 // snapshot tests: list fixture + open detail (snap fixture) + size
 // pinned to the test's terminal dimensions, layout already decided
-// by pickLayout. The caller picks the focus.
+// by splitlayout.PickLayout. The caller picks the focus.
 func snapSplitModel(width, height int, focus focusPane) Model {
 	dm := snapDetailFixture()
 	m := initialModel(Options{})
@@ -754,7 +756,7 @@ func snapSplitModel(width, height int, focus focusPane) Model {
 	m.list.selectedUID = "01TEST-bbb2"
 	m.detail = dm
 	m.width, m.height = width, height
-	m.layout = pickLayout(width, height)
+	m.layout = splitlayout.PickLayout(width, height)
 	m.focus = focus
 	m.sseStatus = sseConnected
 	return m

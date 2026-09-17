@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // scenarios_test.go drives the full Model dispatch path (Update +
@@ -38,7 +39,7 @@ func scenarioModel(t *testing.T, w, h int) Model {
 	m.api = nil
 	m.scope = scope{projectID: 7, projectName: "kata"}
 	m.width, m.height = w, h
-	m.layout = pickLayout(w, h)
+	m.layout = splitlayout.PickLayout(w, h)
 	out, _ := m.Update(initialFetchMsg{
 		dispatchKey: cacheKey{projectID: 7, limit: queueFetchLimit},
 		issues:      listFixture(),
@@ -57,7 +58,7 @@ func setupDetailScenario(t *testing.T, w, h int, body string) Model {
 // assertViewState pins the layout/view/focus triple in one assertion
 // so failures print all three values in one message instead of
 // stopping at the first mismatch.
-func assertViewState(t *testing.T, m Model, l layoutMode, v viewID, f focusPane) {
+func assertViewState(t *testing.T, m Model, l splitlayout.Mode, v viewID, f focusPane) {
 	t.Helper()
 	if m.layout != l || m.view != v || m.focus != f {
 		t.Fatalf("state mismatch: got layout=%v view=%v focus=%v, want %v/%v/%v",
@@ -228,7 +229,7 @@ func TestScenario_EscReturnsFromStackedDetailToList(t *testing.T) {
 // user just did.
 func TestScenario_EscReturnsFromSplitDetailToList(t *testing.T) {
 	m := setupDetailScenario(t, 200, 40, "short body")
-	assertViewState(t, m, layoutSplit, viewDetail, focusDetail)
+	assertViewState(t, m, splitlayout.Split, viewDetail, focusDetail)
 	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.focus != focusList {
 		t.Fatalf("Esc did not return focus to list: focus=%v", m.focus)
@@ -272,7 +273,7 @@ func TestScenario_EscPopsSplitDetailNavStackBeforeLeavingPane(t *testing.T) {
 // clear split focus as well as view state.
 func TestScenario_BackspaceReturnsFromSplitDetailToList(t *testing.T) {
 	m := setupDetailScenario(t, 200, 40, "short body")
-	assertViewState(t, m, layoutSplit, viewDetail, focusDetail)
+	assertViewState(t, m, splitlayout.Split, viewDetail, focusDetail)
 	m = sendKeyAndDrain(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if m.view != viewList {
 		t.Fatalf("Backspace did not return view to list: view=%v", m.view)
@@ -288,11 +289,11 @@ func TestScenario_BackspaceReturnsFromSplitDetailToList(t *testing.T) {
 // instead of toggling).
 func TestScenario_LayoutToggle_LFlipsAtSplitEligibleSize(t *testing.T) {
 	m := scenarioModel(t, 200, 40)
-	if m.layout != layoutSplit {
-		t.Fatalf("setup: layout=%v, want layoutSplit at 200x40", m.layout)
+	if m.layout != splitlayout.Split {
+		t.Fatalf("setup: layout=%v, want splitlayout.Split at 200x40", m.layout)
 	}
 	m = pressRune(t, m, 'L')
-	if m.layout != layoutStacked {
+	if m.layout != splitlayout.Stacked {
 		t.Fatalf("L did not flip to stacked: layout=%v", m.layout)
 	}
 	if !m.layoutLocked {
@@ -319,18 +320,18 @@ func TestScenario_ChildSortToggle_OFlipsBetweenTopologicalAndTemporal(t *testing
 
 // TestScenario_LayoutToggle_LStaysAcrossResize: once the user has
 // pressed L, a subsequent WindowSizeMsg cannot revert the layout via
-// pickLayout. Without the lock, "I pinned stacked, then resized" would
+// splitlayout.PickLayout. Without the lock, "I pinned stacked, then resized" would
 // silently auto-flip back to split.
 func TestScenario_LayoutToggle_LStaysAcrossResize(t *testing.T) {
 	m := scenarioModel(t, 200, 40)
 	m = pressRune(t, m, 'L')
-	if m.layout != layoutStacked {
+	if m.layout != splitlayout.Stacked {
 		t.Fatalf("setup: L did not flip to stacked: layout=%v", m.layout)
 	}
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 220, Height: 50})
 	m = out.(Model)
-	if m.layout != layoutStacked {
-		t.Fatalf("resize reverted layout: %v, want layoutStacked (locked)", m.layout)
+	if m.layout != splitlayout.Stacked {
+		t.Fatalf("resize reverted layout: %v, want splitlayout.Stacked (locked)", m.layout)
 	}
 }
 
@@ -343,29 +344,29 @@ func TestScenario_LayoutToggle_LStaysAcrossResize(t *testing.T) {
 // terminal staying wide forever after still rendered stacked.
 func TestScenario_LayoutToggle_NarrowThenWidePreservesSplitIntent(t *testing.T) {
 	m := scenarioModel(t, 200, 40)
-	if m.layout != layoutSplit {
-		t.Fatalf("setup: layout=%v, want layoutSplit at 200x40", m.layout)
+	if m.layout != splitlayout.Split {
+		t.Fatalf("setup: layout=%v, want splitlayout.Split at 200x40", m.layout)
 	}
 	// Lock split via two L presses (split → stacked → split, locked).
 	m = pressRune(t, m, 'L')
 	m = pressRune(t, m, 'L')
-	if m.layout != layoutSplit || !m.layoutLocked {
-		t.Fatalf("setup: layout=%v locked=%v, want layoutSplit + locked",
+	if m.layout != splitlayout.Split || !m.layoutLocked {
+		t.Fatalf("setup: layout=%v locked=%v, want splitlayout.Split + locked",
 			m.layout, m.layoutLocked)
 	}
 	// Resize too narrow for split — rendered must degrade to stacked.
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
 	m = out.(Model)
-	if m.layout != layoutStacked {
-		t.Fatalf("narrow resize: layout=%v, want layoutStacked (degraded)",
+	if m.layout != splitlayout.Stacked {
+		t.Fatalf("narrow resize: layout=%v, want splitlayout.Stacked (degraded)",
 			m.layout)
 	}
 	// Resize wide again — rendered must return to split because the
 	// user's preference was never lost.
 	out, _ = m.Update(tea.WindowSizeMsg{Width: 200, Height: 40})
 	m = out.(Model)
-	if m.layout != layoutSplit {
-		t.Fatalf("wide resize: layout=%v, want layoutSplit (preference restored)",
+	if m.layout != splitlayout.Split {
+		t.Fatalf("wide resize: layout=%v, want splitlayout.Split (preference restored)",
 			m.layout)
 	}
 }

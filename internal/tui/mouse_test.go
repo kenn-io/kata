@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 func mouseLeftClick(x, y int) tea.MouseMsg {
@@ -67,7 +68,7 @@ func TestMouseClickSelectsIssueListRow(t *testing.T) {
 func TestMouseSplitClickFirstIssueRowSelectsFirstVisibleRow(t *testing.T) {
 	m := resizeModel(newTestModel(), 160, 30)
 	m.opts.Mouse = true
-	m.layout = layoutSplit
+	m.layout = splitlayout.Split
 	m.list.issues = makeTestIssues(5)
 	m.list.cursor = 0
 
@@ -80,7 +81,7 @@ func TestMouseSplitClickFirstIssueRowSelectsFirstVisibleRow(t *testing.T) {
 func TestMouseFullScreenHelpIgnoresSplitPaneMouse(t *testing.T) {
 	m := resizeModel(newTestModel(), 160, 30)
 	m.opts.Mouse = true
-	m.layout = layoutSplit
+	m.layout = splitlayout.Split
 	m.view = viewHelp
 	m.list.issues = makeTestIssues(5)
 	m.list.cursor = 0

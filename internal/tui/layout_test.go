@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // layoutTestSetup pins KATA_COLOR_MODE=none and rebuilds the styles
@@ -24,7 +25,7 @@ func layoutTestSetup(t *testing.T) (Model, func()) {
 
 // TestLayout_PickLayout_Stacked verifies the stacked-fallback branch:
 // any width below the breakpoint OR any height below the breakpoint
-// must return layoutStacked. The post-Plan-8 thresholds are
+// must return splitlayout.Stacked. The post-Plan-8 thresholds are
 // width>=140, height>=36.
 func TestLayout_PickLayout_Stacked(t *testing.T) {
 	cases := []struct {
@@ -36,8 +37,8 @@ func TestLayout_PickLayout_Stacked(t *testing.T) {
 		{140, 35}, // exactly one row below height
 	}
 	for _, c := range cases {
-		if got := pickLayout(c.w, c.h); got != layoutStacked {
-			t.Errorf("pickLayout(%d, %d) = %v, want layoutStacked", c.w, c.h, got)
+		if got := splitlayout.PickLayout(c.w, c.h); got != splitlayout.Stacked {
+			t.Errorf("splitlayout.PickLayout(%d, %d) = %v, want splitlayout.Stacked", c.w, c.h, got)
 		}
 	}
 }
@@ -54,8 +55,8 @@ func TestLayout_PickLayout_Split(t *testing.T) {
 		{200, 50}, // very wide
 	}
 	for _, c := range cases {
-		if got := pickLayout(c.w, c.h); got != layoutSplit {
-			t.Errorf("pickLayout(%d, %d) = %v, want layoutSplit", c.w, c.h, got)
+		if got := splitlayout.PickLayout(c.w, c.h); got != splitlayout.Split {
+			t.Errorf("splitlayout.PickLayout(%d, %d) = %v, want splitlayout.Split", c.w, c.h, got)
 		}
 	}
 }
@@ -70,7 +71,7 @@ func TestLayout_ResizeSplitToStacked_PreservesSelectionFocusDetail(t *testing.T)
 	defer cleanup()
 	// Boot into split layout.
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		t.Fatalf("setup failed: layout=%v want split", m.layout)
 	}
 	// Seed an open detail + focus detail + selectedNumber.
@@ -81,8 +82,8 @@ func TestLayout_ResizeSplitToStacked_PreservesSelectionFocusDetail(t *testing.T)
 	m.list.selectedUID = "01TEST-42aa"
 	// Resize down across the breakpoint.
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked {
-		t.Errorf("layout=%v after resize, want layoutStacked", m.layout)
+	if m.layout != splitlayout.Stacked {
+		t.Errorf("layout=%v after resize, want splitlayout.Stacked", m.layout)
 	}
 	if m.view != viewDetail {
 		t.Errorf("view=%v after split→stacked focusDetail flip, want viewDetail", m.view)
@@ -102,8 +103,8 @@ func TestLayout_ResizeSplitToStacked_PreservesSelectionFocusList(t *testing.T) {
 	m.focus = focusList
 	m.list.selectedUID = "01TEST-99zz"
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked {
-		t.Errorf("layout=%v after resize, want layoutStacked", m.layout)
+	if m.layout != splitlayout.Stacked {
+		t.Errorf("layout=%v after resize, want splitlayout.Stacked", m.layout)
 	}
 	if m.view != viewList {
 		t.Errorf("view=%v after split→stacked focusList flip, want viewList", m.view)
@@ -121,13 +122,13 @@ func TestLayout_ResizeStackedToSplit_PreservesFocusFromList(t *testing.T) {
 	defer cleanup()
 	// Start stacked, viewList.
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked || m.view != viewList {
+	if m.layout != splitlayout.Stacked || m.view != viewList {
 		t.Fatalf("setup failed: layout=%v view=%v", m.layout, m.view)
 	}
 	// Resize up across the breakpoint.
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
-		t.Errorf("layout=%v after resize, want layoutSplit", m.layout)
+	if m.layout != splitlayout.Split {
+		t.Errorf("layout=%v after resize, want splitlayout.Split", m.layout)
 	}
 	if m.focus != focusList {
 		t.Errorf("focus=%v after stacked→split from viewList, want focusList", m.focus)
@@ -145,8 +146,8 @@ func TestLayout_ResizeStackedToSplit_PreservesFocusFromDetail(t *testing.T) {
 	m.detail.issue = &iss
 	m.view = viewDetail
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
-		t.Errorf("layout=%v after resize, want layoutSplit", m.layout)
+	if m.layout != splitlayout.Split {
+		t.Errorf("layout=%v after resize, want splitlayout.Split", m.layout)
 	}
 	if m.focus != focusDetail {
 		t.Errorf("focus=%v after stacked→split from viewDetail, want focusDetail", m.focus)
@@ -172,9 +173,9 @@ func TestLayout_SplitListPaneWidth_GrowsWithTerminal(t *testing.T) {
 		{300, 110}, // still capped
 	}
 	for _, c := range cases {
-		got := splitListPaneWidth(c.termWidth)
+		got := splitConfig.ListWidth(c.termWidth)
 		if got != c.want {
-			t.Errorf("splitListPaneWidth(%d) = %d, want %d", c.termWidth, got, c.want)
+			t.Errorf("splitConfig.ListWidth(%d) = %d, want %d", c.termWidth, got, c.want)
 		}
 	}
 }
@@ -187,15 +188,15 @@ func TestLayout_ToggleLayout_FromSplitToStacked(t *testing.T) {
 	m, cleanup := layoutTestSetup(t)
 	defer cleanup()
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		t.Fatalf("setup failed: layout=%v want split", m.layout)
 	}
 	iss := m.list.issues[0]
 	m.detail.issue = &iss
 	m.focus = focusDetail
 	m = sendRune(m, 'L')
-	if m.layout != layoutStacked {
-		t.Errorf("layout=%v after L toggle, want layoutStacked", m.layout)
+	if m.layout != splitlayout.Stacked {
+		t.Errorf("layout=%v after L toggle, want splitlayout.Stacked", m.layout)
 	}
 	if !m.layoutLocked {
 		t.Error("layoutLocked=false after L toggle, want true")
@@ -204,8 +205,8 @@ func TestLayout_ToggleLayout_FromSplitToStacked(t *testing.T) {
 		t.Errorf("view=%v after toggle from focusDetail, want viewDetail", m.view)
 	}
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 200, Height: 50})
-	if m.layout != layoutStacked {
-		t.Errorf("layout=%v after resize while locked, want layoutStacked", m.layout)
+	if m.layout != splitlayout.Stacked {
+		t.Errorf("layout=%v after resize while locked, want splitlayout.Stacked", m.layout)
 	}
 }
 
@@ -217,12 +218,12 @@ func TestLayout_ToggleLayout_FromStackedToSplit(t *testing.T) {
 	// Boot in a split-eligible terminal but force-stacked first.
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = sendRune(m, 'L')
-	if m.layout != layoutStacked {
+	if m.layout != splitlayout.Stacked {
 		t.Fatalf("setup failed: layout=%v want stacked after first L", m.layout)
 	}
 	m = sendRune(m, 'L')
-	if m.layout != layoutSplit {
-		t.Errorf("layout=%v after second L toggle, want layoutSplit", m.layout)
+	if m.layout != splitlayout.Split {
+		t.Errorf("layout=%v after second L toggle, want splitlayout.Split", m.layout)
 	}
 	if !m.layoutLocked {
 		t.Error("layoutLocked=false after second L toggle, want true")
@@ -237,11 +238,11 @@ func TestLayout_ToggleLayout_RefusesSplitOnTooNarrowTerminal(t *testing.T) {
 	m, cleanup := layoutTestSetup(t)
 	defer cleanup()
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked {
+	if m.layout != splitlayout.Stacked {
 		t.Fatalf("setup failed: layout=%v want stacked", m.layout)
 	}
 	m = sendRune(m, 'L')
-	if m.layout != layoutStacked {
-		t.Errorf("layout=%v after L on too-narrow term, want layoutStacked", m.layout)
+	if m.layout != splitlayout.Stacked {
+		t.Errorf("layout=%v after L on too-narrow term, want splitlayout.Stacked", m.layout)
 	}
 }

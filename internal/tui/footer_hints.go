@@ -6,6 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/helprender"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 func (m Model) helpRows() [][]helplayout.HelpItem {
@@ -15,7 +16,7 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
 	}
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		return m.splitHelpRows()
 	}
 	switch m.view {

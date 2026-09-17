@@ -8,6 +8,7 @@ import (
 
 	"github.com/mattn/go-runewidth"
 	"go.kenn.io/kit/tui/helplayout"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 func TestQueueHelpRows_ConditionalItems(t *testing.T) {
@@ -131,7 +132,7 @@ func TestHelpRows_InputAndModalContexts(t *testing.T) {
 		{
 			name: "discard modal in split layout",
 			m: Model{
-				layout: layoutSplit,
+				layout: splitlayout.Split,
 				input:  inputState{kind: inputCommentForm},
 				modal:  modalDiscardComment,
 			},

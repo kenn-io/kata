@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 type viewID int
@@ -150,25 +151,25 @@ type Model struct {
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
-	// canRenderSplit. See layout.go.
-	layout layoutMode
+	// splitlayout.PickLayout. See layout.go.
+	layout splitlayout.Mode
 	// preferredLayout is the user's stated intent (set on every
 	// toggleLayout). Only consulted when layoutLocked is true; without
-	// the lock, layout follows pickLayout's auto-pick. Tracked
+	// the lock, layout follows splitlayout.PickLayout's auto-pick. Tracked
 	// separately from m.layout so a transient narrow resize that
 	// degrades a locked split to stacked does NOT erase the split
 	// preference — once the terminal is wide enough again, layout
 	// returns to split (roborev #17173 finding 1).
-	preferredLayout layoutMode
+	preferredLayout splitlayout.Mode
 	// layoutLocked is set when the user explicitly toggles the layout
 	// via the ToggleLayout key (default: L). While locked, WindowSizeMsg
-	// honors preferredLayout instead of re-running pickLayout —
+	// honors preferredLayout instead of re-running splitlayout.PickLayout —
 	// except that an outright too-narrow terminal still degrades to
 	// stacked so split never renders unusable UI.
 	layoutLocked bool
 	// focus names which pane owns key dispatch in split layout. In
 	// stacked layout m.view is authoritative; m.focus is only
-	// consulted when m.layout == layoutSplit. Default focusList.
+	// consulted when m.layout == splitlayout.Split. Default focusList.
 	focus focusPane
 	// nextDetailFollowGen is the monotonic generation counter behind
 	// the M6 split-mode detail-follows-cursor debounce. Every cursor
@@ -217,10 +218,9 @@ func initialModel(opts Options) Model {
 		projectsByID:          map[int64]string{},
 		projectStats:          map[int64]ProjectStatsSummary{},
 		projectIdentByID:      map[int64]string{},
-		layout:                layoutStacked,
+		layout:                splitlayout.Stacked,
 		focus:                 focusList,
-		uidFormat:             uidFormat,
-	}
+		uidFormat:             uidFormat}
 }
 
 // resolveTUIActor mirrors cmd/kata's actor precedence without --as or the
@@ -536,7 +536,7 @@ func (m Model) reconcileSearchDetailAfterRefetch(
 	prevPID int64, prevUID string, prevHas bool,
 ) (Model, tea.Cmd) {
 	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusResults ||
-		m.layout != layoutSplit {
+		m.layout != splitlayout.Split {
 		return m, nil
 	}
 	newPID, newUID, newHas := highlightedIdentity(m.list)
@@ -557,7 +557,7 @@ func (m Model) reconcileSearchDetailAfterRefetch(
 // cursor-motion otherwise, so without this hook the right-hand pane
 // stays empty on launch until the user nudges j/k.
 func (m Model) maybeBootstrapSplitDetail() (Model, tea.Cmd) {
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		return m, nil
 	}
 	if m.detail.issue != nil {
@@ -878,8 +878,8 @@ func (m Model) listRenderedDataRows() int {
 	if m.width <= 0 || m.height <= 0 {
 		return 0
 	}
-	if m.layout == layoutSplit {
-		innerH := max(splitBodyHeight(m)-2, 2)
+	if m.layout == splitlayout.Split {
+		innerH := max(m.splitGeometry().ListInnerH, 2)
 		return max(1, innerH-1)
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
@@ -891,14 +891,12 @@ func (m Model) cacheDetailViewport(dm detailModel) detailModel {
 	dm.lastDetailWidth = 0
 	dm.lastDetailHeight = 0
 	dm.lastDetailSplit = false
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		return dm
 	}
-	footerLines := helpLines(m.splitHelpRows(), m.width)
-	bodyHeight := max(m.height-2-footerLines, 4)
-	detailW := max(m.width-splitListPaneWidth(m.width), 20)
-	innerW := detailW - 2
-	innerH := bodyHeight - 2
+	g := m.splitGeometry()
+	innerW := g.DetailInnerW
+	innerH := g.DetailInnerH
 	if innerW < 10 {
 		innerW = 10
 	}
@@ -1114,7 +1112,7 @@ func (m Model) routeSearchInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 }
 
 func (m Model) followSearchResultIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		return m, prior
 	}
 	if _, ok := pickHighlightedIssue(m.list); !ok {
@@ -1186,7 +1184,7 @@ func (m Model) refetchRestoredDetail() tea.Cmd {
 // active search inherits. It runs before split bootstrap so a detail created
 // from the live query is never mistaken for pre-search state.
 func (m Model) captureSearchSplitDetail() Model {
-	if !m.input.kind.isCommandBar() || m.layout != layoutSplit {
+	if !m.input.kind.isCommandBar() || m.layout != splitlayout.Split {
 		return m
 	}
 	if m.input.preSplitDetailCaptured {
@@ -1271,7 +1269,7 @@ func detailModelMatches(detail *detailModel, uid string, pid int64) bool {
 // once set, cancel must restore that pane even after a later stacked resize.
 // It is state-only so layout changes never introduce another follow command.
 func (m Model) markSearchSplitDetailOwned() Model {
-	if m.input.kind.isCommandBar() && m.layout == layoutSplit && m.detail.issue != nil {
+	if m.input.kind.isCommandBar() && m.layout == splitlayout.Split && m.detail.issue != nil {
 		m.input.restoreSplitDetail = true
 	}
 	return m
@@ -1427,7 +1425,7 @@ func (m Model) routeDetailFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // and other Model-level handlers that need to act on "the user is
 // looking at detail right now."
 func (m Model) detailIsActive() bool {
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		return m.focus == focusDetail
 	}
 	return m.view == viewDetail
@@ -1456,7 +1454,7 @@ func (m Model) detailPaneVisible() bool {
 // stacked layout it's m.view == viewList; in split layout it's
 // m.focus == focusList.
 func (m Model) listIsActive() bool {
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		return m.focus == focusList
 	}
 	return m.view == viewList
@@ -1467,7 +1465,7 @@ func (m Model) listIsActive() bool {
 // the existing dispatchToView path); in split layout it forwards to
 // the focused pane regardless of m.view.
 func (m Model) routeMutationToActivePane(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		if mut.origin == "list" {
 			var cmd tea.Cmd
 			m.list, cmd = m.list.applyMutation(mut, m.api, m.scope)
@@ -2060,7 +2058,7 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // In stacked layout the function is a no-op (the layout has only
 // one pane; tab/esc retain their per-view meanings).
 func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		return m, nil, false
 	}
 	if m.focus == focusList && msg.String() == "tab" && m.detail.issue != nil {
@@ -2343,7 +2341,7 @@ func (m Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	// split layout has a detail issue loaded (regardless of focus —
 	// the pane is visible either way and any SSE invalidation should
 	// keep it fresh).
-	if m.view != viewDetail && m.layout != layoutSplit {
+	if m.view != viewDetail && m.layout != splitlayout.Split {
 		return nil
 	}
 	if m.detail.issue == nil {
@@ -2521,7 +2519,7 @@ func (m Model) refetchOpenDetail() tea.Cmd {
 	if m.api == nil || m.detail.issue == nil {
 		return nil
 	}
-	if m.view != viewDetail && m.layout != layoutSplit {
+	if m.view != viewDetail && m.layout != splitlayout.Split {
 		return nil
 	}
 	pid := m.detail.scopePID
@@ -2674,7 +2672,7 @@ func (m Model) seedOpenDetail(iss Issue) Model {
 	// moves to the detail pane on open. m.view also moves to
 	// viewDetail above so a subsequent split→stacked layout flip
 	// keeps the user on the detail pane.
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		m.focus = focusDetail
 	}
 	return m
@@ -2823,7 +2821,7 @@ func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
 		return m, withConnGen(cmd, m.connGen)
 	}
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		return m.dispatchToSplitPane(msg)
 	}
 	switch m.view {
@@ -2892,7 +2890,7 @@ func (m Model) dispatchListKey(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m = m.applyListViewportCache()
 	m.list, cmd = m.list.Update(msg, m.keymap, m.api, m.scope)
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		return m, withConnGen(cmd, m.connGen)
 	}
 	newPID, newUID, newHas := highlightedIdentity(m.list)
@@ -3145,11 +3143,11 @@ func (m Model) overlaySuggestMenu(body string) string {
 	// (height - 2) - menuH.
 	anchorRow := m.height - 2 - menuH
 	anchorCol := m.width - menuW - 1
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		// Anchor inside the detail pane only: the detail pane starts
 		// at the column right after the list pane. The menu's left
 		// edge must not encroach into the list pane.
-		minCol := splitListPaneWidth(m.width) + 1
+		minCol := splitConfig.ListWidth(m.width) + 1
 		if anchorCol < minCol {
 			anchorCol = minCol
 		}
@@ -3182,7 +3180,7 @@ func (m Model) cacheEntryForPrompt(s inputState) labelCacheEntry {
 // View keeps View's cyclomatic budget under the project limit.
 //
 // M6 split layout: list and detail render side-by-side when
-// m.layout == layoutSplit. viewHelp / viewEmpty short-circuit ahead
+// m.layout == splitlayout.Split. viewHelp / viewEmpty short-circuit ahead
 // of the split path so the help overlay / onboarding hint always
 // take the full screen regardless of layout.
 func (m Model) viewBody() string {
@@ -3200,7 +3198,7 @@ func (m Model) viewBody() string {
 	case viewCredentials:
 		return renderCredentials(m)
 	}
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		return renderSplit(m)
 	}
 	switch m.view {

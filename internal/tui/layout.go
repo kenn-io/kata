@@ -1,21 +1,12 @@
 package tui
 
-import tea "charm.land/bubbletea/v2"
-
-// layoutMode discriminates between the stacked single-view layout
-// (the M1-M5 default) and the M6 split-pane layout that renders the
-// list and detail side-by-side. Re-evaluated on every WindowSizeMsg
-// via pickLayout so a resize across the breakpoint flips the layout
-// in both directions.
-type layoutMode int
-
-const (
-	layoutStacked layoutMode = iota
-	layoutSplit
+import (
+	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // focusPane names which pane owns key dispatch in split layout. Only
-// meaningful when m.layout == layoutSplit; in stacked layout m.view
+// meaningful when m.layout == splitlayout.Split; in stacked layout m.view
 // is the authoritative dispatch state. Tab/Enter from focusList →
 // focusDetail; Esc from focusDetail → focusList.
 type focusPane int
@@ -25,95 +16,35 @@ const (
 	focusDetail
 )
 
-// splitListPaneMinWidth is the floor on the list pane's cell width
-// in split layout. Plan 7 said 60-64; bumped to 68 for Plan 8 row
-// chips so the title column still has 20+ cells after the fixed
-// columns (#/status/kids/updated, which sum to ~42 cells in narrow
-// mode). Wider terminals grow past this floor — see splitListPaneWidth.
-const splitListPaneMinWidth = 68
-
-// splitListPaneMaxWidth caps the list pane on very wide terminals.
-// Beyond this point the title column is comfortable enough that
-// further growth would just steal cells from the detail pane.
-const splitListPaneMaxWidth = 110
-
-// splitDetailPaneReservedWidth is the budget the detail pane needs
-// for its document sheet (documentSheetMaxWidth=96 + gutter=2 +
-// border=2). Set as a constant rather than referenced symbolically
-// to keep this package's layout math independent of detail_render
-// (which would otherwise create a coupling cycle for split-mode
-// width computations).
-const splitDetailPaneReservedWidth = 100
-
-// splitListPaneWidth is the cell width of the list pane in split
-// layout. The detail pane gets first dibs on the document sheet's
-// reserved budget; everything beyond that goes to the list pane,
-// floored at splitListPaneMinWidth and capped at splitListPaneMaxWidth.
-//
-// At terminal width 140 (the split breakpoint) the list pane sits on
-// its floor of 68 cells. As the terminal grows past ~168 cells, the
-// list pane reclaims width to give the title column more room.
-func splitListPaneWidth(termWidth int) int {
-	w := termWidth - splitDetailPaneReservedWidth
-	if w < splitListPaneMinWidth {
-		return splitListPaneMinWidth
-	}
-	if w > splitListPaneMaxWidth {
-		return splitListPaneMaxWidth
-	}
-	return w
+var splitConfig = splitlayout.Config{
+	ListMinWidth:        68,
+	ListMaxWidth:        110,
+	DetailReservedWidth: 100,
+	DetailMinWidth:      20,
+	MinBodyHeight:       4,
 }
 
-// splitMinWidth and splitMinHeight are the breakpoint thresholds for
-// split layout. Below either dimension we fall back to layoutStacked
-// so a too-tight terminal keeps the single-pane layout.
-//
-// User-confirmed thresholds (post Plan-8 chrome bump from 7 to 9
-// fixed rows on detail, 5 fixed rows on list): width>=140 (68-cell
-// list pane + a usable detail pane) AND height>=36 (9 fixed rows of
-// detail chrome + comfortable body content per pane).
-const (
-	splitMinWidth  = 140
-	splitMinHeight = 36
-)
-
-// pickLayout chooses between the stacked single-view layout and the
-// split-pane layout based on terminal dimensions. Below either
-// threshold, fall back to stacked. Re-run on every WindowSizeMsg
-// when the user has not manually locked a layout.
-func pickLayout(width, height int) layoutMode {
-	if width >= splitMinWidth && height >= splitMinHeight {
-		return layoutSplit
-	}
-	return layoutStacked
+func (m Model) splitGeometry() splitlayout.Geom {
+	return splitConfig.Geometry(m.width, m.height, helpLines(m.splitHelpRows(), m.width))
 }
 
-// canRenderSplit reports whether the terminal is large enough to
-// render split-pane layout without producing unusable UI. Used both
-// by the auto-pick path and by the manual-toggle path so a locked
-// split-preference still degrades to stacked when the terminal is
-// outright too narrow.
-func canRenderSplit(width, height int) bool {
-	return width >= splitMinWidth && height >= splitMinHeight
-}
-
-// resolveLayout returns the layoutMode the model should render for
+// resolveLayout returns the splitlayout.Mode the model should render for
 // its current width/height + lock state. When unlocked, defers to
-// pickLayout. When locked, honors preferredLayout but degrades to
+// splitlayout.PickLayout. When locked, honors preferredLayout but degrades to
 // stacked if the terminal cannot fit split — the lock represents
 // intent, not a guarantee that split fits.
 //
 // preferredLayout is read here (not m.layout) so a prior degraded
 // resize that pushed m.layout to stacked does not silently erase a
 // locked split preference: when the terminal is wide enough again,
-// resolveLayout returns layoutSplit because preferredLayout still
+// resolveLayout returns splitlayout.Split because preferredLayout still
 // says split.
-func (m Model) resolveLayout() layoutMode {
+func (m Model) resolveLayout() splitlayout.Mode {
 	if !m.layoutLocked {
-		return pickLayout(m.width, m.height)
+		return splitlayout.PickLayout(m.width, m.height)
 	}
-	if m.preferredLayout == layoutSplit && !canRenderSplit(m.width, m.height) {
-		return layoutStacked
+	if m.preferredLayout == splitlayout.Split && splitlayout.PickLayout(m.width, m.height) == splitlayout.Stacked {
+		return splitlayout.Stacked
 	}
 	return m.preferredLayout
 }
@@ -131,10 +62,10 @@ func (m Model) resolveLayout() layoutMode {
 func (m Model) toggleLayout() (Model, tea.Cmd) {
 	prev := m.layout
 	m.layoutLocked = true
-	if m.layout == layoutSplit {
-		m.preferredLayout = layoutStacked
+	if m.layout == splitlayout.Split {
+		m.preferredLayout = splitlayout.Stacked
 	} else {
-		m.preferredLayout = layoutSplit
+		m.preferredLayout = splitlayout.Split
 	}
 	m.layout = m.resolveLayout()
 	var flipCmd tea.Cmd
@@ -152,7 +83,7 @@ func (m Model) toggleLayout() (Model, tea.Cmd) {
 
 // handleLayoutFlip preserves selection and focus across a layout
 // transition. Called from routeTopLevel's WindowSizeMsg branch when
-// pickLayout returns a different mode than m.layout had before.
+// splitlayout.PickLayout returns a different mode than m.layout had before.
 //
 // stacked → split: derive m.focus from m.view (viewList → focusList,
 // viewDetail → focusDetail) so the user's currently-focused pane
@@ -169,8 +100,8 @@ func (m Model) toggleLayout() (Model, tea.Cmd) {
 // identity-based and dm.issue is a pointer the layout flip never
 // touches. Other invariants (gen counters, formGen, modal state,
 // SSE state) live on Model and are likewise untouched.
-func (m Model) handleLayoutFlip(prev layoutMode) (Model, tea.Cmd) {
-	if prev == layoutSplit && m.layout == layoutStacked {
+func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
+	if prev == splitlayout.Split && m.layout == splitlayout.Stacked {
 		// Coming back to the stacked layout: pick the view that
 		// matches the focused pane so the user keeps seeing the
 		// pane they last interacted with.
@@ -181,7 +112,7 @@ func (m Model) handleLayoutFlip(prev layoutMode) (Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if prev == layoutStacked && m.layout == layoutSplit {
+	if prev == splitlayout.Stacked && m.layout == splitlayout.Split {
 		// Entering split: derive focus from the view the user was
 		// looking at. viewHelp / viewEmpty fall through to focusList
 		// (the right-hand pane is informational; the list is what
