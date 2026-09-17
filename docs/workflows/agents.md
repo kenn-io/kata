@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-13
+last_edited: 2026-09-15
 ---
 
 # Agent workflows
@@ -81,6 +81,10 @@ kata deadline <ref> -
 kata meta set <ref> someday true --json-value
 kata meta unset <ref> someday
 ```
+
+Once a schedule or deadline is reached, the daemon writes the same `notify.*`
+request used by `kata notify` for the current owner, or the author when unowned.
+The recipient clears it with `kata notify <ref> --to <recipient> --clear`.
 
 Guidance files produce tendency, not contract: an agent can still end a session
 without updating its issue. For Claude Code workspaces,

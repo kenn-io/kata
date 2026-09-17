@@ -532,6 +532,22 @@ type PatchIssueMetadataOut struct {
 	NewRevision int64
 }
 
+// ReconcileDueNotificationIn identifies one issue for an atomic due-date
+// inbox reconciliation. Now is supplied by the daemon so tests and every
+// backend make the same due decision.
+type ReconcileDueNotificationIn struct {
+	IssueID         int64
+	Now             time.Time
+	DefaultTimezone string
+}
+
+// ReconcileDueNotificationOut reports the ordinary metadata event created by
+// reconciliation. Event is nil when the issue needs no inbox change.
+type ReconcileDueNotificationOut struct {
+	Event   *Event
+	Changed bool
+}
+
 // PatchProjectMetadataIn carries inputs for PatchProjectMetadata.
 // IfMatchRev nil means unconditional, as in PatchIssueMetadataIn.
 type PatchProjectMetadataIn struct {

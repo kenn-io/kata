@@ -2,29 +2,21 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-const notificationKeyPrefix = "notify."
-const notificationRecipientMaxBytes = 128
-const notificationMessageMaxBytes = 1024
+const notificationMessageMaxBytes = notification.MessageMaxBytes
 
-type notificationValue struct {
-	From     string `json:"from"`
-	Teammate string `json:"teammate,omitempty"`
-	Message  string `json:"message"`
-}
+type notificationValue = notification.Value
 
 func newNotifyCmd() *cobra.Command {
 	var recipient, message string
@@ -117,23 +109,18 @@ func newNotifyCmd() *cobra.Command {
 }
 
 func normalizeNotificationRecipient(raw string) (string, error) {
-	recipient := strings.TrimSpace(raw)
-	if recipient == "" {
+	recipient, err := notification.NormalizeRecipient(raw)
+	if err != nil && strings.TrimSpace(raw) == "" {
 		return "", notificationValidationError("--to must not be blank")
 	}
-	if !utf8.ValidString(recipient) || len(recipient) > notificationRecipientMaxBytes {
-		return "", notificationValidationError("recipient must be valid UTF-8 and at most 128 bytes")
-	}
-	if strings.ContainsFunc(recipient, func(r rune) bool {
-		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
-	}) {
-		return "", notificationValidationError("recipient must not contain control characters")
+	if err != nil {
+		return "", notificationValidationError(err.Error())
 	}
 	return recipient, nil
 }
 
 func notificationMetadataKey(recipient string) string {
-	return notificationKeyPrefix + base64.RawURLEncoding.EncodeToString([]byte(recipient))
+	return notification.MetadataKey(recipient)
 }
 
 func notificationValidationError(message string) *cliError {

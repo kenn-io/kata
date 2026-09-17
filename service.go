@@ -143,6 +143,7 @@ type Service struct {
 	gitHubSyncFetcher      githubsync.Fetcher
 	federationCredentials  config.FederationCredentialStore
 	logger                 *slog.Logger
+	defaultTimezone        string
 	hostAccessEnabled      bool
 	workerTransactionFence TransactionFence
 	lifetimeCtx            context.Context
@@ -286,6 +287,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		gitHubSyncFetcher:      gitHubSyncFetcher,
 		federationCredentials:  federationCredentials,
 		logger:                 logger,
+		defaultTimezone:        cfg.DefaultTimezone,
 		hostAccessEnabled:      cfg.Access != nil,
 		workerTransactionFence: cfg.WorkerTransactionFence,
 		lifetimeCtx:            lifetimeCtx,
@@ -584,10 +586,15 @@ func (s *Service) Run(ctx context.Context) error {
 	sweeper.OnError = func(err error) {
 		s.logger.Error("kata timed-claim worker", "err", err)
 	}
+	dueNotificationSweeper := daemon.NewDueNotificationSweeper(s.store, s.publish, s.defaultTimezone)
+	dueNotificationSweeper.OnError = func(err error) {
+		s.logger.Error("kata due-notification worker", "err", err)
+	}
 	workers := []namedWorker{
 		{name: "federation", run: runner.Run},
 		{name: "github-sync", run: gitHubSyncRunner.Run},
 		{name: "timed-claim", run: sweeper.Run},
+		{name: "due-notification", run: dueNotificationSweeper.Run},
 	}
 	workerErrs := make(chan error, len(workers))
 	for _, worker := range workers {

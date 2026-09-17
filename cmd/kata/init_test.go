@@ -628,6 +628,7 @@ func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testin
 	assert.Contains(t, got, "kata deadline <ref> <date-or-time>")
 	assert.Contains(t, got, "kata meta set <ref> someday true --json-value")
 	assert.Contains(t, got, "kata meta unset <ref> someday")
+	assert.Contains(t, got, "Reached schedules and deadlines use notify.*")
 }
 
 // oldAgentsBlockBody is the managed-block body kata shipped before the work.*

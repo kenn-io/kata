@@ -64,6 +64,13 @@ offsets are rejected because they pin an instant while duplicating the named
 timezone. `deadline_on` accepts the same three forms and uses the same timezone
 rules. It is a deadline only; it does not control `ready` or `next`.
 
+The daemon surfaces a reached `scheduled_on` or `deadline_on` through ordinary
+`notify.*` metadata. It addresses the current owner, falling back to the author
+when the issue is unowned. Existing manual inbox content wins until cleared.
+Clearing a generated request acknowledges that exact date and recipient; a
+changed date or assignment can surface again. Kata stores no separate reminder
+record.
+
 All other keys are accepted opaquely by design: consumers carry their own
 metadata without a daemon release. When an opaque key later needs query
 performance, the documented promotion path is a **SQLite expression index** over
