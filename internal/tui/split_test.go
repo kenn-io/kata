@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // splitTestSetup boots a Model into split layout (160x40) with the
@@ -25,8 +26,8 @@ func splitTestSetup(t *testing.T) (Model, func()) {
 	m.list.issues = snapListFixture()
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	cleanup := func() { applyDefaultColorMode() }
-	if m.layout != layoutSplit {
-		t.Fatalf("split setup failed: layout=%v want layoutSplit", m.layout)
+	if m.layout != splitlayout.Split {
+		t.Fatalf("split setup failed: layout=%v want splitlayout.Split", m.layout)
 	}
 	return m, cleanup
 }
@@ -345,7 +346,7 @@ func TestSplit_SearchCancelWhileStackedRestoresHiddenDetail(t *testing.T) {
 	}
 
 	m, resizeCmd := updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked {
+	if m.layout != splitlayout.Stacked {
 		t.Fatalf("layout after narrow resize = %v, want stacked", m.layout)
 	}
 	if resizeCmd != nil {
@@ -375,7 +376,7 @@ func TestSplit_SearchCancelWhileStackedRestoresHiddenDetail(t *testing.T) {
 	}
 
 	m, widenCmd := updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		t.Fatalf("layout after wide resize = %v, want split", m.layout)
 	}
 	if widenCmd != nil {
@@ -1271,7 +1272,7 @@ func stackedSearchTransitionFixture(t *testing.T) (Model, func()) {
 		{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "target row", Status: "open"},
 	}
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked || m.detail.issue != nil {
+	if m.layout != splitlayout.Stacked || m.detail.issue != nil {
 		t.Fatalf("stacked setup = layout %v detail %+v, want stacked/nil", m.layout, m.detail.issue)
 	}
 	m = openBarFromCmd(t, m, '/')
@@ -1290,7 +1291,7 @@ func TestStacked_SearchResizeIntoSplitThenCancelRestoresDetail(t *testing.T) {
 	startGen := m.nextDetailFollowGen
 
 	m, widenCmd := updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		t.Fatalf("layout after wide resize = %v, want split", m.layout)
 	}
 	if widenCmd == nil {
@@ -1304,7 +1305,7 @@ func TestStacked_SearchResizeIntoSplitThenCancelRestoresDetail(t *testing.T) {
 	}
 
 	m, narrowCmd := updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked {
+	if m.layout != splitlayout.Stacked {
 		t.Fatalf("layout after narrow resize = %v, want stacked", m.layout)
 	}
 	if narrowCmd != nil {
@@ -1330,7 +1331,7 @@ func TestStacked_SearchResizeIntoSplitThenCancelRestoresDetail(t *testing.T) {
 	}
 
 	m, finalWidenCmd := updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		t.Fatalf("final layout after wide resize = %v, want split", m.layout)
 	}
 	if finalWidenCmd != nil {
@@ -1369,7 +1370,7 @@ func TestStacked_SearchResizeIntoSplitRetargetsInheritedDetail(t *testing.T) {
 	}
 
 	m, widenCmd := updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
+	if m.layout != splitlayout.Split {
 		t.Fatalf("layout after widen = %v, want split", m.layout)
 	}
 	if widenCmd == nil {
@@ -1460,8 +1461,8 @@ func TestSplit_InitialFetchBootstrapsDetailPane(t *testing.T) {
 	m.api = &Client{}
 	m.scope = scope{projectID: 7, projectName: "kata"}
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
-		t.Fatalf("setup: layout=%v want layoutSplit", m.layout)
+	if m.layout != splitlayout.Split {
+		t.Fatalf("setup: layout=%v want splitlayout.Split", m.layout)
 	}
 	if m.detail.issue != nil {
 		t.Fatalf("setup: detail.issue=%+v want nil before fetch", m.detail.issue)
@@ -1499,8 +1500,8 @@ func TestSplit_StackedToSplitResizeBootstrapsDetailPane(t *testing.T) {
 	m.scope = scope{projectID: 7, projectName: "kata"}
 	// Boot stacked, then deliver the list payload while still stacked.
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked {
-		t.Fatalf("setup: layout=%v want layoutStacked", m.layout)
+	if m.layout != splitlayout.Stacked {
+		t.Fatalf("setup: layout=%v want splitlayout.Stacked", m.layout)
 	}
 	issues := snapListFixture()
 	m, _ = updateModel(m, initialFetchMsg{
@@ -1513,8 +1514,8 @@ func TestSplit_StackedToSplitResizeBootstrapsDetailPane(t *testing.T) {
 	}
 	// Now widen past the split breakpoint — should bootstrap detail.
 	nm, cmd := updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if nm.layout != layoutSplit {
-		t.Fatalf("after resize: layout=%v want layoutSplit", nm.layout)
+	if nm.layout != splitlayout.Split {
+		t.Fatalf("after resize: layout=%v want splitlayout.Split", nm.layout)
 	}
 	if nm.detail.issue == nil {
 		t.Fatal("detail.issue stayed nil after stacked→split resize")
@@ -1541,8 +1542,8 @@ func TestSplit_InitialFetchSkipsBootstrapInStacked(t *testing.T) {
 	m.api = &Client{}
 	m.scope = scope{projectID: 7, projectName: "kata"}
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked {
-		t.Fatalf("setup: layout=%v want layoutStacked", m.layout)
+	if m.layout != splitlayout.Stacked {
+		t.Fatalf("setup: layout=%v want splitlayout.Stacked", m.layout)
 	}
 	nm, _ := updateModel(m, initialFetchMsg{
 		dispatchKey: cacheKey{projectID: 7, limit: queueFetchLimit},
@@ -1697,7 +1698,7 @@ func TestSplit_HelpRowSwapsWithFocus(t *testing.T) {
 // detail pane in split mode anchors the menu inside the detail-pane
 // column range. The menu sits to the right of the list pane; we
 // search for the menu content row ("alpha (1)") and verify it
-// starts at a column >= splitListPaneWidth.
+// starts at a column >= splitConfig.ListWidth.
 func TestSplit_SuggestionMenuClampedToDetailPane(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
@@ -1719,7 +1720,7 @@ func TestSplit_SuggestionMenuClampedToDetailPane(t *testing.T) {
 	// Find the column of "alpha (1)" within its line.
 	lineStart := strings.LastIndex(got[:idx], "\n") + 1
 	col := idx - lineStart
-	listW := splitListPaneWidth(m.width)
+	listW := splitConfig.ListWidth(m.width)
 	if col < listW {
 		t.Errorf("suggest menu content at column %d, want >= %d (list pane width)",
 			col, listW)
@@ -1734,13 +1735,13 @@ func TestSplit_LayoutFlip_FromStackedToSplitFromList(t *testing.T) {
 	defer cleanup()
 	// Already in split mode from setup — flip back to stacked first.
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	if m.layout != layoutStacked {
-		t.Fatalf("setup failed: layout=%v want layoutStacked", m.layout)
+	if m.layout != splitlayout.Stacked {
+		t.Fatalf("setup failed: layout=%v want splitlayout.Stacked", m.layout)
 	}
 	m.list.selectedUID = "01TEST-7zz"
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	if m.layout != layoutSplit {
-		t.Errorf("layout=%v after resize up, want layoutSplit", m.layout)
+	if m.layout != splitlayout.Split {
+		t.Errorf("layout=%v after resize up, want splitlayout.Split", m.layout)
 	}
 	if m.focus != focusList {
 		t.Errorf("focus=%v want focusList", m.focus)
@@ -1890,9 +1891,9 @@ func TestSplit_DetailMutation_LandsOnDetailWhileFocusList(t *testing.T) {
 // the natural anchor lands inside the detail pane, but at 160x40
 // with a small menu that's already true without the clamp. To
 // exercise the clamp itself we'd need a menu wider than width -
-// splitListPaneWidth - 1; with suggestMenuMaxWidth=40 and
-// splitMinWidth=140 the natural anchor is 140-40-1=99, comfortably
-// to the right of splitListPaneWidth+1=69. So the clamp branch as
+// splitConfig.ListWidth - 1; with suggestMenuMaxWidth=40 and
+// splitlayout.MinWidth=140 the natural anchor is 140-40-1=99, comfortably
+// to the right of splitConfig.ListWidth+1=69. So the clamp branch as
 // written is defensive — it cannot fire under realistic constants.
 //
 // To still cover the helper's clamp logic, we drive overlayAtCorner
@@ -1902,20 +1903,20 @@ func TestSplit_DetailMutation_LandsOnDetailWhileFocusList(t *testing.T) {
 // guards against (anchor too far left); together with the comment
 // in overlaySuggestMenu it documents that the M6 minCol is
 // future-proofing in case suggestMenuMaxWidth grows or
-// splitListPaneWidth shrinks past the breakpoint.
+// splitConfig.ListWidth shrinks past the breakpoint.
 func TestSplit_SuggestionMenuClampActuallyFires_AtMinSplit(t *testing.T) {
 	// Confirm the documented invariant: at the minimum split
 	// breakpoint with the maximum menu width, the natural anchor
 	// is still right of the list-pane boundary, so the clamp is
 	// defensive.
-	listW := splitListPaneWidth(splitMinWidth)
-	naturalAnchor := splitMinWidth - suggestMenuMaxWidth - 1
+	listW := splitConfig.ListWidth(splitlayout.MinWidth)
+	naturalAnchor := splitlayout.MinWidth - suggestMenuMaxWidth - 1
 	if naturalAnchor < listW+1 {
 		t.Fatalf("constants drifted: at width=%d max-menu=%d "+
 			"naturalAnchor=%d, want >= listW+1=%d "+
 			"(if this fires, overlaySuggestMenu's minCol clamp is "+
 			"now load-bearing and needs an end-to-end test)",
-			splitMinWidth, suggestMenuMaxWidth, naturalAnchor,
+			splitlayout.MinWidth, suggestMenuMaxWidth, naturalAnchor,
 			listW+1)
 	}
 	// Exercise the underlying overlay-clamp primitive directly: pass

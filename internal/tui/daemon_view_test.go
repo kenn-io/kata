@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 func TestDaemonView_DKeyTransitionsFromList(t *testing.T) {
@@ -160,7 +161,7 @@ func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
 	m.connGen = 4
 	m.api = &Client{}
 	m.scope = homedScope(7, "old")
-	m.layout = layoutSplit
+	m.layout = splitlayout.Split
 	m.focus = focusDetail
 	m.view = viewDetail
 	m.list = newListModel()

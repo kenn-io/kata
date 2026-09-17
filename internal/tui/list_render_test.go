@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // TestRenderLabelChips_AlphabeticalSort verifies the input slice is
@@ -220,7 +221,7 @@ func TestSplitTitleBarShowsDaemon(t *testing.T) {
 	kataVersion = "v0.5.0"
 	t.Cleanup(func() { kataVersion = origVersion })
 	m := resizeModel(newTestModel(), 130, 30)
-	m.layout = layoutSplit
+	m.layout = splitlayout.Split
 	m.activeDaemon = daemonTarget{Name: "shared"}
 	m.list.issues = []Issue{testIssue("abc1")}
 	iss := testIssue("abc1")

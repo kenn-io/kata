@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 func TestFormCommitKeys_CtrlOCanonical_CtrlSCompatible(t *testing.T) {
@@ -643,7 +644,7 @@ func TestOpenCommentForm_UsesDetailScopePID(t *testing.T) {
 
 // TestCommitNewIssueForm_SplitLayoutFocusDetail_UsesDetailScopePID
 // pins the split-layout fix: when the user presses N from a detail
-// pane that's focused in split mode (m.layout == layoutSplit,
+// pane that's focused in split mode (m.layout == splitlayout.Split,
 // m.focus == focusDetail), m.view is still viewList. The earlier
 // guard switched to m.detail.scopePID only when m.view == viewDetail,
 // which missed this case and dispatched a CreateIssue against
@@ -655,7 +656,7 @@ func TestCommitNewIssueForm_SplitLayoutFocusDetail_UsesDetailScopePID(t *testing
 	m := Model{
 		api:    api,
 		view:   viewList,
-		layout: layoutSplit,
+		layout: splitlayout.Split,
 		focus:  focusDetail,
 		keymap: newKeymap(),
 		list:   listModel{actor: "tester"},
@@ -697,7 +698,7 @@ func TestCommitNewIssueForm_StackedViewDetail_UsesDetailScopePID(t *testing.T) {
 	m := Model{
 		api:    api,
 		view:   viewDetail,
-		layout: layoutStacked,
+		layout: splitlayout.Stacked,
 		keymap: newKeymap(),
 		list:   listModel{actor: "tester"},
 		scope:  scope{allProjects: true},

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // renderSplit composes the M6 split-pane layout: a 68-cell list
@@ -17,27 +18,17 @@ import (
 // suggestion menu) render OVER the whole composition — the modal
 // machinery in Model.View applies after this returns. The caller
 // (Model.viewBody) only invokes renderSplit when m.layout ==
-// layoutSplit; the M5 too-narrow short-circuit runs ahead of this
+// splitlayout.Split; the M5 too-narrow short-circuit runs ahead of this
 // path, so width/height are guaranteed >= split breakpoints.
 func renderSplit(m Model) string {
-	width, height := m.width, m.height
+	width := m.width
 	chrome := m.chrome()
 	title := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
-	helpRows := m.splitHelpRows()
-	footerLines := helpLines(helpRows, width)
 	footer := renderSplitFooter(width, m)
 	infoLine := renderSplitInfoLine(width, m)
-	// Body = (height - title - infoLine - adaptive footer) rows. The
-	// two panes share that vertical budget; they're rendered
-	// side-by-side then joined column-wise with lipgloss.JoinHorizontal
-	// so each pane keeps its own border.
-	bodyHeight := max(
-		// title + info + footer
-		height-2-footerLines, 4)
-	listW := splitListPaneWidth(width)
-	detailW := max(width-listW, 20)
-	listPane := renderSplitListPane(m, listW, bodyHeight)
-	detailPane := renderSplitDetailPane(m, detailW, bodyHeight)
+	g := m.splitGeometry()
+	listPane := renderSplitListPane(m, g.ListOuterW, g.BodyH)
+	detailPane := renderSplitDetailPane(m, g.DetailOuterW, g.BodyH)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 	return strings.Join([]string{title, body, infoLine, footer}, "\n")
 }
@@ -59,7 +50,11 @@ func renderSplitListPane(m Model, paneW, paneH int) string {
 	chrome := m.chrome()
 	chrome.narrow = true
 	body := m.list.ViewBody(innerW, innerH, chrome)
-	return splitPaneStyle(m.focus == focusList, paneW, paneH).Render(body)
+	border := panelInactiveBorder
+	if m.focus == focusList {
+		border = panelActiveBorder
+	}
+	return splitlayout.PaneStyle(border, paneW, paneH).Render(body)
 }
 
 // renderSplitDetailPane renders the bordered detail pane. When no
@@ -76,7 +71,11 @@ func renderSplitDetailPane(m Model, paneW, paneH int) string {
 		innerH = 2
 	}
 	body := splitDetailBody(m, innerW, innerH)
-	return splitPaneStyle(m.focus == focusDetail, paneW, paneH).Render(body)
+	border := panelInactiveBorder
+	if m.focus == focusDetail {
+		border = panelActiveBorder
+	}
+	return splitlayout.PaneStyle(border, paneW, paneH).Render(body)
 }
 
 // splitDetailBody picks the rendered body for the detail pane. With
@@ -100,23 +99,6 @@ func splitDetailEmptyHint(innerW, innerH int) string {
 		return hint
 	}
 	return lipgloss.Place(innerW, innerH, lipgloss.Center, lipgloss.Center, hint)
-}
-
-// splitPaneStyle returns the border style for one pane. The focused
-// pane uses panelActiveBorder (magenta); the inactive pane uses
-// panelInactiveBorder (gray). Width/Height set the OUTER dimensions
-// so callers know how much space the rendered string occupies —
-// Lip Gloss v2 sizes border-box, so the outer dims are passed as-is.
-func splitPaneStyle(focused bool, paneW, paneH int) lipgloss.Style {
-	border := panelInactiveBorder
-	if focused {
-		border = panelActiveBorder
-	}
-	return lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(border).
-		Width(paneW).
-		Height(paneH)
 }
 
 // renderSplitInfoLine renders the shared info line at the bottom of
@@ -175,11 +157,9 @@ func splitDetailScrollIndicator(m Model) string {
 	if m.detail.issue == nil {
 		return ""
 	}
-	bodyHeight := splitBodyHeight(m)
-	listW := splitListPaneWidth(m.width)
-	detailW := max(m.width-listW, 20)
-	innerW := detailW - 2
-	innerH := bodyHeight - 2
+	g := m.splitGeometry()
+	innerW := g.DetailInnerW
+	innerH := g.DetailInnerH
 	if innerW < 10 {
 		innerW = 10
 	}
@@ -189,16 +169,6 @@ func splitDetailScrollIndicator(m Model) string {
 	docLines, _ := m.detail.detailDocumentLines(innerW, m.chrome())
 	scroll := clampScroll(m.detail.scroll, len(docLines), innerH)
 	return documentScrollIndicator(len(docLines), scroll, innerH)
-}
-
-// splitBodyHeight mirrors the body-height calculation in renderSplit
-// so the indicator math matches what's actually drawn.
-func splitBodyHeight(m Model) int {
-	footerLines := helpLines(m.splitHelpRows(), m.width)
-	bodyHeight := max(
-		// title + info + footer
-		m.height-2-footerLines, 4)
-	return bodyHeight
 }
 
 // renderSplitFooter renders the shared footer help table for the split

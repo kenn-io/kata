@@ -1,6 +1,9 @@
 package tui
 
-import tea "charm.land/bubbletea/v2"
+import (
+	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kit/tui/splitlayout"
+)
 
 const (
 	stackedListDataRowY   = 4
@@ -56,8 +59,8 @@ func (m Model) mouseWheelAt(delta, x int) (Model, tea.Cmd) {
 		m.moveFederationCursor(delta)
 		return m, nil
 	}
-	if m.layout == layoutSplit {
-		if x >= splitListPaneWidth(m.width) {
+	if m.layout == splitlayout.Split {
+		if x >= splitConfig.ListWidth(m.width) {
 			m.focus = focusDetail
 			return m.mouseDetailWheel(delta), nil
 		}
@@ -89,7 +92,7 @@ func (m Model) mouseListWheel(delta int) (Model, tea.Cmd) {
 	m = m.applyListViewportCache()
 	m.list = m.list.ensureCursorVisible(len(m.list.visibleRows()))
 	m.list = m.list.syncSelection(m.list.visibleRows())
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		return m.scheduleDetailFollow()
 	}
 	return m, nil
@@ -102,8 +105,8 @@ func (m Model) mouseLeftClick(x, y int) (Model, tea.Cmd) {
 	if m.view == viewFederation {
 		return m.mouseFederationClick(y)
 	}
-	if m.layout == layoutSplit {
-		if x < splitListPaneWidth(m.width) {
+	if m.layout == splitlayout.Split {
+		if x < splitConfig.ListWidth(m.width) {
 			m.focus = focusList
 			return m.mouseListClick(splitListRowY(y))
 		}
@@ -137,17 +140,15 @@ func (m Model) mouseListClick(row int) (Model, tea.Cmd) {
 	}
 	m.list.cursor = idx
 	m.list = m.list.syncSelection(rows)
-	if m.layout == layoutSplit {
+	if m.layout == splitlayout.Split {
 		return m.scheduleDetailFollow()
 	}
 	return m, nil
 }
 
 func (m Model) listDataBudget() int {
-	if m.layout == layoutSplit {
-		footerLines := helpLines(m.splitHelpRows(), m.width)
-		bodyHeight := max(m.height-2-footerLines, 4)
-		innerH := max(bodyHeight-2, 2)
+	if m.layout == splitlayout.Split {
+		innerH := max(m.splitGeometry().ListInnerH, 2)
 		return innerH - 2
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
