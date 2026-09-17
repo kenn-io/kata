@@ -51,10 +51,16 @@ func TestScopedStorageCollectionAndRecurrenceContracts(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, ready, 1)
 			require.Equal(t, child.ID, ready[0].ID)
-			hits, err := store.SearchFTS(t.Context(), db.SearchFTSParams{ProjectID: project.ID, Query: "Needle", Limit: 1, IssueScope: scope})
-			require.NoError(t, err)
-			require.Len(t, hits, 1)
-			require.Equal(t, child.ID, hits[0].Issue.ID)
+			for _, status := range []string{"", "open", "closed"} {
+				hits, err := store.SearchFTS(t.Context(), db.SearchFTSParams{ProjectID: project.ID, Query: "Needle", Limit: 1, IssueScope: scope, Status: status})
+				require.NoError(t, err)
+				if status == "closed" {
+					require.Empty(t, hits)
+				} else {
+					require.Len(t, hits, 1)
+					require.Equal(t, child.ID, hits[0].Issue.ID)
+				}
+			}
 
 			_, err = store.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
 				IssueID: child.ID, Recurrence: db.CreateRecurrenceIn{ProjectID: project.ID, Actor: "coordinator", Rule: "FREQ=WEEKLY", DTStart: "2030-01-01", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "Recurring work"}},

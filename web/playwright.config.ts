@@ -17,7 +17,8 @@ export default defineConfig({
   webServer: {
     command: 'bun run scripts/dev.ts',
     url: `${origin}/api/v1/ping`,
-    timeout: 120_000,
+    // Startup includes downloading Go modules and building the daemon on a cold cache.
+    timeout: 600_000,
     reuseExistingServer: false,
     gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
     stdout: 'pipe',

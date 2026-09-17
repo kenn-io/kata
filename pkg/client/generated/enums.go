@@ -400,6 +400,24 @@ func (l ListIssuesQueryStatus) Validate() error {
 	}
 }
 
+// SearchIssuesQueryStatus Issue status; omit to search open and closed issues
+type SearchIssuesQueryStatus string
+
+const (
+	SearchIssuesQueryStatusClosed SearchIssuesQueryStatus = "closed"
+	SearchIssuesQueryStatusOpen   SearchIssuesQueryStatus = "open"
+)
+
+// Validate checks if the SearchIssuesQueryStatus value is valid
+func (s SearchIssuesQueryStatus) Validate() error {
+	switch s {
+	case SearchIssuesQueryStatusClosed, SearchIssuesQueryStatusOpen:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid SearchIssuesQueryStatus value, got: %v", s))
+	}
+}
+
 type SearchIssuesQueryMode string
 
 const (

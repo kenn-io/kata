@@ -289,6 +289,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 			Else: &jsonschema.Schema{Not: &jsonschema.Schema{Required: []string{"external_comment_id"}}},
 		})
 	case "kata.search":
+		setEnum("status", "open", "closed")
 		setStringBounds("query", 1, 4096)
 		setNumberBounds("limit", 1, maximumResultLimit)
 		setEnum("mode", "auto", "lexical", "hybrid", "semantic")
@@ -552,6 +553,7 @@ func nonIdempotent(hints *sdkmcp.ToolAnnotations) *sdkmcp.ToolAnnotations {
 
 // SearchInput selects matching issues without returning large issue bodies.
 type SearchInput struct {
+	Status        *string  `json:"status,omitempty" jsonschema:"Issue status: open or closed; omit for both"`
 	Project       string   `json:"project,omitempty" jsonschema:"Project name; omit to search every project in scope"`
 	Query         string   `json:"query" jsonschema:"Non-empty text to search for"`
 	Mode          string   `json:"mode,omitempty" jsonschema:"Search mode: auto, lexical, hybrid, or semantic"`

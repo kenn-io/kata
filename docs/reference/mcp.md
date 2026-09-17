@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-09-15
+last_edited: 2026-09-16
 ---
 
 # Model Context Protocol server
@@ -165,6 +165,13 @@ The MCP server still starts against its documented baseline daemon. A
 `kata.comment` call with a nonempty teammate checks for API 0.18.0 before
 mutating and returns a tool error explaining the API requirement against an older daemon.
 Teammate-free calls retain their existing compatibility floor.
+
+`kata.search` accepts optional `status: "open"` or `status: "closed"`; omit
+it to search both statuses. It combines with labels and the selected search
+mode across every project in scope. Empty and other status values are invalid.
+A status-filtered call checks for API 0.20.0 before searching and returns a
+tool error for an older daemon. Searches without status retain their existing
+compatibility floor.
 
 ## Progressive tool catalog
 

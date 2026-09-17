@@ -255,9 +255,10 @@ type ReadyIssuesFilter struct {
 }
 
 // SearchFTSParams parameterizes full-text search candidate retrieval. The
-// label filters run inside the backend's SQL, before LIMIT, so a narrow
+// status and label filters run inside the backend's SQL, before LIMIT, so a narrow
 // filter still fills the requested number of rows.
 type SearchFTSParams struct {
+	Status          string // "open" | "closed" | "" (any)
 	ProjectID       int64
 	Query           string
 	Limit           int

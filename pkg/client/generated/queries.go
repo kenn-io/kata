@@ -211,16 +211,25 @@ func (r RestoreProjectQuery) Validate() error {
 }
 
 type SearchIssuesQuery struct {
-	Q              string                 `json:"q" validate:"required"`
-	Limit          *int64                 `json:"limit,omitempty"`
-	IncludeDeleted *bool                  `json:"include_deleted,omitempty"`
-	Mode           *SearchIssuesQueryMode `json:"mode,omitempty"`
-	Label          []string               `json:"label,omitempty"`
-	ExcludeLabel   []string               `json:"exclude_label,omitempty"`
+	// Status Issue status; omit to search open and closed issues
+	Status         *SearchIssuesQueryStatus `json:"status,omitempty"`
+	Q              string                   `json:"q" validate:"required"`
+	Limit          *int64                   `json:"limit,omitempty"`
+	IncludeDeleted *bool                    `json:"include_deleted,omitempty"`
+	Mode           *SearchIssuesQueryMode   `json:"mode,omitempty"`
+	Label          []string                 `json:"label,omitempty"`
+	ExcludeLabel   []string                 `json:"exclude_label,omitempty"`
 }
 
 func (s SearchIssuesQuery) Validate() error {
 	var errors runtime.ValidationErrors
+	if s.Status != nil {
+		if v, ok := any(s.Status).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Status", err)
+			}
+		}
+	}
 	if err := typesValidator.Var(s.Q, "required"); err != nil {
 		errors = errors.Append("Q", err)
 	}

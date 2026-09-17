@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -71,29 +72,42 @@ func TestMultiProjectShowRoutesQualifiedReference(t *testing.T) {
 }
 
 func TestSearchFanoutUsesStableGlobalOrdering(t *testing.T) {
-	session, _ := connectMultiProjectServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
-		if !strings.HasSuffix(request.URL.Path, "/search") {
-			return false
-		}
-		projectName := "spoke-project"
-		shortID := "spk1"
-		if strings.Contains(request.URL.Path, "/projects/2/") {
-			projectName = "hub-project"
-			shortID = "hbb1"
-		}
-		writeJSON(writer, map[string]any{
-			"query": "shared", "mode": "lexical",
-			"results": []any{map[string]any{"issue": issueJSON(1, projectName, shortID), "score": 2.0, "matched_in": []string{"title"}}},
-		})
-		return true
-	})
+	for _, status := range []string{"", "open", "closed"} {
+		t.Run("status="+status, func(t *testing.T) {
+			session, _ := connectMultiProjectServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
+				if request.URL.Path == "/api/v1/health" {
+					writeJSON(writer, map[string]any{"ok": true, "api_schema_version": "0.20.0"})
+					return true
+				}
+				if !strings.HasSuffix(request.URL.Path, "/search") {
+					return false
+				}
+				assert.Equal(t, status, request.URL.Query().Get("status"))
+				projectName := "spoke-project"
+				shortID := "spk1"
+				if strings.Contains(request.URL.Path, "/projects/2/") {
+					projectName = "hub-project"
+					shortID = "hbb1"
+				}
+				writeJSON(writer, map[string]any{
+					"query": "shared", "mode": "lexical",
+					"results": []any{map[string]any{"issue": issueJSON(1, projectName, shortID), "score": 2.0, "matched_in": []string{"title"}}},
+				})
+				return true
+			})
 
-	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "shared", "limit": 20}})
-	require.NoError(t, err)
-	require.False(t, result.IsError)
-	hits := result.StructuredContent.(map[string]any)["results"].([]any)
-	require.Equal(t, "hub-project#hbb1", hits[0].(map[string]any)["issue"].(map[string]any)["qualified_ref"])
-	require.Equal(t, "spoke-project#spk1", hits[1].(map[string]any)["issue"].(map[string]any)["qualified_ref"])
+			arguments := map[string]any{"query": "shared", "limit": 20}
+			if status != "" {
+				arguments["status"] = status
+			}
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: arguments})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+			hits := result.StructuredContent.(map[string]any)["results"].([]any)
+			require.Equal(t, "hub-project#hbb1", hits[0].(map[string]any)["issue"].(map[string]any)["qualified_ref"])
+			require.Equal(t, "spoke-project#spk1", hits[1].(map[string]any)["issue"].(map[string]any)["qualified_ref"])
+		})
+	}
 }
 
 func TestSearchFanoutReturnsNoPartialResultWhenOneProjectFails(t *testing.T) {

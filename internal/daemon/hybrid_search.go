@@ -14,6 +14,7 @@ import (
 )
 
 type hybridParams struct {
+	Status          string
 	ProjectID       int64
 	Query           string
 	Limit           int
@@ -49,11 +50,11 @@ const (
 // L2-normalized, so the dot product is cosine similarity in [-1, 1].
 const cosineFloor = 0.3
 
-// labelCeilingReason labels the one degrade that is not a leg failure. Label
+// filterCeilingReason labels the one degrade that is not a leg failure. Search
 // filters run after the KNN, so a narrow filter can consume the whole
 // knnDeepLimit candidate ceiling and leave matching issues ranked beyond it.
 // The results returned are real; the caller is told they may be incomplete.
-const labelCeilingReason = "label filters exhausted the semantic candidate ceiling; semantic results may be incomplete"
+const filterCeilingReason = "search filters exhausted the semantic candidate ceiling; semantic results may be incomplete"
 
 const scopedSemanticUnavailableReason = "semantic search is unavailable for issue-scoped credentials because the vector index cannot enforce the subtree candidate set"
 
@@ -99,7 +100,7 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		go func() {
 			c, e := store.SearchFTS(ctx, db.SearchFTSParams{
 				ProjectID: p.ProjectID, Query: p.Query, Limit: fetch, IncludeDeleted: p.IncludeDeleted,
-				Labels: p.Labels, ExcludeLabels: p.ExcludeLabels,
+				Labels: p.Labels, ExcludeLabels: p.ExcludeLabels, Status: p.Status,
 				AllowedIssueIDs: p.AllowedIssueIDs,
 				IssueScope:      p.IssueScope,
 			})
@@ -134,7 +135,7 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		}, nil
 	}
 	if vecBounded && strict {
-		return hybridResult{}, &modeError{status: 503, msg: labelCeilingReason}
+		return hybridResult{}, &modeError{status: 503, msg: filterCeilingReason}
 	}
 
 	var res hybridResult
@@ -150,12 +151,12 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		res.Degraded = true
 		res.DegradedReason = scopedSemanticUnavailableReason
 	}
-	// Auto mode may return real but potentially incomplete hits when label
+	// Auto mode may return real but potentially incomplete hits when search
 	// filters exhaust the candidate ceiling. Explicit modes were rejected above
 	// because their strict contract does not permit degraded results.
 	if vecBounded {
 		res.Degraded = true
-		res.DegradedReason = labelCeilingReason
+		res.DegradedReason = filterCeilingReason
 	}
 	return res, nil
 }
@@ -168,7 +169,7 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 // hydrating against kata.db (not the sidecar) preserves the guarantee that
 // soft-deleted or purged issues never leak, whatever the sidecar holds.
 //
-// The second return reports that label filters consumed the deep candidate
+// The second return reports that search filters consumed the deep candidate
 // ceiling, so the leg's short result is a limit of the retrieval depth rather
 // than of the corpus.
 func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb *embedding.Client, p hybridParams, fetch int) ([]db.SearchCandidate, bool, error) {
@@ -211,12 +212,12 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// window means more chunks may exist past the initial boundary. The probe
 	// matters on SQLite, where stale vectors consume raw KNN slots before the
 	// freshness join removes them. Coming up short after filtering means stale
-	// rows, another project's higher-scoring chunks, or non-matching labels may
+	// rows, another project's higher-scoring chunks, or non-matching status or labels may
 	// have crowded this project's candidates out. Re-query once at knnDeepLimit
 	// and redo the rollup + filter.
 	if len(out) < fetch && (len(hits) == fetchCap || window.HasProbe) {
 		var boundedRelevant bool
-		if labels.empty() {
+		if p.Status == "" && labels.empty() {
 			hits, err = idx.Query(ctx, key, query, knnDeepLimit)
 		} else {
 			var deepWindow vector.QueryWindow
@@ -235,7 +236,7 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		// filled completely and its extra probe remained relevant: matching
 		// issues may sit past knnDeepLimit. A missing or below-floor probe makes
 		// the short result exact instead.
-		if !labels.empty() && boundedRelevant && len(out) < p.Limit {
+		if boundedRelevant && len(out) < p.Limit {
 			return out, true, nil
 		}
 	}
@@ -243,8 +244,8 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 }
 
 // hydrateVectorHits rolls chunk hits up to issues and hydrates them against
-// live canonical rows, filtering by project and labels, stopping at the cosine
-// floor or fetch collected candidates. Labels are checked before a candidate
+// live canonical rows, filtering by project, status, and labels, stopping at the cosine
+// floor or fetch collected candidates. Filters are checked before a candidate
 // counts toward fetch, so a filtered leg keeps scanning the batch rather than
 // stopping on rows it is about to drop. The lexical leg gets the same
 // predicates in SQL; here the KNN has already run, so the check is per
@@ -278,7 +279,7 @@ func hydrateVectorHits(ctx context.Context, store db.Storage, hits []kitvec.Hit[
 			}
 			return nil, err
 		}
-		if iss.ProjectID != p.ProjectID {
+		if iss.ProjectID != p.ProjectID || (p.Status != "" && iss.Status != p.Status) {
 			continue
 		}
 		if allowed != nil {

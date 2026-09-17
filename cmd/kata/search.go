@@ -20,6 +20,7 @@ import (
 // daemon's GET /search endpoint and prints either the JSON envelope (under
 // --json) or one line per hit with short_id, score, status, title, and match fields.
 func newSearchCmd() *cobra.Command {
+	var issueStatus string
 	var limit int
 	var includeDeleted bool
 	var lexical, hybrid, semantic bool
@@ -36,6 +37,9 @@ func newSearchCmd() *cobra.Command {
 			query := strings.Join(args, " ")
 			if strings.TrimSpace(query) == "" {
 				return &cliError{Message: "query must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			if cmd.Flags().Changed("status") && issueStatus != "open" && issueStatus != "closed" {
+				return &cliError{Message: "--status must be open or closed", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			modeFlags := 0
 			for _, b := range []bool{lexical, hybrid, semantic} {
@@ -80,7 +84,11 @@ func newSearchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(labels) > 0 || len(noLabels) > 0 {
+			if issueStatus != "" {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionSearchStatus, "status-filtered search"); err != nil {
+					return err
+				}
+			} else if len(labels) > 0 || len(noLabels) > 0 {
 				if err := requireDaemonAPIVersion(ctx, client, baseURL,
 					apiVersionReadyAndSearchFilters, "filtered search"); err != nil {
 					return err
@@ -91,6 +99,9 @@ func newSearchCmd() *cobra.Command {
 				return err
 			}
 			params := &generated.SearchIssuesQuery{Q: query, Limit: new(int64(limit)), Label: labels, ExcludeLabel: noLabels}
+			if issueStatus != "" {
+				params.Status = new(generated.SearchIssuesQueryStatus(issueStatus))
+			}
 			if includeDeleted {
 				params.IncludeDeleted = &includeDeleted
 			}
@@ -110,6 +121,7 @@ func newSearchCmd() *cobra.Command {
 			return printSearchResults(cmd, bs)
 		},
 	}
+	cmd.Flags().StringVar(&issueStatus, "status", "", "issue status: open or closed (default both)")
 	cmd.Flags().IntVar(&limit, "limit", 20, "max rows")
 	cmd.Flags().BoolVar(&includeDeleted, "include-deleted", false, "include soft-deleted issues")
 	cmd.Flags().BoolVar(&lexical, "lexical", false, "lexical (FTS) search only")

@@ -56,6 +56,25 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		}
 		mode = &value
 	}
+	var status *generated.SearchIssuesQueryStatus
+	if input.Status != nil {
+		value := generated.SearchIssuesQueryStatus(*input.Status)
+		if err := value.Validate(); err != nil {
+			return nil, SearchOutput{}, fmt.Errorf("status: %w", err)
+		}
+		status = &value
+		health, err := h.options.Client.Health(ctx)
+		if err != nil {
+			return nil, SearchOutput{}, err
+		}
+		reported := ""
+		if health.APISchemaVersion != nil {
+			reported = strings.TrimSpace(*health.APISchemaVersion)
+		}
+		if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.20.0") < 0 {
+			return nil, SearchOutput{}, fmt.Errorf("status-filtered search requires daemon API 0.20.0 or newer; this daemon reports %q; upgrade the daemon", reported)
+		}
+	}
 	projects, err := h.readProjects(ctx, input.Project)
 	if err != nil {
 		return nil, SearchOutput{}, err
@@ -74,6 +93,7 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 				PathParams: &generated.SearchIssuesPath{ProjectID: projects[index].ID},
 				Query: &generated.SearchIssuesQuery{
 					Q:            query,
+					Status:       status,
 					Limit:        &limit64,
 					Mode:         mode,
 					Label:        compactStrings(input.Labels),
