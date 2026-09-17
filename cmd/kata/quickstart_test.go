@@ -55,6 +55,7 @@ func TestQuickstart_IncludesScheduleDeadlineAndSomedayCommands(t *testing.T) {
 	assert.Contains(t, out, "kata deadline <ref> <date-or-time>")
 	assert.Contains(t, out, "kata meta set <ref> someday true --json-value")
 	assert.Contains(t, out, "kata meta unset <ref> someday")
+	assert.Contains(t, out, "Reached schedules and deadlines use notify.*")
 }
 
 func TestQuickstart_PromotesCloseStep(t *testing.T) {
@@ -135,6 +136,7 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 	assert.Contains(t, out, "kata meta set <ref> someday true --json-value")
 	assert.Contains(t, out, "kata meta unset <ref> someday")
 	assert.Contains(t, out, "Schedule/someday defer work; deadlines don’t.")
+	assert.Contains(t, out, "Reached schedules and deadlines use notify.*")
 	assert.Contains(t, out, "KATA_TEAMMATE")
 	assert.Contains(t, out, "KATA_INBOX_USER=<actor>/<teammate>")
 	assert.Contains(t, out, "--parent <ref>")

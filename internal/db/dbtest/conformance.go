@@ -242,6 +242,21 @@ var storageScenarios = []scenario{
 		run: checkMetadataAndAtomicEdit,
 	},
 	{
+		name: "due notifications",
+		methods: []string{
+			"CreateIssue", "CreateProject", "IssueByID", "ListDueNotificationIssueIDs", "ReconcileDueNotification",
+		},
+		run: checkDueNotifications,
+	},
+	{
+		name: "due notification timezones",
+		run:  checkDueNotificationTimezones,
+	},
+	{
+		name: "due notification federated clear",
+		run:  checkDueNotificationFederatedClear,
+	},
+	{
 		name: "import mappings",
 		methods: []string{
 			"AddLabel", "CreateComment", "CreateIssue", "CreateLink", "CreateProject",

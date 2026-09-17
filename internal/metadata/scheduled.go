@@ -30,31 +30,59 @@ type scheduleMetadata struct {
 // A date or local date-time uses the issue timezone, then the daemon timezone,
 // then UTC. A UTC value ending in Z is an instant and ignores those zones.
 func ScheduledOnDue(raw string, now time.Time, defaultTimezone string) (bool, error) {
-	if len(raw) == 0 {
-		return true, nil
-	}
-	values, err := decodeScheduleMetadata(raw)
+	_, present, due, err := ScheduleFieldDue(raw, "scheduled_on", now, defaultTimezone)
 	if err != nil {
 		return false, err
 	}
-	if values.ScheduledOn == nil {
-		return true, nil
-	}
+	return !present || due, nil
+}
 
-	scheduledOn := *values.ScheduledOn
-	kind, layout, instant, err := classifyScheduledOn(scheduledOn)
+// ScheduleFieldDue evaluates one existing planning-date metadata field and
+// returns its raw value as the stable delivery identity.
+func ScheduleFieldDue(
+	raw string,
+	field string,
+	now time.Time,
+	defaultTimezone string,
+) (string, bool, bool, error) {
+	if field != "scheduled_on" && field != "deadline_on" {
+		return "", false, false, fmt.Errorf("unsupported planning field %q", field)
+	}
+	if len(raw) == 0 {
+		return "", false, false, nil
+	}
+	values, err := decodeScheduleMetadata(raw)
+	if err != nil {
+		return "", false, false, err
+	}
+	value := values.ScheduledOn
+	if field == "deadline_on" {
+		value = values.DeadlineOn
+	}
+	if value == nil {
+		return "", false, false, nil
+	}
+	due, err := scheduleValueDue(*value, values.Timezone, now, defaultTimezone)
+	if err != nil {
+		return "", false, false, err
+	}
+	return *value, true, due, nil
+}
+
+func scheduleValueDue(value, issueTimezone string, now time.Time, defaultTimezone string) (bool, error) {
+	kind, layout, instant, err := classifyScheduledOn(value)
 	if err != nil {
 		return false, err
 	}
 	if kind == scheduledOnDate || kind == scheduledOnLocalTime {
-		location, err := loadScheduleLocation(values.Timezone, defaultTimezone)
+		location, err := loadScheduleLocation(issueTimezone, defaultTimezone)
 		if err != nil {
 			return false, err
 		}
 		if kind == scheduledOnDate {
-			return scheduledOn <= now.In(location).Format(layout), nil
+			return value <= now.In(location).Format(layout), nil
 		}
-		resolved, err := resolveLocalSchedule(scheduledOn, layout, location)
+		resolved, err := resolveLocalSchedule(value, layout, location)
 		if err != nil {
 			return false, err
 		}

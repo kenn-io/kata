@@ -65,6 +65,7 @@ One writer per key: only write your own work.*. Ignore work.* on closed issues; 
 Before stopping, close completed work or update both work.attention and work.attention_msg for the handoff.
 
 Schedule/someday defer work; deadlines don’t. kata deadline <ref> <date-or-time> sets deadline_on without changing readiness.
+Reached schedules and deadlines use notify.* for the current owner, or the author when unowned; clear with kata notify <ref> --to <recipient> --clear.
 `
 
 // agentsManagedBlock returns the full marker-delimited block kata writes.

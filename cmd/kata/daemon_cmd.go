@@ -1113,6 +1113,9 @@ func runDaemonProcess(
 	federationWake := startFederationRunner(
 		ctx, workers, waitableDrainAdmission, store, publisher, daemonLog,
 	)
+	startDueNotificationSweeper(
+		ctx, workers, waitableDrainAdmission, store, publisher, dcfg.Timezone, daemonLog,
+	)
 	federationConfigHealth := startFederationConfigReconciler(
 		ctx, workers, waitableDrainAdmission, dcfg, store, federationWake, func(event db.Event, fork activity.Admission) {
 			publisher.EventFrom(event.ProjectID, event, fork)
@@ -1292,6 +1295,27 @@ func runDaemonProcess(
 		return nil
 	}
 	return serveErr
+}
+
+func startDueNotificationSweeper(
+	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
+	store db.Storage,
+	publisher daemon.EventPublisher,
+	defaultTimezone string,
+	daemonLog *log.Logger,
+) {
+	sweeper := daemon.NewDueNotificationSweeper(store, publisher, defaultTimezone)
+	sweeper.IdleAdmission = drainAdmission
+	sweeper.OnError = func(err error) {
+		daemonLog.Printf("due notification sweeper: %v", err)
+	}
+	workers.Go(func() {
+		if err := sweeper.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			daemonLog.Printf("due notification sweeper: %v", err)
+		}
+	})
 }
 
 func startExternalRootEventWake(
