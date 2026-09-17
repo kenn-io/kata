@@ -504,6 +504,7 @@ type ListIssuesRequest struct {
 	Priority      string   `query:"priority,omitempty" doc:"exact priority filter (0..4); empty = no filter"`
 	MaxPriority   string   `query:"max_priority,omitempty" doc:"include only priority <= this value (0..4); empty = no filter"`
 	Limit         int      `query:"limit,omitempty"`
+	Sort          string   `query:"sort,omitempty" enum:"oldest," doc:"oldest = created_at ascending, then id ascending; empty preserves the route default"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
 	Labels        []string `query:"label,explode"`
@@ -525,6 +526,7 @@ type ListAllIssuesRequest struct {
 	Priority      string   `query:"priority,omitempty" doc:"exact priority filter (0..4); empty = no filter"`
 	MaxPriority   string   `query:"max_priority,omitempty" doc:"include only priority <= this value (0..4); empty = no filter"`
 	Limit         int      `query:"limit,omitempty"`
+	Sort          string   `query:"sort,omitempty" enum:"oldest," doc:"oldest = created_at ascending, then id ascending; empty preserves the route default"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
 	Labels        []string `query:"label,explode"`

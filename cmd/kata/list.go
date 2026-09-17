@@ -15,6 +15,7 @@ import (
 
 func newListCmd() *cobra.Command {
 	var status string
+	var sortOrder string
 	var limit int
 	var priority int
 	var maxPriority int
@@ -28,6 +29,9 @@ func newListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "list issues",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if sortOrder != "" && sortOrder != "oldest" {
+				return &cliError{Message: "--sort must be oldest", Kind: kindValidation, ExitCode: ExitValidation}
+			}
 			if limit < 0 {
 				return &cliError{Message: "--limit must be non-negative", Kind: kindValidation, ExitCode: ExitValidation}
 			}
@@ -51,6 +55,11 @@ func newListCmd() *cobra.Command {
 			client, err := httpClientFor(ctx, baseURL)
 			if err != nil {
 				return err
+			}
+			if sortOrder != "" {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionListSort, "list --sort"); err != nil {
+					return err
+				}
 			}
 			if all && (unowned || owner != "" || len(labels) > 0 || len(noLabels) > 0 || len(meta) > 0) {
 				if err := requireDaemonAPIVersion(ctx, client, baseURL,
@@ -76,6 +85,13 @@ func newListCmd() *cobra.Command {
 			if requestLimit > 0 {
 				params.Limit = new(int64(requestLimit))
 			}
+			if sortOrder != "" {
+				params.Sort = new(generated.ListIssuesQuerySort(sortOrder))
+			}
+			var allSort *generated.ListAllIssuesQuerySort
+			if sortOrder != "" {
+				allSort = new(generated.ListAllIssuesQuerySort(sortOrder))
+			}
 			if cmd.Flags().Changed("priority") {
 				params.Priority = new(fmt.Sprint(priority))
 			}
@@ -92,7 +108,7 @@ func newListCmd() *cobra.Command {
 			if all {
 				response, callErr := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{
 					Status: new(generated.ListAllIssuesQueryStatus(apiStatus)), Priority: params.Priority, MaxPriority: params.MaxPriority,
-					Limit: params.Limit, Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
+					Limit: params.Limit, Sort: allSort, Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
 				}})
 				if err := externalCLITransportError(response, callErr); err != nil {
 					return err
@@ -207,7 +223,9 @@ func newListCmd() *cobra.Command {
 					parents[idx] = i.Parent.QualifiedID
 				}
 			}
-			rows = treeRows(rows, keys, parents)
+			if sortOrder == "" {
+				rows = treeRows(rows, keys, parents)
+			}
 			renderer := newRowRenderer(cmd.OutOrStdout())
 			if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
 				return err
@@ -235,6 +253,7 @@ func newListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&status, "status", "open", "filter by status: open|closed|all")
+	cmd.Flags().StringVar(&sortOrder, "sort", "", "sort list output: oldest (created_at ascending; explicit human output is flat)")
 	cmd.Flags().IntVar(&limit, "limit", 200, "max rows (0 = no limit; --all defaults to 0)")
 	cmd.Flags().BoolVar(&all, "all", false, "list issues across all non-archived projects")
 	cmd.Flags().IntVar(&priority, "priority", 0, "exact priority filter (0..4); 0 = highest")

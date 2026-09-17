@@ -4409,7 +4409,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.20.0
+  version: 0.21.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -4984,6 +4984,16 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: oldest = created_at ascending, then id ascending; empty preserves the route default
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: oldest = created_at ascending, then id ascending; empty preserves the route default
+            enum:
+              - oldest
+              - ""
+            type: string
         - explode: false
           in: query
           name: unowned
@@ -5848,6 +5858,16 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: oldest = created_at ascending, then id ascending; empty preserves the route default
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: oldest = created_at ascending, then id ascending; empty preserves the route default
+            enum:
+              - oldest
+              - ""
+            type: string
         - explode: false
           in: query
           name: unowned

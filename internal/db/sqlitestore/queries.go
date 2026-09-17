@@ -1069,7 +1069,11 @@ func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Iss
 			args = append(args, mf.Key)
 		}
 	}
-	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	if p.OldestFirst {
+		q.WriteString(` ORDER BY i.created_at ASC, i.id ASC`)
+	} else {
+		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	}
 	if p.Limit > 0 {
 		fmt.Fprintf(&q, ` LIMIT %d`, p.Limit)
 	}
@@ -1138,7 +1142,11 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 			args = append(args, mf.Key)
 		}
 	}
-	q.WriteString(` ORDER BY i.created_at DESC, i.id DESC`)
+	if p.OldestFirst {
+		q.WriteString(` ORDER BY i.created_at ASC, i.id ASC`)
+	} else {
+		q.WriteString(` ORDER BY i.created_at DESC, i.id DESC`)
+	}
 	if p.Limit > 0 {
 		fmt.Fprintf(&q, ` LIMIT %d`, p.Limit)
 	}

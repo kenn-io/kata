@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-09-16
+last_edited: 2026-09-17
 ---
 
 # HTTP API schema
@@ -47,7 +47,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 28,
-  "api_schema_version": "0.20.0",
+  "api_schema_version": "0.21.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "idle_shutdown": {
@@ -120,6 +120,7 @@ use the exact request field names, and accept empty response collections as
 
 | Version | Change |
 | --- | --- |
+| `0.21.0` | Added optional `sort=oldest` to both issue-list routes. Matching rows are ordered by `created_at` ascending and `id` ascending before `limit`; omission preserves each route's default. |
 | `0.20.0` | Added optional `status=open` or `status=closed` to project search. Omission searches both statuses; explicit empty values are invalid. The predicate applies to lexical candidates and canonical semantic hits before result limits. |
 | `0.19.0` | Added issue-subtree token scope and expiration, capability discovery, and redacted credential lifecycle state with a server observation time. Health storage, embedding, and federation diagnostics are optional and depend on caller authority. |
 | `0.18.0` | Comments accept optional `teammate` attribution and preserve it in responses and retry fingerprints. |
@@ -248,6 +249,18 @@ local browser sessions. When a host access controller is installed, named
 resolution requires all-project authority before resolution or attachment,
 matching the standalone project-resolve endpoint. Project-scoped clients
 can continue using numeric IDs.
+
+## Listing issues
+
+Both `GET /api/v1/projects/{project_id}/issues` and `GET /api/v1/issues`
+accept the optional `sort` query with the value `oldest`. It orders matching
+issues by `created_at` ascending, then `id` ascending for equal timestamps.
+The daemon applies the order before `limit`.
+
+Omitting `sort`, or sending it as an empty value, preserves the route's
+current default. The project route keeps `updated_at` descending and the
+cross-project route keeps `created_at` descending. The query is available in
+API `0.21.0` and newer.
 
 ## Compatibility expectations
 

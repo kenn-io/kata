@@ -1697,6 +1697,7 @@ func (c *Client) ListAllIssues(ctx context.Context, options *ListAllIssuesReques
 		"owner":        {Style: "form", Explode: &[]bool{false}[0]},
 		"priority":     {Style: "form", Explode: &[]bool{false}[0]},
 		"project_id":   {Style: "form", Explode: &[]bool{false}[0]},
+		"sort":         {Style: "form", Explode: &[]bool{false}[0]},
 		"status":       {Style: "form", Explode: &[]bool{false}[0]},
 		"unowned":      {Style: "form", Explode: &[]bool{false}[0]},
 	}
@@ -3433,6 +3434,7 @@ func (c *Client) ListIssues(ctx context.Context, options *ListIssuesRequestOptio
 		"max_priority": {Style: "form", Explode: &[]bool{false}[0]},
 		"owner":        {Style: "form", Explode: &[]bool{false}[0]},
 		"priority":     {Style: "form", Explode: &[]bool{false}[0]},
+		"sort":         {Style: "form", Explode: &[]bool{false}[0]},
 		"status":       {Style: "form", Explode: &[]bool{false}[0]},
 		"unowned":      {Style: "form", Explode: &[]bool{false}[0]},
 	}

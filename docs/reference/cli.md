@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-16
+last_edited: 2026-09-17
 ---
 
 # CLI reference
@@ -165,10 +165,10 @@ ULIDs collided.
 List and inspect:
 
 ```sh
-kata list [--status open|closed|all] [--limit N]
+kata list [--status open|closed|all] [--sort oldest] [--limit N]
 kata list [--label LABEL] [--no-label LABEL] [--owner NAME] [--unowned]
 kata list [--meta key[=value]]
-kata list --all [--status open|closed|all] [--limit N]
+kata list --all [--status open|closed|all] [--sort oldest] [--limit N]
               [--priority N | --max-priority N]
               [--owner NAME | --unowned]
               [--label LABEL] [--no-label LABEL] [--meta key[=value]]
@@ -206,6 +206,14 @@ For `kata list`, `--meta` is repeatable. A bare key filters on presence,
 while `key=value` filters on string equality. Multiple filters combine with
 AND logic.
 
+`--sort oldest` orders matching issues by `created_at` ascending, then `id`
+ascending for equal timestamps. The daemon applies this order before
+`--limit`, so the oldest matching issue is still returned when the list is
+limited. Explicitly sorted human output is flat. An omitted sort keeps the
+scoped default of `updated_at` descending and the cross-project default of
+`created_at` descending, with the existing human tree grouping. The option
+requires daemon API `0.21.0` or newer.
+
 `kata list --all` applies the same filters across every non-archived project.
 Its human and agent rows use qualified refs such as
 `example-project#abc4`, and JSON rows include `project_name`. A scoped list
@@ -216,7 +224,7 @@ Human `kata list` output groups fetched children beneath their fetched parents
 with box-drawing connectors. When a parent is absent because it did not match
 the filters, belongs to another project, or fell outside `--limit`, its child
 stays visible as a top-level row. JSON and agent output remain flat in the
-server's order.
+server's order. This grouping applies when `--sort` is omitted or empty.
 
 By default `kata search` runs lexical (FTS) search. When the daemon has
 [semantic search](../guide/semantic-search.md) configured, search
@@ -256,8 +264,9 @@ as they return 400 when embeddings are not configured at all.
 Before sending filters that an older daemon could silently ignore, the CLI
 checks `api_schema_version`. Status-filtered search requires API 0.20.0 or
 newer. Label-filtered search and filtered `ready --all` require API 0.8.0 or
-newer; filtered `list --all` requires API 0.9.0 or newer. An older
-daemon fails before the query with `daemon_api_too_old` and an upgrade message.
+newer; filtered `list --all` requires API 0.9.0 or newer, and `list --sort`
+requires API 0.21.0 or newer. An older daemon fails before the query with
+`daemon_api_too_old` and an upgrade message.
 See [HTTP API compatibility](http-api.md#detecting-the-api-version).
 
 Edit:

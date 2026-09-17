@@ -144,6 +144,62 @@ func TestListAllDefaultsToUnlimited(t *testing.T) {
 	assert.False(t, sentLimit.Load(), "list --all must not silently cap a fleet scan at 200 rows")
 }
 
+func TestListSortDaemonCompatibility(t *testing.T) {
+	tests := []struct {
+		name            string
+		version         string
+		args            []string
+		wantError       string
+		wantListCalls   int32
+		wantHealthCalls int32
+		wantSort        string
+	}{
+		{name: "omitted sort reaches old daemon", version: "0.20.0", args: []string{"list", "--all"}, wantListCalls: 1},
+		{name: "empty sort reaches old daemon", version: "0.20.0", args: []string{"list", "--all", "--sort="}, wantListCalls: 1},
+		{name: "missing version rejects oldest", version: "", args: []string{"list", "--all", "--sort", "oldest"}, wantError: "requires daemon API 0.21.0 or newer", wantHealthCalls: 1},
+		{name: "malformed version rejects oldest", version: "development", args: []string{"list", "--all", "--sort", "oldest"}, wantError: "requires daemon API 0.21.0 or newer", wantHealthCalls: 1},
+		{name: "old version rejects oldest", version: "0.20.0", args: []string{"list", "--all", "--sort", "oldest"}, wantError: "requires daemon API 0.21.0 or newer", wantHealthCalls: 1},
+		{name: "current version sends oldest", version: "0.21.0", args: []string{"list", "--all", "--sort", "oldest"}, wantListCalls: 1, wantHealthCalls: 1, wantSort: "oldest"},
+		{name: "invalid value fails locally", version: "0.21.0", args: []string{"list", "--all", "--sort", "newest"}, wantError: "--sort must be oldest"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var listCalls, healthCalls atomic.Int32
+			var observedSort string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/health":
+					healthCalls.Add(1)
+					if tt.version == "" {
+						_, _ = w.Write([]byte(`{"ok":true}`))
+						return
+					}
+					_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"` + tt.version + `"}`))
+				case "/api/v1/issues":
+					listCalls.Add(1)
+					observedSort = r.URL.Query().Get("sort")
+					_, _ = w.Write([]byte(`{"issues":[]}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			_, _, err := executeRootCapture(t,
+				contextWithBaseURL(context.Background(), server.URL), tt.args...)
+			if tt.wantError == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantError)
+			}
+			assert.Equal(t, tt.wantListCalls, listCalls.Load())
+			assert.Equal(t, tt.wantHealthCalls, healthCalls.Load())
+			assert.Equal(t, tt.wantSort, observedSort)
+		})
+	}
+}
+
 func TestAPIVersionAtLeast(t *testing.T) {
 	tests := []struct {
 		reported string
