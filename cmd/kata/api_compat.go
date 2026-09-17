@@ -13,6 +13,7 @@ import (
 
 const (
 	apiVersionSearchStatus          = "0.20.0"
+	apiVersionListSort              = "0.21.0"
 	apiVersionReadyAndSearchFilters = "0.8.0"
 	apiVersionGlobalListFilters     = "0.9.0"
 	// apiVersionMCPServer is the oldest daemon the native MCP server can

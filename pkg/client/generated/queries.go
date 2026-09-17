@@ -59,13 +59,16 @@ type ListAllIssuesQuery struct {
 	Priority *string `json:"priority,omitempty"`
 
 	// MaxPriority include only priority <= this value (0..4); empty = no filter
-	MaxPriority  *string  `json:"max_priority,omitempty"`
-	Limit        *int64   `json:"limit,omitempty"`
-	Unowned      *bool    `json:"unowned,omitempty"`
-	Owner        *string  `json:"owner,omitempty"`
-	Label        []string `json:"label,omitempty"`
-	ExcludeLabel []string `json:"exclude_label,omitempty"`
-	Meta         []string `json:"meta,omitempty"`
+	MaxPriority *string `json:"max_priority,omitempty"`
+	Limit       *int64  `json:"limit,omitempty"`
+
+	// Sort oldest = created_at ascending, then id ascending; empty preserves the route default
+	Sort         *ListAllIssuesQuerySort `json:"sort,omitempty"`
+	Unowned      *bool                   `json:"unowned,omitempty"`
+	Owner        *string                 `json:"owner,omitempty"`
+	Label        []string                `json:"label,omitempty"`
+	ExcludeLabel []string                `json:"exclude_label,omitempty"`
+	Meta         []string                `json:"meta,omitempty"`
 }
 
 func (l ListAllIssuesQuery) Validate() error {
@@ -74,6 +77,13 @@ func (l ListAllIssuesQuery) Validate() error {
 		if v, ok := any(l.Status).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Status", err)
+			}
+		}
+	}
+	if l.Sort != nil {
+		if v, ok := any(l.Sort).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Sort", err)
 			}
 		}
 	}
@@ -136,13 +146,16 @@ type ListIssuesQuery struct {
 	Priority *string `json:"priority,omitempty"`
 
 	// MaxPriority include only priority <= this value (0..4); empty = no filter
-	MaxPriority  *string  `json:"max_priority,omitempty"`
-	Limit        *int64   `json:"limit,omitempty"`
-	Unowned      *bool    `json:"unowned,omitempty"`
-	Owner        *string  `json:"owner,omitempty"`
-	Label        []string `json:"label,omitempty"`
-	ExcludeLabel []string `json:"exclude_label,omitempty"`
-	Meta         []string `json:"meta,omitempty"`
+	MaxPriority *string `json:"max_priority,omitempty"`
+	Limit       *int64  `json:"limit,omitempty"`
+
+	// Sort oldest = created_at ascending, then id ascending; empty preserves the route default
+	Sort         *ListIssuesQuerySort `json:"sort,omitempty"`
+	Unowned      *bool                `json:"unowned,omitempty"`
+	Owner        *string              `json:"owner,omitempty"`
+	Label        []string             `json:"label,omitempty"`
+	ExcludeLabel []string             `json:"exclude_label,omitempty"`
+	Meta         []string             `json:"meta,omitempty"`
 }
 
 func (l ListIssuesQuery) Validate() error {
@@ -151,6 +164,13 @@ func (l ListIssuesQuery) Validate() error {
 		if v, ok := any(l.Status).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Status", err)
+			}
+		}
+	}
+	if l.Sort != nil {
+		if v, ok := any(l.Sort).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Sort", err)
 			}
 		}
 	}

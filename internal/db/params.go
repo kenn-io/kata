@@ -110,6 +110,7 @@ type ListIssuesParams struct {
 	Priority      *int64       // nil = no filter; non-nil = exactly this value
 	MaxPriority   *int64       // nil = no filter; non-nil = priority <= MaxPriority
 	Limit         int          // 0 = no limit
+	OldestFirst   bool         // created_at ASC, id ASC; false preserves the route default
 	Unowned       bool         // only issues where owner IS NULL
 	Owner         string       // only issues where owner = this value (empty = no filter)
 	Labels        []string     // issues must have ALL these labels (AND logic)
@@ -142,6 +143,7 @@ type ListAllIssuesParams struct {
 	Priority        *int64
 	MaxPriority     *int64
 	Limit           int
+	OldestFirst     bool // created_at ASC, id ASC; false preserves the route default
 	Unowned         bool
 	Owner           string
 	Labels          []string

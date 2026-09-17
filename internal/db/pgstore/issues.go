@@ -320,7 +320,11 @@ func (s *Store) ListIssues(ctx context.Context, params db.ListIssuesParams) ([]d
 			conditions = append(conditions, fmt.Sprintf(`i.metadata::jsonb ? $%d`, keyPosition))
 		}
 	}
-	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY i.updated_at DESC, i.id DESC`
+	order := `i.updated_at DESC, i.id DESC`
+	if params.OldestFirst {
+		order = `i.created_at ASC, i.id ASC`
+	}
+	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY ` + order
 	if params.Limit > 0 {
 		args = append(args, params.Limit)
 		query += fmt.Sprintf(` LIMIT $%d`, len(args))
@@ -395,7 +399,11 @@ func (s *Store) ListAllIssues(ctx context.Context, params db.ListAllIssuesParams
 			conditions = append(conditions, fmt.Sprintf(`i.metadata::jsonb ? $%d`, keyPosition))
 		}
 	}
-	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY i.created_at DESC, i.id DESC`
+	order := `i.created_at DESC, i.id DESC`
+	if params.OldestFirst {
+		order = `i.created_at ASC, i.id ASC`
+	}
+	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY ` + order
 	if params.Limit > 0 {
 		args = append(args, params.Limit)
 		query += fmt.Sprintf(` LIMIT $%d`, len(args))
