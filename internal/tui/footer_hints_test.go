@@ -7,34 +7,35 @@ import (
 	"testing"
 
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kit/tui/helplayout"
 )
 
 func TestQueueHelpRows_ConditionalItems(t *testing.T) {
 	withChildren := Model{list: listModel{issues: hierarchyIssues()}}
 	assertHelpItemsPresent(t, withChildren.queueHelpRows(),
-		helpItem{key: "space", desc: "expand"},
-		helpItem{key: "E", desc: "all"},
-		helpItem{key: "N", desc: "child"},
-		helpItem{key: "o", desc: "order"})
+		helplayout.HelpItem{Key: "space", Description: "expand"},
+		helplayout.HelpItem{Key: "E", Description: "all"},
+		helplayout.HelpItem{Key: "N", Description: "child"},
+		helplayout.HelpItem{Key: "o", Description: "order"})
 
 	leaf := Model{list: listModel{issues: []Issue{
 		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "leaf", Status: "open"},
 	}}}
 	assertHelpItemAbsent(t, flattenHelpRows(leaf.queueHelpRows()),
-		helpItem{key: "space", desc: "expand"})
+		helplayout.HelpItem{Key: "space", Description: "expand"})
 	assertHelpItemAbsent(t, flattenHelpRows(leaf.queueHelpRows()),
-		helpItem{key: "E", desc: "all"})
+		helplayout.HelpItem{Key: "E", Description: "all"})
 	assertHelpItemPresent(t, flattenHelpRows(leaf.queueHelpRows()),
-		helpItem{key: "N", desc: "child"})
+		helplayout.HelpItem{Key: "N", Description: "child"})
 
 	flat := withChildren
 	flat.list.viewMode = issueListViewFlat
 	assertHelpItemAbsent(t, flattenHelpRows(flat.queueHelpRows()),
-		helpItem{key: "E", desc: "all"})
+		helplayout.HelpItem{Key: "E", Description: "all"})
 
 	empty := Model{}
 	assertHelpItemAbsent(t, flattenHelpRows(empty.queueHelpRows()),
-		helpItem{key: "N", desc: "child"})
+		helplayout.HelpItem{Key: "N", Description: "child"})
 }
 
 // TestDetailHelpRows_Contexts: the persistent detail footer is
@@ -51,50 +52,50 @@ func TestDetailHelpRows_Contexts(t *testing.T) {
 		activeTab:   tabComments,
 	}}
 	assertHelpItemsPresent(t, activity.detailHelpRows(),
-		helpItem{key: "↑↓", desc: "scroll"},
-		helpItem{key: "j/k", desc: "row"},
-		helpItem{key: "↹", desc: "section"},
-		helpItem{key: "↵", desc: "open"},
-		helpItem{key: "pgup/pgdn", desc: "page"},
-		helpItem{key: "e", desc: "edit"},
-		helpItem{key: "c", desc: "comment"},
-		helpItem{key: "+", desc: "label"},
-		helpItem{key: "a", desc: "owner"},
-		helpItem{key: "x", desc: "close"},
-		helpItem{key: "r", desc: "reopen"},
-		helpItem{key: "p", desc: "parent"},
-		helpItem{key: "b", desc: "block"},
-		helpItem{key: "l", desc: "related"},
-		helpItem{key: "L", desc: "layout"},
-		helpItem{key: "esc", desc: "back"},
-		helpItem{key: "?", desc: "help"},
-		helpItem{key: "q", desc: "quit"})
+		helplayout.HelpItem{Key: "↑↓", Description: "scroll"},
+		helplayout.HelpItem{Key: "j/k", Description: "row"},
+		helplayout.HelpItem{Key: "↹", Description: "section"},
+		helplayout.HelpItem{Key: "↵", Description: "open"},
+		helplayout.HelpItem{Key: "pgup/pgdn", Description: "page"},
+		helplayout.HelpItem{Key: "e", Description: "edit"},
+		helplayout.HelpItem{Key: "c", Description: "comment"},
+		helplayout.HelpItem{Key: "+", Description: "label"},
+		helplayout.HelpItem{Key: "a", Description: "owner"},
+		helplayout.HelpItem{Key: "x", Description: "close"},
+		helplayout.HelpItem{Key: "r", Description: "reopen"},
+		helplayout.HelpItem{Key: "p", Description: "parent"},
+		helplayout.HelpItem{Key: "b", Description: "block"},
+		helplayout.HelpItem{Key: "l", Description: "related"},
+		helplayout.HelpItem{Key: "L", Description: "layout"},
+		helplayout.HelpItem{Key: "esc", Description: "back"},
+		helplayout.HelpItem{Key: "?", Description: "help"},
+		helplayout.HelpItem{Key: "q", Description: "quit"})
 
 	children := Model{detail: hierarchyDetailModel(focusChildren)}
 	assertHelpItemsPresent(t, children.detailHelpRows(),
-		helpItem{key: "↑↓", desc: "scroll"},
-		helpItem{key: "j/k", desc: "child"},
-		helpItem{key: "↵", desc: "open child"},
-		helpItem{key: "N", desc: "child"},
-		helpItem{key: "e", desc: "edit"},
-		helpItem{key: "x", desc: "close"},
-		helpItem{key: "?", desc: "help"},
-		helpItem{key: "q", desc: "quit"})
+		helplayout.HelpItem{Key: "↑↓", Description: "scroll"},
+		helplayout.HelpItem{Key: "j/k", Description: "child"},
+		helplayout.HelpItem{Key: "↵", Description: "open child"},
+		helplayout.HelpItem{Key: "N", Description: "child"},
+		helplayout.HelpItem{Key: "e", Description: "edit"},
+		helplayout.HelpItem{Key: "x", Description: "close"},
+		helplayout.HelpItem{Key: "?", Description: "help"},
+		helplayout.HelpItem{Key: "q", Description: "quit"})
 }
 
 func TestHelpRows_InputAndModalContexts(t *testing.T) {
 	tests := []struct {
 		name string
 		m    Model
-		want [][]helpItem
+		want [][]helplayout.HelpItem
 	}{
 		{
 			name: "search query focus",
 			m:    Model{input: inputState{kind: inputSearchBar}},
-			want: [][]helpItem{{
-				{key: "↑↓/enter", desc: "results"},
-				{key: "esc", desc: "cancel"},
-				{key: "ctrl+u", desc: "clear"},
+			want: [][]helplayout.HelpItem{{
+				{Key: "↑↓/enter", Description: "results"},
+				{Key: "esc", Description: "cancel"},
+				{Key: "ctrl+u", Description: "clear"},
 			}},
 		},
 		{
@@ -103,28 +104,28 @@ func TestHelpRows_InputAndModalContexts(t *testing.T) {
 				kind:        inputSearchBar,
 				searchFocus: searchFocusResults,
 			}},
-			want: [][]helpItem{{
-				{key: "↑↓", desc: "move"},
-				{key: "enter", desc: "apply"},
-				{key: "esc", desc: "query"},
-				{key: "/", desc: "query"},
+			want: [][]helplayout.HelpItem{{
+				{Key: "↑↓", Description: "move"},
+				{Key: "enter", Description: "apply"},
+				{Key: "esc", Description: "query"},
+				{Key: "/", Description: "query"},
 			}},
 		},
 		{
 			name: "filter form",
 			m:    Model{input: inputState{kind: inputFilterForm}},
-			want: [][]helpItem{{
-				{key: "ctrl+o", desc: "apply"},
-				{key: "esc", desc: "cancel"},
-				{key: "ctrl+r", desc: "reset"},
+			want: [][]helplayout.HelpItem{{
+				{Key: "ctrl+o", Description: "apply"},
+				{Key: "esc", Description: "cancel"},
+				{Key: "ctrl+r", Description: "reset"},
 			}},
 		},
 		{
 			name: "quit modal",
 			m:    Model{modal: modalQuitConfirm},
-			want: [][]helpItem{{
-				{key: "y", desc: "confirm"},
-				{key: "n/esc", desc: "cancel"},
+			want: [][]helplayout.HelpItem{{
+				{Key: "y", Description: "confirm"},
+				{Key: "n/esc", Description: "cancel"},
 			}},
 		},
 		{
@@ -134,9 +135,9 @@ func TestHelpRows_InputAndModalContexts(t *testing.T) {
 				input:  inputState{kind: inputCommentForm},
 				modal:  modalDiscardComment,
 			},
-			want: [][]helpItem{{
-				{key: "y", desc: "discard"},
-				{key: "n/esc", desc: "keep editing"},
+			want: [][]helplayout.HelpItem{{
+				{Key: "y", Description: "discard"},
+				{Key: "n/esc", Description: "keep editing"},
 			}},
 		},
 	}
@@ -153,30 +154,30 @@ func TestViewChromeHelpRows_ModalPrecedesInput(t *testing.T) {
 	tests := []struct {
 		name  string
 		modal modalKind
-		want  [][]helpItem
+		want  [][]helplayout.HelpItem
 	}{
 		{
 			name:  "discard comment",
 			modal: modalDiscardComment,
-			want: [][]helpItem{{
-				{key: "y", desc: "discard"},
-				{key: "n/esc", desc: "keep editing"},
+			want: [][]helplayout.HelpItem{{
+				{Key: "y", Description: "discard"},
+				{Key: "n/esc", Description: "keep editing"},
 			}},
 		},
 		{
 			name:  "discard new issue",
 			modal: modalDiscardNewIssue,
-			want: [][]helpItem{{
-				{key: "y", desc: "discard"},
-				{key: "n/esc", desc: "keep editing"},
+			want: [][]helplayout.HelpItem{{
+				{Key: "y", Description: "discard"},
+				{Key: "n/esc", Description: "keep editing"},
 			}},
 		},
 		{
 			name:  "quit",
 			modal: modalQuitConfirm,
-			want: [][]helpItem{{
-				{key: "y", desc: "confirm"},
-				{key: "n/esc", desc: "cancel"},
+			want: [][]helplayout.HelpItem{{
+				{Key: "y", Description: "confirm"},
+				{Key: "n/esc", Description: "cancel"},
 			}},
 		},
 	}
@@ -276,27 +277,168 @@ func TestPersistentHelpRowsPreferArrowNotation(t *testing.T) {
 		detail: hierarchyDetailModel(focusActivity),
 	}
 	for _, item := range flattenHelpRows(m.queueHelpRows()) {
-		if strings.Contains(item.key, "j/k") {
+		if strings.Contains(item.Key, "j/k") {
 			t.Fatalf("queue footer keys should use arrows, got %+v", item)
 		}
 	}
 }
 
+func TestFooterHelpTableParity(t *testing.T) {
+	oldMode, oldDark := activeColorMode, activeHasDarkBackground
+	defer func() { applyColorMode(oldMode, oldDark) }()
+
+	listRows := (Model{list: listModel{issues: hierarchyIssues()}}).queueHelpRows()
+	detailRows := hierarchyDetailModel(focusChildren).detailHelpRows()
+	cases := []struct {
+		name       string
+		mode       colorMode
+		dark       bool
+		width      int
+		innerWidth int
+		rows       [][]helplayout.HelpItem
+		want       string
+		wantLines  int
+	}{
+		{
+			name:       "modal light",
+			mode:       colorLight,
+			width:      80,
+			innerWidth: 78,
+			rows:       modalHelpRows(modalQuitConfirm),
+			want:       "\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242my\x1b[m \x1b[38;5;248mconfirm\x1b[m\x1b[38;5;248m▕\x1b[m \x1b[38;5;242mn/esc\x1b[m \x1b[38;5;248mcancel\x1b[m                                                       \x1b[m\x1b[48;5;253m \x1b[m",
+			wantLines:  1,
+		},
+		{
+			name:       "list dark",
+			mode:       colorDark,
+			dark:       true,
+			width:      80,
+			innerWidth: 78,
+			rows:       listRows,
+			want:       "\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m↑↓\x1b[m \x1b[38;5;240mmove\x1b[m  \x1b[38;5;242m▕\x1b[m \x1b[38;5;246m↵\x1b[m \x1b[38;5;240mopen\x1b[m      \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mspace\x1b[m \x1b[38;5;240mexpand\x1b[m \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mE\x1b[m \x1b[38;5;240mall\x1b[m   \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mn\x1b[m \x1b[38;5;240mnew\x1b[m  \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mN\x1b[m \x1b[38;5;240mchild\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246m/\x1b[m \x1b[38;5;240msearch\x1b[m  \x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246mf\x1b[m \x1b[38;5;240mfilter\x1b[m \x1b[38;5;242m▕\x1b[m \x1b[38;5;246ms\x1b[m \x1b[38;5;240mstatus\x1b[m    \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mv\x1b[m \x1b[38;5;240mview\x1b[m       \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mo\x1b[m \x1b[38;5;240morder\x1b[m \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mc\x1b[m \x1b[38;5;240mclear\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mx\x1b[m \x1b[38;5;240mclose\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246m!\x1b[m \x1b[38;5;240mpriority\x1b[m\x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246mD\x1b[m \x1b[38;5;240mdaemons\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mF\x1b[m \x1b[38;5;240mfederation\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mC\x1b[m \x1b[38;5;240mcredentials\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mL\x1b[m \x1b[38;5;240mlayout\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246m?\x1b[m \x1b[38;5;240mhelp\x1b[m \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mq\x1b[m \x1b[38;5;240mquit\x1b[m             \x1b[m\x1b[48;5;234m \x1b[m",
+			wantLines:  3,
+		},
+		{
+			name:       "detail light",
+			mode:       colorLight,
+			width:      80,
+			innerWidth: 78,
+			rows:       detailRows,
+			want:       "\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242m↑↓\x1b[m \x1b[38;5;248mscroll\x1b[m \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mj/k\x1b[m \x1b[38;5;248mchild\x1b[m \x1b[38;5;248m▕\x1b[m \x1b[38;5;242m↵\x1b[m \x1b[38;5;248mopen child\x1b[m\x1b[38;5;248m▕\x1b[m \x1b[38;5;242m↹\x1b[m \x1b[38;5;248msection\x1b[m   \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mpgup/pgdn\x1b[m \x1b[38;5;248mpage\x1b[m            \x1b[m\x1b[48;5;253m \x1b[m\n\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242me\x1b[m \x1b[38;5;248medit\x1b[m    \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mc\x1b[m \x1b[38;5;248mcomment\x1b[m \x1b[38;5;248m▕\x1b[m \x1b[38;5;242m+\x1b[m \x1b[38;5;248mlabel\x1b[m     \x1b[38;5;248m▕\x1b[m \x1b[38;5;242m-\x1b[m \x1b[38;5;248munlabel\x1b[m   \x1b[38;5;248m▕\x1b[m \x1b[38;5;242ma\x1b[m \x1b[38;5;248mowner\x1b[m                   \x1b[m\x1b[48;5;253m \x1b[m\n\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242mA\x1b[m \x1b[38;5;248munassign\x1b[m\x1b[38;5;248m▕\x1b[m \x1b[38;5;242mx\x1b[m \x1b[38;5;248mclose\x1b[m   \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mr\x1b[m \x1b[38;5;248mreopen\x1b[m    \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mp\x1b[m \x1b[38;5;248mparent\x1b[m    \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mb\x1b[m \x1b[38;5;248mblock\x1b[m                   \x1b[m\x1b[48;5;253m \x1b[m\n\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242ml\x1b[m \x1b[38;5;248mrelated\x1b[m \x1b[38;5;248m▕\x1b[m \x1b[38;5;242m!\x1b[m \x1b[38;5;248mpriority\x1b[m\x1b[38;5;248m▕\x1b[m \x1b[38;5;242mD\x1b[m \x1b[38;5;248mdaemons\x1b[m   \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mF\x1b[m \x1b[38;5;248mfederation\x1b[m\x1b[38;5;248m▕\x1b[m \x1b[38;5;242mC\x1b[m \x1b[38;5;248mcredentials\x1b[m             \x1b[m\x1b[48;5;253m \x1b[m\n\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242mN\x1b[m \x1b[38;5;248mchild\x1b[m   \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mL\x1b[m \x1b[38;5;248mlayout\x1b[m  \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mesc\x1b[m \x1b[38;5;248mback\x1b[m    \x1b[38;5;248m▕\x1b[m \x1b[38;5;242m?\x1b[m \x1b[38;5;248mhelp\x1b[m      \x1b[38;5;248m▕\x1b[m \x1b[38;5;242mq\x1b[m \x1b[38;5;248mquit\x1b[m                    \x1b[m\x1b[48;5;253m \x1b[m",
+			wantLines:  5,
+		},
+		{
+			name:       "project dark",
+			mode:       colorDark,
+			dark:       true,
+			width:      80,
+			innerWidth: 78,
+			rows:       projectsHelpRows(),
+			want:       "\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m↑↓\x1b[m \x1b[38;5;240mmove\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246m↵\x1b[m \x1b[38;5;240mopen\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mesc\x1b[m \x1b[38;5;240mback\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mr\x1b[m \x1b[38;5;240mrefresh\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mD\x1b[m \x1b[38;5;240mdaemons\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mF\x1b[m \x1b[38;5;240mfederation\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mC\x1b[m \x1b[38;5;240mcredentials\x1b[m  \x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m?\x1b[m \x1b[38;5;240mhelp\x1b[m \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mq\x1b[m \x1b[38;5;240mquit\x1b[m                                                               \x1b[m\x1b[48;5;234m \x1b[m",
+			wantLines:  2,
+		},
+		{
+			name:       "ragged light",
+			mode:       colorLight,
+			width:      14,
+			innerWidth: 12,
+			rows: [][]helplayout.HelpItem{{
+				{Key: "a", Description: "one"},
+				{Key: "b", Description: "two"},
+			}, {
+				{Key: "solo"},
+			}},
+			want:      "\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242ma\x1b[m \x1b[38;5;248mone\x1b[m\x1b[38;5;248m▕\x1b[m \x1b[38;5;242mb\x1b[m \x1b[38;5;248mtwo\x1b[m\x1b[m\x1b[48;5;253m \x1b[m\n\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242msolo\x1b[m        \x1b[m\x1b[48;5;253m \x1b[m",
+			wantLines: 2,
+		},
+		{
+			name:       "unicode dark",
+			mode:       colorDark,
+			dark:       true,
+			width:      18,
+			innerWidth: 16,
+			rows: [][]helplayout.HelpItem{{
+				{Key: "界", Description: "東"},
+				{Key: "🙂", Description: "ok"},
+			}},
+			want:      "\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m界\x1b[m \x1b[38;5;240m東\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246m🙂\x1b[m \x1b[38;5;240mok\x1b[m    \x1b[m\x1b[48;5;234m \x1b[m",
+			wantLines: 1,
+		},
+		{
+			name:       "exact outer 14",
+			mode:       colorLight,
+			width:      14,
+			innerWidth: 12,
+			rows: [][]helplayout.HelpItem{{
+				{Key: "a", Description: "one"},
+				{Key: "b", Description: "two"},
+			}},
+			want:      "\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242ma\x1b[m \x1b[38;5;248mone\x1b[m\x1b[38;5;248m▕\x1b[m \x1b[38;5;242mb\x1b[m \x1b[38;5;248mtwo\x1b[m\x1b[m\x1b[48;5;253m \x1b[m",
+			wantLines: 1,
+		},
+		{
+			name:       "reflow outer 13",
+			mode:       colorLight,
+			width:      13,
+			innerWidth: 11,
+			rows: [][]helplayout.HelpItem{{
+				{Key: "a", Description: "one"},
+				{Key: "b", Description: "two"},
+			}},
+			want:      "\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242ma\x1b[m \x1b[38;5;248mone\x1b[m      \x1b[m\x1b[48;5;253m \x1b[m\n\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242mb\x1b[m \x1b[38;5;248mtwo\x1b[m      \x1b[m\x1b[48;5;253m \x1b[m",
+			wantLines: 2,
+		},
+		{
+			name:       "narrow 8",
+			mode:       colorDark,
+			dark:       true,
+			width:      8,
+			innerWidth: 6,
+			rows: [][]helplayout.HelpItem{{
+				{Key: "↑↓", Description: "move"},
+				{Key: "↵", Description: "open"},
+				{Key: "space", Description: "expand"},
+			}},
+			want:      "\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m↑↓\x1b[m \x1b[38;5;240mmo…\x1b[m\x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m↵\x1b[m \x1b[38;5;240mope…\x1b[m\x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246mspace\x1b[m…\x1b[38;5;240m\x1b[m\x1b[m\x1b[48;5;234m \x1b[m",
+			wantLines: 3,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			applyColorMode(tt.mode, tt.dark)
+			if got := titleBarInnerWidth(tt.width); got != tt.innerWidth {
+				t.Fatalf("inner width = %d, want %d", got, tt.innerWidth)
+			}
+			got := renderFooterHelpTable(tt.rows, tt.width)
+			if got != tt.want {
+				t.Fatalf("footer output = %q, want %q", got, tt.want)
+			}
+			if got := strings.Count(got, "\n") + 1; got != tt.wantLines {
+				t.Fatalf("rendered lines = %d, want %d", got, tt.wantLines)
+			}
+			if got := helpLines(tt.rows, tt.width); got != tt.wantLines {
+				t.Fatalf("helpLines = %d, want %d", got, tt.wantLines)
+			}
+		})
+	}
+}
+
 func TestRenderHelpTable_ReflowsToFitWidth80(t *testing.T) {
-	rows := [][]helpItem{{
-		{key: "↑↓", desc: "move"},
-		{key: "↵", desc: "open"},
-		{key: "space", desc: "expand"},
-		{key: "N", desc: "child"},
-		{key: "/", desc: "search"},
-		{key: "f", desc: "filter"},
-		{key: "s", desc: "status"},
-		{key: "c", desc: "clear"},
-		{key: "x", desc: "close"},
-		{key: "?", desc: "help"},
-		{key: "q", desc: "quit"},
+	rows := [][]helplayout.HelpItem{{
+		{Key: "↑↓", Description: "move"},
+		{Key: "↵", Description: "open"},
+		{Key: "space", Description: "expand"},
+		{Key: "N", Description: "child"},
+		{Key: "/", Description: "search"},
+		{Key: "f", Description: "filter"},
+		{Key: "s", Description: "status"},
+		{Key: "c", Description: "clear"},
+		{Key: "x", Description: "close"},
+		{Key: "?", Description: "help"},
+		{Key: "q", Description: "quit"},
 	}}
-	got := stripANSI(renderHelpTable(rows, 80))
+	got := stripANSI(renderFooterHelpTable(rows, 80))
 	assertLinesFitWidth(t, got, 80)
 	assertStringContains(t, got, "▕")
 	assertStringContains(t, got, "space expand")
@@ -304,16 +446,19 @@ func TestRenderHelpTable_ReflowsToFitWidth80(t *testing.T) {
 }
 
 func TestReflowHelpRows_ExtremeNarrowFallsBackToOneItemPerRow(t *testing.T) {
-	rows := [][]helpItem{{
-		{key: "↑↓", desc: "move"},
-		{key: "↵", desc: "open"},
-		{key: "space", desc: "expand"},
+	rows := [][]helplayout.HelpItem{{
+		{Key: "↑↓", Description: "move"},
+		{Key: "↵", Description: "open"},
+		{Key: "space", Description: "expand"},
 	}}
-	got := reflowHelpRows(rows, 8)
-	for _, row := range got {
-		if len(row) > 1 {
-			t.Fatalf("narrow reflow should use one item per row, got %+v", got)
-		}
+	got := convertAndReflowHelpRows(rows, 8)
+	want := [][]helplayout.HelpItem{
+		{{Key: "↑↓", Description: "move"}},
+		{{Key: "↵", Description: "open"}},
+		{{Key: "space", Description: "expand"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("narrow reflow = %+v, want %+v", got, want)
 	}
 }
 
@@ -355,15 +500,15 @@ func hierarchyDetailModel(focus detailFocus) detailModel {
 	}
 }
 
-func flattenHelpRows(rows [][]helpItem) []helpItem {
-	out := []helpItem{}
+func flattenHelpRows(rows [][]helplayout.HelpItem) []helplayout.HelpItem {
+	out := []helplayout.HelpItem{}
 	for _, row := range rows {
 		out = append(out, row...)
 	}
 	return out
 }
 
-func assertHelpItemPresent(t *testing.T, rows []helpItem, want helpItem) {
+func assertHelpItemPresent(t *testing.T, rows []helplayout.HelpItem, want helplayout.HelpItem) {
 	t.Helper()
 	if slices.Contains(rows, want) {
 		return
@@ -371,7 +516,7 @@ func assertHelpItemPresent(t *testing.T, rows []helpItem, want helpItem) {
 	t.Fatalf("help rows missing %+v in %+v", want, rows)
 }
 
-func assertHelpItemsPresent(t *testing.T, rows [][]helpItem, wants ...helpItem) {
+func assertHelpItemsPresent(t *testing.T, rows [][]helplayout.HelpItem, wants ...helplayout.HelpItem) {
 	t.Helper()
 	flat := flattenHelpRows(rows)
 	for _, want := range wants {
@@ -379,7 +524,7 @@ func assertHelpItemsPresent(t *testing.T, rows [][]helpItem, wants ...helpItem) 
 	}
 }
 
-func assertHelpItemAbsent(t *testing.T, rows []helpItem, deny helpItem) {
+func assertHelpItemAbsent(t *testing.T, rows []helplayout.HelpItem, deny helplayout.HelpItem) {
 	t.Helper()
 	for _, row := range rows {
 		if row == deny {

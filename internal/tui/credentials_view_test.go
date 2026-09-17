@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/tui/helplayout"
 )
 
 func TestCredentialsViewCapabilityGateDoesNotFetchWhenUnavailable(t *testing.T) {
@@ -240,9 +241,9 @@ func TestCredentialsViewPublishesContextualFooterBindings(t *testing.T) {
 
 	items := flattenHelpRows(m.helpRows())
 
-	assert.Contains(t, items, helpItem{key: "r", desc: "refresh"})
-	assert.Contains(t, items, helpItem{key: "esc", desc: "back"})
-	assert.Contains(t, items, helpItem{key: "D", desc: "daemons"})
+	assert.Contains(t, items, helplayout.HelpItem{Key: "r", Description: "refresh"})
+	assert.Contains(t, items, helplayout.HelpItem{Key: "esc", Description: "back"})
+	assert.Contains(t, items, helplayout.HelpItem{Key: "D", Description: "daemons"})
 }
 
 func credentialIndexOf(t *testing.T, s, needle string) int {

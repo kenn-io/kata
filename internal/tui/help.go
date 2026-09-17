@@ -5,50 +5,53 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kit/tui/helplayout"
 )
 
 type helpSection struct {
 	title string
-	rows  []helpItem
+	rows  []helplayout.HelpItem
 }
 
 // helpSections returns bindings grouped by section in stable order.
 // TestHelpSections_AllBindingsCovered fails CI when a keymap entry is
 // missed here, so future binding additions must update this too.
 func helpSections(km keymap) []helpSection {
-	r := func(k key) helpItem { return helpItem{keyDisplay(k), k.Help} }
+	r := func(k key) helplayout.HelpItem {
+		return helplayout.HelpItem{Key: keyDisplay(k), Description: k.Help}
+	}
 	return []helpSection{
-		{"Global", []helpItem{r(km.Help), r(km.Quit), r(km.Projects), r(km.Daemons), r(km.Federation), r(km.Credentials), r(km.ToggleLayout)}},
-		{"Graph", []helpItem{
+		{"Global", []helplayout.HelpItem{r(km.Help), r(km.Quit), r(km.Projects), r(km.Daemons), r(km.Federation), r(km.Credentials), r(km.ToggleLayout)}},
+		{"Graph", []helplayout.HelpItem{
 			r(km.Up), r(km.Down), r(km.ScrollUp), r(km.ScrollDown),
 			r(km.PageUp), r(km.PageDown), r(km.Home),
 			r(km.End), r(km.Open), r(km.ExpandCollapse),
 			r(km.Expand), r(km.Collapse), r(km.ExpandAll), r(km.NewIssue),
 			r(km.ToggleIssueView), r(km.SortChildren), r(km.Close), r(km.Reopen),
 		}},
-		{"Detail", []helpItem{
+		{"Detail", []helplayout.HelpItem{
 			r(km.NextTab), r(km.PrevTab), r(km.JumpRef), r(km.Back),
 			r(km.EditBody), r(km.NewComment), r(km.SetParent),
 			r(km.AddBlocker), r(km.AddLink), r(km.AddLabel),
 			r(km.RemoveLabel), r(km.AssignOwner), r(km.ClearOwner),
 			r(km.SetPriority),
 		}},
-		{"Children", []helpItem{
+		{"Children", []helplayout.HelpItem{
 			r(km.NewChild),
-			{key: "j/k", desc: "move child cursor"},
-			{key: "↑↓", desc: "scroll detail viewport"},
-			{key: "enter", desc: "open child"},
+			{Key: "j/k", Description: "move child cursor"},
+			{Key: "↑↓", Description: "scroll detail viewport"},
+			{Key: "enter", Description: "open child"},
 		}},
-		{"Forms", []helpItem{
-			{key: "ctrl+o", desc: "save or apply"},
-			{key: "esc", desc: "cancel"},
-			{key: "tab/shift+tab", desc: "change field"},
-			{key: "ctrl+e", desc: "open editor"},
-			{key: "ctrl+u", desc: "clear prompt"},
+		{"Forms", []helplayout.HelpItem{
+			{Key: "ctrl+o", Description: "save or apply"},
+			{Key: "esc", Description: "cancel"},
+			{Key: "tab/shift+tab", Description: "change field"},
+			{Key: "ctrl+e", Description: "open editor"},
+			{Key: "ctrl+u", Description: "clear prompt"},
 		}},
-		{"Filters", []helpItem{
+		{"Filters", []helplayout.HelpItem{
 			r(km.Search), r(km.FilterStatus), r(km.FilterForm), r(km.ClearFilters),
-			{key: "ctrl+r", desc: "reset filter form"},
+			{Key: "ctrl+r", Description: "reset filter form"},
 		}},
 	}
 }
@@ -127,14 +130,14 @@ func renderHelpGroup(group []helpSection) string {
 		parts = append(parts, titleStyle.Render(s.title))
 		keyW := 0
 		for _, r := range s.rows {
-			if w := runewidth.StringWidth(r.key); w > keyW {
+			if w := runewidth.StringWidth(r.Key); w > keyW {
 				keyW = w
 			}
 		}
 		for _, r := range s.rows {
-			pad := strings.Repeat(" ", keyW-runewidth.StringWidth(r.key)+2)
-			parts = append(parts, helpKeyStyle.Render(r.key)+pad+
-				helpDescStyle.Render(r.desc))
+			pad := strings.Repeat(" ", keyW-runewidth.StringWidth(r.Key)+2)
+			parts = append(parts, helpKeyStyle.Render(r.Key)+pad+
+				helpDescStyle.Render(r.Description))
 		}
 	}
 	return strings.Join(parts, "\n")

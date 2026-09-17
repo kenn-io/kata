@@ -20,7 +20,7 @@ func TestHelpSections_AllBindingsCovered(t *testing.T) {
 	found := map[string]int{}
 	for _, s := range helpSections(km) {
 		for _, r := range s.rows {
-			found[r.key]++
+			found[r.Key]++
 		}
 	}
 	required := map[string]int{}

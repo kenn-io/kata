@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kit/tui/helplayout"
 )
 
 func TestFederationView_FKeyTransitionsFromList(t *testing.T) {
@@ -199,7 +200,7 @@ func TestFederationView_HelpAndFooterIncludeFederationBinding(t *testing.T) {
 	assert.Contains(t, help, "federation")
 
 	m := Model{list: listModel{issues: hierarchyIssues()}}
-	assertHelpItemPresent(t, flattenHelpRows(m.queueHelpRows()), helpItem{key: "F", desc: "federation"})
+	assertHelpItemPresent(t, flattenHelpRows(m.queueHelpRows()), helplayout.HelpItem{Key: "F", Description: "federation"})
 }
 
 func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemon(t *testing.T) {

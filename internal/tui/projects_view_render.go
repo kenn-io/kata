@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kit/tui/helplayout"
 )
 
 // renderProjects draws the projects-view body: a 5-column table
@@ -58,17 +59,17 @@ func projectsViewChromeRows(footerLines int) int {
 	return 7 + footerLines
 }
 
-func projectsHelpRows() [][]helpItem {
-	return [][]helpItem{{
-		{key: "↑↓", desc: "move"},
-		{key: "↵", desc: "open"},
-		{key: "esc", desc: "back"},
-		{key: "r", desc: "refresh"},
-		{key: "D", desc: "daemons"},
-		{key: "F", desc: "federation"},
-		{key: "C", desc: "credentials"},
-		{key: "?", desc: "help"},
-		{key: "q", desc: "quit"},
+func projectsHelpRows() [][]helplayout.HelpItem {
+	return [][]helplayout.HelpItem{{
+		{Key: "↑↓", Description: "move"},
+		{Key: "↵", Description: "open"},
+		{Key: "esc", Description: "back"},
+		{Key: "r", Description: "refresh"},
+		{Key: "D", Description: "daemons"},
+		{Key: "F", Description: "federation"},
+		{Key: "C", Description: "credentials"},
+		{Key: "?", Description: "help"},
+		{Key: "q", Description: "quit"},
 	}}
 }
 
