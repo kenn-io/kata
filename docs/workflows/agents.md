@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-15
+last_edited: 2026-09-17
 ---
 
 # Agent workflows
@@ -108,8 +108,9 @@ for the recipe.
 
 ## Teammate heads-up
 
-Several teammates can work on the same issue while leaving distinct comment
-attribution. A teammate can also create a separately tracked child issue:
+A teammate is a temporary participant working under an existing actor's
+identity. Several teammates can comment on the same issue while recording
+who contributed each comment. A teammate can also create a tracked child issue:
 
 ```sh
 export KATA_TEAMMATE=teammate-1
@@ -125,6 +126,11 @@ author. New issues store `metadata.teammate` in the creation transaction.
 `--teammate` overrides the environment default, and an explicit empty value
 suppresses it. A comment on an existing issue does not change that issue's
 creating teammate.
+
+Upgrade every participating daemon before relying on federation to preserve
+teammate attribution. A teammate handle records who contributed; it does not
+limit access. To give a worker access only to one issue and its descendants,
+use [issue-scoped credentials](../operations/remote-daemon.md#identity-tokens).
 
 Request the actor's attention or one teammate's attention without assigning
 the issue to them:

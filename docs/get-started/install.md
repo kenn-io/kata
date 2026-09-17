@@ -98,6 +98,29 @@ owning package manager. Packagers can read the complete
 remains supported, and building from a clone is still useful for development
 builds.
 
+## Upgrading to 0.18.0
+
+Upgrade the daemon as well as the CLI and MCP server. Kata 0.18.0 includes
+daemon API `0.21.0`; release and API versions are separate. Status-filtered
+search requires API `0.20.0`, and `kata list --sort oldest` requires `0.21.0`.
+See the [API version history](../reference/http-api.md#version-history).
+
+Upgrade all participating daemons before relying on federation to preserve
+teammate attribution. To use issue-scoped worker credentials, enable
+[token identity mode](../operations/remote-daemon.md#identity-tokens) on the
+authoritative daemon. Spoke replicas cannot create these credentials.
+
+When updating from a release before 0.18.0, run `kata daemon restart` with the
+original startup options after installing the new binary. The older updater
+does not restart the daemon automatically. For later updates, the new
+`kata update` can restart a running local daemon; follow any manual-restart
+instructions it reports. Reopen `kata ui` if the browser port changed.
+Package-managed installations still use their package manager to update the
+binary.
+
+For feature details, see the [0.18.0 release notes](../changelog.md#0180).
+If upgrading from before 0.17.0, also follow the guidance below.
+
 ## Upgrading to 0.17.0
 
 Upgrade the remote daemon alongside the CLI. Simple remote writes now select

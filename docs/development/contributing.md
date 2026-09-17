@@ -132,10 +132,55 @@ static files from `site/` with a real static host, CDN, or web server.
 
 ## Documentation standards
 
-Public docs should describe implemented behavior first. Technical notes under
-`docs/design/` cover deeper design rationale, trade-offs, and low-level
-constraints; keep them current as decisions change rather than letting stale
-design drafts accumulate.
+Write for the person trying to use or maintain Kata:
+
+- Lead with the outcome, name who does what, use short sentences, and explain
+  unfamiliar terms.
+- Organize around reader questions. Put purpose and current capabilities
+  first; separate limitations and future work. Use only the sections needed.
+- Give each bullet one main idea. Use numbered steps for sequences,
+  paragraphs for reasons, and tables or diagrams when they clarify a flow or
+  comparison.
+- State rules directly. Preserve exact commands, field names, authorization
+  checks, limits, and failure behavior when simplifying the wording.
+- Give each fact an owning guide or reference and link to it elsewhere.
+  Update that section instead of appending a history of the latest change.
+  Indexes should route readers to the details.
+- Describe current architecture separately from approved but unbuilt work,
+  proposals, and historical decisions. Preserve rationale, approvals, and
+  active exceptions with their removal conditions. Label superseded designs
+  and keep them outside normal navigation.
+- Keep the website, its Markdown companions, README, and documentation in
+  agreement. Distinguish the latest release from newer `main` functionality.
+
+Technical notes under `docs/design/` explain design decisions and constraints.
+Keep them current as decisions change.
+
+### Release notes
+
+Lead each entry with what the reader can do or what now works. Explain the
+problem before naming an internal component. For example, write "Read issue
+titles while editing in a narrow pane" instead of "Improve responsive editor
+layout."
+
+Check claims against the tagged source. Include required upgrade steps and
+link to the owning guide for setup and detailed rules. Release versions and
+daemon API versions are separate; preserve the exact compatibility requirement.
+Verify publication and downloads before describing a tag as the latest
+available release. Credit contributors using the commits and merged pull
+requests since the previous release.
+
+When simplifying an older changelog, preserve its release date, behavior at
+that version, limits, and contributor credits. Do not describe a later feature
+as part of the older release.
+
+### Pages and publication
+
+`docs/website/` owns the product website and its Markdown companions. Zensical
+renders the reference site from the Markdown pages listed in
+`docs/zensical.toml`. The build combines both into `docs/site/`: the website at
+`/`, the introductory guide at `/guide/`, and the documentation at `/docs/`.
+Keep `docs/llms.txt` links aligned with those public routes.
 
 When changing behavior:
 
@@ -144,6 +189,10 @@ When changing behavior:
 - update `docs/` for public user/operator behavior;
 - record durable design rationale in `docs/design/` when the "why" is not
   obvious from the code.
+
+Run the [documentation checks](#documentation-checks) before committing.
+Use the Makefile's publication commands and follow
+[Deploying docs](deploying-docs.md) when publishing.
 
 ### Page frontmatter
 

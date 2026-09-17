@@ -52,7 +52,15 @@ workers. Workers claim, comment, and close against the same ledger; the
 orchestrator follows `kata events --tail` and returns the moment a sub-task
 closes or needs a human. Session hooks keep attention truthful.
 
+Give workers distinct teammate handles to record their contributions under
+the coordinating actor. Use `kata notify` to request attention and `kata inbox`
+to read requests; clear each request after handling it. For a worker that
+should access only its assigned issue and descendants, create an expiring
+issue-scoped credential on a daemon in token identity mode.
+
 → [Agent orchestration](https://katatracker.com/docs/operations/agent-orchestration/)
+· [Teammate requests](https://katatracker.com/docs/workflows/agents/#teammate-heads-up)
+· [Worker credentials](https://katatracker.com/docs/operations/remote-daemon/#identity-tokens)
 
 ## 06 / Close only what you can prove
 

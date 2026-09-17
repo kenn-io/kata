@@ -78,6 +78,12 @@ calls per task. At 4ms each that costs half a second.
   hooks for Claude Code and Codex so the ledger knows which issues have an
   agent on them right now.
 
+In 0.18.0, teammates can request attention with `kata notify` and read requests
+with `kata inbox`. Coordinators can also give a worker an expiring credential
+limited to one issue and its descendants. See the
+[release notes](https://katatracker.com/docs/changelog/#0180) for setup links
+and upgrade requirements.
+
 ## 04 / Discipline: a close is a completion claim
 
 - **Evidence.** `kata close --done` takes `--commit`, `--test`, and typed

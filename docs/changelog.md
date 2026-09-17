@@ -1,14 +1,124 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-09-08
+last_edited: 2026-09-17
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
+## 0.18.0
+<small>2026-09-17</small>
+
+Kata 0.18.0 helps you hand work to teammates, request their attention, and
+limit a worker's access to one issue and its children. You can also find work
+by status or age and receive inbox requests when planning dates arrive.
+
+[Release downloads](https://github.com/kenn-io/kata/releases/tag/v0.18.0)
+· [Changes since 0.17.2](https://github.com/kenn-io/kata/compare/v0.17.2...v0.18.0)
+
+**Before upgrading**
+
+- Upgrade every participating daemon before relying on federation to preserve
+  teammate attribution. See [teammate workflows](workflows/agents.md#teammate-heads-up).
+- Upgrade remote daemons alongside the CLI and MCP server. Status-filtered
+  search requires daemon API `0.20.0`; oldest-first lists require `0.21.0`.
+  Kata 0.18.0 includes API `0.21.0`. Release and API versions are separate;
+  see the [HTTP API version history](reference/http-api.md#version-history).
+- Issue-scoped credentials require
+  [token identity mode](operations/remote-daemon.md#identity-tokens) and must
+  be created on the authoritative daemon, not a spoke replica.
+
+**New features**
+
+- Request attention with `kata notify <ref> --to <recipient> --message <reason>`
+  and read requests with `kata inbox --for <recipient>`. Clear a request after
+  handling it. Closing an issue hides its requests; reopening restores any
+  that were not cleared. See [Teammate requests](reference/cli.md#teammate-requests).
+- Attribute new issues, comments, and attention requests to a teammate: a
+  temporary participant working under an existing actor's identity. Set
+  `KATA_TEAMMATE` or pass `--teammate`, and address a request to
+  `actor/teammate`. The accountable actor and issue owner stay separate from
+  teammate attribution. See [Agent workflows](workflows/agents.md#teammate-heads-up).
+- Delegate one issue and its current descendants in the same project with an
+  expiring credential through the [CLI](reference/cli.md#remote-and-identity-tokens) or
+  [MCP](reference/mcp.md#events-tokens-and-federation). Workers can read and
+  complete that work and create children under an accessible parent. They
+  cannot access unrelated issues or create more credentials.
+- Inspect credential scope, expiry, revocation, and last observed use in the
+  TUI and the web app's [Credentials view](guide/web-ui.md#audit-provisioned-credentials).
+  Recorded use is best-effort, not a complete access log.
+- Find open teammate work grouped by author and teammate in the web app's
+  [Delegated view](guide/web-ui.md#navigate-projects-and-collections).
+- Receive an inbox request when a schedule or deadline is reached. Kata
+  addresses the owner, or the author if the issue has no owner. Existing
+  requests remain in place until cleared, and acknowledged notices do not
+  repeat for the same date and recipient. See
+  [Planning dates](reference/metadata.md#reserved-keys-vs-opaque-pass-through).
+- Search only open or closed issues with `kata search --status open` or
+  `--status closed`. HTTP and MCP searches accept the same filter. Omitting
+  it searches both statuses. See [Search](guide/semantic-search.md).
+- List the oldest matching issues first with `kata list --sort oldest`,
+  including across projects with `--all`. Sorting happens before `--limit`;
+  human output uses a flat list to preserve that order. See the
+  [CLI reference](reference/cli.md#issue-lifecycle).
+- Connect federated projects using an operator-supplied credential helper
+  instead of copying tokens manually. Choose read-only replication,
+  collaboration, or explicit migration. Status shows approval and any supplied
+  expiry. See [External credential providers](operations/federation.md#external-credential-providers).
+- Discover running HTTP MCP listeners with `kata mcp status --json`, including
+  ports, backend targets, and token-file paths. Use `kata mcp serve --runtime-dir`
+  to select an already running local daemon. See
+  [MCP listener discovery](reference/mcp.md#discover-running-http-listeners).
+
+**Improvements**
+
+- Open issues using browser links in show, list, ready, and search results.
+  CLI JSON exposes `web_url`, and MCP issue summaries include links. Daemons
+  without a browser UI omit them. See [Web UI](guide/web-ui.md#open-the-application).
+- Find the existing issue when creation is refused because of a conflict.
+  CLI JSON includes the error details, and agent output includes matching
+  issue references.
+- Quit the TUI without confirmation by setting `confirm_quit = false` under
+  `[tui]`. Confirmation remains enabled by default. See
+  [TUI preferences](reference/configuration.md#tui-preferences).
+
+**Bug fixes**
+
+- Keep the local daemon and web UI current after `kata update`. After replacing
+  the binary, the updater asks a running daemon to restart with its existing
+  settings. A stopped daemon stays stopped. Older daemons require a manual
+  `kata daemon restart`; see [upgrade instructions](get-started/install.md#upgrading-to-0180).
+- Use Kata's MCP tools with the Anthropic Messages API without tool-schema
+  rejection. Tool inputs no longer use unsupported top-level `oneOf` or
+  `allOf` combinations.
+- Read issue titles while editing in a narrow web pane. Below 640 pixels,
+  the editor places the title above its actions.
+- Follow destructive-command confirmation help without a rejected value.
+  The help now shows the required project-qualified issue ID.
+- Avoid connector readiness failures caused by temporary Windows file-sharing
+  violations. Kata retries those reads.
+
+**Acknowledgements**
+
+- Thanks to [Rusty Shackleford](https://github.com/salmonumbrella) for teammate
+  attribution and inbox requests, issue-scoped credentials, the Delegated
+  view, planning-date notifications, search status filters, and documentation.
+- Thanks to [Rod Boev](https://github.com/rodboev) for oldest-first lists, the
+  TUI quit setting and layout work, the Delegated view JSON fix, and Windows
+  and test reliability improvements.
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for browser
+  links, MCP listener discovery, clearer create-conflict errors, and API
+  client improvements.
+- Thanks to [Ruaridh Williamson](https://github.com/ruaridhw) for readable
+  issue titles in narrow panes and corrected destructive-command help.
+- Thanks to [Henry Burden](https://github.com/hsb3) for MCP tool schemas that
+  work with the Anthropic Messages API.
+- Thanks to [Wes McKinney](https://github.com/wesm) for federation credential
+  helpers, daemon restart after updates, and release documentation.
+
 ## 0.17.2
-<small>Unreleased</small>
+<small>2026-09-08</small>
 
 **Bug fixes**
 
@@ -29,15 +139,17 @@ This release contains the same application code as 0.17.0. It repairs release
 packaging and includes the finalized 0.17.0 documentation.
 
 ## 0.17.0
+<small>2026-09-08</small>
 
-kata 0.17.0 helps agents coordinate ownership and retry closes after a lost
-response. CLI commands start faster, simple remote writes need fewer requests,
-and embedding hosts can serve the browser application below a URL path.
+Kata 0.17.0 helps agents claim work and retry a close when they did not receive
+its response. CLI commands start faster, simple remote writes need fewer
+requests, and applications that embed Kata can serve its browser UI below a
+URL path.
 
 **Before upgrading**
 
-- Upgrade remote daemons alongside the CLI. Older daemons reject the project
-  selectors used by the faster remote writes.
+- Upgrade remote daemons alongside the CLI. The faster remote writes send
+  project names in the write request; older daemons reject that form.
 - Update custom API clients for empty collections (`[]` and `{}`),
   case-sensitive request field names, and rejection of `null` arrays. See the
   [HTTP API contract](reference/http-api.md#version-history).
@@ -58,7 +170,8 @@ and embedding hosts can serve the browser application below a URL path.
   `kata unassign --expect-owner <owner>` to remove an assignment only if the
   owner still matches. See [Claim work](workflows/agents.md#claim-work).
 - Retry an issue close after a lost response with `kata close --idempotency-key`.
-  Reusing the key for the same request returns the original result and avoids
+  The key identifies a request so Kata can recognize a retry. Reusing it for
+  the same request returns the original result and avoids
   duplicate follow-up comments. Add `--if-match` to reject the close if the
   issue has changed. See [Close only when verified](workflows/agents.md#close-only-when-verified).
 - Mount the browser application below a URL path when
@@ -102,8 +215,8 @@ and embedding hosts can serve the browser application below a URL path.
   retain their existing behavior.
 - Avoid delaying unrelated PostgreSQL writes by skipping unchanged comments
   during federation rebuilds.
-- Recognize uncertain issue creation results after timeouts, cancellations,
-  dropped connections, or truncated responses as `create_outcome_unknown`.
+- Report `create_outcome_unknown` when a timeout, cancellation, dropped
+  connection, or incomplete response leaves issue creation uncertain.
   Check whether the issue exists before retrying, and use `--force-new` only
   after confirming that no issue was created.
 - Limit similar-issue checks to the first 500 Unicode code points of the title
@@ -114,67 +227,65 @@ and embedding hosts can serve the browser application below a URL path.
 ## 0.16.0
 <small>2026-08-27</small>
 
-kata 0.16.0 connects issues to work that lives outside kata: external root
-bridges backed by a public connector protocol, close evidence for work
-finished outside any repository, and per-project merge imports. Auto-started
-daemons can now shut themselves down when idle.
+Kata 0.16.0 connects issues to work in external systems. You can also record
+completion evidence for work done outside a repository, import one project
+without replacing the database, and let auto-started daemons stop when idle.
 
 **New features**
 
-- Added external root bridges. A connector process configured through
-  `[[connector]]` in `<KATA_HOME>/config.toml` binds a kata issue to one root
-  object in an external system. The `kata connector` and `kata bridge`
-  commands and the MCP `kata.load_external_roots` tools cover discovery, field
-  mapping, and the bind, pause, resume, reconcile, and unbind lifecycle. The
-  external root owns the bound title and body; inbound comments and lifecycle
-  sync are on by default, and outbound comments are opt-in per binding.
-- Published the versioned `kata.connector.v1` connector protocol with a public
-  Go SDK and a language-neutral conformance kit, so provider credentials and
-  APIs stay inside the connector executable.
-- Added `external:<account>` close evidence for `done` work finished by email,
-  phone, or another channel that produces no repository artifact. The weaker
-  claim stays visible in `kata audit closes`, and a supplied-but-disallowed
-  evidence type is now reported instead of the missing-evidence error.
-- Added `kata import --merge`, which restores a one-project JSONL snapshot
-  into an existing SQLite or PostgreSQL database without touching other
-  projects. Merge imports preserve project and issue UIDs, refuse UID
-  collisions, skip cross-project links, and keep imported federation
-  authority disabled.
-- Added opt-in idle shutdown for implicitly started owner-local daemons. Active
-  requests and finite background work drain safely, while running stdio or
-  streamable-HTTP MCP server processes renew the advertised timeout
-  automatically. The daemon logs the idle exit, and `kata daemon start`
-  replaces an idle-eligible auto-started daemon with an explicit resident one.
+- Link a Kata issue to a top-level item in an external system through an
+  [external root bridge](reference/cli.md#external-root-bridges). Configure a
+  connector with `[[connector]]` in `<KATA_HOME>/config.toml`, then use
+  `kata connector`, `kata bridge`, or the MCP `kata.load_external_roots` tools
+  to find items, map fields, and bind, pause, resume, reconcile, or unbind them.
+  The external item controls the linked title and body. Incoming comments and
+  lifecycle changes sync by default; sending comments back requires opt-in
+  for each binding.
+- Build connectors with the versioned `kata.connector.v1` protocol, public Go
+  SDK, and conformance checks usable from any language. Each connector keeps
+  the external service's credentials and API calls inside its own process.
+- Record `external:<account>` evidence when closing `done` work completed by
+  email, phone, or another channel with no repository artifact. The audit
+  keeps this weaker form of evidence visible. If an evidence type is supplied
+  but disallowed, Kata reports that reason instead of saying evidence is missing.
+- Import one project's JSONL snapshot into an existing SQLite or PostgreSQL
+  database with `kata import --merge`. Other projects stay unchanged. The
+  import preserves project and issue UIDs, refuses UID collisions, skips
+  cross-project links, and leaves imported federation authority disabled.
+- Let a local daemon that Kata started automatically stop when idle. This is
+  opt-in. The daemon waits for active requests and finite background work;
+  running stdio and HTTP MCP servers keep it alive automatically. Kata logs
+  the idle exit. An explicit `kata daemon start` replaces an auto-started
+  daemon eligible for idle shutdown with one that stays running.
 
 **Improvements**
 
-- Capped embedding provider requests by an aggregate token budget through the
-  optional `model_context_tokens` and `max_batch_tokens` settings. Deployments
-  that omit them keep count-only batching.
-- Validated plaintext daemon targets when the client is built: a non-loopback
-  plaintext target without the required private-network trust or
-  `allow_insecure` opt-in now fails before any request is sent.
-- Resolved `kata wait` target state and CLI output mode once per command, so
-  error reporting uses the same output mode as normal execution.
-- Let JSON storage and API types define their own OpenAPI shapes, and mirrored
-  deprecated federation `claim` fields from the canonical `lease` fields at
-  one response boundary. Committed schemas and generated clients are
-  unchanged.
-- Moved the remaining web actions onto shared Kit UI buttons and theme state
-  so disabled controls keep readable contrast in dark mode.
-- Made daemon stop drain accepted hook jobs instead of dropping them, and
-  cancel in-flight hooks early enough to exit cleanly inside the 25-second
-  shutdown budget. `kata daemon restart` waits up to 30 seconds for the old
-  process to exit.
+- Limit the total tokens sent to an embedding provider with the optional
+  `model_context_tokens` and `max_batch_tokens` settings. Without them, Kata
+  continues to batch by item count alone.
+- Reject untrusted plaintext daemon targets before sending a request. An HTTP
+  target outside loopback requires private-network trust or an
+  `allow_insecure` opt-in.
+- Keep `kata wait` error output in the selected CLI format. Kata resolves the
+  target and output mode once per command.
+- Simplify how API schemas and deprecated federation `claim` fields are
+  produced. JSON types define their own OpenAPI shapes, and `claim` values
+  come from the corresponding `lease` fields. Published schemas and generated
+  clients are unchanged.
+- Read disabled web controls more easily in dark mode. The remaining actions
+  use shared Kit buttons and theme settings.
+- Finish accepted hook jobs during daemon shutdown instead of dropping them.
+  Kata cancels running hooks in time to meet the 25-second shutdown limit.
+  `kata daemon restart` waits up to 30 seconds for the old process to exit.
 
 **Bug fixes**
 
-- Restored owner-local loopback sessions for local `kata ui` tabs when the
-  daemon has a static API token, instead of falling into token login, and
-  omitted bodies from GET and HEAD responses so Firefox loads the initial
-  snapshot.
-- Kept the task list primary at narrow widths: the sidebar moves into a drawer
-  below 700px and filter controls wrap to the list pane width.
+- Open local `kata ui` tabs without a token login when the daemon has a static
+  API token. Direct loopback sessions use the existing local browser authority.
+- Load the initial web snapshot in Firefox. The browser's daemon gateway no
+  longer adds a body to GET and HEAD requests.
+- Keep the task list usable in narrow windows. Below 700 pixels, the sidebar
+  moves into a drawer, and filters wrap to fit the list pane.
 
 **Acknowledgements**
 
@@ -193,31 +304,32 @@ daemons can now shut themselves down when idle.
 ## 0.15.1
 <small>2026-08-20</small>
 
-kata 0.15.1 is a bugfix release that tightens daemon and remote TUI behavior,
-while adding Streamable HTTP access for MCP clients and clearer daemon
-discovery and autostart diagnostics.
+Kata 0.15.1 lets MCP clients connect over HTTP, reports which daemon a client
+will use, and gives clearer errors when a local daemon cannot start. Remote
+TUI users must supply the same close evidence as other remote clients.
 
 **New features**
 
-- Added Streamable HTTP transport for MCP clients. The listener requires an
-  environment-sourced bearer token and keeps the existing project scope,
-  actor, daemon authorization, and tool safeguards.
+- Connect MCP clients over Streamable HTTP, the MCP protocol's HTTP transport.
+  The listener requires a bearer token read from an environment variable.
+  Existing project scope, actor attribution, daemon authorization, and tool
+  rules still apply.
 
 **Improvements**
 
-- Added a supported `kata daemon locate` interface that reports the selected
-  daemon's locality, transport, scheme, and request base URL without exposing
-  credentials.
-- Made CLI errors identify runtime-store permission failures before daemon
-  autostart and explain when a restricted environment might be responsible.
+- Discover the selected daemon with `kata daemon locate`. It reports whether
+  the daemon is local or remote, its transport, URL scheme, and request base
+  URL without exposing credentials.
+- Explain permission failures in the daemon's runtime directory before trying
+  to start it, including when a restricted environment may be the reason.
 
 **Bug fixes**
 
-- Limited the TUI close-policy exception to owner-local Unix sockets and
-  direct, unforwarded loopback connections. Remote TUI clients must now meet
-  the daemon's normal close message and evidence safeguards.
-- Delegated runtime-store writability checks to kit's shared validation so
-  symlink, ownership, and private-directory failures are detected consistently.
+- Apply normal close-message and evidence requirements to remote TUI clients.
+  The TUI exception applies only to the owner's local Unix socket and direct
+  loopback connections without forwarding.
+- Check daemon runtime-directory permissions consistently through Kit's shared
+  validation, including symlink, ownership, and private-directory failures.
 
 **Acknowledgements**
 
@@ -232,45 +344,44 @@ discovery and autostart diagnostics.
 ## 0.15.0
 <small>2026-08-16</small>
 
-kata 0.15.0 expands the native Model Context Protocol (MCP) server into a
-full agent-facing workflow, adds first-class planning dates and dynamic agent
-guidance, and makes local daemon and browser integrations easier to diagnose
-and embed safely.
+Kata 0.15.0 lets agents manage more of their work through Model Context
+Protocol (MCP) tools. It adds scheduling, deadlines, and agent guidance that
+refreshes during a session, plus clearer errors for local daemon connections.
 
 **New features**
 
-- Expanded the native MCP server from the original project-bound issue tools
-  to scoped issue, project, activity, recurrence, federation, synchronization,
-  import, token, and storage workflows. Thirteen section loaders can
-  progressively expose up to 55 typed tools without placing the full catalog
-  in an agent's initial context.
-- Added paired `kata schedule` / `kata deadline` commands and
-  `kata.set_schedule` / `kata.set_deadline` MCP tools for first-class planning
-  dates. A future schedule parks work; a deadline does not.
-- Added `kata quickstart --format contract` as a marker-free, non-mutating
-  agent briefing generated from the same canonical text as
-  `kata init --with-agents`. `kata init --with-codex-hooks` now injects that
-  contract on startup, resume, clear, and compaction.
-- Added the conventional `kata --version` root flag with the same human, JSON,
+- Manage issues, projects, activity, recurrences, federation, synchronization,
+  imports, tokens, and storage through MCP. Thirteen section loaders make up
+  to 55 typed tools available as needed, so an agent does not have to load the
+  entire catalog at startup. Tools remain limited to the server's project scope.
+- Set planning dates with `kata schedule` and `kata deadline`, or the
+  `kata.set_schedule` and `kata.set_deadline` MCP tools. A future schedule
+  keeps an issue out of ready work until that date; a deadline does not.
+- Read the agent briefing with `kata quickstart --format contract`. It prints
+  the same instructions as `kata init --with-agents`, without file markers
+  or file changes. `kata init --with-codex-hooks` supplies those instructions
+  on session startup, resume, clear, and compaction.
+- Check the version with `kata --version`. It supports the same human, JSON,
   and agent output as `kata version`.
 
 **Improvements**
 
-- Allowed an embedded owner-local browser to omit or send an empty `Origin`
-  only when minting a direct-loopback local Web UI session. Exact Host,
-  loopback, forwarding-header, and cross-site Fetch Metadata checks remain in
-  force.
-- Allowed legacy bindings that predate binding-level `allow_insecure`
-  persistence, with the opt-in retained only in the same-endpoint credential,
-  to rebind to their validated HTTPS endpoint.
-- Removed durability flushes from both SQLite stores when the test-only
-  `KATA_TEST_FAST_SQLITE` mode is enabled. Production durability is unchanged.
+- Allow an embedded local browser to create a direct-loopback web session
+  when `Origin` is missing or empty. This exception applies only to session
+  creation. Exact Host, loopback, forwarding-header, and cross-site Fetch
+  Metadata checks still apply.
+- Move older federation bindings to their validated HTTPS endpoint when their
+  `allow_insecure` opt-in was saved only with the same-endpoint credential.
+  These bindings predate storing that setting on the binding itself.
+- Speed up tests by skipping durability flushes in both SQLite stores when
+  the test-only `KATA_TEST_FAST_SQLITE` mode is enabled. Production durability
+  is unchanged.
 
 **Bug fixes**
 
-- Reported the recorded PID, endpoint, and underlying connection failure when
-  a live local daemon cannot be reached, instead of treating it as stopped and
-  attempting to start another daemon.
+- Report the recorded process ID, endpoint, and connection error when a
+  running local daemon cannot be reached. Kata no longer treats it as stopped
+  and tries to start another daemon.
 
 **Acknowledgements**
 

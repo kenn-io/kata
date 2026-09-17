@@ -110,11 +110,16 @@ response of an older daemon that predates it. Treat an **absent or empty**
 Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
-Kata release 0.17.0 includes API contract changes `0.15.0` through `0.17.0`
-below. API contract versions advance independently of release versions. When
-upgrading a custom client, send array fields as `[]` (or omit optional fields),
-use the exact request field names, and accept empty response collections as
-`[]` or `{}`.
+API contract versions advance independently of Kata release versions.
+Kata 0.18.0 includes API `0.21.0`, adding the changes from `0.18.0` through
+`0.21.0` below. Teammate comments require API `0.18.0`, issue-scoped
+credentials use `0.19.0`, status-filtered search requires `0.20.0`, and
+oldest-first lists require `0.21.0`.
+
+Kata 0.17.0 included API changes `0.15.0` through `0.17.0`. Custom clients
+upgrading from earlier releases must send array fields as `[]` (or omit
+optional fields), use the exact request field names, and accept empty response
+collections as `[]` or `{}`.
 
 ### Version history
 

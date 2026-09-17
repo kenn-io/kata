@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-09-15
+last_edited: 2026-09-17
 ---
 
 # Configuration
@@ -188,6 +188,20 @@ do not break daemon startup. A TOML syntax error anywhere in `config.toml` still
 prevents common config parsing. kata validates this client section only when
 `show --render` is active on a terminal, so display-only semantic mistakes do
 not break plain output or redirected output.
+
+## TUI preferences
+
+Configure the terminal UI in `<KATA_HOME>/config.toml`:
+
+```toml
+[tui]
+confirm_quit = false
+```
+
+With `confirm_quit = false`, pressing `q` quits immediately when no input or
+dialog is open. Omit the setting or set it to `true` to keep the default quit
+confirmation. `Ctrl+C` remains an immediate quit shortcut in those views.
+This is a client preference; it does not change the daemon or other clients.
 
 ## Daemon config
 

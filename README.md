@@ -25,6 +25,11 @@ Zensical at <https://katatracker.com/>.
 > **Stable:** Since v0.14.0, kata releases preserve backward compatibility
 > across upgrades.
 
+The latest release is [0.18.0](docs/changelog.md#0180). It adds teammate
+attention requests, issue-scoped worker credentials, and more ways to find
+work. See the [upgrade guidance](docs/get-started/install.md#upgrading-to-0180)
+when updating remote or federated daemons.
+
 ## Install
 
 macOS:

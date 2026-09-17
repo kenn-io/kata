@@ -1,8 +1,7 @@
 ---
-last_edited: 2026-09-15
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-09-15
+last_edited: 2026-09-17
 ---
 
 # Web UI
@@ -33,6 +32,10 @@ project UIDs in the URL so the bookmark survives project renames and issue
 state changes. `kata daemon status` prints the same browser origin. See the
 [CLI reference](../reference/cli.md#web-ui) for route and launch details.
 
+Show, list, ready, and search results also include browser links when the
+daemon serves a web UI. CLI JSON exposes `web_url`, and MCP includes the link
+in issue summaries. Daemons without a browser UI omit it.
+
 Release binaries contain the browser assets. A binary installed with
 `go install` does not, because that path does not run the browser build; use a
 [release or `make install`](../get-started/install.md) when you need `kata ui`.
@@ -48,7 +51,9 @@ the standalone `kata ui` command keeps its existing route.
 The sidebar combines system collections with individual projects:
 
 - **Inbox** shows the designated inbox project. If none exists, the first new
-  task asks you to choose one.
+  task asks you to choose one. This is separate from `kata inbox`, which reads
+  [attention requests](../reference/cli.md#teammate-requests) for an actor or
+  teammate.
 - **Today**, **Upcoming**, and **Deadlines** organize scheduled work.
 - **Delegated** groups open teammate work by its `author/teammate` attribution.
 - **All Open** and **Logbook** remain available as bookmarkable views for
@@ -82,6 +87,9 @@ returns to the read-only view. The editor also supports:
   blocking, blocked-by, and related links;
 - completing, reopening, moving, and deleting issues; and
 - creating, editing, or deleting the issue's recurrence.
+
+When the editor pane is narrower than 640 pixels, the title appears above the
+actions so it remains readable.
 
 Mutations use the same daemon validation, actor attribution, revision checks,
 events, and hooks as the CLI. Controls are disabled while authority is stale,

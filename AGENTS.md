@@ -51,6 +51,10 @@
 
 - Follow the [page frontmatter policy](docs/development/contributing.md#page-frontmatter)
   when creating or editing guide, operations, and reference pages.
+- Apply the [documentation standards](docs/development/contributing.md#documentation-standards)
+  to release notes as well as guides. Lead each changelog entry with what the
+  reader can do or what now works; preserve version requirements, limits,
+  upgrade steps, and contributor credits when rewriting older entries.
 - Write for the person trying to use or maintain Kata. Lead with the outcome,
   name who does what, use short sentences, and explain unfamiliar terms.
 - Organize around reader questions. Put purpose and current capabilities first;
