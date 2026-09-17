@@ -271,7 +271,8 @@ type ProxyConfig struct {
 type TUIConfig struct {
 	// Mouse enables Bubble Tea mouse cell-motion capture and additive
 	// click/wheel navigation. Default false preserves native selection.
-	Mouse bool `toml:"mouse"`
+	Mouse       bool  `toml:"mouse"`
+	ConfirmQuit *bool `toml:"confirm_quit"`
 }
 
 // DisplayConfig holds client-only display preferences from <KATA_HOME>/config.toml.

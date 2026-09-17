@@ -1982,8 +1982,8 @@ func (m Model) requestInputCancel() (Model, tea.Cmd) {
 // viewEmpty honors quit/ctrl+c and the daemon picker so a user can
 // recover from an empty daemon by switching to another configured one.
 //
-// `q` opens the quit-confirm modal (msgvault pattern); `ctrl+c`
-// remains the immediate-quit escape hatch for power users.
+// `q` opens the quit-confirm modal by default; `ctrl+c` remains the
+// immediate-quit escape hatch for power users.
 //
 // M6: layout-aware focus moves (tab/enter from focusList →
 // focusDetail; esc from focusDetail → focusList) are checked AFTER
@@ -1998,6 +1998,9 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, tea.Quit, true
 	}
 	if m.keymap.Quit.matches(msg) {
+		if m.opts.SkipQuitConfirm {
+			return m, tea.Quit, true
+		}
 		m.modal = modalQuitConfirm
 		return m, nil, true
 	}

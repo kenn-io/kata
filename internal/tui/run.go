@@ -89,6 +89,7 @@ type Options struct {
 	DisplayUIDFormat string    // none, short, or full
 	DaemonName       string    // named daemon catalog entry for this run
 	Mouse            bool      // opt-in mouse capture and mouse-driven navigation
+	SkipQuitConfirm  bool      // q quits immediately instead of opening the confirm modal
 	InitialIssueRef  string    // optional issue ref to open directly
 	ProjectName      string    // optional explicit project selector
 	Workspace        string    // optional workspace path for project and daemon resolution
