@@ -7,7 +7,9 @@ import type { Issue } from './issue.ts'
 export interface ClaimResponseBody {
   changed: boolean
   event?: Event
+  events: Event[]
   issue: Issue
   previous_owner?: string
+  replay_events?: Event[]
   [key: string]: unknown
 }

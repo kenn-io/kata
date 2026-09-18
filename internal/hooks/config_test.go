@@ -419,6 +419,21 @@ func TestMatch_LinksChangedRecognized(t *testing.T) {
 	}
 }
 
+func TestMatch_AssignmentLifecycleRecognized(t *testing.T) {
+	for _, eventType := range []string{"issue.assignment_renewed", "issue.assignment_expired"} {
+		t.Run(eventType, func(t *testing.T) {
+			_, exact, err := compileEventMatcher(eventType)
+			if err != nil || !exact(eventType) {
+				t.Fatalf("explicit matcher: match=%v err=%v", exact != nil && exact(eventType), err)
+			}
+			_, issueStar, err := compileEventMatcher("issue.*")
+			if err != nil || !issueStar(eventType) {
+				t.Fatalf("issue.* matcher: match=%v err=%v", issueStar != nil && issueStar(eventType), err)
+			}
+		})
+	}
+}
+
 // TestMatch_IssueMetadataUpdatedRecognized pins that issue.metadata_updated
 // (added alongside per-issue metadata support) is in knownEventTypes — both
 // the explicit form and the issue.* / * wildcard matchers must accept it.

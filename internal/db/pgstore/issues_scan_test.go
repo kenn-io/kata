@@ -73,18 +73,19 @@ func assertUnsupported(index int) error {
 
 func TestIssueDestinationsMapsSelectPositionsToFields(t *testing.T) {
 	var issue db.Issue
-	var closedAt, deletedAt storedNullTime
-	dest := issueDestinations(&issue, &closedAt, &deletedAt)
-	require.Len(t, dest, 20, "issueSelect projects twenty columns")
+	var assignmentExpiresOn, closedAt, deletedAt storedNullTime
+	dest := issueDestinations(&issue, &assignmentExpiresOn, &closedAt, &deletedAt)
+	require.Len(t, dest, 21, "issueSelect projects twenty-one columns")
 
 	row := fakeIssueRow{columns: []any{
 		int64(701), "issue-uid-2", int64(703), "project-uid-4", "short-5",
 		"title-6", "body-7", "closed", "completed", "owner-10",
-		int64(711), "author-12", `{"column":13}`, int64(714), int64(715),
-		"occurrence-16", "2026-05-23T12:00:00.000Z", "2026-05-23T13:01:00.000Z",
+		"2026-05-23T12:30:00.000Z", int64(712), "author-13", `{"column":14}`, int64(715), int64(716),
+		"occurrence-17", "2026-05-23T12:00:00.000Z", "2026-05-23T13:01:00.000Z",
 		"2026-05-24T14:02:00.000Z", "2026-05-25T15:03:00.000Z",
 	}}
 	require.NoError(t, row.Scan(dest...))
+	issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 	issue.ClosedAt = closedAt.Time
 	issue.DeletedAt = deletedAt.Time
 
@@ -100,15 +101,17 @@ func TestIssueDestinationsMapsSelectPositionsToFields(t *testing.T) {
 	assert.Equal(t, "completed", *issue.ClosedReason)
 	require.NotNil(t, issue.Owner)
 	assert.Equal(t, "owner-10", *issue.Owner)
+	require.NotNil(t, issue.AssignmentExpiresOn)
+	assert.Equal(t, time.Date(2026, 5, 23, 12, 30, 0, 0, time.UTC), *issue.AssignmentExpiresOn)
 	require.NotNil(t, issue.Priority)
-	assert.Equal(t, int64(711), *issue.Priority)
-	assert.Equal(t, "author-12", issue.Author)
-	assert.Equal(t, db.JSONBlob(`{"column":13}`), issue.Metadata)
-	assert.Equal(t, int64(714), issue.Revision)
+	assert.Equal(t, int64(712), *issue.Priority)
+	assert.Equal(t, "author-13", issue.Author)
+	assert.Equal(t, db.JSONBlob(`{"column":14}`), issue.Metadata)
+	assert.Equal(t, int64(715), issue.Revision)
 	require.NotNil(t, issue.RecurrenceID)
-	assert.Equal(t, int64(715), *issue.RecurrenceID)
+	assert.Equal(t, int64(716), *issue.RecurrenceID)
 	require.NotNil(t, issue.OccurrenceKey)
-	assert.Equal(t, "occurrence-16", *issue.OccurrenceKey)
+	assert.Equal(t, "occurrence-17", *issue.OccurrenceKey)
 	assert.True(t, issue.CreatedAt.Equal(time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)))
 	assert.True(t, issue.UpdatedAt.Equal(time.Date(2026, 5, 23, 13, 1, 0, 0, time.UTC)))
 	require.NotNil(t, issue.ClosedAt)

@@ -56,6 +56,7 @@ function renderProperties(
     draftFenceGeneration: number
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
     onAssignOwner: (uid: string, owner: string) => boolean | Promise<boolean>
+    onClaimAssignment: (uid: string, ttlSeconds: number) => boolean | Promise<boolean>
     onUnassignOwner: (uid: string) => boolean | Promise<boolean>
     onSetPriority: (uid: string, priority: number | null) => boolean | Promise<boolean>
     onAddLabel: (uid: string, label: string) => boolean | Promise<boolean>
@@ -71,6 +72,7 @@ function renderProperties(
       ownerOptions,
       onPatchMetadata: vi.fn(async () => true),
       onAssignOwner: vi.fn(async () => true),
+      onClaimAssignment: vi.fn(async () => true),
       onUnassignOwner: vi.fn(async () => true),
       onSetPriority: vi.fn(async () => true),
       onAddLabel: vi.fn(async () => true),
@@ -338,6 +340,26 @@ describe('IssueProperties', () => {
     await fireEvent.mouseDown(screen.getByRole('option', { name: 'Unassigned' }))
 
     expect(onUnassignOwner).toHaveBeenCalledWith('issue-1')
+  })
+
+  it('shows assignment expiry and starts or renews a timed assignment', async () => {
+    const onClaimAssignment = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        owner: 'user-a',
+        assignment_expires_on: '2026-06-01T13:00:00Z',
+      }),
+      onClaimAssignment,
+    })
+
+    expect(screen.getByText('Assignment expires')).toBeTruthy()
+    expect(screen.getByText(/Jun 1.*1:00/)).toBeTruthy()
+
+    expect(screen.getByRole('combobox', { name: /Renew assignment/ })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('combobox', { name: /Assignment duration/ }))
+    await fireEvent.click(screen.getByRole('option', { name: '1 hour' }))
+
+    expect(onClaimAssignment).toHaveBeenCalledWith('issue-1', 3600)
   })
 
   it('keeps custom owner text visible when owner assignment fails', async () => {

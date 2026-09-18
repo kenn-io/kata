@@ -426,12 +426,18 @@ func issueScopedEventInScope(event db.Event, allowed map[int64]struct{}, project
 
 func scopedEventPayload(event db.Event) (string, bool) {
 	allowedKeys := map[string]map[string]struct{}{
-		"issue.created":          keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
-		"issue.updated":          keySet("title", "body", "owner", "changes", "updated_at"),
-		"issue.commented":        keySet("comment_uid", "author", "teammate", "body", "created_at"),
-		"issue.comment_edited":   keySet("comment_uid", "body", "edited_at"),
-		"issue.assigned":         keySet("owner"),
-		"issue.unassigned":       keySet("owner"),
+		"issue.created":        keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
+		"issue.updated":        keySet("title", "body", "owner", "changes", "updated_at"),
+		"issue.commented":      keySet("comment_uid", "author", "teammate", "body", "created_at"),
+		"issue.comment_edited": keySet("comment_uid", "body", "edited_at"),
+		"issue.assigned":       keySet("owner", "assignment_expires_on", "updated_at"),
+		"issue.unassigned":     keySet("owner"),
+		"issue.assignment_renewed": keySet(
+			"owner", "old_assignment_expires_on", "assignment_expires_on", "updated_at",
+		),
+		"issue.assignment_expired": keySet(
+			"previous_owner", "owner", "assignment_expires_on", "updated_at",
+		),
 		"issue.priority_set":     keySet("priority"),
 		"issue.priority_cleared": keySet("old_priority", "updated_at"),
 		"issue.labeled":          keySet("label"),

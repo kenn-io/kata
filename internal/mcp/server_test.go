@@ -431,6 +431,9 @@ func TestCreateAndCommentRequireIdempotencyKeys(t *testing.T) {
 	searchProperties := schemaObject(t, byName["kata.search"].InputSchema)["properties"].(map[string]any)
 	require.ElementsMatch(t, []any{"auto", "lexical", "hybrid", "semantic"}, searchProperties["mode"].(map[string]any)["enum"])
 	require.EqualValues(t, 100, searchProperties["limit"].(map[string]any)["maximum"])
+	claimProperties := schemaObject(t, byName["kata.claim"].InputSchema)["properties"].(map[string]any)
+	require.EqualValues(t, 60, claimProperties["ttl_seconds"].(map[string]any)["minimum"])
+	require.EqualValues(t, 86400, claimProperties["ttl_seconds"].(map[string]any)["maximum"])
 
 	closeProperties := schemaObject(t, byName["kata.close"].InputSchema)["properties"].(map[string]any)
 	require.ElementsMatch(t, []any{"done", "wontfix", "duplicate", "superseded", "audit-no-change"}, closeProperties["reason"].(map[string]any)["enum"])

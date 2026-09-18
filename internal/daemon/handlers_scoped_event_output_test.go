@@ -538,6 +538,61 @@ func TestIssueScopedMutationResponsesProjectEvents(t *testing.T) {
 		"unscoped mutation responses keep raw events")
 }
 
+func TestIssueScopedTimedAssignmentEventsRemainVisible(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue := createScopedHTTPTestIssue(t, env, project.ID, "Timed work", nil)
+	newScopedTokens(t, env, project, issue)
+	headers := map[string]string{"Authorization": "Bearer worker-token"}
+
+	for _, wantType := range []string{"issue.assigned", "issue.assignment_renewed"} {
+		resp, body := envDoRaw(t, env, http.MethodPost, scopedProjectPath(project.ID,
+			"issues/"+issue.ShortID+"/actions/claim"),
+			map[string]any{"actor": "ignored", "ttl_seconds": 60}, headers)
+		require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+		var out struct {
+			Event  *scopedEnvelope  `json:"event"`
+			Events []scopedEnvelope `json:"events"`
+		}
+		require.NoError(t, json.Unmarshal(body, &out))
+		require.NotNil(t, out.Event)
+		require.Equal(t, wantType, out.Event.Type)
+		require.Len(t, out.Events, 1)
+		requireScopedEnvelopeRedacted(t, *out.Event)
+		var payloadJSON string
+		require.NoError(t, json.Unmarshal(out.Event.Payload, &payloadJSON))
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal([]byte(payloadJSON), &payload))
+		require.Equal(t, "worker-a", payload["owner"])
+		require.NotEmpty(t, payload["assignment_expires_on"])
+	}
+
+	_, err = env.DB.ExpireAssignments(t.Context(), db.ExpireAssignmentsParams{
+		ProjectID: project.ID, Now: time.Now().UTC().Add(2 * time.Minute), Limit: 10,
+	})
+	require.NoError(t, err)
+	resp, body := envDoRaw(t, env, http.MethodGet,
+		"/api/v1/events?after_id=0&limit=100", nil, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+	var history struct {
+		Events []scopedEnvelope `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal(body, &history))
+	var expired *scopedEnvelope
+	for i := range history.Events {
+		if history.Events[i].Type == "issue.assignment_expired" {
+			expired = &history.Events[i]
+		}
+	}
+	require.NotNil(t, expired)
+	requireScopedEnvelopeRedacted(t, *expired)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(expired.Payload, &payload))
+	require.Equal(t, "worker-a", payload["previous_owner"])
+	require.NotEmpty(t, payload["assignment_expires_on"])
+}
+
 // Regression for the typed scoped projection omitting issue.soft_deleted,
 // issue.restored, and issue.moved: authorized lifecycle and move events
 // vanished from scoped outputs — polling degraded to sync.reset_required,

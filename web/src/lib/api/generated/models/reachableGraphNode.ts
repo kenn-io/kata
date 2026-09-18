@@ -4,6 +4,7 @@
 import type { ReachableGraphNodeMetadata } from './reachableGraphNodeMetadata.ts'
 
 export interface ReachableGraphNode {
+  assignment_expires_on?: string
   author: string
   body: string
   closed_at?: string

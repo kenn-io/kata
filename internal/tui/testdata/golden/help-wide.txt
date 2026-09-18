@@ -14,14 +14,14 @@ k       up                         +              add label                   f 
 j       down                       -              remove label                c       clear filters
 up      scroll up                  a              assign owner                ctrl+r  reset filter form
 down    scroll down                A              clear owner
-pgup    page up                    !              set priority
-pgdown  page down
-g       first                      Children
-G       last                       N      new child
-enter   open detail                j/k    move child cursor
-space   expand/collapse            ↑↓     scroll detail viewport
-right   expand                     enter  open child
-left    collapse
+pgup    page up                    t              timed assignment
+pgdown  page down                  !              set priority
+g       first
+G       last                       Children
+enter   open detail                N      new child
+space   expand/collapse            j/k    move child cursor
+right   expand                     ↑↓     scroll detail viewport
+left    collapse                   enter  open child
 E       expand/collapse all
 n       new issue (form)
 v       toggle flat/nested view

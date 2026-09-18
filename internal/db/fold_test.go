@@ -111,6 +111,101 @@ func TestFold_LifecycleOwnerPriorityLabelsLinksAndComments(t *testing.T) {
 	assert.Equal(t, "note", comment.Body)
 }
 
+func TestFoldTimedAssignmentRenewsOnlyMatchingOwnerAndExpiry(t *testing.T) {
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
+		testEvent("issue.assigned", 2, `{"owner":"alice","assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+		testEvent("issue.assignment_renewed", 3, `{"owner":"alice","old_assignment_expires_on":"2026-05-23T12:30:00.000Z","assignment_expires_on":"2026-05-23T13:00:00.000Z"}`),
+		testEvent("issue.assignment_renewed", 4, `{"owner":"alice","old_assignment_expires_on":"2026-05-23T12:30:00.000Z","assignment_expires_on":"2026-05-23T14:00:00.000Z"}`),
+	}
+
+	issue := FoldEvents(events).Issues["issue-1"]
+	require.NotNil(t, issue.Owner)
+	assert.Equal(t, "alice", *issue.Owner)
+	require.NotNil(t, issue.AssignmentExpiresOn)
+	assert.Equal(t, "2026-05-23T13:00:00.000Z", *issue.AssignmentExpiresOn,
+		"a delayed renewal must not extend an assignment whose expiry has already changed")
+}
+
+func TestFoldTimedAssignmentExpiryIsConditional(t *testing.T) {
+	tests := []struct {
+		name   string
+		events []FoldEvent
+		owner  string
+		expiry *string
+	}{
+		{
+			name: "matching claim expires",
+			events: []FoldEvent{
+				testEvent("issue.assigned", 2, `{"owner":"alice","assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+				testEvent("issue.assignment_expired", 3, `{"previous_owner":"alice","owner":null,"assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+			},
+		},
+		{
+			name: "replacement claim survives delayed expiry",
+			events: []FoldEvent{
+				testEvent("issue.assigned", 2, `{"owner":"alice","assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+				testEvent("issue.assigned", 3, `{"owner":"bob","assignment_expires_on":"2026-05-23T13:30:00.000Z"}`),
+				testEvent("issue.assignment_expired", 4, `{"previous_owner":"alice","owner":null,"assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+			},
+			owner:  "bob",
+			expiry: new("2026-05-23T13:30:00.000Z"),
+		},
+		{
+			name: "permanent assignment survives delayed expiry",
+			events: []FoldEvent{
+				testEvent("issue.assigned", 2, `{"owner":"alice","assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+				testEvent("issue.assigned", 3, `{"owner":"bob"}`),
+				testEvent("issue.assignment_expired", 4, `{"previous_owner":"alice","owner":null,"assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+			},
+			owner: "bob",
+		},
+		{
+			name: "renewed assignment survives stale expiry",
+			events: []FoldEvent{
+				testEvent("issue.assigned", 2, `{"owner":"alice","assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+				testEvent("issue.assignment_renewed", 3, `{"owner":"alice","old_assignment_expires_on":"2026-05-23T12:30:00.000Z","assignment_expires_on":"2026-05-23T13:00:00.000Z"}`),
+				testEvent("issue.assignment_expired", 4, `{"previous_owner":"alice","owner":null,"assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+			},
+			owner:  "alice",
+			expiry: new("2026-05-23T13:00:00.000Z"),
+		},
+	}
+
+	created := testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issue := FoldEvents(append([]FoldEvent{created}, tt.events...)).Issues["issue-1"]
+			if tt.owner == "" {
+				assert.Nil(t, issue.Owner)
+			} else {
+				require.NotNil(t, issue.Owner)
+				assert.Equal(t, tt.owner, *issue.Owner)
+			}
+			assert.Equal(t, tt.expiry, issue.AssignmentExpiresOn)
+		})
+	}
+}
+
+func TestFoldExplicitOwnerMutationClearsTimedAssignment(t *testing.T) {
+	for _, event := range []FoldEvent{
+		testEvent("issue.assigned", 3, `{"owner":"bob"}`),
+		testEvent("issue.unassigned", 3, `{"owner":null}`),
+		testEvent("issue.updated", 3, `{"owner":"bob"}`),
+	} {
+		t.Run(event.Type, func(t *testing.T) {
+			events := []FoldEvent{
+				testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
+				testEvent("issue.assigned", 2, `{"owner":"alice","assignment_expires_on":"2026-05-23T12:30:00.000Z"}`),
+				event,
+			}
+
+			issue := FoldEvents(events).Issues["issue-1"]
+			assert.Nil(t, issue.AssignmentExpiresOn)
+		})
+	}
+}
+
 func TestFoldReopenRestoreUsePayloadIssueUID(t *testing.T) {
 	// Ingest validation accepts an issue event whose uid lives only in the
 	// payload (empty envelope issue_uid). reopened/restored must apply such an

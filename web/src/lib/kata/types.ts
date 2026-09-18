@@ -68,6 +68,7 @@ export interface KataTaskSummary {
   metadata: KataTaskMetadata
   revision: number
   owner?: string | undefined
+  assignment_expires_on?: string | undefined
   author: string
   priority?: number | undefined
   labels?: string[] | undefined

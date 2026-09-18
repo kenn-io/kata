@@ -23,27 +23,28 @@ func (*MetaKV) ImportKind() string { return ImportKindMeta }
 
 // IssueExport is one issue row in export shape (recurrence_uid resolved via join).
 type IssueExport struct {
-	ID              int64          `json:"id"`
-	UID             string         `json:"uid"`
-	ProjectID       int64          `json:"project_id"`
-	ShortID         string         `json:"short_id"`
-	Title           string         `json:"title"`
-	Body            string         `json:"body"`
-	Status          string         `json:"status"`
-	ClosedReason    *string        `json:"closed_reason"`
-	Owner           *string        `json:"owner"`
-	Priority        *int64         `json:"priority,omitzero"`
-	Author          string         `json:"author"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
-	ClosedAt        *string        `json:"closed_at"`
-	DeletedAt       *string        `json:"deleted_at"`
-	Metadata        jsontext.Value `json:"metadata"`
-	Revision        int64          `json:"revision"`
-	ContentRevision int64          `json:"content_revision"`
-	RecurrenceID    *int64         `json:"recurrence_id,omitzero"`
-	RecurrenceUID   *string        `json:"recurrence_uid,omitempty"`
-	OccurrenceKey   *string        `json:"occurrence_key,omitempty"`
+	ID                  int64          `json:"id"`
+	UID                 string         `json:"uid"`
+	ProjectID           int64          `json:"project_id"`
+	ShortID             string         `json:"short_id"`
+	Title               string         `json:"title"`
+	Body                string         `json:"body"`
+	Status              string         `json:"status"`
+	ClosedReason        *string        `json:"closed_reason"`
+	Owner               *string        `json:"owner"`
+	AssignmentExpiresOn *string        `json:"assignment_expires_on,omitempty"`
+	Priority            *int64         `json:"priority,omitzero"`
+	Author              string         `json:"author"`
+	CreatedAt           string         `json:"created_at"`
+	UpdatedAt           string         `json:"updated_at"`
+	ClosedAt            *string        `json:"closed_at"`
+	DeletedAt           *string        `json:"deleted_at"`
+	Metadata            jsontext.Value `json:"metadata"`
+	Revision            int64          `json:"revision"`
+	ContentRevision     int64          `json:"content_revision"`
+	RecurrenceID        *int64         `json:"recurrence_id,omitzero"`
+	RecurrenceUID       *string        `json:"recurrence_uid,omitempty"`
+	OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.

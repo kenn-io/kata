@@ -851,7 +851,8 @@ func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool
 		return true, m.keymap.NewChild.matches(msg) || m.keymap.EditBody.matches(msg) ||
 			m.keymap.NewComment.matches(msg) || m.keymap.AddLabel.matches(msg) ||
 			m.keymap.RemoveLabel.matches(msg) || m.keymap.AssignOwner.matches(msg) ||
-			m.keymap.ClearOwner.matches(msg) || m.keymap.AddBlocker.matches(msg) ||
+			m.keymap.ClearOwner.matches(msg) || m.keymap.TimedAssignment.matches(msg) ||
+			m.keymap.AddBlocker.matches(msg) ||
 			m.keymap.AddLink.matches(msg) || m.keymap.SetPriority.matches(msg)
 	}
 }

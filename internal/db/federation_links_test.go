@@ -35,6 +35,8 @@ func TestFederationEventAffectsLinks(t *testing.T) {
 		"issue.updated",
 		"issue.assigned",
 		"issue.unassigned",
+		"issue.assignment_renewed",
+		"issue.assignment_expired",
 		"issue.priority_set",
 		"issue.priority_cleared",
 		"issue.closed",

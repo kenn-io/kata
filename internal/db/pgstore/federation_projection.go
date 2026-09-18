@@ -262,7 +262,7 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 	}
 	payload, err := json.Marshal(issueCreatedPayload{
 		UID: issue.UID, ShortID: issue.ShortID, Title: issue.Title, Body: issue.Body,
-		Author: issue.Author, Owner: issue.Owner, Priority: issue.Priority, Status: issue.Status,
+		Author: issue.Author, Owner: issue.Owner, AssignmentExpiresOn: optionalStoredTime(issue.AssignmentExpiresOn), Priority: issue.Priority, Status: issue.Status,
 		ClosedReason: issue.ClosedReason, ClosedAt: optionalStoredTime(issue.ClosedAt),
 		DeletedAt: optionalStoredTime(issue.DeletedAt), Metadata: jsontext.Value(issue.Metadata),
 		Labels: labels, Links: links, Comments: comments,
@@ -520,15 +520,15 @@ func (s *Store) reconcileFederatedIssues(
 				return nil, err
 			}
 			_, err := tx.ExecContext(ctx, `UPDATE issues SET short_id=$1,title=$2,body=$3,status=$4,
-closed_reason=$5,owner=$6,priority=$7,author=$8,created_at=$9,updated_at=$10,
-closed_at=$11,deleted_at=$12,metadata=$13,
+closed_reason=$5,owner=$6,assignment_expires_on=$7,priority=$8,author=$9,created_at=$10,updated_at=$11,
+closed_at=$12,deleted_at=$13,metadata=$14,
 revision=revision+1,content_revision=content_revision+CASE
 WHEN title IS DISTINCT FROM $2 OR body IS DISTINCT FROM $3 THEN 1 ELSE 0 END
-WHERE id=$14 AND ROW(short_id,title,body,status,closed_reason,owner,priority,author,
+WHERE id=$15 AND ROW(short_id,title,body,status,closed_reason,owner,assignment_expires_on,priority,author,
 created_at,updated_at,closed_at,deleted_at,metadata) IS DISTINCT FROM
-ROW($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+ROW($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 				shortIDValue, issue.Title, issue.Body, nonEmptyFederationStatus(issue.Status),
-				issue.ClosedReason, issue.Owner, issue.Priority, nonEmptyFederationAuthor(issue.Author),
+				issue.ClosedReason, issue.Owner, issue.AssignmentExpiresOn, issue.Priority, nonEmptyFederationAuthor(issue.Author),
 				nonEmptyFederationTime(issue.CreatedAt), nonEmptyFederationTime(updatedAt),
 				optionalFederationString(issue.ClosedAt), optionalFederationString(issue.DeletedAt),
 				string(metadata), row.id)
@@ -540,11 +540,11 @@ ROW($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 		}
 		var issueID int64
 		err = tx.QueryRowContext(ctx, `INSERT INTO issues(
-uid,project_id,short_id,title,body,status,closed_reason,owner,priority,author,
+uid,project_id,short_id,title,body,status,closed_reason,owner,assignment_expires_on,priority,author,
 created_at,updated_at,closed_at,deleted_at,metadata,revision
-) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,1) RETURNING id`,
+) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,1) RETURNING id`,
 			issue.UID, projectID, shortIDValue, issue.Title, issue.Body,
-			nonEmptyFederationStatus(issue.Status), issue.ClosedReason, issue.Owner, issue.Priority,
+			nonEmptyFederationStatus(issue.Status), issue.ClosedReason, issue.Owner, issue.AssignmentExpiresOn, issue.Priority,
 			nonEmptyFederationAuthor(issue.Author), nonEmptyFederationTime(issue.CreatedAt),
 			nonEmptyFederationTime(updatedAt), optionalFederationString(issue.ClosedAt),
 			optionalFederationString(issue.DeletedAt), string(metadata)).Scan(&issueID)

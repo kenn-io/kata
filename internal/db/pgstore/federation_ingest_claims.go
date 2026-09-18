@@ -222,7 +222,8 @@ func enabledHubFederationBindingTx(
 
 func claimWorkMutationRequiresClaim(eventType string) bool {
 	switch eventType {
-	case "issue.updated", "issue.assigned", "issue.unassigned",
+	case "issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
+		"issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared", "issue.closed", "issue.reopened",
 		"issue.soft_deleted", "issue.restored", "issue.labeled", "issue.unlabeled",
 		"issue.linked", "issue.unlinked", "issue.links_changed", "issue.metadata_updated":

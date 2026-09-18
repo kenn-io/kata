@@ -20,22 +20,25 @@ func TestProjectedHoldStateDistinguishesLeaseAndAssignment(t *testing.T) {
 	owner := "alice"
 
 	for _, tc := range []struct {
-		name    string
-		status  string
-		owner   *string
-		lease   *claimForShowCLI
-		pending []pendingClaimForCLI
-		want    string
+		name                string
+		status              string
+		owner               *string
+		assignmentExpiresOn *time.Time
+		lease               *claimForShowCLI
+		pending             []pendingClaimForCLI
+		want                string
 	}{
 		{name: "active lease", status: "open", owner: &owner, lease: &claimForShowCLI{ClaimKind: "timed", ExpiresAt: &after}, want: "active"},
 		{name: "expired lease", status: "open", owner: &owner, lease: &claimForShowCLI{ClaimKind: "timed", ExpiresAt: &before}, want: "expired"},
 		{name: "pending lease", status: "open", owner: &owner, pending: []pendingClaimForCLI{{Holder: "alice"}}, want: "pending"},
 		{name: "assignment only", status: "open", owner: &owner, want: "assigned"},
+		{name: "active timed assignment", status: "open", owner: &owner, assignmentExpiresOn: &after, want: "assigned"},
+		{name: "expired timed assignment", status: "open", owner: &owner, assignmentExpiresOn: &before, want: "expired"},
 		{name: "unassigned", status: "open", want: "unassigned"},
 		{name: "closed", status: "closed", owner: &owner, want: "closed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, projectedHoldState(tc.status, tc.owner, tc.lease, tc.pending, now))
+			assert.Equal(t, tc.want, projectedHoldState(tc.status, tc.owner, tc.assignmentExpiresOn, tc.lease, tc.pending, now))
 		})
 	}
 }
@@ -124,4 +127,17 @@ func TestStatusHumanShowsLeaseExpiry(t *testing.T) {
 	assert.Contains(t, out, "hold=active")
 	assert.Contains(t, out, "lease: alice from instance "+env.DB.InstanceUID()+" (timed)")
 	assert.Regexp(t, `(?m)^expires: \d{4}-\d{2}-\d{2}T`, out)
+}
+
+func TestStatusDisplaysTimedAssignmentExpiry(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "timed assignment status")
+	runCLIAs(t, env, dir, "worker", "claim", ref, "--ttl", "2m")
+
+	human := runCLI(t, env, dir, "status", ref)
+	agent := runCLI(t, env, dir, "--agent", "status", ref)
+
+	assert.Contains(t, human, "owner: worker")
+	assert.Regexp(t, `(?m)^assignment expires: \d{4}-\d{2}-\d{2}T`, human)
+	assert.Regexp(t, `owner=worker assignment_expires_on=\d{4}-\d{2}-\d{2}T[^ ]* hold=assigned`, agent)
 }

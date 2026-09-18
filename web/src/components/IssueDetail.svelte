@@ -5,6 +5,7 @@
     type KataIssueHostAction,
   } from '@kenn-io/kata-ui'
   import { Button } from '@kenn-io/kit-ui'
+  import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
   import type { ComponentProps } from 'svelte'
 
   import IssueEditor from './IssueEditor.svelte'
@@ -66,6 +67,18 @@
 {#if !editing}
   <div class="shared-detail">
     <SharedIssueDetail {detail} {actions} />
+    {#if props.issue.issue.assignment_expires_on}
+      <dl class="assignment-timing" aria-label="Assignment timing">
+        <div>
+          <dt>Assignment expires</dt>
+          <dd>
+            <time datetime={props.issue.issue.assignment_expires_on}>
+              {formatTimestamp(props.issue.issue.assignment_expires_on)}
+            </time>
+          </dd>
+        </div>
+      </dl>
+    {/if}
     {#if visibleRecurrences.length > 0}
       <RecurrencePanel recurrences={visibleRecurrences} readOnly />
     {/if}
@@ -85,6 +98,25 @@
     overflow: auto;
     background: var(--bg-primary);
     padding: 18px 22px;
+  }
+
+  .assignment-timing {
+    margin: 12px 0 0;
+  }
+
+  .assignment-timing > div {
+    display: flex;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .assignment-timing dt {
+    font-weight: 600;
+  }
+
+  .assignment-timing dd {
+    margin: 0;
   }
 
   .editor-mode {

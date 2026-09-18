@@ -47,7 +47,7 @@ func TestAgentClaimWorkflow(t *testing.T) {
 	// kata claim succeeds
 	resetFlags(t)
 	out = runCLI(t, env, dir, "claim", unownedID, "--as", "agent1")
-	assert.Contains(t, out, "claimed by agent1")
+	assert.Contains(t, out, "assigned to agent1")
 
 	// kata ready --unowned no longer returns it
 	resetFlags(t)
@@ -58,5 +58,5 @@ func TestAgentClaimWorkflow(t *testing.T) {
 	resetFlags(t)
 	_, err := runCLICapture(t, env, dir, "claim", unownedID, "--as", "agent2")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "already claimed")
+	assert.Contains(t, err.Error(), "already assigned")
 }

@@ -369,10 +369,18 @@ func (s *Store) updateImportedIssue(
 	if item.ClosedAt != nil {
 		closedAt = formatStoredTime(*item.ClosedAt)
 	}
+	// The NULL-safe owner comparison mirrors ImportedIssueUpdatedPayload: the
+	// issue.updated event folds a deadline clear exactly when the normalized
+	// owner changes, so the persisted row must drop assignment_expires_on on
+	// the same condition and never leave an expiry behind a replaced (or NULL)
+	// owner. `owner` in the CASE reads the pre-update value.
+	newOwner := db.NormalizeImportOwner(item.Owner)
 	_, err := tx.ExecContext(ctx, `UPDATE issues SET
-title=$1,body=$2,status=$3,closed_reason=$4,owner=$5,created_at=$6,
+title=$1,body=$2,status=$3,closed_reason=$4,owner=$5,
+assignment_expires_on=CASE WHEN owner IS DISTINCT FROM $5 THEN NULL ELSE assignment_expires_on END,
+created_at=$6,
 updated_at=$7,closed_at=$8,priority=$9`+bump+` WHERE id=$10`,
-		item.Title, item.Body, item.Status, item.ClosedReason, db.NormalizeImportOwner(item.Owner),
+		item.Title, item.Body, item.Status, item.ClosedReason, newOwner,
 		formatStoredTime(createdAt), formatStoredTime(item.UpdatedAt), closedAt, item.Priority, existing.ID)
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported issue: %w", mapSQLError(err, nil))

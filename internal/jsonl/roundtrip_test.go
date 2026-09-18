@@ -981,6 +981,127 @@ func TestRoundtrip_IssuePreservesMetadataAndRevision(t *testing.T) {
 	assert.Equal(t, int64(7), rev)
 }
 
+func TestRoundtrip_IssuePreservesAssignmentExpiry(t *testing.T) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	project, err := source.CreateProject(ctx, "assignment-expiry")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "Timed assignment",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+
+	const expiresOn = "2026-09-18T12:30:00.000Z"
+	_, err = source.ExecContext(ctx, `
+		UPDATE issues
+		   SET owner = 'worker-a', assignment_expires_on = ?
+		 WHERE id = ?`, expiresOn, issue.ID)
+	require.NoError(t, err)
+
+	exported := exportToBuffer(ctx, t, source)
+	assert.Contains(t, exported.String(), `"assignment_expires_on":"`+expiresOn+`"`)
+
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(exported.Bytes()), target))
+	restored, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.NotNil(t, restored.Owner)
+	assert.Equal(t, "worker-a", *restored.Owner)
+	require.NotNil(t, restored.AssignmentExpiresOn)
+	assert.Equal(t, expiresOn, restored.AssignmentExpiresOn.UTC().Format("2006-01-02T15:04:05.000Z"))
+}
+
+// TestRoundtrip_ImportNormalizesNoncanonicalAssignmentExpiry pins that import
+// rewrites a parseable but noncanonical assignment_expires_on wire value (an
+// offset form like 2026-09-18T20:30:00+08:00) to canonical UTC millis.
+// Readiness filters and the expiry sweep compare the stored text against
+// canonical fixed-width timestamps, so an unnormalized value would make an
+// expired assignment look active.
+func TestRoundtrip_ImportNormalizesNoncanonicalAssignmentExpiry(t *testing.T) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	project, err := source.CreateProject(ctx, "noncanonical-expiry")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "Timed assignment",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+
+	const canonical = "2026-09-18T12:30:00.000Z"
+	_, err = source.ExecContext(ctx, `
+		UPDATE issues
+		   SET owner = 'worker-a', assignment_expires_on = ?
+		 WHERE id = ?`, canonical, issue.ID)
+	require.NoError(t, err)
+
+	exported := exportToBuffer(ctx, t, source)
+	noncanonical := bytes.Replace(
+		exported.Bytes(),
+		[]byte(`"assignment_expires_on":"`+canonical+`"`),
+		[]byte(`"assignment_expires_on":"2026-09-18T20:30:00+08:00"`),
+		1,
+	)
+	require.NotEqual(t, exported.Bytes(), noncanonical, "fixture must rewrite the issue expiry")
+
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(noncanonical), target))
+	var stored string
+	require.NoError(t, target.QueryRowContext(ctx,
+		`SELECT CAST(assignment_expires_on AS TEXT) FROM issues WHERE uid = ?`, issue.UID).Scan(&stored))
+	assert.Equal(t, canonical, stored)
+
+	expiry := time.Date(2026, time.September, 18, 12, 30, 0, 0, time.UTC)
+
+	ready, err := target.ReadyIssues(ctx, project.ID, 0, db.ReadyIssuesFilter{Unowned: true, At: expiry})
+	require.NoError(t, err)
+	require.Len(t, ready, 1, "expired assignment must be effectively unowned (claimable)")
+	assert.Equal(t, issue.UID, ready[0].UID)
+
+	active, err := target.ReadyIssues(ctx, project.ID, 0, db.ReadyIssuesFilter{Owner: "worker-a", At: expiry})
+	require.NoError(t, err)
+	assert.Empty(t, active, "expired assignment must no longer be active for worker-a")
+
+	events, err := target.ExpireAssignments(ctx, db.ExpireAssignmentsParams{ProjectID: project.ID, Now: expiry})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "issue.assignment_expired", events[0].Type)
+	cleared, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	assert.Nil(t, cleared.Owner)
+	assert.Nil(t, cleared.AssignmentExpiresOn)
+}
+
+func TestImportRejectsAssignmentExpiryWithoutOwner(t *testing.T) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	project, err := source.CreateProject(ctx, "invalid-assignment-expiry")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "Timed assignment",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `
+		UPDATE issues
+		   SET owner = 'worker-a', assignment_expires_on = '2026-09-18T12:30:00.000Z'
+		 WHERE id = ?`, issue.ID)
+	require.NoError(t, err)
+
+	exported := exportToBuffer(ctx, t, source)
+	invalid := bytes.Replace(exported.Bytes(), []byte(`"owner":"worker-a"`), []byte(`"owner":null`), 1)
+	require.NotEqual(t, exported.Bytes(), invalid, "fixture must rewrite the issue owner")
+
+	target := openImportTargetDB(t)
+	err = jsonl.Import(ctx, bytes.NewReader(invalid), target)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "import issue")
+}
+
 func TestRoundtrip_ProjectPreservesMetadataAndRevision(t *testing.T) {
 	srcDB := openExportTestDB(t)
 	ctx := context.Background()

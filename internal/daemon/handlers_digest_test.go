@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -43,6 +44,8 @@ type digestBody struct {
 		Commented       int `json:"commented"`
 		Labeled         int `json:"labeled"`
 		Assigned        int `json:"assigned"`
+		Unassigned      int `json:"unassigned"`
+		Other           int `json:"other"`
 		PrioritySet     int `json:"priority_set"`
 		PriorityCleared int `json:"priority_cleared"`
 		Linked          int `json:"linked"`
@@ -50,6 +53,35 @@ type digestBody struct {
 		Unblocked       int `json:"unblocked"`
 	} `json:"totals"`
 	Actors []digestActor `json:"actors"`
+}
+
+func TestDigestClassifiesAssignmentRenewalAndExpiry(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "kata")
+	issueID := createIssueAs(t, env, pid, "operator", "timed assignment")
+	issue, err := env.DB.IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	_, err = env.DB.ClaimOwner(t.Context(), db.ClaimOwnerParams{
+		IssueID: issue.ID, Actor: "worker", TTL: 5 * time.Minute, Now: now.Add(-3 * time.Minute),
+	})
+	require.NoError(t, err)
+	_, err = env.DB.ClaimOwner(t.Context(), db.ClaimOwnerParams{
+		IssueID: issue.ID, Actor: "worker", TTL: time.Minute, Now: now.Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+	_, err = env.DB.ExpireAssignments(t.Context(), db.ExpireAssignmentsParams{
+		ProjectID: pid, Now: now, Limit: 10,
+	})
+	require.NoError(t, err)
+
+	digest := fetchDigest(t, env, pid, now.Add(-time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+
+	assert.Equal(t, 2, digest.Totals.Assigned)
+	assert.Equal(t, 1, digest.Totals.Unassigned)
+	assert.Zero(t, digest.Totals.Other)
+	assert.Contains(t, digest.actionsFor("worker", issue.ShortID), "assigned:worker")
+	assert.Contains(t, digest.actionsFor("system", issue.ShortID), "unassigned")
 }
 
 // actionsFor returns the action sequence the digest recorded for actor on

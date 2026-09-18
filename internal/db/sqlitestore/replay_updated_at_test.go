@@ -146,7 +146,7 @@ func TestIssueMutationsCarryUpdatedAt(t *testing.T) {
 	require.True(t, changed)
 	assertEventCarriesUpdatedAt(t, *evt, restored)
 
-	claim, err := d.ClaimOwner(ctx, b.ID, "carol", false)
+	claim, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: b.ID, Actor: "carol"})
 	require.NoError(t, err)
 	require.True(t, claim.Changed)
 	assertEventCarriesUpdatedAt(t, *claim.Event, claim.Issue)

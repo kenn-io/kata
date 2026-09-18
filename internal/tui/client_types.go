@@ -19,29 +19,30 @@ import (
 // the human-facing "<project>#<short_id>" form populated on list rows
 // (api.IssueOut.QualifiedID).
 type Issue struct {
-	ID           int64        `json:"id"`
-	UID          string       `json:"uid,omitempty"`
-	ProjectID    int64        `json:"project_id"`
-	ProjectUID   string       `json:"project_uid,omitempty"`
-	ShortID      string       `json:"short_id"`
-	QualifiedID  string       `json:"qualified_id,omitempty"`
-	Title        string       `json:"title"`
-	Body         string       `json:"body"`
-	Status       string       `json:"status"`
-	ClosedReason *string      `json:"closed_reason,omitempty"`
-	Owner        *string      `json:"owner,omitempty"`
-	Author       string       `json:"author"`
-	CreatedAt    time.Time    `json:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	ClosedAt     *time.Time   `json:"closed_at,omitempty"`
-	DeletedAt    *time.Time   `json:"deleted_at,omitempty"`
-	Labels       []string     `json:"labels,omitempty"`
-	Parent       *LinkPeer    `json:"parent,omitempty"`
-	ChildCounts  *ChildCounts `json:"child_counts,omitempty"`
-	Blocks       []LinkPeer   `json:"blocks,omitempty"`
-	BlockedBy    []LinkPeer   `json:"blocked_by,omitempty"`
-	Related      []LinkPeer   `json:"related,omitempty"`
-	Priority     *int64       `json:"priority,omitempty"`
+	ID                  int64        `json:"id"`
+	UID                 string       `json:"uid,omitempty"`
+	ProjectID           int64        `json:"project_id"`
+	ProjectUID          string       `json:"project_uid,omitempty"`
+	ShortID             string       `json:"short_id"`
+	QualifiedID         string       `json:"qualified_id,omitempty"`
+	Title               string       `json:"title"`
+	Body                string       `json:"body"`
+	Status              string       `json:"status"`
+	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	Owner               *string      `json:"owner,omitempty"`
+	AssignmentExpiresOn *time.Time   `json:"assignment_expires_on,omitempty"`
+	Author              string       `json:"author"`
+	CreatedAt           time.Time    `json:"created_at"`
+	UpdatedAt           time.Time    `json:"updated_at"`
+	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
+	DeletedAt           *time.Time   `json:"deleted_at,omitempty"`
+	Labels              []string     `json:"labels,omitempty"`
+	Parent              *LinkPeer    `json:"parent,omitempty"`
+	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
+	Blocks              []LinkPeer   `json:"blocks,omitempty"`
+	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
+	Related             []LinkPeer   `json:"related,omitempty"`
+	Priority            *int64       `json:"priority,omitempty"`
 }
 
 // LinkPeer mirrors api.LinkPeer: UID, short_id, project, and qualified_id

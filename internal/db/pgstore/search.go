@@ -78,7 +78,7 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
          ) AS any_query
 )
 SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-       i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
+       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
        i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at,
        ts_rank_cd(search.tsv, %[1]s) AS score,
        to_tsvector('kata_simple_unaccent', i.title) @@ queries.any_query AS in_title,
@@ -105,14 +105,15 @@ SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
 	var candidates []db.SearchCandidate
 	for rows.Next() {
 		var issue db.Issue
-		var closedAt, deletedAt storedNullTime
+		var assignmentExpiresOn, closedAt, deletedAt storedNullTime
 		var score float64
 		var inTitle, inBody, inComments bool
-		destinations := append(issueDestinations(&issue, &closedAt, &deletedAt),
+		destinations := append(issueDestinations(&issue, &assignmentExpiresOn, &closedAt, &deletedAt),
 			&score, &inTitle, &inBody, &inComments)
 		if err := rows.Scan(destinations...); err != nil {
 			return nil, fmt.Errorf("scan search candidate: %w", mapSQLError(err, nil))
 		}
+		issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 		issue.ClosedAt = closedAt.Time
 		issue.DeletedAt = deletedAt.Time
 		matchedIn := make([]string, 0, 3)

@@ -308,6 +308,7 @@ function normalizeIssue(
     metadata: { ...issue.metadata },
     revision: issue.revision,
     owner: issue.owner,
+    assignment_expires_on: issue.assignment_expires_on,
     author: issue.author,
     priority: issue.priority,
     labels: [...(issue.labels ?? [])],

@@ -1,15 +1,18 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -705,6 +708,155 @@ func (c *claimHubClient) ReleaseClaim(
 	req api.ClaimActionBody,
 ) (api.ClaimActionResponseBody, error) {
 	return c.claimAction(ctx, hubProjectID, ref, "release", req)
+}
+
+func (c *claimHubClient) ClaimIssue(
+	ctx context.Context,
+	hubProjectID int64,
+	ref string,
+	body api.ClaimRequestBody,
+) (api.ClaimResponseBody, error) {
+	if c.transportErr != nil {
+		return api.ClaimResponseBody{}, c.transportErr
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return api.ClaimResponseBody{}, err
+	}
+	endpoint := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/claim",
+		c.baseURL, hubProjectID, url.PathEscape(ref))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return api.ClaimResponseBody{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req) //nolint:gosec // the binding's canonical hub origin configures this client and pins its bearer token.
+	if err != nil {
+		return api.ClaimResponseBody{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return api.ClaimResponseBody{}, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return api.ClaimResponseBody{}, &claimHubStatusError{
+			Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(raw)),
+		}
+	}
+	var result api.ClaimResponseBody
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return api.ClaimResponseBody{}, err
+	}
+	return result, nil
+}
+
+// nonNilEvents upholds the claim response contract that events is a
+// required array: it replaces a nil slice with the empty array so the
+// response object keeps the invariant outside the daemon's JSON v2 writer,
+// including with legacy encoders that render nil slices as null. Call at
+// every ClaimResponseBody construction site.
+func nonNilEvents(events []db.Event) []db.Event {
+	if events == nil {
+		return []db.Event{}
+	}
+	return events
+}
+
+func applyForwardedAssignmentClaim(
+	ctx context.Context,
+	cfg ServerConfig,
+	projectID int64,
+	issueUID string,
+	forwarded api.ClaimResponseBody,
+) (*api.ClaimResponse, error) {
+	receivedEvents := make([]db.Event, 0, len(forwarded.ReplayEvents)+len(forwarded.Events))
+	receivedEvents = append(receivedEvents, forwarded.ReplayEvents...)
+	receivedEvents = append(receivedEvents, forwarded.Events...)
+	allUIDs := make([]string, 0, len(forwarded.Events))
+	for _, event := range forwarded.Events {
+		allUIDs = append(allUIDs, event.UID)
+	}
+	insertedUIDs := make([]string, 0, len(receivedEvents))
+	for _, event := range receivedEvents {
+		inserted, err := cfg.DB.InsertRemoteEvent(ctx, projectID, remoteEventFromStoredEvent(event))
+		if err != nil {
+			return nil, err
+		}
+		if inserted {
+			insertedUIDs = append(insertedUIDs, event.UID)
+		}
+	}
+	if len(receivedEvents) > 0 {
+		if err := cfg.DB.MaterializeFederatedProject(ctx, projectID); err != nil {
+			return nil, err
+		}
+	}
+	issue, err := cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+	if err != nil {
+		return nil, err
+	}
+	events, err := cfg.DB.EventsByUIDs(ctx, projectID, allUIDs)
+	if err != nil {
+		return nil, err
+	}
+	insertedEvents, err := cfg.DB.EventsByUIDs(ctx, projectID, insertedUIDs)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Publish().Events(projectID, insertedEvents)
+	// Response events follow the scoped projection contract shared by every
+	// mutation response; publishing above stays raw so mirror subscribers and
+	// hooks keep the durable form. Remote event rows carry no local issue_id
+	// (UIDs are canonical), so resolve the mirrored issues' local IDs first:
+	// the scope membership check matches on them and fails closed on rows it
+	// cannot anchor.
+	if issueScopeFromContext(ctx) != nil {
+		anchored := make([]db.Event, len(events))
+		for i, event := range events {
+			anchored[i] = event
+			if event.IssueUID == nil {
+				continue
+			}
+			mirrored, err := cfg.DB.IssueByUID(ctx, *event.IssueUID, db.IncludeDeletedYes)
+			if err != nil {
+				continue
+			}
+			anchored[i].IssueID = &mirrored.ID
+		}
+		events = anchored
+	}
+	responseEvents, _, err := scopedMutationEvents(ctx, cfg.DB, events)
+	if err != nil {
+		return nil, err
+	}
+	body := forwarded
+	body.Issue = issue
+	body.Events = nonNilEvents(responseEvents)
+	body.ReplayEvents = nil
+	body.Event = nil
+	if len(responseEvents) > 0 {
+		body.Event = &responseEvents[len(responseEvents)-1]
+	}
+	return &api.ClaimResponse{Body: body}, nil
+}
+
+func remoteEventFromStoredEvent(event db.Event) db.RemoteEvent {
+	return db.RemoteEvent{
+		EventUID:          event.UID,
+		OriginInstanceUID: event.OriginInstanceUID,
+		ProjectUID:        event.ProjectUID,
+		ProjectName:       event.ProjectName,
+		IssueUID:          event.IssueUID,
+		RelatedIssueUID:   event.RelatedIssueUID,
+		Type:              event.Type,
+		Actor:             event.Actor,
+		HLCPhysicalMS:     event.HLCPhysicalMS,
+		HLCCounter:        event.HLCCounter,
+		ContentHash:       event.ContentHash,
+		Payload:           jsontext.Value(event.Payload),
+		CreatedAt:         event.CreatedAt,
+	}
 }
 
 func (c *claimHubClient) ClaimStatus(ctx context.Context, hubProjectID int64, ref string) (api.ClaimStatusBody, error) {
