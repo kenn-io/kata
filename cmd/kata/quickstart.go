@@ -91,7 +91,7 @@ Use kata as the shared issue ledger for this workspace.
    # Inspect the filtered queue
    kata ready --unowned --label bug --no-label blocked --agent
 
-   # Claim it (fails if already claimed by another actor)
+   # Claim it (fails if already assigned to another actor)
    kata claim <ref>
 
    # Release ownership

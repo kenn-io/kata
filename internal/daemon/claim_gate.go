@@ -19,6 +19,28 @@ func requireFederatedIssueClaim(
 	issue db.Issue,
 	actor string,
 ) error {
+	principal := db.ClaimPrincipal{
+		HolderInstanceUID: cfg.DB.InstanceUID(),
+		Holder:            strings.TrimSpace(actor),
+	}
+	if cfg.HostAccess != nil {
+		requestPrincipal, ok := PrincipalFromContext(ctx)
+		if !ok || !validHostPrincipal(requestPrincipal) {
+			return api.NewError(http.StatusUnauthorized, "auth_required",
+				"valid host principal required", "", nil)
+		}
+		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, requestPrincipal.Subject).ClaimPrincipal
+	}
+	return requireFederatedIssueClaimForPrincipal(ctx, cfg, projectID, issue, principal)
+}
+
+func requireFederatedIssueClaimForPrincipal(
+	ctx context.Context,
+	cfg ServerConfig,
+	projectID int64,
+	issue db.Issue,
+	principal db.ClaimPrincipal,
+) error {
 	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
 	if err != nil {
 		return err
@@ -39,18 +61,6 @@ func requireFederatedIssueClaim(
 		return federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
 
-	principal := db.ClaimPrincipal{
-		HolderInstanceUID: cfg.DB.InstanceUID(),
-		Holder:            strings.TrimSpace(actor),
-	}
-	if cfg.HostAccess != nil {
-		requestPrincipal, ok := PrincipalFromContext(ctx)
-		if !ok || !validHostPrincipal(requestPrincipal) {
-			return api.NewError(http.StatusUnauthorized, "auth_required",
-				"valid host principal required", "", nil)
-		}
-		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, requestPrincipal.Subject).ClaimPrincipal
-	}
 	principal = boundSpokeClaimPrincipal(binding, principal)
 
 	if binding.Role == db.FederationRoleSpoke {

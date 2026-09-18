@@ -17,7 +17,7 @@ import (
 )
 
 const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-       i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
+       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
        i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at`
 
 const issueSelect = `SELECT ` + issueColumns + `
@@ -35,6 +35,7 @@ type issueCreatedPayload struct {
 	Body                   string                 `json:"body"`
 	Author                 string                 `json:"author"`
 	Owner                  *string                `json:"owner,omitempty"`
+	AssignmentExpiresOn    *string                `json:"assignment_expires_on,omitempty"`
 	Priority               *int64                 `json:"priority,omitempty"`
 	Status                 string                 `json:"status"`
 	ClosedReason           *string                `json:"closed_reason,omitempty"`
@@ -538,10 +539,10 @@ func validateInitialLabels(labels []string) error {
 // issueDestinations returns the twenty issueSelect destinations in SELECT
 // order. The two nullable timestamps need caller-owned buffers because
 // storedNullTime cannot be a conversion over *time.Time.
-func issueDestinations(issue *db.Issue, closedAt, deletedAt *storedNullTime) []any {
+func issueDestinations(issue *db.Issue, assignmentExpiresOn, closedAt, deletedAt *storedNullTime) []any {
 	return []any{
 		&issue.ID, &issue.UID, &issue.ProjectID, &issue.ProjectUID, &issue.ShortID,
-		&issue.Title, &issue.Body, &issue.Status, &issue.ClosedReason, &issue.Owner,
+		&issue.Title, &issue.Body, &issue.Status, &issue.ClosedReason, &issue.Owner, assignmentExpiresOn,
 		&issue.Priority, &issue.Author, &issue.Metadata, &issue.Revision, &issue.RecurrenceID,
 		&issue.OccurrenceKey, (*storedTime)(&issue.CreatedAt), (*storedTime)(&issue.UpdatedAt),
 		closedAt, deletedAt,
@@ -550,14 +551,15 @@ func issueDestinations(issue *db.Issue, closedAt, deletedAt *storedNullTime) []a
 
 func scanIssue(row rowScanner) (db.Issue, error) {
 	var issue db.Issue
-	var closedAt, deletedAt storedNullTime
-	err := row.Scan(issueDestinations(&issue, &closedAt, &deletedAt)...)
+	var assignmentExpiresOn, closedAt, deletedAt storedNullTime
+	err := row.Scan(issueDestinations(&issue, &assignmentExpiresOn, &closedAt, &deletedAt)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, db.ErrNotFound
 	}
 	if err != nil {
 		return db.Issue{}, mapSQLError(err, nil)
 	}
+	issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 	issue.ClosedAt = closedAt.Time
 	issue.DeletedAt = deletedAt.Time
 	return issue, nil
@@ -565,9 +567,9 @@ func scanIssue(row rowScanner) (db.Issue, error) {
 
 func scanScheduledIssue(row rowScanner) (db.Issue, string, error) {
 	var issue db.Issue
-	var closedAt, deletedAt storedNullTime
+	var assignmentExpiresOn, closedAt, deletedAt storedNullTime
 	var recurrenceTimezone sql.NullString
-	destinations := append(issueDestinations(&issue, &closedAt, &deletedAt), &recurrenceTimezone)
+	destinations := append(issueDestinations(&issue, &assignmentExpiresOn, &closedAt, &deletedAt), &recurrenceTimezone)
 	err := row.Scan(destinations...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
@@ -575,6 +577,7 @@ func scanScheduledIssue(row rowScanner) (db.Issue, string, error) {
 	if err != nil {
 		return db.Issue{}, "", mapSQLError(err, nil)
 	}
+	issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 	issue.ClosedAt = closedAt.Time
 	issue.DeletedAt = deletedAt.Time
 	return issue, recurrenceTimezone.String, nil

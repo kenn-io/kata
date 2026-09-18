@@ -85,11 +85,11 @@ func TestValidationModeRequiresConfiguredSchemaOwnerBeforeConnecting(t *testing.
 	assert.Contains(t, err.Error(), "postgres schema owner is required in validation mode")
 }
 
-func TestPostgresMigrationRegistryIncludesIssueScopedTokens(t *testing.T) {
+func TestPostgresMigrationRegistryIncludesExpiringAssignments(t *testing.T) {
 	t.Parallel()
 
 	migrations := pgstore.Migrations()
-	require.Len(t, migrations, 3)
+	require.Len(t, migrations, 4)
 	assert.Equal(t, 25, migrations[0].FromVersion)
 	assert.Equal(t, 26, migrations[0].ToVersion)
 	assert.Equal(t, "000026_external_root_bridges.up.sql", migrations[0].Name)
@@ -99,6 +99,9 @@ func TestPostgresMigrationRegistryIncludesIssueScopedTokens(t *testing.T) {
 	assert.Equal(t, 27, migrations[2].FromVersion)
 	assert.Equal(t, 28, migrations[2].ToVersion)
 	assert.Equal(t, "000028_issue_scoped_tokens.up.sql", migrations[2].Name)
+	assert.Equal(t, 28, migrations[3].FromVersion)
+	assert.Equal(t, 29, migrations[3].ToVersion)
+	assert.Equal(t, "000029_expiring_assignments.up.sql", migrations[3].Name)
 }
 
 func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
@@ -128,7 +131,7 @@ func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 28, version)
+	assert.Equal(t, 29, version)
 
 	project, err := migrated.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -185,7 +188,7 @@ func TestCommentTeammateMigrationUpgradesVersion26(t *testing.T) {
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 28, version)
+	assert.Equal(t, 29, version)
 	comments, err := migrated.CommentsByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
@@ -223,6 +226,7 @@ func TestIssueScopedTokensMigrationUpgradesVersion27(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
+	dropExpiringAssignmentsSchema(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `
 ALTER TABLE issue_token_upgrade.api_tokens DROP CONSTRAINT api_tokens_scope_shape;
 ALTER TABLE issue_token_upgrade.api_tokens DROP COLUMN expires_at;
@@ -239,7 +243,7 @@ UPDATE issue_token_upgrade.meta SET value='27' WHERE key='schema_version'`)
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 28, version)
+	assert.Equal(t, 29, version)
 
 	expiresAt := time.Now().UTC().Add(time.Hour)
 	token, _, err := migrated.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -254,6 +258,71 @@ UPDATE issue_token_upgrade.meta SET value='27' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NotNil(t, token.Scope)
 	assert.Equal(t, db.APITokenScopeIssueSubtree, token.Scope.Kind)
+}
+
+func TestExpiringAssignmentsMigrationUpgradesVersion28(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	const schema = "assignment_expiry_upgrade"
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	_, err = admin.ExecContext(ctx, `
+DROP INDEX assignment_expiry_upgrade.idx_issues_assignment_expires_on;
+ALTER TABLE assignment_expiry_upgrade.issues
+  DROP CONSTRAINT issues_assignment_expiry_requires_owner,
+  DROP COLUMN assignment_expires_on;
+UPDATE assignment_expiry_upgrade.meta SET value='28' WHERE key='schema_version'`)
+	require.NoError(t, err)
+
+	migrated, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = migrated.Close() })
+	version, err := migrated.SchemaVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 29, version)
+
+	project, err := migrated.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := migrated.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Timed ownership", Author: "tester",
+	})
+	require.NoError(t, err)
+	expiresOn := time.Date(2026, 9, 17, 20, 30, 0, 0, time.UTC)
+	_, err = migrated.ExecContext(ctx, `
+		UPDATE assignment_expiry_upgrade.issues
+		   SET owner = 'worker-a', assignment_expires_on = $1
+		 WHERE id = $2`, expiresOn, issue.ID)
+	require.NoError(t, err)
+
+	_, err = migrated.ExecContext(ctx, `
+		UPDATE assignment_expiry_upgrade.issues
+		   SET owner = NULL
+		 WHERE id = $1`, issue.ID)
+	require.Error(t, err, "a timed assignment must retain an owner")
+
+	var indexPredicate string
+	require.NoError(t, migrated.QueryRowContext(ctx, `
+		SELECT pg_get_expr(i.indpred, i.indrelid)
+		  FROM pg_index i
+		  JOIN pg_class c ON c.oid = i.indexrelid
+		  JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = $1
+		   AND c.relname = 'idx_issues_assignment_expires_on'`, schema).Scan(&indexPredicate))
+	assert.Contains(t, indexPredicate, "assignment_expires_on IS NOT NULL")
 }
 
 func TestExternalRootMigrationRollsBackSchemaAndVersionTogether(t *testing.T) {
@@ -303,6 +372,7 @@ func setExternalRootMigrationSource(
 	schema string,
 ) {
 	t.Helper()
+	dropExpiringAssignmentsSchema(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
 ALTER TABLE %s.api_tokens DROP CONSTRAINT api_tokens_scope_shape;
 ALTER TABLE %s.api_tokens DROP COLUMN expires_at;
@@ -324,12 +394,28 @@ func setCommentTeammateMigrationSource(
 	schema string,
 ) {
 	t.Helper()
+	dropExpiringAssignmentsSchema(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
 ALTER TABLE %s.api_tokens DROP CONSTRAINT api_tokens_scope_shape,
   DROP COLUMN expires_at, DROP COLUMN scope_root_issue_uid,
   DROP COLUMN scope_project_uid, DROP COLUMN scope_kind;
 ALTER TABLE %s.comments DROP COLUMN teammate;
 UPDATE %s.meta SET value='26' WHERE key='schema_version'`, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
+	require.NoError(t, err)
+}
+
+func dropExpiringAssignmentsSchema(
+	ctx context.Context,
+	t *testing.T,
+	admin *sql.DB,
+	schema string,
+) {
+	t.Helper()
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
+DROP INDEX %s.idx_issues_assignment_expires_on;
+ALTER TABLE %s.issues
+  DROP CONSTRAINT issues_assignment_expiry_requires_owner,
+  DROP COLUMN assignment_expires_on`, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
 

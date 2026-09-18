@@ -92,6 +92,19 @@ describe('IssueDetail', () => {
     expect(screen.queryByRole('region', { name: 'Task detail' })).toBeNull()
   })
 
+  it('shows a timed assignment expiry in the read view', () => {
+    const view = renderDetail({
+      issue: makeIssue({
+        owner: 'user-a',
+        assignment_expires_on: '2026-06-01T13:00:00Z',
+      }),
+    })
+
+    const readView = view.container.querySelector('.shared-detail') as HTMLElement
+    expect(within(readView).getByText('Assignment expires')).toBeTruthy()
+    expect(within(readView).getByText(/Jun 1.*1:00/)).toBeTruthy()
+  })
+
   it('shows recurrence and history to read-only users without mutation controls', () => {
     const view = renderDetail({
       actionsDisabled: true,

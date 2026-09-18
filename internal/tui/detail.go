@@ -61,6 +61,9 @@ type detailAPI interface {
 	Assign(
 		ctx context.Context, projectID int64, ref, owner, actor string,
 	) (*MutationResp, error)
+	ClaimTimedAssignment(
+		ctx context.Context, projectID int64, ref, actor string, ttl time.Duration,
+	) (*MutationResp, error)
 	SetPriority(
 		ctx context.Context, projectID int64, ref string, priority *int64, actor string,
 	) (*MutationResp, error)

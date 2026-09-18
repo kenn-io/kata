@@ -252,12 +252,12 @@ func applyEvent(e db.Event, totals, grand *api.DigestTotals, acc *issueAccum) {
 		if acc != nil {
 			acc.Edited = true
 		}
-	case "issue.assigned":
+	case "issue.assigned", "issue.assignment_renewed":
 		bump(&totals.Assigned, &grand.Assigned)
 		if acc != nil {
 			acc.AssignedTo = ownerOf(e.Payload)
 		}
-	case "issue.unassigned":
+	case "issue.unassigned", "issue.assignment_expired":
 		bump(&totals.Unassigned, &grand.Unassigned)
 		if acc != nil {
 			acc.Unassigned = true

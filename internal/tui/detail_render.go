@@ -199,6 +199,10 @@ func renderDocumentMetadata(
 	owner := metadataLabel("owner:") + " " + ownerDocumentText(iss.Owner)
 	parentText := metadataLabel("parent:") + " " + parentDocumentText(parent)
 	rows = append(rows, joinMetadataRow(owner, parentText, width)...)
+	if iss.AssignmentExpiresOn != nil {
+		expires := metadataLabel("assignment expires:") + " " + formatDocumentTime(*iss.AssignmentExpiresOn)
+		rows = append(rows, truncate(expires, width))
+	}
 	priorityText := metadataLabel("priority:") + " " + priorityDocumentText(iss.Priority)
 	rows = append(rows, truncate(priorityText, width))
 	if len(iss.Labels) > 0 {

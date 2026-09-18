@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-09-16
+last_edited: 2026-09-18
 ---
 
 # Model Context Protocol server
@@ -235,8 +235,10 @@ immutable UID.
 Recurrence patch and delete calls require the current positive `revision` and
 send it as `If-Match`. Create calls do not use a revision.
 
-`kata.create` supports `force_new`. `kata.claim` supports `force` and returns
-the previous owner when the daemon reports one. `kata.edit` supports field,
+`kata.create` supports `force_new`. `kata.claim` supports `force`,
+`if_unowned`, and an optional `ttl_seconds` from 60 through 86400. A timed
+claim renews when the same actor repeats it, and the result includes the
+assignment expiry and previous owner when present. `kata.edit` supports field,
 owner, priority, relationship, scheduling, and generic metadata changes. An
 issue-field or relationship change and a metadata change must use separate
 `kata.edit` calls so one failed request cannot leave a partial edit.

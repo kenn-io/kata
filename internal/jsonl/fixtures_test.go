@@ -557,6 +557,13 @@ func dropV10Additions(t *testing.T, raw *sql.DB) {
 		`CREATE INDEX idx_events_issue_uid ON events(issue_uid) WHERE issue_uid IS NOT NULL`,
 		`CREATE INDEX idx_events_related_issue_uid ON events(related_issue_uid) WHERE related_issue_uid IS NOT NULL`,
 		`CREATE INDEX idx_events_origin_instance ON events(origin_instance_uid)`,
+		// The partial index must go first, but the named CHECK
+		// issues_assignment_expiry_requires_owner needs no separate drop:
+		// it is a column-level constraint inside assignment_expires_on's
+		// own definition, so SQLite removes it with the column. A
+		// table-level CHECK would require a table rebuild instead.
+		`DROP INDEX IF EXISTS idx_issues_assignment_expires_on`,
+		`ALTER TABLE issues DROP COLUMN assignment_expires_on`,
 		`DROP INDEX IF EXISTS issues_recurrence_occurrence_uniq`,
 		`ALTER TABLE issues DROP COLUMN recurrence_id`,
 		`ALTER TABLE issues DROP COLUMN occurrence_key`,

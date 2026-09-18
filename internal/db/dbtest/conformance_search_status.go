@@ -3,11 +3,46 @@ package dbtest
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
+
+// checkSearchRoundTripsAssignmentExpiry pins the search candidate hydration
+// of the timed assignment expiry: both full-text entry points must return the
+// exact expires-on instant ClaimOwner recorded for the issue.
+func checkSearchRoundTripsAssignmentExpiry(t *testing.T, store db.Storage) error {
+	ctx := context.Background()
+	fixture, err := createIssueFixture(ctx, store, "search-expiry-project", "searchable timed assignment", "operator", nil)
+	require.NoError(t, err)
+	now := time.Date(2026, time.September, 17, 12, 0, 0, 0, time.UTC)
+	claimed, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{
+		IssueID: fixture.Issue.ID,
+		Actor:   "worker",
+		TTL:     time.Hour,
+		Now:     now,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, claimed.Issue.AssignmentExpiresOn)
+	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){
+		"all": store.SearchFTS,
+		"any": store.SearchFTSAny,
+	} {
+		t.Run(name, func(t *testing.T) {
+			hits, err := search(ctx, db.SearchFTSParams{
+				ProjectID: fixture.Project.ID,
+				Query:     "searchable assignment",
+				Limit:     10,
+			})
+			require.NoError(t, err)
+			require.Len(t, hits, 1)
+			assert.Equal(t, claimed.Issue.AssignmentExpiresOn, hits[0].Issue.AssignmentExpiresOn)
+		})
+	}
+	return nil
+}
 
 func checkSearchStatus(t *testing.T, store db.Storage) error {
 	ctx := t.Context()

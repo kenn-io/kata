@@ -685,13 +685,22 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 }
 
 func (h toolHandlers) claim(ctx context.Context, _ *sdkmcp.CallToolRequest, input ClaimInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	if input.Force && input.IfUnowned {
+		return nil, MutationOutput{}, errors.New("force and if_unowned are mutually exclusive")
+	}
+	if input.TTLSeconds != nil && (*input.TTLSeconds < 60 || *input.TTLSeconds > 86400) {
+		return nil, MutationOutput{}, errors.New("ttl_seconds must be between 60 and 86400")
+	}
 	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
 	response, err := h.options.Client.ClaimIssue(ctx, &generated.ClaimIssueRequestOptions{
 		PathParams: &generated.ClaimIssuePath{ProjectID: project.ID, Ref: ref},
-		Body:       &generated.ClaimIssueBody{Actor: h.options.Actor, Force: optionalTrue(input.Force)},
+		Body: &generated.ClaimIssueBody{
+			Actor: optionalString(h.options.Actor), Force: optionalTrue(input.Force), IfUnowned: optionalTrue(input.IfUnowned),
+			TTLSeconds: input.TTLSeconds,
+		},
 	})
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -1236,18 +1245,19 @@ func projectIDSet(projects []ProjectIdentity) map[int64]struct{} {
 
 func (h toolHandlers) summaryFromIssue(project ProjectIdentity, issue generated.Issue) IssueSummary {
 	return IssueSummary{
-		UID:          issue.UID,
-		Ref:          issue.ShortID,
-		QualifiedRef: project.Name + "#" + issue.ShortID,
-		Title:        issue.Title,
-		Status:       issue.Status,
-		Owner:        issue.Owner,
-		Priority:     issue.Priority,
-		Revision:     issue.Revision,
-		UpdatedAt:    formatTime(issue.UpdatedAt),
-		ScheduledOn:  metadataString(issue.Metadata, "scheduled_on"),
-		Timezone:     metadataString(issue.Metadata, "timezone"),
-		updatedAt:    issue.UpdatedAt,
+		UID:                 issue.UID,
+		Ref:                 issue.ShortID,
+		QualifiedRef:        project.Name + "#" + issue.ShortID,
+		Title:               issue.Title,
+		Status:              issue.Status,
+		Owner:               issue.Owner,
+		AssignmentExpiresOn: formatOptionalTime(issue.AssignmentExpiresOn),
+		Priority:            issue.Priority,
+		Revision:            issue.Revision,
+		UpdatedAt:           formatTime(issue.UpdatedAt),
+		ScheduledOn:         metadataString(issue.Metadata, "scheduled_on"),
+		Timezone:            metadataString(issue.Metadata, "timezone"),
+		updatedAt:           issue.UpdatedAt,
 	}
 }
 
@@ -1257,21 +1267,22 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 		qualified = project.Name + "#" + issue.ShortID
 	}
 	return IssueSummary{
-		WebURL:       issue.WebURL,
-		UID:          issue.UID,
-		Ref:          issue.ShortID,
-		QualifiedRef: qualified,
-		Title:        issue.Title,
-		Status:       issue.Status,
-		Owner:        issue.Owner,
-		Priority:     issue.Priority,
-		Labels:       new(nonNilStrings(issue.Labels)),
-		Blocked:      issue.Blocked,
-		Revision:     issue.Revision,
-		UpdatedAt:    formatTime(issue.UpdatedAt),
-		ScheduledOn:  metadataString(issue.Metadata, "scheduled_on"),
-		Timezone:     metadataString(issue.Metadata, "timezone"),
-		updatedAt:    issue.UpdatedAt,
+		WebURL:              issue.WebURL,
+		UID:                 issue.UID,
+		Ref:                 issue.ShortID,
+		QualifiedRef:        qualified,
+		Title:               issue.Title,
+		Status:              issue.Status,
+		Owner:               issue.Owner,
+		AssignmentExpiresOn: formatOptionalTime(issue.AssignmentExpiresOn),
+		Priority:            issue.Priority,
+		Labels:              new(nonNilStrings(issue.Labels)),
+		Blocked:             issue.Blocked,
+		Revision:            issue.Revision,
+		UpdatedAt:           formatTime(issue.UpdatedAt),
+		ScheduledOn:         metadataString(issue.Metadata, "scheduled_on"),
+		Timezone:            metadataString(issue.Metadata, "timezone"),
+		updatedAt:           issue.UpdatedAt,
 	}
 }
 
@@ -1279,7 +1290,8 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 	return IssueSummary{
 		WebURL: issue.WebURL,
 		UID:    issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
-		Title: issue.Title, Status: issue.Status, Owner: issue.Owner, Priority: issue.Priority,
+		Title: issue.Title, Status: issue.Status, Owner: issue.Owner,
+		AssignmentExpiresOn: formatOptionalTime(issue.AssignmentExpiresOn), Priority: issue.Priority,
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
@@ -1291,7 +1303,8 @@ func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSumma
 	return IssueSummary{
 		WebURL: issue.WebURL,
 		UID:    issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
-		Title: issue.Title, Status: issue.Status, Owner: issue.Owner, Priority: issue.Priority,
+		Title: issue.Title, Status: issue.Status, Owner: issue.Owner,
+		AssignmentExpiresOn: formatOptionalTime(issue.AssignmentExpiresOn), Priority: issue.Priority,
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
@@ -1624,4 +1637,12 @@ func formatTime(value time.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func formatOptionalTime(value *time.Time) *string {
+	if value == nil {
+		return nil
+	}
+	formatted := formatTime(*value)
+	return &formatted
 }

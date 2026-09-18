@@ -120,7 +120,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	// title/body/comments column matches the per-column phrase, 0 otherwise.
 	query := fmt.Sprintf(`
 		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-		       i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision,
+		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision,
 		       i.recurrence_id, i.occurrence_key,
 		       i.created_at, i.updated_at, i.closed_at, i.deleted_at,
 		       bm25(issues_fts),
@@ -155,7 +155,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 			inTitle, inBody, inComments bool
 		)
 		if err := rows.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status,
-			&i.ClosedReason, &i.Owner, &i.Priority, &i.Author, &i.Metadata, &i.Revision,
+			&i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision,
 			&i.RecurrenceID, &i.OccurrenceKey,
 			&i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt,
 			&rawScore, &inTitle, &inBody, &inComments); err != nil {

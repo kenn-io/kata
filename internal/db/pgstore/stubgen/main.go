@@ -97,7 +97,6 @@ var alreadyImplemented = map[string]bool{
 	"ClaimIssueSyncBinding":                true, // issue_sync.go
 	"ClaimExternalRootBinding":             true, // external_roots.go
 	"ClaimOwner":                           true, // issue_lifecycle.go
-	"ClaimOwnerIfUnowned":                  true, // issue_lifecycle.go
 	"ClaimStatus":                          true, // claims_core.go
 	"ClaimStatusReadOnly":                  true, // claims_core.go
 	"ClaimStatusRefreshError":              true, // claims_pending.go
@@ -137,6 +136,7 @@ var alreadyImplemented = map[string]bool{
 	"EditComment":                          true, // comments.go
 	"EditIssue":                            true, // issue_lifecycle.go
 	"EditIssueAtomic":                      true, // atomic_edit.go
+	"ExpireAssignments":                    true, // assignment_expiry.go
 	"EnsureSystemProject":                  true, // tokens.go
 	"EnsureExternalRootLifecycleRequest":   true, // external_roots.go
 	"EnqueuePendingClaim":                  true, // claims_pending.go

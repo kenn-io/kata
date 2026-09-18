@@ -15,21 +15,22 @@ import (
 )
 
 type issueStatusProjection struct {
-	Issue             string     `json:"issue"`
-	Project           string     `json:"project"`
-	IssueStatus       string     `json:"issue_status"`
-	Revision          int64      `json:"revision"`
-	Actor             string     `json:"actor"`
-	ActorSource       string     `json:"actor_source"`
-	Auth              string     `json:"auth"`
-	Instance          string     `json:"instance"`
-	Owner             *string    `json:"owner,omitempty"`
-	Hold              string     `json:"hold"`
-	Holder            string     `json:"holder,omitempty"`
-	HolderInstance    string     `json:"holder_instance,omitempty"`
-	LeaseKind         string     `json:"lease_kind,omitempty"`
-	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
-	PendingLeaseCount int        `json:"pending_lease_count,omitzero"`
+	Issue               string     `json:"issue"`
+	Project             string     `json:"project"`
+	IssueStatus         string     `json:"issue_status"`
+	Revision            int64      `json:"revision"`
+	Actor               string     `json:"actor"`
+	ActorSource         string     `json:"actor_source"`
+	Auth                string     `json:"auth"`
+	Instance            string     `json:"instance"`
+	Owner               *string    `json:"owner,omitempty"`
+	AssignmentExpiresOn *time.Time `json:"assignment_expires_on,omitempty"`
+	Hold                string     `json:"hold"`
+	Holder              string     `json:"holder,omitempty"`
+	HolderInstance      string     `json:"holder_instance,omitempty"`
+	LeaseKind           string     `json:"lease_kind,omitempty"`
+	ExpiresAt           *time.Time `json:"expires_at,omitempty"`
+	PendingLeaseCount   int        `json:"pending_lease_count,omitzero"`
 }
 
 type instanceStatusForCLI struct {
@@ -88,16 +89,18 @@ func runIssueStatus(cmd *cobra.Command, issueRef string) error {
 		now = show.LeaseHubNow.UTC()
 	}
 	projection := issueStatusProjection{
-		Issue:             show.Issue.ShortID,
-		Project:           ref.ProjectName,
-		IssueStatus:       show.Issue.Status,
-		Revision:          show.Issue.Revision,
-		Actor:             actor,
-		ActorSource:       source,
-		Auth:              authKind,
-		Instance:          instance.InstanceUID,
-		Owner:             show.Issue.Owner,
-		Hold:              projectedHoldState(show.Issue.Status, show.Issue.Owner, show.Lease, show.PendingLeases, now),
+		Issue:               show.Issue.ShortID,
+		Project:             ref.ProjectName,
+		IssueStatus:         show.Issue.Status,
+		Revision:            show.Issue.Revision,
+		Actor:               actor,
+		ActorSource:         source,
+		Auth:                authKind,
+		Instance:            instance.InstanceUID,
+		Owner:               show.Issue.Owner,
+		AssignmentExpiresOn: show.Issue.AssignmentExpiresOn,
+		Hold: projectedHoldState(show.Issue.Status, show.Issue.Owner, show.Issue.AssignmentExpiresOn,
+			show.Lease, show.PendingLeases, now),
 		PendingLeaseCount: len(show.PendingLeases),
 	}
 	if show.Lease != nil {
@@ -127,6 +130,7 @@ func getInstanceStatus(ctx context.Context, client *http.Client, baseURL string,
 func projectedHoldState(
 	issueStatus string,
 	owner *string,
+	assignmentExpiresOn *time.Time,
 	lease *claimForShowCLI,
 	pending []pendingClaimForCLI,
 	now time.Time,
@@ -144,6 +148,9 @@ func projectedHoldState(
 		return "pending"
 	}
 	if owner != nil && *owner != "" {
+		if assignmentExpiresOn != nil && !assignmentExpiresOn.After(now) {
+			return "expired"
+		}
 		return "assigned"
 	}
 	return "unassigned"
@@ -176,11 +183,17 @@ func printIssueStatusAgent(out io.Writer, status issueStatusProjection) error {
 		agentRowField("auth", status.Auth),
 		agentRowField("instance", status.Instance),
 		agentOptionalRowField("owner", status.Owner),
+	}
+	if status.AssignmentExpiresOn != nil {
+		expires := status.AssignmentExpiresOn.UTC().Format(time.RFC3339Nano)
+		fields = append(fields, agentRowField("assignment_expires_on", expires))
+	}
+	fields = append(fields,
 		agentRowField("hold", status.Hold),
 		agentOptionalRowField("holder", optionalStatusString(status.Holder)),
 		agentOptionalRowField("holder_instance", optionalStatusString(status.HolderInstance)),
 		agentOptionalRowField("lease_kind", optionalStatusString(status.LeaseKind)),
-	}
+	)
 	if status.ExpiresAt != nil {
 		expires := status.ExpiresAt.UTC().Format(time.RFC3339Nano)
 		fields = append(fields, agentRowField("expires_at", expires))
@@ -222,6 +235,11 @@ func printIssueStatusHuman(out io.Writer, status issueStatusProjection) error {
 	}
 	if status.Owner != nil && *status.Owner != "" {
 		if _, err := fmt.Fprintln(out, "owner:", textsafe.Line(*status.Owner)); err != nil {
+			return err
+		}
+	}
+	if status.AssignmentExpiresOn != nil {
+		if _, err := fmt.Fprintln(out, "assignment expires:", status.AssignmentExpiresOn.UTC().Format(time.RFC3339)); err != nil {
 			return err
 		}
 	}

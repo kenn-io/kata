@@ -1906,6 +1906,50 @@ describe('App', () => {
     })
   })
 
+  it('omits a client actor from temporary claims in identity mode', async () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const base = snapshot()
+    const accepted = {
+      ...base,
+      selected: {
+        state: 'available',
+        issue: base.collection[0],
+        comments: [],
+        labels: [],
+        links: [],
+        recurrences: [],
+        history: [],
+      },
+    }
+    const claims: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        if (request.method === 'POST' && request.url.endsWith('/actions/claim')) {
+          claims.push(request)
+          return Response.json({ issue: base.collection[0], events: [], changed: false })
+        }
+        return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
+    await fireEvent.click(await screen.findByRole('combobox', { name: /Assignment duration/ }))
+    await fireEvent.click(screen.getByRole('option', { name: '1 hour' }))
+
+    await waitFor(() => expect(claims).toHaveLength(1))
+    expect(await claims[0]!.json()).toEqual({ ttl_seconds: 3600 })
+  })
+
   it('reuses the comment idempotency key after an uncertain response', async () => {
     history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
     sessionStorage.setItem(

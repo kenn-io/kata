@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-17
+last_edited: 2026-09-18
 ---
 
 # Agent workflows
@@ -245,14 +245,15 @@ In multi-agent environments, choose one unowned ready issue and claim it:
 
 ```sh
 kata next --unowned --agent
-kata claim abc4 --if-unowned --agent
+kata claim abc4 --if-unowned --ttl 30m --agent
 ```
 
 `next` applies the shared priority rules and returns at most one candidate. The
-`--if-unowned` claim fails if anyone owns the issue, including the same actor.
-This lets workers sharing an identity compete for unowned work. On a conflict,
-run `next` again. Without the flag, claiming an issue you already own succeeds
-as a no-op.
+`--if-unowned` fails if anyone has a live assignment, including the same
+actor. This lets workers sharing an identity compete for unassigned work. On a
+conflict, run `next` again. A timed assignment becomes eligible for `next`
+again at its expiry. Repeat the claim without `--if-unowned` before then to
+renew it.
 
 Check the effective identity, issue status, revision, owner, and lease before
 continuing or handing off work:

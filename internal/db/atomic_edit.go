@@ -35,7 +35,7 @@ func PlanIssueFieldEdit(issue Issue, title, body, owner *string, updatedAt strin
 			value := *owner
 			plan.Owner = &value
 		}
-		plan.OwnerChanged = !equalOptionalString(issue.Owner, plan.Owner)
+		plan.OwnerChanged = !equalOptionalString(issue.Owner, plan.Owner) || issue.AssignmentExpiresOn != nil
 	}
 	if !plan.Changed() {
 		return plan, nil

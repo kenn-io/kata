@@ -20,7 +20,7 @@ import (
 func TestFederationSchemaVersionAndTable(t *testing.T) {
 	d := openTestDB(t)
 
-	assert.Equal(t, 28, db.CurrentSchemaVersion())
+	assert.Equal(t, 29, db.CurrentSchemaVersion())
 	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 	assertSchemaObject(t, d, "federation_bindings")
 	assertSchemaObject(t, d, "idx_federation_bindings_role_enabled")
@@ -477,6 +477,20 @@ func TestPendingFederationPushEvents(t *testing.T) {
 	_, priorityEvent, changed, err := d.UpdatePriority(ctx, localIssue.ID, &priority, "tester")
 	require.NoError(t, err)
 	require.True(t, changed)
+	assignmentEventIDs := make([]int64, 0, 2)
+	for index, eventType := range []string{"issue.assignment_renewed", "issue.assignment_expired"} {
+		result, insertErr := d.ExecContext(ctx, `
+			INSERT INTO events(
+				uid, origin_instance_uid, project_id, project_name, issue_id, issue_uid,
+				type, actor, payload, hlc_physical_ms, hlc_counter, content_hash
+			) VALUES(?, ?, ?, ?, ?, ?, ?, 'tester', '{}', ?, 0, ?)`,
+			fmt.Sprintf("01HZNQ7VFPK1XGD8R5MABCD4P%d", index), d.InstanceUID(), p.ID, p.Name,
+			localIssue.ID, localIssue.UID, eventType, 2+index, strings.Repeat(fmt.Sprint(index+1), 64))
+		require.NoError(t, insertErr)
+		eventID, insertErr := result.LastInsertId()
+		require.NoError(t, insertErr)
+		assignmentEventIDs = append(assignmentEventIDs, eventID)
+	}
 	_, err = d.ExecContext(ctx, `
 		INSERT INTO events(
 			uid, origin_instance_uid, project_id, project_name,
@@ -493,17 +507,17 @@ func TestPendingFederationPushEvents(t *testing.T) {
 	got, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), binding.PushCursorEventID, 10)
 	require.NoError(t, err)
 
-	require.Len(t, got, 4)
+	require.Len(t, got, 6)
 	assert.Equal(t,
-		[]int64{localEvent.ID, localComment.ID, ownerEvent.ID, priorityEvent.ID},
-		[]int64{got[0].ID, got[1].ID, got[2].ID, got[3].ID})
+		[]int64{localEvent.ID, localComment.ID, ownerEvent.ID, priorityEvent.ID, assignmentEventIDs[0], assignmentEventIDs[1]},
+		[]int64{got[0].ID, got[1].ID, got[2].ID, got[3].ID, got[4].ID, got[5].ID})
 	for _, ev := range got {
 		assert.Equal(t, d.InstanceUID(), ev.OriginInstanceUID)
 	}
 
 	got, err = d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), localEvent.ID, 10)
 	require.NoError(t, err)
-	require.Len(t, got, 3)
+	require.Len(t, got, 5)
 	assert.Equal(t, localComment.ID, got[0].ID)
 
 	got, err = d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), 0, 1)
@@ -1510,6 +1524,12 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 		Labels:    []string{"area:db"},
 	})
 	require.NoError(t, err)
+	claim, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{
+		IssueID: active.ID, Actor: owner, TTL: time.Hour,
+		Now: time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	active = claim.Issue
 	deleted, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
 		Title:     "deleted issue",
@@ -1594,6 +1614,8 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 	assert.Equal(t, active.Author, activePayload.Author)
 	require.NotNil(t, activePayload.Owner)
 	assert.Equal(t, owner, *activePayload.Owner)
+	require.NotNil(t, activePayload.AssignmentExpiresOn)
+	assert.Equal(t, active.AssignmentExpiresOn.UTC().Format(db.EventTimestampFormat), *activePayload.AssignmentExpiresOn)
 	require.NotNil(t, activePayload.Priority)
 	assert.Equal(t, priority, *activePayload.Priority)
 	assert.Equal(t, "open", activePayload.Status)
@@ -4365,7 +4387,8 @@ func TestIngestClaimCloseReleasesLiveClaim(t *testing.T) {
 
 func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 	for _, eventType := range []string{
-		"issue.updated", "issue.assigned", "issue.unassigned",
+		"issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
+		"issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
 		"issue.labeled", "issue.unlabeled", "issue.linked", "issue.unlinked",
@@ -4499,6 +4522,7 @@ func TestMaterializeFederatedProject(t *testing.T) {
 		"body":"body",
 		"author":"alice",
 		"owner":"alice",
+		"assignment_expires_on":"2026-05-23T12:30:00.000Z",
 		"priority":1,
 		"status":"open",
 		"metadata":{"area":"db"},
@@ -4523,6 +4547,8 @@ func TestMaterializeFederatedProject(t *testing.T) {
 			`{"project_uid":"`+remoteProjectUID+`","project_name":"hub","metadata":{"area":"federation"}}`),
 		remoteEvent(t, remoteProjectUID, "hub", &issueUID, nil, "issue.snapshot", "remote-agent", 100, issueSnapshot),
 		remoteEvent(t, remoteProjectUID, "hub", &relatedUID, nil, "issue.snapshot", "remote-agent", 101, relatedSnapshot),
+		remoteEvent(t, remoteProjectUID, "hub", &issueUID, nil, "issue.assignment_renewed", "alice", 102,
+			`{"owner":"alice","old_assignment_expires_on":"2026-05-23T12:30:00.000Z","assignment_expires_on":"2026-05-23T13:00:00.000Z","updated_at":"2026-05-23T12:10:00.000Z"}`),
 	} {
 		inserted, err := d.InsertRemoteEvent(ctx, p.ID, ev)
 		require.NoError(t, err)
@@ -4537,9 +4563,11 @@ func TestMaterializeFederatedProject(t *testing.T) {
 	assert.Equal(t, "body", issue.Body)
 	require.NotNil(t, issue.Owner)
 	assert.Equal(t, "alice", *issue.Owner)
+	require.NotNil(t, issue.AssignmentExpiresOn)
+	assert.Equal(t, "2026-05-23T13:00:00.000Z", issue.AssignmentExpiresOn.UTC().Format(db.EventTimestampFormat))
 	require.NotNil(t, issue.Priority)
 	assert.Equal(t, int64(1), *issue.Priority)
-	assert.Equal(t, "2026-05-23T12:00:09.000Z", issue.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"))
+	assert.Equal(t, "2026-05-23T12:10:00.000Z", issue.UpdatedAt.UTC().Format(db.EventTimestampFormat))
 	assert.JSONEq(t, `{"area":"db"}`, string(issue.Metadata))
 	project, err := d.ProjectByID(ctx, p.ID)
 	require.NoError(t, err)
@@ -4570,7 +4598,18 @@ func TestMaterializeFederatedProject(t *testing.T) {
 	assertRowCount(ctx, t, d, 1, "link materialized",
 		`SELECT count(*) FROM links
 		   WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = ?)
-		     AND type = 'related'`, p.ID)
+			     AND type = 'related'`, p.ID)
+
+	expired := remoteEvent(t, remoteProjectUID, "hub", &issueUID, nil, "issue.assignment_expired", "system", 103,
+		`{"previous_owner":"alice","owner":null,"assignment_expires_on":"2026-05-23T13:00:00.000Z","updated_at":"2026-05-23T13:00:00.000Z"}`)
+	inserted, err := d.InsertRemoteEvent(ctx, p.ID, expired)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	issue, err = d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Nil(t, issue.Owner)
+	assert.Nil(t, issue.AssignmentExpiresOn)
 }
 
 func TestMaterializeFederatedProjectGroupsCrossProjectLinksByHubOrigin(t *testing.T) {
@@ -5101,20 +5140,21 @@ func TestBoundFederationActor_OverridesEditIssueAtomicLinkAuthor(t *testing.T) {
 }
 
 type federationSnapshotPayload struct {
-	UID          string         `json:"uid"`
-	ShortID      string         `json:"short_id"`
-	Title        string         `json:"title"`
-	Body         string         `json:"body"`
-	Author       string         `json:"author"`
-	Owner        *string        `json:"owner"`
-	Priority     *int64         `json:"priority"`
-	Status       string         `json:"status"`
-	ClosedReason *string        `json:"closed_reason"`
-	ClosedAt     *string        `json:"closed_at"`
-	DeletedAt    *string        `json:"deleted_at"`
-	Metadata     jsontext.Value `json:"metadata"`
-	Labels       []string       `json:"labels"`
-	Links        []struct {
+	UID                 string         `json:"uid"`
+	ShortID             string         `json:"short_id"`
+	Title               string         `json:"title"`
+	Body                string         `json:"body"`
+	Author              string         `json:"author"`
+	Owner               *string        `json:"owner"`
+	AssignmentExpiresOn *string        `json:"assignment_expires_on"`
+	Priority            *int64         `json:"priority"`
+	Status              string         `json:"status"`
+	ClosedReason        *string        `json:"closed_reason"`
+	ClosedAt            *string        `json:"closed_at"`
+	DeletedAt           *string        `json:"deleted_at"`
+	Metadata            jsontext.Value `json:"metadata"`
+	Labels              []string       `json:"labels"`
+	Links               []struct {
 		Type       string `json:"type"`
 		ToIssueUID string `json:"to_issue_uid"`
 		Author     string `json:"author"`
@@ -5275,6 +5315,10 @@ func remoteClaimWorkPayload(issueUID string, relatedIssueUID *string, eventType 
 		return `{"issue_uid":"` + issueUID + `","owner":"remote-agent"}`
 	case "issue.unassigned":
 		return `{"issue_uid":"` + issueUID + `","owner":null}`
+	case "issue.assignment_renewed":
+		return `{"issue_uid":"` + issueUID + `","owner":"remote-agent","old_assignment_expires_on":"2026-05-23T12:30:00.000Z","assignment_expires_on":"2026-05-23T13:00:00.000Z"}`
+	case "issue.assignment_expired":
+		return `{"issue_uid":"` + issueUID + `","previous_owner":"holder","owner":null,"assignment_expires_on":"2026-05-23T12:30:00.000Z","updated_at":"2026-05-23T12:30:00.000Z"}`
 	case "issue.priority_set":
 		return `{"issue_uid":"` + issueUID + `","priority":1}`
 	case "issue.priority_cleared":

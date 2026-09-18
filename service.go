@@ -492,9 +492,10 @@ func (a hostAccessControllerAdapter) Authorize(
 	}, nil
 }
 
-// Run executes Kata's federation, GitHub synchronization, and timed-claim
-// workers until ctx is canceled or Close is called. Run does not start a
-// listener and may be called only once at a time.
+// Run executes Kata's federation, GitHub synchronization, timed-claim,
+// due-notification, and assignment-expiry workers until ctx is canceled or
+// Close is called. Run does not start a listener and may be called only once
+// at a time.
 func (s *Service) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("kata: run context is required")
@@ -590,11 +591,16 @@ func (s *Service) Run(ctx context.Context) error {
 	dueNotificationSweeper.OnError = func(err error) {
 		s.logger.Error("kata due-notification worker", "err", err)
 	}
+	assignmentSweeper := daemon.NewAssignmentSweeper(s.store, s.publish)
+	assignmentSweeper.OnError = func(err error) {
+		s.logger.Error("kata assignment-expiry worker", "err", err)
+	}
 	workers := []namedWorker{
 		{name: "federation", run: runner.Run},
 		{name: "github-sync", run: gitHubSyncRunner.Run},
 		{name: "timed-claim", run: sweeper.Run},
 		{name: "due-notification", run: dueNotificationSweeper.Run},
+		{name: "assignment-expiry", run: assignmentSweeper.Run},
 	}
 	workerErrs := make(chan error, len(workers))
 	for _, worker := range workers {

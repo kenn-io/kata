@@ -20,6 +20,9 @@ var commentTeammateMigrationSQL string
 //go:embed migrations/000028_issue_scoped_tokens.up.sql
 var issueScopedTokensMigrationSQL string
 
+//go:embed migrations/000029_expiring_assignments.up.sql
+var expiringAssignmentsMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -51,6 +54,12 @@ var migrationAssets = []Migration{
 		ToVersion:   28,
 		Name:        "000028_issue_scoped_tokens.up.sql",
 		SQL:         issueScopedTokensMigrationSQL,
+	},
+	{
+		FromVersion: 28,
+		ToVersion:   29,
+		Name:        "000029_expiring_assignments.up.sql",
+		SQL:         expiringAssignmentsMigrationSQL,
 	},
 }
 

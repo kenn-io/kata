@@ -2131,6 +2131,32 @@ func checkFederationIngestLifecycle(t *testing.T, store db.Storage) error {
 		Events: []db.FederationIngestEvent{{SourceEventID: 15, Event: wrongOrigin}},
 	})
 	assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+
+	// Assignment expirations are work mutations: an uncovered spoke expiry
+	// against a live hub lease must audit a violation like every other
+	// uncovered work event.
+	expired := newRemoteEvent(t, hub, &issueUID, "issue.assignment_expired", "sync-agent", spokeUID, 305,
+		jsontext.Value(`{"issue_uid":"`+issueUID+`","previous_owner":"other-worker","owner":null,`+
+			`"assignment_expires_on":"2026-05-23T12:05:00.000Z","updated_at":"2026-05-23T12:05:00.000Z"}`))
+	expiredAudited, err := store.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID: hub.ID, SpokeInstanceUID: spokeUID, BoundActor: "sync-agent",
+		Events: []db.FederationIngestEvent{{SourceEventID: 16, Event: expired}},
+	})
+	if err != nil {
+		return fmt.Errorf("ingest claim-violating assignment expiry: %w", err)
+	}
+	assert.Equal(t, 1, expiredAudited.Accepted)
+	violations, violationCount, err = store.UnresolvedClaimViolationsForIssue(
+		ctx, hub.ID, issueUID, 10,
+	)
+	if err != nil {
+		return fmt.Errorf("read claim violations after assignment expiry: %w", err)
+	}
+	assert.Equal(t, int64(2), violationCount)
+	require.Len(t, violations, 2)
+	assert.Equal(t, expired.EventUID, violations[0].OffendingEventUID)
+	assert.Equal(t, "issue.assignment_expired", violations[0].OffendingEventType)
+
 	zero, err := store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: hub.ID})
 	if err != nil {
 		return fmt.Errorf("empty ingest after rejected teammates: %w", err)

@@ -399,6 +399,32 @@ func (c *Client) Assign(ctx context.Context, projectID int64, ref, owner, actor 
 	return &resp, nil
 }
 
+// ClaimTimedAssignment assigns the issue to actor for a bounded duration or
+// renews actor's current timed assignment.
+func (c *Client) ClaimTimedAssignment(
+	ctx context.Context, projectID int64, ref, actor string, ttl time.Duration,
+) (*MutationResp, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	ttlSeconds := int64(ttl / time.Second)
+	wire, callErr := apiClient.ClaimIssueWithResponse(ctx, &generated.ClaimIssueRequestOptions{
+		PathParams: &generated.ClaimIssuePath{ProjectID: projectID, Ref: ref},
+		Body: &generated.ClaimIssueBody{
+			Actor: &actor, TTLSeconds: &ttlSeconds,
+		},
+	})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // SetPriority sends the issue's priority through /actions/priority. A
 // nil priority clears the field. Mirrors Assign's pattern of routing
 // the optional/clear case through the same endpoint with a nil body

@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "b801d55c04e79bda03657d5ce10aba3a2f5dde73b27f5073da7124d09cc9d5f2"
-	canonicalConstraintFingerprint = "fbe93331f4ad6aabcd85a6b1925aeed20b5c8b5b20ecfe6574c9826cb1422992"
-	canonicalIndexFingerprint      = "e128126dddd2ce0bc37ac07a4cc98352f556f0e986c34e0e83b73d06594e848b"
+	canonicalColumnFingerprint     = "f46458bfdd656755b4921c995d8785dcd43033626ef0dc5bee6e7e4d5c1d12cf"
+	canonicalConstraintFingerprint = "184a76b16fd874ccbf2a59d0e100f9958ea3dc799ddddbcda86d800363a0e92f"
+	canonicalIndexFingerprint      = "a827a2c2fa61f2ac0782385bec439033625c9869c656d2190dc80e30a33ab543"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -38,7 +38,7 @@ var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column 
 	"issue_labels":            "issue_id,label,author,created_at",
 	"issue_sync_bindings":     "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at",
 	"issue_sync_status":       "binding_id,project_id,sync_started_at,last_attempt_at,last_success_at,last_error_at,last_error,last_created,last_updated,last_unchanged,last_comments",
-	"issues":                  "id,uid,project_id,short_id,title,body,status,closed_reason,owner,priority,author,created_at,updated_at,closed_at,deleted_at,metadata,revision,content_revision,recurrence_id,occurrence_key",
+	"issues":                  "id,uid,project_id,short_id,title,body,status,closed_reason,owner,assignment_expires_on,priority,author,created_at,updated_at,closed_at,deleted_at,metadata,revision,content_revision,recurrence_id,occurrence_key",
 	"issues_search":           "issue_id,tsv",
 	"links":                   "id,from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at",
 	"meta":                    "key,value",
@@ -59,7 +59,7 @@ var optionalVectorTableColumns = map[string]string{ //nolint:gosec // Catalog co
 
 var canonicalIndexes = strings.Fields(`
 idx_projects_active idx_project_aliases_project recurrences_project
-idx_issues_project_status_updated idx_issues_project_updated idx_issues_owner
+idx_issues_project_status_updated idx_issues_project_updated idx_issues_owner idx_issues_assignment_expires_on
 uniq_issues_project_short_id issues_recurrence_occurrence_uniq idx_comments_issue
 uniq_one_parent_per_child idx_links_from idx_links_to idx_links_from_uid idx_links_to_uid
 idx_issue_labels_label idx_events_project idx_events_issue idx_events_related

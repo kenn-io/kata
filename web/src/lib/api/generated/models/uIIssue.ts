@@ -4,6 +4,7 @@
 import type { UIIssueMetadata } from './uIIssueMetadata.ts'
 
 export interface UIIssue {
+  assignment_expires_on?: string
   author: string
   body: string
   closed_at?: string

@@ -16,6 +16,7 @@ import (
 type claimPrincipal struct {
 	db.ClaimPrincipal
 	IdentityToken    bool
+	Enrollment       bool
 	RequestPrincipal *Principal
 }
 
@@ -43,6 +44,15 @@ func resolveClaimPrincipal(
 		}
 		return ctx, claimPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
 			"host principal or scoped federation bearer required", "", nil)
+	}
+	if requestPrincipal, ok := PrincipalFromContext(ctx); ok {
+		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+			return ctx, claimPrincipal{}, err
+		}
+		principal := localClaimPrincipalWithHolder(cfg, body, actorFor(ctx, body.Holder))
+		principal.IdentityToken = requestPrincipal.Kind == PrincipalDBToken
+		principal.RequestPrincipal = &requestPrincipal
+		return ctx, principal, nil
 	}
 	if cfg.Auth.Token != "" {
 		if principal, ok, err := resolveLocalClaimPrincipal(ctx, cfg, authz, body, false); ok || err != nil {
@@ -100,7 +110,8 @@ func resolveEnrollmentClaimPrincipal(
 	return authorizedCtx, claimPrincipal{
 		HolderInstanceUID: fed.SpokeInstanceUID,
 		Holder:            fed.Actor,
-		ClientKind:        strings.TrimSpace(body.ClientKind)}, nil
+		ClientKind:        strings.TrimSpace(body.ClientKind),
+		Enrollment:        true}, nil
 }
 
 func authorizeClaimStatusRead(

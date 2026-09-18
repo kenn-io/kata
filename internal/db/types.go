@@ -375,26 +375,27 @@ type IssueQualifier struct {
 // Issue mirrors a row in issues. Priority is 0..4 with 0 = highest priority
 // and 4 = lowest; nil means no priority is set.
 type Issue struct {
-	ID            int64      `json:"id"`
-	UID           string     `json:"uid"`
-	ProjectID     int64      `json:"project_id"`
-	ProjectUID    string     `json:"project_uid,omitempty"`
-	ShortID       string     `json:"short_id"`
-	Title         string     `json:"title"`
-	Body          string     `json:"body"`
-	Status        string     `json:"status"`
-	ClosedReason  *string    `json:"closed_reason,omitempty"`
-	Owner         *string    `json:"owner,omitempty"`
-	Priority      *int64     `json:"priority,omitempty"`
-	Author        string     `json:"author"`
-	Metadata      JSONBlob   `json:"metadata"`
-	Revision      int64      `json:"revision"`
-	RecurrenceID  *int64     `json:"recurrence_id,omitempty"`
-	OccurrenceKey *string    `json:"occurrence_key,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	ClosedAt      *time.Time `json:"closed_at,omitempty"`
-	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	ID                  int64      `json:"id"`
+	UID                 string     `json:"uid"`
+	ProjectID           int64      `json:"project_id"`
+	ProjectUID          string     `json:"project_uid,omitempty"`
+	ShortID             string     `json:"short_id"`
+	Title               string     `json:"title"`
+	Body                string     `json:"body"`
+	Status              string     `json:"status"`
+	ClosedReason        *string    `json:"closed_reason,omitempty"`
+	Owner               *string    `json:"owner,omitempty"`
+	AssignmentExpiresOn *time.Time `json:"assignment_expires_on,omitempty"`
+	Priority            *int64     `json:"priority,omitempty"`
+	Author              string     `json:"author"`
+	Metadata            JSONBlob   `json:"metadata"`
+	Revision            int64      `json:"revision"`
+	RecurrenceID        *int64     `json:"recurrence_id,omitempty"`
+	OccurrenceKey       *string    `json:"occurrence_key,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+	ClosedAt            *time.Time `json:"closed_at,omitempty"`
+	DeletedAt           *time.Time `json:"deleted_at,omitempty"`
 }
 
 // ReadyGlobalIssue is an Issue paired with its project's canonical name. Used

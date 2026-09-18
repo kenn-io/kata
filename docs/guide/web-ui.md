@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-09-17
+last_edited: 2026-09-18
 ---
 
 # Web UI
@@ -81,6 +81,8 @@ switches the panel to the editor, which can update the title, description,
 schedule, due date, owner, priority, labels, and project, and **Done editing**
 returns to the read-only view. The editor also supports:
 
+- starting or renewing a temporary assignment from the **Assignment** control;
+  both views show its absolute expiry;
 - adding, completing, and removing checklist items;
 - adding comments with issue-reference completion;
 - adding related links and navigating or filtering existing parent, child,

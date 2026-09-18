@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"testing"
 
@@ -206,6 +207,62 @@ func TestMaterializeFederatedProjectPrunesOnlyUnreferencedOrphans(t *testing.T) 
 	_, err = fixture.store.IssueByUID(ctx, droppedUID, db.IncludeDeletedYes)
 	assert.ErrorIs(t, err, db.ErrNotFound, "an unreferenced orphan must be pruned")
 	_ = dropped
+}
+
+// The federated fold carries assignment_expires_on as the canonical string
+// taken from remote event payloads, and materialization must bind that string
+// verbatim into the issues.assignment_expires_on TEXT column — on insert and
+// on update, and back to NULL when a later snapshot unassigns the owner.
+// Round-tripping the value through time parsing/formatting would rewrite the
+// persisted bytes; this pins the raw TEXT for both write paths.
+func TestMaterializeFederatedProjectPersistsCanonicalAssignmentExpiryText(t *testing.T) {
+	fixture := newFederationGroupFixture(t, "materialize_expiry_text")
+	ctx := context.Background()
+	issueUID, err := uid.New()
+	require.NoError(t, err)
+
+	base := `{"uid":"` + issueUID + `","title":"expiring","body":"",` +
+		`"author":"remote","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"`
+	materialize := func(counter int64, ownerJSON, expiresOn string) {
+		payload := base
+		if ownerJSON != "" {
+			payload += `,"owner":` + ownerJSON
+		}
+		if expiresOn != "" {
+			payload += `,"assignment_expires_on":"` + expiresOn + `"`
+		}
+		payload += `}`
+		event := projectionSnapshotEvent(t, fixture.first, issueUID, fixture.origin, counter, jsontext.Value(payload))
+		inserted, err := fixture.store.InsertRemoteEvent(ctx, fixture.first.ID, event)
+		require.NoError(t, err)
+		require.True(t, inserted)
+		require.NoError(t, fixture.store.MaterializeFederatedProject(ctx, fixture.first.ID))
+	}
+	scanRaw := func() (owner sql.NullString, expiresOn sql.NullString) {
+		require.NoError(t, fixture.store.QueryRowContext(ctx,
+			`SELECT owner, assignment_expires_on FROM issues WHERE uid=$1`, issueUID).
+			Scan(&owner, &expiresOn))
+		return owner, expiresOn
+	}
+
+	// Insert path: the first snapshot lands owner and canonical expiry text verbatim.
+	materialize(1, `"remote-agent"`, "2026-05-23T13:00:00.000Z")
+	owner, expiresOn := scanRaw()
+	assert.Equal(t, "remote-agent", owner.String)
+	require.True(t, expiresOn.Valid)
+	assert.Equal(t, "2026-05-23T13:00:00.000Z", expiresOn.String)
+
+	// Update path: a later snapshot with another canonical expiry rewrites the text.
+	materialize(2, `"remote-agent"`, "2026-05-23T14:30:00.000Z")
+	_, expiresOn = scanRaw()
+	require.True(t, expiresOn.Valid)
+	assert.Equal(t, "2026-05-23T14:30:00.000Z", expiresOn.String)
+
+	// Nil/expiry: a snapshot that unassigns clears the TEXT column too.
+	materialize(3, `null`, "")
+	owner, expiresOn = scanRaw()
+	assert.False(t, owner.Valid)
+	assert.False(t, expiresOn.Valid)
 }
 
 func mustUID(t *testing.T) string {

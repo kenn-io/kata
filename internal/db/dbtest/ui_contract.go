@@ -337,6 +337,61 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	require.NotEmpty(t, graph.GraphLinks)
 }
 
+// RunUISnapshotReadyAssignmentExpiryContract verifies that a timed assignment
+// already expired at the snapshot's ReadyAt no longer counts as ownership: the
+// issue is excluded from owner-filtered ready results and is returned with its
+// ownership cleared in unfiltered ready results, while an assignment still
+// active at ReadyAt keeps matching its owner.
+func RunUISnapshotReadyAssignmentExpiryContract(t *testing.T, open func(*testing.T) db.Storage) {
+	t.Helper()
+	store := open(t)
+	uiStore, ok := store.(db.UIStore)
+	require.True(t, ok, "storage backend must implement db.UIStore")
+	ctx := context.Background()
+	project := createCursorProject(ctx, t, store)
+	readyAt := time.Date(2035, 1, 2, 12, 0, 0, 0, time.UTC)
+	owner := "worker"
+	claim := func(title string, ttl time.Duration) db.Issue {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: title, Author: "user-a",
+		})
+		require.NoError(t, err)
+		claimed, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{
+			IssueID: issue.ID, Actor: owner, TTL: ttl, Now: readyAt.Add(-time.Hour),
+		})
+		require.NoError(t, err)
+		return claimed.Issue
+	}
+	expired := claim("Expired claim issue", time.Hour-time.Second)
+	active := claim("Active claim issue", 2*time.Hour)
+
+	filtered, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", Statuses: []string{"ready"}, Owner: owner,
+		ReadyAt: readyAt.Format(time.RFC3339Nano),
+	})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{active.UID}, uiIssueUIDs(filtered.Issues),
+		"an assignment expired at ReadyAt must not match an owner filter")
+
+	unfiltered, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", Statuses: []string{"ready"},
+		ReadyAt: readyAt.Format(time.RFC3339Nano),
+	})
+	require.NoError(t, err)
+	byUID := make(map[string]db.UIIssue, len(unfiltered.Issues))
+	for _, issue := range unfiltered.Issues {
+		byUID[issue.UID] = issue
+	}
+	require.Contains(t, byUID, expired.UID)
+	require.Contains(t, byUID, active.UID)
+	require.Nil(t, byUID[expired.UID].Owner,
+		"an assignment expired at ReadyAt must be returned unassigned")
+	require.Nil(t, byUID[expired.UID].AssignmentExpiresOn)
+	require.NotNil(t, byUID[active.UID].Owner)
+	require.Equal(t, owner, *byUID[active.UID].Owner)
+	require.NotNil(t, byUID[active.UID].AssignmentExpiresOn)
+}
+
 // RunUISnapshotViewScopeContract verifies that database-side view predicates
 // run before the collection limit and that detail recurrences stay scoped to
 // the selected issue's project.

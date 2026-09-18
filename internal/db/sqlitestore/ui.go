@@ -474,10 +474,10 @@ func readUIIssues(
 	filterReadySchedules := false
 	filterCalendarSchedules := query.View == "today" || query.View == "upcoming" || query.View == "deadlines"
 	filterDelegated := query.View == "delegated"
+	readyRequested := false
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
 		statusPredicates := []string{}
 		persistedStatuses := []string{}
-		readyRequested := false
 		for _, status := range statuses {
 			if status == "ready" {
 				readyRequested = true
@@ -506,6 +506,14 @@ func readUIIssues(
 		}
 		statement += ` AND (` + strings.Join(statusPredicates, " OR ") + `)`
 	}
+	readyAt := time.Now()
+	if readyRequested && query.ReadyAt != "" {
+		var err error
+		readyAt, err = time.Parse(time.RFC3339Nano, query.ReadyAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse UI ready_at: %w", err)
+		}
+	}
 	switch query.View {
 	case "inbox":
 		statement += ` AND json_extract(p.metadata, '$.role') = 'inbox'`
@@ -524,6 +532,10 @@ func readUIIssues(
 		statement += ` AND i.owner IN (` + uiSQLitePlaceholders(len(owners)) + `)`
 		for _, owner := range owners {
 			args = append(args, owner)
+		}
+		if readyRequested {
+			statement += ` AND (i.assignment_expires_on IS NULL OR i.assignment_expires_on > ?)`
+			args = append(args, readyAt.UTC().Format(sqliteTimeFormat))
 		}
 	}
 	labels := uiFilterValues(query.Labels, query.Label)
@@ -557,18 +569,14 @@ func readUIIssues(
 	}
 	defer func() { _ = rows.Close() }()
 	issues := []db.UIIssue{}
-	readyAt := time.Now()
-	if filterReadySchedules && query.ReadyAt != "" {
-		var err error
-		readyAt, err = time.Parse(time.RFC3339Nano, query.ReadyAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse UI ready_at: %w", err)
-		}
-	}
 	for rows.Next() {
 		issue, recurrenceTimezone, err := scanScheduledIssue(rows)
 		if err != nil {
 			return nil, err
+		}
+		if readyRequested && issue.AssignmentExpiresOn != nil && !issue.AssignmentExpiresOn.After(readyAt) {
+			issue.Owner = nil
+			issue.AssignmentExpiresOn = nil
 		}
 		if filterReadySchedules && issue.Status == "open" {
 			due, err := metadata.ScheduledOnDue(

@@ -126,7 +126,7 @@ func (d *Store) ExportMeta(ctx context.Context) iter.Seq2[db.MetaKV, error] {
 // ExportIssues streams issues ordered by id, scoped and filtered by f.
 func (d *Store) ExportIssues(ctx context.Context, f db.ExportFilter) iter.Seq2[db.IssueExport, error] {
 	query := `SELECT i.id, i.uid, i.project_id, i.short_id, i.title, i.body,
-	                 i.status, i.closed_reason, i.owner, i.priority, i.author,
+	                 i.status, i.closed_reason, i.owner, CAST(i.assignment_expires_on AS TEXT), i.priority, i.author,
 	                 CAST(i.created_at AS TEXT), CAST(i.updated_at AS TEXT),
 	                 CAST(i.closed_at AS TEXT), CAST(i.deleted_at AS TEXT),
 	                 i.metadata, i.revision, i.content_revision,
@@ -139,7 +139,7 @@ func (d *Store) ExportIssues(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 			var rec db.IssueExport
 			var metadata string
 			if err := rows.Scan(&rec.ID, &rec.UID, &rec.ProjectID, &rec.ShortID, &rec.Title, &rec.Body,
-				&rec.Status, &rec.ClosedReason, &rec.Owner, &rec.Priority, &rec.Author, &rec.CreatedAt,
+				&rec.Status, &rec.ClosedReason, &rec.Owner, &rec.AssignmentExpiresOn, &rec.Priority, &rec.Author, &rec.CreatedAt,
 				&rec.UpdatedAt, &rec.ClosedAt, &rec.DeletedAt, &metadata, &rec.Revision, &rec.ContentRevision,
 				&rec.RecurrenceID, &rec.RecurrenceUID, &rec.OccurrenceKey); err != nil {
 				return db.IssueExport{}, scanError("issue", err)

@@ -2402,6 +2402,7 @@ func (o *AssignIssueRequestOptions) GetHeader() (map[string]string, error) {
 type ClaimIssueRequestOptions struct {
 	PathParams *ClaimIssuePath
 	Body       *ClaimIssueBody
+	Header     *ClaimIssueHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2421,6 +2422,14 @@ func (o *ClaimIssueRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2448,7 +2457,7 @@ func (o *ClaimIssueRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ClaimIssueRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // CloseIssueRequestOptions is the options needed to make a request to CloseIssue.

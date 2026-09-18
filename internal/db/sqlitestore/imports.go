@@ -356,9 +356,17 @@ func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 	if item.Title != existing.Title || item.Body != existing.Body {
 		bump = `, content_revision = content_revision + 1`
 	}
+	// The NULL-safe owner comparison mirrors ImportedIssueUpdatedPayload: the
+	// issue.updated event folds a deadline clear exactly when the normalized
+	// owner changes, so the persisted row must drop assignment_expires_on on
+	// the same condition and never leave an expiry behind a replaced (or NULL)
+	// owner. `owner` in the CASE reads the pre-update value.
+	newOwner := db.NormalizeImportOwner(item.Owner)
 	_, err := tx.ExecContext(ctx, `UPDATE issues
-		SET title = ?, body = ?, status = ?, closed_reason = ?, owner = ?, created_at = ?, updated_at = ?, closed_at = ?, priority = ?`+bump+`
-		WHERE id = ?`, item.Title, item.Body, item.Status, item.ClosedReason, db.NormalizeImportOwner(item.Owner), createdAt, item.UpdatedAt, item.ClosedAt, item.Priority, existing.ID)
+		SET title = ?, body = ?, status = ?, closed_reason = ?, owner = ?,
+		    assignment_expires_on = CASE WHEN owner IS NOT ? THEN NULL ELSE assignment_expires_on END,
+		    created_at = ?, updated_at = ?, closed_at = ?, priority = ?`+bump+`
+		WHERE id = ?`, item.Title, item.Body, item.Status, item.ClosedReason, newOwner, newOwner, createdAt, item.UpdatedAt, item.ClosedAt, item.Priority, existing.ID)
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported issue: %w", err)
 	}

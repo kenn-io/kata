@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-17
+last_edited: 2026-09-18
 ---
 
 # CLI reference
@@ -436,14 +436,23 @@ kata labels
 
 kata assign <ref> <owner> [--comment TEXT]
 kata unassign <ref> [--expect-owner <owner>] [--comment TEXT]
-kata claim <ref> [--force | --if-unowned] [--comment TEXT]
+kata claim <ref> [--ttl <duration>] [--force | --if-unowned] [--comment TEXT]
 ```
 
-`kata claim` atomically sets ownership to the current actor and fails if the
-issue is already owned by someone else unless `--force` is used. A repeated
-claim by the current actor remains a no-op. Use `--if-unowned` when competing
-workers must claim only a truly ownerless issue; it conflicts even when the
-current actor already owns the issue.
+`kata claim` atomically assigns the issue to the current actor and fails if
+someone else is assigned unless `--force` is used. Add `--ttl` to make the
+assignment temporary. The duration must be a whole number of seconds from one
+minute through 24 hours, such as `10m` or `1h30m`.
+
+Repeating a temporary claim by the same actor renews its expiry. Repeating a
+permanent claim preserves an existing temporary expiry; omit `--ttl` when
+claiming an unassigned issue to create a permanent assignment. After a timed
+assignment expires, `ready` and `next` treat the issue as unassigned even
+before the cleanup worker records `issue.assignment_expired`.
+
+Use `--if-unowned` when competing workers must claim only a currently
+unassigned issue; it conflicts even when the current actor already holds the
+assignment. `--force` may replace another actor's assignment.
 
 `kata unassign --expect-owner <owner>` clears ownership only when the current
 owner matches the expected value. A mismatch returns a conflict without
@@ -928,6 +937,11 @@ with redacted scope and lifecycle metadata. `r` refreshes the view and `Esc`
 returns to the issue browser. The TUI never displays token plaintext or hashes
 and never substitutes a different administrator credential when access is
 denied.
+
+In issue detail, press `t` to start or renew a temporary assignment for the
+current actor. Enter a duration from one minute through 24 hours, such as
+`15m`, `1h`, or `8h`. The detail properties show the resulting absolute
+assignment expiry.
 
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list

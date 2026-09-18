@@ -6,6 +6,7 @@ import type { LinkPeer } from './linkPeer.ts'
 import type { ListGlobalIssueOutMetadata } from './listGlobalIssueOutMetadata.ts'
 
 export interface ListGlobalIssueOut {
+  assignment_expires_on?: string
   author: string
   blocked?: boolean
   blocked_by?: LinkPeer[]

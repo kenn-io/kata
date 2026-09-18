@@ -40,9 +40,9 @@ var (
 	// names a relation other than "parent_of".
 	ErrInitialLinkInvalidType = errors.New("invalid initial link type")
 
-	// ErrAlreadyClaimed is returned by ClaimOwner when another actor already
+	// ErrAlreadyAssigned is returned by ClaimOwner when another actor already
 	// owns the issue and Force=false.
-	ErrAlreadyClaimed = errors.New("already claimed")
+	ErrAlreadyAssigned = errors.New("already assigned")
 
 	// ErrOwnerMismatch is returned by guarded unassign when the current owner
 	// does not match the caller's expected owner.

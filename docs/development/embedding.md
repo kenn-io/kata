@@ -13,8 +13,8 @@ TUI.
 
 The host application remains responsible for the listener, TLS, signal
 handling, and HTTP server shutdown. A `kata.Service` owns its storage handle and
-the federation, GitHub sync, and timed-claim background workers associated with
-that handle.
+the federation, GitHub sync, timed-claim, due-notification, and
+assignment-expiry background workers associated with that handle.
 
 ## Browser host boundary
 
@@ -109,11 +109,12 @@ func main() {
 ```
 
 `Run` does not open a listener. It blocks while federation, scheduled GitHub
-sync, and timed-claim workers are active, then returns when its context is
-canceled or `Close` begins, and it may return an error from any background
-worker. Treat any `Run` return as service termination: stop accepting HTTP
-traffic, cancel the shared context, and inspect the error after both the workers
-and server stop. Only one `Run` call may be active for a service. `Close` cancels
+sync, timed-claim, due-notification, and assignment-expiry workers are active,
+then returns when its context is canceled or `Close` begins, and it may return
+an error from any background worker. Treat any `Run` return as service
+termination: stop accepting HTTP traffic, cancel the shared context, and
+inspect the error after both the workers and server stop. Only one `Run` call
+may be active for a service. `Close` cancels
 active work and requests, waits for them to stop, and closes the owned storage
 handle. It is safe to call more than once.
 
@@ -261,8 +262,9 @@ function without exposing Kata's internal storage packages.
 
 When `Config.Access` is set, also configure `WorkerTransactionFence`. Kata
 applies it to every writable transaction started by the federation, GitHub
-sync, and timed-claim workers. A rejection rolls the transaction back, cancels
-all service workers, and is returned by `Run`; it cannot be reduced to a logged
+sync, timed-claim, due-notification, and assignment-expiry workers. A rejection
+rolls the transaction back, cancels all service workers, and is returned by
+`Run`; it cannot be reduced to a logged
 retry while stale authority remains active.
 
 The host-supplied actor always replaces an actor in request JSON. This keeps

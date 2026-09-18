@@ -838,6 +838,27 @@ func TestClient_AssignEmptyOwnerRoutesToUnassign(t *testing.T) {
 	}
 }
 
+func TestClient_ClaimTimedAssignmentSendsTTL(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		bs, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(bs, &gotBody))
+		respondJSON(t, w, map[string]any{
+			"issue":   map[string]any{"short_id": "aaa1", "title": "t", "status": "open"},
+			"events":  []any{},
+			"changed": true,
+		})
+	})
+
+	_, err := c.ClaimTimedAssignment(context.Background(), 7, "abc4", "alice", time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, "/api/v1/projects/7/issues/abc4/actions/claim", gotPath)
+	assert.Equal(t, map[string]any{"actor": "alice", "ttl_seconds": float64(3600)}, gotBody)
+}
+
 // TestClient_AddLinkSendsToRef pins the wire-shape rename for the link
 // POST body: the daemon's CreateLinkRequest.Body carries {actor, type,
 // to_ref}, where to_ref accepts a short_id, qualified short_id, or
