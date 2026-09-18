@@ -140,6 +140,8 @@ type methods struct{}
 func (methods) Never(any, any, time.Duration, time.Duration) {}
 
 func TestIgnoredForms(t *testing.T) {
+	// assertpkg.Never(t, func() bool { return false }, 50*time.Millisecond, time.Millisecond)
+	const source = "requirepkg.Never(t, fn, 50*time.Millisecond, time.Millisecond)"
 	var receiver methods
 	receiver.Never(t, func() bool { return false }, 50*time.Millisecond, time.Millisecond)
 	Never(t, func() bool { return false }, 50*time.Millisecond, time.Millisecond)
@@ -209,6 +211,19 @@ func TestSkipped(t *testing.T) {
 	requirepkg.Never(t, func() bool { return false }, 50*time.Millisecond, time.Millisecond)
 }
 `,
+		"unrelated_test.go": `package fixture
+
+import (
+	assertpkg "example.com/unrelated/assert"
+	requirepkg "example.com/unrelated/require"
+	"time"
+)
+
+func TestUnrelatedPackages(t *testing.T) {
+	assertpkg.Never(t, func() bool { return false }, 50*time.Millisecond, time.Millisecond)
+	requirepkg.Eventually(t, func() bool { return false }, 50*time.Millisecond, time.Millisecond)
+}
+`,
 	}
 	code, got, _ := runFixture(t, files, nil)
 	if code != 0 || got != "" {
@@ -216,7 +231,7 @@ func TestSkipped(t *testing.T) {
 	}
 }
 
-func TestRunIgnoresShadowedPackages(t *testing.T) {
+func TestRunIgnoresShadowedIdentifiers(t *testing.T) {
 	files := map[string]string{
 		"fixture_test.go": `package fixture
 
@@ -229,8 +244,17 @@ type fakeAssert struct{}
 
 func (fakeAssert) Never(any, any, tm.Duration, tm.Duration) {}
 
+type fakeTime struct {
+	Millisecond tm.Duration
+}
+
 func TestShadowed(t *testing.T) {
 	assertpkg := fakeAssert{}
+	assertpkg.Never(t, func() bool { return false }, 50*tm.Millisecond, tm.Millisecond)
+}
+
+func TestShadowedTime(t *testing.T) {
+	tm := fakeTime{Millisecond: 1}
 	assertpkg.Never(t, func() bool { return false }, 50*tm.Millisecond, tm.Millisecond)
 }
 `,

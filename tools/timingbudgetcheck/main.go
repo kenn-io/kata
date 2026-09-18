@@ -223,7 +223,6 @@ func checkFile(path, relativePath string) ([]budgetOccurrence, error) {
 	}
 
 	imports, timeImport := importAliases(file)
-	info := typeInfo(file, fset)
 	occurrences := make([]budgetOccurrence, 0)
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
@@ -247,11 +246,11 @@ func checkFile(path, relativePath string) ([]budgetOccurrence, error) {
 			if !ok {
 				return true
 			}
-			importPath, ok := importedQualifier(qualifier, imports, info)
+			importPath, ok := importedQualifier(qualifier, imports)
 			if !ok || (importPath != assertImport && importPath != requireImport) {
 				return true
 			}
-			expression, known := literalExpression(call.Args[2], timeImport, info)
+			expression, known := literalExpression(call.Args[2], timeImport)
 			if !known {
 				return true
 			}
@@ -303,23 +302,7 @@ func importAliases(file *ast.File) (map[string]string, string) {
 	return imports, timeImport
 }
 
-func typeInfo(file *ast.File, fset *token.FileSet) *types.Info {
-	info := &types.Info{Uses: make(map[*ast.Ident]types.Object)}
-	checker := types.Config{Importer: importer.Default()}
-	_, _ = checker.Check(file.Name.Name, fset, []*ast.File{file}, info)
-	return info
-}
-
-func importedQualifier(identifier *ast.Ident, imports map[string]string, info *types.Info) (string, bool) {
-	if info != nil {
-		if object, ok := info.Uses[identifier]; ok {
-			packageName, ok := object.(*types.PkgName)
-			if !ok {
-				return "", false
-			}
-			return packageName.Imported().Path(), true
-		}
-	}
+func importedQualifier(identifier *ast.Ident, imports map[string]string) (string, bool) {
 	if identifier.Obj != nil {
 		return "", false
 	}
@@ -336,29 +319,29 @@ func isPollingAssertion(name string) bool {
 	}
 }
 
-func literalExpression(expr ast.Expr, timeImport string, info *types.Info) (string, bool) {
+func literalExpression(expr ast.Expr, timeImport string) (string, bool) {
 	switch expression := expr.(type) {
 	case *ast.BasicLit:
 		return expression.Value, expression.Kind == token.INT || expression.Kind == token.FLOAT
 	case *ast.ParenExpr:
-		inner, ok := literalExpression(expression.X, timeImport, info)
+		inner, ok := literalExpression(expression.X, timeImport)
 		return "(" + inner + ")", ok
 	case *ast.UnaryExpr:
 		if expression.Op != token.ADD && expression.Op != token.SUB && expression.Op != token.XOR {
 			return "", false
 		}
-		inner, ok := literalExpression(expression.X, timeImport, info)
+		inner, ok := literalExpression(expression.X, timeImport)
 		return "(" + expression.Op.String() + inner + ")", ok
 	case *ast.BinaryExpr:
 		switch expression.Op {
 		case token.ADD, token.SUB, token.MUL, token.QUO, token.REM, token.AND, token.OR, token.XOR, token.SHL, token.SHR, token.AND_NOT:
-			left, leftOK := literalExpression(expression.X, timeImport, info)
-			right, rightOK := literalExpression(expression.Y, timeImport, info)
+			left, leftOK := literalExpression(expression.X, timeImport)
+			right, rightOK := literalExpression(expression.Y, timeImport)
 			return "(" + left + " " + expression.Op.String() + " " + right + ")", leftOK && rightOK
 		}
 	case *ast.SelectorExpr:
 		qualifier, ok := expression.X.(*ast.Ident)
-		if !ok || !isTimeQualifier(qualifier, timeImport, info) {
+		if !ok || !isTimeQualifier(qualifier, timeImport) {
 			return "", false
 		}
 		units := map[string]struct{}{
@@ -379,24 +362,18 @@ func literalExpression(expr ast.Expr, timeImport string, info *types.Info) (stri
 			return "", false
 		}
 		qualifier, ok := selector.X.(*ast.Ident)
-		if !ok || !isTimeQualifier(qualifier, timeImport, info) {
+		if !ok || !isTimeQualifier(qualifier, timeImport) {
 			return "", false
 		}
-		inner, ok := literalExpression(expression.Args[0], timeImport, info)
+		inner, ok := literalExpression(expression.Args[0], timeImport)
 		return "time.Duration(" + inner + ")", ok
 	}
 	return "", false
 }
 
-func isTimeQualifier(identifier *ast.Ident, timeImport string, info *types.Info) bool {
+func isTimeQualifier(identifier *ast.Ident, timeImport string) bool {
 	if timeImport == "" {
 		return false
-	}
-	if info != nil {
-		if object, ok := info.Uses[identifier]; ok {
-			packageName, ok := object.(*types.PkgName)
-			return ok && packageName.Imported().Path() == "time"
-		}
 	}
 	return identifier.Obj == nil && identifier.Name == timeImport
 }
