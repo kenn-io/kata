@@ -933,6 +933,19 @@ func TestRunnerRunSkipsDueBindingWhenDrainAdmissionIsClosed(t *testing.T) {
 	require.Zero(t, h.fetcher.repoCallCount())
 }
 
+func cleanupRunner(t *testing.T, cancel context.CancelFunc, done <-chan error, release func()) {
+	t.Helper()
+	cancel()
+	if release != nil {
+		release()
+	}
+	synctest.Wait()
+	select {
+	case <-done:
+	default:
+	}
+}
+
 func TestRunnerRunRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		reopened := make(chan struct{})
@@ -945,8 +958,10 @@ func TestRunnerRunRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.T) {
 		}))
 		h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
 
+		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan error, 1)
-		go func() { done <- h.runner.Run(h.ctx) }()
+		defer cleanupRunner(t, cancel, done, nil)
+		go func() { done <- h.runner.Run(ctx) }()
 		synctest.Wait()
 		require.Equal(t, int32(1), attempts.Load())
 		require.Zero(t, h.fetcher.repoCallCount())
@@ -975,8 +990,10 @@ func TestRunnerRunRetriesWhenBindingAdmissionReopens(t *testing.T) {
 		}))
 		h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
 
+		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan error, 1)
-		go func() { done <- h.runner.Run(h.ctx) }()
+		defer cleanupRunner(t, cancel, done, nil)
+		go func() { done <- h.runner.Run(ctx) }()
 		synctest.Wait()
 		require.Equal(t, int32(2), attempts.Load())
 		require.Zero(t, h.fetcher.repoCallCount())
@@ -999,8 +1016,9 @@ func TestRunnerRunWaitsForCancellationAfterTerminalDrainDenial(t *testing.T) {
 				return nil, false, nil
 			}),
 		)
-		ctx, cancel := context.WithCancel(h.ctx)
+		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan error, 1)
+		defer cleanupRunner(t, cancel, done, nil)
 		go func() { done <- h.runner.Run(ctx) }()
 		synctest.Wait()
 		require.Equal(t, int32(1), attempts.Load())
@@ -1028,8 +1046,9 @@ func TestRunnerIntervalModeLogsBindingFailuresAndKeepsRunning(t *testing.T) {
 			"second-repo": {testIssue(201, 1, "second issue", h.now.Add(-time.Hour))},
 		}
 
-		ctx, cancel := context.WithCancel(h.ctx)
+		ctx, cancel := context.WithCancel(t.Context())
 		runDone := make(chan error, 1)
+		defer cleanupRunner(t, cancel, runDone, nil)
 		go func() {
 			runDone <- h.runner.Run(ctx)
 		}()
@@ -1052,8 +1071,9 @@ func TestGitHubSyncRunnerRunWakesBeforeInterval(t *testing.T) {
 		h := newRunnerHarness(t, withInterval(time.Hour), withWake(wake))
 		h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
 
-		ctx, cancel := context.WithCancel(h.ctx)
+		ctx, cancel := context.WithCancel(t.Context())
 		runDone := make(chan error, 1)
+		defer cleanupRunner(t, cancel, runDone, nil)
 		go func() {
 			runDone <- h.runner.Run(ctx)
 		}()
@@ -1083,8 +1103,13 @@ func TestGitHubSyncRunnerRunDoesNotOverlapWakeWhileBindingIsInFlight(t *testing.
 		h.fetcher.blockRepository = make(chan struct{})
 		h.fetcher.releaseRepository = make(chan struct{})
 
-		ctx, cancel := context.WithCancel(h.ctx)
+		ctx, cancel := context.WithCancel(t.Context())
 		runDone := make(chan error, 1)
+		var releaseOnce sync.Once
+		release := func() {
+			releaseOnce.Do(func() { close(h.fetcher.releaseRepository) })
+		}
+		defer cleanupRunner(t, cancel, runDone, release)
 		go func() {
 			runDone <- h.runner.Run(ctx)
 		}()
@@ -1104,7 +1129,7 @@ func TestGitHubSyncRunnerRunDoesNotOverlapWakeWhileBindingIsInFlight(t *testing.
 		synctest.Wait()
 		require.Equal(t, 1, h.fetcher.repoCallCount())
 
-		close(h.fetcher.releaseRepository)
+		release()
 		synctest.Wait()
 		got, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
 		require.NoError(t, err)
