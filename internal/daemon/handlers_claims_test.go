@@ -1122,6 +1122,7 @@ func createClaimForwardingPair(
 		ReplayHorizonEventID: 1,
 		Actor:                "tester",
 		Enabled:              true,
+		PushEnabled:          true,
 	})
 	require.NoError(t, err)
 	created := createClaimEnrollment(t, hub, hubProject.ID, spoke.DB.InstanceUID(), capabilities)

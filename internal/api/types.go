@@ -1133,23 +1133,40 @@ type UnassignRequest struct {
 
 // ClaimRequest is POST /api/v1/projects/{id}/issues/{ref}/actions/claim.
 type ClaimRequest struct {
-	ProjectID int64  `path:"project_id" required:"true"`
-	Ref       string `path:"ref" required:"true"`
-	Body      struct {
-		Actor     string `json:"actor" required:"true"`
-		Force     bool   `json:"force,omitempty,omitzero"`
-		IfUnowned bool   `json:"if_unowned,omitempty,omitzero"`
-	}
+	ProjectID     int64  `path:"project_id" required:"true"`
+	Ref           string `path:"ref" required:"true"`
+	Authorization string `header:"Authorization"`
+	Body          ClaimRequestBody
+}
+
+// ClaimRequestBody contains the issue-assignment claim options.
+type ClaimRequestBody struct {
+	Actor      string `json:"actor,omitempty"`
+	Force      bool   `json:"force,omitempty,omitzero"`
+	IfUnowned  bool   `json:"if_unowned,omitempty,omitzero"`
+	TTLSeconds *int64 `json:"ttl_seconds,omitempty" minimum:"60" maximum:"86400"`
 }
 
 // ClaimResponse is the response for POST /api/v1/projects/{id}/issues/{ref}/actions/claim.
 type ClaimResponse struct {
-	Body struct {
-		Issue         db.Issue  `json:"issue"`
-		Event         *db.Event `json:"event,omitempty"`
-		Changed       bool      `json:"changed"`
-		PreviousOwner *string   `json:"previous_owner,omitempty"`
-	}
+	Body ClaimResponseBody
+}
+
+// ClaimResponseBody returns the resulting issue and committed events in order.
+// Event remains the final assignment event for existing clients.
+type ClaimResponseBody struct {
+	Issue db.Issue  `json:"issue"`
+	Event *db.Event `json:"event,omitempty"`
+	// Events is a required array, never null: construction sites normalize a
+	// nil slice to the empty array at the response boundary.
+	Events []db.Event `json:"events"`
+	// ReplayEvents carries assignment prerequisites to a federated spoke. The
+	// spoke consumes these events before Events and omits them from its response.
+	// Responses to claim-only federation enrollments carry assignment lifecycle
+	// events only, with the issue projected to identity + assignment fields.
+	ReplayEvents  []db.Event `json:"replay_events,omitempty"`
+	Changed       bool       `json:"changed"`
+	PreviousOwner *string    `json:"previous_owner,omitempty"`
 }
 
 // ReadyRequest is GET /api/v1/projects/{id}/ready.

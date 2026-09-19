@@ -1414,26 +1414,27 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 		occurrenceKey = *issue.OccurrenceKey
 	}
 	return buildIssueCreatedPayload(issueCreatedPayload{
-		UID:           issue.UID,
-		ShortID:       issue.ShortID,
-		Title:         issue.Title,
-		Body:          issue.Body,
-		Author:        issue.Author,
-		Owner:         issue.Owner,
-		Priority:      issue.Priority,
-		Status:        issue.Status,
-		ClosedReason:  issue.ClosedReason,
-		ClosedAt:      formatOptionalSQLiteTime(issue.ClosedAt),
-		DeletedAt:     formatOptionalSQLiteTime(issue.DeletedAt),
-		Metadata:      jsontext.Value(issue.Metadata),
-		Labels:        labels,
-		Links:         links,
-		Comments:      comments,
-		CreatedAt:     issue.CreatedAt.UTC().Format(sqliteTimeFormat),
-		UpdatedAt:     issue.UpdatedAt.UTC().Format(sqliteTimeFormat),
-		Revision:      issue.Revision,
-		RecurrenceUID: recurrenceUID,
-		OccurrenceKey: occurrenceKey,
+		UID:                 issue.UID,
+		ShortID:             issue.ShortID,
+		Title:               issue.Title,
+		Body:                issue.Body,
+		Author:              issue.Author,
+		Owner:               issue.Owner,
+		AssignmentExpiresOn: formatOptionalSQLiteTime(issue.AssignmentExpiresOn),
+		Priority:            issue.Priority,
+		Status:              issue.Status,
+		ClosedReason:        issue.ClosedReason,
+		ClosedAt:            formatOptionalSQLiteTime(issue.ClosedAt),
+		DeletedAt:           formatOptionalSQLiteTime(issue.DeletedAt),
+		Metadata:            jsontext.Value(issue.Metadata),
+		Labels:              labels,
+		Links:               links,
+		Comments:            comments,
+		CreatedAt:           issue.CreatedAt.UTC().Format(sqliteTimeFormat),
+		UpdatedAt:           issue.UpdatedAt.UTC().Format(sqliteTimeFormat),
+		Revision:            issue.Revision,
+		RecurrenceUID:       recurrenceUID,
+		OccurrenceKey:       occurrenceKey,
 	})
 }
 
@@ -1674,7 +1675,7 @@ func reconcileFederatedIssues(
 			}
 			issueValues := []any{
 				shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status),
-				issue.ClosedReason, issue.Owner, issue.Priority, nonEmptyAuthor(issue.Author),
+				issue.ClosedReason, issue.Owner, issue.AssignmentExpiresOn, issue.Priority, nonEmptyAuthor(issue.Author),
 				nonEmptyTime(issue.CreatedAt), nonEmptyTime(updatedAt),
 				optionalStringValue(issue.ClosedAt), optionalStringValue(issue.DeletedAt),
 				string(metadata),
@@ -1691,6 +1692,7 @@ func reconcileFederatedIssues(
 				       status = ?,
 				       closed_reason = ?,
 				       owner = ?,
+				       assignment_expires_on = ?,
 				       priority = ?,
 				       author = ?,
 				       created_at = ?,
@@ -1709,9 +1711,10 @@ func reconcileFederatedIssues(
 					       title IS NOT ? OR
 					       body IS NOT ? OR
 					       status IS NOT ? OR
-					       closed_reason IS NOT ? OR
-					       owner IS NOT ? OR
-					       priority IS NOT ? OR
+				       closed_reason IS NOT ? OR
+				       owner IS NOT ? OR
+				       assignment_expires_on IS NOT ? OR
+				       priority IS NOT ? OR
 					       author IS NOT ? OR
 					       created_at IS NOT ? OR
 					       updated_at IS NOT ? OR
@@ -1729,12 +1732,12 @@ func reconcileFederatedIssues(
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO issues(
 				uid, project_id, short_id, title, body, status, closed_reason,
-				owner, priority, author, created_at, updated_at, closed_at,
+				owner, assignment_expires_on, priority, author, created_at, updated_at, closed_at,
 				deleted_at, metadata, revision
 			)
-			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
 			issue.UID, projectID, shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status),
-			issue.ClosedReason, issue.Owner, issue.Priority, nonEmptyAuthor(issue.Author),
+			issue.ClosedReason, issue.Owner, issue.AssignmentExpiresOn, issue.Priority, nonEmptyAuthor(issue.Author),
 			nonEmptyTime(issue.CreatedAt), nonEmptyTime(updatedAt),
 			optionalStringValue(issue.ClosedAt), optionalStringValue(issue.DeletedAt),
 			string(metadata))

@@ -688,29 +688,34 @@ func exportIssues(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		return exportIssuesV8(ctx, d, enc, opts)
 	}
 	type record struct {
-		ID            int64          `json:"id"`
-		UID           string         `json:"uid"`
-		ProjectID     int64          `json:"project_id"`
-		ShortID       string         `json:"short_id"`
-		Title         string         `json:"title"`
-		Body          string         `json:"body"`
-		Status        string         `json:"status"`
-		ClosedReason  *string        `json:"closed_reason"`
-		Owner         *string        `json:"owner"`
-		Priority      *int64         `json:"priority,omitzero"`
-		Author        string         `json:"author"`
-		CreatedAt     string         `json:"created_at"`
-		UpdatedAt     string         `json:"updated_at"`
-		ClosedAt      *string        `json:"closed_at"`
-		DeletedAt     *string        `json:"deleted_at"`
-		Metadata      jsontext.Value `json:"metadata"`
-		Revision      int64          `json:"revision"`
-		RecurrenceID  *int64         `json:"recurrence_id,omitzero"`
-		RecurrenceUID *string        `json:"recurrence_uid,omitempty"`
-		OccurrenceKey *string        `json:"occurrence_key,omitempty"`
+		ID                  int64          `json:"id"`
+		UID                 string         `json:"uid"`
+		ProjectID           int64          `json:"project_id"`
+		ShortID             string         `json:"short_id"`
+		Title               string         `json:"title"`
+		Body                string         `json:"body"`
+		Status              string         `json:"status"`
+		ClosedReason        *string        `json:"closed_reason"`
+		Owner               *string        `json:"owner"`
+		AssignmentExpiresOn *string        `json:"assignment_expires_on,omitempty"`
+		Priority            *int64         `json:"priority,omitzero"`
+		Author              string         `json:"author"`
+		CreatedAt           string         `json:"created_at"`
+		UpdatedAt           string         `json:"updated_at"`
+		ClosedAt            *string        `json:"closed_at"`
+		DeletedAt           *string        `json:"deleted_at"`
+		Metadata            jsontext.Value `json:"metadata"`
+		Revision            int64          `json:"revision"`
+		RecurrenceID        *int64         `json:"recurrence_id,omitzero"`
+		RecurrenceUID       *string        `json:"recurrence_uid,omitempty"`
+		OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
+	}
+	assignmentExpiryExpr := `NULL`
+	if sourceSchemaVersion >= 29 {
+		assignmentExpiryExpr = `CAST(i.assignment_expires_on AS TEXT)`
 	}
 	query := `SELECT i.id, i.uid, i.project_id, i.short_id, i.title, i.body,
-	                 i.status, i.closed_reason, i.owner, i.priority, i.author,
+	                 i.status, i.closed_reason, i.owner, ` + assignmentExpiryExpr + `, i.priority, i.author,
 	                 CAST(i.created_at AS TEXT), CAST(i.updated_at AS TEXT),
 	                 CAST(i.closed_at AS TEXT), CAST(i.deleted_at AS TEXT),
 	                 i.metadata, i.revision,
@@ -727,7 +732,7 @@ func exportIssues(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		var rec record
 		var metadata string
 		err := rows.Scan(&rec.ID, &rec.UID, &rec.ProjectID, &rec.ShortID, &rec.Title, &rec.Body,
-			&rec.Status, &rec.ClosedReason, &rec.Owner, &rec.Priority, &rec.Author, &rec.CreatedAt,
+			&rec.Status, &rec.ClosedReason, &rec.Owner, &rec.AssignmentExpiresOn, &rec.Priority, &rec.Author, &rec.CreatedAt,
 			&rec.UpdatedAt, &rec.ClosedAt, &rec.DeletedAt, &metadata, &rec.Revision,
 			&rec.RecurrenceID, &rec.RecurrenceUID, &rec.OccurrenceKey)
 		if err != nil {

@@ -499,7 +499,7 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 		}
 		if parts[1] == "actions" && r.Method == http.MethodPost {
 			switch parts[2] {
-			case "assign", "close", "move", "priority", "reopen", "unassign":
+			case "assign", "claim", "close", "move", "priority", "reopen", "unassign":
 				return true
 			}
 		}

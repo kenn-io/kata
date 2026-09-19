@@ -345,7 +345,9 @@ func (h toolHandlers) graph(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 		allowedUIDs[node.UID] = struct{}{}
 		nodes = append(nodes, IssueSummary{
 			UID: node.UID, Ref: node.ShortID, QualifiedRef: node.QualifiedID, Title: node.Title,
-			Status: node.Status, Owner: node.Owner, Priority: node.Priority, Revision: node.Revision,
+			Status: node.Status, Owner: node.Owner,
+			AssignmentExpiresOn: formatOptionalTime(node.AssignmentExpiresOn),
+			Priority:            node.Priority, Revision: node.Revision,
 			UpdatedAt: formatTime(node.UpdatedAt), ScheduledOn: metadataString(node.Metadata, "scheduled_on"),
 			Timezone: metadataString(node.Metadata, "timezone"),
 		})

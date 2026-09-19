@@ -39,20 +39,21 @@ type FoldProjection struct {
 
 // FoldIssue is the replayed issue state keyed by stable issue UID.
 type FoldIssue struct {
-	UID          string
-	ShortID      string
-	Title        string
-	Body         string
-	Author       string
-	Owner        *string
-	Priority     *int64
-	Status       string
-	ClosedReason *string
-	ClosedAt     *string
-	DeletedAt    *string
-	ProjectUID   string
-	CreatedAt    string
-	UpdatedAt    string
+	UID                 string
+	ShortID             string
+	Title               string
+	Body                string
+	Author              string
+	Owner               *string
+	AssignmentExpiresOn *string
+	Priority            *int64
+	Status              string
+	ClosedReason        *string
+	ClosedAt            *string
+	DeletedAt           *string
+	ProjectUID          string
+	CreatedAt           string
+	UpdatedAt           string
 }
 
 // FoldComment is the replayed comment state keyed by stable comment UID.

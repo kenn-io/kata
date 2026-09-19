@@ -25,6 +25,7 @@ type keymap struct {
 	EditBody, NewComment                           key
 	SetParent, AddBlocker, AddLink                 key
 	AddLabel, RemoveLabel, AssignOwner, ClearOwner key
+	TimedAssignment                                key
 	SetPriority                                    key
 }
 
@@ -83,23 +84,24 @@ func newKeymap() keymap {
 		// adaptation #1), so a TUI label filter could not actually
 		// narrow the displayed list. Plan 8 commit 5b will add the
 		// daemon LabelsByIssues hook + the Labels axis.
-		ClearFilters: key{Keys: []string{"c"}, Help: "clear filters"},
-		Close:        key{Keys: []string{"x"}, Help: "close"},
-		Reopen:       key{Keys: []string{"r"}, Help: "reopen"},
-		NextTab:      key{Keys: []string{"tab"}, Help: "next tab"},
-		PrevTab:      key{Keys: []string{"shift+tab"}, Help: "prev tab"},
-		JumpRef:      key{Keys: []string{"enter"}, Help: "jump to referenced issue"},
-		Back:         key{Keys: []string{"esc", "backspace"}, Help: "back"},
-		EditBody:     key{Keys: []string{"e"}, Help: "edit body"},
-		NewComment:   key{Keys: []string{"c"}, Help: "new comment"},
-		SetParent:    key{Keys: []string{"p"}, Help: "set parent"},
-		AddBlocker:   key{Keys: []string{"b"}, Help: "add blocker"},
-		AddLink:      key{Keys: []string{"l"}, Help: "add related"},
-		AddLabel:     key{Keys: []string{"+"}, Help: "add label"},
-		RemoveLabel:  key{Keys: []string{"-"}, Help: "remove label"},
-		AssignOwner:  key{Keys: []string{"a"}, Help: "assign owner"},
-		ClearOwner:   key{Keys: []string{"A"}, Help: "clear owner"},
-		SetPriority:  key{Keys: []string{"!"}, Help: "set priority"},
+		ClearFilters:    key{Keys: []string{"c"}, Help: "clear filters"},
+		Close:           key{Keys: []string{"x"}, Help: "close"},
+		Reopen:          key{Keys: []string{"r"}, Help: "reopen"},
+		NextTab:         key{Keys: []string{"tab"}, Help: "next tab"},
+		PrevTab:         key{Keys: []string{"shift+tab"}, Help: "prev tab"},
+		JumpRef:         key{Keys: []string{"enter"}, Help: "jump to referenced issue"},
+		Back:            key{Keys: []string{"esc", "backspace"}, Help: "back"},
+		EditBody:        key{Keys: []string{"e"}, Help: "edit body"},
+		NewComment:      key{Keys: []string{"c"}, Help: "new comment"},
+		SetParent:       key{Keys: []string{"p"}, Help: "set parent"},
+		AddBlocker:      key{Keys: []string{"b"}, Help: "add blocker"},
+		AddLink:         key{Keys: []string{"l"}, Help: "add related"},
+		AddLabel:        key{Keys: []string{"+"}, Help: "add label"},
+		RemoveLabel:     key{Keys: []string{"-"}, Help: "remove label"},
+		AssignOwner:     key{Keys: []string{"a"}, Help: "assign owner"},
+		ClearOwner:      key{Keys: []string{"A"}, Help: "clear owner"},
+		TimedAssignment: key{Keys: []string{"t"}, Help: "timed assignment"},
+		SetPriority:     key{Keys: []string{"!"}, Help: "set priority"},
 	}
 }
 

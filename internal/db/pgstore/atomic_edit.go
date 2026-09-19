@@ -55,6 +55,7 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 			if fieldPlan.OwnerChanged {
 				args = append(args, fieldPlan.Owner)
 				sets = append(sets, fmt.Sprintf("owner = $%d", len(args)))
+				sets = append(sets, "assignment_expires_on = NULL")
 			}
 			args = append(args, updatedAt)
 			sets = append(sets, fmt.Sprintf("updated_at = $%d", len(args)))

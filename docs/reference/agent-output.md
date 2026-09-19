@@ -1,7 +1,7 @@
 ---
 title: Agent output format
 description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
-last_edited: 2026-09-15
+last_edited: 2026-09-17
 ---
 
 # Agent output format
@@ -251,17 +251,20 @@ included when present. Their existing ordering and omission rules apply.
 lease state separate on one line:
 
 ```text
-OK status issue=abc4 project=example-project issue_status=open revision=4 actor=agent-a actor_source=daemon auth=db_token instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a hold=active holder=agent-a holder_instance=01HZNQ7VFPK1XGD8R5MABCD4AB lease_kind=timed expires_at=2026-09-02T12:30:00Z
+OK status issue=abc4 project=example-project issue_status=open revision=4 actor=agent-a actor_source=daemon auth=db_token instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a assignment_expires_on=2026-09-02T12:30:00Z hold=assigned
 ```
 
 The fixed field order is `issue`, `project`, `issue_status`, `revision`,
-`actor`, `actor_source`, `auth`, `instance`, optional `owner`, and `hold`. An
+`actor`, `actor_source`, `auth`, `instance`, optional `owner`, optional
+`assignment_expires_on`, and `hold`. An
 active or expired lease then appends optional `holder`, `holder_instance`,
 `lease_kind`, and `expires_at`; pending leases append `pending_leases`. Hold
 state is one of `active`, `expired`, `pending`, `assigned`, `unassigned`, or
-`closed`. `assigned` identifies an open issue with an owner and without a live
-or pending lease; a successful `kata claim` on a non-federated project yields
-`hold=assigned`.
+`closed`. `assigned` identifies an open issue with a live owner assignment and
+without a live or pending lease. A successful temporary `kata claim` yields
+`hold=assigned` and `assignment_expires_on`; once due it yields `hold=expired`
+until cleanup records the expiry, then `hold=unassigned` until another hold
+applies.
 `actor_source` is `daemon` when the daemon authenticated the actor; otherwise it
 is the client-side source reported by `kata whoami`. Use
 `kata show <ref> --agent` when the body, comments, metadata, links, or lease

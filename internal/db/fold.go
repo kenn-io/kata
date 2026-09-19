@@ -37,6 +37,10 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		p.applyIssueUpdated(e, payload)
 	case "issue.assigned", "issue.unassigned":
 		p.applyOwner(e, payload)
+	case "issue.assignment_renewed":
+		p.applyAssignmentRenewed(e, payload)
+	case "issue.assignment_expired":
+		p.applyAssignmentExpired(e, payload)
 	case "issue.priority_set", "issue.priority_cleared":
 		p.applyPriority(e, payload)
 	case "issue.closed":
@@ -94,20 +98,21 @@ func (p *FoldProjection) apply(e FoldEvent) {
 
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	var in struct {
-		UID          string         `json:"uid"`
-		ShortID      string         `json:"short_id"`
-		Title        string         `json:"title"`
-		Body         string         `json:"body"`
-		Author       string         `json:"author"`
-		Owner        *string        `json:"owner"`
-		Priority     *int64         `json:"priority"`
-		Status       string         `json:"status"`
-		ClosedReason *string        `json:"closed_reason"`
-		ClosedAt     *string        `json:"closed_at"`
-		DeletedAt    *string        `json:"deleted_at"`
-		Metadata     jsontext.Value `json:"metadata"`
-		Labels       []string       `json:"labels"`
-		Links        []struct {
+		UID                 string         `json:"uid"`
+		ShortID             string         `json:"short_id"`
+		Title               string         `json:"title"`
+		Body                string         `json:"body"`
+		Author              string         `json:"author"`
+		Owner               *string        `json:"owner"`
+		AssignmentExpiresOn *string        `json:"assignment_expires_on"`
+		Priority            *int64         `json:"priority"`
+		Status              string         `json:"status"`
+		ClosedReason        *string        `json:"closed_reason"`
+		ClosedAt            *string        `json:"closed_at"`
+		DeletedAt           *string        `json:"deleted_at"`
+		Metadata            jsontext.Value `json:"metadata"`
+		Labels              []string       `json:"labels"`
+		Links               []struct {
 			Type       string `json:"type"`
 			ToIssueUID string `json:"to_issue_uid"`
 			Incoming   bool   `json:"incoming"`
@@ -156,6 +161,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	issue.Title = in.Title
 	issue.Body = in.Body
 	issue.Owner = cloneStringPtr(in.Owner)
+	setFoldAssignmentExpiry(&issue, in.AssignmentExpiresOn)
 	issue.Priority = cloneInt64Ptr(in.Priority)
 	issue.Status = in.Status
 	issue.ClosedReason = cloneStringPtr(in.ClosedReason)
@@ -202,6 +208,7 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 	}
 	if owner, ok := optionalString(payload["owner"]); ok {
 		issue.Owner = owner
+		clearFoldAssignmentExpiry(&issue)
 	}
 	if priority, ok := optionalInt64(payload["priority"]); ok {
 		issue.Priority = priority
@@ -241,11 +248,76 @@ func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]jsontext.Val
 	issue := p.ensureIssue(uid)
 	if e.Type == "issue.unassigned" {
 		issue.Owner = nil
+		clearFoldAssignmentExpiry(&issue)
 	} else if owner, ok := optionalString(payload["owner"]); ok {
 		issue.Owner = owner
+		expiresAt, hasExpiry := stringValue(payload["assignment_expires_on"])
+		if hasExpiry {
+			setFoldAssignmentExpiry(&issue, &expiresAt)
+		} else {
+			clearFoldAssignmentExpiry(&issue)
+		}
 	}
 	advanceIssueUpdatedAt(&issue, issueUpdatedAt(e, payload))
 	p.Issues[uid] = issue
+}
+
+func (p *FoldProjection) applyAssignmentRenewed(e FoldEvent, payload map[string]jsontext.Value) {
+	uid := issueUID(e, payload)
+	if uid == "" {
+		return
+	}
+	issue := p.ensureIssue(uid)
+	owner, hasOwner := stringValue(payload["owner"])
+	oldExpiry, hasOldExpiry := stringValue(payload["old_assignment_expires_on"])
+	newExpiry, hasNewExpiry := stringValue(payload["assignment_expires_on"])
+	if !hasOwner || !hasOldExpiry || !hasNewExpiry {
+		return
+	}
+	if !foldStringPtrEqual(issue.Owner, owner) ||
+		!foldStringPtrEqual(issue.AssignmentExpiresOn, oldExpiry) {
+		return
+	}
+	issue.AssignmentExpiresOn = cloneStringPtr(&newExpiry)
+	advanceIssueUpdatedAt(&issue, issueUpdatedAt(e, payload))
+	p.Issues[uid] = issue
+}
+
+func (p *FoldProjection) applyAssignmentExpired(e FoldEvent, payload map[string]jsontext.Value) {
+	uid := issueUID(e, payload)
+	if uid == "" {
+		return
+	}
+	issue := p.ensureIssue(uid)
+	expiresAt, hasExpiry := stringValue(payload["assignment_expires_on"])
+	previousOwner, hasPreviousOwner := stringValue(payload["previous_owner"])
+	if !hasExpiry || !hasPreviousOwner {
+		return
+	}
+	if !foldStringPtrEqual(issue.Owner, previousOwner) ||
+		!foldStringPtrEqual(issue.AssignmentExpiresOn, expiresAt) {
+		return
+	}
+	issue.Owner = nil
+	clearFoldAssignmentExpiry(&issue)
+	advanceIssueUpdatedAt(&issue, issueUpdatedAt(e, payload))
+	p.Issues[uid] = issue
+}
+
+func setFoldAssignmentExpiry(issue *FoldIssue, expiresAt *string) {
+	if issue.Owner == nil || expiresAt == nil || *expiresAt == "" {
+		clearFoldAssignmentExpiry(issue)
+		return
+	}
+	issue.AssignmentExpiresOn = cloneStringPtr(expiresAt)
+}
+
+func clearFoldAssignmentExpiry(issue *FoldIssue) {
+	issue.AssignmentExpiresOn = nil
+}
+
+func foldStringPtrEqual(got *string, want string) bool {
+	return got != nil && *got == want
 }
 
 func (p *FoldProjection) applyPriority(e FoldEvent, payload map[string]jsontext.Value) {
@@ -270,6 +342,7 @@ func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]jsontext.Va
 	}
 	issue := p.ensureIssue(uid)
 	issue.Status = "closed"
+	clearFoldAssignmentExpiry(&issue)
 	if reason, ok := stringValue(payload["reason"]); ok {
 		issue.ClosedReason = &reason
 	}

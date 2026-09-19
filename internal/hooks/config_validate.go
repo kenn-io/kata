@@ -17,6 +17,7 @@ var knownEventTypes = map[string]struct{}{
 	"issue.reopened": {}, "issue.commented": {}, "issue.comment_edited": {}, "issue.linked": {},
 	"issue.unlinked": {}, "issue.labeled": {}, "issue.unlabeled": {},
 	"issue.assigned": {}, "issue.unassigned": {},
+	"issue.assignment_renewed": {}, "issue.assignment_expired": {},
 	"issue.priority_set": {}, "issue.priority_cleared": {},
 	"issue.soft_deleted": {}, "issue.restored": {},
 	"issue.links_changed":             {},

@@ -203,7 +203,7 @@ func (s *Store) ExportProjects(ctx context.Context, filter db.ExportFilter) iter
 func (s *Store) ExportIssues(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.IssueExport, error] {
 	where, args := pgExportWhere("i", filter)
 	query := `SELECT i.id, i.uid, i.project_id, i.short_id, i.title, i.body,
-       i.status, i.closed_reason, i.owner, i.priority, i.author,
+       i.status, i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author,
        i.created_at, i.updated_at, i.closed_at, i.deleted_at,
        i.metadata, i.revision, i.content_revision, i.recurrence_id, r.uid, i.occurrence_key
   FROM issues i LEFT JOIN recurrences r ON r.id = i.recurrence_id` + where + ` ORDER BY i.id ASC`
@@ -212,7 +212,7 @@ func (s *Store) ExportIssues(ctx context.Context, filter db.ExportFilter) iter.S
 			var record db.IssueExport
 			var metadata string
 			if err := rows.Scan(&record.ID, &record.UID, &record.ProjectID, &record.ShortID,
-				&record.Title, &record.Body, &record.Status, &record.ClosedReason, &record.Owner,
+				&record.Title, &record.Body, &record.Status, &record.ClosedReason, &record.Owner, &record.AssignmentExpiresOn,
 				&record.Priority, &record.Author, &record.CreatedAt, &record.UpdatedAt,
 				&record.ClosedAt, &record.DeletedAt, &metadata, &record.Revision,
 				&record.ContentRevision, &record.RecurrenceID, &record.RecurrenceUID,

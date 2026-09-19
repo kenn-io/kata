@@ -38,6 +38,9 @@ CREATE TABLE issues (
   status        TEXT NOT NULL CHECK(status IN ('open','closed')) DEFAULT 'open',
   closed_reason TEXT CHECK(closed_reason IN ('done','wontfix','duplicate','superseded','audit-no-change')),
   owner         TEXT,
+  assignment_expires_on DATETIME
+    CONSTRAINT issues_assignment_expiry_requires_owner
+      CHECK (assignment_expires_on IS NULL OR owner IS NOT NULL),
   priority      INTEGER,                       -- 0 = highest, 4 = lowest; NULL = unset
   author        TEXT NOT NULL,
   created_at    DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -65,6 +68,8 @@ CREATE INDEX idx_issues_project_updated
   ON issues(project_id, updated_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_issues_owner
   ON issues(owner) WHERE owner IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX idx_issues_assignment_expires_on
+  ON issues(assignment_expires_on, id) WHERE assignment_expires_on IS NOT NULL;
 CREATE UNIQUE INDEX uniq_issues_project_short_id
   ON issues(project_id, short_id);
 CREATE UNIQUE INDEX issues_recurrence_occurrence_uniq

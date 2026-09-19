@@ -43,6 +43,7 @@ l              add related
 -              remove label
 a              assign owner
 A              clear owner
+t              timed assignment
 !              set priority
 
 Children

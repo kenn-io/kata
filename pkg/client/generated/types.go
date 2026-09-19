@@ -389,9 +389,10 @@ func (c ClaimPrincipalOut) Validate() error {
 }
 
 type ClaimRequestBody struct {
-	Actor     string `json:"actor" validate:"required"`
-	Force     *bool  `json:"force,omitempty"`
-	IfUnowned *bool  `json:"if_unowned,omitempty"`
+	Actor      *string `json:"actor,omitempty"`
+	Force      *bool   `json:"force,omitempty"`
+	IfUnowned  *bool   `json:"if_unowned,omitempty"`
+	TTLSeconds *int64  `json:"ttl_seconds,omitempty" validate:"omitempty,gte=60,lte=86400"`
 }
 
 func (c ClaimRequestBody) Validate() error {
@@ -401,8 +402,10 @@ func (c ClaimRequestBody) Validate() error {
 type ClaimResponseBody struct {
 	Changed       bool    `json:"changed"`
 	Event         *Event  `json:"event,omitempty"`
+	Events        []Event `json:"events" validate:"required"`
 	Issue         Issue   `json:"issue"`
 	PreviousOwner *string `json:"previous_owner,omitempty"`
+	ReplayEvents  []Event `json:"replay_events,omitempty"`
 }
 
 func (c ClaimResponseBody) Validate() error {
@@ -414,9 +417,23 @@ func (c ClaimResponseBody) Validate() error {
 			}
 		}
 	}
+	for i, item := range c.Events {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Events[%d]", i), err)
+			}
+		}
+	}
 	if v, ok := any(c.Issue).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Issue", err)
+		}
+	}
+	for i, item := range c.ReplayEvents {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("ReplayEvents[%d]", i), err)
+			}
 		}
 	}
 	if len(errors) == 0 {
@@ -1917,26 +1934,27 @@ func (i InstanceResponseBody) Validate() error {
 }
 
 type Issue struct {
-	Author        string         `json:"author" validate:"required"`
-	Body          string         `json:"body" validate:"required"`
-	ClosedAt      *time.Time     `json:"closed_at,omitempty"`
-	ClosedReason  *string        `json:"closed_reason,omitempty"`
-	CreatedAt     time.Time      `json:"created_at" validate:"required"`
-	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
-	ID            int64          `json:"id"`
-	Metadata      map[string]any `json:"metadata"`
-	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
-	Owner         *string        `json:"owner,omitempty"`
-	Priority      *int64         `json:"priority,omitempty"`
-	ProjectID     int64          `json:"project_id"`
-	ProjectUID    *string        `json:"project_uid,omitempty"`
-	RecurrenceID  *int64         `json:"recurrence_id,omitempty"`
-	Revision      int64          `json:"revision"`
-	ShortID       string         `json:"short_id" validate:"required"`
-	Status        string         `json:"status" validate:"required"`
-	Title         string         `json:"title" validate:"required"`
-	UID           string         `json:"uid" validate:"required"`
-	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+	AssignmentExpiresOn *time.Time     `json:"assignment_expires_on,omitempty"`
+	Author              string         `json:"author" validate:"required"`
+	Body                string         `json:"body" validate:"required"`
+	ClosedAt            *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason        *string        `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time      `json:"created_at" validate:"required"`
+	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
+	ID                  int64          `json:"id"`
+	Metadata            map[string]any `json:"metadata"`
+	OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
+	Owner               *string        `json:"owner,omitempty"`
+	Priority            *int64         `json:"priority,omitempty"`
+	ProjectID           int64          `json:"project_id"`
+	ProjectUID          *string        `json:"project_uid,omitempty"`
+	RecurrenceID        *int64         `json:"recurrence_id,omitempty"`
+	Revision            int64          `json:"revision"`
+	ShortID             string         `json:"short_id" validate:"required"`
+	Status              string         `json:"status" validate:"required"`
+	Title               string         `json:"title" validate:"required"`
+	UID                 string         `json:"uid" validate:"required"`
+	UpdatedAt           time.Time      `json:"updated_at" validate:"required"`
 }
 
 func (i Issue) Validate() error {
@@ -1976,34 +1994,35 @@ func (i IssueLabel) Validate() error {
 }
 
 type IssueOut struct {
-	Author        string         `json:"author" validate:"required"`
-	Blocked       *bool          `json:"blocked,omitempty"`
-	BlockedBy     []LinkPeer     `json:"blocked_by,omitempty"`
-	Blocks        []LinkPeer     `json:"blocks,omitempty"`
-	Body          string         `json:"body" validate:"required"`
-	ChildCounts   *ChildCounts   `json:"child_counts,omitempty"`
-	ClosedAt      *time.Time     `json:"closed_at,omitempty"`
-	ClosedReason  *string        `json:"closed_reason,omitempty"`
-	CreatedAt     time.Time      `json:"created_at" validate:"required"`
-	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
-	ID            int64          `json:"id"`
-	Labels        []string       `json:"labels,omitempty"`
-	Metadata      map[string]any `json:"metadata"`
-	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
-	Owner         *string        `json:"owner,omitempty"`
-	Parent        *LinkPeer      `json:"parent,omitempty"`
-	Priority      *int64         `json:"priority,omitempty"`
-	ProjectID     int64          `json:"project_id"`
-	ProjectUID    *string        `json:"project_uid,omitempty"`
-	QualifiedID   string         `json:"qualified_id" validate:"required"`
-	RecurrenceID  *int64         `json:"recurrence_id,omitempty"`
-	Related       []LinkPeer     `json:"related,omitempty"`
-	Revision      int64          `json:"revision"`
-	ShortID       string         `json:"short_id" validate:"required"`
-	Status        string         `json:"status" validate:"required"`
-	Title         string         `json:"title" validate:"required"`
-	UID           string         `json:"uid" validate:"required"`
-	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+	AssignmentExpiresOn *time.Time     `json:"assignment_expires_on,omitempty"`
+	Author              string         `json:"author" validate:"required"`
+	Blocked             *bool          `json:"blocked,omitempty"`
+	BlockedBy           []LinkPeer     `json:"blocked_by,omitempty"`
+	Blocks              []LinkPeer     `json:"blocks,omitempty"`
+	Body                string         `json:"body" validate:"required"`
+	ChildCounts         *ChildCounts   `json:"child_counts,omitempty"`
+	ClosedAt            *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason        *string        `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time      `json:"created_at" validate:"required"`
+	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
+	ID                  int64          `json:"id"`
+	Labels              []string       `json:"labels,omitempty"`
+	Metadata            map[string]any `json:"metadata"`
+	OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
+	Owner               *string        `json:"owner,omitempty"`
+	Parent              *LinkPeer      `json:"parent,omitempty"`
+	Priority            *int64         `json:"priority,omitempty"`
+	ProjectID           int64          `json:"project_id"`
+	ProjectUID          *string        `json:"project_uid,omitempty"`
+	QualifiedID         string         `json:"qualified_id" validate:"required"`
+	RecurrenceID        *int64         `json:"recurrence_id,omitempty"`
+	Related             []LinkPeer     `json:"related,omitempty"`
+	Revision            int64          `json:"revision"`
+	ShortID             string         `json:"short_id" validate:"required"`
+	Status              string         `json:"status" validate:"required"`
+	Title               string         `json:"title" validate:"required"`
+	UID                 string         `json:"uid" validate:"required"`
+	UpdatedAt           time.Time      `json:"updated_at" validate:"required"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -2406,35 +2425,36 @@ func (l ListFederationEnrollmentsBody) Validate() error {
 }
 
 type ListGlobalIssueOut struct {
-	Author        string         `json:"author" validate:"required"`
-	Blocked       *bool          `json:"blocked,omitempty"`
-	BlockedBy     []LinkPeer     `json:"blocked_by,omitempty"`
-	Blocks        []LinkPeer     `json:"blocks,omitempty"`
-	Body          string         `json:"body" validate:"required"`
-	ChildCounts   *ChildCounts   `json:"child_counts,omitempty"`
-	ClosedAt      *time.Time     `json:"closed_at,omitempty"`
-	ClosedReason  *string        `json:"closed_reason,omitempty"`
-	CreatedAt     time.Time      `json:"created_at" validate:"required"`
-	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
-	ID            int64          `json:"id"`
-	Labels        []string       `json:"labels,omitempty"`
-	Metadata      map[string]any `json:"metadata"`
-	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
-	Owner         *string        `json:"owner,omitempty"`
-	Parent        *LinkPeer      `json:"parent,omitempty"`
-	Priority      *int64         `json:"priority,omitempty"`
-	ProjectID     int64          `json:"project_id"`
-	ProjectName   string         `json:"project_name" validate:"required"`
-	ProjectUID    *string        `json:"project_uid,omitempty"`
-	QualifiedID   string         `json:"qualified_id" validate:"required"`
-	RecurrenceID  *int64         `json:"recurrence_id,omitempty"`
-	Related       []LinkPeer     `json:"related,omitempty"`
-	Revision      int64          `json:"revision"`
-	ShortID       string         `json:"short_id" validate:"required"`
-	Status        string         `json:"status" validate:"required"`
-	Title         string         `json:"title" validate:"required"`
-	UID           string         `json:"uid" validate:"required"`
-	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+	AssignmentExpiresOn *time.Time     `json:"assignment_expires_on,omitempty"`
+	Author              string         `json:"author" validate:"required"`
+	Blocked             *bool          `json:"blocked,omitempty"`
+	BlockedBy           []LinkPeer     `json:"blocked_by,omitempty"`
+	Blocks              []LinkPeer     `json:"blocks,omitempty"`
+	Body                string         `json:"body" validate:"required"`
+	ChildCounts         *ChildCounts   `json:"child_counts,omitempty"`
+	ClosedAt            *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason        *string        `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time      `json:"created_at" validate:"required"`
+	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
+	ID                  int64          `json:"id"`
+	Labels              []string       `json:"labels,omitempty"`
+	Metadata            map[string]any `json:"metadata"`
+	OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
+	Owner               *string        `json:"owner,omitempty"`
+	Parent              *LinkPeer      `json:"parent,omitempty"`
+	Priority            *int64         `json:"priority,omitempty"`
+	ProjectID           int64          `json:"project_id"`
+	ProjectName         string         `json:"project_name" validate:"required"`
+	ProjectUID          *string        `json:"project_uid,omitempty"`
+	QualifiedID         string         `json:"qualified_id" validate:"required"`
+	RecurrenceID        *int64         `json:"recurrence_id,omitempty"`
+	Related             []LinkPeer     `json:"related,omitempty"`
+	Revision            int64          `json:"revision"`
+	ShortID             string         `json:"short_id" validate:"required"`
+	Status              string         `json:"status" validate:"required"`
+	Title               string         `json:"title" validate:"required"`
+	UID                 string         `json:"uid" validate:"required"`
+	UpdatedAt           time.Time      `json:"updated_at" validate:"required"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -3180,27 +3200,28 @@ func (r ReachableGraphEdge) Validate() error {
 }
 
 type ReachableGraphNode struct {
-	Author        string         `json:"author" validate:"required"`
-	Body          string         `json:"body" validate:"required"`
-	ClosedAt      *time.Time     `json:"closed_at,omitempty"`
-	ClosedReason  *string        `json:"closed_reason,omitempty"`
-	CreatedAt     time.Time      `json:"created_at" validate:"required"`
-	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
-	ID            int64          `json:"id"`
-	Metadata      map[string]any `json:"metadata"`
-	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
-	Owner         *string        `json:"owner,omitempty"`
-	Priority      *int64         `json:"priority,omitempty"`
-	ProjectID     int64          `json:"project_id"`
-	ProjectUID    *string        `json:"project_uid,omitempty"`
-	QualifiedID   string         `json:"qualified_id" validate:"required"`
-	RecurrenceID  *int64         `json:"recurrence_id,omitempty"`
-	Revision      int64          `json:"revision"`
-	ShortID       string         `json:"short_id" validate:"required"`
-	Status        string         `json:"status" validate:"required"`
-	Title         string         `json:"title" validate:"required"`
-	UID           string         `json:"uid" validate:"required"`
-	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+	AssignmentExpiresOn *time.Time     `json:"assignment_expires_on,omitempty"`
+	Author              string         `json:"author" validate:"required"`
+	Body                string         `json:"body" validate:"required"`
+	ClosedAt            *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason        *string        `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time      `json:"created_at" validate:"required"`
+	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
+	ID                  int64          `json:"id"`
+	Metadata            map[string]any `json:"metadata"`
+	OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
+	Owner               *string        `json:"owner,omitempty"`
+	Priority            *int64         `json:"priority,omitempty"`
+	ProjectID           int64          `json:"project_id"`
+	ProjectUID          *string        `json:"project_uid,omitempty"`
+	QualifiedID         string         `json:"qualified_id" validate:"required"`
+	RecurrenceID        *int64         `json:"recurrence_id,omitempty"`
+	Revision            int64          `json:"revision"`
+	ShortID             string         `json:"short_id" validate:"required"`
+	Status              string         `json:"status" validate:"required"`
+	Title               string         `json:"title" validate:"required"`
+	UID                 string         `json:"uid" validate:"required"`
+	UpdatedAt           time.Time      `json:"updated_at" validate:"required"`
 }
 
 func (r ReachableGraphNode) Validate() error {
@@ -3283,35 +3304,36 @@ func (r ReachableGraphUnresolvedRef) Validate() error {
 }
 
 type ReadyGlobalIssueOut struct {
-	Author        string         `json:"author" validate:"required"`
-	Blocked       *bool          `json:"blocked,omitempty"`
-	BlockedBy     []LinkPeer     `json:"blocked_by,omitempty"`
-	Blocks        []LinkPeer     `json:"blocks,omitempty"`
-	Body          string         `json:"body" validate:"required"`
-	ChildCounts   *ChildCounts   `json:"child_counts,omitempty"`
-	ClosedAt      *time.Time     `json:"closed_at,omitempty"`
-	ClosedReason  *string        `json:"closed_reason,omitempty"`
-	CreatedAt     time.Time      `json:"created_at" validate:"required"`
-	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
-	ID            int64          `json:"id"`
-	Labels        []string       `json:"labels,omitempty"`
-	Metadata      map[string]any `json:"metadata"`
-	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
-	Owner         *string        `json:"owner,omitempty"`
-	Parent        *LinkPeer      `json:"parent,omitempty"`
-	Priority      *int64         `json:"priority,omitempty"`
-	ProjectID     int64          `json:"project_id"`
-	ProjectName   string         `json:"project_name" validate:"required"`
-	ProjectUID    *string        `json:"project_uid,omitempty"`
-	QualifiedID   string         `json:"qualified_id" validate:"required"`
-	RecurrenceID  *int64         `json:"recurrence_id,omitempty"`
-	Related       []LinkPeer     `json:"related,omitempty"`
-	Revision      int64          `json:"revision"`
-	ShortID       string         `json:"short_id" validate:"required"`
-	Status        string         `json:"status" validate:"required"`
-	Title         string         `json:"title" validate:"required"`
-	UID           string         `json:"uid" validate:"required"`
-	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+	AssignmentExpiresOn *time.Time     `json:"assignment_expires_on,omitempty"`
+	Author              string         `json:"author" validate:"required"`
+	Blocked             *bool          `json:"blocked,omitempty"`
+	BlockedBy           []LinkPeer     `json:"blocked_by,omitempty"`
+	Blocks              []LinkPeer     `json:"blocks,omitempty"`
+	Body                string         `json:"body" validate:"required"`
+	ChildCounts         *ChildCounts   `json:"child_counts,omitempty"`
+	ClosedAt            *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason        *string        `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time      `json:"created_at" validate:"required"`
+	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
+	ID                  int64          `json:"id"`
+	Labels              []string       `json:"labels,omitempty"`
+	Metadata            map[string]any `json:"metadata"`
+	OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
+	Owner               *string        `json:"owner,omitempty"`
+	Parent              *LinkPeer      `json:"parent,omitempty"`
+	Priority            *int64         `json:"priority,omitempty"`
+	ProjectID           int64          `json:"project_id"`
+	ProjectName         string         `json:"project_name" validate:"required"`
+	ProjectUID          *string        `json:"project_uid,omitempty"`
+	QualifiedID         string         `json:"qualified_id" validate:"required"`
+	RecurrenceID        *int64         `json:"recurrence_id,omitempty"`
+	Related             []LinkPeer     `json:"related,omitempty"`
+	Revision            int64          `json:"revision"`
+	ShortID             string         `json:"short_id" validate:"required"`
+	Status              string         `json:"status" validate:"required"`
+	Title               string         `json:"title" validate:"required"`
+	UID                 string         `json:"uid" validate:"required"`
+	UpdatedAt           time.Time      `json:"updated_at" validate:"required"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -4168,31 +4190,32 @@ func (u UIGraphUnresolvedRef) Validate() error {
 }
 
 type UIIssue struct {
-	Author          string         `json:"author" validate:"required"`
-	Body            string         `json:"body" validate:"required"`
-	ClosedAt        *time.Time     `json:"closed_at,omitempty"`
-	ClosedReason    *string        `json:"closed_reason,omitempty"`
-	CreatedAt       time.Time      `json:"created_at" validate:"required"`
-	DeadlineOnDate  *string        `json:"deadline_on_date,omitempty"`
-	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
-	ID              int64          `json:"id"`
-	Labels          []string       `json:"labels" validate:"required"`
-	Metadata        map[string]any `json:"metadata"`
-	OccurrenceKey   *string        `json:"occurrence_key,omitempty"`
-	Owner           *string        `json:"owner,omitempty"`
-	Priority        *int64         `json:"priority,omitempty"`
-	ProjectID       int64          `json:"project_id"`
-	ProjectName     string         `json:"project_name" validate:"required"`
-	ProjectUID      *string        `json:"project_uid,omitempty"`
-	QualifiedID     string         `json:"qualified_id" validate:"required"`
-	RecurrenceID    *int64         `json:"recurrence_id,omitempty"`
-	Revision        int64          `json:"revision"`
-	ScheduledOnDate *string        `json:"scheduled_on_date,omitempty"`
-	ShortID         string         `json:"short_id" validate:"required"`
-	Status          string         `json:"status" validate:"required"`
-	Title           string         `json:"title" validate:"required"`
-	UID             string         `json:"uid" validate:"required"`
-	UpdatedAt       time.Time      `json:"updated_at" validate:"required"`
+	AssignmentExpiresOn *time.Time     `json:"assignment_expires_on,omitempty"`
+	Author              string         `json:"author" validate:"required"`
+	Body                string         `json:"body" validate:"required"`
+	ClosedAt            *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason        *string        `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time      `json:"created_at" validate:"required"`
+	DeadlineOnDate      *string        `json:"deadline_on_date,omitempty"`
+	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
+	ID                  int64          `json:"id"`
+	Labels              []string       `json:"labels" validate:"required"`
+	Metadata            map[string]any `json:"metadata"`
+	OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
+	Owner               *string        `json:"owner,omitempty"`
+	Priority            *int64         `json:"priority,omitempty"`
+	ProjectID           int64          `json:"project_id"`
+	ProjectName         string         `json:"project_name" validate:"required"`
+	ProjectUID          *string        `json:"project_uid,omitempty"`
+	QualifiedID         string         `json:"qualified_id" validate:"required"`
+	RecurrenceID        *int64         `json:"recurrence_id,omitempty"`
+	Revision            int64          `json:"revision"`
+	ScheduledOnDate     *string        `json:"scheduled_on_date,omitempty"`
+	ShortID             string         `json:"short_id" validate:"required"`
+	Status              string         `json:"status" validate:"required"`
+	Title               string         `json:"title" validate:"required"`
+	UID                 string         `json:"uid" validate:"required"`
+	UpdatedAt           time.Time      `json:"updated_at" validate:"required"`
 }
 
 func (u UIIssue) Validate() error {

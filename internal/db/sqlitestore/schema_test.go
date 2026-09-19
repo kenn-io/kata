@@ -1,6 +1,7 @@
 package sqlitestore_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,6 +41,73 @@ func TestIssuesMetadataRejectsNonObjectShapes(t *testing.T) {
 		require.Errorf(t, err,
 			"json_type CHECK must reject non-object metadata: %s", badShape)
 	}
+}
+
+func TestIssuesTimedAssignmentSupportsTimedAndPermanentOwnership(t *testing.T) {
+	d, ctx, _, iss := setupTestIssue(t)
+
+	const expiresAt = "2026-09-17T20:30:00Z"
+	_, err := d.ExecContext(ctx, `
+		UPDATE issues
+		   SET owner = 'worker-a', assignment_expires_on = ?
+		 WHERE id = ?`, expiresAt, iss.ID)
+	require.NoError(t, err)
+
+	var owner string
+	var gotExpiry any
+	require.NoError(t, d.QueryRowContext(ctx, `
+		SELECT owner, assignment_expires_on
+		  FROM issues
+		 WHERE id = ?`, iss.ID).Scan(&owner, &gotExpiry))
+	assert.Equal(t, "worker-a", owner)
+	assert.NotNil(t, gotExpiry)
+
+	_, err = d.ExecContext(ctx, `
+		UPDATE issues
+		   SET owner = 'worker-b', assignment_expires_on = NULL
+		 WHERE id = ?`, iss.ID)
+	require.NoError(t, err)
+}
+
+func TestIssuesTimedAssignmentRequiresOwner(t *testing.T) {
+	d, ctx, _, iss := setupTestIssue(t)
+
+	const expiresAt = "2026-09-17T20:30:00Z"
+	_, err := d.ExecContext(ctx, `
+		UPDATE issues
+		   SET owner = 'worker-a', assignment_expires_on = ?
+		 WHERE id = ?`, expiresAt, iss.ID)
+	require.NoError(t, err)
+
+	_, err = d.ExecContext(ctx, `UPDATE issues SET owner = NULL WHERE id = ?`, iss.ID)
+	require.Error(t, err, "a timed assignment cannot exist without an owner")
+}
+
+func TestIssuesTimedAssignmentDueLookupUsesExpiryIndex(t *testing.T) {
+	d := openTestDB(t)
+	rows, err := d.Query(`
+		EXPLAIN QUERY PLAN
+		SELECT id
+		  FROM issues
+		 WHERE assignment_expires_on IS NOT NULL
+		   AND assignment_expires_on <= ?
+		 ORDER BY assignment_expires_on, id
+		 LIMIT 100`, "2026-09-17T20:30:00Z")
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+
+	var usedExpiryIndex bool
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+		if strings.Contains(detail, "USING COVERING INDEX idx_issues_assignment_expires_on") ||
+			strings.Contains(detail, "USING INDEX idx_issues_assignment_expires_on") {
+			usedExpiryIndex = true
+		}
+	}
+	require.NoError(t, rows.Err())
+	assert.True(t, usedExpiryIndex, "due lookup must use idx_issues_assignment_expires_on")
 }
 
 func TestProjectsMetadataAndRevisionColumns(t *testing.T) {

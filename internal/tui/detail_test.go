@@ -820,19 +820,21 @@ type fakeDetailAPI struct {
 	addLabelCalls    int
 	removeLabelCalls int
 	assignCalls      int
+	claimTimedCalls  int
 	addLinkCalls     int
 	editBodyCalls    int
 	addCommentCalls  int
 	setPriorityCalls int
 
-	lastProjectID int64
-	lastRef       string
-	lastActor     string
-	lastLabel     string
-	lastOwner     string
-	lastBody      string
-	lastLinkBody  LinkBody
-	lastPriority  *int64
+	lastProjectID     int64
+	lastRef           string
+	lastActor         string
+	lastLabel         string
+	lastOwner         string
+	lastAssignmentTTL time.Duration
+	lastBody          string
+	lastLinkBody      LinkBody
+	lastPriority      *int64
 
 	mutationResult *MutationResp
 	mutationErr    error
@@ -916,6 +918,17 @@ func (f *fakeDetailAPI) Assign(
 	f.lastRef = ref
 	f.lastOwner = owner
 	f.lastActor = actor
+	return f.mutationResult, f.mutationErr
+}
+
+func (f *fakeDetailAPI) ClaimTimedAssignment(
+	_ context.Context, projectID int64, ref, actor string, ttl time.Duration,
+) (*MutationResp, error) {
+	f.claimTimedCalls++
+	f.lastProjectID = projectID
+	f.lastRef = ref
+	f.lastActor = actor
+	f.lastAssignmentTTL = ttl
 	return f.mutationResult, f.mutationErr
 }
 
@@ -1134,6 +1147,10 @@ func TestDetail_RenderEventsTab_FormatsCommonEventTypes(t *testing.T) {
 			}},
 		{Type: "issue.assigned", Actor: "d", CreatedAt: when,
 			Payload: map[string]any{"owner": "wesm"}},
+		{Type: "issue.assignment_renewed", Actor: "wesm", CreatedAt: when,
+			Payload: map[string]any{"owner": "wesm", "assignment_expires_on": "2025-01-02T17:04:00Z"}},
+		{Type: "issue.assignment_expired", Actor: "system", CreatedAt: when,
+			Payload: map[string]any{"previous_owner": "wesm", "assignment_expires_on": "2025-01-02T15:04:00Z"}},
 	}
 	out := renderEventsTab(es, 200, 20, -1, tabState{})
 	assertContainsAll(t, out,
@@ -1142,6 +1159,8 @@ func TestDetail_RenderEventsTab_FormatsCommonEventTypes(t *testing.T) {
 		"[issue.labeled] 2025-01-02 15:04 b — labeled bug",
 		"[issue.linked] 2025-01-02 15:04 c — linked blocks #k1l1",
 		"[issue.assigned] 2025-01-02 15:04 d — assigned wesm",
+		"[issue.assignment_renewed] 2025-01-02 15:04 wesm — renewed assignment for wesm until 2025-01-02T17:04:00Z",
+		"[issue.assignment_expired] 2025-01-02 15:04 system — assignment for wesm expired at 2025-01-02T15:04:00Z",
 	)
 }
 

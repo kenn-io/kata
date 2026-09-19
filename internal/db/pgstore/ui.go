@@ -483,10 +483,10 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	filterReadySchedules := false
 	filterCalendarSchedules := query.View == "today" || query.View == "upcoming" || query.View == "deadlines"
 	filterDelegated := query.View == "delegated"
+	readyRequested := false
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
 		statusPredicates := []string{}
 		persistedStatuses := []string{}
-		readyRequested := false
 		for _, status := range statuses {
 			if status == "ready" {
 				readyRequested = true
@@ -512,6 +512,14 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		}
 		statement += ` AND (` + strings.Join(statusPredicates, " OR ") + `)`
 	}
+	readyAt := time.Now()
+	if readyRequested && query.ReadyAt != "" {
+		var err error
+		readyAt, err = time.Parse(time.RFC3339Nano, query.ReadyAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse UI ready_at: %w", err)
+		}
+	}
 	switch query.View {
 	case "inbox":
 		statement += ` AND p.metadata::jsonb ->> 'role' = 'inbox'`
@@ -528,6 +536,10 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	owners := uiFilterValues(query.Owners, query.Owner)
 	if len(owners) > 0 {
 		statement += ` AND i.owner IN (` + uiPostgresArgs(&args, owners) + `)`
+		if readyRequested {
+			args = append(args, formatStoredTime(readyAt))
+			statement += fmt.Sprintf(` AND (i.assignment_expires_on IS NULL OR i.assignment_expires_on > $%d)`, len(args))
+		}
 	}
 	labels := uiFilterValues(query.Labels, query.Label)
 	if len(labels) > 0 {
@@ -555,19 +567,15 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		return nil, fmt.Errorf("read UI issues: %w", mapSQLError(err, nil))
 	}
 	issues := []db.UIIssue{}
-	readyAt := time.Now()
-	if filterReadySchedules && query.ReadyAt != "" {
-		var err error
-		readyAt, err = time.Parse(time.RFC3339Nano, query.ReadyAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse UI ready_at: %w", err)
-		}
-	}
 	for rows.Next() {
 		issue, recurrenceTimezone, err := scanScheduledIssue(rows)
 		if err != nil {
 			_ = rows.Close()
 			return nil, err
+		}
+		if readyRequested && issue.AssignmentExpiresOn != nil && !issue.AssignmentExpiresOn.After(readyAt) {
+			issue.Owner = nil
+			issue.AssignmentExpiresOn = nil
 		}
 		if filterReadySchedules && issue.Status == "open" {
 			due, err := metadata.ScheduledOnDue(

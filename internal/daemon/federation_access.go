@@ -26,6 +26,7 @@ type HostFederationOperation struct {
 // hostOperationPolicies declares for the same route, which is why this table is
 // its own source of truth and not derived from that registry.
 var federationTransportOperations = map[string]HostFederationOperation{
+	"claimIssue":        {ID: "claimIssue", Mutation: true},
 	"acquireIssueLease": {ID: "acquireIssueLease", Mutation: true},
 	"renewIssueLease":   {ID: "renewIssueLease", Mutation: true},
 	"releaseIssueLease": {ID: "releaseIssueLease", Mutation: true},

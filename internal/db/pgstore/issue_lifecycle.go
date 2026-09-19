@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -54,6 +55,13 @@ func (s *Store) EditIssue(ctx context.Context, params db.EditIssueParams) (db.Is
 				ownerChanged = true
 				args = append(args, next)
 				sets = append(sets, fmt.Sprintf("owner = $%d", len(args)))
+				sets = append(sets, "assignment_expires_on = NULL")
+				payload["owner"], payload["old_owner"] = next, current.Owner
+			} else if current.AssignmentExpiresOn != nil {
+				ownerChanged = true
+				args = append(args, next)
+				sets = append(sets, fmt.Sprintf("owner = $%d", len(args)))
+				sets = append(sets, "assignment_expires_on = NULL")
 				payload["owner"], payload["old_owner"] = next, current.Owner
 			}
 		}
@@ -110,7 +118,7 @@ func (s *Store) updateOwner(ctx context.Context, issueID int64, owner *string, a
 		if expectedOwner != nil && !equalStringPointers(current.Owner, expectedOwner) {
 			return "", nil, "", "", false, db.ErrOwnerMismatch
 		}
-		if equalStringPointers(current.Owner, owner) {
+		if equalStringPointers(current.Owner, owner) && current.AssignmentExpiresOn == nil {
 			return "", nil, "", "", false, nil
 		}
 		payload := map[string]any{"owner": owner, "updated_at": updatedAt}
@@ -180,7 +188,7 @@ func (s *Store) updateIssueAttribute(
 		var query string
 		switch column {
 		case "owner":
-			query = `UPDATE issues SET owner = $1, revision = revision + 1, updated_at = $2 WHERE id = $3`
+			query = `UPDATE issues SET owner = $1, assignment_expires_on = NULL, revision = revision + 1, updated_at = $2 WHERE id = $3`
 		case "priority":
 			query = `UPDATE issues SET priority = $1, updated_at = $2 WHERE id = $3`
 		default:
@@ -200,54 +208,107 @@ func (s *Store) updateIssueAttribute(
 	return issue, event, changed, err
 }
 
-// ClaimOwner atomically assigns an unowned issue or force-replaces its owner.
-func (s *Store) ClaimOwner(ctx context.Context, issueID int64, actor string, force bool) (db.ClaimResult, error) {
-	return s.claimOwner(ctx, issueID, actor, force, false)
-}
+// ClaimOwner atomically acquires or renews an assignment. Expired assignments
+// are cleared and recorded before the new assignment is written.
+func (s *Store) ClaimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.ClaimResult, error) {
+	p.Actor = strings.TrimSpace(p.Actor)
+	if p.TTL < 0 {
+		return db.ClaimResult{}, fmt.Errorf("assignment timeout must not be negative")
+	}
+	now := p.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	now = now.UTC()
+	updatedAt := formatStoredTime(now)
+	var newExpiry *time.Time
+	var newExpiryText any
+	if p.TTL > 0 {
+		expiresOn := now.Add(p.TTL).UTC()
+		newExpiry = &expiresOn
+		newExpiryText = formatStoredTime(expiresOn)
+	}
 
-// ClaimOwnerIfUnowned claims only when no owner is set, including when the
-// current owner has the same actor identity.
-func (s *Store) ClaimOwnerIfUnowned(ctx context.Context, issueID int64, actor string) (db.ClaimResult, error) {
-	return s.claimOwner(ctx, issueID, actor, false, true)
-}
-
-func (s *Store) claimOwner(ctx context.Context, issueID int64, actor string, force, ifUnowned bool) (db.ClaimResult, error) {
-	actor = strings.TrimSpace(actor)
 	var result db.ClaimResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		result = db.ClaimResult{}
-		current, project, err := lockedIssueTx(ctx, tx, issueID, false)
+		current, project, err := lockedIssueTx(ctx, tx, p.IssueID, false)
 		if err != nil {
 			return err
 		}
-		if ifUnowned && current.Owner != nil {
-			result.CurrentOwner = current.Owner
-			return db.ErrAlreadyClaimed
+		result.Issue = current
+		var previousOwner *string
+		if current.Owner != nil {
+			owner := *current.Owner
+			previousOwner = &owner
 		}
-		if current.Owner != nil && *current.Owner == actor {
+		appendEvent := func(eventType, eventActor string, payload map[string]any) error {
+			body, marshalErr := json.Marshal(payload)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			created, insertErr := s.insertEventTx(ctx, tx,
+				issueEventInput(current, project, eventType, eventActor, string(body)))
+			if insertErr == nil {
+				result.Events = append(result.Events, created)
+			}
+			return insertErr
+		}
+
+		if current.Owner != nil && current.AssignmentExpiresOn != nil && !current.AssignmentExpiresOn.After(now) {
+			oldOwner := *current.Owner
+			oldExpiry := formatStoredTime(*current.AssignmentExpiresOn)
+			if _, err := tx.ExecContext(ctx, `UPDATE issues
+				SET owner = NULL, assignment_expires_on = NULL, revision = revision + 1, updated_at = $1
+				WHERE id = $2`, updatedAt, current.ID); err != nil {
+				return mapSQLError(err, nil)
+			}
+			if err := appendEvent("issue.assignment_expired", "system", map[string]any{
+				"previous_owner": oldOwner, "owner": nil,
+				"assignment_expires_on": oldExpiry, "updated_at": updatedAt,
+			}); err != nil {
+				return err
+			}
+			current.Owner = nil
+			current.AssignmentExpiresOn = nil
+		}
+
+		if p.IfUnowned && current.Owner != nil {
+			result.CurrentOwner = current.Owner
+			return db.ErrAlreadyAssigned
+		}
+		if current.Owner != nil && *current.Owner == p.Actor && p.TTL == 0 {
 			result.Issue = current
 			return nil
 		}
-		if current.Owner != nil && !force {
+		if current.Owner != nil && *current.Owner != p.Actor && !p.Force {
 			result.CurrentOwner = current.Owner
-			return db.ErrAlreadyClaimed
+			return db.ErrAlreadyAssigned
 		}
-		result.PreviousOwner = current.Owner
-		updatedAt := mutationTimestamp()
+
+		eventType := "issue.assigned"
+		payload := map[string]any{"owner": p.Actor, "updated_at": updatedAt}
+		if newExpiry != nil {
+			payload["assignment_expires_on"] = formatStoredTime(*newExpiry)
+		}
+		if current.Owner != nil && *current.Owner == p.Actor && current.AssignmentExpiresOn != nil {
+			eventType = "issue.assignment_renewed"
+			payload["old_assignment_expires_on"] = formatStoredTime(*current.AssignmentExpiresOn)
+		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE issues SET owner = $1, revision = revision + 1, updated_at = $2 WHERE id = $3`, actor, updatedAt, current.ID); err != nil {
+			`UPDATE issues SET owner = $1, assignment_expires_on = $2, revision = revision + 1, updated_at = $3 WHERE id = $4`,
+			p.Actor, newExpiryText, updatedAt, current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		body, err := json.Marshal(map[string]any{"owner": actor, "updated_at": updatedAt})
-		if err != nil {
+		if err := appendEvent(eventType, p.Actor, payload); err != nil {
 			return err
 		}
-		created, err := s.insertEventTx(ctx, tx, issueEventInput(current, project, "issue.assigned", actor, string(body)))
-		if err != nil {
-			return err
-		}
-		result.Event, result.Changed = &created, true
+		result.Changed = true
+		result.PreviousOwner = previousOwner
 		result.Issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))
+		if err == nil {
+			result.Event = &result.Events[len(result.Events)-1]
+		}
 		return err
 	})
 	return result, err
@@ -337,7 +398,7 @@ func (s *Store) closeIssueWithEvents(
 		}
 		closedAt := mutationTimestamp()
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET status = 'closed', revision = revision + 1, closed_reason = $1,
-		  closed_at = $2, updated_at = $2 WHERE id = $3`, p.Reason, closedAt, current.ID); err != nil {
+		  assignment_expires_on = NULL, closed_at = $2, updated_at = $2 WHERE id = $3`, p.Reason, closedAt, current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		parentUID, parentShortID := new(string), new(string)
