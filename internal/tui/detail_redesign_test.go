@@ -203,6 +203,7 @@ func TestDetailRedesign_FooterHintsAreComprehensive(t *testing.T) {
 		"↑↓ scroll", "j/k row", "↹ section", "↵ open", "pgup/pgdn page",
 		"e edit", "c comment", "+ label", "- unlabel",
 		"a owner", "A unassign",
+		"t timed",
 		"x close", "r reopen",
 		"p parent", "b block", "l related", "N child",
 		"L layout",

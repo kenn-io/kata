@@ -65,6 +65,28 @@ describe('describeKataEvent', () => {
     )
   })
 
+  test('issue.assignment_renewed names the owner and new expiry', () => {
+    const descriptor = describeKataEvent(
+      makeEvent('issue.assignment_renewed', {
+        owner: 'user-a',
+        assignment_expires_on: '2026-09-17T21:30:00Z',
+      }),
+    )
+    expect(descriptor.label).toBe('renewed assignment for user-a until 2026-09-17T21:30:00Z')
+    expect(descriptor.tone).toBe('neutral')
+  })
+
+  test('issue.assignment_expired names the previous owner and expiry', () => {
+    const descriptor = describeKataEvent(
+      makeEvent('issue.assignment_expired', {
+        previous_owner: 'user-a',
+        assignment_expires_on: '2026-09-17T21:30:00Z',
+      }),
+    )
+    expect(descriptor.label).toBe('assignment for user-a expired at 2026-09-17T21:30:00Z')
+    expect(descriptor.tone).toBe('warning')
+  })
+
   test('issue.priority_set names the new priority', () => {
     expect(describeKataEvent(makeEvent('issue.priority_set', { priority: 1 })).label).toBe(
       'set priority P1',

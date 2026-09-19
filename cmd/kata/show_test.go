@@ -270,6 +270,19 @@ func TestShow_AgentOutputIncludesRevision(t *testing.T) {
 	assert.Contains(t, out, "Revision: 2\n")
 }
 
+func TestShowDisplaysTimedAssignmentExpiry(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "timed assignment")
+	runCLIAs(t, env, dir, "worker", "claim", ref, "--ttl", "2m")
+
+	human := runCLI(t, env, dir, "show", ref)
+	agent := runCLI(t, env, dir, "--agent", "show", ref)
+
+	assert.Contains(t, human, "owner: worker until ")
+	assert.Contains(t, agent, "Owner: worker\n")
+	assert.Regexp(t, `(?m)^Assignment-Expires-On: \d{4}-\d{2}-\d{2}T`, agent)
+}
+
 func TestShow_AgentOutputLinkRowsUseExistingLinkResponseFields(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	blocker := createIssue(t, env, pid, "blocker")

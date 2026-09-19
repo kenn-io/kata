@@ -67,6 +67,8 @@ func (dm detailModel) handleModalOpenKey(
 		kind = inputRemoveLabelPrompt
 	case km.AssignOwner.matches(msg):
 		kind = inputOwnerPrompt
+	case km.TimedAssignment.matches(msg):
+		kind = inputAssignmentTTLPrompt
 	case km.SetParent.matches(msg):
 		kind = inputParentPrompt
 	case km.AddBlocker.matches(msg):
@@ -101,6 +103,8 @@ func (dm detailModel) dispatchPanelPromptCommit(
 		return dm, dm.dispatchLabel(api, buf, false)
 	case inputOwnerPrompt:
 		return dm, dm.dispatchAssign(api, buf)
+	case inputAssignmentTTLPrompt:
+		return dm, dm.dispatchTimedAssignment(api, buf)
 	case inputParentPrompt:
 		return dm, dm.dispatchLink(api, "parent", buf)
 	case inputBlockerPrompt:
@@ -157,19 +161,20 @@ func (dm detailModel) applyMutationState(m mutationDoneMsg) (detailModel, bool) 
 // mutationSuccessText. Keeping the dispatch table-driven keeps the
 // formatter at cyclomatic ≤8 and makes adding kinds (Task 11+) trivial.
 var successTemplates = map[string]string{
-	"close":          "closed #%s",
-	"reopen":         "reopened #%s",
-	"label.add":      "added label to #%s",
-	"label.remove":   "removed label from #%s",
-	"owner.assign":   "assigned #%s",
-	"owner.clear":    "unassigned #%s",
-	"link.parent":    "linked #%s",
-	"link.blocks":    "linked #%s",
-	"link.relates":   "linked #%s",
-	"body.edit":      "updated body of #%s",
-	"comment.add":    "added comment to #%s",
-	"priority.set":   "set priority of #%s",
-	"priority.clear": "cleared priority of #%s",
+	"close":            "closed #%s",
+	"reopen":           "reopened #%s",
+	"label.add":        "added label to #%s",
+	"label.remove":     "removed label from #%s",
+	"owner.assign":     "assigned #%s",
+	"owner.clear":      "unassigned #%s",
+	"assignment.timed": "assigned #%s for a limited time",
+	"link.parent":      "linked #%s",
+	"link.blocks":      "linked #%s",
+	"link.relates":     "linked #%s",
+	"body.edit":        "updated body of #%s",
+	"comment.add":      "added comment to #%s",
+	"priority.set":     "set priority of #%s",
+	"priority.clear":   "cleared priority of #%s",
 }
 
 // mutationSuccessText is the per-kind toast for a successful mutation.
@@ -289,6 +294,30 @@ func (dm detailModel) dispatchAssign(api detailAPI, owner string) tea.Cmd {
 		resp, err := api.Assign(ctx, pid, ref, owner, actor)
 		return mutationDoneMsg{
 			origin: "detail", gen: gen, kind: kind, resp: resp, err: err,
+		}
+	}
+}
+
+func (dm detailModel) dispatchTimedAssignment(api detailAPI, value string) tea.Cmd {
+	if dm.issue == nil {
+		return nil
+	}
+	timeout, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil || timeout < time.Minute || timeout > 24*time.Hour || timeout%time.Second != 0 {
+		return func() tea.Msg {
+			return mutationDoneMsg{
+				origin: "detail", gen: dm.gen, kind: "assignment.timed",
+				err: fmt.Errorf("duration must be a whole number of seconds from 1m through 24h"),
+			}
+		}
+	}
+	pid, ref, actor, gen := dm.scopePID, dm.issue.ShortID, dm.actor, dm.gen
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resp, err := api.ClaimTimedAssignment(ctx, pid, ref, actor, timeout)
+		return mutationDoneMsg{
+			origin: "detail", gen: gen, kind: "assignment.timed", resp: resp, err: err,
 		}
 	}
 }

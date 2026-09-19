@@ -22,6 +22,10 @@ func (s *Store) ReadyIssues(
 	limit int,
 	filter db.ReadyIssuesFilter,
 ) ([]db.Issue, error) {
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
 	var query strings.Builder
 	query.WriteString(scheduledIssueSelect + `
  WHERE i.project_id = $1
@@ -47,9 +51,9 @@ func (s *Store) ReadyIssues(
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
-		query.WriteString(` AND i.owner IS NULL`)
+		query.WriteString(` AND (i.owner IS NULL OR i.assignment_expires_on <= ` + addArg(formatStoredTime(at)) + `)`)
 	} else if filter.Owner != "" {
-		query.WriteString(` AND i.owner = ` + addArg(filter.Owner))
+		query.WriteString(` AND i.owner = ` + addArg(filter.Owner) + ` AND (i.assignment_expires_on IS NULL OR i.assignment_expires_on > ` + addArg(formatStoredTime(at)) + `)`)
 	}
 	for _, label := range filter.Labels {
 		query.WriteString(` AND EXISTS (
@@ -68,10 +72,6 @@ func (s *Store) ReadyIssues(
 	}
 	defer func() { _ = rows.Close() }()
 	var issues []db.Issue
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
 	for rows.Next() {
 		issue, recurrenceTimezone, err := scanScheduledIssue(rows)
 		if err != nil {
@@ -85,6 +85,10 @@ func (s *Store) ReadyIssues(
 		}
 		if !due {
 			continue
+		}
+		if issue.AssignmentExpiresOn != nil && !issue.AssignmentExpiresOn.After(at) {
+			issue.Owner = nil
+			issue.AssignmentExpiresOn = nil
 		}
 		issues = append(issues, issue)
 		if limit > 0 && len(issues) == limit {
@@ -101,6 +105,10 @@ func (s *Store) ReadyIssues(
 // along with the project name needed to render a qualified reference. Filter
 // and parked-item semantics match ReadyIssues.
 func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
 	var query strings.Builder
 	query.WriteString(`SELECT ` + issueColumns + `, p.name, schedule_recurrence.timezone
   FROM issues i
@@ -129,9 +137,9 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
 	if filter.Unowned {
-		query.WriteString(` AND i.owner IS NULL`)
+		query.WriteString(` AND (i.owner IS NULL OR i.assignment_expires_on <= ` + addArg(formatStoredTime(at)) + `)`)
 	} else if filter.Owner != "" {
-		query.WriteString(` AND i.owner = ` + addArg(filter.Owner))
+		query.WriteString(` AND i.owner = ` + addArg(filter.Owner) + ` AND (i.assignment_expires_on IS NULL OR i.assignment_expires_on > ` + addArg(formatStoredTime(at)) + `)`)
 	}
 	for _, label := range filter.Labels {
 		query.WriteString(` AND EXISTS (
@@ -151,19 +159,16 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 	defer func() { _ = rows.Close() }()
 
 	var issues []db.ReadyGlobalIssue
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
 	for rows.Next() {
 		var issue db.Issue
-		var closedAt, deletedAt storedNullTime
+		var assignmentExpiresOn, closedAt, deletedAt storedNullTime
 		var projectName string
 		var recurrenceTimezone sql.NullString
-		destinations := append(issueDestinations(&issue, &closedAt, &deletedAt), &projectName, &recurrenceTimezone)
+		destinations := append(issueDestinations(&issue, &assignmentExpiresOn, &closedAt, &deletedAt), &projectName, &recurrenceTimezone)
 		if err := rows.Scan(destinations...); err != nil {
 			return nil, fmt.Errorf("scan ready global issue: %w", mapSQLError(err, nil))
 		}
+		issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 		issue.ClosedAt = closedAt.Time
 		issue.DeletedAt = deletedAt.Time
 		due, err := metadata.ScheduledOnDue(
@@ -175,6 +180,10 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		}
 		if !due {
 			continue
+		}
+		if issue.AssignmentExpiresOn != nil && !issue.AssignmentExpiresOn.After(at) {
+			issue.Owner = nil
+			issue.AssignmentExpiresOn = nil
 		}
 		issues = append(issues, db.ReadyGlobalIssue{Issue: issue, ProjectName: projectName})
 		if limit > 0 && len(issues) == limit {

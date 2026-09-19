@@ -107,6 +107,12 @@ func printShowHuman(
 		textsafe.Line(b.Issue.Author)); err != nil {
 		return err
 	}
+	if b.Issue.Owner != nil && *b.Issue.Owner != "" {
+		if _, err := fmt.Fprintf(out, "owner: %s%s\n", textsafe.Line(*b.Issue.Owner),
+			assignmentExpiryTimeSuffix(b.Issue.AssignmentExpiresOn)); err != nil {
+			return err
+		}
+	}
 	if err := printShowClaimLines(out, b.Lease, b.PendingLeases, b.LeaseHubNow); err != nil {
 		return err
 	}
@@ -238,16 +244,17 @@ func compactJSON(raw jsontext.Value) string {
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
 	Issue struct {
-		ShortID  string                    `json:"short_id"`
-		UID      string                    `json:"uid"`
-		Title    string                    `json:"title"`
-		Body     string                    `json:"body"`
-		Status   string                    `json:"status"`
-		Author   string                    `json:"author"`
-		Owner    *string                   `json:"owner"`
-		Priority *int64                    `json:"priority"`
-		Revision int64                     `json:"revision"`
-		Metadata map[string]jsontext.Value `json:"metadata"`
+		ShortID             string                    `json:"short_id"`
+		UID                 string                    `json:"uid"`
+		Title               string                    `json:"title"`
+		Body                string                    `json:"body"`
+		Status              string                    `json:"status"`
+		Author              string                    `json:"author"`
+		Owner               *string                   `json:"owner"`
+		AssignmentExpiresOn *time.Time                `json:"assignment_expires_on"`
+		Priority            *int64                    `json:"priority"`
+		Revision            int64                     `json:"revision"`
+		Metadata            map[string]jsontext.Value `json:"metadata"`
 	} `json:"issue"`
 	Comments []struct {
 		UID       string `json:"uid"`
@@ -351,6 +358,12 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 			return err
 		}
 	}
+	if b.Issue.AssignmentExpiresOn != nil {
+		if err := writeAgentField(w, "Assignment-Expires-On",
+			agentValue(b.Issue.AssignmentExpiresOn.UTC().Format(time.RFC3339Nano))); err != nil {
+			return err
+		}
+	}
 	if len(b.Labels) > 0 {
 		labels := make([]string, 0, len(b.Labels))
 		for _, l := range b.Labels {
@@ -426,6 +439,13 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 		}
 	}
 	return nil
+}
+
+func assignmentExpiryTimeSuffix(expiresOn *time.Time) string {
+	if expiresOn == nil {
+		return ""
+	}
+	return " until " + expiresOn.UTC().Format(time.RFC3339Nano)
 }
 
 func printShowAgentLeaseLines(

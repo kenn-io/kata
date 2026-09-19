@@ -856,6 +856,9 @@ func normalizeIssueTimes(rec *db.IssueExport) error {
 	if err := normalizeImportTime("issue.closed_at", rec.ClosedAt); err != nil {
 		return err
 	}
+	if err := normalizeImportTime("issue.assignment_expires_on", rec.AssignmentExpiresOn); err != nil {
+		return err
+	}
 	return normalizeImportTime("issue.deleted_at", rec.DeletedAt)
 }
 

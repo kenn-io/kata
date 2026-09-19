@@ -56,6 +56,10 @@ type EditIssueHeaders struct {
 	XKataProjectAliasKind *string `json:"X-Kata-Project-Alias-Kind,omitempty"`
 }
 
+type ClaimIssueHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
 type CloseIssueHeaders struct {
 	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
 	IfMatch        *string `json:"If-Match,omitempty"`

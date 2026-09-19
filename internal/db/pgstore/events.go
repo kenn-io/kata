@@ -61,6 +61,18 @@ func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([
 		args = append(args, params.ThroughID)
 		conditions = append(conditions, fmt.Sprintf("e.id <= $%d", len(args)))
 	}
+	if params.IssueUID != "" {
+		args = append(args, params.IssueUID)
+		conditions = append(conditions, fmt.Sprintf("e.issue_uid = $%d", len(args)))
+	}
+	if len(params.Types) > 0 {
+		positions := make([]string, 0, len(params.Types))
+		for _, eventType := range params.Types {
+			args = append(args, eventType)
+			positions = append(positions, fmt.Sprintf("$%d", len(args)))
+		}
+		conditions = append(conditions, "e.type IN ("+strings.Join(positions, ",")+")")
+	}
 	args = append(args, params.Limit)
 	query := eventSelect + ` WHERE ` + strings.Join(conditions, " AND ") +
 		fmt.Sprintf(` ORDER BY e.id ASC LIMIT $%d`, len(args))
@@ -69,7 +81,7 @@ func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([
 		return nil, mapSQLError(err, nil)
 	}
 	defer func() { _ = rows.Close() }()
-	var events []db.Event
+	events := make([]db.Event, 0)
 	for rows.Next() {
 		event, err := scanEvent(rows)
 		if err != nil {

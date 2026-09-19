@@ -14,6 +14,7 @@ func TestDetailDocumentPage80x50LayoutSignals(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailHierarchyFixture()
 	dm.issue.Owner = new("alice")
+	dm.issue.AssignmentExpiresOn = new(time.Date(2026, 4, 30, 11, 0, 0, 0, time.UTC))
 	dm.issue.Labels = []string{"prio-1", "bug", "needs-design"}
 	dm.issue.CreatedAt = time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
 	dm.issue.UpdatedAt = snapshotFixedNow.Add(-3 * time.Hour)
@@ -33,6 +34,7 @@ func TestDetailDocumentPage80x50LayoutSignals(t *testing.T) {
 		"created Apr 30 10:00",
 		"updated 3h ago",
 		"owner: alice",
+		"assignment expires: Apr 30 11:00",
 		"labels: [bug] [needs-design] [prio-1]",
 		"parent: #c012 workspace polish parent",
 		"priority: none",

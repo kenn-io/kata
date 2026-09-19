@@ -234,6 +234,157 @@ func checkExternalImportLifecycle(t *testing.T, store db.Storage) error {
 	return checkImportFederationActor(ctx, t, store)
 }
 
+// checkExternalImportAssignmentExpiry pins how import-driven owner changes
+// interact with timed assignments. The persisted row must follow the folded
+// event state: an import that changes the normalized owner clears the stale
+// assignment deadline (and may set the owner to NULL without tripping the
+// owner/expiry constraint), while an import that keeps the normalized owner
+// preserves a live deadline. A deadline that no longer matches the row's owner
+// must also never fire during expiry sweeps.
+func checkExternalImportAssignmentExpiry(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "external-import-expiry")
+	if err != nil {
+		return err
+	}
+	base := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+
+	imported := func(externalID string, owner *string, updatedAt time.Time, create bool) db.Issue {
+		items := []db.ImportItem{{
+			ExternalID: externalID, Title: "Timed " + externalID, Body: "body", Author: "alice",
+			Owner: owner, Status: "open", CreatedAt: base, UpdatedAt: updatedAt,
+		}}
+		result, _, importErr := store.ImportBatch(ctx, db.ImportBatchParams{
+			ProjectID: project.ID, Source: "tracker", Actor: "import-agent", Items: items,
+		})
+		require.NoError(t, importErr)
+		if create {
+			assert.Equal(t, 1, result.Created, "the first source version must create the row")
+		} else {
+			assert.Equal(t, 1, result.Updated, "the newer source version must update the row")
+		}
+		mapping, mappingErr := store.ImportMappingBySource(ctx, project.ID, "tracker", "issue", externalID)
+		require.NoError(t, mappingErr)
+		require.NotNil(t, mapping.IssueID)
+		issue, issueErr := store.IssueByID(ctx, *mapping.IssueID)
+		require.NoError(t, issueErr)
+		return issue
+	}
+	claimTimed := func(issue db.Issue, owner string) time.Time {
+		_, claimErr := store.ClaimOwner(ctx, db.ClaimOwnerParams{
+			IssueID: issue.ID, Actor: owner, TTL: time.Hour, Now: base,
+		})
+		require.NoError(t, claimErr)
+		stored, storedErr := store.IssueByID(ctx, issue.ID)
+		require.NoError(t, storedErr)
+		require.NotNil(t, stored.Owner)
+		require.NotNil(t, stored.AssignmentExpiresOn)
+		return *stored.AssignmentExpiresOn
+	}
+	requireFolded := func(issue db.Issue, owner *string, expiresOn *time.Time) {
+		folded, foldErr := foldProjectIssues(ctx, store, project.ID)
+		require.NoError(t, foldErr)
+		foldedIssue, ok := folded.Issues[issue.UID]
+		require.True(t, ok, "issue %s must replay from its events", issue.UID)
+		if owner == nil {
+			assert.Nil(t, foldedIssue.Owner, "folded owner must match the persisted row")
+		} else {
+			require.NotNil(t, foldedIssue.Owner)
+			assert.Equal(t, *owner, *foldedIssue.Owner, "folded owner must match the persisted row")
+		}
+		if expiresOn == nil {
+			assert.Nil(t, foldedIssue.AssignmentExpiresOn, "folded deadline must match the persisted row")
+		} else {
+			require.NotNil(t, foldedIssue.AssignmentExpiresOn)
+			assert.Equal(t, expiresOn.UTC().Format(db.EventTimestampFormat),
+				*foldedIssue.AssignmentExpiresOn, "folded deadline must match the persisted row")
+		}
+	}
+
+	// A newer import that replaces the owner adopts the replacement owner and
+	// clears the stale deadline; sweeping past that deadline afterwards must
+	// neither emit an expiry nor unassign the replacement owner.
+	replaced := imported("timed-replace", nil, base, true)
+	staleDeadline := claimTimed(replaced, "agent-one")
+	replacement := "agent-two"
+	replaced = imported("timed-replace", &replacement, base.Add(2*time.Hour), false)
+	require.NotNil(t, replaced.Owner)
+	assert.Equal(t, replacement, *replaced.Owner)
+	assert.Nil(t, replaced.AssignmentExpiresOn,
+		"an import that replaces the owner must clear the stale assignment deadline")
+	requireFolded(replaced, &replacement, nil)
+	sweepEvents, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{
+		ProjectID: project.ID, Now: staleDeadline.Add(time.Minute),
+	})
+	if err != nil {
+		return err
+	}
+	assert.Empty(t, sweepEvents, "a stale deadline must not unassign the replacement owner")
+	afterSweep, err := store.IssueByID(ctx, replaced.ID)
+	if err != nil {
+		return err
+	}
+	if assert.NotNil(t, afterSweep.Owner) {
+		assert.Equal(t, replacement, *afterSweep.Owner)
+	}
+	assert.Nil(t, afterSweep.AssignmentExpiresOn)
+
+	// An import unassignment (nil and empty-string owners both normalize to
+	// unassigned) must succeed without violating the owner/expiry constraint
+	// and clear the deadline alongside the owner.
+	for _, tc := range []struct {
+		externalID string
+		owner      *string
+	}{
+		{externalID: "timed-unassign-nil", owner: nil},
+		{externalID: "timed-unassign-empty", owner: new(string)},
+	} {
+		unassigned := imported(tc.externalID, nil, base, true)
+		claimTimed(unassigned, "agent-three")
+		unassigned = imported(tc.externalID, tc.owner, base.Add(3*time.Hour), false)
+		assert.Nil(t, unassigned.Owner,
+			"an import unassignment must clear the owner without a constraint failure")
+		assert.Nil(t, unassigned.AssignmentExpiresOn,
+			"an import unassignment must clear the assignment deadline")
+		requireFolded(unassigned, nil, nil)
+	}
+
+	// A newer import that keeps the normalized owner and changes unrelated
+	// content must preserve the live deadline; folded state matches the row.
+	keptOwner := "agent-keep"
+	kept := imported("timed-keep", nil, base, true)
+	liveDeadline := claimTimed(kept, keptOwner)
+	kept = imported("timed-keep", &keptOwner, base.Add(4*time.Hour), false)
+	require.NotNil(t, kept.Owner)
+	assert.Equal(t, keptOwner, *kept.Owner)
+	require.NotNil(t, kept.AssignmentExpiresOn,
+		"an import that keeps the owner must preserve the live deadline")
+	assert.True(t, liveDeadline.Equal(*kept.AssignmentExpiresOn))
+	requireFolded(kept, &keptOwner, &liveDeadline)
+	return nil
+}
+
+// foldProjectIssues folds one project's event log into its replay projection.
+func foldProjectIssues(ctx context.Context, store db.Storage, projectID int64) (db.FoldProjection, error) {
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: projectID, Limit: 1000})
+	if err != nil {
+		return db.FoldProjection{}, err
+	}
+	foldEvents := make([]db.FoldEvent, 0, len(events))
+	for _, event := range events {
+		foldEvents = append(foldEvents, db.FoldEvent{
+			UID: event.UID, OriginInstanceUID: event.OriginInstanceUID,
+			ProjectUID: event.ProjectUID, IssueUID: pointerString(event.IssueUID),
+			RelatedIssueUID: pointerString(event.RelatedIssueUID), Type: event.Type,
+			Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
+			CreatedAt: event.CreatedAt.UTC().Format(db.EventTimestampFormat),
+			Payload:   jsontext.Value(event.Payload),
+		})
+	}
+	return db.FoldEvents(foldEvents), nil
+}
+
 func checkExternalImportEdgeCases(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := context.Background()

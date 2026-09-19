@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-09-17
+last_edited: 2026-09-18
 ---
 
 # HTTP API schema
@@ -46,8 +46,8 @@ The schema carries a version in its `info.version` field
 ```json
 {
   "ok": true,
-  "schema_version": 28,
-  "api_schema_version": "0.21.0",
+  "schema_version": 29,
+  "api_schema_version": "0.22.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "idle_shutdown": {
@@ -111,8 +111,8 @@ Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
 API contract versions advance independently of Kata release versions.
-Kata 0.18.0 includes API `0.21.0`, adding the changes from `0.18.0` through
-`0.21.0` below. Teammate comments require API `0.18.0`, issue-scoped
+The current contract is API `0.22.0`. Kata 0.18.0 includes the changes from
+`0.18.0` through `0.21.0` below. Teammate comments require API `0.18.0`, issue-scoped
 credentials use `0.19.0`, status-filtered search requires `0.20.0`, and
 oldest-first lists require `0.21.0`.
 
@@ -125,6 +125,7 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
+| `0.22.0` | Added temporary assignments: claim requests accept `ttl_seconds`, claim responses return ordered `events`, issue projections include `assignment_expires_on`, and assignment renewal and expiry have distinct event types. |
 | `0.21.0` | Added optional `sort=oldest` to both issue-list routes. Matching rows are ordered by `created_at` ascending and `id` ascending before `limit`; omission preserves each route's default. |
 | `0.20.0` | Added optional `status=open` or `status=closed` to project search. Omission searches both statuses; explicit empty values are invalid. The predicate applies to lexical candidates and canonical semantic hits before result limits. |
 | `0.19.0` | Added issue-subtree token scope and expiration, capability discovery, and redacted credential lifecycle state with a server observation time. Health storage, embedding, and federation diagnostics are optional and depend on caller authority. |
@@ -225,6 +226,34 @@ object and `created_at` is a zero timestamp. An alias-resolution response retain
 an empty alias object. These placeholders do not expose private project data.
 The [scope guide](../design/issue-scoped-credentials.md) owns membership,
 operation constraints, and [event invalidation and revocation](../design/issue-scoped-credentials.md#events-concurrency-and-revocation).
+
+## Temporary assignments
+
+`POST /api/v1/projects/{project_id}/issues/{ref}/actions/claim` accepts an
+optional `ttl_seconds` integer from 60 through 86400. Omitting it creates a
+permanent assignment when the issue is unassigned. Repeating a timed claim by
+the current actor renews its expiry; repeating a permanent claim preserves any
+existing expiry. `if_unowned` refuses every live assignment, including one
+held by the same actor, while `force` can replace another actor.
+
+The response's `events` array is ordered. A takeover of an expired assignment
+returns `issue.assignment_expired` before the new `issue.assigned` event. The
+singular `event` remains the final event for compatibility. Renewal emits
+`issue.assignment_renewed`. Issue projections expose the nullable absolute UTC
+deadline as `assignment_expires_on`.
+
+At the expiry boundary, `ready` and `next` treat the issue as unassigned even
+if the cleanup worker has not recorded the expiry event yet. Cleanup later
+clears the stored owner and deadline conditionally, so a concurrent renewal or
+takeover is preserved.
+
+For a federated spoke, the hub is authoritative for temporary claims. The
+spoke forwards the request with its enrollment credential, persists the
+returned events in order, and does not fall back to a local claim when the hub
+is unavailable. A hub may include `replay_events` with the assignment history
+needed to apply a renewal after the spoke missed earlier events. The spoke
+persists those prerequisites before the mutation events and omits them from
+the client-facing response.
 
 ## Resolving projects inside mutations
 

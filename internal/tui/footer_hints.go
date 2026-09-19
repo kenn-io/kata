@@ -184,6 +184,7 @@ func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 		{Key: "-", Description: "unlabel"},
 		{Key: "a", Description: "owner"},
 		{Key: "A", Description: "unassign"},
+		{Key: "t", Description: "timed"},
 		{Key: "x", Description: "close"},
 		{Key: "r", Description: "reopen"},
 		{Key: "p", Description: "parent"},

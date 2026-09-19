@@ -26,13 +26,14 @@ const (
 
 type agentIssueMutation struct {
 	Issue struct {
-		ShortID      string  `json:"short_id"`
-		QualifiedID  string  `json:"qualified_id"`
-		Title        string  `json:"title"`
-		Status       string  `json:"status"`
-		ClosedReason *string `json:"closed_reason"`
-		Owner        *string `json:"owner"`
-		DeletedAt    *string `json:"deleted_at"`
+		ShortID             string  `json:"short_id"`
+		QualifiedID         string  `json:"qualified_id"`
+		Title               string  `json:"title"`
+		Status              string  `json:"status"`
+		ClosedReason        *string `json:"closed_reason"`
+		Owner               *string `json:"owner"`
+		AssignmentExpiresOn *string `json:"assignment_expires_on"`
+		DeletedAt           *string `json:"deleted_at"`
 	} `json:"issue"`
 	Event *struct {
 		Payload string `json:"payload"`

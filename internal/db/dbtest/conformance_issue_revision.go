@@ -36,19 +36,19 @@ func checkIssueRevisionOwner(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.False(t, changed)
 	require.Nil(t, event)
-	claim, err := store.ClaimOwner(ctx, issue.ID, a, false)
+	claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: a})
 	require.NoError(t, err)
 	require.False(t, claim.Changed)
 	require.Equal(t, issue.Revision, claim.Issue.Revision)
-	_, err = store.ClaimOwner(ctx, issue.ID, b, false)
-	require.ErrorIs(t, err, db.ErrAlreadyClaimed)
+	_, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: b})
+	require.ErrorIs(t, err, db.ErrAlreadyAssigned)
 
-	claim, err = store.ClaimOwner(ctx, issue.ID, b, true)
+	claim, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: b, Force: true})
 	require.NoError(t, err)
 	require.True(t, claim.Changed)
 	require.Equal(t, issue.Revision+1, claim.Issue.Revision)
 	issue = claim.Issue
-	claim, err = store.ClaimOwner(ctx, issue.ID, a, true)
+	claim, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: a, Force: true})
 	require.NoError(t, err)
 	require.Equal(t, issue.Revision+1, claim.Issue.Revision)
 	issue = claim.Issue
@@ -59,7 +59,7 @@ func checkIssueRevisionOwner(t *testing.T, store db.Storage) error {
 	require.NotNil(t, event)
 	require.Equal(t, issue.Revision+1, unassigned.Revision)
 	issue = unassigned
-	claim, err = store.ClaimOwnerIfUnowned(ctx, issue.ID, a)
+	claim, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: a, IfUnowned: true})
 	require.NoError(t, err)
 	require.True(t, claim.Changed)
 	require.Equal(t, issue.Revision+1, claim.Issue.Revision)

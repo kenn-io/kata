@@ -323,6 +323,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setStringBounds("idempotency_key", 1, 256)
 	case "kata.claim":
 		setStringBounds("ref", 1, 256)
+		setNumberBounds("ttl_seconds", 60, 86400)
 	case "kata.set_label":
 		setStringBounds("ref", 1, 256)
 		setStringBounds("label", 1, 64)
@@ -651,8 +652,10 @@ type CommentInput struct {
 
 // ClaimInput claims an issue, optionally replacing its current owner.
 type ClaimInput struct {
-	Ref   string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
-	Force bool   `json:"force,omitempty" jsonschema:"Replace a different current owner"`
+	Ref        string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
+	Force      bool   `json:"force,omitempty" jsonschema:"Replace a different current owner"`
+	IfUnowned  bool   `json:"if_unowned,omitempty" jsonschema:"Claim only when the issue has no active owner"`
+	TTLSeconds *int64 `json:"ttl_seconds,omitempty" jsonschema:"Expire the assignment after 60 through 86400 seconds"`
 }
 
 // SetLabelInput makes label presence explicit and naturally idempotent.
@@ -722,21 +725,22 @@ type ProjectIdentity struct {
 
 // IssueSummary is the compact issue form used by list-like tools.
 type IssueSummary struct {
-	WebURL       *string   `json:"web_url,omitempty" jsonschema:"Browser URL for this issue; use this URL when linking to it."`
-	UID          string    `json:"uid"`
-	Ref          string    `json:"ref"`
-	QualifiedRef string    `json:"qualified_ref"`
-	Title        string    `json:"title"`
-	Status       string    `json:"status"`
-	Owner        *string   `json:"owner,omitempty"`
-	Priority     *int64    `json:"priority,omitempty"`
-	Labels       *[]string `json:"labels,omitempty"`
-	Blocked      *bool     `json:"blocked,omitempty"`
-	Revision     int64     `json:"revision"`
-	UpdatedAt    string    `json:"updated_at"`
-	ScheduledOn  *string   `json:"scheduled_on,omitempty"`
-	Timezone     *string   `json:"timezone,omitempty"`
-	updatedAt    time.Time
+	WebURL              *string   `json:"web_url,omitempty" jsonschema:"Browser URL for this issue; use this URL when linking to it."`
+	UID                 string    `json:"uid"`
+	Ref                 string    `json:"ref"`
+	QualifiedRef        string    `json:"qualified_ref"`
+	Title               string    `json:"title"`
+	Status              string    `json:"status"`
+	Owner               *string   `json:"owner,omitempty"`
+	AssignmentExpiresOn *string   `json:"assignment_expires_on,omitempty" jsonschema:"Absolute UTC deadline when a temporary assignment expires"`
+	Priority            *int64    `json:"priority,omitempty"`
+	Labels              *[]string `json:"labels,omitempty"`
+	Blocked             *bool     `json:"blocked,omitempty"`
+	Revision            int64     `json:"revision"`
+	UpdatedAt           string    `json:"updated_at"`
+	ScheduledOn         *string   `json:"scheduled_on,omitempty"`
+	Timezone            *string   `json:"timezone,omitempty"`
+	updatedAt           time.Time
 }
 
 // IssueListOutput is a bounded collection without issue bodies or comments.

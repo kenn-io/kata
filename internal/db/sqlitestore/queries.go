@@ -783,6 +783,7 @@ type issueCreatedPayload struct {
 	Body                   string                 `json:"body"`
 	Author                 string                 `json:"author"`
 	Owner                  *string                `json:"owner,omitempty"`
+	AssignmentExpiresOn    *string                `json:"assignment_expires_on,omitempty"`
 	Priority               *int64                 `json:"priority,omitempty"`
 	Status                 string                 `json:"status"`
 	ClosedReason           *string                `json:"closed_reason,omitempty"`
@@ -1541,6 +1542,7 @@ func (d *Store) closeIssueGuarded(
 		`UPDATE issues
 		 SET status        = 'closed',
 		     revision      = revision + 1,
+		     assignment_expires_on = NULL,
 		     closed_reason = ?,
 		     closed_at     = ?,
 		     updated_at    = ?
@@ -1866,6 +1868,7 @@ func issueFieldUpdatePlan(issue db.Issue, title, body, owner *string, ts string)
 	if plan.OwnerChanged {
 		sets = append(sets, `owner = ?`)
 		args = append(args, plan.Owner)
+		sets = append(sets, `assignment_expires_on = NULL`)
 	}
 	if !plan.Changed() {
 		return nil, nil, "", false, nil
@@ -1891,7 +1894,7 @@ func joinComma(parts []string) string {
 func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Issue, string, error) {
 	const q = `
 		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-		       i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision,
+		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision,
 		       i.recurrence_id, i.occurrence_key,
 		       i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name
 		FROM issues i
@@ -1900,7 +1903,7 @@ func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Iss
 	var i db.Issue
 	var projectName string
 	err := tx.QueryRowContext(ctx, q, issueID).
-		Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &projectName)
+		Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
 	}
@@ -1913,7 +1916,7 @@ func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Iss
 	return i, projectName, nil
 }
 
-const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at`
+const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at`
 
 const issueSelect = `SELECT ` + issueColumns + ` FROM issues i JOIN projects p ON p.id = i.project_id`
 
@@ -1924,7 +1927,7 @@ const scheduledIssueSelect = `SELECT ` + issueColumns + `, schedule_recurrence.t
 
 func scanIssue(r rowScanner) (db.Issue, error) {
 	var i db.Issue
-	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt)
+	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, db.ErrNotFound
 	}
@@ -1937,7 +1940,7 @@ func scanIssue(r rowScanner) (db.Issue, error) {
 func scanScheduledIssue(r rowScanner) (db.Issue, string, error) {
 	var i db.Issue
 	var recurrenceTimezone sql.NullString
-	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &recurrenceTimezone)
+	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &recurrenceTimezone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
 	}
@@ -1998,7 +2001,7 @@ func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string
 		return issue, nil, false, db.ErrOwnerMismatch
 	}
 	// No-op: same owner.
-	if ownerEqual(issue.Owner, newOwner) {
+	if ownerEqual(issue.Owner, newOwner) && issue.AssignmentExpiresOn == nil {
 		if err := tx.Commit(); err != nil {
 			return db.Issue{}, nil, false, err
 		}
@@ -2010,6 +2013,7 @@ func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string
 		`UPDATE issues
 		 SET owner      = ?,
 		     revision   = revision + 1,
+		     assignment_expires_on = NULL,
 		     updated_at = ?
 		 WHERE id = ?`, newOwner, ts, issueID); err != nil {
 		return db.Issue{}, nil, false, fmt.Errorf("update owner: %w", err)
@@ -2059,30 +2063,33 @@ func ownerEqual(a, b *string) bool {
 	return *a == *b
 }
 
-// ClaimOwner atomically claims an issue for the given actor. The conditional
-// UPDATE ensures the claim only succeeds if the issue is unowned or owned by
-// the same actor (or force is true). If a concurrent claim causes a SQLite
-// busy/locked error during the UPDATE, we treat it as a conflict and return
-// ErrAlreadyClaimed after fetching the current owner.
-//
-// Returns ErrAlreadyClaimed if the issue is already owned by a different actor
-// and force is false. The ClaimResult.CurrentOwner field is set in this case.
-func (d *Store) ClaimOwner(ctx context.Context, issueID int64, actor string, force bool) (db.ClaimResult, error) {
+// ClaimOwner atomically acquires or renews an assignment. Expired assignments
+// are cleared and recorded before the new assignment is written.
+func (d *Store) ClaimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.ClaimResult, error) {
 	return retryWrite1(ctx, d, func() (db.ClaimResult, error) {
-		return d.claimOwner(ctx, issueID, actor, force, false)
+		return d.claimOwner(ctx, p)
 	})
 }
 
-// ClaimOwnerIfUnowned claims only when no owner is set, including when the
-// current owner has the same actor identity.
-func (d *Store) ClaimOwnerIfUnowned(ctx context.Context, issueID int64, actor string) (db.ClaimResult, error) {
-	return retryWrite1(ctx, d, func() (db.ClaimResult, error) {
-		return d.claimOwner(ctx, issueID, actor, false, true)
-	})
-}
+func (d *Store) claimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.ClaimResult, error) {
+	p.Actor = strings.TrimSpace(p.Actor)
+	if p.TTL < 0 {
+		return db.ClaimResult{}, fmt.Errorf("assignment timeout must not be negative")
+	}
+	now := p.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	now = now.UTC()
+	nowText := now.Format(sqliteTimeFormat)
+	var newExpiry *time.Time
+	var newExpiryText any
+	if p.TTL > 0 {
+		expiresOn := now.Add(p.TTL).UTC()
+		newExpiry = &expiresOn
+		newExpiryText = expiresOn.Format(sqliteTimeFormat)
+	}
 
-func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, force, ifUnowned bool) (db.ClaimResult, error) {
-	actor = strings.TrimSpace(actor)
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.ClaimResult{}, err
@@ -2090,96 +2097,109 @@ func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 	defer func() { _ = tx.Rollback() }()
 
 	// Read current state to get previous owner and check for no-op
-	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.ClaimResult{}, err
 	}
 
-	if ifUnowned && issue.Owner != nil {
-		return db.ClaimResult{CurrentOwner: issue.Owner}, db.ErrAlreadyClaimed
-	}
-
-	// Already owned by same actor: no-op
-	if issue.Owner != nil && *issue.Owner == actor {
-		if err := tx.Commit(); err != nil {
-			return db.ClaimResult{}, err
-		}
-		return db.ClaimResult{
-			Issue:         issue,
-			Event:         nil,
-			Changed:       false,
-			PreviousOwner: nil,
-		}, nil
-	}
-
-	// Store previous owner before update
 	var previousOwner *string
 	if issue.Owner != nil {
 		prev := *issue.Owner
 		previousOwner = &prev
 	}
 
-	// Conditional UPDATE: only succeeds if ownership state matches expectations.
-	// The WHERE clause prevents races - if another request claimed between our
-	// read and this write, zero rows will be affected.
-	ts := nowTimestamp()
-	var res sql.Result
-	if force {
-		res, err = tx.ExecContext(ctx,
-			`UPDATE issues
-			 SET owner      = ?,
-			     revision   = revision + 1,
-			     updated_at = ?
-			 WHERE id = ? AND deleted_at IS NULL`, actor, ts, issueID)
-	} else if ifUnowned {
-		res, err = tx.ExecContext(ctx,
-			`UPDATE issues
-			 SET owner      = ?,
-			     revision   = revision + 1,
-			     updated_at = ?
-			 WHERE id = ? AND deleted_at IS NULL AND owner IS NULL`, actor, ts, issueID)
-	} else {
-		res, err = tx.ExecContext(ctx,
-			`UPDATE issues
-			 SET owner      = ?,
-			     revision   = revision + 1,
-			     updated_at = ?
-			 WHERE id = ? AND deleted_at IS NULL AND (owner IS NULL OR owner = ?)`, actor, ts, issueID, actor)
-	}
-	if err != nil {
-		return db.ClaimResult{}, fmt.Errorf("update owner: %w", err)
+	events := make([]db.Event, 0, 2)
+	appendEvent := func(eventType, eventActor string, payload map[string]any) error {
+		body, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			return fmt.Errorf("marshal %s payload: %w", eventType, marshalErr)
+		}
+		event, insertErr := d.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: issue.ProjectID, ProjectName: projectName, IssueID: &issue.ID,
+			Type: eventType, Actor: eventActor, Payload: string(body),
+		})
+		if insertErr == nil {
+			events = append(events, event)
+		}
+		return insertErr
 	}
 
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return db.ClaimResult{}, fmt.Errorf("rows affected: %w", err)
+	if issue.Owner != nil && issue.AssignmentExpiresOn != nil && !issue.AssignmentExpiresOn.After(now) {
+		oldOwner := *issue.Owner
+		oldExpiry := issue.AssignmentExpiresOn.UTC().Format(sqliteTimeFormat)
+		res, updateErr := tx.ExecContext(ctx, `UPDATE issues
+			SET owner = NULL, assignment_expires_on = NULL, revision = revision + 1, updated_at = ?
+			WHERE id = ? AND owner = ? AND assignment_expires_on = ? AND deleted_at IS NULL`,
+			nowText, issue.ID, oldOwner, oldExpiry)
+		if updateErr != nil {
+			return db.ClaimResult{}, fmt.Errorf("expire assignment: %w", updateErr)
+		}
+		matched, rowsErr := res.RowsAffected()
+		if rowsErr != nil {
+			return db.ClaimResult{}, fmt.Errorf("expire assignment rows affected: %w", rowsErr)
+		}
+		if matched == 0 {
+			return db.ClaimResult{Issue: issue, CurrentOwner: issue.Owner}, db.ErrAlreadyAssigned
+		}
+		if err := appendEvent("issue.assignment_expired", "system", map[string]any{
+			"previous_owner": oldOwner, "owner": nil,
+			"assignment_expires_on": oldExpiry, "updated_at": nowText,
+		}); err != nil {
+			return db.ClaimResult{}, err
+		}
+		issue.Owner = nil
+		issue.AssignmentExpiresOn = nil
 	}
 
-	// Zero rows affected means the conditional WHERE didn't match:
-	// someone else claimed the issue between our read and write.
-	if rowsAffected == 0 {
-		return db.ClaimResult{CurrentOwner: issue.Owner}, db.ErrAlreadyClaimed
+	if p.IfUnowned && issue.Owner != nil {
+		return db.ClaimResult{Issue: issue, CurrentOwner: issue.Owner}, db.ErrAlreadyAssigned
+	}
+	if issue.Owner != nil && *issue.Owner == p.Actor && p.TTL == 0 {
+		if err := tx.Commit(); err != nil {
+			return db.ClaimResult{}, err
+		}
+		return db.ClaimResult{Issue: issue}, nil
+	}
+	if issue.Owner != nil && *issue.Owner != p.Actor && !p.Force {
+		return db.ClaimResult{Issue: issue, CurrentOwner: issue.Owner}, db.ErrAlreadyAssigned
 	}
 
-	// Re-read the updated issue for response
-	issue, _, err = lookupIssueForEvent(ctx, tx, issueID)
+	eventType := "issue.assigned"
+	payload := map[string]any{"owner": p.Actor, "updated_at": nowText}
+	if newExpiry != nil {
+		payload["assignment_expires_on"] = newExpiry.UTC().Format(sqliteTimeFormat)
+	}
+	if issue.Owner != nil && *issue.Owner == p.Actor && issue.AssignmentExpiresOn != nil {
+		eventType = "issue.assignment_renewed"
+		payload["old_assignment_expires_on"] = issue.AssignmentExpiresOn.UTC().Format(sqliteTimeFormat)
+	}
+	var observedOwner any
+	if issue.Owner != nil {
+		observedOwner = *issue.Owner
+	}
+	var observedExpiry any
+	if issue.AssignmentExpiresOn != nil {
+		observedExpiry = issue.AssignmentExpiresOn.UTC().Format(sqliteTimeFormat)
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE issues
+		SET owner = ?, assignment_expires_on = ?, revision = revision + 1, updated_at = ?
+		WHERE id = ? AND deleted_at IS NULL
+		  AND owner IS ? AND assignment_expires_on IS ?`,
+		p.Actor, newExpiryText, nowText, issue.ID, observedOwner, observedExpiry)
 	if err != nil {
+		return db.ClaimResult{}, fmt.Errorf("update assignment: %w", err)
+	}
+	matched, err := res.RowsAffected()
+	if err != nil {
+		return db.ClaimResult{}, fmt.Errorf("assignment rows affected: %w", err)
+	}
+	if matched == 0 {
+		return db.ClaimResult{Issue: issue, CurrentOwner: issue.Owner}, db.ErrAlreadyAssigned
+	}
+	if err := appendEvent(eventType, p.Actor, payload); err != nil {
 		return db.ClaimResult{}, err
 	}
-
-	// Emit assigned event
-	bs, marshalErr := json.Marshal(map[string]any{"owner": actor, "updated_at": ts})
-	if marshalErr != nil {
-		return db.ClaimResult{}, fmt.Errorf("marshal assigned payload: %w", marshalErr)
-	}
-	evt, err := d.insertEventTx(ctx, tx, eventInsert{
-		ProjectID:   issue.ProjectID,
-		ProjectName: projectName,
-		IssueID:     &issue.ID,
-		Type:        "issue.assigned",
-		Actor:       actor,
-		Payload:     string(bs),
-	})
+	issue, _, err = lookupIssueForEvent(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.ClaimResult{}, err
 	}
@@ -2188,12 +2208,14 @@ func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 		return db.ClaimResult{}, err
 	}
 
-	return db.ClaimResult{
+	result := db.ClaimResult{
 		Issue:         issue,
-		Event:         &evt,
+		Events:        events,
 		Changed:       true,
 		PreviousOwner: previousOwner,
-	}, nil
+	}
+	result.Event = &result.Events[len(result.Events)-1]
+	return result, nil
 }
 
 // ReadyIssues returns actionable open issues with no open `blocks` predecessor,
@@ -2205,6 +2227,10 @@ func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 // archived-project exclusion, so an active issue is not stranded behind hidden
 // archived work.
 func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, filter db.ReadyIssuesFilter) ([]db.Issue, error) {
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
 	var q strings.Builder
 	q.WriteString(scheduledIssueSelect + `
 		WHERE i.project_id = ? AND i.status = 'open' AND i.deleted_at IS NULL
@@ -2223,10 +2249,11 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 
 	// Apply owner filters
 	if filter.Unowned {
-		q.WriteString(` AND i.owner IS NULL`)
+		q.WriteString(` AND (i.owner IS NULL OR i.assignment_expires_on <= ?)`)
+		args = append(args, at.UTC().Format(sqliteTimeFormat))
 	} else if filter.Owner != "" {
-		q.WriteString(` AND i.owner = ?`)
-		args = append(args, filter.Owner)
+		q.WriteString(` AND i.owner = ? AND (i.assignment_expires_on IS NULL OR i.assignment_expires_on > ?)`)
+		args = append(args, filter.Owner, at.UTC().Format(sqliteTimeFormat))
 	}
 
 	// Apply label filters (must have ALL these labels)
@@ -2248,10 +2275,6 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 	}
 	defer func() { _ = rows.Close() }()
 	var out []db.Issue
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
 	for rows.Next() {
 		i, recurrenceTimezone, err := scanScheduledIssue(rows)
 		if err != nil {
@@ -2265,6 +2288,10 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 		}
 		if !due {
 			continue
+		}
+		if i.AssignmentExpiresOn != nil && !i.AssignmentExpiresOn.After(at) {
+			i.Owner = nil
+			i.AssignmentExpiresOn = nil
 		}
 		out = append(out, i)
 		if limit > 0 && len(out) == limit {
@@ -2284,6 +2311,10 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
 	// The global row also carries the project name and linked recurrence
 	// timezone, so build this projection from the shared issue columns.
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
 	var q strings.Builder
 	q.WriteString(`SELECT ` + issueColumns + `, p.name AS project_name, schedule_recurrence.timezone
 		FROM issues i
@@ -2306,10 +2337,11 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 
 	// Apply owner filters (same semantics as ReadyIssues)
 	if filter.Unowned {
-		q.WriteString(` AND i.owner IS NULL`)
+		q.WriteString(` AND (i.owner IS NULL OR i.assignment_expires_on <= ?)`)
+		args = append(args, at.UTC().Format(sqliteTimeFormat))
 	} else if filter.Owner != "" {
-		q.WriteString(` AND i.owner = ?`)
-		args = append(args, filter.Owner)
+		q.WriteString(` AND i.owner = ? AND (i.assignment_expires_on IS NULL OR i.assignment_expires_on > ?)`)
+		args = append(args, filter.Owner, at.UTC().Format(sqliteTimeFormat))
 	}
 
 	// Apply label filters (must have ALL these labels)
@@ -2331,17 +2363,13 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 	}
 	defer func() { _ = rows.Close() }()
 	var out []db.ReadyGlobalIssue
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
 	for rows.Next() {
 		var r db.ReadyGlobalIssue
 		var recurrenceTimezone sql.NullString
 		if err := rows.Scan(
 			&r.ID, &r.UID, &r.ProjectID, &r.ProjectUID,
 			&r.ShortID, &r.Title, &r.Body, &r.Status,
-			&r.ClosedReason, &r.Owner, &r.Priority, &r.Author,
+			&r.ClosedReason, &r.Owner, &r.AssignmentExpiresOn, &r.Priority, &r.Author,
 			&r.Metadata, &r.Revision, &r.RecurrenceID, &r.OccurrenceKey,
 			&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt, &r.DeletedAt,
 			&r.ProjectName, &recurrenceTimezone,
@@ -2356,6 +2384,10 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		}
 		if !due {
 			continue
+		}
+		if r.AssignmentExpiresOn != nil && !r.AssignmentExpiresOn.After(at) {
+			r.Owner = nil
+			r.AssignmentExpiresOn = nil
 		}
 		out = append(out, r)
 		if limit > 0 && len(out) == limit {

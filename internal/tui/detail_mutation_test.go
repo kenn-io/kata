@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -193,6 +194,20 @@ func TestDetail_AssignOwner_OpensPromptAndDispatches(t *testing.T) {
 	}
 	if api.lastOwner != "alice" {
 		t.Fatalf("lastOwner = %q, want alice", api.lastOwner)
+	}
+}
+
+func TestDetail_TimedAssignment_OpensPromptAndDispatches(t *testing.T) {
+	api, dm, km := setupMutationTest(t)
+
+	_, cmd := dm.Update(runeKey('t'), km, api)
+	requireInputPrompt(t, cmd, inputAssignmentTTLPrompt)
+	_ = executePromptCommit(t, dm, api, km, inputAssignmentTTLPrompt, "1h")
+	if api.claimTimedCalls != 1 {
+		t.Fatalf("claimTimedCalls = %d, want 1", api.claimTimedCalls)
+	}
+	if api.lastAssignmentTTL != time.Hour {
+		t.Fatalf("lastAssignmentTTL = %s, want 1h", api.lastAssignmentTTL)
 	}
 }
 

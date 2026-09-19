@@ -262,6 +262,23 @@ func checkIssueEventAtomicity(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, events, 1)
 	assert.Equal(t, event.UID, events[0].UID)
+	filteredEvents, err := store.EventsAfter(ctx, db.EventsAfterParams{
+		AfterID: before, ProjectID: project.ID, IssueUID: issue.UID,
+		Types: []string{"issue.created"}, Limit: 10,
+	})
+	if err != nil {
+		return fmt.Errorf("filter events by issue and type: %w", err)
+	}
+	require.Len(t, filteredEvents, 1)
+	assert.Equal(t, event.UID, filteredEvents[0].UID)
+	filteredEvents, err = store.EventsAfter(ctx, db.EventsAfterParams{
+		AfterID: before, ProjectID: project.ID, IssueUID: issue.UID,
+		Types: []string{"issue.updated"}, Limit: 10,
+	})
+	if err != nil {
+		return fmt.Errorf("filter events by absent type: %w", err)
+	}
+	assert.Empty(t, filteredEvents)
 
 	afterCreate, err := store.MaxEventID(ctx)
 	if err != nil {
@@ -728,10 +745,10 @@ func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 	require.NotNil(t, owned.Owner)
 	assert.Equal(t, owner, *owned.Owner)
 	require.NotNil(t, ownerEvent)
-	claim, err := store.ClaimOwner(ctx, issue.ID, "owner-two", false)
-	assert.ErrorIs(t, err, db.ErrAlreadyClaimed)
+	claim, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "owner-two"})
+	assert.ErrorIs(t, err, db.ErrAlreadyAssigned)
 	require.NotNil(t, claim.CurrentOwner)
-	claim, err = store.ClaimOwner(ctx, issue.ID, "owner-two", true)
+	claim, err = store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "owner-two", Force: true})
 	if err != nil {
 		return fmt.Errorf("force claim owner: %w", err)
 	}
@@ -1094,7 +1111,7 @@ func checkConcurrentOwnerClaim(t *testing.T, store db.Storage) error {
 	for _, actor := range []string{"claimant-one", "claimant-two"} {
 		go func(actor string) {
 			<-start
-			_, err := store.ClaimOwner(ctx, issue.ID, actor, false)
+			_, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: actor})
 			results <- err
 		}(actor)
 	}
@@ -1105,7 +1122,7 @@ func checkConcurrentOwnerClaim(t *testing.T, store db.Storage) error {
 		switch {
 		case err == nil:
 			success++
-		case errors.Is(err, db.ErrAlreadyClaimed):
+		case errors.Is(err, db.ErrAlreadyAssigned):
 			conflicts++
 		default:
 			return fmt.Errorf("concurrent owner claim: %w", err)
@@ -1134,7 +1151,7 @@ func checkConcurrentGuardedOwnerClaim(t *testing.T, store db.Storage) error {
 	for range 2 {
 		go func() {
 			<-start
-			_, err := store.ClaimOwnerIfUnowned(ctx, issue.ID, "shared-agent")
+			_, err := store.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: issue.ID, Actor: "shared-agent", IfUnowned: true})
 			results <- err
 		}()
 	}
@@ -1145,7 +1162,7 @@ func checkConcurrentGuardedOwnerClaim(t *testing.T, store db.Storage) error {
 		switch {
 		case err == nil:
 			success++
-		case errors.Is(err, db.ErrAlreadyClaimed):
+		case errors.Is(err, db.ErrAlreadyAssigned):
 			conflicts++
 		default:
 			return fmt.Errorf("concurrent guarded owner claim: %w", err)
@@ -1159,6 +1176,185 @@ func checkConcurrentGuardedOwnerClaim(t *testing.T, store db.Storage) error {
 	}
 	require.NotNil(t, claimed.Owner)
 	assert.Equal(t, "shared-agent", *claimed.Owner)
+	return nil
+}
+
+func checkTimedAssignmentOwnerMutations(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "timed-owner-mutations-project")
+	if err != nil {
+		return fmt.Errorf("create project: %w", err)
+	}
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "clear timed ownership", Author: "conformance-agent",
+	})
+	if err != nil {
+		return fmt.Errorf("create issue: %w", err)
+	}
+	owner := "agent-one"
+	revision := issue.Revision
+	claim := func() error {
+		result, claimErr := store.ClaimOwner(ctx, db.ClaimOwnerParams{
+			IssueID: issue.ID, Actor: owner, TTL: time.Hour,
+		})
+		if claimErr != nil {
+			return claimErr
+		}
+		require.NotNil(t, result.Issue.AssignmentExpiresOn)
+		revision++
+		assert.Equal(t, revision, result.Issue.Revision)
+		return nil
+	}
+	assertPermanent := func(got db.Issue) {
+		require.NotNil(t, got.Owner)
+		assert.Equal(t, owner, *got.Owner)
+		assert.Nil(t, got.AssignmentExpiresOn)
+		revision++
+		assert.Equal(t, revision, got.Revision)
+	}
+
+	if err := claim(); err != nil {
+		return fmt.Errorf("claim before owner update: %w", err)
+	}
+	if err := claim(); err != nil {
+		return fmt.Errorf("renew before owner update: %w", err)
+	}
+	updated, event, changed, err := store.UpdateOwner(ctx, issue.ID, &owner, "conformance-agent")
+	if err != nil {
+		return fmt.Errorf("update same owner: %w", err)
+	}
+	assert.True(t, changed)
+	require.NotNil(t, event)
+	assertPermanent(updated)
+
+	if err := claim(); err != nil {
+		return fmt.Errorf("claim before legacy edit: %w", err)
+	}
+	edited, event, changed, err := store.EditIssue(ctx, db.EditIssueParams{
+		IssueID: issue.ID, Owner: &owner, Actor: "conformance-agent",
+	})
+	if err != nil {
+		return fmt.Errorf("edit same owner: %w", err)
+	}
+	assert.True(t, changed)
+	require.NotNil(t, event)
+	assertPermanent(edited)
+
+	if err := claim(); err != nil {
+		return fmt.Errorf("claim before atomic edit: %w", err)
+	}
+	atomicResult, err := store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: issue.ID, Owner: &owner, Actor: "conformance-agent",
+	})
+	if err != nil {
+		return fmt.Errorf("atomic edit same owner: %w", err)
+	}
+	assert.True(t, atomicResult.AnyChange)
+	require.Len(t, atomicResult.Events, 1)
+	assertPermanent(atomicResult.Issue)
+
+	if err := claim(); err != nil {
+		return fmt.Errorf("claim before unassign: %w", err)
+	}
+	unassigned, event, changed, err := store.UnassignOwner(ctx, issue.ID, "conformance-agent", &owner)
+	if err != nil {
+		return fmt.Errorf("unassign timed owner: %w", err)
+	}
+	assert.True(t, changed)
+	require.NotNil(t, event)
+	assert.Nil(t, unassigned.Owner)
+	assert.Nil(t, unassigned.AssignmentExpiresOn)
+	assert.Equal(t, revision+1, unassigned.Revision)
+	return nil
+}
+
+func checkBoundedAssignmentExpiry(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "assignment-expiry-project")
+	if err != nil {
+		return fmt.Errorf("create project: %w", err)
+	}
+	otherProject, err := store.CreateProject(ctx, "other-assignment-expiry-project")
+	if err != nil {
+		return fmt.Errorf("create other project: %w", err)
+	}
+	create := func(projectID int64, title string) db.Issue {
+		issue, _, createErr := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: projectID, Title: title, Author: "conformance-agent",
+		})
+		require.NoError(t, createErr)
+		return issue
+	}
+	first := create(project.ID, "first due assignment")
+	second := create(project.ID, "second due assignment")
+	active := create(project.ID, "active assignment")
+	other := create(otherProject.ID, "other project due assignment")
+	base := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	for index, issue := range []db.Issue{first, second, active, other} {
+		ttl := time.Duration(index+1) * time.Minute
+		if issue.ID == active.ID {
+			ttl = time.Hour
+		}
+		_, claimErr := store.ClaimOwner(ctx, db.ClaimOwnerParams{
+			IssueID: issue.ID, Actor: "agent-one", TTL: ttl, Now: base,
+		})
+		require.NoError(t, claimErr)
+	}
+	closedSecond, _, changed, err := store.CloseIssue(ctx, second.ID, "done", "conformance-agent", "", nil)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, "closed", closedSecond.Status)
+	assert.Equal(t, new("agent-one"), closedSecond.Owner)
+	assert.Equal(t, second.Revision+2, closedSecond.Revision)
+	assert.Nil(t, closedSecond.AssignmentExpiresOn, "closing preserves the owner without an expiry")
+
+	events, err := store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{
+		ProjectID: project.ID, Now: base.Add(10 * time.Minute), Limit: 1,
+	})
+	if err != nil {
+		return fmt.Errorf("expire first bounded batch: %w", err)
+	}
+	require.Len(t, events, 1)
+	assert.Equal(t, "issue.assignment_expired", events[0].Type)
+	assert.Equal(t, "system", events[0].Actor)
+	var payload struct {
+		PreviousOwner       string  `json:"previous_owner"`
+		Owner               *string `json:"owner"`
+		AssignmentExpiresOn string  `json:"assignment_expires_on"`
+		UpdatedAt           string  `json:"updated_at"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(events[0].Payload), &payload))
+	assert.Equal(t, "agent-one", payload.PreviousOwner)
+	assert.Nil(t, payload.Owner)
+	assert.Equal(t, base.Add(time.Minute).Format(db.EventTimestampFormat), payload.AssignmentExpiresOn)
+	assert.Equal(t, base.Add(10*time.Minute).Format(db.EventTimestampFormat), payload.UpdatedAt)
+
+	firstStored, err := store.IssueByID(ctx, first.ID)
+	require.NoError(t, err)
+	assert.Nil(t, firstStored.Owner)
+	assert.Nil(t, firstStored.AssignmentExpiresOn)
+	assert.Equal(t, first.Revision+2, firstStored.Revision)
+	secondStored, err := store.IssueByID(ctx, second.ID)
+	require.NoError(t, err)
+	require.NotNil(t, secondStored.Owner)
+
+	events, err = store.ExpireAssignments(ctx, db.ExpireAssignmentsParams{
+		ProjectID: project.ID, Now: base.Add(10 * time.Minute), Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Empty(t, events, "closed assignments must not expire")
+	secondStored, err = store.IssueByID(ctx, second.ID)
+	require.NoError(t, err)
+	assert.Equal(t, new("agent-one"), secondStored.Owner)
+
+	activeStored, err := store.IssueByID(ctx, active.ID)
+	require.NoError(t, err)
+	require.NotNil(t, activeStored.Owner)
+	otherStored, err := store.IssueByID(ctx, other.ID)
+	require.NoError(t, err)
+	require.NotNil(t, otherStored.Owner)
 	return nil
 }
 

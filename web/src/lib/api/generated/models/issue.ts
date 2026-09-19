@@ -4,6 +4,7 @@
 import type { IssueMetadata } from './issueMetadata.ts'
 
 export interface Issue {
+  assignment_expires_on?: string
   author: string
   body: string
   closed_at?: string

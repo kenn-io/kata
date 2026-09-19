@@ -41,7 +41,7 @@ type scenario struct {
 var storageScenarios = []scenario{
 	{
 		name:    "issue revision owner",
-		methods: []string{"ClaimOwner", "ClaimOwnerIfUnowned", "CreateIssue", "CreateProject", "IssueByID", "PatchIssueMetadata", "UnassignOwner", "UpdateOwner"},
+		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "IssueByID", "PatchIssueMetadata", "UnassignOwner", "UpdateOwner"},
 		run:     checkIssueRevisionOwner,
 	},
 	{
@@ -65,6 +65,11 @@ var storageScenarios = []scenario{
 		run:     checkIssueRevisionAuthorRewrite,
 	},
 	{name: "search status", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchStatus},
+	{
+		name:    "search assignment expiry",
+		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "SearchFTS", "SearchFTSAny"},
+		run:     checkSearchRoundTripsAssignmentExpiry,
+	},
 	{
 		name:    "list ordering",
 		methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "ListAllIssues", "ListIssues"},
@@ -163,8 +168,18 @@ var storageScenarios = []scenario{
 	},
 	{
 		name:    "concurrent guarded owner claim",
-		methods: []string{"ClaimOwnerIfUnowned", "CreateIssue", "CreateProject", "IssueByID"},
+		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "IssueByID"},
 		run:     checkConcurrentGuardedOwnerClaim,
+	},
+	{
+		name:    "timed assignment owner mutations",
+		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "EditIssue", "EditIssueAtomic", "UnassignOwner", "UpdateOwner"},
+		run:     checkTimedAssignmentOwnerMutations,
+	},
+	{
+		name:    "bounded assignment expiry",
+		methods: []string{"ClaimOwner", "CloseIssue", "CreateIssue", "CreateProject", "ExpireAssignments", "IssueByID"},
+		run:     checkBoundedAssignmentExpiry,
 	},
 	{
 		name:    "expected owner unassign",
@@ -218,6 +233,11 @@ var storageScenarios = []scenario{
 			"IssueByID", "LinksByIssue", "RemoveProject",
 		},
 		run: checkArchivedLinkTargets,
+	},
+	{
+		name:    "ready assignment expiry",
+		methods: []string{"CreateProject", "CreateIssue", "ClaimOwner", "ReadyIssues", "ReadyIssuesGlobal", "IssueByID", "MaxEventID", "PatchIssueMetadata", "AddLabel", "CreateLink"},
+		run:     checkReadyAssignmentExpiry,
 	},
 	{
 		name: "ready queues and discovery",
@@ -543,6 +563,14 @@ var storageScenarios = []scenario{
 			"ImportMappingBySource",
 		},
 		run: checkImportCommentTimestampPrecision,
+	},
+	{
+		name: "external import assignment expiry",
+		methods: []string{
+			"ClaimOwner", "CreateProject", "EventsAfter", "ExpireAssignments",
+			"ImportBatch", "ImportMappingBySource", "IssueByID",
+		},
+		run: checkExternalImportAssignmentExpiry,
 	},
 	{
 		name: "snapshot replay core",

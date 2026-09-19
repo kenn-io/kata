@@ -3,7 +3,12 @@
  */
 
 export interface ClaimRequestBody {
-  actor: string
+  actor?: string
   force?: boolean
   if_unowned?: boolean
+  /**
+   * @minimum 60
+   * @maximum 86400
+   */
+  ttl_seconds?: number
 }

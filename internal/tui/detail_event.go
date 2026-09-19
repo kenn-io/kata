@@ -33,23 +33,51 @@ func payloadDesc(prefix, field string) eventDescriber {
 // Unknown types fall through to a stripped "issue." prefix in
 // eventDescription so the column always carries something readable.
 var eventDescribers = map[string]eventDescriber{
-	"issue.created":          staticDesc("created"),
-	"issue.closed":           func(e EventLogEntry) string { return "closed" + reasonSuffix(e) },
-	"issue.reopened":         staticDesc("reopened"),
-	"issue.commented":        staticDesc("added comment"),
-	"issue.comment_edited":   staticDesc("edited comment"),
-	"issue.labeled":          payloadDesc("labeled", "label"),
-	"issue.unlabeled":        payloadDesc("unlabeled", "label"),
-	"issue.linked":           func(e EventLogEntry) string { return "linked " + linkPayloadDesc(e) },
-	"issue.unlinked":         func(e EventLogEntry) string { return "unlinked " + linkPayloadDesc(e) },
-	"issue.links_changed":    linksChangedDesc,
-	"issue.assigned":         payloadDesc("assigned", "owner"),
-	"issue.unassigned":       staticDesc("unassigned"),
-	"issue.priority_set":     prioritySetDesc,
-	"issue.priority_cleared": priorityClearedDesc,
-	"issue.updated":          staticDesc("updated"),
-	"issue.soft_deleted":     staticDesc("deleted"),
-	"issue.restored":         staticDesc("restored"),
+	"issue.created":            staticDesc("created"),
+	"issue.closed":             func(e EventLogEntry) string { return "closed" + reasonSuffix(e) },
+	"issue.reopened":           staticDesc("reopened"),
+	"issue.commented":          staticDesc("added comment"),
+	"issue.comment_edited":     staticDesc("edited comment"),
+	"issue.labeled":            payloadDesc("labeled", "label"),
+	"issue.unlabeled":          payloadDesc("unlabeled", "label"),
+	"issue.linked":             func(e EventLogEntry) string { return "linked " + linkPayloadDesc(e) },
+	"issue.unlinked":           func(e EventLogEntry) string { return "unlinked " + linkPayloadDesc(e) },
+	"issue.links_changed":      linksChangedDesc,
+	"issue.assigned":           payloadDesc("assigned", "owner"),
+	"issue.unassigned":         staticDesc("unassigned"),
+	"issue.assignment_renewed": assignmentRenewedDesc,
+	"issue.assignment_expired": assignmentExpiredDesc,
+	"issue.priority_set":       prioritySetDesc,
+	"issue.priority_cleared":   priorityClearedDesc,
+	"issue.updated":            staticDesc("updated"),
+	"issue.soft_deleted":       staticDesc("deleted"),
+	"issue.restored":           staticDesc("restored"),
+}
+
+func assignmentRenewedDesc(e EventLogEntry) string {
+	owner, hasOwner := payloadStringField(e, "owner")
+	expiresAt, hasExpiry := payloadStringField(e, "assignment_expires_on")
+	switch {
+	case hasOwner && hasExpiry:
+		return fmt.Sprintf("renewed assignment for %s until %s", owner, expiresAt)
+	case hasOwner:
+		return "renewed assignment for " + owner
+	default:
+		return "renewed assignment"
+	}
+}
+
+func assignmentExpiredDesc(e EventLogEntry) string {
+	owner, hasOwner := payloadStringField(e, "previous_owner")
+	expiresAt, hasExpiry := payloadStringField(e, "assignment_expires_on")
+	switch {
+	case hasOwner && hasExpiry:
+		return fmt.Sprintf("assignment for %s expired at %s", owner, expiresAt)
+	case hasOwner:
+		return "assignment for " + owner + " expired"
+	default:
+		return "assignment expired"
+	}
 }
 
 // linksChangedDesc renders the aggregated issue.links_changed event from

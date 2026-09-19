@@ -22,18 +22,19 @@ type inputKind int
 const (
 	inputNone inputKind = iota
 	inputSearchBar
-	inputLabelPrompt       // detail `+` — add label
-	inputRemoveLabelPrompt // detail `-` — remove label
-	inputOwnerPrompt       // detail `a` — assign owner
-	inputParentPrompt      // detail `p` — set parent
-	inputBlockerPrompt     // detail `b` — add blocker
-	inputLinkPrompt        // detail `l` — add related link
-	inputPriorityPrompt    // detail `!` — set priority (0..4 or '-' to clear)
-	inputNewIssueForm      // list `n` — multi-field modal: Title/Body/Labels/Owner
-	inputBodyEditForm      // detail `e` — centered multi-line body editor
-	inputCommentForm       // detail `c` — centered multi-line comment editor
-	inputFilterForm        // list `f` — multi-axis filter modal: Status/Owner/Search
-	inputCloseForm         // list/detail `x` — authenticated close message + evidence
+	inputLabelPrompt         // detail `+` — add label
+	inputRemoveLabelPrompt   // detail `-` — remove label
+	inputOwnerPrompt         // detail `a` — assign owner
+	inputAssignmentTTLPrompt // detail `t` — start or renew a timed assignment
+	inputParentPrompt        // detail `p` — set parent
+	inputBlockerPrompt       // detail `b` — add blocker
+	inputLinkPrompt          // detail `l` — add related link
+	inputPriorityPrompt      // detail `!` — set priority (0..4 or '-' to clear)
+	inputNewIssueForm        // list `n` — multi-field modal: Title/Body/Labels/Owner
+	inputBodyEditForm        // detail `e` — centered multi-line body editor
+	inputCommentForm         // detail `c` — centered multi-line comment editor
+	inputFilterForm          // list `f` — multi-axis filter modal: Status/Owner/Search
+	inputCloseForm           // list/detail `x` — authenticated close message + evidence
 )
 
 type searchFocus int
@@ -47,7 +48,7 @@ const (
 // prompt kinds (anchored to the bottom of the detail pane).
 func (k inputKind) isPanelPrompt() bool {
 	switch k {
-	case inputLabelPrompt, inputRemoveLabelPrompt, inputOwnerPrompt,
+	case inputLabelPrompt, inputRemoveLabelPrompt, inputOwnerPrompt, inputAssignmentTTLPrompt,
 		inputParentPrompt, inputBlockerPrompt, inputLinkPrompt,
 		inputPriorityPrompt:
 		return true
@@ -782,6 +783,8 @@ func panelPromptTitle(kind inputKind, ref string) string {
 		return fmt.Sprintf("remove label from #%s", ref)
 	case inputOwnerPrompt:
 		return fmt.Sprintf("assign #%s to", ref)
+	case inputAssignmentTTLPrompt:
+		return fmt.Sprintf("assignment duration for #%s (1m..24h, e.g. 1h)", ref)
 	case inputParentPrompt:
 		return fmt.Sprintf("set parent of #%s", ref)
 	case inputBlockerPrompt:

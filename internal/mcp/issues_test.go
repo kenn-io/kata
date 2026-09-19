@@ -270,6 +270,84 @@ func TestForceClaimReportsPreviousOwner(t *testing.T) {
 	require.Equal(t, "other-agent", result.StructuredContent.(map[string]any)["previous_owner"])
 }
 
+func TestClaimReportsAssignmentExpiry(t *testing.T) {
+	const expiresOn = "2026-08-08T01:00:00Z"
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(daemonResponse(request), &response))
+		response["issue"].(map[string]any)["assignment_expires_on"] = expiresOn
+		writeJSON(writer, response)
+	}))
+	t.Cleanup(daemon.Close)
+	client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
+	require.NoError(t, err)
+	session := connectTestServerWithClient(t, client)
+
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.claim", Arguments: map[string]any{"ref": "abc1", "ttl_seconds": 3600},
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError, "%s", mustJSON(t, result))
+	issue := result.StructuredContent.(map[string]any)["issue"].(map[string]any)
+	require.Equal(t, expiresOn, issue["assignment_expires_on"])
+}
+
+func TestClaimForwardsTTLAndIfUnowned(t *testing.T) {
+	type claimBody struct {
+		Actor      string `json:"actor"`
+		IfUnowned  bool   `json:"if_unowned"`
+		TTLSeconds *int64 `json:"ttl_seconds"`
+	}
+	requestSeen := make(chan claimBody, 1)
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if strings.HasSuffix(request.URL.Path, "/actions/claim") {
+			raw, err := io.ReadAll(request.Body)
+			if err != nil {
+				http.Error(writer, err.Error(), http.StatusBadRequest)
+				return
+			}
+			var body claimBody
+			if err := json.Unmarshal(raw, &body); err != nil {
+				http.Error(writer, err.Error(), http.StatusBadRequest)
+				return
+			}
+			requestSeen <- body
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write(daemonResponse(request))
+	}))
+	t.Cleanup(daemon.Close)
+	client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
+	require.NoError(t, err)
+	session := connectTestServerWithClient(t, client)
+
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.claim",
+		Arguments: map[string]any{
+			"ref": "abc1", "if_unowned": true, "ttl_seconds": 7200,
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError, "%s", mustJSON(t, result))
+	body := <-requestSeen
+	assert.Equal(t, "example-agent", body.Actor)
+	assert.True(t, body.IfUnowned)
+	require.NotNil(t, body.TTLSeconds)
+	assert.Equal(t, int64(7200), *body.TTLSeconds)
+}
+
+func TestClaimRejectsOutOfRangeTTL(t *testing.T) {
+	session := connectTestServer(t)
+	for _, ttl := range []int{59, 86401} {
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+			Name: "kata.claim", Arguments: map[string]any{"ref": "abc1", "ttl_seconds": ttl},
+		})
+		require.NoError(t, err)
+		assert.True(t, result.IsError, "ttl=%d result=%s", ttl, mustJSON(t, result))
+	}
+}
+
 func connectMultiProjectServer(t *testing.T, override func(http.ResponseWriter, *http.Request) bool) (*sdkmcp.ClientSession, *[]string) {
 	t.Helper()
 	var mu sync.Mutex

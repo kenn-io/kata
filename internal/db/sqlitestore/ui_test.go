@@ -118,6 +118,12 @@ func TestUISnapshotReadsCollectionLinkDetailsInOneBatch(t *testing.T) {
 	require.Equal(t, 1, detailReads)
 }
 
+func TestUISnapshotReadyAssignmentExpiryContract(t *testing.T) {
+	dbtest.RunUISnapshotReadyAssignmentExpiryContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotCollectionContract(t *testing.T) {
 	dbtest.RunUISnapshotCollectionContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)

@@ -233,19 +233,40 @@ type EditIssueParams struct {
 	Actor   string
 }
 
-// ClaimResult contains the result of a ClaimOwner operation.
+// ClaimOwnerParams describes one atomic ownership claim. TTL zero preserves
+// the existing permanent-claim behavior. Now zero uses the store clock.
+type ClaimOwnerParams struct {
+	IssueID   int64
+	Actor     string
+	Force     bool
+	IfUnowned bool
+	TTL       time.Duration
+	Now       time.Time
+}
+
+// ClaimResult contains the result of a ClaimOwner operation. Event is the
+// final event for compatibility; Events preserves an expiry+assignment batch.
 type ClaimResult struct {
 	Issue         Issue
 	Event         *Event
+	Events        []Event
 	Changed       bool
 	PreviousOwner *string
-	CurrentOwner  *string // set when ErrAlreadyClaimed is returned
+	CurrentOwner  *string // set when ErrAlreadyAssigned is returned
+}
+
+// ExpireAssignmentsParams bounds one project-local expiry pass. Now zero uses
+// the store clock; Limit values below one use the backend default.
+type ExpireAssignmentsParams struct {
+	ProjectID int64
+	Now       time.Time
+	Limit     int
 }
 
 // ReadyIssuesFilter holds optional filters for the ready query.
 type ReadyIssuesFilter struct {
-	Unowned       bool     // only issues where owner IS NULL
-	Owner         string   // only issues where owner = this value (empty = no filter)
+	Unowned       bool     // only issues effectively unassigned at At
+	Owner         string   // only active assignments to this owner (empty = no filter)
 	Labels        []string // issues must have ALL these labels (AND logic)
 	ExcludeLabels []string // issues must NOT have any of these labels
 	At            time.Time
@@ -395,13 +416,16 @@ type AliasRow struct {
 }
 
 // EventsAfterParams selects events with id strictly greater than AfterID,
-// optionally bounded above by ThroughID and filtered by ProjectID. Limit is
-// applied verbatim; callers are responsible for clamping (the polling
-// endpoint clamps to [1, 1000]; the SSE drain passes 10001).
+// optionally bounded above by ThroughID and filtered by ProjectID, IssueUID,
+// or event Types. Limit is applied verbatim; callers are responsible for
+// clamping (the polling endpoint clamps to [1, 1000]; the SSE drain passes
+// 10001).
 type EventsAfterParams struct {
 	AfterID   int64
 	ProjectID int64 // 0 = cross-project; nonzero adds AND project_id = ?
 	ThroughID int64 // 0 = no upper bound; nonzero adds AND id <= ?
+	IssueUID  string
+	Types     []string
 	Limit     int
 }
 

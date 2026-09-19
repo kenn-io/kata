@@ -2,10 +2,12 @@
   import CalendarIcon from '@lucide/svelte/icons/calendar'
   import ClockIcon from '@lucide/svelte/icons/clock-3'
   import FlagIcon from '@lucide/svelte/icons/flag'
+  import TimerIcon from '@lucide/svelte/icons/timer'
   import UserIcon from '@lucide/svelte/icons/user-round'
   import XIcon from '@lucide/svelte/icons/x'
   import { Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
   import { Button, Chip, SelectDropdown } from '@kenn-io/kit-ui'
+  import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
   import type { KataTaskDetail } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
 
@@ -17,6 +19,9 @@
     draftFenceGeneration?: number | undefined
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
     onAssignOwner: (uid: string, owner: string) => boolean | Promise<boolean>
+    onClaimAssignment?:
+      | ((uid: string, ttlSeconds: number) => boolean | Promise<boolean>)
+      | undefined
     onUnassignOwner: (uid: string) => boolean | Promise<boolean>
     onSetPriority: (uid: string, priority: number | null) => boolean | Promise<boolean>
     onAddLabel: (uid: string, label: string) => boolean | Promise<boolean>
@@ -31,6 +36,7 @@
     draftFenceGeneration = 0,
     onPatchMetadata,
     onAssignOwner,
+    onClaimAssignment = async () => false,
     onUnassignOwner,
     onSetPriority,
     onAddLabel,
@@ -55,11 +61,23 @@
     { value: '3', label: 'P3' },
     { value: '4', label: 'P4' },
   ]
+  const assignmentTTLOptions = $derived([
+    {
+      value: '',
+      label: issue.issue.assignment_expires_on ? 'Renew assignment…' : 'Assign temporarily…',
+    },
+    { value: '300', label: '5 minutes' },
+    { value: '900', label: '15 minutes' },
+    { value: '3600', label: '1 hour' },
+    { value: '28800', label: '8 hours' },
+    { value: '86400', label: '1 day' },
+  ])
 
   let activeProperty = $state<PropertyKey | null>(null)
   let scheduledDraft = $state('')
   let dueDraft = $state('')
   let priorityDraft = $state('')
+  let assignmentTTLDraft = $state('')
   let addingLabel = $state(false)
   let editingLabels = $state(false)
   let labelDraft = $state('')
@@ -79,6 +97,7 @@
     scheduledDraft = ''
     dueDraft = ''
     priorityDraft = ''
+    assignmentTTLDraft = ''
     addingLabel = false
     editingLabels = false
     labelDraft = ''
@@ -250,6 +269,17 @@
     return scheduleAcceptedReset('owner', mutationUID, generation, editVersion)
   }
 
+  async function claimAssignment(value: string): Promise<void> {
+    assignmentTTLDraft = value
+    const ttlSeconds = Number(value)
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds < 60) {
+      assignmentTTLDraft = ''
+      return
+    }
+    await onClaimAssignment(uid(), ttlSeconds)
+    assignmentTTLDraft = ''
+  }
+
   async function updatePriority(value: string): Promise<void> {
     if (actionsDisabled) return
     const property = 'priority'
@@ -405,6 +435,24 @@
     {/key}
   </div>
 
+  <div
+    class="property-pill property-pill--editing property-pill--select"
+    role="group"
+    aria-label="Temporary assignment"
+  >
+    <TimerIcon size={13} strokeWidth={1.8} />
+    <span>Assignment</span>
+    <SelectDropdown
+      title="Assignment duration"
+      value={assignmentTTLDraft}
+      options={assignmentTTLOptions}
+      disabled={actionsDisabled}
+      onchange={(value) => {
+        void claimAssignment(value)
+      }}
+    />
+  </div>
+
   {#if activeProperty === 'priority'}
     <div
       class="property-pill property-pill--editing property-pill--select"
@@ -443,6 +491,12 @@
     <dt>Project</dt>
     <dd>{issue.issue.project_name}</dd>
   </div>
+  {#if issue.issue.assignment_expires_on}
+    <div>
+      <dt>Assignment expires</dt>
+      <dd>{formatTimestamp(issue.issue.assignment_expires_on)}</dd>
+    </div>
+  {/if}
   {#if issue.labels.length > 0}
     <div>
       <dt>Labels</dt>

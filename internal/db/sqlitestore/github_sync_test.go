@@ -17,11 +17,11 @@ func TestGitHubSyncSchemaVersion(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
 
-	assert.Equal(t, 28, db.CurrentSchemaVersion())
+	assert.Equal(t, 29, db.CurrentSchemaVersion())
 	got, err := d.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 28, got)
-	assertSchemaVersion(t, d, 28)
+	assert.Equal(t, 29, got)
+	assertSchemaVersion(t, d, 29)
 }
 
 func TestGitHubSyncEnableAndReenableSameRepository(t *testing.T) {

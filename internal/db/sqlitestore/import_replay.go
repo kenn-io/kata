@@ -562,12 +562,12 @@ func importIssue(ctx context.Context, tx *sql.Tx, i *db.IssueExport) error {
 		recurrenceID = &resolvedID
 	}
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO issues(id, uid, project_id, short_id, title, body, status, closed_reason, owner, priority, author,
+		`INSERT INTO issues(id, uid, project_id, short_id, title, body, status, closed_reason, owner, assignment_expires_on, priority, author,
 		                    created_at, updated_at, closed_at, deleted_at, metadata, revision, content_revision,
 		                    recurrence_id, occurrence_key)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		i.ID, i.UID, i.ProjectID, i.ShortID, i.Title, i.Body, i.Status, i.ClosedReason,
-		i.Owner, i.Priority, i.Author, i.CreatedAt, i.UpdatedAt, i.ClosedAt, i.DeletedAt,
+		i.Owner, i.AssignmentExpiresOn, i.Priority, i.Author, i.CreatedAt, i.UpdatedAt, i.ClosedAt, i.DeletedAt,
 		string(metadata), revision, i.ContentRevision, recurrenceID, i.OccurrenceKey)
 	return wrapImportErr(db.ImportKindIssue, err)
 }

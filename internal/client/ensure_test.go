@@ -831,12 +831,13 @@ func TestDiscoverIgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 func TestDiscoverStopsProbingAfterFirstLiveDaemon(t *testing.T) {
 	tmp := setupKataEnv(t)
 
-	var firstHits, secondHits atomic.Int32
-	_, addr1 := startCountingPing(t, &firstHits)
-	_, addr2 := startCountingPing(t, &secondHits)
-
-	// Two distinct alive PIDs: this process and a long-lived helper.
+	// Two distinct alive PIDs: this process and a long-lived helper. Obtain
+	// the helper first so each mock can report the PID of its own record;
+	// whichever record sorts first is then a valid matching live daemon.
 	helper, _ := startLongLivedTestProcess(t)
+	var firstHits, secondHits atomic.Int32
+	_, addr1 := startCountingPing(t, &firstHits, os.Getpid())
+	_, addr2 := startCountingPing(t, &secondHits, helper.Process.Pid)
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr1))
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, helper.Process.Pid, addr2))
 
@@ -854,8 +855,10 @@ func TestDiscoverStopsProbingAfterFirstLiveDaemon(t *testing.T) {
 }
 
 // startCountingPing is startMockDaemonPing with a hit counter, for asserting
-// that a scan short-circuits rather than probing every record.
-func startCountingPing(t *testing.T, hits *atomic.Int32) (url, addr string) {
+// that a scan short-circuits rather than probing every record. The ping
+// payload reports the given pid so the response matches the runtime record
+// that points at this server.
+func startCountingPing(t *testing.T, hits *atomic.Int32, pid int) (url, addr string) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/ping" {
@@ -864,7 +867,7 @@ func startCountingPing(t *testing.T, hits *atomic.Int32) (url, addr string) {
 		}
 		hits.Add(1)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok": true, "service": "kata", "version": "test-version", "pid": os.Getpid(),
+			"ok": true, "service": "kata", "version": "test-version", "pid": pid,
 		})
 	}))
 	t.Cleanup(server.Close)

@@ -33,7 +33,7 @@ func helpSections(km keymap) []helpSection {
 			r(km.NextTab), r(km.PrevTab), r(km.JumpRef), r(km.Back),
 			r(km.EditBody), r(km.NewComment), r(km.SetParent),
 			r(km.AddBlocker), r(km.AddLink), r(km.AddLabel),
-			r(km.RemoveLabel), r(km.AssignOwner), r(km.ClearOwner),
+			r(km.RemoveLabel), r(km.AssignOwner), r(km.ClearOwner), r(km.TimedAssignment),
 			r(km.SetPriority),
 		}},
 		{"Children", []helplayout.HelpItem{

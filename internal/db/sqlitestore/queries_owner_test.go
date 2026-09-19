@@ -3,6 +3,7 @@ package sqlitestore_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -128,7 +129,7 @@ func TestUpdateOwner_ControlByteOwnerProducesValidJSON(t *testing.T) {
 func TestClaimOwner_UnownedIssue(t *testing.T) {
 	d, ctx, _, i := setupTestIssue(t)
 
-	result, err := d.ClaimOwner(ctx, i.ID, "agent1", false)
+	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent1"})
 	require.NoError(t, err)
 	assert.True(t, result.Changed)
 	require.NotNil(t, result.Issue.Owner)
@@ -141,7 +142,7 @@ func TestClaimOwner_UnownedIssue(t *testing.T) {
 func TestClaimOwner_AlreadyOwnedBySameActor(t *testing.T) {
 	d, ctx, _, i := setupAssignedIssue(t, "agent1")
 
-	result, err := d.ClaimOwner(ctx, i.ID, "agent1", false)
+	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent1"})
 	require.NoError(t, err)
 	assert.False(t, result.Changed, "claiming own issue is no-op")
 	assert.Nil(t, result.Event)
@@ -149,12 +150,12 @@ func TestClaimOwner_AlreadyOwnedBySameActor(t *testing.T) {
 	assert.Equal(t, "agent1", *result.Issue.Owner)
 }
 
-func TestClaimOwnerIfUnowned_AlreadyOwnedBySameActor(t *testing.T) {
+func TestClaimOwner_IfUnownedAlreadyOwnedBySameActor(t *testing.T) {
 	d, ctx, _, i := setupAssignedIssue(t, "agent1")
 
-	result, err := d.ClaimOwnerIfUnowned(ctx, i.ID, "agent1")
+	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent1", IfUnowned: true})
 
-	require.ErrorIs(t, err, db.ErrAlreadyClaimed)
+	require.ErrorIs(t, err, db.ErrAlreadyAssigned)
 	require.NotNil(t, result.CurrentOwner)
 	assert.Equal(t, "agent1", *result.CurrentOwner)
 	assert.False(t, result.Changed)
@@ -164,8 +165,8 @@ func TestClaimOwnerIfUnowned_AlreadyOwnedBySameActor(t *testing.T) {
 func TestClaimOwner_AlreadyOwnedByDifferentActor(t *testing.T) {
 	d, ctx, _, i := setupAssignedIssue(t, "agent1")
 
-	result, err := d.ClaimOwner(ctx, i.ID, "agent2", false)
-	require.ErrorIs(t, err, db.ErrAlreadyClaimed)
+	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent2"})
+	require.ErrorIs(t, err, db.ErrAlreadyAssigned)
 	require.NotNil(t, result.CurrentOwner)
 	assert.Equal(t, "agent1", *result.CurrentOwner)
 }
@@ -173,7 +174,7 @@ func TestClaimOwner_AlreadyOwnedByDifferentActor(t *testing.T) {
 func TestClaimOwner_ForceReassign(t *testing.T) {
 	d, ctx, _, i := setupAssignedIssue(t, "agent1")
 
-	result, err := d.ClaimOwner(ctx, i.ID, "agent2", true)
+	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent2", Force: true})
 	require.NoError(t, err)
 	assert.True(t, result.Changed)
 	require.NotNil(t, result.Issue.Owner)
@@ -196,6 +197,81 @@ func TestClaimOwner_ReadOnlyFederatedSpokeRejected(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = d.ClaimOwner(ctx, i.ID, "agent1", false)
+	_, err = d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent1"})
 	require.ErrorIs(t, err, db.ErrFederatedReadOnly)
+}
+
+func TestClaimOwner_TimedAssignmentRenewsAndPermanentRetryPreservesExpiry(t *testing.T) {
+	d, ctx, _, issue := setupTestIssue(t)
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+
+	acquired, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{
+		IssueID: issue.ID, Actor: "agent1", TTL: 30 * time.Minute, Now: now,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, acquired.Issue.AssignmentExpiresOn)
+	assert.Equal(t, now.Add(30*time.Minute), acquired.Issue.AssignmentExpiresOn.UTC())
+	require.Len(t, acquired.Events, 1)
+	assert.Equal(t, "issue.assigned", acquired.Events[0].Type)
+	require.NotNil(t, acquired.Event)
+	assert.Equal(t, acquired.Events[0].UID, acquired.Event.UID)
+
+	renewed, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{
+		IssueID: issue.ID, Actor: "agent1", TTL: 30 * time.Minute, Now: now.Add(5 * time.Minute),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, renewed.Issue.AssignmentExpiresOn)
+	assert.Equal(t, now.Add(35*time.Minute), renewed.Issue.AssignmentExpiresOn.UTC())
+	require.Len(t, renewed.Events, 1)
+	assert.Equal(t, "issue.assignment_renewed", renewed.Events[0].Type)
+
+	retried, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{
+		IssueID: issue.ID, Actor: "agent1", Now: now.Add(6 * time.Minute),
+	})
+	require.NoError(t, err)
+	assert.False(t, retried.Changed)
+	require.NotNil(t, retried.Issue.AssignmentExpiresOn)
+	assert.Equal(t, now.Add(35*time.Minute), retried.Issue.AssignmentExpiresOn.UTC())
+}
+
+func TestClaimOwner_ExpiredAssignmentTakeoverEmitsOrderedEvents(t *testing.T) {
+	d, ctx, _, issue := setupTestIssue(t)
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	_, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{
+		IssueID: issue.ID, Actor: "agent1", TTL: time.Minute, Now: now,
+	})
+	require.NoError(t, err)
+
+	taken, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{
+		IssueID: issue.ID, Actor: "agent2", IfUnowned: true,
+		TTL: time.Minute, Now: now.Add(2 * time.Minute),
+	})
+	require.NoError(t, err)
+	assert.True(t, taken.Changed)
+	require.Len(t, taken.Events, 2)
+	assert.Equal(t, "issue.assignment_expired", taken.Events[0].Type)
+	assert.Equal(t, "issue.assigned", taken.Events[1].Type)
+	require.NotNil(t, taken.Event)
+	assert.Equal(t, taken.Events[1].UID, taken.Event.UID)
+	require.NotNil(t, taken.PreviousOwner)
+	assert.Equal(t, "agent1", *taken.PreviousOwner)
+	require.NotNil(t, taken.Issue.Owner)
+	assert.Equal(t, "agent2", *taken.Issue.Owner)
+	require.NotNil(t, taken.Issue.AssignmentExpiresOn)
+	assert.Equal(t, now.Add(3*time.Minute), taken.Issue.AssignmentExpiresOn.UTC())
+}
+
+func TestClaimOwner_ForcePermanentAssignmentClearsExpiry(t *testing.T) {
+	d, ctx, _, issue := setupTestIssue(t)
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	_, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{
+		IssueID: issue.ID, Actor: "agent1", TTL: time.Hour, Now: now,
+	})
+	require.NoError(t, err)
+
+	forced, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{
+		IssueID: issue.ID, Actor: "agent2", Force: true, Now: now.Add(time.Minute),
+	})
+	require.NoError(t, err)
+	assert.Nil(t, forced.Issue.AssignmentExpiresOn)
 }

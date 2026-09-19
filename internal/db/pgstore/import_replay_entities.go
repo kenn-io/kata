@@ -178,12 +178,12 @@ func pgReplayIssue(ctx context.Context, tx *sql.Tx, issue *db.IssueExport) error
 		recurrenceID = &resolved
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO issues(
-id,uid,project_id,short_id,title,body,status,closed_reason,owner,priority,author,created_at,
+id,uid,project_id,short_id,title,body,status,closed_reason,owner,assignment_expires_on,priority,author,created_at,
 updated_at,closed_at,deleted_at,metadata,revision,content_revision,recurrence_id,occurrence_key
 ) OVERRIDING SYSTEM VALUE VALUES(
-$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
 )`, issue.ID, issue.UID, issue.ProjectID, issue.ShortID, issue.Title, issue.Body, issue.Status,
-		issue.ClosedReason, issue.Owner, issue.Priority, issue.Author, issue.CreatedAt, issue.UpdatedAt,
+		issue.ClosedReason, issue.Owner, issue.AssignmentExpiresOn, issue.Priority, issue.Author, issue.CreatedAt, issue.UpdatedAt,
 		issue.ClosedAt, issue.DeletedAt, string(metadata), revision, issue.ContentRevision,
 		recurrenceID, issue.OccurrenceKey)
 	return pgReplayError(db.ImportKindIssue, err)

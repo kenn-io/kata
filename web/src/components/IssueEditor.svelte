@@ -65,6 +65,9 @@
     onAddComment?: ((uid: string, body: string) => boolean | Promise<boolean>) | undefined
     onEditIssue: (uid: string, patch: KataTaskEditPatch) => boolean | Promise<boolean>
     onAssignOwner: (uid: string, owner: string) => boolean | Promise<boolean>
+    onClaimAssignment?:
+      | ((uid: string, ttlSeconds: number) => boolean | Promise<boolean>)
+      | undefined
     onUnassignOwner: (uid: string) => boolean | Promise<boolean>
     onSetPriority: (uid: string, priority: number | null) => boolean | Promise<boolean>
     onAddLabel: (uid: string, label: string) => boolean | Promise<boolean>
@@ -105,6 +108,7 @@
     onAddComment = async () => false,
     onEditIssue,
     onAssignOwner,
+    onClaimAssignment = async () => false,
     onUnassignOwner,
     onSetPriority,
     onAddLabel,
@@ -487,6 +491,7 @@
     {draftFenceGeneration}
     {onPatchMetadata}
     {onAssignOwner}
+    {onClaimAssignment}
     {onUnassignOwner}
     {onSetPriority}
     {onAddLabel}

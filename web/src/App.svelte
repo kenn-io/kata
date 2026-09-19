@@ -13,6 +13,7 @@
   import {
     addLabel as addLabelRequest,
     assignIssue,
+    claimIssue as claimIssueRequest,
     closeIssue as closeIssueRequest,
     createComment,
     createIssue as createIssueRequest,
@@ -632,6 +633,18 @@
     )
   }
 
+  async function claimAssignment(uid: string, ttlSeconds: number): Promise<boolean> {
+    const target = selectedMutationTarget(uid)
+    if (!target) return false
+    return runMutation({ draft: ttlSeconds }, (context) =>
+      claimIssueRequest(
+        { projectId: target.project_id, ref: target.ref },
+        context.body({ ttl_seconds: ttlSeconds }, requestActor),
+        { headers: context.headers },
+      ),
+    )
+  }
+
   async function setPriority(uid: string, priority: number | null): Promise<boolean> {
     const target = selectedMutationTarget(uid)
     if (!target) return false
@@ -1150,6 +1163,7 @@
         onAddComment={addComment}
         onEditIssue={editIssue}
         onAssignOwner={assignOwner}
+        onClaimAssignment={claimAssignment}
         onUnassignOwner={unassignOwner}
         onSetPriority={setPriority}
         onAddLabel={addLabel}

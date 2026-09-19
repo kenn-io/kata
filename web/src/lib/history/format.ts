@@ -48,6 +48,18 @@ export function describeKataEvent(event: KataTaskEvent): KataEventDescriptor {
       return { icon: UserIcon, label: `assigned to ${formatValue(payload.owner)}`, tone: 'neutral' }
     case 'issue.unassigned':
       return { icon: UserIcon, label: 'unassigned', tone: 'neutral' }
+    case 'issue.assignment_renewed':
+      return {
+        icon: UserIcon,
+        label: `renewed assignment for ${formatValue(payload.owner)} until ${formatValue(payload.assignment_expires_on)}`,
+        tone: 'neutral',
+      }
+    case 'issue.assignment_expired':
+      return {
+        icon: UserIcon,
+        label: `assignment for ${formatValue(payload.previous_owner)} expired at ${formatValue(payload.assignment_expires_on)}`,
+        tone: 'warning',
+      }
     case 'issue.priority_set':
       return {
         icon: FlagIcon,
