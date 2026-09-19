@@ -120,6 +120,7 @@ docs-deploy:
 	vercel deploy --prebuilt --prod
 
 lint:
+	go run ./tools/timingbudgetcheck
 	GOLANGCI_LINT_CACHE="$(CURDIR)/.cache/golangci-lint" golangci-lint run --config .golangci.yml
 
 vet:
