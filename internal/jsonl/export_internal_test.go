@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,64 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
+
+func TestExportForCutoverPreservesAssignment(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version int
+		ttl     time.Duration
+	}{
+		{name: "v28_permanent", version: 28},
+		{name: "v29_permanent", version: 29},
+		{name: "v29_timed", version: 29, ttl: 30 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			ctx := t.Context()
+			source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = source.Close() })
+			project, err := source.CreateProject(ctx, "example-project")
+			require.NoError(t, err)
+			issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID, Title: "Assigned issue", Author: "tester",
+			})
+			require.NoError(t, err)
+			_, err = source.ClaimOwner(ctx, db.ClaimOwnerParams{
+				IssueID: issue.ID, Actor: "worker-a", TTL: tc.ttl,
+				Now: time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC),
+			})
+			require.NoError(t, err)
+			if tc.version < 29 {
+				// Exercise the old projection against a database without the column.
+				_, err = source.ExecContext(ctx, `DROP INDEX idx_issues_assignment_expires_on`)
+				require.NoError(t, err)
+				_, err = source.ExecContext(ctx, `ALTER TABLE issues DROP COLUMN assignment_expires_on`)
+				require.NoError(t, err)
+			}
+			_, err = source.ExecContext(ctx, `UPDATE meta SET value = ? WHERE key = 'schema_version'`,
+				fmt.Sprint(tc.version))
+			require.NoError(t, err)
+
+			var out bytes.Buffer
+			require.NoError(t, exportForCutover(ctx, source, &out, ExportOptions{IncludeDeleted: true}))
+			target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = target.Close() })
+			require.NoError(t, Import(ctx, &out, target))
+			restored, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.NotNil(t, restored.Owner)
+			assert.Equal(t, "worker-a", *restored.Owner)
+			if tc.ttl == 0 {
+				assert.Nil(t, restored.AssignmentExpiresOn)
+			} else {
+				require.NotNil(t, restored.AssignmentExpiresOn)
+				assert.Equal(t, "2026-09-19T12:30:00Z", restored.AssignmentExpiresOn.UTC().Format(time.RFC3339))
+			}
+		})
+	}
+}
 
 func TestExportSnapshotV14FederationEnrollmentPreservesAdoptionMarker(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
