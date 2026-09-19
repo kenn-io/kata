@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-09-15
+last_edited: 2026-09-19
 ---
 
 # Metadata
@@ -21,12 +21,14 @@ replacing the whole object:
 - A key set to `null` is cleared (removed).
 - Keys not mentioned in a patch are left untouched.
 
-Because merges are per-key, two writers touching *different* keys never conflict.
-For a genuine read-modify-write on the *same* key, optimistic concurrency is
-available: every metadata read returns the current revision as an ETag, and a
-write may carry an `If-Match` precondition. If the stored revision has moved on,
-the write is rejected (HTTP `412`) instead of clobbering the newer value. On the
-CLI this is `--if-match <rev>` (see below).
+Because merges are per-key, unguarded writers touching different metadata keys
+can update them independently. For a read-modify-write, optimistic concurrency
+is available: every metadata read returns the current issue revision as an ETag,
+and a write may carry an `If-Match` precondition. The revision advances when
+metadata, owner, or status changes, including a claim, unassignment, close, or
+reopen. If it has moved on, the write is rejected (HTTP `412`). On the CLI this
+is `--if-match <rev>` (see below). Read the current issue again after a conflict
+before deciding whether to retry.
 
 Each metadata change emits an `issue.metadata_updated` event carrying the
 per-key before/after diff, so consumers following the event stream see exactly

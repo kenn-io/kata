@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-17
+last_edited: 2026-09-19
 ---
 
 # CLI reference
@@ -208,6 +208,9 @@ state `kata claim` produces outside federation. A cached timed
 lease can report `expired` while its hub is unavailable; a successful hub read
 releases the expired lease before returning current state. JSON output is a
 flat projection of the same fields. Use `kata show` for the complete issue.
+The revision advances on ownership and open/closed status changes. A dispatcher
+can read `status --json`, then pass that revision to `meta set --if-match` to
+reject a stale attention update after another worker claims or closes the issue.
 
 For `kata list`, `--meta` is repeatable. A bare key filters on presence,
 while `key=value` filters on string equality. Multiple filters combine with
@@ -444,6 +447,9 @@ issue is already owned by someone else unless `--force` is used. A repeated
 claim by the current actor remains a no-op. Use `--if-unowned` when competing
 workers must claim only a truly ownerless issue; it conflicts even when the
 current actor already owns the issue.
+An actual owner change advances the issue revision; a repeated claim by the
+same owner does not. `--if-match` on a later metadata write also detects a
+handoff back to the original owner.
 
 `kata unassign --expect-owner <owner>` clears ownership only when the current
 owner matches the expected value. A mismatch returns a conflict without

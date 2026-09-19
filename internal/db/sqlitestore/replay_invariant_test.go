@@ -78,9 +78,11 @@ func TestReplayInvariant_ProjectProjectionMatchesDirectWrites(t *testing.T) {
 		})
 	require.NoError(t, err)
 
+	currentBeforePatch, err := d.IssueByID(ctx, a.ID)
+	require.NoError(t, err)
 	metadataOut, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID:    a.ID,
-		IfMatchRev: new(int64(1)),
+		IfMatchRev: &currentBeforePatch.Revision,
 		Actor:      "agent",
 		Patch:      map[string]jsontext.Value{"area": jsontext.Value(`"api"`)},
 	})

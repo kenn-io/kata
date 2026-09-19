@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-17
+last_edited: 2026-09-19
 ---
 
 # Agent workflows
@@ -260,6 +260,15 @@ continuing or handing off work:
 ```sh
 kata status abc4 --agent
 ```
+
+When coordinating another worker, read `kata status abc4 --json` and keep its
+`revision`. Pass it to `kata meta set abc4 work.attention ... --if-match <revision>`.
+A claim, assignment, unassignment, close, or reopen after the read makes that
+write fail with a revision conflict. Read the issue again before retrying so a
+stale worker does not overwrite the current worker's attention state. A handoff
+from one owner to another and back still advances the revision.
+The guard applies to that metadata write only; it does not reserve ownership
+for later work. Claim the issue separately when you need to own it.
 
 Ownership records who is responsible. A federation write lease reserves the
 issue for a holder while the lease is live. They are separate: a local claim

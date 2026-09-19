@@ -365,6 +365,10 @@ func (s *Store) updateImportedIssue(
 	if item.Title != existing.Title || item.Body != existing.Body {
 		bump = `,content_revision=content_revision+1`
 	}
+	owner := db.NormalizeImportOwner(item.Owner)
+	if item.Status != existing.Status || !equalStringPointers(owner, existing.Owner) {
+		bump += `,revision=revision+1`
+	}
 	var closedAt any
 	if item.ClosedAt != nil {
 		closedAt = formatStoredTime(*item.ClosedAt)
@@ -372,7 +376,7 @@ func (s *Store) updateImportedIssue(
 	_, err := tx.ExecContext(ctx, `UPDATE issues SET
 title=$1,body=$2,status=$3,closed_reason=$4,owner=$5,created_at=$6,
 updated_at=$7,closed_at=$8,priority=$9`+bump+` WHERE id=$10`,
-		item.Title, item.Body, item.Status, item.ClosedReason, db.NormalizeImportOwner(item.Owner),
+		item.Title, item.Body, item.Status, item.ClosedReason, owner,
 		formatStoredTime(createdAt), formatStoredTime(item.UpdatedAt), closedAt, item.Priority, existing.ID)
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported issue: %w", mapSQLError(err, nil))
