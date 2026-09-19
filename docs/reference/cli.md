@@ -950,6 +950,23 @@ such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
+Press `u` in the issue list or detail view to undo the latest eligible issue
+edit from this TUI session. Repeated presses walk back through up to 20 edits,
+including close, reopen, owner, priority, label, body, and newly added parent,
+blocker, or related links. Undo follows the recorded issue across navigation
+and projects; it does not target whichever row is currently selected. It makes
+a new attributed change, so the original audit event remains. Undoing a reopen
+may open the normal completion form when the daemon requires evidence.
+
+Creating an issue or comment, making a timed assignment or owner edit involving
+an expiry, changing the status of a recurring issue, closing an issue with a
+live federation lease, or reopening an issue closed for a reason other than
+`done` clears the undo history. Switching daemons also clears it.
+Before undo writes, the TUI reads the affected issue or exact link and refuses
+an observed conflicting change. These checks are not atomic: another client can
+edit the same field between the read and the undo write. A failed write with an
+uncertain outcome clears history rather than risking a second change.
+
 Press `C` to open the read-only credential ledger when the selected daemon
 advertises `token_audit_read`. It lists live, expired, and revoked credentials
 with redacted scope and lifecycle metadata. `r` refreshes the view and `Esc`

@@ -186,6 +186,10 @@ type Model struct {
 	authCapabilitiesReady    bool
 	authCapabilitiesRequired bool
 	tokenAuditRead           bool
+	undoHistory              undoHistory
+	undoInFlight             bool
+	undoCloseEntryID         uint64
+	mutationEpoch            uint64
 }
 
 // initialModel constructs the root Bubble Tea model. Style vars are
@@ -338,6 +342,7 @@ func (m Model) fetchProjects() tea.Cmd {
 func (m Model) fetchInitial() tea.Cmd {
 	api, sc, filter := m.api, m.scope, queueFetchFilter()
 	connGen := m.connGen
+	epoch := m.mutationEpoch
 	dispatchKey := cacheKey{
 		allProjects: sc.allProjects, projectID: sc.projectID, limit: filter.Limit,
 	}
@@ -353,7 +358,7 @@ func (m Model) fetchInitial() tea.Cmd {
 		} else {
 			issues, err = api.ListIssues(ctx, sc.projectID, filter)
 		}
-		return initialFetchMsg{connGen: connGen, dispatchKey: dispatchKey, issues: issues, err: err}
+		return initialFetchMsg{connGen: connGen, epoch: epoch, epochSet: true, dispatchKey: dispatchKey, issues: issues, err: err}
 	}
 }
 
@@ -403,12 +408,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if mut, ok := msg.(mutationDoneMsg); ok {
+		m = m.recordUndoAttempt(mut)
 		if m.staleConnMsg(mut.connGen) {
 			return m, nil
 		}
 		snapshotCmd := m.searchSnapshotMutationRefetch(mut)
 		next, cmd := m.routeMutation(mut)
 		return next, combineCmds(cmd, snapshotCmd)
+	}
+	if done, ok := msg.(undoDoneMsg); ok {
+		return m.handleUndoDone(done)
 	}
 	// Editor returns from a centered form's ctrl+e handoff land here
 	// before dispatchToView so the writeback can hit m.input. formGen=0
@@ -572,6 +581,16 @@ func (m Model) maybeBootstrapSplitDetail() (Model, tea.Cmd) {
 // so the cache/list aren't churned by a slow reply that the user has
 // already moved past.
 func (m Model) isStaleListFetch(msg tea.Msg) bool {
+	switch fetched := msg.(type) {
+	case initialFetchMsg:
+		if fetched.epochSet && fetched.epoch < m.mutationEpoch {
+			return true
+		}
+	case refetchedMsg:
+		if fetched.epochSet && fetched.epoch < m.mutationEpoch {
+			return true
+		}
+	}
 	dispatchKey, _, _ := fetchPayload(msg)
 	return !cacheKeysEqual(dispatchKey, m.currentCacheKey())
 }
@@ -774,6 +793,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			return next, cmd, true
 		}
 		if next, cmd, ok := m.routeGlobalKey(msg); ok {
+			return next, cmd, true
+		}
+		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail) {
+			next, cmd := m.startUndo()
 			return next, cmd, true
 		}
 		if m.view == viewProjects {
@@ -1728,6 +1751,9 @@ func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 			m.input.err = err.Error()
 			return m, nil
 		}
+		if m.undoCloseEntryID != 0 {
+			return m.dispatchUndoEvidenceClose(in)
+		}
 		m.input.saving = true
 		m.input.err = ""
 		return m, withConnGen(dispatchFormClose(m.api, m.input.target, in, m.input.formGen), m.connGen)
@@ -1941,6 +1967,7 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 		m.list = m.list.clampCursorToFilter()
 	}
 	m.input = inputState{}
+	m.undoCloseEntryID = 0
 	if restoreSplitDetail {
 		return m.restoreSearchDetailIfNeeded(preSplitDetail, nil)
 	}
@@ -3218,15 +3245,16 @@ func (m Model) viewBody() string {
 // this keeps the sub-views free of Model coupling.
 func (m Model) chrome() viewChrome {
 	return viewChrome{
-		scope:        m.scope,
-		sseStatus:    m.sseStatus,
-		pending:      m.pendingRefetch,
-		toast:        m.toast,
-		version:      kataVersion,
-		input:        m.input,
-		projectsByID: m.projectsByID,
-		daemon:       activeDaemonDisplay(m.activeDaemon),
-		modal:        m.modal,
+		scope:         m.scope,
+		sseStatus:     m.sseStatus,
+		pending:       m.pendingRefetch,
+		toast:         m.toast,
+		version:       kataVersion,
+		input:         m.input,
+		projectsByID:  m.projectsByID,
+		daemon:        activeDaemonDisplay(m.activeDaemon),
+		modal:         m.modal,
+		undoAvailable: len(m.undoHistory.entries) > 0,
 	}
 }
 

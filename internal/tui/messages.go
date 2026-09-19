@@ -8,6 +8,8 @@ import "time"
 // scope toggle or filter change.
 type initialFetchMsg struct {
 	connGen     uint64
+	epoch       uint64
+	epochSet    bool
 	dispatchKey cacheKey
 	issues      []Issue
 	err         error
@@ -18,6 +20,8 @@ type initialFetchMsg struct {
 // Model.populateCache can drop stale responses — see initialFetchMsg.
 type refetchedMsg struct {
 	connGen     uint64
+	epoch       uint64
+	epochSet    bool
 	dispatchKey cacheKey
 	issues      []Issue
 	err         error

@@ -28,5 +28,6 @@ v       toggle flat/nested view
 o       toggle graph order
 x       close
 r       reopen
+u       undo last issue action
 
 press ? to return

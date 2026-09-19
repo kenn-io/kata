@@ -20,7 +20,7 @@ type keymap struct {
 	ExpandCollapse, Expand, Collapse, ExpandAll    key
 	SortChildren                                   key
 	FilterStatus, FilterForm, ClearFilters         key
-	Close, Reopen                                  key
+	Close, Reopen, Undo                            key
 	NextTab, PrevTab, JumpRef, Back                key
 	EditBody, NewComment                           key
 	SetParent, AddBlocker, AddLink                 key
@@ -87,6 +87,7 @@ func newKeymap() keymap {
 		ClearFilters:    key{Keys: []string{"c"}, Help: "clear filters"},
 		Close:           key{Keys: []string{"x"}, Help: "close"},
 		Reopen:          key{Keys: []string{"r"}, Help: "reopen"},
+		Undo:            key{Keys: []string{"u"}, Help: "undo last issue action"},
 		NextTab:         key{Keys: []string{"tab"}, Help: "next tab"},
 		PrevTab:         key{Keys: []string{"shift+tab"}, Help: "prev tab"},
 		JumpRef:         key{Keys: []string{"enter"}, Help: "jump to referenced issue"},

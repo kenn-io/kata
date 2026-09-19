@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -70,7 +71,7 @@ func listHelpRows(lm listModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return lm.queueHelpRows()
+	return appendUndoHint(lm.queueHelpRows(), chrome.undoAvailable)
 }
 
 func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
@@ -80,7 +81,17 @@ func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return dm.detailHelpRows()
+	return appendUndoHint(dm.detailHelpRows(), chrome.undoAvailable)
+}
+
+func appendUndoHint(rows [][]helplayout.HelpItem, available bool) [][]helplayout.HelpItem {
+	if !available || len(rows) == 0 {
+		return rows
+	}
+	out := make([][]helplayout.HelpItem, len(rows))
+	copy(out, rows)
+	out[0] = append(slices.Clone(rows[0]), helplayout.HelpItem{Key: "u", Description: "undo"})
+	return out
 }
 
 func inputHelpRows(input inputState) [][]helplayout.HelpItem {

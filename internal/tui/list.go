@@ -1015,6 +1015,12 @@ func (lm listModel) dispatchCreateIssue(
 // the user has changed filter, switched scope, or another refetch
 // reordered ahead of it.
 func (lm listModel) refetchCmd(api listAPI, sc scope) tea.Cmd {
+	var epoch uint64
+	var epochSet bool
+	if tracked, ok := api.(*undoClient); ok {
+		epoch = tracked.snapshotEpoch()
+		epochSet = true
+	}
 	filter := queueFetchFilter()
 	dispatchKey := cacheKey{
 		allProjects: sc.allProjects, projectID: sc.projectID, limit: filter.Limit,
@@ -1031,7 +1037,7 @@ func (lm listModel) refetchCmd(api listAPI, sc scope) tea.Cmd {
 		} else {
 			issues, err = api.ListIssues(ctx, sc.projectID, filter)
 		}
-		return refetchedMsg{dispatchKey: dispatchKey, issues: issues, err: err}
+		return refetchedMsg{dispatchKey: dispatchKey, epoch: epoch, epochSet: epochSet, issues: issues, err: err}
 	}
 }
 

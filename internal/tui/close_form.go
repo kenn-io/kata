@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -47,6 +48,13 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 			level: toastError, expiresAt: m.toastNow().Add(3 * time.Second),
 		}
 		return m, toastExpireCmd(3 * time.Second)
+	}
+	if len(m.undoHistory.entries) > 0 && !reflect.DeepEqual(m.undoHistory.entries[len(m.undoHistory.entries)-1].auth, msg.auth) {
+		m.undoHistory.clear("daemon principal changed")
+		if m.undoCloseEntryID != 0 {
+			m.input = inputState{}
+			m.undoCloseEntryID = 0
+		}
 	}
 	m.authCapabilitiesReady = true
 	m.tokenAuditRead = msg.auth.TokenAuditRead

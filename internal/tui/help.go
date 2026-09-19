@@ -27,7 +27,7 @@ func helpSections(km keymap) []helpSection {
 			r(km.PageUp), r(km.PageDown), r(km.Home),
 			r(km.End), r(km.Open), r(km.ExpandCollapse),
 			r(km.Expand), r(km.Collapse), r(km.ExpandAll), r(km.NewIssue),
-			r(km.ToggleIssueView), r(km.SortChildren), r(km.Close), r(km.Reopen),
+			r(km.ToggleIssueView), r(km.SortChildren), r(km.Close), r(km.Reopen), r(km.Undo),
 		}},
 		{"Detail", []helplayout.HelpItem{
 			r(km.NextTab), r(km.PrevTab), r(km.JumpRef), r(km.Back),
