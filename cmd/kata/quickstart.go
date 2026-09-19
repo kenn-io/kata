@@ -94,8 +94,12 @@ Use kata as the shared issue ledger for this workspace.
    # Claim it (fails if already claimed by another actor)
    kata claim <ref>
 
-   # Release ownership
-   kata unassign <ref>
+   # Release ownership only if you still own it
+   kata unassign <ref> --expect-owner <your actor>
+
+   A bare unassign clears the current owner, whoever that is.
+   Check kata status <ref> for the current owner and your effective actor;
+   kata show's [open] by <name> line names the author, not the owner.
 
 7. Use native planning dates deliberately:
 

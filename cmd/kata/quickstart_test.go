@@ -27,6 +27,30 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, "kata notify abc4 --to coordinator/teammate-1 --clear")
 }
 
+func TestQuickstart_GuardsOwnershipRelease(t *testing.T) {
+	resetFlags(t)
+	plain := string(executeRoot(t, newQuickstartCmd()))
+	jsonOutput := executeRoot(t, newRootCmd(), "--json", "quickstart")
+	var decoded struct {
+		Quickstart string `json:"quickstart"`
+	}
+	require.NoError(t, json.Unmarshal(jsonOutput, &decoded))
+
+	for _, output := range []string{plain, decoded.Quickstart} {
+		step := strings.SplitN(output, "6. Find and claim available work", 2)
+		require.Len(t, step, 2)
+		step6 := strings.SplitN(step[1], "7. Use native planning dates", 2)
+		require.Len(t, step6, 2)
+		assert.Contains(t, step6[0], "kata unassign <ref> --expect-owner <your actor>")
+		assert.NotContains(t, step6[0], "\n   kata unassign <ref>\n")
+		assert.Contains(t, step6[0], "A bare unassign clears the current owner")
+		assert.Contains(t, step6[0], "kata status <ref>")
+		assert.Contains(t, step6[0], "current owner and your effective actor")
+		assert.Contains(t, step6[0], "[open] by <name>")
+		assert.Contains(t, step6[0], "author, not the owner")
+	}
+}
+
 func TestQuickstartExplainsTeammateFlow(t *testing.T) {
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "quickstart"))
