@@ -53,7 +53,12 @@ web-check: kata-ui-check
 	cd web && bun run check
 
 web-audit:
-	cd web && bun run audit
+	@cd web && for attempt in 1 2 3; do \
+		bun run audit && exit 0; \
+		if [ "$$attempt" -eq 3 ]; then exit 1; fi; \
+		echo "Web dependency audit failed (attempt $$attempt/3); retrying in 10 seconds..." >&2; \
+		sleep 10; \
+	done
 
 web-test: kata-ui-test kata-ui-pack-check
 	cd web && bun run test
