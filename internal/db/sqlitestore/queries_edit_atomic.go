@@ -71,6 +71,9 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 	if fieldsChanged {
 		sets = append([]string{`updated_at = ?`}, sets...)
 		args = append([]any{ts}, args...)
+		if slices.Contains(sets, `owner = ?`) {
+			sets = append(sets, `revision = revision + 1`)
+		}
 		if contentFieldsChanged(issue, p.Title, p.Body) {
 			sets = append(sets, `content_revision = content_revision + 1`)
 		}

@@ -58,6 +58,9 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 			}
 			args = append(args, updatedAt)
 			sets = append(sets, fmt.Sprintf("updated_at = $%d", len(args)))
+			if fieldPlan.OwnerChanged {
+				sets = append(sets, "revision = revision + 1")
+			}
 			if fieldPlan.ContentChanged() {
 				sets = append(sets, "content_revision = content_revision + 1")
 			}

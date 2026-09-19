@@ -228,6 +228,8 @@ func TestClose_IdempotencyReplaysReceiptAfterMove(t *testing.T) {
 
 	target, err := h.DB().CreateProject(t.Context(), "target")
 	require.NoError(t, err)
+	issue, err = h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
 	moved, err := h.DB().MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
 		IssueID: issueID, FromProjectID: projectID, ToProjectID: target.ID,
 		IfMatchRev: issue.Revision, Actor: "coordinator",

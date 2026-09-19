@@ -1540,6 +1540,7 @@ func (d *Store) closeIssueGuarded(
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
 		 SET status        = 'closed',
+		     revision      = revision + 1,
 		     closed_reason = ?,
 		     closed_at     = ?,
 		     updated_at    = ?
@@ -1723,6 +1724,7 @@ func (d *Store) reopenIssue(
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
 		 SET status        = 'open',
+		     revision      = revision + 1,
 		     closed_reason = NULL,
 		     closed_at     = NULL,
 		     updated_at    = ?
@@ -1795,6 +1797,9 @@ func (d *Store) editIssue(ctx context.Context, p db.EditIssueParams) (db.Issue, 
 	}
 	sets = append([]string{`updated_at = ?`}, sets...)
 	args = append([]any{ts}, args...)
+	if slices.Contains(sets, `owner = ?`) {
+		sets = append(sets, `revision = revision + 1`)
+	}
 	if contentFieldsChanged(issue, p.Title, p.Body) {
 		sets = append(sets, `content_revision = content_revision + 1`)
 	}
@@ -2004,6 +2009,7 @@ func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
 		 SET owner      = ?,
+		     revision   = revision + 1,
 		     updated_at = ?
 		 WHERE id = ?`, newOwner, ts, issueID); err != nil {
 		return db.Issue{}, nil, false, fmt.Errorf("update owner: %w", err)
@@ -2122,18 +2128,21 @@ func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 		res, err = tx.ExecContext(ctx,
 			`UPDATE issues
 			 SET owner      = ?,
+			     revision   = revision + 1,
 			     updated_at = ?
 			 WHERE id = ? AND deleted_at IS NULL`, actor, ts, issueID)
 	} else if ifUnowned {
 		res, err = tx.ExecContext(ctx,
 			`UPDATE issues
 			 SET owner      = ?,
+			     revision   = revision + 1,
 			     updated_at = ?
 			 WHERE id = ? AND deleted_at IS NULL AND owner IS NULL`, actor, ts, issueID)
 	} else {
 		res, err = tx.ExecContext(ctx,
 			`UPDATE issues
 			 SET owner      = ?,
+			     revision   = revision + 1,
 			     updated_at = ?
 			 WHERE id = ? AND deleted_at IS NULL AND (owner IS NULL OR owner = ?)`, actor, ts, issueID, actor)
 	}

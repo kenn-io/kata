@@ -39,6 +39,31 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{
+		name:    "issue revision owner",
+		methods: []string{"ClaimOwner", "ClaimOwnerIfUnowned", "CreateIssue", "CreateProject", "IssueByID", "PatchIssueMetadata", "UnassignOwner", "UpdateOwner"},
+		run:     checkIssueRevisionOwner,
+	},
+	{
+		name:    "issue revision edits",
+		methods: []string{"CreateIssue", "CreateProject", "EditIssue", "EditIssueAtomic", "IssueByID"},
+		run:     checkIssueRevisionEdits,
+	},
+	{
+		name:    "issue revision status",
+		methods: []string{"CloseIssue", "CreateIssue", "CreateProject", "IssueByID", "PatchIssueMetadata", "ReopenIssue"},
+		run:     checkIssueRevisionStatus,
+	},
+	{
+		name:    "issue revision import",
+		methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID"},
+		run:     checkIssueRevisionImport,
+	},
+	{
+		name:    "issue revision author rewrite",
+		methods: []string{"CreateIssue", "CreateProject", "IssueByID", "RewriteAuthorIdentity"},
+		run:     checkIssueRevisionAuthorRewrite,
+	},
 	{name: "search status", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchStatus},
 	{
 		name:    "list ordering",

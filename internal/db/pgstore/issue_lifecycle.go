@@ -33,6 +33,7 @@ func (s *Store) EditIssue(ctx context.Context, params db.EditIssueParams) (db.Is
 		sets := make([]string, 0, 5)
 		args := make([]any, 0, 6)
 		payload := make(map[string]any)
+		ownerChanged := false
 		if params.Title != nil && *params.Title != current.Title {
 			args = append(args, *params.Title)
 			sets = append(sets, fmt.Sprintf("title = $%d", len(args)))
@@ -50,6 +51,7 @@ func (s *Store) EditIssue(ctx context.Context, params db.EditIssueParams) (db.Is
 				next = &value
 			}
 			if !equalStringPointers(current.Owner, next) {
+				ownerChanged = true
 				args = append(args, next)
 				sets = append(sets, fmt.Sprintf("owner = $%d", len(args)))
 				payload["owner"], payload["old_owner"] = next, current.Owner
@@ -62,6 +64,9 @@ func (s *Store) EditIssue(ctx context.Context, params db.EditIssueParams) (db.Is
 		updatedAt := mutationTimestamp()
 		args = append(args, updatedAt)
 		sets = append(sets, fmt.Sprintf("updated_at = $%d", len(args)))
+		if ownerChanged {
+			sets = append(sets, "revision = revision + 1")
+		}
 		if (params.Title != nil && *params.Title != current.Title) || (params.Body != nil && *params.Body != current.Body) {
 			sets = append(sets, "content_revision = content_revision + 1")
 		}
@@ -175,7 +180,7 @@ func (s *Store) updateIssueAttribute(
 		var query string
 		switch column {
 		case "owner":
-			query = `UPDATE issues SET owner = $1, updated_at = $2 WHERE id = $3`
+			query = `UPDATE issues SET owner = $1, revision = revision + 1, updated_at = $2 WHERE id = $3`
 		case "priority":
 			query = `UPDATE issues SET priority = $1, updated_at = $2 WHERE id = $3`
 		default:
@@ -230,7 +235,7 @@ func (s *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 		result.PreviousOwner = current.Owner
 		updatedAt := mutationTimestamp()
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE issues SET owner = $1, updated_at = $2 WHERE id = $3`, actor, updatedAt, current.ID); err != nil {
+			`UPDATE issues SET owner = $1, revision = revision + 1, updated_at = $2 WHERE id = $3`, actor, updatedAt, current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		body, err := json.Marshal(map[string]any{"owner": actor, "updated_at": updatedAt})
@@ -331,7 +336,7 @@ func (s *Store) closeIssueWithEvents(
 			return db.ErrOpenChildren
 		}
 		closedAt := mutationTimestamp()
-		if _, err := tx.ExecContext(ctx, `UPDATE issues SET status = 'closed', closed_reason = $1,
+		if _, err := tx.ExecContext(ctx, `UPDATE issues SET status = 'closed', revision = revision + 1, closed_reason = $1,
 		  closed_at = $2, updated_at = $2 WHERE id = $3`, p.Reason, closedAt, current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -471,7 +476,7 @@ func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string
 		at := mutationTimestamp()
 		eventType := "issue.reopened"
 		payload := map[string]any{"reopened_at": at, "updated_at": at}
-		statement := `UPDATE issues SET status = 'open', closed_reason = NULL, closed_at = NULL, updated_at = $1 WHERE id = $2`
+		statement := `UPDATE issues SET status = 'open', revision = revision + 1, closed_reason = NULL, closed_at = NULL, updated_at = $1 WHERE id = $2`
 		if deleteIssue {
 			eventType = "issue.soft_deleted"
 			payload = map[string]any{"deleted_at": at}

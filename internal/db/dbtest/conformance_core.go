@@ -421,7 +421,7 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	if !ok || conflict == nil {
 		return fmt.Errorf("guarded closed-issue retry returned %v, want revision conflict", err)
 	}
-	assert.Equal(t, staleIssue.Revision+1, conflict.CurrentRevision)
+	assert.Equal(t, staleIssue.Revision+2, conflict.CurrentRevision)
 
 	nulRelease, err := store.AcquireIdempotencyLock(ctx, 0, "issue-uid\x00comment-request")
 	if err != nil {

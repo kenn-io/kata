@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -115,6 +116,34 @@ func TestMetaIfMatchStaleRevisionConflictsAndCorrectRevisionSucceeds(t *testing.
 
 	out := runCLI(t, env, dir, "meta", "set", "--if-match", "1", ref, "work.attention", "ok")
 	assert.Contains(t, out, "rev-2")
+}
+
+func TestMetaIfMatchRejectsOwnerHandoffAfterStatusRead(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "dispatcher work")
+	statusJSON := runCLI(t, env, dir, "--json", "status", ref)
+	var status struct {
+		Revision int64 `json:"revision"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(statusJSON), &status))
+	require.Positive(t, status.Revision)
+
+	runCLIAs(t, env, dir, "worker-a", "claim", ref)
+	runCLIAs(t, env, dir, "worker-b", "claim", "--force", ref)
+	runCLIAs(t, env, dir, "worker-a", "claim", "--force", ref)
+	before, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: pid, Limit: 100})
+	require.NoError(t, err)
+
+	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "set", "--if-match",
+		fmt.Sprint(status.Revision), ref, "work.attention", "ok")
+	ce := requireCLIError(t, err, ExitConfirm)
+	assert.Equal(t, kindConfirm, ce.Kind)
+	assert.Contains(t, stderr, "revision conflict")
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
+	after, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: pid, Limit: 100})
+	require.NoError(t, err)
+	assert.Len(t, after, len(before))
 }
 
 func TestMetaSetIfMatchEmptyValueRejectedAsMalformed(t *testing.T) {

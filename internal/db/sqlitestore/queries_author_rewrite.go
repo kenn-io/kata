@@ -68,9 +68,13 @@ func (d *Store) rewriteAuthorIdentity(
 	if err != nil {
 		return db.RewriteAuthorIdentityResult{}, fmt.Errorf("rewrite issue authors: %w", err)
 	}
+	ownerRevision := ""
+	if from != to {
+		ownerRevision = ", revision = revision + 1"
+	}
 	out.IssueOwners, err = execRowsAffected(ctx, tx, `
 		UPDATE issues
-		   SET owner = ?, updated_at = ?
+		   SET owner = ?, updated_at = ?`+ownerRevision+`
 		 WHERE project_id = ? AND owner = ?`,
 		to, ts, p.ProjectID, from)
 	if err != nil {
