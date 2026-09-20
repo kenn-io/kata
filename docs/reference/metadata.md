@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-09-19
+last_edited: 2026-09-20
 ---
 
 # Metadata
@@ -79,6 +79,28 @@ performance, the documented promotion path is a **SQLite expression index** over
 the JSON path: no schema column and no change to the stored shape. Reserving a
 key in the daemon's registry (adding a validator) is the second, heavier step,
 taken only when the daemon starts to attach real semantics to the key.
+
+## Project Inbox designation
+
+The project metadata value `"role": "inbox"` designates the project used by the
+web and TUI Inbox views. They show its open tasks, regardless of the project's
+name. In the web UI, choose the project with the **Inbox project** selector in
+the sidebar.
+
+API clients can designate it with a project metadata patch:
+
+```http
+POST /api/v1/projects/{project_id}/metadata
+Content-Type: application/json
+
+{"actor":"example-actor","patch":{"role":"inbox"}}
+```
+
+This patch must contain only `role`. The daemon clears an existing Inbox
+designation on other projects in the same transaction, so only one project is
+designated at a time. Setting `role` to `null` on the designated project clears
+that designation. This project role is separate from the issue-level `notify.*`
+requests read by `kata inbox`.
 
 ## CLI usage
 

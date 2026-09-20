@@ -10,23 +10,23 @@ import (
 // reads from this same value so rendered help stays in lockstep with
 // what Update actually handles.
 type keymap struct {
-	Help, Quit                                     key
-	Projects, Daemons, Federation, Credentials     key
-	ToggleLayout                                   key
-	Up, Down, PageUp, PageDown, Home, End          key
-	ScrollUp, ScrollDown                           key
-	Open, NewIssue, NewChild, Search               key
-	ToggleIssueView                                key
-	ExpandCollapse, Expand, Collapse, ExpandAll    key
-	SortChildren                                   key
-	FilterStatus, FilterForm, ClearFilters         key
-	Close, Reopen, Undo                            key
-	NextTab, PrevTab, JumpRef, Back                key
-	EditBody, NewComment                           key
-	SetParent, AddBlocker, AddLink                 key
-	AddLabel, RemoveLabel, AssignOwner, ClearOwner key
-	TimedAssignment                                key
-	SetPriority                                    key
+	Help, Quit                                        key
+	Projects, Inbox, Daemons, Federation, Credentials key
+	ToggleLayout                                      key
+	Up, Down, PageUp, PageDown, Home, End             key
+	ScrollUp, ScrollDown                              key
+	Open, NewIssue, NewChild, Search                  key
+	ToggleIssueView                                   key
+	ExpandCollapse, Expand, Collapse, ExpandAll       key
+	SortChildren                                      key
+	FilterStatus, FilterForm, ClearFilters            key
+	Close, Reopen, Undo                               key
+	NextTab, PrevTab, JumpRef, Back                   key
+	EditBody, NewComment                              key
+	SetParent, AddBlocker, AddLink                    key
+	AddLabel, RemoveLabel, AssignOwner, ClearOwner    key
+	TimedAssignment                                   key
+	SetPriority                                       key
 }
 
 // key is a binding plus its human label. matches() compares against the
@@ -43,6 +43,7 @@ func newKeymap() keymap {
 		Help:         key{Keys: []string{"?"}, Help: "help"},
 		Quit:         key{Keys: []string{"q", "ctrl+c"}, Help: "quit"},
 		Projects:     key{Keys: []string{"P"}, Help: "projects"},
+		Inbox:        key{Keys: []string{"I"}, Help: "Inbox"},
 		Daemons:      key{Keys: []string{"D"}, Help: "daemons"},
 		Federation:   key{Keys: []string{"F"}, Help: "federation"},
 		Credentials:  key{Keys: []string{"C"}, Help: "credentials"},

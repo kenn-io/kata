@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-19
+last_edited: 2026-09-20
 ---
 
 # CLI reference
@@ -949,6 +949,15 @@ read-only experiments, and explicit tokenless private-network writes, see
 such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
+
+Press `I` to open the TUI Inbox. It shows open tasks from the project designated
+with `role=inbox`, regardless of that project's name. Press Enter to open a task;
+Esc from the Inbox list restores the browsing context and its filters. If no
+project is designated, the TUI shows a notice. [Choose the Inbox project](metadata.md#project-inbox-designation)
+in the web UI or through the project metadata API. This view is separate from
+`kata inbox`, which lists attention requests sent to an actor.
+
+![kata TUI Inbox showing the open tasks of the project designated with role=inbox](/assets/tui-inbox.png)
 
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,

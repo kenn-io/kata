@@ -103,10 +103,10 @@ func (m Model) cursorMoveDaemons(msg tea.KeyPressMsg, rows []daemonRow) (Model, 
 func (m Model) escFromDaemonsView() (Model, tea.Cmd) {
 	if m.prevView == viewDaemons {
 		m.view = viewList
-		return m, nil
+		return m.resumeInboxReresolve()
 	}
 	m.view = m.prevView
-	return m, nil
+	return m.resumeInboxReresolve()
 }
 
 func cursorForDaemon(rows []daemonRow) int {
@@ -149,6 +149,9 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 		m.daemonTargets = conn.catalog
 	}
 	m.scope = conn.init.scope
+	m.inboxReturn = nil
+	m.inboxPending = false
+	m.inboxReresolvePending = false
 	m.view = conn.init.view
 	if previousView == viewDaemons && conn.init.view == viewEmpty {
 		m.prevView = viewDaemons

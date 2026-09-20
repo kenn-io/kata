@@ -110,7 +110,13 @@ func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
 		} else {
 			m.view = viewList
 		}
-		return m, nil
+		// The flip's view rewrite can dismiss a full-screen view (help,
+		// projects, ...) that covered the Inbox, restoring the Inbox
+		// foreground. A designation re-resolve deferred under that
+		// overlay must fire on this exit path, same as the other
+		// global-view exits. No-op when nothing is pending or the Inbox
+		// is not the restored foreground.
+		return m.resumeInboxReresolve()
 	}
 	if prev == splitlayout.Stacked && m.layout == splitlayout.Split {
 		// Entering split: derive focus from the view the user was

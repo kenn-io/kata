@@ -891,7 +891,9 @@ var filterFormStatusChoices = []string{"all", "open", "closed"}
 // by `f` on the list view. Plan 8 commit 5a shipped Status/Owner/Search;
 // commit 5b adds the Labels axis (any-of semantics). Four axes:
 //   - Status: tri-state radio (all/open/closed) — pre-positioned on
-//     current.Status (empty maps to "all").
+//     current.Status (empty maps to "all"). Omitted in Inbox scope:
+//     the Inbox fetch is already pinned to open issues, so the form
+//     keeps only Owner/Search/Labels there.
 //   - Owner: single-line textinput, pre-filled from current.Owner.
 //   - Search: single-line textinput, pre-filled from current.Search.
 //   - Labels: single-line comma-separated textinput, pre-filled from
@@ -912,14 +914,21 @@ var filterFormStatusChoices = []string{"all", "open", "closed"}
 // text (no project label cache to source from); the deferral keeps
 // the same shape for the single-project case until the overlay
 // rework lands.
-func newFilterForm(current ListFilter) inputState {
-	status := inputField{
-		id:    fieldStatus,
-		label: "Status",
-		kind:  fieldRadio,
-		radio: radioField{choices: filterFormStatusChoices},
+func newFilterForm(current ListFilter, sc scope) inputState {
+	var fields []inputField
+	// The Inbox fetch carries Status=open (queueFetchFilterForScope),
+	// so the Status axis has nothing to offer there; the form stays
+	// available for the owner/search/labels axes.
+	if !sc.inbox {
+		status := inputField{
+			id:    fieldStatus,
+			label: "Status",
+			kind:  fieldRadio,
+			radio: radioField{choices: filterFormStatusChoices},
+		}
+		status.radio.set(current.Status)
+		fields = append(fields, status)
 	}
-	status.radio.set(current.Status)
 	owner := textinput.New()
 	owner.SetValue(current.Owner)
 	owner.Prompt = ""
@@ -932,15 +941,15 @@ func newFilterForm(current ListFilter) inputState {
 	labels.SetValue(joinLabelsForFilterForm(current.Labels))
 	labels.Prompt = ""
 	labels.Blur()
+	fields = append(fields,
+		inputField{id: fieldOwner, kind: fieldSingleLine, input: owner, label: "Owner"},
+		inputField{id: fieldSearch, kind: fieldSingleLine, input: search, label: "Search"},
+		inputField{id: fieldLabels, kind: fieldSingleLine, input: labels, label: "Labels"},
+	)
 	return inputState{
-		kind:  inputFilterForm,
-		title: "filter",
-		fields: []inputField{
-			status,
-			{id: fieldOwner, kind: fieldSingleLine, input: owner, label: "Owner"},
-			{id: fieldSearch, kind: fieldSingleLine, input: search, label: "Search"},
-			{id: fieldLabels, kind: fieldSingleLine, input: labels, label: "Labels"},
-		},
+		kind:      inputFilterForm,
+		title:     "filter",
+		fields:    fields,
 		preFilter: current,
 	}
 }

@@ -21,6 +21,8 @@ type issueCache struct {
 // does not return stale single-project data.
 type cacheKey struct {
 	allProjects bool
+	inbox       bool
+	inboxVisit  uint64
 	projectID   int64
 	limit       int
 }

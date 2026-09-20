@@ -179,6 +179,15 @@ func (m Model) cursorMoveProjects(msg tea.KeyPressMsg, rows []projectsRow) (Mode
 // active scope, just return to viewList without invalidating the cache
 // or refetching, so the user can re-confirm the current scope without
 // churn.
+//
+// The new scope must not share a cache key with list fetches still in
+// flight from before this selection — notably pre-Inbox dispatches for
+// the same ordinary project or all-projects scope, which carry the
+// pre-entry inboxVisit. Stamp the next nonce into the selected scope so
+// every scope era keys distinctly and a slow pre-selection reply is
+// dropped instead of overwriting the fresh rows (same fencing
+// leaveInbox applies to the restored scope). Wire filters are untouched
+// — the nonce only discriminates client-side cache slots.
 func (m Model) applyProjectsViewSelection(rows []projectsRow) (Model, tea.Cmd) {
 	if m.projectsCursor < 0 || m.projectsCursor >= len(rows) {
 		return m, nil
@@ -188,19 +197,33 @@ func (m Model) applyProjectsViewSelection(rows []projectsRow) (Model, tea.Cmd) {
 		m.view = viewList
 		return m, nil
 	}
+	m.inboxReturn = nil
+	m.inboxReresolvePending = false
+	m.inboxVisit++
 	if r.sentinel {
-		m.scope = scope{allProjects: true}
+		m.scope = scope{allProjects: true, inboxVisit: m.inboxVisit}
 	} else {
 		m.scope = scope{
 			projectID:       r.projectID,
 			projectName:     r.name,
 			homeProjectID:   r.projectID,
 			homeProjectName: r.name,
+			inboxVisit:      m.inboxVisit,
 		}
 	}
 	m.view = viewList
 	m.list = listModel{actor: m.list.actor}
 	m.cache.markStale()
+	// The new scope must not inherit the old scope's detail pane: in
+	// split layout the pane stays visible, and its retained issue +
+	// scopePID would aim detail-side actions at the previous scope's
+	// issue. Drop it here; the accepted fresh list fetch bootstraps the
+	// pane onto the newly selected scope's highlighted row
+	// (maybeBootstrapSplitDetail fires because dm.issue is now nil).
+	m.detail = newDetailModel()
+	// Fence a follow tick still in flight from the old scope so its
+	// arrival drops instead of fetching the departed issue.
+	m.nextDetailFollowGen++
 	return m, m.fetchInitial()
 }
 
@@ -212,7 +235,7 @@ func projectsSelectionMatchesScope(r projectsRow, s scope) bool {
 	if r.sentinel {
 		return s.allProjects
 	}
-	return !s.allProjects && r.projectID == s.projectID
+	return !s.allProjects && !s.inbox && r.projectID == s.projectID
 }
 
 // escFromProjectsView returns to the prior viewList if scope is set
@@ -224,7 +247,7 @@ func (m Model) escFromProjectsView() (Model, tea.Cmd) {
 		return m, nil // boot landing, no prior list
 	}
 	m.view = viewList
-	return m, nil
+	return m.resumeInboxReresolve()
 }
 
 // transitionToProjects switches to viewProjects and dispatches a stats

@@ -6,8 +6,43 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
 )
+
+// TestSplit_InboxDetailNavEscPopsNavStack pins the review finding: in
+// split layout inside the Inbox with focusDetail and a non-empty nav
+// stack, Esc must pop one navigation level via the detail pane.
+// routeLayoutFocusKey deliberately declines that case so detail.Update
+// can handle the pop; the Inbox-level Esc intercept in routeGlobalKey
+// must not swallow the key and leaveInbox instead.
+func TestSplit_InboxDetailNavEscPopsNavStack(t *testing.T) {
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	m.scope = scope{projectID: 2, projectName: "capture-project", inbox: true,
+		homeProjectID: 7, homeProjectName: "example-project", inboxVisit: 1}
+	m.inboxReturn = &inboxReturnState{scope: homedScope(7, "example-project")}
+	current := Issue{ProjectID: 2, UID: "01TEST-nnn5", ShortID: "nnn5", Title: "jumped issue", Status: "open"}
+	prior := Issue{ProjectID: 2, UID: "01TEST-old9", ShortID: "old9", Title: "prior issue", Status: "open"}
+	m.detail = detailModel{
+		issue:    &current,
+		scopePID: 2,
+		gen:      41,
+		navStack: []detailModel{{issue: &prior, scopePID: 2, gen: 40}},
+	}
+	m.focus = focusDetail
+
+	out, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	require.True(t, out.scope.inbox,
+		"esc with a pending nav stack pops navigation; it must not leave the Inbox")
+	require.NotNil(t, out.inboxReturn, "the saved pre-Inbox return state must survive the esc")
+	require.Equal(t, focusDetail, out.focus, "focus stays on the detail pane after the pop")
+	require.Empty(t, out.detail.navStack, "esc pops one nav level")
+	require.NotNil(t, out.detail.issue, "the prior nav issue is restored")
+	require.Equal(t, "old9", out.detail.issue.ShortID)
+	require.Equal(t, int64(2), out.detail.scopePID)
+	require.Nil(t, cmd, "popping the nav stack is pure state")
+}
 
 // splitTestSetup boots a Model into split layout (160x40) with the
 // listFixture seeded so the split tests have something to render and

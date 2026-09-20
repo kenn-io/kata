@@ -341,6 +341,8 @@ func findProjectByName(
 type scope struct {
 	projectID       int64
 	allProjects     bool
+	inbox           bool
+	inboxVisit      uint64
 	empty           bool
 	projectName     string
 	workspace       string
