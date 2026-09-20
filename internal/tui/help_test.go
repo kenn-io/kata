@@ -55,6 +55,18 @@ func TestRenderHelp_ChildrenSectionMatchesKeymap(t *testing.T) {
 	}
 }
 
+func TestRenderHelp_EmacsNavigationAliases(t *testing.T) {
+	out := stripANSI(renderHelp(newKeymap(), 60, ListFilter{}))
+	for _, alias := range []string{
+		"pgup/M-v", "pgdown/C-v", "g/C-M-<", "G/C-M->",
+		"up/C-p", "down/C-n", "tab/C-j", "shift+tab/C-k",
+	} {
+		if !strings.Contains(out, alias) {
+			t.Errorf("help omitted %q:\n%s", alias, out)
+		}
+	}
+}
+
 // TestRenderHelp_NarrowWidth: width 40 picks a 1-column layout. We
 // assert each section title appears on its own line so a future
 // regression that drops Detail (or any other section) is caught.

@@ -454,6 +454,11 @@ func (dm detailModel) handleNavKey(
 		return dm.pageScrollUp(), nil, true
 	case km.PageDown.matches(msg):
 		return dm.pageScrollDown(), nil, true
+	case km.Home.matches(msg):
+		dm.scroll = 0
+		return dm, nil, true
+	case km.End.matches(msg):
+		return dm.scrollViewportToEnd(), nil, true
 	case km.ScrollUp.matches(msg):
 		return dm.scrollViewportBy(-1), nil, true
 	case km.ScrollDown.matches(msg):
@@ -497,6 +502,18 @@ func (dm detailModel) scrollViewportBy(delta int) detailModel {
 	if maxStart := viewportMaxStart(len(docLines), visible); dm.scroll > maxStart {
 		dm.scroll = maxStart
 	}
+	return dm
+}
+
+// scrollViewportToEnd uses the same document and visible-row calculation as
+// incremental scrolling, so a boundary key lands on the final rendered page.
+func (dm detailModel) scrollViewportToEnd() detailModel {
+	width, visible, ok := dm.viewportDims()
+	if !ok {
+		return dm
+	}
+	docLines, _ := dm.detailDocumentLines(width, dm.scrollChrome())
+	dm.scroll = viewportMaxStart(len(docLines), visible)
 	return dm
 }
 

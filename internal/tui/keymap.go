@@ -32,8 +32,9 @@ type keymap struct {
 // key is a binding plus its human label. matches() compares against the
 // canonical string Bubble Tea reports for a KeyMsg.
 type key struct {
-	Keys []string
-	Help string
+	Keys    []string
+	Help    string
+	Display string
 }
 
 // newKeymap returns the spec §7.3 bindings.
@@ -54,12 +55,12 @@ func newKeymap() keymap {
 		// cursor handler so existing j/k + arrow ergonomics survive.
 		Up:         key{Keys: []string{"k"}, Help: "up"},
 		Down:       key{Keys: []string{"j"}, Help: "down"},
-		ScrollUp:   key{Keys: []string{"up"}, Help: "scroll up"},
-		ScrollDown: key{Keys: []string{"down"}, Help: "scroll down"},
-		PageUp:     key{Keys: []string{"pgup"}, Help: "page up"},
-		PageDown:   key{Keys: []string{"pgdown"}, Help: "page down"},
-		Home:       key{Keys: []string{"g"}, Help: "first"},
-		End:        key{Keys: []string{"G"}, Help: "last"},
+		ScrollUp:   key{Keys: []string{"up", "ctrl+p"}, Help: "scroll up", Display: "up/C-p"},
+		ScrollDown: key{Keys: []string{"down", "ctrl+n"}, Help: "scroll down", Display: "down/C-n"},
+		PageUp:     key{Keys: []string{"pgup", "alt+v", "meta+v"}, Help: "page up", Display: "pgup/M-v"},
+		PageDown:   key{Keys: []string{"pgdown", "ctrl+v"}, Help: "page down", Display: "pgdown/C-v"},
+		Home:       key{Keys: []string{"g", "ctrl+alt+<", "ctrl+alt+shift+,", "ctrl+meta+<", "ctrl+shift+meta+,"}, Help: "first", Display: "g/C-M-<"},
+		End:        key{Keys: []string{"G", "ctrl+alt+>", "ctrl+alt+shift+.", "ctrl+meta+>", "ctrl+shift+meta+."}, Help: "last", Display: "G/C-M->"},
 		Open:       key{Keys: []string{"enter"}, Help: "open detail"},
 		NewIssue:   key{Keys: []string{"n"}, Help: "new issue (form)"},
 		NewChild:   key{Keys: []string{"N"}, Help: "new child"},
@@ -88,8 +89,8 @@ func newKeymap() keymap {
 		Close:           key{Keys: []string{"x"}, Help: "close"},
 		Reopen:          key{Keys: []string{"r"}, Help: "reopen"},
 		Undo:            key{Keys: []string{"u"}, Help: "undo last issue action"},
-		NextTab:         key{Keys: []string{"tab"}, Help: "next tab"},
-		PrevTab:         key{Keys: []string{"shift+tab"}, Help: "prev tab"},
+		NextTab:         key{Keys: []string{"tab", "ctrl+j"}, Help: "next tab", Display: "tab/C-j"},
+		PrevTab:         key{Keys: []string{"shift+tab", "ctrl+k"}, Help: "prev tab", Display: "shift+tab/C-k"},
 		JumpRef:         key{Keys: []string{"enter"}, Help: "jump to referenced issue"},
 		Back:            key{Keys: []string{"esc", "backspace"}, Help: "back"},
 		EditBody:        key{Keys: []string{"e"}, Help: "edit body"},
@@ -108,6 +109,8 @@ func newKeymap() keymap {
 
 // matches reports whether msg is one of k's bound keys.
 func (k key) matches(msg tea.KeyPressMsg) bool {
-	s := msg.String()
-	return slices.Contains(k.Keys, s)
+	if msg.Mod&(tea.ModCtrl|tea.ModAlt|tea.ModMeta) != 0 {
+		return slices.Contains(k.Keys, msg.Keystroke())
+	}
+	return slices.Contains(k.Keys, msg.String())
 }

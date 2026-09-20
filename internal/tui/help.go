@@ -58,6 +58,9 @@ func helpSections(km keymap) []helpSection {
 
 // keyDisplay joins multi-key bindings with '/' (e.g. "q/ctrl+c").
 func keyDisplay(k key) string {
+	if k.Display != "" {
+		return k.Display
+	}
 	parts := make([]string, len(k.Keys))
 	for i, binding := range k.Keys {
 		if binding == " " {

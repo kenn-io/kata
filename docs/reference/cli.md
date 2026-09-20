@@ -995,6 +995,18 @@ parent is collapsed, then collapses all when every parent is already expanded.
 the first or final page, the cursor keeps its screen row; pressing the same page
 key again at that boundary jumps to the first or last issue.
 
+The issue list also accepts Emacs navigation keys: `C-v` pages forward,
+`M-v` pages backward, `C-M-<` jumps to the first visible issue, and `C-M->`
+jumps to the last. `M` is Alt or Meta. In issue detail, the page keys scroll
+the document and the boundary keys jump to its first or final page; `g` and
+`G` do the same there. A terminal must report modified punctuation keys for
+`C-M-<` and `C-M->` to work; the existing `g` and `G` keys remain available.
+
+`C-n` and `C-p` move down and up through list rows or scroll the detail
+document one line. In detail, `C-j` and `C-k` cycle forward and backward
+through activity tabs and the child section. Some terminals send `C-j` as
+Enter; Tab and Shift-Tab remain available for section cycling.
+
 The TUI appends local daemon transport diagnostics to
 `<KATA_HOME>/runtime/<dbhash>/tui.log`, including retried stale-socket failures
 and request paths. Use that file when an interactive fetch reports a local

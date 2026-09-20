@@ -10,29 +10,29 @@ C         credentials
 L         toggle layout
 
 Graph
-k       up
-j       down
-up      scroll up
-down    scroll down
-pgup    page up
-pgdown  page down
-g       first
-G       last
-enter   open detail
-space   expand/collapse
-right   expand
-left    collapse
-E       expand/collapse all
-n       new issue (form)
-v       toggle flat/nested view
-o       toggle graph order
-x       close
-r       reopen
-u       undo last issue action
+k           up
+j           down
+up/C-p      scroll up
+down/C-n    scroll down
+pgup/M-v    page up
+pgdown/C-v  page down
+g/C-M-<     first
+G/C-M->     last
+enter       open detail
+space       expand/collapse
+right       expand
+left        collapse
+E           expand/collapse all
+n           new issue (form)
+v           toggle flat/nested view
+o           toggle graph order
+x           close
+r           reopen
+u           undo last issue action
 
 Detail
-tab            next tab
-shift+tab      prev tab
+tab/C-j        next tab
+shift+tab/C-k  prev tab
 enter          jump to referenced issue
 esc/backspace  back
 e              edit body

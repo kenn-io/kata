@@ -219,6 +219,62 @@ func TestEdge_PageUpPageDown_PagesVisibleWindow(t *testing.T) {
 	assertViewContains(t, nm, "[1-24 of 50]")
 }
 
+func TestEmacsListNavigationUsesFilteredRows(t *testing.T) {
+	m := initialModel(Options{})
+	m.list.loading = false
+	m.list.issues = makeTestIssues(50)
+	for i := range m.list.issues {
+		if i%2 == 0 {
+			m.list.issues[i].Status = "open"
+		} else {
+			m.list.issues[i].Status = "closed"
+		}
+	}
+	m.list.filter = ListFilter{Status: "open"}
+	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	forward := tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl, Text: "v"}
+	back := tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt, Text: "v"}
+	end := tea.KeyPressMsg{Code: '>', Mod: tea.ModCtrl | tea.ModAlt, Text: ">"}
+	start := tea.KeyPressMsg{Code: '<', Mod: tea.ModCtrl | tea.ModAlt, Text: "<"}
+	m, _ = updateModel(m, forward)
+	if m.list.cursor <= 0 || m.list.viewMode != issueListViewNested {
+		t.Fatalf("C-v: cursor=%d mode=%v, want forward page without view toggle", m.list.cursor, m.list.viewMode)
+	}
+	if m.list.selectedUID != m.list.visibleRows()[m.list.cursor].issue.UID {
+		t.Fatal("C-v desynchronized selected issue")
+	}
+	before := m.list.cursor
+	m, _ = updateModel(m, back)
+	if m.list.cursor >= before {
+		t.Fatalf("M-v: cursor=%d, want before %d", m.list.cursor, before)
+	}
+	m, _ = updateModel(m, end)
+	if m.list.cursor != 24 || m.list.selectedUID != "01TEST-r049" {
+		t.Fatalf("C-M->: cursor=%d selected=%q, want final open row", m.list.cursor, m.list.selectedUID)
+	}
+	m, _ = updateModel(m, start)
+	if m.list.cursor != 0 || m.list.selectedUID != "01TEST-r001" {
+		t.Fatalf("C-M-<: cursor=%d selected=%q, want first open row", m.list.cursor, m.list.selectedUID)
+	}
+}
+
+func TestEmacsVerticalListMovement(t *testing.T) {
+	m := initialModel(Options{})
+	m.list.loading = false
+	m.list.issues = makeTestIssues(3)
+	m.list.cursor = 1
+	m.list.selectedUID = "01TEST-r002"
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl, Text: "n"})
+	if m.list.cursor != 2 || m.list.selectedUID != "01TEST-r003" || m.input.kind != inputNone {
+		t.Fatalf("C-n: cursor=%d selected=%q input=%v", m.list.cursor, m.list.selectedUID, m.input.kind)
+	}
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl, Text: "p"})
+	if m.list.cursor != 1 || m.list.selectedUID != "01TEST-r002" {
+		t.Fatalf("C-p: cursor=%d selected=%q", m.list.cursor, m.list.selectedUID)
+	}
+}
+
 func TestEdge_PageDownToFinalPagePreservesScreenRow(t *testing.T) {
 	m := initialModel(Options{})
 	m.list.loading = false
