@@ -43,6 +43,8 @@ type Issue struct {
 	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
 	Related             []LinkPeer   `json:"related,omitempty"`
 	Priority            *int64       `json:"priority,omitempty"`
+	Revision            int64        `json:"revision"`
+	RecurrenceID        *int64       `json:"recurrence_id,omitempty"`
 }
 
 // LinkPeer mirrors api.LinkPeer: UID, short_id, project, and qualified_id
@@ -133,9 +135,11 @@ type LinkBody struct {
 // MutationResp mirrors the §4.5 mutation envelope.
 type MutationResp struct {
 	Issue   *Issue         `json:"issue"`
+	Link    *LinkEntry     `json:"link,omitempty"`
 	Event   *EventEnvelope `json:"event,omitempty"`
 	Changed bool           `json:"changed"`
 	Reused  bool           `json:"reused,omitempty"`
+	undo    *undoAttempt
 }
 
 // EventEnvelope is the minimal event projection embedded in mutation
@@ -332,12 +336,14 @@ func (e *APIError) Error() string {
 // The daemon ships labels as a sibling slice (one IssueLabel per row);
 // showIssueLabel keeps decode tight to the fields the TUI needs.
 type showIssueBody struct {
-	Issue    Issue            `json:"issue"`
-	Comments []CommentEntry   `json:"comments"`
-	Links    []LinkEntry      `json:"links"`
-	Labels   []showIssueLabel `json:"labels"`
-	Parent   *IssueRef        `json:"parent,omitempty"`
-	Children []Issue          `json:"children,omitempty"`
+	Issue    Issue              `json:"issue"`
+	Comments []CommentEntry     `json:"comments"`
+	Links    []LinkEntry        `json:"links"`
+	Labels   []showIssueLabel   `json:"labels"`
+	Parent   *IssueRef          `json:"parent,omitempty"`
+	Children []Issue            `json:"children,omitempty"`
+	Lease    *api.IssueClaimOut `json:"lease,omitempty"`
+	Claim    *api.IssueClaimOut `json:"claim,omitempty"`
 }
 
 // IssueDetail is the hydrated detail payload used by the TUI detail view.
@@ -345,6 +351,7 @@ type IssueDetail struct {
 	Issue    *Issue
 	Parent   *IssueRef
 	Children []Issue
+	Lease    *api.IssueClaimOut
 }
 
 // showIssueLabel is the per-label projection from showIssue's labels

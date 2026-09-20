@@ -139,7 +139,11 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	actor := m.list.actor
 	previousView := m.view
 	m.connGen++
-	m.api = conn.api
+	m.api = newUndoClient(conn.api)
+	m.undoHistory.clear("connected to a different daemon")
+	m.undoInFlight = false
+	m.undoCloseEntryID = 0
+	m.mutationEpoch = 0
 	m.activeDaemon = conn.target
 	if len(conn.catalog) > 0 {
 		m.daemonTargets = conn.catalog

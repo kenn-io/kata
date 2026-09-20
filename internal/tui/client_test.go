@@ -638,7 +638,9 @@ func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 			"issue": map[string]any{
 				"uid": "01JZ0000000000000000000001", "project_uid": "01JZ0000000000000000000002",
 				"short_id": "abc4", "title": "fix", "status": "open",
+				"revision": 9, "recurrence_id": 23,
 			},
+			"lease":    map[string]any{"claim_uid": "lease-1", "issue_uid": "01JZ0000000000000000000001"},
 			"comments": []any{},
 			"links": []map[string]any{
 				{
@@ -671,6 +673,12 @@ func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 	if got.ProjectUID != "01JZ0000000000000000000002" {
 		t.Fatalf("project UID = %q", got.ProjectUID)
 	}
+	if got.Revision != 9 || got.RecurrenceID == nil || *got.RecurrenceID != 23 {
+		t.Fatalf("issue revision/recurrence not decoded: %+v", got)
+	}
+	if detail.Lease == nil || detail.Lease.ClaimUID != "lease-1" {
+		t.Fatalf("lease not decoded: %+v", detail.Lease)
+	}
 	links, err := c.ListLinks(context.Background(), 7, "abc4")
 	require.NoError(t, err)
 	if len(links) != 1 || links[0].From.UID != "01JZ0000000000000000000001" ||
@@ -679,6 +687,29 @@ func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 	}
 	if links[0].From.ShortID != "abc4" || links[0].To.ShortID != "def4" {
 		t.Fatalf("link short_ids not decoded: %+v", links)
+	}
+}
+
+func TestClient_AddLinkDecodesExactCreatedLink(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		respondJSON(t, w, map[string]any{
+			"issue":   map[string]any{"uid": "01JZ0000000000000000000001", "short_id": "abc4", "status": "open"},
+			"changed": true,
+			"link": map[string]any{
+				"id": 42, "type": "related",
+				"from": map[string]any{"uid": "01JZ0000000000000000000001", "short_id": "abc4"},
+				"to":   map[string]any{"uid": "01JZ0000000000000000000003", "short_id": "def4"},
+			},
+		})
+	})
+	resp, err := c.AddLink(context.Background(), 7, "abc4", LinkBody{Type: "related", ToRef: "def4"}, "alice")
+	require.NoError(t, err)
+	require.True(t, resp.Changed)
+	if resp.Link == nil || resp.Link.ID != 42 || resp.Link.Type != "related" ||
+		resp.Link.From.UID != "01JZ0000000000000000000001" ||
+		resp.Link.To.UID != "01JZ0000000000000000000003" {
+		t.Fatalf("exact created link not decoded: %+v", resp.Link)
 	}
 }
 

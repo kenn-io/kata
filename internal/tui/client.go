@@ -199,10 +199,15 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 	if err != nil {
 		return nil, err
 	}
+	lease := body.Lease
+	if lease == nil {
+		lease = body.Claim
+	}
 	return &IssueDetail{
 		Issue:    &body.Issue,
 		Parent:   body.Parent,
 		Children: body.Children,
+		Lease:    lease,
 	}, nil
 }
 

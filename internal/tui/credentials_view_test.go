@@ -34,6 +34,25 @@ func TestCredentialsViewCapabilityGateDoesNotFetchWhenUnavailable(t *testing.T) 
 	assert.Contains(t, stripANSI(out.viewContent()), "credential audit unavailable")
 }
 
+func TestCredentialsViewLoadsThroughUndoClient(t *testing.T) {
+	var requests atomic.Int32
+	srv := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/tokens": func(w http.ResponseWriter, _ *http.Request) {
+			requests.Add(1)
+			respondJSON(t, w, map[string]any{"tokens": []any{}, "observed_at": time.Now()})
+		},
+	})
+	m := newTestModel()
+	m.api = newUndoClient(NewClient(srv.URL, srv.Client()))
+	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{TokenAuditRead: true}})
+	_, cmd := updateModel(m, keyRune('C'))
+	require.NotNil(t, cmd)
+	loaded, ok := cmd().(credentialsLoadedMsg)
+	require.True(t, ok)
+	require.NoError(t, loaded.err)
+	require.EqualValues(t, 1, requests.Load())
+}
+
 func TestCredentialsViewStartsLoadingWhenCapabilityDiscoveryCompletes(t *testing.T) {
 	var requests atomic.Int32
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
