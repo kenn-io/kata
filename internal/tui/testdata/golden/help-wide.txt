@@ -1,33 +1,33 @@
 kata — keybindings
 
-Global                             Detail                                     Forms
-?         help                     tab            next tab                    ctrl+o         save or apply
-q/ctrl+c  quit                     shift+tab      prev tab                    esc            cancel
-P         projects                 enter          jump to referenced issue    tab/shift+tab  change field
-D         daemons                  esc/backspace  back                        ctrl+e         open editor
-F         federation               e              edit body                   ctrl+u         clear prompt
-C         credentials              c              new comment
-L         toggle layout            p              set parent                  Filters
-                                   b              add blocker                 /       search
-Graph                              l              add related                 s       cycle status filter
-k       up                         +              add label                   f       filter (form)
-j       down                       -              remove label                c       clear filters
-up      scroll up                  a              assign owner                ctrl+r  reset filter form
-down    scroll down                A              clear owner
-pgup    page up                    t              timed assignment
-pgdown  page down                  !              set priority
-g       first
-G       last                       Children
-enter   open detail                N      new child
-space   expand/collapse            j/k    move child cursor
-right   expand                     ↑↓     scroll detail viewport
-left    collapse                   enter  open child
-E       expand/collapse all
-n       new issue (form)
-v       toggle flat/nested view
-o       toggle graph order
-x       close
-r       reopen
-u       undo last issue action
+Global                                 Detail                                     Forms
+?         help                         tab/C-j        next tab                    ctrl+o         save or apply
+q/ctrl+c  quit                         shift+tab/C-k  prev tab                    esc            cancel
+P         projects                     enter          jump to referenced issue    tab/shift+tab  change field
+D         daemons                      esc/backspace  back                        ctrl+e         open editor
+F         federation                   e              edit body                   ctrl+u         clear prompt
+C         credentials                  c              new comment
+L         toggle layout                p              set parent                  Filters
+                                       b              add blocker                 /       search
+Graph                                  l              add related                 s       cycle status filter
+k           up                         +              add label                   f       filter (form)
+j           down                       -              remove label                c       clear filters
+up/C-p      scroll up                  a              assign owner                ctrl+r  reset filter form
+down/C-n    scroll down                A              clear owner
+pgup/M-v    page up                    t              timed assignment
+pgdown/C-v  page down                  !              set priority
+g/C-M-<     first
+G/C-M->     last                       Children
+enter       open detail                N      new child
+space       expand/collapse            j/k    move child cursor
+right       expand                     ↑↓     scroll detail viewport
+left        collapse                   enter  open child
+E           expand/collapse all
+n           new issue (form)
+v           toggle flat/nested view
+o           toggle graph order
+x           close
+r           reopen
+u           undo last issue action
 
 press ? to return

@@ -294,6 +294,102 @@ func TestDetail_Scroll_PageDownScrollsBodyEvenWithActivityRows(t *testing.T) {
 	}
 }
 
+func TestEmacsDetailNavigationScrollsDocument(t *testing.T) {
+	dm := detailFixture()
+	dm.issue.Body = strings.Repeat("line\n", 79) + "tail"
+	dm.lastTermWidth, dm.lastTermHeight = 120, 30
+	dm.detailFocus = focusChildren
+	dm.children = []Issue{{UID: "01TEST-child", ShortID: "child", Title: "child"}}
+	km := newKeymap()
+	forward := tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl, Text: "v"}
+	back := tea.KeyPressMsg{Code: 'v', Mod: tea.ModMeta, Text: "v"}
+	end := tea.KeyPressMsg{Code: '>', Mod: tea.ModCtrl | tea.ModMeta, Text: ">"}
+	start := tea.KeyPressMsg{Code: '<', Mod: tea.ModCtrl | tea.ModMeta, Text: "<"}
+
+	dm, _ = dm.Update(forward, km, nil)
+	if dm.scroll <= 0 || dm.detailFocus != focusChildren || dm.childCursor != 0 {
+		t.Fatalf("C-v: scroll=%d focus=%v child cursor=%d", dm.scroll, dm.detailFocus, dm.childCursor)
+	}
+	page := dm.scroll
+	dm, _ = dm.Update(back, km, nil)
+	if dm.scroll >= page {
+		t.Fatalf("M-v: scroll=%d, want before %d", dm.scroll, page)
+	}
+	dm, _ = dm.Update(end, km, nil)
+	width, visible, _ := dm.viewportDims()
+	doc, _ := dm.detailDocumentLines(width, dm.scrollChrome())
+	wantEnd := viewportMaxStart(len(doc), visible)
+	if dm.scroll != wantEnd || dm.detailFocus != focusChildren {
+		t.Fatalf("C-M->: scroll=%d, want final page %d; focus=%v", dm.scroll, wantEnd, dm.detailFocus)
+	}
+	dm, _ = dm.Update(end, km, nil)
+	if dm.scroll != wantEnd {
+		t.Fatalf("C-M-> at end: scroll=%d, want %d", dm.scroll, wantEnd)
+	}
+	dm, _ = dm.Update(start, km, nil)
+	if dm.scroll != 0 || dm.childCursor != 0 {
+		t.Fatalf("C-M-<: scroll=%d child cursor=%d, want zero", dm.scroll, dm.childCursor)
+	}
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: 'G', Text: "G"}, km, nil)
+	if dm.scroll != wantEnd {
+		t.Fatalf("G: scroll=%d, want final page %d", dm.scroll, wantEnd)
+	}
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: 'g', Text: "g"}, km, nil)
+	if dm.scroll != 0 {
+		t.Fatalf("g: scroll=%d, want zero", dm.scroll)
+	}
+}
+
+func TestEmacsVerticalDetailMovement(t *testing.T) {
+	dm := detailFixture()
+	dm.lastTermWidth, dm.lastTermHeight = 120, 24
+	km := newKeymap()
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl, Text: "n"}, km, nil)
+	if dm.scroll != 1 || dm.tabCursor != 0 {
+		t.Fatalf("C-n: scroll=%d tab cursor=%d, want one-line viewport movement", dm.scroll, dm.tabCursor)
+	}
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl, Text: "p"}, km, nil)
+	if dm.scroll != 0 || dm.tabCursor != 0 {
+		t.Fatalf("C-p: scroll=%d tab cursor=%d, want top of viewport", dm.scroll, dm.tabCursor)
+	}
+	dm.children = []Issue{{UID: "01TEST-child1"}, {UID: "01TEST-child2"}}
+	dm.detailFocus = focusChildren
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl, Text: "n"}, km, nil)
+	if dm.scroll != 1 || dm.childCursor != 0 {
+		t.Fatalf("C-n on children: scroll=%d child cursor=%d, want one-line viewport movement", dm.scroll, dm.childCursor)
+	}
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl, Text: "p"}, km, nil)
+	if dm.scroll != 0 || dm.childCursor != 0 {
+		t.Fatalf("C-p on children: scroll=%d child cursor=%d, want top of viewport", dm.scroll, dm.childCursor)
+	}
+}
+
+func TestEmacsSectionDetailCycling(t *testing.T) {
+	dm := detailFixture()
+	dm.children = []Issue{{UID: "01TEST-child"}}
+	km := newKeymap()
+	prev := tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl, Text: "k"}
+	next := tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl, Text: "j"}
+	dm, _ = dm.Update(prev, km, nil)
+	if dm.detailFocus != focusChildren {
+		t.Fatalf("C-k from comments: focus=%v, want children", dm.detailFocus)
+	}
+	dm, _ = dm.Update(next, km, nil)
+	if dm.detailFocus != focusActivity || dm.activeTab != tabComments {
+		t.Fatalf("C-j from children: focus/tab=%v/%v, want comments", dm.detailFocus, dm.activeTab)
+	}
+	for _, want := range []detailTab{tabEvents, tabLinks} {
+		dm, _ = dm.Update(next, km, nil)
+		if dm.activeTab != want {
+			t.Fatalf("C-j: tab=%v, want %v", dm.activeTab, want)
+		}
+	}
+	dm, _ = dm.Update(next, km, nil)
+	if dm.detailFocus != focusChildren {
+		t.Fatalf("C-j from links: focus=%v, want children", dm.detailFocus)
+	}
+}
+
 // TestDetail_Scroll_PageUpClampsAtTop: pgup at the top of the body is
 // a no-op, not a negative scroll.
 func TestDetail_Scroll_PageUpClampsAtTop(t *testing.T) {

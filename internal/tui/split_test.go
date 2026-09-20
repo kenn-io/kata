@@ -32,6 +32,116 @@ func splitTestSetup(t *testing.T) (Model, func()) {
 	return m, cleanup
 }
 
+func TestEmacsHelpOverlayKeepsHiddenPanesStill(t *testing.T) {
+	keys := []struct {
+		name string
+		msg  tea.KeyPressMsg
+	}{
+		{"page forward", tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl, Text: "v"}},
+		{"page back", tea.KeyPressMsg{Code: 'v', Mod: tea.ModAlt, Text: "v"}},
+		{"start", tea.KeyPressMsg{Code: '<', Mod: tea.ModCtrl | tea.ModAlt, Text: "<"}},
+		{"end", tea.KeyPressMsg{Code: '>', Mod: tea.ModCtrl | tea.ModAlt, Text: ">"}},
+		{"move down", tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl, Text: "n"}},
+		{"move up", tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl, Text: "p"}},
+	}
+	for _, focus := range []struct {
+		name string
+		pane focusPane
+	}{
+		{"list", focusList},
+		{"detail", focusDetail},
+	} {
+		for _, binding := range keys {
+			t.Run(focus.name+"/"+binding.name, func(t *testing.T) {
+				m, cleanup := splitTestSetup(t)
+				defer cleanup()
+				m.list.issues = makeTestIssues(50)
+				m.list.cursor = 5
+				m.list.selectedUID = m.list.issues[5].UID
+				issue := m.list.issues[5]
+				issue.Body = strings.Repeat("line\n", 79) + "tail"
+				m.detail.issue = &issue
+				m.detail.scroll = 5
+				m.detail.lastDetailSplit = true
+				m.detail.lastDetailWidth = 72
+				m.detail.lastDetailHeight = 24
+				m.focus = focus.pane
+				m = sendRune(m, '?')
+				if m.view != viewHelp {
+					t.Fatal("help did not open")
+				}
+				m.detail.scroll = 5
+				m, _ = updateModel(m, binding.msg)
+				if m.list.cursor != 5 || m.detail.scroll != 5 || m.detail.childCursor != 0 {
+					t.Fatalf("hidden panes moved: cursor=%d scroll=%d child=%d", m.list.cursor, m.detail.scroll, m.detail.childCursor)
+				}
+				m = sendRune(m, '?')
+				m.detail.scroll = 5
+				m, _ = updateModel(m, binding.msg)
+				if focus.pane == focusList && m.list.cursor == 5 {
+					t.Fatal("list did not resume navigation after closing help")
+				}
+				if focus.pane == focusDetail && m.detail.scroll == 5 {
+					t.Fatal("detail did not resume navigation after closing help")
+				}
+			})
+		}
+	}
+}
+
+func TestEmacsSectionSplitFocus(t *testing.T) {
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	m.detail = detailFixture()
+	m.detail.children = []Issue{{UID: "01TEST-child"}}
+	m.list.cursor = 1
+	m.focus = focusList
+	next := tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl, Text: "j"}
+	prev := tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl, Text: "k"}
+	m, _ = updateModel(m, next)
+	if m.list.cursor != 1 || m.detail.activeTab != tabComments {
+		t.Fatalf("C-j on list focus changed state: cursor=%d tab=%v", m.list.cursor, m.detail.activeTab)
+	}
+	m.focus = focusDetail
+	m, _ = updateModel(m, next)
+	if m.detail.activeTab != tabEvents || m.list.cursor != 1 {
+		t.Fatalf("C-j on detail focus: tab=%v cursor=%d, want events and unchanged list", m.detail.activeTab, m.list.cursor)
+	}
+	m, _ = updateModel(m, prev)
+	if m.detail.activeTab != tabComments {
+		t.Fatalf("C-k on detail focus: tab=%v, want comments", m.detail.activeTab)
+	}
+}
+
+func TestEmacsInputAndModalOwnNavigationKeys(t *testing.T) {
+	for _, state := range []struct {
+		name  string
+		apply func(*Model)
+	}{
+		{"search", func(m *Model) { m.input = newSearchBar(ListFilter{}) }},
+		{"modal", func(m *Model) { m.modal = modalQuitConfirm }},
+	} {
+		t.Run(state.name, func(t *testing.T) {
+			m, cleanup := splitTestSetup(t)
+			defer cleanup()
+			m.list.issues = makeTestIssues(50)
+			m.list.cursor = 5
+			m.list.selectedUID = m.list.issues[5].UID
+			state.apply(&m)
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl, Text: "v"})
+			if m.list.selectedUID != "01TEST-r006" || m.list.viewMode != issueListViewNested {
+				t.Fatalf("%s let C-v navigate list: selected=%q mode=%v", state.name, m.list.selectedUID, m.list.viewMode)
+			}
+			if state.name == "search" && m.input.activeField().value() != "v" {
+				t.Fatalf("search did not own C-v: buffer=%q", m.input.activeField().value())
+			}
+			if state.name == "modal" && m.list.cursor != 5 {
+				t.Fatalf("modal let C-v move list: cursor=%d", m.list.cursor)
+			}
+		})
+	}
+}
+
 // focusFirstIssueDetail seeds the detail pane with m.list.issues[0],
 // pins scopePID to the active project, and switches focus to the
 // detail pane — the standard mutation pattern that drives detail-pane

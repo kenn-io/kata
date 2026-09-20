@@ -2853,6 +2853,9 @@ func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
 		return m, withConnGen(cmd, m.connGen)
 	}
+	if _, isKey := msg.(tea.KeyPressMsg); isKey && m.view != viewList && m.view != viewDetail {
+		return m, nil
+	}
 	if m.layout == splitlayout.Split {
 		return m.dispatchToSplitPane(msg)
 	}
