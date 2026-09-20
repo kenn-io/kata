@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 )
@@ -11,6 +12,7 @@ import (
 // The top-level model consumes it before view generation guards apply.
 type undoAttempt struct {
 	client   *undoClient
+	ready    chan struct{}
 	entry    *undoEntry
 	boundary string
 	unknown  bool
@@ -21,17 +23,25 @@ func (a *undoAttempt) complete() {
 		return
 	}
 	a.client.mu.Lock()
-	a.client.pending = false
-	a.client.mu.Unlock()
+	defer a.client.mu.Unlock()
+	i := slices.Index(a.client.pending, a)
+	if i < 0 {
+		return
+	}
+	a.client.pending = slices.Delete(a.client.pending, i, i+1)
+	if i == 0 && len(a.client.pending) > 0 {
+		close(a.client.pending[0].ready)
+	}
 }
 
 // undoClient wraps only the TUI's write methods. Embedding KataAPI forwards
 // all reads and unrelated operations to the connected daemon client.
 type undoClient struct {
 	KataAPI
-	mu      sync.Mutex
-	pending bool
-	epoch   uint64
+	mu       sync.Mutex
+	pending  []*undoAttempt
+	instance InstanceInfo
+	epoch    uint64
 }
 
 func (c *undoClient) snapshotEpoch() uint64 {
@@ -59,29 +69,41 @@ func (c *undoClient) ListTokens(ctx context.Context) ([]TokenInfo, time.Time, er
 	return audit.ListTokens(ctx)
 }
 
-func (c *undoClient) begin() (*undoAttempt, error) {
+// Writes wait until the model has recorded the preceding response. Undo must
+// refuse a busy client because its history entry was selected before waiting.
+func (c *undoClient) begin(ctx context.Context, wait bool) (*undoAttempt, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.pending {
+	if !wait && len(c.pending) > 0 {
+		c.mu.Unlock()
 		return nil, errors.New("another issue action is in progress")
 	}
-	c.pending = true
-	return &undoAttempt{client: c}, nil
+	attempt := &undoAttempt{client: c, ready: make(chan struct{})}
+	c.pending = append(c.pending, attempt)
+	if len(c.pending) == 1 {
+		close(attempt.ready)
+	}
+	c.mu.Unlock()
+	select {
+	case <-attempt.ready:
+		return attempt, nil
+	case <-ctx.Done():
+		attempt.complete()
+		return nil, ctx.Err()
+	}
 }
 
 func (c *undoClient) edit(ctx context.Context, projectID int64, ref, actor, kind string,
 	write func(string) (*MutationResp, error),
 ) (*MutationResp, error) {
-	attempt, err := c.begin()
+	attempt, err := c.begin(ctx, true)
 	if err != nil {
 		return nil, err
 	}
-	instance, err := c.GetInstance(ctx)
-	if err != nil || instance.InstanceUID == "" {
-		if err == nil {
-			err = errors.New("daemon instance identity is unavailable")
-		}
-		return &MutationResp{undo: attempt}, err
+	c.mu.Lock()
+	instance := c.instance
+	c.mu.Unlock()
+	if instance.InstanceUID == "" {
+		return &MutationResp{undo: attempt}, errors.New("daemon instance identity is unavailable")
 	}
 	before, err := c.GetIssueDetail(ctx, projectID, ref)
 	if err != nil || before == nil || before.Issue == nil {
@@ -229,8 +251,8 @@ func (c *undoClient) CloseWithEvidence(ctx context.Context, projectID int64, ref
 	})
 }
 
-func (c *undoClient) boundaryWrite(reason string, write func() (*MutationResp, error)) (*MutationResp, error) {
-	attempt, err := c.begin()
+func (c *undoClient) boundaryWrite(ctx context.Context, reason string, write func() (*MutationResp, error)) (*MutationResp, error) {
+	attempt, err := c.begin(ctx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -248,19 +270,19 @@ func (c *undoClient) boundaryWrite(reason string, write func() (*MutationResp, e
 }
 
 func (c *undoClient) CreateIssue(ctx context.Context, projectID int64, body CreateIssueBody) (*MutationResp, error) {
-	return c.boundaryWrite("issue creation cannot be undone", func() (*MutationResp, error) {
+	return c.boundaryWrite(ctx, "issue creation cannot be undone", func() (*MutationResp, error) {
 		return c.KataAPI.CreateIssue(ctx, projectID, body)
 	})
 }
 
 func (c *undoClient) AddComment(ctx context.Context, projectID int64, ref, body, actor string) (*MutationResp, error) {
-	return c.boundaryWrite("comment addition cannot be undone", func() (*MutationResp, error) {
+	return c.boundaryWrite(ctx, "comment addition cannot be undone", func() (*MutationResp, error) {
 		return c.KataAPI.AddComment(ctx, projectID, ref, body, actor)
 	})
 }
 
 func (c *undoClient) ClaimTimedAssignment(ctx context.Context, projectID int64, ref, actor string, ttl time.Duration) (*MutationResp, error) {
-	return c.boundaryWrite("timed assignment cannot be undone", func() (*MutationResp, error) {
+	return c.boundaryWrite(ctx, "timed assignment cannot be undone", func() (*MutationResp, error) {
 		return c.KataAPI.ClaimTimedAssignment(ctx, projectID, ref, actor, ttl)
 	})
 }

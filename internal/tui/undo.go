@@ -134,15 +134,11 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 	}
 	if formMatches {
 		m.input.saving = false
-		if out.conflict != "" {
-			m.input.err = "cannot undo: " + out.conflict
-			return m, nil
-		}
 		if out.err != nil && (out.attempt == nil || !out.attempt.unknown) {
 			m.input.err = "undo failed: " + out.err.Error()
 			return m, nil
 		}
-		if out.changed || out.already || (out.attempt != nil && out.attempt.unknown) {
+		if out.changed || out.already || out.conflict != "" || (out.attempt != nil && out.attempt.unknown) {
 			m.input = inputState{}
 			m.undoCloseEntryID = 0
 		}
@@ -151,7 +147,8 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 	case out.needsEvidence:
 		return m.openUndoCloseForm(), nil
 	case out.conflict != "":
-		return m.undoNotice("cannot undo "+target+": "+out.conflict, toastError)
+		m.undoHistory.entries = m.undoHistory.entries[:len(m.undoHistory.entries)-1]
+		return m.undoNotice("skipped undo for "+target+": "+out.conflict, toastError)
 	case out.attempt != nil && out.attempt.unknown:
 		m.advanceMutationEpoch()
 		m.undoHistory.clear("undo outcome is unknown")

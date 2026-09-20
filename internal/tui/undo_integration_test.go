@@ -21,7 +21,7 @@ func TestUndoClientRealDaemonCloseAndParentLink(t *testing.T) {
 	require.NoError(t, err)
 	child, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Child", Author: "alice"})
 	require.NoError(t, err)
-	client := newUndoClient(NewClient(env.URL, env.HTTP))
+	client := newConnectedUndoClient(t, NewClient(env.URL, env.HTTP))
 
 	closed, err := client.Close(ctx, project.ID, child.UID, "alice")
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestUndoClientRealDaemonScopedReopenRequiresEvidence(t *testing.T) {
 		clone.Header.Set("Authorization", "Bearer scoped-undo-token")
 		return transport.RoundTrip(clone)
 	})}
-	client := newUndoClient(NewClient(env.URL, hc))
+	client := newConnectedUndoClient(t, NewClient(env.URL, hc))
 	reopened, err := client.Reopen(ctx, project.ID, issue.UID, "worker-a")
 	require.NoError(t, err)
 	require.NotNil(t, reopened.undo.entry)
@@ -105,7 +105,7 @@ func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) {
 	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Example", Body: "before", Author: "alice"})
 	require.NoError(t, err)
 	base := NewClient(env.URL, env.HTTP)
-	client := newUndoClient(base)
+	client := newConnectedUndoClient(t, base)
 	edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice")
 	require.NoError(t, err)
 	require.NotNil(t, edited.undo.entry)
@@ -121,4 +121,34 @@ func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) {
 	current, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "someone else's text", current.Body)
+}
+
+func TestUndoClientRealDaemonDetectsStatusChangedAwayAndBack(t *testing.T) {
+	ctx := context.Background()
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Example", Author: "alice",
+	})
+	require.NoError(t, err)
+	base := NewClient(env.URL, env.HTTP)
+	client := newConnectedUndoClient(t, base)
+	closed, err := client.Close(ctx, project.ID, issue.UID, "alice")
+	require.NoError(t, err)
+	entry := *closed.undo.entry
+	closed.undo.complete()
+	_, err = base.Reopen(ctx, project.ID, issue.UID, "bob")
+	require.NoError(t, err)
+	reclosed, err := base.Close(ctx, project.ID, issue.UID, "bob")
+	require.NoError(t, err)
+	require.Equal(t, entry.after.Status, reclosed.Issue.Status)
+	require.Equal(t, entry.after.ClosedReason, reclosed.Issue.ClosedReason)
+	outcome := client.undo(ctx, entry, false, nil)
+	defer outcome.attempt.complete()
+	require.NotEmpty(t, outcome.conflict)
+	require.False(t, outcome.changed)
+	current, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "closed", current.Status)
 }

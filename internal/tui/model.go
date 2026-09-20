@@ -397,6 +397,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.isStaleListFetch(msg) {
+			dispatchKey, _, _ := fetchPayload(msg)
+			if cacheKeysEqual(dispatchKey, m.currentCacheKey()) {
+				return m, m.fetchInitial()
+			}
 			return m, nil
 		}
 		prevPID, prevUID, prevHas := highlightedIdentity(m.list)

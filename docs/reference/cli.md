@@ -957,14 +957,19 @@ blocker, or related links. Undo follows the recorded issue across navigation
 and projects; it does not target whichever row is currently selected. It makes
 a new attributed change, so the original audit event remains. Undoing a reopen
 may open the normal completion form when the daemon requires evidence.
+There is no redo; repeat the action manually if you undo by mistake. Issue edits
+run one at a time; quick successive edits wait for the current edit to finish.
 
 Creating an issue or comment, making a timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
 `done` clears the undo history. Switching daemons also clears it.
 Before undo writes, the TUI reads the affected issue or exact link and refuses
-an observed conflicting change. These checks are not atomic: another client can
-edit the same field between the read and the undo write. A failed write with an
+an observed conflicting change. It skips that history entry without changing
+the issue, so pressing `u` again reaches earlier edits. The revision check also
+rejects intervening status or owner changes, including changes away and back
+to the same value. These checks are not atomic: another client can edit the
+same field between the read and the undo write. A failed write with an
 uncertain outcome clears history rather than risking a second change.
 
 Press `C` to open the read-only credential ledger when the selected daemon

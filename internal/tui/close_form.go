@@ -13,9 +13,10 @@ import (
 )
 
 type authCapabilitiesMsg struct {
-	connGen uint64
-	auth    AuthInfo
-	err     error
+	connGen     uint64
+	auth        AuthInfo
+	instanceUID string
+	err         error
 }
 
 func (m Model) fetchAuthCapabilities() tea.Cmd {
@@ -25,7 +26,7 @@ func (m Model) fetchAuthCapabilities() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		instance, err := apiClient.GetInstance(ctx)
-		return authCapabilitiesMsg{connGen: connGen, auth: instance.Auth, err: err}
+		return authCapabilitiesMsg{connGen: connGen, auth: instance.Auth, instanceUID: instance.InstanceUID, err: err}
 	}
 }
 
@@ -55,6 +56,11 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 			m.input = inputState{}
 			m.undoCloseEntryID = 0
 		}
+	}
+	if client, ok := m.api.(*undoClient); ok {
+		client.mu.Lock()
+		client.instance = InstanceInfo{InstanceUID: msg.instanceUID, Auth: msg.auth}
+		client.mu.Unlock()
 	}
 	m.authCapabilitiesReady = true
 	m.tokenAuditRead = msg.auth.TokenAuditRead

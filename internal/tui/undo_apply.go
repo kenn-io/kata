@@ -20,7 +20,7 @@ type undoOutcome struct {
 }
 
 func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired bool, evidence *CloseInput) undoOutcome {
-	attempt, err := c.begin()
+	attempt, err := c.begin(ctx, false)
 	if err != nil {
 		return undoOutcome{err: err}
 	}
