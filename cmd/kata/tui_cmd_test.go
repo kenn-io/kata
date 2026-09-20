@@ -15,7 +15,7 @@ import (
 // kata tui needs a TTY, so we exercise the registration via --help;
 // cobra prints help text and returns before RunE is invoked.
 //
-// --all-projects and --include-deleted are intentionally NOT
+// --all and --include-deleted are intentionally NOT
 // registered: the daemon has no cross-project list endpoint and no
 // include_deleted query param, so either flag would advertise a
 // capability the wire cannot deliver. Both gates land at the daemon
@@ -34,7 +34,7 @@ func TestTUI_CommandRegistered(t *testing.T) {
 	if !strings.Contains(out, "kata tui [issue-ref]") {
 		t.Fatalf("optional issue ref missing from help: %s", out)
 	}
-	for _, banned := range []string{"--all-projects", "--include-deleted"} {
+	for _, banned := range []string{"--all", "--include-deleted"} {
 		if strings.Contains(out, banned) {
 			t.Fatalf("%s leaked back into help (daemon support not yet wired): %s",
 				banned, out)

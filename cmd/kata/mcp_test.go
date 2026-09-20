@@ -32,9 +32,9 @@ func TestMCPServeProjectModesRejectFlagConflicts(t *testing.T) {
 	}{
 		{name: "allowlist with project", args: []string{"--project", "spoke-project", "mcp", "serve", "--projects", "hub-project"}},
 		{name: "allowlist with workspace", args: []string{"--workspace", t.TempDir(), "mcp", "serve", "--projects", "spoke-project"}},
-		{name: "all projects with project", args: []string{"--project", "spoke-project", "mcp", "serve", "--all-projects"}},
-		{name: "all projects with workspace", args: []string{"--workspace", t.TempDir(), "mcp", "serve", "--all-projects"}},
-		{name: "all projects with allowlist", args: []string{"mcp", "serve", "--all-projects", "--projects", "spoke-project"}},
+		{name: "all projects with project", args: []string{"--project", "spoke-project", "mcp", "serve", "--all"}},
+		{name: "all projects with workspace", args: []string{"--workspace", t.TempDir(), "mcp", "serve", "--all"}},
+		{name: "all projects with allowlist", args: []string{"mcp", "serve", "--all", "--projects", "spoke-project"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestMCPServeTokenAdminRequiresAllProjects(t *testing.T) {
 	} {
 		command := newRootCmd()
 		command.SetArgs(args)
-		require.ErrorContains(t, command.Execute(), "--enable-token-admin requires --all-projects")
+		require.ErrorContains(t, command.Execute(), "--enable-token-admin requires --all")
 	}
 }
 
@@ -76,7 +76,7 @@ func startMCPHTTPTestServer(t *testing.T, daemonURL string, extraArgs ...string)
 	command.SetOut(io.Discard)
 	command.SetErr(stderrWriter)
 	command.SetArgs(append([]string{
-		"mcp", "serve", "--all-projects", "--http", "127.0.0.1:0",
+		"mcp", "serve", "--all", "--http", "127.0.0.1:0",
 		"--http-token-env", "KATA_MCP_TEST_TOKEN",
 	}, extraArgs...))
 	commandContext, cancel := context.WithCancel(context.WithValue(
@@ -303,7 +303,7 @@ func TestMCPServeHTTPLoopbackRequiresBearer(t *testing.T) {
 	command := newRootCmd()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
-	command.SetArgs([]string{"mcp", "serve", "--all-projects", "--http", "127.0.0.1:0"})
+	command.SetArgs([]string{"mcp", "serve", "--all", "--http", "127.0.0.1:0"})
 	require.ErrorContains(t, command.Execute(), "--http-token-env")
 }
 
@@ -365,7 +365,7 @@ func TestMCPServeHTTPNonLoopbackRequiresToken(t *testing.T) {
 	command := newRootCmd()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
-	command.SetArgs([]string{"mcp", "serve", "--all-projects", "--http", "0.0.0.0:0"})
+	command.SetArgs([]string{"mcp", "serve", "--all", "--http", "0.0.0.0:0"})
 	require.ErrorContains(t, command.Execute(), "--http-token-env")
 }
 
@@ -375,7 +375,7 @@ func TestMCPServeHTTPNonLoopbackRequiresExplicitPrivateNetworkTrust(t *testing.T
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{
-		"mcp", "serve", "--all-projects", "--http", "0.0.0.0:0",
+		"mcp", "serve", "--all", "--http", "0.0.0.0:0",
 		"--http-token-env", "KATA_MCP_TEST_TOKEN",
 	})
 	require.ErrorContains(t, command.Execute(), "--trust-private-network")
@@ -408,7 +408,7 @@ func TestMCPServeHTTPTokenEnvMustBeSet(t *testing.T) {
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{
-		"mcp", "serve", "--all-projects", "--http", "127.0.0.1:0",
+		"mcp", "serve", "--all", "--http", "127.0.0.1:0",
 		"--http-token-env", "KATA_MCP_MISSING_TOKEN",
 	})
 	require.ErrorContains(t, command.Execute(), "KATA_MCP_MISSING_TOKEN")
@@ -431,7 +431,7 @@ func TestMCPServeAllProjectsServesDaemonWideScope(t *testing.T) {
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
-	command.SetArgs([]string{"mcp", "serve", "--all-projects"})
+	command.SetArgs([]string{"mcp", "serve", "--all"})
 	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
 
 	require.NoError(t, command.Execute())
@@ -464,7 +464,7 @@ func TestMCPServeRenewsAdvertisedAutostartDaemon(t *testing.T) {
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
-	command.SetArgs([]string{"mcp", "serve", "--all-projects"})
+	command.SetArgs([]string{"mcp", "serve", "--all"})
 	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemonServer.URL))
 
 	require.NoError(t, command.Execute())
@@ -528,7 +528,7 @@ func TestMCPServeRejectsDaemonBeforeRelationshipPinning(t *testing.T) {
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
-	command.SetArgs([]string{"mcp", "serve", "--all-projects"})
+	command.SetArgs([]string{"mcp", "serve", "--all"})
 	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
 
 	err := command.Execute()
@@ -556,7 +556,7 @@ func TestMCPServeDefaultRequiresWorkspaceBinding(t *testing.T) {
 	command.SetArgs([]string{"mcp", "serve"})
 	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
 
-	require.ErrorContains(t, command.Execute(), "--all-projects")
+	require.ErrorContains(t, command.Execute(), "--all")
 }
 
 func TestParseMCPStorageTargets(t *testing.T) {
@@ -758,7 +758,7 @@ func TestMCPServeOrdinaryRequestsUseDefaultClientTimeout(t *testing.T) {
 	command.SetIn(inputReader)
 	command.SetOut(outputWriter)
 	command.SetErr(io.Discard)
-	command.SetArgs([]string{"mcp", "serve", "--all-projects"})
+	command.SetArgs([]string{"mcp", "serve", "--all"})
 	commandContext, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	t.Cleanup(cancel)
 	command.SetContext(context.WithValue(commandContext, internalclient.BaseURLKey{}, daemon.URL))

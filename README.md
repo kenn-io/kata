@@ -1,3 +1,7 @@
+---
+last_edited: 2026-09-20
+---
+
 # kata カタ
 
 The issue tracker built for coding agents and the humans steering them.
@@ -95,7 +99,7 @@ flowchart TB
 
   subgraph delegateside[" "]
     direction TB
-    fanout["Tracked children: --parent #60;ref#62;, --meta work.branch=#60;branch#62;,<br/>--idempotency-key #60;key#62;, --json; capture .issue.short_id.<br/>Subagents: distinct KATA_TEAMMATE and<br/>KATA_INBOX_USER=#60;actor#62;/#60;teammate#62;; keep the actor.<br/>Read requests: kata inbox --for #60;actor#62;[/#60;teammate#62;].<br/>After handling: kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --clear."]
+    fanout["Tracked children: --parent #60;ref#62;, --meta work.branch=#60;branch#62;,<br/>--idempotency-key #60;key#62;, --json; capture .issue.short_id.<br/>Subagents: distinct KATA_TEAMMATE and<br/>KATA_INBOX_USER=#60;actor#62;/#60;teammate#62;; keep the actor.<br/>Read requests: kata inbox --for #60;actor#62;[/#60;teammate#62;] --all.<br/>After handling: kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --clear."]
     join["Join with kata wait #60;refs#62; --until attention --any<br/>Matches needs-human or stuck; a close also completes the wait,<br/>and the reported reason distinguishes which. Use --timeout so a<br/>wrapper can tell timeout from satisfaction."]
     coord["Read delegated work.*; never write it."]
     fanout --> join --> coord

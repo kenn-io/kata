@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-09-18
+last_edited: 2026-09-20
 ---
 
 # Model Context Protocol server
@@ -23,10 +23,10 @@ kata --project example-project mcp serve
 kata mcp serve --projects example-project,shared-project
 
 # Every project visible to the selected daemon
-kata mcp serve --all-projects
+kata mcp serve --all
 
 # Add explicit daemon credential administration
-kata mcp serve --all-projects --enable-token-admin
+kata mcp serve --all --enable-token-admin
 ```
 
 With the default stdio transport, JSON-RPC uses stdin and stdout. Kata writes
@@ -52,7 +52,7 @@ listeners were found in this application's configured data directory.
 
 For Unix-socket daemons, `backend_url` is the actual `unix:///path` address,
 not the synthetic HTTP request URL. An embedding client that has already
-selected a local runtime can use `kata mcp serve --all-projects --runtime-dir
+selected a local runtime can use `kata mcp serve --all --runtime-dir
 /path/to/runtime` to reach that daemon over stdio. This option ignores the
 working directory's server selection and never starts a missing daemon.
 
@@ -63,7 +63,7 @@ instead:
 
 ```sh
 export KATA_MCP_HTTP_TOKEN='<random bearer token>'
-kata mcp serve --all-projects \
+kata mcp serve --all \
   --http 127.0.0.1:8080 \
   --http-token-env KATA_MCP_HTTP_TOKEN
 ```
@@ -80,7 +80,7 @@ requests. A non-loopback listener additionally requires
 `--trust-private-network` and a literal non-public IP or wildcard bind:
 
 ```sh
-kata mcp serve --all-projects \
+kata mcp serve --all \
   --http 0.0.0.0:8080 \
   --http-token-env KATA_MCP_HTTP_TOKEN \
   --trust-private-network
@@ -132,7 +132,7 @@ it was launched for. Broader boundaries are explicit startup choices:
   project UIDs. A later rename does not change the boundary, and a member
   that is later archived or merged away drops out without disabling the
   remaining allowlist.
-- `--all-projects` follows the selected daemon's active project catalog for
+- `--all` follows the selected daemon's active project catalog for
   long-lived clients that need every project the daemon can access.
 
 Multi-project issue reads and writes use `project#ref`. Project-list tools can
@@ -142,7 +142,7 @@ project's own ranking (per-project scores are not comparable) and reports
 `mode: "mixed"` when projects resolve different effective search modes. Issue creation and other project-selected writes
 require an explicit `project` in multi-project mode. Project administration
 (create, rename, metadata, merge, archive, restore, and purge) requires the
-`--all-projects` daemon-wide scope; a scoped server can read its projects but
+`--all` daemon-wide scope; a scoped server can read its projects but
 cannot alter or destroy the catalog it was bound to.
 
 Tool calls cannot change the startup actor or expand the startup scope. The
@@ -200,7 +200,7 @@ model context at startup.
 
 `kata.connectors`, `kata.connector_fields`, `kata.connector_field_map`,
 `kata.connector_field_unmap`, and `kata.bridge_bind` require the
-`--all-projects` daemon-wide scope. The remaining bridge tools operate on
+`--all` daemon-wide scope. The remaining bridge tools operate on
 already-bound issues inside the startup project scope.
 
 Loaders are idempotent. A loader reports `available=false` when its optional
@@ -283,7 +283,7 @@ polling. A `sync.reset_required` result returns `reset_after_id`, advances
 
 Unscoped `kata.token_create` returns the plaintext token once. `kata.tokens`, status
 tools, errors, and later calls never return that secret or its hash. Token
-administration requires both the `--all-projects` daemon-wide startup scope and
+administration requires both the `--all` daemon-wide startup scope and
 the explicit `--enable-token-admin` startup capability. A default workspace
 server, a one-project server, and a fixed-allowlist server cannot read, create,
 or revoke global daemon tokens.
@@ -307,7 +307,7 @@ accepts, or returns enrollment secrets.
 
 Enabling issue synchronization selects which external repository the daemon's
 configured GitHub credentials read, so `kata.sync_update` with
-`action: "enable"` requires the `--all-projects` daemon-wide scope. Scoped
+`action: "enable"` requires the `--all` daemon-wide scope. Scoped
 servers can still disable the operator-configured binding and run
 `kata.sync_once` against it.
 
@@ -316,7 +316,7 @@ operator can preserve the normal revoke-before-local-teardown order. The phase
 is required. A commit without external hub revocation also requires
 `COMMIT FEDERATION LEAVE <project>`. The `archive` disposition and
 `kata.federation_rebind`, which routes the replica's enrollment token to the
-selected catalog origin, require the `--all-projects` daemon-wide scope.
+selected catalog origin, require the `--all` daemon-wide scope.
 Quarantine retry and skip require
 `RETRY FEDERATION BATCH <id>` or `SKIP FEDERATION BATCH <id>`.
 
@@ -325,12 +325,12 @@ Quarantine retry and skip require
 JSONL storage access is absent by default. Enable it only on the daemon host:
 
 ```sh
-kata mcp serve --all-projects \
+kata mcp serve --all \
   --storage-root /srv/kata/exchange \
   --storage-target restore=restore.db
 ```
 
-`kata.storage_export` additionally requires the `--all-projects` daemon-wide
+`kata.storage_export` additionally requires the `--all` daemon-wide
 scope even when a `project` filter is supplied: a project-filtered JSONL
 export still contains cross-project link rows and unredacted event payload
 references that scoped reads deliberately hide.

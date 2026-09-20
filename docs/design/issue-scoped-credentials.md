@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-15
+last_edited: 2026-09-20
 ---
 
 # Issue-scoped credentials
@@ -388,7 +388,7 @@ conditions or the credentials are revoked. A binding change participates in
 the same transactional and stream revalidation boundary as a hierarchy change.
 
 MCP startup scope and request filters can only narrow the server-enforced grant.
-`--all-projects`, alternate refs, `--as`, and body actor fields cannot widen it.
+`--all`, alternate refs, `--as`, and body actor fields cannot widen it.
 The server-bound token actor remains authoritative. Worker startup uses the
 minimal project and system projections without project initialization or broad
 catalog reads. The coordinator's bootstrap credential never reaches the worker.

@@ -11,7 +11,7 @@ import (
 
 var runTUI = tui.Run
 
-// newTUICmd registers the TUI command. --all-projects is intentionally
+// newTUICmd registers the TUI command. --all is intentionally
 // absent today: the daemon has no cross-project list endpoint
 // (handlers_issues.go only registers the project-scoped route), so
 // advertising the flag would land the user on a 404. The all-projects

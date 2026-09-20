@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-19
+last_edited: 2026-09-20
 ---
 
 # CLI reference
@@ -26,6 +26,11 @@ current flag list in your installed binary.
 `kata --version` prints the same build identity as the `version` command below
 and honors `--json`/`--agent`. It is a root-level flag, so it is not accepted
 on subcommands. There is no `-v` shorthand.
+
+For `list`, `ready`, `next`, `inbox`, `events`, `digest`, and `mcp serve`,
+pass `--all` to select projects across the chosen daemon. These commands
+remain project-scoped by default. Update scripts and MCP launch configurations
+that use `--all-projects` to use `--all`; the old spelling is no longer accepted.
 
 ## Workspace initialization
 
@@ -101,9 +106,9 @@ the other output modes.
 ```sh
 kata [--workspace PATH | --project NAME] [--daemon NAME] [--as ACTOR] mcp serve
 kata mcp serve --projects NAME[,NAME...]
-kata mcp serve --all-projects [--enable-token-admin]
+kata mcp serve --all [--enable-token-admin]
 kata mcp serve --http HOST:PORT --http-token-env ENV_NAME
-kata mcp serve --all-projects --runtime-dir /path/to/runtime
+kata mcp serve --all --runtime-dir /path/to/runtime
 kata mcp status --json
 ```
 
@@ -113,7 +118,7 @@ inbound bearer from `--http-token-env`, and non-loopback binds also require
 `--trust-private-network`. The server binds to the current workspace's project
 by default. `--workspace` or `--project` selects one explicit project.
 `--projects` fixes an allowlist of project names, pinned by immutable project
-UID. `--all-projects` follows every project in the selected daemon catalog.
+UID. `--all` follows every project in the selected daemon catalog.
 The startup scope and actor apply to every tool call. The initial catalog
 contains 14 section loaders that progressively expose the detailed typed
 tools. Optional `--storage-root` and repeatable `--storage-target
@@ -526,6 +531,7 @@ See the [metadata conventions](metadata.md) for all reserved and standard keys.
 kata notify abc4 --to coordinator --message "Please decide"
 kata notify abc4 --to coordinator/teammate-1 --message "Please check the reproduction"
 kata inbox --for coordinator/teammate-1
+kata --daemon team-hub inbox --for coordinator/teammate-1 --all
 kata notify abc4 --to coordinator/teammate-1 --clear
 kata inbox --for coordinator/teammate-1 --context
 ```
@@ -541,8 +547,15 @@ Closure can still race with the write; either way, the request is hidden while
 the issue is closed. Messages must be nonblank and at most 1024 bytes.
 Requests do not change ownership or readiness.
 
-`inbox` reads requests on open issues in the selected project, including parked
-issues. Closing an issue hides its requests; reopening restores uncleared
+`inbox` reads requests on open issues in the selected project by default,
+including parked issues. `--all` reads every active project on the
+selected daemon; it does not traverse other daemons. The flag works without a
+workspace binding and conflicts with explicit `--project` or `--workspace`.
+Use `--daemon` or `KATA_SERVER` to select a remote daemon. All-project output
+uses qualified issue refs and identifies each project. A daemon older than API
+0.9.0 is rejected before the filtered read. An embedding host that denies
+`AllProjects` access rejects the read without returning partial output.
+Closing an issue hides its requests; reopening restores uncleared
 requests. Handles are case-sensitive, at most 128 UTF-8 bytes, and cannot contain
 control characters. `--for` overrides `KATA_INBOX_USER`; an actor inbox does
 not aggregate its `actor/*` teammate addresses. Neither the agent's author nor
@@ -557,7 +570,10 @@ that recipient. Changing the date or recipient makes the new combination
 eligible. No reminder object or separate delivery queue is involved.
 
 Normal inbox output includes every matching request and supports `--json` and
-`--agent`. Human output reports an empty inbox unless `--quiet` is set.
+`--agent`. For `--all`, JSON adds `all_projects: true` and a `project`
+on each request; agent rows add `project`, and context includes the quoted
+project name. Project-scoped output keeps its existing shape. Human output
+reports an empty inbox unless `--quiet` is set.
 `--context` instead emits bounded, quoted context for a harness, with
 a notice when content is truncated. An empty inbox produces no context. Do not
 combine `--context` with other output selectors. Malformed request metadata is
@@ -735,9 +751,9 @@ preserving the binding's history.
 ## Events and audit
 
 ```sh
-kata events [--after N] [--limit N]
-kata events --tail [--last-event-id N]
-kata digest --since 24h [--until ...] [--project-id N | --all-projects] [--actor NAME ...]
+kata events [--after N] [--limit N] [--project-id N | --all]
+kata events --tail [--last-event-id N] [--project-id N | --all]
+kata digest --since 24h [--until ...] [--project-id N | --all] [--actor NAME ...]
 kata audit closes [--actor NAME] [--reason done|wontfix|duplicate|superseded|audit-no-change]
 ```
 

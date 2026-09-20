@@ -265,11 +265,11 @@ func TestExternalRootMutationsKeepStartupScope(t *testing.T) {
 	_, _, err = boundHandlers.connectorFieldMap(t.Context(), nil, ConnectorFieldMapInput{
 		Instance: "example-connector", KataField: "scheduled_on", ExternalField: "start-date",
 	})
-	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 	_, _, err = boundHandlers.connectorFieldUnmap(t.Context(), nil, ConnectorFieldUnmapInput{
 		Instance: "example-connector", KataField: "scheduled_on",
 	})
-	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 
 	allowlist, err := NewAllowlistScope([]ProjectIdentity{{
 		ID: 42, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
@@ -302,9 +302,9 @@ func TestConnectorMetadataRequiresAllProjectsScopeBeforeDaemonRequest(t *testing
 		t.Run(name, func(t *testing.T) {
 			handlers := toolHandlers{options: Options{Client: client, LongRunningClient: client, Scope: scope}}
 			_, _, err := handlers.connectors(t.Context(), nil, ConnectorsInput{})
-			require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+			require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 			_, _, err = handlers.connectorFields(t.Context(), nil, ConnectorFieldsInput{Instance: "example-connector"})
-			require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+			require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 		})
 	}
 	require.Zero(t, requests.Load(), "scoped connector metadata reads must fail before any daemon request")
@@ -328,7 +328,7 @@ func TestBridgeBindRequiresAllProjectsScopeBeforeUsingConnectorCredentials(t *te
 	_, _, err = handlers.bridgeBind(t.Context(), nil, BridgeBindInput{
 		Ref: "abc4", Connector: "example-connector", External: "root-locator",
 	})
-	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 	require.Zero(t, requests.Load())
 }
 

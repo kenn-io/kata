@@ -90,7 +90,7 @@ func (h toolHandlers) syncUpdate(ctx context.Context, _ *sdkmcp.CallToolRequest,
 		// operator action. Scoped sessions may only disable or run the
 		// operator-configured binding.
 		if h.options.Scope.Mode() != ScopeAll {
-			return nil, SyncStatusOutput{}, errors.New("enabling issue synchronization requires the --all-projects daemon-wide scope; scoped MCP can only disable or run the operator-configured binding")
+			return nil, SyncStatusOutput{}, errors.New("enabling issue synchronization requires the --all daemon-wide scope; scoped MCP can only disable or run the operator-configured binding")
 		}
 		response, err = h.options.Client.EnableIssueSync(ctx, &generated.EnableIssueSyncRequestOptions{PathParams: &generated.EnableIssueSyncPath{ProjectID: project.ID, Provider: provider}, Body: &generated.EnableIssueSyncBody{Config: input.Config, Interval: optionalString(input.Interval), IntervalSeconds: input.IntervalSeconds}})
 	case "disable":

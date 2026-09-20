@@ -24,6 +24,7 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, `kata events --after 0 --limit 100 --agent`)
 	assert.Contains(t, out, "kata notify abc4 --to coordinator/teammate-1")
 	assert.Contains(t, out, "kata inbox --for coordinator/teammate-1")
+	assert.Contains(t, out, "kata inbox --for coordinator/teammate-1 --all")
 	assert.Contains(t, out, "kata notify abc4 --to coordinator/teammate-1 --clear")
 }
 
@@ -109,6 +110,7 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.")
 	assert.Contains(t, out, "--to <actor>[/<teammate>]")
 	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>]")
+	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>] --all")
 	assert.Contains(t, out, "--to <actor>[/<teammate>] --clear")
 	assert.Contains(t, out, "KATA_TEAMMATE=teammate-1")
 	assert.Contains(t, out, "KATA_INBOX_USER=coordinator/teammate-1")
@@ -144,6 +146,7 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 		"session injection should teach attention requests once")
 	assert.LessOrEqual(t, len(out), 4000, "keep the per-session briefing compact")
 	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>]")
+	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>] --all")
 	assert.Contains(t, out, "kata notify <ref> --to <actor>[/<teammate>] --clear")
 	assert.NotContains(t, out, "20z0", "a universal contract cannot use a project-scoped issue ref")
 	assert.NotContains(t, out, agentsBlockBegin)
