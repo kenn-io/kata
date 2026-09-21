@@ -89,9 +89,6 @@ func TestAutoCutoverPreservesIssueContentRevision(t *testing.T) {
 			t.Cleanup(func() { _ = target.Close() })
 			after := collectIssueExports(ctx, t, target)
 			assert.Equal(t, before, after)
-			if !t.Failed() {
-				t.Logf("schema_version=%d: complete IssueExport records preserved, including deleted issue; ContentRevision values 2, 1, 0", version)
-			}
 		})
 	}
 }
