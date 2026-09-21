@@ -994,6 +994,8 @@ func ttlDuration(seconds int64) time.Duration {
 
 func claimAPIError(err error) error {
 	switch {
+	case errors.Is(err, db.ErrTransactionFinalizationFailed):
+		return internalAPIError(err)
 	case errors.Is(err, ErrHostAccessDenied):
 		return federationCredentialDenied()
 	case errors.Is(err, db.ErrClaimDenied):

@@ -314,6 +314,10 @@ func writeHostAccessError(ctx huma.Context, status int, code, message string) {
 }
 
 func internalAPIError(err error) error {
+	if errors.Is(err, db.ErrTransactionFinalizationFailed) {
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable",
+			"transaction finalization is unavailable", "", nil)
+	}
 	if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 		return apiErr
 	}

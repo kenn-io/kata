@@ -262,6 +262,8 @@ use a separate host transaction to save an audit event or suspend a credential.
 It receives the request context, must tolerate retries, and must not reuse the
 rolled-back transaction. Kata still denies the original operation if recording
 succeeds or fails. Rollback and callback failures remain in the returned error.
+HTTP callers receive a temporary-unavailable response when finalization fails,
+not a completed authorization decision. The rejected write still does not run.
 An earlier fence's denial prevents later fences and their callbacks from running.
 
 Serializable transactions may retry, so a fence must be safe to invoke once

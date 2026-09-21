@@ -95,7 +95,11 @@ func TestFederationDenialKeepsRollbackCallback(t *testing.T) {
 		service, project, enrollment := newFederationAccessService(t, controller)
 		issue := createFederationAccessIssue(t, service, project.ID)
 		response := acquireFederationAccessClaim(t, service, project.ID, issue, enrollment.Token)
-		assert.Equal(t, http.StatusForbidden, response.Code)
+		wantStatus := http.StatusForbidden
+		if finishError != nil {
+			wantStatus = http.StatusServiceUnavailable
+		}
+		assert.Equal(t, wantStatus, response.Code)
 		assert.Equal(t, 1, calls)
 	}
 }

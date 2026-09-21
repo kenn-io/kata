@@ -18,6 +18,10 @@ type Transaction interface {
 // domain write. Any returned error aborts the transaction.
 type TransactionFence func(context.Context, Transaction) error
 
+// ErrTransactionFinalizationFailed reports failed rollback or host recording.
+// Callers must not misreport this as a completed authorization decision.
+var ErrTransactionFinalizationFailed = errors.New("transaction finalization unavailable")
+
 type afterRollbackError struct {
 	cause  error
 	finish func(context.Context) error
@@ -47,7 +51,7 @@ func FinishTransactionRollback(ctx context.Context, cause, rollbackErr error) er
 	if rollbackErr == nil && finishErr == nil {
 		return cause
 	}
-	return errors.Join(cause, rollbackErr, finishErr)
+	return errors.Join(ErrTransactionFinalizationFailed, cause, rollbackErr, finishErr)
 }
 
 type transactionFenceContextKey struct{}
