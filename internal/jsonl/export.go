@@ -706,6 +706,7 @@ func exportIssues(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		DeletedAt           *string        `json:"deleted_at"`
 		Metadata            jsontext.Value `json:"metadata"`
 		Revision            int64          `json:"revision"`
+		ContentRevision     int64          `json:"content_revision"`
 		RecurrenceID        *int64         `json:"recurrence_id,omitzero"`
 		RecurrenceUID       *string        `json:"recurrence_uid,omitempty"`
 		OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
@@ -714,11 +715,19 @@ func exportIssues(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 	if sourceSchemaVersion >= 29 {
 		assignmentExpiryExpr = `CAST(i.assignment_expires_on AS TEXT)`
 	}
+	contentRevisionExpr := `0`
+	hasContentRevision, err := tableHasColumn(ctx, d, "issues", "content_revision")
+	if err != nil {
+		return err
+	}
+	if hasContentRevision {
+		contentRevisionExpr = `i.content_revision`
+	}
 	query := `SELECT i.id, i.uid, i.project_id, i.short_id, i.title, i.body,
 	                 i.status, i.closed_reason, i.owner, ` + assignmentExpiryExpr + `, i.priority, i.author,
 	                 CAST(i.created_at AS TEXT), CAST(i.updated_at AS TEXT),
 	                 CAST(i.closed_at AS TEXT), CAST(i.deleted_at AS TEXT),
-	                 i.metadata, i.revision,
+	                 i.metadata, i.revision, ` + contentRevisionExpr + `,
 	                 i.recurrence_id, r.uid, i.occurrence_key
 	          FROM issues i
 	          LEFT JOIN recurrences r ON r.id = i.recurrence_id`
@@ -734,6 +743,7 @@ func exportIssues(ctx context.Context, d exportQuerier, enc *Encoder, opts Expor
 		err := rows.Scan(&rec.ID, &rec.UID, &rec.ProjectID, &rec.ShortID, &rec.Title, &rec.Body,
 			&rec.Status, &rec.ClosedReason, &rec.Owner, &rec.AssignmentExpiresOn, &rec.Priority, &rec.Author, &rec.CreatedAt,
 			&rec.UpdatedAt, &rec.ClosedAt, &rec.DeletedAt, &metadata, &rec.Revision,
+			&rec.ContentRevision,
 			&rec.RecurrenceID, &rec.RecurrenceUID, &rec.OccurrenceKey)
 		if err != nil {
 			return rec, err
