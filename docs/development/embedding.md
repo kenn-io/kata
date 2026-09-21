@@ -255,6 +255,15 @@ not-found response as an initial authorization denial. Other failures roll
 back and make only the mounted service temporarily unavailable. A missing
 fence fails closed before writing.
 
+If the host must record a denial outside that transaction, return
+`kata.AfterTransactionRollback(err, finish)` from the fence. Kata rolls back
+and releases its connection before calling `finish` once. The callback can
+use a separate host transaction to save an audit event or suspend a credential.
+It receives the request context, must tolerate retries, and must not reuse the
+rolled-back transaction. Kata still denies the original operation if recording
+succeeds or fails. Rollback and callback failures remain in the returned error.
+An earlier fence's denial prevents later fences and their callbacks from running.
+
 Serializable transactions may retry, so a fence must be safe to invoke once
 per transaction attempt. The transaction exposes only `ExecContext` and
 `QueryRowContext`, which is enough to call a fixed host-owned validation

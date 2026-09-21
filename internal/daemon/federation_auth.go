@@ -208,9 +208,9 @@ func sanitizeFederationTransactionFence(fence db.TransactionFence) db.Transactio
 		case err == nil:
 			return nil
 		case errors.Is(err, ErrHostAccessDenied):
-			return ErrHostAccessDenied
+			return errors.Join(ErrHostAccessDenied, err)
 		default:
-			return errHostFederationAccessUnavailable
+			return errors.Join(errHostFederationAccessUnavailable, err)
 		}
 	}
 }

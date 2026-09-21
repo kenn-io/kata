@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 )
 
 // Transaction is the storage-neutral database/sql surface available to a
@@ -16,6 +17,38 @@ type Transaction interface {
 // TransactionFence runs after a transaction begins and before its first
 // domain write. Any returned error aborts the transaction.
 type TransactionFence func(context.Context, Transaction) error
+
+type afterRollbackError struct {
+	cause  error
+	finish func(context.Context) error
+}
+
+func (e *afterRollbackError) Error() string { return e.cause.Error() }
+func (e *afterRollbackError) Unwrap() error { return e.cause }
+
+// AfterTransactionRollback attaches host cleanup to a rejected transaction.
+func AfterTransactionRollback(cause error, finish func(context.Context) error) error {
+	if cause == nil {
+		cause = errors.New("transaction fence rejected")
+	}
+	return &afterRollbackError{cause: cause, finish: finish}
+}
+
+// FinishTransactionRollback runs only after the store has rolled back and
+// returned its connection. Callback failure never permits the rejected write.
+func FinishTransactionRollback(ctx context.Context, cause, rollbackErr error) error {
+	if errors.Is(rollbackErr, sql.ErrTxDone) {
+		rollbackErr = nil
+	}
+	var finishErr error
+	if rejected, ok := errors.AsType[*afterRollbackError](cause); ok && rejected.finish != nil {
+		finishErr = rejected.finish(ctx)
+	}
+	if rollbackErr == nil && finishErr == nil {
+		return cause
+	}
+	return errors.Join(cause, rollbackErr, finishErr)
+}
 
 type transactionFenceContextKey struct{}
 

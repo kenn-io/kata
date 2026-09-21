@@ -436,7 +436,7 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 		transactionFence = func(ctx context.Context, transaction db.Transaction) error {
 			err := decision.TransactionFence(ctx, transaction)
 			if errors.Is(err, ErrAccessDenied) {
-				return daemon.ErrHostAccessDenied
+				return errors.Join(daemon.ErrHostAccessDenied, err)
 			}
 			return err
 		}
@@ -482,7 +482,7 @@ func (a hostAccessControllerAdapter) Authorize(
 		transactionFence = func(ctx context.Context, transaction db.Transaction) error {
 			err := decision.TransactionFence(ctx, transaction)
 			if errors.Is(err, ErrAccessDenied) {
-				return daemon.ErrHostAccessDenied
+				return errors.Join(daemon.ErrHostAccessDenied, err)
 			}
 			return err
 		}

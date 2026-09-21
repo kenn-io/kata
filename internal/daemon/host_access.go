@@ -184,10 +184,10 @@ func withHostAccessState(ctx huma.Context, state *hostAccessState) huma.Context 
 		}
 		if err := state.decision.TransactionFence(fenceCtx, transaction); err != nil {
 			if errors.Is(err, ErrHostAccessDenied) {
-				return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+				return errors.Join(api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil), err)
 			}
-			return api.NewError(http.StatusServiceUnavailable,
-				"access_unavailable", "transaction access decision unavailable", "", nil)
+			return errors.Join(api.NewError(http.StatusServiceUnavailable,
+				"access_unavailable", "transaction access decision unavailable", "", nil), err)
 		}
 		return nil
 	})
