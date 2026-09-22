@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kit/tui/markdownrender"
 	"go.kenn.io/kata/internal/textsafe"
+	"go.kenn.io/kit/tui/markdownrender"
 )
 
 func TestShowMarkdownRendererHelperProcess(_ *testing.T) {
