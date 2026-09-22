@@ -1596,13 +1596,13 @@ func (m Model) escFromFederationView() (Model, tea.Cmd) {
 	m = m.invalidateFederationOp()
 	if m.prevView == viewFederation {
 		m.view = viewList
-		return m.resumeInboxReresolve()
+		return m, nil
 	}
 	m.view = m.prevView
 	if m.view == viewHelp {
 		m.view = viewList
 	}
-	return m.resumeInboxReresolve()
+	return m, nil
 }
 
 func federationSpokeStatuses(statuses []FederationProjectStatus) []FederationProjectStatus {

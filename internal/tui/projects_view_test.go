@@ -445,12 +445,8 @@ func cursorForTestProject(t *testing.T, m Model, projectID int64) int {
 	return 0
 }
 
-// TestProjectsView_SelectionClearsStaleSplitDetail pins the review
-// finding: a scope-changing selection from the projects view must not
-// retain the prior scope's detail pane. In split layout the pane stays
-// visible, and its issue + scopePID would aim detail-side actions at
-// the previous scope's issue. Covers both the real-project and the
-// All-projects sentinel selection.
+// Selecting another project or All projects clears the previous detail pane
+// so detail actions cannot target a task from the old scope.
 func TestProjectsView_SelectionClearsStaleSplitDetail(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -495,9 +491,7 @@ func TestProjectsView_SelectionClearsStaleSplitDetail(t *testing.T) {
 	}
 }
 
-// TestProjectsView_SelectionDropsStaleDetailResponse pins the stale-
-// traffic half of the review finding: a detail response still in
-// flight from before a scope-changing selection must not repopulate
+// A detail reply from before a project selection must not repopulate
 // the cleared pane.
 func TestProjectsView_SelectionDropsStaleDetailResponse(t *testing.T) {
 	m, oldIssue := inboxSplitWithOpenDetail(t)
@@ -529,10 +523,8 @@ func TestProjectsView_SelectionFencesPendingFollowTick(t *testing.T) {
 		"a pre-selection follow tick must be fenced instead of fetching the old scope's issue")
 }
 
-// TestProjectsView_SelectionBootstrapsDetailFromFreshList pins the
-// recovery half of the review finding: once the fresh list fetch
-// accepted by the new scope lands in split layout, the detail pane
-// bootstraps onto the newly selected scope's highlighted row.
+// After a project selection, the fresh list opens the highlighted task
+// in the split detail pane.
 func TestProjectsView_SelectionBootstrapsDetailFromFreshList(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -575,13 +567,8 @@ func TestProjectsView_SelectionBootstrapsDetailFromFreshList(t *testing.T) {
 	}
 }
 
-// TestProjectsViewSelectionDropsPreInboxFetchForSameProject pins the
-// review finding: a list fetch dispatched before entering the Inbox —
-// for the same ordinary project the user later re-selects from the
-// projects view — carries the pre-entry inboxVisit (zero), which
-// collides with the selection fetch's cacheKey. When that stale reply
-// lands after the fresh selection result it must be dropped, not
-// overwrite the fresh rows and cache with the pre-Inbox snapshot.
+// Reselecting a project after visiting Inbox must reject old list replies
+// from before Inbox entry, even when they name the same project.
 func TestProjectsViewSelectionDropsPreInboxFetchForSameProject(t *testing.T) {
 	inbox := ProjectSummary{ID: 2, Name: "capture-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -646,11 +633,8 @@ func TestProjectsViewSelectionDropsPreInboxFetchForSameProject(t *testing.T) {
 		"a pre-Inbox reply landing after the selection fetch must not overwrite the fresh cache")
 }
 
-// TestProjectsViewSelectionDropsPreInboxFetchForAllProjectsScope pins
-// the all-projects half of the review finding: a pre-Inbox fetch under
-// the all-projects scope shares the sentinel selection's cacheKey
-// (both carry inboxVisit zero) and must be dropped when it lands after
-// the fresh sentinel-selection result.
+// Selecting All projects after visiting Inbox must reject all-projects
+// replies from before Inbox entry.
 func TestProjectsViewSelectionDropsPreInboxFetchForAllProjectsScope(t *testing.T) {
 	inbox := ProjectSummary{ID: 2, Name: "capture-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)

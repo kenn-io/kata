@@ -44,27 +44,26 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
-	opts                  Options
-	api                   KataAPI
-	scope                 scope
-	view                  viewID
-	prevView              viewID
-	width                 int
-	height                int
-	keymap                keymap
-	list                  listModel
-	inboxReturn           *inboxReturnState
-	inboxAttempt          uint64
-	inboxVisit            uint64
-	inboxPending          bool
-	inboxReresolvePending bool
-	detail                detailModel
-	sseCh                 chan tea.Msg
-	sseStatus             sseConnState
-	pendingRefetch        bool
-	connGen               uint64
-	daemonSwitchAttempt   uint64
-	sseRestart            func(daemonConnection, uint64, chan tea.Msg) tea.Cmd
+	opts                Options
+	api                 KataAPI
+	scope               scope
+	view                viewID
+	prevView            viewID
+	width               int
+	height              int
+	keymap              keymap
+	list                listModel
+	inboxReturn         *inboxReturnState
+	inboxAttempt        uint64
+	scopeGen            uint64
+	inboxPending        bool
+	detail              detailModel
+	sseCh               chan tea.Msg
+	sseStatus           sseConnState
+	pendingRefetch      bool
+	connGen             uint64
+	daemonSwitchAttempt uint64
+	sseRestart          func(daemonConnection, uint64, chan tea.Msg) tea.Cmd
 	// projectsStale flags that the projects table needs a refetch. Set by
 	// the SSE event router when an event's project_id matches a row in
 	// m.projectsByID and viewProjects is the active view. Cleared when the
@@ -349,7 +348,7 @@ func (m Model) fetchInitial() tea.Cmd {
 	connGen := m.connGen
 	epoch := m.mutationEpoch
 	dispatchKey := cacheKey{
-		allProjects: sc.allProjects, inbox: sc.inbox, inboxVisit: sc.inboxVisit, projectID: sc.projectID, limit: filter.Limit,
+		allProjects: sc.allProjects, scopeGen: sc.scopeGen, projectID: sc.projectID, limit: filter.Limit,
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2173,12 +2172,10 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // from list/detail enters viewHelp; pressing ? from viewHelp restores
 // whatever view the user came from. prevView is preserved so the round
 // trip is reversible — q from viewHelp still quits per routeGlobalKey.
-// Restoring the prior view is a global-view exit path, so a designation
-// re-resolve deferred while Help covered the Inbox fires here.
 func (m Model) toggleHelp() (Model, tea.Cmd) {
 	if m.view == viewHelp {
 		m.view = m.prevView
-		return m.resumeInboxReresolve()
+		return m, nil
 	}
 	m.prevView = m.view
 	m.view = viewHelp
@@ -2312,8 +2309,7 @@ func (m Model) populateCache(msg tea.Msg) Model {
 func (m Model) currentCacheKey() cacheKey {
 	return cacheKey{
 		allProjects: m.scope.allProjects,
-		inbox:       m.scope.inbox,
-		inboxVisit:  m.scope.inboxVisit,
+		scopeGen:    m.scope.scopeGen,
 		projectID:   m.scope.projectID,
 		limit:       queueFetchLimit,
 	}
@@ -2336,8 +2332,7 @@ func fetchPayload(msg tea.Msg) (cacheKey, []Issue, error) {
 // working set.
 func cacheKeysEqual(a, b cacheKey) bool {
 	return a.allProjects == b.allProjects &&
-		a.inbox == b.inbox &&
-		a.inboxVisit == b.inboxVisit &&
+		a.scopeGen == b.scopeGen &&
 		a.projectID == b.projectID &&
 		a.limit == b.limit
 }
@@ -2359,27 +2354,6 @@ func cacheKeysEqual(a, b cacheKey) bool {
 // it doesn't replace or short-circuit the list/detail refetch above.
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
-	if m.inboxReresolveNeeded(msg) {
-		if m.inboxPending {
-			// The entry lookup's snapshot may predate this frame. Restart
-			// it: the bumped inboxAttempt fences the stale in-flight
-			// reply, and the fresh reply enters the Inbox with the
-			// post-event designation. Not the refresh path — no
-			// inboxReturn exists until a reply lands.
-			var lookup tea.Cmd
-			m, lookup = m.lookupInboxProject(false)
-			cmds = append(cmds, lookup)
-		} else if m.inboxScopeForeground() {
-			var lookup tea.Cmd
-			m, lookup = m.lookupInboxProject(true)
-			cmds = append(cmds, lookup)
-		} else {
-			// A full-screen view covers the Inbox: resolving now would
-			// leaveInbox or swap scopes over a view the user is reading.
-			// Defer; every global-view exit path re-resolves on return.
-			m.inboxReresolvePending = true
-		}
-	}
 	if m.eventAffectsView(msg) {
 		m.cache.markStale()
 		if !m.pendingRefetch {
@@ -2622,31 +2596,6 @@ func (m Model) handleResetRequired(_ resetRequiredMsg) (tea.Model, tea.Cmd) {
 		// per-project counts wouldn't reflect the post-reset state.
 		if m.view == viewProjects {
 			cmds = append(cmds, m.fetchProjectsWithStats())
-		}
-		// A reset can coincide with the role=inbox designation moving or
-		// clearing (purge, merge, archive churn), so refetching the old
-		// project's issues alone would leave the TUI scoped to a project
-		// the designation no longer names. Re-resolve through the same
-		// defer/return path the project SSE events use: an immediate
-		// lookup when the Inbox is foreground, otherwise a deferred one
-		// on the next global-view exit. Stale replies stay fenced out by
-		// inboxAttempt and the scope's inboxVisit.
-		if m.inboxPending {
-			// The reset landed while an entry lookup is in flight: its
-			// snapshot may predate the purge. Restart it — the fresh
-			// attempt fences the stale reply — rather than letting the
-			// stale reply enter an Inbox the reset already invalidated.
-			var lookup tea.Cmd
-			m, lookup = m.lookupInboxProject(false)
-			cmds = append(cmds, lookup)
-		} else if m.scope.inbox {
-			if m.inboxScopeForeground() {
-				var lookup tea.Cmd
-				m, lookup = m.lookupInboxProject(true)
-				cmds = append(cmds, lookup)
-			} else {
-				m.inboxReresolvePending = true
-			}
 		}
 	}
 	return m, tea.Batch(cmds...)

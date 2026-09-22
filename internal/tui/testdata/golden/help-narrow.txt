@@ -4,7 +4,7 @@ Global
 ?         help
 q/ctrl+c  quit
 P         projects
-I         Inbox
+I         inbox
 D         daemons
 F         federation
 C         credentials

@@ -43,7 +43,7 @@ func newKeymap() keymap {
 		Help:         key{Keys: []string{"?"}, Help: "help"},
 		Quit:         key{Keys: []string{"q", "ctrl+c"}, Help: "quit"},
 		Projects:     key{Keys: []string{"P"}, Help: "projects"},
-		Inbox:        key{Keys: []string{"I"}, Help: "Inbox"},
+		Inbox:        key{Keys: []string{"I"}, Help: "inbox"},
 		Daemons:      key{Keys: []string{"D"}, Help: "daemons"},
 		Federation:   key{Keys: []string{"F"}, Help: "federation"},
 		Credentials:  key{Keys: []string{"C"}, Help: "credentials"},

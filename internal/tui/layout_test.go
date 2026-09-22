@@ -1,11 +1,9 @@
 package tui
 
 import (
-	"encoding/json/jsontext"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -230,82 +228,6 @@ func TestLayout_ToggleLayout_FromStackedToSplit(t *testing.T) {
 	if !m.layoutLocked {
 		t.Error("layoutLocked=false after second L toggle, want true")
 	}
-}
-
-// helpCoveredInboxSplitFixture enters the Inbox in split layout and
-// opens Help over it, then clears the role=inbox designation via the
-// event path so the designation re-resolve is deferred while the
-// overlay covers the Inbox. Returns the model primed with
-// inboxReresolvePending.
-func helpCoveredInboxSplitFixture(t *testing.T) (Model, *inboxTestAPI) {
-	t.Helper()
-	inbox := ProjectSummary{ID: 2, Name: "example-project"}
-	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
-	api := &inboxTestAPI{
-		projects: []ProjectSummary{{ID: 1, Name: "spoke-project"}, inbox},
-		issues: []Issue{
-			{UID: "01TEST-inbox", ProjectID: 2, ShortID: "inbox", Title: "Capture task", Status: "open"},
-		},
-	}
-	m := newTestModel()
-	m.api = api
-	m.scope = homedScope(1, "spoke-project")
-	m.width, m.height = 120, 30
-	m = resizeModel(m, 160, 40)
-	require.Equal(t, splitlayout.Split, m.layout)
-	m = enterInboxForTest(t, m)
-	m = sendRune(m, '?')
-	require.Equal(t, viewHelp, m.view)
-
-	// The designation clears while Help covers the Inbox: the re-resolve
-	// defers to the exit path that restores the Inbox foreground.
-	api.projects = []ProjectSummary{{ID: 1, Name: "spoke-project"}}
-	m.sseCh = nil
-	out, _ := m.handleEventReceived(eventReceivedMsg{eventType: "project.metadata_updated", projectID: 2})
-	m = out.(Model)
-	require.True(t, m.inboxReresolvePending)
-	return m, api
-}
-
-// TestLayout_ToggleFromHelpOverlayFiresDeferredInboxReresolve pins the
-// review finding: pressing L while Help (or any full-screen view)
-// covers the Inbox flips split → stacked and the flip's view rewrite
-// dismisses the overlay, restoring the Inbox foreground. That exit
-// path must fire a designation re-resolve deferred under the overlay,
-// same as the other global-view exit paths do.
-func TestLayout_ToggleFromHelpOverlayFiresDeferredInboxReresolve(t *testing.T) {
-	m, _ := helpCoveredInboxSplitFixture(t)
-
-	m, lookup := updateModel(m, keyRune('L'))
-	require.Equal(t, splitlayout.Stacked, m.layout)
-	require.Equal(t, viewList, m.view, "the layout flip dismisses the covering view")
-	require.NotNil(t, lookup,
-		"restoring the Inbox foreground must fire the deferred designation re-resolve")
-	require.False(t, m.inboxReresolvePending, "the deferred re-resolve is consumed")
-
-	// The designation is really gone, so the re-resolve leaves the Inbox
-	// with the usual notice and restore fetch.
-	m, leaveCmd := deliverInboxLifecycleEvent(m, lookup)
-	require.False(t, m.scope.inbox)
-	require.Equal(t, int64(1), m.scope.projectID)
-	require.NotNil(t, leaveCmd)
-	require.Contains(t, m.toast.text, "No Inbox project designated")
-}
-
-// TestLayout_ResizeFlipFromHelpOverlayFiresDeferredInboxReresolve pins
-// the resize half of the review finding: a WindowSizeMsg that flips
-// split → stacked takes the same handleLayoutFlip path as the L toggle
-// and must fire the deferred re-resolve when it dismisses a covering
-// view over the Inbox.
-func TestLayout_ResizeFlipFromHelpOverlayFiresDeferredInboxReresolve(t *testing.T) {
-	m, _ := helpCoveredInboxSplitFixture(t)
-
-	m, lookup := updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	require.Equal(t, splitlayout.Stacked, m.layout)
-	require.Equal(t, viewList, m.view, "the resize flip dismisses the covering view")
-	require.NotNil(t, lookup,
-		"a resize flip restoring the Inbox foreground must fire the deferred designation re-resolve")
-	require.False(t, m.inboxReresolvePending, "the deferred re-resolve is consumed")
 }
 
 // TestLayout_ToggleLayout_RefusesSplitOnTooNarrowTerminal: pressing L

@@ -90,7 +90,7 @@ func (m Model) routeCredentialsViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		} else {
 			m.view = m.prevView
 		}
-		return m.resumeInboxReresolve()
+		return m, nil
 	case "r":
 		if !m.credentials.available {
 			if m.credentials.err != nil {

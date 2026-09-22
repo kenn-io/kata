@@ -891,20 +891,12 @@ func (lm listModel) applyFetched(msg tea.Msg) listModel {
 		lm.loading = false
 		lm.err = m.err
 		if m.err == nil {
-			issues := m.issues
-			if lm.inboxOnly {
-				issues = inboxOpenIssues(issues)
-			}
-			lm.issues, lm.truncated = trimQueueWorkingSet(issues)
+			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
 		}
 	case refetchedMsg:
 		lm.err = m.err
 		if m.err == nil {
-			issues := m.issues
-			if lm.inboxOnly {
-				issues = inboxOpenIssues(issues)
-			}
-			lm.issues, lm.truncated = trimQueueWorkingSet(issues)
+			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
 		}
 	}
 	lm = lm.expandAncestorsOfSelection()
@@ -1048,7 +1040,7 @@ func (lm listModel) refetchCmd(api listAPI, sc scope) tea.Cmd {
 	}
 	filter := queueFetchFilterForScope(sc)
 	dispatchKey := cacheKey{
-		allProjects: sc.allProjects, inbox: sc.inbox, inboxVisit: sc.inboxVisit, projectID: sc.projectID, limit: filter.Limit,
+		allProjects: sc.allProjects, scopeGen: sc.scopeGen, projectID: sc.projectID, limit: filter.Limit,
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

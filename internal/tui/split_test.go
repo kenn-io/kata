@@ -10,17 +10,13 @@ import (
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
-// TestSplit_InboxDetailNavEscPopsNavStack pins the review finding: in
-// split layout inside the Inbox with focusDetail and a non-empty nav
-// stack, Esc must pop one navigation level via the detail pane.
-// routeLayoutFocusKey deliberately declines that case so detail.Update
-// can handle the pop; the Inbox-level Esc intercept in routeGlobalKey
-// must not swallow the key and leaveInbox instead.
+// In split Inbox detail, Esc goes back one level in task navigation
+// before leaving Inbox.
 func TestSplit_InboxDetailNavEscPopsNavStack(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.scope = scope{projectID: 2, projectName: "capture-project", inbox: true,
-		homeProjectID: 7, homeProjectName: "example-project", inboxVisit: 1}
+		homeProjectID: 7, homeProjectName: "example-project", scopeGen: 1}
 	m.inboxReturn = &inboxReturnState{scope: homedScope(7, "example-project")}
 	current := Issue{ProjectID: 2, UID: "01TEST-nnn5", ShortID: "nnn5", Title: "jumped issue", Status: "open"}
 	prior := Issue{ProjectID: 2, UID: "01TEST-old9", ShortID: "old9", Title: "prior issue", Status: "open"}

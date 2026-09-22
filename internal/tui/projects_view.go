@@ -183,7 +183,7 @@ func (m Model) cursorMoveProjects(msg tea.KeyPressMsg, rows []projectsRow) (Mode
 // The new scope must not share a cache key with list fetches still in
 // flight from before this selection — notably pre-Inbox dispatches for
 // the same ordinary project or all-projects scope, which carry the
-// pre-entry inboxVisit. Stamp the next nonce into the selected scope so
+// pre-entry scopeGen. Stamp the next nonce into the selected scope so
 // every scope era keys distinctly and a slow pre-selection reply is
 // dropped instead of overwriting the fresh rows (same fencing
 // leaveInbox applies to the restored scope). Wire filters are untouched
@@ -198,17 +198,16 @@ func (m Model) applyProjectsViewSelection(rows []projectsRow) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.inboxReturn = nil
-	m.inboxReresolvePending = false
-	m.inboxVisit++
+	m.scopeGen++
 	if r.sentinel {
-		m.scope = scope{allProjects: true, inboxVisit: m.inboxVisit}
+		m.scope = scope{allProjects: true, scopeGen: m.scopeGen}
 	} else {
 		m.scope = scope{
 			projectID:       r.projectID,
 			projectName:     r.name,
 			homeProjectID:   r.projectID,
 			homeProjectName: r.name,
-			inboxVisit:      m.inboxVisit,
+			scopeGen:        m.scopeGen,
 		}
 	}
 	m.view = viewList
@@ -247,7 +246,7 @@ func (m Model) escFromProjectsView() (Model, tea.Cmd) {
 		return m, nil // boot landing, no prior list
 	}
 	m.view = viewList
-	return m.resumeInboxReresolve()
+	return m, nil
 }
 
 // transitionToProjects switches to viewProjects and dispatches a stats

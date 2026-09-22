@@ -4,7 +4,7 @@ Global                                 Detail                                   
 ?         help                         tab/C-j        next tab                    ctrl+o         save or apply
 q/ctrl+c  quit                         shift+tab/C-k  prev tab                    esc            cancel
 P         projects                     enter          jump to referenced issue    tab/shift+tab  change field
-I         Inbox                        esc/backspace  back                        ctrl+e         open editor
+I         inbox                        esc/backspace  back                        ctrl+e         open editor
 D         daemons                      e              edit body                   ctrl+u         clear prompt
 F         federation                   c              new comment
 C         credentials                  p              set parent                  Filters

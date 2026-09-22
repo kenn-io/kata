@@ -208,12 +208,8 @@ func TestCredentialsViewGlobalExitPreservesUnderlyingReturnView(t *testing.T) {
 	assert.Greater(t, out.credentials.gen, gen)
 }
 
-// TestCredentialsViewInboxKeyExitsLedgerWithInFlightLoad pins the review
-// finding: I is a global exit from the credentials ledger just like
-// D/F/P, so it must normalize ledger state before entering the Inbox.
-// An in-flight load must not come back to a ledger stuck rendering
-// "loading credential inventory..." after the Inbox round-trip, and the
-// abandoned response must not repopulate a later ledger visit.
+// Opening Inbox leaves the credentials ledger. An unfinished credential
+// load must neither keep the next ledger visit loading nor populate it.
 func TestCredentialsViewInboxKeyExitsLedgerWithInFlightLoad(t *testing.T) {
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -250,14 +246,8 @@ func TestCredentialsViewInboxKeyExitsLedgerWithInFlightLoad(t *testing.T) {
 	require.Equal(t, newGen, afterStale.credentials.gen)
 }
 
-// TestCredentialsViewInboxKeyDoesNotStrandScheduledRefresh pins the
-// review finding: handleCredentialsRefreshTick early-returns outside the
-// ledger without clearing refreshScheduled, so the I global exit must
-// clear the flag itself. Otherwise the pending tick fires while the
-// Inbox is open, the flag survives the round-trip, and
-// handleCredentialsLoaded stops re-arming periodic refresh — leaving the
-// restored ledger with stale token-lifecycle data until the user leaves
-// and re-enters.
+// Returning to credentials after an Inbox visit must resume periodic
+// refresh, even when a previously scheduled tick fired inside Inbox.
 func TestCredentialsViewInboxKeyDoesNotStrandScheduledRefresh(t *testing.T) {
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
