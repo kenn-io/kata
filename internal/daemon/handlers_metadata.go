@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -15,8 +16,14 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
-// registerMetadataHandlers installs the metadata patch routes.
+// registerMetadataHandlers installs the metadata read and patch routes.
 func registerMetadataHandlers(humaAPI huma.API, cfg ServerConfig) {
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "getIssueMetadata",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/projects/{project_id}/issues/{ref}/metadata",
+	}, getIssueMetadataHandler(cfg))
+
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "patchIssueMetadata",
 		Method:      "POST",
@@ -28,6 +35,22 @@ func registerMetadataHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/metadata",
 	}, patchProjectMetadataHandler(cfg))
+}
+
+func getIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.GetIssueMetadataRequest) (*api.GetIssueMetadataResponse, error) {
+	return func(ctx context.Context, in *api.GetIssueMetadataRequest) (*api.GetIssueMetadataResponse, error) {
+		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		out := &api.GetIssueMetadataResponse{}
+		out.Body.Issue = api.IssueMetadataOut{
+			ShortID:  iss.ShortID,
+			Metadata: api.JSONRawObject(iss.Metadata),
+			Revision: iss.Revision,
+		}
+		return out, nil
+	}
 }
 
 // parseOptionalIfMatchRevision parses the metadata patch endpoints' OPTIONAL

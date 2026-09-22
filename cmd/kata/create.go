@@ -210,6 +210,10 @@ func createRequestError(err error, forceNew bool) error {
 	if err == nil {
 		return err
 	}
+	transportErr, selectedDaemon := errors.AsType[*daemonTransportError](err)
+	if selectedDaemon && !transportErr.mutationOutcomeUnknown() {
+		return err
+	}
 	reason := ""
 	switch {
 	case requestTimedOut(err):
@@ -228,11 +232,17 @@ func createRequestError(err error, forceNew bool) error {
 	if !forceNew {
 		message += "; use --force-new only after confirming no issue exists"
 	}
+	kind := kindInternal
+	exitCode := ExitInternal
+	if selectedDaemon {
+		kind = kindDaemonUnavail
+		exitCode = ExitDaemonUnavail
+	}
 	return &cliError{
 		Message:  message,
-		Kind:     kindInternal,
+		Kind:     kind,
 		Code:     "create_outcome_unknown",
-		ExitCode: ExitInternal,
+		ExitCode: exitCode,
 	}
 }
 

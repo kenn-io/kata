@@ -285,6 +285,18 @@ func emitHumanError(w io.Writer, err error, runEReached bool) {
 func cliErrorForErr(err error, runEReached bool) *cliError {
 	var cli *cliError
 	if !errors.As(err, &cli) {
+		if transportErr, ok := errors.AsType[*daemonTransportError](err); ok {
+			message := transportErr.Error()
+			if transportErr.mutationOutcomeUnknown() {
+				message += "; mutation result may be unknown"
+			}
+			return &cliError{
+				Message:  message,
+				Kind:     kindDaemonUnavail,
+				Code:     "daemon_unavailable",
+				ExitCode: ExitDaemonUnavail,
+			}
+		}
 		// Non-cliError: synthesize one so the JSON path has uniform
 		// shape. Kind/code are inferred from exit-code conventions.
 		exit := exitCodeForErr(err, runEReached)
@@ -307,7 +319,7 @@ func exitCodeForErr(err error, runEReached bool) int {
 	// Only the selected daemon's transport marks unavailable errors. Hub and
 	// other external dial failures retain their command's error classification.
 	// Command-specific outcome-unknown errors above still take priority.
-	if _, ok := errors.AsType[*daemonDialError](err); ok {
+	if _, ok := errors.AsType[*daemonTransportError](err); ok {
 		return ExitDaemonUnavail
 	}
 	return exitCodeFor(err, runEReached)

@@ -97,7 +97,7 @@ func newMetaGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			issue, _, err := fetchMetaIssue(ctx, client, baseURL, pid, ref.RefForAPI)
+			issue, err := fetchIssueMetadata(ctx, client, baseURL, pid, ref.RefForAPI)
 			if err != nil {
 				return err
 			}
@@ -350,6 +350,30 @@ func runMetaPatchGuarded(
 	}
 	bs := response.Body
 	return printMetaPatch(cmd, bs, verb, key)
+}
+
+func fetchIssueMetadata(ctx context.Context, client *http.Client, baseURL string, pid int64, ref string) (metaIssueWire, error) {
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	if err != nil {
+		return metaIssueWire{}, err
+	}
+	response, callErr := apiClient.GetIssueMetadataWithResponse(ctx, &generated.GetIssueMetadataRequestOptions{
+		PathParams: &generated.GetIssueMetadataPath{ProjectID: pid, Ref: ref},
+	})
+	if response == nil {
+		return metaIssueWire{}, externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return metaIssueWire{}, err
+	}
+	var out metaShowResponse
+	if err := json.Unmarshal(response.Body, &out); err != nil {
+		return metaIssueWire{}, err
+	}
+	if out.Issue.Metadata == nil {
+		out.Issue.Metadata = map[string]jsontext.Value{}
+	}
+	return out.Issue, nil
 }
 
 func fetchMetaIssue(ctx context.Context, client *http.Client, baseURL string, pid int64, ref string) (metaIssueWire, []byte, error) {

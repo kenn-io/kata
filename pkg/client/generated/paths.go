@@ -482,6 +482,15 @@ func (d DeleteLinkPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
+type GetIssueMetadataPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (g GetIssueMetadataPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
 type PatchIssueMetadataPath struct {
 	ProjectID int64  `json:"project_id"`
 	Ref       string `json:"ref" validate:"required"`

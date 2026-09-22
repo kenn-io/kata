@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -264,15 +266,105 @@ func streamingClientForResolved(ctx context.Context, resolved client.ResolvedDae
 	return markDaemonHTTPClient(resolved.BaseURL, hc)
 }
 
-// Embed the operation error to preserve net.Error timeout behavior through
-// net/http's url.Error. Retain the full cause for diagnostics and unwrapping.
-type daemonDialError struct {
-	*net.OpError
-	cause error
+type daemonTransportError struct {
+	selectedOrigin      string
+	unixSocket          bool
+	method              string
+	phase               string
+	possiblyTransmitted bool
+	cause               error
 }
 
-func (e *daemonDialError) Error() string { return e.cause.Error() }
-func (e *daemonDialError) Unwrap() error { return e.cause }
+func (e *daemonTransportError) Error() string {
+	subject := "selected daemon"
+	if e.unixSocket {
+		subject = "local Unix-socket daemon"
+	}
+	if e.Timeout() {
+		switch e.phase {
+		case "connect":
+			return subject + " timed out while connecting"
+		case "body":
+			return subject + " timed out while reading response body"
+		default:
+			return subject + " timed out while reading response headers"
+		}
+	}
+	switch e.phase {
+	case "connect":
+		return subject + " is unavailable while connecting"
+	case "body":
+		return subject + " response was interrupted while reading response body"
+	default:
+		return subject + " connection closed before response headers arrived"
+	}
+}
+
+func (e *daemonTransportError) Unwrap() error { return e.cause }
+
+func (e *daemonTransportError) Timeout() bool {
+	if errors.Is(e.cause, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(e.cause, &netErr) && netErr != nil && netErr.Timeout()
+}
+
+func (e *daemonTransportError) Temporary() bool {
+	return e.Timeout()
+}
+
+func (e *daemonTransportError) daemonPhase() string      { return e.phase }
+func (e *daemonTransportError) selectedUnixSocket() bool { return e.unixSocket }
+
+func (e *daemonTransportError) mutationOutcomeUnknown() bool {
+	if !e.possiblyTransmitted {
+		return false
+	}
+	switch strings.ToUpper(e.method) {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	default:
+		return true
+	}
+}
+
+type daemonRequestBudgetKey struct{}
+
+type daemonRequestBudget struct {
+	ctx               context.Context
+	cancel            context.CancelFunc
+	cancelOnce        sync.Once
+	followingRedirect atomic.Bool
+	selectedOrigin    string
+	unixSocket        bool
+	originalMethod    string
+}
+
+func newDaemonRequestBudget(req *http.Request, timeout time.Duration, origin *url.URL) *daemonRequestBudget {
+	ctx := req.Context()
+	cancel := func() {}
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout) //nolint:gosec // G118: daemonRequestBudget.stop owns cancellation after the response closes.
+	}
+	state := &daemonRequestBudget{
+		cancel:         cancel,
+		selectedOrigin: origin.Scheme + "://" + origin.Host,
+		unixSocket:     strings.EqualFold(origin.Hostname(), "kata.invalid"),
+		originalMethod: req.Method,
+	}
+	state.ctx = context.WithValue(ctx, daemonRequestBudgetKey{}, state)
+	return state
+}
+
+func (s *daemonRequestBudget) stop() {
+	s.cancelOnce.Do(s.cancel)
+}
+
+func daemonBudgetFromContext(ctx context.Context) *daemonRequestBudget {
+	state, _ := ctx.Value(daemonRequestBudgetKey{}).(*daemonRequestBudget)
+	return state
+}
 
 // Only clients built for the selected daemon mark its dial failures. Hub
 // clients and requests redirected to other origins retain their own errors.
@@ -285,37 +377,109 @@ func markDaemonHTTPClient(baseURL string, hc *http.Client) (*http.Client, error)
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	hc.Transport = daemonErrorTransport{RoundTripper: transport, origin: origin}
+	timeout := hc.Timeout
+	hc.Timeout = 0
+	hc.Transport = daemonErrorTransport{RoundTripper: transport, origin: origin, timeout: timeout}
+	checkRedirect := hc.CheckRedirect
+	hc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		var err error
+		if checkRedirect != nil {
+			err = checkRedirect(req, via)
+		} else if len(via) >= 10 {
+			err = errors.New("stopped after 10 redirects")
+		}
+		if err != nil || req.Response == nil || req.Response.Request == nil {
+			return err
+		}
+		state := daemonBudgetFromContext(req.Response.Request.Context())
+		if state == nil {
+			return nil
+		}
+		state.followingRedirect.Store(true)
+		*req = *req.WithContext(state.ctx)
+		return nil
+	}
 	return hc, nil
 }
 
 type daemonErrorTransport struct {
 	http.RoundTripper
-	origin *url.URL
+	origin  *url.URL
+	timeout time.Duration
 }
 
 func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := t.RoundTripper.RoundTrip(req)
-	if req.URL.Scheme == t.origin.Scheme && req.URL.Host == t.origin.Host {
-		if resp != nil && resp.Body != nil {
-			resp.Body = daemonResponseBody{resp.Body}
-		}
-		if op, ok := errors.AsType[*net.OpError](err); ok && op.Op == "dial" {
-			return resp, &daemonDialError{OpError: op, cause: err}
-		}
+	state := daemonBudgetFromContext(req.Context())
+	if state == nil {
+		state = newDaemonRequestBudget(req, t.timeout, t.origin)
 	}
-	return resp, err
+	selected := req.URL.Scheme == t.origin.Scheme && req.URL.Host == t.origin.Host
+	request := req.Clone(state.ctx)
+	resp, err := t.RoundTripper.RoundTrip(request)
+	if resp != nil && resp.Body != nil {
+		resp.Body = &daemonResponseBody{ReadCloser: resp.Body, state: state, selected: selected}
+	}
+	if err == nil || !selected {
+		if err != nil {
+			state.stop()
+		}
+		return resp, err
+	}
+	state.stop()
+	phase := "headers"
+	possiblyTransmitted := true
+	if op, ok := errors.AsType[*net.OpError](err); ok && op.Op == "dial" {
+		phase = "connect"
+		possiblyTransmitted = false
+	}
+	return resp, &daemonTransportError{
+		selectedOrigin:      state.selectedOrigin,
+		unixSocket:          state.unixSocket,
+		method:              state.originalMethod,
+		phase:               phase,
+		possiblyTransmitted: possiblyTransmitted,
+		cause:               err,
+	}
 }
 
-// Keep response-read failures distinct when the generated runtime buffers a body.
-type daemonResponseBody struct{ io.ReadCloser }
+// Keep the request budget below net/http's Client.Timeout replacement path so
+// generated response buffering retains selected-daemon provenance.
+type daemonResponseBody struct {
+	io.ReadCloser
+	state    *daemonRequestBudget
+	selected bool
+}
 
-func (b daemonResponseBody) Read(p []byte) (int, error) {
+func (b *daemonResponseBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return n, &responseBodyReadError{err: err}
+	if err == nil {
+		return n, nil
 	}
-	return n, err
+	if b.state.followingRedirect.Load() {
+		return n, err
+	}
+	b.state.stop()
+	if errors.Is(err, io.EOF) || !b.selected {
+		return n, err
+	}
+	cause := &responseBodyReadError{err: err}
+	return n, &daemonTransportError{
+		selectedOrigin:      b.state.selectedOrigin,
+		unixSocket:          b.state.unixSocket,
+		method:              b.state.originalMethod,
+		phase:               "body",
+		possiblyTransmitted: true,
+		cause:               cause,
+	}
+}
+
+func (b *daemonResponseBody) Close() error {
+	err := b.ReadCloser.Close()
+	if b.state.followingRedirect.CompareAndSwap(true, false) {
+		return err
+	}
+	b.state.stop()
+	return err
 }
 
 // daemonAPI is a resolved connection to one daemon: the base URL, the

@@ -1035,7 +1035,10 @@ func claimStatusBody(status db.ClaimStatus) api.ClaimStatusBody {
 	return body
 }
 
-const showClaimStatusRetryAfter = time.Minute
+const (
+	showClaimStatusRefreshTimeout = 500 * time.Millisecond
+	showClaimStatusRetryAfter     = time.Minute
+)
 
 func showIssueClaimRelevant(ctx context.Context, store db.Storage, projectID int64) (bool, error) {
 	binding, err := store.FederationBindingByProject(ctx, projectID)
@@ -1083,14 +1086,22 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	} else if skip {
 		return nil, nil
 	}
-	remote, cred, err := claimForwardClient(ctx, cfg, binding)
+	remoteCtx, cancelRemote := context.WithTimeout(ctx, showClaimStatusRefreshTimeout)
+	remote, cred, err := claimForwardClient(remoteCtx, cfg, binding)
 	if err != nil {
+		budgetErr := remoteCtx.Err()
+		cancelRemote()
+		if budgetErr != nil {
+			return nil, markShowClaimStatusRefreshFailure(ctx, cfg.DB, issue, 0,
+				fmt.Sprintf("status refresh transport: %s", budgetErr.Error()), now)
+		}
 		if isOfflineClaimRefreshError(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	resp, err := remote.ClaimStatus(ctx, cred.HubProjectID, issue.ShortID)
+	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.ShortID)
+	cancelRemote()
 	if err != nil {
 		if statusErr, ok := errors.AsType[*claimHubStatusError](err); ok {
 			return nil, markShowClaimStatusError(ctx, cfg.DB, issue, statusErr, now)

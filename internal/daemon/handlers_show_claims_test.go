@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -437,6 +440,82 @@ func TestShowIssueClaimRefreshHubUnreachableFallsBackToCachedClaimAndPending(t *
 	assert.Equal(t, pending.RequestUID, body.PendingClaims[0].RequestUID)
 }
 
+func TestShowIssueClaimSpokeBoundsRemoteRefreshHeaders(t *testing.T) {
+	spoke, project, issue, pending := newShowClaimTimeoutSpoke(t)
+	hub := newBlockingClaimStatusHub(t, false)
+	writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
+
+	started := time.Now()
+	body := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+	elapsed := time.Since(started)
+
+	require.NotNil(t, body.Claim)
+	assert.Equal(t, "cached-holder", body.Claim.Holder)
+	require.Len(t, body.PendingClaims, 1)
+	assert.Equal(t, pending.RequestUID, body.PendingClaims[0].RequestUID)
+	assert.Less(t, elapsed, 1500*time.Millisecond)
+	assert.EqualValues(t, 1, hub.calls.Load())
+	hub.requireCanceled(t)
+}
+
+func TestShowIssueClaimSpokeBoundsRemoteRefreshBody(t *testing.T) {
+	spoke, project, issue, pending := newShowClaimTimeoutSpoke(t)
+	hub := newBlockingClaimStatusHub(t, true)
+	writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
+
+	started := time.Now()
+	body := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+	elapsed := time.Since(started)
+
+	require.NotNil(t, body.Claim)
+	assert.Equal(t, "cached-holder", body.Claim.Holder)
+	require.Len(t, body.PendingClaims, 1)
+	assert.Equal(t, pending.RequestUID, body.PendingClaims[0].RequestUID)
+	assert.Less(t, elapsed, 1500*time.Millisecond)
+	assert.EqualValues(t, 1, hub.calls.Load())
+	hub.requireCanceled(t)
+}
+
+func TestShowIssueClaimSpokeTimeoutSuppressesImmediateRetryWithoutPendingClaim(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, issue := createShowClaimSpokeProject(t, spoke)
+	cachedAt := time.Date(2026, 5, 23, 14, 0, 0, 0, time.UTC)
+	require.NoError(t, spoke.DB.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
+		Held: true,
+		Holder: db.ClaimPrincipal{
+			HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD",
+			Holder:            "cached-holder",
+			ClientKind:        "cli",
+		},
+		Claim:  showIssueCachedClaim(issue, "cached-holder", cachedAt),
+		HubNow: cachedAt,
+	}))
+	hub := newBlockingClaimStatusHub(t, false)
+	writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
+
+	first := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+	require.NotNil(t, first.Claim)
+	assert.Equal(t, "cached-holder", first.Claim.Holder)
+	second := getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+	require.NotNil(t, second.Claim)
+	assert.Equal(t, "cached-holder", second.Claim.Holder)
+	assert.EqualValues(t, 1, hub.calls.Load())
+}
+
+func TestShowIssueClaimSpokeRemoteBudgetKeepsParentContextForCacheWrites(t *testing.T) {
+	spoke, project, issue, _ := newShowClaimTimeoutSpoke(t)
+	hub := newBlockingClaimStatusHub(t, false)
+	writeShowClaimSpokeBinding(t, spoke, project, hub.URL(), "claim-token", "claim")
+
+	_ = getShowIssueClaimBodyWithTimeout(t, spoke, project.ID, issue.ShortID, 2*time.Second)
+
+	refreshErr, err := spoke.DB.ClaimStatusRefreshError(t.Context(), project.ID, issue.UID)
+	require.NoError(t, err)
+	assert.Contains(t, refreshErr.LastError, "status refresh transport")
+	assert.EqualValues(t, 1, hub.calls.Load())
+}
+
 func TestShowIssueClaimRefreshForbiddenRecordsErrorAndDoesNotHotLoop(t *testing.T) {
 	testShowIssueClaimRefreshStatusErrorDoesNotHotLoop(t, http.StatusForbidden)
 }
@@ -500,6 +579,102 @@ func getShowIssueClaimBody(t *testing.T, env *testenv.Env, projectID int64, ref 
 	var body showIssueClaimBody
 	require.NoError(t, json.Unmarshal(raw, &body))
 	return body
+}
+
+func getShowIssueClaimBodyWithTimeout(
+	t *testing.T,
+	env *testenv.Env,
+	projectID int64,
+	ref string,
+	timeout time.Duration,
+) showIssueClaimBody {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, env.URL+issuePathRef(projectID, ref, ""), nil)
+	require.NoError(t, err)
+	resp, err := env.HTTP.Do(req) //nolint:gosec // test request to loopback URL
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var body showIssueClaimBody
+	require.NoError(t, json.Unmarshal(raw, &body))
+	return body
+}
+
+type blockingClaimStatusHub struct {
+	server       *httptest.Server
+	calls        atomic.Int64
+	canceled     chan struct{}
+	canceledOnce sync.Once
+	release      chan struct{}
+	releaseOnce  sync.Once
+}
+
+func newBlockingClaimStatusHub(t *testing.T, blockBody bool) *blockingClaimStatusHub {
+	t.Helper()
+	hub := &blockingClaimStatusHub{
+		canceled: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	hub.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.calls.Add(1)
+		if blockBody {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `{"held":false`)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+		select {
+		case <-r.Context().Done():
+			hub.canceledOnce.Do(func() { close(hub.canceled) })
+		case <-hub.release:
+		}
+	}))
+	t.Cleanup(func() {
+		hub.releaseOnce.Do(func() { close(hub.release) })
+		hub.server.Close()
+	})
+	return hub
+}
+
+func (h *blockingClaimStatusHub) URL() string {
+	return h.server.URL
+}
+
+func (h *blockingClaimStatusHub) requireCanceled(t *testing.T) {
+	t.Helper()
+	select {
+	case <-h.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("claim-status request context was not canceled")
+	}
+}
+
+func newShowClaimTimeoutSpoke(
+	t *testing.T,
+) (*testenv.Env, db.Project, db.Issue, db.PendingClaimRequest) {
+	t.Helper()
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, issue := createShowClaimSpokeProject(t, spoke)
+	cachedAt := time.Date(2026, 5, 23, 14, 0, 0, 0, time.UTC)
+	require.NoError(t, spoke.DB.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
+		Held: true,
+		Holder: db.ClaimPrincipal{
+			HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD",
+			Holder:            "cached-holder",
+			ClientKind:        "cli",
+		},
+		Claim:  showIssueCachedClaim(issue, "cached-holder", cachedAt),
+		HubNow: cachedAt,
+	}))
+	pending := enqueueShowPendingClaim(t, spoke.DB, project.ID, issue.ShortID, "pending-cli", cachedAt.Add(time.Minute))
+	return spoke, project, issue, pending
 }
 
 func testShowIssueClaimRefreshStatusErrorDoesNotHotLoop(t *testing.T, status int) {

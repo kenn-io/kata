@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +28,103 @@ func seedProjectAndIssue(t *testing.T, env *testenv.Env) (db.Project, db.Issue) 
 	})
 	require.NoError(t, err)
 	return p, iss
+}
+
+type getIssueMetadataBody struct {
+	Issue struct {
+		ShortID  string                    `json:"short_id"`
+		Metadata map[string]jsontext.Value `json:"metadata"`
+		Revision int64                     `json:"revision"`
+	} `json:"issue"`
+}
+
+func TestGetIssueMetadataReturnsLocalFieldsWithoutClaimRefresh(t *testing.T) {
+	env := testenv.New(t)
+	project, issue := createShowClaimSpokeProject(t, env)
+	patched, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: issue.ID,
+		Actor:   "tester",
+		Patch: map[string]jsontext.Value{
+			"custom": jsontext.Value(`{"nested":[1,true,"x"]}`),
+		},
+	})
+	require.NoError(t, err)
+
+	var claimStatusCalls atomic.Int64
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		claimStatusCalls.Add(1)
+		http.Error(w, "claim status must not be called", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(hub.Close)
+	writeShowClaimSpokeBinding(t, env, project, hub.URL, "claim-token", "claim")
+
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", project.ID, issue.ShortID)
+	resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, nil)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+	assert.Equal(t, int64(0), claimStatusCalls.Load())
+
+	var body getIssueMetadataBody
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, issue.ShortID, body.Issue.ShortID)
+	assert.Equal(t, patched.Issue.Revision, body.Issue.Revision)
+	require.JSONEq(t, `{"nested":[1,true,"x"]}`, string(body.Issue.Metadata["custom"]))
+	var envelope map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(raw, &envelope))
+	var issueObject map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(envelope["issue"], &issueObject))
+	assert.NotContains(t, issueObject, "status")
+}
+
+func TestGetIssueMetadataPreservesEmptyObject(t *testing.T) {
+	env := testenv.New(t)
+	project, issue := seedProjectAndIssue(t, env)
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", project.ID, issue.ShortID)
+
+	resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, nil)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+	var body getIssueMetadataBody
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.NotNil(t, body.Issue.Metadata)
+	assert.Empty(t, body.Issue.Metadata)
+	assert.Contains(t, string(raw), `"metadata":{}`)
+}
+
+func TestGetIssueMetadataRejectsInvisibleReferences(t *testing.T) {
+	t.Run("deleted issue", func(t *testing.T) {
+		env := testenv.New(t)
+		project, issue := seedProjectAndIssue(t, env)
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", project.ID, issue.ShortID)
+		resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, nil)
+		assertAPIError(t, resp.StatusCode, raw, http.StatusNotFound, "issue_not_found")
+	})
+
+	t.Run("cross project uid", func(t *testing.T) {
+		env := testenv.New(t)
+		project, _ := seedProjectAndIssue(t, env)
+		otherProject, err := env.DB.CreateProject(t.Context(), "other-project")
+		require.NoError(t, err)
+		otherIssue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: otherProject.ID, Title: "other issue", Author: "tester",
+		})
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", project.ID, otherIssue.UID)
+		resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, nil)
+		assertAPIError(t, resp.StatusCode, raw, http.StatusNotFound, "issue_not_found")
+	})
+
+	t.Run("archived project", func(t *testing.T) {
+		env := testenv.New(t)
+		project, issue := seedProjectAndIssue(t, env)
+		_, _, err := env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
+			ProjectID: project.ID, Actor: "tester", Force: true,
+		})
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", project.ID, issue.ShortID)
+		resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, nil)
+		assertAPIError(t, resp.StatusCode, raw, http.StatusNotFound, "project_not_found")
+	})
 }
 
 // metadataSubject parameterises the issue + project metadata tests over a
