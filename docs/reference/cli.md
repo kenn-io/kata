@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-20
+last_edited: 2026-09-22
 ---
 
 # CLI reference
@@ -29,7 +29,8 @@ on subcommands. There is no `-v` shorthand.
 
 For `list`, `ready`, `next`, `inbox`, `events`, `digest`, and `mcp serve`,
 pass `--all` to select projects across the chosen daemon. These commands
-remain project-scoped by default. Update scripts and MCP launch configurations
+remain project-scoped by default. `--all` cannot be combined with explicit
+`--project` or `--workspace`. Update scripts and MCP launch configurations
 that use `--all-projects` to use `--all`; the old spelling is no longer accepted.
 
 ## Workspace initialization
@@ -233,7 +234,7 @@ requires daemon API `0.21.0` or newer.
 Its human and agent rows use qualified refs such as
 `example-project#abc4`, and JSON rows include `project_name`. A scoped list
 defaults to 200 rows; `list --all` defaults to no limit. Passing `--limit 0`
-also means no limit. `--all` cannot be combined with `--project`.
+also means no limit. `--all` cannot be combined with `--project` or `--workspace`.
 
 Human `kata list` output groups fetched children beneath their fetched parents
 with box-drawing connectors. When a parent is absent because it did not match
@@ -575,10 +576,11 @@ on each request; agent rows add `project`, and context includes the quoted
 project name. Project-scoped output keeps its existing shape. Human output
 reports an empty inbox unless `--quiet` is set.
 `--context` instead emits bounded, quoted context for a harness, with
-a notice when content is truncated. An empty inbox produces no context. Do not
-combine `--context` with other output selectors. Malformed request metadata is
-skipped with a warning on stderr unless `--quiet` is set; ordinary command
-failures return nonzero.
+a notice when content is truncated. Long issue refs are also truncated; use the
+full inbox to retrieve refs for follow-up commands. An empty inbox produces no
+context. Do not combine `--context` with other output selectors. Malformed
+request metadata is skipped with a warning on stderr unless `--quiet` is set;
+ordinary command failures return nonzero.
 
 Requests use existing issue metadata: `notify.` followed by the recipient's
 unpadded base64url encoding, with a JSON value containing `from`, `message`, and
@@ -628,7 +630,7 @@ Filters combine with AND logic. `--all` lists ready issues across every
 non-archived project; the scoped filters (`--unowned`, `--owner`, `--label`,
 `--no-label`) compose with it, so a cross-project queue view such as "every
 unowned ready issue labeled `handoff-to:example-host`" is a single query.
-`--all` cannot be combined with `--project`.
+`--all` cannot be combined with `--project` or `--workspace`.
 
 `next` selects one issue from the same ready candidates. Selection is
 deterministic: any explicitly prioritized candidate beats every unprioritized

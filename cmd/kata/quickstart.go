@@ -147,7 +147,6 @@ Use kata as the shared issue ledger for this workspace.
    kata notify abc4 --to coordinator --message "Please decide"
    kata notify abc4 --to coordinator/teammate-1 --message "Please check the update"
    kata inbox --for coordinator/teammate-1
-   kata inbox --for coordinator/teammate-1 --all
    kata notify abc4 --to coordinator/teammate-1 --clear
 
    Comment creation stores the teammate in its dedicated field. New issue
@@ -156,8 +155,11 @@ Use kata as the shared issue ledger for this workspace.
    value that suppresses the inherited default. KATA_INBOX_USER only selects
    an inbox; it does not set comment or create attribution.
 
-   Inbox reads cover open issues in the selected project by default; --all
-   reads the selected daemon's active projects and returns qualified issue refs.
+   Inbox reads cover open issues in the selected project by default.
+   For cross-project work, use kata inbox --for coordinator/teammate-1 --all
+   without --project or --workspace. This reads the selected daemon's active
+   projects and returns qualified issue refs. It requires daemon API 0.9.0 or
+   newer and daemon-wide read authority.
    Closing an issue hides its requests; reopening restores uncleared requests.
    The recipient remains explicit: use --for or KATA_INBOX_USER. An external harness must map each
    exact actor/teammate address to the runtime it launched and poll or watch

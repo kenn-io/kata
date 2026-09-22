@@ -11,13 +11,6 @@ import (
 
 var runTUI = tui.Run
 
-// newTUICmd registers the TUI command. --all is intentionally
-// absent today: the daemon has no cross-project list endpoint
-// (handlers_issues.go only registers the project-scoped route), so
-// advertising the flag would land the user on a 404. The all-projects
-// surface is gated end-to-end (this flag, the R toggle, and the boot-
-// fallback path) until the daemon ships GET /issues for cross-project
-// reads.
 func newTUICmd() *cobra.Command {
 	var uidFormat string
 	var mouse bool

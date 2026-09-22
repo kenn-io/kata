@@ -36,6 +36,9 @@ By default, digest is scoped to the current workspace's project. Use
 cross-project digest.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if allProjects && strings.TrimSpace(flags.Workspace) != "" {
+				return &cliError{Message: "--all and --workspace are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}
+			}
 			if allProjects && projectIDArg != 0 {
 				return &cliError{
 					Message:  "--all and --project-id are mutually exclusive",

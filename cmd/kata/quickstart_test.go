@@ -145,7 +145,7 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(out, "kata notify <ref> --to <actor>[/<teammate>] --message <reason>"),
 		"session injection should teach attention requests once")
 	assert.LessOrEqual(t, len(out), 4000, "keep the per-session briefing compact")
-	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>]")
+	assert.Contains(t, out, "Read requests: kata inbox --for <actor>[/<teammate>].")
 	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>] --all")
 	assert.Contains(t, out, "kata notify <ref> --to <actor>[/<teammate>] --clear")
 	assert.NotContains(t, out, "20z0", "a universal contract cannot use a project-scoped issue ref")

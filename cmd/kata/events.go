@@ -39,6 +39,9 @@ With --tail, opens an SSE connection and emits one NDJSON envelope per
 line. The stream reconnects with exponential backoff on disconnect and
 runs until SIGINT/SIGTERM.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if allProjects && strings.TrimSpace(flags.Workspace) != "" {
+				return &cliError{Message: "--all and --workspace are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}
+			}
 			if allProjects && projectIDArg != 0 {
 				return &cliError{Message: "--all and --project-id are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}
 			}

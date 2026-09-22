@@ -19,6 +19,7 @@ import (
 
 const (
 	inboxContextBudget     = 8 * 1024
+	inboxContextRefLimit   = 256
 	inboxContextTitleLimit = 256
 	inboxContextFromLimit  = 128
 	inboxContextMsgLimit   = 1024
@@ -253,10 +254,11 @@ func renderInboxContext(recipient string, requests []inboxRequest, allProjects b
 	lines := make([]string, len(requests))
 	truncated := false
 	for i, request := range requests {
+		ref, cutRef := truncateInboxField(textsafe.Line(request.Ref), inboxContextRefLimit)
 		title, cutTitle := truncateInboxField(textsafe.Line(request.Title), inboxContextTitleLimit)
 		from, cutFrom := truncateInboxField(textsafe.Line(request.From), inboxContextFromLimit)
 		message, cutMessage := truncateInboxField(textsafe.Line(request.Message), inboxContextMsgLimit)
-		truncated = truncated || cutTitle || cutFrom || cutMessage
+		truncated = truncated || cutRef || cutTitle || cutFrom || cutMessage
 		attribution := ""
 		if request.Teammate != "" {
 			handle, cutTeammate := truncateInboxField(textsafe.Line(request.Teammate), 64)
@@ -270,19 +272,15 @@ func renderInboxContext(recipient string, requests []inboxRequest, allProjects b
 			projectField = " project=" + strconv.Quote(project)
 		}
 		lines[i] = fmt.Sprintf("- issue=%s%s title=%s from=%s%s message=%s\n",
-			strconv.Quote(request.Ref), projectField, strconv.Quote(title), strconv.Quote(from), attribution, strconv.Quote(message))
+			strconv.Quote(ref), projectField, strconv.Quote(title), strconv.Quote(from), attribution, strconv.Quote(message))
 	}
 	var output strings.Builder
 	output.WriteString(header)
 	omitted := 0
 	for i, line := range lines {
 		if output.Len()+len(line) > inboxContextBudget {
-			if !allProjects {
-				omitted = len(lines) - i
-				break
-			}
-			omitted++
-			continue
+			omitted = len(lines) - i
+			break
 		}
 		output.WriteString(line)
 	}

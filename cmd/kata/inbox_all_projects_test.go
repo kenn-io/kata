@@ -256,7 +256,7 @@ func TestAllProjectsInboxReturnsMoreThanDefaultPageAndBoundsContext(t *testing.T
 	assert.Contains(t, context, "project=\"hub-project\"")
 }
 
-func TestAllProjectsInboxContextKeepsLaterRequestsAfterOversizedReference(t *testing.T) {
+func TestAllProjectsInboxContextTruncatesOversizedReference(t *testing.T) {
 	longProject := strings.Repeat("a", inboxContextBudget)
 	requests := []inboxRequest{
 		{
@@ -270,6 +270,8 @@ func TestAllProjectsInboxContextKeepsLaterRequestsAfterOversizedReference(t *tes
 	}
 	context := renderInboxContext("reviewer", requests, true)
 	assert.LessOrEqual(t, len(context), inboxContextBudget)
+	assert.Contains(t, context, `title="large"`)
 	assert.Contains(t, context, `issue="spoke-project#abc2" project="spoke-project"`)
-	assert.Contains(t, context, "1 request(s) omitted")
+	assert.Contains(t, context, "request text was truncated")
+	assert.NotContains(t, context, "request(s) omitted")
 }

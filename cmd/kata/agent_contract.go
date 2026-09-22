@@ -30,7 +30,7 @@ digraph kata {
 
   subgraph cluster_delegate {
     label="";
-    fanout [label="Tracked children: --parent <ref>, --meta work.branch=<branch>,\n--idempotency-key <key>, --json; capture .issue.short_id.\nSubagents: distinct KATA_TEAMMATE and\nKATA_INBOX_USER=<actor>/<teammate>; keep the actor.\nRead requests: kata inbox --for <actor>[/<teammate>] --all.\nAfter handling: kata notify <ref> --to <actor>[/<teammate>] --clear."];
+    fanout [label="Tracked children: --parent <ref>, --meta work.branch=<branch>,\n--idempotency-key <key>, --json; capture .issue.short_id.\nSubagents: distinct KATA_TEAMMATE and\nKATA_INBOX_USER=<actor>/<teammate>; keep the actor.\nRead requests: kata inbox --for <actor>[/<teammate>].\nAfter handling: kata notify <ref> --to <actor>[/<teammate>] --clear."];
     join   [label="Join with kata wait <refs> --until attention --any\nMatches needs-human or stuck; a close also completes the wait,\nand the reported reason distinguishes which. Use --timeout so a\nwrapper can tell timeout from satisfaction."];
     coord  [label="Read delegated work.*; never write it."];
     fanout -> join -> coord;
@@ -56,6 +56,8 @@ digraph kata {
   park -> review   [label="needs review"];
 }
 ~~~
+
+Inbox reads stay in the selected project. For cross-project work, use kata inbox --for <actor>[/<teammate>] --all without --project or --workspace.
 
 Parent links group work; they do not gate readiness, but a parent cannot close with open children.
 Use --blocks <dependent> / --blocked-by <prerequisite> only for real prerequisites; they gate kata ready.

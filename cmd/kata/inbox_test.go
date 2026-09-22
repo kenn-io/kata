@@ -134,17 +134,19 @@ func TestInboxContextIncludesAllRequestsWhenTheyFit(t *testing.T) {
 	assert.Contains(t, context, `issue="last"`)
 }
 
-func TestInboxProjectContextStopsAfterFirstOverBudgetRequest(t *testing.T) {
+func TestInboxContextStopsAfterFirstOverBudgetRequest(t *testing.T) {
 	requests := make([]inboxRequest, 9)
 	for i := range 8 {
 		requests[i] = inboxRequest{Ref: "large", Title: "t", From: "sender", Message: strings.Repeat("x", 1024)}
 	}
 	requests[8] = inboxRequest{Ref: "later", Title: "t", From: "sender", Message: "short"}
 
-	context := renderInboxContext("reviewer", requests, false)
-	assert.LessOrEqual(t, len(context), inboxContextBudget)
-	assert.NotContains(t, context, `issue="later"`)
-	assert.Contains(t, context, "2 request(s) omitted")
+	for _, allProjects := range []bool{false, true} {
+		context := renderInboxContext("reviewer", requests, allProjects)
+		assert.LessOrEqual(t, len(context), inboxContextBudget)
+		assert.NotContains(t, context, `issue="later"`)
+		assert.Contains(t, context, "2 request(s) omitted")
+	}
 }
 
 func TestInboxReturnsEveryMatchAndStaysProjectScoped(t *testing.T) {

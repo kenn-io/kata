@@ -46,7 +46,7 @@ func TestList_DefaultsToOpenIssuesInProject(t *testing.T) {
 }
 
 func TestList_AllFiltersAcrossProjectsAndUsesQualifiedRefs(t *testing.T) {
-	env, dir, primaryID := setupCLIWorkspace(t)
+	env, _, primaryID := setupCLIWorkspace(t)
 	secondary, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 
@@ -62,17 +62,17 @@ func TestList_AllFiltersAcrossProjectsAndUsesQualifiedRefs(t *testing.T) {
 			map[string]any{"actor": "tester", "label": "handoff"})
 	}
 
-	out := runCLI(t, env, dir, "--agent", "list", "--all", "--label", "HANDOFF", "--limit", "0")
+	out := requireCmdOutput(t, env, "--agent", "list", "--all", "--label", "HANDOFF", "--limit", "0")
 	assert.Contains(t, out, "issue=kata#"+primaryMatch)
 	assert.Contains(t, out, "issue=spoke-project#"+secondaryMatch)
 	assert.NotContains(t, out, secondaryOther)
 }
 
 func TestList_AllJSONIncludesProjectName(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "global row")
 
-	out := runCLI(t, env, dir, "--json", "list", "--all")
+	out := requireCmdOutput(t, env, "--json", "list", "--all")
 	var got struct {
 		Issues []map[string]any `json:"issues"`
 	}

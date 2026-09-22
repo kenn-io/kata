@@ -104,10 +104,10 @@ func TestReady_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
 // plus one kv row per issue whose issue field is the qualified
 // "<project>#<short_id>" ref — never the human glyph rows.
 func TestReady_AgentAllEmitsKVRows(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	sid := createIssue(t, env, pid, "agent all row")
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "--agent", "ready", "--all")
+	out, err := runCmdOutput(t, env, "--agent", "ready", "--all")
 	require.NoError(t, err)
 
 	assert.Contains(t, out, "OK ready count=1\n")
@@ -121,11 +121,11 @@ func TestReady_AgentAllEmitsKVRows(t *testing.T) {
 // on --all agent rows: priority is rendered when set, owner is omitted when
 // absent (same optional-field idiom as the project-scoped agent path).
 func TestReady_AgentAllRowCarriesPriorityAndOmitsAbsentOwner(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	postJSON[map[string]any](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
 		map[string]any{"actor": "tester", "title": "urgent fix", "priority": int64(1)})
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "--agent", "ready", "--all")
+	out, err := runCmdOutput(t, env, "--agent", "ready", "--all")
 	require.NoError(t, err)
 
 	assert.Contains(t, out, "priority=1")
@@ -157,7 +157,7 @@ func TestReady_AgentAllRowEmitsLabels(t *testing.T) {
 	ref := createIssue(t, env, pid, "labeled global ready")
 	runCLI(t, env, dir, "label", "add", ref, "epic")
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "--agent", "ready", "--all")
+	out, err := runCmdOutput(t, env, "--agent", "ready", "--all")
 	require.NoError(t, err)
 
 	assert.Contains(t, out,
@@ -174,10 +174,10 @@ func TestReady_UnownedAndOwnerMutualExclusion(t *testing.T) {
 }
 
 func TestReady_AllFlagListsAcrossProjects(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "in-bound-project")
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	out, err := runCmdOutput(t, env, "ready", "--all")
 	require.NoError(t, err)
 	// Text rows must use the qualified short-ref form: "<project>#<short_id>".
 	// We don't pin the project name (depends on setupCLIWorkspace), but the
@@ -187,10 +187,10 @@ func TestReady_AllFlagListsAcrossProjects(t *testing.T) {
 }
 
 func TestReady_AllFlagJSONIncludesProjectName(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "first")
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "--json", "ready", "--all")
+	out, err := runCmdOutput(t, env, "--json", "ready", "--all")
 	require.NoError(t, err)
 	var got struct {
 		Issues []map[string]any `json:"issues"`
@@ -218,7 +218,8 @@ func TestReady_AllFromBoundDirSkipsLocalProject(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "from-bound-project")
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	t.Chdir(dir)
+	out, err := runCmdOutput(t, env, "ready", "--all")
 	require.NoError(t, err)
 	assert.Contains(t, out, "#",
 		"--all from bound dir still emits qualified refs, got: %q", out)
@@ -273,7 +274,7 @@ func TestReady_AllHumanRowRendersLabelChips(t *testing.T) {
 	ref := createIssue(t, env, pid, "big effort")
 	runCLI(t, env, dir, "label", "add", ref, "epic")
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	out, err := runCmdOutput(t, env, "ready", "--all")
 	require.NoError(t, err)
 
 	assert.Contains(t, out, "[epic] ")
@@ -350,12 +351,12 @@ func TestReady_HumanFooterShowsReadyWhenNotTruncated(t *testing.T) {
 // TestReady_AllHumanFooterShowsShowingWhenTruncated pins the --all path's
 // truncation wording, mirroring the scoped-project case above.
 func TestReady_AllHumanFooterShowsShowingWhenTruncated(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta", "gamma"} {
 		createIssue(t, env, pid, title)
 	}
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--limit", "2")
+	out, err := runCmdOutput(t, env, "ready", "--all", "--limit", "2")
 	require.NoError(t, err)
 
 	assert.Contains(t, out, "Showing: 2 ready issues with no active blockers")
@@ -366,10 +367,10 @@ func TestReady_AllHumanFooterShowsShowingWhenTruncated(t *testing.T) {
 // human path renders through the shared row renderer with the qualified
 // "project#short_id" id and the open glyph.
 func TestReady_AllHumanRowUsesGlyphLayoutAndQualifiedID(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	out, err := runCmdOutput(t, env, "ready", "--all")
 	require.NoError(t, err)
 
 	assert.Contains(t, out, "○ ", "expected open glyph prefix in --all human ready output")
@@ -380,11 +381,11 @@ func TestReady_AllHumanRowUsesGlyphLayoutAndQualifiedID(t *testing.T) {
 // TestReady_AllHumanRowRendersPriorityChip pins that --all human output
 // renders the priority chip for a ready issue created with a priority.
 func TestReady_AllHumanRowRendersPriorityChip(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	postJSON[map[string]any](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
 		map[string]any{"actor": "tester", "title": "urgent fix", "priority": int64(1)})
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	out, err := runCmdOutput(t, env, "ready", "--all")
 	require.NoError(t, err)
 
 	assert.Contains(t, out, "• P1")
@@ -392,10 +393,10 @@ func TestReady_AllHumanRowRendersPriorityChip(t *testing.T) {
 
 // TestReady_AllHumanFooterShowsSummaryAndLegend pins the --all footer.
 func TestReady_AllHumanFooterShowsSummaryAndLegend(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	out, err := runCmdOutput(t, env, "ready", "--all")
 	require.NoError(t, err)
 
 	assert.Contains(t, out, "Ready: 1 issue with no active blockers")
@@ -405,22 +406,22 @@ func TestReady_AllHumanFooterShowsSummaryAndLegend(t *testing.T) {
 func TestReady_AllAcceptsFilterFlags(t *testing.T) {
 	// --all composes with the scoped filters: cross-project queue views like
 	// "every unowned issue labeled X anywhere" are the point of the flag.
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
-	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--unowned")
+	out, err := runCmdOutput(t, env, "ready", "--all", "--unowned")
 	require.NoError(t, err)
 	assert.Contains(t, out, "alpha")
 
-	out, err = runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--label", "no-such-label")
+	out, err = runCmdOutput(t, env, "ready", "--all", "--label", "no-such-label")
 	require.NoError(t, err)
 	assert.NotContains(t, out, "alpha")
 
-	out, err = runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--no-label", "no-such-label")
+	out, err = runCmdOutput(t, env, "ready", "--all", "--no-label", "no-such-label")
 	require.NoError(t, err)
 	assert.Contains(t, out, "alpha")
 
-	out, err = runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--owner", "somebody-else")
+	out, err = runCmdOutput(t, env, "ready", "--all", "--owner", "somebody-else")
 	require.NoError(t, err)
 	assert.NotContains(t, out, "alpha")
 }
