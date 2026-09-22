@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"go.kenn.io/kata/internal/colormode"
-	"go.kenn.io/kata/internal/markdownrender"
+	"go.kenn.io/kit/tui/markdownrender"
 )
 
 type colorMode = colormode.Mode

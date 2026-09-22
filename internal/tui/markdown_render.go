@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"go.kenn.io/kata/internal/markdownrender"
+	"go.kenn.io/kit/tui/markdownrender"
 )
 
 func renderMarkdownLines(markdown string, width int) []string {

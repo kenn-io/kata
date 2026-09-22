@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"go.kenn.io/kata/internal/colormode"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/markdownrender"
+	"go.kenn.io/kit/tui/markdownrender"
 	"go.kenn.io/kata/internal/processtree"
 )
 
