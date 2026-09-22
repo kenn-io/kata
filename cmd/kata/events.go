@@ -39,11 +39,14 @@ With --tail, opens an SSE connection and emits one NDJSON envelope per
 line. The stream reconnects with exponential backoff on disconnect and
 runs until SIGINT/SIGTERM.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if allProjects && strings.TrimSpace(flags.Workspace) != "" {
+				return &cliError{Message: "--all and --workspace are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}
+			}
 			if allProjects && projectIDArg != 0 {
-				return &cliError{Message: "--all-projects and --project-id are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}
+				return &cliError{Message: "--all and --project-id are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}
 			}
 			if strings.TrimSpace(flags.Project) != "" && (allProjects || projectIDArg != 0) {
-				return &cliError{Message: "--project cannot be combined with --all-projects or --project-id", Kind: kindUsage, ExitCode: ExitUsage}
+				return &cliError{Message: "--project cannot be combined with --all or --project-id", Kind: kindUsage, ExitCode: ExitUsage}
 			}
 			if tail {
 				// One-shot-only flags must reject under --tail so users
@@ -84,7 +87,7 @@ runs until SIGINT/SIGTERM.`,
 	}
 	cmd.Flags().BoolVar(&tail, "tail", false, "stream events live over SSE")
 	cmd.Flags().Int64Var(&projectIDArg, "project-id", 0, "scope to a specific project id")
-	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "use the cross-project endpoint")
+	cmd.Flags().BoolVar(&allProjects, "all", false, "use the cross-project endpoint")
 	cmd.Flags().Int64Var(&afterID, "after", 0, "polling cursor (one-shot mode)")
 	cmd.Flags().Int64Var(&lastEventID, "last-event-id", 0, "resume cursor (--tail mode)")
 	cmd.Flags().IntVar(&limit, "limit", 100, "max rows in one-shot mode")

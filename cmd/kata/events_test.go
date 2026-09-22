@@ -112,7 +112,7 @@ func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
 	createIssueViaHTTP(t, env, dirA, "a-issue")
 	createIssueViaHTTP(t, env, dirB, "b-issue")
 
-	out := requireCmdOutput(t, env, "events", "--all-projects", "--json")
+	out := requireCmdOutput(t, env, "events", "--all", "--json")
 
 	var b struct {
 		Events []struct {
@@ -130,7 +130,7 @@ func TestEvents_OneShotAllProjectsAgentIncludesProject(t *testing.T) {
 	createIssueViaHTTP(t, env, dirA, "a-issue")
 	createIssueViaHTTP(t, env, dirB, "b-issue")
 
-	out := requireCmdOutput(t, env, "events", "--all-projects", "--agent")
+	out := requireCmdOutput(t, env, "events", "--all", "--agent")
 
 	assert.Contains(t, out, "project=a")
 	assert.Contains(t, out, "project=b")
@@ -237,13 +237,13 @@ func TestEvents_TailEmitsNDJSON(t *testing.T) {
 }
 
 func TestEvents_NegativeAfterRejected(t *testing.T) {
-	_, err := runCmdOutput(t, nil, "events", "--all-projects", "--after=-1")
+	_, err := runCmdOutput(t, nil, "events", "--all", "--after=-1")
 	ce := requireCLIError(t, err, ExitUsage)
 	assert.Contains(t, ce.Message, "non-negative")
 }
 
 func TestEvents_NegativeLastEventIDRejected(t *testing.T) {
-	_, err := runCmdOutput(t, nil, "events", "--all-projects", "--tail", "--last-event-id=-1")
+	_, err := runCmdOutput(t, nil, "events", "--all", "--tail", "--last-event-id=-1")
 	ce := requireCLIError(t, err, ExitUsage)
 	assert.Contains(t, ce.Message, "non-negative")
 }

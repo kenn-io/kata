@@ -155,9 +155,13 @@ Use kata as the shared issue ledger for this workspace.
    value that suppresses the inherited default. KATA_INBOX_USER only selects
    an inbox; it does not set comment or create attribution.
 
-   Inbox reads cover open issues in the selected project. Closing an issue hides
-   its requests; reopening restores uncleared requests. The recipient remains
-   explicit: use --for or KATA_INBOX_USER. An external harness must map each
+   Inbox reads cover open issues in the selected project by default.
+   For cross-project work, use kata inbox --for coordinator/teammate-1 --all
+   without --project or --workspace. This reads the selected daemon's active
+   projects and returns qualified issue refs. It requires daemon API 0.9.0 or
+   newer and daemon-wide read authority.
+   Closing an issue hides its requests; reopening restores uncleared requests.
+   The recipient remains explicit: use --for or KATA_INBOX_USER. An external harness must map each
    exact actor/teammate address to the runtime it launched and poll or watch
    while that runtime is idle. It wakes an available idle runtime, coalesces a
    request for one already running, and retains an unavailable teammate's
@@ -230,6 +234,7 @@ Comments store teammate; new issues store metadata.teammate while author remains
 KATA_INBOX_USER selects an inbox and does not set attribution; --teammate overrides the attribution default.
 Request actor or teammate attention: kata notify <ref> --to <actor>[/<teammate>] --message "<reason>".
 Read exact requests with kata inbox --for <actor>[/<teammate>]; clear after handling with kata notify <ref> --to <actor>[/<teammate>] --clear.
+Use kata inbox --for <actor>[/<teammate>] --all for the selected daemon's active projects; refs are qualified.
 An external harness polls idle inboxes and wakes the exact mapped runtime; quickstart does not install that integration.
 If work is incomplete, label needs-review and comment with what remains.
 Close only verified work with substantive prose and typed evidence.

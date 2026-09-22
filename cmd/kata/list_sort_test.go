@@ -58,7 +58,7 @@ func TestList_SortOldest(t *testing.T) {
 	})
 
 	t.Run("all projects", func(t *testing.T) {
-		stdout, stderr, err := run("list", "--all", "--sort", "oldest")
+		stdout, stderr, err := executeRootCapture(t, contextWithBaseURL(ctx, env.URL), "list", "--all", "--sort", "oldest")
 		require.NoError(t, err, "%s", stderr)
 		assertListTitlesInOrder(t, stdout, want)
 		assert.NotContains(t, stdout, "├─")

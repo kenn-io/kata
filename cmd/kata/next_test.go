@@ -175,7 +175,7 @@ func TestNext_JSONFullUsesShowEnvelope(t *testing.T) {
 }
 
 func TestNext_AllFullResolvesQualifiedProject(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	peer := createIssue(t, env, pid, "local peer")
 	project, err := env.DB.CreateProject(context.Background(), "example-project")
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestNext_AllFullResolvesQualifiedProject(t *testing.T) {
 	postJSONOK(t, env.URL+"/api/v1/projects/"+itoa(project.ID)+"/issues/"+target+"/links",
 		map[string]any{"actor": "tester", "type": "related", "to_ref": "kata#" + peer})
 
-	out := runCLI(t, env, dir, "next", "--all", "--full")
+	out := requireCmdOutput(t, env, "next", "--all", "--full")
 
 	assert.Contains(t, out, target+"  global full candidate  [open]  by tester")
 	assert.Contains(t, out, "related: kata#"+peer)
@@ -231,13 +231,13 @@ func TestNext_OwnershipAndLabelFiltersMirrorReady(t *testing.T) {
 }
 
 func TestNext_AllQualifiesRefAndPreservesProjectNameInJSON(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "global candidate")
 
-	agentOut := runCLI(t, env, dir, "--agent", "next", "--all")
+	agentOut := requireCmdOutput(t, env, "--agent", "next", "--all")
 	assert.Contains(t, agentOut, "issue=kata#"+ref)
 
-	jsonOut := runCLI(t, env, dir, "--json", "next", "--all")
+	jsonOut := requireCmdOutput(t, env, "--json", "next", "--all")
 	var got struct {
 		Issue map[string]any `json:"issue"`
 	}
@@ -266,10 +266,10 @@ func TestNext_AllValidationMirrorsReady(t *testing.T) {
 func TestNext_AllAcceptsFilterFlags(t *testing.T) {
 	// next shares ready's option validation: the scoped filters compose with
 	// --all so an agent can pick, e.g., the next unowned issue anywhere.
-	env, dir, pid := setupCLIWorkspace(t)
+	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
-	out, err := runCLICapture(t, env, dir, "next", "--all", "--unowned")
+	out, err := runCmdOutput(t, env, "next", "--all", "--unowned")
 	require.NoError(t, err)
 	assert.Contains(t, out, "alpha")
 }

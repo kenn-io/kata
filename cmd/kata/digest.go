@@ -32,20 +32,23 @@ human-readable changelog grouped by actor. Use --since with a duration
 (e.g. 24h, 7d) or an RFC3339 timestamp; --until defaults to now.
 
 By default, digest is scoped to the current workspace's project. Use
---project-id to scope to a specific project, or --all-projects for a
+--project-id to scope to a specific project, or --all for a
 cross-project digest.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if allProjects && strings.TrimSpace(flags.Workspace) != "" {
+				return &cliError{Message: "--all and --workspace are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}
+			}
 			if allProjects && projectIDArg != 0 {
 				return &cliError{
-					Message:  "--all-projects and --project-id are mutually exclusive",
+					Message:  "--all and --project-id are mutually exclusive",
 					Kind:     kindUsage,
 					ExitCode: ExitUsage,
 				}
 			}
 			if strings.TrimSpace(flags.Project) != "" && (allProjects || projectIDArg != 0) {
 				return &cliError{
-					Message:  "--project cannot be combined with --all-projects or --project-id",
+					Message:  "--project cannot be combined with --all or --project-id",
 					Kind:     kindUsage,
 					ExitCode: ExitUsage,
 				}
@@ -117,7 +120,7 @@ cross-project digest.`,
 	cmd.Flags().StringVar(&sinceStr, "since", "", "window start (duration like 24h or RFC3339)")
 	cmd.Flags().StringVar(&untilStr, "until", "", "window end (default: now)")
 	cmd.Flags().Int64Var(&projectIDArg, "project-id", 0, "scope to a specific project id")
-	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "summarize all projects")
+	cmd.Flags().BoolVar(&allProjects, "all", false, "summarize all projects")
 	cmd.Flags().StringSliceVar(&actors, "actor", nil, "limit to one or more actors (repeatable)")
 	return cmd
 }

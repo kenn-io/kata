@@ -432,15 +432,15 @@ func TestScopedServersCannotAdministerProjects(t *testing.T) {
 	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
 
 	_, _, err = handlers.projectRemove(t.Context(), nil, ProjectRemoveInput{Project: "spoke-project"})
-	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 	_, _, err = handlers.projectPurge(t.Context(), nil, ProjectPurgeInput{Project: "spoke-project", Confirm: "PURGE spoke-project"})
-	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 	_, _, err = handlers.projectUpdate(t.Context(), nil, ProjectUpdateInput{Project: "spoke-project", Action: "rename", Name: "renamed"})
-	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 	_, _, err = handlers.projectMerge(t.Context(), nil, ProjectMergeInput{Source: "spoke-project", Target: "spoke-project"})
-	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 	_, _, err = handlers.projectRestore(t.Context(), nil, ProjectRestoreInput{Project: "spoke-project"})
-	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 	require.Zero(t, requests, "scoped project administration must fail before any daemon request")
 }
 
@@ -596,7 +596,7 @@ func TestScopedStorageExportRequiresDaemonWideScope(t *testing.T) {
 	for name, scope := range map[string]*Scope{"bound": bound, "allowlist": allowlist} {
 		handlers := toolHandlers{options: Options{Client: client, Scope: scope, StorageAdmin: admin}}
 		_, _, err := handlers.storageExport(t.Context(), nil, StorageExportInput{Artifact: "backup.jsonl"})
-		require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope",
+		require.ErrorContains(t, err, "requires the --all daemon-wide scope",
 			"%s scope must not export cross-project link and payload data", name)
 	}
 }
@@ -817,7 +817,7 @@ func TestScopedSyncEnableRequiresDaemonWideScope(t *testing.T) {
 		Project: "spoke-project", Action: "enable",
 		Config: map[string]any{"owner": "victim-org", "repo": "private-repo"},
 	})
-	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
 	require.Empty(t, syncRequests, "scoped enable must not reach the daemon")
 
 	_, _, err = scoped.syncUpdate(t.Context(), nil, SyncUpdateInput{Project: "spoke-project", Action: "disable"})
@@ -1511,7 +1511,7 @@ func TestScopedFederationLeaveCannotArchive(t *testing.T) {
 				Project: "spoke-project", Phase: phase, Disposition: "archive",
 				Confirm: "COMMIT FEDERATION LEAVE spoke-project",
 			})
-			require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope", "%s %s", name, phase)
+			require.ErrorContains(t, err, "requires the --all daemon-wide scope", "%s %s", name, phase)
 		}
 		require.Equal(t, before, mutations, "scoped archive leave must fail before any daemon mutation")
 
@@ -1524,7 +1524,7 @@ func TestScopedFederationLeaveCannotArchive(t *testing.T) {
 		_, _, err = handlers.federationRebind(t.Context(), nil, FederationRebindInput{
 			Project: "spoke-project", HubCatalog: "other-hub",
 		})
-		require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope",
+		require.ErrorContains(t, err, "requires the --all daemon-wide scope",
 			"%s scope must not route the enrollment token to a caller-selected catalog", name)
 		require.Equal(t, before+1, mutations)
 	}

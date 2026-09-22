@@ -8,7 +8,46 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestDigest_AllIncludesMultipleProjects(t *testing.T) {
+	env := testenv.New(t)
+	spokeDir, _ := initLocalBoundWorkspace(t, env, "spoke-project")
+	hubDir, _ := initLocalBoundWorkspace(t, env, "hub-project")
+	spokeRef := createIssueViaHTTP(t, env, spokeDir, "spoke issue")
+	hubRef := createIssueViaHTTP(t, env, hubDir, "hub issue")
+
+	// Global reads work without a workspace binding.
+	t.Chdir(t.TempDir())
+	out, err := runCmdOutput(t, env, "digest", "--all", "--since", "1h", "--json")
+	require.NoError(t, err)
+	var got struct {
+		Actors []struct {
+			Issues []struct {
+				Project string `json:"project_name"`
+				Ref     string `json:"issue_short_id"`
+			} `json:"issues"`
+		} `json:"actors"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	var refs []string
+	for _, actor := range got.Actors {
+		for _, issue := range actor.Issues {
+			refs = append(refs, issue.Project+"#"+issue.Ref)
+		}
+	}
+	assert.ElementsMatch(t, []string{"spoke-project#" + spokeRef, "hub-project#" + hubRef}, refs)
+
+	for _, args := range [][]string{
+		{"digest", "--all", "--project-id", "1", "--since", "1h"},
+		{"--project", "spoke-project", "digest", "--all", "--since", "1h"},
+	} {
+		_, err := runCmdOutput(t, env, args...)
+		cli := requireCLIError(t, err, ExitUsage)
+		assert.Contains(t, cli.Message, "--all")
+	}
+}
 
 func TestDigest_HumanRender(t *testing.T) {
 	f := newCLIFixture(t)

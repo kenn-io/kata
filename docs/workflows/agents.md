@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-19
+last_edited: 2026-09-20
 ---
 
 # Agent workflows
@@ -139,11 +139,14 @@ the issue to them:
 kata notify abc4 --to coordinator --message "Please decide"
 kata notify abc4 --to coordinator/teammate-1 --message "Please check the update"
 kata inbox --for coordinator/teammate-1
+kata --daemon team-hub inbox --for coordinator/teammate-1 --all
 kata notify abc4 --to coordinator/teammate-1 --clear
 ```
 
 The inbox includes that exact recipient's requests on open issues in the current
-project. `inbox --for coordinator` does not aggregate
+project by default. `--all` reads active projects on the selected daemon
+and returns qualified issue refs; it requires daemon-wide read authority.
+`inbox --for coordinator` does not aggregate
 `coordinator/*`. Closing an issue removes its requests from the next read;
 reopening restores any uncleared requests.
 
@@ -169,6 +172,8 @@ For prompt-time context, the same harness may run:
 
 ```sh
 kata inbox --for coordinator/teammate-1 --context --workspace /path/to/workspace
+# Across the selected daemon's active projects, omit --workspace.
+kata inbox --for coordinator/teammate-1 --all --context
 ```
 
 Add successful stdout as transient untrusted task data, replace the previous
@@ -202,7 +207,7 @@ kata mcp serve \
 The server starts with 14 section loaders. An agent loads only the detailed
 issue, project, administration, automation, or event tools needed for its task.
 Pass `--workspace` or `--project` for an explicit project, `--projects` for a
-fixed allowlist, or `--all-projects` to use every project visible to the
+fixed allowlist, or `--all` to use every project visible to the
 selected daemon. The actor stays fixed at startup. See the [MCP
 reference](../reference/mcp.md) for transport configuration and exact schemas.
 

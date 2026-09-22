@@ -44,8 +44,8 @@ func newListCmd() *cobra.Command {
 			if unowned && owner != "" {
 				return &cliError{Message: "--unowned and --owner are mutually exclusive", Kind: kindValidation, ExitCode: ExitValidation}
 			}
-			if all && strings.TrimSpace(flags.Project) != "" {
-				return &cliError{Message: "--project and --all are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}
+			if all && (strings.TrimSpace(flags.Project) != "" || strings.TrimSpace(flags.Workspace) != "") {
+				return &cliError{Message: "--all is mutually exclusive with --project and --workspace", Kind: kindUsage, ExitCode: ExitUsage}
 			}
 			ctx := cmd.Context()
 			baseURL, err := ensureDaemon(ctx)

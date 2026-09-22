@@ -50,7 +50,7 @@ func newMCPServeCmd() *cobra.Command {
 				return errors.New("--storage-target requires --storage-root")
 			}
 			if allProjects && (len(projects) > 0 || strings.TrimSpace(flags.Workspace) != "" || strings.TrimSpace(flags.Project) != "") {
-				return errors.New("--all-projects cannot be combined with --projects, --project, or --workspace")
+				return errors.New("--all cannot be combined with --projects, --project, or --workspace")
 			}
 			if len(projects) > 0 && strings.TrimSpace(flags.Workspace) != "" {
 				return errors.New("--projects cannot be combined with --workspace")
@@ -59,7 +59,7 @@ func newMCPServeCmd() *cobra.Command {
 				return errors.New("--projects cannot be combined with --project")
 			}
 			if enableTokenAdmin && !allProjects {
-				return errors.New("--enable-token-admin requires --all-projects")
+				return errors.New("--enable-token-admin requires --all")
 			}
 			httpToken, err := resolveMCPHTTPToken(httpAddress, httpTokenEnv, trustPrivateNetwork)
 			if err != nil {
@@ -140,7 +140,7 @@ func newMCPServeCmd() *cobra.Command {
 				projectID, projectName, err = resolveProjectIDAndNameWithClient(
 					daemonAPI{ctx: ctx, client: httpClient, baseURL: baseURL}, start)
 				if err != nil && strings.TrimSpace(flags.Workspace) == "" && strings.TrimSpace(flags.Project) == "" {
-					err = fmt.Errorf("%w (run inside a kata workspace, or pass --project, --workspace, --projects, or --all-projects)", err)
+					err = fmt.Errorf("%w (run inside a kata workspace, or pass --project, --workspace, --projects, or --all)", err)
 				}
 				if err == nil {
 					scope, err = mcpserver.ResolveBoundScope(ctx, apiClient, mcpserver.ProjectIdentity{ID: projectID, Name: projectName})
@@ -190,7 +190,7 @@ func newMCPServeCmd() *cobra.Command {
 		},
 	}
 	command.Flags().StringVar(&runtimeDirectory, "runtime-dir", "", "use an existing daemon runtime directory without starting a daemon")
-	command.Flags().BoolVar(&allProjects, "all-projects", false, "serve every project visible to the selected daemon")
+	command.Flags().BoolVar(&allProjects, "all", false, "serve every project visible to the selected daemon")
 	command.Flags().StringSliceVar(&projects, "projects", nil, "serve only these project names")
 	command.Flags().StringVar(&storageRoot, "storage-root", "", "enable host-local JSONL artifacts under this directory")
 	command.Flags().StringArrayVar(&storageTargets, "storage-target", nil, "approved import target alias=path-or-DSN (repeatable)")

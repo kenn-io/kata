@@ -57,6 +57,8 @@ digraph kata {
 }
 ~~~
 
+Inbox reads stay in the selected project. For cross-project work, use kata inbox --for <actor>[/<teammate>] --all without --project or --workspace.
+
 Parent links group work; they do not gate readiness, but a parent cannot close with open children.
 Use --blocks <dependent> / --blocked-by <prerequisite> only for real prerequisites; they gate kata ready.
 Use --related <ref> for context only. kata wait observes state without requiring a dependency edge.

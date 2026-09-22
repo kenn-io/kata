@@ -185,7 +185,7 @@ func (h toolHandlers) projectInFixedScope(project generated.ProjectOut) bool {
 // federation rebind — out of scoped servers.
 func (h toolHandlers) requireAllProjectsScope(operation string) error {
 	if h.options.Scope.Mode() != ScopeAll {
-		return fmt.Errorf("%s requires the --all-projects daemon-wide scope", operation)
+		return fmt.Errorf("%s requires the --all daemon-wide scope", operation)
 	}
 	return nil
 }

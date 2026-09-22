@@ -42,9 +42,9 @@ func (o readyOptions) validate() error {
 	if o.Unowned && o.Owner != "" {
 		return &cliError{Message: "--unowned and --owner are mutually exclusive", Kind: kindValidation, ExitCode: ExitValidation}
 	}
-	if o.All && strings.TrimSpace(flags.Project) != "" {
+	if o.All && (strings.TrimSpace(flags.Project) != "" || strings.TrimSpace(flags.Workspace) != "") {
 		return &cliError{
-			Message:  "--project and --all are mutually exclusive",
+			Message:  "--all is mutually exclusive with --project and --workspace",
 			Kind:     kindUsage,
 			ExitCode: ExitUsage,
 		}

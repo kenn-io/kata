@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-09-19
+last_edited: 2026-09-20
 ---
 
 # Metadata
@@ -181,7 +181,9 @@ containing `from` and `message` strings plus an optional `teammate` string
 identifying the sender participant. These keys remain opaque to the daemon.
 
 `kata inbox --for <actor>[/<teammate>]` reads requests on open issues in the
-selected project. Closing hides requests without deleting them; reopening
+selected project. Add `--all` to read the selected daemon's active
+projects with qualified issue refs; this needs daemon API 0.9.0 or newer and
+daemon-wide read authority. Closing hides requests without deleting them; reopening
 restores uncleared requests. The actor address does not aggregate teammate
 addresses. Requests do not change ownership or readiness. A replacement and
 clear can race, so consumers must treat the value as current attention state
