@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,117 @@ func TestAutoCutoverNoopsAtCurrentSchema(t *testing.T) {
 
 	assertCurrentSchemaVersion(t, path)
 	assertNoCutoverTemps(t, path)
+}
+
+func TestAutoCutoverPreservesIssueContentRevision(t *testing.T) {
+	for _, version := range []int{22, 26, db.CurrentSchemaVersion() - 1} {
+		t.Run(fmt.Sprintf("schema_version=%d", version), func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "kata.db")
+			source := openCutoverTargetDB(t, ctx, path)
+			project, err := source.CreateProject(ctx, "source-project")
+			require.NoError(t, err)
+
+			twoEdits, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID, Title: "two edits", Author: "tester",
+			})
+			require.NoError(t, err)
+			title := "two edits, first change"
+			_, _, _, err = source.EditIssue(ctx, db.EditIssueParams{
+				IssueID: twoEdits.ID, Title: &title, Actor: "tester",
+			})
+			require.NoError(t, err)
+			body := "two edits, second change"
+			_, _, _, err = source.EditIssue(ctx, db.EditIssueParams{
+				IssueID: twoEdits.ID, Body: &body, Actor: "tester",
+			})
+			require.NoError(t, err)
+
+			deleted, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID, Title: "deleted after one edit", Author: "tester",
+			})
+			require.NoError(t, err)
+			title = "deleted after one edit, changed"
+			_, _, _, err = source.EditIssue(ctx, db.EditIssueParams{
+				IssueID: deleted.ID, Title: &title, Actor: "tester",
+			})
+			require.NoError(t, err)
+			_, _, _, err = source.SoftDeleteIssue(ctx, deleted.ID, "tester")
+			require.NoError(t, err)
+
+			zeroEdits, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID, Title: "no edits", Author: "tester",
+			})
+			require.NoError(t, err)
+
+			before := collectIssueExports(ctx, t, source)
+			require.Equal(t, int64(2), before[twoEdits.UID].ContentRevision)
+			require.Equal(t, int64(1), before[deleted.UID].ContentRevision)
+			require.Equal(t, int64(0), before[zeroEdits.UID].ContentRevision)
+			require.NotNil(t, before[deleted.UID].DeletedAt)
+
+			_, err = source.ExecContext(ctx,
+				`UPDATE meta SET value = ? WHERE key = 'schema_version'`, version)
+			require.NoError(t, err)
+			require.NoError(t, source.Close())
+
+			require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+			target, err := sqlitestore.Open(ctx, path)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = target.Close() })
+			after := collectIssueExports(ctx, t, target)
+			assert.Equal(t, before, after)
+		})
+	}
+}
+
+func TestAutoCutoverWithoutSourceContentRevisionColumn(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version int
+	}{
+		{name: "schema_version=21", version: 21},
+		{name: "schema_version=22", version: 22},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "kata.db")
+			source := openCutoverTargetDB(t, ctx, path)
+			project, err := source.CreateProject(ctx, "source-project")
+			require.NoError(t, err)
+			issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID, Title: "legacy issue", Author: "tester",
+			})
+			require.NoError(t, err)
+
+			_, err = source.ExecContext(ctx, `ALTER TABLE issues DROP COLUMN content_revision`)
+			require.NoError(t, err)
+			_, err = source.ExecContext(ctx,
+				`UPDATE meta SET value = ? WHERE key = 'schema_version'`, tc.version)
+			require.NoError(t, err)
+			require.NoError(t, source.Close())
+
+			require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+			target, err := sqlitestore.Open(ctx, path)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = target.Close() })
+			after := collectIssueExports(ctx, t, target)
+			require.Contains(t, after, issue.UID)
+			assert.Equal(t, int64(0), after[issue.UID].ContentRevision)
+		})
+	}
+}
+
+func collectIssueExports(ctx context.Context, t *testing.T, d *sqlitestore.Store) map[string]db.IssueExport {
+	t.Helper()
+	issues := make(map[string]db.IssueExport)
+	for issue, err := range d.ExportIssues(ctx, db.ExportFilter{IncludeDeleted: true}) {
+		require.NoError(t, err)
+		issues[issue.UID] = issue
+	}
+	return issues
 }
 
 func TestAutoCutoverPreservesMovedIssueHistory(t *testing.T) {
