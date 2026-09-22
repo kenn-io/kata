@@ -21,7 +21,7 @@ func helpSections(km keymap) []helpSection {
 		return helplayout.HelpItem{Key: keyDisplay(k), Description: k.Help}
 	}
 	return []helpSection{
-		{"Global", []helplayout.HelpItem{r(km.Help), r(km.Quit), r(km.Projects), r(km.Daemons), r(km.Federation), r(km.Credentials), r(km.ToggleLayout)}},
+		{"Global", []helplayout.HelpItem{r(km.Help), r(km.Quit), r(km.Projects), r(km.Inbox), r(km.Daemons), r(km.Federation), r(km.Credentials), r(km.ToggleLayout)}},
 		{"Graph", []helplayout.HelpItem{
 			r(km.Up), r(km.Down), r(km.ScrollUp), r(km.ScrollDown),
 			r(km.PageUp), r(km.PageDown), r(km.Home),

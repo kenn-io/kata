@@ -84,7 +84,7 @@ func (e errStub) Error() string { return string(e) }
 // the caller's. The fieldMultiLine swap below is the exact failure mode
 // the old fields[1].input.Value() reads hid: it compiled and returned "".
 func TestInputState_FieldValueReadsThroughValueAccessor(t *testing.T) {
-	s := newFilterForm(ListFilter{Status: "open", Owner: "avery"})
+	s := newFilterForm(ListFilter{Status: "open", Owner: "avery"}, scope{})
 
 	if got := s.fieldValue(fieldStatus); got != "open" {
 		t.Errorf("fieldValue(fieldStatus) = %q, want open", got)

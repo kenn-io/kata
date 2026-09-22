@@ -173,6 +173,9 @@ func renderTitleBar(width int, sc scope, version string, daemon ...string) strin
 // "") falls through to the `—` placeholder instead of rendering an
 // empty `Project: ` string. Roborev job 128.
 func titleBarLeft(sc scope) string {
+	if sc.inbox {
+		return "Inbox · Project: " + sanitizeForDisplay(sc.projectName)
+	}
 	if sc.allProjects {
 		return "Project: all"
 	}

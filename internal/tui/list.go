@@ -48,6 +48,7 @@ type listAPI interface {
 // covers `n`. All input flows now live on Model.input.
 type listModel struct {
 	issues            []Issue
+	inboxOnly         bool
 	cursor            int
 	selectedUID       string
 	selectedProjectID int64
@@ -76,6 +77,14 @@ const queueFetchLimit = queueWorkingSetLimit + 1
 
 func queueFetchFilter() ListFilter {
 	return ListFilter{Limit: queueFetchLimit}
+}
+
+func queueFetchFilterForScope(sc scope) ListFilter {
+	filter := queueFetchFilter()
+	if sc.inbox {
+		filter.Status = "open"
+	}
+	return filter
 }
 
 func trimQueueWorkingSet(issues []Issue) ([]Issue, bool) {
@@ -710,6 +719,10 @@ func (lm listModel) syncSelection(rows []queueRow) listModel {
 // The cursor is reset to 0 because the filtered-row count (and thus the
 // index space lm.cursor lives in) changes with every filter adjustment.
 //
+// In Inbox scope (inboxOnly) the status axis is unavailable: the fetch
+// already carries Status=open, so `s` becomes a no-op with a hint
+// instead of cycling toward closed/all.
+//
 // selectedUID is also cleared on each commit so the identity-
 // based restore in applyFetched (after the refetch lands) doesn't
 // fight the cursor=0 reset by jumping the cursor back to the
@@ -719,6 +732,10 @@ func (lm listModel) syncSelection(rows []queueRow) listModel {
 func (lm listModel) applyFilterKey(msg tea.KeyPressMsg, km keymap) (listModel, tea.Cmd, bool) {
 	switch {
 	case km.FilterStatus.matches(msg):
+		if lm.inboxOnly {
+			lm.status = "Inbox shows open issues only"
+			return lm, nil, true
+		}
 		lm.filter.Status = nextStatus(lm.filter.Status)
 		lm.cursor = 0
 		lm.windowStart = 0
@@ -1021,9 +1038,9 @@ func (lm listModel) refetchCmd(api listAPI, sc scope) tea.Cmd {
 		epoch = tracked.snapshotEpoch()
 		epochSet = true
 	}
-	filter := queueFetchFilter()
+	filter := queueFetchFilterForScope(sc)
 	dispatchKey := cacheKey{
-		allProjects: sc.allProjects, projectID: sc.projectID, limit: filter.Limit,
+		allProjects: sc.allProjects, scopeGen: sc.scopeGen, projectID: sc.projectID, limit: filter.Limit,
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -53,6 +53,10 @@ type Model struct {
 	height              int
 	keymap              keymap
 	list                listModel
+	inboxReturn         *inboxReturnState
+	inboxAttempt        uint64
+	scopeGen            uint64
+	inboxPending        bool
 	detail              detailModel
 	sseCh               chan tea.Msg
 	sseStatus           sseConnState
@@ -340,11 +344,11 @@ func (m Model) fetchProjects() tea.Cmd {
 // filter since dispatch so a slow initial fetch can't clobber a fresh
 // post-toggle list.
 func (m Model) fetchInitial() tea.Cmd {
-	api, sc, filter := m.api, m.scope, queueFetchFilter()
+	api, sc, filter := m.api, m.scope, queueFetchFilterForScope(m.scope)
 	connGen := m.connGen
 	epoch := m.mutationEpoch
 	dispatchKey := cacheKey{
-		allProjects: sc.allProjects, projectID: sc.projectID, limit: filter.Limit,
+		allProjects: sc.allProjects, scopeGen: sc.scopeGen, projectID: sc.projectID, limit: filter.Limit,
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -494,6 +498,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.projectsCursor = 0
 		}
 		return m, nil
+	}
+	if inbox, ok := msg.(inboxProjectLoadedMsg); ok {
+		return m.handleInboxProjectLoaded(inbox)
 	}
 	if fl, ok := msg.(federationLoadedMsg); ok {
 		next := m.handleFederationLoaded(fl)
@@ -786,6 +793,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		m = m.applyListViewportCache()
 		return m, flipCmd, true
 	case tea.KeyPressMsg:
+		if m.inboxPending && !m.inboxEntryKeptKey(msg) {
+			m.inboxPending = false
+		}
 		// Modal owns input when active. Enter the modal-specific
 		// handler before falling through to input/global routing.
 		if m.modal != modalNone {
@@ -862,6 +872,31 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	return m, nil, false
+}
+
+// inboxEntryKeptKey reports whether a keypress while an I-key entry
+// lookup is pending is harmless navigation/scrolling that must keep
+// the entry alive: a repeat I (which restarts the lookup) plus the
+// cursor, scroll, page, and first/last bindings. Everything else —
+// foreground-changing keys (view switches, help, esc, input/modal
+// triggers) and unrelated actions — cancels the entry so its late
+// reply cannot swap views under the user. Classification is
+// keymap-based so the kept set stays in lockstep with the bindings
+// the help view documents.
+func (m Model) inboxEntryKeptKey(msg tea.KeyPressMsg) bool {
+	km := m.keymap
+	for _, k := range []key{
+		km.Inbox,
+		km.Up, km.Down,
+		km.ScrollUp, km.ScrollDown,
+		km.PageUp, km.PageDown,
+		km.Home, km.End,
+	} {
+		if k.matches(msg) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool) {
@@ -981,7 +1016,7 @@ func (m Model) openInputFromMsg(msg openInputMsg) (Model, tea.Cmd) {
 		m.input = s
 	case kind == inputFilterForm:
 		m.nextFormGen++
-		s := newFilterForm(m.list.filter)
+		s := newFilterForm(m.list.filter, m.scope)
 		s.formGen = m.nextFormGen
 		m.input = s
 	case kind.isPanelPrompt():
@@ -2057,7 +2092,13 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	}
 	if m.keymap.Help.matches(msg) {
 		m = m.prepareCredentialsGlobalExit()
-		return m.toggleHelp(), nil, true
+		next, helpCmd := m.toggleHelp()
+		return next, helpCmd, true
+	}
+	if m.keymap.Inbox.matches(msg) {
+		m = m.prepareCredentialsGlobalExit()
+		next, cmd := m.toggleInbox()
+		return next, cmd, true
 	}
 	if m.keymap.Projects.matches(msg) {
 		m = m.prepareCredentialsGlobalExit()
@@ -2069,6 +2110,25 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return next, cmd, true
 	}
 	if next, cmd, ok := m.routeLayoutFocusKey(msg); ok {
+		return next, cmd, true
+	}
+	if m.scope.inbox && m.view == viewList && msg.String() == "esc" {
+		// Split detail pane with a pending nav stack owns esc:
+		// routeLayoutFocusKey deliberately declines that case so
+		// detail.Update can pop one level. Don't let the Inbox intercept
+		// swallow the key — leaveInbox here would discard the user's
+		// navigation state instead of popping it.
+		if m.layout == splitlayout.Split && m.focus == focusDetail && len(m.detail.navStack) > 0 {
+			return m, nil, false
+		}
+		if m.list.pendingPriority {
+			// `!` armed the priority prompt whose hint says esc cancels.
+			// Don't consume the key here: let it fall through to list
+			// dispatch so applyPendingPriorityKey cancels the prompt
+			// instead of leaveInbox firing on the same press.
+			return m, nil, false
+		}
+		next, cmd := m.leaveInbox()
 		return next, cmd, true
 	}
 	return m, nil, false
@@ -2112,14 +2172,14 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // from list/detail enters viewHelp; pressing ? from viewHelp restores
 // whatever view the user came from. prevView is preserved so the round
 // trip is reversible — q from viewHelp still quits per routeGlobalKey.
-func (m Model) toggleHelp() Model {
+func (m Model) toggleHelp() (Model, tea.Cmd) {
 	if m.view == viewHelp {
 		m.view = m.prevView
-		return m
+		return m, nil
 	}
 	m.prevView = m.view
 	m.view = viewHelp
-	return m
+	return m, nil
 }
 
 // routeSSE handles the SSE-side message family. Splitting this off
@@ -2249,6 +2309,7 @@ func (m Model) populateCache(msg tea.Msg) Model {
 func (m Model) currentCacheKey() cacheKey {
 	return cacheKey{
 		allProjects: m.scope.allProjects,
+		scopeGen:    m.scope.scopeGen,
 		projectID:   m.scope.projectID,
 		limit:       queueFetchLimit,
 	}
@@ -2271,6 +2332,7 @@ func fetchPayload(msg tea.Msg) (cacheKey, []Issue, error) {
 // working set.
 func cacheKeysEqual(a, b cacheKey) bool {
 	return a.allProjects == b.allProjects &&
+		a.scopeGen == b.scopeGen &&
 		a.projectID == b.projectID &&
 		a.limit == b.limit
 }

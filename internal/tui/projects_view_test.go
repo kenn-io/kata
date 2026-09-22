@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
 	"strconv"
 	"strings"
 	"testing"
@@ -393,4 +394,305 @@ func TestProjectsView_PWhileInputFocusedRoutesToPrompt(t *testing.T) {
 	if v := nm.input.activeField().value(); v != "P" {
 		t.Fatalf("input buffer = %q, want %q", v, "P")
 	}
+}
+
+// inboxSplitWithOpenDetail drives a model through the real I-key path
+// into the Inbox scope in split layout, then seeds a detail pane open
+// on the Inbox project's issue (the pane a split user sees while
+// browsing). Returns the model plus the seeded issue so tests can
+// assert on exactly that stale state.
+func inboxSplitWithOpenDetail(t *testing.T) (Model, Issue) {
+	t.Helper()
+	inbox := ProjectSummary{ID: 2, Name: "capture-project"}
+	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
+	api := &inboxTestAPI{
+		projects: []ProjectSummary{{ID: 7, Name: "example-project"}, inbox},
+		issues: []Issue{
+			{UID: "01TEST-inbox", ProjectID: 2, ShortID: "inbox", Title: "Capture task", Status: "open"},
+		},
+	}
+	m := newTestModel()
+	m.api = api
+	m.scope = homedScope(7, "example-project")
+	m.width, m.height = 120, 30
+	m = resizeModel(m, 160, 40)
+	injectProjects(&m,
+		mockProject{ID: 2, Name: "capture-project", Ident: "..."},
+		mockProject{ID: 5, Name: "spoke-project", Ident: "..."},
+	)
+	m = enterInboxForTest(t, m)
+
+	// The split detail pane is open on the Inbox project's issue with a
+	// generation from that open (unit fixture for the pane a user sees
+	// before pressing P).
+	oldIssue := Issue{ProjectID: 2, UID: "01TEST-old9", ShortID: "old9", Title: "Old inbox issue", Status: "open"}
+	m.detail = detailModel{issue: &oldIssue, scopePID: 2, gen: 41, loading: true}
+	m.nextGen = 41
+	return m, oldIssue
+}
+
+// cursorForTestProject returns the projects-view row index for the
+// given project id, failing the test if the row is missing.
+func cursorForTestProject(t *testing.T, m Model, projectID int64) int {
+	t.Helper()
+	rows := projectsRows(m.projectsByID, m.projectIdentByID, m.projectStats)
+	for i, r := range rows {
+		if !r.sentinel && r.projectID == projectID {
+			return i
+		}
+	}
+	t.Fatalf("project %d missing from projects rows", projectID)
+	return 0
+}
+
+// Selecting another project or All projects clears the previous detail pane
+// so detail actions cannot target a task from the old scope.
+func TestProjectsView_SelectionClearsStaleSplitDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		wantAll   bool
+		wantPID   int64
+		cursorFor func(t *testing.T, m Model) int
+		wantScope string
+	}{
+		{
+			name: "real project", wantAll: false, wantPID: 5,
+			cursorFor: func(t *testing.T, m Model) int { return cursorForTestProject(t, m, 5) },
+		},
+		{
+			name: "all projects sentinel", wantAll: true, wantPID: 0,
+			cursorFor: func(*testing.T, Model) int { return 0 },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := inboxSplitWithOpenDetail(t)
+			require.NotNil(t, m.inboxReturn)
+			followGenBefore := m.nextDetailFollowGen
+
+			m, _ = updateModel(m, keyRune('P'))
+			require.Equal(t, viewProjects, m.view)
+			m.projectsCursor = tc.cursorFor(t, m)
+
+			m, selectFetch := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			require.NotNil(t, selectFetch, "scope-changing selection must dispatch a fetch")
+			require.Equal(t, viewList, m.view)
+			require.Equal(t, tc.wantAll, m.scope.allProjects)
+			require.Equal(t, tc.wantPID, m.scope.projectID)
+			require.Nil(t, m.inboxReturn, "scope change discards the saved Inbox return state")
+			require.True(t, m.cache.isStale(), "issue cache must be invalidated on scope change")
+
+			require.Nil(t, m.detail.issue,
+				"the prior scope's detail issue must not survive the scope change")
+			require.Zero(t, m.detail.scopePID,
+				"the prior scope's detail project pin must not survive the scope change")
+			require.Equal(t, followGenBefore+1, m.nextDetailFollowGen,
+				"a pending detail-follow tick from the old scope must be fenced")
+		})
+	}
+}
+
+// A detail reply from before a project selection must not repopulate
+// the cleared pane.
+func TestProjectsView_SelectionDropsStaleDetailResponse(t *testing.T) {
+	m, oldIssue := inboxSplitWithOpenDetail(t)
+
+	m, _ = updateModel(m, keyRune('P'))
+	m.projectsCursor = cursorForTestProject(t, m, 5)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Nil(t, m.detail.issue)
+
+	m, _ = updateModel(m, detailFetchedMsg{gen: 41, issue: &oldIssue})
+	require.Nil(t, m.detail.issue,
+		"a pre-selection detail response must not repopulate the pane after the scope change")
+}
+
+// TestProjectsView_SelectionFencesPendingFollowTick pins that a
+// detail-follow debounce tick armed before a scope-changing selection
+// is fenced by the selection: it must not dispatch detail fetches
+// against the old scope's issue.
+func TestProjectsView_SelectionFencesPendingFollowTick(t *testing.T) {
+	m, _ := inboxSplitWithOpenDetail(t)
+	pendingGen := m.nextDetailFollowGen
+
+	m, _ = updateModel(m, keyRune('P'))
+	m.projectsCursor = cursorForTestProject(t, m, 5)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	_, tickCmd := updateModel(m, detailFollowTickMsg{gen: pendingGen})
+	require.Nil(t, tickCmd,
+		"a pre-selection follow tick must be fenced instead of fetching the old scope's issue")
+}
+
+// After a project selection, the fresh list opens the highlighted task
+// in the split detail pane.
+func TestProjectsView_SelectionBootstrapsDetailFromFreshList(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		wantAll   bool
+		cursorFor func(t *testing.T, m Model) int
+	}{
+		{
+			name: "real project", wantAll: false,
+			cursorFor: func(t *testing.T, m Model) int { return cursorForTestProject(t, m, 5) },
+		},
+		{
+			name: "all projects sentinel", wantAll: true,
+			cursorFor: func(*testing.T, Model) int { return 0 },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &inboxTestAPI{}
+			m, _ := inboxSplitWithOpenDetail(t)
+			m.api = api
+
+			m, _ = updateModel(m, keyRune('P'))
+			m.projectsCursor = tc.cursorFor(t, m)
+			m, selectFetch := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			require.Nil(t, m.detail.issue)
+
+			fresh := Issue{ProjectID: 5, UID: "01TEST-nnp1", ShortID: "nnp1", Title: "Fresh row", Status: "open"}
+			api.issues = []Issue{fresh}
+			selectMsg, ok := selectFetch().(initialFetchMsg)
+			require.True(t, ok, "selection fetch must be an initialFetchMsg")
+			m, _ = updateModel(m, selectMsg)
+
+			require.NotNil(t, m.detail.issue,
+				"the accepted fresh list response must bootstrap the detail pane")
+			require.Equal(t, "nnp1", m.detail.issue.ShortID,
+				"the pane follows the newly selected scope's highlighted row")
+			require.Equal(t, int64(5), m.detail.scopePID,
+				"the pane pins the new scope's project id")
+			require.Equal(t, tc.wantAll, m.scope.allProjects)
+		})
+	}
+}
+
+// Reselecting a project after visiting Inbox must reject old list replies
+// from before Inbox entry, even when they name the same project.
+func TestProjectsViewSelectionDropsPreInboxFetchForSameProject(t *testing.T) {
+	inbox := ProjectSummary{ID: 2, Name: "capture-project"}
+	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
+	api := &inboxTestAPI{
+		projects: []ProjectSummary{{ID: 7, Name: "example-project"}, inbox},
+		issues: []Issue{
+			{UID: "01TEST-stale", ProjectID: 7, ShortID: "stale", Title: "Stale queue task", Status: "open"},
+		},
+	}
+	m := newTestModel()
+	m.api = api
+	m.scope = homedScope(7, "example-project")
+	m.width, m.height = 120, 30
+	injectProjects(&m,
+		mockProject{ID: 2, Name: "capture-project", Ident: "..."},
+		mockProject{ID: 7, Name: "example-project", Ident: "..."},
+	)
+
+	// A pre-Inbox list fetch for project 7 is in flight.
+	oldFetch := m.fetchInitial()
+	require.NotNil(t, oldFetch)
+	oldResult := oldFetch()
+
+	// Enter the Inbox, then open the projects view and select the same
+	// ordinary project the user came from.
+	api.issues = []Issue{
+		{UID: "01TEST-inbox", ProjectID: 2, ShortID: "inbox", Title: "Capture task", Status: "open"},
+	}
+	m, lookup := updateModel(m, keyRune('I'))
+	require.NotNil(t, lookup)
+	m, inboxFetch := updateModel(m, lookup())
+	require.NotNil(t, inboxFetch)
+	m, _ = updateModel(m, inboxFetch())
+	require.True(t, m.scope.inbox)
+
+	m, _ = updateModel(m, keyRune('P'))
+	require.Equal(t, viewProjects, m.view)
+
+	// Rows: sentinel, then name-ascending (no events): capture-project
+	// (ID 2), example-project (ID 7). Select the example-project row.
+	m.projectsCursor = 2
+	m, selectFetch := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, selectFetch, "scope-changing selection must dispatch a fetch")
+	require.False(t, m.scope.inbox)
+	require.Equal(t, int64(7), m.scope.projectID)
+
+	// The fresh selection fetch lands first.
+	api.issues = []Issue{
+		{UID: "01TEST-fresh", ProjectID: 7, ShortID: "fresh", Title: "Fresh queue task", Status: "open"},
+	}
+	m, _ = updateModel(m, selectFetch())
+	require.NotEmpty(t, m.list.issues)
+	require.Equal(t, "Fresh queue task", m.list.issues[0].Title)
+
+	// The stale pre-Inbox reply lands after the fresh selection result.
+	m, _ = updateModel(m, oldResult)
+	require.NotEmpty(t, m.list.issues)
+	require.Equal(t, "Fresh queue task", m.list.issues[0].Title,
+		"a pre-Inbox reply landing after the selection fetch must not overwrite the fresh list")
+	require.NotEmpty(t, m.cache.data)
+	require.Equal(t, "Fresh queue task", m.cache.data[0].Title,
+		"a pre-Inbox reply landing after the selection fetch must not overwrite the fresh cache")
+}
+
+// Selecting All projects after visiting Inbox must reject all-projects
+// replies from before Inbox entry.
+func TestProjectsViewSelectionDropsPreInboxFetchForAllProjectsScope(t *testing.T) {
+	inbox := ProjectSummary{ID: 2, Name: "capture-project"}
+	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
+	api := &inboxTestAPI{
+		projects: []ProjectSummary{{ID: 7, Name: "example-project"}, inbox},
+		issues: []Issue{
+			{UID: "01TEST-stale", ProjectID: 7, ShortID: "stale", Title: "Stale queue task", Status: "open"},
+		},
+	}
+	m := newTestModel()
+	m.api = api
+	m.scope = scope{allProjects: true}
+	m.width, m.height = 120, 30
+	injectProjects(&m,
+		mockProject{ID: 2, Name: "capture-project", Ident: "..."},
+		mockProject{ID: 7, Name: "example-project", Ident: "..."},
+	)
+
+	// A pre-Inbox all-projects list fetch is in flight.
+	oldFetch := m.fetchInitial()
+	require.NotNil(t, oldFetch)
+	oldResult := oldFetch()
+
+	// Enter the Inbox, then open the projects view and select the
+	// All-projects sentinel.
+	api.issues = []Issue{
+		{UID: "01TEST-inbox", ProjectID: 2, ShortID: "inbox", Title: "Capture task", Status: "open"},
+	}
+	m, lookup := updateModel(m, keyRune('I'))
+	require.NotNil(t, lookup)
+	m, inboxFetch := updateModel(m, lookup())
+	require.NotNil(t, inboxFetch)
+	m, _ = updateModel(m, inboxFetch())
+	require.True(t, m.scope.inbox)
+
+	m, _ = updateModel(m, keyRune('P'))
+	require.Equal(t, viewProjects, m.view)
+
+	m.projectsCursor = 0 // sentinel row
+	m, selectFetch := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, selectFetch, "scope-changing selection must dispatch a fetch")
+	require.False(t, m.scope.inbox)
+	require.True(t, m.scope.allProjects)
+
+	// The fresh selection fetch lands first.
+	api.issues = []Issue{
+		{UID: "01TEST-fresh", ProjectID: 7, ShortID: "fresh", Title: "Fresh queue task", Status: "open"},
+	}
+	m, _ = updateModel(m, selectFetch())
+	require.NotEmpty(t, m.list.issues)
+	require.Equal(t, "Fresh queue task", m.list.issues[0].Title)
+
+	// The stale pre-Inbox reply lands after the fresh selection result.
+	m, _ = updateModel(m, oldResult)
+	require.NotEmpty(t, m.list.issues)
+	require.Equal(t, "Fresh queue task", m.list.issues[0].Title,
+		"a pre-Inbox reply landing after the selection fetch must not overwrite the fresh list")
+	require.NotEmpty(t, m.cache.data)
+	require.Equal(t, "Fresh queue task", m.cache.data[0].Title,
+		"a pre-Inbox reply landing after the selection fetch must not overwrite the fresh cache")
 }

@@ -968,6 +968,15 @@ such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
+Press `I` to open the TUI Inbox. It shows open tasks from the project designated
+with `role=inbox`, regardless of that project's name. The project is chosen when
+you open Inbox; leave and reopen it to pick up a changed designation. Task updates
+still refresh live. Press Enter to open a task.
+Esc from the Inbox list restores the browsing context and its filters. If no
+project is designated, the TUI shows a notice. [Choose the Inbox project](metadata.md#project-inbox-designation)
+in the web UI or through the project metadata API. This view is separate from
+`kata inbox`, which lists attention requests sent to an actor.
+
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
 including close, reopen, owner, priority, label, body, and newly added parent,

@@ -146,6 +146,9 @@ func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 		{Key: "↑↓", Description: "move"},
 		{Key: "↵", Description: "open"},
 	}
+	if lm.inboxOnly {
+		items = append(items, helplayout.HelpItem{Key: "esc", Description: "back"})
+	}
 	if ok && row.hasChildren {
 		items = append(items, helplayout.HelpItem{Key: "space", Description: "expand"})
 	}
@@ -159,7 +162,13 @@ func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 	items = append(items,
 		helplayout.HelpItem{Key: "/", Description: "search"},
 		helplayout.HelpItem{Key: "f", Description: "filter"},
-		helplayout.HelpItem{Key: "s", Description: "status"},
+	)
+	// The Inbox fetch carries Status=open, so there is no status axis
+	// to cycle — don't advertise one.
+	if !lm.inboxOnly {
+		items = append(items, helplayout.HelpItem{Key: "s", Description: "status"})
+	}
+	items = append(items,
 		helplayout.HelpItem{Key: "v", Description: "view"},
 		helplayout.HelpItem{Key: "o", Description: "order"},
 		helplayout.HelpItem{Key: "c", Description: "clear"},

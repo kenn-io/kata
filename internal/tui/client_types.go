@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"time"
@@ -172,7 +173,10 @@ type ProjectSummary struct {
 	Name string `json:"name"`
 	// UID is the project's durable identity. Federated replicas share it with
 	// their hub project, which is how the enroll flow recognizes a rejoin.
-	UID string `json:"uid,omitempty"`
+	UID      string `json:"uid,omitempty"`
+	Metadata struct {
+		Role jsontext.Value `json:"role"`
+	} `json:"metadata"`
 }
 
 // InstanceInfo is the daemon instance identity returned by /api/v1/instance.

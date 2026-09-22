@@ -48,7 +48,7 @@ func filterFormFixture() Model {
 // with today.
 func TestFilterForm_OwnerCommitReadsThroughValueAccessor(t *testing.T) {
 	m := newTestModel()
-	s := newFilterForm(ListFilter{})
+	s := newFilterForm(ListFilter{}, scope{})
 
 	ta := textarea.New()
 	ta.SetValue("  avery  ")
@@ -514,7 +514,7 @@ func TestSnapshot_FilterForm_AllAxes(t *testing.T) {
 	defer snapshotInit(t)()
 	s := newFilterForm(ListFilter{
 		Status: "open", Owner: "alice", Search: "login",
-	})
+	}, scope{})
 	got := renderCenteredForm(s, 120, 30)
 	assertGolden(t, "filter-form-all-axes", got)
 }
@@ -527,7 +527,7 @@ func TestSnapshot_FilterForm_WithLabelsAxis(t *testing.T) {
 	s := newFilterForm(ListFilter{
 		Status: "open", Owner: "alice", Search: "login",
 		Labels: []string{"bug", "prio-1"},
-	})
+	}, scope{})
 	got := renderCenteredForm(s, 120, 30)
 	assertGolden(t, "filter-form-with-labels-axis", got)
 }

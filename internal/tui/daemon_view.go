@@ -149,6 +149,8 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 		m.daemonTargets = conn.catalog
 	}
 	m.scope = conn.init.scope
+	m.inboxReturn = nil
+	m.inboxPending = false
 	m.view = conn.init.view
 	if previousView == viewDaemons && conn.init.view == viewEmpty {
 		m.prevView = viewDaemons
