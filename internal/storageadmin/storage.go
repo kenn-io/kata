@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
+	"go.kenn.io/kit/pathresolve"
 )
 
 // Config defines the storage root, active source, and approved targets.
@@ -81,7 +82,7 @@ func New(config Config) (*Admin, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve storage root: %w", err)
 	}
-	canonical, err := filepath.EvalSymlinks(absolute)
+	canonical, err := pathresolve.EvalSymlinks(absolute)
 	if err != nil {
 		return nil, fmt.Errorf("resolve storage root: %w", err)
 	}
@@ -422,7 +423,7 @@ func (a *Admin) activeSQLitePath() (string, bool, error) {
 	if err != nil {
 		return "", false, fmt.Errorf("resolve active storage path: %w", err)
 	}
-	canonical, err := filepath.EvalSymlinks(absolute)
+	canonical, err := pathresolve.EvalSymlinks(absolute)
 	if err == nil {
 		absolute = canonical
 	} else if !errors.Is(err, os.ErrNotExist) {

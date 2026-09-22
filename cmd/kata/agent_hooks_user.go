@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	"go.kenn.io/kit/pathresolve"
 
 	"go.kenn.io/kit/agenthook"
 )
@@ -146,7 +147,7 @@ func newAgentHooksInstallCmdWithInstaller(install agentHookInstaller) *cobra.Com
 			if err != nil {
 				return err
 			}
-			path, warning, err := resolveAgentHookExecutable(executable, agentHookExecutableEnv{Executable: os.Executable, EvalSymlinks: filepath.EvalSymlinks, Path: os.Getenv("PATH"), GOOS: runtime.GOOS})
+			path, warning, err := resolveAgentHookExecutable(executable, agentHookExecutableEnv{Executable: os.Executable, EvalSymlinks: pathresolve.EvalSymlinks, Path: os.Getenv("PATH"), GOOS: runtime.GOOS})
 			if err != nil {
 				return err
 			}
