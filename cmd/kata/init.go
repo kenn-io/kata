@@ -818,12 +818,20 @@ func writeMigrationProposal(path, content string) (string, error) {
 	return sidecar, nil
 }
 
-// writeNewGuidanceFile creates path with data only when nothing exists there,
-// so kata never redirects its write through a symlink a hostile repo may have
-// planted. Anything already at path, including a symlink, fails with an error
-// wrapping fs.ErrExist.
+// writeNewGuidanceFile creates path with data, refusing to follow a symlink a
+// hostile repo may have planted there. O_EXCL fails (EEXIST) when anything —
+// regular file or symlink — already occupies the path, so kata never redirects
+// its write onto a victim file the path merely points at.
 func writeNewGuidanceFile(path string, data []byte) error {
-	return atomicfile.WriteNew(path, data, atomicfile.WithPerm(0o644))
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	return werr
 }
 
 // rewriteGuidanceFile atomically replaces an existing regular file, keeping its
