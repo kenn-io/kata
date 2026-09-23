@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -105,4 +106,34 @@ func TestApplyClaudeHooks_RefusesSymlinks(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "{}", string(got))
 	})
+}
+
+func TestMigrateLegacyAgentHooksKeepsConfigFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits")
+	}
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "settings.json")
+	legacyHandler := map[string]any{"type": "command", "command": "kata", "args": []any{"attention-hook", "start"}}
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"kata","args":["attention-hook","start"]},{"type":"command","command":"notify-session"}]}]}}`), 0o600))
+	require.NoError(t, os.Chmod(configPath, 0o640))
+
+	changed, err := migrateLegacyAgentHooks(configPath, []legacyAgentHook{{
+		event:    "SessionStart",
+		matcher:  "startup",
+		handlers: []map[string]any{legacyHandler},
+	}})
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	info, err := os.Stat(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+	data, err := os.ReadFile(configPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "attention-hook")
+	assert.Contains(t, string(data), "notify-session")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "migration must not leave a staging file")
 }
