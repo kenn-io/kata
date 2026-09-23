@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
+	"go.kenn.io/kit/atomicfile"
 )
 
 func newExportCmd() *cobra.Command {
@@ -106,20 +105,11 @@ func requireHostLocalExport(ctx context.Context) error {
 }
 
 func writeExportOutput(ctx context.Context, d db.Storage, output string, opts jsonl.ExportOptions) error {
-	dir := filepath.Dir(output)
-	base := filepath.Base(output)
-	f, err := os.CreateTemp(dir, "."+base+".tmp-*")
+	f, err := atomicfile.Create(output)
 	if err != nil {
 		return fmt.Errorf("create export output: %w", err)
 	}
-	tmpName := f.Name()
-	committed := false
-	defer func() {
-		if !committed {
-			_ = f.Close()
-			_ = os.Remove(tmpName)
-		}
-	}()
+	defer func() { _ = f.Abort() }()
 
 	bw := bufio.NewWriter(f)
 	if err := jsonl.Export(ctx, d, bw, opts); err != nil {
@@ -128,16 +118,12 @@ func writeExportOutput(ctx context.Context, d db.Storage, output string, opts js
 	if err := bw.Flush(); err != nil {
 		return fmt.Errorf("flush export output: %w", err)
 	}
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("sync export output: %w", err)
+	if err := f.Commit(); err != nil {
+		if errors.Is(err, atomicfile.ErrPublished) {
+			return fmt.Errorf("export output %s was written, but a later step failed: %w", output, err)
+		}
+		return fmt.Errorf("replace export output: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close export output: %w", err)
-	}
-	if err := replaceExportOutput(tmpName, output); err != nil {
-		return err
-	}
-	committed = true
 	return nil
 }
 
