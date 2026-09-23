@@ -116,7 +116,7 @@ func TestMigrateLegacyAgentHooksKeepsConfigFileMode(t *testing.T) {
 	configPath := filepath.Join(dir, "settings.json")
 	legacyHandler := map[string]any{"type": "command", "command": "kata", "args": []any{"attention-hook", "start"}}
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"kata","args":["attention-hook","start"]},{"type":"command","command":"notify-session"}]}]}}`), 0o600))
-	require.NoError(t, os.Chmod(configPath, 0o640))
+	require.NoError(t, os.Chmod(configPath, 0o640)) //nolint:gosec // exercise preservation of a non-default mode
 
 	changed, err := migrateLegacyAgentHooks(configPath, []legacyAgentHook{{
 		event:    "SessionStart",

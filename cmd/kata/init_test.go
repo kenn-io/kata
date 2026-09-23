@@ -908,7 +908,7 @@ func TestRewriteGuidanceFileKeepsFileMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "AGENTS.md")
 	require.NoError(t, os.WriteFile(path, []byte("old\n"), 0o600))
-	require.NoError(t, os.Chmod(path, 0o640))
+	require.NoError(t, os.Chmod(path, 0o640)) //nolint:gosec // exercise preservation of a non-default mode
 
 	require.NoError(t, rewriteGuidanceFile(path, []byte("new\n")))
 
