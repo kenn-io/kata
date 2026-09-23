@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-09-20
+last_edited: 2026-09-22
 ---
 
 # Metadata
@@ -150,6 +150,11 @@ kata meta get <ref> [key]
 
 Prints the whole metadata object, or one key when `[key]` is given. It honors the
 global `--json` and `--agent` output modes.
+
+This command uses the issue's project-local metadata projection. It returns
+only the short ID, metadata, and current revision; it does not fetch comments
+or refresh a federated lease. Use `kata show` when you need the complete issue
+and its best-effort current lease state.
 
 ```sh
 kata meta get abc4

@@ -170,6 +170,46 @@ func TestIssueScopedTokenNarrowsListBeforeLimitAndHidesDirectLookups(t *testing.
 	assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "validation")
 }
 
+func TestIssueScopedTokenReadsMetadataOnlyInsideSubtree(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
+	child := createScopedHTTPTestIssue(t, env, project.ID, "Child", &root)
+	outside := createScopedHTTPTestIssue(t, env, project.ID, "Outside", nil)
+	otherProject, err := env.DB.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	foreign := createScopedHTTPTestIssue(t, env, otherProject.ID, "Foreign", nil)
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
+		Scope: &db.APITokenScope{
+			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
+		},
+		ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+	headers := map[string]string{"Authorization": "Bearer worker-token"}
+
+	path := func(ref string) string {
+		return "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + ref + "/metadata"
+	}
+	resp, body := envDoRaw(t, env, http.MethodGet, path(child.ShortID), nil, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+
+	for _, ref := range []string{outside.ShortID, foreign.UID} {
+		resp, body = envDoRaw(t, env, http.MethodGet, path(ref), nil, headers)
+		assertAPIError(t, resp.StatusCode, body, http.StatusNotFound, "issue_not_found")
+	}
+
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
+		ProjectID: project.ID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+	resp, body = envDoRaw(t, env, http.MethodGet, path(child.ShortID), nil, headers)
+	assertAPIError(t, resp.StatusCode, body, http.StatusUnauthorized, "unauthorized")
+}
+
 func TestIssueScopedTokenCannotUseLeaseRoutesOutsideSubtree(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(t.Context(), "example-project")

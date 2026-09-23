@@ -61,6 +61,23 @@ func TestCreateRequestError(t *testing.T) {
 	assert.Contains(t, clientTimeoutCLIError.Message, "check whether the issue was created")
 	assert.NotContains(t, clientTimeoutCLIError.Message, "daemon.example")
 
+	selectedTimeout := &daemonTransportError{
+		selectedOrigin:      "http://kata.invalid",
+		unixSocket:          true,
+		method:              http.MethodPost,
+		phase:               "headers",
+		possiblyTransmitted: true,
+		cause:               context.DeadlineExceeded,
+	}
+	selectedGot := createRequestError(selectedTimeout, false)
+	var selectedCLIError *cliError
+	require.ErrorAs(t, selectedGot, &selectedCLIError)
+	assert.Equal(t, kindDaemonUnavail, selectedCLIError.Kind)
+	assert.Equal(t, "create_outcome_unknown", selectedCLIError.Code)
+	assert.Equal(t, ExitDaemonUnavail, selectedCLIError.ExitCode)
+	assert.Contains(t, selectedCLIError.Message, "check whether the issue was created")
+	assert.NotContains(t, selectedCLIError.Message, "kata.invalid")
+
 	otherErr := errors.New("connection refused")
 	assert.Same(t, otherErr, createRequestError(otherErr, false))
 }
@@ -136,7 +153,8 @@ func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) {
 
 	_, _, err := executeRootCapture(t, ctx, "--workspace", t.TempDir(),
 		"create", "example issue")
-	cliErr := requireCLIError(t, err, ExitInternal)
+	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Equal(t, kindDaemonUnavail, cliErr.Kind)
 	assert.Equal(t, "create_outcome_unknown", cliErr.Code)
 	assert.Contains(t, cliErr.Message, "canceled")
 	assert.Contains(t, cliErr.Message, "check whether the issue was created")
@@ -144,40 +162,45 @@ func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) {
 }
 
 func TestCreateTimeoutClassificationAtCommandBoundary(t *testing.T) {
+	previousTransport := http.DefaultTransport
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Start the timeout after sending, so slow command setup cannot turn
+	// this unknown-outcome scenario into a pre-transmission failure.
+	transport.ResponseHeaderTimeout = 100 * time.Millisecond
+	http.DefaultTransport = transport
+	t.Cleanup(func() {
+		http.DefaultTransport = previousTransport
+		transport.CloseIdleConnections()
+	})
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/projects/resolve":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"example-project"}}`)
-		case "/api/v1/projects/7/issues":
-			select {
-			case <-r.Context().Done():
-			case <-time.After(500 * time.Millisecond):
-			}
-		default:
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/projects/name:example-project/issues" {
 			http.NotFound(w, r)
+			return
 		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
 	}))
 	t.Cleanup(server.Close)
 
 	run := func(t *testing.T, extra ...string) error {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(
-			contextWithBaseURL(context.Background(), server.URL), 150*time.Millisecond)
-		defer cancel()
-		args := []string{"--workspace", t.TempDir(), "create", "example issue"}
+		ctx := contextWithBaseURL(t.Context(), server.URL)
+		args := []string{"--workspace", t.TempDir(), "--project", "example-project", "create", "example issue"}
 		args = append(args, extra...)
 		_, _, err := executeRootCapture(t, ctx, args...)
 		return err
 	}
 
 	t.Run("normal create reports unknown outcome", func(t *testing.T) {
-		cliErr := requireCLIError(t, run(t), ExitInternal)
+		cliErr := requireCLIError(t, run(t), ExitDaemonUnavail)
+		assert.Equal(t, kindDaemonUnavail, cliErr.Kind)
 		assert.Equal(t, "create_outcome_unknown", cliErr.Code)
 	})
 
 	t.Run("force new reports unknown outcome without retry advice", func(t *testing.T) {
-		cliErr := requireCLIError(t, run(t, "--force-new"), ExitInternal)
+		cliErr := requireCLIError(t, run(t, "--force-new"), ExitDaemonUnavail)
+		assert.Equal(t, kindDaemonUnavail, cliErr.Kind)
 		assert.Equal(t, "create_outcome_unknown", cliErr.Code)
 		assert.NotContains(t, cliErr.Message, "--force-new")
 	})
@@ -215,7 +238,8 @@ func TestCreateResponseBodyCutClassificationAtCommandBoundary(t *testing.T) {
 	ctx := contextWithBaseURL(context.Background(), server.URL)
 	_, _, err := executeRootCapture(t, ctx, "--workspace", t.TempDir(),
 		"create", "example issue")
-	cliErr := requireCLIError(t, err, ExitInternal)
+	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+	assert.Equal(t, kindDaemonUnavail, cliErr.Kind)
 	assert.Equal(t, "create_outcome_unknown", cliErr.Code)
 	assert.Contains(t, cliErr.Message, "cut off")
 	assert.Contains(t, cliErr.Message, "check whether the issue was created")

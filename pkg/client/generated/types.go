@@ -1605,6 +1605,23 @@ func (f FieldDescriptor) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
+type GetIssueMetadataResponseBody struct {
+	Issue IssueMetadataOut `json:"issue"`
+}
+
+func (g GetIssueMetadataResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(g.Issue).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Issue", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type HealthResponseBody struct {
 	APISchemaVersion *string                 `json:"api_schema_version,omitempty"`
 	DBPath           *string                 `json:"db_path,omitempty"`
@@ -1990,6 +2007,16 @@ type IssueLabel struct {
 }
 
 func (i IssueLabel) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(i))
+}
+
+type IssueMetadataOut struct {
+	Metadata map[string]any `json:"metadata"`
+	Revision int64          `json:"revision"`
+	ShortID  string         `json:"short_id" validate:"required"`
+}
+
+func (i IssueMetadataOut) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(i))
 }
 

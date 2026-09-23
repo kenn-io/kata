@@ -958,6 +958,12 @@ forms, and the output schema.
 When a live local daemon record exists but its endpoint cannot be reached,
 client commands report the PID, endpoint, and underlying connection error
 instead of treating the daemon as stopped or attempting to start another one.
+Selected-daemon timeouts, disconnects, and incomplete responses are reported as
+`daemon_unavailable` and exit with code 7. For a mutation whose request may
+already have reached the daemon, the diagnostic also says `mutation result may
+be unknown`; inspect the current state before retrying. Failures known to occur
+before transmission omit that warning. Other remote services, including
+federation hubs, keep their command-specific error classification.
 `kata agent-instructions` is an alias for `kata quickstart`.
 For TCP listener auth modes, including trusted private-network bearer auth,
 read-only experiments, and explicit tokenless private-network writes, see

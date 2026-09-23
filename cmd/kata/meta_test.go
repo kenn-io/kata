@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +16,38 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestMetaGetUsesMetadataEndpoint(t *testing.T) {
+	var metadataCalls atomic.Int64
+	var showCalls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/resolve":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"project":{"id":7,"name":"example-project"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/7/issues/abc4/metadata":
+			metadataCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issue":{"short_id":"abc4","metadata":{"custom":{"nested":[1,true,"x"]}},"revision":4}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/7/issues/abc4":
+			showCalls.Add(1)
+			http.Error(w, "show route must not be used", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	stdout, stderr, err := executeRootCapture(t,
+		contextWithBaseURL(context.Background(), server.URL),
+		"--json", "--project", "example-project", "meta", "get", "abc4")
+	require.NoError(t, err, stderr)
+	assert.JSONEq(t,
+		`{"kata_api_version":1,"ref":"abc4","revision":4,"metadata":{"custom":{"nested":[1,true,"x"]}}}`,
+		stdout)
+	assert.Equal(t, int64(1), metadataCalls.Load())
+	assert.Equal(t, int64(0), showCalls.Load())
+}
 
 func TestMetaSetStoresJSONStringAndGetReturnsValue(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)

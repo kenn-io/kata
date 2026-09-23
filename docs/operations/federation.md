@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-09-15
+last_edited: 2026-09-22
 ---
 
 # Federation
@@ -811,6 +811,13 @@ Spokes refresh cached lease state before checking exclusivity when online.
 When offline, cached hard leases can still be used as a continuity hint, but
 they are not proof that exclusivity still holds. Timed leases expire by hub
 time and stop blocking edits once expired.
+
+A complete issue read, including `kata show`, makes an optional lease-status
+refresh from the hub. That refresh gets a 500 ms budget; if it times out or the
+hub is unavailable, the read still returns the locally cached lease state.
+This is a budget for the optional hub refresh, not a deadline for the complete
+issue read. Project-local projections such as `kata meta get` do not perform
+the refresh.
 
 The hub checks pushed work against live lease state at ingest time. Work that
 conflicts with another holder's live lease is kept, but the hub records

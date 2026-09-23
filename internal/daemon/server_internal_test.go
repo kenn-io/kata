@@ -93,6 +93,16 @@ func TestFederationRebindHostPolicyIsRestrictedMutation(t *testing.T) {
 	}
 }
 
+func TestGetIssueMetadataHostPolicyIsTaskRead(t *testing.T) {
+	policy, ok := hostOperationPolicy("getIssueMetadata")
+	if !ok {
+		t.Fatal("getIssueMetadata has no host operation policy")
+	}
+	if policy.Mutation || policy.restricted || policy.Kind != hostOperationTaskRead || policy.Capability != hostCapabilityRead {
+		t.Fatalf("unexpected getIssueMetadata host policy: %+v", policy)
+	}
+}
+
 func TestServerServesOpenAPIYAML(t *testing.T) {
 	srv := NewServer(ServerConfig{})
 	t.Cleanup(func() { _ = srv.Close() })
