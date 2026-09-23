@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
+	"go.kenn.io/kit/atomicfile"
 )
 
 func newImportCmd() *cobra.Command {
@@ -438,12 +439,12 @@ func moveSQLiteFileSet(from, to string) (bool, error) {
 		} else if err != nil {
 			return len(moved) > 0, fmt.Errorf("stat %s: %w", src, err)
 		}
-		if err := os.Rename(src, dst); err != nil { //nolint:gosec // src/dst are SQLite files beside an explicit import target or temp DB.
+		if err := moveFileNoReplace(src, dst); err != nil {
 			var rollbackErr error
 			for _, m := range slices.Backward(moved) {
 				oldSrc := to + m
 				oldDst := from + m
-				if err := os.Rename(oldSrc, oldDst); err != nil { //nolint:gosec // rollback of the SQLite files just moved by this helper.
+				if err := moveFileNoReplace(oldSrc, oldDst); err != nil {
 					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback %s: %w", m, err))
 				}
 			}
@@ -452,6 +453,24 @@ func moveSQLiteFileSet(from, to string) (bool, error) {
 		moved = append(moved, suffix)
 	}
 	return len(moved) > 0, nil
+}
+
+// moveFileNoReplace moves from to to, failing with an error wrapping
+// fs.ErrExist when anything already exists at to. PublishNoReplace may leave
+// from in place (it tries a hard link first), so the source name is removed
+// afterwards; if that fails the new name is removed again so the file is not
+// left under both names.
+func moveFileNoReplace(from, to string) error {
+	if err := atomicfile.PublishNoReplace(from, to); err != nil {
+		return err
+	}
+	if err := os.Remove(from); err != nil && !errors.Is(err, os.ErrNotExist) { //nolint:gosec // from is a SQLite file beside an explicit import target or temp DB.
+		return errors.Join(
+			fmt.Errorf("remove %s after install: %w", from, err),
+			os.Remove(to), //nolint:gosec // to was just published from from by this helper.
+		)
+	}
+	return nil
 }
 
 func sqliteFileSetExists(path string) (bool, error) {
