@@ -48,10 +48,21 @@ func FinishTransactionRollback(ctx context.Context, cause, rollbackErr error) er
 	if rejected, ok := errors.AsType[*afterRollbackError](cause); ok && rejected.finish != nil {
 		finishErr = rejected.finish(ctx)
 	}
-	if rollbackErr == nil && finishErr == nil {
-		return cause
+	if rollbackErr != nil || finishErr != nil {
+		cause = errors.Join(ErrTransactionFinalizationFailed, cause, rollbackErr, finishErr)
 	}
-	return errors.Join(ErrTransactionFinalizationFailed, cause, rollbackErr, finishErr)
+	if observe, _ := ctx.Value(transactionRollbackObserverKey{}).(func(error)); observe != nil {
+		observe(cause)
+	}
+	return cause
+}
+
+type transactionRollbackObserverKey struct{}
+
+// WithTransactionRollbackObserver observes a fence rejection only after rollback
+// and host cleanup finish. The observer receives the complete finalization error.
+func WithTransactionRollbackObserver(ctx context.Context, observe func(error)) context.Context {
+	return context.WithValue(ctx, transactionRollbackObserverKey{}, observe)
 }
 
 type transactionFenceContextKey struct{}

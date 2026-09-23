@@ -46,37 +46,58 @@ func TestHostDenialFinalizesAfterRollback(t *testing.T) {
 			t.Cleanup(func() { require.NoError(t, inspection.Close()) })
 			_, err = inspection.ExecContext(ctx, `CREATE TABLE `+prefix+`fence_markers (attempt INTEGER NOT NULL)`)
 			require.NoError(t, err)
-			calls := 0
-			controller.transactionFence = func(ctx context.Context, tx kata.Transaction) error {
-				if _, err := tx.ExecContext(ctx, `INSERT INTO `+prefix+`fence_markers VALUES (1)`); err != nil {
-					return err
-				}
-				return kata.AfterTransactionRollback(kata.ErrAccessDenied, func(ctx context.Context) error {
-					calls++
-					var markers int
-					if err := inspection.QueryRowContext(ctx, `SELECT count(*) FROM `+prefix+`fence_markers`).Scan(&markers); err != nil {
-						return err
+			for _, testCase := range []struct {
+				name        string
+				finishError error
+				wantStatus  int
+				wantRecords int
+			}{
+				{name: "recorded", wantStatus: http.StatusNotFound, wantRecords: 1},
+				{name: "recording failed", finishError: errors.New("host recording unavailable"), wantStatus: http.StatusServiceUnavailable},
+			} {
+				t.Run(testCase.name, func(t *testing.T) {
+					_, err := inspection.ExecContext(ctx, `DELETE FROM `+prefix+`fence_markers`)
+					require.NoError(t, err)
+					calls := 0
+					controller.transactionFence = func(ctx context.Context, tx kata.Transaction) error {
+						if _, err := tx.ExecContext(ctx, `INSERT INTO `+prefix+`fence_markers VALUES (1)`); err != nil {
+							return err
+						}
+						return kata.AfterTransactionRollback(kata.ErrAccessDenied, func(ctx context.Context) error {
+							calls++
+							var markers int
+							if err := inspection.QueryRowContext(ctx, `SELECT count(*) FROM `+prefix+`fence_markers`).Scan(&markers); err != nil {
+								return err
+							}
+							assert.Zero(t, markers, "the callback must see the completed rollback")
+							if testCase.finishError != nil {
+								return testCase.finishError
+							}
+							// This write uses a separate transaction and must survive denial.
+							_, err := inspection.ExecContext(ctx, `INSERT INTO `+prefix+`fence_markers VALUES (2)`)
+							return err
+						})
 					}
-					assert.Zero(t, markers, "the callback must see the completed rollback")
-					// This write uses a separate transaction and must survive denial.
-					_, err := inspection.ExecContext(ctx, `INSERT INTO `+prefix+`fence_markers VALUES (2)`)
-					return err
+					request := httptest.NewRequestWithContext(ctx, http.MethodPost,
+						"/api/v1/projects/"+strconv.FormatInt(project.Project.ID, 10)+"/issues",
+						bytes.NewBufferString(`{"actor":"ignored","title":"must not be stored"}`))
+					request.Header.Set("Content-Type", "application/json")
+					request = request.WithContext(kata.WithPrincipal(request.Context(), kata.Principal{Subject: "user-a", Actor: "Example User"}))
+					response := httptest.NewRecorder()
+					service.Handler().ServeHTTP(response, request)
+					assert.Equal(t, testCase.wantStatus, response.Code)
+					if testCase.finishError != nil {
+						assert.Contains(t, response.Body.String(), `"code":"access_unavailable"`)
+						assert.NotContains(t, response.Body.String(), testCase.finishError.Error())
+					}
+					assert.Equal(t, 1, calls)
+					var records, issues int
+					require.NoError(t, inspection.QueryRowContext(ctx, `SELECT count(*) FROM `+prefix+`fence_markers WHERE attempt = 2`).Scan(&records))
+					assert.Equal(t, testCase.wantRecords, records)
+					require.NoError(t, inspection.QueryRowContext(ctx, `SELECT count(*) FROM `+prefix+`issues`).Scan(&issues))
+					assert.Zero(t, issues)
 				})
 			}
-			request := httptest.NewRequestWithContext(ctx, http.MethodPost,
-				"/api/v1/projects/"+strconv.FormatInt(project.Project.ID, 10)+"/issues",
-				bytes.NewBufferString(`{"actor":"ignored","title":"must not be stored"}`))
-			request.Header.Set("Content-Type", "application/json")
-			request = request.WithContext(kata.WithPrincipal(request.Context(), kata.Principal{Subject: "user-a", Actor: "Example User"}))
-			response := httptest.NewRecorder()
-			service.Handler().ServeHTTP(response, request)
-			assert.Equal(t, http.StatusNotFound, response.Code)
-			assert.Equal(t, 1, calls)
-			var marker, issues int
-			require.NoError(t, inspection.QueryRowContext(ctx, `SELECT attempt FROM `+prefix+`fence_markers`).Scan(&marker))
-			assert.Equal(t, 2, marker)
-			require.NoError(t, inspection.QueryRowContext(ctx, `SELECT count(*) FROM `+prefix+`issues`).Scan(&issues))
-			assert.Zero(t, issues)
 		})
 	}
 }

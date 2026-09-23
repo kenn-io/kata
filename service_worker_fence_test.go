@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 type allowWorkerFenceAccess struct{}
@@ -63,6 +64,83 @@ func TestServiceWorkerTransactionFenceRollsBackAndStopsWorkers(t *testing.T) {
 		`SELECT released_at IS NOT NULL FROM issue_claims WHERE issue_uid = ?`, issue.UID).Scan(&released))
 	assert.Zero(t, markerCount)
 	assert.Zero(t, released)
+}
+
+func TestServiceWorkerDenialFinalizesBeforeStopping(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, recordingFails := range []bool{false, true} {
+			name := backend + "/recorded"
+			if recordingFails {
+				name = backend + "/recording_failed"
+			}
+			t.Run(name, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+				defer cancel()
+				config := Config{DSN: filepath.Join(t.TempDir(), "service.db"), Access: allowWorkerFenceAccess{}}
+				driver, prefix := "sqlite", ""
+				if backend == "postgres" {
+					dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+					t.Cleanup(cleanup)
+					config.DSN = dsn
+					config.Postgres = PostgresConfig{Schema: "kata", SchemaMode: PostgresSchemaBootstrap}
+					driver, prefix = "pgx", "kata."
+				}
+				rejected := errors.New("worker transaction rejected")
+				finishFailed := errors.New("host recording unavailable")
+				var inspection *sql.DB
+				config.WorkerTransactionFence = func(ctx context.Context, tx Transaction) error {
+					if _, err := tx.ExecContext(ctx, `INSERT INTO `+prefix+`worker_fence_markers VALUES (1)`); err != nil {
+						return err
+					}
+					return AfterTransactionRollback(rejected, func(ctx context.Context) error {
+						var markers int
+						if err := inspection.QueryRowContext(ctx,
+							`SELECT count(*) FROM `+prefix+`worker_fence_markers WHERE attempt = 1`).Scan(&markers); err != nil {
+							return err
+						}
+						assert.Zero(t, markers, "the callback must see the completed rollback")
+						if recordingFails {
+							return finishFailed
+						}
+						_, err := inspection.ExecContext(ctx, `INSERT INTO `+prefix+`worker_fence_markers VALUES (2)`)
+						return err
+					})
+				}
+				service, err := New(ctx, config)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, service.Close()) })
+				issue := seedExpiredWorkerClaim(ctx, t, service)
+				inspection, err = sql.Open(driver, config.DSN)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, inspection.Close()) })
+				_, err = inspection.ExecContext(ctx, `CREATE TABLE `+prefix+`worker_fence_markers (attempt INTEGER NOT NULL)`)
+				require.NoError(t, err)
+
+				runErr := service.Run(ctx)
+				require.ErrorIs(t, runErr, rejected)
+				require.NoError(t, ctx.Err(), "the worker rejection must stop Run before its caller cancels")
+				var recorded, rolledBack int
+				require.NoError(t, inspection.QueryRowContext(ctx,
+					`SELECT count(*) FROM `+prefix+`worker_fence_markers WHERE attempt = 2`).Scan(&recorded))
+				require.NoError(t, inspection.QueryRowContext(ctx,
+					`SELECT count(*) FROM `+prefix+`worker_fence_markers WHERE attempt = 1`).Scan(&rolledBack))
+				assert.Zero(t, rolledBack)
+				if recordingFails {
+					assert.ErrorIs(t, runErr, finishFailed)
+					assert.ErrorIs(t, runErr, db.ErrTransactionFinalizationFailed)
+					assert.Zero(t, recorded)
+				} else {
+					assert.NotErrorIs(t, runErr, db.ErrTransactionFinalizationFailed)
+					assert.Positive(t, recorded, "the denial that stops Run must finish recording")
+				}
+				var released int
+				require.NoError(t, inspection.QueryRowContext(ctx,
+					`SELECT CASE WHEN released_at IS NOT NULL THEN 1 ELSE 0 END FROM `+prefix+`issue_claims WHERE issue_uid = $1`,
+					issue.UID).Scan(&released))
+				assert.Zero(t, released, "denial must leave the expired claim unreleased")
+			})
+		}
+	}
 }
 
 func TestServiceRunTreatsCanceledInFlightWorkerFenceAsCleanShutdown(t *testing.T) {

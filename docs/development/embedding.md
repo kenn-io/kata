@@ -274,9 +274,10 @@ function without exposing Kata's internal storage packages.
 When `Config.Access` is set, also configure `WorkerTransactionFence`. Kata
 applies it to every writable transaction started by the federation, GitHub
 sync, timed-claim, due-notification, and assignment-expiry workers. A rejection
-rolls the transaction back, cancels all service workers, and is returned by
-`Run`; it cannot be reduced to a logged
-retry while stale authority remains active.
+rolls the transaction back and finishes host recording before canceling all
+service workers. `Run` returns the rejection with any rollback or recording
+failure; it cannot be reduced to a logged retry while stale authority remains
+active.
 
 The host-supplied actor always replaces an actor in request JSON. This keeps
 audit attribution tied to the authenticated principal rather than caller input.
