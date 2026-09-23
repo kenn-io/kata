@@ -517,7 +517,9 @@ func TestReconcilerRetriesWaitingProviderDecisions(t *testing.T) {
 				cancel()
 				require.ErrorIs(t, <-done, context.Canceled)
 			}()
-			require.Eventually(t, func() bool { return r.Health().LastErrorCategory == status }, 3*time.Second, time.Millisecond)
+			// Real provider processes use their own attempt budget; only retry time is fake.
+			const providerWait = 2 * federationprovider.AttemptTimeout
+			require.Eventually(t, func() bool { return r.Health().LastErrorCategory == status }, providerWait, 10*time.Millisecond)
 			waitForTimerCount(t, clock, 1)
 			assert.Equal(t, 1, r.Health().Pending)
 			saved, found, err := credentials.FindManagedFederationCredential(t.Context(), "spoke-project")
@@ -525,7 +527,7 @@ func TestReconcilerRetriesWaitingProviderDecisions(t *testing.T) {
 			require.True(t, found)
 			t.Setenv("KATA_TEST_PROVIDER_DECISION", "denied")
 			clock.Advance(time.Second)
-			require.Eventually(t, func() bool { return r.Health().LastErrorCategory == "denied" }, 3*time.Second, time.Millisecond)
+			require.Eventually(t, func() bool { return r.Health().LastErrorCategory == "denied" }, providerWait, 10*time.Millisecond)
 			retried, found, err := credentials.FindManagedFederationCredential(t.Context(), "spoke-project")
 			require.NoError(t, err)
 			require.True(t, found)

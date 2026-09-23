@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -315,6 +316,33 @@ func TestDispatcher_Shutdown_DrainsQueued(t *testing.T) {
 }
 
 func TestDispatcher_Shutdown_CancelsInFlightBeforeDeadlineAndJoins(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := defaultConfig()
+		cfg.PoolSize = 0
+		d, _, _ := mustNewDispatcher(t, nil, cfg)
+		var cancelledAt time.Time
+		joined := false
+		// Model a worker that needs the entire grace window after cancellation.
+		d.wg.Go(func() {
+			<-d.done
+			cancelledAt = time.Now()
+			time.Sleep(dispatcherTestGraceWindow)
+			joined = true
+		})
+		const budget = 5 * dispatcherTestGraceWindow
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(t.Context(), budget)
+		defer cancel()
+
+		require.NoError(t, d.Shutdown(ctx))
+		require.True(t, joined, "Shutdown must join the worker")
+		require.Equal(t, start.Add(budget-2*dispatcherTestGraceWindow), cancelledAt)
+		require.Equal(t, start.Add(budget-dispatcherTestGraceWindow), time.Now())
+		require.NoError(t, ctx.Err(), "worker must join before the deadline")
+	})
+}
+
+func TestDispatcher_Shutdown_CancelsRealProcessAndJoins(t *testing.T) {
 	slow := newTestHook(t, "*", "sleep", "10s")
 	slow.Timeout = 10 * time.Second
 	cfg := defaultConfig()
@@ -324,12 +352,12 @@ func TestDispatcher_Shutdown_CancelsInFlightBeforeDeadlineAndJoins(t *testing.T)
 	enqueueEvents(d, "issue.created", 500, 1)
 	waitForInflight(t, d, 1, 5*time.Second)
 
-	const budget = 5 * dispatcherTestGraceWindow
-	ctx, cancel := context.WithTimeout(context.Background(), budget)
-	defer cancel()
-	err := d.Shutdown(ctx)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, d.Shutdown(ctx), context.Canceled)
 
-	require.NoError(t, err, "in-flight hook must be cancelled inside the budget so workers join cleanly")
+	// Process creation and reaping use real time; the deadline contract is tested above.
+	require.NoError(t, d.Shutdown(t.Context()))
 	data, readErr := os.ReadFile(runsPath) //nolint:gosec // G304: test-controlled path under t.TempDir()
 	require.NoError(t, readErr)
 	require.Contains(t, string(data), `"result":"daemon_shutdown"`)
