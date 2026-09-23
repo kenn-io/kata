@@ -455,7 +455,6 @@ func moveSQLiteFileSet(from, to string) (bool, error) {
 	return len(moved) > 0, nil
 }
 
-
 func sqliteFileSetExists(path string) (bool, error) {
 	for _, name := range sqliteFileSetPaths(path) {
 		if _, err := os.Stat(name); err == nil { //nolint:gosec // path is an explicit import target or temp/backup path, plus SQLite sidecars.
