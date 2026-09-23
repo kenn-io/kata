@@ -14,8 +14,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/markdownrender"
 	"go.kenn.io/kata/internal/textsafe"
+	"go.kenn.io/kit/tui/markdownrender"
 )
 
 func newShowCmd() *cobra.Command {
