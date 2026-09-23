@@ -22,6 +22,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"go.kenn.io/kit/atomicfile"
 )
 
 var releaseVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$`)
@@ -103,21 +105,16 @@ func BuildSourceArchive(ctx context.Context, opts SourceArchiveOptions) (SourceA
 	if err := os.MkdirAll(filepath.Dir(opts.Output), 0o750); err != nil {
 		return SourceArchiveMetadata{}, fmt.Errorf("create archive directory: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(opts.Output), "."+filepath.Base(opts.Output)+".tmp-*")
+	tmp, err := atomicfile.Create(opts.Output)
 	if err != nil {
 		return SourceArchiveMetadata{}, fmt.Errorf("create temporary archive: %w", err)
 	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
+	defer func() { _ = tmp.Abort() }()
 	root := "kata-" + opts.Version
 	if err := writeSourceTarGzip(tmp, bytes.NewReader(archiveBytes), repoRoot, vendorRoot, root, commitTime.UTC()); err != nil {
-		_ = tmp.Close()
 		return SourceArchiveMetadata{}, err
 	}
-	if err := tmp.Close(); err != nil {
-		return SourceArchiveMetadata{}, fmt.Errorf("close source archive: %w", err)
-	}
-	if err := os.Rename(tmpName, opts.Output); err != nil {
+	if err := tmp.Commit(); err != nil {
 		return SourceArchiveMetadata{}, fmt.Errorf("publish source archive: %w", err)
 	}
 	contents, err := os.ReadFile(opts.Output)
