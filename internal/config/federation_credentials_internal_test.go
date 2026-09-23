@@ -265,3 +265,28 @@ func TestDefaultFederationCredentialStoreSupportsExactReplacement(t *testing.T) 
 	require.True(t, found)
 	assert.Equal(t, target, stored)
 }
+
+func TestWriteFederationCredentialRefusesSymlinkedCredentialsFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	linkTarget := filepath.Join(t.TempDir(), "elsewhere.toml")
+	require.NoError(t, os.WriteFile(linkTarget, []byte("# untouched\n"), 0o600))
+	path, err := FederationCredentialsPath()
+	require.NoError(t, err)
+	if err := os.Symlink(linkTarget, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	err = WriteFederationCredential("01HZNQ7VFPK1XGD8R5MABCD4EA", FederationCredential{
+		HubURL: "https://hub.example", HubProjectID: 42, Token: "token-a",
+	})
+	require.Error(t, err)
+
+	info, err := os.Lstat(path)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "credentials.toml must stay a symlink")
+	got, err := os.ReadFile(linkTarget) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "# untouched\n", string(got))
+	assertNoFederationCredentialTempFiles(t, home)
+}
