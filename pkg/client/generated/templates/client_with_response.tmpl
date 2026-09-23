@@ -1,0 +1,137 @@
+{{- /*
+Adapted from oapi-codegen-dd's client-with-response.tmpl (Copyright 2026
+DoorDash, Inc., Apache License 2.0). Kata's change: error responses decode the
+operation's error body and wrap it in the returned ClientAPIError, so callers
+of WithResponse methods can use errors.AsType[ErrorEnvelope] exactly as they
+can with the plain methods. An undecodable body keeps the status-only error;
+the raw body stays available on the response envelope.
+*/ -}}
+
+{{- define "kataErrorEnvelope" }}
+{{- $op := . }}
+{{- if and $op.Response.Error $op.Response.Error.ResponseName }}
+        if len(resp.Content) > 0 {
+            envelope := new({{ $op.Response.Error.ResponseName }})
+            if json.Unmarshal(resp.Content, envelope) == nil {
+                if errTarget, ok := any(*envelope).(error); ok {
+                    return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+                }
+            }
+        }
+{{- end }}
+{{- end }}
+
+{{ define "client-with-response" }}
+{{ $args := . }}
+{{ $config := $args.config }}
+{{ $operations := $args.operations }}
+
+{{ $clientName := $config.Client.Name }}
+
+{{- /* When generate.client is off, the Client struct, constructors, and the
+       single ClientInterface are not produced by client.tmpl. Emit them here
+       so the envelope methods have a receiver and a stable interface name.
+       When generate.client is also on, client.tmpl already emits all of these
+       (with envelope methods folded into the combined ClientInterface) - this
+       template just adds the function bodies. */ -}}
+{{- if not $config.Generate.Client }}
+// {{$clientName}} is the client for the API implementing the {{$clientName}}Interface interface.
+type {{$clientName}} struct {
+    apiClient runtime.APIClient
+}
+
+// New{{$clientName}} creates a new instance of the {{$clientName}} client.
+func New{{$clientName}}(apiClient runtime.APIClient) *{{$clientName}} {
+    return &{{$clientName}}{apiClient: apiClient}
+}
+
+// NewDefault{{$clientName}} creates a new instance of the {{$clientName}} client with default api client.
+func NewDefault{{$clientName}}(baseURL string, opts ...runtime.APIClientOption) (*{{$clientName}}, error) {
+    apiClient, err := runtime.NewAPIClient(baseURL, opts...)
+    if err != nil {
+        return nil, fmt.Errorf("error creating API client: %w", err)
+    }
+    return &{{$clientName}}{apiClient: apiClient}, nil
+}
+
+// {{$clientName}}Interface is the interface for the API client. With
+// envelope-only generation it lists the WithResponse methods.
+type {{$clientName}}Interface interface {
+    {{- range $operations }}{{ $op := . }}
+    {{$op.ID}}WithResponse(ctx context.Context{{- if $op.HasRequestOptions }}, options *{{$op.ID | ucFirst}}RequestOptions{{ end }}, reqEditors ...runtime.RequestEditorFn) (*{{$op.WithResponseTypeName}}, error)
+    {{- end }}
+}
+{{- end }}
+
+{{ range $operations }}{{ $op := . }}
+{{ if not $config.Generate.OmitDescription }}{{ toGoComment $op.Summary $op.ID }}{{ end }}
+func (c *{{$clientName}}) {{$op.ID}}WithResponse(ctx context.Context{{ if $op.HasRequestOptions }}, options *{{$op.ID | ucFirst}}RequestOptions{{ end }}, reqEditors ...runtime.RequestEditorFn) (*{{$op.WithResponseTypeName}}, error) {
+    var err error
+    reqParams := runtime.RequestOptionsParameters{
+        RequestURL:  c.apiClient.GetBaseURL() + "{{escapeGoString $op.Path}}",
+        Method:      "{{$op.Method}}",
+        {{- if $op.HasRequestOptions }}
+        Options:     options,
+        {{- end }}
+        {{- if $op.Body }}
+        ContentType: "{{$op.Body.ContentType}}",
+        {{- end }}
+    }
+
+    req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+    if err != nil {
+        return nil, fmt.Errorf("error creating request: %w", err)
+    }
+
+    resp, err := c.apiClient.ExecuteRequest(ctx, req, "{{ escapeGoString $op.Path }}")
+    if err != nil {
+        return nil, fmt.Errorf("error executing request: %w", err)
+    }
+
+    out := &{{$op.WithResponseTypeName}}{
+        HTTPResponse: resp.Raw,
+        Body:         resp.Content,
+        StatusCode:   resp.StatusCode,
+    }
+
+    switch resp.StatusCode {
+    {{- range $rcd := $op.Response.Successes }}
+    case {{ $rcd.StatusCode }}:
+        {{- template "decodeBody" (dict "rcd" $rcd) }}
+        {{- if gt (len $rcd.Headers) 0 }}
+        out.Headers{{$rcd.StatusCode}} = &{{ index $op.HeaderTypeNames $rcd.StatusCode }}{
+            {{- range $hName, $hSchema := $rcd.Headers }}
+            {{ genTypeName $hName }}: resp.Headers.Get("{{ escapeGoString $hName }}"),
+            {{- end }}
+        }
+        {{- end }}
+        return out, nil
+    {{- end }}
+    {{- range $rcd := $op.Response.Errors }}
+    case {{ $rcd.StatusCode }}:
+        {{- template "decodeBody" (dict "rcd" $rcd) }}
+        {{- if gt (len $rcd.Headers) 0 }}
+        out.Headers{{$rcd.StatusCode}} = &{{ index $op.HeaderTypeNames $rcd.StatusCode }}{
+            {{- range $hName, $hSchema := $rcd.Headers }}
+            {{ genTypeName $hName }}: resp.Headers.Get("{{ escapeGoString $hName }}"),
+            {{- end }}
+        }
+        {{- end }}
+        {{- template "kataErrorEnvelope" $op }}
+        return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+    {{- end }}
+    default:
+        {{- template "kataErrorEnvelope" $op }}
+        return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+    }
+}
+
+{{ end }}{{- /* end range operations */ -}}
+
+{{- /* The interface assertion is emitted by client.tmpl when classic is on
+       (its ClientInterface already covers envelope methods); only emit it
+       here in envelope-only mode. */ -}}
+{{- if not $config.Generate.Client }}
+var _ {{$clientName}}Interface = (*{{$clientName}})(nil)
+{{- end }}
+{{ end -}}

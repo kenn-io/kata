@@ -126,6 +126,16 @@
       "permanent": true
     },
     {
+      "source": "/reference/go-client/",
+      "destination": "/docs/reference/go-client/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/go-client.md",
+      "destination": "/docs/reference/go-client.md",
+      "permanent": true
+    },
+    {
       "source": "/reference/mcp/",
       "destination": "/docs/reference/mcp/",
       "permanent": true

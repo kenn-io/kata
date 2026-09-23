@@ -36,6 +36,8 @@ for machine readers.
   Streamable HTTP transports, tool loading
 - [Agent output format](https://katatracker.com/docs/reference/agent-output.md):
   the `--agent` output contract
+- [Go client](https://katatracker.com/docs/reference/go-client.md): typed Go
+  client, daemon discovery, and an in-process test server
 - [Web UI](https://katatracker.com/docs/guide/web-ui.md): the browser workspace
 - [Semantic search](https://katatracker.com/docs/guide/semantic-search.md):
   opt-in embeddings

@@ -12,6 +12,7 @@ import (
 	"iter"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -354,14 +355,7 @@ func NewHTTPClientForResolved(ctx context.Context, d ResolvedDaemon, opts Opts) 
 		return nil, errors.New("resolved daemon has no base URL")
 	}
 	if d.UnixSocket != "" {
-		c := unixClient(d.UnixSocket, opts)
-		rt, err := authBearerTransport(c.Transport, d.Token, d.BaseURL,
-			d.TrustPrivateNetwork, d.AllowInsecure)
-		if err != nil {
-			return nil, err
-		}
-		c.Transport = rt
-		return c, nil
+		return newUnixHTTPClient(d.UnixSocket, d.Token, d.BaseURL, d.TrustPrivateNetwork, d.AllowInsecure, opts)
 	}
 	return NewHTTPClientForTarget(ctx, d.BaseURL, TargetAuth{
 		Token:               d.Token,
@@ -425,6 +419,39 @@ func tcpClient(opts Opts) (*http.Client, error) {
 	clone := t.Clone()
 	clone.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
 	c.Transport = clone
+	return c, nil
+}
+
+// UnixSocketPath returns the socket path named by a unix:// endpoint. ok is
+// false for any other endpoint. The path must be absolute so the endpoint
+// never depends on the caller's working directory.
+func UnixSocketPath(endpoint string) (path string, ok bool, err error) {
+	path, ok = strings.CutPrefix(endpoint, "unix://")
+	if !ok {
+		return "", false, nil
+	}
+	if !filepath.IsAbs(path) {
+		return "", true, fmt.Errorf("unix endpoint %q must name an absolute socket path", endpoint)
+	}
+	return path, true, nil
+}
+
+// NewHTTPClientForUnixSocket returns a client that dials socket and sends
+// token as bearer auth when it is non-empty. Requests use UnixBase as their
+// base URL.
+func NewHTTPClientForUnixSocket(socket, token string, opts Opts) (*http.Client, error) {
+	return newUnixHTTPClient(socket, token, UnixBase, false, false, opts)
+}
+
+func newUnixHTTPClient(
+	socket, token, baseURL string, trustPrivateNetwork, allowInsecure bool, opts Opts,
+) (*http.Client, error) {
+	c := unixClient(socket, opts)
+	rt, err := authBearerTransport(c.Transport, token, baseURL, trustPrivateNetwork, allowInsecure)
+	if err != nil {
+		return nil, err
+	}
+	c.Transport = rt
 	return c, nil
 }
 
