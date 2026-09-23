@@ -162,28 +162,31 @@ func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) {
 }
 
 func TestCreateTimeoutClassificationAtCommandBoundary(t *testing.T) {
+	previousTransport := http.DefaultTransport
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Start the timeout after sending, so slow command setup cannot turn
+	// this unknown-outcome scenario into a pre-transmission failure.
+	transport.ResponseHeaderTimeout = 100 * time.Millisecond
+	http.DefaultTransport = transport
+	t.Cleanup(func() {
+		http.DefaultTransport = previousTransport
+		transport.CloseIdleConnections()
+	})
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/projects/resolve":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"example-project"}}`)
-		case "/api/v1/projects/7/issues":
-			select {
-			case <-r.Context().Done():
-			case <-time.After(500 * time.Millisecond):
-			}
-		default:
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/projects/name:example-project/issues" {
 			http.NotFound(w, r)
+			return
 		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
 	}))
 	t.Cleanup(server.Close)
 
 	run := func(t *testing.T, extra ...string) error {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(
-			contextWithBaseURL(context.Background(), server.URL), 150*time.Millisecond)
-		defer cancel()
-		args := []string{"--workspace", t.TempDir(), "create", "example issue"}
+		ctx := contextWithBaseURL(t.Context(), server.URL)
+		args := []string{"--workspace", t.TempDir(), "--project", "example-project", "create", "example issue"}
 		args = append(args, extra...)
 		_, _, err := executeRootCapture(t, ctx, args...)
 		return err
