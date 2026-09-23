@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 // ErrAccessDenied is returned by an AccessController when a caller must not
@@ -104,6 +106,16 @@ type Transaction interface {
 // TransactionFence revalidates authority from inside the active storage
 // transaction. Returning an error aborts and rolls back the domain mutation.
 type TransactionFence func(context.Context, Transaction) error
+
+// AfterTransactionRollback rejects a fenced operation, then calls finish once
+// after its transaction rolls back. Use it to retain a host-side observation
+// that must survive rejection. The callback uses the request context, must be
+// retry-safe, and must not retain the rolled-back Transaction. Its error and
+// the original cause are preserved; neither callback success nor failure can
+// admit the rejected operation. Use only as a TransactionFence return value.
+func AfterTransactionRollback(cause error, finish func(context.Context) error) error {
+	return db.AfterTransactionRollback(cause, finish)
+}
 
 // AccessDecision carries state needed after a request is admitted. Lease may
 // be nil for bounded responses; long-lived operations require one.

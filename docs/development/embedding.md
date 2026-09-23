@@ -255,6 +255,17 @@ not-found response as an initial authorization denial. Other failures roll
 back and make only the mounted service temporarily unavailable. A missing
 fence fails closed before writing.
 
+If the host must record a denial outside that transaction, return
+`kata.AfterTransactionRollback(err, finish)` from the fence. Kata rolls back
+and releases its connection before calling `finish` once. The callback can
+use a separate host transaction to save an audit event or suspend a credential.
+It receives the request context, must tolerate retries, and must not reuse the
+rolled-back transaction. Kata still denies the original operation if recording
+succeeds or fails. Rollback and callback failures remain in the returned error.
+HTTP callers receive a temporary-unavailable response when finalization fails,
+not a completed authorization decision. The rejected write still does not run.
+An earlier fence's denial prevents later fences and their callbacks from running.
+
 Serializable transactions may retry, so a fence must be safe to invoke once
 per transaction attempt. The transaction exposes only `ExecContext` and
 `QueryRowContext`, which is enough to call a fixed host-owned validation
@@ -263,9 +274,10 @@ function without exposing Kata's internal storage packages.
 When `Config.Access` is set, also configure `WorkerTransactionFence`. Kata
 applies it to every writable transaction started by the federation, GitHub
 sync, timed-claim, due-notification, and assignment-expiry workers. A rejection
-rolls the transaction back, cancels all service workers, and is returned by
-`Run`; it cannot be reduced to a logged
-retry while stale authority remains active.
+rolls the transaction back and finishes host recording before canceling all
+service workers. `Run` returns the rejection with any rollback or recording
+failure; it cannot be reduced to a logged retry while stale authority remains
+active.
 
 The host-supplied actor always replaces an actor in request JSON. This keeps
 audit attribution tied to the authenticated principal rather than caller input.
