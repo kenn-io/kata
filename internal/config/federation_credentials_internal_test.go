@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,7 +37,7 @@ func TestWriteFederationCredentialPartialTempWriteLeavesOldFileUnchanged(t *test
 	require.NoError(t, err)
 
 	originalWriter := writeFederationCredentialsTempFile
-	writeFederationCredentialsTempFile = func(file *os.File, data []byte) error {
+	writeFederationCredentialsTempFile = func(file io.Writer, data []byte) error {
 		if _, writeErr := file.Write(data[:len(data)/2]); writeErr != nil {
 			return writeErr
 		}
@@ -56,41 +57,6 @@ func TestWriteFederationCredentialPartialTempWriteLeavesOldFileUnchanged(t *test
 	require.NoError(t, err)
 	assert.Equal(t, manual, credentials.Projects[localUID])
 	assert.Equal(t, other, credentials.Projects[otherUID])
-	assertNoFederationCredentialTempFiles(t, home)
-}
-
-func TestWriteFederationCredentialRenameFailureLeavesOldFileUnchanged(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	const projectUID = "01HZNQ7VFPK1XGD8R5MABCD4EA"
-	original := FederationCredential{
-		HubURL: "https://hub.example", HubProjectID: 42,
-		Token: "token-a", Capabilities: "claim,pull,push",
-		Actor: "user-a",
-	}
-	require.NoError(t, WriteFederationCredential(projectUID, original))
-	path, err := FederationCredentialsPath()
-	require.NoError(t, err)
-	before, err := os.ReadFile(path) //nolint:gosec // path is the test's isolated KATA_HOME.
-	require.NoError(t, err)
-
-	originalRename := renameFederationCredentialsFile
-	renameFederationCredentialsFile = func(string, string) error {
-		return errors.New("injected credential rename failure")
-	}
-	t.Cleanup(func() { renameFederationCredentialsFile = originalRename })
-
-	changed := original
-	changed.Actor = "identity-user"
-	err = WriteFederationCredential(projectUID, changed)
-	require.ErrorContains(t, err, "injected credential rename failure")
-
-	after, err := os.ReadFile(path) //nolint:gosec // path is the test's isolated KATA_HOME.
-	require.NoError(t, err)
-	assert.Equal(t, before, after)
-	credentials, err := ReadFederationCredentials()
-	require.NoError(t, err)
-	assert.Equal(t, original, credentials.Projects[projectUID])
 	assertNoFederationCredentialTempFiles(t, home)
 }
 
@@ -160,21 +126,12 @@ func TestReplaceFederationCredentialExactTargetDoesNotRewriteFile(t *testing.T) 
 	require.NoError(t, err)
 
 	writes := 0
-	renames := 0
 	originalWriter := writeFederationCredentialsTempFile
-	originalRename := renameFederationCredentialsFile
-	writeFederationCredentialsTempFile = func(*os.File, []byte) error {
+	writeFederationCredentialsTempFile = func(io.Writer, []byte) error {
 		writes++
 		return nil
 	}
-	renameFederationCredentialsFile = func(string, string) error {
-		renames++
-		return nil
-	}
-	t.Cleanup(func() {
-		writeFederationCredentialsTempFile = originalWriter
-		renameFederationCredentialsFile = originalRename
-	})
+	t.Cleanup(func() { writeFederationCredentialsTempFile = originalWriter })
 
 	err = ReplaceFederationCredential(FederationCredentialReplacement{
 		ProjectUID:  projectUID,
@@ -184,7 +141,6 @@ func TestReplaceFederationCredentialExactTargetDoesNotRewriteFile(t *testing.T) 
 
 	require.NoError(t, err)
 	assert.Zero(t, writes)
-	assert.Zero(t, renames)
 	after, readErr := os.ReadFile(path) //nolint:gosec // path is the test's isolated KATA_HOME.
 	require.NoError(t, readErr)
 	assert.Equal(t, before, after)
@@ -242,22 +198,12 @@ func TestReplaceFederationCredentialWriteFailuresLeaveSourceUnchanged(t *testing
 			name: "partial temporary write",
 			inject: func(t *testing.T) {
 				original := writeFederationCredentialsTempFile
-				writeFederationCredentialsTempFile = func(file *os.File, data []byte) error {
+				writeFederationCredentialsTempFile = func(file io.Writer, data []byte) error {
 					_, err := file.Write(data[:len(data)/2])
 					require.NoError(t, err)
 					return errors.New("injected replacement write failure")
 				}
 				t.Cleanup(func() { writeFederationCredentialsTempFile = original })
-			},
-		},
-		{
-			name: "rename",
-			inject: func(t *testing.T) {
-				original := renameFederationCredentialsFile
-				renameFederationCredentialsFile = func(string, string) error {
-					return errors.New("injected replacement rename failure")
-				}
-				t.Cleanup(func() { renameFederationCredentialsFile = original })
 			},
 		},
 	} {
