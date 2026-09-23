@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"strings"
@@ -280,6 +282,12 @@ func (e *daemonTransportError) Error() string {
 	if e.unixSocket {
 		subject = "local Unix-socket daemon"
 	}
+	if certificateErr, ok := errors.AsType[*tls.CertificateVerificationError](e.cause); ok {
+		return subject + ": " + certificateErr.Error()
+	}
+	if errors.Is(e.cause, context.Canceled) {
+		return subject + " request canceled"
+	}
 	if e.Timeout() {
 		switch e.phase {
 		case "connect":
@@ -332,13 +340,14 @@ func (e *daemonTransportError) mutationOutcomeUnknown() bool {
 type daemonRequestBudgetKey struct{}
 
 type daemonRequestBudget struct {
-	ctx               context.Context
-	cancel            context.CancelFunc
-	cancelOnce        sync.Once
-	followingRedirect atomic.Bool
-	selectedOrigin    string
-	unixSocket        bool
-	originalMethod    string
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	cancelOnce          sync.Once
+	followingRedirect   atomic.Bool
+	possiblyTransmitted atomic.Bool
+	selectedOrigin      string
+	unixSocket          bool
+	originalMethod      string
 }
 
 func newDaemonRequestBudget(req *http.Request, timeout time.Duration, origin *url.URL) *daemonRequestBudget {
@@ -353,6 +362,13 @@ func newDaemonRequestBudget(req *http.Request, timeout time.Duration, origin *ur
 		unixSocket:     strings.EqualFold(origin.Hostname(), "kata.invalid"),
 		originalMethod: req.Method,
 	}
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) {
+			// Sending can race cancellation once the connection is ready. Keep
+			// this conservative boundary across redirects and transport retries.
+			state.possiblyTransmitted.Store(true)
+		},
+	})
 	state.ctx = context.WithValue(ctx, daemonRequestBudgetKey{}, state)
 	return state
 }
@@ -427,10 +443,12 @@ func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 	state.stop()
 	phase := "headers"
-	possiblyTransmitted := true
+	possiblyTransmitted := state.possiblyTransmitted.Load()
+	if !possiblyTransmitted {
+		phase = "connect"
+	}
 	if op, ok := errors.AsType[*net.OpError](err); ok && op.Op == "dial" {
 		phase = "connect"
-		possiblyTransmitted = false
 	}
 	return resp, &daemonTransportError{
 		selectedOrigin:      state.selectedOrigin,

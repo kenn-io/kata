@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -318,6 +320,54 @@ func TestDaemonTransportErrorOutputModes(t *testing.T) {
 	envelope := parseErrorEnvelope(t, jsonOut.Bytes())
 	assert.Equal(t, string(kindDaemonUnavail), envelope.Error.Kind)
 	assert.Equal(t, ExitDaemonUnavail, envelope.Error.ExitCode)
+}
+
+func TestDaemonClientPreTransmissionFailure(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(server.Close)
+
+	for _, canceled := range []bool{false, true} {
+		name := "certificate rejection"
+		if canceled {
+			name = "canceled request"
+		}
+		t.Run(name, func(t *testing.T) {
+			hc, err := markDaemonHTTPClient(server.URL, &http.Client{})
+			require.NoError(t, err)
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			if canceled {
+				cancel()
+			}
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, nil)
+			require.NoError(t, err)
+			_, err = hc.Do(req) //nolint:gosec // loopback fixture only
+			require.Error(t, err)
+			if canceled {
+				require.ErrorIs(t, err, context.Canceled)
+			} else {
+				var certificateErr *tls.CertificateVerificationError
+				require.ErrorAs(t, err, &certificateErr)
+			}
+			assert.Zero(t, requests.Load())
+
+			for _, commandErr := range []error{err, createRequestError(err, false)} {
+				classified := cliErrorForErr(commandErr, true)
+				assert.Equal(t, "daemon_unavailable", classified.Code)
+				assert.NotContains(t, classified.Message, "mutation result may be unknown")
+				assert.NotContains(t, classified.Message, "create outcome unknown")
+				if canceled {
+					assert.Contains(t, classified.Message, "canceled")
+				} else {
+					assert.Contains(t, classified.Message, "certificate")
+				}
+			}
+		})
+	}
 }
 
 func TestDaemonTransportErrorMutationUncertainty(t *testing.T) {
