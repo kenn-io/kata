@@ -178,7 +178,11 @@ func sanitizeNativeFederationTransactionFence(fence db.TransactionFence) db.Tran
 		case errors.Is(err, db.ErrNotFound):
 			return ErrHostAccessDenied
 		default:
-			return errHostFederationAccessUnavailable
+			// Keep the underlying error so a transient database failure
+			// (serialization failure, deadlock, lock timeout) stays
+			// recognizable to the storage retry loop. Dropping it turns a
+			// retryable conflict into a hard 503.
+			return errors.Join(errHostFederationAccessUnavailable, err)
 		}
 	}
 }
