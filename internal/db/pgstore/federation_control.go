@@ -566,22 +566,21 @@ WHERE token_hash=$1 AND revoked_at IS NULL
 
 // FederationEnrollmentTransactionFence rechecks native credential authority
 // in the same transaction as the protected mutation.
+//
+// The binding is locked before the enrollment on purpose: federation ingest
+// (requireFederationIngestHub, then consumeFederationAdoptionSnapshotAuthorMarker)
+// and the other binding-first writers take federation_bindings before
+// federation_enrollments. Acquiring the same two rows in the opposite order
+// deadlocks two concurrent transactions, and the losing fenced request
+// surfaces as an unrelated 503.
 func (s *Store) FederationEnrollmentTransactionFence(
 	admitted db.FederationEnrollment,
 	projectID int64,
 	capability string,
 ) db.TransactionFence {
 	return func(ctx context.Context, transaction db.Transaction) error {
-		current, err := scanFederationEnrollment(transaction.QueryRowContext(ctx,
-			federationEnrollmentSelect+` WHERE id=$1 FOR SHARE`, admitted.ID))
-		if err != nil {
-			return err
-		}
-		if !db.FederationEnrollmentAuthorizationMatches(current, admitted, projectID, capability) {
-			return db.ErrNotFound
-		}
 		var active int
-		err = transaction.QueryRowContext(ctx, `
+		err := transaction.QueryRowContext(ctx, `
 			SELECT binding.enabled
 			FROM federation_bindings AS binding
 			JOIN projects AS project ON project.id=binding.project_id
@@ -595,6 +594,14 @@ func (s *Store) FederationEnrollmentTransactionFence(
 			return err
 		}
 		if active != 1 {
+			return db.ErrNotFound
+		}
+		current, err := scanFederationEnrollment(transaction.QueryRowContext(ctx,
+			federationEnrollmentSelect+` WHERE id=$1 FOR SHARE`, admitted.ID))
+		if err != nil {
+			return err
+		}
+		if !db.FederationEnrollmentAuthorizationMatches(current, admitted, projectID, capability) {
 			return db.ErrNotFound
 		}
 		return nil

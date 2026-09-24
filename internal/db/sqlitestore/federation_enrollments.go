@@ -357,23 +357,16 @@ func (d *Store) AuthorizeFederationToken(
 }
 
 // FederationEnrollmentTransactionFence rechecks native credential authority
-// in the same transaction as the protected mutation.
+// in the same transaction as the protected mutation. The binding-before-enrollment
+// order matches the PostgreSQL store; see the comment there for why.
 func (d *Store) FederationEnrollmentTransactionFence(
 	admitted db.FederationEnrollment,
 	projectID int64,
 	capability string,
 ) db.TransactionFence {
 	return func(ctx context.Context, transaction db.Transaction) error {
-		current, err := scanFederationEnrollment(transaction.QueryRowContext(ctx,
-			federationEnrollmentSelect+` WHERE id = ?`, admitted.ID))
-		if err != nil {
-			return err
-		}
-		if !db.FederationEnrollmentAuthorizationMatches(current, admitted, projectID, capability) {
-			return db.ErrNotFound
-		}
 		var active int
-		err = transaction.QueryRowContext(ctx, `
+		err := transaction.QueryRowContext(ctx, `
 			SELECT binding.enabled
 			FROM federation_bindings AS binding
 			JOIN projects AS project ON project.id = binding.project_id
@@ -386,6 +379,14 @@ func (d *Store) FederationEnrollmentTransactionFence(
 			return err
 		}
 		if active != 1 {
+			return db.ErrNotFound
+		}
+		current, err := scanFederationEnrollment(transaction.QueryRowContext(ctx,
+			federationEnrollmentSelect+` WHERE id = ?`, admitted.ID))
+		if err != nil {
+			return err
+		}
+		if !db.FederationEnrollmentAuthorizationMatches(current, admitted, projectID, capability) {
 			return db.ErrNotFound
 		}
 		return nil
