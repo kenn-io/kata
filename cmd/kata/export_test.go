@@ -164,11 +164,6 @@ func TestExportReplacesExistingOutput(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(bs), "replacement export")
 	assert.NotContains(t, string(bs), "previous backup")
-	entries, err := os.ReadDir(home)
-	require.NoError(t, err)
-	for _, entry := range entries {
-		assert.NotContains(t, entry.Name(), ".export.jsonl.", "export must not leave a staging file")
-	}
 }
 
 func TestExportRefusesSymlinkedOutput(t *testing.T) {

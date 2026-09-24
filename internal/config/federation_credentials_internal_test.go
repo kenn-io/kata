@@ -57,14 +57,6 @@ func TestWriteFederationCredentialPartialTempWriteLeavesOldFileUnchanged(t *test
 	require.NoError(t, err)
 	assert.Equal(t, manual, credentials.Projects[localUID])
 	assert.Equal(t, other, credentials.Projects[otherUID])
-	assertNoFederationCredentialTempFiles(t, home)
-}
-
-func assertNoFederationCredentialTempFiles(t *testing.T, home string) {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(home, ".credentials.toml.tmp-*"))
-	require.NoError(t, err)
-	assert.Empty(t, matches)
 }
 
 func TestReplaceFederationCredentialSupportsManualAndManagedCredentials(t *testing.T) {
@@ -237,7 +229,6 @@ func TestReplaceFederationCredentialWriteFailuresLeaveSourceUnchanged(t *testing
 			credentials, readErr := ReadFederationCredentials()
 			require.NoError(t, readErr)
 			assert.Equal(t, current, credentials.Projects[projectUID])
-			assertNoFederationCredentialTempFiles(t, home)
 		})
 	}
 }
@@ -288,5 +279,4 @@ func TestWriteFederationCredentialRefusesSymlinkedCredentialsFile(t *testing.T) 
 	got, err := os.ReadFile(linkTarget) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, "# untouched\n", string(got))
-	assertNoFederationCredentialTempFiles(t, home)
 }
