@@ -2,6 +2,7 @@ package: generated
 skip-prune: true
 user-templates:
   client: templates/client.tmpl
+  client-with-response: templates/client_with_response.tmpl
   typeDef: templates/type_def.tmpl
   union.tmpl: templates/union.tmpl
 additional-imports:

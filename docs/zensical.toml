@@ -37,6 +37,7 @@ nav = [
     {"Metadata" = "reference/metadata.md"},
     {"Agent output format" = "reference/agent-output.md"},
     {"HTTP API schema" = "reference/http-api.md"},
+    {"Go client" = "reference/go-client.md"},
   ]},
   {"Workflows" = [
     {"Agent workflows" = "workflows/agents.md"},
