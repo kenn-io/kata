@@ -110,7 +110,12 @@ func TestServiceWorkerDenialFinalizesBeforeStopping(t *testing.T) {
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, service.Close()) })
 				issue := seedExpiredWorkerClaim(ctx, t, service)
-				inspection, err = sql.Open(driver, config.DSN)
+				inspectionDSN := config.DSN
+				if driver == "sqlite" {
+					// Match the store's lock wait because other service workers share this database.
+					inspectionDSN = "file:" + config.DSN + "?_pragma=busy_timeout(5000)"
+				}
+				inspection, err = sql.Open(driver, inspectionDSN)
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, inspection.Close()) })
 				_, err = inspection.ExecContext(ctx, `CREATE TABLE `+prefix+`worker_fence_markers (attempt INTEGER NOT NULL)`)
