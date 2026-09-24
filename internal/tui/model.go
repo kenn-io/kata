@@ -44,26 +44,27 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
-	opts                Options
-	api                 KataAPI
-	scope               scope
-	view                viewID
-	prevView            viewID
-	width               int
-	height              int
-	keymap              keymap
-	list                listModel
-	inboxReturn         *inboxReturnState
-	inboxAttempt        uint64
-	scopeGen            uint64
-	inboxPending        bool
-	detail              detailModel
-	sseCh               chan tea.Msg
-	sseStatus           sseConnState
-	pendingRefetch      bool
-	connGen             uint64
-	daemonSwitchAttempt uint64
-	sseRestart          func(daemonConnection, uint64, chan tea.Msg) tea.Cmd
+	opts                     Options
+	api                      KataAPI
+	scope                    scope
+	view                     viewID
+	prevView                 viewID
+	width                    int
+	height                   int
+	keymap                   keymap
+	list                     listModel
+	inboxReturn              *inboxReturnState
+	inboxAttempt             uint64
+	scopeGen                 uint64
+	inboxPending             bool
+	detail                   detailModel
+	splitDetailFollowPending bool
+	sseCh                    chan tea.Msg
+	sseStatus                sseConnState
+	pendingRefetch           bool
+	connGen                  uint64
+	daemonSwitchAttempt      uint64
+	sseRestart               func(daemonConnection, uint64, chan tea.Msg) tea.Cmd
 	// projectsStale flags that the projects table needs a refetch. Set by
 	// the SSE event router when an event's project_id matches a row in
 	// m.projectsByID and viewProjects is the active view. Cleared when the
@@ -410,9 +411,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 		m = m.populateCache(msg)
 		if _, isInitial := msg.(initialFetchMsg); isInitial {
-			m, postFetchCmd = m.maybeBootstrapSplitDetail()
+			switch {
+			case m.detail.issue == nil:
+				m, postFetchCmd = m.maybeBootstrapSplitDetail()
+			case !prevHas:
+				// An explicit --issue detail can be seeded before the first
+				// list selection exists. Keep it instead of following the
+				// list's default highlighted row.
+			default:
+				_, _, err := fetchPayload(msg)
+				if err == nil {
+					m, postFetchCmd = m.reconcileSplitDetailAfterFetch(prevPID, prevUID, prevHas)
+				}
+			}
 		} else {
-			m, postFetchCmd = m.reconcileSearchDetailAfterRefetch(prevPID, prevUID, prevHas)
+			_, _, err := fetchPayload(msg)
+			if err == nil {
+				m, postFetchCmd = m.reconcileSplitDetailAfterFetch(prevPID, prevUID, prevHas)
+			}
 		}
 	}
 	if mut, ok := msg.(mutationDoneMsg); ok {
@@ -548,27 +564,65 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return next, tea.Batch(cmd, postFetchCmd)
 }
 
-// reconcileSearchDetailAfterRefetch applies the same detail-follows-selection
-// invariant as keyboard navigation when an accepted list response moves the
-// highlighted search result. Empty results clear the search-owned pane and
-// invalidate any debounce tick for the departed issue.
-func (m Model) reconcileSearchDetailAfterRefetch(
+// reconcileSplitDetailAfterFetch applies the same detail-follows-selection
+// invariant as keyboard navigation when an accepted list response changes
+// the highlighted issue. Active input shells keep their detail target while
+// editing; focused search results are the one input that follows selection.
+func (m Model) reconcileSplitDetailAfterFetch(
 	prevPID int64, prevUID string, prevHas bool,
 ) (Model, tea.Cmd) {
-	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusResults ||
-		m.layout != splitlayout.Split {
+	if m.layout != splitlayout.Split {
 		return m, nil
 	}
 	newPID, newUID, newHas := highlightedIdentity(m.list)
 	if prevHas == newHas && prevPID == newPID && prevUID == newUID {
 		return m, nil
 	}
+	// A scope restore may bring back a detail pane already pinned to the
+	// newly highlighted issue. Keep that pane and its in-flight refetch.
+	if newHas && m.detail.issue != nil &&
+		m.detail.issue.ProjectID == newPID && m.detail.issue.UID == newUID {
+		m.splitDetailFollowPending = false
+		return m, nil
+	}
+	if m.input.kind != inputNone &&
+		(m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusResults) {
+		m.splitDetailFollowPending = true
+		return m, nil
+	}
 	if !newHas {
-		m.nextDetailFollowGen++
-		m.detail = m.applyDetailViewportCache(newDetailModel())
+		return m.clearSplitDetail(), nil
+	}
+	return m.scheduleDetailFollow()
+}
+
+// reconcileSplitDetailAfterInput catches a selection change deferred while an
+// input shell kept the detail pane pinned to its original issue.
+func (m Model) reconcileSplitDetailAfterInput(force bool) (Model, tea.Cmd) {
+	if m.input.kind != inputNone || (!force && !m.splitDetailFollowPending) {
+		return m, nil
+	}
+	m.splitDetailFollowPending = false
+	if m.layout != splitlayout.Split {
+		return m, nil
+	}
+	pid, uid, has := highlightedIdentity(m.list)
+	if !has {
+		if m.detail.issue == nil {
+			return m, nil
+		}
+		return m.clearSplitDetail(), nil
+	}
+	if m.detail.issue != nil && m.detail.issue.ProjectID == pid && m.detail.issue.UID == uid {
 		return m, nil
 	}
 	return m.scheduleDetailFollow()
+}
+
+func (m Model) clearSplitDetail() Model {
+	m.nextDetailFollowGen++
+	m.detail = m.applyDetailViewportCache(newDetailModel())
+	return m
 }
 
 // maybeBootstrapSplitDetail auto-loads the highlighted list row into the
@@ -1179,9 +1233,7 @@ func (m Model) followSearchResultIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
 		return m, prior
 	}
 	if _, ok := pickHighlightedIssue(m.list); !ok {
-		m.nextDetailFollowGen++
-		m.detail = m.applyDetailViewportCache(newDetailModel())
-		return m, prior
+		return m.clearSplitDetail(), prior
 	}
 	return m.followHighlightedIssueIfNeeded(prior)
 }
@@ -1606,6 +1658,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		m.list, cmd = m.list.applyMutation(mutationDoneMsg{
 			origin: "list", kind: "create", resp: mut.resp,
 		}, m.api, m.scope)
+		m, follow := m.reconcileSplitDetailAfterInput(false)
 		// Form-create may carry labels (inline Labels field). The
 		// daemon emits only issue.created (with labels folded into the
 		// payload), NOT a separate issue.labeled event — so the
@@ -1618,9 +1671,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		// menu for.
 		if mutAffectsLabelCounts(mut) {
 			next, cmd := batchLabelRefresh(m, cmd, mut)
-			return next, withConnGen(cmd, m.connGen)
+			return next, tea.Batch(withConnGen(cmd, m.connGen), follow)
 		}
-		return m, withConnGen(cmd, m.connGen)
+		return m, tea.Batch(withConnGen(cmd, m.connGen), follow)
 	}
 	target := m.input.target
 	formKind := m.input.kind
@@ -1636,7 +1689,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		mut.origin = "detail"
 		mut.gen = m.detail.gen
 	}
-	return m.routeMutation(mut)
+	next, cmd := m.routeMutation(mut)
+	m, follow := next.(Model).reconcileSplitDetailAfterInput(false)
+	return m, tea.Batch(cmd, follow)
 }
 
 // routeEditorReturn handles editorReturnedMsg at the Model level.
@@ -1718,7 +1773,9 @@ func (m Model) applyLiveBarFilter() Model {
 func (m Model) commitInput() (Model, tea.Cmd) {
 	kind := m.input.kind
 	if kind == inputFilterForm {
-		return m.commitFilterForm(m.input)
+		m, cmd := m.commitFilterForm(m.input)
+		m, follow := m.reconcileSplitDetailAfterInput(true)
+		return m, tea.Batch(cmd, follow)
 	}
 	rawBuf := ""
 	if f := m.input.activeField(); f != nil {
@@ -1732,9 +1789,10 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 	if kind.isPanelPrompt() && trimmed != "" {
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.dispatchPanelPromptCommit(m.api, kind, trimmed)
-		return m, cmd
+		m, follow := m.reconcileSplitDetailAfterInput(false)
+		return m, tea.Batch(cmd, follow)
 	}
-	return m, nil
+	return m.reconcileSplitDetailAfterInput(false)
 }
 
 // commitFilterForm reads the four filter axes off the form and
@@ -2013,7 +2071,7 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 	if searchCanceled {
 		return m.followSearchResultIfNeeded(nil)
 	}
-	return m, nil
+	return m.reconcileSplitDetailAfterInput(false)
 }
 
 func snapshotListSelection(lm listModel) listSelectionSnapshot {
