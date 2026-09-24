@@ -106,7 +106,10 @@ jobs:
       - name: Run tests
         env:
           KATA_TEST_POSTGRES_AUTO_CONTAINER: "0"
-        run: env -u KATA_AUTH_TOKEN go test -p 1 ./...
+        # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
+        run: |
+          env -u KATA_AUTH_TOKEN go test $(go list ./... | grep -v '/e2e$')
+          env -u KATA_AUTH_TOKEN go test -p 1 ./e2e
 
   api-breaking:
     name: OpenAPI breaking changes
