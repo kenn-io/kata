@@ -258,3 +258,46 @@ func mapKeys(values map[string]jsontext.Value) []string {
 	}
 	return keys
 }
+
+func TestHealth_EmbeddingsReportsReplicaImport(t *testing.T) {
+	d := openTestDB(t)
+	success := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	ts := startTestServer(t, daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		Auth:      config.AuthConfig{Token: "operator-token"},
+		ReconcilerHealth: func() daemon.ReconcilerHealth {
+			return daemon.ReconcilerHealth{
+				Configured:           true,
+				Source:               "replica",
+				SourceStatus:         daemon.ReplicaStatusGenerationMismatch,
+				Replicated:           12,
+				AwaitingUpstream:     3,
+				Rejected:             1,
+				LastReplicaSuccessAt: &success,
+				ReplicaProjects: []daemon.ReplicaProjectHealth{{
+					ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EP", Status: daemon.ReplicaStatusGenerationMismatch,
+					UpstreamFingerprint: "0123456789abcdef",
+				}},
+			}
+		},
+	})
+
+	var body struct {
+		Embeddings *api.EmbeddingsHealth `json:"embeddings"`
+	}
+	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil,
+		map[string]string{"Authorization": "Bearer operator-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.NotNil(t, body.Embeddings)
+	assert.Equal(t, "replica", body.Embeddings.Source)
+	assert.Equal(t, "generation_mismatch", body.Embeddings.SourceStatus)
+	assert.Equal(t, int64(12), body.Embeddings.Replicated)
+	assert.Equal(t, int64(3), body.Embeddings.AwaitingUpstream)
+	assert.Equal(t, int64(1), body.Embeddings.Rejected)
+	require.NotNil(t, body.Embeddings.LastReplicaSuccessAt)
+	assert.True(t, body.Embeddings.LastReplicaSuccessAt.Equal(success))
+	require.Len(t, body.Embeddings.ReplicaProjects, 1)
+	assert.Equal(t, "0123456789abcdef", body.Embeddings.ReplicaProjects[0].UpstreamFingerprint)
+}

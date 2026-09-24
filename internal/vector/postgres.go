@@ -472,3 +472,48 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 	}
 	return changed, nil
 }
+
+func (p *postgresIndex) pendingScoped(ctx context.Context, key string, scope PendingScope, limit int) ([]PendingDoc, error) {
+	projects := scope.Projects
+	if projects == nil {
+		projects = []string{}
+	}
+	rows, err := p.db.QueryContext(ctx, `
+		SELECT m.issue_uid, m.project_uid, m.content, m.content_revision
+		FROM issue_vector_mirror m
+		LEFT JOIN issue_vector_stamps s
+		  ON s.gen_key = $1 AND s.issue_uid = m.issue_uid AND s.revision = m.content_revision
+		WHERE s.issue_uid IS NULL
+		  AND m.issue_uid > $2
+		  AND (m.project_uid = ANY($3::text[])) = $4
+		ORDER BY m.issue_uid
+		LIMIT $5`, key, scope.AfterDoc, projects, scope.Include, limit)
+	if err != nil {
+		return nil, fmt.Errorf("vector: postgres scoped pending documents: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []PendingDoc
+	for rows.Next() {
+		var doc PendingDoc
+		var revision int64
+		if err := rows.Scan(&doc.Doc, &doc.ProjectUID, &doc.Content, &revision); err != nil {
+			return nil, fmt.Errorf("vector: scan postgres scoped pending document: %w", err)
+		}
+		doc.Revision = revision
+		out = append(out, doc)
+	}
+	return out, rows.Err()
+}
+
+func (p *postgresIndex) generationState(ctx context.Context, key string) (string, error) {
+	var state string
+	err := p.db.QueryRowContext(ctx,
+		`SELECT state FROM issue_vector_generations WHERE gen_key = $1`, key).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("vector: postgres generation state: %w", err)
+	}
+	return state, nil
+}

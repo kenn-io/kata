@@ -1648,6 +1648,9 @@ func startEmbeddingReconciler(
 		BatchSize:      ec.BatchSize,
 		BatchOptions:   embeddingBatchOptions(ec, embedder.BatchSize()),
 		DrainAdmission: drainAdmission,
+		// Federated replica rows import hub vectors instead of calling the
+		// provider; see docs/guide/semantic-search.md.
+		Upstream: federation.VectorUpstream{},
 	})
 	workers.Go(func() {
 		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

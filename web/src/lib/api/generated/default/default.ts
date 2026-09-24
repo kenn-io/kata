@@ -74,6 +74,8 @@ import type {
   FederationIngestEventsRequestBody,
   FederationQuarantineSummary,
   FederationStatusBody,
+  FederationVectorLookupBody,
+  FederationVectorLookupRequestBody,
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
   GetExternalRootBridgeParams,
@@ -112,6 +114,7 @@ import type {
   ListRecurrencesPathParameters,
   ListRecurrencesResponseBody,
   ListTokensResponseBody,
+  LookupFederationProjectVectorsPathParameters,
   MapConnectorFieldPathParameters,
   MapConnectorFieldRequestBody,
   MergeProjectPathParameters,
@@ -2087,6 +2090,63 @@ export const getProjectFederationStatus = async (
     {
       ...options,
       method: 'GET',
+    },
+  )
+}
+
+export type lookupFederationProjectVectorsResponse200 = {
+  data: FederationVectorLookupBody
+  status: 200
+}
+
+export type lookupFederationProjectVectorsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type lookupFederationProjectVectorsResponseSuccess =
+  lookupFederationProjectVectorsResponse200 & {
+    headers: Headers
+  }
+export type lookupFederationProjectVectorsResponseError =
+  lookupFederationProjectVectorsResponseDefault & {
+    headers: Headers
+  }
+
+export type lookupFederationProjectVectorsResponse =
+  | lookupFederationProjectVectorsResponseSuccess
+  | lookupFederationProjectVectorsResponseError
+
+export const getLookupFederationProjectVectorsUrl = ({
+  projectId,
+}: LookupFederationProjectVectorsPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/vectors:lookup`
+}
+
+/**
+ * Returns the hub's stored chunk vectors for issues whose content hash matches. The hub never embeds on request; a missing vector is not_ready.
+ * @summary Look up hub-computed issue vectors
+ */
+export const lookupFederationProjectVectors = async (
+  { projectId }: LookupFederationProjectVectorsPathParameters,
+  federationVectorLookupRequestBody: FederationVectorLookupRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<lookupFederationProjectVectorsResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<lookupFederationProjectVectorsResponse>(
+    getLookupFederationProjectVectorsUrl({ projectId }),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(federationVectorLookupRequestBody),
     },
   )
 }

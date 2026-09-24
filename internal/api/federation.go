@@ -86,6 +86,10 @@ type ProjectFederationBody struct {
 	ProjectName            string `json:"project_name"`
 	ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
 	BaselineThroughEventID int64  `json:"baseline_through_event_id"`
+	// VectorGeneration advertises the hub's embedding generation on the
+	// enrollment-authenticated metadata route. Absent when the hub has no
+	// embeddings configured, and on routes that are not federation transport.
+	VectorGeneration *FederationVectorGeneration `json:"vector_generation,omitempty"`
 }
 
 // ProjectFederationResponse wraps ProjectFederationBody.

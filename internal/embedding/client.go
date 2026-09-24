@@ -120,11 +120,17 @@ func (c *Client) Dims() int { return c.dims }
 func (c *Client) BatchSize() int { return c.batchSize }
 
 // Generation identifies the vector space this client produces: model, dims,
-// recipe version, and the operator salt ("same model name, different
-// weights"). The endpoint URL is deliberately excluded so moving a host or
-// port never forces a re-embed.
+// recipe version, chunking, and the operator salt ("same model name,
+// different weights"). The endpoint URL is deliberately excluded so moving a
+// host or port never forces a re-embed. Chunking is included because a
+// federation hub and its spokes exchange per-chunk vectors: two nodes share a
+// fingerprint only when they split the same text into the same chunks.
 func (c *Client) Generation() kitvec.Generation {
-	params := map[string]string{"recipe": strconv.Itoa(RecipeVersion)}
+	params := map[string]string{
+		"recipe":              strconv.Itoa(RecipeVersion),
+		"chunk_max_runes":     strconv.Itoa(ChunkMaxRunes),
+		"chunk_overlap_runes": strconv.Itoa(ChunkOverlapRunes),
+	}
 	if c.salt != "" {
 		params["salt"] = c.salt
 	}

@@ -33,7 +33,7 @@ func TestFillEmbedsChunksAndQueryFindsThem(t *testing.T) {
 	ctx := context.Background()
 	ix := openTestIndex(t)
 	seedMirror(t, ix, "u1", 1)
-	// Long content must produce multiple chunks (> splitMaxRunes runes).
+	// Long content must produce multiple chunks (> embedding.ChunkMaxRunes runes).
 	if _, err := ix.db.ExecContext(ctx,
 		`UPDATE issue_mirror SET content = ? WHERE issue_uid = 'u1'`,
 		strings.Repeat("kata ", 1000)); err != nil {

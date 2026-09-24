@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-09-23
+last_edited: 2026-09-24
 ---
 
 # HTTP API schema
@@ -49,7 +49,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 29,
-  "api_schema_version": "0.22.0",
+  "api_schema_version": "0.23.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "idle_shutdown": {
@@ -113,7 +113,7 @@ Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
 and decline to render issue detail.
 
 API contract versions advance independently of Kata release versions.
-The current contract is API `0.22.0`. Kata 0.18.0 includes the changes from
+The current contract is API `0.23.0`. Kata 0.18.0 includes the changes from
 `0.18.0` through `0.21.0` below. Teammate comments require API `0.18.0`, issue-scoped
 credentials use `0.19.0`, status-filtered search requires `0.20.0`, and
 oldest-first lists require `0.21.0`.
@@ -127,6 +127,7 @@ collections as `[]` or `{}`.
 
 | Version | Change |
 | --- | --- |
+| `0.23.0` | Added `POST /api/v1/projects/{project_id}/federation/vectors:lookup` (federation `pull` capability) and optional `vector_generation` on federation metadata, so spokes import hub-computed issue vectors. Embeddings health adds `source`, `source_status`, `replicated`, `awaiting_upstream`, `rejected`, `last_replica_success_at`, and `replica_projects`. |
 | `0.22.0` | Added temporary assignments: claim requests accept `ttl_seconds`, claim responses return ordered `events`, issue projections include `assignment_expires_on`, and assignment renewal and expiry have distinct event types. |
 | `0.21.0` | Added optional `sort=oldest` to both issue-list routes. Matching rows are ordered by `created_at` ascending and `id` ascending before `limit`; omission preserves each route's default. |
 | `0.20.0` | Added optional `status=open` or `status=closed` to project search. Omission searches both statuses; explicit empty values are invalid. The predicate applies to lexical candidates and canonical semantic hits before result limits. |

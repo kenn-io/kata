@@ -42,6 +42,9 @@ var federationTransportOperations = map[string]HostFederationOperation{
 	"getFederationProjectMetadata":  {ID: "getFederationProjectMetadata", Mutation: true},
 	"pollFederationProjectEvents":   {ID: "pollFederationProjectEvents"},
 	"ingestFederationProjectEvents": {ID: "ingestFederationProjectEvents", Mutation: true},
+	// A POST for its request body only: the lookup reads stored vectors and
+	// never writes, so it needs no transaction fence.
+	"lookupFederationProjectVectors": {ID: "lookupFederationProjectVectors"},
 }
 
 // federationTransportOperation returns the transport-auth facts for

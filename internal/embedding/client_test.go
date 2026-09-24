@@ -11,7 +11,30 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	kitvec "go.kenn.io/kit/vector"
 )
+
+func TestGenerationFingerprintCoversChunking(t *testing.T) {
+	c, err := New(Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := c.Generation()
+	if g.Params["chunk_max_runes"] != "2000" || g.Params["chunk_overlap_runes"] != "200" {
+		t.Fatalf("chunk params = %q/%q, want 2000/200",
+			g.Params["chunk_max_runes"], g.Params["chunk_overlap_runes"])
+	}
+	legacy := kitvec.Generation{Model: "m", Dimensions: 4, Params: map[string]string{"recipe": "2"}}
+	if g.Fingerprint() == legacy.Fingerprint() {
+		t.Fatal("chunk parameters must change the fingerprint so upgraded nodes rebuild once")
+	}
+	split := SplitOptions()
+	if strconv.Itoa(split.MaxRunes) != g.Params["chunk_max_runes"] ||
+		strconv.Itoa(split.Overlap) != g.Params["chunk_overlap_runes"] {
+		t.Fatalf("SplitOptions %+v disagrees with fingerprint params %v", split, g.Params)
+	}
+}
 
 func newFakeServer(t *testing.T, status int, body string, retryAfter string) *httptest.Server {
 	t.Helper()

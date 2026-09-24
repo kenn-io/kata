@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-09-17
+last_edited: 2026-09-24
 ---
 
 # Configuration
@@ -686,14 +686,19 @@ this during daemon startup before Kata processes documents.
 Privacy: configuring an endpoint sends issue titles and bodies to it on every
 embed. That is the consent boundary: the operator who writes this section
 authorizes the data flow. For sensitive projects, prefer a local endpoint (for
-example Ollama on loopback) so issue text never leaves the host. Embeddings are
-local derived state and **do not federate**: each daemon embeds only what it
-stores, and no vectors are sent to or pulled from federated hubs.
+example Ollama on loopback) so issue text never leaves the host. There is no
+federation setting: a hub with this section configured serves its vectors to
+its spokes, and a spoke with this section configured imports vectors for its
+federated projects instead of embedding their issue text. Give a spoke the same
+`model`, `dims`, and `fingerprint_salt` as its hub; `base_url` and the key may
+differ. See [Federation: spokes import vectors from the hub](../guide/semantic-search.md#federation-spokes-import-vectors-from-the-hub).
 
 The daemon keeps the index fresh on its own: a background reconciler embeds new
 and edited issues within seconds, and `kata` reports its state under
 `embeddings` in the `/health` response (`configured`, `last_success_at`,
-`last_error_status`, `embedded`, `skipped`, and `backlog`). During a backfill it also
+`last_error_status`, `embedded`, `skipped`, `backlog`, and, for federation,
+`source`, `source_status`, `replicated`, `awaiting_upstream`, `rejected`,
+`last_replica_success_at`, and `replica_projects`). During a backfill it also
 reports `started_at` and `last_progress_at`, then adds a smoothed
 `rate_per_second` and `eta_seconds` after two positive progress samples. Search
 never blocks on embedding lag: an issue is findable lexically the instant it

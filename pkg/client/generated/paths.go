@@ -135,6 +135,10 @@ type GetProjectFederationStatusPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type LookupFederationProjectVectorsPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type ImportIssuesPath struct {
 	ProjectID int64 `json:"project_id"`
 }

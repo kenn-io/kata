@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -268,6 +269,16 @@ const (
 type fixtureEmbedder struct {
 	srv    *httptest.Server
 	closed atomic.Bool
+
+	mu     sync.Mutex
+	inputs []string
+}
+
+// Inputs returns every text the embedder has been asked to embed, in order.
+func (f *fixtureEmbedder) Inputs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.inputs)
 }
 
 // newFixtureEmbedder starts the fake embedder on a loopback listener. Loopback
@@ -289,6 +300,9 @@ func newFixtureEmbedder(t *testing.T) *fixtureEmbedder {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		f.mu.Lock()
+		f.inputs = append(f.inputs, req.Input...)
+		f.mu.Unlock()
 		type vec struct {
 			Embedding []float32 `json:"embedding"`
 		}
