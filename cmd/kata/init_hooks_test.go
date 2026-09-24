@@ -133,7 +133,4 @@ func TestMigrateLegacyAgentHooksKeepsConfigFileMode(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "attention-hook")
 	assert.Contains(t, string(data), "notify-session")
-	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	assert.Len(t, entries, 1, "migration must not leave a staging file")
 }

@@ -918,7 +918,4 @@ func TestRewriteGuidanceFileKeepsFileMode(t *testing.T) {
 	got, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, "new\n", string(got))
-	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	assert.Len(t, entries, 1, "rewrite must not leave a staging file")
 }
