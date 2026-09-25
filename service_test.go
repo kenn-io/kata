@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata"
+	"go.kenn.io/kata/webui"
 )
 
 func TestServiceMountRunAndClose(t *testing.T) {
@@ -65,9 +66,12 @@ func TestServiceMountRunAndClose(t *testing.T) {
 }
 
 func TestServiceHandlerAtMountsAPIAndBrowserApplication(t *testing.T) {
+	webHandler, err := webui.NewEmbeddedHandler()
+	require.NoError(t, err)
 	service, err := kata.New(context.Background(), kata.Config{
-		DSN:  filepath.Join(t.TempDir(), "service.db"),
-		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+		DSN:        filepath.Join(t.TempDir(), "service.db"),
+		Auth:       kata.AuthConfig{TrustCallerAuthentication: true},
+		WebHandler: webHandler,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })

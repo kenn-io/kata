@@ -15,8 +15,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	kataweb "go.kenn.io/kata/internal/web"
 )
 
 // The tests in this file set Accept-Encoding explicitly on every request so
@@ -119,7 +121,9 @@ func TestGzip_SSEStreamNotCompressedAndStillStreams(t *testing.T) {
 }
 
 func TestGzip_WebHandlerCompressesHTML(t *testing.T) {
-	env := testenv.New(t)
+	webHandler, err := kataweb.NewEmbeddedHandler()
+	require.NoError(t, err)
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.WebHandler = webHandler })
 	resp, body := envDoRaw(t, env, http.MethodGet, "/kata", nil,
 		map[string]string{"Accept": "text/html", "Accept-Encoding": "gzip"})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -133,7 +137,10 @@ func TestGzip_WebHandlerCompressesHTML(t *testing.T) {
 }
 
 func TestGzip_WebHandlerStaticShellBypassesBearer(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("test-token"))
+	webHandler, err := kataweb.NewEmbeddedHandler()
+	require.NoError(t, err)
+	env := testenv.New(t, testenv.WithAuthToken("test-token"),
+		func(cfg *daemon.ServerConfig) { cfg.WebHandler = webHandler })
 	resp, body := envDoRaw(t, env, http.MethodGet, "/kata", nil,
 		map[string]string{"Accept": "text/html", "Accept-Encoding": "identity"})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
