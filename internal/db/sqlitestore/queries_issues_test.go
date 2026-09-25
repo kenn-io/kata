@@ -13,6 +13,7 @@ import (
 )
 
 func TestCreateIssue_AllocatesShortIDAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	issue, evt, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -38,6 +39,7 @@ func TestCreateIssue_AllocatesShortIDAndEmitsEvent(t *testing.T) {
 }
 
 func TestCreateIssue_RetriesTransientSQLiteBusy(t *testing.T) {
+	t.Parallel()
 	d, path := openTestDBWithPath(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "busy-create")
@@ -57,6 +59,7 @@ func TestCreateIssue_RetriesTransientSQLiteBusy(t *testing.T) {
 }
 
 func TestCreateIssue_ShortIDsAreUniquePerProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	seen := map[string]struct{}{}
@@ -76,6 +79,7 @@ func TestCreateIssue_ShortIDsAreUniquePerProject(t *testing.T) {
 // auto-extend. The override must be the lowercased suffix of UID at its
 // length — anything else is a caller bug that returns an error.
 func TestCreateIssue_ShortIDOverridePersistsVerbatim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -90,6 +94,7 @@ func TestCreateIssue_ShortIDOverridePersistsVerbatim(t *testing.T) {
 }
 
 func TestCreateIssue_ShortIDOverrideRejectsMismatch(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -104,6 +109,7 @@ func TestCreateIssue_ShortIDOverrideRejectsMismatch(t *testing.T) {
 }
 
 func TestCreateIssue_ShortIDOverrideRejectsInvalidSyntax(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -120,6 +126,7 @@ func TestCreateIssue_ShortIDOverrideRejectsInvalidSyntax(t *testing.T) {
 // TestIssueByShortID_ReturnsLiveIssue pins that a live issue resolves by its
 // stored short_id under the default include-deleted=no filter.
 func TestIssueByShortID_ReturnsLiveIssue(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "demo")
@@ -139,6 +146,7 @@ func TestIssueByShortID_ReturnsLiveIssue(t *testing.T) {
 // TestIssueByShortID_NotFoundForUnknownShortID pins that a short_id with no
 // matching row returns ErrNotFound rather than a zero-value Issue.
 func TestIssueByShortID_NotFoundForUnknownShortID(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "demo")
@@ -150,6 +158,7 @@ func TestIssueByShortID_NotFoundForUnknownShortID(t *testing.T) {
 // paths hide soft-deleted rows. The same short_id that resolved before
 // SoftDeleteIssue must return ErrNotFound after.
 func TestIssueByShortID_DefaultExcludesSoftDeleted(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "demo")
@@ -171,6 +180,7 @@ func TestIssueByShortID_DefaultExcludesSoftDeleted(t *testing.T) {
 // branch (spec §6): restore/delete/purge/idempotency-collision pass
 // IncludeDeletedYes and must see the soft-deleted row.
 func TestIssueByShortID_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "demo")
@@ -194,6 +204,7 @@ func TestIssueByShortID_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) {
 // not surface through the prefix-match fallback used by the daemon's global
 // /api/v1/issues/{ref} handler.
 func TestIssueUIDPrefixMatch_DefaultExcludesSoftDeleted(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "demo")
@@ -217,6 +228,7 @@ func TestIssueUIDPrefixMatch_DefaultExcludesSoftDeleted(t *testing.T) {
 // idempotent re-delete) must see soft-deleted rows when matched by UID
 // prefix.
 func TestIssueUIDPrefixMatch_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "demo")
@@ -237,6 +249,7 @@ func TestIssueUIDPrefixMatch_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) 
 }
 
 func TestListIssues_DefaultsToOpenOnlyAndExcludesDeleted(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	for _, title := range []string{"a", "b", "c"} {
 		createTesterIssue(ctx, t, d, p.ID, title)
@@ -248,6 +261,7 @@ func TestListIssues_DefaultsToOpenOnlyAndExcludesDeleted(t *testing.T) {
 }
 
 func TestListIssues_LabelFiltersAreCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	bug := makeIssueWithLabels(t, ctx, d, p.ID, "bug issue", "tester", "bug")
 	feature := makeIssueWithLabels(t, ctx, d, p.ID, "feature issue", "tester", "feature")
@@ -267,6 +281,7 @@ func TestListIssues_LabelFiltersAreCaseInsensitive(t *testing.T) {
 // ProjectID==0 every project's issues are returned, soft-deleted rows are
 // excluded, and the ordering is created_at DESC, id DESC.
 func TestListAllIssues_CoversAllProjectsAndOrders(t *testing.T) {
+	t.Parallel()
 	d, ctx, p1 := setupTestProject(t)
 	p2 := createProject(ctx, t, d, "beta")
 
@@ -288,6 +303,7 @@ func TestListAllIssues_CoversAllProjectsAndOrders(t *testing.T) {
 // TestListAllIssues_ProjectFilterScopes pins the optional project_id query:
 // passing ProjectID>0 returns only that project's issues.
 func TestListAllIssues_ProjectFilterScopes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p1 := setupTestProject(t)
 	p2 := createProject(ctx, t, d, "beta")
 	createTesterIssue(ctx, t, d, p1.ID, "a1")
@@ -302,6 +318,7 @@ func TestListAllIssues_ProjectFilterScopes(t *testing.T) {
 // TestListAllIssues_StatusFilterApplies pins the status filter across
 // projects: closed/open are honored.
 func TestListAllIssues_StatusFilterApplies(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	open1, _ := createTesterIssue(ctx, t, d, p.ID, "open")
 	closed1, _ := createTesterIssue(ctx, t, d, p.ID, "to-close")
@@ -317,6 +334,7 @@ func TestListAllIssues_StatusFilterApplies(t *testing.T) {
 // TestListAllIssues_ExcludesSoftDeleted pins that purged/soft-deleted issues
 // don't surface in the cross-project list.
 func TestListAllIssues_ExcludesSoftDeleted(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	live, _ := createTesterIssue(ctx, t, d, p.ID, "live")
 	doomed, _ := createTesterIssue(ctx, t, d, p.ID, "doomed")
@@ -331,6 +349,7 @@ func TestListAllIssues_ExcludesSoftDeleted(t *testing.T) {
 
 // TestListAllIssues_LimitCaps pins the limit knob on cross-project listing.
 func TestListAllIssues_LimitCaps(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	createTesterIssues(ctx, t, d, p.ID, 5)
 
@@ -340,6 +359,7 @@ func TestListAllIssues_LimitCaps(t *testing.T) {
 }
 
 func TestCreateComment_EmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 
 	cmt, evt, err := d.CreateComment(ctx, db.CreateCommentParams{
@@ -365,6 +385,7 @@ func TestCreateComment_EmitsEvent(t *testing.T) {
 }
 
 func TestEditComment_UpdatesBodyOnlyAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 
 	cmt, _, err := d.CreateComment(ctx, db.CreateCommentParams{
@@ -408,6 +429,7 @@ func TestEditComment_UpdatesBodyOnlyAndEmitsEvent(t *testing.T) {
 }
 
 func TestCloseIssue_SetsStatusAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
 	updated, evt, changed, err := d.CloseIssue(ctx, issue.ID, "done", "agent", "", nil)
@@ -427,6 +449,7 @@ func TestCloseIssue_SetsStatusAndEmitsEvent(t *testing.T) {
 }
 
 func TestCloseIssue_OnAlreadyClosedIsNoOp(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 	_, _, _, err := d.CloseIssue(ctx, issue.ID, "done", "agent", "", nil)
 	require.NoError(t, err)
@@ -438,6 +461,7 @@ func TestCloseIssue_OnAlreadyClosedIsNoOp(t *testing.T) {
 }
 
 func TestReopenIssue_ClearsStatusAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 	_, _, _, err := d.CloseIssue(ctx, issue.ID, "done", "agent", "", nil)
 	require.NoError(t, err)
@@ -456,6 +480,7 @@ func TestReopenIssue_ClearsStatusAndEmitsEvent(t *testing.T) {
 }
 
 func TestEditIssue_SetsFieldsAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
 	newTitle := "new"
@@ -483,6 +508,7 @@ func TestEditIssue_SetsFieldsAndEmitsEvent(t *testing.T) {
 }
 
 func TestEditIssue_UnassignOwnerPayloadIncludesExplicitNull(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	owner := "alice"
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -506,6 +532,7 @@ func TestEditIssue_UnassignOwnerPayloadIncludesExplicitNull(t *testing.T) {
 }
 
 func TestEditIssue_NoFieldsIsValidationError(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
 	_, _, _, err := d.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Actor: "agent"})
@@ -517,6 +544,7 @@ func TestEditIssue_NoFieldsIsValidationError(t *testing.T) {
 // owns reason defaulting (for the TUI bypass path) so the db layer's
 // surprise default is gone; this regression test catches any reintroduction.
 func TestCloseIssue_EmptyReasonRejected(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
 	_, _, _, err := d.CloseIssue(ctx, issue.ID, "", "wesm", "", nil)
@@ -525,6 +553,7 @@ func TestCloseIssue_EmptyReasonRejected(t *testing.T) {
 }
 
 func TestCloseIssue_SupersededReasonAccepted(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
 	_, _, _, err := d.CloseIssue(ctx, issue.ID, "superseded", "wesm", "", nil)
@@ -532,6 +561,7 @@ func TestCloseIssue_SupersededReasonAccepted(t *testing.T) {
 }
 
 func TestCloseIssue_AuditNoChangeReasonAccepted(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
 	_, _, _, err := d.CloseIssue(ctx, issue.ID, "audit-no-change", "wesm", "", nil)
@@ -539,6 +569,7 @@ func TestCloseIssue_AuditNoChangeReasonAccepted(t *testing.T) {
 }
 
 func TestCloseIssue_RefusesParentWithOpenChildren(t *testing.T) {
+	t.Parallel()
 	// The in-transaction guard mirrors CheckParentCloseCompleteness in the
 	// daemon handler so a child link inserted between the read-side check
 	// and the close write still aborts the close at commit time.
@@ -557,6 +588,7 @@ func TestCloseIssue_RefusesParentWithOpenChildren(t *testing.T) {
 // handler's OpenChildrenOf pre-check sees zero children and proceeds, then
 // txHasOpenChildren counts the archived-project child and rejects at commit.
 func TestCloseIssue_AllowsParentWhenOnlyChildInArchivedProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	pa := createProject(ctx, t, d, "alpha")
@@ -571,6 +603,7 @@ func TestCloseIssue_AllowsParentWhenOnlyChildInArchivedProject(t *testing.T) {
 }
 
 func TestCloseIssue_AllowsParentWithOnlyClosedChildren(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, parent := setupTestIssue(t)
 	child, _ := createTesterIssue(ctx, t, d, p.ID, "child")
 	makeLink(ctx, t, d, child.ID, parent.ID, "parent")
@@ -582,6 +615,7 @@ func TestCloseIssue_AllowsParentWithOnlyClosedChildren(t *testing.T) {
 }
 
 func TestCloseIssue_PersistsMessageAndEvidence(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
 	evidence := []db.Evidence{{Type: "commit", SHA: "abc1234"}}
@@ -599,6 +633,7 @@ func TestCloseIssue_PersistsMessageAndEvidence(t *testing.T) {
 }
 
 func TestCommentsByIssue(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 

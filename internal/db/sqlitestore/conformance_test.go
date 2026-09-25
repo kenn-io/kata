@@ -15,6 +15,7 @@ import (
 )
 
 func TestStorageConformance(t *testing.T) {
+	t.Parallel()
 	dbtest.RunStorageConformance(t, dbtest.Backend{
 		Name: "sqlite",
 		Open: func(t *testing.T) db.Storage {
@@ -88,6 +89,7 @@ hlc_physical_ms,hlc_counter,content_hash
 }
 
 func TestExternalRootConformance(t *testing.T) {
+	t.Parallel()
 	dbtest.RunExternalRootConformance(t, dbtest.Backend{
 		Name: "sqlite",
 		Open: func(t *testing.T) db.Storage {
@@ -104,6 +106,7 @@ func TestExternalRootConformance(t *testing.T) {
 }
 
 func TestExternalRootContentOwned(t *testing.T) {
+	t.Parallel()
 	dbtest.RunExternalRootContentOwnershipConformance(t, dbtest.Backend{
 		Name: "sqlite",
 		Open: func(t *testing.T) db.Storage {

@@ -17,6 +17,7 @@ import (
 )
 
 func TestCanonicalFederationCapabilitiesIncludesClaim(t *testing.T) {
+	t.Parallel()
 	got, err := db.CanonicalFederationCapabilities("pull,push,claim")
 
 	require.NoError(t, err)
@@ -24,6 +25,7 @@ func TestCanonicalFederationCapabilitiesIncludesClaim(t *testing.T) {
 }
 
 func TestAuthorizeFederationTokenRequiresClaimCapability(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	token := "claim-capability-token"
@@ -58,6 +60,7 @@ func TestAuthorizeFederationTokenRequiresClaimCapability(t *testing.T) {
 }
 
 func TestAcquireClaimFirstHolderGrantsAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 
@@ -83,6 +86,7 @@ func TestAcquireClaimFirstHolderGrantsAndEmitsEvent(t *testing.T) {
 }
 
 func TestAcquireClaimDifferentLiveHolderDeniesWithCurrentHolder(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -105,6 +109,7 @@ func TestAcquireClaimDifferentLiveHolderDeniesWithCurrentHolder(t *testing.T) {
 }
 
 func TestTimedClaimRequiresBoundedTTL(t *testing.T) {
+	t.Parallel()
 	for name, ttl := range map[string]time.Duration{
 		"too-short": time.Minute - time.Nanosecond,
 		"too-long":  24*time.Hour + time.Nanosecond,
@@ -151,6 +156,7 @@ func TestTimedClaimRequiresBoundedTTL(t *testing.T) {
 }
 
 func TestAcquireClaimSameHardHolderRetryIsIdempotent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -172,6 +178,7 @@ func TestAcquireClaimSameHardHolderRetryIsIdempotent(t *testing.T) {
 }
 
 func TestRenewClaimTimedExtendsExpiryAndIncrementsRevision(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -204,6 +211,7 @@ func TestRenewClaimTimedExtendsExpiryAndIncrementsRevision(t *testing.T) {
 }
 
 func TestRenewClaimDifferentTupleDoesNotExtendTimedClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -235,6 +243,7 @@ func TestRenewClaimDifferentTupleDoesNotExtendTimedClaim(t *testing.T) {
 }
 
 func TestRenewClaimHardClaimReturnsValidationError(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -264,6 +273,7 @@ func TestRenewClaimHardClaimReturnsValidationError(t *testing.T) {
 }
 
 func TestReleaseClaimSameTupleSucceedsAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -287,6 +297,7 @@ func TestReleaseClaimSameTupleSucceedsAndEmitsEvent(t *testing.T) {
 }
 
 func TestReleaseClaimDifferentHolderDenies(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -307,6 +318,7 @@ func TestReleaseClaimDifferentHolderDenies(t *testing.T) {
 }
 
 func TestClaimCloseByHolderReleasesClaimAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -329,6 +341,7 @@ func TestClaimCloseByHolderReleasesClaimAndEmitsEvent(t *testing.T) {
 }
 
 func TestClaimCloseByNonHolderEmitsViolationAndReleasesClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -350,6 +363,7 @@ func TestClaimCloseByNonHolderEmitsViolationAndReleasesClaim(t *testing.T) {
 }
 
 func TestIngestClaimViolationPayloadIncludesCanonicalOffenderFields(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, spokeUID, issue, _ := setupIngestClaimIssue(t)
 	claim, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
 		ProjectID: p.ID,
@@ -378,6 +392,7 @@ func TestIngestClaimViolationPayloadIncludesCanonicalOffenderFields(t *testing.T
 }
 
 func TestIngestWithoutLiveClaimDoesNotEmitViolation(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, spokeUID, issue, _ := setupIngestClaimIssue(t)
 	offending := remoteClaimWorkEvent(t, p, spokeUID, issue.UID, nil, "issue.updated", "remote-agent")
 
@@ -388,6 +403,7 @@ func TestIngestWithoutLiveClaimDoesNotEmitViolation(t *testing.T) {
 }
 
 func TestClaimViolationQueriesUseLegacyPayloadOriginFallback(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, _, issue, _ := setupIngestClaimIssue(t)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
 		ProjectID: p.ID,
@@ -411,6 +427,7 @@ func TestClaimViolationQueriesUseLegacyPayloadOriginFallback(t *testing.T) {
 }
 
 func TestClaimViolationQueriesDoNotFallbackToAuditEventOrigin(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, _, issue, _ := setupIngestClaimIssue(t)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
 		ProjectID: p.ID,
@@ -431,6 +448,7 @@ func TestClaimViolationQueriesDoNotFallbackToAuditEventOrigin(t *testing.T) {
 }
 
 func TestClaimViolationQueriesIgnoreNeverClaimedIssue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, spokeUID, issue, _ := setupIngestClaimIssue(t)
 	offending := remoteClaimWorkEvent(t, p, spokeUID, issue.UID, nil, "issue.updated", "remote-agent")
 	_, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, offending))
@@ -448,6 +466,7 @@ func TestClaimViolationQueriesIgnoreNeverClaimedIssue(t *testing.T) {
 }
 
 func TestClaimViolationQueriesTreatReleaseEventsAsResolutionBoundary(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		release func(t *testing.T, d *sqlitestore.Store, ctx context.Context, p db.Project, issue db.Issue, principal db.ClaimPrincipal)
@@ -539,6 +558,7 @@ func TestClaimViolationQueriesTreatReleaseEventsAsResolutionBoundary(t *testing.
 }
 
 func TestClaimCloseIdempotentRetryDoesNotDuplicateReleaseEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -561,6 +581,7 @@ func TestClaimCloseIdempotentRetryDoesNotDuplicateReleaseEvent(t *testing.T) {
 }
 
 func TestClaimCloseNonFederatedDoesNotEmitViolation(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
 		ProjectID: p.ID,
@@ -579,6 +600,7 @@ func TestClaimCloseNonFederatedDoesNotEmitViolation(t *testing.T) {
 }
 
 func TestRenewClaimExpiredTimedClaimPersistsExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -617,6 +639,7 @@ func TestRenewClaimExpiredTimedClaimPersistsExpiry(t *testing.T) {
 }
 
 func TestReleaseClaimExpiredTimedClaimPersistsExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -656,6 +679,7 @@ func TestReleaseClaimExpiredTimedClaimPersistsExpiry(t *testing.T) {
 }
 
 func TestTimedClaimExpiredBeforeNewAcquireReleasesAndEmitsExpired(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -687,6 +711,7 @@ func TestTimedClaimExpiredBeforeNewAcquireReleasesAndEmitsExpired(t *testing.T) 
 }
 
 func TestExpireClaimEmitsExpiredOnceAcrossSweeperAndOpportunisticExpiry(t *testing.T) {
+	t.Parallel()
 	t.Run("sweeper then opportunistic", func(t *testing.T) {
 		d, ctx, p, issue := setupTestIssue(t)
 		now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
@@ -748,6 +773,7 @@ func TestExpireClaimEmitsExpiredOnceAcrossSweeperAndOpportunisticExpiry(t *testi
 }
 
 func TestForceReleaseClaimExpiredTimedClaimPersistsExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	acquired, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -774,6 +800,7 @@ func TestForceReleaseClaimExpiredTimedClaimPersistsExpiry(t *testing.T) {
 }
 
 func TestForceReleaseClaimReleasesAnyHolderAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -798,6 +825,7 @@ func TestForceReleaseClaimReleasesAnyHolderAndEmitsEvent(t *testing.T) {
 }
 
 func TestClaimStatusReturnsLiveHolderAndHubNow(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -822,6 +850,7 @@ func TestClaimStatusReturnsLiveHolderAndHubNow(t *testing.T) {
 }
 
 func TestClaimsCanBeReacquiredForSoftDeletedIssue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -865,6 +894,7 @@ func TestClaimsCanBeReacquiredForSoftDeletedIssue(t *testing.T) {
 }
 
 func TestClaimStatusExpiresTimedClaimForSoftDeletedIssue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -888,6 +918,7 @@ func TestClaimStatusExpiresTimedClaimForSoftDeletedIssue(t *testing.T) {
 }
 
 func TestPendingClaimRequestInsertIsDurable(t *testing.T) {
+	t.Parallel()
 	d, path := openTestDBWithPath(t)
 	ctx := t.Context()
 	p := createProject(ctx, t, d, "p")
@@ -932,6 +963,7 @@ func TestPendingClaimRequestInsertIsDurable(t *testing.T) {
 }
 
 func TestPendingClaimRequestDuplicateReturnsExisting(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -956,6 +988,7 @@ func TestPendingClaimRequestDuplicateReturnsExisting(t *testing.T) {
 }
 
 func TestPendingClaimRequestActiveUniquenessUsesFullPrincipal(t *testing.T) {
+	t.Parallel()
 	t.Run("different client kind", func(t *testing.T) {
 		d, ctx, p, issue := setupTestIssue(t)
 		now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
@@ -1014,6 +1047,7 @@ func TestPendingClaimRequestActiveUniquenessUsesFullPrincipal(t *testing.T) {
 }
 
 func TestPendingClaimRequestLegacyEmptyHolderInstanceStillDedupesByHolder(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1038,6 +1072,7 @@ func TestPendingClaimRequestLegacyEmptyHolderInstanceStillDedupesByHolder(t *tes
 }
 
 func TestClaimGateAllowsUnclaimedIssue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 
@@ -1049,6 +1084,7 @@ func TestClaimGateAllowsUnclaimedIssue(t *testing.T) {
 }
 
 func TestPendingClaimDoesNotBlockUnclaimedClaimGate(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1065,6 +1101,7 @@ func TestPendingClaimDoesNotBlockUnclaimedClaimGate(t *testing.T) {
 }
 
 func TestPendingClaimResolveStoresCachedClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1084,6 +1121,7 @@ func TestPendingClaimResolveStoresCachedClaim(t *testing.T) {
 }
 
 func TestPendingClaimResolveRejectsDifferentHolderClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1102,6 +1140,7 @@ func TestPendingClaimResolveRejectsDifferentHolderClaim(t *testing.T) {
 }
 
 func TestPendingClaimResolveRejectsDifferentClaimKind(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1126,6 +1165,7 @@ func TestPendingClaimResolveRejectsDifferentClaimKind(t *testing.T) {
 }
 
 func TestPendingClaimResolveRejectsDifferentClientKind(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1145,6 +1185,7 @@ func TestPendingClaimResolveRejectsDifferentClientKind(t *testing.T) {
 }
 
 func TestPendingClaimResolveRejectsDifferentHolderInstanceUID(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1164,6 +1205,7 @@ func TestPendingClaimResolveRejectsDifferentHolderInstanceUID(t *testing.T) {
 }
 
 func TestCachedClaimHardSatisfiesClaimGateOffline(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1177,6 +1219,7 @@ func TestCachedClaimHardSatisfiesClaimGateOffline(t *testing.T) {
 }
 
 func TestClaimGateIgnoresClientKindForLiveHolderMatch(t *testing.T) {
+	t.Parallel()
 	t.Run("same holder instance with non-empty claim client kind satisfies gate", func(t *testing.T) {
 		d, ctx, p, issue := setupTestIssue(t)
 		now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
@@ -1270,6 +1313,7 @@ func TestClaimGateIgnoresClientKindForLiveHolderMatch(t *testing.T) {
 }
 
 func TestCachedClaimTimedGateAllowsAfterExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	expires := now.Add(time.Minute)
@@ -1287,6 +1331,7 @@ func TestCachedClaimTimedGateAllowsAfterExpiry(t *testing.T) {
 }
 
 func TestCachedClaimTimedGateDeniesDifferentTupleBeforeExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	expires := now.Add(time.Minute)
@@ -1309,6 +1354,7 @@ func TestCachedClaimTimedGateDeniesDifferentTupleBeforeExpiry(t *testing.T) {
 }
 
 func TestCachedClaimDeniedForDifferentHolder(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	require.NoError(t, d.UpsertClaimCache(ctx, cachedClaim(t, issue, claimPrincipal(t, "alice"), "hard", now, nil)))
@@ -1322,6 +1368,7 @@ func TestCachedClaimDeniedForDifferentHolder(t *testing.T) {
 }
 
 func TestApplyClaimStatusStoresLiveCachedClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1340,6 +1387,7 @@ func TestApplyClaimStatusStoresLiveCachedClaim(t *testing.T) {
 }
 
 func TestApplyClaimStatusSameClaimUIDUpdatesCachedTimedClaimInPlace(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1367,6 +1415,7 @@ func TestApplyClaimStatusSameClaimUIDUpdatesCachedTimedClaimInPlace(t *testing.T
 }
 
 func TestApplyClaimStatusReplacesCachedHolderWithSingleLiveClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1386,6 +1435,7 @@ func TestApplyClaimStatusReplacesCachedHolderWithSingleLiveClaim(t *testing.T) {
 }
 
 func TestApplyClaimStatusNoLiveClaimClearsCachedClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1403,6 +1453,7 @@ func TestApplyClaimStatusNoLiveClaimClearsCachedClaim(t *testing.T) {
 }
 
 func TestApplyClaimStatusStaleLiveStatusDoesNotResurrectAfterNewerNoLiveStatus(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	t1 := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Minute)
@@ -1430,6 +1481,7 @@ func TestApplyClaimStatusStaleLiveStatusDoesNotResurrectAfterNewerNoLiveStatus(t
 }
 
 func TestApplyClaimStatusStaleSameUIDLiveStatusDoesNotResurrectAfterNewerNoLiveStatus(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	t1 := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Minute)
@@ -1456,6 +1508,7 @@ func TestApplyClaimStatusStaleSameUIDLiveStatusDoesNotResurrectAfterNewerNoLiveS
 }
 
 func TestApplyClaimStatusStaleNoLiveStatusDoesNotReleaseNewerCachedClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	t1 := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Minute)
@@ -1479,6 +1532,7 @@ func TestApplyClaimStatusStaleNoLiveStatusDoesNotReleaseNewerCachedClaim(t *test
 }
 
 func TestApplyClaimStatusStaleLiveStatusDoesNotReplaceNewerCachedClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	t1 := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Minute)
@@ -1503,6 +1557,7 @@ func TestApplyClaimStatusStaleLiveStatusDoesNotReplaceNewerCachedClaim(t *testin
 }
 
 func TestApplyClaimStatusStaleWrongIssueUIDStillReturnsValidation(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issueA := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	issueB := makeIssue(t, ctx, d, p.ID, "b", "tester")
@@ -1529,6 +1584,7 @@ func TestApplyClaimStatusStaleWrongIssueUIDStillReturnsValidation(t *testing.T) 
 }
 
 func TestApplyClaimStatusRejectsClaimForDifferentIssueUID(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issueA := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	issueB := makeIssue(t, ctx, d, p.ID, "b", "tester")
@@ -1546,6 +1602,7 @@ func TestApplyClaimStatusRejectsClaimForDifferentIssueUID(t *testing.T) {
 }
 
 func TestApplyClaimStatusSameClaimUIDDoesNotMoveMutableFieldsBackward(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	t1 := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Minute)
@@ -1574,6 +1631,7 @@ func TestApplyClaimStatusSameClaimUIDDoesNotMoveMutableFieldsBackward(t *testing
 }
 
 func TestApplyClaimStatusSameClaimUIDEqualTimestampLowerRevisionDoesNotOverwrite(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1599,6 +1657,7 @@ func TestApplyClaimStatusSameClaimUIDEqualTimestampLowerRevisionDoesNotOverwrite
 }
 
 func TestApplyClaimStatusSameClaimUIDEqualTimestampHigherRevisionUpdates(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1624,6 +1683,7 @@ func TestApplyClaimStatusSameClaimUIDEqualTimestampHigherRevisionUpdates(t *test
 }
 
 func TestApplyClaimStatusNoLiveClaimNoopSucceeds(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 
@@ -1635,6 +1695,7 @@ func TestApplyClaimStatusNoLiveClaimNoopSucceeds(t *testing.T) {
 }
 
 func TestAcquireClaimConcurrentAttemptsGrantExactlyOne(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	const attempts = 12
@@ -1877,6 +1938,7 @@ func localClaimPrincipal(d *sqlitestore.Store, holder string) db.ClaimPrincipal 
 }
 
 func TestCountLiveClaims(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	got, err := d.CountLiveClaims(ctx, p.ID)
@@ -1919,6 +1981,7 @@ func TestCountLiveClaims(t *testing.T) {
 }
 
 func TestCountPendingClaims(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	got, err := d.CountPendingClaims(ctx, p.ID)

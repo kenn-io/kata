@@ -14,6 +14,7 @@ import (
 // must never be sent to the embedding endpoint after deletion) and issues
 // whose project is deleted. A restored issue rejoins the feed.
 func TestListIssueContentPaginatesLiveIssues(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	proj := createProject(ctx, t, d, "spoke-project")

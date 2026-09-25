@@ -14,6 +14,7 @@ import (
 // alphabetized keys); full-byte equality catches field-order regressions,
 // omitempty drift, and key renames before they reach consumers.
 func TestLinksChangedPayload_GoldenBytes(t *testing.T) {
+	t.Parallel()
 	const ts = "2026-06-11T12:00:00.000Z"
 
 	p1 := db.PeerIdentity{

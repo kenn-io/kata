@@ -14,6 +14,7 @@ import (
 )
 
 func TestImportBatch_CreatesIssueCommentsLabelsLinks(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 1, 11, 0, 0, 0, time.UTC)
@@ -185,6 +186,7 @@ func TestImportBatch_CreatesIssueCommentsLabelsLinks(t *testing.T) {
 }
 
 func TestImportBatch_BoundFederationActorOverridesImportedAuthors(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestSpokeFederationBindingWithPushActor(ctx, t, d, p, true, true, "wesm")
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
@@ -249,6 +251,7 @@ func TestImportBatch_BoundFederationActorOverridesImportedAuthors(t *testing.T) 
 }
 
 func TestImportBatch_RelatedLinkEventPayloadKeepsImportDirectionWhenStorageCanonicalizes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	ts := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 
@@ -308,6 +311,7 @@ func TestImportBatch_RelatedLinkEventPayloadKeepsImportDirectionWhenStorageCanon
 }
 
 func TestImportBatch_ReimportSourceNewerUpdatesFieldsAndTimestamp(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	older := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	newer := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -338,6 +342,7 @@ func TestImportBatch_ReimportSourceNewerUpdatesFieldsAndTimestamp(t *testing.T) 
 }
 
 func TestImportBatch_LocalNewerIssueUnchangedButMissingCommentsMerge(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	older := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 
@@ -368,6 +373,7 @@ func TestImportBatch_LocalNewerIssueUnchangedButMissingCommentsMerge(t *testing.
 }
 
 func TestImportBatch_SameSourceVersionCanCorrectOwnedPresentationTitle(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	sourceTime := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 
@@ -395,6 +401,7 @@ func TestImportBatch_SameSourceVersionCanCorrectOwnedPresentationTitle(t *testin
 }
 
 func TestImportBatch_SameSourceVersionTitleCorrectionDoesNotClobberLocalEdit(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	sourceTime := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 
@@ -418,6 +425,7 @@ func TestImportBatch_SameSourceVersionTitleCorrectionDoesNotClobberLocalEdit(t *
 }
 
 func TestImportBatch_SourceOwnedLabelsLinksReconcileLocalRemain(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -462,6 +470,7 @@ func TestImportBatch_SourceOwnedLabelsLinksReconcileLocalRemain(t *testing.T) {
 }
 
 func TestImportBatch_NonAuthoritativeParentLinksPreserveExistingSourceParentForChangedIssue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -496,6 +505,7 @@ func TestImportBatch_NonAuthoritativeParentLinksPreserveExistingSourceParentForC
 }
 
 func TestImportBatch_AuthoritativeParentLinksRemoveMissingSourceParentForChangedIssue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -529,6 +539,7 @@ func TestImportBatch_AuthoritativeParentLinksRemoveMissingSourceParentForChanged
 }
 
 func TestImportBatch_AuthoritativeParentDoesNotReplaceExistingLocalParent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -577,6 +588,7 @@ func TestImportBatch_AuthoritativeParentDoesNotReplaceExistingLocalParent(t *tes
 }
 
 func TestImportBatch_ConflictingParentFailsUnlessLocalParentPreservationEnabled(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -601,6 +613,7 @@ func TestImportBatch_ConflictingParentFailsUnlessLocalParentPreservationEnabled(
 }
 
 func TestImportBatch_NonAuthoritativeParentDoesNotPreserveOtherLinkTypes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -647,6 +660,7 @@ func TestImportBatch_NonAuthoritativeParentDoesNotPreserveOtherLinkTypes(t *test
 }
 
 func TestImportBatch_StaleSourceLinkMappingDoesNotUseIssueExternalIDAsLinkType(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -687,6 +701,7 @@ func TestImportBatch_StaleSourceLinkMappingDoesNotUseIssueExternalIDAsLinkType(t
 }
 
 func TestImportBatch_DoesNotAdoptPreExistingLocalLink(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Now().UTC().Add(-24 * time.Hour)
 	t2 := time.Now().UTC().Add(time.Hour)
@@ -725,6 +740,7 @@ func TestImportBatch_DoesNotAdoptPreExistingLocalLink(t *testing.T) {
 }
 
 func TestImportBatch_ReimportCorrectsStoredCreatedAtAheadOfClosedAt(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	// First import stores a synthetic, late created_at (e.g. an older sync
 	// that fell back to syncStartedAt when GitHub omitted created_at).
@@ -762,6 +778,7 @@ func TestImportBatch_ReimportCorrectsStoredCreatedAtAheadOfClosedAt(t *testing.T
 }
 
 func TestImportBatch_ReimportDoesNotPushStoredCreatedAtLater(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	realCreated := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	syntheticLater := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
@@ -786,6 +803,7 @@ func TestImportBatch_ReimportDoesNotPushStoredCreatedAtLater(t *testing.T) {
 }
 
 func TestImportBatch_ReimportSameVersionHealsInvertedCreatedAt(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	realCreated := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	realClosed := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -840,6 +858,7 @@ func TestImportBatch_ReimportSameVersionHealsInvertedCreatedAt(t *testing.T) {
 }
 
 func TestImportBatch_ReimportSameVersionDoesNotEmitWhenCreatedAtUnchanged(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 
@@ -857,6 +876,7 @@ func TestImportBatch_ReimportSameVersionDoesNotEmitWhenCreatedAtUnchanged(t *tes
 }
 
 func TestImportBatch_NewerReimportCarriesCreatedAtInPayload(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	synthetic := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
 	realCreated := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
@@ -888,6 +908,7 @@ func TestImportBatch_NewerReimportCarriesCreatedAtInPayload(t *testing.T) {
 }
 
 func TestImportBatch_ReimportRecreatesLinkWhenMappingReferencesStaleLink(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
@@ -936,6 +957,7 @@ func TestImportBatch_ReimportRecreatesLinkWhenMappingReferencesStaleLink(t *test
 }
 
 func TestImportBatch_MissingLinkTargetRejectsTransaction(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	ts := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 
@@ -948,6 +970,7 @@ func TestImportBatch_MissingLinkTargetRejectsTransaction(t *testing.T) {
 }
 
 func TestImportBatch_AdoptsLegacyExternalIDMapping(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 
@@ -996,6 +1019,7 @@ func TestImportBatch_AdoptsLegacyExternalIDMapping(t *testing.T) {
 }
 
 func TestImportBatch_ValidationErrors(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	ts := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 
@@ -1020,6 +1044,7 @@ func TestImportBatch_ValidationErrors(t *testing.T) {
 }
 
 func TestImportBatch_AcceptsAllSchemaClosedReasons(t *testing.T) {
+	t.Parallel()
 	// Schema v8 accepts done, wontfix, duplicate, superseded, and
 	// audit-no-change. The import validator must agree with the schema
 	// or callers cannot replay closed issues that used the newer reasons.
@@ -1048,6 +1073,7 @@ func TestImportBatch_AcceptsAllSchemaClosedReasons(t *testing.T) {
 }
 
 func TestImportBatch_TimestampValidationErrors(t *testing.T) {
+	t.Parallel()
 	t.Run("updated before created", func(t *testing.T) {
 		d, ctx, p := setupTestProject(t)
 		createdAt := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)

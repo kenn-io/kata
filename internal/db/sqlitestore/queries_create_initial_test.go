@@ -11,6 +11,7 @@ import (
 )
 
 func TestCreateIssue_WithInitialLabels(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	issue, evt, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -36,6 +37,7 @@ func TestCreateIssue_WithInitialLabels(t *testing.T) {
 }
 
 func TestCreateIssue_WithInitialOwner(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	owner := "alice"
@@ -54,6 +56,7 @@ func TestCreateIssue_WithInitialOwner(t *testing.T) {
 }
 
 func TestCreateIssue_WithInitialLinks(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 	blocker := makeIssue(t, ctx, d, p.ID, "blocker", "tester")
@@ -83,6 +86,7 @@ func TestCreateIssue_WithInitialLinks(t *testing.T) {
 }
 
 func TestCreateIssue_RejectsInitialLinkToMissingTarget(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -94,6 +98,7 @@ func TestCreateIssue_RejectsInitialLinkToMissingTarget(t *testing.T) {
 }
 
 func TestCreateIssue_RejectsInvalidInitialLinkType(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	target := makeIssue(t, ctx, d, p.ID, "t", "tester")
 
@@ -105,6 +110,7 @@ func TestCreateIssue_RejectsInvalidInitialLinkType(t *testing.T) {
 }
 
 func TestCreateIssue_RejectsInvalidLabel(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -115,6 +121,7 @@ func TestCreateIssue_RejectsInvalidLabel(t *testing.T) {
 }
 
 func TestCreateIssue_EmitsReplayCompletePayload(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	owner := "alice"
@@ -159,6 +166,7 @@ func TestCreateIssue_EmitsReplayCompletePayload(t *testing.T) {
 }
 
 func TestCreateIssue_DuplicateInitialLinksAreDeduped(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 
@@ -194,6 +202,7 @@ func TestCreateIssue_DuplicateInitialLinksAreDeduped(t *testing.T) {
 // second insert blew up on the UNIQUE index. This pins that the second
 // entry collapses cleanly to a no-op.
 func TestCreateIssue_RelatedIncomingNormalizes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	peer := makeIssue(t, ctx, d, p.ID, "peer", "tester")
 
@@ -223,6 +232,7 @@ func TestCreateIssue_RelatedIncomingNormalizes(t *testing.T) {
 }
 
 func TestCreateIssue_EmptyStringOwnerNormalizesToNil(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	empty := ""
@@ -237,6 +247,7 @@ func TestCreateIssue_EmptyStringOwnerNormalizesToNil(t *testing.T) {
 }
 
 func TestCreateIssue_WithAllInitialState(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 
@@ -288,6 +299,7 @@ func TestCreateIssue_WithAllInitialState(t *testing.T) {
 //	01HZNQ7VFPK1XGD8R5MABXD4EX -> last4=d4ex,  last5=xd4ex,  last6=bxd4ex
 //	01HZNQ7VFPK1XGD8R5AYBXD4EX -> last4=d4ex,  last5=xd4ex,  last6=bxd4ex
 func TestCreateIssue_AssignsLength4WhenUnique(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "demo")
@@ -302,6 +314,7 @@ func TestCreateIssue_AssignsLength4WhenUnique(t *testing.T) {
 }
 
 func TestCreateIssue_ExtendsToLength5OnCollision(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "demo")
@@ -324,6 +337,7 @@ func TestCreateIssue_ExtendsToLength5OnCollision(t *testing.T) {
 }
 
 func TestCreateIssue_ExtendsToLength6OnDoubleCollision(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "demo")

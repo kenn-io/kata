@@ -11,6 +11,7 @@ import (
 )
 
 func TestCreateLink_RoundTrips(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createKataProject(ctx, t, d)
@@ -33,6 +34,7 @@ func TestCreateLink_RoundTrips(t *testing.T) {
 }
 
 func TestLinksRejectMismatchedUIDCache(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
@@ -52,6 +54,7 @@ func TestLinksRejectMismatchedUIDCache(t *testing.T) {
 }
 
 func TestCreateLink_DuplicateIsErrLinkExists(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createKataProject(ctx, t, d)
@@ -66,6 +69,7 @@ func TestCreateLink_DuplicateIsErrLinkExists(t *testing.T) {
 }
 
 func TestCreateLink_SecondParentIsErrParentAlreadySet(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createKataProject(ctx, t, d)
@@ -82,6 +86,7 @@ func TestCreateLink_SecondParentIsErrParentAlreadySet(t *testing.T) {
 }
 
 func TestCreateLink_ExactDuplicateParentIsErrLinkExists(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	child := makeIssue(t, ctx, d, p.ID, "child", "tester")
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
@@ -101,6 +106,7 @@ func TestCreateLink_ExactDuplicateParentIsErrLinkExists(t *testing.T) {
 // TestCreateLink_CrossProject pins storage v16: links are project-independent
 // edges, so endpoints in different projects are legal at the db layer.
 func TestCreateLink_CrossProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 
@@ -123,6 +129,7 @@ func TestCreateLink_CrossProject(t *testing.T) {
 }
 
 func TestCreateLink_SelfLinkIsError(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 
@@ -134,6 +141,7 @@ func TestCreateLink_SelfLinkIsError(t *testing.T) {
 }
 
 func TestLinkByEndpoints_FindsExisting(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
@@ -148,6 +156,7 @@ func TestLinkByEndpoints_FindsExisting(t *testing.T) {
 }
 
 func TestLinksByIssue_ReturnsBothDirections(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
@@ -162,6 +171,7 @@ func TestLinksByIssue_ReturnsBothDirections(t *testing.T) {
 }
 
 func TestParentOf_ReturnsErrNotFoundWhenAbsent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 
@@ -170,6 +180,7 @@ func TestParentOf_ReturnsErrNotFoundWhenAbsent(t *testing.T) {
 }
 
 func TestRelationshipsByIssues_EmptyInput(t *testing.T) {
+	t.Parallel()
 	d, ctx, _ := setupTestProject(t)
 
 	got, err := d.RelationshipsByIssues(ctx, nil)
@@ -184,6 +195,7 @@ func TestRelationshipsByIssues_EmptyInput(t *testing.T) {
 }
 
 func TestRelationshipsByIssues_ReturnsImmediateParents(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 	child1 := makeIssue(t, ctx, d, p.ID, "child 1", "tester")
@@ -203,6 +215,7 @@ func TestRelationshipsByIssues_ReturnsImmediateParents(t *testing.T) {
 }
 
 func TestRelationshipsByIssues_ReturnsOpenAndTotalDirectChildren(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 	child1 := makeIssue(t, ctx, d, p.ID, "child 1", "tester")
@@ -220,6 +233,7 @@ func TestRelationshipsByIssues_ReturnsOpenAndTotalDirectChildren(t *testing.T) {
 }
 
 func TestChildrenOfIssue_ReturnsDirectChildrenOnly(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 	child1 := makeIssue(t, ctx, d, p.ID, "child 1", "tester")
@@ -237,6 +251,7 @@ func TestChildrenOfIssue_ReturnsDirectChildrenOnly(t *testing.T) {
 }
 
 func TestRelationshipsByIssues_ChunksLargeInputs(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	const parentCount = 501
@@ -255,6 +270,7 @@ func TestRelationshipsByIssues_ChunksLargeInputs(t *testing.T) {
 }
 
 func TestDeleteLinkByID_RemovesRow(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
@@ -282,6 +298,7 @@ func TestDeleteLinkByID_RemovesRow(t *testing.T) {
 //   - relA   --related-- relB     (cross-project; relA.ID < relB.ID guaranteed
 //     by creation order)
 func TestRelationshipQueries_CrossProjectPeersVisible(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 
@@ -400,6 +417,7 @@ func TestRelationshipQueries_CrossProjectPeersVisible(t *testing.T) {
 // — neither in the listing nor the count — so an active parent is not blocked
 // from closing by a child hidden behind an archived project.
 func TestOpenChildrenOf_ExcludesArchivedProjectChildren(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	pa := createProject(ctx, t, d, "alpha")
@@ -421,6 +439,7 @@ func TestOpenChildrenOf_ExcludesArchivedProjectChildren(t *testing.T) {
 // TestChildrenOfIssue_ExcludesArchivedProjectChildren: the surface child
 // listing must omit children whose project is archived.
 func TestChildrenOfIssue_ExcludesArchivedProjectChildren(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	pa := createProject(ctx, t, d, "alpha")
@@ -441,6 +460,7 @@ func TestChildrenOfIssue_ExcludesArchivedProjectChildren(t *testing.T) {
 // TestRelationshipsByIssues_ExcludesArchivedProjectChildren: child counts on
 // queue/detail rows must not include children in archived projects.
 func TestRelationshipsByIssues_ExcludesArchivedProjectChildren(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	pa := createProject(ctx, t, d, "alpha")
@@ -465,6 +485,7 @@ func TestRelationshipsByIssues_ExcludesArchivedProjectChildren(t *testing.T) {
 // LinksByIssue, so `kata list --json` must not silently drop it. "Actively
 // blocked" display state is a separate concern (ActivelyBlocked).
 func TestRelationshipsByIssues_IncludesBlockerInArchivedProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p1 := setupTestProject(t)
 	p2, err := d.CreateProject(ctx, "blocker-project")
 	require.NoError(t, err)
@@ -485,6 +506,7 @@ func TestRelationshipsByIssues_IncludesBlockerInArchivedProject(t *testing.T) {
 // blockers, archived-project blockers, issues with no blocker, and closed
 // target issues all have ActivelyBlocked set to false.
 func TestRelationshipsByIssues_ActivelyBlocked(t *testing.T) {
+	t.Parallel()
 	d, ctx, p1 := setupTestProject(t)
 	p2, err := d.CreateProject(ctx, "blocker-project")
 	require.NoError(t, err)

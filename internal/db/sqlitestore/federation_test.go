@@ -18,6 +18,7 @@ import (
 )
 
 func TestFederationSchemaVersionAndTable(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 
 	assert.Equal(t, 29, db.CurrentSchemaVersion())
@@ -48,6 +49,7 @@ func TestFederationSchemaVersionAndTable(t *testing.T) {
 }
 
 func TestFederationSchemaIssueClaims(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 
 	assertSchemaObject(t, d, "issue_claims")
@@ -61,6 +63,7 @@ func TestFederationSchemaIssueClaims(t *testing.T) {
 }
 
 func TestFederationBindingsFreshDBEmpty(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 
 	got, err := d.ListFederationBindings(context.Background())
@@ -86,6 +89,7 @@ func assertIndexColumns(t *testing.T, d *sqlitestore.Store, indexName string, wa
 }
 
 func TestFederationBindingUpsertRoundTrip(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	binding := db.FederationBinding{
@@ -130,6 +134,7 @@ func TestFederationBindingUpsertRoundTrip(t *testing.T) {
 }
 
 func TestFederationSyncStatusRecordsOperationalState(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestSpokeFederationBinding(ctx, t, d, p, true)
 	pullStarted := time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC)
@@ -160,6 +165,7 @@ func TestFederationSyncStatusRecordsOperationalState(t *testing.T) {
 }
 
 func TestFederationSyncStatusSuccessDoesNotClearPriorError(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestSpokeFederationBinding(ctx, t, d, p, true)
 	errorAt := time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC)
@@ -177,6 +183,7 @@ func TestFederationSyncStatusSuccessDoesNotClearPriorError(t *testing.T) {
 }
 
 func TestFederationSyncStatusClearErrorExplicitly(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestSpokeFederationBinding(ctx, t, d, p, true)
 	errorAt := time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC)
@@ -191,6 +198,7 @@ func TestFederationSyncStatusClearErrorExplicitly(t *testing.T) {
 }
 
 func TestFederationQuarantineRecordAndActiveRoundTrip(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	// Quarantine recording is binding-guarded (leave race); seed the binding.
 	upsertTestSpokeFederationBinding(ctx, t, d, p, true)
@@ -224,6 +232,7 @@ func TestFederationQuarantineRecordAndActiveRoundTrip(t *testing.T) {
 }
 
 func TestFederationQuarantineRecordIsIdempotentPerProjectDirection(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	// Quarantine recording is binding-guarded (leave race); seed the binding.
 	upsertTestSpokeFederationBinding(ctx, t, d, p, true)
@@ -255,6 +264,7 @@ func TestFederationQuarantineRecordIsIdempotentPerProjectDirection(t *testing.T)
 }
 
 func TestSkipFederationQuarantineAdvancesPushCursor(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -304,6 +314,7 @@ func TestSkipFederationQuarantineAdvancesPushCursor(t *testing.T) {
 }
 
 func TestRetryFederationQuarantineLeavesPushCursorUnchanged(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -353,6 +364,7 @@ func TestRetryFederationQuarantineLeavesPushCursorUnchanged(t *testing.T) {
 }
 
 func TestRetryFederationQuarantineRejectsPullQuarantine(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -393,6 +405,7 @@ func TestRetryFederationQuarantineRejectsPullQuarantine(t *testing.T) {
 }
 
 func TestSkipFederationQuarantineRejectsWrongProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	other, err := d.CreateProject(ctx, "other")
 	require.NoError(t, err)
@@ -438,6 +451,7 @@ func TestSkipFederationQuarantineRejectsWrongProject(t *testing.T) {
 }
 
 func TestPendingFederationPushEvents(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	binding, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -529,6 +543,7 @@ func TestPendingFederationPushEvents(t *testing.T) {
 }
 
 func TestAdvanceFederationPushCursor(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -550,6 +565,7 @@ func TestAdvanceFederationPushCursor(t *testing.T) {
 }
 
 func TestEnableFederationPush(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -577,6 +593,7 @@ func TestEnableFederationPush(t *testing.T) {
 }
 
 func TestResetFederatedProjectIfNoPendingPushRejectsPendingLocalEvents(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -610,6 +627,7 @@ func TestResetFederatedProjectIfNoPendingPushRejectsPendingLocalEvents(t *testin
 }
 
 func TestResetFederatedProjectIfNoPendingPushIgnoresUnsupportedLocalEvents(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -647,6 +665,7 @@ func TestResetFederatedProjectIfNoPendingPushIgnoresUnsupportedLocalEvents(t *te
 }
 
 func TestResetFederatedProjectIfNoPendingPushRejectsActiveQuarantine(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	binding, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -679,6 +698,7 @@ func TestResetFederatedProjectIfNoPendingPushRejectsActiveQuarantine(t *testing.
 }
 
 func TestResetFederatedProjectIfNoPendingPushAllowsAckedLocalEvents(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -712,6 +732,7 @@ func TestResetFederatedProjectIfNoPendingPushAllowsAckedLocalEvents(t *testing.T
 }
 
 func TestResetFederatedProjectClearsClaimProjectionState(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	other, err := d.CreateProject(ctx, "other")
 	require.NoError(t, err)
@@ -741,6 +762,7 @@ func TestResetFederatedProjectClearsClaimProjectionState(t *testing.T) {
 }
 
 func TestResetFederatedProjectIfNoPendingPushClearsClaimProjectionState(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	other, err := d.CreateProject(ctx, "other")
 	require.NoError(t, err)
@@ -779,6 +801,7 @@ func TestResetFederatedProjectIfNoPendingPushClearsClaimProjectionState(t *testi
 }
 
 func TestAdoptProjectIntoFederationPreservesSnapshotPayloadAuthors(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -824,6 +847,7 @@ func TestAdoptProjectIntoFederationPreservesSnapshotPayloadAuthors(t *testing.T)
 }
 
 func TestFederationRoundTripPreservesSubMillisecondCommentCreatedAt(t *testing.T) {
+	t.Parallel()
 	t.Run("comment event", func(t *testing.T) {
 		source, ctx, project := setupTestProject(t)
 		_, err := source.EnableProjectFederation(ctx, project.ID, "source-agent")
@@ -933,6 +957,7 @@ func TestFederationRoundTripPreservesSubMillisecondCommentCreatedAt(t *testing.T
 }
 
 func TestAdoptProjectIntoFederationSnapshotsEditedCommentWithoutLeakedBody(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -981,6 +1006,7 @@ func TestAdoptProjectIntoFederationSnapshotsEditedCommentWithoutLeakedBody(t *te
 }
 
 func TestAdoptProjectIntoFederationReconcilesDeferredGroupLinks(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -1038,6 +1064,7 @@ func TestAdoptProjectIntoFederationReconcilesDeferredGroupLinks(t *testing.T) {
 }
 
 func TestFederationBindingPhase1StyleDefaultsPushState(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	_, err := d.ExecContext(ctx, `
@@ -1087,6 +1114,7 @@ func assertClaimProjectionCounts(ctx context.Context, t *testing.T, d *sqlitesto
 }
 
 func TestFederationTokenHash(t *testing.T) {
+	t.Parallel()
 	got := db.FederationTokenHash("kata-federation-token")
 
 	assert.Equal(t, "4260028b25f27cdfc5555050688678320f251c8f9a02ca473d4309ffe3e53947", got)
@@ -1094,6 +1122,7 @@ func TestFederationTokenHash(t *testing.T) {
 }
 
 func TestCanonicalFederationCapabilities(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"push,pull,push": "pull,push",
 		" pull , push ":  "pull,push",
@@ -1119,6 +1148,7 @@ func TestCanonicalFederationCapabilities(t *testing.T) {
 }
 
 func TestFederationEnrollmentCreateStoresOnlyTokenHash(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	token := "plaintext-enrollment-token"
 	spokeUID := newTestUID(t)
@@ -1156,6 +1186,7 @@ func TestFederationEnrollmentCreateStoresOnlyTokenHash(t *testing.T) {
 }
 
 func TestFederationEnrollmentCreateStoresBoundActor(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	token := "actor-bound-token"
@@ -1184,6 +1215,7 @@ func TestFederationEnrollmentCreateStoresBoundActor(t *testing.T) {
 }
 
 func TestFederationEnrollmentCreateStoresAdoptionSnapshotAuthorMarker(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	token := "adoption-marker-token"
@@ -1213,6 +1245,7 @@ func TestFederationEnrollmentCreateStoresAdoptionSnapshotAuthorMarker(t *testing
 }
 
 func TestFederationEnrollmentCreateRejectsWildcardAdoptionSnapshotAuthorMarker(t *testing.T) {
+	t.Parallel()
 	d, ctx, _ := setupTestProject(t)
 
 	_, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -1228,6 +1261,7 @@ func TestFederationEnrollmentCreateRejectsWildcardAdoptionSnapshotAuthorMarker(t
 }
 
 func TestFederationEnrollmentCreateRequiresActor(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 
@@ -1243,6 +1277,7 @@ func TestFederationEnrollmentCreateRequiresActor(t *testing.T) {
 }
 
 func TestFederationEnrollmentCreateGeneratesTokenOnceAndStoresHash(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	spokeUID := newTestUID(t)
@@ -1268,6 +1303,7 @@ func TestFederationEnrollmentCreateGeneratesTokenOnceAndStoresHash(t *testing.T)
 }
 
 func TestFederationEnrollmentCreateCanonicalizesCapabilities(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -1290,6 +1326,7 @@ func TestFederationEnrollmentCreateCanonicalizesCapabilities(t *testing.T) {
 }
 
 func TestFederationEnrollmentAuthorizeReturnsSpokeInstanceUID(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	token := "spoke-bound-token"
@@ -1312,6 +1349,7 @@ func TestFederationEnrollmentAuthorizeReturnsSpokeInstanceUID(t *testing.T) {
 }
 
 func TestFederationEnrollmentWildcardAuthorizesAnyEnabledHubProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	first := createProject(ctx, t, d, "first")
@@ -1342,6 +1380,7 @@ func TestFederationEnrollmentWildcardAuthorizesAnyEnabledHubProject(t *testing.T
 }
 
 func TestFederationEnrollmentWildcardRejectsNonFederatedDisabledAndNonHubProjects(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	plain := createProject(ctx, t, d, "plain")
@@ -1369,6 +1408,7 @@ func TestFederationEnrollmentWildcardRejectsNonFederatedDisabledAndNonHubProject
 }
 
 func TestFederationEnrollmentRejectsArchivedHubProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	token := "archived-hub-token" //nolint:gosec // test-only bearer token
@@ -1390,6 +1430,7 @@ func TestFederationEnrollmentRejectsArchivedHubProject(t *testing.T) {
 }
 
 func TestFederationEnrollmentProjectSpecificAuthorizesOnlyThatProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	allowed := createProject(ctx, t, d, "allowed")
@@ -1416,6 +1457,7 @@ func TestFederationEnrollmentProjectSpecificAuthorizesOnlyThatProject(t *testing
 }
 
 func TestFederationEnrollmentProjectSpecificRejectsNonFederatedDisabledAndNonHubProjects(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	plain := createProject(ctx, t, d, "plain")
@@ -1445,6 +1487,7 @@ func TestFederationEnrollmentProjectSpecificRejectsNonFederatedDisabledAndNonHub
 }
 
 func TestFederationEnrollmentRevokedRowsAreRejected(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	token := "revoked-token"
@@ -1471,6 +1514,7 @@ func TestFederationEnrollmentRevokedRowsAreRejected(t *testing.T) {
 }
 
 func TestFederationEnrollmentMissingCapabilityIsRejected(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	token := "missing-capability-token"
@@ -1493,6 +1537,7 @@ func TestFederationEnrollmentMissingCapabilityIsRejected(t *testing.T) {
 }
 
 func TestFederationEnrollmentUnknownTokenIsRejected(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestHubFederationBinding(ctx, t, d, p, true)
 	_, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -1511,6 +1556,7 @@ func TestFederationEnrollmentUnknownTokenIsRejected(t *testing.T) {
 }
 
 func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	owner := "alice"
 	priority := int64(1)
@@ -1691,6 +1737,7 @@ func assertTimePtrEqual(t *testing.T, want time.Time, got *time.Time) {
 }
 
 func TestInsertRemoteEventPreservesPortableFieldsAndDedupe(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issueUID := newTestUID(t)
 	remoteProjectUID := p.UID
@@ -1728,6 +1775,7 @@ func TestInsertRemoteEventPreservesPortableFieldsAndDedupe(t *testing.T) {
 }
 
 func TestInsertRemoteEventRejectsDuplicateUIDWithDifferentHash(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issueUID := newTestUID(t)
 	remoteProjectUID := p.UID
@@ -1748,6 +1796,7 @@ func TestInsertRemoteEventRejectsDuplicateUIDWithDifferentHash(t *testing.T) {
 }
 
 func TestInsertRemoteEventRejectsContentHashMismatch(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issueUID := newTestUID(t)
 	remoteProjectUID := p.UID
@@ -1767,6 +1816,7 @@ func TestInsertRemoteEventRejectsContentHashMismatch(t *testing.T) {
 }
 
 func TestIngestFederationEvents(t *testing.T) {
+	t.Parallel()
 	t.Run("empty batch succeeds with zero cursor", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 
@@ -2048,6 +2098,7 @@ func TestIngestFederationEvents(t *testing.T) {
 }
 
 func TestIngestFederationEventsDefersUnknownLinkPeer(t *testing.T) {
+	t.Parallel()
 	d, ctx, project, spokeUID := setupFederationIngestHub(t)
 	issueUID := newTestUID(t)
 	peerUID := newTestUID(t)
@@ -2067,6 +2118,7 @@ func TestIngestFederationEventsDefersUnknownLinkPeer(t *testing.T) {
 }
 
 func TestIngestFederationEventsDeferredPeerDoesNotBecomeKnownPrimary(t *testing.T) {
+	t.Parallel()
 	d, ctx, project, spokeUID := setupFederationIngestHub(t)
 	primaryUID := newTestUID(t)
 	peerUID := newTestUID(t)
@@ -2103,6 +2155,7 @@ func TestIngestFederationEventsDeferredPeerDoesNotBecomeKnownPrimary(t *testing.
 }
 
 func TestIngestFederationEventsConvergesCircularCrossProjectLinks(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -2153,6 +2206,7 @@ func TestIngestFederationEventsConvergesCircularCrossProjectLinks(t *testing.T) 
 }
 
 func TestIngestFederationEventsRejectsDeferredCrossProjectParentCycle(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -2183,6 +2237,7 @@ func TestIngestFederationEventsRejectsDeferredCrossProjectParentCycle(t *testing
 }
 
 func TestIngestFederationEventsUnlinksDirectionalEdgeThroughDestination(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -2225,6 +2280,7 @@ func TestIngestFederationEventsUnlinksDirectionalEdgeThroughDestination(t *testi
 }
 
 func TestEnableProjectFederationReconcilesDeferredGroupLinks(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -2264,6 +2320,7 @@ func TestEnableProjectFederationReconcilesDeferredGroupLinks(t *testing.T) {
 }
 
 func TestFederationMembershipDestinationFirstPreservesIncomingLink(t *testing.T) {
+	t.Parallel()
 	t.Run("hub enable", func(t *testing.T) {
 		d := openTestDB(t)
 		ctx := context.Background()
@@ -2366,6 +2423,7 @@ func TestFederationMembershipDestinationFirstPreservesIncomingLink(t *testing.T)
 }
 
 func TestFederationMembershipDifferentOriginsRemoveLocalBoundaryLink(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -2426,6 +2484,7 @@ func TestFederationMembershipDifferentOriginsRemoveLocalBoundaryLink(t *testing.
 }
 
 func TestUpsertFederationBindingReconcilesChangedGroupMembership(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -2531,6 +2590,7 @@ func TestUpsertFederationBindingReconcilesChangedGroupMembership(t *testing.T) {
 }
 
 func TestIngestFederationEvents_Validation(t *testing.T) {
+	t.Parallel()
 	t.Run("rejects project uid mismatch", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		ev := ingestIssueCreatedEvent(t, newTestUID(t), p.Name, spokeUID, newTestUID(t), 100)
@@ -4324,6 +4384,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 }
 
 func TestIngestClaimCloseReleasesLiveClaim(t *testing.T) {
+	t.Parallel()
 	t.Run("holder close releases and emits release", func(t *testing.T) {
 		d, ctx, p, spokeUID, issue, _ := setupIngestClaimIssue(t)
 		_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -4386,6 +4447,7 @@ func TestIngestClaimCloseReleasesLiveClaim(t *testing.T) {
 }
 
 func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
+	t.Parallel()
 	for _, eventType := range []string{
 		"issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
 		"issue.assignment_expired",
@@ -4435,6 +4497,7 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 }
 
 func TestIngestClaimViolationAuditsCompatibleCrossProjectPeer(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -4478,6 +4541,7 @@ func TestIngestClaimViolationAuditsCompatibleCrossProjectPeer(t *testing.T) {
 }
 
 func TestIngestClaimViolationExpiresTimedClaimBeforeAudit(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, spokeUID, issue, _ := setupIngestClaimIssue(t)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
 		ProjectID: p.ID,
@@ -4499,6 +4563,7 @@ func TestIngestClaimViolationExpiresTimedClaimBeforeAudit(t *testing.T) {
 }
 
 func TestMaterializeFederatedProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	remoteProjectUID := p.UID
 	issueUID := newTestUID(t)
@@ -4613,6 +4678,7 @@ func TestMaterializeFederatedProject(t *testing.T) {
 }
 
 func TestMaterializeFederatedProjectGroupsCrossProjectLinksByHubOrigin(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		firstURL  string
@@ -4686,6 +4752,7 @@ func TestMaterializeFederatedProjectGroupsCrossProjectLinksByHubOrigin(t *testin
 }
 
 func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue, createdEvent, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -4769,6 +4836,7 @@ func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T
 }
 
 func TestMaterializeFederatedProjectExtendsCollidingIncomingShortIDs(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestSpokeFederationBinding(ctx, t, d, p, true)
 	uidA := "01HZNQ7VFPK1XGD8R5MABCD4EC"
@@ -4804,6 +4872,7 @@ func TestMaterializeFederatedProjectExtendsCollidingIncomingShortIDs(t *testing.
 }
 
 func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(context.Context, *sqlitestore.Store, db.Project, db.Issue, db.Issue) error{
 		"create issue": func(ctx context.Context, d *sqlitestore.Store, p db.Project, _, _ db.Issue) error {
 			_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -4956,6 +5025,7 @@ func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *test
 }
 
 func TestFederatedSpokeRejectsRecurrence(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(context.Context, *sqlitestore.Store, db.Project, db.Recurrence) error{
 		"create recurrence": func(ctx context.Context, d *sqlitestore.Store, p db.Project, _ db.Recurrence) error {
 			_, _, err := d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
@@ -5022,6 +5092,7 @@ func TestFederatedSpokeRejectsRecurrence(t *testing.T) {
 }
 
 func TestFederatedMoveUnsupported(t *testing.T) {
+	t.Parallel()
 	t.Run("source federated", func(t *testing.T) {
 		d, ctx, source := setupTestProject(t)
 		target, err := d.CreateProject(ctx, "target")
@@ -5074,6 +5145,7 @@ func TestFederatedMoveUnsupported(t *testing.T) {
 }
 
 func TestFederatedSpokeRejectsHardPurge(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -5091,6 +5163,7 @@ func TestFederatedSpokeRejectsHardPurge(t *testing.T) {
 }
 
 func TestBoundFederationActor_OverridesCreateLinkAndEventAuthor(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestSpokeFederationBindingWithPushActor(ctx, t, d, p, true, true, "wesm")
 	from, _ := createTesterIssue(ctx, t, d, p.ID, "from")
@@ -5119,6 +5192,7 @@ func TestBoundFederationActor_OverridesCreateLinkAndEventAuthor(t *testing.T) {
 }
 
 func TestBoundFederationActor_OverridesEditIssueAtomicLinkAuthor(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	upsertTestSpokeFederationBindingWithPushActor(ctx, t, d, p, true, true, "wesm")
 	subject, _ := createTesterIssue(ctx, t, d, p.ID, "subject")
@@ -5444,6 +5518,7 @@ func remoteEventHash(t *testing.T, ev db.RemoteEvent) string {
 }
 
 func TestCountActiveFederationEnrollments(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	got, err := d.CountActiveFederationEnrollments(ctx, p.ID)
@@ -5524,6 +5599,7 @@ func newTestHubProject(t *testing.T, d *sqlitestore.Store) int64 {
 }
 
 func TestLeaveFederationReplicaDetachesSpoke(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	projectID, projectUID := newTestSpokeProject(t, d)
@@ -5544,6 +5620,7 @@ func TestLeaveFederationReplicaDetachesSpoke(t *testing.T) {
 }
 
 func TestLeaveFederationReplicaPreservesDetachedProjectState(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -5606,6 +5683,7 @@ func TestLeaveFederationReplicaPreservesDetachedProjectState(t *testing.T) {
 }
 
 func TestLeaveFederationReplicaIdempotentWhenStandalone(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	projectID := newTestStandaloneProject(t, d)
@@ -5619,6 +5697,7 @@ func TestLeaveFederationReplicaIdempotentWhenStandalone(t *testing.T) {
 }
 
 func TestLeaveFederationReplicaRejectsHub(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	projectID := newTestHubProject(t, d)
@@ -5631,6 +5710,7 @@ func TestLeaveFederationReplicaRejectsHub(t *testing.T) {
 // 404 mapping: a missing project must surface db.ErrNotFound, not a wrapped
 // sql.ErrNoRows (which would slip past errors.Is and yield a 500).
 func TestLeaveFederationReplicaMissingProjectIsNotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	if _, err := d.LeaveFederationReplica(ctx, 999999); !errors.Is(err, db.ErrNotFound) {
@@ -5644,6 +5724,7 @@ func TestLeaveFederationReplicaMissingProjectIsNotFound(t *testing.T) {
 // writers so the race cannot recreate active quarantine state for a
 // standalone (or archived) project and block a later rejoin.
 func TestQuarantineRecordingNoOpsWithoutBinding(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "spoke-project")
@@ -5681,6 +5762,7 @@ func TestQuarantineRecordingNoOpsWithoutBinding(t *testing.T) {
 }
 
 func TestSyncStatusWritersNoOpWithoutBinding(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	projectID := newTestStandaloneProject(t, d)
@@ -5705,6 +5787,7 @@ func TestSyncStatusWritersNoOpWithoutBinding(t *testing.T) {
 // materialized link state must be left exactly as it was, and the rest of the
 // projection must still be rebuilt.
 func TestIngestWithoutLinkAffectingEventsPreservesMaterializedLinks(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	project := createProject(ctx, t, d, "spoke-project")

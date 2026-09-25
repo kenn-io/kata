@@ -10,6 +10,7 @@ import (
 )
 
 func TestRewriteAuthorIdentity_ScopedCountsAndIdempotent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	other := createProject(ctx, t, d, "other-project")
 	from, to := "old-agent", "new-agent"
@@ -105,6 +106,7 @@ func TestRewriteAuthorIdentity_ScopedCountsAndIdempotent(t *testing.T) {
 }
 
 func TestRewriteAuthorIdentity_RejectsEmptyTo(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	_, err := d.RewriteAuthorIdentity(ctx, db.RewriteAuthorIdentityParams{
@@ -119,6 +121,7 @@ func TestRewriteAuthorIdentity_RejectsEmptyTo(t *testing.T) {
 }
 
 func TestRewriteAuthorIdentity_ReplayKeepsRewrittenAuthors(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	from, to := "old-agent", "new-agent"
 	owner := from
@@ -189,6 +192,7 @@ func TestRewriteAuthorIdentity_ReplayKeepsRewrittenAuthors(t *testing.T) {
 }
 
 func TestRewriteAuthorIdentity_ReplayRewritesInitialLinkAuthors(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	from, to := "old-agent", "new-agent"
 	peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -222,6 +226,7 @@ func TestRewriteAuthorIdentity_ReplayRewritesInitialLinkAuthors(t *testing.T) {
 }
 
 func TestRewriteAuthorIdentity_FederationBaselineSnapshotsRewrittenAuthors(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	from, to := "old-agent", "new-agent"
 	owner := from

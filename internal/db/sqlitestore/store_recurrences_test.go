@@ -12,6 +12,7 @@ import (
 )
 
 func TestCreateRecurrence_HappyPath(t *testing.T) {
+	t.Parallel()
 	owner := "alice"
 	priority := int64(2)
 	d, _, _, rec := setupRecurrence(t, db.CreateRecurrenceIn{
@@ -65,6 +66,7 @@ func TestCreateRecurrence_HappyPath(t *testing.T) {
 }
 
 func TestPatchRecurrence_BumpsRevisionAndEmitsDiff(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "Old"},
@@ -95,6 +97,7 @@ func TestPatchRecurrence_BumpsRevisionAndEmitsDiff(t *testing.T) {
 }
 
 func TestPatchRecurrence_NoChangeIsNoOp(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "Same"},
@@ -113,6 +116,7 @@ func TestPatchRecurrence_NoChangeIsNoOp(t *testing.T) {
 }
 
 func TestPatchRecurrence_RevisionConflict(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "X"},
@@ -127,6 +131,7 @@ func TestPatchRecurrence_RevisionConflict(t *testing.T) {
 }
 
 func TestSoftDeleteRecurrence(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "X"},
@@ -149,6 +154,7 @@ func TestSoftDeleteRecurrence(t *testing.T) {
 }
 
 func TestGetRecurrenceByUID(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "X"},
@@ -159,6 +165,7 @@ func TestGetRecurrenceByUID(t *testing.T) {
 }
 
 func TestGetRecurrenceByUID_MissingReturnsErrNotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	_, err := d.GetRecurrenceByUID(ctx, "nosuchuid")
@@ -166,6 +173,7 @@ func TestGetRecurrenceByUID_MissingReturnsErrNotFound(t *testing.T) {
 }
 
 func TestListRecurrencesByProject_ExcludesArchivedProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 
@@ -191,6 +199,7 @@ func TestListRecurrencesByProject_ExcludesArchivedProject(t *testing.T) {
 }
 
 func TestCreateRecurrence_DedupesTemplateLabels(t *testing.T) {
+	t.Parallel()
 	// Labels with duplicates, varied case, and extra whitespace.
 	_, _, _, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
@@ -205,6 +214,7 @@ func TestCreateRecurrence_DedupesTemplateLabels(t *testing.T) {
 }
 
 func TestCreateRecurrence_RejectsInvalidLabel(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, _ := d.CreateProject(ctx, "p")
@@ -228,6 +238,7 @@ func TestCreateRecurrence_RejectsInvalidLabel(t *testing.T) {
 // reading the cursor don't see NULL (which MaterializeNext docs as the
 // exhausted-state signal).
 func TestCreateRecurrence_SeedsNextOccurrenceCursor(t *testing.T) {
+	t.Parallel()
 	_, _, _, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "weekly review"},
@@ -241,6 +252,7 @@ func TestCreateRecurrence_SeedsNextOccurrenceCursor(t *testing.T) {
 // the initial cursor — if recurrence.Next can't evaluate the inputs, the row
 // must not be persisted.
 func TestCreateRecurrence_RejectsBadRecurrenceInputs(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "p")
@@ -276,6 +288,7 @@ func TestCreateRecurrence_RejectsBadRecurrenceInputs(t *testing.T) {
 }
 
 func TestMaterializeNext_NormalizesLegacyDuplicateLabels(t *testing.T) {
+	t.Parallel()
 	// Create a recurrence the normal way, then bypass dedupe normalization by
 	// overwriting template_labels directly with a duplicate-containing array.
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
@@ -338,6 +351,7 @@ func TestMaterializeNext_NormalizesLegacyDuplicateLabels(t *testing.T) {
 }
 
 func TestMaterializeNext_ReplacesLegacyGeneratedMetadataBeforeValidation(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "America/New_York",
 		Template: db.RecurrenceTemplate{Title: "legacy template"},

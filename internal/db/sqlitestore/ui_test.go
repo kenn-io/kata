@@ -16,30 +16,35 @@ import (
 )
 
 func TestUISnapshotMutationCursorContract(t *testing.T) {
+	t.Parallel()
 	dbtest.RunUISnapshotMutationCursorContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
 	})
 }
 
 func TestUISnapshotCompletenessContract(t *testing.T) {
+	t.Parallel()
 	dbtest.RunUISnapshotCompletenessContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
 	})
 }
 
 func TestUISnapshotAuthorityReuseContract(t *testing.T) {
+	t.Parallel()
 	dbtest.RunUISnapshotAuthorityReuseContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
 	})
 }
 
 func TestUISnapshotScopedAuthorityContract(t *testing.T) {
+	t.Parallel()
 	dbtest.RunUISnapshotScopedAuthorityContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
 	})
 }
 
 func TestUISnapshotAuthorityReuseSkipsProjectStats(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
@@ -61,6 +66,7 @@ func TestUISnapshotAuthorityReuseSkipsProjectStats(t *testing.T) {
 }
 
 func TestUISnapshotReadsProjectStatsInOneBatch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openUIStore(t)
 	for _, name := range []string{"example-project", "example-workspace", "spoke-project"} {
@@ -85,6 +91,7 @@ func TestUISnapshotReadsProjectStatsInOneBatch(t *testing.T) {
 }
 
 func TestUISnapshotReadsCollectionLinkDetailsInOneBatch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
@@ -119,24 +126,28 @@ func TestUISnapshotReadsCollectionLinkDetailsInOneBatch(t *testing.T) {
 }
 
 func TestUISnapshotReadyAssignmentExpiryContract(t *testing.T) {
+	t.Parallel()
 	dbtest.RunUISnapshotReadyAssignmentExpiryContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
 	})
 }
 
 func TestUISnapshotCollectionContract(t *testing.T) {
+	t.Parallel()
 	dbtest.RunUISnapshotCollectionContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
 	})
 }
 
 func TestUISnapshotViewScopeContract(t *testing.T) {
+	t.Parallel()
 	dbtest.RunUISnapshotViewScopeContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
 	})
 }
 
 func TestReadUILabelsForIssues(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
@@ -165,6 +176,7 @@ func TestReadUILabelsForIssues(t *testing.T) {
 }
 
 func TestReadUISnapshotConsistent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openUIStore(t)
 	first := createUIProject(t, store, "example-project")
@@ -256,6 +268,7 @@ func TestReadUISnapshotConsistent(t *testing.T) {
 }
 
 func TestReadUISnapshotPreservesUnresolvedGraphEndpoints(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
@@ -285,6 +298,7 @@ func TestReadUISnapshotPreservesUnresolvedGraphEndpoints(t *testing.T) {
 }
 
 func TestReadUIReferences(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openUIStore(t)
 	first := createUIProject(t, store, "example-project")
@@ -310,6 +324,7 @@ func TestReadUIReferences(t *testing.T) {
 }
 
 func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openUIStore(t)
 	firstProject := createUIProject(t, store, "alpha-project")
@@ -388,7 +403,6 @@ func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
 
 func openUIStore(t *testing.T) *Store {
 	t.Helper()
-	t.Setenv("KATA_HOME", t.TempDir())
 	store, err := Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
@@ -409,6 +423,7 @@ func createUIProject(t *testing.T, store *Store, name string) db.Project {
 // read must parse timestamps the way CommentsByIssue does instead of
 // normalizing only fixed-width canonical layouts in SQL.
 func TestReadUISnapshotOrdersLegacyCommentTimestamps(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "ui-legacy-comment-order")

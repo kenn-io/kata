@@ -18,7 +18,6 @@ import (
 func newTimedAssignmentStore(t *testing.T) (*Store, context.Context, db.Project, db.Issue, time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	t.Setenv("KATA_HOME", t.TempDir())
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
@@ -45,6 +44,7 @@ func newTimedAssignmentStore(t *testing.T) (*Store, context.Context, db.Project,
 // report a timed assignment as unexpiring while snapshotting destructive
 // verbs.
 func TestLookupIssueIncludingDeletedKeepsAssignmentExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue, wantExpiry := newTimedAssignmentStore(t)
 
 	tx, err := d.BeginTx(ctx, nil)
@@ -62,6 +62,7 @@ func TestLookupIssueIncludingDeletedKeepsAssignmentExpiry(t *testing.T) {
 // issue loader carries assignment_expires_on, matching the canonical issue
 // column order.
 func TestResolveClaimGateIssueKeepsAssignmentExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, project, issue, wantExpiry := newTimedAssignmentStore(t)
 
 	tx, err := d.BeginTx(ctx, nil)
@@ -78,6 +79,7 @@ func TestResolveClaimGateIssueKeepsAssignmentExpiry(t *testing.T) {
 // TestResolveClaimIssueKeepsAssignmentExpiry pins that the claim issue loader
 // carries assignment_expires_on, matching the canonical issue column order.
 func TestResolveClaimIssueKeepsAssignmentExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, project, issue, wantExpiry := newTimedAssignmentStore(t)
 
 	tx, err := d.BeginTx(ctx, nil)

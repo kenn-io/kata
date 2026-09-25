@@ -13,6 +13,7 @@ import (
 )
 
 func TestPatchIssueMetadata_HappyPath(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	res, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
@@ -30,6 +31,7 @@ func TestPatchIssueMetadata_HappyPath(t *testing.T) {
 }
 
 func TestPatchIssueMetadata_StaleRevisionReturns409(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	_, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
@@ -45,6 +47,7 @@ func TestPatchIssueMetadata_StaleRevisionReturns409(t *testing.T) {
 }
 
 func TestPatchIssueMetadata_ValueGuardRejectsStaleValueWithoutMutation(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	seed, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
@@ -78,6 +81,7 @@ func TestPatchIssueMetadata_ValueGuardRejectsStaleValueWithoutMutation(t *testin
 }
 
 func TestPatchIssueMetadata_AbsentGuardIsCheckedInsideMutation(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	first, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
@@ -109,6 +113,7 @@ func TestPatchIssueMetadata_AbsentGuardIsCheckedInsideMutation(t *testing.T) {
 }
 
 func TestPatchIssueMetadata_EmptyDiffNoEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	// First patch sets the key (revision bumps).
@@ -142,6 +147,7 @@ func TestPatchIssueMetadata_EmptyDiffNoEvent(t *testing.T) {
 }
 
 func TestPatchIssueMetadata_InvalidKeyValueRejected(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	_, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
@@ -156,6 +162,7 @@ func TestPatchIssueMetadata_InvalidKeyValueRejected(t *testing.T) {
 // TestPatchIssueMetadata_UnknownKeyAccepted: keys outside the reserved set
 // are accepted opaquely and persist into the metadata blob.
 func TestPatchIssueMetadata_UnknownKeyAccepted(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	res, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
@@ -170,6 +177,7 @@ func TestPatchIssueMetadata_UnknownKeyAccepted(t *testing.T) {
 }
 
 func TestPatchProjectMetadata_HappyPath(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "p")
@@ -190,6 +198,7 @@ func TestPatchProjectMetadata_HappyPath(t *testing.T) {
 }
 
 func TestPatchProjectMetadata_StaleRevisionReturns409(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, _ := d.CreateProject(ctx, "p")
@@ -204,6 +213,7 @@ func TestPatchProjectMetadata_StaleRevisionReturns409(t *testing.T) {
 // TestPatchProjectMetadata_UnknownKeyAccepted: project metadata accepts
 // unknown keys opaquely, matching the issue side.
 func TestPatchProjectMetadata_UnknownKeyAccepted(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, _ := d.CreateProject(ctx, "p")
@@ -217,6 +227,7 @@ func TestPatchProjectMetadata_UnknownKeyAccepted(t *testing.T) {
 }
 
 func TestPatchProjectMetadata_EmptyDiffNoEvent(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, _ := d.CreateProject(ctx, "p")
@@ -238,6 +249,7 @@ func TestPatchProjectMetadata_EmptyDiffNoEvent(t *testing.T) {
 }
 
 func TestDesignateInboxProject_RollsBackWhenAssignmentFails(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	previous, err := d.CreateProject(ctx, "previous-inbox")
@@ -274,6 +286,7 @@ func TestDesignateInboxProject_RollsBackWhenAssignmentFails(t *testing.T) {
 }
 
 func TestPatchIssueMetadata_ClearKeyWithNull(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	// Set a key first.

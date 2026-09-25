@@ -17,6 +17,7 @@ import (
 )
 
 func TestImportReplayInsertsGitHubSyncState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	target := openTestDB(t)
 	recs := []db.ImportRecord{
@@ -83,6 +84,7 @@ func TestImportReplayInsertsGitHubSyncState(t *testing.T) {
 }
 
 func TestImportReplayCanPreserveIssueSyncBindingEnabledForTrustedCutover(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	target := openTestDB(t)
 	recs := []db.ImportRecord{
@@ -121,6 +123,7 @@ func TestImportReplayCanPreserveIssueSyncBindingEnabledForTrustedCutover(t *test
 // fresh DB, then asserts table counts match the source for each table the
 // fixture touches.
 func TestImportReplayInsertsEveryEntity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src, _, p, issue := setupTestIssue(t)
 	other, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "b", Author: "a"})
@@ -143,6 +146,7 @@ func TestImportReplayInsertsEveryEntity(t *testing.T) {
 }
 
 func TestImportReplayStoresTokenExpiryInSortableUTCFormat(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src := openTestDB(t)
 	expiresAt := time.Date(2026, time.September, 15, 12, 34, 56, 789000000, time.FixedZone("test", 2*60*60))
@@ -173,6 +177,7 @@ func TestImportReplayStoresTokenExpiryInSortableUTCFormat(t *testing.T) {
 // import into a fresh DB byte-for-byte on the columns that matter (uid, the
 // snapshot identity, the counts, and the SSE reset cursor).
 func TestImportReplayRoundTripsProjectPurgeLog(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src := openTestDB(t)
 	project, err := src.CreateProject(ctx, "spoke-project")
@@ -244,6 +249,7 @@ func scanRoundTripProjectPurgeLog(ctx context.Context, d *sqlitestore.Store, id 
 // import skips it (reported, not fatal) instead of failing the FK pass, and
 // importing the peer project's envelope later self-heals the edge once.
 func TestImportReplay_SkipsDanglingCrossProjectLink(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
@@ -292,6 +298,7 @@ func TestImportReplay_SkipsDanglingCrossProjectLink(t *testing.T) {
 // leaving exactly one row instead of tripping UNIQUE(id) or
 // UNIQUE(from_issue_id, to_issue_id, type).
 func TestImportReplay_DedupesRepeatedCrossProjectLink(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
@@ -325,6 +332,7 @@ func TestImportReplay_DedupesRepeatedCrossProjectLink(t *testing.T) {
 }
 
 func TestImportReplayRejectsEventHashComputedBeforeResolvedIssueUID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src, _, _, _ := setupTestIssue(t)
 	recs := collectImportRecords(t, ctx, src)
@@ -339,6 +347,7 @@ func TestImportReplayRejectsEventHashComputedBeforeResolvedIssueUID(t *testing.T
 }
 
 func TestImportReplayRecomputesLegacyEventHashAfterResolvedIssueUID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src, _, _, _ := setupTestIssue(t)
 	recs := collectImportRecords(t, ctx, src)
@@ -441,6 +450,7 @@ func tableCount(t *testing.T, ctx context.Context, d *sqlitestore.Store, table s
 // default-mode replay adopts the source's instance_uid, while NewInstance
 // preserves the target's (the value db.Open wrote on first open).
 func TestImportReplayInstanceUID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src, _, _, _ := setupTestIssue(t)
 	srcUID := src.InstanceUID()
@@ -464,6 +474,7 @@ func TestImportReplayInstanceUID(t *testing.T) {
 // while rows exist), so the assertion targets the persisted sqlite_sequence
 // row directly — the value reconcile is uniquely responsible for raising.
 func TestImportReplayReconcilesSequence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src, _, p, _ := setupTestIssue(t)
 	for range 3 {
@@ -519,6 +530,7 @@ func tableMax(t *testing.T, ctx context.Context, d *sqlitestore.Store, table str
 // loop (immediate constraint), which isolates the per-record rollback path
 // cleanly — a deferred-FK violation would only surface at commit.
 func TestImportReplayIsAtomic(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src, _, _, _ := setupTestIssue(t)
 	recs := collectImportRecords(t, ctx, src)
@@ -553,6 +565,7 @@ func TestImportReplayIsAtomic(t *testing.T) {
 // tagged-union validation: a malformed record (kind set but no payload) must
 // fail with a slice-ordinal-bearing error and leave the target untouched.
 func TestImportReplayRejectsMalformedRecord(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dst := openTestDB(t)
 	recs := []db.ImportRecord{
@@ -573,7 +586,7 @@ func TestImportReplayRejectsMalformedRecord(t *testing.T) {
 // skipped because the peer issue is absent. Without the fix, the FK check at
 // commit fails. With the fix, the mapping is silently skipped and a note is
 // emitted on stderr.
-func TestImportReplay_SkipsMappingForSkippedLink(t *testing.T) {
+func TestImportReplay_SkipsMappingForSkippedLink(t *testing.T) { //nolint:paralleltest // captureStderr swaps os.Stderr
 	ctx := context.Background()
 	src := openTestDB(t)
 	spoke, err := src.CreateProject(ctx, "spoke-project")
@@ -647,7 +660,7 @@ func captureStderr(t *testing.T) (*bytes.Buffer, func() *bytes.Buffer) {
 // TestImportReplay_StderrNotesMissingPeerOnly pins that the missing-peer
 // aggregate note is emitted when only missing-peer skips occur, and the
 // duplicate-skip note is absent.
-func TestImportReplay_StderrNotesMissingPeerOnly(t *testing.T) {
+func TestImportReplay_StderrNotesMissingPeerOnly(t *testing.T) { //nolint:paralleltest // captureStderr swaps os.Stderr
 	ctx := context.Background()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
@@ -677,7 +690,7 @@ func TestImportReplay_StderrNotesMissingPeerOnly(t *testing.T) {
 // TestImportReplay_StderrNotesDuplicateOnly pins that the duplicate-edge
 // aggregate note is emitted when only duplicate skips occur, and the
 // missing-peer note is absent.
-func TestImportReplay_StderrNotesDuplicateOnly(t *testing.T) {
+func TestImportReplay_StderrNotesDuplicateOnly(t *testing.T) { //nolint:paralleltest // captureStderr swaps os.Stderr
 	ctx := context.Background()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
@@ -716,7 +729,7 @@ func TestImportReplay_StderrNotesDuplicateOnly(t *testing.T) {
 
 // TestImportReplay_StderrNotesMixed pins that both aggregate notes are emitted
 // with the correct individual counts when both skip reasons occur in one replay.
-func TestImportReplay_StderrNotesMixed(t *testing.T) {
+func TestImportReplay_StderrNotesMixed(t *testing.T) { //nolint:paralleltest // captureStderr swaps os.Stderr
 	ctx := context.Background()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
@@ -771,6 +784,7 @@ func TestImportReplay_StderrNotesMixed(t *testing.T) {
 // recurrence_id, so at least one foreign_key_list index must resolve to a
 // known column, and an out-of-range fkid must return "".
 func TestFKColumnResolverResolvesIssuesProjectID(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	resolver := sqlitestore.NewFKColumnResolver(d)
@@ -805,6 +819,7 @@ func TestFKColumnResolverResolvesIssuesProjectID(t *testing.T) {
 // CreateProject does not validate (the daemon handler does), which is
 // exactly how a malicious envelope would be produced.
 func TestImportReplay_RejectsControlCharacterProjectName(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	src := openTestDB(t)
 	_, err := src.CreateProject(ctx, "evil\x1b]0;pwned\x07proj")
