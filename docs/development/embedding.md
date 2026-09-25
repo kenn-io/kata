@@ -9,7 +9,8 @@ The module root, `go.kenn.io/kata`, exposes kata as a listener-free application
 service. Use it when a Go application should own the HTTP server and process
 lifecycle instead of supervising a separate `kata daemon` process. The mounted
 handler serves the same [HTTP API](../reference/http-api.md) used by the CLI and
-TUI.
+TUI. Embedded services are API-only by default; importing `go.kenn.io/kata`
+does not include the browser application assets.
 
 The host application remains responsible for the listener, TLS, signal
 handling, and HTTP server shutdown. A `kata.Service` owns its storage handle and
@@ -143,7 +144,14 @@ token over plaintext non-loopback HTTP.
 
 ## Mount below a URL path
 
-Keep the browser application and API under one path with
+To include the bundled browser application, import `go.kenn.io/kata/webui`,
+call `webui.NewEmbeddedHandler()`, and pass the returned handler in
+`kata.Config.WebHandler`. The standalone `kata daemon` includes this handler
+automatically. Existing embedding hosts that serve the browser application
+must now select it explicitly. A custom `WebHandler` must serve public, data-free
+assets: Kata's bearer check protects API requests, not the static shell.
+
+Keep the API and any configured browser application under one path with
 `service.HandlerAt("/tools/tasks")`. Handle its returned error, then mount the
 handler behind the host's authentication middleware. Open `/tools/tasks/` to
 use the application.

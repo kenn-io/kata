@@ -27,7 +27,6 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/vector"
-	kataweb "go.kenn.io/kata/internal/web"
 )
 
 // ServerConfig wires the daemon's runtime dependencies. DB and StartedAt are
@@ -74,6 +73,10 @@ type ServerConfig struct {
 	// Token == "" disables bearer auth (appropriate for Unix-socket and
 	// loopback-TCP deployments).
 	Auth config.AuthConfig
+
+	// WebHandler serves optional public browser assets. Non-API paths bypass
+	// the bearer check. Nil keeps the server API-only without bundled assets.
+	WebHandler http.Handler
 
 	// WebSessions owns browser cookie+header session state. Nil keeps
 	// the browser-only routes and middleware disabled for embedded/API-only use.
@@ -269,11 +272,9 @@ func NewServer(cfg ServerConfig) *Server {
 	registerWebDaemonHandlers(mux, cfg)
 	registerOpenAPIYAML(mux, cfg.HostAccess)
 	registerPprofHandlers(mux)
-	webHandler, err := kataweb.NewEmbeddedHandler()
-	if err != nil {
-		panic(fmt.Errorf("build embedded web handler: %w", err))
+	if cfg.WebHandler != nil {
+		mux.Handle("/", cfg.WebHandler)
 	}
-	mux.Handle("/", webHandler)
 	applyErrorEnvelopeResponses(humaAPI.OpenAPI())
 	policy := cfg.authPolicy()
 	policy.SelfAuthenticatedRoutes = newSelfAuthenticatedRouteMatcher(
