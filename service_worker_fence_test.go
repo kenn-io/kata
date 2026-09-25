@@ -78,12 +78,15 @@ func TestServiceWorkerDenialFinalizesBeforeStopping(t *testing.T) {
 				defer cancel()
 				config := Config{DSN: filepath.Join(t.TempDir(), "service.db"), Access: allowWorkerFenceAccess{}}
 				driver, prefix := "sqlite", ""
+				// Run's other workers can hold the write lock when the callback records.
+				inspectionDSN := "file:" + config.DSN + "?_pragma=busy_timeout(5000)"
 				if backend == "postgres" {
 					dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 					t.Cleanup(cleanup)
 					config.DSN = dsn
 					config.Postgres = PostgresConfig{Schema: "kata", SchemaMode: PostgresSchemaBootstrap}
 					driver, prefix = "pgx", "kata."
+					inspectionDSN = dsn
 				}
 				rejected := errors.New("worker transaction rejected")
 				finishFailed := errors.New("host recording unavailable")
@@ -110,10 +113,6 @@ func TestServiceWorkerDenialFinalizesBeforeStopping(t *testing.T) {
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, service.Close()) })
 				issue := seedExpiredWorkerClaim(ctx, t, service)
-				inspectionDSN := config.DSN
-				if backend == "sqlite" {
-					inspectionDSN = "file:" + config.DSN + "?_pragma=busy_timeout(5000)"
-				}
 				inspection, err = sql.Open(driver, inspectionDSN)
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, inspection.Close()) })
