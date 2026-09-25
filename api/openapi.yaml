@@ -1720,6 +1720,14 @@ components:
         - writable
         - schema_revision
       type: object
+    GetIssueMetadataResponseBody:
+      additionalProperties: true
+      properties:
+        issue:
+          $ref: "#/components/schemas/IssueMetadataOut"
+      required:
+        - issue
+      type: object
     HealthResponseBody:
       additionalProperties: true
       properties:
@@ -2132,6 +2140,22 @@ components:
         - label
         - author
         - created_at
+      type: object
+    IssueMetadataOut:
+      additionalProperties: true
+      properties:
+        metadata:
+          additionalProperties: true
+          type: object
+        revision:
+          format: int64
+          type: integer
+        short_id:
+          type: string
+      required:
+        - short_id
+        - metadata
+        - revision
       type: object
     IssueOut:
       additionalProperties: true
@@ -7384,6 +7408,33 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
   /api/v1/projects/{project_id}/issues/{ref}/metadata:
+    get:
+      operationId: getIssueMetadata
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetIssueMetadataResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
     post:
       operationId: patchIssueMetadata
       parameters:

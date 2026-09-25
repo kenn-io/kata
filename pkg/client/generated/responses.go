@@ -329,6 +329,10 @@ type DeleteLinkResponse = MutationResponseBody
 
 type DeleteLinkErrorResponse = ErrorEnvelope
 
+type GetIssueMetadataResponse = GetIssueMetadataResponseBody
+
+type GetIssueMetadataErrorResponse = ErrorEnvelope
+
 type PatchIssueMetadataResponse = PatchIssueMetadataResponseBody
 
 type PatchIssueMetadataErrorResponse = ErrorEnvelope
@@ -1042,6 +1046,13 @@ type DeleteLinkResp struct {
 	StatusCode   int
 	JSON200      *DeleteLinkResponse
 	Headers200   *DeleteLinkResp200Headers
+}
+
+type GetIssueMetadataResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetIssueMetadataResponse
 }
 
 type PatchIssueMetadataResp200Headers struct {

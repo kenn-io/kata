@@ -24,8 +24,8 @@ func (s *Store) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, erro
 		return tx, nil
 	}
 	if err := db.ApplyTransactionFence(ctx, tx); err != nil {
-		_ = tx.Rollback()
-		return nil, err
+		rollbackErr := tx.Rollback()
+		return nil, db.FinishTransactionRollback(ctx, err, rollbackErr)
 	}
 	return tx, nil
 }

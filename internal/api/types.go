@@ -1594,6 +1594,28 @@ type MetadataPatchGuard struct {
 	IfAbsent *bool   `json:"if_absent,omitempty"`
 }
 
+// IssueMetadataOut is the narrow local issue shape returned by the metadata
+// read endpoint. It deliberately excludes fields whose hydration may require
+// relationship or federation work.
+type IssueMetadataOut struct {
+	ShortID  string        `json:"short_id"`
+	Metadata JSONRawObject `json:"metadata"`
+	Revision int64         `json:"revision"`
+}
+
+// GetIssueMetadataRequest is GET /api/v1/projects/{project_id}/issues/{ref}/metadata.
+type GetIssueMetadataRequest struct {
+	ProjectID int64  `path:"project_id" required:"true"`
+	Ref       string `path:"ref" required:"true"`
+}
+
+// GetIssueMetadataResponse returns issue metadata from the local projection.
+type GetIssueMetadataResponse struct {
+	Body struct {
+		Issue IssueMetadataOut `json:"issue"`
+	}
+}
+
 // PatchIssueMetadataRequest is POST /api/v1/projects/{project_id}/issues/{ref}/metadata.
 // If-Match is optional: absent means an unconditional last-write-wins patch;
 // present it must be the current `"rev-N"` ETag (412 on mismatch).

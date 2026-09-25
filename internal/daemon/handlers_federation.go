@@ -735,6 +735,8 @@ func federationIngestEventsToDB(events []api.FederationIngestEventEnvelope) []db
 
 func federationIngestError(err error) error {
 	switch {
+	case errors.Is(err, db.ErrTransactionFinalizationFailed):
+		return internalAPIError(err)
 	case errors.Is(err, ErrHostAccessDenied):
 		return federationCredentialDenied()
 	case errors.Is(err, db.ErrRemoteEventConflict):

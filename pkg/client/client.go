@@ -1,5 +1,13 @@
 // Package client exposes the generated kata daemon API client with constructors
 // that match kata's existing daemon transport and authentication modes.
+//
+// Use Discover to reach the daemon the kata CLI would use, or pass an explicit
+// endpoint to a constructor. Endpoints are HTTP(S) origins or unix:///path
+// Unix sockets.
+//
+// Operations return an error for any non-success response. The daemon's
+// structured error is available with errors.AsType[generated.ErrorEnvelope],
+// and StatusCode reports the HTTP status.
 package client
 
 import (
@@ -96,10 +104,17 @@ func WithTrustedActor(header, actor string) Option {
 // configuration. Use NewWithGlobalAuth, NewWithBearer, or NewForTarget when
 // the daemon endpoint requires kata auth.
 func New(baseURL string, opts ...Option) (*Client, error) {
-	return newGeneratedClient(baseURL, collectOptions(opts...))
+	merged := collectOptions(opts...)
+	if socket, ok, err := internalclient.UnixSocketPath(baseURL); err != nil {
+		return nil, err
+	} else if ok {
+		return newUnixClient(socket, "", merged)
+	}
+	return newGeneratedClient(baseURL, merged)
 }
 
-// NewWithHTTPClient creates a client using the supplied HTTP client.
+// NewWithHTTPClient creates a client using the supplied HTTP client. The
+// client owns transport selection, so baseURL must be an HTTP(S) origin.
 func NewWithHTTPClient(baseURL string, httpClient *http.Client, opts ...Option) (*Client, error) {
 	merged := collectOptions(opts...)
 	merged.httpClient = httpClient
@@ -111,6 +126,11 @@ func NewWithHTTPClient(baseURL string, httpClient *http.Client, opts ...Option) 
 // and Unix-socket transport behavior match the first-party CLI/TUI path.
 func NewWithGlobalAuth(ctx context.Context, baseURL string, opts ...Option) (*Client, error) {
 	merged := collectOptions(opts...)
+	if socket, ok, err := internalclient.UnixSocketPath(baseURL); err != nil {
+		return nil, err
+	} else if ok {
+		return newUnixClient(socket, internalclient.GlobalAuthToken(), merged)
+	}
 	httpClient, err := internalclient.NewHTTPClient(ctx, baseURL, internalOpts(merged.transport))
 	if err != nil {
 		return nil, err
@@ -124,6 +144,11 @@ func NewWithGlobalAuth(ctx context.Context, baseURL string, opts ...Option) (*Cl
 // behavior.
 func NewWithBearer(ctx context.Context, baseURL, token string, opts ...Option) (*Client, error) {
 	merged := collectOptions(opts...)
+	if socket, ok, err := internalclient.UnixSocketPath(baseURL); err != nil {
+		return nil, err
+	} else if ok {
+		return newUnixClient(socket, token, merged)
+	}
 	httpClient, err := internalclient.NewHTTPClientWithBearer(ctx, baseURL, token, internalOpts(merged.transport))
 	if err != nil {
 		return nil, err
@@ -137,6 +162,11 @@ func NewWithBearer(ctx context.Context, baseURL, token string, opts ...Option) (
 // the supplied TargetAuth is the complete bearer policy for this client.
 func NewForTarget(ctx context.Context, baseURL string, auth TargetAuth, opts ...Option) (*Client, error) {
 	merged := collectOptions(opts...)
+	if socket, ok, err := internalclient.UnixSocketPath(baseURL); err != nil {
+		return nil, err
+	} else if ok {
+		return newUnixClient(socket, auth.Token, merged)
+	}
 	httpClient, err := internalclient.NewHTTPClientForTarget(ctx, baseURL,
 		internalclient.TargetAuth{
 			Token:               auth.Token,
@@ -149,6 +179,17 @@ func NewForTarget(ctx context.Context, baseURL string, auth TargetAuth, opts ...
 	}
 	merged.httpClient = httpClient
 	return newGeneratedClient(baseURL, merged)
+}
+
+// newUnixClient builds a client that dials a daemon's Unix socket and sends
+// token as bearer auth when it is non-empty.
+func newUnixClient(socket, token string, opts options) (*Client, error) {
+	httpClient, err := internalclient.NewHTTPClientForUnixSocket(socket, token, internalOpts(opts.transport))
+	if err != nil {
+		return nil, err
+	}
+	opts.httpClient = httpClient
+	return newGeneratedClient(internalclient.UnixBase, opts)
 }
 
 func collectOptions(opts ...Option) options {

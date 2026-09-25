@@ -436,7 +436,7 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 		transactionFence = func(ctx context.Context, transaction db.Transaction) error {
 			err := decision.TransactionFence(ctx, transaction)
 			if errors.Is(err, ErrAccessDenied) {
-				return daemon.ErrHostAccessDenied
+				return errors.Join(daemon.ErrHostAccessDenied, err)
 			}
 			return err
 		}
@@ -482,7 +482,7 @@ func (a hostAccessControllerAdapter) Authorize(
 		transactionFence = func(ctx context.Context, transaction db.Transaction) error {
 			err := decision.TransactionFence(ctx, transaction)
 			if errors.Is(err, ErrAccessDenied) {
-				return daemon.ErrHostAccessDenied
+				return errors.Join(daemon.ErrHostAccessDenied, err)
 			}
 			return err
 		}
@@ -519,8 +519,9 @@ func (s *Service) Run(ctx context.Context) error {
 			fenceCtx context.Context,
 			transaction db.Transaction,
 		) error {
-			return fence.record(s.workerTransactionFence(fenceCtx, transaction))
+			return s.workerTransactionFence(fenceCtx, transaction)
 		})
+		runCtx = db.WithTransactionRollbackObserver(runCtx, func(err error) { _ = fence.record(err) })
 	}
 	done := make(chan struct{})
 	s.running = true
@@ -651,14 +652,14 @@ func signalWake(ch chan<- struct{}) {
 	}
 }
 
-// fenceRecorder keeps the first worker-transaction-fence rejection and cancels
-// the run so the remaining workers stop — the cancel is load-bearing, it is
-// what unwinds the other two workers. Once Run begins its own unwind,
+// fenceRecorder keeps the first finalized worker-transaction-fence rejection and
+// cancels the run after rollback and host cleanup so the remaining workers stop.
+// Once Run begins its own unwind,
 // cancellation-only fence results caused by that cancel are ignored; genuine
 // failures still take priority over the stop that began the unwind.
 //
 // Recording replaces the old report channel plus its non-blocking re-drain:
-// every worker's exit is received after its fence callback has returned, so
+// every worker's exit is received after rollback finalization has returned, so
 // reading first() once the drain is complete cannot race a record.
 type fenceRecorder struct {
 	mu        sync.Mutex

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 )
 
 // DaemonSource names the input that selected a daemon. The source is carried
@@ -131,6 +132,15 @@ func (d ResolvedDaemon) withGlobalAuth() ResolvedDaemon {
 	return d
 }
 
+// GlobalAuthToken returns the bearer token selected by global auth
+// resolution: KATA_AUTH_TOKEN, then [auth].token.
+func GlobalAuthToken() string {
+	if override := authTokenEnvOverride(); override != "" {
+		return override
+	}
+	return resolveAuthConfig().Token
+}
+
 func (d ResolvedDaemon) withRemoteTargetAuth(token string, allowInsecure bool) ResolvedDaemon {
 	auth := resolveAuthConfig()
 	d.Token = token
@@ -195,6 +205,21 @@ func EnsureResolvedNamed(ctx context.Context, name string) (ResolvedDaemon, erro
 // probing a remote. Named local daemons retain discovery and auto-start.
 func PrepareResolvedNamed(ctx context.Context, name string) (ResolvedDaemon, error) {
 	return resolveNamedDaemonMode(ctx, name, namedRequestTarget)
+}
+
+// DiscoverResolvedInWorkspace selects the daemon that
+// PrepareResolvedInWorkspace would, but never starts, restarts, or
+// version-checks a local daemon. ok is false when no remote is configured and
+// no live local runtime exists.
+func DiscoverResolvedInWorkspace(ctx context.Context, workspaceStart string) (ResolvedDaemon, bool, error) {
+	if resolved, ok, err := resolveRemoteSelection(ctx, workspaceStart, remoteRequestTarget); err != nil || ok {
+		return resolved, ok, err
+	}
+	namespace, err := daemon.NewNamespace()
+	if err != nil {
+		return ResolvedDaemon{}, false, err
+	}
+	return DiscoverResolved(ctx, namespace.DataDir)
 }
 
 // DiscoverResolved returns the first live local runtime with its exact

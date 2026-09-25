@@ -58,29 +58,49 @@ func TestTransactionFenceSkipsExplicitReadOnlyTransactions(t *testing.T) {
 
 func TestTransactionFenceRollsBackAutocommitAndImmediateMutations(t *testing.T) {
 	d, ctx, _, issue := setupSoftDeletedIssue(t)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	d.SetMaxOpenConns(1)
 	_, err := d.ExecContext(ctx, `CREATE TABLE fence_markers (operation TEXT NOT NULL)`)
 	require.NoError(t, err)
 	_, err = d.AddLabel(ctx, issue.ID, "retained", "tester")
 	require.NoError(t, err)
 
 	rejected := errors.New("test transaction fence rejected")
+	finishFailed := errors.New("host record unavailable")
+	callbacks := 0
 	fenced := db.WithTransactionFence(ctx, func(ctx context.Context, tx db.Transaction) error {
 		_, insertErr := tx.ExecContext(ctx,
 			`INSERT INTO fence_markers(operation) VALUES(?)`, "rejected")
 		if insertErr != nil {
 			return insertErr
 		}
-		return rejected
+		return db.AfterTransactionRollback(rejected, func(ctx context.Context) error {
+			callbacks++
+			var markers int
+			if err := d.QueryRowContext(ctx, `SELECT count(*) FROM fence_markers`).Scan(&markers); err != nil {
+				return err
+			}
+			assert.Zero(t, markers, "rollback must finish before the callback takes the connection")
+			return finishFailed
+		})
+	})
+	fenced = db.WithAdditionalTransactionFence(fenced, func(context.Context, db.Transaction) error {
+		t.Error("an earlier denial must skip the next fence")
+		return nil
 	})
 
 	err = d.RemoveLabel(fenced, issue.ID, "retained")
 	require.ErrorIs(t, err, rejected)
+	require.ErrorIs(t, err, finishFailed)
 	hasLabel, err := d.HasLabel(ctx, issue.ID, "retained")
 	require.NoError(t, err)
 	assert.True(t, hasLabel)
 
 	_, err = d.PurgeIssue(fenced, issue.ID, "tester", nil)
 	require.ErrorIs(t, err, rejected)
+	require.ErrorIs(t, err, finishFailed)
+	assert.Equal(t, 2, callbacks)
 	retained, err := d.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, issue.ID, retained.ID)

@@ -81,6 +81,8 @@ import type {
   GetFederationProjectMetadataPathParameters,
   GetFederationStatusParams,
   GetIssueLeaseStatusPathParameters,
+  GetIssueMetadataPathParameters,
+  GetIssueMetadataResponseBody,
   GetIssueSyncStatusPathParameters,
   GetProjectFederationPathParameters,
   GetProjectFederationStatusPathParameters,
@@ -3907,6 +3909,41 @@ export const deleteLink = async (
   return orvalFetch<deleteLinkResponse>(getDeleteLinkUrl({ projectId, ref, linkId }, params), {
     ...options,
     method: 'DELETE',
+  })
+}
+
+export type getIssueMetadataResponse200 = {
+  data: GetIssueMetadataResponseBody
+  status: 200
+}
+
+export type getIssueMetadataResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getIssueMetadataResponseSuccess = getIssueMetadataResponse200 & {
+  headers: Headers
+}
+export type getIssueMetadataResponseError = getIssueMetadataResponseDefault & {
+  headers: Headers
+}
+
+export type getIssueMetadataResponse =
+  | getIssueMetadataResponseSuccess
+  | getIssueMetadataResponseError
+
+export const getGetIssueMetadataUrl = ({ projectId, ref }: GetIssueMetadataPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/metadata`
+}
+
+export const getIssueMetadata = async (
+  { projectId, ref }: GetIssueMetadataPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getIssueMetadataResponse> => {
+  return orvalFetch<getIssueMetadataResponse>(getGetIssueMetadataUrl({ projectId, ref }), {
+    ...options,
+    method: 'GET',
   })
 }
 
