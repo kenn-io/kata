@@ -1164,6 +1164,8 @@ func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
 
 	child := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
 	child.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
+	stdin, err := child.StdinPipe()
+	require.NoError(t, err)
 	require.NoError(t, child.Start())
 	exited := make(chan struct{})
 	go func() {
@@ -1171,6 +1173,7 @@ func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
 		close(exited)
 	}()
 	t.Cleanup(func() {
+		_ = stdin.Close()
 		_ = child.Process.Kill()
 		<-exited
 	})
