@@ -35,7 +35,7 @@ func validatePrivateDirectory(path string, _ os.FileInfo) error {
 		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
 			return fmt.Errorf("token file directory %s has an unsupported ACL entry", path)
 		}
-		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart)) //nolint:gosec // G103: the ACE stores its SID inline at SidStart; x/sys has no safe accessor.
 		trusted := sid.Equals(user)
 		for _, candidate := range allowed {
 			trusted = trusted || sid.Equals(candidate)
@@ -48,11 +48,12 @@ func validatePrivateDirectory(path string, _ os.FileInfo) error {
 }
 
 func privateDirectoryTrustees() (*windows.SID, []*windows.SID, error) {
-	token, err := windows.OpenCurrentProcessToken()
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer token.Close()
+	defer func() { _ = token.Close() }()
 	user, err := token.GetTokenUser()
 	if err != nil {
 		return nil, nil, err
