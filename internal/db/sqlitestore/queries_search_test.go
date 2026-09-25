@@ -9,6 +9,7 @@ import (
 )
 
 func TestFTS_IssueInsertIsIndexed(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	createTesterIssueWithBody(ctx, t, d, p.ID, "fix login crash", "stack trace here")
 
@@ -19,6 +20,7 @@ func TestFTS_IssueInsertIsIndexed(t *testing.T) {
 }
 
 func TestFTS_IssueUpdateReindexes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "old title", "initial body content")
 
@@ -35,6 +37,7 @@ func TestFTS_IssueUpdateReindexes(t *testing.T) {
 }
 
 func TestFTS_CommentInsertReindexes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "boring", "body")
 	addTesterComment(ctx, t, d, issue.ID, "watermelon")
@@ -44,6 +47,7 @@ func TestFTS_CommentInsertReindexes(t *testing.T) {
 }
 
 func TestFTS_CommentUpdateReindexes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "boring", "body")
 	comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{
@@ -63,6 +67,7 @@ func TestFTS_CommentUpdateReindexes(t *testing.T) {
 }
 
 func TestSearchFTS_RanksByBM25(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	// Three issues. Only the first two mention "login"; the second has it
@@ -90,6 +95,7 @@ func TestSearchFTS_RanksByBM25(t *testing.T) {
 }
 
 func TestSearchFTS_MatchedIn_Comments(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	// Issue body does NOT contain the search term; only the comment does.
@@ -104,6 +110,7 @@ func TestSearchFTS_MatchedIn_Comments(t *testing.T) {
 }
 
 func TestSearchFTS_MatchedIn_AllThreeColumns(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "watermelon title", "watermelon body")
@@ -117,6 +124,7 @@ func TestSearchFTS_MatchedIn_AllThreeColumns(t *testing.T) {
 }
 
 func TestSearchFTS_FiltersByProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p1 := setupTestProject(t)
 	p2 := createProject(ctx, t, d, "p2")
 
@@ -130,6 +138,7 @@ func TestSearchFTS_FiltersByProject(t *testing.T) {
 }
 
 func TestSearchFTS_PopulatesIssueUIDs(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login bug", "")
 
@@ -141,6 +150,7 @@ func TestSearchFTS_PopulatesIssueUIDs(t *testing.T) {
 }
 
 func TestSearchFTS_ExcludesDeletedByDefault(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	keep := createTesterIssueWithBody(ctx, t, d, p.ID, "keep login", "")
 	gone := createTesterIssueWithBody(ctx, t, d, p.ID, "deleted login", "")
@@ -164,6 +174,7 @@ func TestSearchFTS_ExcludesDeletedByDefault(t *testing.T) {
 }
 
 func TestSearchFTS_EmptyQueryReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	createTesterIssueWithBody(ctx, t, d, p.ID, "anything", "")
 
@@ -173,6 +184,7 @@ func TestSearchFTS_EmptyQueryReturnsEmpty(t *testing.T) {
 }
 
 func TestSearchFTS_LimitCappedAt200(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	// Create 250 matching issues. The cap must clamp the result set to 200
 	// regardless of how large a limit the caller passes; without the cap, this
@@ -186,6 +198,7 @@ func TestSearchFTS_LimitCappedAt200(t *testing.T) {
 }
 
 func TestSearchFTS_MultiTermImplicitAND(t *testing.T) {
+	t.Parallel()
 	// Multi-term queries split on whitespace and AND the terms. "login Safari"
 	// must match an issue that contains both terms even when they aren't
 	// adjacent — the previous single-phrase wrap missed this.
@@ -202,6 +215,7 @@ func TestSearchFTS_MultiTermImplicitAND(t *testing.T) {
 }
 
 func TestSearchFTS_QueryEscaping(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	createTesterIssueWithBody(ctx, t, d, p.ID, `fix "login" crash`, "")
 
@@ -217,6 +231,7 @@ func TestSearchFTS_QueryEscaping(t *testing.T) {
 // must use OR semantics so each column reports as matched. With the old
 // AND-based per-column subqueries this returned matched_in=[].
 func TestSearchFTS_MatchedIn_CrossColumn(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	createTesterIssueWithBody(ctx, t, d, p.ID, "login bug", "Safari issue")
 
@@ -232,6 +247,7 @@ func TestSearchFTS_MatchedIn_CrossColumn(t *testing.T) {
 // token and doubles embedded quotes, which neutralizes NEAR/OR/AND/NOT and
 // the `*` prefix-match marker.
 func TestSearchFTS_OperatorWordsAsLiterals(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	createTesterIssueWithBody(ctx, t, d, p.ID, "do NOT merge yet", "blocked OR waiting")
 	createTesterIssue(ctx, t, d, p.ID, "merge after review")
@@ -276,6 +292,7 @@ func TestSearchFTS_OperatorWordsAsLiterals(t *testing.T) {
 // can decide. With AND, "login crash Safari critical" excludes a row that
 // only contains "login crash Safari" (no "critical").
 func TestSearchFTSAny_FindsNearDuplicates(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	createTesterIssueWithBody(ctx, t, d, p.ID, "login crash on Safari", "stack trace")
 

@@ -27,6 +27,7 @@ func makeIssueWithMetadata(t *testing.T, d *sqlitestore.Store, projectID int64, 
 // TestListIssues_MetaPresenceFilter pins that `key` alone matches any issue
 // where that flat key is present in top-level metadata.
 func TestListIssues_MetaPresenceFilter(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	with := makeIssueWithMetadata(t, d, p.ID, "has key", map[string]jsontext.Value{
 		"work.attention": jsontext.Value(`"needs-human"`),
@@ -47,6 +48,7 @@ func TestListIssues_MetaPresenceFilter(t *testing.T) {
 // TestListIssues_MetaEqualityFilter pins that `key=value` matches only issues
 // whose string-valued key equals value.
 func TestListIssues_MetaEqualityFilter(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	stuck := makeIssueWithMetadata(t, d, p.ID, "stuck", map[string]jsontext.Value{
 		"work.attention": jsontext.Value(`"stuck"`),
@@ -69,6 +71,7 @@ func TestListIssues_MetaEqualityFilter(t *testing.T) {
 // {"work":{"branch":...}}. json_each iterates only top-level keys, so the
 // nested issue exposes key "work" (an object), never "work.branch".
 func TestListIssues_MetaFlatDottedKeyDoesNotTraverseNested(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	flat := makeIssueWithMetadata(t, d, p.ID, "flat", map[string]jsontext.Value{
 		"work.branch": jsontext.Value(`"feature/x"`),
@@ -99,6 +102,7 @@ func TestListIssues_MetaFlatDottedKeyDoesNotTraverseNested(t *testing.T) {
 // TestListIssues_MetaFiltersAndTogether pins that multiple meta filters AND,
 // and combine with status/label filters.
 func TestListIssues_MetaFiltersAndTogether(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	match := makeIssueWithMetadata(t, d, p.ID, "match", map[string]jsontext.Value{
 		"work.attention": jsontext.Value(`"stuck"`),

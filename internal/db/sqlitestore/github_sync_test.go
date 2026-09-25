@@ -14,6 +14,7 @@ import (
 )
 
 func TestGitHubSyncSchemaVersion(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 
@@ -25,6 +26,7 @@ func TestGitHubSyncSchemaVersion(t *testing.T) {
 }
 
 func TestGitHubSyncEnableAndReenableSameRepository(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	initial := githubSyncBindingParams(p.ID)
 
@@ -80,6 +82,7 @@ func TestGitHubSyncEnableAndReenableSameRepository(t *testing.T) {
 }
 
 func TestGitHubSyncEnableDifferentRepositoryRejected(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	_, err := d.UpsertIssueSyncBinding(ctx, githubSyncBindingParams(p.ID))
 	require.NoError(t, err)
@@ -94,6 +97,7 @@ func TestGitHubSyncEnableDifferentRepositoryRejected(t *testing.T) {
 }
 
 func TestGitHubSyncDisablePreservesStatusAndMappings(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	started := time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC)
@@ -141,6 +145,7 @@ func TestGitHubSyncDisablePreservesStatusAndMappings(t *testing.T) {
 }
 
 func TestGitHubSyncDueListing(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	now := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)
 	due := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
@@ -199,6 +204,7 @@ func TestGitHubSyncDueListing(t *testing.T) {
 }
 
 func TestGitHubSyncClaimRejectsBindingDisabledOrProjectArchivedAfterListing(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	now := time.Date(2026, 6, 23, 12, 30, 0, 0, time.UTC)
 	disabled := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
@@ -229,6 +235,7 @@ func TestGitHubSyncClaimRejectsBindingDisabledOrProjectArchivedAfterListing(t *t
 }
 
 func TestGitHubSyncClaimRejectsDifferentProvider(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	bindingParams := issueSyncBindingParams(p.ID, "linear", "linear:team-1", "team-1", "example-workspace/team-1")
 	binding, err := d.UpsertIssueSyncBinding(ctx, bindingParams)
@@ -246,6 +253,7 @@ func TestGitHubSyncClaimRejectsDifferentProvider(t *testing.T) {
 }
 
 func TestGitHubSyncClaimHonorsInFlightAndStaleCutoff(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	now := time.Date(2026, 6, 23, 13, 0, 0, 0, time.UTC)
@@ -266,6 +274,7 @@ func TestGitHubSyncClaimHonorsInFlightAndStaleCutoff(t *testing.T) {
 }
 
 func TestGitHubSyncRecordSuccessAndError(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	started := time.Date(2026, 6, 23, 14, 0, 0, 0, time.UTC)
@@ -319,6 +328,7 @@ func TestGitHubSyncRecordSuccessAndError(t *testing.T) {
 }
 
 func TestGitHubSyncRecordSuccessRejectsStaleWorker(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	firstStarted := time.Date(2026, 6, 23, 15, 0, 0, 0, time.UTC)
@@ -354,6 +364,7 @@ func TestGitHubSyncRecordSuccessRejectsStaleWorker(t *testing.T) {
 }
 
 func TestGitHubSyncRecordErrorRejectsStaleWorker(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	firstStarted := time.Date(2026, 6, 23, 16, 0, 0, 0, time.UTC)
@@ -383,6 +394,7 @@ func TestGitHubSyncRecordErrorRejectsStaleWorker(t *testing.T) {
 }
 
 func TestGitHubSyncRefreshRepositoryPreservesSourceIdentity(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 
@@ -401,6 +413,7 @@ func TestGitHubSyncRefreshRepositoryPreservesSourceIdentity(t *testing.T) {
 }
 
 func TestGitHubSyncEnableAllowsFederationHub(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	_, err := d.EnableProjectFederation(ctx, p.ID, "tester")
 	require.NoError(t, err)
@@ -412,6 +425,7 @@ func TestGitHubSyncEnableAllowsFederationHub(t *testing.T) {
 }
 
 func TestGitHubSyncEnableRejectsFederationSpoke(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -429,6 +443,7 @@ func TestGitHubSyncEnableRejectsFederationSpoke(t *testing.T) {
 }
 
 func TestEnableProjectFederationAllowsIssueSyncBinding(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	_ = mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 
@@ -438,6 +453,7 @@ func TestEnableProjectFederationAllowsIssueSyncBinding(t *testing.T) {
 }
 
 func TestEnableProjectFederationAllowsDisabledIssueSyncBinding(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	_ = mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	_, err := d.DisableIssueSyncBinding(ctx, p.ID)
@@ -448,6 +464,7 @@ func TestEnableProjectFederationAllowsDisabledIssueSyncBinding(t *testing.T) {
 }
 
 func TestGitHubSyncImportGuardRejectsDisabledBinding(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	started := time.Date(2026, 6, 23, 17, 0, 0, 0, time.UTC)
@@ -466,6 +483,7 @@ func TestGitHubSyncImportGuardRejectsDisabledBinding(t *testing.T) {
 }
 
 func TestGitHubSyncImportGuardRejectsClaimInvalidatedByDisableReenable(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	started := time.Date(2026, 6, 23, 17, 15, 0, 0, time.UTC)
@@ -489,6 +507,7 @@ func TestGitHubSyncImportGuardRejectsClaimInvalidatedByDisableReenable(t *testin
 }
 
 func TestGitHubSyncImportGuardRejectsStaleClaim(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	firstStarted := time.Date(2026, 6, 23, 17, 30, 0, 0, time.UTC)
@@ -509,6 +528,7 @@ func TestGitHubSyncImportGuardRejectsStaleClaim(t *testing.T) {
 }
 
 func TestGitHubSyncImportGuardAllowsFederationHub(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 	started := time.Date(2026, 6, 23, 18, 0, 0, 0, time.UTC)
@@ -528,6 +548,7 @@ func TestGitHubSyncImportGuardAllowsFederationHub(t *testing.T) {
 }
 
 func TestUpsertFederationBindingAllowsHubIssueSyncBinding(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	_ = mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 
@@ -543,6 +564,7 @@ func TestUpsertFederationBindingAllowsHubIssueSyncBinding(t *testing.T) {
 }
 
 func TestUpsertFederationBindingRejectsSpokeIssueSyncBinding(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	_ = mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 
@@ -559,6 +581,7 @@ func TestUpsertFederationBindingRejectsSpokeIssueSyncBinding(t *testing.T) {
 }
 
 func TestAdoptProjectIntoFederationRejectsIssueSyncBinding(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	_ = mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
 
@@ -654,6 +677,7 @@ func gitHubSyncBindingIDs(bindings []db.IssueSyncBinding) []int64 {
 }
 
 func TestGitHubSyncMissingBindingReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 

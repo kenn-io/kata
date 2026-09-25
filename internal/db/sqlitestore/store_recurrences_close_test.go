@@ -10,6 +10,7 @@ import (
 )
 
 func TestCloseDone_MaterializesNextRecurrence(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "Pay rent"},
@@ -49,6 +50,7 @@ func TestCloseDone_MaterializesNextRecurrence(t *testing.T) {
 }
 
 func TestCloseDone_DisallowsRecurrenceEffectsAtomically(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "Delegated recurring work"},
@@ -72,6 +74,7 @@ func TestCloseDone_DisallowsRecurrenceEffectsAtomically(t *testing.T) {
 }
 
 func TestCloseDone_ClaimAuditEventsAreReturnedOnceBeforeMaterialization(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "Claimed recurrence"},
@@ -99,6 +102,7 @@ func TestCloseDone_ClaimAuditEventsAreReturnedOnceBeforeMaterialization(t *testi
 }
 
 func TestCloseWontfix_DoesNotMaterialize(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "x"},
@@ -119,6 +123,7 @@ func TestCloseWontfix_DoesNotMaterialize(t *testing.T) {
 }
 
 func TestCloseDone_NonRecurrenceIssueIsNoOp(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "p")
@@ -141,6 +146,7 @@ func TestCloseDone_NonRecurrenceIssueIsNoOp(t *testing.T) {
 }
 
 func TestCloseDone_LabelsSeededFromTemplate(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{
@@ -169,6 +175,7 @@ func TestCloseDone_LabelsSeededFromTemplate(t *testing.T) {
 }
 
 func TestCloseDone_MetadataContainsScheduledOn(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "t"},
@@ -188,6 +195,7 @@ func TestCloseDone_MetadataContainsScheduledOn(t *testing.T) {
 }
 
 func TestMaterializeNext_UniqueConflict_SkipsAndAdvancesCursor(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "x"},
@@ -225,6 +233,7 @@ func TestMaterializeNext_UniqueConflict_SkipsAndAdvancesCursor(t *testing.T) {
 }
 
 func TestMaterializeNext_AfterConflict_NoRegressionOnReplay(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "x"},

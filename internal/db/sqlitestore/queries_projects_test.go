@@ -12,6 +12,7 @@ import (
 )
 
 func TestCreateProject_RoundTrips(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 
@@ -34,12 +35,14 @@ func assertValidUID(t *testing.T, got string) {
 }
 
 func TestProjectByName_NotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	_, err := d.ProjectByName(context.Background(), "missing")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestProjectByUID_RoundTrips(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "byuid")
@@ -52,12 +55,14 @@ func TestProjectByUID_RoundTrips(t *testing.T) {
 }
 
 func TestProjectByUID_NotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	_, err := d.ProjectByUID(context.Background(), "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestCreateProject_DuplicateName(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	createProject(ctx, t, d, "x")
@@ -66,6 +71,7 @@ func TestCreateProject_DuplicateName(t *testing.T) {
 }
 
 func TestRenameProject_UpdatesNameOnly(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createKataProject(ctx, t, d)
@@ -86,12 +92,14 @@ func TestRenameProject_UpdatesNameOnly(t *testing.T) {
 }
 
 func TestRenameProject_MissingReturnsErrNotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	_, err := d.RenameProject(context.Background(), 9999, "missing")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestAttachAlias_AndLookup(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createKataProject(ctx, t, d)
@@ -107,12 +115,14 @@ func TestAttachAlias_AndLookup(t *testing.T) {
 }
 
 func TestAliasByIdentity_NotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	_, err := d.AliasByIdentity(context.Background(), "missing")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestListProjects_Empty(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	got, err := d.ListProjects(context.Background())
 	require.NoError(t, err)
@@ -120,6 +130,7 @@ func TestListProjects_Empty(t *testing.T) {
 }
 
 func TestListProjects_OrdersByIDAsc(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	createProject(ctx, t, d, "a")
@@ -133,6 +144,7 @@ func TestListProjects_OrdersByIDAsc(t *testing.T) {
 }
 
 func TestProjectAliases_ReturnsAllForProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	attachAlias(ctx, t, d, p.ID, "alias-a", "/tmp/a")
 	attachAlias(ctx, t, d, p.ID, "alias-b", "/tmp/b")
@@ -143,6 +155,7 @@ func TestProjectAliases_ReturnsAllForProject(t *testing.T) {
 }
 
 func TestMergeProjects_MovesSourceIntoSurvivingTarget(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	alpha := createProject(ctx, t, d, "alpha")
@@ -209,6 +222,7 @@ func TestMergeProjects_MovesSourceIntoSurvivingTarget(t *testing.T) {
 }
 
 func TestMergeProjects_PreservesAliasesAlreadyTargetingTarget(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	source := createProject(ctx, t, d, "old")
@@ -230,6 +244,7 @@ func TestMergeProjects_PreservesAliasesAlreadyTargetingTarget(t *testing.T) {
 // archived source can't be merged into the target. Restore-then-merge would be
 // required if/when restore ships.
 func TestMergeProjects_RejectsArchivedSource(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	source := createProject(ctx, t, d, "src")
@@ -246,6 +261,7 @@ func TestMergeProjects_RejectsArchivedSource(t *testing.T) {
 // TestMergeProjects_RejectsArchivedTarget pins the symmetric guard: folding
 // live work into an archived project undoes the archive's intent.
 func TestMergeProjects_RejectsArchivedTarget(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	source := createProject(ctx, t, d, "src")
@@ -260,6 +276,7 @@ func TestMergeProjects_RejectsArchivedTarget(t *testing.T) {
 }
 
 func TestMergeProjects_RejectsSystemProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	sys, err := d.SystemProject(ctx)
@@ -278,6 +295,7 @@ func TestMergeProjects_RejectsSystemProject(t *testing.T) {
 }
 
 func TestRemoveAndRestoreProject_RejectSystemProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	sys, err := d.SystemProject(ctx)
@@ -299,6 +317,7 @@ func TestRemoveAndRestoreProject_RejectSystemProject(t *testing.T) {
 // auto-extended to the next non-colliding length. Existing target short_ids
 // stay put. The merge response lists each shifted issue's pre/post short_id.
 func TestMergeProjects_ExtendsCollidingSourceShortIDs(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	src := createProject(ctx, t, d, "src")
@@ -350,6 +369,7 @@ func TestMergeProjects_ExtendsCollidingSourceShortIDs(t *testing.T) {
 // auto-extended too. Without this, a purged-then-merged-into target would
 // silently re-issue the slot the tombstone owned.
 func TestMergeProjects_ExtendsAgainstTargetPurgeLogTombstone(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	src := createProject(ctx, t, d, "src")
@@ -406,6 +426,7 @@ func TestMergeProjects_ExtendsAgainstTargetPurgeLogTombstone(t *testing.T) {
 // T both carry short_id "xd4ex" (length 5) under UIDs whose length-4 suffix
 // "d4ex" is unoccupied on either side. Merge must rekey B to a length >= 6.
 func TestMergeProjects_DoesNotShortenExistingShortIDs(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	src := createProject(ctx, t, d, "src")
@@ -468,6 +489,7 @@ func TestMergeProjects_DoesNotShortenExistingShortIDs(t *testing.T) {
 }
 
 func TestMergeProjects_MovesImportMappingsToTargetProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	source := createProject(ctx, t, d, "src")
@@ -499,6 +521,7 @@ func TestMergeProjects_MovesImportMappingsToTargetProject(t *testing.T) {
 }
 
 func TestMergeProjects_ImportMappingCollisionReturnsError(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	source := createProject(ctx, t, d, "src")
@@ -527,6 +550,7 @@ func TestMergeProjects_ImportMappingCollisionReturnsError(t *testing.T) {
 }
 
 func TestMergeProjects_RejectsFederationBinding(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	source := createProject(ctx, t, d, "src")
@@ -551,6 +575,7 @@ func TestMergeProjects_RejectsFederationBinding(t *testing.T) {
 }
 
 func TestMergeProjects_RejectsSourceIssueSyncBinding(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	source := createProject(ctx, t, d, "source-project")
@@ -565,6 +590,7 @@ func TestMergeProjects_RejectsSourceIssueSyncBinding(t *testing.T) {
 }
 
 func TestMergeProjects_RejectsTargetIssueSyncBinding(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	source := createProject(ctx, t, d, "source-project")
@@ -579,6 +605,7 @@ func TestMergeProjects_RejectsTargetIssueSyncBinding(t *testing.T) {
 }
 
 func TestBatchProjectStats_EmptyProjectReturnsZeroes(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "empty")
@@ -598,6 +625,7 @@ func TestBatchProjectStats_EmptyProjectReturnsZeroes(t *testing.T) {
 // times M events would inflate counts. Three issues + four events on the
 // same project must still report Open=3.
 func TestBatchProjectStats_NoCountInflation(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "proj")
@@ -631,6 +659,7 @@ func TestBatchProjectStats_NoCountInflation(t *testing.T) {
 // `WHERE deleted_at IS NULL` filter would never get a chance to exercise
 // itself. Spec §6.1.
 func TestBatchProjectStats_ExcludesSoftDeletedIssues(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "proj")
@@ -652,6 +681,7 @@ func TestBatchProjectStats_ExcludesSoftDeletedIssues(t *testing.T) {
 // TestBatchProjectStats_ExcludesArchivedProjects pins that archived
 // projects don't appear in the result map at all. Spec §6.1.
 func TestBatchProjectStats_ExcludesArchivedProjects(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	live := createProject(ctx, t, d, "live")
@@ -669,6 +699,7 @@ func TestBatchProjectStats_ExcludesArchivedProjects(t *testing.T) {
 // distinct issue counts produce distinct rows; counts are not summed
 // across projects. Spec §6.1.
 func TestBatchProjectStats_PartitionsByProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	a := createProject(ctx, t, d, "a")
@@ -697,6 +728,7 @@ func TestBatchProjectStats_PartitionsByProject(t *testing.T) {
 // year-bump, the issue.created row wins the MAX regardless of date
 // and parseSQLiteTimestamp's zoned layout is never exercised.
 func TestBatchProjectStats_ParsesZonedLegacyTimestamp(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "zoned")
@@ -734,6 +766,7 @@ func TestBatchProjectStats_ParsesZonedLegacyTimestamp(t *testing.T) {
 // later-T-formatted earlier event. After the julianday() normalization,
 // the absolute-latest space-zoned event wins.
 func TestBatchProjectStats_PicksAbsoluteLatestAcrossMixedFormats(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "mixed-ts")
@@ -760,6 +793,7 @@ func TestBatchProjectStats_PicksAbsoluteLatestAcrossMixedFormats(t *testing.T) {
 }
 
 func TestHardDeleteProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 
@@ -775,6 +809,7 @@ func TestHardDeleteProject(t *testing.T) {
 }
 
 func TestReassignAlias(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 

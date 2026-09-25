@@ -16,6 +16,7 @@ import (
 // schema.sql for later plans; this test is the only thing that catches a
 // silent removal.
 func TestAllSchemaTablesExist(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	wanted := []string{
 		"projects", "project_aliases", "issues", "comments",
@@ -53,6 +54,7 @@ func TestAllSchemaTablesExist(t *testing.T) {
 }
 
 func TestSchemaUIDColumnsIndexesAndTriggers(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	assertColumn(t, d, "projects", "uid", "TEXT", true)
 	assertColumn(t, d, "projects", "metadata", "TEXT", true)

@@ -14,6 +14,7 @@ import (
 )
 
 func TestReadyIssuesAppliesScheduleBeforeLimit(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	due := makeIssue(t, ctx, d, p.ID, "due in Tokyo", "tester")
 	parked := makeIssue(t, ctx, d, p.ID, "parked in Los Angeles", "tester")
@@ -43,6 +44,7 @@ func TestReadyIssuesAppliesScheduleBeforeLimit(t *testing.T) {
 }
 
 func TestReadyIssues_FiltersOutClosed(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	open := makeIssue(t, ctx, d, p.ID, "open", "tester")
 	closed := makeIssue(t, ctx, d, p.ID, "closed", "tester")
@@ -55,6 +57,7 @@ func TestReadyIssues_FiltersOutClosed(t *testing.T) {
 }
 
 func TestReadyIssues_ExcludesIssuesBlockedByOpenBlocker(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	blocker := makeIssue(t, ctx, d, p.ID, "blocker", "tester")
 	blocked := makeIssue(t, ctx, d, p.ID, "blocked", "tester")
@@ -68,6 +71,7 @@ func TestReadyIssues_ExcludesIssuesBlockedByOpenBlocker(t *testing.T) {
 }
 
 func TestReadyIssues_ClosedBlockerUnblocksDownstream(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	blocker := makeIssue(t, ctx, d, p.ID, "blocker", "tester")
 	blocked := makeIssue(t, ctx, d, p.ID, "blocked", "tester")
@@ -80,6 +84,7 @@ func TestReadyIssues_ClosedBlockerUnblocksDownstream(t *testing.T) {
 }
 
 func TestReadyIssues_FilterByUnowned(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	unowned := makeIssue(t, ctx, d, p.ID, "unowned", "tester")
 	owned := makeIssue(t, ctx, d, p.ID, "owned", "tester")
@@ -100,6 +105,7 @@ func TestReadyIssues_FilterByUnowned(t *testing.T) {
 }
 
 func TestReadyIssues_FilterByOwner(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	aliceIssue := makeIssue(t, ctx, d, p.ID, "alice task", "tester")
 	bobIssue := makeIssue(t, ctx, d, p.ID, "bob task", "tester")
@@ -126,6 +132,7 @@ func TestReadyIssues_FilterByOwner(t *testing.T) {
 }
 
 func TestReadyIssues_FilterByLabel(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	bug := makeIssueWithLabels(t, ctx, d, p.ID, "bug issue", "tester", "bug")
 	feature := makeIssueWithLabels(t, ctx, d, p.ID, "feature issue", "tester", "feature")
@@ -159,6 +166,7 @@ func TestReadyIssues_FilterByLabel(t *testing.T) {
 }
 
 func TestReadyIssues_LabelFiltersAreCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	bug := makeIssueWithLabels(t, ctx, d, p.ID, "bug issue", "tester", "bug")
 	feature := makeIssueWithLabels(t, ctx, d, p.ID, "feature issue", "tester", "feature")
@@ -178,6 +186,7 @@ func TestReadyIssues_LabelFiltersAreCaseInsensitive(t *testing.T) {
 }
 
 func TestReadyIssues_FilterByNoLabel(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	bug := makeIssueWithLabels(t, ctx, d, p.ID, "bug issue", "tester", "bug")
 	wontfix := makeIssueWithLabels(t, ctx, d, p.ID, "wontfix issue", "tester", "wontfix")
@@ -209,6 +218,7 @@ func TestReadyIssues_FilterByNoLabel(t *testing.T) {
 }
 
 func TestReadyIssues_FilterComposition(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	// Create various issues to test filter composition
@@ -260,6 +270,7 @@ func readyNumbers(t *testing.T, ctx context.Context, d *sqlitestore.Store, proje
 }
 
 func TestReadyIssuesGlobal_ReturnsIssuesAcrossProjects(t *testing.T) {
+	t.Parallel()
 	d, ctx, p1 := setupTestProject(t)
 	p2, err := d.CreateProject(ctx, "second-project")
 	require.NoError(t, err)
@@ -279,6 +290,7 @@ func TestReadyIssuesGlobal_ReturnsIssuesAcrossProjects(t *testing.T) {
 }
 
 func TestReadyIssuesGlobal_ExcludesArchivedProjects(t *testing.T) {
+	t.Parallel()
 	d, ctx, p1 := setupTestProject(t)
 	p2, err := d.CreateProject(ctx, "to-archive")
 	require.NoError(t, err)
@@ -305,6 +317,7 @@ func TestReadyIssuesGlobal_ExcludesArchivedProjects(t *testing.T) {
 }
 
 func TestReadyIssuesGlobal_ExcludesBlockedIssues(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	blocker := makeIssue(t, ctx, d, p.ID, "blocker", "tester")
 	blocked := makeIssue(t, ctx, d, p.ID, "blocked", "tester")
@@ -326,6 +339,7 @@ func TestReadyIssuesGlobal_ExcludesBlockedIssues(t *testing.T) {
 // blocker's project an open blocker hidden behind an archived project would
 // strand the downstream issue as perpetually not-ready.
 func TestReadyIssues_IgnoresBlockerInArchivedProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p1 := setupTestProject(t)
 	p2, err := d.CreateProject(ctx, "blocker-project")
 	require.NoError(t, err)
@@ -342,6 +356,7 @@ func TestReadyIssues_IgnoresBlockerInArchivedProject(t *testing.T) {
 // TestReadyIssuesGlobal_IgnoresBlockerInArchivedProject mirrors the per-project
 // case for the global ready query.
 func TestReadyIssuesGlobal_IgnoresBlockerInArchivedProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p1 := setupTestProject(t)
 	p2, err := d.CreateProject(ctx, "blocker-project")
 	require.NoError(t, err)

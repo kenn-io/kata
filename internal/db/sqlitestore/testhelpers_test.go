@@ -26,7 +26,6 @@ func openTestDB(t *testing.T) *sqlitestore.Store {
 // useful for tests that need to reopen the database or pre-seed it.
 func openTestDBWithPath(t *testing.T) (*sqlitestore.Store, string) {
 	t.Helper()
-	t.Setenv("KATA_HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := sqlitestore.Open(context.Background(), path)
 	require.NoError(t, err)

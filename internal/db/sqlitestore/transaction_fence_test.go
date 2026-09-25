@@ -13,7 +13,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestIssueScopedTokenTransactionFenceRejectsExpiryBeforeFirstWrite(t *testing.T) {
+func TestIssueScopedTokenTransactionFenceRejectsExpiryBeforeFirstWrite(t *testing.T) { //nolint:paralleltest // token expires 75ms after creation in real time
 	d, ctx, project, _ := setupSoftDeletedIssue(t)
 	root, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
@@ -43,6 +43,7 @@ func TestIssueScopedTokenTransactionFenceRejectsExpiryBeforeFirstWrite(t *testin
 }
 
 func TestTransactionFenceSkipsExplicitReadOnlyTransactions(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, _ := setupSoftDeletedIssue(t)
 	var calls atomic.Int64
 	fenced := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error {
@@ -57,6 +58,7 @@ func TestTransactionFenceSkipsExplicitReadOnlyTransactions(t *testing.T) {
 }
 
 func TestTransactionFenceRollsBackAutocommitAndImmediateMutations(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupSoftDeletedIssue(t)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -112,6 +114,7 @@ func TestTransactionFenceRollsBackAutocommitAndImmediateMutations(t *testing.T) 
 }
 
 func TestLargeScopeAllowlistUsesBoundedSQLParameters(t *testing.T) {
+	t.Parallel()
 	store, ctx, project, _ := setupSoftDeletedIssue(t)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Needle", Author: "worker"})
 	require.NoError(t, err)

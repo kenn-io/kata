@@ -10,6 +10,7 @@ import (
 )
 
 func TestPurgeProject_DeletesArchivedProjectAndFreesName(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 
@@ -51,6 +52,7 @@ func TestPurgeProject_DeletesArchivedProjectAndFreesName(t *testing.T) {
 }
 
 func TestPurgeProject_RefusesActiveProject(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "spoke-project")
@@ -60,6 +62,7 @@ func TestPurgeProject_RefusesActiveProject(t *testing.T) {
 }
 
 func TestPurgeProject_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	_, err := d.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: 9999, Actor: "tester"})
@@ -67,6 +70,7 @@ func TestPurgeProject_NotFound(t *testing.T) {
 }
 
 func TestPurgeProject_RefusesFederated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "hub-project")
@@ -88,6 +92,7 @@ func TestPurgeProject_RefusesFederated(t *testing.T) {
 }
 
 func TestPurgeProject_RefusesFederatedSpoke(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "spoke-project")
@@ -111,6 +116,7 @@ func TestPurgeProject_RefusesFederatedSpoke(t *testing.T) {
 }
 
 func TestPurgeProject_DetachesMovedInIssueEvents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	origin, err := d.CreateProject(ctx, "origin-project")
@@ -146,6 +152,7 @@ func TestPurgeProject_DetachesMovedInIssueEvents(t *testing.T) {
 // (projectID 0) and the purged project's own stream (projectID == p.ID), so a
 // resuming subscriber discovers the reset regardless of its subscription scope.
 func TestPurgeProject_ReservesResetCursorForBothStreams(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "spoke-project")
@@ -175,6 +182,7 @@ func TestPurgeProject_ReservesResetCursorForBothStreams(t *testing.T) {
 // project purge. A future stray `DELETE FROM purge_log` in the cascade would
 // flip this assertion.
 func TestPurgeProject_PreservesIssuePurgeLog(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "spoke-project")

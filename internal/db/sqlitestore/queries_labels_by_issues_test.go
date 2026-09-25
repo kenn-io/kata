@@ -12,6 +12,7 @@ import (
 // map without a SQL roundtrip. The daemon's list handler relies on
 // this so an empty list page doesn't waste a query.
 func TestLabelsByIssues_EmptyInput_ReturnsEmptyMap(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	got, err := d.LabelsByIssues(ctx, p.ID, nil)
@@ -30,6 +31,7 @@ func TestLabelsByIssues_EmptyInput_ReturnsEmptyMap(t *testing.T) {
 // querying project B returns no labels for that ID. issue_labels has
 // no project_id column, so the constraint runs through the JOIN.
 func TestLabelsByIssues_ConstrainedByProjectID(t *testing.T) {
+	t.Parallel()
 	d, ctx, pa := setupTestProject(t)
 	pb := createProject(ctx, t, d, "b")
 	ia := makeIssueWithLabels(t, ctx, d, pa.ID, "a", "tester", "bug")
@@ -46,6 +48,7 @@ func TestLabelsByIssues_ConstrainedByProjectID(t *testing.T) {
 // alphabetical sort. Insertion order is intentionally non-alphabetical
 // so the assertion would fail if ORDER BY were dropped.
 func TestLabelsByIssues_OrdersByIssueThenLabel(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	i := makeIssueWithLabels(t, ctx, d, p.ID, "a", "tester", "prio-1", "bug", "needs-review")
 
@@ -58,6 +61,7 @@ func TestLabelsByIssues_OrdersByIssueThenLabel(t *testing.T) {
 // across multiple issues with overlapping and disjoint labels: each
 // issue's slice is independently sorted and only contains its own labels.
 func TestLabelsByIssues_MultiIssue_HappyPath(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	i1 := makeIssueWithLabels(t, ctx, d, p.ID, "a", "tester", "bug", "prio-1")
 	i2 := makeIssueWithLabels(t, ctx, d, p.ID, "b", "tester", "feature", "needs-review", "bug")
@@ -78,6 +82,7 @@ func TestLabelsByIssues_MultiIssue_HappyPath(t *testing.T) {
 // because the IN clause exceeded the bound-parameter cap. The function
 // now chunks the IN clause into groups of <=500 IDs and merges results.
 func TestLabelsByIssues_LargeBatch_ChunksUnderSQLiteLimit(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	const n = 1500
@@ -100,6 +105,7 @@ func TestLabelsByIssues_LargeBatch_ChunksUnderSQLiteLimit(t *testing.T) {
 // missing key as "no labels"; this prevents allocation noise on the
 // common case where most issues are unlabeled.
 func TestLabelsByIssues_IssueWithNoLabelsAbsent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	i1 := makeIssueWithLabels(t, ctx, d, p.ID, "labeled", "tester", "bug")
 	i2 := makeIssue(t, ctx, d, p.ID, "naked", "tester")

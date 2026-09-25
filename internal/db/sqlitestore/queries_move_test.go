@@ -10,6 +10,7 @@ import (
 )
 
 func TestMoveIssueProject_HappyPath(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	srcP, err := d.CreateProject(ctx, "src")
@@ -51,6 +52,7 @@ func TestMoveIssueProject_HappyPath(t *testing.T) {
 // are never removed or modified during a project move. Endpoints are row IDs
 // and UIDs — both stable — so every edge survives verbatim.
 func TestMoveIssueProject_PreservesLinks(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	srcP, _ := d.CreateProject(ctx, "src")
@@ -73,6 +75,7 @@ func TestMoveIssueProject_PreservesLinks(t *testing.T) {
 }
 
 func TestMoveIssueProject_RefusesRecurrencePinned(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	src, _ := d.CreateProject(ctx, "src")
@@ -93,6 +96,7 @@ func TestMoveIssueProject_RefusesRecurrencePinned(t *testing.T) {
 }
 
 func TestMoveIssueProject_RefusesRevisionConflict(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	src, _ := d.CreateProject(ctx, "src")
@@ -109,6 +113,7 @@ func TestMoveIssueProject_RefusesRevisionConflict(t *testing.T) {
 }
 
 func TestMoveIssueProject_RefusesSameProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, _ := d.CreateProject(ctx, "p")
@@ -123,6 +128,7 @@ func TestMoveIssueProject_RefusesSameProject(t *testing.T) {
 }
 
 func TestMoveIssueProject_RefusesSoftDeleted(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	src, _ := d.CreateProject(ctx, "src")
@@ -143,6 +149,7 @@ func TestMoveIssueProject_RefusesSoftDeleted(t *testing.T) {
 }
 
 func TestMoveIssueProject_RehomesImportMappings(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	src, _ := d.CreateProject(ctx, "src")
@@ -179,6 +186,7 @@ func TestMoveIssueProject_RehomesImportMappings(t *testing.T) {
 }
 
 func TestMoveIssueProject_RejectsImportMappingCollisionsAtomically(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	src, _ := d.CreateProject(ctx, "src")

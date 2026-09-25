@@ -11,6 +11,7 @@ import (
 )
 
 func TestCreateIssue_WithInitialPriority(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	for _, prio := range []int64{0, 1, 2, 3, 4} {
 		t.Run(fmt.Sprintf("%s_p%d", t.Name(), prio), func(t *testing.T) {
@@ -32,6 +33,7 @@ func TestCreateIssue_WithInitialPriority(t *testing.T) {
 }
 
 func TestCreateIssue_NoPriorityIsNullAndOmittedFromPayload(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue, evt, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID, Title: "x", Author: "tester",
@@ -43,6 +45,7 @@ func TestCreateIssue_NoPriorityIsNullAndOmittedFromPayload(t *testing.T) {
 }
 
 func TestCreateIssue_RejectsPriorityOutOfRange(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	for _, bad := range []int64{-1, 5, 99} {
 		_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -58,6 +61,7 @@ func TestCreateIssue_RejectsPriorityOutOfRange(t *testing.T) {
 }
 
 func TestIssueByNumber_SurfacesPriority(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	prio := int64(2)
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -73,6 +77,7 @@ func TestIssueByNumber_SurfacesPriority(t *testing.T) {
 }
 
 func TestUpdatePriority_SetsAndEmitsPrioritySetEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID, Title: "x", Author: "tester",
@@ -98,6 +103,7 @@ func TestUpdatePriority_SetsAndEmitsPrioritySetEvent(t *testing.T) {
 }
 
 func TestUpdatePriority_ChangesAndEmitsOldPriorityInPayload(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	old := int64(3)
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -123,6 +129,7 @@ func TestUpdatePriority_ChangesAndEmitsOldPriorityInPayload(t *testing.T) {
 }
 
 func TestUpdatePriority_ClearsAndEmitsPriorityClearedEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	old := int64(2)
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -145,6 +152,7 @@ func TestUpdatePriority_ClearsAndEmitsPriorityClearedEvent(t *testing.T) {
 }
 
 func TestUpdatePriority_NoOpWhenSameValue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	prio := int64(1)
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -161,6 +169,7 @@ func TestUpdatePriority_NoOpWhenSameValue(t *testing.T) {
 }
 
 func TestUpdatePriority_NoOpWhenClearingUnset(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID, Title: "x", Author: "tester",
@@ -174,6 +183,7 @@ func TestUpdatePriority_NoOpWhenClearingUnset(t *testing.T) {
 }
 
 func TestUpdatePriority_RejectsOutOfRange(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID, Title: "x", Author: "tester",

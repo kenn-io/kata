@@ -15,6 +15,7 @@ import (
 // with no open issues + one alias is archived (deleted_at set), the alias
 // row is removed, and a project.removed event is emitted.
 func TestRemoveProject_ArchivesAndDropsAliases(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "archive-me")
@@ -40,6 +41,7 @@ func TestRemoveProject_ArchivesAndDropsAliases(t *testing.T) {
 // TestRemoveProject_RefusesWhenOpenIssues pins the safety gate: open issues
 // block archival unless Force=true.
 func TestRemoveProject_RefusesWhenOpenIssues(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "busy")
@@ -62,6 +64,7 @@ func TestRemoveProject_RefusesWhenOpenIssues(t *testing.T) {
 // with open issues. The issue rows themselves stay open in the DB; archival
 // is about the project surface, not bulk-closing tickets.
 func TestRemoveProject_ForceOverridesOpenIssues(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "force")
@@ -83,6 +86,7 @@ func TestRemoveProject_ForceOverridesOpenIssues(t *testing.T) {
 }
 
 func TestRemoveProject_DisablesIssueSyncBinding(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "archive-sync")
@@ -99,6 +103,7 @@ func TestRemoveProject_DisablesIssueSyncBinding(t *testing.T) {
 }
 
 func TestRemoveProject_RefusedArchiveLeavesGitHubSyncEnabled(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "refuse-sync-archive")
@@ -119,6 +124,7 @@ func TestRemoveProject_RefusedArchiveLeavesGitHubSyncEnabled(t *testing.T) {
 }
 
 func TestRestoreProject_LeavesGitHubSyncDisabled(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "restore-sync-disabled")
@@ -140,6 +146,7 @@ func TestRestoreProject_LeavesGitHubSyncDisabled(t *testing.T) {
 // federation leave route: it returns the number of open, non-deleted issues
 // and does not archive or otherwise mutate the project.
 func TestCountOpenIssues(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "counted")
@@ -174,6 +181,7 @@ func TestCountOpenIssues(t *testing.T) {
 // second RemoveProject on an archived project surfaces a clean error rather
 // than silently re-archiving.
 func TestRemoveProject_AlreadyArchived(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "twice")
@@ -190,6 +198,7 @@ func TestRemoveProject_AlreadyArchived(t *testing.T) {
 // after archival the project no longer surfaces in ListProjects /
 // ProjectByName.
 func TestRemoveProject_ExcludedFromListAndResolve(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	keep, err := d.CreateProject(ctx, "keep")
@@ -214,6 +223,7 @@ func TestRemoveProject_ExcludedFromListAndResolve(t *testing.T) {
 }
 
 func TestRestoreProject_ReactivatesArchivedProjectAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "restore-me")
@@ -236,6 +246,7 @@ func TestRestoreProject_ReactivatesArchivedProjectAndEmitsEvent(t *testing.T) {
 }
 
 func TestRestoreProject_ActiveProjectIsNoop(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "already-active")
@@ -252,6 +263,7 @@ func TestRestoreProject_ActiveProjectIsNoop(t *testing.T) {
 // TestDetachProjectAlias_RemovesOneAndEmitsEvent pins the happy path: with
 // two aliases, one detaches cleanly and emits project.alias_removed.
 func TestDetachProjectAlias_RemovesOneAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "detach")
@@ -284,6 +296,7 @@ func TestDetachProjectAlias_RemovesOneAndEmitsEvent(t *testing.T) {
 // alias for a project requires Force=true to drop. Without it the resolve
 // flow would lose the workspace→project link silently.
 func TestDetachProjectAlias_RefusesWhenLast(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "only")
@@ -302,6 +315,7 @@ func TestDetachProjectAlias_RefusesWhenLast(t *testing.T) {
 // last-alias refusal — the operator has explicitly accepted that the
 // project will no longer resolve from any workspace.
 func TestDetachProjectAlias_ForceDropsLast(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "force-last")
@@ -326,6 +340,7 @@ func TestDetachProjectAlias_ForceDropsLast(t *testing.T) {
 // SELECT keys on both columns so a reassignment between any preflight
 // and the delete cannot mis-target.
 func TestDetachProjectAlias_RejectsCrossProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	pA, err := d.CreateProject(ctx, "a")

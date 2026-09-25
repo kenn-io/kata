@@ -10,6 +10,7 @@ import (
 )
 
 func TestImportMapping_UpsertAndLookupIssue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue := makeIssue(t, ctx, d, p.ID, "imported", "tester")
 	srcUpdated := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
@@ -36,6 +37,7 @@ func TestImportMapping_UpsertAndLookupIssue(t *testing.T) {
 }
 
 func TestImportMapping_ListByProjectSource(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue := makeIssue(t, ctx, d, p.ID, "imported", "tester")
 	comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "hi"})
@@ -56,6 +58,7 @@ func TestImportMapping_ListByProjectSource(t *testing.T) {
 }
 
 func TestImportMapping_PurgeIssueRemovesMappedDependents(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	target := makeIssue(t, ctx, d, p.ID, "mapped", "tester")
 	keeper := makeIssue(t, ctx, d, p.ID, "keeper", "tester")
