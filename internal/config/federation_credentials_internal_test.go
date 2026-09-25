@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,7 +37,7 @@ func TestWriteFederationCredentialPartialTempWriteLeavesOldFileUnchanged(t *test
 	require.NoError(t, err)
 
 	originalWriter := writeFederationCredentialsTempFile
-	writeFederationCredentialsTempFile = func(file *os.File, data []byte) error {
+	writeFederationCredentialsTempFile = func(file io.Writer, data []byte) error {
 		if _, writeErr := file.Write(data[:len(data)/2]); writeErr != nil {
 			return writeErr
 		}
@@ -56,49 +57,6 @@ func TestWriteFederationCredentialPartialTempWriteLeavesOldFileUnchanged(t *test
 	require.NoError(t, err)
 	assert.Equal(t, manual, credentials.Projects[localUID])
 	assert.Equal(t, other, credentials.Projects[otherUID])
-	assertNoFederationCredentialTempFiles(t, home)
-}
-
-func TestWriteFederationCredentialRenameFailureLeavesOldFileUnchanged(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	const projectUID = "01HZNQ7VFPK1XGD8R5MABCD4EA"
-	original := FederationCredential{
-		HubURL: "https://hub.example", HubProjectID: 42,
-		Token: "token-a", Capabilities: "claim,pull,push",
-		Actor: "user-a",
-	}
-	require.NoError(t, WriteFederationCredential(projectUID, original))
-	path, err := FederationCredentialsPath()
-	require.NoError(t, err)
-	before, err := os.ReadFile(path) //nolint:gosec // path is the test's isolated KATA_HOME.
-	require.NoError(t, err)
-
-	originalRename := renameFederationCredentialsFile
-	renameFederationCredentialsFile = func(string, string) error {
-		return errors.New("injected credential rename failure")
-	}
-	t.Cleanup(func() { renameFederationCredentialsFile = originalRename })
-
-	changed := original
-	changed.Actor = "identity-user"
-	err = WriteFederationCredential(projectUID, changed)
-	require.ErrorContains(t, err, "injected credential rename failure")
-
-	after, err := os.ReadFile(path) //nolint:gosec // path is the test's isolated KATA_HOME.
-	require.NoError(t, err)
-	assert.Equal(t, before, after)
-	credentials, err := ReadFederationCredentials()
-	require.NoError(t, err)
-	assert.Equal(t, original, credentials.Projects[projectUID])
-	assertNoFederationCredentialTempFiles(t, home)
-}
-
-func assertNoFederationCredentialTempFiles(t *testing.T, home string) {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(home, ".credentials.toml.tmp-*"))
-	require.NoError(t, err)
-	assert.Empty(t, matches)
 }
 
 func TestReplaceFederationCredentialSupportsManualAndManagedCredentials(t *testing.T) {
@@ -160,21 +118,12 @@ func TestReplaceFederationCredentialExactTargetDoesNotRewriteFile(t *testing.T) 
 	require.NoError(t, err)
 
 	writes := 0
-	renames := 0
 	originalWriter := writeFederationCredentialsTempFile
-	originalRename := renameFederationCredentialsFile
-	writeFederationCredentialsTempFile = func(*os.File, []byte) error {
+	writeFederationCredentialsTempFile = func(io.Writer, []byte) error {
 		writes++
 		return nil
 	}
-	renameFederationCredentialsFile = func(string, string) error {
-		renames++
-		return nil
-	}
-	t.Cleanup(func() {
-		writeFederationCredentialsTempFile = originalWriter
-		renameFederationCredentialsFile = originalRename
-	})
+	t.Cleanup(func() { writeFederationCredentialsTempFile = originalWriter })
 
 	err = ReplaceFederationCredential(FederationCredentialReplacement{
 		ProjectUID:  projectUID,
@@ -184,7 +133,6 @@ func TestReplaceFederationCredentialExactTargetDoesNotRewriteFile(t *testing.T) 
 
 	require.NoError(t, err)
 	assert.Zero(t, writes)
-	assert.Zero(t, renames)
 	after, readErr := os.ReadFile(path) //nolint:gosec // path is the test's isolated KATA_HOME.
 	require.NoError(t, readErr)
 	assert.Equal(t, before, after)
@@ -242,22 +190,12 @@ func TestReplaceFederationCredentialWriteFailuresLeaveSourceUnchanged(t *testing
 			name: "partial temporary write",
 			inject: func(t *testing.T) {
 				original := writeFederationCredentialsTempFile
-				writeFederationCredentialsTempFile = func(file *os.File, data []byte) error {
+				writeFederationCredentialsTempFile = func(file io.Writer, data []byte) error {
 					_, err := file.Write(data[:len(data)/2])
 					require.NoError(t, err)
 					return errors.New("injected replacement write failure")
 				}
 				t.Cleanup(func() { writeFederationCredentialsTempFile = original })
-			},
-		},
-		{
-			name: "rename",
-			inject: func(t *testing.T) {
-				original := renameFederationCredentialsFile
-				renameFederationCredentialsFile = func(string, string) error {
-					return errors.New("injected replacement rename failure")
-				}
-				t.Cleanup(func() { renameFederationCredentialsFile = original })
 			},
 		},
 	} {
@@ -291,7 +229,6 @@ func TestReplaceFederationCredentialWriteFailuresLeaveSourceUnchanged(t *testing
 			credentials, readErr := ReadFederationCredentials()
 			require.NoError(t, readErr)
 			assert.Equal(t, current, credentials.Projects[projectUID])
-			assertNoFederationCredentialTempFiles(t, home)
 		})
 	}
 }
@@ -318,4 +255,28 @@ func TestDefaultFederationCredentialStoreSupportsExactReplacement(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, target, stored)
+}
+
+func TestWriteFederationCredentialRefusesSymlinkedCredentialsFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	linkTarget := filepath.Join(t.TempDir(), "elsewhere.toml")
+	require.NoError(t, os.WriteFile(linkTarget, []byte("# untouched\n"), 0o600))
+	path, err := FederationCredentialsPath()
+	require.NoError(t, err)
+	if err := os.Symlink(linkTarget, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	err = WriteFederationCredential("01HZNQ7VFPK1XGD8R5MABCD4EA", FederationCredential{
+		HubURL: "https://hub.example", HubProjectID: 42, Token: "token-a",
+	})
+	require.Error(t, err)
+
+	info, err := os.Lstat(path)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "credentials.toml must stay a symlink")
+	got, err := os.ReadFile(linkTarget) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "# untouched\n", string(got))
 }

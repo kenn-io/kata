@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
+	"go.kenn.io/kit/atomicfile"
 )
 
 func newImportCmd() *cobra.Command {
@@ -438,12 +439,12 @@ func moveSQLiteFileSet(from, to string) (bool, error) {
 		} else if err != nil {
 			return len(moved) > 0, fmt.Errorf("stat %s: %w", src, err)
 		}
-		if err := os.Rename(src, dst); err != nil { //nolint:gosec // src/dst are SQLite files beside an explicit import target or temp DB.
+		if err := atomicfile.RenameNoReplace(src, dst); err != nil {
 			var rollbackErr error
 			for _, m := range slices.Backward(moved) {
 				oldSrc := to + m
 				oldDst := from + m
-				if err := os.Rename(oldSrc, oldDst); err != nil { //nolint:gosec // rollback of the SQLite files just moved by this helper.
+				if err := atomicfile.RenameNoReplace(oldSrc, oldDst); err != nil {
 					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback %s: %w", m, err))
 				}
 			}

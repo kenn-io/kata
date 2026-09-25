@@ -11,6 +11,7 @@ import (
 	"reflect"
 
 	"go.kenn.io/kit/agenthook"
+	"go.kenn.io/kit/atomicfile"
 )
 
 type legacyAgentHook struct {
@@ -67,7 +68,7 @@ func migrateLegacyAgentHooks(configPath string, legacy []legacyAgentHook) (bool,
 		return false, err
 	}
 	encoded = append(encoded, '\n')
-	if err := os.WriteFile(configPath, encoded, 0o600); err != nil { //nolint:gosec // existing workspace config; mode is preserved
+	if err := atomicfile.WriteFile(configPath, encoded, atomicfile.WithPreserveMode()); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -35,7 +35,7 @@ func Publish(directory, address, token, backendURL string) (func() error, error)
 	rec.Metadata = map[string]string{"url": "http://" + address + "/mcp", "backend_url": backendURL}
 	tokenPath := ""
 	if token != "" {
-		file, err := os.CreateTemp(directory, "mcp-token-*")
+		file, err := safefileio.CreatePrivateTemp(directory, "mcp-token-*")
 		if err != nil {
 			return nil, err
 		}
