@@ -18,6 +18,8 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/textsafe"
+	"go.kenn.io/kit/atomicfile"
+	"go.kenn.io/kit/fslink"
 )
 
 // initOptions holds the flags specific to `kata init`.
@@ -832,17 +834,15 @@ func writeNewGuidanceFile(path string, data []byte) error {
 	return werr
 }
 
-// rewriteGuidanceFile overwrites an existing regular file, refusing to write
-// through a symlink so kata never rewrites a file the path merely points at.
+// rewriteGuidanceFile atomically replaces an existing regular file, keeping its
+// permission bits and refusing to write through a symlink so kata never
+// rewrites a file the path merely points at.
 func rewriteGuidanceFile(path string, data []byte) error {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
+	err := atomicfile.WriteFile(path, data, atomicfile.WithPreserveMode())
+	if errors.Is(err, fslink.ErrIsLink) {
 		return fmt.Errorf("refusing to write through symlinked %s", path)
 	}
-	return os.WriteFile(path, data, 0o644) //nolint:gosec
+	return err
 }
 
 // hasBeadsBlock reports whether content carries a complete beads integration

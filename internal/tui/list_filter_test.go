@@ -269,7 +269,8 @@ func TestList_StatusOpenShowsNestedMatchingGrandchildContext(t *testing.T) {
 // The filter changes are *client-side* (filteredIssues), so no API
 // refetch fires for Search/Owner — only Status filter changes
 // dispatch a refetch.
-func TestList_Search_AccumulatesAndCommits(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestList_Search_AccumulatesAndCommits(t *testing.T) {
+	t.Parallel()
 	m := mFixtureForBar()
 	m, _ = stepModel(m, runeKey('/'))
 	// Drive openInputMsg through the model so the bar opens.
@@ -304,7 +305,8 @@ func TestList_Search_AccumulatesAndCommits(t *testing.T) { //nolint:paralleltest
 // refine an active search without retyping; appending "xyz" to a
 // pre-filled "previous" produces "previousxyz" live, then Esc
 // restores "previous".
-func TestList_Search_EscCancels(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestList_Search_EscCancels(t *testing.T) {
+	t.Parallel()
 	m := mFixtureForBar()
 	m.list.filter.Search = "previous"
 	m = openBarFromCmd(t, m, '/')
@@ -373,7 +375,8 @@ func searchNavigationFixture(t *testing.T) Model {
 	return openBarFromCmd(t, m, '/')
 }
 
-func TestSearch_DownMovesIntoResultsAndAdvancesCursor(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_DownMovesIntoResultsAndAdvancesCursor(t *testing.T) {
+	t.Parallel()
 	m := searchNavigationFixture(t)
 	for _, r := range "fix" {
 		m, _ = stepModel(m, runeKey(r))
@@ -387,7 +390,8 @@ func TestSearch_DownMovesIntoResultsAndAdvancesCursor(t *testing.T) { //nolint:p
 	}
 }
 
-func TestSearch_UpMovesIntoResultsRelativeToCursor(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_UpMovesIntoResultsRelativeToCursor(t *testing.T) {
+	t.Parallel()
 	m := searchNavigationFixture(t)
 	m.list.cursor = 1
 	for _, r := range "fix" {
@@ -399,7 +403,8 @@ func TestSearch_UpMovesIntoResultsRelativeToCursor(t *testing.T) { //nolint:para
 	}
 }
 
-func TestSearch_EnterMovesToResultsThenCommitsFilter(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_EnterMovesToResultsThenCommitsFilter(t *testing.T) {
+	t.Parallel()
 	m := searchNavigationFixture(t)
 	for _, r := range "fix" {
 		m, _ = stepModel(m, runeKey(r))
@@ -417,7 +422,8 @@ func TestSearch_EnterMovesToResultsThenCommitsFilter(t *testing.T) { //nolint:pa
 	}
 }
 
-func TestSearch_EnterSynchronizesSelectionAcrossRefetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_EnterSynchronizesSelectionAcrossRefetch(t *testing.T) {
+	t.Parallel()
 	m := mFixtureForBar()
 	m.list.issues = []Issue{
 		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other", Status: "open"},
@@ -452,7 +458,8 @@ func TestSearch_EnterSynchronizesSelectionAcrossRefetch(t *testing.T) { //nolint
 	}
 }
 
-func TestSearch_EscReturnsToQueryThenCancels(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_EscReturnsToQueryThenCancels(t *testing.T) {
+	t.Parallel()
 	m := mFixtureForBar()
 	m.list.filter.Search = "previous"
 	m = openBarFromCmd(t, m, '/')
@@ -470,7 +477,8 @@ func TestSearch_EscReturnsToQueryThenCancels(t *testing.T) { //nolint:parallelte
 	}
 }
 
-func TestSearch_CancelRestoresSelectionAcrossRefetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_CancelRestoresSelectionAcrossRefetch(t *testing.T) {
+	t.Parallel()
 	m := mFixtureForBar()
 	m.list.issues = []Issue{
 		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other alpha", Status: "open"},
@@ -513,7 +521,8 @@ func TestSearch_CancelRestoresSelectionAcrossRefetch(t *testing.T) { //nolint:pa
 	}
 }
 
-func TestSearch_ResultsAbsorbUnrelatedKeys(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_ResultsAbsorbUnrelatedKeys(t *testing.T) {
+	t.Parallel()
 	m := searchNavigationFixture(t)
 	m.input.activeField().setValue("fix")
 	m = m.applyLiveBarFilter()
@@ -526,7 +535,8 @@ func TestSearch_ResultsAbsorbUnrelatedKeys(t *testing.T) { //nolint:paralleltest
 	}
 }
 
-func TestSearch_ResultsAbsorbPaste(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_ResultsAbsorbPaste(t *testing.T) {
+	t.Parallel()
 	m := searchNavigationFixture(t)
 	for _, r := range "fix" {
 		m, _ = stepModel(m, runeKey(r))
@@ -556,7 +566,8 @@ func TestSearch_ResultsAbsorbPaste(t *testing.T) { //nolint:paralleltest // appl
 	}
 }
 
-func TestSearch_SlashReturnsFromResultsToQuery(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_SlashReturnsFromResultsToQuery(t *testing.T) {
+	t.Parallel()
 	m := searchNavigationFixture(t)
 	m.input.searchFocus = searchFocusResults
 	m, _ = stepModel(m, runeKey('/'))
@@ -565,7 +576,8 @@ func TestSearch_SlashReturnsFromResultsToQuery(t *testing.T) { //nolint:parallel
 	}
 }
 
-func TestSearch_ZeroResultsNavigationIsSafe(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestSearch_ZeroResultsNavigationIsSafe(t *testing.T) {
+	t.Parallel()
 	m := searchNavigationFixture(t)
 	m.input.activeField().setValue("no-match")
 	m = m.applyLiveBarFilter()
@@ -1039,7 +1051,8 @@ func TestList_NewIssueCreateSeedsSelectionToNewIssue(t *testing.T) {
 // gesture; `o` is now a plain unhandled key on the list. Regression
 // catch for accidentally re-binding `o` to inputSearchBar or any other
 // shell.
-func TestList_OKey_NoLongerOpensOwnerBar(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestList_OKey_NoLongerOpensOwnerBar(t *testing.T) {
+	t.Parallel()
 	m := mFixtureForBar()
 	m, _ = stepModel(m, runeKey('o'))
 	if m.input.kind != inputNone {
@@ -1052,7 +1065,8 @@ func TestList_OKey_NoLongerOpensOwnerBar(t *testing.T) { //nolint:paralleltest /
 // because the wire doesn't carry Labels yet (matchesFilter could not
 // honor it). Regression catch for accidentally rebinding 'l' before
 // the wire surface lands.
-func TestList_LabelKey_NoLongerOpensPrompt(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestList_LabelKey_NoLongerOpensPrompt(t *testing.T) {
+	t.Parallel()
 	m := mFixtureForBar()
 	m, _ = stepModel(m, runeKey('l'))
 	if m.input.kind != inputNone {
@@ -1064,7 +1078,8 @@ func TestList_LabelKey_NoLongerOpensPrompt(t *testing.T) { //nolint:paralleltest
 // command bar deletes the last rune. The bubbles textinput handles
 // the actual edit; Model.routeInputKey forwards the key through
 // inputState.Update.
-func TestList_BackspaceTrimsBuffer(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestList_BackspaceTrimsBuffer(t *testing.T) {
+	t.Parallel()
 	m := mFixtureForBar()
 	m = openBarFromCmd(t, m, '/')
 	for _, r := range "abc" {

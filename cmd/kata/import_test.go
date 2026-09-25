@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -575,4 +576,25 @@ func writeExportFixture(t *testing.T, home string) string {
 	input := filepath.Join(home, "input.jsonl")
 	require.NoError(t, os.WriteFile(input, out.Bytes(), 0o600))
 	return input
+}
+
+func TestInstallImportedTargetDoesNotReplaceTargetCreatedAfterCheck(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.db")
+	tmpTarget := filepath.Join(dir, "imported.db")
+	require.NoError(t, os.WriteFile(tmpTarget, []byte("new-db"), 0o600))
+	// A file that appears at the target after the pre-install existence check
+	// must survive; moving the imported set uses no-replace publication.
+	require.NoError(t, os.WriteFile(target, []byte("concurrent-db"), 0o600))
+
+	_, err := moveSQLiteFileSet(tmpTarget, target)
+	require.ErrorIs(t, err, fs.ErrExist)
+
+	gotTarget, readErr := os.ReadFile(target) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, "concurrent-db", string(gotTarget))
+	gotTmp, readErr := os.ReadFile(tmpTarget) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, "new-db", string(gotTmp))
 }

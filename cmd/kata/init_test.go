@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -900,4 +901,24 @@ func captureProcessStderr(t *testing.T, fn func()) string {
 	require.NoError(t, r.Close())
 	os.Stderr = old
 	return buf.String()
+}
+
+func TestRewriteGuidanceFileKeepsFileMode(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(path, []byte("old\n"), 0o600))
+	require.NoError(t, os.Chmod(path, 0o640)) //nolint:gosec // exercise preservation of a non-default mode
+
+	require.NoError(t, rewriteGuidanceFile(path, []byte("new\n")))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+	got, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "new\n", string(got))
 }

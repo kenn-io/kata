@@ -8,15 +8,16 @@ import (
 	"io"
 	"maps"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/BurntSushi/toml"
 	"go.kenn.io/kata/pkg/federationprovider"
+	"go.kenn.io/kit/atomicfile"
 )
 
 // FederationCredentials is the local secret-bearing credentials.toml shape.
@@ -107,10 +108,12 @@ var ErrFederationCredentialConflict = errors.New("federation credential conflict
 
 var federationCredentialsMu sync.Mutex
 
-var (
-	writeFederationCredentialsTempFile = writeAllFederationCredentials
-	renameFederationCredentialsFile    = replaceFederationCredentialsFileOnDisk
-)
+// writeFederationCredentialsTempFile writes the encoded credentials to the
+// staged replacement. Tests replace it to inject write failures.
+var writeFederationCredentialsTempFile = func(file io.Writer, data []byte) error {
+	_, err := file.Write(data)
+	return err
+}
 
 // FederationCredentialStore isolates secret-bearing federation credentials
 // from the database and from other service instances in the same process.
@@ -386,64 +389,34 @@ func writeFederationCredentials(creds *FederationCredentials) error {
 }
 
 func replaceFederationCredentialsFile(path string, data []byte) (retErr error) {
-	dir := filepath.Dir(path)
-	temp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*") //nolint:gosec // owner-only mode is enforced before writing.
+	file, err := atomicfile.Create(path)
 	if err != nil {
-		return fmt.Errorf("create temporary federation credentials in %s: %w", dir, err)
+		return fmt.Errorf("create temporary federation credentials for %s: %w", path, err)
 	}
-	tempPath := temp.Name()
-	renamed := false
-	closed := false
 	defer func() {
-		if renamed {
-			return
-		}
-		if !closed {
-			if closeErr := temp.Close(); closeErr != nil {
-				retErr = errors.Join(retErr, fmt.Errorf("close temporary federation credentials %s: %w", tempPath, closeErr))
-			}
-		}
-		if removeErr := os.Remove(tempPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			retErr = errors.Join(retErr, fmt.Errorf("remove temporary federation credentials %s: %w", tempPath, removeErr))
+		if retErr != nil {
+			retErr = errors.Join(retErr, file.Abort())
 		}
 	}()
-
-	if err := temp.Chmod(0o600); err != nil {
-		return fmt.Errorf("chmod temporary federation credentials %s: %w", tempPath, err)
+	if err := writeFederationCredentialsTempFile(file, data); err != nil {
+		return fmt.Errorf("write temporary federation credentials %s: %w", file.TempName(), err)
 	}
-	if err := writeFederationCredentialsTempFile(temp, data); err != nil {
-		return fmt.Errorf("write temporary federation credentials %s: %w", tempPath, err)
-	}
-	if err := temp.Sync(); err != nil {
-		return fmt.Errorf("sync temporary federation credentials %s: %w", tempPath, err)
-	}
-	if err := temp.Close(); err != nil {
-		closed = true
-		return fmt.Errorf("close temporary federation credentials %s: %w", tempPath, err)
-	}
-	closed = true
-	if err := renameFederationCredentialsFile(tempPath, path); err != nil {
+	if err := file.Commit(); err != nil {
+		if errors.Is(err, atomicfile.ErrNotDurable) && directorySyncUnsupported(err) {
+			// The replacement is visible; some file systems cannot fsync a
+			// directory, and credentials are still written there.
+			return nil
+		}
 		return fmt.Errorf("replace federation credentials %s: %w", path, err)
-	}
-	renamed = true
-	if err := syncFederationCredentialsDirectory(dir); err != nil {
-		return fmt.Errorf("sync federation credentials directory %s: %w", dir, err)
 	}
 	return nil
 }
 
-func writeAllFederationCredentials(file *os.File, data []byte) error {
-	for len(data) > 0 {
-		n, err := file.Write(data)
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[n:]
-	}
-	return nil
+// directorySyncUnsupported reports whether a directory fsync failed because
+// the file system does not support it. Kit's directory sync is a no-op on
+// Windows, so this only matches on Unix.
+func directorySyncUnsupported(err error) bool {
+	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP)
 }
 
 // WriteFederationCredential upserts one project credential into

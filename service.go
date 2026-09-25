@@ -103,6 +103,10 @@ type Config struct {
 	Postgres   PostgresConfig
 	Auth       AuthConfig
 	GitHubSync GitHubSyncConfig
+	// WebHandler optionally serves public, data-free browser assets alongside
+	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
+	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
+	WebHandler http.Handler
 	// DefaultTimezone applies to civil schedules without issue timezone.
 	// Empty means UTC.
 	DefaultTimezone string
@@ -260,6 +264,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	server := daemon.NewServer(daemon.ServerConfig{
 		DB:                      store,
+		WebHandler:              cfg.WebHandler,
 		DefaultTimezone:         cfg.DefaultTimezone,
 		StartedAt:               startedAt,
 		Broadcaster:             broadcaster,

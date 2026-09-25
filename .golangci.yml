@@ -14,6 +14,11 @@ linters:
     - revive
     - gosec
     - modernize
+    - paralleltest
+  settings:
+    paralleltest:
+      ignore-missing-subtests: true
+
   exclusions:
     generated: lax
     paths:
@@ -23,6 +28,9 @@ linters:
         linters:
           - revive
         text: "package-comments:"
+      - path-except: '^(cmd/kata|internal/tui)/[^/]+_test\.go$'
+        linters:
+          - paralleltest
 formatters:
   enable:
     - gofmt

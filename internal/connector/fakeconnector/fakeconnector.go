@@ -11,13 +11,13 @@ import (
 	"io"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"go.kenn.io/kata/pkg/connector"
+	"go.kenn.io/kit/atomicfile"
 )
 
 const (
@@ -492,37 +492,14 @@ func Update(path string, apply func(*State) error) error {
 
 // Write atomically replaces the test-owned state file.
 func Write(path string, current State) error {
-	directory := filepath.Dir(path)
-	temporary, err := os.CreateTemp(directory, ".fake-connector-state-*")
+	file, err := atomicfile.Create(path)
 	if err != nil {
 		return err
 	}
-	temporaryPath := temporary.Name()
-	remove := true
-	defer func() {
-		if remove {
-			_ = os.Remove(temporaryPath) // #nosec G703 -- temporaryPath was returned by os.CreateTemp in the test-owned state directory.
-		}
-	}()
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	encoder := jsontext.NewEncoder(temporary, jsontext.WithIndent("  "))
+	defer func() { _ = file.Abort() }()
+	encoder := jsontext.NewEncoder(file, jsontext.WithIndent("  "))
 	if err := json.MarshalEncode(encoder, current); err != nil {
-		_ = temporary.Close()
 		return err
 	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil { // #nosec G703 -- both paths are confined to the explicit test-owned state directory.
-		return err
-	}
-	remove = false
-	return nil
+	return file.Commit()
 }

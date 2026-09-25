@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,7 +14,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestExportRejectsConfiguredRemoteBeforeReadingLocalStorage(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
+func TestExportRejectsConfiguredRemoteBeforeReadingLocalStorage(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; t.Setenv sets KATA_SERVER; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)
@@ -45,7 +44,7 @@ func TestExportRejectsConfiguredRemoteBeforeReadingLocalStorage(t *testing.T) { 
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
-func TestExportRejectsExplicitDaemonSelection(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
+func TestExportRejectsExplicitDaemonSelection(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)
@@ -60,7 +59,7 @@ func TestExportRejectsExplicitDaemonSelection(t *testing.T) { //nolint:parallelt
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
-func TestExportWritesJSONLToOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
+func TestExportWritesJSONLToOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)
@@ -85,7 +84,7 @@ func TestExportWritesJSONLToOutput(t *testing.T) { //nolint:paralleltest // setu
 	assert.Contains(t, out, outPath)
 }
 
-func TestExportReadsDatabaseWithoutWritePermission(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
+func TestExportReadsDatabaseWithoutWritePermission(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)
@@ -111,7 +110,7 @@ func TestExportReadsDatabaseWithoutWritePermission(t *testing.T) { //nolint:para
 	assert.Contains(t, string(bs), "read-only export")
 }
 
-func TestExportDoesNotReplaceExistingOutputOnFailure(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
+func TestExportDoesNotReplaceExistingOutputOnFailure(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	ctx := context.Background()
@@ -145,43 +144,54 @@ func TestExportDoesNotReplaceExistingOutputOnFailure(t *testing.T) { //nolint:pa
 	assert.Equal(t, "previous backup\n", string(bs))
 }
 
-func TestExportReplaceOutputDoesNotDeleteExistingOutput(t *testing.T) {
-	t.Parallel()
-	bs, err := os.ReadFile("export.go")
+func TestExportReplacesExistingOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
+	home := setupKataEnv(t)
+	d := openKataTestDB(t, filepath.Join(home, "kata.db"))
+	p, err := d.CreateProject(context.Background(), "kata")
+	require.NoError(t, err)
+	_, _, err = d.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: p.ID, Title: "replacement export", Author: "tester",
+	})
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	outPath := filepath.Join(home, "export.jsonl")
+	require.NoError(t, os.WriteFile(outPath, []byte("previous backup\n"), 0o600))
+	_, err = runCmdOutput(t, nil, "export", "--output", outPath)
 	require.NoError(t, err)
 
-	re := regexp.MustCompile(`os\.Remove\(\s*output\s*\)`)
-	assert.NotRegexp(t, re, string(bs),
-		"export replacement must not delete the existing backup before replacement succeeds")
-}
-
-func TestExportReplaceOutputUsesWindowsReplacePrimitive(t *testing.T) {
-	t.Parallel()
-	bs, err := os.ReadFile("export_replace_windows.go")
+	bs, err := os.ReadFile(outPath) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
-
-	assert.Contains(t, string(bs), "windows.MoveFileEx")
-	assert.Contains(t, string(bs), "windows.MOVEFILE_REPLACE_EXISTING")
+	assert.Contains(t, string(bs), "replacement export")
+	assert.NotContains(t, string(bs), "previous backup")
 }
 
-func TestReplaceExportOutputReplacesExistingOutput(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	output := filepath.Join(dir, "export.jsonl")
-	tmp := filepath.Join(dir, ".export.jsonl.tmp")
-	require.NoError(t, os.WriteFile(output, []byte("old\n"), 0o600))
-	require.NoError(t, os.WriteFile(tmp, []byte("new\n"), 0o600))
-
-	require.NoError(t, replaceExportOutput(tmp, output))
-
-	bs, err := os.ReadFile(output) //nolint:gosec // test fixture under TempDir
+func TestExportRefusesSymlinkedOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
+	home := setupKataEnv(t)
+	d := openKataTestDB(t, filepath.Join(home, "kata.db"))
+	_, err := d.CreateProject(context.Background(), "kata")
 	require.NoError(t, err)
-	assert.Equal(t, "new\n", string(bs))
-	_, err = os.Stat(tmp)
-	assert.True(t, os.IsNotExist(err), "successful replacement must consume the temp file")
+	require.NoError(t, d.Close())
+
+	linkTarget := filepath.Join(home, "elsewhere.jsonl")
+	require.NoError(t, os.WriteFile(linkTarget, []byte("untouched\n"), 0o600))
+	outPath := filepath.Join(home, "export.jsonl")
+	if err := os.Symlink(linkTarget, outPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err = runCmdOutput(t, nil, "export", "--output", outPath)
+	require.Error(t, err)
+
+	info, err := os.Lstat(outPath)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "export must leave the symlink in place")
+	bs, err := os.ReadFile(linkTarget) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "untouched\n", string(bs))
 }
 
-func TestExportAgentOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
+func TestExportAgentOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)
@@ -204,7 +214,7 @@ func TestExportAgentOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv
 	assert.Equal(t, "OK export output="+agentValue(outPath)+"\n", out)
 }
 
-func TestExportScopesByProjectName(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
+func TestExportScopesByProjectName(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	ctx := context.Background()
@@ -228,7 +238,7 @@ func TestExportScopesByProjectName(t *testing.T) { //nolint:paralleltest // setu
 	assert.NotContains(t, string(bs), "beta-only")
 }
 
-func TestExportProjectNameNotFound(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
+func TestExportProjectNameNotFound(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)
@@ -241,7 +251,7 @@ func TestExportProjectNameNotFound(t *testing.T) { //nolint:paralleltest // setu
 	assert.Contains(t, ce.Message, `project "nope" not found`)
 }
 
-func TestExportProjectFlagConflict(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
+func TestExportProjectFlagConflict(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)
@@ -260,7 +270,7 @@ func TestExportProjectFlagConflict(t *testing.T) { //nolint:paralleltest // setu
 	_ = alpha
 }
 
-func TestExportRefusesRunningDaemonUnlessAllowed(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
+func TestExportRefusesRunningDaemonUnlessAllowed(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; runCmdOutput executes the root command
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)

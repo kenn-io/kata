@@ -153,7 +153,8 @@ func TestInputState_ActiveFieldIsFollowsIdentity(t *testing.T) {
 // TestDetail_EKey_OpensBodyEditForm: pressing `e` from the detail
 // view opens the centered body editor pre-filled with the issue
 // body. Replaces the old shell-out-to-$EDITOR path.
-func TestDetail_EKey_OpensBodyEditForm(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestDetail_EKey_OpensBodyEditForm(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m.view = viewDetail
 	out, _ := m.Update(runeKey('e'))
@@ -170,7 +171,8 @@ func TestDetail_EKey_OpensBodyEditForm(t *testing.T) { //nolint:paralleltest // 
 // TestDetail_CKey_OpensCommentForm: pressing `c` from the detail
 // view opens the centered comment editor empty. Replaces the old
 // shell-out-to-$EDITOR path.
-func TestDetail_CKey_OpensCommentForm(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestDetail_CKey_OpensCommentForm(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m.view = viewDetail
 	out, _ := m.Update(runeKey('c'))
@@ -185,7 +187,8 @@ func TestDetail_CKey_OpensCommentForm(t *testing.T) { //nolint:paralleltest // a
 
 // TestDetail_FormKeys_NoIssue_NoOp: `e`/`c` while no issue is open
 // (loading state) must not open a form.
-func TestDetail_FormKeys_NoIssue_NoOp(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestDetail_FormKeys_NoIssue_NoOp(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m.view = viewDetail
 	m.detail.issue = nil
@@ -202,7 +205,8 @@ func TestDetail_FormKeys_NoIssue_NoOp(t *testing.T) { //nolint:paralleltest // a
 // successful form-side mutationDoneMsg closes the form (input clears)
 // and re-classifies as origin=detail so the existing detail
 // applyMutation logic refreshes the body / comments.
-func TestRouteFormMutation_Success_ClosesFormAndDispatchesToDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestRouteFormMutation_Success_ClosesFormAndDispatchesToDetail(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m.view = viewDetail
 	m = m.openBodyEditForm()
@@ -221,7 +225,8 @@ func TestRouteFormMutation_Success_ClosesFormAndDispatchesToDetail(t *testing.T)
 // TestRouteFormMutation_Error_KeepsFormAndShowsError: a form-side
 // mutation error leaves the form open and surfaces the error on
 // the form's err line; saving=false so the user can retry.
-func TestRouteFormMutation_Error_KeepsFormAndShowsError(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestRouteFormMutation_Error_KeepsFormAndShowsError(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m.view = viewDetail
 	m = m.openBodyEditForm()
@@ -310,7 +315,8 @@ func TestForm_OpenCommentForm_StartsEmpty(t *testing.T) {
 // empty comment form must NOT dispatch AddComment; the form stays
 // open with an error message. Distinguishes from body edit, where
 // empty content is legitimate.
-func TestForm_CtrlO_OnEmptyComment_BlocksAndShowsError(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestForm_CtrlO_OnEmptyComment_BlocksAndShowsError(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m = m.openCommentForm()
 	out, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
@@ -329,7 +335,8 @@ func TestForm_CtrlO_OnEmptyComment_BlocksAndShowsError(t *testing.T) { //nolint:
 // TestForm_CtrlO_OnEmptyBodyEdit_AllowedToCommit: clearing a body
 // is legitimate; ctrl+o on an empty body edit form must dispatch
 // EditBody with body="" — no in-form error.
-func TestForm_CtrlO_OnEmptyBodyEdit_AllowedToCommit(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestForm_CtrlO_OnEmptyBodyEdit_AllowedToCommit(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m = m.openBodyEditForm()
 	// Clear the textarea (it pre-filled with the existing body).
@@ -344,7 +351,8 @@ func TestForm_CtrlO_OnEmptyBodyEdit_AllowedToCommit(t *testing.T) { //nolint:par
 // TestForm_CtrlO_SetsSavingGate: the first ctrl+o flips saving=true
 // and a duplicate ctrl+o while saving is absorbed (no second cmd).
 // Regression for the "duplicate ctrl+o issues two mutations" race.
-func TestForm_CtrlO_SetsSavingGate(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestForm_CtrlO_SetsSavingGate(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m = m.openCommentForm()
 	m.input.activeField().setValue("hello")
@@ -368,7 +376,8 @@ func TestForm_CtrlO_SetsSavingGate(t *testing.T) { //nolint:paralleltest // appl
 	}
 }
 
-func TestCommentForm_EscEmptyClosesImmediately(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestCommentForm_EscEmptyClosesImmediately(t *testing.T) {
+	t.Parallel()
 	m := formFixture().openCommentForm()
 	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	nm := out.(Model)
@@ -377,7 +386,8 @@ func TestCommentForm_EscEmptyClosesImmediately(t *testing.T) { //nolint:parallel
 	}
 }
 
-func TestCommentForm_EscWhitespaceOnlyClosesImmediately(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestCommentForm_EscWhitespaceOnlyClosesImmediately(t *testing.T) {
+	t.Parallel()
 	m := formFixture().openCommentForm()
 	m.input.activeField().setValue(" \t\n")
 	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -387,7 +397,8 @@ func TestCommentForm_EscWhitespaceOnlyClosesImmediately(t *testing.T) { //nolint
 	}
 }
 
-func TestCommentForm_EscDirtyRequiresConfirmation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestCommentForm_EscDirtyRequiresConfirmation(t *testing.T) {
+	t.Parallel()
 	m := formFixture().openCommentForm()
 	m.input.activeField().setValue("draft comment")
 	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -400,7 +411,8 @@ func TestCommentForm_EscDirtyRequiresConfirmation(t *testing.T) { //nolint:paral
 	}
 }
 
-func TestCommentForm_EscWhileSavingIsAbsorbed(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestCommentForm_EscWhileSavingIsAbsorbed(t *testing.T) {
+	t.Parallel()
 	m := formFixture().openCommentForm()
 	m.input.activeField().setValue("draft comment")
 
@@ -423,7 +435,8 @@ func TestCommentForm_EscWhileSavingIsAbsorbed(t *testing.T) { //nolint:parallelt
 	}
 }
 
-func TestCommentDiscardModal_CancelPreservesDraft(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestCommentDiscardModal_CancelPreservesDraft(t *testing.T) {
+	t.Parallel()
 	for _, msg := range []tea.KeyPressMsg{
 		runeKey('n'),
 		{Code: tea.KeyEsc},
@@ -451,7 +464,8 @@ func TestCommentDiscardModal_CancelPreservesDraft(t *testing.T) { //nolint:paral
 	}
 }
 
-func TestCommentDiscardModal_ConfirmClearsDraft(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestCommentDiscardModal_ConfirmClearsDraft(t *testing.T) {
+	t.Parallel()
 	m := formFixture().openCommentForm()
 	m.input.activeField().setValue("draft comment")
 	m.modal = modalDiscardComment
@@ -462,7 +476,8 @@ func TestCommentDiscardModal_ConfirmClearsDraft(t *testing.T) { //nolint:paralle
 	}
 }
 
-func TestCommentDiscardModal_AbsorbsOtherKeys(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestCommentDiscardModal_AbsorbsOtherKeys(t *testing.T) {
+	t.Parallel()
 	m := formFixture().openCommentForm()
 	m.input.activeField().setValue("draft comment")
 	m.modal = modalDiscardComment
@@ -479,7 +494,8 @@ func TestCommentDiscardModal_AbsorbsOtherKeys(t *testing.T) { //nolint:parallelt
 // test (it shells out to $EDITOR) but the form's formGen rides
 // through editorCmd into the eventual editorReturnedMsg, which we
 // validate via the return-routing tests below.
-func TestForm_CtrlE_RequestsEditorHandoff_TaggedWithFormGen(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestForm_CtrlE_RequestsEditorHandoff_TaggedWithFormGen(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m = m.openBodyEditForm()
 	formGenAtOpen := m.input.formGen
@@ -502,7 +518,8 @@ func TestForm_CtrlE_RequestsEditorHandoff_TaggedWithFormGen(t *testing.T) { //no
 // TestForm_EditorReturn_MatchingFormGen_WritesBackToTextarea: a
 // successful editor return whose formGen matches the active form
 // repopulates the textarea with the returned content.
-func TestForm_EditorReturn_MatchingFormGen_WritesBackToTextarea(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestForm_EditorReturn_MatchingFormGen_WritesBackToTextarea(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m = m.openBodyEditForm()
 	gen := m.input.formGen
@@ -523,7 +540,8 @@ func TestForm_EditorReturn_MatchingFormGen_WritesBackToTextarea(t *testing.T) { 
 // form was closed and re-opened in the meantime) is silently
 // discarded. The current form's textarea is unchanged. Regression
 // for the stale-handoff race class.
-func TestForm_EditorReturn_StaleFormGen_DropsContent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestForm_EditorReturn_StaleFormGen_DropsContent(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m = m.openCommentForm()
 	staleGen := m.input.formGen
@@ -551,7 +569,8 @@ func TestForm_EditorReturn_StaleFormGen_DropsContent(t *testing.T) { //nolint:pa
 // TestForm_EditorReturn_NoActiveForm_DropsContent: editor return
 // arrives with formGen=N but no form is active. Must not panic, must
 // not change anything.
-func TestForm_EditorReturn_NoActiveForm_DropsContent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestForm_EditorReturn_NoActiveForm_DropsContent(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	out, cmd := m.Update(editorReturnedMsg{
 		kind: "edit", content: "x", formGen: 999,
@@ -569,7 +588,8 @@ func TestForm_EditorReturn_NoActiveForm_DropsContent(t *testing.T) { //nolint:pa
 // editor exited with an error (non-zero exit, tmpfile read fail).
 // The form stays open with its previous buffer intact and the err
 // surfaces on the form's status line.
-func TestForm_EditorReturn_WithError_KeepsBufferAndShowsStatus(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestForm_EditorReturn_WithError_KeepsBufferAndShowsStatus(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m = m.openBodyEditForm()
 	gen := m.input.formGen
@@ -590,7 +610,8 @@ func TestForm_EditorReturn_WithError_KeepsBufferAndShowsStatus(t *testing.T) { /
 // TestForm_LegacyEditorReturn_FormGenZero_DoesNotRouteToFormPath:
 // editor returns with formGen=0 are the legacy detail-side shell-
 // out path and must NOT touch m.input.
-func TestForm_LegacyEditorReturn_FormGenZero_DoesNotRouteToFormPath(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestForm_LegacyEditorReturn_FormGenZero_DoesNotRouteToFormPath(t *testing.T) {
+	t.Parallel()
 	m := formFixture()
 	m = m.openBodyEditForm()
 	originalBuffer := m.input.activeField().value()

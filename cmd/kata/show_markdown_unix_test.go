@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestExternalShowMarkdownRendererTimeoutKillsDescendant(t *testing.T) {
+func TestExternalShowMarkdownRendererTimeoutKillsDescendant(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer("spawn-descendant", filepath.Join(t.TempDir(), "ready"))
 	// The timeout must fire, but only after the helper has had time to
@@ -37,7 +37,7 @@ func TestExternalShowMarkdownRendererTimeoutKillsDescendant(t *testing.T) {
 	requireProcessGone(t, pid)
 }
 
-func TestExternalShowMarkdownRendererCancellationKillsDescendant(t *testing.T) {
+func TestExternalShowMarkdownRendererCancellationKillsDescendant(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer("spawn-descendant", filepath.Join(t.TempDir(), "ready"))
 	renderer.grace = 50 * time.Millisecond
@@ -57,7 +57,7 @@ func TestExternalShowMarkdownRendererCancellationKillsDescendant(t *testing.T) {
 	requireProcessGone(t, pid)
 }
 
-func TestExternalShowMarkdownRendererBoundsInheritedDescendantStdout(t *testing.T) {
+func TestExternalShowMarkdownRendererBoundsInheritedDescendantStdout(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER and GO_WANT_SHOW_MARKDOWN_HELPER_DETACH
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER_DETACH", "1")
 	renderer := helperRenderer("spawn-descendant", filepath.Join(t.TempDir(), "ready"))

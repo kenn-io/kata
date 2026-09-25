@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"go.kenn.io/kit/safefileio"
 )
 
 // Reservation is an exclusively created token file that has not yet received
@@ -46,7 +48,7 @@ func Reserve(path string) (*Reservation, error) {
 	if err := validatePrivateDirectory(physicalParent, info); err != nil {
 		return nil, err
 	}
-	file, err := openExclusive(abs)
+	file, err := safefileio.CreatePrivateFile(abs)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("token file %s already exists", abs)

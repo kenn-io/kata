@@ -48,7 +48,8 @@ func assertHighlight(t *testing.T, m Model, want int) {
 // TestLabelPrompt_ArrowKeys_MoveHighlight_WithWrap: pressing ↓ four
 // times wraps from index 0 → 1 → 2 → 0 (3 entries). Then ↑ wraps
 // 0 → 2.
-func TestLabelPrompt_ArrowKeys_MoveHighlight_WithWrap(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestLabelPrompt_ArrowKeys_MoveHighlight_WithWrap(t *testing.T) {
+	t.Parallel()
 	m := labelPromptFixture()
 	m = sendKey(m, tea.KeyDown)
 	assertHighlight(t, m, 1)
@@ -65,7 +66,8 @@ func TestLabelPrompt_ArrowKeys_MoveHighlight_WithWrap(t *testing.T) { //nolint:p
 // TestLabelPrompt_TabCompletesHighlightedSuggestion: with the
 // highlight on entry index 1 (beta — second after sort), pressing
 // Tab fills the buffer with "beta".
-func TestLabelPrompt_TabCompletesHighlightedSuggestion(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestLabelPrompt_TabCompletesHighlightedSuggestion(t *testing.T) {
+	t.Parallel()
 	m := labelPromptFixture()
 	// Move highlight to beta (sorted by count desc: alpha=5, beta=3,
 	// gamma=1, so beta is index 1).
@@ -135,7 +137,8 @@ func TestRemoveLabelPrompt_SourceIsAttachedLabelsNotProjectCache(t *testing.T) {
 // TestLabelPrompt_EnterCommitsCurrentBuffer: pressing Enter with a
 // free-typed buffer dispatches the label-add mutation (commit
 // closes the input and routes through commitInput → dispatchLabel).
-func TestLabelPrompt_EnterCommitsCurrentBuffer(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestLabelPrompt_EnterCommitsCurrentBuffer(t *testing.T) {
+	t.Parallel()
 	m := labelPromptFixture()
 	m.input.activeField().input.SetValue("freshlabel")
 	m.input.fields[0] = *m.input.activeField()
@@ -145,7 +148,8 @@ func TestLabelPrompt_EnterCommitsCurrentBuffer(t *testing.T) { //nolint:parallel
 
 // TestLabelPrompt_EscClosesPromptAndMenu: esc cancels the input,
 // closing both the prompt and the menu.
-func TestLabelPrompt_EscClosesPromptAndMenu(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestLabelPrompt_EscClosesPromptAndMenu(t *testing.T) {
+	t.Parallel()
 	m := labelPromptFixture()
 	nm := sendKey(m, tea.KeyEsc)
 	assertInputKind(t, nm, inputNone)

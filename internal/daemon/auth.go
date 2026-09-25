@@ -60,7 +60,7 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Non-API paths can only reach the data-free embedded web handler.
+			// Non-API paths reach the optional, public web-assets handler.
 			// Keep the static shell public; listener Host policy still wraps it.
 			if !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api" &&
 				r.URL.Path != "/openapi.yaml" && r.URL.Path != "/openapi.json" {

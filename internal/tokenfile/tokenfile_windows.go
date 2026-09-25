@@ -73,29 +73,3 @@ func privateDirectoryTrustees() (*windows.SID, []*windows.SID, error) {
 	}
 	return user.User.Sid, allowed, nil
 }
-
-func openExclusive(path string) (*os.File, error) {
-	user, _, err := privateDirectoryTrustees()
-	if err != nil {
-		return nil, err
-	}
-	sd, err := windows.SecurityDescriptorFromString(
-		"O:" + user.String() + "D:P(A;;FA;;;" + user.String() + ")(A;;FA;;;SY)(A;;FA;;;BA)")
-	if err != nil {
-		return nil, err
-	}
-	name, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return nil, err
-	}
-	sa := &windows.SecurityAttributes{
-		Length:             uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
-		SecurityDescriptor: sd,
-	}
-	handle, err := windows.CreateFile(name, windows.GENERIC_WRITE, 0, sa,
-		windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
-	if err != nil {
-		return nil, err
-	}
-	return os.NewFile(uintptr(handle), path), nil
-}

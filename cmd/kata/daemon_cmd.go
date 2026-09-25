@@ -36,6 +36,7 @@ import (
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
+	kataweb "go.kenn.io/kata/internal/web"
 	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
 	kitvec "go.kenn.io/kit/vector"
@@ -1173,6 +1174,10 @@ func runDaemonProcess(
 		idleHealth = idleController.Snapshot
 		idleAdmission = idleController
 	}
+	webHandler, err := kataweb.NewEmbeddedHandler()
+	if err != nil {
+		return fmt.Errorf("build embedded web handler: %w", err)
+	}
 	srv := daemon.NewServer(daemon.ServerConfig{
 		DB:                     store,
 		DefaultTimezone:        dcfg.Timezone,
@@ -1197,6 +1202,7 @@ func runDaemonProcess(
 		},
 		Auth:                   dcfg.Auth,
 		WebSessions:            webSessions,
+		WebHandler:             webHandler,
 		InsecureReadonly:       insecureReadonly,
 		Embedder:               embedder,
 		VectorIndex:            vectorIndex,

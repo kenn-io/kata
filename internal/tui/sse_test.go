@@ -372,8 +372,7 @@ Done:
 // closes, and returns another frame on the second connect; with the
 // default 1s initial backoff the reconnect lands well inside the 1.5s
 // grace window.
-func TestSSE_GracePeriod_FastReconnect_NoReconnectingBadge(t *testing.T) {
-	t.Parallel()
+func TestSSE_GracePeriod_FastReconnect_NoReconnectingBadge(t *testing.T) { //nolint:paralleltest // reconnectStatusGrace is a 1s timer and the assertion depends on a 1.5s fast-reconnect window
 	var connects atomic.Int32
 	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		n := connects.Add(1)

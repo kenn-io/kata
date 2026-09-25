@@ -120,7 +120,8 @@ func assertActiveField(t *testing.T, m Model, want int) {
 // TestFilterForm_OpensOnFKey: pressing f on the list view opens the
 // centered four-axis filter modal. Field labels are Status / Owner /
 // Search / Labels in order (Labels axis added in Plan 8 commit 5b).
-func TestFilterForm_OpensOnFKey(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_OpensOnFKey(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	if len(m.input.fields) != 4 {
 		t.Fatalf("form fields = %d, want 4 (Status/Owner/Search/Labels)",
@@ -140,7 +141,8 @@ func TestFilterForm_OpensOnFKey(t *testing.T) { //nolint:paralleltest // applyCo
 // TestFilterForm_AllProjectsScopeStillRenders: the filter modal works
 // in cross-project mode too — it's filter-only, no project-scoped
 // mutation. Unlike the new-issue form, no all-projects gate fires.
-func TestFilterForm_AllProjectsScopeStillRenders(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_AllProjectsScopeStillRenders(t *testing.T) {
+	t.Parallel()
 	m := filterFormFixture()
 	m.scope = scope{allProjects: true}
 	m, cmd := stepModel(m, runeKey('f'))
@@ -154,7 +156,8 @@ func TestFilterForm_AllProjectsScopeStillRenders(t *testing.T) { //nolint:parall
 // TestFilterForm_TabCyclesFourFields_WithWrap: tab cycles
 // 0→1→2→3→0 (Status → Owner → Search → Labels → Status). Plan 8
 // commit 5b added the Labels axis as the 4th field.
-func TestFilterForm_TabCyclesFourFields_WithWrap(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_TabCyclesFourFields_WithWrap(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	wants := []int{1, 2, 3, 0}
 	for i, want := range wants {
@@ -168,7 +171,8 @@ func TestFilterForm_TabCyclesFourFields_WithWrap(t *testing.T) { //nolint:parall
 // TestFilterForm_StatusFieldRadioCycle_LeftRightSpace: with Status
 // active (the default), → cycles forward, ← backward, space cycles
 // forward. Choices are all/open/closed.
-func TestFilterForm_StatusFieldRadioCycle_LeftRightSpace(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_StatusFieldRadioCycle_LeftRightSpace(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	if got := m.input.fields[0].radio.value(); got != "all" {
 		t.Fatalf("initial radio = %q, want all", got)
@@ -198,7 +202,8 @@ func TestFilterForm_StatusFieldRadioCycle_LeftRightSpace(t *testing.T) { //nolin
 //
 // applyLiveBarFilter would only set ONE field (the active bar); the
 // dedicated path sets all three atomically.
-func TestFilterForm_CommitUsesDedicatedPath(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_CommitUsesDedicatedPath(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	// Set Status=open via a right-arrow cycle.
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyRight})
@@ -224,7 +229,8 @@ func TestFilterForm_CommitUsesDedicatedPath(t *testing.T) { //nolint:paralleltes
 // commit zeros selectedUID and resets cursor to 0 — matches the
 // s/c convention. Predictable fresh-view behavior beats trying to
 // pin selection across a filter change.
-func TestFilterForm_CommitZeroesSelectedUIDAndResetsCursor(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_CommitZeroesSelectedUIDAndResetsCursor(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	m.list.cursor = 5
 	m.list.selectedUID = "01TEST-42aa"
@@ -240,7 +246,8 @@ func TestFilterForm_CommitZeroesSelectedUIDAndResetsCursor(t *testing.T) { //nol
 // TestFilterForm_CommitClearsLmStatus: any prior list-status hint is
 // cleared on commit so the new filtered view doesn't read with a
 // stale "closed #42" or similar.
-func TestFilterForm_CommitClearsLmStatus(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_CommitClearsLmStatus(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	m.list.status = "closed #99"
 	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
@@ -251,7 +258,8 @@ func TestFilterForm_CommitClearsLmStatus(t *testing.T) { //nolint:paralleltest /
 
 // TestFilterForm_CommitDoesNotRefetch: commit applies filters over the
 // cached all-status working set and returns no command.
-func TestFilterForm_CommitDoesNotRefetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_CommitDoesNotRefetch(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	_, cmd := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd != nil {
@@ -262,7 +270,8 @@ func TestFilterForm_CommitDoesNotRefetch(t *testing.T) { //nolint:paralleltest /
 // TestFilterForm_CommitResetsCursorToZero is a more explicit form of
 // the cursor=0 invariant — separate test pins the contract per the
 // per-step assertion list (5a.17).
-func TestFilterForm_CommitResetsCursorToZero(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_CommitResetsCursorToZero(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	m.list.cursor = 17
 	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
@@ -275,7 +284,8 @@ func TestFilterForm_CommitResetsCursorToZero(t *testing.T) { //nolint:parallelte
 // every field on the form but leaves preFilter intact so a subsequent
 // esc still restores the at-open snapshot. Plan 8 commit 5b: the
 // Labels field is now part of the reset.
-func TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact(t *testing.T) {
+	t.Parallel()
 	m := filterFormFixture()
 	m.list.filter = ListFilter{
 		Status: "open", Owner: "wesm", Search: "bug",
@@ -314,7 +324,8 @@ func TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact(t *testing.T) { //noli
 // restores lm.filter to the preFilter snapshot (in case a future
 // "live preview" path mutated it; today the commit is the only mutator
 // but the symmetry is locked down for safety).
-func TestFilterForm_EscRestoresPreFilter(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_EscRestoresPreFilter(t *testing.T) {
+	t.Parallel()
 	m := filterFormFixture()
 	m.list.filter = ListFilter{Status: "open", Owner: "wesm"}
 	m = openFilterForm(t, m)
@@ -336,9 +347,9 @@ func TestFilterForm_EscRestoresPreFilter(t *testing.T) { //nolint:paralleltest /
 // would set saving=true and wait for a mutationDoneMsg that never
 // arrives. The assertion is direct: after ctrl+o, the form is closed
 // (kind=inputNone) and saving is NOT true.
-func TestFilterForm_CtrlOCommitsViaCommitInputBranch_NotCommitFormInput( //nolint:paralleltest // applyColorMode rewrites package style vars
-	t *testing.T,
+func TestFilterForm_CtrlOCommitsViaCommitInputBranch_NotCommitFormInput(t *testing.T,
 ) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	assertInputKind(t, nm, inputNone)
@@ -360,7 +371,8 @@ func TestFilterForm_CtrlOCommitsViaCommitInputBranch_NotCommitFormInput( //nolin
 // closed the open filter modal whenever any unrelated form's response
 // landed late. The new contract: stale form responses are dropped
 // before they can touch a different form's state.
-func TestFilterForm_NoBranchInRouteFormMutation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_NoBranchInRouteFormMutation(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	preInput := m.input
 	// formGen that cannot match the filter form's freshly-allocated one.
@@ -435,7 +447,8 @@ func TestHelpScreen_NoLongerMentionsO(t *testing.T) {
 // commits via commitFilterForm — the resulting lm.filter.Labels is
 // populated AND the any-of filter narrows the visible rows to issues
 // carrying any of the typed labels.
-func TestFilterForm_LabelsField_AnyOfSemantics_AppliesViaCommit(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_LabelsField_AnyOfSemantics_AppliesViaCommit(t *testing.T) {
+	t.Parallel()
 	m := openFilterForm(t, filterFormFixture())
 	// Tab three times so Labels (idx 3) is the active field.
 	m = pressTabN(m, 3)
@@ -473,7 +486,8 @@ func TestFilterForm_LabelsField_AnyOfSemantics_AppliesViaCommit(t *testing.T) { 
 // from). The form still opens and commits cleanly. Suggestion-menu
 // wiring inside the form is deferred regardless of scope, but this
 // test pins the all-projects fallback contract.
-func TestFilterForm_LabelsField_FreeTypedInAllProjectsScope(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestFilterForm_LabelsField_FreeTypedInAllProjectsScope(t *testing.T) {
+	t.Parallel()
 	m := filterFormFixture()
 	m.scope = scope{allProjects: true}
 	m, cmd := stepModel(m, runeKey('f'))

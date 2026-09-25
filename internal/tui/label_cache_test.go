@@ -54,7 +54,8 @@ func (f *fakeLabelLister) ListLabels(_ context.Context, _ int64) ([]LabelCount, 
 // the resulting gen=1 message is rejected. A regression that moved
 // the gen-stamp into the cmd (or dropped the gen check in the
 // handler) would let the stale labels overwrite the cache.
-func TestLabelCache_DispatchStampsGenBeforeResponse(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestLabelCache_DispatchStampsGenBeforeResponse(t *testing.T) {
+	t.Parallel()
 	pid := int64(7)
 	m := setupScopedModel(t, pid)
 	fake := &fakeLabelLister{labels: []LabelCount{{Label: "from-first", Count: 1}}}
@@ -92,7 +93,8 @@ func TestLabelCache_DispatchStampsGenBeforeResponse(t *testing.T) { //nolint:par
 // acceptance check on response is gen >= cache.gen; older messages
 // are silently discarded so a slow first-dispatch can't overwrite a
 // freshly-invalidated cache entry.
-func TestLabelCache_StaleGenResponseDropped(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestLabelCache_StaleGenResponseDropped(t *testing.T) {
+	t.Parallel()
 	pid := int64(7)
 	m := setupScopedModel(t, pid)
 	m, _ = m.dispatchLabelFetch(pid) // gen=1
@@ -120,7 +122,8 @@ func TestLabelCache_StaleGenResponseDropped(t *testing.T) { //nolint:paralleltes
 // Setup: dispatch for pid=7 (creates entry, fetching=true), switch
 // scope to pid=8, then send the pid=7 response. Assert the pid=7
 // entry IS populated AND fetching=false — that's the new contract.
-func TestLabelCache_InactiveProjectResponseStillPopulatesCache(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestLabelCache_InactiveProjectResponseStillPopulatesCache(t *testing.T) {
+	t.Parallel()
 	m := setupScopedModel(t, 7) // active project is 7
 	// Dispatch creates the entry for pid=7 with gen=1, fetching=true.
 	m, _ = m.dispatchLabelFetch(7)
@@ -229,7 +232,8 @@ func TestMutAffectsLabelCounts_AllRelevantKinds(t *testing.T) {
 // trigger a refetch (entry.fetching=true, entry.gen advanced). The
 // list/detail refetch path is independent — this test asserts the
 // suggestion-cache invalidation specifically.
-func TestLabelCache_SSEEventInvalidatesSuggestionCacheOnly(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestLabelCache_SSEEventInvalidatesSuggestionCacheOnly(t *testing.T) {
+	t.Parallel()
 	pid := int64(7)
 	m := setupScopedModel(t, pid)
 	m.cache = newIssueCache()

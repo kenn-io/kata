@@ -15,6 +15,7 @@ import (
 )
 
 func TestConnectionDroppedErrnosUnix(t *testing.T) {
+	t.Parallel()
 	for _, errno := range []syscall.Errno{syscall.EPIPE, syscall.ECONNRESET} {
 		err := &url.Error{Op: http.MethodPost, URL: "https://daemon.example/issues", Err: &net.OpError{
 			Op: "write", Net: "tcp", Err: errno,

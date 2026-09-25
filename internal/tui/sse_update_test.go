@@ -841,7 +841,8 @@ func TestProjectsView_IgnoresEventsWhenInactive(t *testing.T) { //nolint:paralle
 // TestProjectsView_DebouncesRefetch pins that a burst of SSE events
 // flips projectsStale once and dispatches exactly one debounce timer
 // (no thundering herd). Spec §6.3.
-func TestProjectsView_DebouncesRefetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestProjectsView_DebouncesRefetch(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsByID = map[int64]string{7: "kata"}
@@ -868,7 +869,8 @@ func TestProjectsView_DebouncesRefetch(t *testing.T) { //nolint:paralleltest // 
 // signal that a new project has appeared (e.g. `kata init` ran in
 // another terminal); without this refresh, the all-projects table
 // would never learn about it until the user manually refetched.
-func TestProjectsView_StaleOnUnknownProjectEvent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestProjectsView_StaleOnUnknownProjectEvent(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsByID = map[int64]string{7: "kata"}
@@ -886,7 +888,8 @@ func TestProjectsView_StaleOnUnknownProjectEvent(t *testing.T) { //nolint:parall
 // is NOT cleared at dispatch — a failed fetch must leave the flag
 // armed so the next debounce can retry. The flag is cleared by
 // projectsLoadedMsg when the fetch lands successfully. Spec §6.3.
-func TestProjectsDebounceFire_DispatchesFetchWhenActive(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestProjectsDebounceFire_DispatchesFetchWhenActive(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsStale = true
@@ -904,7 +907,8 @@ func TestProjectsDebounceFire_DispatchesFetchWhenActive(t *testing.T) { //nolint
 // wakeup is a no-op for the fetch when the user has navigated away
 // from viewProjects, but still clears the pending flag so future
 // invalidations can re-arm. Spec §6.3.
-func TestProjectsDebounceFire_NoFetchWhenInactive(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestProjectsDebounceFire_NoFetchWhenInactive(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.view = viewList // user navigated away
 	m.projectsStale = true
@@ -920,7 +924,8 @@ func TestProjectsDebounceFire_NoFetchWhenInactive(t *testing.T) { //nolint:paral
 // TestProjectsDebounceFire_NoFetchWhenNotStale pins that the timer's
 // wakeup is a no-op when the stale flag is unset (spurious fire after
 // a manual refresh that consumed staleness). Spec §6.3.
-func TestProjectsDebounceFire_NoFetchWhenNotStale(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestProjectsDebounceFire_NoFetchWhenNotStale(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsStale = false
@@ -1060,7 +1065,8 @@ func TestProjectsLoadedMsg_ClampsCursor(t *testing.T) { //nolint:paralleltest //
 // a stats refetch when the user is in viewProjects. Without this,
 // "resynced" would lie to a viewProjects user — the table numbers
 // would lag the daemon. Spec §6.3 / §10 (resync semantics).
-func TestHandleResetRequired_ClearsProjectsState(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
+func TestHandleResetRequired_ClearsProjectsState(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsStale = true
