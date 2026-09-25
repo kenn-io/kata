@@ -25,7 +25,7 @@ func setupImportTest(t *testing.T) (home, input, target string) {
 	return home, input, target
 }
 
-func TestImportCreatesTargetDB(t *testing.T) {
+func TestImportCreatesTargetDB(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, input, target := setupImportTest(t)
 
 	out, err := runCmdOutput(t, nil, "import", "--input", input, "--target", target)
@@ -39,7 +39,7 @@ func TestImportCreatesTargetDB(t *testing.T) {
 	assert.Contains(t, out, target)
 }
 
-func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
+func TestImportFormatAgentSelectsOutputMode(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, input, target := setupImportTest(t)
 
 	out, err := runCmdOutput(t, nil, "import", "--format", "agent", "--source-format", "kata", "--input", input, "--target", target)
@@ -54,7 +54,7 @@ func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
 	assert.Equal(t, "OK import source_format=kata target="+agentValue(target)+"\n", out)
 }
 
-func TestImportLegacyFormatConflictsWithSourceFormat(t *testing.T) {
+func TestImportLegacyFormatConflictsWithSourceFormat(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	setupKataEnv(t)
 
 	_, err := runCmdOutput(t, nil, "import", "--format", "beads", "--source-format", "kata")
@@ -62,7 +62,7 @@ func TestImportLegacyFormatConflictsWithSourceFormat(t *testing.T) {
 	assert.Contains(t, ce.Message, "--format beads cannot be combined with --source-format")
 }
 
-func TestImportLegacyFormatBeadsAllowsAgentOutputMode(t *testing.T) {
+func TestImportLegacyFormatBeadsAllowsAgentOutputMode(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	setupKataEnv(t)
@@ -75,7 +75,7 @@ func TestImportLegacyFormatBeadsAllowsAgentOutputMode(t *testing.T) {
 	assert.Contains(t, stderr, "--input is not supported")
 }
 
-func TestImportLegacyFormatBeadsParseErrorPreservesAgentMode(t *testing.T) {
+func TestImportLegacyFormatBeadsParseErrorPreservesAgentMode(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	setupKataEnv(t)
@@ -87,7 +87,7 @@ func TestImportLegacyFormatBeadsParseErrorPreservesAgentMode(t *testing.T) {
 		"stderr should use agent mode for legacy beads parse error, got %q", stderr)
 }
 
-func TestImportLegacyFormatBeadsParseErrorPreservesJSONMode(t *testing.T) {
+func TestImportLegacyFormatBeadsParseErrorPreservesJSONMode(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	setupKataEnv(t)
@@ -100,7 +100,7 @@ func TestImportLegacyFormatBeadsParseErrorPreservesJSONMode(t *testing.T) {
 	assert.Contains(t, got.Error.Message, "unknown flag: --bogus")
 }
 
-func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
+func TestImportRejectsExistingTargetWithoutForce(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, input, target := setupImportTest(t)
 	d := openKataTestDB(t, target)
 	_, err := d.CreateProject(context.Background(), "existing")
@@ -112,7 +112,7 @@ func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 	assert.Contains(t, ce.Message, "target already exists")
 }
 
-func TestImportMergeRejectsReplacementFlags(t *testing.T) {
+func TestImportMergeRejectsReplacementFlags(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	setupKataEnv(t)
 	for _, incompatible := range []string{"--force", "--new-instance"} {
 		t.Run(incompatible, func(t *testing.T) {
@@ -124,7 +124,7 @@ func TestImportMergeRejectsReplacementFlags(t *testing.T) {
 	}
 }
 
-func TestImportMergeRejectsUninitializedSQLiteTargetsWithoutMutation(t *testing.T) {
+func TestImportMergeRejectsUninitializedSQLiteTargetsWithoutMutation(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, tt := range []struct {
 		name          string
 		targetSuffix  string
@@ -165,7 +165,7 @@ func TestImportMergeRejectsUninitializedSQLiteTargetsWithoutMutation(t *testing.
 	}
 }
 
-func TestImportMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *testing.T) {
+func TestImportMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	home := setupKataEnv(t)
 	ctx := context.Background()
 
@@ -308,7 +308,7 @@ func TestImportMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *te
 	require.NoError(t, err)
 }
 
-func TestImportMergeRefusesMultiProjectSnapshotWithoutMutation(t *testing.T) {
+func TestImportMergeRefusesMultiProjectSnapshotWithoutMutation(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, input, target := setupImportTest(t)
 	ctx := context.Background()
 	targetStore := openKataTestDB(t, target)
@@ -328,7 +328,7 @@ func TestImportMergeRefusesMultiProjectSnapshotWithoutMutation(t *testing.T) {
 	assert.Equal(t, existing.Name, got.Name)
 }
 
-func TestImportMergeSkipsCrossProjectLink(t *testing.T) {
+func TestImportMergeSkipsCrossProjectLink(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	home := setupKataEnv(t)
 	ctx := context.Background()
 	source := openKataTestDB(t, filepath.Join(home, "source-links.db"))
@@ -380,7 +380,7 @@ func TestImportMergeSkipsCrossProjectLink(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestImportRejectsExistingTargetSidecarWithoutForce(t *testing.T) {
+func TestImportRejectsExistingTargetSidecarWithoutForce(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, input, target := setupImportTest(t)
 	require.NoError(t, os.WriteFile(target+"-wal", []byte("stale-wal"), 0o600))
 
@@ -396,6 +396,7 @@ func TestImportRejectsExistingTargetSidecarWithoutForce(t *testing.T) {
 }
 
 func TestInstallImportedTargetForceRemovesSidecarsWhenMainTargetIsMissing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.db")
 	tmpTarget := filepath.Join(dir, "imported.db")
@@ -415,6 +416,7 @@ func TestInstallImportedTargetForceRemovesSidecarsWhenMainTargetIsMissing(t *tes
 }
 
 func TestInstallImportedTargetForcePreservesUserFileAtDeterministicBackupPath(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.db")
 	tmpTarget := filepath.Join(dir, "imported.db")
@@ -434,6 +436,7 @@ func TestInstallImportedTargetForcePreservesUserFileAtDeterministicBackupPath(t 
 }
 
 func TestInstallImportedTargetMovesTempSidecars(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.db")
 	tmpTarget := filepath.Join(dir, "imported.db")
@@ -458,7 +461,7 @@ func TestInstallImportedTargetMovesTempSidecars(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "installed import must not leave shm sidecar at temp path")
 }
 
-func TestImportForcePreservesExistingTargetOnFailure(t *testing.T) {
+func TestImportForcePreservesExistingTargetOnFailure(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	home := setupKataEnv(t)
 	input := filepath.Join(home, "bad.jsonl")
 	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
@@ -478,7 +481,7 @@ func TestImportForcePreservesExistingTargetOnFailure(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestImportFailureRemovesNewPartialTarget(t *testing.T) {
+func TestImportFailureRemovesNewPartialTarget(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	home := setupKataEnv(t)
 	input := filepath.Join(home, "bad.jsonl")
 	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
@@ -492,6 +495,7 @@ func TestImportFailureRemovesNewPartialTarget(t *testing.T) {
 }
 
 func TestInstallImportedTargetForcePreservesUserDirectoryAtDeterministicBackupSidecarPath(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.db")
 	tmpTarget := filepath.Join(dir, "imported.db")
@@ -515,6 +519,7 @@ func TestInstallImportedTargetForcePreservesUserDirectoryAtDeterministicBackupSi
 }
 
 func TestMoveSQLiteFileSetRollsBackAlreadyMovedSidecarOnError(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	from := filepath.Join(dir, "from.db")
 	to := filepath.Join(dir, "to.db")
@@ -537,7 +542,7 @@ func TestMoveSQLiteFileSetRollsBackAlreadyMovedSidecarOnError(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "rolled back wal sidecar must not remain at destination")
 }
 
-func TestImportRefusesDaemon(t *testing.T) {
+func TestImportRefusesDaemon(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	home, input, target := setupImportTest(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)

@@ -28,7 +28,7 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
-func TestFederationStatusJSONOutput(t *testing.T) {
+func TestFederationStatusJSONOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, project := setupFederationStatusCLIState(t)
 
 	out := requireCmdOutput(t, env, "--json", "federation", "status")
@@ -78,7 +78,7 @@ func TestFederationStatusJSONOutput(t *testing.T) {
 	assert.Equal(t, "hub offline", *status.LastError)
 }
 
-func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
+func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _ := setupFederationStatusCLIState(t)
 
 	out := requireCmdOutput(t, env, "federation", "status")
@@ -105,7 +105,7 @@ func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 	}
 }
 
-func TestFederationQuarantineListHumanAndShow(t *testing.T) {
+func TestFederationQuarantineListHumanAndShow(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, project := setupFederationStatusCLIState(t)
 	q, err := env.DB.ActiveFederationQuarantine(
 		context.Background(), project.ID, db.FederationQuarantineDirectionPush)
@@ -127,7 +127,7 @@ func TestFederationQuarantineListHumanAndShow(t *testing.T) {
 	}
 }
 
-func TestFederationQuarantineListAgentAndJSON(t *testing.T) {
+func TestFederationQuarantineListAgentAndJSON(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, project := setupFederationStatusCLIState(t)
 	q, err := env.DB.ActiveFederationQuarantine(
 		context.Background(), project.ID, db.FederationQuarantineDirectionPush)
@@ -166,7 +166,7 @@ func TestFederationQuarantineListAgentAndJSON(t *testing.T) {
 	assert.Equal(t, "hub rejected batch", got.Quarantines[0].Error)
 }
 
-func TestFederationQuarantineListEmptyAndShowMissing(t *testing.T) {
+func TestFederationQuarantineListEmptyAndShowMissing(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	human := requireCmdOutput(t, env, "federation", "quarantine", "list")
@@ -179,7 +179,7 @@ func TestFederationQuarantineListEmptyAndShowMissing(t *testing.T) {
 	assert.Equal(t, "federation_quarantine_not_found", ce.Code)
 }
 
-func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
+func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid, ref := setupFederatedHubIssue(t, "status violation")
 	ctx := context.Background()
 	issue, err := env.DB.IssueByShortID(ctx, pid, ref, db.IncludeDeletedNo)
@@ -233,7 +233,7 @@ func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 	assert.Contains(t, text, ref+" issue.updated by bob on spoke "+cliViolationSpokeUID)
 }
 
-func TestFederationQuarantineSkipCLI(t *testing.T) {
+func TestFederationQuarantineSkipCLI(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, project := setupFederationStatusCLIState(t)
 	ctx := context.Background()
 	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
@@ -249,7 +249,7 @@ func TestFederationQuarantineSkipCLI(t *testing.T) {
 	assert.Equal(t, q.LastEventID, binding.PushCursorEventID)
 }
 
-func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) {
+func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, project := setupFederationStatusCLIState(t)
 	ctx := context.Background()
 	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
@@ -262,7 +262,7 @@ func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("OK federation-quarantine-skip id=%d\n", q.ID), out)
 }
 
-func TestFederationQuarantineRetryCLI(t *testing.T) {
+func TestFederationQuarantineRetryCLI(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, project := setupFederationStatusCLIState(t)
 	ctx := context.Background()
 	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
@@ -287,7 +287,7 @@ func TestFederationQuarantineRetryCLI(t *testing.T) {
 	assert.Equal(t, "retry: hub upgraded", skipReason)
 }
 
-func TestFederationQuarantineRetryCLIAgentMode(t *testing.T) {
+func TestFederationQuarantineRetryCLIAgentMode(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, project := setupFederationStatusCLIState(t)
 	ctx := context.Background()
 	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
@@ -300,7 +300,7 @@ func TestFederationQuarantineRetryCLIAgentMode(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("OK federation-quarantine-retry id=%d\n", q.ID), out)
 }
 
-func TestFederationHelpIsVisible(t *testing.T) {
+func TestFederationHelpIsVisible(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	rootHelp := string(executeRoot(t, newRootCmd(), "--help"))
 	assert.Contains(t, strings.ToLower(rootHelp), "federation")
 
@@ -317,7 +317,7 @@ func TestFederationHelpIsVisible(t *testing.T) {
 	assert.NotContains(t, out, "rewrite-author")
 }
 
-func TestFederationStatusInvisibilityNonFederatedShowUnchanged(t *testing.T) {
+func TestFederationStatusInvisibilityNonFederatedShowUnchanged(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	short := createIssue(t, env, pid, "ordinary issue")
 
@@ -327,7 +327,7 @@ func TestFederationStatusInvisibilityNonFederatedShowUnchanged(t *testing.T) {
 	assertNoFederationInternals(t, out)
 }
 
-func TestFederationIdentityCLIShowsInstanceUID(t *testing.T) {
+func TestFederationIdentityCLIShowsInstanceUID(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	out := requireCmdOutput(t, env, "federation", "identity")
@@ -335,7 +335,7 @@ func TestFederationIdentityCLIShowsInstanceUID(t *testing.T) {
 	assert.Contains(t, out, "instance: "+env.DB.InstanceUID())
 }
 
-func TestFederationEnableCLIEnablesWorkspaceProject(t *testing.T) {
+func TestFederationEnableCLIEnablesWorkspaceProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 
 	out := runCLI(t, env, dir, "federation", "enable")
@@ -346,7 +346,7 @@ func TestFederationEnableCLIEnablesWorkspaceProject(t *testing.T) {
 	assert.Equal(t, db.FederationRoleHub, binding.Role)
 }
 
-func TestFederationEnableCLIResolvesExplicitProjectFlag(t *testing.T) {
+func TestFederationEnableCLIResolvesExplicitProjectFlag(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(context.Background(), "fedlab")
 	require.NoError(t, err)
@@ -359,7 +359,7 @@ func TestFederationEnableCLIResolvesExplicitProjectFlag(t *testing.T) {
 	assert.Equal(t, db.FederationRoleHub, binding.Role)
 }
 
-func TestFederationEnableCLIRequiresExactProjectFlagName(t *testing.T) {
+func TestFederationEnableCLIRequiresExactProjectFlagName(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	project, err := env.DB.CreateProject(ctx, "team/hub-project")
@@ -373,7 +373,7 @@ func TestFederationEnableCLIRequiresExactProjectFlagName(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestFederationEnableCLIDoesNotCreateProjectFromProjectFlag(t *testing.T) {
+func TestFederationEnableCLIDoesNotCreateProjectFromProjectFlag(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	_, _, err := runCmdCapture(t, env, "federation", "enable", "--project", "missing-project")
@@ -384,7 +384,7 @@ func TestFederationEnableCLIDoesNotCreateProjectFromProjectFlag(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestFederationEnableCLIRejectsSpokeProject(t *testing.T) {
+func TestFederationEnableCLIRejectsSpokeProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	project, err := env.DB.CreateProject(ctx, "spoke")
@@ -406,7 +406,7 @@ func TestFederationEnableCLIRejectsSpokeProject(t *testing.T) {
 	assert.Contains(t, err.Error(), "spoke")
 }
 
-func TestFederationEnrollCLIPrintsJoinCommand(t *testing.T) {
+func TestFederationEnrollCLIPrintsJoinCommand(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	runCLI(t, env, dir, "federation", "enable")
 	spokeUID := env.DB.InstanceUID()
@@ -437,7 +437,7 @@ func TestFederationEnrollCLIPrintsJoinCommand(t *testing.T) {
 	assert.Contains(t, out, "--token ")
 }
 
-func TestFederationEnrollCLIUsesHubURLForEnrollmentAndDefaultDaemonForAdoption(t *testing.T) {
+func TestFederationEnrollCLIUsesHubURLForEnrollmentAndDefaultDaemonForAdoption(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -480,7 +480,7 @@ func TestFederationEnrollCLIUsesHubURLForEnrollmentAndDefaultDaemonForAdoption(t
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
+func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -516,7 +516,7 @@ func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
 	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
-func TestFederationEnrollCLIUsesNamedSpokeCatalogAuthForAdoption(t *testing.T) {
+func TestFederationEnrollCLIUsesNamedSpokeCatalogAuthForAdoption(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
@@ -554,7 +554,7 @@ token = "spoke-token"
 	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
-func TestFederationEnrollCLIExplicitDaemonResolutionFailureErrors(t *testing.T) {
+func TestFederationEnrollCLIExplicitDaemonResolutionFailureErrors(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	ctx := context.Background()
@@ -582,7 +582,7 @@ func TestFederationEnrollCLIExplicitDaemonResolutionFailureErrors(t *testing.T) 
 	assert.Empty(t, enrollments)
 }
 
-func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) {
+func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER and KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	resetFlags(t)
 	spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
@@ -615,7 +615,7 @@ func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) {
 	assert.Empty(t, enrollments)
 }
 
-func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t *testing.T) {
+func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -649,7 +649,7 @@ func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t 
 	assert.False(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
-func TestFederationEnrollCLIAutoAdoptionRequiresExactSpokeProjectName(t *testing.T) {
+func TestFederationEnrollCLIAutoAdoptionRequiresExactSpokeProjectName(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -680,7 +680,7 @@ func TestFederationEnrollCLIAutoAdoptionRequiresExactSpokeProjectName(t *testing
 	assert.False(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
-func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameSpokeProject(t *testing.T) {
+func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameSpokeProject(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -717,7 +717,7 @@ func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameS
 	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
-func TestFederationEnrollCLIAdoptExistingRequiresPushCapability(t *testing.T) {
+func TestFederationEnrollCLIAdoptExistingRequiresPushCapability(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -739,7 +739,7 @@ func TestFederationEnrollCLIAdoptExistingRequiresPushCapability(t *testing.T) {
 	assert.Contains(t, err.Error(), "--adopt-existing requires push capability")
 }
 
-func TestFederationEnrollCLICreatesMissingProjectFromProjectFlag(t *testing.T) {
+func TestFederationEnrollCLICreatesMissingProjectFromProjectFlag(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	spokeUID := "01HZNQ7VFPK1XGD8R5MABCD4EF"
@@ -766,7 +766,7 @@ func TestFederationEnrollCLICreatesMissingProjectFromProjectFlag(t *testing.T) {
 	assert.Equal(t, "wesm", enrollments[0].Actor)
 }
 
-func TestFederationEnrollHTTPClientRequiresExplicitAllowInsecureForPlaintextHostname(t *testing.T) {
+func TestFederationEnrollHTTPClientRequiresExplicitAllowInsecureForPlaintextHostname(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and KATA_TRUST_PRIVATE_NETWORK
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
@@ -778,7 +778,7 @@ func TestFederationEnrollHTTPClientRequiresExplicitAllowInsecureForPlaintextHost
 	assert.Contains(t, err.Error(), "refusing to attach bearer token")
 }
 
-func TestFederationEnrollCLIExplicitAllowInsecurePrintsJoinFlag(t *testing.T) {
+func TestFederationEnrollCLIExplicitAllowInsecurePrintsJoinFlag(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	spokeUID := "01HZNQ7VFPK1XGD8R5MABCD4EF"
 
@@ -792,7 +792,7 @@ func TestFederationEnrollCLIExplicitAllowInsecurePrintsJoinFlag(t *testing.T) {
 	assert.Contains(t, out, "--allow-insecure")
 }
 
-func TestFederationEnrollCLIPlaintextBearerErrorMentionsAllowInsecure(t *testing.T) {
+func TestFederationEnrollCLIPlaintextBearerErrorMentionsAllowInsecure(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN and KATA_TRUST_PRIVATE_NETWORK; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
@@ -809,7 +809,7 @@ func TestFederationEnrollCLIPlaintextBearerErrorMentionsAllowInsecure(t *testing
 	assert.Contains(t, err.Error(), "--allow-insecure")
 }
 
-func TestFederationEnrollHTTPClientAllowsExplicitInsecurePlaintext(t *testing.T) {
+func TestFederationEnrollHTTPClientAllowsExplicitInsecurePlaintext(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 
 	client, err := federationEnrollHTTPClient(context.Background(), "http://8.8.8.8:7787", true)
@@ -818,7 +818,7 @@ func TestFederationEnrollHTTPClientAllowsExplicitInsecurePlaintext(t *testing.T)
 	require.NotNil(t, client)
 }
 
-func TestFederationEnrollHTTPClientNeverReplaysExplicitTokenCrossOrigin(t *testing.T) {
+func TestFederationEnrollHTTPClientNeverReplaysExplicitTokenCrossOrigin(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	const enrollmentToken = "explicit-enrollment-secret"
@@ -869,7 +869,7 @@ func TestFederationEnrollHTTPClientNeverReplaysExplicitTokenCrossOrigin(t *testi
 	}
 }
 
-func TestFederationEnrollHTTPClientFollowsSameOriginRedirect(t *testing.T) {
+func TestFederationEnrollHTTPClientFollowsSameOriginRedirect(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	const enrollmentToken = "explicit-enrollment-secret"
@@ -905,7 +905,7 @@ func TestFederationEnrollHTTPClientFollowsSameOriginRedirect(t *testing.T) {
 	assert.Equal(t, enrollmentToken, redirectedBody.Token)
 }
 
-func TestFederationJoinEnrollmentBodyNeverCrossesRedirectOrigin(t *testing.T) {
+func TestFederationJoinEnrollmentBodyNeverCrossesRedirectOrigin(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	for _, status := range []int{
 		http.StatusTemporaryRedirect,
 		http.StatusPermanentRedirect,
@@ -951,7 +951,7 @@ func TestFederationJoinEnrollmentBodyNeverCrossesRedirectOrigin(t *testing.T) {
 	}
 }
 
-func TestResolveFederationProjectUsesProvidedClientForWorkspaceResolution(t *testing.T) {
+func TestResolveFederationProjectUsesProvidedClientForWorkspaceResolution(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN; swaps package var flags
 	resetFlags(t)
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 	flags.Workspace = t.TempDir()
@@ -984,7 +984,7 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
-func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testing.T) {
+func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 	var seenAuth []string
 	spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1007,7 +1007,7 @@ func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testin
 	assert.Equal(t, []string{""}, seenAuth)
 }
 
-func TestFederationSpokeHTTPClientDoesNotUseKATAServerGlobalAuth(t *testing.T) {
+func TestFederationSpokeHTTPClientDoesNotUseKATAServerGlobalAuth(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN and KATA_SERVER; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 	var gotAuth string
@@ -1037,7 +1037,7 @@ func TestFederationSpokeHTTPClientDoesNotUseKATAServerGlobalAuth(t *testing.T) {
 	assert.Empty(t, gotAuth)
 }
 
-func TestFederationSpokeHTTPClientDoesNotUseNamedDaemonGlobalAuthFallback(t *testing.T) {
+func TestFederationSpokeHTTPClientDoesNotUseNamedDaemonGlobalAuthFallback(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN; swaps package var flags
 	resetFlags(t)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -1067,7 +1067,7 @@ url = "`+spoke.URL+`"
 	assert.Empty(t, gotAuth)
 }
 
-func TestFederationSpokeHTTPClientNamedTokenlessHonorsTrustPrivateNetwork(t *testing.T) {
+func TestFederationSpokeHTTPClientNamedTokenlessHonorsTrustPrivateNetwork(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN; swaps package var flags
 	resetFlags(t)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -1089,7 +1089,7 @@ url = "`+baseURL+`"
 	assert.NotNil(t, hc)
 }
 
-func TestFederationImplicitSpokeTargetAuthMatchingServerPreservesTrust(t *testing.T) {
+func TestFederationImplicitSpokeTargetAuthMatchingServerPreservesTrust(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and KATA_TRUST_PRIVATE_NETWORK; resetFlags sets package var flags
 	resetFlags(t)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -1118,7 +1118,7 @@ func TestFederationImplicitSpokeTargetAuthMatchingServerPreservesTrust(t *testin
 	assert.NotNil(t, hc)
 }
 
-func TestFederationImplicitSpokeTargetAuthMatchingLocalConfigPreservesPolicy(t *testing.T) {
+func TestFederationImplicitSpokeTargetAuthMatchingLocalConfigPreservesPolicy(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SERVER and KATA_AUTH_TOKEN; swaps package var flags
 	resetFlags(t)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -1153,7 +1153,7 @@ trust_private_network = true
 	assert.True(t, auth.AllowInsecure)
 }
 
-func TestFederationImplicitSpokeTargetAuthMismatchDoesNotResolveActiveTokenEnv(t *testing.T) {
+func TestFederationImplicitSpokeTargetAuthMismatchDoesNotResolveActiveTokenEnv(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SERVER and KATA_AUTH_TOKEN; resetFlags sets package var flags
 	resetFlags(t)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -1188,7 +1188,7 @@ token_env = "KATA_UNRELATED_TOKEN"
 	assert.False(t, auth.AllowInsecure)
 }
 
-func TestFederationSpokeHTTPClientNamedDaemonTokenEnvHonorsTrustPrivateNetwork(t *testing.T) {
+func TestFederationSpokeHTTPClientNamedDaemonTokenEnvHonorsTrustPrivateNetwork(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SPOKE_TOKEN; swaps package var flags
 	resetFlags(t)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -1212,6 +1212,7 @@ token_env = "KATA_SPOKE_TOKEN"
 }
 
 func TestFederationSpokeProjectExistsUsesReadonlyGETProbe(t *testing.T) {
+	t.Parallel()
 	spokeUID := "01HZNQ7VFPK1XGD8R5MABCD4EF"
 	var seenMethods []string
 	spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1242,7 +1243,7 @@ func TestFederationSpokeProjectExistsUsesReadonlyGETProbe(t *testing.T) {
 	}, seenMethods)
 }
 
-func TestFederationEnrollCLIRequiresPullCapabilityForJoinCommand(t *testing.T) {
+func TestFederationEnrollCLIRequiresPullCapabilityForJoinCommand(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 
 	_, err := runCLICapture(t, env, dir, "federation", "enroll",
@@ -1254,7 +1255,7 @@ func TestFederationEnrollCLIRequiresPullCapabilityForJoinCommand(t *testing.T) {
 	assert.Contains(t, err.Error(), "pull")
 }
 
-func TestFederationEnrollCLIUsesResolvedActorWhenAutoEnabling(t *testing.T) {
+func TestFederationEnrollCLIUsesResolvedActorWhenAutoEnabling(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 
 	runCLI(t, env, dir, "--as", "alice", "federation", "enroll",
@@ -1276,7 +1277,7 @@ func TestFederationEnrollCLIUsesResolvedActorWhenAutoEnabling(t *testing.T) {
 	t.Fatal("project.federation_enabled event not found")
 }
 
-func TestFederationJoinCLIRequiresPullCapability(t *testing.T) {
+func TestFederationJoinCLIRequiresPullCapability(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	_, err := runCmdOutput(t, env, "federation", "join",
@@ -1293,7 +1294,7 @@ func TestFederationJoinCLIRequiresPullCapability(t *testing.T) {
 	assert.Contains(t, err.Error(), "pull")
 }
 
-func TestFederationJoinCLIRequiresPushCapabilityWhenPushEnabled(t *testing.T) {
+func TestFederationJoinCLIRequiresPushCapabilityWhenPushEnabled(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	_, err := runCmdOutput(t, env, "federation", "join",
@@ -1311,7 +1312,7 @@ func TestFederationJoinCLIRequiresPushCapabilityWhenPushEnabled(t *testing.T) {
 	assert.Contains(t, err.Error(), "push")
 }
 
-func TestFederationJoinCLIAdoptExistingRequiresPush(t *testing.T) {
+func TestFederationJoinCLIAdoptExistingRequiresPush(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	_, err := runCmdOutput(t, env, "federation", "join",
@@ -1328,7 +1329,7 @@ func TestFederationJoinCLIAdoptExistingRequiresPush(t *testing.T) {
 	assert.Contains(t, err.Error(), "--adopt-existing requires --push")
 }
 
-func TestFederationJoinCLIAdoptExistingRequiresPushCapability(t *testing.T) {
+func TestFederationJoinCLIAdoptExistingRequiresPushCapability(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	_, err := runCmdOutput(t, env, "federation", "join",
@@ -1347,7 +1348,7 @@ func TestFederationJoinCLIAdoptExistingRequiresPushCapability(t *testing.T) {
 	assert.Contains(t, err.Error(), "push")
 }
 
-func TestFederationJoinCLICreatesPushEnabledReplicaAndCredential(t *testing.T) {
+func TestFederationJoinCLICreatesPushEnabledReplicaAndCredential(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	hubProjectUID := "01HZNQ7VFPK1XGD8R5MABCD4EG"
 
@@ -1379,7 +1380,7 @@ func TestFederationJoinCLICreatesPushEnabledReplicaAndCredential(t *testing.T) {
 	assert.Equal(t, "wesm", creds.Projects[project.UID].Actor)
 }
 
-func TestFederationJoinCLIPersistsAllowInsecureCredential(t *testing.T) {
+func TestFederationJoinCLIPersistsAllowInsecureCredential(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	hubProjectUID := "01HZNQ7VFPK1XGD8R5MABCD4EG"
 
@@ -1401,7 +1402,7 @@ func TestFederationJoinCLIPersistsAllowInsecureCredential(t *testing.T) {
 	assert.True(t, got.AllowInsecure)
 }
 
-func TestHydrateFederationJoinMetadataAllowsPlaintextHostnameWithOptIn(t *testing.T) {
+func TestHydrateFederationJoinMetadataAllowsPlaintextHostnameWithOptIn(t *testing.T) { //nolint:paralleltest // swaps package var fetchFederationJoinMetadata
 	orig := fetchFederationJoinMetadata
 	t.Cleanup(func() { fetchFederationJoinMetadata = orig })
 	fetchFederationJoinMetadata = func(_ context.Context, bundle federationJoinBundle) (api.ProjectFederationBody, error) {
@@ -1429,7 +1430,7 @@ func TestHydrateFederationJoinMetadataAllowsPlaintextHostnameWithOptIn(t *testin
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EG", bundle.HubProjectUID)
 }
 
-func TestFederationJoinCLIAdoptExistingOutput(t *testing.T) {
+func TestFederationJoinCLIAdoptExistingOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	project, err := env.DB.CreateProject(ctx, "fedlab")
@@ -1460,7 +1461,7 @@ func TestFederationJoinCLIAdoptExistingOutput(t *testing.T) {
 	assert.NotContains(t, out, "require hub leases before edits")
 }
 
-func TestFederationJoinCLIAgentOutputIncludesAdoptionFields(t *testing.T) {
+func TestFederationJoinCLIAgentOutputIncludesAdoptionFields(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	project, err := env.DB.CreateProject(ctx, "fedlab")
@@ -1489,7 +1490,7 @@ func TestFederationJoinCLIAgentOutputIncludesAdoptionFields(t *testing.T) {
 	assert.Contains(t, out, "adoption_snapshots=1")
 }
 
-func TestFederationJoinCLIFetchesMissingHubMetadata(t *testing.T) {
+func TestFederationJoinCLIFetchesMissingHubMetadata(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
 	ctx := context.Background()
@@ -1524,7 +1525,7 @@ func TestFederationJoinCLIFetchesMissingHubMetadata(t *testing.T) {
 	assert.True(t, binding.PushEnabled)
 }
 
-func TestFederationJoinCLIWarnsWhenPushCapabilityIsNotEnabledLocally(t *testing.T) {
+func TestFederationJoinCLIWarnsWhenPushCapabilityIsNotEnabledLocally(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	stdout, stderr, err := runCmdCapture(t, env, "federation", "join",
@@ -1544,7 +1545,7 @@ func TestFederationJoinCLIWarnsWhenPushCapabilityIsNotEnabledLocally(t *testing.
 	assert.Contains(t, stderr, "push capability is present but local push is disabled")
 }
 
-func TestFederationEnrollmentsListCLIShowsHubEnrollments(t *testing.T) {
+func TestFederationEnrollmentsListCLIShowsHubEnrollments(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	project, err := env.DB.CreateProject(ctx, "fedlab")
@@ -1567,7 +1568,7 @@ func TestFederationEnrollmentsListCLIShowsHubEnrollments(t *testing.T) {
 	assert.NotContains(t, out, "list-token")
 }
 
-func TestFederationRevokeCLIRevokesEnrollment(t *testing.T) {
+func TestFederationRevokeCLIRevokesEnrollment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -1586,6 +1587,7 @@ func TestFederationRevokeCLIRevokesEnrollment(t *testing.T) {
 }
 
 func TestResolveHubAdminAuthPrecedence(t *testing.T) {
+	t.Parallel()
 	cat := &config.DaemonConfig{Daemons: []config.CatalogDaemonConfig{
 		{Name: "hub-daemon", URL: "http://hub.example:7777", Token: "catalog-tok", AllowInsecure: true},
 	}}
@@ -1704,7 +1706,7 @@ func seedLeaveSpoke(t *testing.T, env *testenv.Env, name, hubURL string, hubProj
 	return project
 }
 
-func TestFederationLeaveDetachRevokesThenTearsDown(t *testing.T) {
+func TestFederationLeaveDetachRevokesThenTearsDown(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -1729,7 +1731,7 @@ func TestFederationLeaveDetachRevokesThenTearsDown(t *testing.T) {
 // instance UID can drift from the enrollment's (clone/import refresh, or an
 // enroll created with an explicit --spoke-instance). Leave must abort with
 // the surviving IDs; --local-only stays the explicit local-teardown path.
-func TestFederationLeaveAbortsOnEnrollmentUIDMismatch(t *testing.T) {
+func TestFederationLeaveAbortsOnEnrollmentUIDMismatch(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	t.Run("aborts before any teardown", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
@@ -1767,7 +1769,7 @@ func TestFederationLeaveAbortsOnEnrollmentUIDMismatch(t *testing.T) {
 	})
 }
 
-func TestFederationLeaveLocalOnlySkipsRevoke(t *testing.T) {
+func TestFederationLeaveLocalOnlySkipsRevoke(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -1788,7 +1790,7 @@ func TestFederationLeaveLocalOnlySkipsRevoke(t *testing.T) {
 	assert.Contains(t, stderr, "token remains valid")
 }
 
-func TestFederationLeaveDeleteArchivesReplica(t *testing.T) {
+func TestFederationLeaveDeleteArchivesReplica(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	t.Run("no open issues", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
@@ -1866,7 +1868,7 @@ func TestFederationLeaveDeleteArchivesReplica(t *testing.T) {
 	})
 }
 
-func TestFederationLeaveNotASpoke(t *testing.T) {
+func TestFederationLeaveNotASpoke(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -1888,7 +1890,7 @@ func TestFederationLeaveNotASpoke(t *testing.T) {
 	require.Empty(t, hub.revokedIDs)
 }
 
-func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
+func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -1920,7 +1922,7 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 	assert.ErrorIs(t, bindErr, db.ErrNotFound)
 }
 
-func TestFederationLeaveHubDecodeFailureIncludesLocalOnlyRecovery(t *testing.T) {
+func TestFederationLeaveHubDecodeFailureIncludesLocalOnlyRecovery(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1946,7 +1948,7 @@ func TestFederationLeaveHubDecodeFailureIncludesLocalOnlyRecovery(t *testing.T) 
 // able to reach the daemon's idempotent resume by name even though the
 // project is archived — active-only resolution would report "not found"
 // while detach/credential cleanup is still pending.
-func TestFederationLeaveResolvesArchivedProject(t *testing.T) {
+func TestFederationLeaveResolvesArchivedProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	t.Run("stale credential cleaned through the archived project", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
@@ -2012,7 +2014,7 @@ func TestFederationLeaveResolvesArchivedProject(t *testing.T) {
 // predictable open-issue refusal after the revoke would leave the spoke
 // locally bound with a revoked hub token, breaking sync until manual
 // recovery.
-func TestFederationLeaveDeletePreflightsArchiveBeforeRevoke(t *testing.T) {
+func TestFederationLeaveDeletePreflightsArchiveBeforeRevoke(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	seed := func(t *testing.T, env *testenv.Env, hubURL string, hubProjectID int64) db.Project {
 		t.Helper()
 		ctx := context.Background()
@@ -2092,7 +2094,7 @@ func TestFederationLeaveDeletePreflightsArchiveBeforeRevoke(t *testing.T) {
 // stranding an active enrollment on the hub. For the archive-leave retry,
 // where the enrollment was already revoked, the same pass is an idempotent
 // no-op (zero active matches is success).
-func TestFederationLeaveRevokesAfterProjectsRemoveArchive(t *testing.T) {
+func TestFederationLeaveRevokesAfterProjectsRemoveArchive(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -2120,7 +2122,7 @@ func TestFederationLeaveRevokesAfterProjectsRemoveArchive(t *testing.T) {
 // gone but the binding to a plaintext-hostname overlay hub remains. Without a
 // restored opt-in the bearer transport refuses --hub-token before any I/O;
 // --allow-insecure is the explicit leave-time escape hatch.
-func TestFederationLeaveAllowInsecureFlag(t *testing.T) {
+func TestFederationLeaveAllowInsecureFlag(t *testing.T) { //nolint:paralleltest // sets KATA_TRUST_PRIVATE_NETWORK; newRootCmd resets package var flags
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
 	seed := func(t *testing.T, env *testenv.Env) {
@@ -2170,7 +2172,7 @@ func TestFederationLeaveAllowInsecureFlag(t *testing.T) {
 	})
 }
 
-func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
+func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	t.Run("delete on no-binding project archives it", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
@@ -2431,7 +2433,7 @@ func ingestCLIClaimViolation(
 // that joins, leaves, and joins the same hub project again must come back as a
 // working replica. The leave keeps the local project's shared hub UID, so the
 // second join exercises the daemon's rejoin path.
-func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) {
+func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -2476,7 +2478,7 @@ func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) {
 // same-name project already shares the hub project's UID (it previously left
 // this federation), enroll must not auto-mark adoption — the printed join is
 // a plain rejoin that rebinds without rewriting local event history.
-func TestFederationEnrollCLISameNameUIDHolderPrintsRejoinJoin(t *testing.T) {
+func TestFederationEnrollCLISameNameUIDHolderPrintsRejoinJoin(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
@@ -2515,7 +2517,7 @@ func TestFederationEnrollCLISameNameUIDHolderPrintsRejoinJoin(t *testing.T) {
 // project-scoped enrollment but must not silently ignore a matching GLOBAL
 // enrollment — it still authorizes the project, yet may serve the spoke's
 // other projects, so it is surfaced as a warning instead of auto-revoked.
-func TestFederationLeaveWarnsAboutActiveGlobalEnrollment(t *testing.T) {
+func TestFederationLeaveWarnsAboutActiveGlobalEnrollment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	const hubProjectID int64 = 42
@@ -2539,6 +2541,7 @@ func TestFederationLeaveWarnsAboutActiveGlobalEnrollment(t *testing.T) {
 // means the project was not created as asked, and the generic helper's >= 400
 // rule would let it fall through to an opaque decode failure.
 func TestEnsureFederationProjectByNameRejects3xx(t *testing.T) {
+	t.Parallel()
 	const actor = "cli-operator"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/projects" {

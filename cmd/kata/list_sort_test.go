@@ -12,7 +12,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestList_SortOldest(t *testing.T) {
+func TestList_SortOldest(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, projectID := setupCLIWorkspace(t)
 	ctx := context.Background()
 	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -86,7 +86,7 @@ func TestList_SortOldest(t *testing.T) {
 	})
 }
 
-func TestList_RejectsInvalidSort(t *testing.T) {
+func TestList_RejectsInvalidSort(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, _, err := executeRootCapture(t, context.Background(), "list", "--sort", "newest")
 	require.Error(t, err)
 	var cliErr *cliError

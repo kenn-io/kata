@@ -70,7 +70,7 @@ func createShowMarkdownFixture(t *testing.T, env *testenv.Env, dir string, proje
 	return created.Issue.ShortID
 }
 
-func TestShowRenderRejectsStructuredModes(t *testing.T) {
+func TestShowRenderRejectsStructuredModes(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "rendered issue")
 	for _, mode := range []string{"--json", "--agent"} {
@@ -83,7 +83,7 @@ func TestShowRenderRejectsStructuredModes(t *testing.T) {
 	}
 }
 
-func TestShowRenderNonTTYKeepsPlainOutputAndSkipsDisplayConfig(t *testing.T) {
+func TestShowRenderNonTTYKeepsPlainOutputAndSkipsDisplayConfig(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createShowMarkdownFixture(t, env, dir, pid)
 	home := t.TempDir()
@@ -101,6 +101,7 @@ future_option = true
 }
 
 func TestRenderShowFieldsScopesRendererToBodyAndComments(t *testing.T) {
+	t.Parallel()
 	var response showResponseForCLI
 	require.NoError(t, json.Unmarshal([]byte(`{
       "issue":{"short_id":"abc4","uid":"01TEST","title":"# literal title","body":"## Body","status":"open","author":"user-a","metadata":{"#key":"- value"}},
@@ -127,6 +128,7 @@ func TestRenderShowFieldsScopesRendererToBodyAndComments(t *testing.T) {
 }
 
 func TestPrintShowHumanIndentsRenderedCommentWithANSIWidth(t *testing.T) {
+	t.Parallel()
 	var response showResponseForCLI
 	require.NoError(t, json.Unmarshal([]byte(`{
       "issue":{"short_id":"abc4","uid":"01TEST","title":"title","status":"open","author":"user-a"},
@@ -146,6 +148,7 @@ func TestPrintShowHumanIndentsRenderedCommentWithANSIWidth(t *testing.T) {
 }
 
 func TestShowCommentTeammatesRemainSeparateAndVisible(t *testing.T) {
+	t.Parallel()
 	var response showResponseForCLI
 	require.NoError(t, json.Unmarshal([]byte(`{
       "issue":{"short_id":"abc4","uid":"01TEST","title":"title","status":"open","author":"coordinator"},
@@ -167,6 +170,7 @@ func TestShowCommentTeammatesRemainSeparateAndVisible(t *testing.T) {
 }
 
 func TestRenderAndPrintShowHumanDoesNotPrintPartialRecord(t *testing.T) {
+	t.Parallel()
 	var response showResponseForCLI
 	require.NoError(t, json.Unmarshal([]byte(`{
       "issue":{"short_id":"abc4","uid":"01TEST","title":"title","body":"body","status":"open","author":"user-a"},
@@ -182,7 +186,7 @@ func TestRenderAndPrintShowHumanDoesNotPrintPartialRecord(t *testing.T) {
 	assert.Empty(t, out.String())
 }
 
-func TestShowRenderBuiltinFormatsMarkdownFields(t *testing.T) {
+func TestShowRenderBuiltinFormatsMarkdownFields(t *testing.T) { //nolint:paralleltest // sets NO_COLOR; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createShowMarkdownFixture(t, env, dir, pid)
 	stubIsTTY(t, true)
@@ -210,7 +214,7 @@ func TestShowRenderBuiltinFormatsMarkdownFields(t *testing.T) {
 	assert.Contains(t, text, "--- comments ---")
 }
 
-func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
+func TestShow_RendersLabelsAndLinksSections(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	parent := createIssue(t, env, pid, "parent")
 	child := createIssue(t, env, pid, "child")
@@ -230,7 +234,7 @@ func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
 	assert.Contains(t, out, "parent: "+parent)
 }
 
-func TestShow_AgentOutputRendersIssueBodyLabelsAndComments(t *testing.T) {
+func TestShow_AgentOutputRendersIssueBodyLabelsAndComments(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	type createResp struct {
 		Issue struct {
@@ -260,7 +264,7 @@ func TestShow_AgentOutputRendersIssueBodyLabelsAndComments(t *testing.T) {
 	assert.NotContains(t, out, "Owner:")
 }
 
-func TestShow_AgentOutputIncludesRevision(t *testing.T) {
+func TestShow_AgentOutputIncludesRevision(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "revision task")
 	runCLI(t, env, dir, "meta", "set", ref, "work.attention", "needs-human")
@@ -270,7 +274,7 @@ func TestShow_AgentOutputIncludesRevision(t *testing.T) {
 	assert.Contains(t, out, "Revision: 2\n")
 }
 
-func TestShowDisplaysTimedAssignmentExpiry(t *testing.T) {
+func TestShowDisplaysTimedAssignmentExpiry(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "timed assignment")
 	runCLIAs(t, env, dir, "worker", "claim", ref, "--ttl", "2m")
@@ -283,7 +287,7 @@ func TestShowDisplaysTimedAssignmentExpiry(t *testing.T) {
 	assert.Regexp(t, `(?m)^Assignment-Expires-On: \d{4}-\d{2}-\d{2}T`, agent)
 }
 
-func TestShow_AgentOutputLinkRowsUseExistingLinkResponseFields(t *testing.T) {
+func TestShow_AgentOutputLinkRowsUseExistingLinkResponseFields(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	blocker := createIssue(t, env, pid, "blocker")
 	blocked := createIssue(t, env, pid, "blocked title")
@@ -296,7 +300,7 @@ func TestShow_AgentOutputLinkRowsUseExistingLinkResponseFields(t *testing.T) {
 	assert.NotContains(t, out, `title="blocked title"`)
 }
 
-func TestShow_AgentOutputLinkRowsUsePOVLabels(t *testing.T) {
+func TestShow_AgentOutputLinkRowsUsePOVLabels(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	blocker := createIssue(t, env, pid, "blocker")
 	blocked := createIssue(t, env, pid, "blocked")
@@ -308,7 +312,7 @@ func TestShow_AgentOutputLinkRowsUsePOVLabels(t *testing.T) {
 	assert.NotContains(t, out, "- type=blocks issue="+blocker)
 }
 
-func TestShow_NoClaimLineOnNonFederatedUnclaimedIssue(t *testing.T) {
+func TestShow_NoClaimLineOnNonFederatedUnclaimedIssue(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "plain issue")
 
@@ -316,7 +320,7 @@ func TestShow_NoClaimLineOnNonFederatedUnclaimedIssue(t *testing.T) {
 	assert.NotContains(t, out, "lease:")
 }
 
-func TestShow_ActiveHardClaimRendersOneClaimLine(t *testing.T) {
+func TestShow_ActiveHardClaimRendersOneClaimLine(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "claimed issue")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 
@@ -328,7 +332,7 @@ func TestShow_ActiveHardClaimRendersOneClaimLine(t *testing.T) {
 	assert.Contains(t, lines[0], "(hard)")
 }
 
-func TestShow_PendingClaimsRenderPendingNewestFirst(t *testing.T) {
+func TestShow_PendingClaimsRenderPendingNewestFirst(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupFederatedHubIssue(t, "pending issue")
 	oldAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	newAt := oldAt.Add(2 * time.Minute)
@@ -344,7 +348,7 @@ func TestShow_PendingClaimsRenderPendingNewestFirst(t *testing.T) {
 	}, lines)
 }
 
-func TestShow_UnreachableHubRendersCachedTimedClaimAndPending(t *testing.T) {
+func TestShow_UnreachableHubRendersCachedTimedClaimAndPending(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	ctx := context.Background()
 	env, dir, pid := setupCLIWorkspace(t)
 	created := createIssueViaHTTPFull(t, env, dir, "cached claim")
@@ -385,7 +389,7 @@ func TestShow_UnreachableHubRendersCachedTimedClaimAndPending(t *testing.T) {
 	assert.Equal(t, "lease: pending pending", lines[1])
 }
 
-func TestShow_TimedClaimUsesClaimHubNowForTimeLeft(t *testing.T) {
+func TestShow_TimedClaimUsesClaimHubNowForTimeLeft(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	created := createIssueViaHTTPFull(t, env, dir, "fresh hub claim")
 	hubNow := time.Now().UTC().Add(5 * time.Minute)
@@ -427,7 +431,7 @@ func TestShow_TimedClaimUsesClaimHubNowForTimeLeft(t *testing.T) {
 	assert.Equal(t, "lease: hub-alice from instance 01HZNQ7VFPK1XGD8R5MABCD4EF (timed, 29m left)", lines[0])
 }
 
-func TestShow_JSONIncludesClaimFields(t *testing.T) {
+func TestShow_JSONIncludesClaimFields(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupFederatedHubIssue(t, "json claim issue")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 	enqueueCLIPendingClaim(t, env.DB, pid, ref, "pending", time.Now().UTC())
@@ -441,7 +445,7 @@ func TestShow_JSONIncludesClaimFields(t *testing.T) {
 	assert.Contains(t, body, "lease_hub_now")
 }
 
-func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) {
+func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupFederatedHubIssue(t, "violated issue")
 	ctx := context.Background()
 	issue, err := env.DB.IssueByShortID(ctx, pid, ref, db.IncludeDeletedNo)
@@ -495,7 +499,7 @@ func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) {
 // viewer's perspective: the parent slot's "to" end is the parent of
 // the "from" end, so from the parent's POV (parent of child), the link
 // reads "child: <child_short_id>".
-func TestShow_LinkLabelInvertsOnToSide(t *testing.T) {
+func TestShow_LinkLabelInvertsOnToSide(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	parent := createIssue(t, env, pid, "parent")
 	child := createIssue(t, env, pid, "child")
@@ -508,7 +512,7 @@ func TestShow_LinkLabelInvertsOnToSide(t *testing.T) {
 		"showing the parent issue must label the link as `child` from its POV")
 }
 
-func TestShow_AcceptsBareUIDAndQualified(t *testing.T) {
+func TestShow_AcceptsBareUIDAndQualified(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	created := createIssueViaHTTPFull(t, env, dir, "uid target")
 	_ = pid // pid not needed; we resolve via created.ShortID
@@ -521,7 +525,7 @@ func TestShow_AcceptsBareUIDAndQualified(t *testing.T) {
 
 // TestShow_LegacyNumberFails pins that bare numeric refs no longer resolve.
 // The ResolveRef helper rejects them up-front with a guidance message.
-func TestShow_LegacyNumberFails(t *testing.T) {
+func TestShow_LegacyNumberFails(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	_, err := runCLICapture(t, env, dir, "show", "1")
 	require.Error(t, err)
@@ -534,7 +538,7 @@ func TestShow_LegacyNumberFails(t *testing.T) {
 // passed only workspaceProjectName(start) so --project was ignored and
 // the user got "no project bound to this workspace" even though they
 // had explicitly named one.
-func TestShow_BareRefHonorsProjectFlagOutsideWorkspace(t *testing.T) {
+func TestShow_BareRefHonorsProjectFlagOutsideWorkspace(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	created := createIssueViaHTTPFull(t, env, dir, "ref outside workspace")
 
@@ -599,6 +603,7 @@ func enqueueCLIPendingClaim(
 // the same way titles and authors already do. JSON output does not go
 // through this helper and keeps the daemon's raw bytes.
 func TestPeerRefForDisplay_SanitizesHostileQualifiedRef(t *testing.T) {
+	t.Parallel()
 	hostile := linkPeerForCLI{
 		UID:         "01TESTPEERAAAAAAAAAAAAAAAA",
 		ShortID:     "abc4",

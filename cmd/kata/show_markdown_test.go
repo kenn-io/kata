@@ -21,7 +21,8 @@ import (
 	"go.kenn.io/kit/tui/markdownrender"
 )
 
-func TestShowMarkdownRendererHelperProcess(_ *testing.T) {
+func TestShowMarkdownRendererHelperProcess(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("GO_WANT_SHOW_MARKDOWN_HELPER") != "1" {
 		return
 	}
@@ -90,7 +91,7 @@ func helperRenderer(mode string, extra ...string) *externalShowMarkdownRenderer 
 	}
 }
 
-func TestExternalShowMarkdownRendererPassesArgvEnvAndStdin(t *testing.T) {
+func TestExternalShowMarkdownRendererPassesArgvEnvAndStdin(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER and SHOW_RENDER_ENV
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	t.Setenv("SHOW_RENDER_ENV", "inherited")
 	renderer := helperRenderer("echo", "argument with spaces")
@@ -100,7 +101,7 @@ func TestExternalShowMarkdownRendererPassesArgvEnvAndStdin(t *testing.T) {
 	assert.Equal(t, "arg=argument with spaces env=inherited input=**hello**", got)
 }
 
-func TestExternalShowMarkdownRendererSanitizesStdin(t *testing.T) {
+func TestExternalShowMarkdownRendererSanitizesStdin(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer("echo", "argument")
 
@@ -112,7 +113,7 @@ func TestExternalShowMarkdownRendererSanitizesStdin(t *testing.T) {
 	assert.Equal(t, "arg=argument env= input=beforeafterlinkspoofvisible\tok\nnext", got)
 }
 
-func TestExternalShowMarkdownRendererNormalizesFinalNewlineAtReinsertion(t *testing.T) {
+func TestExternalShowMarkdownRendererNormalizesFinalNewlineAtReinsertion(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	var got [][]string
 	for _, mode := range []string{"echo", "echo-newline"} {
@@ -124,7 +125,7 @@ func TestExternalShowMarkdownRendererNormalizesFinalNewlineAtReinsertion(t *test
 	assert.Equal(t, got[0], got[1])
 }
 
-func TestExternalShowMarkdownRendererDiscardsStderr(t *testing.T) {
+func TestExternalShowMarkdownRendererDiscardsStderr(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer("fail")
 
@@ -137,6 +138,7 @@ func TestExternalShowMarkdownRendererDiscardsStderr(t *testing.T) {
 }
 
 func TestExternalShowMarkdownRendererNamesMissingExecutable(t *testing.T) {
+	t.Parallel()
 	executable := filepath.Join(t.TempDir(), "missing-renderer")
 	renderer := newExternalShowMarkdownRenderer([]string{executable})
 
@@ -147,7 +149,7 @@ func TestExternalShowMarkdownRendererNamesMissingExecutable(t *testing.T) {
 	assert.NotContains(t, err.Error(), "private body")
 }
 
-func TestExternalShowMarkdownRendererTimesOutPerInvocation(t *testing.T) {
+func TestExternalShowMarkdownRendererTimesOutPerInvocation(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer("wait")
 	renderer.timeout = 50 * time.Millisecond
@@ -159,7 +161,7 @@ func TestExternalShowMarkdownRendererTimesOutPerInvocation(t *testing.T) {
 	assert.Less(t, time.Since(started), time.Second)
 }
 
-func TestExternalShowMarkdownRendererPreservesParentCancellation(t *testing.T) {
+func TestExternalShowMarkdownRendererPreservesParentCancellation(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer("wait")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -171,6 +173,7 @@ func TestExternalShowMarkdownRendererPreservesParentCancellation(t *testing.T) {
 }
 
 func TestBuiltinShowMarkdownRendererUsesSharedStyle(t *testing.T) {
+	t.Parallel()
 	rows := newRowRendererFor(colorprofile.ANSI256)
 	got, err := rows.markdownRenderer().Render(
 		context.Background(), markdownDescription, "## Steps", 80,
@@ -196,7 +199,7 @@ func TestBuiltinShowMarkdownRendererUsesSharedStyle(t *testing.T) {
 	assert.Equal(t, textsafe.StripANSI(styled.String()), noColor.String())
 }
 
-func TestBuiltinShowMarkdownRendererCodeBlockBackgroundFollowsColorMode(t *testing.T) {
+func TestBuiltinShowMarkdownRendererCodeBlockBackgroundFollowsColorMode(t *testing.T) { //nolint:paralleltest // sets NO_COLOR and KATA_COLOR_MODE
 	t.Setenv("NO_COLOR", "")
 	tests := []struct {
 		name           string
@@ -229,6 +232,7 @@ func TestBuiltinShowMarkdownRendererCodeBlockBackgroundFollowsColorMode(t *testi
 }
 
 func TestConfiguredShowMarkdownRendererSelectsOverride(t *testing.T) {
+	t.Parallel()
 	rows := newRowRendererFor(colorprofile.ANSI256)
 	got := configuredShowMarkdownRenderer(config.DisplayConfig{
 		MarkdownRenderer: []string{"renderer", "--flag"},

@@ -52,6 +52,7 @@ func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, 
 }
 
 func TestAttnStart_ConditionallySetsOnlyAttentionOKForOpenIssue(t *testing.T) {
+	t.Parallel()
 	d := &fakeAttnDaemon{lookups: map[string]attnLookup{
 		"abc4": {kind: lookupOpen, attention: attnValueNeedsHuman, revision: 13},
 	}}
@@ -65,6 +66,7 @@ func TestAttnStart_ConditionallySetsOnlyAttentionOKForOpenIssue(t *testing.T) {
 }
 
 func TestAttnStart_SkipsMissingAndTransientIssues(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		lookup attnLookup
@@ -84,6 +86,7 @@ func TestAttnStart_SkipsMissingAndTransientIssues(t *testing.T) {
 }
 
 func TestAttnStart_RetriesOnceAfterRevisionConflict(t *testing.T) {
+	t.Parallel()
 	d := &fakeAttnDaemon{
 		lookupSequence: []attnLookup{
 			{kind: lookupOpen, revision: 13},
@@ -102,6 +105,7 @@ func TestAttnStart_RetriesOnceAfterRevisionConflict(t *testing.T) {
 }
 
 func TestAttnEnd_AtomicallySetsHandoffForOpenOKIssue(t *testing.T) {
+	t.Parallel()
 	d := &fakeAttnDaemon{lookups: map[string]attnLookup{
 		"abc4": {kind: lookupOpen, attention: attnValueOK, revision: 17},
 	}}
@@ -120,6 +124,7 @@ func TestAttnEnd_AtomicallySetsHandoffForOpenOKIssue(t *testing.T) {
 }
 
 func TestAttnEnd_SkipsNonActionableIssues(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		lookup attnLookup
@@ -142,6 +147,7 @@ func TestAttnEnd_SkipsNonActionableIssues(t *testing.T) {
 }
 
 func TestAttnEnd_RechecksAttentionAfterRevisionConflict(t *testing.T) {
+	t.Parallel()
 	d := &fakeAttnDaemon{
 		lookupSequence: []attnLookup{
 			{kind: lookupOpen, attention: attnValueOK, revision: 17},
@@ -157,6 +163,7 @@ func TestAttnEnd_RechecksAttentionAfterRevisionConflict(t *testing.T) {
 }
 
 func TestAttentionHooks_IgnoreEmptyAndDashLeadingRefs(t *testing.T) {
+	t.Parallel()
 	for _, ref := range []string{"", "   ", "-abc4", "  --project  "} {
 		t.Run(ref, func(t *testing.T) {
 			d := &fakeAttnDaemon{}
@@ -171,6 +178,7 @@ func TestAttentionHooks_IgnoreEmptyAndDashLeadingRefs(t *testing.T) {
 }
 
 func TestParseAttentionHookArgs_AcceptsDirectAndManagedInvocations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args []string
 		mode string
@@ -190,7 +198,7 @@ func TestParseAttentionHookArgs_AcceptsDirectAndManagedInvocations(t *testing.T)
 	}
 }
 
-func TestAttentionHookCommand_InvalidInvocationsExitZeroWithoutDaemonActivity(t *testing.T) {
+func TestAttentionHookCommand_InvalidInvocationsExitZeroWithoutDaemonActivity(t *testing.T) { //nolint:paralleltest // sets KATA_REF; newRootCmd resets package var flags
 	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
@@ -223,6 +231,7 @@ func TestAttentionHookCommand_InvalidInvocationsExitZeroWithoutDaemonActivity(t 
 }
 
 func TestAttnEnd_WriteFailureDoesNotRetry(t *testing.T) {
+	t.Parallel()
 	d := &fakeAttnDaemon{
 		lookups: map[string]attnLookup{
 			"abc4": {kind: lookupOpen, attention: attnValueOK, revision: 23},
@@ -236,7 +245,7 @@ func TestAttnEnd_WriteFailureDoesNotRetry(t *testing.T) {
 	assert.Len(t, d.conditionalWrites, 1)
 }
 
-func TestLiveAttnDaemon_LookupTreatsNonStringAttentionAsAbsent(t *testing.T) {
+func TestLiveAttnDaemon_LookupTreatsNonStringAttentionAsAbsent(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags; swaps package var flags
 	for _, tc := range []struct {
 		name string
 		raw  jsontext.Value
@@ -285,7 +294,7 @@ func TestLiveAttnDaemon_LookupTreatsNonStringAttentionAsAbsent(t *testing.T) {
 	}
 }
 
-func TestLiveAttnDaemon_ConditionalSetSendsOnlyActorPatchAndIfMatch(t *testing.T) {
+func TestLiveAttnDaemon_ConditionalSetSendsOnlyActorPatchAndIfMatch(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags; swaps package var flags
 	resetFlags(t)
 	requestSeen := false
 

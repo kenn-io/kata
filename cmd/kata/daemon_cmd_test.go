@@ -43,7 +43,7 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
+func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -51,7 +51,7 @@ func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
 	assert.Equal(t, "No kata daemon is running.\n", string(out))
 }
 
-func TestDaemonLocate_JSONReportsConfiguredRemoteWithoutSecrets(t *testing.T) {
+func TestDaemonLocate_JSONReportsConfiguredRemoteWithoutSecrets(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER and KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	addr, cleanup := pipeServer(t)
@@ -81,7 +81,7 @@ func TestDaemonLocate_JSONReportsConfiguredRemoteWithoutSecrets(t *testing.T) {
 	assert.NotContains(t, string(out), "secret-that-must-not-be-emitted")
 }
 
-func TestDaemonLocate_JSONReportsNamedRemoteWithoutCatalogToken(t *testing.T) {
+func TestDaemonLocate_JSONReportsNamedRemoteWithoutCatalogToken(t *testing.T) { //nolint:paralleltest // sets KATA_EXAMPLE_REMOTE_TOKEN; newRootCmd resets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	addr, cleanup := pipeServer(t)
@@ -108,7 +108,7 @@ token_env = "KATA_EXAMPLE_REMOTE_TOKEN"
 	assert.NotContains(t, string(out), "catalog-secret-that-must-not-be-emitted")
 }
 
-func TestDaemonLocate_JSONReportsActiveRemoteWithoutResolvingCatalogToken(t *testing.T) {
+func TestDaemonLocate_JSONReportsActiveRemoteWithoutResolvingCatalogToken(t *testing.T) { //nolint:paralleltest // sets KATA_MISSING_REMOTE_TOKEN; newRootCmd resets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	addr, cleanup := pipeServer(t)
@@ -133,7 +133,7 @@ token_env = "KATA_MISSING_REMOTE_TOKEN"
 	assert.Equal(t, "http://"+addr, got.Address)
 }
 
-func TestDaemonLocate_ErrorRedactsConfiguredURLUserInfo(t *testing.T) {
+func TestDaemonLocate_ErrorRedactsConfiguredURLUserInfo(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "http://fixture-user:fixture-secret@127.0.0.1:7777")
@@ -147,7 +147,7 @@ func TestDaemonLocate_ErrorRedactsConfiguredURLUserInfo(t *testing.T) {
 	assert.NotContains(t, stderr, "fixture-secret")
 }
 
-func TestDaemonLocate_ErrorRedactsMalformedConfiguredURLUserInfo(t *testing.T) {
+func TestDaemonLocate_ErrorRedactsMalformedConfiguredURLUserInfo(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "http://fixture-user:fixture-secret@127.0.0.1:bad")
@@ -161,7 +161,7 @@ func TestDaemonLocate_ErrorRedactsMalformedConfiguredURLUserInfo(t *testing.T) {
 	assert.NotContains(t, stderr, "fixture-secret")
 }
 
-func TestDaemonLocate_ErrorRedactsConfiguredURLPathQueryAndFragment(t *testing.T) {
+func TestDaemonLocate_ErrorRedactsConfiguredURLPathQueryAndFragment(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "http://public.example/secret-path?token=secret-query#secret-fragment")
@@ -175,7 +175,7 @@ func TestDaemonLocate_ErrorRedactsConfiguredURLPathQueryAndFragment(t *testing.T
 	}
 }
 
-func TestDaemonLocate_JSONReportsLocalTCPConfigAddress(t *testing.T) {
+func TestDaemonLocate_JSONReportsLocalTCPConfigAddress(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
@@ -195,7 +195,7 @@ func TestDaemonLocate_JSONReportsLocalTCPConfigAddress(t *testing.T) {
 	assert.Equal(t, "http://"+addr, got.RequestBaseURL)
 }
 
-func TestDaemonLocate_JSONReportsLocalUnixConfigAddress(t *testing.T) {
+func TestDaemonLocate_JSONReportsLocalUnixConfigAddress(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER and KATA_SKIP_DAEMON_VERSION_CHECK; newRootCmd resets package var flags
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix sockets are unavailable on Windows")
 	}
@@ -241,7 +241,7 @@ func TestDaemonLocate_JSONReportsLocalUnixConfigAddress(t *testing.T) {
 		string(agent))
 }
 
-func TestDaemonLocate_HumanAndAgentOutput(t *testing.T) {
+func TestDaemonLocate_HumanAndAgentOutput(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	addr, cleanup := pipeServer(t)
@@ -258,7 +258,7 @@ func TestDaemonLocate_HumanAndAgentOutput(t *testing.T) {
 		string(agent))
 }
 
-func TestDaemonLocate_HelpDocumentsResolutionOrder(t *testing.T) {
+func TestDaemonLocate_HelpDocumentsResolutionOrder(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	root := newRootCmd()
 	cmd, _, err := root.Find([]string{"daemon", "locate"})
 	require.NoError(t, err)
@@ -277,7 +277,7 @@ func TestDaemonLocate_HelpDocumentsResolutionOrder(t *testing.T) {
 	assert.Contains(t, cmd.Long, "never includes authentication credentials")
 }
 
-func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
+func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -307,7 +307,7 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	assert.Regexp(t, `(?m)^  uptime:  52m3[3-4]s$`, out)
 }
 
-func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
+func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 
@@ -355,7 +355,7 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	assert.Equal(t, started.Format(time.RFC3339), got.Daemons[0].StartedAt)
 }
 
-func TestDaemonStatus_JSONReportsDBPathFromKitRuntimeMetadata(t *testing.T) {
+func TestDaemonStatus_JSONReportsDBPathFromKitRuntimeMetadata(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 
@@ -391,7 +391,7 @@ func TestDaemonStatus_JSONReportsDBPathFromKitRuntimeMetadata(t *testing.T) {
 	assert.Equal(t, filepath.Join(tmp, "kata.db"), got.Daemons[0].DBPath)
 }
 
-func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) {
+func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -406,7 +406,7 @@ func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) {
 	assert.JSONEq(t, "[]", string(got.Daemons))
 }
 
-func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
+func TestDaemonStatus_AgentReportsStopped(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -414,7 +414,7 @@ func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
 	assert.Equal(t, "OK daemon status=stopped\n", string(out))
 }
 
-func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
+func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 	child := startSleepProcess(t)
@@ -425,7 +425,7 @@ func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	assert.Equal(t, "OK daemon status=stopped\n", string(out))
 }
 
-func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
+func TestDaemonStatus_AgentReportsWebURL(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -443,6 +443,7 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 }
 
 func TestRuntimeRecordRedactsPostgresDSN(t *testing.T) {
+	t.Parallel()
 	// Build the runtime-record DBPath the way the daemon does and assert the
 	// password is hidden. Direct unit test on the assembly function avoids
 	// spinning up the daemon.
@@ -454,7 +455,7 @@ func TestRuntimeRecordRedactsPostgresDSN(t *testing.T) {
 	assert.Contains(t, dsn, "SECRET")
 }
 
-func TestDaemonServesHealthFromPostgres(t *testing.T) {
+func TestDaemonServesHealthFromPostgres(t *testing.T) { //nolint:paralleltest // sets PORT and KATA_DSN and daemon.AutoStartMarkerEnv; resetFlags sets package var flags
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -538,11 +539,13 @@ func TestDaemonServesHealthFromPostgres(t *testing.T) {
 }
 
 func TestRuntimeRecordKeepsSQLitePath(t *testing.T) {
+	t.Parallel()
 	got := redactRuntimeDSN("/var/lib/kata/kata.db")
 	assert.Equal(t, "/var/lib/kata/kata.db", got)
 }
 
 func TestRuntimeRecordPassesThroughSQLiteSchemeDSN(t *testing.T) {
+	t.Parallel()
 	// A sqlite:// URL has no credential to redact; the helper must not
 	// mangle it. RedactDSN already preserves the userinfo-free form, so
 	// the round-trip is identity.
@@ -550,7 +553,7 @@ func TestRuntimeRecordPassesThroughSQLiteSchemeDSN(t *testing.T) {
 	assert.Equal(t, "sqlite:///var/lib/kata/kata.db", got)
 }
 
-func TestDaemonStart_RuntimeRecordSerializesUnixAddressAsURL(t *testing.T) {
+func TestDaemonStart_RuntimeRecordSerializesUnixAddressAsURL(t *testing.T) { //nolint:paralleltest // readRuntimeRecordFromStartedDaemon sets PORT and daemon.AutoStartMarkerEnv; resetFlags sets package var flags
 	if runtime.GOOS == "windows" {
 		t.Skip("default daemon endpoint is TCP on Windows")
 	}
@@ -560,7 +563,7 @@ func TestDaemonStart_RuntimeRecordSerializesUnixAddressAsURL(t *testing.T) {
 	assert.Equal(t, "unix://"+filepath.Join(ns.SocketDir, "daemon.sock"), got.Address)
 }
 
-func TestDaemonStart_RuntimeRecordSerializesTCPAddressAsHostPort(t *testing.T) {
+func TestDaemonStart_RuntimeRecordSerializesTCPAddressAsHostPort(t *testing.T) { //nolint:paralleltest // readRuntimeRecordFromStartedDaemon sets PORT and daemon.AutoStartMarkerEnv; resetFlags sets package var flags
 	_, got := readRuntimeRecordFromStartedDaemon(t, "127.0.0.1:0")
 
 	host, port, err := net.SplitHostPort(got.Address)
@@ -571,7 +574,7 @@ func TestDaemonStart_RuntimeRecordSerializesTCPAddressAsHostPort(t *testing.T) {
 	assert.NotContains(t, got.Address, "://")
 }
 
-func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) {
+func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) { //nolint:paralleltest // sets PORT and KATA_AUTOSTART_IDLE_TIMEOUT and daemon.AutoStartMarkerEnv; resetFlags sets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
@@ -619,7 +622,7 @@ func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) 
 	require.ErrorIs(t, err, os.ErrNotExist, "idle exit left a discoverable runtime record")
 }
 
-func TestDaemonDoesNotPublishRuntimeBeforeEmbeddingInitializationCompletes(t *testing.T) {
+func TestDaemonDoesNotPublishRuntimeBeforeEmbeddingInitializationCompletes(t *testing.T) { //nolint:paralleltest // sets PORT; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	t.Setenv("PORT", "")
@@ -738,7 +741,7 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 	return ns, got
 }
 
-func TestDaemonStart_RejectsAgentOutputBeforeStartup(t *testing.T) {
+func TestDaemonStart_RejectsAgentOutputBeforeStartup(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, args := range [][]string{
 		{"--agent", "daemon", "start", "--listen", "8.8.8.8:7777"},
 		{"--format", "agent", "daemon", "start", "--listen", "8.8.8.8:7777"},
@@ -758,7 +761,7 @@ func TestDaemonStart_RejectsAgentOutputBeforeStartup(t *testing.T) {
 	}
 }
 
-func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
+func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	oldStart := startDetachedDaemon
@@ -788,6 +791,7 @@ func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
 }
 
 func TestDaemonStartOutputFromRecordIncludesWebURL(t *testing.T) {
+	t.Parallel()
 	record := kitdaemon.RuntimeRecord{
 		PID: 1234, Network: "unix", Address: "/tmp/example.sock",
 		Metadata: map[string]string{
@@ -842,7 +846,7 @@ func writeRuntimeRecordFor(t *testing.T, home, addr string, pid int) {
 	require.NoError(t, err)
 }
 
-func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
+func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	if runtime.GOOS == "windows" {
 		t.Skip("the test helper does not install the Windows daemon stop event watcher")
 	}
@@ -880,7 +884,7 @@ func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
 	assert.Equal(t, child.Process.Pid, out.ReplacedPID)
 }
 
-func TestDaemonStart_KeepsResidentDaemonWithoutIdleShutdown(t *testing.T) {
+func TestDaemonStart_KeepsResidentDaemonWithoutIdleShutdown(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	server := writeIdleDaemonHealthServer(t, false)
@@ -901,7 +905,7 @@ func TestDaemonStart_KeepsResidentDaemonWithoutIdleShutdown(t *testing.T) {
 	assert.Equal(t, address, out.Address)
 }
 
-func TestDaemonStart_ReportsReplacedDaemon(t *testing.T) {
+func TestDaemonStart_ReportsReplacedDaemon(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	oldStart := startDetachedDaemon
@@ -919,7 +923,7 @@ func TestDaemonStart_ReportsReplacedDaemon(t *testing.T) {
 	assert.Empty(t, stderr)
 }
 
-func TestDaemonStart_ListenConflictWithExistingDaemon(t *testing.T) {
+func TestDaemonStart_ListenConflictWithExistingDaemon(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:7777"))
@@ -933,7 +937,7 @@ func TestDaemonStart_ListenConflictWithExistingDaemon(t *testing.T) {
 	assert.Empty(t, out)
 }
 
-func TestDaemonStart_ListenMatchesExistingDaemon(t *testing.T) {
+func TestDaemonStart_ListenMatchesExistingDaemon(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	require.NoError(t, writeRuntimeFor(home, "100.64.0.5:7777"))
@@ -946,7 +950,7 @@ func TestDaemonStart_ListenMatchesExistingDaemon(t *testing.T) {
 	assert.Equal(t, "100.64.0.5:7777", out.Address)
 }
 
-func TestDaemonStart_ExplicitListenMatchIgnoresMalformedConfig(t *testing.T) {
+func TestDaemonStart_ExplicitListenMatchIgnoresMalformedConfig(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	require.NoError(t, writeRuntimeFor(home, "100.64.0.5:7777"))
@@ -960,7 +964,7 @@ func TestDaemonStart_ExplicitListenMatchIgnoresMalformedConfig(t *testing.T) {
 	assert.Equal(t, "100.64.0.5:7777", out.Address)
 }
 
-func TestDaemonStart_ConfigListenConflictWithExistingDaemon(t *testing.T) {
+func TestDaemonStart_ConfigListenConflictWithExistingDaemon(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:7777"))
@@ -976,7 +980,7 @@ func TestDaemonStart_ConfigListenConflictWithExistingDaemon(t *testing.T) {
 	assert.Empty(t, out)
 }
 
-func TestDaemonStart_PortListenConflictWithExistingDaemon(t *testing.T) {
+func TestDaemonStart_PortListenConflictWithExistingDaemon(t *testing.T) { //nolint:paralleltest // sets PORT; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	t.Setenv("PORT", "8080")
@@ -991,7 +995,7 @@ func TestDaemonStart_PortListenConflictWithExistingDaemon(t *testing.T) {
 	assert.Empty(t, out)
 }
 
-func TestDaemonStart_ForegroundKeepsCurrentProcess(t *testing.T) {
+func TestDaemonStart_ForegroundKeepsCurrentProcess(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	oldStart := startDetachedDaemon
@@ -1024,7 +1028,7 @@ func TestDaemonStart_ForegroundKeepsCurrentProcess(t *testing.T) {
 	assert.Empty(t, stderr)
 }
 
-func TestDaemonStop_AgentReportsStoppedPID(t *testing.T) {
+func TestDaemonStop_AgentReportsStoppedPID(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 	child := startSleepProcess(t)
@@ -1035,7 +1039,7 @@ func TestDaemonStop_AgentReportsStoppedPID(t *testing.T) {
 	assert.Equal(t, "OK daemon action=stop pid="+strconv.Itoa(child.Process.Pid)+"\n", string(out))
 }
 
-func TestDaemonStop_AgentNoDaemonReportsNoop(t *testing.T) {
+func TestDaemonStop_AgentNoDaemonReportsNoop(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -1044,7 +1048,7 @@ func TestDaemonStop_AgentNoDaemonReportsNoop(t *testing.T) {
 	assert.Equal(t, "OK daemon action=stop stopped=0\n", string(out))
 }
 
-func TestDaemonStop_DoesNotSignalRuntimeRecordWhosePIDWasReused(t *testing.T) {
+func TestDaemonStop_DoesNotSignalRuntimeRecordWhosePIDWasReused(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 	child := startSleepProcess(t)
@@ -1056,7 +1060,7 @@ func TestDaemonStop_DoesNotSignalRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	assert.True(t, kitdaemon.ProcessAlive(child.Process.Pid))
 }
 
-func TestDaemonStop_JSONReportsStoppedPIDs(t *testing.T) {
+func TestDaemonStop_JSONReportsStoppedPIDs(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 	child := startSleepProcess(t)
@@ -1077,7 +1081,7 @@ func TestDaemonStop_JSONReportsStoppedPIDs(t *testing.T) {
 	assert.Equal(t, []int{child.Process.Pid}, got.PIDs)
 }
 
-func TestDaemonStop_JSONReportsNoop(t *testing.T) {
+func TestDaemonStop_JSONReportsNoop(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -1096,7 +1100,7 @@ func TestDaemonStop_JSONReportsNoop(t *testing.T) {
 	assert.Empty(t, got.PIDs)
 }
 
-func TestDaemonStop_AgentReportsMultiplePIDs(t *testing.T) {
+func TestDaemonStop_AgentReportsMultiplePIDs(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 	first := startSleepProcess(t)
@@ -1111,7 +1115,7 @@ func TestDaemonStop_AgentReportsMultiplePIDs(t *testing.T) {
 	assert.Contains(t, out, strconv.Itoa(second.Process.Pid))
 }
 
-func TestDaemonStop_JSONReportsMultiplePIDs(t *testing.T) {
+func TestDaemonStop_JSONReportsMultiplePIDs(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 	first := startSleepProcess(t)
@@ -1134,7 +1138,7 @@ func TestDaemonStop_JSONReportsMultiplePIDs(t *testing.T) {
 	assert.ElementsMatch(t, []int{first.Process.Pid, second.Process.Pid}, got.PIDs)
 }
 
-func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
+func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -1155,7 +1159,7 @@ func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
 		"  web UI:  http://127.0.0.1:28888\n", string(out))
 }
 
-func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
+func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	if runtime.GOOS == "windows" {
 		t.Skip("the test helper does not install the Windows daemon stop event watcher")
 	}
@@ -1196,7 +1200,7 @@ func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
 		"  web UI:  http://127.0.0.1:28888\n", string(out))
 }
 
-func TestDaemonRestart_AllowsFullGracefulShutdownBudget(t *testing.T) {
+func TestDaemonRestart_AllowsFullGracefulShutdownBudget(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	if runtime.GOOS == "windows" {
 		t.Skip("the test helper does not install the Windows daemon stop event watcher")
 	}
@@ -1238,10 +1242,11 @@ func TestDaemonRestart_AllowsFullGracefulShutdownBudget(t *testing.T) {
 }
 
 func TestDaemonRestartReservesProcessExitMarginBeyondDrainBudget(t *testing.T) {
+	t.Parallel()
 	require.Equal(t, 5*time.Second, daemonRestartProcessWaitTimeout-daemonShutdownDrainTimeout)
 }
 
-func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) {
+func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -1275,7 +1280,7 @@ func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:28888", got.WebURL)
 }
 
-func TestDaemonRestart_AgentReportsStartedDaemon(t *testing.T) {
+func TestDaemonRestart_AgentReportsStartedDaemon(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -1294,7 +1299,7 @@ func TestDaemonRestart_AgentReportsStartedDaemon(t *testing.T) {
 		"web_url=http://127.0.0.1:28888\n", string(out))
 }
 
-func TestDaemonRestart_PassesStartupOverrides(t *testing.T) {
+func TestDaemonRestart_PassesStartupOverrides(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -1314,7 +1319,7 @@ func TestDaemonRestart_PassesStartupOverrides(t *testing.T) {
 	assert.True(t, gotInsecureReadonly)
 }
 
-func TestDaemonRestart_ValidatesReplacementBeforeStopping(t *testing.T) {
+func TestDaemonRestart_ValidatesReplacementBeforeStopping(t *testing.T) { //nolint:paralleltest // sets KATA_DSN; newRootCmd resets package var flags
 	if runtime.GOOS == "windows" {
 		t.Skip("the test helper does not install the Windows daemon stop event watcher")
 	}
@@ -1387,6 +1392,7 @@ model = "example-model"
 }
 
 func TestValidateFederationStartupConfigActors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		actor    string
@@ -1419,7 +1425,7 @@ func TestValidateFederationStartupConfigActors(t *testing.T) {
 	}
 }
 
-func TestDaemonFederationConfigUnavailableHubDoesNotDelayReadiness(t *testing.T) {
+func TestDaemonFederationConfigUnavailableHubDoesNotDelayReadiness(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	requestStarted := make(chan struct{})
 	var requestOnce sync.Once
 	release := make(chan struct{})
@@ -1466,7 +1472,7 @@ func TestDaemonFederationConfigUnavailableHubDoesNotDelayReadiness(t *testing.T)
 
 const daemonFederationHubProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EZ"
 
-func TestDaemonFederationConfigRetriesWhenHubAppearsAndConverges(t *testing.T) {
+func TestDaemonFederationConfigRetriesWhenHubAppearsAndConverges(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	address := unusedLoopbackAddress(t)
 	var lateServer *http.Server
 	t.Cleanup(func() {
@@ -1532,7 +1538,7 @@ func TestDaemonFederationConfigRetriesWhenHubAppearsAndConverges(t *testing.T) {
 	assert.Positive(t, catalogRequests.Load())
 }
 
-func TestDaemonFederationConfigEmptyTokenEnvFailsOpenWithoutGlobalBearer(t *testing.T) {
+func TestDaemonFederationConfigEmptyTokenEnvFailsOpenWithoutGlobalBearer(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN and KATA_TEST_EMPTY_HUB_TOKEN; resetFlags sets package var flags
 	t.Setenv("KATA_AUTH_TOKEN", "daemon-global-bearer")
 	t.Setenv("KATA_TEST_EMPTY_HUB_TOKEN", "")
 	var requests atomic.Int32
@@ -1555,7 +1561,7 @@ func TestDaemonFederationConfigEmptyTokenEnvFailsOpenWithoutGlobalBearer(t *test
 	assert.Zero(t, requests.Load(), "empty catalog token_env must fail before sending any bearer")
 }
 
-func TestDaemonFederationConfigNoMappingsSkipsReconcilerFactory(t *testing.T) {
+func TestDaemonFederationConfigNoMappingsSkipsReconcilerFactory(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	var factoryCalls atomic.Int32
 	original := newFederationConfigReconciler
 	newFederationConfigReconciler = func(
@@ -1575,7 +1581,7 @@ func TestDaemonFederationConfigNoMappingsSkipsReconcilerFactory(t *testing.T) {
 	assert.Zero(t, factoryCalls.Load())
 }
 
-func TestDaemonWiresNamedCatalogToFederationRebindRoute(t *testing.T) {
+func TestDaemonWiresNamedCatalogToFederationRebindRoute(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	baseURL := startDaemonWithFederationConfig(t, `
 [[daemon]]
 name = "primary-hub"
@@ -1693,7 +1699,7 @@ func unusedLoopbackAddress(t *testing.T) string {
 	return address
 }
 
-func TestDaemonReload_AgentReportsReloadedPID(t *testing.T) {
+func TestDaemonReload_AgentReportsReloadedPID(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 	child := startSleepProcess(t)
@@ -1704,7 +1710,7 @@ func TestDaemonReload_AgentReportsReloadedPID(t *testing.T) {
 	assert.Equal(t, "OK daemon action=reload pid="+strconv.Itoa(child.Process.Pid)+"\n", string(out))
 }
 
-func TestDaemonReload_JSONReportsReloadedPID(t *testing.T) {
+func TestDaemonReload_JSONReportsReloadedPID(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	tmp := setupKataEnv(t)
 	child := startSleepProcess(t)
@@ -1723,7 +1729,7 @@ func TestDaemonReload_JSONReportsReloadedPID(t *testing.T) {
 	assert.Equal(t, child.Process.Pid, got.PID)
 }
 
-func TestHealth_AgentReportsOK(t *testing.T) {
+func TestHealth_AgentReportsOK(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	cmd := newRootCmd()
@@ -1733,7 +1739,7 @@ func TestHealth_AgentReportsOK(t *testing.T) {
 	assert.Equal(t, "OK health ok=true daemon=running\n", string(out))
 }
 
-func TestDaemonStart_ListenFlagRejectsPublicAddress(t *testing.T) {
+func TestDaemonStart_ListenFlagRejectsPublicAddress(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
@@ -1749,7 +1755,7 @@ func TestDaemonStart_ListenFlagRejectsPublicAddress(t *testing.T) {
 	assert.Contains(t, err.Error(), "non-public")
 }
 
-func TestDaemonStart_ListenFlagRejectsMalformed(t *testing.T) {
+func TestDaemonStart_ListenFlagRejectsMalformed(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
@@ -1765,7 +1771,7 @@ func TestDaemonStart_ListenFlagRejectsMalformed(t *testing.T) {
 	assert.Contains(t, err.Error(), "--listen")
 }
 
-func TestListenFromPortEnv(t *testing.T) {
+func TestListenFromPortEnv(t *testing.T) { //nolint:paralleltest // sets PORT and daemon.AutoStartMarkerEnv
 	t.Run("PORT yields wildcard bind", func(t *testing.T) {
 		t.Setenv(daemon.AutoStartMarkerEnv, "")
 		t.Setenv("PORT", "8080")
@@ -1791,6 +1797,7 @@ func TestListenFromPortEnv(t *testing.T) {
 }
 
 func TestAutostartIdleControllerRequiresMarkerAndOwnerLocalExposure(t *testing.T) {
+	t.Parallel()
 	localDaemon := kitdaemon.Endpoint{Network: kitdaemon.NetworkUnix, Address: "/tmp/kata.sock"}
 	localWeb := daemon.WebEndpoint{
 		Endpoint: kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:27123"},
@@ -1824,6 +1831,7 @@ func TestAutostartIdleControllerRequiresMarkerAndOwnerLocalExposure(t *testing.T
 }
 
 func TestAnnounceIdleShutdownNamesTheTimeout(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 
 	announceIdleShutdown(&out, 15*time.Minute)
@@ -1832,6 +1840,7 @@ func TestAnnounceIdleShutdownNamesTheTimeout(t *testing.T) {
 }
 
 func TestWithoutEnvironmentKeyRemovesOnlyAutostartMarker(t *testing.T) {
+	t.Parallel()
 	got := withoutEnvironmentKey([]string{
 		"PATH=/example/bin",
 		daemon.AutoStartMarkerEnv + "=1",
@@ -1853,7 +1862,7 @@ func TestWithoutEnvironmentKeyRemovesOnlyAutostartMarker(t *testing.T) {
 // auth-startup guard refuses the non-loopback bind — and the refusal
 // names the derived address, proving the PORT path was taken and the
 // address passed validation.
-func TestDaemonStart_PortEnvBindsWildcard(t *testing.T) {
+func TestDaemonStart_PortEnvBindsWildcard(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DB and PORT; newRootCmd resets package var flags
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
@@ -1879,7 +1888,7 @@ func TestDaemonStart_PortEnvBindsWildcard(t *testing.T) {
 // validator rejects it before the daemon actually starts — this lets us
 // assert that the config value was consulted (otherwise the daemon would
 // fall through to the Unix-socket path and not error).
-func TestDaemonStart_ConfigFileListenIsHonored(t *testing.T) {
+func TestDaemonStart_ConfigFileListenIsHonored(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
@@ -1900,7 +1909,7 @@ func TestDaemonStart_ConfigFileListenIsHonored(t *testing.T) {
 
 // TestDaemonStart_FlagWinsOverConfigFile asserts the --listen flag
 // takes precedence over <KATA_HOME>/config.toml.
-func TestDaemonStart_FlagWinsOverConfigFile(t *testing.T) {
+func TestDaemonStart_FlagWinsOverConfigFile(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
@@ -1923,7 +1932,7 @@ func TestDaemonStart_FlagWinsOverConfigFile(t *testing.T) {
 		"config.toml value must NOT win when --listen is set")
 }
 
-func TestNewDaemonTelemetryReporterUsesInstanceUID(t *testing.T) {
+func TestNewDaemonTelemetryReporterUsesInstanceUID(t *testing.T) { //nolint:paralleltest // swaps package var newTelemetryReporter
 	tmp := t.TempDir()
 	store := openKataTestDB(t, filepath.Join(tmp, "kata.db"))
 	defer func() { _ = store.Close() }()
@@ -1945,6 +1954,7 @@ func TestNewDaemonTelemetryReporterUsesInstanceUID(t *testing.T) {
 }
 
 func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	store := openKataTestDB(t, filepath.Join(tmp, "kata.db"))
 	defer func() { _ = store.Close() }()
@@ -1961,6 +1971,7 @@ func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
 }
 
 func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
@@ -2008,6 +2019,7 @@ func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
 }
 
 func TestVectorsPathForDSN(t *testing.T) {
+	t.Parallel()
 	// Derived from the database filename so two SQLite databases in one
 	// directory never share sidecar state.
 	got, err := vectorsPathForDSN("/var/lib/kata/kata.db")
@@ -2040,6 +2052,7 @@ func TestVectorsPathForDSN(t *testing.T) {
 }
 
 func TestPreflightEmbeddingStartupLetsKitRejectInvalidTokenBudget(t *testing.T) {
+	t.Parallel()
 	_, _, err := preflightEmbeddingStartup(config.EmbeddingsConfig{
 		BaseURL:            "http://127.0.0.1:11434/v1",
 		Model:              "example-model",
@@ -2050,7 +2063,7 @@ func TestPreflightEmbeddingStartupLetsKitRejectInvalidTokenBudget(t *testing.T) 
 	assert.ErrorContains(t, err, "embedding batching")
 }
 
-func TestGitHubSyncRunnerInterval(t *testing.T) {
+func TestGitHubSyncRunnerInterval(t *testing.T) { //nolint:paralleltest // sets KATA_GITHUB_SYNC_INTERVAL_MS
 	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "")
 	assert.Equal(t, 5*time.Minute, githubSyncRunnerInterval())
 
@@ -2064,7 +2077,7 @@ func TestGitHubSyncRunnerInterval(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, githubSyncRunnerInterval())
 }
 
-func TestDaemonGitHubSyncHTTPFetcherUsesCredentialConfig(t *testing.T) {
+func TestDaemonGitHubSyncHTTPFetcherUsesCredentialConfig(t *testing.T) { //nolint:paralleltest // sets tokenEnv; swaps package var newGitHubSyncHTTPFetcher
 	var captured githubsync.HTTPFetcherConfig
 	orig := newGitHubSyncHTTPFetcher
 	newGitHubSyncHTTPFetcher = func(cfg githubsync.HTTPFetcherConfig) *githubsync.HTTPFetcher {
@@ -2107,7 +2120,7 @@ func TestDaemonGitHubSyncHTTPFetcherUsesCredentialConfig(t *testing.T) {
 	assert.Equal(t, githubsync.CredentialKindEnv, envKind)
 }
 
-func TestDaemonStartGitHubSyncHTTPFetcherUsesConfigFileCredentials(t *testing.T) {
+func TestDaemonStartGitHubSyncHTTPFetcherUsesConfigFileCredentials(t *testing.T) { //nolint:paralleltest // sets PORT and EXAMPLE_GITHUB_TOKEN and daemon.AutoStartMarkerEnv; swaps package var newGitHubSyncHTTPFetcher
 	home := setupKataEnv(t)
 	t.Setenv("PORT", "")
 	t.Setenv(daemon.AutoStartMarkerEnv, "1")
@@ -2183,7 +2196,7 @@ private_key_path = "/secure/example.pem"
 	assert.Equal(t, githubsync.CredentialKindEnv, envKind)
 }
 
-func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *testing.T) {
+func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *testing.T) { //nolint:paralleltest // sets KATA_GITHUB_SYNC_INTERVAL_MS; swaps package var newGitHubSyncDaemonRunner
 	synctest.Test(t, func(t *testing.T) {
 		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
 		store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
@@ -2221,7 +2234,7 @@ func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *te
 	})
 }
 
-func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
+func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) { //nolint:paralleltest // sets KATA_GITHUB_SYNC_INTERVAL_MS; swaps package var newGitHubSyncDaemonRunner
 	synctest.Test(t, func(t *testing.T) {
 		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
 		store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
@@ -2250,7 +2263,7 @@ func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
 	})
 }
 
-func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing.T) {
+func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing.T) { //nolint:paralleltest // sets KATA_GITHUB_SYNC_INTERVAL_MS
 	synctest.Test(t, func(t *testing.T) {
 		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
 		store, project, binding := newDaemonGitHubSyncStore(t)
@@ -2277,7 +2290,7 @@ func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing
 	})
 }
 
-func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
+func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) { //nolint:paralleltest // sets KATA_GITHUB_SYNC_INTERVAL_MS
 	synctest.Test(t, func(t *testing.T) {
 		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
 		store, project, binding := newDaemonGitHubSyncStore(t)
@@ -2318,7 +2331,7 @@ func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
 	})
 }
 
-func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testing.T) {
+func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testing.T) { //nolint:paralleltest // sets KATA_GITHUB_SYNC_INTERVAL_MS
 	synctest.Test(t, func(t *testing.T) {
 		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
 		store, _, binding := newDaemonGitHubSyncStore(t)
@@ -2360,6 +2373,7 @@ func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testi
 }
 
 func TestDefaultEndpointForOS(t *testing.T) {
+	t.Parallel()
 	ns := &daemon.Namespace{SocketDir: t.TempDir()}
 
 	t.Run("windows uses loopback TCP", func(t *testing.T) {
@@ -2375,7 +2389,7 @@ func TestDefaultEndpointForOS(t *testing.T) {
 	})
 }
 
-func TestPreflightDaemonStartupWebConfig(t *testing.T) {
+func TestPreflightDaemonStartupWebConfig(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DB
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
@@ -2393,7 +2407,7 @@ public_origin = "https://daemon.example"
 	}, startup.Web)
 }
 
-func TestDaemonRuntimeWebMetadata(t *testing.T) {
+func TestDaemonRuntimeWebMetadata(t *testing.T) { //nolint:paralleltest // sets PORT and daemon.AutoStartMarkerEnv; resetFlags sets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
@@ -2440,7 +2454,7 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 	}
 }
 
-func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t *testing.T) {
+func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t *testing.T) { //nolint:paralleltest // sets PORT and KATA_AUTH_TOKEN and daemon.AutoStartMarkerEnv; resetFlags sets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
@@ -2482,6 +2496,7 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t 
 }
 
 func TestWebAuthenticationModeAdvertisesOnlyUsableSessionIssuers(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name             string
 		insecureReadonly bool
@@ -2542,6 +2557,7 @@ func (f *fakeTelemetryReporter) eventAt(i int) fakeTelemetryEvent {
 }
 
 func TestRuntimeEndpointForListener_UsesActualTCPPort(t *testing.T) {
+	t.Parallel()
 	ep := kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:0"}
 	l, err := ep.Listen()
 	require.NoError(t, err)
@@ -2557,6 +2573,7 @@ func TestRuntimeEndpointForListener_UsesActualTCPPort(t *testing.T) {
 }
 
 func TestRuntimeEndpointForListener_KeepsExplicitTCPAddress(t *testing.T) {
+	t.Parallel()
 	ep := kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:0"}
 	l, err := ep.Listen()
 	require.NoError(t, err)
@@ -2569,7 +2586,7 @@ func TestRuntimeEndpointForListener_KeepsExplicitTCPAddress(t *testing.T) {
 	assert.Equal(t, explicit, runtimeEndpointForListener(explicit, l))
 }
 
-func TestEnsureDaemon_ReturnsExistingURL(t *testing.T) {
+func TestEnsureDaemon_ReturnsExistingURL(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB
 	if testing.Short() {
 		t.Skip()
 	}
@@ -2745,7 +2762,7 @@ func startSleepProcess(t *testing.T) *exec.Cmd {
 	return cmd
 }
 
-func TestDaemonCommandSleepHelperProcess(_ *testing.T) {
+func TestDaemonCommandSleepHelperProcess(_ *testing.T) { //nolint:paralleltest // calls os/signal.Notify
 	if os.Getenv("KATA_DAEMON_CMD_SLEEP_HELPER") != "1" {
 		return
 	}
@@ -2814,6 +2831,7 @@ func writeReusedRuntimePID(t *testing.T, home string, pid int) {
 }
 
 func TestExternalRootEventWakeUsesActualNativeEventsAndSkipsProjectionLoops(t *testing.T) {
+	t.Parallel()
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -2878,6 +2896,7 @@ func TestExternalRootEventWakeUsesActualNativeEventsAndSkipsProjectionLoops(t *t
 }
 
 func TestExternalRootEventWakeReconnectsAfterBroadcasterOverflow(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 		require.NoError(t, err)
@@ -2941,6 +2960,7 @@ func TestExternalRootEventWakeReconnectsAfterBroadcasterOverflow(t *testing.T) {
 }
 
 func TestExternalRootEventWakeReconnectsAndDiscardsQueuedEventsAfterReset(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 		require.NoError(t, err)
@@ -3010,7 +3030,7 @@ func TestExternalRootEventWakeReconnectsAndDiscardsQueuedEventsAfterReset(t *tes
 	})
 }
 
-func TestDaemonStartupFailureStopsExternalRootRunnerBeforeReturning(t *testing.T) {
+func TestDaemonStartupFailureStopsExternalRootRunnerBeforeReturning(t *testing.T) { //nolint:paralleltest // sets PORT; resetFlags sets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
@@ -3028,7 +3048,7 @@ func TestDaemonStartupFailureStopsExternalRootRunnerBeforeReturning(t *testing.T
 		"runner shutdown must cancel before waiting when startup returns with a live parent context")
 }
 
-func TestDaemonAutoStartWiresExternalRootRunnerDrainAdmission(t *testing.T) {
+func TestDaemonAutoStartWiresExternalRootRunnerDrainAdmission(t *testing.T) { //nolint:paralleltest // sets PORT and KATA_AUTOSTART_IDLE_TIMEOUT and daemon.AutoStartMarkerEnv; resetFlags sets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
@@ -3070,7 +3090,7 @@ func TestDaemonAutoStartWiresExternalRootRunnerDrainAdmission(t *testing.T) {
 	}
 }
 
-func TestDaemonWithoutConnectorsStartsExternalRootRunnerForDurableBindings(t *testing.T) {
+func TestDaemonWithoutConnectorsStartsExternalRootRunnerForDurableBindings(t *testing.T) { //nolint:paralleltest // sets PORT and KATA_AUTH_TOKEN and KATA_REQUIRE_TOKEN_IDENTITY; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	t.Setenv("PORT", "")
@@ -3130,7 +3150,7 @@ func TestDaemonWithoutConnectorsStartsExternalRootRunnerForDurableBindings(t *te
 		"durable binding was not paused when its connector configuration was absent")
 }
 
-func TestDaemonStartsWithUnavailableConnectorAndServesRedactedStatus(t *testing.T) {
+func TestDaemonStartsWithUnavailableConnectorAndServesRedactedStatus(t *testing.T) { //nolint:paralleltest // sets PORT and KATA_AUTH_TOKEN and KATA_REQUIRE_TOKEN_IDENTITY; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	t.Setenv("PORT", "")

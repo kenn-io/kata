@@ -25,7 +25,7 @@ import (
 	"go.kenn.io/kata/internal/version"
 )
 
-func TestMCPServeProjectModesRejectFlagConflicts(t *testing.T) {
+func TestMCPServeProjectModesRejectFlagConflicts(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	tests := []struct {
 		name string
 		args []string
@@ -46,7 +46,7 @@ func TestMCPServeProjectModesRejectFlagConflicts(t *testing.T) {
 	}
 }
 
-func TestMCPServeTokenAdminRequiresAllProjects(t *testing.T) {
+func TestMCPServeTokenAdminRequiresAllProjects(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, args := range [][]string{
 		{"mcp", "serve", "--enable-token-admin"},
 		{"--project", "spoke-project", "mcp", "serve", "--enable-token-admin"},
@@ -153,7 +153,7 @@ func newAuthenticatedMCPHTTPTestTransport(endpoint string) *sdkmcp.StreamableCli
 	}
 }
 
-func TestMCPServeHTTPServesStreamableEndpointAndHealth(t *testing.T) {
+func TestMCPServeHTTPServesStreamableEndpointAndHealth(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -184,7 +184,7 @@ func TestMCPServeHTTPServesStreamableEndpointAndHealth(t *testing.T) {
 	require.NotEmpty(t, tools.Tools)
 }
 
-func TestMCPServeHTTPBearerProtectsMCPButNotHealth(t *testing.T) {
+func TestMCPServeHTTPBearerProtectsMCPButNotHealth(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR and KATA_MCP_TEST_TOKEN; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
@@ -219,7 +219,7 @@ func TestMCPServeHTTPBearerProtectsMCPButNotHealth(t *testing.T) {
 	require.NoError(t, session.Close())
 }
 
-func TestMCPServeHTTPCrossOriginBrowserMutationRejected(t *testing.T) {
+func TestMCPServeHTTPCrossOriginBrowserMutationRejected(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -244,7 +244,7 @@ func TestMCPServeHTTPCrossOriginBrowserMutationRejected(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, response.StatusCode)
 }
 
-func TestMCPServeHTTPLocalhostProtectionRejectsForeignHost(t *testing.T) {
+func TestMCPServeHTTPLocalhostProtectionRejectsForeignHost(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -266,7 +266,7 @@ func TestMCPServeHTTPLocalhostProtectionRejectsForeignHost(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, response.StatusCode)
 }
 
-func TestMCPServeHTTPRejectsLoopbackHostThatDoesNotMatchConfiguredAuthority(t *testing.T) {
+func TestMCPServeHTTPRejectsLoopbackHostThatDoesNotMatchConfiguredAuthority(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -295,11 +295,12 @@ func TestMCPServeHTTPRejectsLoopbackHostThatDoesNotMatchConfiguredAuthority(t *t
 }
 
 func TestResolveMCPHTTPTokenLoopbackRequiresBearer(t *testing.T) {
+	t.Parallel()
 	_, err := resolveMCPHTTPToken("127.0.0.1:8080", "", false)
 	require.ErrorContains(t, err, "--http-token-env")
 }
 
-func TestMCPServeHTTPLoopbackRequiresBearer(t *testing.T) {
+func TestMCPServeHTTPLoopbackRequiresBearer(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	command := newRootCmd()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
@@ -308,6 +309,7 @@ func TestMCPServeHTTPLoopbackRequiresBearer(t *testing.T) {
 }
 
 func TestRunMCPHTTPServerWaitsForInflightHandlersDuringShutdown(t *testing.T) {
+	t.Parallel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	started := make(chan struct{})
@@ -361,7 +363,7 @@ func TestRunMCPHTTPServerWaitsForInflightHandlersDuringShutdown(t *testing.T) {
 	require.NoError(t, <-requestDone)
 }
 
-func TestMCPServeHTTPNonLoopbackRequiresToken(t *testing.T) {
+func TestMCPServeHTTPNonLoopbackRequiresToken(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	command := newRootCmd()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
@@ -369,7 +371,7 @@ func TestMCPServeHTTPNonLoopbackRequiresToken(t *testing.T) {
 	require.ErrorContains(t, command.Execute(), "--http-token-env")
 }
 
-func TestMCPServeHTTPNonLoopbackRequiresExplicitPrivateNetworkTrust(t *testing.T) {
+func TestMCPServeHTTPNonLoopbackRequiresExplicitPrivateNetworkTrust(t *testing.T) { //nolint:paralleltest // sets KATA_MCP_TEST_TOKEN; newRootCmd resets package var flags
 	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
 	command := newRootCmd()
 	command.SetOut(io.Discard)
@@ -381,7 +383,7 @@ func TestMCPServeHTTPNonLoopbackRequiresExplicitPrivateNetworkTrust(t *testing.T
 	require.ErrorContains(t, command.Execute(), "--trust-private-network")
 }
 
-func TestMCPServeHTTPTrustedPrivateNetworkRejectsPublicAndHostnameBinds(t *testing.T) {
+func TestMCPServeHTTPTrustedPrivateNetworkRejectsPublicAndHostnameBinds(t *testing.T) { //nolint:paralleltest // sets KATA_MCP_TEST_TOKEN
 	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
 	for _, address := range []string{"203.0.113.10:8080", "daemon.example:8080"} {
 		t.Run(address, func(t *testing.T) {
@@ -391,7 +393,7 @@ func TestMCPServeHTTPTrustedPrivateNetworkRejectsPublicAndHostnameBinds(t *testi
 	}
 }
 
-func TestMCPServeHTTPTrustedPrivateNetworkAllowsPrivateAndWildcardBinds(t *testing.T) {
+func TestMCPServeHTTPTrustedPrivateNetworkAllowsPrivateAndWildcardBinds(t *testing.T) { //nolint:paralleltest // sets KATA_MCP_TEST_TOKEN
 	t.Setenv("KATA_MCP_TEST_TOKEN", "test-mcp-token")
 	for _, address := range []string{"10.0.0.5:8080", "100.64.0.5:8080", "0.0.0.0:8080", "[::]:8080"} {
 		t.Run(address, func(t *testing.T) {
@@ -402,7 +404,7 @@ func TestMCPServeHTTPTrustedPrivateNetworkAllowsPrivateAndWildcardBinds(t *testi
 	}
 }
 
-func TestMCPServeHTTPTokenEnvMustBeSet(t *testing.T) {
+func TestMCPServeHTTPTokenEnvMustBeSet(t *testing.T) { //nolint:paralleltest // sets KATA_MCP_MISSING_TOKEN; newRootCmd resets package var flags
 	t.Setenv("KATA_MCP_MISSING_TOKEN", "")
 	command := newRootCmd()
 	command.SetOut(io.Discard)
@@ -414,7 +416,7 @@ func TestMCPServeHTTPTokenEnvMustBeSet(t *testing.T) {
 	require.ErrorContains(t, command.Execute(), "KATA_MCP_MISSING_TOKEN")
 }
 
-func TestMCPServeAllProjectsServesDaemonWideScope(t *testing.T) {
+func TestMCPServeAllProjectsServesDaemonWideScope(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	var requests int
@@ -438,7 +440,7 @@ func TestMCPServeAllProjectsServesDaemonWideScope(t *testing.T) {
 	require.Zero(t, requests, "daemon-wide startup must not resolve the current workspace")
 }
 
-func TestMCPServeRenewsAdvertisedAutostartDaemon(t *testing.T) {
+func TestMCPServeRenewsAdvertisedAutostartDaemon(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	keepalive := make(chan struct{}, 1)
@@ -476,6 +478,7 @@ func TestMCPServeRenewsAdvertisedAutostartDaemon(t *testing.T) {
 }
 
 func TestMCPIdleKeepaliveWaitsAFullIntervalAfterSlowFailure(t *testing.T) {
+	t.Parallel()
 	var requests atomic.Int32
 	var mu sync.Mutex
 	var secondCompleted time.Time
@@ -510,7 +513,7 @@ func TestMCPIdleKeepaliveWaitsAFullIntervalAfterSlowFailure(t *testing.T) {
 	}
 }
 
-func TestMCPServeRejectsDaemonBeforeRelationshipPinning(t *testing.T) {
+func TestMCPServeRejectsDaemonBeforeRelationshipPinning(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	var otherRequests int
@@ -537,7 +540,7 @@ func TestMCPServeRejectsDaemonBeforeRelationshipPinning(t *testing.T) {
 	require.Zero(t, otherRequests, "an incompatible daemon must be rejected before any MCP traffic")
 }
 
-func TestMCPServeDefaultRequiresWorkspaceBinding(t *testing.T) {
+func TestMCPServeDefaultRequiresWorkspaceBinding(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	t.Chdir(t.TempDir())
@@ -560,6 +563,7 @@ func TestMCPServeDefaultRequiresWorkspaceBinding(t *testing.T) {
 }
 
 func TestParseMCPStorageTargets(t *testing.T) {
+	t.Parallel()
 	targets, err := parseMCPStorageTargets([]string{"restore=restore.db", "archive=postgres://db.example/kata"})
 	require.NoError(t, err)
 	require.Equal(t, "restore.db", targets["restore"])
@@ -574,7 +578,7 @@ func TestParseMCPStorageTargets(t *testing.T) {
 
 const currentMCPProtocolVersion = "2026-07-28"
 
-func TestMCPServeSyncOutlivesHandshakeTimeout(t *testing.T) {
+func TestMCPServeSyncOutlivesHandshakeTimeout(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("holds a sync response past the 10s SSE handshake timeout")
 	}
@@ -653,7 +657,7 @@ func TestMCPServeSyncOutlivesHandshakeTimeout(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
-func TestMCPServeEventWaitOutlivesDefaultClientTimeout(t *testing.T) {
+func TestMCPServeEventWaitOutlivesDefaultClientTimeout(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("holds an event wait past the 5s default client timeout")
 	}
@@ -731,7 +735,7 @@ func TestMCPServeEventWaitOutlivesDefaultClientTimeout(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
-func TestMCPServeOrdinaryRequestsUseDefaultClientTimeout(t *testing.T) {
+func TestMCPServeOrdinaryRequestsUseDefaultClientTimeout(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR and KATA_HTTP_TIMEOUT; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
@@ -795,7 +799,7 @@ func TestMCPServeOrdinaryRequestsUseDefaultClientTimeout(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
-func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) {
+func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; newRootCmd resets package var flags
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	workspace := t.TempDir()

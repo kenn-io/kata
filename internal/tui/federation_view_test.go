@@ -19,7 +19,7 @@ import (
 	"go.kenn.io/kit/tui/helplayout"
 )
 
-func TestFederationView_FKeyTransitionsFromList(t *testing.T) {
+func TestFederationView_FKeyTransitionsFromList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationSourceModel()
 
 	out, cmd := updateModel(m, keyRune('F'))
@@ -34,7 +34,7 @@ func TestFederationView_FKeyTransitionsFromList(t *testing.T) {
 // fresh federation list must own neither an enrollment nor leave operation
 // retained from the previous view, so either late reply is discarded instead
 // of replacing the list with an unrelated result screen.
-func TestFederationView_FKeyInvalidatesPriorOperationResults(t *testing.T) {
+func TestFederationView_FKeyInvalidatesPriorOperationResults(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	tests := []struct {
 		name string
 		kind federationOpKind
@@ -83,7 +83,7 @@ func TestFederationView_FKeyInvalidatesPriorOperationResults(t *testing.T) {
 	}
 }
 
-func TestFederationView_EscReturnsToPreviousView(t *testing.T) {
+func TestFederationView_EscReturnsToPreviousView(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 
 	out, cmd := m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -92,7 +92,7 @@ func TestFederationView_EscReturnsToPreviousView(t *testing.T) {
 	assert.Equal(t, viewList, out.view)
 }
 
-func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
+func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.federation.cursor = 0
 
@@ -108,7 +108,7 @@ func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
 	assert.Contains(t, rendered, "hub rejected deferred peer")
 }
 
-func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
+func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.federation.instance.Auth = AuthInfo{Kind: "db_token", Actor: "operator"}
 	rendered := stripANSI(renderFederation(m))
@@ -131,7 +131,7 @@ func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
 	assert.NotContains(t, rendered, "hub rejected deferred peer")
 }
 
-func TestFederationView_ActiveLocalGlobalAuthDisplaysTokenActor(t *testing.T) {
+func TestFederationView_ActiveLocalGlobalAuthDisplaysTokenActor(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses()
 	m.activeDaemon = daemonTarget{Name: "local", Local: true}
 	m.federation.instance.Auth = AuthInfo{Kind: "db_token", Actor: "operator"}
@@ -142,7 +142,7 @@ func TestFederationView_ActiveLocalGlobalAuthDisplaysTokenActor(t *testing.T) {
 	assert.NotContains(t, rendered, "auth no token actor operator")
 }
 
-func TestFederationView_ListShowsOnlySpokeBindings(t *testing.T) {
+func TestFederationView_ListShowsOnlySpokeBindings(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(
 		federationStatusFixture("spoke-proj", "spoke"),
 		federationStatusFixture("hub-only", "hub"),
@@ -154,7 +154,7 @@ func TestFederationView_ListShowsOnlySpokeBindings(t *testing.T) {
 	assert.NotContains(t, rendered, "hub-only")
 }
 
-func TestFederationView_ListFitsTerminalHeight(t *testing.T) {
+func TestFederationView_ListFitsTerminalHeight(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	statuses := make([]FederationProjectStatus, 0, 10)
 	for i := range 10 {
 		status := federationStatusFixture("spoke-proj-"+strconv.Itoa(i), "spoke")
@@ -169,7 +169,7 @@ func TestFederationView_ListFitsTerminalHeight(t *testing.T) {
 	assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), m.height)
 }
 
-func TestFederationView_DetailFitsTerminalHeight(t *testing.T) {
+func TestFederationView_DetailFitsTerminalHeight(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.height = 12
 	m.federation.mode = federationModeDetail
@@ -181,7 +181,7 @@ func TestFederationView_DetailFitsTerminalHeight(t *testing.T) {
 	assert.Contains(t, rendered, "[esc] back")
 }
 
-func TestFederationView_MouseClickUsesFederationRowOffset(t *testing.T) {
+func TestFederationView_MouseClickUsesFederationRowOffset(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(
 		federationStatusFixture("spoke-proj-0", "spoke"),
 		federationStatusFixture("spoke-proj-1", "spoke"),
@@ -195,6 +195,7 @@ func TestFederationView_MouseClickUsesFederationRowOffset(t *testing.T) {
 }
 
 func TestFederationView_HelpAndFooterIncludeFederationBinding(t *testing.T) {
+	t.Parallel()
 	help := stripANSI(renderHelp(newKeymap(), 100, ListFilter{}))
 	assert.Contains(t, help, "F")
 	assert.Contains(t, help, "federation")
@@ -203,7 +204,7 @@ func TestFederationView_HelpAndFooterIncludeFederationBinding(t *testing.T) {
 	assertHelpItemPresent(t, flattenHelpRows(m.queueHelpRows()), helplayout.HelpItem{Key: "F", Description: "federation"})
 }
 
-func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemon(t *testing.T) {
+func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemon(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	spokeAPI := &Client{}
 	spokeTarget := daemonTargetWithResolvedAuth("spoke", "https://spoke.example", "spoke-auth", false)
 	hubTarget := daemonTargetWithResolvedAuth("catalog-hub", "https://hub.example", "hub-auth", false)
@@ -255,7 +256,7 @@ func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemo
 	assert.Contains(t, rendered, "other-hub-project")
 }
 
-func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
+func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	hubTarget := daemonTargetWithResolvedAuth("catalog-hub", "https://hub.example", "hub-auth", false)
 	hub := &recordingFederationHubAdmin{
 		projects: []ProjectSummary{{ID: 42, Name: "hub-project"}},
@@ -295,7 +296,7 @@ func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
 // active project must never skip the local-project step (that hid the
 // create-replica row and silently pre-armed adoption); it only positions the
 // cursor, so the adopt flow costs exactly one Enter more.
-func TestFederationEnroll_NWithCurrentProjectStartsLocalSelectionCursored(t *testing.T) {
+func TestFederationEnroll_NWithCurrentProjectStartsLocalSelectionCursored(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR and USER; applyColorMode rewrites package style vars
 	t.Setenv("KATA_AUTHOR", "")
 	t.Setenv("USER", "operator")
 	m := setupFederationView()
@@ -341,7 +342,7 @@ func TestFederationEnroll_NWithCurrentProjectStartsLocalSelectionCursored(t *tes
 // project-list fetch is asynchronous and can fail, so the scoped project must
 // be adoptable from scope state alone — an empty projectsByID cache must not
 // reduce the enroll flow to "create replica" only.
-func TestFederationEnroll_ScopedProjectAdoptableWithEmptyProjectCache(t *testing.T) {
+func TestFederationEnroll_ScopedProjectAdoptableWithEmptyProjectCache(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.scope = homedScope(7, "spoke-project")
 	// No injectProjects: simulate pressing `n` before projectsLoadedMsg (or
@@ -360,7 +361,7 @@ func TestFederationEnroll_ScopedProjectAdoptableWithEmptyProjectCache(t *testing
 	assert.Equal(t, int64(7), cursorRow.project.ID)
 }
 
-func TestFederationEnroll_NWithoutProjectStartsLocalProjectSelection(t *testing.T) {
+func TestFederationEnroll_NWithoutProjectStartsLocalProjectSelection(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.scope = scope{allProjects: true}
 	injectProjects(&m,
@@ -379,7 +380,7 @@ func TestFederationEnroll_NWithoutProjectStartsLocalProjectSelection(t *testing.
 	assert.Contains(t, rendered, "other-project")
 }
 
-func TestFederationEnroll_EscFromHubSelectionReturnsToLocalProjectSelection(t *testing.T) {
+func TestFederationEnroll_EscFromHubSelectionReturnsToLocalProjectSelection(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.scope = scope{allProjects: true}
 	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
@@ -397,7 +398,7 @@ func TestFederationEnroll_EscFromHubSelectionReturnsToLocalProjectSelection(t *t
 	assert.Equal(t, federationModeSelectLocalProject, out.federation.mode)
 }
 
-func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testing.T) {
+func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationHubProjectSelection()
 	m.federation.draft.HubInstance = InstanceInfo{Auth: AuthInfo{Kind: "db_token", Actor: "hub-operator"}}
 	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
@@ -425,7 +426,7 @@ func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testin
 	assert.Contains(t, rendered, "pre-adoption event history is replaced by snapshot events for federation")
 }
 
-func TestFederationEnroll_SelectHubLoadsHubAuthPrincipal(t *testing.T) {
+func TestFederationEnroll_SelectHubLoadsHubAuthPrincipal(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	hub := &recordingFederationHubAdmin{
 		instance: InstanceInfo{Auth: AuthInfo{Kind: "db_token", Actor: "hub-operator"}},
 		projects: []ProjectSummary{
@@ -465,7 +466,7 @@ func TestFederationEnroll_SelectHubLoadsHubAuthPrincipal(t *testing.T) {
 	assert.NotContains(t, rendered, "requested actor: anonymous")
 }
 
-func TestFederationEnroll_SelectDifferentHubProjectSkipsSameNameDuplicate(t *testing.T) {
+func TestFederationEnroll_SelectDifferentHubProjectSkipsSameNameDuplicate(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationHubProjectSelection()
 	m.federation.hubProjects = []ProjectSummary{
 		{ID: 42, Name: "spoke-project"},
@@ -484,7 +485,7 @@ func TestFederationEnroll_SelectDifferentHubProjectSkipsSameNameDuplicate(t *tes
 	assert.Contains(t, rendered, "team-hub-project")
 }
 
-func TestFederationEnroll_SelectDifferentExistingHubProjectStillAdoptsLocalProject(t *testing.T) {
+func TestFederationEnroll_SelectDifferentExistingHubProjectStillAdoptsLocalProject(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationHubProjectSelection()
 	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "hub-project"}}
 	m.federation.hubProjectCursor = 1
@@ -501,7 +502,7 @@ func TestFederationEnroll_SelectDifferentExistingHubProjectStillAdoptsLocalProje
 	assert.Contains(t, rendered, "hub-project")
 }
 
-func TestFederationEnroll_CreateReplicaBranchDefaultsLocalNameFromHubProject(t *testing.T) {
+func TestFederationEnroll_CreateReplicaBranchDefaultsLocalNameFromHubProject(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.scope = scope{allProjects: true}
 	m.daemonTargets = []daemonTarget{
@@ -537,7 +538,7 @@ func TestFederationEnroll_CreateReplicaBranchDefaultsLocalNameFromHubProject(t *
 	assert.NotContains(t, rendered, "pre-adoption event history")
 }
 
-func TestFederationEnroll_CreateReplicaBranchPreflightsLocalNameConflict(t *testing.T) {
+func TestFederationEnroll_CreateReplicaBranchPreflightsLocalNameConflict(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.scope = scope{allProjects: true}
 	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
@@ -555,7 +556,7 @@ func TestFederationEnroll_CreateReplicaBranchPreflightsLocalNameConflict(t *test
 	assert.Contains(t, stripANSI(renderFederation(out)), `Blocked: local project "spoke-project" already exists`)
 }
 
-func TestFederationEnroll_SameNamePreviewClearsStaleSelectedHubProjectID(t *testing.T) {
+func TestFederationEnroll_SameNamePreviewClearsStaleSelectedHubProjectID(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationHubProjectSelection()
 	m.federation.draft.HubProjectID = 42
 	m.federation.draft.HubProjectName = "old-hub-project"
@@ -570,7 +571,7 @@ func TestFederationEnroll_SameNamePreviewClearsStaleSelectedHubProjectID(t *test
 	assert.Equal(t, "spoke-project", out.federation.draft.HubProjectName)
 }
 
-func TestFederationEnroll_ExistingLocalFederationBindingBlocksBeforeMutation(t *testing.T) {
+func TestFederationEnroll_ExistingLocalFederationBindingBlocksBeforeMutation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationHubProjectSelection()
 	m.federation.statuses = []FederationProjectStatus{federationStatusFixture("spoke-project", "spoke")}
 	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
@@ -586,7 +587,7 @@ func TestFederationEnroll_ExistingLocalFederationBindingBlocksBeforeMutation(t *
 	assert.Equal(t, federationModePreview, out.federation.mode)
 }
 
-func TestFederationEnroll_MissingTokenEnvBlocksBeforeMutation(t *testing.T) {
+func TestFederationEnroll_MissingTokenEnvBlocksBeforeMutation(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN; applyColorMode rewrites package style vars
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv(missingHubAuthEnvName(), "")
 	m := setupFederationView()
@@ -609,7 +610,7 @@ func TestFederationEnroll_MissingTokenEnvBlocksBeforeMutation(t *testing.T) {
 		`daemon "hub": token_env "`+missingHubAuthEnvName()+`" is unset or empty`)
 }
 
-func TestFederationEnroll_GlobalAuthTokenDoesNotOverrideMissingTargetTokenEnv(t *testing.T) {
+func TestFederationEnroll_GlobalAuthTokenDoesNotOverrideMissingTargetTokenEnv(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN; applyColorMode rewrites package style vars
 	t.Setenv("KATA_AUTH_TOKEN", "local-daemon-token")
 	t.Setenv(missingHubAuthEnvName(), "")
 	m := setupFederationView()
@@ -632,7 +633,7 @@ func TestFederationEnroll_GlobalAuthTokenDoesNotOverrideMissingTargetTokenEnv(t 
 		`daemon "hub": token_env "`+missingHubAuthEnvName()+`" is unset or empty`)
 }
 
-func TestFederationEnroll_ActiveDaemonAsHubBlocked(t *testing.T) {
+func TestFederationEnroll_ActiveDaemonAsHubBlocked(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.scope = homedScope(7, "spoke-project")
 	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
@@ -647,7 +648,7 @@ func TestFederationEnroll_ActiveDaemonAsHubBlocked(t *testing.T) {
 	assert.Contains(t, stripANSI(renderFederation(out)), "active daemon cannot be selected as hub")
 }
 
-func TestFederationEnroll_LocalHubTargetBlocksBeforeMutation(t *testing.T) {
+func TestFederationEnroll_LocalHubTargetBlocksBeforeMutation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.scope = homedScope(7, "spoke-project")
 	m.federation.mode = federationModeSelectHub
@@ -670,7 +671,7 @@ func TestFederationEnroll_LocalHubTargetBlocksBeforeMutation(t *testing.T) {
 	assert.Contains(t, out.federation.op.err.Error(), "local hub")
 }
 
-func TestFederationEnroll_PlainHTTPHostnameRequiresCatalogAllowInsecure(t *testing.T) {
+func TestFederationEnroll_PlainHTTPHostnameRequiresCatalogAllowInsecure(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.scope = homedScope(7, "spoke-project")
 	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
@@ -689,7 +690,7 @@ func TestFederationEnroll_PlainHTTPHostnameRequiresCatalogAllowInsecure(t *testi
 	assert.Contains(t, stripANSI(renderFederation(out)), "allow_insecure")
 }
 
-func TestFederationEnroll_EnterCreatesEnrollmentAndJoinsSpoke(t *testing.T) {
+func TestFederationEnroll_EnterCreatesEnrollmentAndJoinsSpoke(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, joinBody := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
@@ -708,7 +709,7 @@ func TestFederationEnroll_EnterCreatesEnrollmentAndJoinsSpoke(t *testing.T) {
 	assert.NotContains(t, stripANSI(renderFederation(out)), enrollmentSecret())
 }
 
-func TestFederationEnroll_AdoptSelectedHubJoinsSelectedLocalProjectName(t *testing.T) {
+func TestFederationEnroll_AdoptSelectedHubJoinsSelectedLocalProjectName(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, joinBody := setupFederationExecutionPreview(t, federationExecutionServerOptions{hubProjectName: "hub-project"})
 	m.federation.draft.Operation = federationOperationAdoptSelectedHub
 	m.federation.draft.SpokeProjectName = "local-spoke-project"
@@ -725,7 +726,7 @@ func TestFederationEnroll_AdoptSelectedHubJoinsSelectedLocalProjectName(t *testi
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", joinBody.HubProjectUID)
 }
 
-func TestFederationEnroll_AdoptSelectedHubRecoveryUsesSelectedLocalProjectName(t *testing.T) {
+func TestFederationEnroll_AdoptSelectedHubRecoveryUsesSelectedLocalProjectName(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{
 		hubProjectName: "hub-project",
 		joinStatus:     http.StatusInternalServerError,
@@ -746,7 +747,7 @@ func TestFederationEnroll_AdoptSelectedHubRecoveryUsesSelectedLocalProjectName(t
 	assert.NotContains(t, rendered, "--project hub-project")
 }
 
-func TestFederationEnroll_ResultShowsBoundActorAndHubMetadata(t *testing.T) {
+func TestFederationEnroll_ResultShowsBoundActorAndHubMetadata(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
@@ -764,7 +765,7 @@ func TestFederationEnroll_ResultShowsBoundActorAndHubMetadata(t *testing.T) {
 	assert.NotContains(t, rendered, enrollmentSecret())
 }
 
-func TestFederationEnroll_MetadataFailureShowsHubLabeledRecoveryAndHidesToken(t *testing.T) {
+func TestFederationEnroll_MetadataFailureShowsHubLabeledRecoveryAndHidesToken(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{metadataStatus: 500})
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
@@ -778,7 +779,7 @@ func TestFederationEnroll_MetadataFailureShowsHubLabeledRecoveryAndHidesToken(t 
 	assert.NotContains(t, rendered, enrollmentSecret())
 }
 
-func TestFederationEnroll_MetadataFailureRecoveryRevealUsesOnlyAvailableFields(t *testing.T) {
+func TestFederationEnroll_MetadataFailureRecoveryRevealUsesOnlyAvailableFields(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{metadataStatus: 500})
 	out, cmd := enterThroughAdoptConfirm(t, m)
 	msg := cmd().(federationEnrollResultMsg)
@@ -804,7 +805,7 @@ func TestFederationEnroll_MetadataFailureRecoveryRevealUsesOnlyAvailableFields(t
 	assert.NotContains(t, rendered, "--server")
 }
 
-func TestFederationEnroll_JoinFailureShowsSpokeLabeledRecoveryAndHidesToken(t *testing.T) {
+func TestFederationEnroll_JoinFailureShowsSpokeLabeledRecoveryAndHidesToken(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
@@ -819,7 +820,7 @@ func TestFederationEnroll_JoinFailureShowsSpokeLabeledRecoveryAndHidesToken(t *t
 	assert.NotContains(t, rendered, enrollmentSecret())
 }
 
-func TestFederationEnroll_PreEnrollmentFailureReturnsToPreview(t *testing.T) {
+func TestFederationEnroll_PreEnrollmentFailureReturnsToPreview(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
 	restoreFederationHubAdminClient(t, func(
 		_ context.Context,
@@ -840,7 +841,7 @@ func TestFederationEnroll_PreEnrollmentFailureReturnsToPreview(t *testing.T) {
 	assert.Empty(t, out.federation.recovery.Token)
 }
 
-func TestFederationEnroll_MissingSpokeInstanceBlocksBeforeHubMutation(t *testing.T) {
+func TestFederationEnroll_MissingSpokeInstanceBlocksBeforeHubMutation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	m := setupFederationHubProjectSelection()
 	var hubCalled bool
 	restoreFederationHubAdminClient(t, func(
@@ -865,7 +866,7 @@ func TestFederationEnroll_MissingSpokeInstanceBlocksBeforeHubMutation(t *testing
 	assert.Empty(t, result.Enrollment.Token)
 }
 
-func TestFederationEnroll_JoinFailureRecoveryRevealIsExplicitAndSecretBearing(t *testing.T) {
+func TestFederationEnroll_JoinFailureRecoveryRevealIsExplicitAndSecretBearing(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
 	out, cmd := enterThroughAdoptConfirm(t, m)
 	msg := cmd().(federationEnrollResultMsg)
@@ -892,7 +893,7 @@ func TestFederationEnroll_JoinFailureRecoveryRevealIsExplicitAndSecretBearing(t 
 	assert.NotContains(t, rendered, "--server")
 }
 
-func TestFederationEnroll_RecoveryCommandPreservesSpokeAllowInsecure(t *testing.T) {
+func TestFederationEnroll_RecoveryCommandPreservesSpokeAllowInsecure(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
 	m.activeDaemon.resolved.AllowInsecure = true
 	out, cmd := enterThroughAdoptConfirm(t, m)
@@ -907,7 +908,7 @@ func TestFederationEnroll_RecoveryCommandPreservesSpokeAllowInsecure(t *testing.
 	assert.Contains(t, rendered, "KATA_ALLOW_INSECURE=1")
 }
 
-func TestFederationEnroll_RecoveryCommandPreservesSpokeAuthOnlyAfterReveal(t *testing.T) {
+func TestFederationEnroll_RecoveryCommandPreservesSpokeAuthOnlyAfterReveal(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	spokeToken := spokeAuthSecret()
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
 	m.activeDaemon.resolved.Token = spokeToken
@@ -926,12 +927,14 @@ func TestFederationEnroll_RecoveryCommandPreservesSpokeAuthOnlyAfterReveal(t *te
 }
 
 func TestFederationAuthDisplayShowsTrustedProxyMissingActor(t *testing.T) {
+	t.Parallel()
 	got := federationAuthDisplay(daemonTarget{Name: "hub"}, AuthInfo{Kind: "trusted_proxy_absent"})
 
 	assert.Equal(t, "trusted-proxy missing actor", got)
 }
 
 func TestFederationEnroll_RecoveryCommandQuotesShellMetacharacters(t *testing.T) {
+	t.Parallel()
 	cmd := federationRecoveryCommand{
 		HubURL:        "http://hub.internal:7777",
 		HubProjectID:  42,
@@ -952,7 +955,7 @@ func TestFederationEnroll_RecoveryCommandQuotesShellMetacharacters(t *testing.T)
 	assert.NotContains(t, rendered, "--actor hub$(actor)")
 }
 
-func TestFederationLeaveKeyOpensPreviewOnSpokeRowOnly(t *testing.T) {
+func TestFederationLeaveKeyOpensPreviewOnSpokeRowOnly(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.federation.cursor = 0
 
@@ -968,7 +971,7 @@ func TestFederationLeaveKeyOpensPreviewOnSpokeRowOnly(t *testing.T) {
 	assert.Empty(t, out.federation.leaveDraft.BlockedReason)
 }
 
-func TestFederationLeaveKeyDoesNotOpenPreviewOnNonSpokeRow(t *testing.T) {
+func TestFederationLeaveKeyDoesNotOpenPreviewOnNonSpokeRow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	// The list only ever shows spoke rows, but the guard is the contract:
 	// a non-spoke selection must never enter leave preview. Drive the guard
 	// directly by exercising the detail router on a hub status.
@@ -983,7 +986,7 @@ func TestFederationLeaveKeyDoesNotOpenPreviewOnNonSpokeRow(t *testing.T) {
 	assert.Equal(t, federationModeDetail, out.federation.mode)
 }
 
-func TestFederationLeavePreviewRender(t *testing.T) {
+func TestFederationLeavePreviewRender(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
@@ -998,7 +1001,7 @@ func TestFederationLeavePreviewRender(t *testing.T) {
 	assert.Contains(t, rendered, "[enter] confirm")
 }
 
-func TestFederationLeaveListFooterAdvertisesLeaveKey(t *testing.T) {
+func TestFederationLeaveListFooterAdvertisesLeaveKey(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 
 	rendered := stripANSI(renderFederation(m))
@@ -1006,7 +1009,7 @@ func TestFederationLeaveListFooterAdvertisesLeaveKey(t *testing.T) {
 	assert.Contains(t, rendered, "[x] leave")
 }
 
-func TestFederationLeavePreviewTogglesDispositionAndLocalOnly(t *testing.T) {
+func TestFederationLeavePreviewTogglesDispositionAndLocalOnly(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
@@ -1030,7 +1033,7 @@ func TestFederationLeavePreviewTogglesDispositionAndLocalOnly(t *testing.T) {
 	assert.False(t, out.federation.leaveDraft.LocalOnly)
 }
 
-func TestFederationLeavePreviewEscReturnsToList(t *testing.T) {
+func TestFederationLeavePreviewEscReturnsToList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.federation.cursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
@@ -1042,7 +1045,7 @@ func TestFederationLeavePreviewEscReturnsToList(t *testing.T) {
 	assert.Equal(t, federationModeList, out.federation.mode)
 }
 
-func TestFederationLeaveDelegatesProviderReleaseToSpoke(t *testing.T) {
+func TestFederationLeaveDelegatesProviderReleaseToSpoke(t *testing.T) { //nolint:paralleltest // restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	hub := &recordingFederationHubAdmin{}
 	adminOpened := false
 	restoreFederationHubAdminClient(t, func(_ context.Context, target daemonTarget) (federationHubAdminAPI, daemonTarget, error) {
@@ -1071,7 +1074,7 @@ func TestFederationLeaveDelegatesProviderReleaseToSpoke(t *testing.T) {
 	assert.False(t, adminOpened, "provider leave must not ask for hub admin credentials")
 }
 
-func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T) {
+func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	hubProject := int64(42)
 	hub := &recordingFederationHubAdmin{
 		enrollments: []FederationEnrollment{
@@ -1127,7 +1130,7 @@ func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T
 // local teardown instead of treating zero matches as success — the instance
 // UID can drift from the enrollment's (clone/import refresh or an explicit
 // --spoke-instance enroll), and proceeding would strand a live token.
-func TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject(t *testing.T) {
+func TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	hubProject := int64(42)
 	hub := &recordingFederationHubAdmin{
 		enrollments: []FederationEnrollment{
@@ -1178,7 +1181,7 @@ func TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject(t *testing.
 // (role drift, vanished project, actor validation), and a refusal discovered
 // only after the hub revoke would strand the spoke locally bound with the hub
 // side gone.
-func TestFederationLeaveDetachPreflightRefusalSkipsRevoke(t *testing.T) {
+func TestFederationLeaveDetachPreflightRefusalSkipsRevoke(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	hubProject := int64(42)
 	hub := &recordingFederationHubAdmin{
 		enrollments: []FederationEnrollment{
@@ -1230,7 +1233,7 @@ func TestFederationLeaveDetachPreflightRefusalSkipsRevoke(t *testing.T) {
 // whose archive would be refused (open issues) must fail BEFORE the hub
 // revoke — otherwise the spoke is left locally bound with a revoked hub
 // token, breaking sync until manual recovery.
-func TestFederationLeaveArchivePreflightRefusalSkipsRevoke(t *testing.T) {
+func TestFederationLeaveArchivePreflightRefusalSkipsRevoke(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	hubProject := int64(42)
 	hub := &recordingFederationHubAdmin{
 		enrollments: []FederationEnrollment{
@@ -1280,7 +1283,7 @@ func TestFederationLeaveArchivePreflightRefusalSkipsRevoke(t *testing.T) {
 	_ = out
 }
 
-func TestFederationLeaveLocalOnlySkipsHubRevoke(t *testing.T) {
+func TestFederationLeaveLocalOnlySkipsHubRevoke(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	hub := &recordingFederationHubAdmin{}
 	restoreFederationHubAdminClient(t, func(
 		_ context.Context,
@@ -1321,7 +1324,7 @@ func TestFederationLeaveLocalOnlySkipsHubRevoke(t *testing.T) {
 	assert.Contains(t, stripANSI(renderFederation(out)), "hub revoke skipped")
 }
 
-func TestFederationLeaveHubRevokeFailureReturnsToPreview(t *testing.T) {
+func TestFederationLeaveHubRevokeFailureReturnsToPreview(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	restoreFederationHubAdminClient(t, func(
 		_ context.Context,
 		_ daemonTarget,
@@ -1360,6 +1363,7 @@ func TestFederationLeaveHubRevokeFailureReturnsToPreview(t *testing.T) {
 }
 
 func TestFederationLeaveMatchesActiveEnrollmentsForSpokeInstanceAndHubProject(t *testing.T) {
+	t.Parallel()
 	hubProject := int64(42)
 	otherProject := int64(99)
 	revoked := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
@@ -1380,7 +1384,7 @@ func TestFederationLeaveMatchesActiveEnrollmentsForSpokeInstanceAndHubProject(t 
 		"active project-scoped enrollments for other spoke instances must be surfaced so a zero-match leave can refuse instead of stranding them")
 }
 
-func TestFederationLeaveHubTargetUsesBindingURLAndToleratesTrailingSlash(t *testing.T) {
+func TestFederationLeaveHubTargetUsesBindingURLAndToleratesTrailingSlash(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.daemonTargets = []daemonTarget{
 		{Name: "local", Local: true},
@@ -1405,7 +1409,7 @@ func TestFederationLeaveHubTargetUsesBindingURLAndToleratesTrailingSlash(t *test
 // must be able to RESTORE the flag when the binding-side value was lost with
 // the credential; the union means the catalog can add but never remove the
 // binding's opt-in.
-func TestFederationLeaveHubTargetUnionsCatalogAllowInsecure(t *testing.T) {
+func TestFederationLeaveHubTargetUnionsCatalogAllowInsecure(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.daemonTargets = []daemonTarget{
 		daemonTargetWithResolvedAuth("hub", "http://hub.internal:7373", "catalog-token", true),
@@ -1418,7 +1422,7 @@ func TestFederationLeaveHubTargetUnionsCatalogAllowInsecure(t *testing.T) {
 		"same-origin catalog allow_insecure must union into the leave hub target")
 }
 
-func TestFederationLeaveHubTargetNoMatchFallsBackToBindingURL(t *testing.T) {
+func TestFederationLeaveHubTargetNoMatchFallsBackToBindingURL(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.daemonTargets = []daemonTarget{{Name: "local", Local: true}}
 
@@ -1536,7 +1540,7 @@ func setupFederationHubProjectSelection() Model {
 // the single place the sentinel-row convention is now stated: count,
 // labels and selection all come off one row list, so they cannot drift
 // apart the way the four independent derivations used to.
-func TestFederationHubProjectRows(t *testing.T) {
+func TestFederationHubProjectRows(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	sameName := ProjectSummary{ID: 42, Name: "spoke-project"}
 	other := ProjectSummary{ID: 77, Name: "hub-project"}
 
@@ -1631,7 +1635,7 @@ func TestFederationHubProjectRows(t *testing.T) {
 // convention over the same cursor and the same []ProjectSummary. Naming it
 // in a builder is what removes the count patch-up that
 // handleFederationHubProjectsLoaded used to need.
-func TestFederationHubProjectRowsForMode(t *testing.T) {
+func TestFederationHubProjectRowsForMode(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationHubProjectSelection()
 	m.federation.hubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
 
@@ -1648,7 +1652,7 @@ func TestFederationHubProjectRowsForMode(t *testing.T) {
 // the resolution of the count-vs-label divergence: with create-replica and
 // no hub projects, the screen explains itself but offers nothing to move to,
 // and the key router agrees.
-func TestFederationSelectHubProject_EmptyCreateReplicaListIsNotSelectable(t *testing.T) {
+func TestFederationSelectHubProject_EmptyCreateReplicaListIsNotSelectable(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationHubProjectSelection()
 	m.federation.draft.CreateReplica = true
 	m.federation.hubProjects = nil
@@ -1671,7 +1675,7 @@ func TestFederationSelectHubProject_EmptyCreateReplicaListIsNotSelectable(t *tes
 // the renderer has always clamped its highlight, but the selection used to
 // return "nothing selected" past the end, so Enter and the highlight could
 // disagree. Selection now clamps the same way.
-func TestFederationSelectHubProject_OutOfRangeCursorSelectsTheHighlightedRow(t *testing.T) {
+func TestFederationSelectHubProject_OutOfRangeCursorSelectsTheHighlightedRow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationHubProjectSelection()
 	m.federation.hubProjects = []ProjectSummary{{ID: 77, Name: "hub-project"}}
 	m.federation.hubProjectCursor = 99 // rows are [sentinel, hub-project]
@@ -1686,7 +1690,7 @@ func TestFederationSelectHubProject_OutOfRangeCursorSelectsTheHighlightedRow(t *
 // TestFederationSelectHubProject_RowLabelsDriveTheRenderedList: the render
 // loop reads row.label instead of calling a parallel label builder, so a
 // label change cannot land on one of the two lists only.
-func TestFederationSelectHubProject_RowLabelsDriveTheRenderedList(t *testing.T) {
+func TestFederationSelectHubProject_RowLabelsDriveTheRenderedList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationHubProjectSelection()
 	m.federation.hubProjects = []ProjectSummary{
 		{ID: 42, Name: "spoke-project"},
@@ -1873,7 +1877,7 @@ func restoreFederationHubAdminClient(
 // actual join error instead of hiding it behind the canned token guess. A
 // non-auth failure (here the rejoin name-mismatch 409) must not be blamed on
 // the enrollment token.
-func TestFederationRecoveryShowsRealJoinError(t *testing.T) {
+func TestFederationRecoveryShowsRealJoinError(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.federation.mode = federationModeRecovery
 	m.federation.recovery = federationRecovery{
@@ -1894,7 +1898,7 @@ func TestFederationRecoveryShowsRealJoinError(t *testing.T) {
 
 // TestFederationRecoveryKeepsTokenHintForAuthFailures: 401/403 failures keep
 // the token-oriented hint alongside the real error.
-func TestFederationRecoveryKeepsTokenHintForAuthFailures(t *testing.T) {
+func TestFederationRecoveryKeepsTokenHintForAuthFailures(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.federation.mode = federationModeRecovery
 	m.federation.recovery = federationRecovery{
@@ -1911,7 +1915,7 @@ func TestFederationRecoveryKeepsTokenHintForAuthFailures(t *testing.T) {
 // whose UID is already held by an unbound local project must present the
 // operation as a rejoin of that project (it previously left this federation),
 // not as a new local replica that would dead-end on the daemon.
-func TestFederationPreviewDetectsRejoinForUIDHolder(t *testing.T) {
+func TestFederationPreviewDetectsRejoinForUIDHolder(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4EX"}
@@ -1936,7 +1940,7 @@ func TestFederationPreviewDetectsRejoinForUIDHolder(t *testing.T) {
 // TestFederationPreviewBlocksRejoinWhenHolderStillBound: a UID-holder that
 // still has a live binding is not silently rebound; the preview is blocked
 // with a message naming it.
-func TestFederationPreviewBlocksRejoinWhenHolderStillBound(t *testing.T) {
+func TestFederationPreviewBlocksRejoinWhenHolderStillBound(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4EX"}
@@ -1953,7 +1957,7 @@ func TestFederationPreviewBlocksRejoinWhenHolderStillBound(t *testing.T) {
 
 // TestFederationPreviewCreateReplicaUnaffectedWithoutUIDMatch: no local
 // UID-holder means the plain create-replica path is unchanged.
-func TestFederationPreviewCreateReplicaUnaffectedWithoutUIDMatch(t *testing.T) {
+func TestFederationPreviewCreateReplicaUnaffectedWithoutUIDMatch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "other-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4ZZ"}
@@ -1994,7 +1998,7 @@ func enterThroughAdoptConfirm(t *testing.T, m Model) (Model, tea.Cmd) {
 // TestFederationAdoptEnterOpensTypedConfirmation: adoption never executes on a
 // bare Enter; the gate states the INTO relationship, a wrong name keeps it
 // gated, and Esc returns to the preview.
-func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) {
+func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
 
 	out, cmd := m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -2022,7 +2026,7 @@ func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) {
 // rune "for backwards compatibility"), Windows delivers KeyRunes, and a
 // runeless KeySpace — a hand-built message or a future input backend — must
 // not silently drop the character.
-func TestFederationAdoptConfirmTypesSpaces(t *testing.T) {
+func TestFederationAdoptConfirmTypesSpaces(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	newConfirm := func() Model {
 		m := setupFederationView()
 		m.federation.mode = federationModeAdoptConfirm
@@ -2048,7 +2052,7 @@ func TestFederationAdoptConfirmTypesSpaces(t *testing.T) {
 
 // TestFederationAdoptTypedConfirmationExecutes: typing the exact project name
 // and confirming runs the enrollment.
-func TestFederationAdoptTypedConfirmationExecutes(t *testing.T) {
+func TestFederationAdoptTypedConfirmationExecutes(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, joinBody := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
@@ -2065,7 +2069,7 @@ func TestFederationAdoptTypedConfirmationExecutes(t *testing.T) {
 // landed, or it failed), the adopt-first preview cannot distinguish genuine
 // adoption from a post-leave rejoin. It must block rather than default to
 // adoption, which would rewrite the project's event history.
-func TestFederationPreviewAdoptFlowBlocksWithoutLocalUID(t *testing.T) {
+func TestFederationPreviewAdoptFlowBlocksWithoutLocalUID(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	// projectUIDByID intentionally unseeded: the boot race window.
@@ -2087,7 +2091,7 @@ func TestFederationPreviewAdoptFlowBlocksWithoutLocalUID(t *testing.T) {
 // UID disables the rejoin comparison just like an unknown local UID — the
 // preview must block rather than default to adoption, which could rewrite a
 // post-leave project's event history.
-func TestFederationPreviewAdoptFlowBlocksWithoutHubUID(t *testing.T) {
+func TestFederationPreviewAdoptFlowBlocksWithoutHubUID(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4EX"}
@@ -2112,7 +2116,7 @@ func TestFederationPreviewAdoptFlowBlocksWithoutHubUID(t *testing.T) {
 // rewrite the project's event history a second time. Covers the adopt-flow
 // branch (local project picked first), which the create-replica-branch
 // detection missed.
-func TestFederationPreviewAdoptFlowDetectsRejoinForUIDHolder(t *testing.T) {
+func TestFederationPreviewAdoptFlowDetectsRejoinForUIDHolder(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4EX"}
@@ -2135,7 +2139,7 @@ func TestFederationPreviewAdoptFlowDetectsRejoinForUIDHolder(t *testing.T) {
 
 // TestFederationPreviewAdoptFlowStaysAdoptWithoutUIDMatch: a local project
 // with its own identity adopts normally.
-func TestFederationPreviewAdoptFlowStaysAdoptWithoutUIDMatch(t *testing.T) {
+func TestFederationPreviewAdoptFlowStaysAdoptWithoutUIDMatch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.projectsByID = map[int64]string{7: "spoke-project"}
 	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4ZZ"}
@@ -2155,7 +2159,7 @@ func TestFederationPreviewAdoptFlowStaysAdoptWithoutUIDMatch(t *testing.T) {
 // boot/refresh list fetch must populate projectUIDByID, otherwise
 // previewFederationEnrollment cannot recognize a UID-holder and silently
 // degrades a rejoin into history-rewriting adoption.
-func TestFetchProjectsCarriesUIDs(t *testing.T) {
+func TestFetchProjectsCarriesUIDs(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"projects":[{"id":7,"uid":"01HZNQ7VFPK1XGD8R5MABCD4EX","name":"spoke-project"}]}`))
@@ -2190,7 +2194,7 @@ func daemonTargetWithResolvedAuth(name, baseURL, token string, allowInsecure boo
 // pick its body from a separate bool discriminator any writer could leave
 // disagreeing with the populated result struct. It now switches on the kind
 // of the operation that produced the result.
-func TestFederationResultScreenFollowsOperationKind(t *testing.T) {
+func TestFederationResultScreenFollowsOperationKind(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	base := setupFederationView()
 	base.federation.mode = federationModeResult
 
@@ -2220,7 +2224,7 @@ func TestFederationResultScreenFollowsOperationKind(t *testing.T) {
 // attempt counter now, so starting a leave invalidates an in-flight enroll's
 // result. That is the intended reading of "the modes are mutually exclusive",
 // but it is a behavior change and has to be asserted rather than assumed.
-func TestFederationLateResultFromOtherFlowIsDiscarded(t *testing.T) {
+func TestFederationLateResultFromOtherFlowIsDiscarded(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-project", "spoke"))
 	m.federation.op = federationOp{kind: federationOpEnroll, attempt: 1, running: true}
 
@@ -2243,7 +2247,7 @@ func TestFederationLateResultFromOtherFlowIsDiscarded(t *testing.T) {
 
 // TestFederationMergedHandlerRoutesErrorsToTheFlowsOwnPreview pins that the
 // merged handler still routes each flow's failure back to its own preview.
-func TestFederationMergedHandlerRoutesErrorsToTheFlowsOwnPreview(t *testing.T) {
+func TestFederationMergedHandlerRoutesErrorsToTheFlowsOwnPreview(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-project", "spoke"))
 
 	enrolling := m
@@ -2272,7 +2276,7 @@ func TestFederationMergedHandlerRoutesErrorsToTheFlowsOwnPreview(t *testing.T) {
 // an enrollment, back out through each enrollment screen, then open the leave
 // preview from the list. The enrollment reply must no longer own the current
 // operation and therefore cannot replace the leave preview.
-func TestFederationKeyRouteSwitchFromEnrollToLeaveInvalidatesLateEnrollResult(t *testing.T) {
+func TestFederationKeyRouteSwitchFromEnrollToLeaveInvalidatesLateEnrollResult(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
 	m.federation.statuses = []FederationProjectStatus{federationStatusFixture("spoke-project", "spoke")}
 
@@ -2316,7 +2320,7 @@ func TestFederationKeyRouteSwitchFromEnrollToLeaveInvalidatesLateEnrollResult(t 
 // behind to block Enter on the enrollment preview. Every transition below is
 // driven through the federation key router, including loading the selected
 // hub's projects through the command returned by Enter.
-func TestFederationKeyRouteSwitchFromLeaveToEnrollCanDispatchEnrollment(t *testing.T) {
+func TestFederationKeyRouteSwitchFromLeaveToEnrollCanDispatchEnrollment(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; restoreFederationHubAdminClient sets package var newFederationHubAdminClient
 	hubAdmin := &recordingFederationHubAdmin{
 		instance: InstanceInfo{Auth: AuthInfo{Kind: "db_token", Actor: "hub-operator"}},
 		projects: []ProjectSummary{{ID: 42, Name: "spoke-project"}},

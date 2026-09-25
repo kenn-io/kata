@@ -18,7 +18,7 @@ import (
 // whose cutover will fail (orphan rows preflight halt) and verifying the
 // daemon's startup error reaches us; the cutover gate runs before any
 // sqlitestore.Open against the path.
-func TestDaemonStartUpgradesLegacyDBThroughStoreopen(t *testing.T) {
+func TestDaemonStartUpgradesLegacyDBThroughStoreopen(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB
 	dbPath := filepath.Join(setupKataEnv(t), "kata.db")
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, dbPath)

@@ -17,7 +17,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestExternalShowMarkdownRendererTimeoutBoundsInheritedDescendantStdout(t *testing.T) {
+func TestExternalShowMarkdownRendererTimeoutBoundsInheritedDescendantStdout(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer("spawn-descendant", filepath.Join(t.TempDir(), "ready"))
 	// The timeout must fire, but only after the helper has had time to
@@ -42,7 +42,7 @@ func TestExternalShowMarkdownRendererTimeoutBoundsInheritedDescendantStdout(t *t
 	require.Less(t, time.Since(started), 10*time.Second)
 }
 
-func TestExternalShowMarkdownRendererCancellationBoundsInheritedDescendantStdout(t *testing.T) {
+func TestExternalShowMarkdownRendererCancellationBoundsInheritedDescendantStdout(t *testing.T) { //nolint:paralleltest // sets GO_WANT_SHOW_MARKDOWN_HELPER
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer("spawn-descendant", filepath.Join(t.TempDir(), "ready"))
 	renderer.grace = 50 * time.Millisecond

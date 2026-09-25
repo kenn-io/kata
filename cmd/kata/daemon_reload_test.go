@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDaemonReload_NoRunningDaemon_ExitUsage(t *testing.T) {
+func TestDaemonReload_NoRunningDaemon_ExitUsage(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	setupKataEnv(t)
 

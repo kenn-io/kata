@@ -57,7 +57,7 @@ func setupListTeatest(t *testing.T) *teatest.TestModel {
 // TestList_Render_Fixture confirms the seed reaches the screen so the
 // rendering layer can be reviewed independent of the network layer. The
 // [deleted] assertion guards statusChip's soft-delete branch.
-func TestList_Render_Fixture(t *testing.T) {
+func TestList_Render_Fixture(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	tm := setupListTeatest(t)
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
 		s := string(b)
@@ -73,6 +73,7 @@ func TestList_Render_Fixture(t *testing.T) {
 // status 10 + children 8 + owner 14 + updated 10 + title 20 = 81). With
 // prio at 4 the sum stays at 80 even with the title floor.
 func TestList_Render_FitsAt80Cols(t *testing.T) {
+	t.Parallel()
 	lm := newListModel()
 	lm.loading = false
 	lm.issues = []Issue{
@@ -92,6 +93,7 @@ func TestList_Render_FitsAt80Cols(t *testing.T) {
 // regression in priorityCell or buildRows doesn't have to wait for a
 // snapshot file to flag it.
 func TestList_Render_PriorityColumn(t *testing.T) {
+	t.Parallel()
 	lm := newListModel()
 	lm.loading = false
 	lm.issues = []Issue{
@@ -117,7 +119,7 @@ func TestList_Render_PriorityColumn(t *testing.T) {
 // cursor never reaches 2. lipgloss/table pads between columns, so we
 // scan output line-by-line for one that contains both the marker and
 // the row's short_id.
-func TestList_Cursor_DownAndUp(t *testing.T) {
+func TestList_Cursor_DownAndUp(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	tm := setupListTeatest(t)
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
 		return strings.Contains(string(b), "purge stale tokens")

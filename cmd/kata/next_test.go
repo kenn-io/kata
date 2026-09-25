@@ -40,7 +40,7 @@ func createFullNextTestIssue(t *testing.T, env *testenv.Env, dir, title string) 
 	return ref
 }
 
-func TestNext_HumanSelectsP0AndPrintsOneReadyRow(t *testing.T) {
+func TestNext_HumanSelectsP0AndPrintsOneReadyRow(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	p0 := int64(0)
 	highest := createNextTestIssue(t, env, pid, "highest priority", &p0)
@@ -56,7 +56,7 @@ func TestNext_HumanSelectsP0AndPrintsOneReadyRow(t *testing.T) {
 	assert.NotContains(t, out, "Ready:")
 }
 
-func TestNext_SkipsParkedMetadata(t *testing.T) {
+func TestNext_SkipsParkedMetadata(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	actionable := createIssue(t, env, pid, "actionable candidate")
 	someday := createIssue(t, env, pid, "someday parked")
@@ -70,7 +70,7 @@ func TestNext_SkipsParkedMetadata(t *testing.T) {
 	assert.NotContains(t, out, future)
 }
 
-func TestNext_AgentOutputIsOneLine(t *testing.T) {
+func TestNext_AgentOutputIsOneLine(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	p0 := int64(0)
 	ref := createNextTestIssue(t, env, pid, "highest priority", &p0)
@@ -81,7 +81,7 @@ func TestNext_AgentOutputIsOneLine(t *testing.T) {
 	assert.NotContains(t, out, "owner=")
 }
 
-func TestNext_JSONWrapsSelectedRawIssue(t *testing.T) {
+func TestNext_JSONWrapsSelectedRawIssue(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createNextTestIssue(t, env, pid, "json candidate", nil)
 
@@ -96,7 +96,7 @@ func TestNext_JSONWrapsSelectedRawIssue(t *testing.T) {
 	assert.Equal(t, "json candidate", issue["title"])
 }
 
-func TestNext_EmptyOutputs(t *testing.T) {
+func TestNext_EmptyOutputs(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	tests := []struct {
 		name string
 		args []string
@@ -122,7 +122,7 @@ func TestNext_EmptyOutputs(t *testing.T) {
 	})
 }
 
-func TestNext_HumanFullUsesShowDetail(t *testing.T) {
+func TestNext_HumanFullUsesShowDetail(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	ref := createFullNextTestIssue(t, env, dir, "full detail candidate")
 
@@ -139,7 +139,7 @@ func TestNext_HumanFullUsesShowDetail(t *testing.T) {
 	assert.NotContains(t, out, "• P1")
 }
 
-func TestNext_AgentFullUsesNextHeaderAndShowSections(t *testing.T) {
+func TestNext_AgentFullUsesNextHeaderAndShowSections(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	ref := createFullNextTestIssue(t, env, dir, "agent full candidate")
 
@@ -156,7 +156,7 @@ func TestNext_AgentFullUsesNextHeaderAndShowSections(t *testing.T) {
 	assert.Contains(t, out, "Detailed comment record.")
 }
 
-func TestNext_JSONFullUsesShowEnvelope(t *testing.T) {
+func TestNext_JSONFullUsesShowEnvelope(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	ref := createFullNextTestIssue(t, env, dir, "json full candidate")
 
@@ -174,7 +174,7 @@ func TestNext_JSONFullUsesShowEnvelope(t *testing.T) {
 	assert.Equal(t, "json full candidate", issue["title"])
 }
 
-func TestNext_AllFullResolvesQualifiedProject(t *testing.T) {
+func TestNext_AllFullResolvesQualifiedProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	peer := createIssue(t, env, pid, "local peer")
 	project, err := env.DB.CreateProject(context.Background(), "example-project")
@@ -189,7 +189,7 @@ func TestNext_AllFullResolvesQualifiedProject(t *testing.T) {
 	assert.Contains(t, out, "related: kata#"+peer)
 }
 
-func TestNext_EmptyFullMatchesCompactOutputs(t *testing.T) {
+func TestNext_EmptyFullMatchesCompactOutputs(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	tests := []struct {
 		name string
 		args []string
@@ -208,7 +208,7 @@ func TestNext_EmptyFullMatchesCompactOutputs(t *testing.T) {
 	}
 }
 
-func TestNext_OwnershipAndLabelFiltersMirrorReady(t *testing.T) {
+func TestNext_OwnershipAndLabelFiltersMirrorReady(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	t.Run("ownership", func(t *testing.T) {
 		env, dir, pid := setupCLIWorkspace(t)
 		unowned := createIssue(t, env, pid, "unowned candidate")
@@ -230,7 +230,7 @@ func TestNext_OwnershipAndLabelFiltersMirrorReady(t *testing.T) {
 	})
 }
 
-func TestNext_AllQualifiesRefAndPreservesProjectNameInJSON(t *testing.T) {
+func TestNext_AllQualifiesRefAndPreservesProjectNameInJSON(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "global candidate")
 
@@ -245,7 +245,7 @@ func TestNext_AllQualifiesRefAndPreservesProjectNameInJSON(t *testing.T) {
 	assert.Equal(t, "kata", got.Issue["project_name"])
 }
 
-func TestNext_AllValidationMirrorsReady(t *testing.T) {
+func TestNext_AllValidationMirrorsReady(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	tests := []struct {
 		name string
 		args []string
@@ -263,7 +263,7 @@ func TestNext_AllValidationMirrorsReady(t *testing.T) {
 	}
 }
 
-func TestNext_AllAcceptsFilterFlags(t *testing.T) {
+func TestNext_AllAcceptsFilterFlags(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	// next shares ready's option validation: the scoped filters compose with
 	// --all so an agent can pick, e.g., the next unowned issue anywhere.
 	env, _, pid := setupCLIWorkspace(t)
@@ -274,14 +274,14 @@ func TestNext_AllAcceptsFilterFlags(t *testing.T) {
 	assert.Contains(t, out, "alpha")
 }
 
-func TestNext_UnownedAndOwnerAreMutuallyExclusive(t *testing.T) {
+func TestNext_UnownedAndOwnerAreMutuallyExclusive(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	_, err := runCLICapture(t, env, dir, "next", "--unowned", "--owner", "alice")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
-func TestNext_HasNoLimitFlag(t *testing.T) {
+func TestNext_HasNoLimitFlag(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	_, err := runCLICapture(t, env, dir, "next", "--limit", "1")
 	require.Error(t, err)

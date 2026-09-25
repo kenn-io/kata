@@ -18,7 +18,7 @@ func stubDaemonExecutable(t *testing.T, resolve func() (string, error)) {
 	t.Cleanup(func() { resolveDaemonExecutable = original })
 }
 
-func TestNewDaemonRestart_UnresolvableExecutableDisablesRestart(t *testing.T) {
+func TestNewDaemonRestart_UnresolvableExecutableDisablesRestart(t *testing.T) { //nolint:paralleltest // stubDaemonExecutable sets package var resolveDaemonExecutable
 	stubDaemonExecutable(t, func() (string, error) { return "", errors.New("procfs unavailable") })
 	var stderr bytes.Buffer
 	restart := newDaemonRestart(&stderr)
@@ -27,21 +27,21 @@ func TestNewDaemonRestart_UnresolvableExecutableDisablesRestart(t *testing.T) {
 	assert.Contains(t, stderr.String(), "automatic restart")
 }
 
-func TestNewDaemonRestart_MissingExecutableDisablesRestart(t *testing.T) {
+func TestNewDaemonRestart_MissingExecutableDisablesRestart(t *testing.T) { //nolint:paralleltest // stubDaemonExecutable sets package var resolveDaemonExecutable
 	stubDaemonExecutable(t, func() (string, error) { return filepath.Join(t.TempDir(), "kata"), nil })
 	var stderr bytes.Buffer
 	assert.Nil(t, newDaemonRestart(&stderr))
 	assert.Contains(t, stderr.String(), "automatic restart")
 }
 
-func TestNewDaemonRestart_EphemeralExecutableIsSilent(t *testing.T) {
+func TestNewDaemonRestart_EphemeralExecutableIsSilent(t *testing.T) { //nolint:paralleltest // stubDaemonExecutable sets package var resolveDaemonExecutable
 	stubDaemonExecutable(t, os.Executable)
 	var stderr bytes.Buffer
 	assert.Nil(t, newDaemonRestart(&stderr), "test binaries never re-execute")
 	assert.Empty(t, stderr.String())
 }
 
-func TestNewDaemonRestart_ResolvesSymlinkedExecutable(t *testing.T) {
+func TestNewDaemonRestart_ResolvesSymlinkedExecutable(t *testing.T) { //nolint:paralleltest // stubDaemonExecutable sets package var resolveDaemonExecutable
 	dir := t.TempDir()
 	target := filepath.Join(dir, "kata")
 	require.NoError(t, os.WriteFile(target, []byte("#!/bin/sh\n"), 0o600))

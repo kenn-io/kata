@@ -10,6 +10,7 @@ import (
 // agent mistake; it must stay rejected (ambiguous) but the error must
 // suggest the seconds spelling rather than echo the stock parse failure.
 func TestDurationFlagBareNumberSuggestsUnit(t *testing.T) {
+	t.Parallel()
 	for _, in := range []string{"1800", "1800.5", " 1800 "} {
 		var d time.Duration
 		err := durationFlag{&d}.Set(in)
@@ -25,6 +26,7 @@ func TestDurationFlagBareNumberSuggestsUnit(t *testing.T) {
 // TestDurationFlagGarbageGetsGuidance: non-numeric junk gets the generic
 // guidance message with example spellings, not a bare parse error.
 func TestDurationFlagGarbageGetsGuidance(t *testing.T) {
+	t.Parallel()
 	var d time.Duration
 	err := durationFlag{&d}.Set("soon")
 	if err == nil {
@@ -39,6 +41,7 @@ func TestDurationFlagGarbageGetsGuidance(t *testing.T) {
 // which ParseDuration accepts) must parse exactly, including surrounding
 // whitespace.
 func TestDurationFlagValidValues(t *testing.T) {
+	t.Parallel()
 	cases := map[string]time.Duration{
 		"30m":   30 * time.Minute,
 		"0":     0,
@@ -61,6 +64,7 @@ func TestDurationFlagValidValues(t *testing.T) {
 // TestDurationFlagStringShowsCurrentValue: String() backs the flag's default
 // rendering in --help, so it must reflect the pointed-at value.
 func TestDurationFlagStringShowsCurrentValue(t *testing.T) {
+	t.Parallel()
 	d := 2 * time.Second
 	if got := (durationFlag{&d}).String(); got != "2s" {
 		t.Fatalf("String() = %q, want \"2s\"", got)

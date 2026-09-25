@@ -86,6 +86,7 @@ func primeLabelCache(m *Model, projectID, gen int64) {
 // reads, newIssueBodyFromForm did fields[2].input.Value() — which compiles
 // against a fieldMultiLine field and returns "", dropping the labels.
 func TestNewIssueForm_LabelsCommitReadsThroughValueAccessor(t *testing.T) {
+	t.Parallel()
 	s := newNewIssueForm()
 	s.field(fieldTitle).input.SetValue("re-backed labels field")
 
@@ -117,7 +118,7 @@ func focusNewIssueField(s inputState, id fieldID) inputState {
 
 // TestNewIssueForm_OpensOnNKey_ListView: pressing n on the list view
 // opens the centered multi-field form (replaces the M3.5c inline row).
-func TestNewIssueForm_OpensOnNKey_ListView(t *testing.T) {
+func TestNewIssueForm_OpensOnNKey_ListView(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	if len(m.input.fields) != 5 {
 		t.Fatalf("form fields = %d, want 5 (Title/Body/Labels/Owner/Parent)", len(m.input.fields))
@@ -136,7 +137,7 @@ func TestNewIssueForm_OpensOnNKey_ListView(t *testing.T) {
 // TestNewIssueForm_AllProjectsScopeIsNoOp: in cross-project view there
 // is no projectID to create against, so n surfaces a status hint and
 // does NOT open the form.
-func TestNewIssueForm_AllProjectsScopeIsNoOp(t *testing.T) {
+func TestNewIssueForm_AllProjectsScopeIsNoOp(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newIssueFormFixture()
 	m.scope = scope{allProjects: true}
 	nm, cmd := stepModel(m, runeKey('n'))
@@ -153,6 +154,7 @@ func TestNewIssueForm_AllProjectsScopeIsNoOp(t *testing.T) {
 // non-active field is blurred so only the focused field renders the
 // bubbles cursor, and the active field starts at index 0 (Title).
 func TestNewIssueForm_ConstructorBlursAllFieldsFocusesField0(t *testing.T) {
+	t.Parallel()
 	s := newNewIssueForm()
 	if s.active != 0 {
 		t.Fatalf("active = %d, want 0 (Title)", s.active)
@@ -176,7 +178,7 @@ func TestNewIssueForm_ConstructorBlursAllFieldsFocusesField0(t *testing.T) {
 
 // TestNewIssueForm_TabCyclesFieldsWithWrap: tab cycles 0→1→2→3→4→0 and
 // blurs/focuses the right fields each step.
-func TestNewIssueForm_TabCyclesFieldsWithWrap(t *testing.T) {
+func TestNewIssueForm_TabCyclesFieldsWithWrap(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	for _, want := range []int{1, 2, 3, 4, 0} {
 		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
@@ -186,7 +188,7 @@ func TestNewIssueForm_TabCyclesFieldsWithWrap(t *testing.T) {
 
 // TestNewIssueForm_ShiftTabReverseCyclesWithWrap: shift+tab cycles
 // 0→4→3→2→1→0 with wrap.
-func TestNewIssueForm_ShiftTabReverseCyclesWithWrap(t *testing.T) {
+func TestNewIssueForm_ShiftTabReverseCyclesWithWrap(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	for _, want := range []int{4, 3, 2, 1, 0} {
 		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
@@ -197,7 +199,7 @@ func TestNewIssueForm_ShiftTabReverseCyclesWithWrap(t *testing.T) {
 // TestNewIssueForm_EnterInSingleLineAdvancesField: enter on a single-
 // line field advances to the next field instead of committing. Title
 // → Body, Labels → Owner, Owner → Parent, Parent → Title (wrap).
-func TestNewIssueForm_EnterInSingleLineAdvancesField(t *testing.T) {
+func TestNewIssueForm_EnterInSingleLineAdvancesField(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	m, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil {
@@ -218,7 +220,7 @@ func TestNewIssueForm_EnterInSingleLineAdvancesField(t *testing.T) {
 
 // TestNewIssueForm_EnterInBodyInsertsNewline: enter on the body field
 // stays as a textarea newline insert (no advance).
-func TestNewIssueForm_EnterInBodyInsertsNewline(t *testing.T) {
+func TestNewIssueForm_EnterInBodyInsertsNewline(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	// Tab to Body.
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
@@ -239,7 +241,7 @@ func TestNewIssueForm_EnterInBodyInsertsNewline(t *testing.T) {
 
 // TestNewIssueForm_CtrlOEmptyTitleSetsErrNoDispatch: ctrl+o with a
 // blank Title sets the in-form err and does NOT dispatch.
-func TestNewIssueForm_CtrlOEmptyTitleSetsErrNoDispatch(t *testing.T) {
+func TestNewIssueForm_CtrlOEmptyTitleSetsErrNoDispatch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if cmd != nil {
@@ -257,7 +259,7 @@ func TestNewIssueForm_CtrlOEmptyTitleSetsErrNoDispatch(t *testing.T) {
 // TestNewIssueForm_CtrlSTitleOnly_DispatchesWithMinimalPayload:
 // ctrl+s with only a Title dispatches CreateIssue with empty body,
 // nil owner, nil labels.
-func TestNewIssueForm_CtrlSTitleOnly_DispatchesWithMinimalPayload(t *testing.T) {
+func TestNewIssueForm_CtrlSTitleOnly_DispatchesWithMinimalPayload(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	api := &fakeListAPI{createResult: &MutationResp{Issue: &Issue{UID: "01TEST-99zz", ShortID: "99zz"}}}
 	m := openNewIssueForm(t, newIssueFormFixture())
 	m = typeString(m, "fix bug")
@@ -293,6 +295,7 @@ func TestNewIssueForm_CtrlSTitleOnly_DispatchesWithMinimalPayload(t *testing.T) 
 // untrimmed, owner trimmed, empty label tokens dropped, whitespace-
 // only owner omitted.
 func TestNewIssueForm_CtrlSAllFields_NormalizedPayload(t *testing.T) {
+	t.Parallel()
 	api := &fakeListAPI{createResult: &MutationResp{Issue: &Issue{UID: "01TEST-99zz", ShortID: "99zz"}}}
 	owner := "  alice  "
 	labels := normalizeLabels("bug, , prio-1 ,  , feature")
@@ -344,7 +347,7 @@ func TestNewIssueForm_CtrlSAllFields_NormalizedPayload(t *testing.T) {
 // TestNewIssueForm_CtrlEOnlyWhenBodyFocused: ctrl+e produces an
 // editor handoff cmd only when the Body field has focus; on Title /
 // Labels / Owner it is a silent no-op (and the form stays open).
-func TestNewIssueForm_CtrlEOnlyWhenBodyFocused(t *testing.T) {
+func TestNewIssueForm_CtrlEOnlyWhenBodyFocused(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	// Title focused — ctrl+e is a no-op.
 	m, cmd := stepModel(m, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
@@ -371,6 +374,7 @@ func TestNewIssueForm_CtrlEOnlyWhenBodyFocused(t *testing.T) {
 }
 
 func TestNewIssueForm_ParentBlankOmitsLink(t *testing.T) {
+	t.Parallel()
 	s := newNewIssueForm()
 	s.fields[0].input.SetValue("childless issue")
 	body, err := newIssueBodyFromForm(s.fields, "tester")
@@ -383,6 +387,7 @@ func TestNewIssueForm_ParentBlankOmitsLink(t *testing.T) {
 }
 
 func TestNewIssueForm_ParentRefCreatesInitialParentLink(t *testing.T) {
+	t.Parallel()
 	s := newNewIssueForm()
 	s.fields[0].input.SetValue("child issue")
 	s.fields[4].input.SetValue("#abc4")
@@ -403,6 +408,7 @@ func TestNewIssueForm_ParentRefCreatesInitialParentLink(t *testing.T) {
 // non-empty value flows through as the ToRef. The daemon's 400 is the
 // canonical error path.
 func TestNewIssueForm_ParentFreeFormPassesToDaemon(t *testing.T) {
+	t.Parallel()
 	s := newNewIssueForm()
 	s.fields[0].input.SetValue("any parent")
 	s.fields[4].input.SetValue("parent-ish")
@@ -415,7 +421,7 @@ func TestNewIssueForm_ParentFreeFormPassesToDaemon(t *testing.T) {
 	}
 }
 
-func TestList_NewChild_NoSelectionNoOp(t *testing.T) {
+func TestList_NewChild_NoSelectionNoOp(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newIssueFormFixture()
 	nm, cmd := stepModel(m, runeKey('N'))
 	if cmd != nil {
@@ -424,7 +430,7 @@ func TestList_NewChild_NoSelectionNoOp(t *testing.T) {
 	assertInputKind(t, nm, inputNone)
 }
 
-func TestList_NewChild_PrefillsSelectedParent(t *testing.T) {
+func TestList_NewChild_PrefillsSelectedParent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newIssueFormFixture()
 	m.list.issues = []Issue{{ProjectID: 7, UID: "01TEST-42aa", ShortID: "42aa", Title: "parent", Status: "open"}}
 	m, cmd := stepModel(m, runeKey('N'))
@@ -446,6 +452,7 @@ func TestList_NewChild_PrefillsSelectedParent(t *testing.T) {
 }
 
 func TestNewChildForm_ParentPrefillIgnoresEditsUntilCleared(t *testing.T) {
+	t.Parallel()
 	s := newNewIssueFormWithParent("42aa")
 	s = focusNewIssueField(s, fieldParent)
 	next, _ := s.Update(tea.KeyPressMsg{Code: '9', Text: "9"})
@@ -455,6 +462,7 @@ func TestNewChildForm_ParentPrefillIgnoresEditsUntilCleared(t *testing.T) {
 }
 
 func TestNewChildForm_ParentPrefillBackspaceClearsAndUnlocks(t *testing.T) {
+	t.Parallel()
 	s := newNewIssueFormWithParent("42aa")
 	s = focusNewIssueField(s, fieldParent)
 	next, _ := s.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
@@ -473,7 +481,7 @@ func TestNewChildForm_ParentPrefillBackspaceClearsAndUnlocks(t *testing.T) {
 // TestNewIssueForm_StaleEditorReturnDropped: an editor return whose
 // formGen mismatches the open form is silently discarded. Mirrors
 // the existing single-field form's stale-return guard.
-func TestNewIssueForm_StaleEditorReturnDropped(t *testing.T) {
+func TestNewIssueForm_StaleEditorReturnDropped(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	// Tab to Body and seed it.
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
@@ -490,7 +498,7 @@ func TestNewIssueForm_StaleEditorReturnDropped(t *testing.T) {
 // TestNewIssueForm_MutationFailureLeavesFormOpenWithErr: a failed
 // form-side create leaves the form open with err set and saving
 // cleared so the user can retry.
-func TestNewIssueForm_MutationFailureLeavesFormOpenWithErr(t *testing.T) {
+func TestNewIssueForm_MutationFailureLeavesFormOpenWithErr(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	m.input.saving = true
 	nm, _ := stepModel(m, mutationDoneMsg{
@@ -506,7 +514,7 @@ func TestNewIssueForm_MutationFailureLeavesFormOpenWithErr(t *testing.T) {
 	}
 }
 
-func TestNewIssueForm_EscUnchangedReturnsToList(t *testing.T) {
+func TestNewIssueForm_EscUnchangedReturnsToList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if nm.input.kind != inputNone || nm.modal != modalNone || cmd != nil {
@@ -515,7 +523,7 @@ func TestNewIssueForm_EscUnchangedReturnsToList(t *testing.T) {
 	}
 }
 
-func TestNewChildForm_EscUnchangedReturnsToList(t *testing.T) {
+func TestNewChildForm_EscUnchangedReturnsToList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newIssueFormFixture()
 	m.input = newNewIssueFormWithParent("42aa")
 	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -525,7 +533,7 @@ func TestNewChildForm_EscUnchangedReturnsToList(t *testing.T) {
 	}
 }
 
-func TestNewIssueForm_EscWhitespaceOnlyOrRestoredBaselineClosesImmediately(t *testing.T) {
+func TestNewIssueForm_EscWhitespaceOnlyOrRestoredBaselineClosesImmediately(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	t.Run("ordinary whitespace", func(t *testing.T) {
 		m := openNewIssueForm(t, newIssueFormFixture())
 		for i := range m.input.fields {
@@ -551,7 +559,7 @@ func TestNewIssueForm_EscWhitespaceOnlyOrRestoredBaselineClosesImmediately(t *te
 	})
 }
 
-func TestNewIssueForm_EscEditedFieldRequiresConfirmation(t *testing.T) {
+func TestNewIssueForm_EscEditedFieldRequiresConfirmation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	tests := []struct {
 		name  string
 		field int
@@ -578,7 +586,7 @@ func TestNewIssueForm_EscEditedFieldRequiresConfirmation(t *testing.T) {
 	}
 }
 
-func TestNewChildForm_EscEditedFieldRequiresConfirmation(t *testing.T) {
+func TestNewChildForm_EscEditedFieldRequiresConfirmation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newIssueFormFixture()
 	m.input = newNewIssueFormWithParent("42aa")
 	m.input.fields[0].setValue("draft child")
@@ -591,7 +599,7 @@ func TestNewChildForm_EscEditedFieldRequiresConfirmation(t *testing.T) {
 	}
 }
 
-func TestNewIssueForm_EscWhileSavingIsAbsorbed(t *testing.T) {
+func TestNewIssueForm_EscWhileSavingIsAbsorbed(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	m.input.fields[0].setValue("draft title")
 	m.input.saving = true
@@ -606,7 +614,7 @@ func TestNewIssueForm_EscWhileSavingIsAbsorbed(t *testing.T) {
 	}
 }
 
-func TestNewIssueDiscardModal_CancelPreservesDraft(t *testing.T) {
+func TestNewIssueDiscardModal_CancelPreservesDraft(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	for _, msg := range []tea.KeyPressMsg{runeKey('n'), {Code: tea.KeyEsc}} {
 		m := newIssueFormFixture()
 		m.input = focusNewIssueField(newNewIssueFormWithParent("42aa"), fieldBody)
@@ -633,7 +641,7 @@ func TestNewIssueDiscardModal_CancelPreservesDraft(t *testing.T) {
 	}
 }
 
-func TestNewIssueDiscardModal_ConfirmClearsDraft(t *testing.T) {
+func TestNewIssueDiscardModal_ConfirmClearsDraft(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newIssueFormFixture()
 	m.input = newNewIssueForm()
 	m.input.fields[0].setValue("draft title")
@@ -644,7 +652,7 @@ func TestNewIssueDiscardModal_ConfirmClearsDraft(t *testing.T) {
 	}
 }
 
-func TestNewIssueDiscardModal_AbsorbsOtherKeys(t *testing.T) {
+func TestNewIssueDiscardModal_AbsorbsOtherKeys(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newIssueFormFixture()
 	m.input = newNewIssueForm()
 	m.input.fields[0].setValue("draft title")
@@ -662,7 +670,7 @@ func TestNewIssueDiscardModal_AbsorbsOtherKeys(t *testing.T) {
 // auto-open detail. The success path goes through list create
 // handling (lm.applyMutation), not the detail re-classification used
 // by the body-edit and comment forms.
-func TestNewIssueForm_MutationSuccessRoutesToList(t *testing.T) {
+func TestNewIssueForm_MutationSuccessRoutesToList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	m.input.saving = true
 	mut := mutationDoneMsg{
@@ -683,7 +691,7 @@ func TestNewIssueForm_MutationSuccessRoutesToList(t *testing.T) {
 // TestSnapshot_NewIssueForm_AllFields locks in the rendered modal
 // layout when every field is populated. Body field is focused so the
 // footer hint advertises the unrestricted ctrl+e handoff.
-func TestSnapshot_NewIssueForm_AllFields(t *testing.T) {
+func TestSnapshot_NewIssueForm_AllFields(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	s := newNewIssueForm()
 	s.fields[0].input.SetValue("fix login bug on Safari")
@@ -698,7 +706,7 @@ func TestSnapshot_NewIssueForm_AllFields(t *testing.T) {
 	assertGolden(t, "new-issue-form-all-fields", got)
 }
 
-func TestSnapshot_NewChildForm(t *testing.T) {
+func TestSnapshot_NewChildForm(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	s := newNewIssueFormWithParent("42aa")
 	s.fields[0].input.SetValue("follow-up child issue")
@@ -721,7 +729,7 @@ func TestSnapshot_NewChildForm(t *testing.T) {
 //
 // Setup primes the cache for pid=7 with a known gen so the assertion
 // can confirm dispatchLabelFetch ran (gen advanced + fetching=true).
-func TestNewIssueForm_MutationSuccessRefreshesLabelCache(t *testing.T) {
+func TestNewIssueForm_MutationSuccessRefreshesLabelCache(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	m.input.saving = true
 	// Prime the label cache for pid=7 as if the user had opened the
@@ -748,7 +756,7 @@ func TestNewIssueForm_MutationSuccessRefreshesLabelCache(t *testing.T) {
 	}
 }
 
-func TestNewIssueFormCreateRefetchCarriesConnGen(t *testing.T) {
+func TestNewIssueFormCreateRefetchCarriesConnGen(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	called := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
@@ -800,7 +808,7 @@ func TestNewIssueFormCreateRefetchCarriesConnGen(t *testing.T) {
 // trigger an unrelated batchLabelRefresh (form A's project may differ
 // from form B's), or the body-edit / comment "form A" response could
 // land on form B's still-open new-issue draft.
-func TestNewIssueForm_StaleResponseFromPriorFormDropped(t *testing.T) {
+func TestNewIssueForm_StaleResponseFromPriorFormDropped(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := openNewIssueForm(t, newIssueFormFixture())
 	staleGen := m.input.formGen
 	// Type something into the original form so we have observable state.
@@ -862,12 +870,14 @@ func TestNewIssueForm_StaleResponseFromPriorFormDropped(t *testing.T) {
 // `inputNewIssueRow` — guards against accidental re-introduction of
 // the M3.5c inline new-issue row code path.
 func TestNoLingeringInlineRowReferences(t *testing.T) {
+	t.Parallel()
 	assertNoSourceReference(t, "inputNewIssueRow")
 }
 
 // TestNoLingeringPostCreateChain mirrors TestNoLingeringInlineRowReferences
 // for `openBodyEditPostCreate` — the M4 post-create chain symbol.
 func TestNoLingeringPostCreateChain(t *testing.T) {
+	t.Parallel()
 	assertNoSourceReference(t, "openBodyEditPostCreate")
 }
 
@@ -878,6 +888,7 @@ func TestNoLingeringPostCreateChain(t *testing.T) {
 // that inherited index 1. The fixture below moves Body without touching the
 // shipped form's order, which is what makes this a real regression pin.
 func TestNewIssueForm_EditorHandoffFollowsBodyIdentity(t *testing.T) {
+	t.Parallel()
 	s := newNewIssueForm()
 	// Swap Body (index 1) with Labels (index 2) in this fixture only.
 	s.fields[1], s.fields[2] = s.fields[2], s.fields[1]

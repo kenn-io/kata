@@ -24,6 +24,7 @@ import (
 )
 
 func TestCreateRequestError(t *testing.T) {
+	t.Parallel()
 	timeoutErr := &url.Error{
 		Op:  http.MethodPost,
 		URL: "https://daemon.example/api/v1/projects/7/issues",
@@ -83,6 +84,7 @@ func TestCreateRequestError(t *testing.T) {
 }
 
 func TestCreateRequestErrorConnectionDropped(t *testing.T) {
+	t.Parallel()
 	dropped := &url.Error{Op: http.MethodPost, URL: "https://daemon.example/issues", Err: io.EOF}
 	got := createRequestError(dropped, false)
 	var cliErr *cliError
@@ -93,6 +95,7 @@ func TestCreateRequestErrorConnectionDropped(t *testing.T) {
 }
 
 func TestCreateRequestErrorCanceled(t *testing.T) {
+	t.Parallel()
 	canceledErr := &url.Error{
 		Op:  http.MethodPost,
 		URL: "https://daemon.example/api/v1/projects/7/issues",
@@ -122,7 +125,7 @@ func TestCreateRequestErrorCanceled(t *testing.T) {
 	assert.NotContains(t, forceErr.Message, "daemon.example")
 }
 
-func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) {
+func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	createHit := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -161,7 +164,7 @@ func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) {
 	assert.NotContains(t, cliErr.Message, "timed out")
 }
 
-func TestCreateTimeoutClassificationAtCommandBoundary(t *testing.T) {
+func TestCreateTimeoutClassificationAtCommandBoundary(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	previousTransport := http.DefaultTransport
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// Start the timeout after sending, so slow command setup cannot turn
@@ -206,7 +209,7 @@ func TestCreateTimeoutClassificationAtCommandBoundary(t *testing.T) {
 	})
 }
 
-func TestCreateResponseBodyCutClassificationAtCommandBoundary(t *testing.T) {
+func TestCreateResponseBodyCutClassificationAtCommandBoundary(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects/resolve":
@@ -246,7 +249,7 @@ func TestCreateResponseBodyCutClassificationAtCommandBoundary(t *testing.T) {
 	assert.NotContains(t, cliErr.Message, "timed out")
 }
 
-func TestCreate_PrintsIssueShortIDInQuietMode(t *testing.T) {
+func TestCreate_PrintsIssueShortIDInQuietMode(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	out := runCLI(t, env, dir, "--quiet", "create", "first issue", "--body", "details")
 	// Quiet mode emits the new issue's short_id as the only output.
@@ -254,7 +257,7 @@ func TestCreate_PrintsIssueShortIDInQuietMode(t *testing.T) {
 	assert.NotContains(t, out, "\n", "quiet mode must emit a single line")
 }
 
-func TestCreate_AgentOutput(t *testing.T) {
+func TestCreate_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 
 	out := runCLI(t, env, dir, "--agent", "create", "first issue")
@@ -264,7 +267,7 @@ func TestCreate_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, `Status: open`)
 }
 
-func TestCreate_WithInitialLabelsAndParent(t *testing.T) {
+func TestCreate_WithInitialLabelsAndParent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	parent := createIssue(t, env, pid, "parent-issue")
@@ -325,7 +328,7 @@ func TestCreate_WithInitialLabelsAndParent(t *testing.T) {
 // added by the relationship-flag consolidation. `--blocked-by R` records
 // "this new issue is blocked by R" — i.e. the link runs FROM R TO the new
 // issue. `--related R` records the symmetric tie.
-func TestCreate_WithBlockedByAndRelated(t *testing.T) {
+func TestCreate_WithBlockedByAndRelated(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	blocker := createIssue(t, env, pid, "blocker")
@@ -363,7 +366,7 @@ func TestCreate_WithBlockedByAndRelated(t *testing.T) {
 	assert.True(t, sawRelated, "related link between peer and new issue must be persisted")
 }
 
-func TestCreate_WithIdempotencyKeyReusesOnRepeat(t *testing.T) {
+func TestCreate_WithIdempotencyKeyReusesOnRepeat(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 
 	// First call.
@@ -378,7 +381,7 @@ func TestCreate_WithIdempotencyKeyReusesOnRepeat(t *testing.T) {
 	assert.Equal(t, first, second, "same key + fingerprint must return existing issue short_id")
 }
 
-func TestCreate_AgentOutputIdempotencyReuse(t *testing.T) {
+func TestCreate_AgentOutputIdempotencyReuse(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 
 	runCLI(t, env, dir, "--agent", "create", "first issue", "--idempotency-key", "K")
@@ -388,7 +391,7 @@ func TestCreate_AgentOutputIdempotencyReuse(t *testing.T) {
 	assert.Contains(t, second, "reused=true changed=false")
 }
 
-func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
+func TestCreate_ConflictReportsExistingIssues(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, conflict := range []string{"idempotency_mismatch", "duplicate_candidates", "multiple_candidates"} {
 		t.Run(conflict, func(t *testing.T) {
 			env := testenv.New(t)
@@ -464,7 +467,7 @@ func TestCreate_ConflictReportsExistingIssues(t *testing.T) {
 // does NOT print a synthetic `links: +parent ...` summary in human
 // mode — nothing was mutated on this call, so reporting "links
 // applied" would mislead the operator.
-func TestCreate_IdempotentReuseHumanModeOmitsLinksSummary(t *testing.T) {
+func TestCreate_IdempotentReuseHumanModeOmitsLinksSummary(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	parent := createIssue(t, env, pid, "parent")
@@ -484,7 +487,7 @@ func TestCreate_IdempotentReuseHumanModeOmitsLinksSummary(t *testing.T) {
 		"idempotent reuse must not synthesize a links summary: %q", second)
 }
 
-func TestCreate_ForceNewBypassesLookalike(t *testing.T) {
+func TestCreate_ForceNewBypassesLookalike(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	first := createIssueViaHTTP(t, env, dir, "fix login crash on Safari")
 
@@ -502,7 +505,7 @@ func TestCreate_ForceNewBypassesLookalike(t *testing.T) {
 // failure mode would be a confusing "stat: no such file" instead of
 // the actual "broken .kata.toml" the user can fix. The fix-it error
 // must surface client-side without ever calling the daemon.
-func TestResolveProjectID_PropagatesParseError(t *testing.T) {
+func TestResolveProjectID_PropagatesParseError(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"), //nolint:gosec // test fixture mode matches production
@@ -523,7 +526,7 @@ func TestResolveProjectID_PropagatesParseError(t *testing.T) {
 // case still works: when no .kata.toml exists, the request goes
 // through with start_path so the daemon can resolve via its own
 // filesystem walk (local-mode behavior).
-func TestResolveProjectID_FallsBackOnMissingConfig(t *testing.T) {
+func TestResolveProjectID_FallsBackOnMissingConfig(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	dir := t.TempDir() // no .kata.toml
 
@@ -551,7 +554,7 @@ func TestResolveProjectID_FallsBackOnMissingConfig(t *testing.T) {
 // alias, not against a daemon-side filesystem walk that fails on
 // remote clients (the bug 12ced3a introduced by collapsing the
 // project_identity branch into the always-start_path fallthrough).
-func TestResolveProjectID_SendsNameAndAliasForWorkspaceConfig(t *testing.T) {
+func TestResolveProjectID_SendsNameAndAliasForWorkspaceConfig(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	dir := testfix.InitGitRepo(t)
 	require.NoError(t, config.WriteProjectConfig(dir, "project-name"))
@@ -582,7 +585,7 @@ func TestResolveProjectID_SendsNameAndAliasForWorkspaceConfig(t *testing.T) {
 // .kata.toml: the client sends alias metadata alone. The daemon must
 // not derive a project name from the git remote and create-by-
 // convention (resolve is strict; init owns that path).
-func TestResolveProjectID_SendsAliasOnlyForGitWorkspaceWithoutKataToml(t *testing.T) {
+func TestResolveProjectID_SendsAliasOnlyForGitWorkspaceWithoutKataToml(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	dir := testfix.InitGitRepo(t)
 
@@ -610,7 +613,7 @@ func TestResolveProjectID_SendsAliasOnlyForGitWorkspaceWithoutKataToml(t *testin
 // --project override: when the caller targets a project explicitly,
 // alias-first repair must not run (it could redirect away from the
 // caller's chosen project). Name-only is the strict-target contract.
-func TestResolveProjectID_ExplicitProjectFlagSendsNameOnly(t *testing.T) {
+func TestResolveProjectID_ExplicitProjectFlagSendsNameOnly(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	resetFlags(t)
 	dir := testfix.InitGitRepo(t)
 	require.NoError(t, config.WriteProjectConfig(dir, "in-toml"))
@@ -646,7 +649,7 @@ func TestResolveProjectID_ExplicitProjectFlagSendsNameOnly(t *testing.T) {
 //     renders the qualified string verbatim.
 //  3. `kata show` the new issue and confirm the foreign peer renders qualified
 //     from wire data (daemon populates Project/QualifiedID on the response).
-func TestCreate_CrossProjectLinkViaQualifiedRef(t *testing.T) {
+func TestCreate_CrossProjectLinkViaQualifiedRef(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	hubDir := initBoundWorkspace(t, env.URL, "https://github.com/example/hub-project.git")
 	spokeDir := initBoundWorkspace(t, env.URL, "https://github.com/example/spoke-project.git")
@@ -687,7 +690,7 @@ func TestCreate_CrossProjectLinkViaQualifiedRef(t *testing.T) {
 // daemon-side), the client rewrites the file to the canonical name.
 // In remote-client mode the daemon cannot reach the client's
 // filesystem, so this repair must happen on the client.
-func TestResolveProjectID_RewritesStaleKataToml(t *testing.T) {
+func TestResolveProjectID_RewritesStaleKataToml(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	dir := testfix.InitGitRepo(t)
 	require.NoError(t, config.WriteProjectConfig(dir, "stale-name"))

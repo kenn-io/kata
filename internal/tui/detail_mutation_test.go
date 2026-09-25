@@ -97,6 +97,7 @@ func typeRunes(
 // TestDetail_Close_DispatchesAPI: pressing 'x' calls api.Close exactly
 // once with the fixture's projectID, number, and actor.
 func TestDetail_Close_DispatchesAPI(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	out, cmd := dm.Update(runeKey('x'), km, api)
@@ -115,6 +116,7 @@ func TestDetail_Close_DispatchesAPI(t *testing.T) {
 
 // TestDetail_Reopen_DispatchesAPI: pressing 'r' calls api.Reopen.
 func TestDetail_Reopen_DispatchesAPI(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	out, cmd := dm.Update(runeKey('r'), km, api)
@@ -136,6 +138,7 @@ func TestDetail_Reopen_DispatchesAPI(t *testing.T) {
 // Model.routeTopLevel intercepts to construct the inputState; dm
 // itself is unchanged after the keypress.
 func TestDetail_AddLabel_OpensPrompt(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_, cmd := dm.Update(runeKey('+'), km, api)
@@ -151,6 +154,7 @@ func TestDetail_AddLabel_OpensPrompt(t *testing.T) {
 // (Model.commitInput → dm.dispatchPanelPromptCommit), and
 // fakeDetailAPI doesn't fit through Model.api (*Client).
 func TestDetail_AddLabel_CommitCallsAPI(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_ = executePromptCommit(t, dm, api, km, inputLabelPrompt, "bug")
@@ -168,6 +172,7 @@ func TestDetail_AddLabel_CommitCallsAPI(t *testing.T) {
 // TestDetail_RemoveLabel_OpensPromptAndDispatches: '-' opens a
 // remove-label prompt; commit dispatches to api.RemoveLabel.
 func TestDetail_RemoveLabel_OpensPromptAndDispatches(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_, cmd := dm.Update(runeKey('-'), km, api)
@@ -184,6 +189,7 @@ func TestDetail_RemoveLabel_OpensPromptAndDispatches(t *testing.T) {
 // TestDetail_AssignOwner_OpensPromptAndDispatches: 'a' opens an
 // owner-assign prompt; commit dispatches to api.Assign.
 func TestDetail_AssignOwner_OpensPromptAndDispatches(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_, cmd := dm.Update(runeKey('a'), km, api)
@@ -198,6 +204,7 @@ func TestDetail_AssignOwner_OpensPromptAndDispatches(t *testing.T) {
 }
 
 func TestDetail_TimedAssignment_OpensPromptAndDispatches(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_, cmd := dm.Update(runeKey('t'), km, api)
@@ -214,6 +221,7 @@ func TestDetail_TimedAssignment_OpensPromptAndDispatches(t *testing.T) {
 // TestDetail_ClearOwner_DispatchesAPI: 'A' immediately calls
 // api.Assign("", "tester") with no modal.
 func TestDetail_ClearOwner_DispatchesAPI(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	out, cmd := dm.Update(runeKey('A'), km, api)
@@ -232,6 +240,7 @@ func TestDetail_ClearOwner_DispatchesAPI(t *testing.T) {
 // TestDetail_AddLink_Parent: 'p' opens an inputParentPrompt; commit
 // of "abc4" calls api.AddLink({Type:parent, ToRef:"abc4"}).
 func TestDetail_AddLink_Parent(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_, cmd := dm.Update(runeKey('p'), km, api)
@@ -248,6 +257,7 @@ func TestDetail_AddLink_Parent(t *testing.T) {
 // TestDetail_AddLink_Blocks: 'b' opens an inputBlockerPrompt;
 // commit of "xyz4" calls api.AddLink({Type:blocks, ToRef:"xyz4"}).
 func TestDetail_AddLink_Blocks(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_, cmd := dm.Update(runeKey('b'), km, api)
@@ -267,6 +277,7 @@ func TestDetail_AddLink_Blocks(t *testing.T) {
 // ToggleLayout when the layout-toggle hotkey was added — AddLink moved
 // to lowercase l for ergonomics.)
 func TestDetail_AddLink_Other(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_, cmd := dm.Update(runeKey('l'), km, api)
@@ -283,6 +294,7 @@ func TestDetail_AddLink_Other(t *testing.T) {
 // TestDetail_SetPriority_OpensPromptAndDispatches: '!' opens an
 // inputPriorityPrompt; commit of "1" calls api.SetPriority(*int64=1).
 func TestDetail_SetPriority_OpensPromptAndDispatches(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_, cmd := dm.Update(runeKey('!'), km, api)
@@ -302,6 +314,7 @@ func TestDetail_SetPriority_OpensPromptAndDispatches(t *testing.T) {
 // TestDetail_SetPriority_ClearWithDash: commit of "-" clears via a nil
 // priority pointer, mirroring CLI's `--priority -`.
 func TestDetail_SetPriority_ClearWithDash(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 
 	_ = executePromptCommit(t, dm, api, km, inputPriorityPrompt, "-")
@@ -316,6 +329,7 @@ func TestDetail_SetPriority_ClearWithDash(t *testing.T) {
 // TestDetail_SetPriority_ParseFailure: out-of-range or non-numeric
 // input does not reach the API; the status surfaces a parse error.
 func TestDetail_SetPriority_ParseFailure(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []string{"5", "abc", "-1"} {
 		api := &fakeDetailAPI{}
 		km := newKeymap()
@@ -338,6 +352,7 @@ func TestDetail_SetPriority_ParseFailure(t *testing.T) {
 // dispatchLink surfaces a parse-failed status via the synthetic
 // mutationDoneMsg path.
 func TestDetail_AddLink_EmptyTrimmedFails(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{}
 	km := newKeymap()
 	dm := dmFixture()
@@ -355,6 +370,7 @@ func TestDetail_AddLink_EmptyTrimmedFails(t *testing.T) {
 // *APIError, the resulting status line includes "failed" and the
 // error's Code/Message.
 func TestDetail_MutationError_SurfacesStatus(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{
 		mutationErr: &APIError{Code: "validation_error", Message: "bad label"},
 	}
@@ -378,6 +394,7 @@ func TestDetail_MutationError_SurfacesStatus(t *testing.T) {
 // reaches the status line so non-typed daemons (or wrapped errors) are
 // reported.
 func TestDetail_MutationError_PlainError(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{mutationErr: errors.New("boom")}
 	km := newKeymap()
 	dm := dmFixture()
@@ -394,6 +411,7 @@ func TestDetail_MutationError_PlainError(t *testing.T) {
 // (issue, comments, events, links). We assert at least the GetIssue
 // call landed by inspecting api.lastGetIssue after running the batch.
 func TestDetail_MutationSuccess_DispatchesRefetch(t *testing.T) {
+	t.Parallel()
 	api, dm, km := setupMutationTest(t)
 	api.getIssueResult = &Issue{UID: "01TEST-42aa", ShortID: "42aa", Status: "closed"}
 
@@ -420,7 +438,7 @@ func TestDetail_MutationSuccess_DispatchesRefetch(t *testing.T) {
 // prompt open, 'q' must reach the bubbles input buffer instead of
 // triggering tea.Quit. canQuit gates on m.input.kind != inputNone
 // regardless of view.
-func TestDetail_QuitGate_RoutesToBuffer(t *testing.T) {
+func TestDetail_QuitGate_RoutesToBuffer(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.scope = scope{projectID: 7}
 	m.list.loading = false
@@ -459,6 +477,7 @@ func TestDetail_QuitGate_RoutesToBuffer(t *testing.T) {
 // a panel prompt must not call any API. Tested at the dispatcher
 // level since Model.commitInput is the empty-check guard.
 func TestDetail_EmptyBufferCommit_NoDispatch(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{}
 	dm := dmFixture()
 	_, dispatchCmd := dm.dispatchPanelPromptCommit(api, inputLabelPrompt, "")
@@ -480,6 +499,7 @@ func TestDetail_EmptyBufferCommit_NoDispatch(t *testing.T) {
 // first fetch lands), pressing 'x' must be a quiet no-op rather than
 // panicking on a nil-deref.
 func TestDetail_NoIssue_NoDispatch(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{}
 	km := newKeymap()
 	dm := detailModel{actor: "tester"}

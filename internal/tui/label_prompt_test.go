@@ -48,7 +48,7 @@ func assertHighlight(t *testing.T, m Model, want int) {
 // TestLabelPrompt_ArrowKeys_MoveHighlight_WithWrap: pressing ↓ four
 // times wraps from index 0 → 1 → 2 → 0 (3 entries). Then ↑ wraps
 // 0 → 2.
-func TestLabelPrompt_ArrowKeys_MoveHighlight_WithWrap(t *testing.T) {
+func TestLabelPrompt_ArrowKeys_MoveHighlight_WithWrap(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := labelPromptFixture()
 	m = sendKey(m, tea.KeyDown)
 	assertHighlight(t, m, 1)
@@ -65,7 +65,7 @@ func TestLabelPrompt_ArrowKeys_MoveHighlight_WithWrap(t *testing.T) {
 // TestLabelPrompt_TabCompletesHighlightedSuggestion: with the
 // highlight on entry index 1 (beta — second after sort), pressing
 // Tab fills the buffer with "beta".
-func TestLabelPrompt_TabCompletesHighlightedSuggestion(t *testing.T) {
+func TestLabelPrompt_TabCompletesHighlightedSuggestion(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := labelPromptFixture()
 	// Move highlight to beta (sorted by count desc: alpha=5, beta=3,
 	// gamma=1, so beta is index 1).
@@ -80,6 +80,7 @@ func TestLabelPrompt_TabCompletesHighlightedSuggestion(t *testing.T) {
 // buffer, the suggestion source is unfiltered and the count-desc
 // sort applies (alpha=5 first).
 func TestLabelPrompt_EmptyBuffer_ShowsTopProjectLabels(t *testing.T) {
+	t.Parallel()
 	m := labelPromptFixture()
 	got := filterSuggestions(m.suggestionsForPrompt(m.input), "")
 	if len(got) != 3 {
@@ -94,6 +95,7 @@ func TestLabelPrompt_EmptyBuffer_ShowsTopProjectLabels(t *testing.T) {
 // TestLabelPrompt_PrefixFilterCaseInsensitive: an "AL" prefix
 // matches "alpha" but not "beta" (case-insensitive).
 func TestLabelPrompt_PrefixFilterCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	m := labelPromptFixture()
 	got := filterSuggestions(m.suggestionsForPrompt(m.input), "AL")
 	if len(got) != 1 {
@@ -109,6 +111,7 @@ func TestLabelPrompt_PrefixFilterCaseInsensitive(t *testing.T) {
 // cache. Even with a populated cache, the suggestion list reflects
 // only what's currently attached.
 func TestRemoveLabelPrompt_SourceIsAttachedLabelsNotProjectCache(t *testing.T) {
+	t.Parallel()
 	m := labelPromptFixture()
 	m.detail.issue.Labels = []string{"attached1", "attached2"}
 	m.input = newPanelPrompt(inputRemoveLabelPrompt, formTarget{
@@ -132,7 +135,7 @@ func TestRemoveLabelPrompt_SourceIsAttachedLabelsNotProjectCache(t *testing.T) {
 // TestLabelPrompt_EnterCommitsCurrentBuffer: pressing Enter with a
 // free-typed buffer dispatches the label-add mutation (commit
 // closes the input and routes through commitInput → dispatchLabel).
-func TestLabelPrompt_EnterCommitsCurrentBuffer(t *testing.T) {
+func TestLabelPrompt_EnterCommitsCurrentBuffer(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := labelPromptFixture()
 	m.input.activeField().input.SetValue("freshlabel")
 	m.input.fields[0] = *m.input.activeField()
@@ -142,7 +145,7 @@ func TestLabelPrompt_EnterCommitsCurrentBuffer(t *testing.T) {
 
 // TestLabelPrompt_EscClosesPromptAndMenu: esc cancels the input,
 // closing both the prompt and the menu.
-func TestLabelPrompt_EscClosesPromptAndMenu(t *testing.T) {
+func TestLabelPrompt_EscClosesPromptAndMenu(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := labelPromptFixture()
 	nm := sendKey(m, tea.KeyEsc)
 	assertInputKind(t, nm, inputNone)
@@ -157,7 +160,7 @@ func TestLabelPrompt_EscClosesPromptAndMenu(t *testing.T) {
 // the load-bearing layout invariant directly — paired with C1's
 // TestSuggestMenu_InfoLineAndFooterStayAtBottom_WhenMenuOpen, which
 // pins the same shape at the full Model.View() level.
-func TestSuggestMenu_BodyKeepsFullHeight_AndChromeStaysAtBottom(t *testing.T) {
+func TestSuggestMenu_BodyKeepsFullHeight_AndChromeStaysAtBottom(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := labelPromptFixture()
 	dm := m.detail

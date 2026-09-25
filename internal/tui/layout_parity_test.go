@@ -111,7 +111,7 @@ func assertSplitBytes(t *testing.T, label, got, want string) {
 var splitParityWidths = []int{0, 40, 87, 88, 89, 139, 140, 141, 167, 168, 169, 180, 209, 210, 211, 300}
 var splitParityHeights = []int{0, 4, 35, 36, 37, 40, 50}
 
-func TestSplitLayout_RenderParity(t *testing.T) {
+func TestSplitLayout_RenderParity(t *testing.T) { //nolint:paralleltest // sets KATA_COLOR_MODE; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	for _, palette := range []struct {
 		name string
@@ -151,7 +151,7 @@ func TestSplitLayout_RenderParity(t *testing.T) {
 	}
 }
 
-func TestSplitLayout_GeometryParity(t *testing.T) {
+func TestSplitLayout_GeometryParity(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	for _, width := range splitParityWidths {
 		for _, height := range splitParityHeights {
@@ -206,7 +206,7 @@ func assertSplitConsumers(t *testing.T, m Model) {
 	}
 }
 
-func TestLayout_ResolveLayout_Unlocked_Thresholds(t *testing.T) {
+func TestLayout_ResolveLayout_Unlocked_Thresholds(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	for _, tc := range []struct {
 		width, height int
@@ -227,7 +227,7 @@ func TestLayout_ResolveLayout_Unlocked_Thresholds(t *testing.T) {
 	}
 }
 
-func TestSplitLayout_ConsumerGeometry(t *testing.T) {
+func TestSplitLayout_ConsumerGeometry(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	for _, width := range []int{168, 180, 211} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {

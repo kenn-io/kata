@@ -16,6 +16,7 @@ import (
 // type assertion is replaced by a guarded form so future non-key fields
 // on keymap (e.g. a config struct) wouldn't panic the test.
 func TestHelpSections_AllBindingsCovered(t *testing.T) {
+	t.Parallel()
 	km := newKeymap()
 	found := map[string]int{}
 	for _, s := range helpSections(km) {
@@ -46,6 +47,7 @@ func TestHelpSections_AllBindingsCovered(t *testing.T) {
 // help text used to claim "↑↓ move child cursor" which became stale
 // when the document-viewport keymap split landed.
 func TestRenderHelp_ChildrenSectionMatchesKeymap(t *testing.T) {
+	t.Parallel()
 	out := stripANSI(renderHelp(newKeymap(), 80, ListFilter{}))
 	if !strings.Contains(out, "j/k") || !strings.Contains(out, "move child cursor") {
 		t.Errorf("help overlay should describe j/k as the child-cursor key; got:\n%s", out)
@@ -56,6 +58,7 @@ func TestRenderHelp_ChildrenSectionMatchesKeymap(t *testing.T) {
 }
 
 func TestRenderHelp_EmacsNavigationAliases(t *testing.T) {
+	t.Parallel()
 	out := stripANSI(renderHelp(newKeymap(), 60, ListFilter{}))
 	for _, alias := range []string{
 		"pgup/M-v", "pgdown/C-v", "g/C-M-<", "G/C-M->",
@@ -71,6 +74,7 @@ func TestRenderHelp_EmacsNavigationAliases(t *testing.T) {
 // assert each section title appears on its own line so a future
 // regression that drops Detail (or any other section) is caught.
 func TestRenderHelp_NarrowWidth(t *testing.T) {
+	t.Parallel()
 	out := renderHelp(newKeymap(), 40, ListFilter{})
 	assertContainsAll(t, out, "Global", "Graph", "Detail", "Children", "Forms", "Filters")
 	if helpColumnCount(40) != 1 {
@@ -82,6 +86,7 @@ func TestRenderHelp_NarrowWidth(t *testing.T) {
 // sections lay out side-by-side. We don't assert exact placement (column
 // padding varies), but the column count helper is the contract.
 func TestRenderHelp_WideWidth(t *testing.T) {
+	t.Parallel()
 	if helpColumnCount(130) != 3 {
 		t.Fatalf("helpColumnCount(130)=%d, want 3", helpColumnCount(130))
 	}
@@ -95,6 +100,7 @@ func TestRenderHelp_WideWidth(t *testing.T) {
 // above the bindings so the user can see why their list looks the way
 // it does without leaving the help view.
 func TestRenderHelp_FilterChips(t *testing.T) {
+	t.Parallel()
 	out := renderHelp(newKeymap(), 100, ListFilter{Status: "open"})
 	if !strings.Contains(out, "status:open") {
 		t.Errorf("expected status chip in help output\n%s", out)
@@ -105,7 +111,7 @@ func TestRenderHelp_FilterChips(t *testing.T) {
 // viewHelp; pressing ? again restores viewList. The Model's prevView is
 // the carrier so a future viewDetail-and-back would round-trip the same
 // way (see TestHelpToggle_FromDetail).
-func TestHelpToggle_FromList_AndBack(t *testing.T) {
+func TestHelpToggle_FromList_AndBack(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewList
 	mh := sendRune(m, '?')
@@ -121,7 +127,7 @@ func TestHelpToggle_FromList_AndBack(t *testing.T) {
 // TestHelpToggle_FromDetail: pressing ? in viewDetail enters viewHelp,
 // pressing ? again returns to viewDetail (not viewList). Catches a
 // regression that would always pop back to the list.
-func TestHelpToggle_FromDetail(t *testing.T) {
+func TestHelpToggle_FromDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewDetail
 	mh := sendRune(m, '?')
@@ -139,7 +145,7 @@ func TestHelpToggle_FromDetail(t *testing.T) {
 // q wired to a quit path even inside the overlay so the user can
 // always escape regardless of which view is active — but post-M3.5b
 // the user has to confirm via the modal first.
-func TestHelpToggle_QuitFromHelp(t *testing.T) {
+func TestHelpToggle_QuitFromHelp(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewHelp
 	nm := sendRune(m, 'q')
@@ -151,7 +157,7 @@ func TestHelpToggle_QuitFromHelp(t *testing.T) {
 // TestHelp_GatedByInputting: pressing ? while the M3a inline command
 // bar is open must reach the bar's textinput buffer instead of
 // opening help. canQuit gates the global keys via m.input.kind.
-func TestHelp_GatedByInputting(t *testing.T) {
+func TestHelp_GatedByInputting(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.input = newSearchBar(ListFilter{})
 	nm := sendRune(m, '?')
@@ -170,7 +176,7 @@ func TestHelp_GatedByInputting(t *testing.T) {
 // cache but left lm.issues at the pre-help snapshot. The fix moves
 // applyFetched into populateCache so cache and list stay in lockstep
 // regardless of the active view.
-func TestHelp_RefetchWhileOpen_KeepsListInSync(t *testing.T) {
+func TestHelp_RefetchWhileOpen_KeepsListInSync(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.scope = scope{projectID: 1}
 	m.list.issues = []Issue{{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "old"}}
@@ -202,7 +208,7 @@ func TestHelp_RefetchWhileOpen_KeepsListInSync(t *testing.T) {
 // it to m.list at the top level so toggling back to the list shows
 // the new scope's rows. The earlier regression covered refetchedMsg
 // only; this exercises the initialFetchMsg path of the same bug.
-func TestHelp_InitialFetchAfterScopeToggle_KeepsListInSync(t *testing.T) {
+func TestHelp_InitialFetchAfterScopeToggle_KeepsListInSync(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.scope = scope{projectID: 1, homeProjectID: 1, homeProjectName: "home"}
 	m.list.issues = []Issue{{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "single-project"}}

@@ -20,7 +20,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestTokensCreateCommand_PrintsPlaintextOnce(t *testing.T) {
+func TestTokensCreateCommand_PrintsPlaintextOnce(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 
 	out := requireCmdOutput(t, env, "tokens", "create", "--actor", "wesm", "--name", "laptop")
@@ -41,7 +41,7 @@ func TestTokensCreateCommand_PrintsPlaintextOnce(t *testing.T) {
 	assert.Equal(t, "laptop", *resolved.Name)
 }
 
-func TestTokensCreateCommand_QuietSuppressesAdvisoryText(t *testing.T) {
+func TestTokensCreateCommand_QuietSuppressesAdvisoryText(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 
 	out := requireCmdOutput(t, env, "--quiet", "tokens", "create", "--actor", "wesm")
@@ -52,7 +52,7 @@ func TestTokensCreateCommand_QuietSuppressesAdvisoryText(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(out, plaintext))
 }
 
-func TestTokensCreateCommand_ExplainsIdentityModeBeforeMinting(t *testing.T) {
+func TestTokensCreateCommand_ExplainsIdentityModeBeforeMinting(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"))
 
 	_, err := runCmdOutput(t, env, "tokens", "create", "--actor", "wesm")
@@ -66,7 +66,7 @@ func TestTokensCreateCommand_ExplainsIdentityModeBeforeMinting(t *testing.T) {
 	assert.Zero(t, tokens)
 }
 
-func TestTokensCreateCommand_WritesScopedTokenToOwnerOnlyFile(t *testing.T) {
+func TestTokensCreateCommand_WritesScopedTokenToOwnerOnlyFile(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(context.Background(), "example-project")
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestTokensCreateCommand_WritesScopedTokenToOwnerOnlyFile(t *testing.T) {
 	assert.Contains(t, listed, "expires_at=")
 }
 
-func TestTokensCreateCommand_ScopedOutputNeverContainsPlaintext(t *testing.T) {
+func TestTokensCreateCommand_ScopedOutputNeverContainsPlaintext(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, mode := range []struct {
 		name string
 		arg  string
@@ -160,7 +160,7 @@ func TestTokensCreateCommand_ScopedOutputNeverContainsPlaintext(t *testing.T) {
 	}
 }
 
-func TestTokensCreateCommand_ReservesScopedTokenFileBeforeMinting(t *testing.T) {
+func TestTokensCreateCommand_ReservesScopedTokenFileBeforeMinting(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(context.Background(), "example-project")
 	require.NoError(t, err)
@@ -188,7 +188,7 @@ func TestTokensCreateCommand_ReservesScopedTokenFileBeforeMinting(t *testing.T) 
 	assert.Zero(t, count)
 }
 
-func TestTokensCreateCommand_RequiresCompleteScopedArguments(t *testing.T) {
+func TestTokensCreateCommand_RequiresCompleteScopedArguments(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	tokenFile := privateTokenFilePath(t)
 	for _, args := range [][]string{
@@ -209,7 +209,7 @@ func TestTokensCreateCommand_RequiresCompleteScopedArguments(t *testing.T) {
 	assert.Zero(t, count)
 }
 
-func TestTokensCreateCommand_RejectsConflictingExplicitProject(t *testing.T) {
+func TestTokensCreateCommand_RejectsConflictingExplicitProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(context.Background(), "example-project")
 	require.NoError(t, err)
@@ -236,7 +236,7 @@ func TestTokensCreateCommand_RejectsConflictingExplicitProject(t *testing.T) {
 	assert.Zero(t, count)
 }
 
-func TestTokensCreateCommand_RejectsSymlinkTokenFileWithoutTouchingTarget(t *testing.T) {
+func TestTokensCreateCommand_RejectsSymlinkTokenFileWithoutTouchingTarget(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks may require elevated Windows privileges")
 	}
@@ -270,7 +270,7 @@ func TestTokensCreateCommand_RejectsSymlinkTokenFileWithoutTouchingTarget(t *tes
 	assert.Zero(t, count)
 }
 
-func TestTokensCreateCommand_RejectsNonPrivateTokenDirectoryBeforeMinting(t *testing.T) {
+func TestTokensCreateCommand_RejectsNonPrivateTokenDirectoryBeforeMinting(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows privacy is enforced with directory ACLs")
 	}
@@ -301,7 +301,7 @@ func TestTokensCreateCommand_RejectsNonPrivateTokenDirectoryBeforeMinting(t *tes
 	assert.Zero(t, count)
 }
 
-func TestTokensCreateCommand_RejectsUnsupportedServerBeforeMinting(t *testing.T) {
+func TestTokensCreateCommand_RejectsUnsupportedServerBeforeMinting(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -325,7 +325,7 @@ func TestTokensCreateCommand_RejectsUnsupportedServerBeforeMinting(t *testing.T)
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
-func TestTokensCreateCommand_RevokesMismatchedScopedResponseWithoutWritingSecret(t *testing.T) {
+func TestTokensCreateCommand_RevokesMismatchedScopedResponseWithoutWritingSecret(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	const secret = "kata_mismatched-secret"
 	revoked := false
 	server := scopedTokenTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -358,7 +358,7 @@ func TestTokensCreateCommand_RevokesMismatchedScopedResponseWithoutWritingSecret
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
-func TestTokensCreateCommand_ReportsAmbiguousUndecodableResponse(t *testing.T) {
+func TestTokensCreateCommand_ReportsAmbiguousUndecodableResponse(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	server := scopedTokenTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/tokens" {
 			http.NotFound(w, r)
@@ -382,6 +382,7 @@ func TestTokensCreateCommand_ReportsAmbiguousUndecodableResponse(t *testing.T) {
 }
 
 func TestCleanupScopedTokenCreationSurvivesCanceledCommandContext(t *testing.T) {
+	t.Parallel()
 	revoked := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		revoked = true
@@ -400,7 +401,7 @@ func TestCleanupScopedTokenCreationSurvivesCanceledCommandContext(t *testing.T) 
 	require.True(t, revoked)
 }
 
-func TestTokensListCommand_RedactsPlaintextAndHash(t *testing.T) {
+func TestTokensListCommand_RedactsPlaintextAndHash(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	createOut := requireCmdOutput(t, env, "tokens", "create", "--actor", "wesm", "--name", "laptop")
 	plaintext := extractTokenPlaintext(t, createOut)
@@ -414,7 +415,7 @@ func TestTokensListCommand_RedactsPlaintextAndHash(t *testing.T) {
 	assert.NotContains(t, out, "token_hash")
 }
 
-func TestTokensRevokeCommand_RevokesToken(t *testing.T) {
+func TestTokensRevokeCommand_RevokesToken(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	tok, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
 		PlaintextToken: "user-token",
@@ -431,7 +432,7 @@ func TestTokensRevokeCommand_RevokesToken(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestTokensCommands_JSONAndAgentOutput(t *testing.T) {
+func TestTokensCommands_JSONAndAgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 
 	jsonOut := requireCmdOutput(t, env, "--json", "tokens", "create", "--actor", "wesm")

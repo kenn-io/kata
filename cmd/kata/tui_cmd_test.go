@@ -20,7 +20,7 @@ import (
 // include_deleted query param, so either flag would advertise a
 // capability the wire cannot deliver. Both gates land at the daemon
 // boundary; re-add when handlers_issues.go grows the routes.
-func TestTUI_CommandRegistered(t *testing.T) {
+func TestTUI_CommandRegistered(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	out, err := runCmdOutput(t, nil, "tui", "--help")
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestTUI_CommandRegistered(t *testing.T) {
 	}
 }
 
-func TestTUI_RejectsInvalidUIDFormatBeforeTTYCheck(t *testing.T) {
+func TestTUI_RejectsInvalidUIDFormatBeforeTTYCheck(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, err := runCmdOutput(t, nil, "tui", "--uid-format", "wide")
 	if err == nil {
 		t.Fatal("expected invalid uid format error")
@@ -52,7 +52,7 @@ func TestTUI_RejectsInvalidUIDFormatBeforeTTYCheck(t *testing.T) {
 	}
 }
 
-func TestTUI_RejectsAgentOutputBeforeLaunch(t *testing.T) {
+func TestTUI_RejectsAgentOutputBeforeLaunch(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, args := range [][]string{
 		{"--agent", "tui"},
 		{"tui", "--agent"},
@@ -70,7 +70,7 @@ func TestTUI_RejectsAgentOutputBeforeLaunch(t *testing.T) {
 	}
 }
 
-func TestTUI_AcceptsOptionalIssueRef(t *testing.T) {
+func TestTUI_AcceptsOptionalIssueRef(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var got tui.Options
 	old := runTUI
 	runTUI = func(_ context.Context, opts tui.Options) error {
@@ -84,7 +84,7 @@ func TestTUI_AcceptsOptionalIssueRef(t *testing.T) {
 	assert.Equal(t, "abc4", got.InitialIssueRef)
 }
 
-func TestTUI_ThreadsProjectAndWorkspaceSelectors(t *testing.T) {
+func TestTUI_ThreadsProjectAndWorkspaceSelectors(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var got tui.Options
 	old := runTUI
 	runTUI = func(_ context.Context, opts tui.Options) error {
@@ -109,7 +109,7 @@ func TestTUI_ThreadsProjectAndWorkspaceSelectors(t *testing.T) {
 
 // TestTUI_RejectsMoreThanOneIssueRef guards the one-ref CLI contract:
 // accepting two refs would make the direct-open target ambiguous.
-func TestTUI_RejectsMoreThanOneIssueRef(t *testing.T) {
+func TestTUI_RejectsMoreThanOneIssueRef(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, err := runCmdOutput(t, nil, "tui", "abc4", "def5")
 	if err == nil {
 		t.Fatal("expected error for more than one issue ref")
@@ -121,7 +121,7 @@ func TestTUI_RejectsMoreThanOneIssueRef(t *testing.T) {
 	}
 }
 
-func TestTUI_ConfirmQuitConfigAccepted(t *testing.T) {
+func TestTUI_ConfirmQuitConfigAccepted(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; newRootCmd resets package var flags
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[tui]\nconfirm_quit = false\n"), 0o600); err != nil {
@@ -141,7 +141,7 @@ func TestTUI_ConfirmQuitConfigAccepted(t *testing.T) {
 	assert.True(t, run, "runTUI hook did not run")
 }
 
-func TestTUI_ConfirmQuitConfigModes(t *testing.T) {
+func TestTUI_ConfirmQuitConfigModes(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; newRootCmd resets package var flags
 	tests := []struct {
 		name      string
 		config    string
@@ -180,7 +180,7 @@ func TestTUI_ConfirmQuitConfigModes(t *testing.T) {
 	}
 }
 
-func TestTUI_MouseOptionReadsConfigToml(t *testing.T) {
+func TestTUI_MouseOptionReadsConfigToml(t *testing.T) { //nolint:paralleltest // sets KATA_HOME
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[tui]\nmouse = true\n"), 0o600); err != nil {
@@ -196,7 +196,7 @@ func TestTUI_MouseOptionReadsConfigToml(t *testing.T) {
 	}
 }
 
-func TestTUI_MouseFlagOverridesConfigToml(t *testing.T) {
+func TestTUI_MouseFlagOverridesConfigToml(t *testing.T) { //nolint:paralleltest // sets KATA_HOME
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[tui]\nmouse = false\n"), 0o600); err != nil {

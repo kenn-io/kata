@@ -24,6 +24,7 @@ import (
 // authoritative, and the CLI would have broken on the day the deprecated
 // alias is retired.
 func TestClaimMutationBodyPrefersLeaseOverDeprecatedClaim(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		payload    string
@@ -53,7 +54,7 @@ func TestClaimMutationBodyPrefersLeaseOverDeprecatedClaim(t *testing.T) {
 	}
 }
 
-func TestClaim_DefaultsToHardClaimPostsActor(t *testing.T) {
+func TestClaim_DefaultsToHardClaimPostsActor(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupFederatedHubIssue(t, "claim target")
 
 	out := runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
@@ -68,7 +69,7 @@ func TestClaim_DefaultsToHardClaimPostsActor(t *testing.T) {
 	assert.Nil(t, status.Claim.ExpiresAt)
 }
 
-func TestClaim_TTLPostsTimedClaim(t *testing.T) {
+func TestClaim_TTLPostsTimedClaim(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupFederatedHubIssue(t, "timed target")
 
 	out := runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref, "--ttl", "30m")
@@ -83,7 +84,7 @@ func TestClaim_TTLPostsTimedClaim(t *testing.T) {
 	assert.LessOrEqual(t, left, 31*time.Minute)
 }
 
-func TestLeaseRenew_ExtendsTimedLease(t *testing.T) {
+func TestLeaseRenew_ExtendsTimedLease(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupFederatedHubIssue(t, "renew target")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref, "--ttl", "5m")
 	before := fetchClaimStatus(t, env, pid, ref)
@@ -101,7 +102,7 @@ func TestLeaseRenew_ExtendsTimedLease(t *testing.T) {
 	assert.Greater(t, after.Claim.ExpiresAt.Sub(*before.Claim.ExpiresAt), 20*time.Minute)
 }
 
-func TestLeaseRenew_RejectsHardLease(t *testing.T) {
+func TestLeaseRenew_RejectsHardLease(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "renew hard lease")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 
@@ -110,7 +111,7 @@ func TestLeaseRenew_RejectsHardLease(t *testing.T) {
 	assert.Contains(t, err.Error(), "hard claims cannot be renewed")
 }
 
-func TestLeaseRenew_RequiresTTL(t *testing.T) {
+func TestLeaseRenew_RequiresTTL(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "renew without ttl")
 
 	_, err := runCLICapture(t, env, dir, "federation", "lease", "renew", ref)
@@ -118,7 +119,7 @@ func TestLeaseRenew_RequiresTTL(t *testing.T) {
 	assert.Contains(t, err.Error(), "--ttl is required")
 }
 
-func TestClaim_RejectsBareNumericTTL(t *testing.T) {
+func TestClaim_RejectsBareNumericTTL(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "bad ttl")
 
 	_, err := runCLICapture(t, env, dir, "federation", "lease", "acquire", ref, "--ttl", "30")
@@ -126,7 +127,7 @@ func TestClaim_RejectsBareNumericTTL(t *testing.T) {
 	assert.Contains(t, err.Error(), "duration unit")
 }
 
-func TestClaim_RejectsTTLBounds(t *testing.T) {
+func TestClaim_RejectsTTLBounds(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, ttl := range []string{"30s", "25h", "36028797018964028s"} {
 		t.Run(ttl, func(t *testing.T) {
 			env, dir, _, ref := setupFederatedHubIssue(t, "bad ttl "+ttl)
@@ -138,7 +139,7 @@ func TestClaim_RejectsTTLBounds(t *testing.T) {
 	}
 }
 
-func TestClaim_RejectsUnsupportedTTLUnitsAndFractions(t *testing.T) {
+func TestClaim_RejectsUnsupportedTTLUnitsAndFractions(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, ttl := range []string{"60000000000ns", "60000ms", "60.5s"} {
 		t.Run(ttl, func(t *testing.T) {
 			env, dir, _, ref := setupFederatedHubIssue(t, "bad ttl "+ttl)
@@ -150,7 +151,7 @@ func TestClaim_RejectsUnsupportedTTLUnitsAndFractions(t *testing.T) {
 	}
 }
 
-func TestRelease_PostsRelease(t *testing.T) {
+func TestRelease_PostsRelease(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupFederatedHubIssue(t, "release target")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 
@@ -162,7 +163,7 @@ func TestRelease_PostsRelease(t *testing.T) {
 	assert.Nil(t, status.Claim)
 }
 
-func TestClaimForceRelease_PostsAdminForceRelease(t *testing.T) {
+func TestClaimForceRelease_PostsAdminForceRelease(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupFederatedHubIssue(t, "force release target")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 
@@ -174,7 +175,7 @@ func TestClaimForceRelease_PostsAdminForceRelease(t *testing.T) {
 	assert.Nil(t, status.Claim)
 }
 
-func TestClaimForceRelease_RequiresExplicitActorAndReason(t *testing.T) {
+func TestClaimForceRelease_RequiresExplicitActorAndReason(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "force release validation")
 
 	_, err := runCLICapture(t, env, dir, "federation", "lease", "force-release", ref, "--reason", "stale holder")
@@ -186,7 +187,7 @@ func TestClaimForceRelease_RequiresExplicitActorAndReason(t *testing.T) {
 	assert.Contains(t, err.Error(), "--reason is required")
 }
 
-func TestClaimForceRelease_EnrollmentBearerCannotForceRelease(t *testing.T) {
+func TestClaimForceRelease_EnrollmentBearerCannotForceRelease(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
 	dir := t.TempDir()
@@ -221,7 +222,7 @@ func TestClaimForceRelease_EnrollmentBearerCannotForceRelease(t *testing.T) {
 	assert.Contains(t, strings.ToLower(cli.Error()), "token")
 }
 
-func TestClaimSteal_ReleasesExistingClaimThenClaimsAsActor(t *testing.T) {
+func TestClaimSteal_ReleasesExistingClaimThenClaimsAsActor(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupFederatedHubIssue(t, "steal target")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 
@@ -235,7 +236,7 @@ func TestClaimSteal_ReleasesExistingClaimThenClaimsAsActor(t *testing.T) {
 	assert.Equal(t, "bob", status.Claim.Holder)
 }
 
-func TestClaimSteal_JSONIncludesReleasedAndNewHolders(t *testing.T) {
+func TestClaimSteal_JSONIncludesReleasedAndNewHolders(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "json steal target")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 
@@ -258,7 +259,7 @@ func TestClaimSteal_JSONIncludesReleasedAndNewHolders(t *testing.T) {
 	assert.Equal(t, "bob", claimedClaim["holder"])
 }
 
-func TestClaimSteal_JSONPartialSuccessIncludesReleasedClaim(t *testing.T) {
+func TestClaimSteal_JSONPartialSuccessIncludesReleasedClaim(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	dir := t.TempDir()
 	var forceReleaseCalled bool
@@ -313,7 +314,7 @@ func TestClaimSteal_JSONPartialSuccessIncludesReleasedClaim(t *testing.T) {
 	assert.Equal(t, "alice", releasedClaim["holder"])
 }
 
-func TestClaimSteal_JSONPartialSuccessWhenSecondClaimDeniedWithOK(t *testing.T) {
+func TestClaimSteal_JSONPartialSuccessWhenSecondClaimDeniedWithOK(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	dir := t.TempDir()
 	var forceReleaseCalled bool
@@ -373,7 +374,7 @@ func TestClaimSteal_JSONPartialSuccessWhenSecondClaimDeniedWithOK(t *testing.T) 
 	assert.Equal(t, "charlie", claimedClaim["holder"])
 }
 
-func TestClaim_JSONPreservesDaemonResponse(t *testing.T) {
+func TestClaim_JSONPreservesDaemonResponse(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "json target")
 
 	out := runCLIAs(t, env, dir, "alice", "--json", "federation", "lease", "acquire", ref)
@@ -391,14 +392,14 @@ func TestClaim_JSONPreservesDaemonResponse(t *testing.T) {
 	assert.Equal(t, "hard", claim["claim_kind"])
 }
 
-func TestClaim_HumanPendingLineConcise(t *testing.T) {
+func TestClaim_HumanPendingLineConcise(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedSpokeIssue(t, "pending target")
 
 	out := runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 	assert.Equal(t, "lease pending for "+ref+" as alice", out)
 }
 
-func TestClaim_DenialExitsNonZeroWithClaimDenied(t *testing.T) {
+func TestClaim_DenialExitsNonZeroWithClaimDenied(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "denied target")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 
@@ -412,7 +413,7 @@ func TestClaim_DenialExitsNonZeroWithClaimDenied(t *testing.T) {
 		strings.Contains(cli.Error(), "already leased"))
 }
 
-func TestClaim_JSONDenialPreservesDaemonResponse(t *testing.T) {
+func TestClaim_JSONDenialPreservesDaemonResponse(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "json denied target")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
 

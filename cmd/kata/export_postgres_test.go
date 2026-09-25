@@ -13,7 +13,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestExportReadsPostgresThroughConfiguredDSN(t *testing.T) {
+func TestExportReadsPostgresThroughConfiguredDSN(t *testing.T) { //nolint:paralleltest // sets KATA_DSN; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}

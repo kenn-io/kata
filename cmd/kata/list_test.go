@@ -15,7 +15,7 @@ import (
 
 // TestList_OutputsShortIDNotNumber pins the JSON wire shape: each issue
 // row carries short_id and qualified_id; the legacy `number` field is gone.
-func TestList_OutputsShortIDNotNumber(t *testing.T) {
+func TestList_OutputsShortIDNotNumber(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	createIssueViaHTTP(t, f.env, f.dir, "first")
 
@@ -34,7 +34,7 @@ func TestList_OutputsShortIDNotNumber(t *testing.T) {
 	assert.False(t, hasNumber, "number still present in list row: %v", first)
 }
 
-func TestList_DefaultsToOpenIssuesInProject(t *testing.T) {
+func TestList_DefaultsToOpenIssuesInProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta"} {
 		createIssue(t, env, pid, title)
@@ -45,7 +45,7 @@ func TestList_DefaultsToOpenIssuesInProject(t *testing.T) {
 	assert.Contains(t, out, "beta")
 }
 
-func TestList_AllFiltersAcrossProjectsAndUsesQualifiedRefs(t *testing.T) {
+func TestList_AllFiltersAcrossProjectsAndUsesQualifiedRefs(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, primaryID := setupCLIWorkspace(t)
 	secondary, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ func TestList_AllFiltersAcrossProjectsAndUsesQualifiedRefs(t *testing.T) {
 	assert.NotContains(t, out, secondaryOther)
 }
 
-func TestList_AllJSONIncludesProjectName(t *testing.T) {
+func TestList_AllJSONIncludesProjectName(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "global row")
 
@@ -82,7 +82,7 @@ func TestList_AllJSONIncludesProjectName(t *testing.T) {
 	assert.Equal(t, "kata#"+got.Issues[0]["short_id"].(string), got.Issues[0]["qualified_id"])
 }
 
-func TestList_AllDoesNotRequireWorkspaceProject(t *testing.T) {
+func TestList_AllDoesNotRequireWorkspaceProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestList_AllDoesNotRequireWorkspaceProject(t *testing.T) {
 	assert.Contains(t, out, "issue=spoke-project#"+ref)
 }
 
-func TestList_AllAndProjectAreMutuallyExclusive(t *testing.T) {
+func TestList_AllAndProjectAreMutuallyExclusive(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 
 	_, err := runCmdOutput(t, env, "--workspace", dir,
@@ -102,7 +102,7 @@ func TestList_AllAndProjectAreMutuallyExclusive(t *testing.T) {
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
-func TestList_LimitZeroMeansUnlimited(t *testing.T) {
+func TestList_LimitZeroMeansUnlimited(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"first", "second", "third"} {
 		createIssue(t, env, pid, title)
@@ -114,12 +114,12 @@ func TestList_LimitZeroMeansUnlimited(t *testing.T) {
 	}
 }
 
-func TestList_RejectsNegativeLimit(t *testing.T) {
+func TestList_RejectsNegativeLimit(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, err := runCmdOutput(t, nil, "list", "--limit", "-1")
 	_ = requireCLIError(t, err, ExitValidation)
 }
 
-func TestList_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
+func TestList_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	alphaOnly := createIssue(t, env, pid, "alpha only")
 	alphaBeta := createIssue(t, env, pid, "alpha beta")
@@ -132,7 +132,7 @@ func TestList_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
 	assert.NotContains(t, out, "alpha only")
 }
 
-func TestList_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
+func TestList_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	alpha := createIssue(t, env, pid, "alpha candidate")
 	beta := createIssue(t, env, pid, "beta candidate")
@@ -149,7 +149,7 @@ func TestList_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
 // TestList_HumanRowUsesGlyphLayout pins the new row renderer's layout: an
 // open issue renders the open glyph "○ " ahead of its title, replacing the
 // old "%-8s  %-8s" column format.
-func TestList_HumanRowUsesGlyphLayout(t *testing.T) {
+func TestList_HumanRowUsesGlyphLayout(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
@@ -161,7 +161,7 @@ func TestList_HumanRowUsesGlyphLayout(t *testing.T) {
 
 // TestList_HumanRowRendersPriorityChip pins that an issue created with a
 // priority renders the "• P<n>" chip in human list output.
-func TestList_HumanRowRendersPriorityChip(t *testing.T) {
+func TestList_HumanRowRendersPriorityChip(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	type createResp struct {
 		Issue struct {
@@ -178,7 +178,7 @@ func TestList_HumanRowRendersPriorityChip(t *testing.T) {
 
 // TestList_HumanRowRendersBugLabelChip pins that a bug-labeled issue renders
 // the "[bug] " chip in human list output.
-func TestList_HumanRowRendersBugLabelChip(t *testing.T) {
+func TestList_HumanRowRendersBugLabelChip(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "broken thing")
 	runCLI(t, env, dir, "label", "add", ref, "bug")
@@ -192,7 +192,7 @@ func TestList_HumanRowRendersBugLabelChip(t *testing.T) {
 // rendering: children move directly beneath their parent, non-last
 // children connect with "├─ ", the last child with "└─ ", and the
 // parent row stays unindented.
-func TestList_HumanTreeIndentsChildrenUnderParent(t *testing.T) {
+func TestList_HumanTreeIndentsChildrenUnderParent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	parent := createIssue(t, env, pid, "parent epic")
 	childA := createIssue(t, env, pid, "child alpha")
@@ -216,7 +216,7 @@ func TestList_HumanTreeIndentsChildrenUnderParent(t *testing.T) {
 // TestList_HumanTreeRendersGrandchildRecursively pins recursion through
 // parent chains: a grandchild nests one level deeper with the rail
 // continuation prefix.
-func TestList_HumanTreeRendersGrandchildRecursively(t *testing.T) {
+func TestList_HumanTreeRendersGrandchildRecursively(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	root := createIssue(t, env, pid, "tree root")
 	mid := createIssue(t, env, pid, "tree mid")
@@ -234,7 +234,7 @@ func TestList_HumanTreeRendersGrandchildRecursively(t *testing.T) {
 // fallback: when a child's parent does not match the active filter
 // (here excluded via --no-label), the child renders flat at top level
 // rather than being dropped or indented.
-func TestList_HumanTreeOrphanedChildRendersFlat(t *testing.T) {
+func TestList_HumanTreeOrphanedChildRendersFlat(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	parent := createIssue(t, env, pid, "filtered parent")
 	child := createIssue(t, env, pid, "orphan child")
@@ -253,7 +253,7 @@ func TestList_HumanTreeOrphanedChildRendersFlat(t *testing.T) {
 // TestList_AgentOutputUnchangedByTree pins that tree rendering is human
 // mode only: agent rows keep the flat "- issue=..." shape with no
 // box-drawing connectors.
-func TestList_AgentOutputUnchangedByTree(t *testing.T) {
+func TestList_AgentOutputUnchangedByTree(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	parent := createIssue(t, env, pid, "agent parent")
 	child := createIssue(t, env, pid, "agent child")
@@ -270,7 +270,7 @@ func TestList_AgentOutputUnchangedByTree(t *testing.T) {
 // derivation: an open issue with an OPEN blocker renders the blocked glyph
 // "●", and once the blocker is closed (or the blocker starts out closed)
 // the same issue renders the open glyph "○" instead.
-func TestList_HumanRowBlockedGlyphFollowsOpenBlocker(t *testing.T) {
+func TestList_HumanRowBlockedGlyphFollowsOpenBlocker(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	blocker := createIssue(t, env, pid, "blocker issue")
 	blocked := createIssue(t, env, pid, "blocked issue")
@@ -294,7 +294,7 @@ func TestList_HumanRowBlockedGlyphFollowsOpenBlocker(t *testing.T) {
 // must not mark the blocked issue as blocked. The issue lives in the bound
 // workspace project; the blocker lives in a separate project that gets
 // archived via the same path `kata projects remove` uses (RemoveProject).
-func TestList_HumanRowIgnoresBlockerInArchivedProject(t *testing.T) {
+func TestList_HumanRowIgnoresBlockerInArchivedProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ctx := context.Background()
 	blockerProject, err := env.DB.CreateProject(ctx, "blocker-project")
@@ -323,7 +323,7 @@ func TestList_HumanRowIgnoresBlockerInArchivedProject(t *testing.T) {
 // TestList_HumanFooterShowsTotalsAndLegend pins the footer: non-quiet human
 // list output includes the rule, a "Total: N issues" summary, and the
 // "Status: ○ open" legend.
-func TestList_HumanFooterShowsTotalsAndLegend(t *testing.T) {
+func TestList_HumanFooterShowsTotalsAndLegend(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
@@ -335,7 +335,7 @@ func TestList_HumanFooterShowsTotalsAndLegend(t *testing.T) {
 
 // TestList_HumanFooterAbsentUnderQuiet pins that --quiet suppresses the
 // footer entirely, even when rows were printed.
-func TestList_HumanFooterAbsentUnderQuiet(t *testing.T) {
+func TestList_HumanFooterAbsentUnderQuiet(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
@@ -347,7 +347,7 @@ func TestList_HumanFooterAbsentUnderQuiet(t *testing.T) {
 
 // TestList_HumanFooterAbsentOnZeroRows pins that an empty result set prints
 // no footer (no rule, no "Total:" line).
-func TestList_HumanFooterAbsentOnZeroRows(t *testing.T) {
+func TestList_HumanFooterAbsentOnZeroRows(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 
 	out := runCLI(t, env, dir, "list")
@@ -383,7 +383,7 @@ func findLineContaining(t *testing.T, out, substr string) string {
 	return matches[0]
 }
 
-func TestList_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
+func TestList_AgentOutputRowsOmitAbsentOwner(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "unowned task")
 
@@ -395,7 +395,7 @@ func TestList_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
 	assert.NotContains(t, out, "owner=")
 }
 
-func TestList_AgentOutputEscapesQuotedTitle(t *testing.T) {
+func TestList_AgentOutputEscapesQuotedTitle(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, `quoted "title"`)
 
@@ -411,7 +411,7 @@ func TestList_AgentOutputEscapesQuotedTitle(t *testing.T) {
 // the screen, set the window title, or break row layout. Sanitized
 // at the human-output boundary; the JSON path is exempt (agents need
 // the raw bytes).
-func TestList_SanitizesAnsiAndNewlinesInTitle(t *testing.T) {
+func TestList_SanitizesAnsiAndNewlinesInTitle(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "evil\x1b[2Jtitle\nwith newline")
 
@@ -432,7 +432,7 @@ func TestList_SanitizesAnsiAndNewlinesInTitle(t *testing.T) {
 // TestList_HumanFooterShowsShowingWhenTruncated pins that when the returned
 // page is exactly --limit rows, the human footer swaps "Total:" for
 // "Showing:" so the summary doesn't misread as a project-wide total.
-func TestList_HumanFooterShowsShowingWhenTruncated(t *testing.T) {
+func TestList_HumanFooterShowsShowingWhenTruncated(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta", "gamma"} {
 		createIssue(t, env, pid, title)
@@ -447,7 +447,7 @@ func TestList_HumanFooterShowsShowingWhenTruncated(t *testing.T) {
 // TestList_HumanFooterShowsTotalWhenNotTruncated pins the non-truncated
 // counterpart: when all matching rows fit under --limit, the footer keeps
 // the "Total:" wording.
-func TestList_HumanFooterShowsTotalWhenNotTruncated(t *testing.T) {
+func TestList_HumanFooterShowsTotalWhenNotTruncated(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta"} {
 		createIssue(t, env, pid, title)
@@ -463,7 +463,7 @@ func TestList_HumanFooterShowsTotalWhenNotTruncated(t *testing.T) {
 // returned page is exactly --limit rows, the CLI prints a stderr hint so users
 // realize there may be more. Hint goes to stderr so it doesn't pollute pipes
 // (kata list | grep ...) and is suppressed in --json mode.
-func TestList_HintsWhenTruncated(t *testing.T) {
+func TestList_HintsWhenTruncated(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta", "gamma"} {
 		createIssue(t, env, pid, title)
@@ -483,7 +483,7 @@ func TestList_HintsWhenTruncated(t *testing.T) {
 
 // TestList_NoHintWhenAllRowsFit guards the false-negative direction: when the
 // page is shorter than --limit, no hint should fire.
-func TestList_NoHintWhenAllRowsFit(t *testing.T) {
+func TestList_NoHintWhenAllRowsFit(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta"} {
 		createIssue(t, env, pid, title)
@@ -499,7 +499,7 @@ func TestList_NoHintWhenAllRowsFit(t *testing.T) {
 // TestList_JSONOmitsHint pins that the JSON output path stays pure JSON. The
 // hint is human-facing; agents consuming --json must not get extra stderr
 // noise that breaks parsers expecting silent success.
-func TestList_JSONOmitsHint(t *testing.T) {
+func TestList_JSONOmitsHint(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta", "gamma"} {
 		createIssue(t, env, pid, title)

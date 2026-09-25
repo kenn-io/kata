@@ -24,7 +24,7 @@ import (
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
-func TestEnvHTTPTimeout(t *testing.T) {
+func TestEnvHTTPTimeout(t *testing.T) { //nolint:paralleltest // assertEnvDurationOverride sets envKey
 	const def = 5 * time.Second
 
 	cases := []struct {
@@ -46,7 +46,7 @@ func TestEnvHTTPTimeout(t *testing.T) {
 	}
 }
 
-func TestLongRunningClientForLeavesResponseHeadersUnbounded(t *testing.T) {
+func TestLongRunningClientForLeavesResponseHeadersUnbounded(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 
@@ -63,7 +63,7 @@ func TestLongRunningClientForLeavesResponseHeadersUnbounded(t *testing.T) {
 	}
 }
 
-func TestRemoteCommand_UnavailableMapsToCLIError(t *testing.T) {
+func TestRemoteCommand_UnavailableMapsToCLIError(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1") // closed port
 	t.Chdir(t.TempDir())
@@ -83,7 +83,7 @@ func TestRemoteCommand_UnavailableMapsToCLIError(t *testing.T) {
 	assert.Contains(t, stderr, `"kind":"daemon_unavailable"`)
 }
 
-func TestFederationEnroll_UnavailableHubKeepsOperationalError(t *testing.T) {
+func TestFederationEnroll_UnavailableHubKeepsOperationalError(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
 	t.Setenv("KATA_AUTH_TOKEN", "")
@@ -98,7 +98,7 @@ func TestFederationEnroll_UnavailableHubKeepsOperationalError(t *testing.T) {
 	assert.NotContains(t, stderr, `"kind":"daemon_unavailable"`)
 }
 
-func TestDaemonClients_ClassifyOnlyTheirOwnDialFailures(t *testing.T) {
+func TestDaemonClients_ClassifyOnlyTheirOwnDialFailures(t *testing.T) { //nolint:paralleltest // changes working directory; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", "")
@@ -189,7 +189,7 @@ type daemonTransportProvenance interface {
 	selectedUnixSocket() bool
 }
 
-func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
+func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) { //nolint:paralleltest // newUnixGeneratedTestClient sets KATA_HOME and KATA_AUTH_TOKEN and KATA_HTTP_TIMEOUT; resetFlags sets package var flags
 	tests := []struct {
 		name      string
 		handler   http.Handler
@@ -295,7 +295,7 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 	})
 }
 
-func TestDaemonTransportErrorOutputModes(t *testing.T) {
+func TestDaemonTransportErrorOutputModes(t *testing.T) { //nolint:paralleltest // newUnixGeneratedTestClient sets KATA_HOME and KATA_AUTH_TOKEN and KATA_HTTP_TIMEOUT; resetFlags sets package var flags
 	api := newUnixGeneratedTestClient(t, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}), 100*time.Millisecond)
@@ -323,6 +323,7 @@ func TestDaemonTransportErrorOutputModes(t *testing.T) {
 }
 
 func TestDaemonClientPreTransmissionFailure(t *testing.T) {
+	t.Parallel()
 	var requests atomic.Int64
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
@@ -371,6 +372,7 @@ func TestDaemonClientPreTransmissionFailure(t *testing.T) {
 }
 
 func TestDaemonTransportErrorMutationUncertainty(t *testing.T) {
+	t.Parallel()
 	failures := []struct {
 		name                string
 		phase               string
@@ -421,6 +423,7 @@ func TestDaemonTransportErrorMutationUncertainty(t *testing.T) {
 }
 
 func TestSameOriginRedirectPreservesMutationUncertainty(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/start" {
 			http.Redirect(w, r, "/stall", http.StatusFound)
@@ -444,6 +447,7 @@ func TestSameOriginRedirectPreservesMutationUncertainty(t *testing.T) {
 }
 
 func TestSameOriginRedirectFinalBodyFailurePreservesMutationUncertainty(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/start" {
 			http.Redirect(w, r, "/truncated", http.StatusTemporaryRedirect)
@@ -472,6 +476,7 @@ func TestSameOriginRedirectFinalBodyFailurePreservesMutationUncertainty(t *testi
 }
 
 func TestSameOriginRedirectFinalBodyCloseStopsRequestBudget(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/start" {
 			http.Redirect(w, r, "/complete", http.StatusTemporaryRedirect)
@@ -504,6 +509,7 @@ func TestSameOriginRedirectFinalBodyCloseStopsRequestBudget(t *testing.T) {
 }
 
 func TestDifferentOriginRedirectDoesNotClaimMutationUncertainty(t *testing.T) {
+	t.Parallel()
 	external := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
@@ -555,6 +561,7 @@ func newUnixGeneratedTestClient(t *testing.T, handler http.Handler, timeout time
 }
 
 func TestDaemonDialTimeoutDoesNotClaimCreateOutcomeUnknown(t *testing.T) {
+	t.Parallel()
 	hc, err := markDaemonHTTPClient("https://daemon.example", &http.Client{
 		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTimeout: true}}
@@ -572,7 +579,7 @@ func TestDaemonDialTimeoutDoesNotClaimCreateOutcomeUnknown(t *testing.T) {
 	assert.NotContains(t, classified.Message, "mutation result may be unknown")
 }
 
-func TestEnsureDaemonResolvedPreservesInjectedResolution(t *testing.T) {
+func TestEnsureDaemonResolvedPreservesInjectedResolution(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "injected-token")
@@ -585,7 +592,7 @@ func TestEnsureDaemonResolvedPreservesInjectedResolution(t *testing.T) {
 	assert.Equal(t, "injected-token", resolved.Token)
 }
 
-func TestDiscoverDaemonResolvedPreservesInjectedResolution(t *testing.T) {
+func TestDiscoverDaemonResolvedPreservesInjectedResolution(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and KATA_TRUST_PRIVATE_NETWORK; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "discover-injected-token")
@@ -600,7 +607,7 @@ func TestDiscoverDaemonResolvedPreservesInjectedResolution(t *testing.T) {
 	assert.True(t, resolved.TrustPrivateNetwork)
 }
 
-func TestHTTPClientForResolvedUsesResolvedPolicy(t *testing.T) {
+func TestHTTPClientForResolvedUsesResolvedPolicy(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and KATA_ALLOW_INSECURE; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "")
@@ -630,7 +637,7 @@ func TestHTTPClientForResolvedUsesResolvedPolicy(t *testing.T) {
 	}
 }
 
-func TestHTTPClientForResolvedRefusesUnsafeTargetWithoutPolicy(t *testing.T) {
+func TestHTTPClientForResolvedRefusesUnsafeTargetWithoutPolicy(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and KATA_ALLOW_INSECURE; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "")
@@ -645,7 +652,7 @@ func TestHTTPClientForResolvedRefusesUnsafeTargetWithoutPolicy(t *testing.T) {
 	assert.Contains(t, err.Error(), "plaintext")
 }
 
-func TestHTTPClientForCompatibilityCarriesMatchedAllowInsecure(t *testing.T) {
+func TestHTTPClientForCompatibilityCarriesMatchedAllowInsecure(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN and KATA_SERVER and KATA_ALLOW_INSECURE; swaps package var flags
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_ALLOW_INSECURE", "")
@@ -686,7 +693,7 @@ func TestHTTPClientForCompatibilityCarriesMatchedAllowInsecure(t *testing.T) {
 	}
 }
 
-func TestEnsureDaemonHTTPClientForUsesNamedCatalogCredential(t *testing.T) {
+func TestEnsureDaemonHTTPClientForUsesNamedCatalogCredential(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN and KATA_SHARED_TOKEN and KATA_HOME; swaps package var flags
 	for _, tt := range []struct {
 		name         string
 		catalogAuth  string
@@ -748,7 +755,7 @@ url = "`+srv.URL+`"
 	}
 }
 
-func TestEnsureDaemonHTTPClientForUsesActiveCatalogToken(t *testing.T) {
+func TestEnsureDaemonHTTPClientForUsesActiveCatalogToken(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN and KATA_SERVER and KATA_HOME; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv("KATA_SERVER", "")

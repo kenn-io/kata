@@ -41,7 +41,7 @@ type nopLogger struct{}
 
 func (nopLogger) Printf(string, ...any) {}
 
-func TestRunReloadLoop_DispatchesOnSignal(t *testing.T) {
+func TestRunReloadLoop_DispatchesOnSignal(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB
 	dir := setupKataEnv(t)
 	path := filepath.Join(dir, "hooks.toml")
 	require.NoError(t, os.WriteFile(path, []byte(`[[hook]]

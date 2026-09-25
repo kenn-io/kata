@@ -11,7 +11,7 @@ import (
 
 // TestReady_OutputsShortIDNotNumber pins the JSON wire shape: each ready
 // row carries short_id; the legacy `number` field is gone.
-func TestReady_OutputsShortIDNotNumber(t *testing.T) {
+func TestReady_OutputsShortIDNotNumber(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "first")
 
@@ -29,7 +29,7 @@ func TestReady_OutputsShortIDNotNumber(t *testing.T) {
 	assert.False(t, hasNumber, "number still present in ready row: %v", first)
 }
 
-func TestReady_FiltersBlocked(t *testing.T) {
+func TestReady_FiltersBlocked(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	blocker := createIssue(t, env, pid, "blocker")
 	blocked := createIssue(t, env, pid, "blocked")
@@ -43,7 +43,7 @@ func TestReady_FiltersBlocked(t *testing.T) {
 		"blocked is hidden while blocker is open")
 }
 
-func TestReady_ExcludesParkedMetadata(t *testing.T) {
+func TestReady_ExcludesParkedMetadata(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	someday := createIssue(t, env, pid, "someday parked")
 	future := createIssue(t, env, pid, "future parked")
@@ -61,7 +61,7 @@ func TestReady_ExcludesParkedMetadata(t *testing.T) {
 	assert.Contains(t, out, "past scheduled actionable")
 }
 
-func TestReady_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
+func TestReady_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	alphaOnly := createIssue(t, env, pid, "alpha only")
 	alphaBeta := createIssue(t, env, pid, "alpha beta")
@@ -74,7 +74,7 @@ func TestReady_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
 	assert.NotContains(t, out, "alpha only")
 }
 
-func TestReady_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
+func TestReady_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	alpha := createIssue(t, env, pid, "alpha candidate")
 	beta := createIssue(t, env, pid, "beta candidate")
@@ -88,7 +88,7 @@ func TestReady_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
 	assert.NotContains(t, out, "beta candidate")
 }
 
-func TestReady_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
+func TestReady_AgentOutputRowsOmitAbsentOwner(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "ready unowned")
 
@@ -103,7 +103,7 @@ func TestReady_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
 // path: `--agent ready --all` emits the structured `OK ready count=N` header
 // plus one kv row per issue whose issue field is the qualified
 // "<project>#<short_id>" ref — never the human glyph rows.
-func TestReady_AgentAllEmitsKVRows(t *testing.T) {
+func TestReady_AgentAllEmitsKVRows(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	sid := createIssue(t, env, pid, "agent all row")
 
@@ -120,7 +120,7 @@ func TestReady_AgentAllEmitsKVRows(t *testing.T) {
 // TestReady_AgentAllRowCarriesPriorityAndOmitsAbsentOwner pins the field set
 // on --all agent rows: priority is rendered when set, owner is omitted when
 // absent (same optional-field idiom as the project-scoped agent path).
-func TestReady_AgentAllRowCarriesPriorityAndOmitsAbsentOwner(t *testing.T) {
+func TestReady_AgentAllRowCarriesPriorityAndOmitsAbsentOwner(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	postJSON[map[string]any](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
 		map[string]any{"actor": "tester", "title": "urgent fix", "priority": int64(1)})
@@ -137,7 +137,7 @@ func TestReady_AgentAllRowCarriesPriorityAndOmitsAbsentOwner(t *testing.T) {
 // contract (docs/reference/agent-output.md) field order is part of the
 // contract and new fields append to the line, so labels goes AFTER the
 // pre-existing issue/priority/owner/title fields.
-func TestReady_AgentRowEmitsLabels(t *testing.T) {
+func TestReady_AgentRowEmitsLabels(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "labeled ready")
 	runCLI(t, env, dir, "label", "add", ref, "bug")
@@ -152,7 +152,7 @@ func TestReady_AgentRowEmitsLabels(t *testing.T) {
 
 // TestReady_AgentAllRowEmitsLabels pins the same appended labels= field
 // on the --all agent path.
-func TestReady_AgentAllRowEmitsLabels(t *testing.T) {
+func TestReady_AgentAllRowEmitsLabels(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "labeled global ready")
 	runCLI(t, env, dir, "label", "add", ref, "epic")
@@ -165,7 +165,7 @@ func TestReady_AgentAllRowEmitsLabels(t *testing.T) {
 		"labels append after the existing fields, order-stable")
 }
 
-func TestReady_UnownedAndOwnerMutualExclusion(t *testing.T) {
+func TestReady_UnownedAndOwnerMutualExclusion(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	resetFlags(t)
 	_, err := runCLICapture(t, env, dir, "ready", "--unowned", "--owner", "alice")
@@ -173,7 +173,7 @@ func TestReady_UnownedAndOwnerMutualExclusion(t *testing.T) {
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
-func TestReady_AllFlagListsAcrossProjects(t *testing.T) {
+func TestReady_AllFlagListsAcrossProjects(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "in-bound-project")
 
@@ -186,7 +186,7 @@ func TestReady_AllFlagListsAcrossProjects(t *testing.T) {
 		"--all output uses qualified refs (project#short_id), got: %q", out)
 }
 
-func TestReady_AllFlagJSONIncludesProjectName(t *testing.T) {
+func TestReady_AllFlagJSONIncludesProjectName(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "first")
 
@@ -202,7 +202,7 @@ func TestReady_AllFlagJSONIncludesProjectName(t *testing.T) {
 	assert.True(t, hasProject, "project_name missing from --all JSON row: %v", first)
 }
 
-func TestReady_AllAndProjectAreMutuallyExclusive(t *testing.T) {
+func TestReady_AllAndProjectAreMutuallyExclusive(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 
 	_, err := runCmdOutput(t, env, "--workspace", dir,
@@ -214,7 +214,7 @@ func TestReady_AllAndProjectAreMutuallyExclusive(t *testing.T) {
 // TestReady_AllFromBoundDirSkipsLocalProject pins that --all does not require
 // (or use) the local .kata.toml project context: an agent in a bound workspace
 // can still get the global view.
-func TestReady_AllFromBoundDirSkipsLocalProject(t *testing.T) {
+func TestReady_AllFromBoundDirSkipsLocalProject(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "from-bound-project")
 
@@ -232,7 +232,7 @@ func TestReady_AllFromBoundDirSkipsLocalProject(t *testing.T) {
 // (unfiltered) results.
 // TestReady_HumanRowUsesGlyphLayout pins that the project-scoped human
 // path renders through the shared row renderer: open glyph + title.
-func TestReady_HumanRowUsesGlyphLayout(t *testing.T) {
+func TestReady_HumanRowUsesGlyphLayout(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
@@ -244,7 +244,7 @@ func TestReady_HumanRowUsesGlyphLayout(t *testing.T) {
 
 // TestReady_HumanRowRendersPriorityChip pins that a ready issue with a
 // priority renders the "• P<n>" chip in project-scoped human output.
-func TestReady_HumanRowRendersPriorityChip(t *testing.T) {
+func TestReady_HumanRowRendersPriorityChip(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	postJSON[map[string]any](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
 		map[string]any{"actor": "tester", "title": "urgent fix", "priority": int64(1)})
@@ -257,7 +257,7 @@ func TestReady_HumanRowRendersPriorityChip(t *testing.T) {
 // TestReady_HumanRowRendersLabelChips pins that a labeled ready issue
 // renders the well-known "[epic] " / "[bug] " chips in project-scoped
 // human output, now that the ready payload carries labels.
-func TestReady_HumanRowRendersLabelChips(t *testing.T) {
+func TestReady_HumanRowRendersLabelChips(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "broken thing")
 	runCLI(t, env, dir, "label", "add", ref, "bug")
@@ -269,7 +269,7 @@ func TestReady_HumanRowRendersLabelChips(t *testing.T) {
 
 // TestReady_AllHumanRowRendersLabelChips pins the same label-chip
 // rendering on the --all (global) human path.
-func TestReady_AllHumanRowRendersLabelChips(t *testing.T) {
+func TestReady_AllHumanRowRendersLabelChips(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "big effort")
 	runCLI(t, env, dir, "label", "add", ref, "epic")
@@ -284,7 +284,7 @@ func TestReady_AllHumanRowRendersLabelChips(t *testing.T) {
 // "Ready: N issues with no active blockers" summary, and the
 // "Status: ○ open" legend (no "● blocked" clause since ready results are
 // by definition unblocked).
-func TestReady_HumanFooterShowsSummaryAndLegend(t *testing.T) {
+func TestReady_HumanFooterShowsSummaryAndLegend(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
@@ -297,7 +297,7 @@ func TestReady_HumanFooterShowsSummaryAndLegend(t *testing.T) {
 
 // TestReady_HumanFooterAbsentUnderQuiet pins that --quiet suppresses the
 // ready footer even when rows were printed.
-func TestReady_HumanFooterAbsentUnderQuiet(t *testing.T) {
+func TestReady_HumanFooterAbsentUnderQuiet(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
@@ -309,7 +309,7 @@ func TestReady_HumanFooterAbsentUnderQuiet(t *testing.T) {
 
 // TestReady_HumanFooterAbsentOnZeroRows pins that an empty ready result
 // prints no footer at all.
-func TestReady_HumanFooterAbsentOnZeroRows(t *testing.T) {
+func TestReady_HumanFooterAbsentOnZeroRows(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 
 	out := runCLI(t, env, dir, "ready")
@@ -321,7 +321,7 @@ func TestReady_HumanFooterAbsentOnZeroRows(t *testing.T) {
 // returned page is exactly --limit rows, the scoped ready footer swaps
 // "Ready:" for "Showing:" so the summary doesn't misread as a full count
 // of ready issues.
-func TestReady_HumanFooterShowsShowingWhenTruncated(t *testing.T) {
+func TestReady_HumanFooterShowsShowingWhenTruncated(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta", "gamma"} {
 		createIssue(t, env, pid, title)
@@ -336,7 +336,7 @@ func TestReady_HumanFooterShowsShowingWhenTruncated(t *testing.T) {
 // TestReady_HumanFooterShowsReadyWhenNotTruncated pins the non-truncated
 // counterpart: when all ready rows fit under --limit, the footer keeps
 // the "Ready:" wording.
-func TestReady_HumanFooterShowsReadyWhenNotTruncated(t *testing.T) {
+func TestReady_HumanFooterShowsReadyWhenNotTruncated(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta"} {
 		createIssue(t, env, pid, title)
@@ -350,7 +350,7 @@ func TestReady_HumanFooterShowsReadyWhenNotTruncated(t *testing.T) {
 
 // TestReady_AllHumanFooterShowsShowingWhenTruncated pins the --all path's
 // truncation wording, mirroring the scoped-project case above.
-func TestReady_AllHumanFooterShowsShowingWhenTruncated(t *testing.T) {
+func TestReady_AllHumanFooterShowsShowingWhenTruncated(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	for _, title := range []string{"alpha", "beta", "gamma"} {
 		createIssue(t, env, pid, title)
@@ -366,7 +366,7 @@ func TestReady_AllHumanFooterShowsShowingWhenTruncated(t *testing.T) {
 // TestReady_AllHumanRowUsesGlyphLayoutAndQualifiedID pins that the --all
 // human path renders through the shared row renderer with the qualified
 // "project#short_id" id and the open glyph.
-func TestReady_AllHumanRowUsesGlyphLayoutAndQualifiedID(t *testing.T) {
+func TestReady_AllHumanRowUsesGlyphLayoutAndQualifiedID(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
@@ -380,7 +380,7 @@ func TestReady_AllHumanRowUsesGlyphLayoutAndQualifiedID(t *testing.T) {
 
 // TestReady_AllHumanRowRendersPriorityChip pins that --all human output
 // renders the priority chip for a ready issue created with a priority.
-func TestReady_AllHumanRowRendersPriorityChip(t *testing.T) {
+func TestReady_AllHumanRowRendersPriorityChip(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	postJSON[map[string]any](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
 		map[string]any{"actor": "tester", "title": "urgent fix", "priority": int64(1)})
@@ -392,7 +392,7 @@ func TestReady_AllHumanRowRendersPriorityChip(t *testing.T) {
 }
 
 // TestReady_AllHumanFooterShowsSummaryAndLegend pins the --all footer.
-func TestReady_AllHumanFooterShowsSummaryAndLegend(t *testing.T) {
+func TestReady_AllHumanFooterShowsSummaryAndLegend(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, _, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "alpha")
 
@@ -403,7 +403,7 @@ func TestReady_AllHumanFooterShowsSummaryAndLegend(t *testing.T) {
 	assert.Contains(t, out, "Status: ○ open")
 }
 
-func TestReady_AllAcceptsFilterFlags(t *testing.T) {
+func TestReady_AllAcceptsFilterFlags(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	// --all composes with the scoped filters: cross-project queue views like
 	// "every unowned issue labeled X anywhere" are the point of the flag.
 	env, _, pid := setupCLIWorkspace(t)

@@ -20,6 +20,7 @@ import (
 )
 
 func TestDaemonTargetsFromConfigIncludesConfiguredEntries(t *testing.T) {
+	t.Parallel()
 	daemons := []config.CatalogDaemonConfig{
 		{Name: "local", Local: true},
 		{Name: "shared", URL: "http://100.64.0.5:7777", TokenEnv: "KATA_SHARED_TOKEN", AllowInsecure: true}, //nolint:gosec // env var name, not a credential
@@ -38,6 +39,7 @@ func TestDaemonTargetsFromConfigIncludesConfiguredEntries(t *testing.T) {
 }
 
 func TestActiveDaemonTargetUsesConfiguredActive(t *testing.T) {
+	t.Parallel()
 	targets := []daemonTarget{
 		{Name: "local", Local: true},
 		{Name: "shared", URL: "https://kata.example.test"},
@@ -50,24 +52,27 @@ func TestActiveDaemonTargetUsesConfiguredActive(t *testing.T) {
 }
 
 func TestDaemonTargetDisplayPrefersName(t *testing.T) {
+	t.Parallel()
 	got := daemonTargetDisplay(daemonTarget{Name: "shared", URL: "https://kata.example.test:9443"})
 
 	assert.Equal(t, "shared", got)
 }
 
 func TestDaemonTargetDisplayFallsBackToHostPort(t *testing.T) {
+	t.Parallel()
 	got := daemonTargetDisplay(daemonTarget{URL: "https://kata.example.test:9443"})
 
 	assert.Equal(t, "kata.example.test:9443", got)
 }
 
 func TestDaemonTargetDisplayLocalFallback(t *testing.T) {
+	t.Parallel()
 	got := daemonTargetDisplay(daemonTarget{Local: true})
 
 	assert.Equal(t, "local", got)
 }
 
-func TestConnectDaemonTargetLocalUsesLocalOnlyEnsurePath(t *testing.T) {
+func TestConnectDaemonTargetLocalUsesLocalOnlyEnsurePath(t *testing.T) { //nolint:paralleltest // swaps package var bootResolveScopeForTUI; swaps package var ensureResolvedForTUI
 	oldEnsure := ensureResolvedForTUI
 	oldEnsureNamed := ensureResolvedNamedForTUI
 	oldNewClient := newHTTPClientForTUI
@@ -107,7 +112,7 @@ func TestConnectDaemonTargetLocalUsesLocalOnlyEnsurePath(t *testing.T) {
 	assert.Equal(t, viewEmpty, conn.init.view)
 }
 
-func TestConnectResolvedRemoteUsesPathFreeBoot(t *testing.T) {
+func TestConnectResolvedRemoteUsesPathFreeBoot(t *testing.T) { //nolint:paralleltest // swaps package var bootResolveScopeForTUI; swaps package var bootResolveScopePathFreeForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
@@ -144,7 +149,7 @@ func TestConnectResolvedRemoteUsesPathFreeBoot(t *testing.T) {
 	assert.Equal(t, viewProjects, conn.init.view)
 }
 
-func TestConnectResolvedImplicitLoopbackUsesLocalBoot(t *testing.T) {
+func TestConnectResolvedImplicitLoopbackUsesLocalBoot(t *testing.T) { //nolint:paralleltest // swaps package var bootResolveScopeForTUI; swaps package var bootResolveScopePathFreeForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
@@ -180,7 +185,7 @@ func TestConnectResolvedImplicitLoopbackUsesLocalBoot(t *testing.T) {
 	assert.Equal(t, viewEmpty, conn.init.view)
 }
 
-func TestConnectImplicitConfiguredLoopbackUsesPathFreeBoot(t *testing.T) {
+func TestConnectImplicitConfiguredLoopbackUsesPathFreeBoot(t *testing.T) { //nolint:paralleltest // changes working directory; swaps package var bootResolveScopeForTUI
 	for _, source := range []string{"environment", "workspace config"} {
 		t.Run(source, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
@@ -251,7 +256,7 @@ func TestConnectImplicitConfiguredLoopbackUsesPathFreeBoot(t *testing.T) {
 	}
 }
 
-func TestConnectImplicitWorkspaceRemoteThreadsPlaintextAuthOptions(t *testing.T) {
+func TestConnectImplicitWorkspaceRemoteThreadsPlaintextAuthOptions(t *testing.T) { //nolint:paralleltest // changes working directory; swaps package var bootResolveScopeForTUI
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_AUTH_TOKEN", "workspace-token")
@@ -298,7 +303,7 @@ allow_insecure = true
 	require.NotNil(t, conn.sseHC)
 }
 
-func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *testing.T) {
+func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *testing.T) { //nolint:paralleltest // changes working directory; swaps package var bootResolveScopeForTUI
 	oldRead := readDaemonConfigForTUI
 	oldEnsure := ensureResolvedForTUI
 	oldEnsureLocal := ensureLocalRunningTargetForTUI
@@ -349,7 +354,7 @@ func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *t
 	assert.Equal(t, viewEmpty, conn.init.view)
 }
 
-func TestBootDaemonConnectionDefinitiveTargetSkipsCWDResolution(t *testing.T) {
+func TestBootDaemonConnectionDefinitiveTargetSkipsCWDResolution(t *testing.T) { //nolint:paralleltest // swaps package var bootResolveScopeForTUI; swaps package var ensureResolvedForTUI
 	oldRead := readDaemonConfigForTUI
 	oldEnsure := ensureResolvedForTUI
 	oldNewClient := newHTTPClientForTUI
@@ -384,7 +389,7 @@ func TestBootDaemonConnectionDefinitiveTargetSkipsCWDResolution(t *testing.T) {
 	}
 }
 
-func TestBootDaemonConnectionOptionsDaemonNameOverridesActiveDaemon(t *testing.T) {
+func TestBootDaemonConnectionOptionsDaemonNameOverridesActiveDaemon(t *testing.T) { //nolint:paralleltest // swaps package var connectDaemonTargetForTUI; swaps package var readDaemonConfigForTUI
 	oldRead := readDaemonConfigForTUI
 	oldConnect := connectDaemonTargetForTUI
 	t.Cleanup(func() {
@@ -426,7 +431,7 @@ func TestBootDaemonConnectionOptionsDaemonNameOverridesActiveDaemon(t *testing.T
 	}
 }
 
-func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testing.T) {
+func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testing.T) { //nolint:paralleltest // swaps package var bootResolveScopeForTUI; swaps package var bootResolveScopePathFreeForTUI
 	oldRead := readDaemonConfigForTUI
 	oldEnsure := ensureResolvedForTUI
 	oldNewClient := newHTTPClientForTUI
@@ -464,7 +469,7 @@ func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testin
 	assert.Equal(t, "daemon.example:7777", daemonTargetDisplay(conn.target))
 }
 
-func TestResolvedImplicitRemoteTargetCarriesEnvAllowInsecure(t *testing.T) {
+func TestResolvedImplicitRemoteTargetCarriesEnvAllowInsecure(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SERVER and KATA_ALLOW_INSECURE
 	srv := startTUIPingServer(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", srv.URL)
@@ -477,7 +482,7 @@ func TestResolvedImplicitRemoteTargetCarriesEnvAllowInsecure(t *testing.T) {
 	assert.True(t, resolved.AllowInsecure)
 }
 
-func TestResolvedImplicitRemoteTargetCarriesGlobalAuthToken(t *testing.T) {
+func TestResolvedImplicitRemoteTargetCarriesGlobalAuthToken(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SERVER and KATA_ALLOW_INSECURE
 	srv := startTUIPingServer(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", srv.URL)
@@ -491,7 +496,7 @@ func TestResolvedImplicitRemoteTargetCarriesGlobalAuthToken(t *testing.T) {
 	assert.Equal(t, "global-token", resolved.Token)
 }
 
-func TestResolvedImplicitRemoteTargetEnvTokenOverridesAuthConfig(t *testing.T) {
+func TestResolvedImplicitRemoteTargetEnvTokenOverridesAuthConfig(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and KATA_AUTOSTART
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_AUTH_TOKEN", "client-db-token")
@@ -508,7 +513,7 @@ func TestResolvedImplicitRemoteTargetEnvTokenOverridesAuthConfig(t *testing.T) {
 	assert.Equal(t, "client-db-token", resolved.Token)
 }
 
-func TestConnectResolvedImplicitRemoteUsesEnvTokenForHTTPClient(t *testing.T) {
+func TestConnectResolvedImplicitRemoteUsesEnvTokenForHTTPClient(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and KATA_AUTOSTART; swaps package var bootResolveScopeForTUI
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_AUTH_TOKEN", "client-db-token")
@@ -548,7 +553,7 @@ func TestConnectResolvedImplicitRemoteUsesEnvTokenForHTTPClient(t *testing.T) {
 	assert.Equal(t, "client-db-token", conn.target.resolved.Token)
 }
 
-func TestNewHTTPClientForTUIResolvedImplicitRemoteHonorsTrustPrivateNetwork(t *testing.T) {
+func TestNewHTTPClientForTUIResolvedImplicitRemoteHonorsTrustPrivateNetwork(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and KATA_TRUST_PRIVATE_NETWORK
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
@@ -566,7 +571,7 @@ func TestNewHTTPClientForTUIResolvedImplicitRemoteHonorsTrustPrivateNetwork(t *t
 	require.NoError(t, err)
 }
 
-func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
+func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -591,7 +596,7 @@ func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 	assert.Equal(t, "Bearer global-token", gotAuth)
 }
 
-func TestNewHTTPClientForTUIExplicitLocalBypassesActiveDaemonAuth(t *testing.T) {
+func TestNewHTTPClientForTUIExplicitLocalBypassesActiveDaemonAuth(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_REMOTE_TOKEN; swaps package var ensureResolvedNamedForTUI
 	originalEnsureResolvedNamed := ensureResolvedNamedForTUI
 	t.Cleanup(func() { ensureResolvedNamedForTUI = originalEnsureResolvedNamed })
 	home := t.TempDir()
@@ -640,7 +645,7 @@ token_env = "KATA_REMOTE_TOKEN"
 	assert.Equal(t, "Bearer global-token", gotAuth)
 }
 
-func TestNewHTTPClientForTUIExplicitRemoteAuthTokenEnvOverridesCatalogToken(t *testing.T) {
+func TestNewHTTPClientForTUIExplicitRemoteAuthTokenEnvOverridesCatalogToken(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "env-token")
 	var gotAuth string
@@ -665,7 +670,7 @@ func TestNewHTTPClientForTUIExplicitRemoteAuthTokenEnvOverridesCatalogToken(t *t
 	assert.Equal(t, "Bearer env-token", gotAuth)
 }
 
-func TestNewHTTPClientForTUIImplicitRemoteFallsBackToGlobalAuth(t *testing.T) {
+func TestNewHTTPClientForTUIImplicitRemoteFallsBackToGlobalAuth(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -689,7 +694,7 @@ func TestNewHTTPClientForTUIImplicitRemoteFallsBackToGlobalAuth(t *testing.T) {
 	assert.Equal(t, "Bearer global-token", gotAuth)
 }
 
-func TestNewHTTPClientForTUIImplicitRemoteAnchorsCompatibilityToWorkspace(t *testing.T) {
+func TestNewHTTPClientForTUIImplicitRemoteAnchorsCompatibilityToWorkspace(t *testing.T) { //nolint:paralleltest // changes working directory; sets KATA_HOME and KATA_AUTH_TOKEN and KATA_SERVER
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_AUTH_TOKEN", "")
@@ -740,7 +745,7 @@ token_env = "KATA_MISSING_TOKEN"
 	assert.Equal(t, "Bearer global-token", gotAuth)
 }
 
-func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {
+func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) { //nolint:paralleltest // swaps package var bootResolveScopeForTUI; swaps package var bootResolveScopePathFreeForTUI
 	oldEnsureResolvedNamed := ensureResolvedNamedForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
@@ -788,7 +793,7 @@ func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {
 	assert.Equal(t, "shared", conn.target.Name)
 }
 
-func TestConnectDaemonTargetCarriesResolvedProvenance(t *testing.T) {
+func TestConnectDaemonTargetCarriesResolvedProvenance(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and HUB_TOKEN_ENV; swaps package var bootResolveScopePathFreeForTUI
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_AUTH_TOKEN", "")
@@ -836,7 +841,7 @@ token_env = "HUB_TOKEN_ENV"
 	assert.Equal(t, "catalog-token", conn.target.resolved.Token)
 }
 
-func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
+func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) { //nolint:paralleltest // sets KATA_WORK_TOKEN; swaps package var bootResolveScopeForTUI
 	oldEnsureResolvedNamed := ensureResolvedNamedForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
@@ -878,7 +883,7 @@ func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
 	assert.Equal(t, "secret-from-env", conn.target.resolved.Token)
 }
 
-func TestConnectDaemonTargetRemoteAuthTokenEnvOverridesUnsetTokenEnv(t *testing.T) {
+func TestConnectDaemonTargetRemoteAuthTokenEnvOverridesUnsetTokenEnv(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN and KATA_HOME and KATA_WORK_TOKEN; swaps package var bootResolveScopeForTUI
 	oldEnsureResolvedNamed := ensureResolvedNamedForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
@@ -922,7 +927,7 @@ func TestConnectDaemonTargetRemoteAuthTokenEnvOverridesUnsetTokenEnv(t *testing.
 	assert.Equal(t, "env-token", conn.target.resolved.Token)
 }
 
-func TestConnectResolvedLocalTargetRetryRefreshPreservesTargetToken(t *testing.T) {
+func TestConnectResolvedLocalTargetRetryRefreshPreservesTargetToken(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; swaps package var bootResolveScopeForTUI
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix sockets are unsupported on Windows")
 	}
@@ -1010,7 +1015,7 @@ func TestConnectResolvedLocalTargetRetryRefreshPreservesTargetToken(t *testing.T
 	assert.Equal(t, "Bearer target-token", gotAuth)
 }
 
-func TestConnectDaemonTargetRemoteRejectsUnsetTokenEnvOnUse(t *testing.T) {
+func TestConnectDaemonTargetRemoteRejectsUnsetTokenEnvOnUse(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_WORK_TOKEN
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_WORK_TOKEN", "")
@@ -1029,7 +1034,7 @@ token_env = "KATA_WORK_TOKEN"
 	assert.Contains(t, err.Error(), "KATA_WORK_TOKEN")
 }
 
-func TestBuildRunModelCarriesDaemonMetadata(t *testing.T) {
+func TestBuildRunModelCarriesDaemonMetadata(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	conn := daemonConnection{
 		target:  daemonTarget{Name: "shared", URL: "https://kata.example.test"},
 		catalog: []daemonTarget{{Name: "local", Local: true}, {Name: "shared", URL: "https://kata.example.test"}},
@@ -1043,6 +1048,7 @@ func TestBuildRunModelCarriesDaemonMetadata(t *testing.T) {
 }
 
 func TestDaemonConnectionUsesSSEHeaderTimeout(t *testing.T) {
+	t.Parallel()
 	opts := optsForKind(clientOptsSSE)
 
 	assert.Equal(t, clientSSEHandshakeTimeout(), opts.ResponseHeaderTimeout)

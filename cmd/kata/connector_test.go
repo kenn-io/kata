@@ -193,7 +193,7 @@ func connectorMappingFixture(active bool) map[string]any {
 	}
 }
 
-func TestConnectorRootHelpRegistersEveryCommand(t *testing.T) {
+func TestConnectorRootHelpRegistersEveryCommand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	root := newRootCmd()
 	rootHelp := string(executeRoot(t, newRootCmd(), "--help"))
 	assert.Contains(t, rootHelp, "connector")
@@ -224,7 +224,7 @@ func TestConnectorRootHelpRegistersEveryCommand(t *testing.T) {
 	}
 }
 
-func TestConnectorMapFieldUsesExactBidirectionalPayload(t *testing.T) {
+func TestConnectorMapFieldUsesExactBidirectionalPayload(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	root := newRootCmd()
 	cmd, _, err := root.Find([]string{"connector", "field", "map"})
 	require.NoError(t, err)
@@ -252,7 +252,7 @@ func TestConnectorMapFieldUsesExactBidirectionalPayload(t *testing.T) {
 	assert.Nil(t, requests[0].Body)
 }
 
-func TestConnectorProcessCallsUseLongRunningClient(t *testing.T) {
+func TestConnectorProcessCallsUseLongRunningClient(t *testing.T) { //nolint:paralleltest // sets KATA_HTTP_TIMEOUT; newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	f.connectorDelay = true
 	t.Setenv("KATA_HTTP_TIMEOUT", "500ms")
@@ -270,7 +270,7 @@ func TestConnectorProcessCallsUseLongRunningClient(t *testing.T) {
 	}
 }
 
-func TestConnectorEveryCommandRendersHumanJSONAndAgent(t *testing.T) {
+func TestConnectorEveryCommandRendersHumanJSONAndAgent(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	tests := []struct {
 		name      string
@@ -308,7 +308,7 @@ func TestConnectorEveryCommandRendersHumanJSONAndAgent(t *testing.T) {
 	}
 }
 
-func TestConnectorHumanOutputContainsOnlyPublicStatus(t *testing.T) {
+func TestConnectorHumanOutputContainsOnlyPublicStatus(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	for _, mode := range []string{"", "--agent"} {
 		for _, command := range [][]string{{"connector", "list"}, {"connector", "status", "example-connector"}} {
@@ -325,7 +325,7 @@ func TestConnectorHumanOutputContainsOnlyPublicStatus(t *testing.T) {
 	}
 }
 
-func TestConnectorMissingInstanceKeepsSafeDaemonError(t *testing.T) {
+func TestConnectorMissingInstanceKeepsSafeDaemonError(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	f.fail(http.MethodGet, "/api/v1/connectors/example-connector", http.StatusNotFound, map[string]any{
 		"error": map[string]any{"code": "connector_not_found", "message": "connector instance was not found", "detail": "diagnostic-sentinel"},
@@ -341,7 +341,7 @@ func TestConnectorMissingInstanceKeepsSafeDaemonError(t *testing.T) {
 	assert.NotContains(t, cli.Error(), "diagnostic-sentinel")
 }
 
-func TestExternalCommandsRedactMalformedErrorBodiesInEveryOutputMode(t *testing.T) {
+func TestExternalCommandsRedactMalformedErrorBodiesInEveryOutputMode(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	const rawDiagnostic = "upstream private diagnostic: credential=diagnostic-sentinel root_binding=opaque-private-value"
 	tests := []struct {
 		name    string
@@ -399,11 +399,13 @@ func TestExternalCommandsRedactMalformedErrorBodiesInEveryOutputMode(t *testing.
 }
 
 func TestExternalCLIResponseErrorPreservesTransportError(t *testing.T) {
+	t.Parallel()
 	transportErr := errors.New("transport-sentinel")
 	assert.Same(t, transportErr, externalCLIResponseError(0, nil, transportErr))
 }
 
 func TestExternalCLITransportGuardAndConcreteEnvelopeHandling(t *testing.T) {
+	t.Parallel()
 	transportErr := errors.New("transport-sentinel")
 	assert.Same(t, transportErr, externalCLITransportError((*generated.GetConnectorStatusResp)(nil), transportErr))
 

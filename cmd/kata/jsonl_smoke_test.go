@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestSmoke_ExportImport(t *testing.T) {
+func TestSmoke_ExportImport(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 

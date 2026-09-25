@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRestore_ClearsDeletedAt(t *testing.T) {
+func TestRestore_ClearsDeletedAt(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	short := createIssue(t, env, pid, "delete me")
 
@@ -15,7 +15,7 @@ func TestRestore_ClearsDeletedAt(t *testing.T) {
 	assert.Contains(t, output, "restored")
 }
 
-func TestRestore_AgentOutput(t *testing.T) {
+func TestRestore_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	short := createIssue(t, env, pid, "delete me")
 	runCLI(t, env, dir, "delete", short, "--force", "--confirm", "DELETE kata#"+short)

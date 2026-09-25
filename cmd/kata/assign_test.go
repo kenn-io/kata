@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAssign_RoundTrip(t *testing.T) {
+func TestAssign_RoundTrip(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "x")
 
 	out := runCLI(t, env, dir, "assign", ref, "alice")
@@ -19,7 +19,7 @@ func TestAssign_RoundTrip(t *testing.T) {
 	assert.True(t, strings.Contains(uOut, "unassigned"))
 }
 
-func TestAssign_AgentOutput(t *testing.T) {
+func TestAssign_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "x")
 
 	out := runCLI(t, env, dir, "--agent", "assign", ref, "wesm")
@@ -28,7 +28,7 @@ func TestAssign_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Owner: wesm")
 }
 
-func TestUnassign_AgentOutput(t *testing.T) {
+func TestUnassign_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "x")
 	runCLI(t, env, dir, "assign", ref, "wesm")
 
@@ -39,7 +39,7 @@ func TestUnassign_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Owner-Cleared: true")
 }
 
-func TestAssign_WithComment_AppendsComment(t *testing.T) {
+func TestAssign_WithComment_AppendsComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "x")
 
 	runCLI(t, env, dir, "assign", ref, "alice", "--comment", "owns the auth area")
@@ -49,7 +49,7 @@ func TestAssign_WithComment_AppendsComment(t *testing.T) {
 	assert.Equal(t, "owns the auth area", got.Comments[0].Body)
 }
 
-func TestUnassign_WithComment_AppendsComment(t *testing.T) {
+func TestUnassign_WithComment_AppendsComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "x")
 	runCLI(t, env, dir, "assign", ref, "alice")
 
@@ -60,7 +60,7 @@ func TestUnassign_WithComment_AppendsComment(t *testing.T) {
 	assert.Equal(t, "rolling off", got.Comments[0].Body)
 }
 
-func TestUnassign_ExpectOwnerMatches(t *testing.T) {
+func TestUnassign_ExpectOwnerMatches(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "x")
 	runCLI(t, env, dir, "assign", ref, "agent-a")
 
@@ -69,7 +69,7 @@ func TestUnassign_ExpectOwnerMatches(t *testing.T) {
 	assert.Contains(t, out, "unassigned")
 }
 
-func TestUnassign_ExpectOwnerMismatchDoesNotAppendComment(t *testing.T) {
+func TestUnassign_ExpectOwnerMismatchDoesNotAppendComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "x")
 	runCLI(t, env, dir, "assign", ref, "agent-b")
 
@@ -82,7 +82,7 @@ func TestUnassign_ExpectOwnerMismatchDoesNotAppendComment(t *testing.T) {
 	assert.Empty(t, got.Comments)
 }
 
-func TestUnassign_BlankExpectOwnerIsValidationError(t *testing.T) {
+func TestUnassign_BlankExpectOwnerIsValidationError(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, expected := range []string{"", "   "} {
 		t.Run("value="+expected, func(t *testing.T) {
 			env, dir, _, ref := setupWorkspaceWithIssue(t, "x")

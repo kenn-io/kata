@@ -33,6 +33,7 @@ func row(glyph, idPadded, prio, chips, title, owner string) string {
 }
 
 func TestRenderRows_ColorOff(t *testing.T) {
+	t.Parallel()
 	r := newRowRendererFor(colorprofile.NoTTY)
 
 	t.Run("open row with P1 and epic chip", func(t *testing.T) {
@@ -170,6 +171,7 @@ func TestRenderRows_ColorOff(t *testing.T) {
 }
 
 func TestRenderListFooter_ColorOff(t *testing.T) {
+	t.Parallel()
 	r := newRowRendererFor(colorprofile.NoTTY)
 
 	const rule = "──────────────────────────────────────────────────"
@@ -244,6 +246,7 @@ func TestRenderListFooter_ColorOff(t *testing.T) {
 }
 
 func TestRenderReadyFooter_ColorOff(t *testing.T) {
+	t.Parallel()
 	r := newRowRendererFor(colorprofile.NoTTY)
 
 	const rule = "──────────────────────────────────────────────────"
@@ -289,6 +292,7 @@ func TestRenderReadyFooter_ColorOff(t *testing.T) {
 // It also asserts that stripping the ANSI from the color-ON row yields
 // byte-identical output to the color-OFF rendering (layout invariance).
 func TestRenderRows_ColorOn(t *testing.T) {
+	t.Parallel()
 	r := newRowRendererFor(colorprofile.ANSI256)
 
 	rows := []issueRow{{
@@ -317,6 +321,7 @@ func TestRenderRows_ColorOn(t *testing.T) {
 // TestRenderListFooter_ColorOn pins the rule's and legend's exact ANSI
 // output (both faint).
 func TestRenderListFooter_ColorOn(t *testing.T) {
+	t.Parallel()
 	r := newRowRendererFor(colorprofile.ANSI256)
 
 	rows := []issueRow{{ID: "a1", Status: "open"}}
@@ -341,6 +346,7 @@ func TestRenderListFooter_ColorOn(t *testing.T) {
 // and confirms id-column alignment uses cell width, not len(), and does
 // not panic. "カタ1" is 5 cells wide (2 + 2 + 1).
 func TestRenderRows_WideGlyphID(t *testing.T) {
+	t.Parallel()
 	r := newRowRendererFor(colorprofile.NoTTY)
 
 	rows := []issueRow{
@@ -360,6 +366,7 @@ func TestRenderRows_WideGlyphID(t *testing.T) {
 // and doesn't perturb id-column alignment (the id column precedes the
 // title, so only id padding affects alignment).
 func TestRenderRows_WideGlyphTitle(t *testing.T) {
+	t.Parallel()
 	r := newRowRendererFor(colorprofile.NoTTY)
 
 	rows := []issueRow{
@@ -377,6 +384,7 @@ func TestRenderRows_WideGlyphTitle(t *testing.T) {
 }
 
 func TestNewRowRenderer(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	r := newRowRenderer(&buf)
 	require.NotNil(t, r)

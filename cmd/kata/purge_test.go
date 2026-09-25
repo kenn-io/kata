@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPurge_NoForceIsValidationError(t *testing.T) {
+func TestPurge_NoForceIsValidationError(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	short := createIssueViaHTTP(t, f.env, f.dir, "vaporize")
 
@@ -16,7 +16,7 @@ func TestPurge_NoForceIsValidationError(t *testing.T) {
 	_ = requireCLIError(t, err, ExitValidation)
 }
 
-func TestPurge_ForceWithConfirmRemovesEverything(t *testing.T) {
+func TestPurge_ForceWithConfirmRemovesEverything(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	short := createIssueViaHTTP(t, f.env, f.dir, "vaporize")
 
@@ -24,7 +24,7 @@ func TestPurge_ForceWithConfirmRemovesEverything(t *testing.T) {
 	assert.Contains(t, f.buf.String(), "purged")
 }
 
-func TestPurge_AgentOutput(t *testing.T) {
+func TestPurge_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	short := createIssueViaHTTP(t, env, dir, "vaporize")
 
@@ -38,7 +38,7 @@ func TestPurge_AgentOutput(t *testing.T) {
 // TestPurge_NoTTYNoConfirmIsConfirmRequired mirrors the delete coverage:
 // non-terminal stdin + missing --confirm must surface as exit 6
 // confirm_required, not as a confirm_mismatch from an empty TTY read.
-func TestPurge_NoTTYNoConfirmIsConfirmRequired(t *testing.T) {
+func TestPurge_NoTTYNoConfirmIsConfirmRequired(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	stubIsTTY(t, false)
 	f := newCLIFixture(t)
 	short := createIssueViaHTTP(t, f.env, f.dir, "vaporize")
@@ -51,7 +51,7 @@ func TestPurge_NoTTYNoConfirmIsConfirmRequired(t *testing.T) {
 // TestPurge_ReasonFlagPersistsToPurgeLog verifies that `--reason "..."`
 // flows through the CLI → HTTP body → daemon → DB so the purge_log.reason
 // column captures the operator's free-text justification.
-func TestPurge_ReasonFlagPersistsToPurgeLog(t *testing.T) {
+func TestPurge_ReasonFlagPersistsToPurgeLog(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	short := createIssueViaHTTP(t, f.env, f.dir, "vaporize")
 

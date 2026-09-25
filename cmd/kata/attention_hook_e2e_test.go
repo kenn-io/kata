@@ -46,7 +46,7 @@ func attnMetaValue(t *testing.T, env *testenv.Env, pid int64, ref, key string) (
 	return value, true
 }
 
-func TestE2E_AttentionHook_StartSetsOnlyAttentionFromKataRef(t *testing.T) {
+func TestE2E_AttentionHook_StartSetsOnlyAttentionFromKataRef(t *testing.T) { //nolint:paralleltest // sets KATA_REF; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "launcher-tracked work")
 	runCLI(t, env, dir, "meta", "set", ref, attentionMsgKey, "existing context")
@@ -62,7 +62,7 @@ func TestE2E_AttentionHook_StartSetsOnlyAttentionFromKataRef(t *testing.T) {
 	assert.Equal(t, "existing context", message)
 }
 
-func TestE2E_AttentionHook_EndEscalatesDirectlyFromKataRefWithoutState(t *testing.T) {
+func TestE2E_AttentionHook_EndEscalatesDirectlyFromKataRefWithoutState(t *testing.T) { //nolint:paralleltest // sets KATA_REF; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "unhanded-off work")
 	runCLI(t, env, dir, "meta", "set", ref, attentionKey, attnValueOK)
@@ -80,7 +80,7 @@ func TestE2E_AttentionHook_EndEscalatesDirectlyFromKataRefWithoutState(t *testin
 	assert.Equal(t, attnHandoffMsg, message)
 }
 
-func TestE2E_AttentionHook_EndSkipsClosedIssue(t *testing.T) {
+func TestE2E_AttentionHook_EndSkipsClosedIssue(t *testing.T) { //nolint:paralleltest // sets KATA_REF; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "closed before session end")
 	runCLI(t, env, dir, "meta", "set", ref, attentionKey, attnValueOK)
@@ -98,7 +98,7 @@ func TestE2E_AttentionHook_EndSkipsClosedIssue(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestE2E_AttentionHook_ConditionalEndRejectsConcurrentChange(t *testing.T) {
+func TestE2E_AttentionHook_ConditionalEndRejectsConcurrentChange(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "concurrent hand-off")
 	runCLI(t, env, dir, "meta", "set", ref, attentionKey, attnValueOK)

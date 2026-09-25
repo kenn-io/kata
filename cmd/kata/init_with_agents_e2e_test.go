@@ -18,7 +18,7 @@ import (
 // TestE2E_InitWithAgents_NewEmptyRepo is the happy path: a fresh git repo with
 // no agent docs. init binds the project and writes AGENTS.md, and does not
 // fabricate a CLAUDE.md.
-func TestE2E_InitWithAgents_NewEmptyRepo(t *testing.T) {
+func TestE2E_InitWithAgents_NewEmptyRepo(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir := t.TempDir()
@@ -40,7 +40,7 @@ func TestE2E_InitWithAgents_NewEmptyRepo(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(dir, "CLAUDE.md"))
 }
 
-func TestE2E_QuickstartContractDoesNotInitializeWorkspace(t *testing.T) {
+func TestE2E_QuickstartContractDoesNotInitializeWorkspace(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir := t.TempDir()
@@ -57,7 +57,7 @@ func TestE2E_QuickstartContractDoesNotInitializeWorkspace(t *testing.T) {
 // TestE2E_InitWithAgents_PreservesExistingAgentDocs runs init in a repo that
 // already ships a CLAUDE.md and an AGENTS.md full of unrelated guidance. Both
 // files keep their existing content and gain kata's appended block.
-func TestE2E_InitWithAgents_PreservesExistingAgentDocs(t *testing.T) {
+func TestE2E_InitWithAgents_PreservesExistingAgentDocs(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir := t.TempDir()
@@ -93,7 +93,7 @@ func TestE2E_InitWithAgents_PreservesExistingAgentDocs(t *testing.T) {
 // `kata init --with-agents` and then `kata import --source-format beads`. The
 // issues import and the AGENTS.md retains both the legacy content and kata's
 // block through the whole flow.
-func TestE2E_InitWithAgents_ThenBeadsImport(t *testing.T) {
+func TestE2E_InitWithAgents_ThenBeadsImport(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir := t.TempDir()

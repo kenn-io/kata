@@ -156,7 +156,7 @@ func view(m Model) string { return stripANSI(m.viewContent()) }
 // event), so PageDown is the dedicated body-scroll key. Snapshot
 // tests didn't catch it because the bug was about an interaction,
 // not a static frame.
-func TestScenario_ReadAnIssue_BodyScrollsOnPageDown(t *testing.T) {
+func TestScenario_ReadAnIssue_BodyScrollsOnPageDown(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	body := strings.Repeat("scrollable line\n", 60) + "TAIL_MARKER"
 	m := setupDetailScenario(t, 120, 30, body)
 	assertViewMissing(t, m, "TAIL_MARKER")
@@ -168,7 +168,7 @@ func TestScenario_ReadAnIssue_BodyScrollsOnPageDown(t *testing.T) {
 // helpers never produce a negative offset: PgUp at the top scrolls
 // past zero only if the clamp is broken, in which case the renderer
 // would slice an empty window and lose the body's first line.
-func TestScenario_ReadAnIssue_PageUpClampsAtTop(t *testing.T) {
+func TestScenario_ReadAnIssue_PageUpClampsAtTop(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	body := "FIRST_LINE_MARKER\n" + strings.Repeat("filler line\n", 30)
 	m := setupDetailScenario(t, 120, 30, body)
 	m = pressN(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp}, 5)
@@ -185,7 +185,7 @@ func TestScenario_ReadAnIssue_PageUpClampsAtTop(t *testing.T) {
 // never reached the body. With the unified-viewport refactor, ↑/↓ is
 // always document scroll — on a short terminal full of body the user
 // can read past the visible window without learning PgUp/PgDn.
-func TestScenario_ReadAnIssue_ArrowKeysScrollOnShortTerminal(t *testing.T) {
+func TestScenario_ReadAnIssue_ArrowKeysScrollOnShortTerminal(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	body := strings.Repeat("scrollable line\n", 80) + "ARROW_TAIL_MARKER"
 	m := setupDetailScenario(t, 120, 24, body)
 	assertViewMissing(t, m, "ARROW_TAIL_MARKER")
@@ -198,7 +198,7 @@ func TestScenario_ReadAnIssue_ArrowKeysScrollOnShortTerminal(t *testing.T) {
 // where Tab gets silently swallowed (e.g. eaten by an open modal,
 // double-bound, or clobbered by a global handler), which a snapshot
 // of one focus state can't see.
-func TestScenario_NavigateTabs_TabAdvancesActiveSection(t *testing.T) {
+func TestScenario_NavigateTabs_TabAdvancesActiveSection(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDetailScenario(t, 120, 30, "short body")
 	assertViewContains(t, m, "[ Comments (1) ]")
 	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
@@ -211,7 +211,7 @@ func TestScenario_NavigateTabs_TabAdvancesActiveSection(t *testing.T) {
 // Bubble Tea uses in the real TUI: Esc reaches the detail view, which
 // returns a popDetailMsg command, and the command is then fed back into
 // Model.Update. A submodel-only test can miss this parent handoff.
-func TestScenario_EscReturnsFromStackedDetailToList(t *testing.T) {
+func TestScenario_EscReturnsFromStackedDetailToList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDetailScenario(t, 120, 30, "short body")
 	if m.view != viewDetail {
 		t.Fatalf("setup: view=%v, want viewDetail", m.view)
@@ -227,7 +227,7 @@ func TestScenario_EscReturnsFromStackedDetailToList(t *testing.T) {
 // mode; Esc should make the list the active view again so future
 // overlays, layout flips, and model-level gates agree with what the
 // user just did.
-func TestScenario_EscReturnsFromSplitDetailToList(t *testing.T) {
+func TestScenario_EscReturnsFromSplitDetailToList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDetailScenario(t, 200, 40, "short body")
 	assertViewState(t, m, splitlayout.Split, viewDetail, focusDetail)
 	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -243,7 +243,7 @@ func TestScenario_EscReturnsFromSplitDetailToList(t *testing.T) {
 // nested detail jump in split mode. Esc must first unwind the detail
 // nav stack, matching Backspace and stacked detail behavior; only a
 // second back action should leave the detail pane.
-func TestScenario_EscPopsSplitDetailNavStackBeforeLeavingPane(t *testing.T) {
+func TestScenario_EscPopsSplitDetailNavStackBeforeLeavingPane(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDetailScenario(t, 200, 40, "parent body")
 	parent := m.detail
 	child := Issue{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Title: "child task", Status: "open"}
@@ -271,7 +271,7 @@ func TestScenario_EscPopsSplitDetailNavStackBeforeLeavingPane(t *testing.T) {
 // other key advertised by "esc/backspace back". Backspace reaches the
 // detail model first, then emits popDetailMsg; the parent handler must
 // clear split focus as well as view state.
-func TestScenario_BackspaceReturnsFromSplitDetailToList(t *testing.T) {
+func TestScenario_BackspaceReturnsFromSplitDetailToList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDetailScenario(t, 200, 40, "short body")
 	assertViewState(t, m, splitlayout.Split, viewDetail, focusDetail)
 	m = sendKeyAndDrain(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
@@ -287,7 +287,7 @@ func TestScenario_BackspaceReturnsFromSplitDetailToList(t *testing.T) {
 // triggers split layout, pressing L flips to stacked. Catches the L
 // keymap conflict (pre-93e37ec, L in detail opened the link prompt
 // instead of toggling).
-func TestScenario_LayoutToggle_LFlipsAtSplitEligibleSize(t *testing.T) {
+func TestScenario_LayoutToggle_LFlipsAtSplitEligibleSize(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := scenarioModel(t, 200, 40)
 	if m.layout != splitlayout.Split {
 		t.Fatalf("setup: layout=%v, want splitlayout.Split at 200x40", m.layout)
@@ -301,7 +301,7 @@ func TestScenario_LayoutToggle_LFlipsAtSplitEligibleSize(t *testing.T) {
 	}
 }
 
-func TestScenario_ChildSortToggle_OFlipsBetweenTopologicalAndTemporal(t *testing.T) {
+func TestScenario_ChildSortToggle_OFlipsBetweenTopologicalAndTemporal(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := scenarioModel(t, 120, 30)
 	if m.list.childSort != childSortTopological {
 		t.Fatalf("default child sort = %v, want topological", m.list.childSort)
@@ -322,7 +322,7 @@ func TestScenario_ChildSortToggle_OFlipsBetweenTopologicalAndTemporal(t *testing
 // pressed L, a subsequent WindowSizeMsg cannot revert the layout via
 // splitlayout.PickLayout. Without the lock, "I pinned stacked, then resized" would
 // silently auto-flip back to split.
-func TestScenario_LayoutToggle_LStaysAcrossResize(t *testing.T) {
+func TestScenario_LayoutToggle_LStaysAcrossResize(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := scenarioModel(t, 200, 40)
 	m = pressRune(t, m, 'L')
 	if m.layout != splitlayout.Stacked {
@@ -342,7 +342,7 @@ func TestScenario_LayoutToggle_LStaysAcrossResize(t *testing.T) {
 // again must return to split. Before the fix, m.layout was stomped
 // with the degraded value and the split preference vanished, so the
 // terminal staying wide forever after still rendered stacked.
-func TestScenario_LayoutToggle_NarrowThenWidePreservesSplitIntent(t *testing.T) {
+func TestScenario_LayoutToggle_NarrowThenWidePreservesSplitIntent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := scenarioModel(t, 200, 40)
 	if m.layout != splitlayout.Split {
 		t.Fatalf("setup: layout=%v, want splitlayout.Split at 200x40", m.layout)
@@ -377,7 +377,7 @@ func TestScenario_LayoutToggle_NarrowThenWidePreservesSplitIntent(t *testing.T) 
 // link-input prompt. Two assertions are independent — a regression
 // that flips one but not both must still fail (roborev #17192
 // finding 1).
-func TestScenario_LDoesNotOpenLinkPromptInDetail(t *testing.T) {
+func TestScenario_LDoesNotOpenLinkPromptInDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDetailScenario(t, 200, 40, "short body")
 	prevLayout := m.layout
 	m = pressRune(t, m, 'L')
@@ -395,7 +395,7 @@ func TestScenario_LDoesNotOpenLinkPromptInDetail(t *testing.T) {
 // TestScenario_LowercaseLOpensLinkPromptInDetail: the matching
 // positive path — lowercase l should still open the link prompt. If
 // this test fails, AddLink got accidentally rebound or removed.
-func TestScenario_LowercaseLOpensLinkPromptInDetail(t *testing.T) {
+func TestScenario_LowercaseLOpensLinkPromptInDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDetailScenario(t, 120, 30, "short body")
 	m = sendKeyAndDrain(t, m, runeKey('l'))
 	if m.input.kind != inputLinkPrompt {
@@ -436,7 +436,7 @@ func sendKeyAndDrain(t *testing.T, m Model, msg tea.KeyPressMsg) Model {
 // build a fetch cmd without a client), so we hand it a stub *Client.
 // The cmd it returns isn't invoked — we just assert it was produced,
 // which proves the SSE → detail-refetch routing is intact.
-func TestScenario_ChildCreatedRefetchesParentDetail(t *testing.T) {
+func TestScenario_ChildCreatedRefetchesParentDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := scenarioModel(t, 120, 30)
 	m.api = NewClient("http://kata.invalid", nil)
 	m = scenarioOpenDetail(t, m, "short body")
@@ -464,7 +464,7 @@ func TestScenario_ChildCreatedRefetchesParentDetail(t *testing.T) {
 // children-focus + long body case. Even when the cursor is parked
 // on the children list, PageDown should still advance the body
 // scroll — the body-scroll keys are intentionally focus-agnostic.
-func TestScenario_BodyScrollWorksWhileChildrenFocused(t *testing.T) {
+func TestScenario_BodyScrollWorksWhileChildrenFocused(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	body := strings.Repeat("scrollable line\n", 60) + "BODY_TAIL"
 	m := setupDetailScenario(t, 120, 30, body)
 	// Seed a child so children focus is reachable.

@@ -12,7 +12,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestTeammateCLICommentReadback(t *testing.T) {
+func TestTeammateCLICommentReadback(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	t.Setenv("KATA_TEAMMATE", "reviewer-7")
 	short := createIssue(t, env, pid, "Existing issue")
@@ -29,7 +29,7 @@ func TestTeammateCLICommentReadback(t *testing.T) {
 	require.Equal(t, "implementer-3", got.Comments[2].Teammate)
 }
 
-func TestTeammateCLICreateMetadata(t *testing.T) {
+func TestTeammateCLICreateMetadata(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	t.Setenv("KATA_TEAMMATE", "reviewer-7")
 	for _, tc := range []struct {
@@ -72,7 +72,7 @@ func TestTeammateCLICreateMetadata(t *testing.T) {
 	}
 }
 
-func TestTeammateFollowupRejectsBeforePrimaryMutation(t *testing.T) {
+func TestTeammateFollowupRejectsBeforePrimaryMutation(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	for _, handle := range []string{"reviewer-7", "bad/handle"} {
 		t.Run(handle, func(t *testing.T) {
 			t.Setenv("KATA_TEAMMATE", handle)
@@ -109,7 +109,7 @@ func TestTeammateFollowupRejectsBeforePrimaryMutation(t *testing.T) {
 	}
 }
 
-func TestTeammateCLIFollowupCommands(t *testing.T) {
+func TestTeammateCLIFollowupCommands(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	t.Setenv("KATA_TEAMMATE", "reviewer-7")
 	for _, tc := range []struct {
@@ -149,7 +149,7 @@ func TestTeammateCLIFollowupCommands(t *testing.T) {
 	}
 }
 
-func TestTeammateCLICloseRetryAfterMove(t *testing.T) {
+func TestTeammateCLICloseRetryAfterMove(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "Retry work")
 	t.Setenv("KATA_TEAMMATE", "reviewer-7")
 	args := []string{"close", ref, "--done", "--message", "Implemented requested behavior and verified the focused test suite.", "--test", "go test ./cmd/kata", "--comment", "check retries", "--idempotency-key", "teammate-close-retry"}
@@ -170,7 +170,7 @@ func TestTeammateCLICloseRetryAfterMove(t *testing.T) {
 	require.Equal(t, "reviewer-7", comments[0].Teammate)
 }
 
-func TestTeammateCLIMoveFollowup(t *testing.T) {
+func TestTeammateCLIMoveFollowup(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	env, dir, source, target, issue := setupMoveCLIProjects(t)
 	t.Setenv("KATA_TEAMMATE", "reviewer-7")
 	runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name, "--comment", "relocated")
@@ -180,7 +180,7 @@ func TestTeammateCLIMoveFollowup(t *testing.T) {
 	require.Equal(t, "reviewer-7", comments[0].Teammate)
 }
 
-func TestTeammateInvalidDefaultDoesNotAffectReadsOrUnattributedEdits(t *testing.T) {
+func TestTeammateInvalidDefaultDoesNotAffectReadsOrUnattributedEdits(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "Existing issue")
 	t.Setenv("KATA_TEAMMATE", "bad/handle")

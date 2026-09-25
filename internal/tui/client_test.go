@@ -57,7 +57,7 @@ func respondJSON(t *testing.T, w http.ResponseWriter, body any) {
 	}
 }
 
-func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
+func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	ctx := context.Background()
 	var spokeInstanceAuth, spokeStatusAuth, spokeJoinAuth string
@@ -205,6 +205,7 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 }
 
 func TestClientGetInstanceDecodesAuthPrincipal(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondJSON(t, w, map[string]any{
 			"instance_uid":   "01HZNQ7VFPK1XGD8R5MABCD4EA",
@@ -225,6 +226,7 @@ func TestClientGetInstanceDecodesAuthPrincipal(t *testing.T) {
 }
 
 func TestClientListTokensDecodesRedactedAuditInventory(t *testing.T) {
+	t.Parallel()
 	created := time.Date(2026, 9, 15, 10, 0, 0, 0, time.UTC)
 	observed := created.Add(time.Hour)
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -257,6 +259,7 @@ func TestClientListTokensDecodesRedactedAuditInventory(t *testing.T) {
 }
 
 func TestTUIHubAdminClientRejectsPlainHTTPHostnameWithoutAllowInsecure(t *testing.T) {
+	t.Parallel()
 	_, _, err := newHubAdminClient(context.Background(), daemonTarget{
 		Name: "hub",
 		URL:  "http://hub.internal:7777",
@@ -268,7 +271,7 @@ func TestTUIHubAdminClientRejectsPlainHTTPHostnameWithoutAllowInsecure(t *testin
 	assert.Contains(t, err.Error(), "allow_insecure")
 }
 
-func TestTUIHubAdminClientResolvesMatchedLeaveTargetTokenEnv(t *testing.T) {
+func TestTUIHubAdminClientResolvesMatchedLeaveTargetTokenEnv(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and HUB_ADMIN_TOKEN; applyColorMode rewrites package style vars
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("HUB_ADMIN_TOKEN", "catalog-env-token")
@@ -292,7 +295,7 @@ token_env = "HUB_ADMIN_TOKEN"
 	assert.Equal(t, srv.URL, resolved.resolved.BaseURL)
 }
 
-func TestTUIHubAdminClientDoesNotSendGlobalDaemonTokenToCatalogHub(t *testing.T) {
+func TestTUIHubAdminClientDoesNotSendGlobalDaemonTokenToCatalogHub(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and tt.tokenEnv
 	for _, tt := range []struct {
 		name       string
 		credential string
@@ -355,7 +358,7 @@ url = "`+srv.URL+`"
 	}
 }
 
-func TestTUIHubAdminClientInjectedRemoteRetainsPrivateNetworkTrustWithoutGlobalToken(t *testing.T) {
+func TestTUIHubAdminClientInjectedRemoteRetainsPrivateNetworkTrustWithoutGlobalToken(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN and KATA_TRUST_PRIVATE_NETWORK; applyColorMode rewrites package style vars
 	endpoint := "http://100.64.0.5:7777"
 	for _, tt := range []struct {
 		name   string
@@ -400,7 +403,7 @@ func TestTUIHubAdminClientInjectedRemoteRetainsPrivateNetworkTrustWithoutGlobalT
 	}
 }
 
-func TestTUIHubAdminClientLocalNamedTargetRetainsLocalDaemonGlobalAuth(t *testing.T) {
+func TestTUIHubAdminClientLocalNamedTargetRetainsLocalDaemonGlobalAuth(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_AUTH_TOKEN
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_AUTH_TOKEN", "local-daemon-token")
@@ -430,6 +433,7 @@ local = true
 }
 
 func TestTUIHubEnrollmentClientCarriesAllowInsecureForPlainHTTPHostname(t *testing.T) {
+	t.Parallel()
 	_, err := newHubEnrollmentClient(context.Background(), "http://hub.internal:7777", "enrollment-token", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "allow_insecure")
@@ -440,6 +444,7 @@ func TestTUIHubEnrollmentClientCarriesAllowInsecureForPlainHTTPHostname(t *testi
 }
 
 func TestClient_ListIssues_BuildsExpectedURLAndDecodes(t *testing.T) {
+	t.Parallel()
 	var gotURL string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotURL = r.URL.String()
@@ -464,6 +469,7 @@ func TestClient_ListIssues_BuildsExpectedURLAndDecodes(t *testing.T) {
 }
 
 func TestClient_ListIssues_SendsLimit(t *testing.T) {
+	t.Parallel()
 	var gotQuery string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
@@ -480,7 +486,7 @@ func TestClient_ListIssues_SendsLimit(t *testing.T) {
 	}
 }
 
-func TestClient_LocalUnixTransportFailureRetriesWithRefreshedClient(t *testing.T) {
+func TestClient_LocalUnixTransportFailureRetriesWithRefreshedClient(t *testing.T) { //nolint:paralleltest // swaps package var refreshLocalHTTPClientForTUI
 	oldRefresh := refreshLocalHTTPClientForTUI
 	t.Cleanup(func() { refreshLocalHTTPClientForTUI = oldRefresh })
 	var refreshed atomic.Bool
@@ -508,7 +514,7 @@ func TestClient_LocalUnixTransportFailureRetriesWithRefreshedClient(t *testing.T
 	assert.Equal(t, "aaa1", got[0].ShortID)
 }
 
-func TestClient_LocalUnixTransportFailureDoesNotRetryMutationWithoutIdempotencyKey(t *testing.T) {
+func TestClient_LocalUnixTransportFailureDoesNotRetryMutationWithoutIdempotencyKey(t *testing.T) { //nolint:paralleltest // swaps package var refreshLocalHTTPClientForTUI
 	oldRefresh := refreshLocalHTTPClientForTUI
 	t.Cleanup(func() { refreshLocalHTTPClientForTUI = oldRefresh })
 	var refreshed atomic.Bool
@@ -532,7 +538,7 @@ func TestClient_LocalUnixTransportFailureDoesNotRetryMutationWithoutIdempotencyK
 	assert.Contains(t, err.Error(), "local kata daemon connection failed")
 }
 
-func TestClient_LocalUnixTransportFailureRetriesMutationWithIdempotencyKey(t *testing.T) {
+func TestClient_LocalUnixTransportFailureRetriesMutationWithIdempotencyKey(t *testing.T) { //nolint:paralleltest // swaps package var refreshLocalHTTPClientForTUI
 	oldRefresh := refreshLocalHTTPClientForTUI
 	t.Cleanup(func() { refreshLocalHTTPClientForTUI = oldRefresh })
 	var refreshed atomic.Bool
@@ -562,7 +568,7 @@ func TestClient_LocalUnixTransportFailureRetriesMutationWithIdempotencyKey(t *te
 	assert.Equal(t, "create-issue-key", gotKey)
 }
 
-func TestClient_LocalUnixTransportFailureLogsAndHidesSyntheticHost(t *testing.T) {
+func TestClient_LocalUnixTransportFailureLogsAndHidesSyntheticHost(t *testing.T) { //nolint:paralleltest // swaps package var refreshLocalHTTPClientForTUI; swaps package var tuiClientLogPathForTUI
 	oldRefresh := refreshLocalHTTPClientForTUI
 	oldLogPath := tuiClientLogPathForTUI
 	t.Cleanup(func() {
@@ -602,6 +608,7 @@ func TestClient_LocalUnixTransportFailureLogsAndHidesSyntheticHost(t *testing.T)
 }
 
 func TestModel_FetchInitialUsesQueueFetchFilter(t *testing.T) {
+	t.Parallel()
 	var gotQuery string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
@@ -631,6 +638,7 @@ func TestModel_FetchInitialUsesQueueFetchFilter(t *testing.T) {
 }
 
 func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -691,6 +699,7 @@ func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 }
 
 func TestClient_AddLinkDecodesExactCreatedLink(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
 		respondJSON(t, w, map[string]any{
@@ -714,6 +723,7 @@ func TestClient_AddLinkDecodesExactCreatedLink(t *testing.T) {
 }
 
 func TestClient_ShowIssue_DecodesHierarchy(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondJSON(t, w, map[string]any{
 			"issue": map[string]any{"short_id": "abc4", "title": "fix", "status": "open"},
@@ -761,6 +771,7 @@ func TestClient_ShowIssue_DecodesHierarchy(t *testing.T) {
 }
 
 func TestClient_CreateIssue_SendsIdempotencyHeader(t *testing.T) {
+	t.Parallel()
 	var gotKey string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.Header.Get("Idempotency-Key")
@@ -779,6 +790,7 @@ func TestClient_CreateIssue_SendsIdempotencyHeader(t *testing.T) {
 }
 
 func TestClient_DecodeError_ReturnsAPIError(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -809,6 +821,7 @@ func TestClient_DecodeError_ReturnsAPIError(t *testing.T) {
 }
 
 func TestClient_RemoveLabel_PathEscapesLabel(t *testing.T) {
+	t.Parallel()
 	var gotRawURI, gotMethod, gotActor string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotRawURI = r.RequestURI
@@ -833,6 +846,7 @@ func TestClient_RemoveLabel_PathEscapesLabel(t *testing.T) {
 }
 
 func TestClient_ListComments_RoutesThroughShowIssue(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -854,6 +868,7 @@ func TestClient_ListComments_RoutesThroughShowIssue(t *testing.T) {
 }
 
 func TestClient_AssignEmptyOwnerRoutesToUnassign(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -870,6 +885,7 @@ func TestClient_AssignEmptyOwnerRoutesToUnassign(t *testing.T) {
 }
 
 func TestClient_ClaimTimedAssignmentSendsTTL(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	var gotBody map[string]any
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -897,6 +913,7 @@ func TestClient_ClaimTimedAssignmentSendsTTL(t *testing.T) {
 // would be silently rejected as an unknown field; this regression-
 // locks the new shape.
 func TestClient_AddLinkSendsToRef(t *testing.T) {
+	t.Parallel()
 	var gotBody map[string]any
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		bs, _ := io.ReadAll(r.Body)
@@ -917,6 +934,7 @@ func TestClient_AddLinkSendsToRef(t *testing.T) {
 }
 
 func TestClient_ListEvents_FiltersByIssueShortID(t *testing.T) {
+	t.Parallel()
 	matched := "abc4"
 	other := "xyz9"
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -981,6 +999,7 @@ func TestClient_ListEvents_FiltersByIssueShortID(t *testing.T) {
 // events filter must match on issue_uid as well as issue_short_id, or the
 // events tab comes back empty for an issue opened by UID.
 func TestClient_ListEvents_MatchesByIssueUID(t *testing.T) {
+	t.Parallel()
 	const wantUID = "01JZ0000000000000000000001"
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("after_id") != "" {
@@ -1011,6 +1030,7 @@ func TestClient_ListEvents_MatchesByIssueUID(t *testing.T) {
 }
 
 func TestClient_ListEvents_PaginatesProjectEventStream(t *testing.T) {
+	t.Parallel()
 	var calls int
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -1057,6 +1077,7 @@ func TestClient_ListEvents_PaginatesProjectEventStream(t *testing.T) {
 // returned resp.Issues evaluated *before* c.do filled it (the do call was
 // the second operand of the comma-statement, so resp was nil at capture).
 func TestClient_ListIssues_NotNilOnSuccess(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issues":[{"short_id":"aaa1","title":"a","status":"open"}]}`))
@@ -1071,6 +1092,7 @@ func TestClient_ListIssues_NotNilOnSuccess(t *testing.T) {
 // TestClient_ListAllIssues_NotNilOnSuccess covers the same regression on
 // the cross-project endpoint.
 func TestClient_ListAllIssues_NotNilOnSuccess(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issues":[{"short_id":"bbb2","title":"b","status":"open"}]}`))
@@ -1084,6 +1106,7 @@ func TestClient_ListAllIssues_NotNilOnSuccess(t *testing.T) {
 
 // TestClient_ListProjects_NotNilOnSuccess is the analogue for ListProjects.
 func TestClient_ListProjects_NotNilOnSuccess(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"projects":[{"id":7,"identity":"x","name":"k"}]}`))
@@ -1099,6 +1122,7 @@ func TestClient_ListProjects_NotNilOnSuccess(t *testing.T) {
 // query params land on the wire. Owner/Author/Search/Labels are kept on
 // the struct for client-side filtering but must not leak as URL params.
 func TestClient_ListIssues_FilterShape(t *testing.T) {
+	t.Parallel()
 	var gotURL string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotURL = r.URL.String()
@@ -1130,6 +1154,7 @@ func TestClient_ListIssues_FilterShape(t *testing.T) {
 // is automatic — this test pins that promise so a future struct-tag
 // removal doesn't silently drop labels from the list view.
 func TestListIssues_TUIDecodePopulatesLabels(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondJSON(t, w, map[string]any{
 			"issues": []map[string]any{
@@ -1180,6 +1205,7 @@ func TestListIssues_TUIDecodePopulatesLabels(t *testing.T) {
 // Issue struct) means a show response with no labels leaves a
 // previously-populated Labels slice empty — covered by other tests.
 func TestShowIssue_PopulatesLabelsFromTopLevel(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondJSON(t, w, map[string]any{
 			"issue":    map[string]any{"short_id": "abc4", "title": "fix", "status": "open"},
@@ -1210,6 +1236,7 @@ func TestShowIssue_PopulatesLabelsFromTopLevel(t *testing.T) {
 // Code and Message are both blank. Without the fallback, Error() would
 // return ": ".
 func TestAPIError_EmptyBodyFallback(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
@@ -1234,6 +1261,7 @@ func TestAPIError_EmptyBodyFallback(t *testing.T) {
 // decodes the ?include=stats wire shape into ProjectSummaryWithStats,
 // including the optional Stats field. Spec §7.3.
 func TestClient_ListProjectsWithStats_Decodes(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/projects", r.URL.Path)
 		require.Equal(t, "stats", r.URL.Query().Get("include"))
@@ -1267,6 +1295,7 @@ func TestClient_ListProjectsWithStats_Decodes(t *testing.T) {
 // array returns []ProjectSummaryWithStats{}, never nil — callers iterate
 // without nil-checks. Spec §7.3.
 func TestClient_ListProjectsWithStats_NotNilOnSuccess(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"projects": []}`))
@@ -1284,6 +1313,7 @@ func TestClient_ListProjectsWithStats_NotNilOnSuccess(t *testing.T) {
 // client's path, so the failure mode is a confusing "no such file"
 // rather than the actual broken-config error the user can fix.
 func TestClient_ResolveProject_PropagatesParseError(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"), //nolint:gosec // test fixture
 		[]byte("not = valid = toml ==="), 0o644))
@@ -1304,6 +1334,7 @@ func TestClient_ResolveProject_PropagatesParseError(t *testing.T) {
 // missing case still works: no .kata.toml means start_path is sent
 // for daemon-side filesystem resolution.
 func TestClient_ResolveProject_FallsBackOnMissingConfig(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir() // no .kata.toml
 
 	var got map[string]any
@@ -1324,6 +1355,7 @@ func TestClient_ResolveProject_FallsBackOnMissingConfig(t *testing.T) {
 }
 
 func TestClientResolveProjectPathFreeDoesNotSendStartPath(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	var called atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
@@ -1339,6 +1371,7 @@ func TestClientResolveProjectPathFreeDoesNotSendStartPath(t *testing.T) {
 }
 
 func TestClientResolveProjectPathFreeDoesNotSendLocalGitAlias(t *testing.T) {
+	t.Parallel()
 	dir := testfix.InitGitRepo(t)
 	var called atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1356,6 +1389,7 @@ func TestClientResolveProjectPathFreeDoesNotSendLocalGitAlias(t *testing.T) {
 }
 
 func TestClientResolveProjectPathFreeUsesNameInsteadOfLocalWorkspaceAlias(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	require.NoError(t, config.WriteProjectConfig(dir, "example-workspace"))
 
@@ -1377,6 +1411,7 @@ func TestClientResolveProjectPathFreeUsesNameInsteadOfLocalWorkspaceAlias(t *tes
 }
 
 func TestClientResolveProjectPathFreeSendsPortableGitAlias(t *testing.T) {
+	t.Parallel()
 	dir := testfix.InitGitRepo(t)
 	testfix.RunGit(t, dir, "remote", "add", "origin", "https://example.com/example/example-workspace.git")
 
@@ -1405,6 +1440,7 @@ func TestClientResolveProjectPathFreeSendsPortableGitAlias(t *testing.T) {
 // TUI must send {name, alias} so a daemon on another host can resolve
 // without stat'ing the client's filesystem.
 func TestClient_ResolveProject_SendsNameAndAliasForWorkspaceConfig(t *testing.T) {
+	t.Parallel()
 	dir := testfix.InitGitRepo(t)
 	require.NoError(t, config.WriteProjectConfig(dir, "project-name"))
 
@@ -1433,6 +1469,7 @@ func TestClient_ResolveProject_SendsNameAndAliasForWorkspaceConfig(t *testing.T)
 // Resolve must not derive a project name from the git remote (init
 // owns by-convention).
 func TestClient_ResolveProject_SendsAliasOnlyForGitWorkspaceWithoutKataToml(t *testing.T) {
+	t.Parallel()
 	dir := testfix.InitGitRepo(t)
 
 	var got map[string]any
@@ -1462,6 +1499,7 @@ func TestClient_ResolveProject_SendsAliasOnlyForGitWorkspaceWithoutKataToml(t *t
 // rewrites the file. Mirrors the CLI behavior so both clients keep
 // .kata.toml fresh.
 func TestClient_ResolveProject_RewritesStaleKataToml(t *testing.T) {
+	t.Parallel()
 	dir := testfix.InitGitRepo(t)
 	require.NoError(t, config.WriteProjectConfig(dir, "stale-name"))
 

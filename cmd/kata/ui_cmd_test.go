@@ -14,7 +14,7 @@ import (
 	"go.kenn.io/kata/internal/web"
 )
 
-func TestUICommandRejectsCompilationStub(t *testing.T) {
+func TestUICommandRejectsCompilationStub(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	oldPrepare := prepareWebUIForCommand
 	oldValidate := validateWebUIAssetsForCommand
 	prepareWebUIForCommand = func(context.Context, client.PrepareWebUIOptions) (client.PreparedWebUI, error) {
@@ -31,7 +31,7 @@ func TestUICommandRejectsCompilationStub(t *testing.T) {
 	assert.Contains(t, err.Error(), "release binary")
 }
 
-func TestUICommandNoArgOpensInbox(t *testing.T) {
+func TestUICommandNoArgOpensInbox(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	stubUICommandLaunch(t, client.PreparedWebUI{
 		BaseURL:          "https://daemon.example",
 		ConfiguredRemote: true,
@@ -43,7 +43,7 @@ func TestUICommandNoArgOpensInbox(t *testing.T) {
 	assert.Contains(t, openedUIURL, "https://daemon.example/kata#")
 }
 
-func TestUICommandResolvesRefsToCanonicalUIDRoutes(t *testing.T) {
+func TestUICommandResolvesRefsToCanonicalUIDRoutes(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	workspace, _ := initLocalBoundWorkspace(t, env, "example-project")
 	created := createIssueViaHTTPFull(t, env, workspace, "Open in browser")
@@ -68,7 +68,7 @@ func TestUICommandResolvesRefsToCanonicalUIDRoutes(t *testing.T) {
 	}
 }
 
-func TestUICommandRefusesUnresolvedOrAmbiguousBeforeOpen(t *testing.T) {
+func TestUICommandRefusesUnresolvedOrAmbiguousBeforeOpen(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	stubUICommandLaunch(t, client.PreparedWebUI{
 		BaseURL:          env.URL,
@@ -86,7 +86,7 @@ func TestUICommandRefusesUnresolvedOrAmbiguousBeforeOpen(t *testing.T) {
 	assert.Empty(t, openedUIURL)
 }
 
-func TestUICommandResolvesBeforeOpening(t *testing.T) {
+func TestUICommandResolvesBeforeOpening(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var calls []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -127,7 +127,7 @@ func TestUICommandResolvesBeforeOpening(t *testing.T) {
 		openedUIReturnPath)
 }
 
-func TestUICommandResolvesRefsThroughLocalDaemonGateway(t *testing.T) {
+func TestUICommandResolvesRefsThroughLocalDaemonGateway(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var calls []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "example-selected", r.Header.Get("X-Kata-Web-Daemon"))

@@ -11,7 +11,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestDigest_AllIncludesMultipleProjects(t *testing.T) {
+func TestDigest_AllIncludesMultipleProjects(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	env := testenv.New(t)
 	spokeDir, _ := initLocalBoundWorkspace(t, env, "spoke-project")
 	hubDir, _ := initLocalBoundWorkspace(t, env, "hub-project")
@@ -49,7 +49,7 @@ func TestDigest_AllIncludesMultipleProjects(t *testing.T) {
 	}
 }
 
-func TestDigest_HumanRender(t *testing.T) {
+func TestDigest_HumanRender(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	first := createIssueViaHTTP(t, f.env, f.dir, "first")
 	second := createIssueViaHTTP(t, f.env, f.dir, "second")
@@ -64,7 +64,7 @@ func TestDigest_HumanRender(t *testing.T) {
 	assert.Contains(t, out, "created")
 }
 
-func TestDigest_AgentOutputShape(t *testing.T) {
+func TestDigest_AgentOutputShape(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	short := createIssueViaHTTP(t, env, dir, "first")
 
@@ -81,7 +81,7 @@ func TestDigest_AgentOutputShape(t *testing.T) {
 
 // TestDigest_OutputShape pins the JSON wire shape: per-issue rows carry
 // issue_short_id and issue_uid; the legacy issue_number field is gone.
-func TestDigest_OutputShape(t *testing.T) {
+func TestDigest_OutputShape(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	createIssueViaHTTP(t, f.env, f.dir, "alpha")
 
@@ -103,7 +103,7 @@ func TestDigest_OutputShape(t *testing.T) {
 	assert.False(t, hasNumber, "issue_number still present in digest row: %v", row)
 }
 
-func TestDigest_RejectsBadSince(t *testing.T) {
+func TestDigest_RejectsBadSince(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 
 	err := f.execute("digest", "--since", "blarg")
@@ -112,6 +112,7 @@ func TestDigest_RejectsBadSince(t *testing.T) {
 }
 
 func TestDigest_ParseSinceUntil(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
 
 	got, err := parseSinceUntil("24h", now)

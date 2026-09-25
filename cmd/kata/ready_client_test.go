@@ -8,6 +8,7 @@ import (
 )
 
 func TestSelectNextReadyIssue(t *testing.T) {
+	t.Parallel()
 	priority := func(value int64) *int64 { return &value }
 	candidate := func(shortID string, p *int64) readyIssueForCLI {
 		return readyIssueForCLI{

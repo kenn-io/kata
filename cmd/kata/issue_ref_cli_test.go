@@ -8,6 +8,7 @@ import (
 )
 
 func TestRefToWireForwardsQualifiedRefsOnlyForOtherProjects(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		ref  string
@@ -29,6 +30,7 @@ func TestRefToWireForwardsQualifiedRefsOnlyForOtherProjects(t *testing.T) {
 }
 
 func TestRefToWireWithoutCurrentProjectKeepsRefsBare(t *testing.T) {
+	t.Parallel()
 	for _, ref := range []string{"abc4", "other#abc4"} {
 		t.Run(ref, func(t *testing.T) {
 			got, err := refToWire(ref, "--related", "")
@@ -39,6 +41,7 @@ func TestRefToWireWithoutCurrentProjectKeepsRefsBare(t *testing.T) {
 }
 
 func TestRefToWireRejectsEmptyAndLegacyNumericRefsWithTheFlagName(t *testing.T) {
+	t.Parallel()
 	for _, ref := range []string{"", "  ", "12"} {
 		t.Run(ref, func(t *testing.T) {
 			_, err := refToWire(ref, "--blocked-by", "kata")
@@ -52,6 +55,7 @@ func TestRefToWireRejectsEmptyAndLegacyNumericRefsWithTheFlagName(t *testing.T) 
 }
 
 func TestRefsToWireKeepsOrderAndFailsTheWholeList(t *testing.T) {
+	t.Parallel()
 	got, err := refsToWire([]string{"other#abc4", "def5", "kata#jkm6"}, "--blocks", "kata")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"other#abc4", "def5", "jkm6"}, got)
@@ -66,6 +70,7 @@ func TestRefsToWireKeepsOrderAndFailsTheWholeList(t *testing.T) {
 }
 
 func TestSingletonRefToWireAcceptsEquivalentFormsAndRejectsDistinctOnes(t *testing.T) {
+	t.Parallel()
 	got, err := singletonRefToWire([]string{"abc4", "kata#abc4", "abc4"}, "--parent", "kata")
 	require.NoError(t, err)
 	assert.Equal(t, "abc4", got)
@@ -85,6 +90,7 @@ func TestSingletonRefToWireAcceptsEquivalentFormsAndRejectsDistinctOnes(t *testi
 }
 
 func TestAddAndRemoveRefsResolveIdentically(t *testing.T) {
+	t.Parallel()
 	refs := []string{"abc4", "kata#def5", "other#jkm6"}
 
 	add, err := refsToWire(refs, "--related", "kata")

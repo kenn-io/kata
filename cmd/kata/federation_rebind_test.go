@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFederationRebindUsesNamedSpokeDaemonAndPostsOnlyCatalogName(t *testing.T) {
+func TestFederationRebindUsesNamedSpokeDaemonAndPostsOnlyCatalogName(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; newRootCmd resets package var flags
 	var requestBody map[string]any
 	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -51,7 +51,7 @@ token = "spoke-daemon-secret"
 	assert.NotContains(t, out, "spoke-daemon-secret")
 }
 
-func TestFederationRebindValidatesSelectors(t *testing.T) {
+func TestFederationRebindValidatesSelectors(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -70,7 +70,7 @@ func TestFederationRebindValidatesSelectors(t *testing.T) {
 	}
 }
 
-func TestFederationRebindSinglePreservesDaemonError(t *testing.T) {
+func TestFederationRebindSinglePreservesDaemonError(t *testing.T) { //nolint:paralleltest // runFederationRebindAgainstServer sets KATA_SERVER and KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/status":
@@ -95,7 +95,7 @@ func TestFederationRebindSinglePreservesDaemonError(t *testing.T) {
 	assert.Equal(t, "target hub unavailable", cli.Message)
 }
 
-func TestFederationRebindExplicitIncludesArchivedSpoke(t *testing.T) {
+func TestFederationRebindExplicitIncludesArchivedSpoke(t *testing.T) { //nolint:paralleltest // runFederationRebindAgainstServer sets KATA_SERVER and KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	var posted bool
 	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -123,7 +123,7 @@ func TestFederationRebindExplicitIncludesArchivedSpoke(t *testing.T) {
 	assert.Contains(t, out, "archived-spoke")
 }
 
-func TestFederationRebindAllIncludesArchivedSpokes(t *testing.T) {
+func TestFederationRebindAllIncludesArchivedSpokes(t *testing.T) { //nolint:paralleltest // runFederationRebindAgainstServer sets KATA_SERVER and KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	var posted []string
 	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -161,7 +161,7 @@ func TestFederationRebindAllIncludesArchivedSpokes(t *testing.T) {
 	assert.Contains(t, out, "archived-spoke")
 }
 
-func TestFederationRebindAgentPartialFailureDoesNotPrintOK(t *testing.T) {
+func TestFederationRebindAgentPartialFailureDoesNotPrintOK(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; newRootCmd resets package var flags
 	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/status":
@@ -191,7 +191,7 @@ func TestFederationRebindAgentPartialFailureDoesNotPrintOK(t *testing.T) {
 	assert.Contains(t, out, "state=failed")
 }
 
-func TestFederationRebindAllIsOrderedContinuesAndRendersEveryResult(t *testing.T) {
+func TestFederationRebindAllIsOrderedContinuesAndRendersEveryResult(t *testing.T) { //nolint:paralleltest // runFederationRebindAgainstServer sets KATA_SERVER and KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	var mu sync.Mutex
 	var posted []int
 	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +259,7 @@ func TestFederationRebindAllIsOrderedContinuesAndRendersEveryResult(t *testing.T
 	assert.Equal(t, "resumed", got.Results[2].State)
 }
 
-func TestFederationRebindOutputModesDistinguishResumeAndNoop(t *testing.T) {
+func TestFederationRebindOutputModesDistinguishResumeAndNoop(t *testing.T) { //nolint:paralleltest // runFederationRebindAgainstServer sets KATA_SERVER and KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	for _, tc := range []struct {
 		name  string
 		mode  string

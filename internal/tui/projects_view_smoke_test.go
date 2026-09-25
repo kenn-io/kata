@@ -14,7 +14,7 @@ import (
 // ordered by last_event_at desc, Enter on the sentinel transitions to
 // viewList in all-projects scope, and P from viewList returns to
 // viewProjects.
-func TestSmoke_ProjectsViewLoop(t *testing.T) {
+func TestSmoke_ProjectsViewLoop(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects/resolve": projectNotInitializedHandler,
 		"/api/v1/projects": func(w http.ResponseWriter, r *http.Request) {

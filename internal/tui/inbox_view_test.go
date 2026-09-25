@@ -89,6 +89,7 @@ func drainInboxCmds(m Model, cmd tea.Cmd) Model {
 }
 
 func TestListProjectsRetainsInboxDesignation(t *testing.T) {
+	t.Parallel()
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/projects", r.URL.Path)
 		respondJSON(t, w, map[string]any{"projects": []map[string]any{
@@ -106,7 +107,7 @@ func TestListProjectsRetainsInboxDesignation(t *testing.T) {
 	require.Equal(t, int64(2), selected.ID)
 }
 
-func TestInboxViewShowsDesignatedProjectOpenTasksAndRestoresList(t *testing.T) {
+func TestInboxViewShowsDesignatedProjectOpenTasksAndRestoresList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	actualInbox := ProjectSummary{ID: 2, Name: "example-project"}
 	actualInbox.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -150,7 +151,7 @@ func TestInboxViewShowsDesignatedProjectOpenTasksAndRestoresList(t *testing.T) {
 	require.True(t, strings.Contains(stripANSI(m.viewContent()), "Prior work"))
 }
 
-func TestInboxViewRequiresRoleDesignation(t *testing.T) {
+func TestInboxViewRequiresRoleDesignation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	api := &inboxTestAPI{projects: []ProjectSummary{{ID: 1, Name: "Inbox"}}}
 	m := newTestModel()
 	m.api = api
@@ -167,7 +168,7 @@ func TestInboxViewRequiresRoleDesignation(t *testing.T) {
 
 // If the project disappears after lookup, show the fetch error and let Esc
 // restore the previous list and filters.
-func TestInboxMissingProjectAllowsEscape(t *testing.T) {
+func TestInboxMissingProjectAllowsEscape(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -206,7 +207,7 @@ func TestInboxMissingProjectAllowsEscape(t *testing.T) {
 	require.Contains(t, stripANSI(m.viewContent()), "Prior task")
 }
 
-func TestInboxViewWorksWithoutBoundWorkspaceAndReturnsToProjects(t *testing.T) {
+func TestInboxViewWorksWithoutBoundWorkspaceAndReturnsToProjects(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	project := ProjectSummary{ID: 2, Name: "example-project"}
 	project.Metadata.Role = jsontext.Value(`"inbox"`)
 	m := newTestModel()
@@ -223,7 +224,7 @@ func TestInboxViewWorksWithoutBoundWorkspaceAndReturnsToProjects(t *testing.T) {
 	require.True(t, m.scope.empty)
 }
 
-func TestInboxViewDropsPriorUnfilteredFetchForSameProject(t *testing.T) {
+func TestInboxViewDropsPriorUnfilteredFetchForSameProject(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	project := ProjectSummary{ID: 7, Name: "example-project"}
 	project.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -237,7 +238,7 @@ func TestInboxViewDropsPriorUnfilteredFetchForSameProject(t *testing.T) {
 	require.Equal(t, "Inbox task", m.list.issues[0].Title)
 }
 
-func TestInboxViewDropsFetchFromEarlierVisit(t *testing.T) {
+func TestInboxViewDropsFetchFromEarlierVisit(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	project := ProjectSummary{ID: 7, Name: "example-project"}
 	project.Metadata.Role = jsontext.Value(`"inbox"`)
 	api := &inboxTestAPI{projects: []ProjectSummary{project}}
@@ -259,7 +260,7 @@ func TestInboxViewDropsFetchFromEarlierVisit(t *testing.T) {
 
 // A list reply from before Inbox entry must not overwrite the refreshed
 // list or cache after leaving Inbox.
-func TestInboxLeaveDropsPreInboxFetchArrivingAfterRestore(t *testing.T) {
+func TestInboxLeaveDropsPreInboxFetchArrivingAfterRestore(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
 	api := &inboxTestAPI{
@@ -310,7 +311,7 @@ func TestInboxLeaveDropsPreInboxFetchArrivingAfterRestore(t *testing.T) {
 }
 
 // Esc cancels an active priority prompt first. A second Esc leaves Inbox.
-func TestInboxEscCancelsPendingPriorityBeforeLeaving(t *testing.T) {
+func TestInboxEscCancelsPendingPriorityBeforeLeaving(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
 	api := &inboxTestAPI{
@@ -354,7 +355,7 @@ func TestInboxEscCancelsPendingPriorityBeforeLeaving(t *testing.T) {
 	require.Equal(t, int64(1), m.scope.projectID)
 }
 
-func TestInboxViewPreservesHelpReturnNavigation(t *testing.T) {
+func TestInboxViewPreservesHelpReturnNavigation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	project := ProjectSummary{ID: 7, Name: "example-project"}
 	project.Metadata.Role = jsontext.Value(`"inbox"`)
 	m := newTestModel()
@@ -370,7 +371,7 @@ func TestInboxViewPreservesHelpReturnNavigation(t *testing.T) {
 	require.Equal(t, viewDaemons, m.view)
 }
 
-func TestInboxNoticeVisibleOverOldStatus(t *testing.T) {
+func TestInboxNoticeVisibleOverOldStatus(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	m := newTestModel()
 	m.api = &inboxTestAPI{projects: []ProjectSummary{{ID: 1, Name: "Inbox"}}}
@@ -382,7 +383,7 @@ func TestInboxNoticeVisibleOverOldStatus(t *testing.T) {
 }
 
 // Leaving Inbox refreshes the restored issue, comments, events, and links.
-func TestInboxLeaveRefetchesRestoredDetail(t *testing.T) {
+func TestInboxLeaveRefetchesRestoredDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -430,7 +431,7 @@ func TestInboxLeaveRefetchesRestoredDetail(t *testing.T) {
 }
 
 // Leaving Inbox refreshes the detail pane visible beside the restored list.
-func TestInboxLeaveRefetchesRestoredSplitDetail(t *testing.T) {
+func TestInboxLeaveRefetchesRestoredSplitDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
 	stale := testIssue("aaa1", withTitle("Stale title"))
@@ -490,6 +491,7 @@ func runInboxRestoreCmd(m Model, cmd tea.Cmd) Model {
 // Inbox always shows open tasks; the status key gives a hint instead
 // of switching to closed or all tasks.
 func TestInboxStatusCycleUnavailable(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	sc.inbox = true
 	lm := listModel{inboxOnly: true, issues: []Issue{
@@ -507,7 +509,7 @@ func TestInboxStatusCycleUnavailable(t *testing.T) {
 }
 
 // Inbox filters offer Owner, Search, and Labels while keeping status open.
-func TestInboxFilterFormOmitsStatusAxis(t *testing.T) {
+func TestInboxFilterFormOmitsStatusAxis(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	m := filterFormFixture()
 	m.scope = scope{projectID: 7, projectName: "kata", inbox: true}
@@ -535,6 +537,7 @@ func TestInboxFilterFormOmitsStatusAxis(t *testing.T) {
 // TestInboxFooterHidesStatusKey keeps the footer honest about the
 // unavailable axis: the Inbox footer must not advertise `s status`.
 func TestInboxFooterHidesStatusKey(t *testing.T) {
+	t.Parallel()
 	inbox := Model{list: listModel{inboxOnly: true}}
 	assertHelpItemAbsent(t, flattenHelpRows(inbox.queueHelpRows()),
 		helplayout.HelpItem{Key: "s", Description: "status"})
@@ -559,7 +562,7 @@ func enterInboxForTest(t *testing.T, m Model) Model {
 
 // Leaving Inbox restores Help and refreshes its hidden list, so closing
 // Help reveals current tasks without waiting for another event.
-func TestInboxLeaveRefreshesRestoredScopeUnderHelp(t *testing.T) {
+func TestInboxLeaveRefreshesRestoredScopeUnderHelp(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -601,7 +604,7 @@ func TestInboxLeaveRefreshesRestoredScopeUnderHelp(t *testing.T) {
 
 // Leaving Inbox refreshes the list behind each restored full-screen view.
 // Credentials closes before entry, so it returns through the ordinary list path.
-func TestInboxLeaveRefreshesHiddenScopeFromEachOverlayEntry(t *testing.T) {
+func TestInboxLeaveRefreshesHiddenScopeFromEachOverlayEntry(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	for _, tc := range []struct {
 		name string
 		view viewID
@@ -645,7 +648,7 @@ func TestInboxLeaveRefreshesHiddenScopeFromEachOverlayEntry(t *testing.T) {
 
 // Leaving Inbox refreshes the detail retained behind Help without closing
 // Help. Closing Help then reveals the current issue and activity.
-func TestInboxLeaveRefetchesRetainedDetailBehindHelp(t *testing.T) {
+func TestInboxLeaveRefetchesRetainedDetailBehindHelp(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -697,7 +700,7 @@ func TestInboxLeaveRefetchesRetainedDetailBehindHelp(t *testing.T) {
 }
 
 // Leaving Inbox refreshes the split detail pane retained behind Help.
-func TestInboxLeaveRefetchesRetainedSplitDetailBehindHelp(t *testing.T) {
+func TestInboxLeaveRefetchesRetainedSplitDetailBehindHelp(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
 	stale := testIssue("aaa1", withTitle("Stale title"))
@@ -733,7 +736,7 @@ func TestInboxLeaveRefetchesRetainedSplitDetailBehindHelp(t *testing.T) {
 	require.Equal(t, "Fresh title", m.detail.issue.Title)
 }
 
-func TestInboxLeaveRefetchesSplitDetailBehindProjectsAfterHelp(t *testing.T) {
+func TestInboxLeaveRefetchesSplitDetailBehindProjectsAfterHelp(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
 	stale := testIssue("aaa1", withTitle("Stale title"))
@@ -768,7 +771,7 @@ func TestInboxLeaveRefetchesSplitDetailBehindProjectsAfterHelp(t *testing.T) {
 }
 
 // An issue event does not cancel a pending Inbox entry.
-func TestInboxPendingEntryUnaffectedByIssueEvent(t *testing.T) {
+func TestInboxPendingEntryUnaffectedByIssueEvent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -798,7 +801,7 @@ func TestInboxPendingEntryUnaffectedByIssueEvent(t *testing.T) {
 }
 
 // Cursor and scroll keys keep a pending Inbox entry active on every view.
-func TestInboxPendingEntrySurvivesCursorAndScrollKeys(t *testing.T) {
+func TestInboxPendingEntrySurvivesCursorAndScrollKeys(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -858,7 +861,7 @@ func TestInboxPendingEntrySurvivesCursorAndScrollKeys(t *testing.T) {
 
 // Changing views or pressing Esc cancels a pending Inbox entry.
 // A late reply must not replace the new foreground.
-func TestInboxPendingEntryCancelledByForegroundKeys(t *testing.T) {
+func TestInboxPendingEntryCancelledByForegroundKeys(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
@@ -907,7 +910,7 @@ func TestInboxPendingEntryCancelledByForegroundKeys(t *testing.T) {
 
 // Inbox keeps the project chosen on entry. Events still refresh its tasks;
 // leaving and reopening Inbox picks up the current designation.
-func TestInboxDesignationChangesApplyOnNextVisit(t *testing.T) {
+func TestInboxDesignationChangesApplyOnNextVisit(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	for _, tc := range []struct {
 		name string
 		msg  tea.Msg

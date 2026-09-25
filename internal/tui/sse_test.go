@@ -18,6 +18,7 @@ import (
 // TestSSEParser_KeepalivesAreSkipped: a leading ": keepalive\n\n" must
 // not produce a frame; the issue.created frame after it must.
 func TestSSEParser_KeepalivesAreSkipped(t *testing.T) {
+	t.Parallel()
 	in := ": keepalive\n\n" +
 		formatSSEFrame(1, "issue.created", `{"event_id":1,"type":"issue.created"}`)
 	frames := assertParse(t, in)
@@ -34,6 +35,7 @@ func TestSSEParser_KeepalivesAreSkipped(t *testing.T) {
 
 // TestSSEParser_MultipleFrames: two consecutive event blocks both arrive.
 func TestSSEParser_MultipleFrames(t *testing.T) {
+	t.Parallel()
 	in := formatSSEFrame(1, "issue.created", `{"event_id":1}`) +
 		formatSSEFrame(2, "issue.commented", `{"event_id":2}`)
 	frames := assertParse(t, in)
@@ -50,6 +52,7 @@ func TestSSEParser_MultipleFrames(t *testing.T) {
 // per api.EventReset's contract); the JSON payload's reset_after_id is
 // intentionally not lifted onto the frame.
 func TestSSEParser_ResetRequired(t *testing.T) {
+	t.Parallel()
 	in := formatSSEFrame(42, "sync.reset_required",
 		`{"event_id":42,"reset_after_id":42}`)
 	frames := assertParse(t, in)
@@ -68,6 +71,7 @@ func TestSSEParser_ResetRequired(t *testing.T) {
 // dropped, the next well-formed frame still arrives. Regression for
 // "single bad frame wedges the consumer."
 func TestSSEParser_MalformedFrameSkipped(t *testing.T) {
+	t.Parallel()
 	// First frame intentionally omits the data: line — the malformedness
 	// is the subject of the test, so it cannot be built via formatSSEFrame.
 	in := "id: 1\nevent: issue.created\n\n" +
@@ -84,6 +88,7 @@ func TestSSEParser_MalformedFrameSkipped(t *testing.T) {
 // TestSSEParser_EOFNoTrailingFrame: an in-progress frame at EOF is
 // dropped (no blank-line terminator means no commit).
 func TestSSEParser_EOFNoTrailingFrame(t *testing.T) {
+	t.Parallel()
 	// No trailing blank line — the missing terminator is the subject of
 	// the test, so it cannot be built via formatSSEFrame.
 	in := "id: 1\nevent: issue.created\ndata: {\"event_id\":1}\n"
@@ -96,6 +101,7 @@ func TestSSEParser_EOFNoTrailingFrame(t *testing.T) {
 // TestSSEParser_DecodeEventReceived: a well-formed frame's payload is
 // decoded into eventReceivedMsg with type+projectID+issueNumber.
 func TestSSEParser_DecodeEventReceived(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{
 		"type":"issue.created",
 		"project_id":7,
@@ -125,6 +131,7 @@ func TestSSEParser_DecodeEventReceived(t *testing.T) {
 // without issue_short_id falls through as empty (no panic on a nil
 // pointer).
 func TestSSEParser_DecodeEventReceived_MissingIssueShortID(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"type":"sync.reset_required","project_id":7}`)
 	got := decodeEventReceived(frame{kind: frameEvent, data: body})
 	if got.issueShortID != "" {
@@ -133,6 +140,7 @@ func TestSSEParser_DecodeEventReceived_MissingIssueShortID(t *testing.T) {
 }
 
 func TestSSEParser_LinkPayloadType(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{
 		"type":"issue.linked",
 		"project_id":7,
@@ -174,6 +182,7 @@ func TestSSEParser_LinkPayloadType(t *testing.T) {
 // detail-pane refetch logic needs to invalidate the OTHER endpoint of
 // a parent transition.
 func TestSSEParser_LinkPayloadDecodesDaemonWireShape(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{
 		"type":"issue.unlinked",
 		"project_id":7,
@@ -201,6 +210,7 @@ func TestSSEParser_LinkPayloadDecodesDaemonWireShape(t *testing.T) {
 // TestNextBackoff_Doubles_Caps: doubles each call until the ceiling,
 // then stays at ceiling.
 func TestNextBackoff_Doubles_Caps(t *testing.T) {
+	t.Parallel()
 	ceiling := 30 * time.Second
 	d := time.Second
 	want := []time.Duration{
@@ -221,6 +231,7 @@ func TestNextBackoff_Doubles_Caps(t *testing.T) {
 // sseConnected status (deferred until the first frame arrives); the two
 // frames follow. Last-Event-ID is omitted on the first connect.
 func TestSSE_StreamForwardsMessages(t *testing.T) {
+	t.Parallel()
 	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Last-Event-ID") != "" {
 			t.Errorf("Last-Event-ID set on first connect: %q",
@@ -268,6 +279,7 @@ func TestSSE_StreamForwardsMessages(t *testing.T) {
 // regression-locks Fix I1: a flapping daemon must not flicker
 // connected ↔ reconnecting between frame-less retries.
 func TestSSE_NoConnectedStatusBeforeFirstFrame(t *testing.T) {
+	t.Parallel()
 	srv := newSSEMockServer(t, func(_ http.ResponseWriter, _ *http.Request) {
 		// Return immediately — body closes with no frames.
 	})
@@ -292,6 +304,7 @@ func TestSSE_NoConnectedStatusBeforeFirstFrame(t *testing.T) {
 // closes the response, and verifies the second connection request
 // carries Last-Event-ID matching the last frame seen on the first.
 func TestSSE_ReconnectSendsLastEventID(t *testing.T) {
+	t.Parallel()
 	var connects atomic.Int32
 	var secondHeader atomic.Value
 	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -360,6 +373,7 @@ Done:
 // default 1s initial backoff the reconnect lands well inside the 1.5s
 // grace window.
 func TestSSE_GracePeriod_FastReconnect_NoReconnectingBadge(t *testing.T) {
+	t.Parallel()
 	var connects atomic.Int32
 	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		n := connects.Add(1)
@@ -418,7 +432,7 @@ func TestSSE_GracePeriod_FastReconnect_NoReconnectingBadge(t *testing.T) {
 // sseConnected and channel ordering preserves the correct final state.
 //
 // Run under -race -count=N for additional confidence.
-func TestSSE_GracePeriod_TimerVsConnectIsRaceFree(t *testing.T) {
+func TestSSE_GracePeriod_TimerVsConnectIsRaceFree(t *testing.T) { //nolint:paralleltest // swaps package var reconnectStatusGrace
 	saved := reconnectStatusGrace
 	reconnectStatusGrace = 1 * time.Millisecond
 	t.Cleanup(func() { reconnectStatusGrace = saved })
@@ -497,7 +511,7 @@ done:
 // outage (no productive reconnect within the grace window) does push
 // sseReconnecting to the channel, and that recovery pushes sseConnected.
 // The test shortens reconnectStatusGrace to keep the run fast.
-func TestSSE_GracePeriod_LongOutage_SurfacesBadge(t *testing.T) {
+func TestSSE_GracePeriod_LongOutage_SurfacesBadge(t *testing.T) { //nolint:paralleltest // swaps package var reconnectStatusGrace
 	saved := reconnectStatusGrace
 	reconnectStatusGrace = 50 * time.Millisecond
 	t.Cleanup(func() { reconnectStatusGrace = saved })
@@ -559,6 +573,7 @@ func drainOne(t *testing.T, ch <-chan tea.Msg) tea.Msg {
 // TestSSE_StreamRequest_AllProjectsOmitsQuery: nil projectID leaves the
 // URL clean.
 func TestSSE_StreamRequest_AllProjectsOmitsQuery(t *testing.T) {
+	t.Parallel()
 	var req *http.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req = r.Clone(r.Context())
@@ -582,6 +597,7 @@ func TestSSE_StreamRequest_AllProjectsOmitsQuery(t *testing.T) {
 // TestSSE_StreamRequest_SingleProjectAddsQuery: project scope adds the
 // query param; lastID > 0 sets Last-Event-ID.
 func TestSSE_StreamRequest_SingleProjectAddsQuery(t *testing.T) {
+	t.Parallel()
 	pid := int64(7)
 	var req *http.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

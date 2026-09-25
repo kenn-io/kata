@@ -660,7 +660,7 @@ func fetchIssueViaHTTP(t *testing.T, env *testenv.Env, pid int64, ref string) Is
 	return getJSON[IssueResponse](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues/"+ref)
 }
 
-func TestSetupCLIWorkspaceUsesFastLocalBinding(t *testing.T) {
+func TestSetupCLIWorkspaceUsesFastLocalBinding(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	require.NotZero(t, pid)
 

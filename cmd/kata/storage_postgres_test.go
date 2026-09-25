@@ -16,7 +16,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestStoragePostgresMigrateAndStatusWithSeparatedRoles(t *testing.T) {
+func TestStoragePostgresMigrateAndStatusWithSeparatedRoles(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DSN and KATA_DB; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -74,7 +74,7 @@ func TestStoragePostgresMigrateAndStatusWithSeparatedRoles(t *testing.T) {
 	require.Error(t, err, "runtime role must not hold schema DDL authority")
 }
 
-func TestStoragePostgresRejectsSQLiteTarget(t *testing.T) {
+func TestStoragePostgresRejectsSQLiteTarget(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DSN; newRootCmd resets package var flags
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_DSN", t.TempDir()+"/kata.db")
 	_, err := runCmdOutput(t, nil, "storage", "postgres", "status")
@@ -82,7 +82,7 @@ func TestStoragePostgresRejectsSQLiteTarget(t *testing.T) {
 	assert.Contains(t, err.Error(), "requires a postgres DSN")
 }
 
-func TestStoragePostgresStatusRejectsIncompleteRuntimePrivileges(t *testing.T) {
+func TestStoragePostgresStatusRejectsIncompleteRuntimePrivileges(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DSN and KATA_DB; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -141,7 +141,7 @@ func TestStoragePostgresStatusRejectsIncompleteRuntimePrivileges(t *testing.T) {
 	}
 }
 
-func TestDaemonPreflightCarriesPostgresValidationPolicy(t *testing.T) {
+func TestDaemonPreflightCarriesPostgresValidationPolicy(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_DSN and KATA_DB
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_DSN", "postgres://db.example/kata")

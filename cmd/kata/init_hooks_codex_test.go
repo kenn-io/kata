@@ -54,6 +54,7 @@ func expectedCodexSessionStartGroups() []any {
 }
 
 func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
 	require.NoError(t, os.MkdirAll(codexDir, 0o750))
@@ -72,6 +73,7 @@ func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
 }
 
 func TestApplyCodexHooks_UpgradesCurrentAttentionOnlyInstall(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
 	require.NoError(t, os.MkdirAll(codexDir, 0o750))
@@ -87,6 +89,7 @@ func TestApplyCodexHooks_UpgradesCurrentAttentionOnlyInstall(t *testing.T) {
 }
 
 func TestApplyCodexHooks_PreservesLegacyCommandWithExplicitNonScopedMatcher(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		matcher any
@@ -126,6 +129,7 @@ func TestApplyCodexHooks_PreservesLegacyCommandWithExplicitNonScopedMatcher(t *t
 }
 
 func TestApplyCodexHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
 	require.NoError(t, os.MkdirAll(codexDir, 0o750))
@@ -144,6 +148,7 @@ func TestApplyCodexHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
 }
 
 func TestApplyCodexHooks_RefusesSymlinks(t *testing.T) {
+	t.Parallel()
 	t.Run("config directory", func(t *testing.T) {
 		dir := t.TempDir()
 		outside := t.TempDir()
@@ -175,6 +180,7 @@ func TestApplyCodexHooks_RefusesSymlinks(t *testing.T) {
 }
 
 func TestApplyCodexHooks_WarnsOnConfigTomlHooks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
 	require.NoError(t, os.MkdirAll(codexDir, 0o750))

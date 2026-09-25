@@ -14,13 +14,13 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestWhoami_FlagOverride(t *testing.T) {
+func TestWhoami_FlagOverride(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	out := requireCmdOutput(t, nil, "whoami", "--as", "claude-4.7")
 	assert.Contains(t, out, "claude-4.7")
 	assert.Contains(t, out, "flag")
 }
 
-func TestWhoami_FormatJSONAliasAffectsSuccessfulOutput(t *testing.T) {
+func TestWhoami_FormatJSONAliasAffectsSuccessfulOutput(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "--format", "json", "whoami", "--as", "tester"))
 
@@ -35,19 +35,19 @@ func TestWhoami_FormatJSONAliasAffectsSuccessfulOutput(t *testing.T) {
 	assert.Equal(t, "flag", got.Source)
 }
 
-func TestWhoami_AgentIncludesActorAndSource(t *testing.T) {
+func TestWhoami_AgentIncludesActorAndSource(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "--agent", "whoami", "--as", "tester"))
 	assert.Equal(t, "OK whoami actor=tester source=flag\n", out)
 }
 
-func TestHealth_PrintsSchemaVersion(t *testing.T) {
+func TestHealth_PrintsSchemaVersion(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	out := requireCmdOutput(t, env, "health")
 	assert.Contains(t, out, "schema_version="+strconv.Itoa(db.CurrentSchemaVersion()))
 }
 
-func TestProjectsList_PrintsKnown(t *testing.T) {
+func TestProjectsList_PrintsKnown(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	_ = initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 
@@ -55,7 +55,7 @@ func TestProjectsList_PrintsKnown(t *testing.T) {
 	assert.True(t, strings.Contains(out, "kata"))
 }
 
-func TestProjectsRename_RenamesProject(t *testing.T) {
+func TestProjectsRename_RenamesProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 	projectID := resolvePIDViaHTTP(t, env.URL, dir)
@@ -68,7 +68,7 @@ func TestProjectsRename_RenamesProject(t *testing.T) {
 	assert.NotContains(t, show, "next #")
 }
 
-func TestProjectsRename_AcceptsProjectSelector(t *testing.T) {
+func TestProjectsRename_AcceptsProjectSelector(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	_ = initBoundWorkspace(t, env.URL, "https://github.com/wesm/alpha.git")
 
@@ -77,7 +77,7 @@ func TestProjectsRename_AcceptsProjectSelector(t *testing.T) {
 	assert.Contains(t, out, "to beta")
 }
 
-func TestProjectsMerge_MergesSourceSelectorIntoSurvivingTarget(t *testing.T) {
+func TestProjectsMerge_MergesSourceSelectorIntoSurvivingTarget(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	alpha, beta := setupMergeProjects(t, env)
 	created, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
@@ -98,7 +98,7 @@ func TestProjectsMerge_MergesSourceSelectorIntoSurvivingTarget(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestProjectsMerge_RewritesWorkspaceBindingFromSourceToTarget(t *testing.T) {
+func TestProjectsMerge_RewritesWorkspaceBindingFromSourceToTarget(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	setupMergeProjects(t, env)
 
@@ -112,13 +112,14 @@ func TestProjectsMerge_RewritesWorkspaceBindingFromSourceToTarget(t *testing.T) 
 	assert.Equal(t, "beta", cfg.Project.Name)
 }
 
-func TestProjectsRename_RejectsBlankName(t *testing.T) {
+func TestProjectsRename_RejectsBlankName(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, err := runCmdOutput(t, nil, "projects", "rename", "1", "   ")
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, ce.Message, "project name must be non-empty")
 }
 
 func TestProjectSelector_AmbiguousAcrossNameAndAliasSuffix(t *testing.T) {
+	t.Parallel()
 	projects := []projectRef{
 		{ID: 1, Name: "foo"},
 		{ID: 2, Name: "bar", Aliases: []projectAliasRef{{AliasIdentity: "github.com/example/foo"}}},
@@ -133,6 +134,7 @@ func TestProjectSelector_AmbiguousAcrossNameAndAliasSuffix(t *testing.T) {
 }
 
 func TestPluralCount_PluralizesAlias(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "1 alias", pluralCount(1, "alias"))
 	assert.Equal(t, "2 aliases", pluralCount(2, "alias"))
 }

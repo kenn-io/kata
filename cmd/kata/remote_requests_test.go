@@ -22,7 +22,7 @@ import (
 // A simple remote mutation resolves its project in the mutation request.
 // Exercise every remote
 // selection source against a real, authenticated daemon and persisted writes.
-func TestRemoteMutationsWithoutPreflight(t *testing.T) {
+func TestRemoteMutationsWithoutPreflight(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	for _, source := range []string{"environment", "workspace", "active", "named"} {
 		t.Run(source, func(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("fixture-token"))

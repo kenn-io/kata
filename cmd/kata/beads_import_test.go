@@ -19,7 +19,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestImportBeadsRejectsInputAndTargetFlags(t *testing.T) {
+func TestImportBeadsRejectsInputAndTargetFlags(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	setupKataEnv(t)
 
 	_, err := runCmdOutput(t, nil, "import", "--source-format", "beads", "--input", "beads.jsonl")
@@ -31,7 +31,7 @@ func TestImportBeadsRejectsInputAndTargetFlags(t *testing.T) {
 	assert.Contains(t, ce.Message, "--target")
 }
 
-func TestImportRejectsUnsupportedSourceFormat(t *testing.T) {
+func TestImportRejectsUnsupportedSourceFormat(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	setupKataEnv(t)
 
 	_, err := runCmdOutput(t, nil, "import", "--source-format", "bogus")
@@ -39,7 +39,7 @@ func TestImportRejectsUnsupportedSourceFormat(t *testing.T) {
 	assert.Contains(t, ce.Message, "unsupported import format")
 }
 
-func TestImportLegacyFormatBeadsStillSelectsSource(t *testing.T) {
+func TestImportLegacyFormatBeadsStillSelectsSource(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	setupKataEnv(t)
 
 	_, err := runCmdOutput(t, nil, "import", "--format", "beads", "--input", "beads.jsonl")
@@ -47,7 +47,7 @@ func TestImportLegacyFormatBeadsStillSelectsSource(t *testing.T) {
 	assert.Contains(t, ce.Message, "--input")
 }
 
-func TestImportBeadsMissingProjectUnattended(t *testing.T) {
+func TestImportBeadsMissingProjectUnattended(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir := t.TempDir()
@@ -57,7 +57,7 @@ func TestImportBeadsMissingProjectUnattended(t *testing.T) {
 	assert.Contains(t, ce.Message, "run kata init first")
 }
 
-func TestImportBeadsAgentMissingProjectDoesNotPrompt(t *testing.T) {
+func TestImportBeadsAgentMissingProjectDoesNotPrompt(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubIsTTY(t, true)
 	env := testenv.New(t)
@@ -70,7 +70,7 @@ func TestImportBeadsAgentMissingProjectDoesNotPrompt(t *testing.T) {
 	assert.NotContains(t, out, "Run kata init now?")
 }
 
-func TestImportBeadsFromLiveBD(t *testing.T) {
+func TestImportBeadsFromLiveBD(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	installFakeBD(t)
 
@@ -94,7 +94,7 @@ func TestImportBeadsFromLiveBD(t *testing.T) {
 	assert.Contains(t, show, "Comment body from beads")
 }
 
-func TestImportBeadsFromLegacyBD(t *testing.T) {
+func TestImportBeadsFromLegacyBD(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	installLegacyFakeBD(t)
 
@@ -120,7 +120,7 @@ func TestImportBeadsFromLegacyBD(t *testing.T) {
 	assert.Contains(t, out, "imported beads: created 0, updated 0, unchanged 1, comments 0, links 0")
 }
 
-func TestImportBeadsJSONSummaryFromLiveBD(t *testing.T) {
+func TestImportBeadsJSONSummaryFromLiveBD(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	installFakeBD(t)
 
@@ -146,7 +146,7 @@ func TestImportBeadsJSONSummaryFromLiveBD(t *testing.T) {
 	assert.Empty(t, summary.Errors)
 }
 
-func TestImportBeadsAgentSummaryFromLiveBD(t *testing.T) {
+func TestImportBeadsAgentSummaryFromLiveBD(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	installFakeBD(t)
 
@@ -161,7 +161,7 @@ func TestImportBeadsAgentSummaryFromLiveBD(t *testing.T) {
 // up a valid kata short_id from the auto-extend path — the importer
 // creates fresh kata ULIDs and the short_id flows through unchanged in
 // the per-item JSON output.
-func TestBeadsImport_AssignsShortIDs(t *testing.T) {
+func TestBeadsImport_AssignsShortIDs(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	installFakeBD(t)
 
@@ -184,7 +184,7 @@ func TestBeadsImport_AssignsShortIDs(t *testing.T) {
 	}
 }
 
-func TestImportBeadsPromptsInitAndRetries(t *testing.T) {
+func TestImportBeadsPromptsInitAndRetries(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubIsTTY(t, true)
 	env := testenv.New(t)
@@ -201,7 +201,7 @@ func TestImportBeadsPromptsInitAndRetries(t *testing.T) {
 	assert.FileExists(t, filepath.Join(dir, ".kata.toml"))
 }
 
-func TestImportBeadsPromptNoReturnsInitValidation(t *testing.T) {
+func TestImportBeadsPromptNoReturnsInitValidation(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubIsTTY(t, true)
 	env := testenv.New(t)
@@ -294,7 +294,7 @@ fi
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestRunBeadsExportFallsBackForUnsupportedNoMemories(t *testing.T) {
+func TestRunBeadsExportFallsBackForUnsupportedNoMemories(t *testing.T) { //nolint:paralleltest // installBDExportFixture sets FAKE_BD_MODE and FAKE_BD_CALLS
 	bdPath, callsPath := installBDExportFixture(t, "fallback-success")
 
 	got, err := runBeadsExport(context.Background(), t.TempDir(), bdPath)
@@ -304,7 +304,7 @@ func TestRunBeadsExportFallsBackForUnsupportedNoMemories(t *testing.T) {
 	assert.Equal(t, "export --no-memories\nexport\n", readFixtureCalls(t, callsPath))
 }
 
-func TestRunBeadsExportDoesNotFallbackForOtherErrors(t *testing.T) {
+func TestRunBeadsExportDoesNotFallbackForOtherErrors(t *testing.T) { //nolint:paralleltest // installBDExportFixture sets FAKE_BD_MODE and FAKE_BD_CALLS
 	bdPath, callsPath := installBDExportFixture(t, "unrelated-error")
 
 	_, err := runBeadsExport(context.Background(), t.TempDir(), bdPath)
@@ -313,7 +313,7 @@ func TestRunBeadsExportDoesNotFallbackForOtherErrors(t *testing.T) {
 	assert.Equal(t, "export --no-memories\n", readFixtureCalls(t, callsPath))
 }
 
-func TestRunBeadsExportReturnsPlainExportFailure(t *testing.T) {
+func TestRunBeadsExportReturnsPlainExportFailure(t *testing.T) { //nolint:paralleltest // installBDExportFixture sets FAKE_BD_MODE and FAKE_BD_CALLS
 	bdPath, callsPath := installBDExportFixture(t, "fallback-error")
 
 	_, err := runBeadsExport(context.Background(), t.TempDir(), bdPath)
@@ -370,6 +370,7 @@ func readFixtureCalls(t *testing.T, path string) string {
 }
 
 func TestParseBeadsCommentsJSONAcceptsLegacyNumericID(t *testing.T) {
+	t.Parallel()
 	comments, err := parseBeadsCommentsJSON(strings.NewReader(
 		`[{"id":9007199254740993,"issue_id":"legacy-1","author":"user-a","text":"note","created_at":"2026-01-01T00:00:00Z"}]`,
 	))
@@ -380,6 +381,7 @@ func TestParseBeadsCommentsJSONAcceptsLegacyNumericID(t *testing.T) {
 }
 
 func TestParseBeadsCommentsJSONRejectsInvalidIDShape(t *testing.T) {
+	t.Parallel()
 	_, err := parseBeadsCommentsJSON(strings.NewReader(
 		`[{"id":{},"issue_id":"legacy-1","created_at":"2026-01-01T00:00:00Z"}]`,
 	))
@@ -388,6 +390,7 @@ func TestParseBeadsCommentsJSONRejectsInvalidIDShape(t *testing.T) {
 }
 
 func TestBuildBeadsImportRequestLegacyFields(t *testing.T) {
+	t.Parallel()
 	comment := beadsComment{
 		ID:        "1",
 		IssueID:   "legacy-1",
@@ -432,6 +435,7 @@ func TestBuildBeadsImportRequestLegacyFields(t *testing.T) {
 }
 
 func TestParseBeadsExportAndBuildImportRequest(t *testing.T) {
+	t.Parallel()
 	export := strings.NewReader(`{"id":"b1","title":"Blocker","description":"blocker body","status":"open","priority":1,"issue_type":"task","owner":"alice","created_at":"2026-05-01T10:00:00Z","created_by":"Alice","updated_at":"2026-05-01T10:00:00Z","labels":["Needs Review","bad label!","` + strings.Repeat("Very Long Label ", 8) + `"],"dependency_count":0,"dependent_count":1,"comment_count":0}
 {"id":"b2","title":"Blocked","description":"blocked body","status":"closed","priority":2,"issue_type":"bug","owner":"bob","created_at":"2026-05-01T11:00:00Z","created_by":"Bob","updated_at":"2026-05-01T12:00:00Z","closed_at":"2026-05-01T12:00:00Z","close_reason":"fixed elsewhere","labels":[],"dependencies":[{"issue_id":"b2","depends_on_id":"b1","type":"blocks","created_at":"2026-05-01T11:30:00Z","created_by":"Bob","metadata":"{}"}],"comment_count":1}
 `)
@@ -502,6 +506,7 @@ func TestParseBeadsExportAndBuildImportRequest(t *testing.T) {
 }
 
 func TestNormalizeKataLabel(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "needs-review", importlabels.Normalize("Needs Review!"))
 	assert.Equal(t, "imported", importlabels.Normalize("!!!"))
 	assert.Equal(t, "source:beads", importlabels.Normalize("source:beads"))
@@ -511,6 +516,7 @@ func TestNormalizeKataLabel(t *testing.T) {
 }
 
 func TestMapBeadsPriority(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   int
@@ -536,6 +542,7 @@ func TestMapBeadsPriority(t *testing.T) {
 }
 
 func TestMapBeadsStatus(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		raw  string
 		want string
@@ -561,6 +568,7 @@ func TestMapBeadsStatus(t *testing.T) {
 }
 
 func TestBeadsImportsBlockedStatusAsOpenWithLabel(t *testing.T) {
+	t.Parallel()
 	export := strings.NewReader(`{"id":"b1","title":"Active work","description":"body","status":"blocked","created_at":"2026-05-01T10:00:00Z","created_by":"Alice","updated_at":"2026-05-01T10:00:00Z"}`)
 	req, err := buildBeadsImportRequest(export, nil, "importer")
 	require.NoError(t, err)
@@ -572,6 +580,7 @@ func TestBeadsImportsBlockedStatusAsOpenWithLabel(t *testing.T) {
 }
 
 func TestBeadsImportsMergedStatusAsClosed(t *testing.T) {
+	t.Parallel()
 	export := strings.NewReader(`{"id":"b1","title":"Shipped","description":"body","status":"merged","close_reason":"shipped","closed_at":"2026-05-02T10:00:00Z","created_at":"2026-05-01T10:00:00Z","created_by":"Alice","updated_at":"2026-05-02T10:00:00Z"}`)
 	req, err := buildBeadsImportRequest(export, nil, "importer")
 	require.NoError(t, err)
@@ -583,6 +592,7 @@ func TestBeadsImportsMergedStatusAsClosed(t *testing.T) {
 }
 
 func TestBeadsRejectsDependencyTargetMissingFromExport(t *testing.T) {
+	t.Parallel()
 	export := strings.NewReader(`{"id":"b2","title":"Blocked","description":"body","status":"open","created_at":"2026-05-01T10:00:00Z","created_by":"Alice","updated_at":"2026-05-01T10:00:00Z","dependencies":[{"issue_id":"b2","depends_on_id":"missing","type":"blocks"}]}`)
 	_, err := buildBeadsImportRequest(export, nil, "importer")
 	require.Error(t, err)
@@ -590,6 +600,7 @@ func TestBeadsRejectsDependencyTargetMissingFromExport(t *testing.T) {
 }
 
 func TestBeadsRejectsOversizedCommentsJSON(t *testing.T) {
+	t.Parallel()
 	_, err := parseBeadsCommentsJSON(io.LimitReader(repeatedByteReader(' '), maxBeadsCommentsJSONBytes+1))
 	require.Error(t, err)
 	var ce *cliError

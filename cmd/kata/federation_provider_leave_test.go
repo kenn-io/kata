@@ -25,7 +25,8 @@ import (
 
 // The helper is an external executable. It accepts release only for the exact
 // saved request, after the daemon has durably marked the connection as leaving.
-func TestLeaveProviderProcess(_ *testing.T) {
+func TestLeaveProviderProcess(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("KATA_TEST_LEAVE_PROVIDER") != "1" {
 		return
 	}
@@ -51,7 +52,7 @@ func TestLeaveProviderProcess(_ *testing.T) {
 	os.Exit(2)
 }
 
-func TestProviderCleanupStartupReportsUnreadableCredentials(t *testing.T) {
+func TestProviderCleanupStartupReportsUnreadableCredentials(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	require.NoError(t, os.WriteFile(filepath.Join(env.Home, "credentials.toml"), []byte("[invalid"), 0o600))
@@ -70,7 +71,7 @@ func TestProviderCleanupStartupReportsUnreadableCredentials(t *testing.T) {
 	assert.Positive(t, health().Pending)
 }
 
-func TestFederationLeaveUsesProviderAndRetainsOfflineCleanup(t *testing.T) {
+func TestFederationLeaveUsesProviderAndRetainsOfflineCleanup(t *testing.T) { //nolint:paralleltest // sets KATA_TEST_LEAVE_PROVIDER and KATA_TEST_LEAVE_DECISION; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	t.Setenv("KATA_TEST_LEAVE_PROVIDER", "1")

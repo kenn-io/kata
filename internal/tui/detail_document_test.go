@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestDetailDocumentPage80x50LayoutSignals(t *testing.T) {
+func TestDetailDocumentPage80x50LayoutSignals(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailHierarchyFixture()
 	dm.issue.Owner = new("alice")
@@ -49,7 +49,7 @@ func TestDetailDocumentPage80x50LayoutSignals(t *testing.T) {
 	assertStringsLack(t, got, "Owner:", "Parent:")
 }
 
-func TestDetailCompactSheet_UsesDenseRhythmAndNoDecorativeRules(t *testing.T) {
+func TestDetailCompactSheet_UsesDenseRhythmAndNoDecorativeRules(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.issue.Owner = new("alice")
@@ -84,7 +84,7 @@ func TestDetailCompactSheet_UsesDenseRhythmAndNoDecorativeRules(t *testing.T) {
 // behind those rows and looked like heavy chrome competing with the
 // issue body — the redesign drops them so the page reads as a quiet
 // document.
-func TestDetailCompactSheet_AdaptiveSurfaces(t *testing.T) {
+func TestDetailCompactSheet_AdaptiveSurfaces(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorDark, true)
 	if styleHasBackground(detailMetaStyle) {
 		t.Fatal("detailMetaStyle should not paint a background slab in color modes")
@@ -108,7 +108,7 @@ func TestDetailCompactSheet_AdaptiveSurfaces(t *testing.T) {
 	}
 }
 
-func TestMarkdownCodeBlockBackground_RespectsAutoDetectedBackground(t *testing.T) {
+func TestMarkdownCodeBlockBackground_RespectsAutoDetectedBackground(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	oldMode := activeColorMode
 	oldDark := activeHasDarkBackground
 	defer func() { applyColorMode(oldMode, oldDark) }()
@@ -136,7 +136,7 @@ func styleHasBackground(s lipgloss.Style) bool {
 	}
 }
 
-func TestDetailDocument_DoesNotPadBodyBeforeChildren(t *testing.T) {
+func TestDetailDocument_DoesNotPadBodyBeforeChildren(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailHierarchyFixture()
 
@@ -149,7 +149,7 @@ func TestDetailDocument_DoesNotPadBodyBeforeChildren(t *testing.T) {
 // stacks vertically rather than overflowing the sheet. Empty
 // labels/children are still omitted entirely — the stacking is a
 // fallback for the present rows, not an excuse to render placeholders.
-func TestDetailDocument_NarrowStacksMetadata(t *testing.T) {
+func TestDetailDocument_NarrowStacksMetadata(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.issue.Owner = new("alice")
@@ -166,7 +166,7 @@ func TestDetailDocument_NarrowStacksMetadata(t *testing.T) {
 	}
 }
 
-func TestDetailDocument_EmptyBodyAndActivityOmitted(t *testing.T) {
+func TestDetailDocument_EmptyBodyAndActivityOmitted(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	iss := Issue{ProjectID: 7, UID: "01TEST-99", ShortID: "99zz", Title: "empty issue", Status: "open"}
 	dm := detailModel{issue: &iss}
@@ -178,7 +178,7 @@ func TestDetailDocument_EmptyBodyAndActivityOmitted(t *testing.T) {
 	}
 }
 
-func TestDetailDocument_LongTitleKeepsStatusVisible(t *testing.T) {
+func TestDetailDocument_LongTitleKeepsStatusVisible(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	title := "this is a very long issue title that should truncate before it can collide with the status pill"
 	iss := Issue{ProjectID: 7, UID: "01TEST-77", ShortID: "77yy", Title: title, Status: "closed"}
@@ -192,7 +192,7 @@ func TestDetailDocument_LongTitleKeepsStatusVisible(t *testing.T) {
 	}
 }
 
-func TestDetailDocument_MarkdownRenderingDropsSourceFences(t *testing.T) {
+func TestDetailDocument_MarkdownRenderingDropsSourceFences(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	iss := Issue{
 		ProjectID: 7,
@@ -219,7 +219,7 @@ func TestDetailDocument_MarkdownRenderingDropsSourceFences(t *testing.T) {
 	assertStringsLack(t, got, "## Steps", "```")
 }
 
-func TestDetailDocument_CommentAuthorsAlignTimestamps(t *testing.T) {
+func TestDetailDocument_CommentAuthorsAlignTimestamps(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
 	comments := []CommentEntry{
@@ -232,7 +232,7 @@ func TestDetailDocument_CommentAuthorsAlignTimestamps(t *testing.T) {
 	assertStringContains(t, got, "bob    Apr 30 11:00")
 }
 
-func TestDetailDocument_CommentTeammatesAlignTimestamps(t *testing.T) {
+func TestDetailDocument_CommentTeammatesAlignTimestamps(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	when := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	comments := []CommentEntry{
@@ -245,7 +245,7 @@ func TestDetailDocument_CommentTeammatesAlignTimestamps(t *testing.T) {
 	assertStringContains(t, got, "coordinator / teammate-2  Sep 13 12:01")
 }
 
-func TestDetailDocument_NarrowCommentTeammatePreservesTimestamp(t *testing.T) {
+func TestDetailDocument_NarrowCommentTeammatePreservesTimestamp(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	when := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	comment := CommentEntry{
@@ -259,7 +259,7 @@ func TestDetailDocument_NarrowCommentTeammatePreservesTimestamp(t *testing.T) {
 	assert.LessOrEqual(t, runewidth.StringWidth(strings.Split(got, "\n")[0]), 32)
 }
 
-func TestDetailDocument_CommentAuthorWithoutTeammateStaysCompact(t *testing.T) {
+func TestDetailDocument_CommentAuthorWithoutTeammateStaysCompact(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	comment := CommentEntry{
 		Author: "coordinator-with-a-long-name", Body: "checked",

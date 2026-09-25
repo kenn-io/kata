@@ -9,14 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLabelAdd_HappyPath(t *testing.T) {
+func TestLabelAdd_HappyPath(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 
 	out := runCLI(t, env, dir, "label", "add", ref, "needs-review")
 	assert.Contains(t, out, "needs-review")
 }
 
-func TestLabelAdd_AgentOutput(t *testing.T) {
+func TestLabelAdd_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 
 	out := runCLI(t, env, dir, "--agent", "label", "add", ref, "needs-review")
@@ -26,7 +26,7 @@ func TestLabelAdd_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Action: added")
 }
 
-func TestLabelRm_HappyPath(t *testing.T) {
+func TestLabelRm_HappyPath(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 
 	runCLI(t, env, dir, "label", "add", ref, "bug")
@@ -34,7 +34,7 @@ func TestLabelRm_HappyPath(t *testing.T) {
 	assert.True(t, strings.Contains(out, "removed") || strings.Contains(out, "unlabeled"))
 }
 
-func TestLabelRm_AgentOutput(t *testing.T) {
+func TestLabelRm_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 	runCLI(t, env, dir, "label", "add", ref, "bug")
 
@@ -46,7 +46,7 @@ func TestLabelRm_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Action: removed")
 }
 
-func TestLabelsList_PrintsCounts(t *testing.T) {
+func TestLabelsList_PrintsCounts(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 
 	runCLI(t, env, dir, "label", "add", ref, "bug")
@@ -55,7 +55,7 @@ func TestLabelsList_PrintsCounts(t *testing.T) {
 	assert.Contains(t, out, "1")
 }
 
-func TestLabelsList_AgentOutputIncludesCount(t *testing.T) {
+func TestLabelsList_AgentOutputIncludesCount(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 
 	runCLI(t, env, dir, "label", "add", ref, "bug")
@@ -71,7 +71,7 @@ func TestLabelsList_AgentOutputIncludesCount(t *testing.T) {
 // empty value used to URL-encode to "" and hit /labels/?actor=... which the
 // daemon answered with a raw 404 page. Now both add and rm reject
 // client-side with a uniform validation message.
-func TestLabel_RejectsEmptyLabel(t *testing.T) {
+func TestLabel_RejectsEmptyLabel(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 	for _, args := range [][]string{
 		{"label", "add", ref, ""},
@@ -85,7 +85,7 @@ func TestLabel_RejectsEmptyLabel(t *testing.T) {
 	}
 }
 
-func TestLabelAdd_WithComment_AppendsComment(t *testing.T) {
+func TestLabelAdd_WithComment_AppendsComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "a")
 
 	runCLI(t, env, dir, "label", "add", ref, "flaky", "--comment", "intermittent in CI")
@@ -95,7 +95,7 @@ func TestLabelAdd_WithComment_AppendsComment(t *testing.T) {
 	assert.Equal(t, "intermittent in CI", got.Comments[0].Body)
 }
 
-func TestLabelRm_WithComment_AppendsComment(t *testing.T) {
+func TestLabelRm_WithComment_AppendsComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "a")
 	runCLI(t, env, dir, "label", "add", ref, "flaky")
 
@@ -110,7 +110,7 @@ func TestLabelRm_WithComment_AppendsComment(t *testing.T) {
 // hammer #8. Pflag's StringSliceVar drops a literal empty argument (""),
 // but a whitespace-only label like "   " makes it through and used to be
 // silently dropped by the daemon. Reject client-side instead.
-func TestCreate_RejectsWhitespaceLabel(t *testing.T) {
+func TestCreate_RejectsWhitespaceLabel(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	_, _, err := executeRootCapture(t, context.Background(), "create", "title", "--label", "   ")
 	ce := requireCLIError(t, err, ExitValidation)

@@ -11,7 +11,7 @@ import (
 
 // TestCreate_WithMetadataPersists pins that `kata create --meta key=value`
 // forwards metadata that round-trips on show --json.
-func TestCreate_WithMetadataPersists(t *testing.T) {
+func TestCreate_WithMetadataPersists(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 
 	short := runCLI(t, env, dir, "--quiet", "create", "meta issue",
@@ -32,7 +32,7 @@ func TestCreate_WithMetadataPersists(t *testing.T) {
 
 // TestCreate_MetaMissingEqualsIsUsageError pins that a --meta without "=" is a
 // local usage error.
-func TestCreate_MetaMissingEqualsIsUsageError(t *testing.T) {
+func TestCreate_MetaMissingEqualsIsUsageError(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	_, err := runCLICapture(t, env, dir, "create", "bad meta", "--meta", "noequals")
 	require.Error(t, err)
@@ -40,7 +40,7 @@ func TestCreate_MetaMissingEqualsIsUsageError(t *testing.T) {
 }
 
 // TestList_MetaFilterEquality pins `kata list --meta key=value`.
-func TestList_MetaFilterEquality(t *testing.T) {
+func TestList_MetaFilterEquality(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	stuck := trimLine(runCLI(t, env, dir, "--quiet", "create", "stuck one",
 		"--meta", "work.attention=stuck"))
@@ -53,7 +53,7 @@ func TestList_MetaFilterEquality(t *testing.T) {
 }
 
 // TestList_MetaFilterPresence pins `kata list --meta key` (presence).
-func TestList_MetaFilterPresence(t *testing.T) {
+func TestList_MetaFilterPresence(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	_ = runCLI(t, env, dir, "--quiet", "create", "branched", "--meta", "work.branch=feature/x")
 	_ = runCLI(t, env, dir, "--quiet", "create", "unbranched")
@@ -63,7 +63,7 @@ func TestList_MetaFilterPresence(t *testing.T) {
 	assert.NotContains(t, out, "unbranched")
 }
 
-func TestList_RepeatedMetaFiltersRequireEveryMatch(t *testing.T) {
+func TestList_RepeatedMetaFiltersRequireEveryMatch(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	_ = runCLI(t, env, dir, "--quiet", "create", "matching metadata",
 		"--meta", "team=core", "--meta", "tier=one")
@@ -76,7 +76,7 @@ func TestList_RepeatedMetaFiltersRequireEveryMatch(t *testing.T) {
 }
 
 // TestShow_HumanRendersMetadataSection pins the human-mode metadata section.
-func TestShow_HumanRendersMetadataSection(t *testing.T) {
+func TestShow_HumanRendersMetadataSection(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	short := trimLine(runCLI(t, env, dir, "--quiet", "create", "with meta",
 		"--meta", "work.branch=feature/x"))
@@ -88,7 +88,7 @@ func TestShow_HumanRendersMetadataSection(t *testing.T) {
 
 // TestShow_HumanOmitsMetadataSectionWhenEmpty pins that no section renders when
 // the issue has no metadata.
-func TestShow_HumanOmitsMetadataSectionWhenEmpty(t *testing.T) {
+func TestShow_HumanOmitsMetadataSectionWhenEmpty(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	short := trimLine(runCLI(t, env, dir, "--quiet", "create", "plain"))
 
@@ -97,7 +97,7 @@ func TestShow_HumanOmitsMetadataSectionWhenEmpty(t *testing.T) {
 }
 
 // TestShow_AgentRendersMetadataRows pins agent-mode metadata rows.
-func TestShow_AgentRendersMetadataRows(t *testing.T) {
+func TestShow_AgentRendersMetadataRows(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 	short := trimLine(runCLI(t, env, dir, "--quiet", "create", "agent meta",
 		"--meta", "work.attention=stuck"))

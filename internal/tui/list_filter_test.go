@@ -140,6 +140,7 @@ func drainCmd(
 // TestList_StatusCycle confirms `s` cycles "" → open → closed → "" without
 // refetching. Status now filters the cached all-status working set.
 func TestList_StatusCycle(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	lm := listModel{issues: []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Status: "open"},
@@ -180,6 +181,7 @@ func TestList_StatusCycle(t *testing.T) {
 }
 
 func TestList_StatusOpenDoesNotAutoExpandMatchingChildren(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "p001"
 	lm := listModel{issues: []Issue{
@@ -210,6 +212,7 @@ func TestList_StatusOpenDoesNotAutoExpandMatchingChildren(t *testing.T) {
 }
 
 func TestList_StatusOpenPromotesChildWhenParentClosed(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "pp17"
 	lm := listModel{issues: []Issue{
@@ -237,6 +240,7 @@ func TestList_StatusOpenPromotesChildWhenParentClosed(t *testing.T) {
 }
 
 func TestList_StatusOpenShowsNestedMatchingGrandchildContext(t *testing.T) {
+	t.Parallel()
 	parentSID := "p001"
 	childSID := "c002"
 	rows := buildQueueRows([]Issue{
@@ -265,7 +269,7 @@ func TestList_StatusOpenShowsNestedMatchingGrandchildContext(t *testing.T) {
 // The filter changes are *client-side* (filteredIssues), so no API
 // refetch fires for Search/Owner — only Status filter changes
 // dispatch a refetch.
-func TestList_Search_AccumulatesAndCommits(t *testing.T) {
+func TestList_Search_AccumulatesAndCommits(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := mFixtureForBar()
 	m, _ = stepModel(m, runeKey('/'))
 	// Drive openInputMsg through the model so the bar opens.
@@ -300,7 +304,7 @@ func TestList_Search_AccumulatesAndCommits(t *testing.T) {
 // refine an active search without retyping; appending "xyz" to a
 // pre-filled "previous" produces "previousxyz" live, then Esc
 // restores "previous".
-func TestList_Search_EscCancels(t *testing.T) {
+func TestList_Search_EscCancels(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := mFixtureForBar()
 	m.list.filter.Search = "previous"
 	m = openBarFromCmd(t, m, '/')
@@ -369,7 +373,7 @@ func searchNavigationFixture(t *testing.T) Model {
 	return openBarFromCmd(t, m, '/')
 }
 
-func TestSearch_DownMovesIntoResultsAndAdvancesCursor(t *testing.T) {
+func TestSearch_DownMovesIntoResultsAndAdvancesCursor(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := searchNavigationFixture(t)
 	for _, r := range "fix" {
 		m, _ = stepModel(m, runeKey(r))
@@ -383,7 +387,7 @@ func TestSearch_DownMovesIntoResultsAndAdvancesCursor(t *testing.T) {
 	}
 }
 
-func TestSearch_UpMovesIntoResultsRelativeToCursor(t *testing.T) {
+func TestSearch_UpMovesIntoResultsRelativeToCursor(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := searchNavigationFixture(t)
 	m.list.cursor = 1
 	for _, r := range "fix" {
@@ -395,7 +399,7 @@ func TestSearch_UpMovesIntoResultsRelativeToCursor(t *testing.T) {
 	}
 }
 
-func TestSearch_EnterMovesToResultsThenCommitsFilter(t *testing.T) {
+func TestSearch_EnterMovesToResultsThenCommitsFilter(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := searchNavigationFixture(t)
 	for _, r := range "fix" {
 		m, _ = stepModel(m, runeKey(r))
@@ -413,7 +417,7 @@ func TestSearch_EnterMovesToResultsThenCommitsFilter(t *testing.T) {
 	}
 }
 
-func TestSearch_EnterSynchronizesSelectionAcrossRefetch(t *testing.T) {
+func TestSearch_EnterSynchronizesSelectionAcrossRefetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := mFixtureForBar()
 	m.list.issues = []Issue{
 		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other", Status: "open"},
@@ -448,7 +452,7 @@ func TestSearch_EnterSynchronizesSelectionAcrossRefetch(t *testing.T) {
 	}
 }
 
-func TestSearch_EscReturnsToQueryThenCancels(t *testing.T) {
+func TestSearch_EscReturnsToQueryThenCancels(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := mFixtureForBar()
 	m.list.filter.Search = "previous"
 	m = openBarFromCmd(t, m, '/')
@@ -466,7 +470,7 @@ func TestSearch_EscReturnsToQueryThenCancels(t *testing.T) {
 	}
 }
 
-func TestSearch_CancelRestoresSelectionAcrossRefetch(t *testing.T) {
+func TestSearch_CancelRestoresSelectionAcrossRefetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := mFixtureForBar()
 	m.list.issues = []Issue{
 		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other alpha", Status: "open"},
@@ -509,7 +513,7 @@ func TestSearch_CancelRestoresSelectionAcrossRefetch(t *testing.T) {
 	}
 }
 
-func TestSearch_ResultsAbsorbUnrelatedKeys(t *testing.T) {
+func TestSearch_ResultsAbsorbUnrelatedKeys(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := searchNavigationFixture(t)
 	m.input.activeField().setValue("fix")
 	m = m.applyLiveBarFilter()
@@ -522,7 +526,7 @@ func TestSearch_ResultsAbsorbUnrelatedKeys(t *testing.T) {
 	}
 }
 
-func TestSearch_ResultsAbsorbPaste(t *testing.T) {
+func TestSearch_ResultsAbsorbPaste(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := searchNavigationFixture(t)
 	for _, r := range "fix" {
 		m, _ = stepModel(m, runeKey(r))
@@ -552,7 +556,7 @@ func TestSearch_ResultsAbsorbPaste(t *testing.T) {
 	}
 }
 
-func TestSearch_SlashReturnsFromResultsToQuery(t *testing.T) {
+func TestSearch_SlashReturnsFromResultsToQuery(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := searchNavigationFixture(t)
 	m.input.searchFocus = searchFocusResults
 	m, _ = stepModel(m, runeKey('/'))
@@ -561,7 +565,7 @@ func TestSearch_SlashReturnsFromResultsToQuery(t *testing.T) {
 	}
 }
 
-func TestSearch_ZeroResultsNavigationIsSafe(t *testing.T) {
+func TestSearch_ZeroResultsNavigationIsSafe(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := searchNavigationFixture(t)
 	m.input.activeField().setValue("no-match")
 	m = m.applyLiveBarFilter()
@@ -575,6 +579,7 @@ func TestSearch_ZeroResultsNavigationIsSafe(t *testing.T) {
 // and does not dispatch a refetch. There is no IncludeDeleted slot today (see
 // ListFilter doc) so the post-state is the zero value.
 func TestList_ClearFilters_ZeroesEveryField(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	lm := listModel{filter: ListFilter{
 		Status: "open", Owner: "wes", Search: "bug",
@@ -591,6 +596,7 @@ func TestList_ClearFilters_ZeroesEveryField(t *testing.T) {
 }
 
 func TestList_ApplyFetched_SetsTruncatedAboveWorkingSetLimitAndTrims(t *testing.T) {
+	t.Parallel()
 	issues := make([]Issue, queueFetchLimit)
 	for i := range issues {
 		sid := fmt.Sprintf("w%03d", i+1)
@@ -620,6 +626,7 @@ func TestList_ApplyFetched_SetsTruncatedAboveWorkingSetLimitAndTrims(t *testing.
 // previously j moved through all issues and the marker landed on the
 // wrong (sometimes invisible) row.
 func TestList_Cursor_MovesInFilteredSpace(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	lm := listModel{
 		filter: ListFilter{Owner: "alice"},
@@ -648,6 +655,7 @@ func TestList_Cursor_MovesInFilteredSpace(t *testing.T) {
 }
 
 func TestList_ExpandCollapse(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "p001"
 	lm := listModel{
@@ -671,6 +679,7 @@ func TestList_ExpandCollapse(t *testing.T) {
 }
 
 func TestList_ExpandCollapse_LeafNoOp(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	lm := listModel{issues: []Issue{{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1"}}}
 
@@ -689,6 +698,7 @@ func TestList_ExpandCollapse_LeafNoOp(t *testing.T) {
 // direction must be no-ops so users can mash arrows without the row
 // flipping back and forth.
 func TestList_ArrowExpandCollapse(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "p001"
 	lm := listModel{
@@ -728,6 +738,7 @@ func TestList_ArrowExpandCollapse(t *testing.T) {
 // for the arrow bindings: a row with no children must not get an
 // entry written to the expansion set.
 func TestList_ArrowExpandCollapse_LeafNoOp(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	lm := listModel{issues: []Issue{{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1"}}}
 
@@ -742,6 +753,7 @@ func TestList_ArrowExpandCollapse_LeafNoOp(t *testing.T) {
 }
 
 func TestList_ExpandAll(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "p001"
 	childSID := "c002"
@@ -767,6 +779,7 @@ func TestList_ExpandAll(t *testing.T) {
 }
 
 func TestList_ExpandAllCollapsesWhenEverythingIsExpanded(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "p001"
 	childSID := "c002"
@@ -797,6 +810,7 @@ func TestList_ExpandAllCollapsesWhenEverythingIsExpanded(t *testing.T) {
 }
 
 func TestList_ExpandAllCollapseRestoresHiddenChildToNearestVisibleParent(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "p001"
 	childSID := "c002"
@@ -827,6 +841,7 @@ func TestList_ExpandAllCollapseRestoresHiddenChildToNearestVisibleParent(t *test
 }
 
 func TestList_ViewToggleShowsFlatPeersAndPreservesSelection(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "p001"
 	lm := listModel{
@@ -861,6 +876,7 @@ func TestList_ViewToggleShowsFlatPeersAndPreservesSelection(t *testing.T) {
 }
 
 func TestList_ViewToggleFromFlatCollapsesNestedView(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "p001"
 	lm := listModel{
@@ -887,6 +903,7 @@ func TestList_ViewToggleFromFlatCollapsesNestedView(t *testing.T) {
 }
 
 func TestList_ViewToggleFromFlatRestoresHiddenChildToNearestVisibleParent(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	parentSID := "p001"
 	childSID := "c002"
@@ -918,6 +935,7 @@ func TestList_ViewToggleFromFlatRestoresHiddenChildToNearestVisibleParent(t *tes
 }
 
 func TestList_SelectionPreservedAcrossRefetchWithParentInsertion(t *testing.T) {
+	t.Parallel()
 	parentSID := "p001"
 	lm := listModel{
 		issues:            []Issue{{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Title: "child"}},
@@ -939,6 +957,7 @@ func TestList_SelectionPreservedAcrossRefetchWithParentInsertion(t *testing.T) {
 }
 
 func TestList_SelectionClampsWhenFilterHidesSelectedChild(t *testing.T) {
+	t.Parallel()
 	lm := listModel{
 		filter:            ListFilter{Status: "closed"},
 		cursor:            1,
@@ -963,6 +982,7 @@ func TestList_SelectionClampsWhenFilterHidesSelectedChild(t *testing.T) {
 // is no projectID to create against, so 'n' should not open the prompt
 // and should leave a status hint.
 func TestList_NewIssue_AllProjectsModeIsNoOp(t *testing.T) {
+	t.Parallel()
 	api := &fakeListAPI{}
 	km := newKeymap()
 	sc := scope{allProjects: true}
@@ -987,6 +1007,7 @@ func TestList_NewIssue_AllProjectsModeIsNoOp(t *testing.T) {
 // form refactor because the seed lives in lm.applyMutation, not the
 // inline-row code path.
 func TestList_NewIssueCreateSeedsSelectionToNewIssue(t *testing.T) {
+	t.Parallel()
 	api := &fakeListAPI{}
 	lm := listModel{
 		issues: []Issue{
@@ -1018,7 +1039,7 @@ func TestList_NewIssueCreateSeedsSelectionToNewIssue(t *testing.T) {
 // gesture; `o` is now a plain unhandled key on the list. Regression
 // catch for accidentally re-binding `o` to inputSearchBar or any other
 // shell.
-func TestList_OKey_NoLongerOpensOwnerBar(t *testing.T) {
+func TestList_OKey_NoLongerOpensOwnerBar(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := mFixtureForBar()
 	m, _ = stepModel(m, runeKey('o'))
 	if m.input.kind != inputNone {
@@ -1031,7 +1052,7 @@ func TestList_OKey_NoLongerOpensOwnerBar(t *testing.T) {
 // because the wire doesn't carry Labels yet (matchesFilter could not
 // honor it). Regression catch for accidentally rebinding 'l' before
 // the wire surface lands.
-func TestList_LabelKey_NoLongerOpensPrompt(t *testing.T) {
+func TestList_LabelKey_NoLongerOpensPrompt(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := mFixtureForBar()
 	m, _ = stepModel(m, runeKey('l'))
 	if m.input.kind != inputNone {
@@ -1043,7 +1064,7 @@ func TestList_LabelKey_NoLongerOpensPrompt(t *testing.T) {
 // command bar deletes the last rune. The bubbles textinput handles
 // the actual edit; Model.routeInputKey forwards the key through
 // inputState.Update.
-func TestList_BackspaceTrimsBuffer(t *testing.T) {
+func TestList_BackspaceTrimsBuffer(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := mFixtureForBar()
 	m = openBarFromCmd(t, m, '/')
 	for _, r := range "abc" {
@@ -1063,7 +1084,7 @@ func TestList_BackspaceTrimsBuffer(t *testing.T) {
 // bar's buffer instead of triggering tea.Quit. After M3a, the bar
 // lives on m.input — canQuit() returns false when m.input.kind !=
 // inputNone so routeGlobalKey doesn't match.
-func TestList_QuitGate_RoutesQuitToBuffer(t *testing.T) {
+func TestList_QuitGate_RoutesQuitToBuffer(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.scope = scope{projectID: 7}
 	m.list.loading = false
@@ -1088,6 +1109,7 @@ func TestList_QuitGate_RoutesQuitToBuffer(t *testing.T) {
 // TestList_RefetchError_PutsErrOnModel ensures fetch failures surface in
 // lm.err so View renders the error state and the user can retry.
 func TestList_RefetchError_PutsErrOnModel(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	api.listIssuesErr = errors.New("boom")
 
@@ -1103,6 +1125,7 @@ func TestList_RefetchError_PutsErrOnModel(t *testing.T) {
 }
 
 func TestList_RefetchUsesQueueFetchFilter(t *testing.T) {
+	t.Parallel()
 	api := &fakeListAPI{}
 	sc := scope{projectID: 7}
 	lm := listModel{
@@ -1140,6 +1163,7 @@ func lmFromUpdate(
 // branch (alice matches twice, bob is filtered out, nil-owner case is
 // covered by TestList_NoFilter_PassThrough).
 func TestList_OwnerFilter_NarrowsDisplay(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Owner: new("alice"), Title: "a"},
 		{UID: "01TEST-bbb2", ShortID: "bbb2", Owner: new("bob"), Title: "b"},
@@ -1159,6 +1183,7 @@ func TestList_OwnerFilter_NarrowsDisplay(t *testing.T) {
 // empty. (Empty filter is the no-filter fast path; non-empty plus nil
 // owner is the case under test here.)
 func TestList_OwnerFilter_NilOwnerNeverMatches(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "no owner"},
 		{UID: "01TEST-bbb2", ShortID: "bbb2", Owner: new("alice"), Title: "owned"},
@@ -1172,6 +1197,7 @@ func TestList_OwnerFilter_NilOwnerNeverMatches(t *testing.T) {
 // TestList_SearchFilter_CaseInsensitive: the search box is forgiving
 // about case so users typing "login" find "LOGIN bug" and vice versa.
 func TestList_SearchFilter_CaseInsensitive(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "Fix LOGIN bug"},
 		{UID: "01TEST-bbb2", ShortID: "bbb2", Title: "deploy"},
@@ -1186,6 +1212,7 @@ func TestList_SearchFilter_CaseInsensitive(t *testing.T) {
 // fast path returns the input unchanged so the steady state pays no
 // per-render allocation.
 func TestList_NoFilter_PassThrough(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Owner: new("alice"), Title: "a"},
 		{UID: "01TEST-bbb2", ShortID: "bbb2", Title: "b"},
@@ -1202,6 +1229,7 @@ func TestList_NoFilter_PassThrough(t *testing.T) {
 // included. Pre-fix the early-return ignored f.Labels, so a
 // label-only filter narrowed nothing on the steady path.
 func TestFilteredIssues_FastPathIncludesLabels(t *testing.T) {
+	t.Parallel()
 	f := ListFilter{Labels: []string{"bug"}}
 	issues := []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Labels: []string{"bug"}},
@@ -1222,6 +1250,7 @@ func TestFilteredIssues_FastPathIncludesLabels(t *testing.T) {
 // the filter's Labels slice. Empty filter Labels is the no-filter
 // case (every issue matches).
 func TestMatchesFilter_LabelsAnyOfSemantics(t *testing.T) {
+	t.Parallel()
 	iss := Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Labels: []string{"bug", "prio-1"}}
 	cases := []struct {
 		name   string
@@ -1246,6 +1275,7 @@ func TestMatchesFilter_LabelsAnyOfSemantics(t *testing.T) {
 // labels can never match a non-empty Labels filter (the any-of set is
 // empty, so no overlap with any non-empty filter slice).
 func TestMatchesFilter_LabelsAnyOf_EmptyIssueLabels(t *testing.T) {
+	t.Parallel()
 	iss := Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Labels: nil}
 	if matchesFilter(iss, ListFilter{Labels: []string{"bug"}}) {
 		t.Fatal("issue with no labels must not match any non-empty Labels filter")
@@ -1258,6 +1288,7 @@ func TestMatchesFilter_LabelsAnyOf_EmptyIssueLabels(t *testing.T) {
 // honors it. When a future task adds an `a` keystroke to filter by
 // author, this test guards the wiring.
 func TestList_AuthorFilter_NarrowsDisplay(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Author: "wes", Title: "a"},
 		{UID: "01TEST-bbb2", ShortID: "bbb2", Author: "claude", Title: "b"},
@@ -1273,6 +1304,7 @@ func TestList_AuthorFilter_NarrowsDisplay(t *testing.T) {
 // intentionally tested through Model because it first resolves the daemon's
 // evidence requirement and opens the close form.
 func TestList_Reopen_DispatchesAPI(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	api.reopenResult = &MutationResp{Issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Status: "open"}}
 	lm := listModel{
@@ -1301,6 +1333,7 @@ func TestList_Reopen_DispatchesAPI(t *testing.T) {
 // with the corresponding *int64. The pending hint must clear after the
 // dispatch so the success status text is what the user sees.
 func TestList_SetPriority_PendingThenDigit(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	api.setPriorityResult = &MutationResp{Issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Status: "open"}}
 	lm := listModel{
@@ -1346,6 +1379,7 @@ func TestList_SetPriority_PendingThenDigit(t *testing.T) {
 // TestList_SetPriority_ClearWithDash: `!` followed by `-` clears the
 // priority via a nil pointer.
 func TestList_SetPriority_ClearWithDash(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	api.setPriorityResult = &MutationResp{Issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Status: "open"}}
 	priority := int64(3)
@@ -1373,6 +1407,7 @@ func TestList_SetPriority_ClearWithDash(t *testing.T) {
 // TestList_SetPriority_EscCancels: `!` then esc cancels pending mode
 // without dispatching anything.
 func TestList_SetPriority_EscCancels(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	lm := listModel{
 		actor: "tester",
@@ -1397,6 +1432,7 @@ func TestList_SetPriority_EscCancels(t *testing.T) {
 // TestList_SetPriority_EmptyListNoOp: `!` on an empty list does not
 // arm pending mode (no row to act on).
 func TestList_SetPriority_EmptyListNoOp(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	lm := listModel{actor: "tester"}
 
@@ -1412,6 +1448,7 @@ func TestList_SetPriority_EmptyListNoOp(t *testing.T) {
 // TestList_Close_EmptyListNoOp: 'x' on an empty list does not call
 // api.Close and does not panic.
 func TestList_Close_EmptyListNoOp(t *testing.T) {
+	t.Parallel()
 	api, km, sc := newListEnv()
 	lm := listModel{actor: "tester"}
 
@@ -1429,6 +1466,7 @@ func TestList_Close_EmptyListNoOp(t *testing.T) {
 // qualified `<project>#<short_id>` form. Title-only search forced users
 // to remember exact wording when they only had the id at hand.
 func TestMatchesFilter_SearchAcrossIDs(t *testing.T) {
+	t.Parallel()
 	iss := Issue{
 		UID:         "01TEST-aaa1",
 		ShortID:     "abc4",
@@ -1464,6 +1502,7 @@ func TestMatchesFilter_SearchAcrossIDs(t *testing.T) {
 // short_id or qualified_id populated (older fixtures, partial decode)
 // must still pass title-only searches without panicking.
 func TestMatchesFilter_SearchEmptyIdentifiers(t *testing.T) {
+	t.Parallel()
 	iss := Issue{Title: "hello world"}
 	if !matchesFilter(iss, ListFilter{Search: "hello"}) {
 		t.Fatal("title-only issue must still match a title-substring search")

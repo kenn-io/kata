@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreate_WithPriority(t *testing.T) {
+func TestCreate_WithPriority(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 
@@ -20,7 +20,7 @@ func TestCreate_WithPriority(t *testing.T) {
 	assert.Equal(t, int64(1), *b.Issue.Priority)
 }
 
-func TestCreate_PriorityOutOfRangeRejectsLocally(t *testing.T) {
+func TestCreate_PriorityOutOfRangeRejectsLocally(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	resetFlags(t)
 	_, err := runCLICapture(t, env, dir, "create", "x", "--priority", "5")
@@ -28,7 +28,7 @@ func TestCreate_PriorityOutOfRangeRejectsLocally(t *testing.T) {
 	assert.Contains(t, err.Error(), "0 and 4")
 }
 
-func TestEdit_PrioritySetClearsAndSets(t *testing.T) {
+func TestEdit_PrioritySetClearsAndSets(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "to be prioritized")
@@ -45,7 +45,7 @@ func TestEdit_PrioritySetClearsAndSets(t *testing.T) {
 	assert.Nil(t, b.Issue.Priority)
 }
 
-func TestEdit_PriorityCombinedWithTitle(t *testing.T) {
+func TestEdit_PriorityCombinedWithTitle(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "old title")
@@ -58,7 +58,7 @@ func TestEdit_PriorityCombinedWithTitle(t *testing.T) {
 	assert.Equal(t, int64(2), *b.Issue.Priority)
 }
 
-func TestEdit_PriorityInvalidValueRejected(t *testing.T) {
+func TestEdit_PriorityInvalidValueRejected(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "x")
@@ -74,7 +74,7 @@ func TestEdit_PriorityInvalidValueRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "integer 0..4 or '-'")
 }
 
-func TestList_FiltersByPriority(t *testing.T) {
+func TestList_FiltersByPriority(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	p0 := createIssue(t, env, pid, "p0 issue")
@@ -100,7 +100,7 @@ func TestList_FiltersByPriority(t *testing.T) {
 	assert.NotContains(t, out, "no prio issue", "max-priority requires priority IS NOT NULL")
 }
 
-func TestList_PriorityFlagOutOfRangeRejected(t *testing.T) {
+func TestList_PriorityFlagOutOfRangeRejected(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	resetFlags(t)
 	_, err := runCLICapture(t, env, dir, "list", "--priority", "5")

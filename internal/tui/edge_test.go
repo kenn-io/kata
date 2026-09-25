@@ -17,7 +17,7 @@ import (
 // narrow hint (covered by narrow_terminal_test.go). The fixture is
 // the same three-row mix used by snapshot tests so the comparison
 // stays deterministic.
-func TestEdge_WindowResize_NoPanic(t *testing.T) {
+func TestEdge_WindowResize_NoPanic(t *testing.T) { //nolint:paralleltest // sets KATA_COLOR_MODE; applyColorMode rewrites package style vars
 	t.Setenv("KATA_COLOR_MODE", "none")
 	applyDefaultColorMode()
 	prior := renderNow
@@ -66,7 +66,7 @@ func TestEdge_WindowResize_NoPanic(t *testing.T) {
 // Search is client-side so the bar's commit does NOT dispatch a
 // refetch — the cursor clamp + filter mirror handle the visual update.
 // Status filter changes still dispatch a refetch (covered separately).
-func TestEdge_SSEDuringSearchPrompt(t *testing.T) {
+func TestEdge_SSEDuringSearchPrompt(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.list.issues = []Issue{{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "x"}}
 
@@ -130,7 +130,7 @@ func TestEdge_SSEDuringSearchPrompt(t *testing.T) {
 // reorders rows (issues come back sorted by updated_at DESC, so any
 // background mutation can shuffle them). The cursor must stay on the
 // same issue rather than the same index.
-func TestEdge_IdentitySelection_FollowsIssueAcrossReorder(t *testing.T) {
+func TestEdge_IdentitySelection_FollowsIssueAcrossReorder(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.list.issues = []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "alpha"},
@@ -160,7 +160,7 @@ func TestEdge_IdentitySelection_FollowsIssueAcrossReorder(t *testing.T) {
 // soft-deleted, or filter narrowed it out), the cursor falls back to
 // the same index clamped to the new visible range and re-records the
 // issue under it.
-func TestEdge_IdentitySelection_FallsBackWhenIssueDisappears(t *testing.T) {
+func TestEdge_IdentitySelection_FallsBackWhenIssueDisappears(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.list.issues = []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "alpha"},
@@ -186,7 +186,7 @@ func TestEdge_IdentitySelection_FallsBackWhenIssueDisappears(t *testing.T) {
 // screen row when possible. This feels like paging the viewport,
 // unlike the old cursor-only jump that re-centered the list around
 // the new row.
-func TestEdge_PageUpPageDown_PagesVisibleWindow(t *testing.T) {
+func TestEdge_PageUpPageDown_PagesVisibleWindow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.list.issues = makeTestIssues(50)
@@ -219,7 +219,7 @@ func TestEdge_PageUpPageDown_PagesVisibleWindow(t *testing.T) {
 	assertViewContains(t, nm, "[1-24 of 50]")
 }
 
-func TestEmacsListNavigationUsesFilteredRows(t *testing.T) {
+func TestEmacsListNavigationUsesFilteredRows(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.list.issues = makeTestIssues(50)
@@ -259,7 +259,7 @@ func TestEmacsListNavigationUsesFilteredRows(t *testing.T) {
 	}
 }
 
-func TestEmacsVerticalListMovement(t *testing.T) {
+func TestEmacsVerticalListMovement(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.list.issues = makeTestIssues(3)
@@ -275,7 +275,7 @@ func TestEmacsVerticalListMovement(t *testing.T) {
 	}
 }
 
-func TestEdge_PageDownToFinalPagePreservesScreenRow(t *testing.T) {
+func TestEdge_PageDownToFinalPagePreservesScreenRow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.list.issues = makeTestIssues(88)
@@ -291,7 +291,7 @@ func TestEdge_PageDownToFinalPagePreservesScreenRow(t *testing.T) {
 	assertSelection(t, nm, 87, "01TEST-r088")
 }
 
-func TestEdge_PageUpToFirstPagePreservesScreenRow(t *testing.T) {
+func TestEdge_PageUpToFirstPagePreservesScreenRow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.list.issues = makeTestIssues(88)
@@ -309,7 +309,7 @@ func TestEdge_PageUpToFirstPagePreservesScreenRow(t *testing.T) {
 
 // TestEdge_PageDown_ClampsAtEnd: pgdown near the end clamps to the
 // last row rather than walking past the slice.
-func TestEdge_PageDown_ClampsAtEnd(t *testing.T) {
+func TestEdge_PageDown_ClampsAtEnd(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.list.issues = makeTestIssues(12)
@@ -326,6 +326,7 @@ func TestEdge_PageDown_ClampsAtEnd(t *testing.T) {
 // every row. We verify the rendered output contains the cursor row's
 // title and excludes rows far from the cursor.
 func TestEdge_ListViewport_KeepsCursorVisible(t *testing.T) {
+	t.Parallel()
 	lm := newListModel()
 	lm.loading = false
 	issues := make([]Issue, 100)
@@ -378,7 +379,7 @@ func numToTag(n int) string {
 // changes no longer create cache slots. A working-set fetch dispatched
 // before a status/search/owner/labels change should still populate the
 // full list; filteredIssues narrows what renders afterward.
-func TestEdge_RefetchAfterRenderFilterChangeKeepsWorkingSet(t *testing.T) {
+func TestEdge_RefetchAfterRenderFilterChangeKeepsWorkingSet(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.list.issues = []Issue{{UID: "01TEST-99zz", ShortID: "99zz", Title: "current-filter row"}}
 	m.list.filter = ListFilter{Status: "open"}
@@ -405,7 +406,7 @@ func TestEdge_RefetchAfterRenderFilterChangeKeepsWorkingSet(t *testing.T) {
 // projects. dispatchKey carries the original scope; populateCache
 // drops the response so the new scope's list isn't polluted by single-
 // project rows.
-func TestEdge_StaleRefetch_DroppedAcrossScopeToggle(t *testing.T) {
+func TestEdge_StaleRefetch_DroppedAcrossScopeToggle(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.api = &Client{}
 	// Currently in all-projects scope.
@@ -427,7 +428,7 @@ func TestEdge_StaleRefetch_DroppedAcrossScopeToggle(t *testing.T) {
 // TestQuit_QPressed_OpensConfirm: pressing q opens the M3.5b
 // quit-confirm modal instead of immediately quitting. The modal
 // owns key dispatch from this point until y/n/esc closes it.
-func TestQuit_QPressed_OpensConfirm(t *testing.T) {
+func TestQuit_QPressed_OpensConfirm(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.list.loading = false
 	nm, cmd := updateModel(m, runeKey('q'))
@@ -443,7 +444,7 @@ func TestQuit_QPressed_OpensConfirm(t *testing.T) {
 	}
 }
 
-func TestQuit_ConfirmationDisabled(t *testing.T) {
+func TestQuit_ConfirmationDisabled(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{SkipQuitConfirm: true})
 	m.list.loading = false
 	nm, cmd := updateModel(m, runeKey('q'))
@@ -460,7 +461,7 @@ func TestQuit_ConfirmationDisabled(t *testing.T) {
 
 // TestQuit_CtrlCFastQuits: ctrl+c bypasses the confirm modal and
 // triggers tea.Quit immediately. Power-user escape hatch.
-func TestQuit_CtrlCFastQuits(t *testing.T) {
+func TestQuit_CtrlCFastQuits(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	for _, skipQuitConfirm := range []bool{false, true} {
 		t.Run(fmt.Sprintf("skip=%t", skipQuitConfirm), func(t *testing.T) {
 			m := initialModel(Options{SkipQuitConfirm: skipQuitConfirm})
@@ -479,7 +480,7 @@ func TestQuit_CtrlCFastQuits(t *testing.T) {
 	}
 }
 
-func TestQuit_InputOpenPreserved(t *testing.T) {
+func TestQuit_InputOpenPreserved(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.opts.SkipQuitConfirm = true
 	m = openBarFromCmd(t, m, '/')
@@ -498,7 +499,7 @@ func TestQuit_InputOpenPreserved(t *testing.T) {
 
 // TestQuit_YConfirms: with the quit modal open, pressing y commits
 // — returns tea.Quit.
-func TestQuit_YConfirms(t *testing.T) {
+func TestQuit_YConfirms(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.modal = modalQuitConfirm
@@ -513,7 +514,7 @@ func TestQuit_YConfirms(t *testing.T) {
 
 // TestQuit_NCancels: with the quit modal open, n closes it without
 // quitting. Esc behaves the same.
-func TestQuit_NCancels(t *testing.T) {
+func TestQuit_NCancels(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	for _, k := range []rune{'n', 'N'} {
 		m := initialModel(Options{})
 		m.list.loading = false
@@ -543,7 +544,7 @@ func TestQuit_NCancels(t *testing.T) {
 // TestQuit_ModalAbsorbsOtherKeys: while the quit modal is open,
 // unrelated keys (j, /, x) don't reach the underlying view. The
 // modal's exclusive routing is what makes "q to confirm" safe.
-func TestQuit_ModalAbsorbsOtherKeys(t *testing.T) {
+func TestQuit_ModalAbsorbsOtherKeys(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.modal = modalQuitConfirm
@@ -566,7 +567,7 @@ func TestQuit_ModalAbsorbsOtherKeys(t *testing.T) {
 // stale. routeMutation now marks the cache stale so the next list
 // refetch picks up the change without waiting for SSE. Regression
 // for roborev #89 finding 1.
-func TestEdge_DetailMutation_StaleGen_MarksCacheStale(t *testing.T) {
+func TestEdge_DetailMutation_StaleGen_MarksCacheStale(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.view = viewDetail
 	// Pretend the user is now on issue #99 (gen=10) after jumping
@@ -598,7 +599,7 @@ func TestEdge_DetailMutation_StaleGen_MarksCacheStale(t *testing.T) {
 // after the user popped to the list view (or opened help) must NOT
 // mutate detail state or dispatch fetches. handleJumpDetail gates on
 // view==viewDetail. Regression for roborev #89 finding 2.
-func TestEdge_JumpDetail_ViewGuard(t *testing.T) {
+func TestEdge_JumpDetail_ViewGuard(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	// User left detail view between the keypress and the jump msg.
 	m.view = viewList
@@ -628,7 +629,7 @@ func TestEdge_JumpDetail_ViewGuard(t *testing.T) {
 // identity-restore can pull the cursor back to the previously-selected
 // issue if it survived the new filter, defeating the explicit "I changed
 // the filter" intent. Regression for roborev #90 finding 1.
-func TestEdge_FilterChange_ClearsSelectedUID(t *testing.T) {
+func TestEdge_FilterChange_ClearsSelectedUID(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.list.issues = []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "alpha", Status: "open"},
@@ -650,7 +651,7 @@ func TestEdge_FilterChange_ClearsSelectedUID(t *testing.T) {
 
 // TestEdge_ClearFilters_ClearsSelectedUID: same as above for `c`
 // (clear filters).
-func TestEdge_ClearFilters_ClearsSelectedUID(t *testing.T) {
+func TestEdge_ClearFilters_ClearsSelectedUID(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.list.filter = ListFilter{Status: "open", Owner: "alice"}
 	m.list.issues = []Issue{
@@ -674,7 +675,7 @@ func TestEdge_ClearFilters_ClearsSelectedUID(t *testing.T) {
 // the post-success refetch fires) — without top-level routing,
 // dispatchToView would forward to detail and the result would be
 // silently dropped.
-func TestEdge_ListMutation_CompletesAfterDetailOpen(t *testing.T) {
+func TestEdge_ListMutation_CompletesAfterDetailOpen(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.list.actor = "tester"
 	m.list.issues = []Issue{{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "x"}}
@@ -700,7 +701,7 @@ func TestEdge_ListMutation_CompletesAfterDetailOpen(t *testing.T) {
 // reflects the close and the post-success refetch is dispatched.
 // Without top-level routing, dispatchToView would forward to the list
 // and the response would be silently dropped.
-func TestEdge_DetailMutation_CompletesAfterPopToList(t *testing.T) {
+func TestEdge_DetailMutation_CompletesAfterPopToList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	// Detail is initialized with a current issue and gen=5 from a recent
 	// open; after popping, m.view is viewList but m.detail still holds
@@ -728,7 +729,7 @@ func TestEdge_DetailMutation_CompletesAfterPopToList(t *testing.T) {
 //
 // Driven through Model.Update so the jumpDetailMsg flow exercises
 // Model.handleJumpDetail end-to-end (gen comes from m.nextGen).
-func TestEdge_DetailJumpBack(t *testing.T) {
+func TestEdge_DetailJumpBack(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 11
 	m.view = viewDetail
@@ -819,6 +820,7 @@ func TestEdge_DetailJumpBack(t *testing.T) {
 // past the last bg line and disappears entirely. Regression for
 // roborev #119 finding 1.
 func TestOverlayModal_PadsShortBackground(t *testing.T) {
+	t.Parallel()
 	bg := "row1\nrow2\nrow3" // 3 lines, terminal height = 30
 	modal := "[Y]\n[N]"      // 2-line modal — would land near center (~14)
 	out := overlayModal(bg, modal, 80, 30)
@@ -845,6 +847,7 @@ func TestOverlayModal_PadsShortBackground(t *testing.T) {
 // units (not per-tab entry units, which the legacy detail view used
 // before the unified-viewport refactor).
 func TestDetail_ScrollIndicator_ViewportCoversWholeDocument(t *testing.T) {
+	t.Parallel()
 	cs := make([]CommentEntry, 6)
 	body := "wrapped body content that takes a few lines"
 	for i := range cs {

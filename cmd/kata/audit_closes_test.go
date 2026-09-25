@@ -20,7 +20,7 @@ const wontfixMessage = "Decided not to fix; out of scope for this milestone and 
 // TestAuditCloses_ListsAllClosesInWindow verifies the happy path: every
 // close event in the default (open) window surfaces in the JSON output
 // with its reason intact.
-func TestAuditCloses_ListsAllClosesInWindow(t *testing.T) {
+func TestAuditCloses_ListsAllClosesInWindow(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, refOne := setupWorkspaceWithIssue(t, "issue one")
 	refTwo := createIssue(t, env, pid, "issue two")
 	runCLI(t, env, dir, "close", refOne, "--done",
@@ -41,7 +41,7 @@ func TestAuditCloses_ListsAllClosesInWindow(t *testing.T) {
 // unmarshal mismatch where the CLI decoded into the full
 // AuditClosesResponse shape (with nested Body.Rows) while huma emits
 // the body content directly, leaving Rows empty and the table blank.
-func TestAuditCloses_TextOutputRendersRows(t *testing.T) {
+func TestAuditCloses_TextOutputRendersRows(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "issue one")
 	runCLI(t, env, dir, "close", ref, "--done",
 		"--message", "Fixed the issue and ran the auth tests thoroughly.",
@@ -55,7 +55,7 @@ func TestAuditCloses_TextOutputRendersRows(t *testing.T) {
 		"text output must include the close reason")
 }
 
-func TestAuditCloses_AgentOutputShape(t *testing.T) {
+func TestAuditCloses_AgentOutputShape(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "issue one")
 	runCLIAs(t, env, dir, "tester", "close", ref, "--done",
 		"--message", "Fixed the issue and ran the auth tests thoroughly.",
@@ -75,7 +75,7 @@ func TestAuditCloses_AgentOutputShape(t *testing.T) {
 
 // TestAuditCloses_FilterByActor verifies --actor narrows results to a
 // single actor's closes.
-func TestAuditCloses_FilterByActor(t *testing.T) {
+func TestAuditCloses_FilterByActor(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, refOne := setupWorkspaceWithIssue(t, "issue one")
 	refTwo := createIssue(t, env, pid, "issue two")
 	runCLIAs(t, env, dir, "alice", "close", refOne, "--done",
@@ -92,7 +92,7 @@ func TestAuditCloses_FilterByActor(t *testing.T) {
 
 // TestAuditCloses_FilterByReason verifies --reason narrows to a single
 // close reason (here, the wontfix close is filtered out).
-func TestAuditCloses_FilterByReason(t *testing.T) {
+func TestAuditCloses_FilterByReason(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, refOne := setupWorkspaceWithIssue(t, "issue one")
 	refTwo := createIssue(t, env, pid, "issue two")
 	runCLI(t, env, dir, "close", refOne, "--done",
@@ -112,7 +112,7 @@ func TestAuditCloses_FilterByReason(t *testing.T) {
 // close (which is admissible without evidence) does NOT get the
 // "no-evidence" flag — that flag is reserved for closes that should
 // have carried evidence and didn't.
-func TestAuditCloses_WontfixHasNoNoEvidenceFlag(t *testing.T) {
+func TestAuditCloses_WontfixHasNoNoEvidenceFlag(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "issue one")
 	runCLI(t, env, dir, "close", ref, "--wontfix",
 		"--message", wontfixMessage)
@@ -126,7 +126,7 @@ func TestAuditCloses_WontfixHasNoNoEvidenceFlag(t *testing.T) {
 // every close in the window carries evidence, --no-evidence returns no
 // rows (the projection's Rows field is an empty list rather than
 // missing or nil).
-func TestAuditCloses_FilterByNoEvidenceEmptyByDefault(t *testing.T) {
+func TestAuditCloses_FilterByNoEvidenceEmptyByDefault(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "issue one")
 	runCLI(t, env, dir, "close", ref, "--done",
 		"--message", "Fixed first issue and ran the auth tests.",
@@ -140,7 +140,7 @@ func TestAuditCloses_FilterByNoEvidenceEmptyByDefault(t *testing.T) {
 // TestAuditCloses_EvidenceTypesSurfaceInRow verifies that the
 // evidence_types projection lists the evidence kinds attached to a
 // close (here, "commit" from --commit abc1234).
-func TestAuditCloses_EvidenceTypesSurfaceInRow(t *testing.T) {
+func TestAuditCloses_EvidenceTypesSurfaceInRow(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "issue one")
 	runCLI(t, env, dir, "close", ref, "--done",
 		"--message", "Fixed first issue and ran the auth tests.",
@@ -152,7 +152,7 @@ func TestAuditCloses_EvidenceTypesSurfaceInRow(t *testing.T) {
 
 // TestAuditCloses_FilterByParent verifies --parent narrows to closes
 // of children of the given parent issue.
-func TestAuditCloses_FilterByParent(t *testing.T) {
+func TestAuditCloses_FilterByParent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
 	childOfParent := createIssue(t, env, pid, "child of parent")
 	runCLI(t, env, dir, "edit", childOfParent, "--parent", parent)
@@ -176,7 +176,7 @@ func TestAuditCloses_FilterByParent(t *testing.T) {
 // the event payload, an agent could close children under parent A
 // and then reparent them to B to shift their audit rows out of
 // `audit closes --parent A`.
-func TestAuditCloses_ParentFrozenAtCloseTime(t *testing.T) {
+func TestAuditCloses_ParentFrozenAtCloseTime(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parentA := setupWorkspaceWithIssue(t, "parent A")
 	parentB := createIssue(t, env, pid, "parent B")
 	child := createIssue(t, env, pid, "child of A")
@@ -211,7 +211,7 @@ func TestAuditCloses_ParentFrozenAtCloseTime(t *testing.T) {
 // inherit the prior throttle flag — otherwise an all-time audit window
 // would keep stamping "throttled" on closes that have nothing to do
 // with the original refusal.
-func TestAuditCloses_ThrottledFlagDoesNotBleedAcrossReopenCycles(t *testing.T) {
+func TestAuditCloses_ThrottledFlagDoesNotBleedAcrossReopenCycles(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
 		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	childA := createIssue(t, env, pid, "child a")
@@ -277,7 +277,7 @@ func TestAuditCloses_ThrottledFlagDoesNotBleedAcrossReopenCycles(t *testing.T) {
 // qualified `project#short_id`), not just the rendered short_id. A
 // caller using the parent's UID (or pasting a `kata show --json`
 // ULID) should reach the same rows as the short_id form.
-func TestAuditCloses_FilterByParentUID(t *testing.T) {
+func TestAuditCloses_FilterByParentUID(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
 	child := createIssue(t, env, pid, "child of parent")
 	runCLI(t, env, dir, "edit", child, "--parent", parent)
@@ -306,7 +306,7 @@ func TestAuditCloses_FilterByParentUID(t *testing.T) {
 // after the child was closed. Audit is a historical view; using
 // IncludeDeletedNo on the parent resolver silently dropped these
 // rows from the response.
-func TestAuditCloses_FilterByParent_SoftDeletedParent(t *testing.T) {
+func TestAuditCloses_FilterByParent_SoftDeletedParent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
 	child := createIssue(t, env, pid, "child of parent")
 	runCLI(t, env, dir, "edit", child, "--parent", parent)
@@ -330,7 +330,7 @@ func TestAuditCloses_FilterByParent_SoftDeletedParent(t *testing.T) {
 // and a later close by the originally-throttled actor (after a
 // reopen) must NOT inherit a stale flag from before the intervening
 // close.
-func TestAuditCloses_ThrottledFlag_DifferentActorEndsCycle(t *testing.T) {
+func TestAuditCloses_ThrottledFlag_DifferentActorEndsCycle(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
 		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	childA := createIssue(t, env, pid, "child a")
@@ -402,7 +402,7 @@ func TestAuditCloses_ThrottledFlag_DifferentActorEndsCycle(t *testing.T) {
 // agent-a's marker pending, flagging the later legitimate close.
 // Lifting --actor to the row-emit pass keeps the marker walk
 // consistent regardless of which actor the caller filters on.
-func TestAuditCloses_ActorFilterDoesNotHideThrottleEndingClose(t *testing.T) {
+func TestAuditCloses_ActorFilterDoesNotHideThrottleEndingClose(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
 		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	childA := createIssue(t, env, pid, "child a")
@@ -457,7 +457,7 @@ func TestAuditCloses_ActorFilterDoesNotHideThrottleEndingClose(t *testing.T) {
 // the parsed short_id / UID against stored payload snapshots. Prior
 // to the parser fallback, qualified refs to soft-deleted-then-purged
 // parents silently returned no rows.
-func TestAuditCloses_FilterByParent_QualifiedAndUIDRefs(t *testing.T) {
+func TestAuditCloses_FilterByParent_QualifiedAndUIDRefs(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
 	child := createIssue(t, env, pid, "child of parent")
 	runCLI(t, env, dir, "edit", child, "--parent", parent)
@@ -477,7 +477,7 @@ func TestAuditCloses_FilterByParent_QualifiedAndUIDRefs(t *testing.T) {
 // scoped project. The resolver-404 fallback previously kept
 // parsedShortID from `other#abc4`, so an audit for project=kata
 // with `--parent other#abc4` would surface closes under kata#abc4.
-func TestAuditCloses_FilterByParent_CrossProjectQualifierMatchesNothing(t *testing.T) {
+func TestAuditCloses_FilterByParent_CrossProjectQualifierMatchesNothing(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
 	child := createIssue(t, env, pid, "child of parent")
 	runCLI(t, env, dir, "edit", child, "--parent", parent)
@@ -502,7 +502,7 @@ func TestAuditCloses_FilterByParent_CrossProjectQualifierMatchesNothing(t *testi
 // close it could naively be matched against must not flag that close.
 // The throttle there is a later retry against the same key, not a guard
 // the original close tripped — flagging it would mislead a reviewer.
-func TestAuditCloses_ThrottledFlagIgnoresLaterThrottle(t *testing.T) {
+func TestAuditCloses_ThrottledFlagIgnoresLaterThrottle(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
 		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	siblingA := createIssue(t, env, pid, "sibling a")
@@ -565,7 +565,7 @@ func TestAuditCloses_ThrottledFlagIgnoresLaterThrottle(t *testing.T) {
 // previously hit the repeated-message guard (and thus emitted a
 // close.throttled event) is flagged "throttled" in the audit row once
 // the same actor retries successfully with a different message.
-func TestAuditCloses_ThrottledFlagSurfaces(t *testing.T) {
+func TestAuditCloses_ThrottledFlagSurfaces(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
 		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	childA := createIssue(t, env, pid, "child a")
@@ -599,7 +599,7 @@ func TestAuditCloses_ThrottledFlagSurfaces(t *testing.T) {
 // parent and match those rows by UID. A qualified ref that does NOT
 // resolve must keep matching nothing — its bare suffix must not leak
 // onto same-suffix issues in the audited project.
-func TestAuditCloses_FilterByCrossProjectParent(t *testing.T) {
+func TestAuditCloses_FilterByCrossProjectParent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	hubDir := initBoundWorkspace(t, env.URL, "https://github.com/example/hub-project.git")
 	hubPID := resolvePIDViaHTTP(t, env.URL, hubDir)

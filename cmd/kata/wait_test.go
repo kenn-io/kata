@@ -23,6 +23,7 @@ import (
 // --- pure condition-evaluation unit tests -------------------------------
 
 func TestWaitEvalCondition(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		mode       waitMode
@@ -57,6 +58,7 @@ func TestWaitEvalCondition(t *testing.T) {
 }
 
 func TestWaitClassifyFetchErr(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name          string
 		err           error
@@ -134,6 +136,7 @@ func waitAbandonedRefs(abandoned []waitAbandoned) []string {
 // could not express this table without constructing the invalid
 // "done and abandoned" target.
 func TestWaitTargetStateAccessors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name          string
 		states        []waitTargetState
@@ -213,6 +216,7 @@ func TestWaitTargetStateAccessors(t *testing.T) {
 // zero value of waitJoin must be joinAll, because runWait only ever sets
 // joinAny explicitly.
 func TestWaitJoinZeroValueIsAll(t *testing.T) {
+	t.Parallel()
 	var zero waitJoin
 	targets := waitStateTargets(targetSatisfied, targetPending)
 	assert.False(t, waitComplete(targets, zero),
@@ -220,6 +224,7 @@ func TestWaitJoinZeroValueIsAll(t *testing.T) {
 }
 
 func TestWaitParseModeRejectsUnknown(t *testing.T) {
+	t.Parallel()
 	_, err := parseWaitMode("banana")
 	require.Error(t, err)
 	_ = requireCLIError(t, err, ExitValidation)
@@ -239,7 +244,7 @@ const (
 	waitMutDelay  = 120 * time.Millisecond
 )
 
-func TestWaitAlreadyClosedReturnsImmediately(t *testing.T) {
+func TestWaitAlreadyClosedReturnsImmediately(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "finished work")
 	require.NoError(t, closeIssueHTTP(env, pid, ref))
@@ -253,7 +258,7 @@ func TestWaitAlreadyClosedReturnsImmediately(t *testing.T) {
 	assert.Contains(t, stdout, "closed")
 }
 
-func TestWaitClosesAfterDelay(t *testing.T) {
+func TestWaitClosesAfterDelay(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "will close soon")
 
@@ -271,7 +276,7 @@ func TestWaitClosesAfterDelay(t *testing.T) {
 	assert.Contains(t, stdout, "closed")
 }
 
-func TestWaitUntilNeedsHumanSurfacesMessage(t *testing.T) {
+func TestWaitUntilNeedsHumanSurfacesMessage(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "needs a human")
 
@@ -289,7 +294,7 @@ func TestWaitUntilNeedsHumanSurfacesMessage(t *testing.T) {
 	assert.Contains(t, stdout, "blocked on database migration")
 }
 
-func TestWaitUntilAttentionFiresOnStuck(t *testing.T) {
+func TestWaitUntilAttentionFiresOnStuck(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "stuck work")
 
@@ -306,7 +311,7 @@ func TestWaitUntilAttentionFiresOnStuck(t *testing.T) {
 	assert.Contains(t, stdout, "stuck")
 }
 
-func TestWaitUntilAttentionFiresOnNovelLevel(t *testing.T) {
+func TestWaitUntilAttentionFiresOnNovelLevel(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "novel level")
 
@@ -323,7 +328,7 @@ func TestWaitUntilAttentionFiresOnNovelLevel(t *testing.T) {
 	assert.Contains(t, stdout, "on-fire")
 }
 
-func TestWaitAttentionModeCompletesOnClose(t *testing.T) {
+func TestWaitAttentionModeCompletesOnClose(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "closes instead of flagging")
 
@@ -340,7 +345,7 @@ func TestWaitAttentionModeCompletesOnClose(t *testing.T) {
 	assert.Contains(t, stdout, "closed")
 }
 
-func TestWaitAnyReturnsOnFirst(t *testing.T) {
+func TestWaitAnyReturnsOnFirst(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref1 := createIssue(t, env, pid, "first ref")
 	ref2 := createIssue(t, env, pid, "second ref never closes")
@@ -360,7 +365,7 @@ func TestWaitAnyReturnsOnFirst(t *testing.T) {
 	assert.Contains(t, stdout, ref1)
 }
 
-func TestWaitAllWaitsForEvery(t *testing.T) {
+func TestWaitAllWaitsForEvery(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref1 := createIssue(t, env, pid, "first of two")
 	ref2 := createIssue(t, env, pid, "second of two")
@@ -383,7 +388,7 @@ func TestWaitAllWaitsForEvery(t *testing.T) {
 	assert.Contains(t, stdout, ref2)
 }
 
-func TestWaitTimeoutReportsPendingAndExitCode(t *testing.T) {
+func TestWaitTimeoutReportsPendingAndExitCode(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "never changes")
 
@@ -394,7 +399,7 @@ func TestWaitTimeoutReportsPendingAndExitCode(t *testing.T) {
 	assert.Contains(t, stderr, ref)
 }
 
-func TestWaitTimeoutJSONEmitsObject(t *testing.T) {
+func TestWaitTimeoutJSONEmitsObject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "never changes json")
 
@@ -408,7 +413,7 @@ func TestWaitTimeoutJSONEmitsObject(t *testing.T) {
 	assert.Empty(t, obj.Results)
 }
 
-func TestWaitUsageAnyAllConflict(t *testing.T) {
+func TestWaitUsageAnyAllConflict(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "conflict")
 
@@ -416,7 +421,7 @@ func TestWaitUsageAnyAllConflict(t *testing.T) {
 	_ = requireCLIError(t, err, ExitUsage)
 }
 
-func TestWaitUsageZeroPollInterval(t *testing.T) {
+func TestWaitUsageZeroPollInterval(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "bad poll")
 
@@ -427,7 +432,7 @@ func TestWaitUsageZeroPollInterval(t *testing.T) {
 // TestWaitUsageNegativeTimeout: a negative --timeout must be rejected, not
 // silently treated like 0 (wait forever) because the poll loop only arms a
 // deadline when timeout > 0. A typo like --timeout=-1s must fail fast.
-func TestWaitUsageNegativeTimeout(t *testing.T) {
+func TestWaitUsageNegativeTimeout(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "bad timeout")
 
@@ -439,7 +444,7 @@ func TestWaitUsageNegativeTimeout(t *testing.T) {
 // first mistake real agents make (kenn-io/kata#159). It must fail at flag
 // parsing with an error suggesting the "1800s" spelling, not Go's stock
 // parse failure.
-func TestWaitUsageBareTimeoutSuggestsUnit(t *testing.T) {
+func TestWaitUsageBareTimeoutSuggestsUnit(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "bare timeout")
 
@@ -456,7 +461,7 @@ func TestWaitUsageBareTimeoutSuggestsUnit(t *testing.T) {
 // be bounded by --timeout. Ref resolution answers immediately, but the issue
 // GET hangs; the command must still return an ExitWaitTimeout well before the
 // server's hard cap rather than blocking on the stuck request.
-func TestWaitTimeoutBoundsHungFetch(t *testing.T) {
+func TestWaitTimeoutBoundsHungFetch(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/projects/resolve":
@@ -489,7 +494,7 @@ func TestWaitTimeoutBoundsHungFetch(t *testing.T) {
 // wall-clock budget, not only the post-resolution poll loop. If project/ref
 // resolution stalls, the command must return ExitWaitTimeout promptly instead
 // of waiting for the default per-request HTTP timeout.
-func TestWaitTimeoutBoundsRefResolution(t *testing.T) {
+func TestWaitTimeoutBoundsRefResolution(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects/resolve":
@@ -519,7 +524,7 @@ func TestWaitTimeoutBoundsRefResolution(t *testing.T) {
 // --timeout deadline must not be counted toward the consecutive-failure budget.
 // With two prior transient (5xx) failures, a third deadline-canceled fetch must
 // still surface as ExitWaitTimeout, not ExitInternal.
-func TestWaitTimeoutAfterTransientFailsReportsTimeout(t *testing.T) {
+func TestWaitTimeoutAfterTransientFailsReportsTimeout(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var issueGets int
 	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -561,7 +566,7 @@ func TestWaitTimeoutAfterTransientFailsReportsTimeout(t *testing.T) {
 // parent deadline must surface as the resolution error, not be misclassified as
 // ExitWaitTimeout with timed_out=true — the wait command's own timeout budget
 // was never exhausted.
-func TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout(t *testing.T) {
+func TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects/resolve":
@@ -594,7 +599,7 @@ func TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout(t *testing.T) {
 // fetching once a ref already satisfies the join. Otherwise a later stalled
 // fetch (with no --timeout to bound it) hangs even though the wait is already
 // met.
-func TestWaitAnyInitialPassStopsAfterJoinMet(t *testing.T) {
+func TestWaitAnyInitialPassStopsAfterJoinMet(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var laterFetches atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -621,7 +626,7 @@ func TestWaitAnyInitialPassStopsAfterJoinMet(t *testing.T) {
 		"--any must stop fetching once the initial pass satisfies the join")
 }
 
-func TestWaitBadRefFailsFast(t *testing.T) {
+func TestWaitBadRefFailsFast(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 
 	start := time.Now()
@@ -632,7 +637,7 @@ func TestWaitBadRefFailsFast(t *testing.T) {
 	assert.Less(t, time.Since(start), 2*time.Second, "bad ref must fail before entering the poll loop")
 }
 
-func TestWaitAnySucceedsWhenOtherRefAlreadySatisfiedBadRefLast(t *testing.T) {
+func TestWaitAnySucceedsWhenOtherRefAlreadySatisfiedBadRefLast(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "already closed, bad ref last")
 	require.NoError(t, closeIssueHTTP(env, pid, ref))
@@ -646,7 +651,7 @@ func TestWaitAnySucceedsWhenOtherRefAlreadySatisfiedBadRefLast(t *testing.T) {
 	assert.Contains(t, stdout, "closed")
 }
 
-func TestWaitAnySucceedsWhenOtherRefAlreadySatisfiedBadRefFirst(t *testing.T) {
+func TestWaitAnySucceedsWhenOtherRefAlreadySatisfiedBadRefFirst(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "already closed, bad ref first")
 	require.NoError(t, closeIssueHTTP(env, pid, ref))
@@ -660,7 +665,7 @@ func TestWaitAnySucceedsWhenOtherRefAlreadySatisfiedBadRefFirst(t *testing.T) {
 	assert.Contains(t, stdout, "closed")
 }
 
-func TestWaitAnyStillFailsFastOnBadRefWhenJoinUnsatisfied(t *testing.T) {
+func TestWaitAnyStillFailsFastOnBadRefWhenJoinUnsatisfied(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "still open, never closes")
 
@@ -672,7 +677,7 @@ func TestWaitAnyStillFailsFastOnBadRefWhenJoinUnsatisfied(t *testing.T) {
 	assert.Less(t, time.Since(start), 2*time.Second, "bad ref must fail before entering the poll loop")
 }
 
-func TestWaitAllStillFailsOnBadRefEvenWhenOtherRefAlreadySatisfied(t *testing.T) {
+func TestWaitAllStillFailsOnBadRefEvenWhenOtherRefAlreadySatisfied(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "already closed, but --all with bad ref")
 	require.NoError(t, closeIssueHTTP(env, pid, ref))
@@ -687,7 +692,7 @@ func TestWaitAllStillFailsOnBadRefEvenWhenOtherRefAlreadySatisfied(t *testing.T)
 // is a permanent 404, so the wait aborts promptly with the daemon's not-found
 // exit code (4) rather than treating it as a transient blip and eventually
 // failing with a generic internal error.
-func TestWaitAllAbortsOnDeletedRefMidWait(t *testing.T) {
+func TestWaitAllAbortsOnDeletedRefMidWait(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "deleted mid-wait")
 
@@ -709,7 +714,7 @@ func TestWaitAllAbortsOnDeletedRefMidWait(t *testing.T) {
 // TestWaitAnyAbandonsDeletedRefCompletesOnOther: in --any mode a ref that is
 // deleted mid-wait is abandoned (reported, no longer polled) while the wait
 // keeps running and completes on the second ref that closes later.
-func TestWaitAnyAbandonsDeletedRefCompletesOnOther(t *testing.T) {
+func TestWaitAnyAbandonsDeletedRefCompletesOnOther(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref1 := createIssue(t, env, pid, "abandoned ref")
 	ref2 := createIssue(t, env, pid, "closes later")
@@ -738,7 +743,7 @@ func TestWaitAnyAbandonsDeletedRefCompletesOnOther(t *testing.T) {
 // abandoned mid-wait must not emit an ERR line (the agent contract reserves
 // ERR for command failure) when the overall command later succeeds on another
 // ref. The abandoned ref is surfaced as a non-error row instead.
-func TestWaitAnyAbandonedAgentUsesNonErrorRow(t *testing.T) {
+func TestWaitAnyAbandonedAgentUsesNonErrorRow(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref1 := createIssue(t, env, pid, "abandoned agent ref")
 	ref2 := createIssue(t, env, pid, "closes later agent")
@@ -769,7 +774,7 @@ func TestWaitAnyAbandonedAgentUsesNonErrorRow(t *testing.T) {
 
 // TestWaitAnyAbandonedRefAppearsInJSON: the --json payload carries an
 // abandoned ref in its own per-ref list (not in results or pending).
-func TestWaitAnyAbandonedRefAppearsInJSON(t *testing.T) {
+func TestWaitAnyAbandonedRefAppearsInJSON(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref1 := createIssue(t, env, pid, "abandoned json ref")
 	ref2 := createIssue(t, env, pid, "closes later json")
@@ -802,7 +807,7 @@ func TestWaitAnyAbandonedRefAppearsInJSON(t *testing.T) {
 // must not report the un-needed second ref in `pending`. `pending` is
 // documented as timeout-only (refs still unmet when the wait times out); on a
 // successful join it must be empty so the result does not look incomplete.
-func TestWaitAnyJSONSuccessLeavesPendingEmpty(t *testing.T) {
+func TestWaitAnyJSONSuccessLeavesPendingEmpty(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref1 := createIssue(t, env, pid, "closes first json any")
 	ref2 := createIssue(t, env, pid, "never satisfied json any")
@@ -829,7 +834,7 @@ func TestWaitAnyJSONSuccessLeavesPendingEmpty(t *testing.T) {
 // TestWaitAnyAllRefsDeletedReturnsFirstError: when every ref is deleted
 // mid-wait in --any mode, the wait returns the first permanent error rather
 // than spinning forever.
-func TestWaitAnyAllRefsDeletedReturnsFirstError(t *testing.T) {
+func TestWaitAnyAllRefsDeletedReturnsFirstError(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref1 := createIssue(t, env, pid, "both deleted 1")
 	ref2 := createIssue(t, env, pid, "both deleted 2")
@@ -848,7 +853,7 @@ func TestWaitAnyAllRefsDeletedReturnsFirstError(t *testing.T) {
 	_ = requireCLIError(t, err, ExitNotFound)
 }
 
-func TestWaitAgentOutput(t *testing.T) {
+func TestWaitAgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "agent output")
 	require.NoError(t, closeIssueHTTP(env, pid, ref))
@@ -861,7 +866,7 @@ func TestWaitAgentOutput(t *testing.T) {
 	assert.Contains(t, stdout, "reason=closed")
 }
 
-func TestWaitJSONOutput(t *testing.T) {
+func TestWaitJSONOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "json output")
 	require.NoError(t, setAttentionHTTP(env, pid, ref, "needs-human", "please look"))

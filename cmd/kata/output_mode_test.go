@@ -14,6 +14,7 @@ import (
 // which commands allow contract output, and how the import command's legacy
 // --format kata|beads overload is skipped rather than rejected.
 func TestOutputModePrecedenceTable(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name            string
 		formats         []string
@@ -85,6 +86,7 @@ func TestOutputModePrecedenceTable(t *testing.T) {
 // so an --agent caller whose other flag was bad still gets a parseable ERR
 // line rather than human prose.
 func TestOutputSelectionResolveFallbackMode(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name            string
 		sel             outputSelection
@@ -186,7 +188,7 @@ var errorPathArgvCases = []struct {
 // TestErrorPathArgvSelectsCommand pins which command each argv shape selects
 // and which output flags it carries. The command decides importLegacy and
 // contractAllowed, which decide whether overloaded --format values are valid.
-func TestErrorPathArgvSelectsCommand(t *testing.T) {
+func TestErrorPathArgvSelectsCommand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, tc := range errorPathArgvCases {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newRootCmd()
@@ -201,7 +203,7 @@ func TestErrorPathArgvSelectsCommand(t *testing.T) {
 // TestPreParseIsTotal covers the degenerate inputs the error path can hand
 // preParse: it must answer without panicking, since it runs after cobra has
 // already failed.
-func TestPreParseIsTotal(t *testing.T) {
+func TestPreParseIsTotal(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	root := newRootCmd()
 	for _, args := range [][]string{
 		nil,
@@ -235,7 +237,7 @@ func TestPreParseIsTotal(t *testing.T) {
 // TestErrorPathArgvResolvesMode pins the end-to-end error-path answer: the mode
 // emitRootError renders in when cobra failed before PersistentPreRunE could
 // resolve one.
-func TestErrorPathArgvResolvesMode(t *testing.T) {
+func TestErrorPathArgvResolvesMode(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, tc := range errorPathArgvCases {
 		t.Run(tc.name, func(t *testing.T) {
 			resetFlags(t)
@@ -248,6 +250,7 @@ func TestErrorPathArgvResolvesMode(t *testing.T) {
 }
 
 func TestAgentValue_Quoting(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "abc4", agentValue("abc4"))
 	assert.Equal(t, strconv.Quote("Fix login race"), agentValue("Fix login race"))
 	assert.Equal(t, strconv.Quote(`quoted "title"`), agentValue(`quoted "title"`))
@@ -255,12 +258,14 @@ func TestAgentValue_Quoting(t *testing.T) {
 }
 
 func TestAgentFencedText_ExtendsFenceForBackticks(t *testing.T) {
+	t.Parallel()
 	got := agentFencedText("``` inside")
 	assert.Contains(t, got, "````text\n")
 	assert.True(t, strings.HasSuffix(got, "\n````\n"))
 }
 
 func TestAgentFencedText_ChoosesFenceAfterSanitizing(t *testing.T) {
+	t.Parallel()
 	got := agentFencedText("``\x00` inside")
 	assert.Contains(t, got, "````text\n")
 	assert.Contains(t, got, "``` inside")

@@ -34,6 +34,7 @@ func assertSafeRender(t testing.TB, got string) {
 // joiners), and the legitimate-content cases that must pass through
 // untouched.
 func TestSanitizeForDisplay(t *testing.T) {
+	t.Parallel()
 	rlo := string(rune(0x202E))  // RIGHT-TO-LEFT OVERRIDE
 	zwsp := string(rune(0x200B)) // ZERO WIDTH SPACE
 	zwnj := string(rune(0x200C)) // ZERO WIDTH NON-JOINER
@@ -120,6 +121,7 @@ func TestSanitizeForDisplay(t *testing.T) {
 // ANSI escapes must not reach the rendered list view. Regression for
 // the sanitize-at-render boundary in buildRows.
 func TestListView_SanitizesMaliciousTitle(t *testing.T) {
+	t.Parallel()
 	lm := newListModel()
 	lm.loading = false
 	lm.issues = []Issue{
@@ -138,6 +140,7 @@ func TestListView_SanitizesMaliciousTitle(t *testing.T) {
 // TestDetailView_SanitizesMaliciousBody: an issue body containing a
 // CSI sequence must be stripped before reaching the body window.
 func TestDetailView_SanitizesMaliciousBody(t *testing.T) {
+	t.Parallel()
 	dm := detailModel{
 		issue: &Issue{
 			UID: "01TEST-42aa", ShortID: "42aa", Title: "x", Status: "open",
@@ -154,6 +157,7 @@ func TestDetailView_SanitizesMaliciousBody(t *testing.T) {
 // TestCommentsTab_SanitizesMaliciousAuthorAndBody: comment author and
 // body are agent-supplied; both render paths must sanitize.
 func TestCommentsTab_SanitizesMaliciousAuthorAndBody(t *testing.T) {
+	t.Parallel()
 	cs := []CommentEntry{{
 		ID: 1, Author: "alice\x1b[31m",
 		Body: "body line\rOVERWRITE",

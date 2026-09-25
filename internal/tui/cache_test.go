@@ -22,6 +22,7 @@ func assertStale(t *testing.T, c *issueCache, want bool) {
 // fetch populates the slot, an event marks it stale, and a fresh fetch
 // clears stale and replaces the data.
 func TestCache_PutThenStaleThenRefetch(t *testing.T) {
+	t.Parallel()
 	c, k := setupSeededCache()
 	assertStale(t, c, false)
 	c.markStale()
@@ -37,6 +38,7 @@ func TestCache_PutThenStaleThenRefetch(t *testing.T) {
 // follow-up isStale returns false (no slot, nothing to be stale about).
 // This is the sync.reset_required path.
 func TestCache_DropEmpties(t *testing.T) {
+	t.Parallel()
 	c, _ := setupSeededCache()
 	c.markStale()
 	c.drop()
@@ -52,6 +54,7 @@ func TestCache_DropEmpties(t *testing.T) {
 // TestCache_MarkStaleIdempotent: multiple events in a 150ms window all
 // flip stale; the second markStale on an already-stale cache is a no-op.
 func TestCache_MarkStaleIdempotent(t *testing.T) {
+	t.Parallel()
 	c, _ := setupSeededCache()
 	c.markStale()
 	c.markStale()
@@ -60,6 +63,7 @@ func TestCache_MarkStaleIdempotent(t *testing.T) {
 }
 
 func TestCache_RenderFilterDoesNotChangeSlotKey(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		scope: scope{projectID: 7},
 		list: listModel{filter: ListFilter{
@@ -75,6 +79,7 @@ func TestCache_RenderFilterDoesNotChangeSlotKey(t *testing.T) {
 // TestCache_EmptyIsNotStale: a freshly constructed cache is not stale —
 // stale=true requires a real slot to be stale about.
 func TestCache_EmptyIsNotStale(t *testing.T) {
+	t.Parallel()
 	c := newIssueCache()
 	assertStale(t, c, false)
 }

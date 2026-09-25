@@ -11,7 +11,7 @@ import (
 // TestEdit_AddsAllFourLinkDirections covers the new add flags on `kata edit`.
 // One edit call attaches a parent, a blocks-out, a blocked-by, and a related
 // link in a single PATCH; all four must be persisted.
-func TestEdit_AddsAllFourLinkDirections(t *testing.T) {
+func TestEdit_AddsAllFourLinkDirections(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -57,7 +57,7 @@ func TestEdit_AddsAllFourLinkDirections(t *testing.T) {
 
 // TestEdit_RemoveParent_StrictMatch removes the parent link when the asserted
 // parent ref matches the current one.
-func TestEdit_RemoveParent_StrictMatch(t *testing.T) {
+func TestEdit_RemoveParent_StrictMatch(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	child := createIssue(t, env, pid, "child")
@@ -75,7 +75,7 @@ func TestEdit_RemoveParent_StrictMatch(t *testing.T) {
 // TestEdit_RemoveParent_MismatchFails surfaces a 409-flavored error when the
 // asserted parent ref does not match the current parent. Protects agents
 // from acting on stale state.
-func TestEdit_RemoveParent_MismatchFails(t *testing.T) {
+func TestEdit_RemoveParent_MismatchFails(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	child := createIssue(t, env, pid, "child")
@@ -90,7 +90,7 @@ func TestEdit_RemoveParent_MismatchFails(t *testing.T) {
 
 // TestEdit_RemoveLinksAreIdempotent succeeds with no error and no panic when
 // the requested link is already gone.
-func TestEdit_RemoveLinksAreIdempotent(t *testing.T) {
+func TestEdit_RemoveLinksAreIdempotent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -104,7 +104,7 @@ func TestEdit_RemoveLinksAreIdempotent(t *testing.T) {
 
 // TestEdit_LinkFlagsRejectEmptyOrCommaOnly pins that an empty or
 // comma-only flag value fails validation before any field landed.
-func TestEdit_LinkFlagsRejectEmptyOrCommaOnly(t *testing.T) {
+func TestEdit_LinkFlagsRejectEmptyOrCommaOnly(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -128,7 +128,7 @@ func TestEdit_LinkFlagsRejectEmptyOrCommaOnly(t *testing.T) {
 
 // TestEdit_LinkFlagsAcceptIssueRefs covers UID forms on link flags.
 // Without ref resolution, scripts that link by UID would break silently.
-func TestEdit_LinkFlagsAcceptIssueRefs(t *testing.T) {
+func TestEdit_LinkFlagsAcceptIssueRefs(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -160,7 +160,7 @@ func TestEdit_LinkFlagsAcceptIssueRefs(t *testing.T) {
 
 // TestEdit_HumanModePrintsLinkSummary verifies the human-mode renderer
 // appends a "links: ..." segment listing every applied add/remove.
-func TestEdit_HumanModePrintsLinkSummary(t *testing.T) {
+func TestEdit_HumanModePrintsLinkSummary(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -178,7 +178,7 @@ func TestEdit_HumanModePrintsLinkSummary(t *testing.T) {
 		"human-mode no-op edit must say so explicitly: %q", out)
 }
 
-func TestEdit_AgentOutputIncludesChangedAndChanges(t *testing.T) {
+func TestEdit_AgentOutputIncludesChangedAndChanges(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -193,7 +193,7 @@ func TestEdit_AgentOutputIncludesChangedAndChanges(t *testing.T) {
 	assert.Contains(t, out, "Changes: title, owner, links")
 }
 
-func TestEdit_AgentOutputDoesNotReportNoopLinkChanges(t *testing.T) {
+func TestEdit_AgentOutputDoesNotReportNoopLinkChanges(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -211,7 +211,7 @@ func TestEdit_AgentOutputDoesNotReportNoopLinkChanges(t *testing.T) {
 // TestEdit_DistinctParentRefsRejected covers the at-most-one parent contract.
 // --parent A --parent B (or --remove-parent) must error rather than
 // silently last-winning so a typo can't mutate the wrong relationship.
-func TestEdit_DistinctParentRefsRejected(t *testing.T) {
+func TestEdit_DistinctParentRefsRejected(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -233,7 +233,7 @@ func TestEdit_DistinctParentRefsRejected(t *testing.T) {
 // TestEdit_EquivalentParentRefsAccepted verifies that at-most-one flags
 // accept different ref forms that resolve to the same issue (qualified vs
 // bare, short_id vs ULID).
-func TestEdit_EquivalentParentRefsAccepted(t *testing.T) {
+func TestEdit_EquivalentParentRefsAccepted(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -258,7 +258,7 @@ func TestEdit_EquivalentParentRefsAccepted(t *testing.T) {
 // same-project peers stay bare. The edit command's own one-liner output
 // must apply the same bare/qualified rule so the user sees the correct
 // ref immediately after the mutation.
-func TestEdit_CrossProjectLinkViaQualifiedRef(t *testing.T) {
+func TestEdit_CrossProjectLinkViaQualifiedRef(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	// hub-project: the workspace the CLI is bound to.
 	hubDir := initBoundWorkspace(t, env.URL, "https://github.com/example/hub-project.git")
@@ -305,7 +305,7 @@ func TestEdit_CrossProjectLinkViaQualifiedRef(t *testing.T) {
 // from the spoke issue's viewpoint the link type is "blocks" and from == hub
 // subject, so linkLabelFromPOV returns ("blocked-by", peerRefForDisplay(from, spokeProject)).
 // Since from.Project == "hub-project" != "spoke-project", it must render qualified.
-func TestEdit_CrossProjectLinkReversePOV(t *testing.T) {
+func TestEdit_CrossProjectLinkReversePOV(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	hubDir := initBoundWorkspace(t, env.URL, "https://github.com/example/hub-project.git")
 	hubPID := resolvePIDViaHTTP(t, env.URL, hubDir)
@@ -332,7 +332,7 @@ func TestEdit_CrossProjectLinkReversePOV(t *testing.T) {
 // validation error. Without canonicalization, `--blocks abc4
 // --remove-blocks <ULID-of-abc4>` would pass string-equality and reach
 // the daemon as a contradictory mutation.
-func TestEdit_ConflictDetectedAcrossRefForms(t *testing.T) {
+func TestEdit_ConflictDetectedAcrossRefForms(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -347,7 +347,7 @@ func TestEdit_ConflictDetectedAcrossRefForms(t *testing.T) {
 }
 
 // TestEdit_PriorityOnPATCH sets priority via the unified PATCH.
-func TestEdit_PriorityOnPATCH(t *testing.T) {
+func TestEdit_PriorityOnPATCH(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -366,7 +366,7 @@ func TestEdit_PriorityOnPATCH(t *testing.T) {
 
 // TestEdit_EmptyTitle_ValidatedClientSide pins that --title "" (or
 // whitespace-only) is rejected client-side before reaching the daemon.
-func TestEdit_EmptyTitle_ValidatedClientSide(t *testing.T) {
+func TestEdit_EmptyTitle_ValidatedClientSide(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	subject := createIssue(t, env, pid, "subject")
@@ -380,7 +380,7 @@ func TestEdit_EmptyTitle_ValidatedClientSide(t *testing.T) {
 	}
 }
 
-func TestEdit_WithComment_AppendsComment(t *testing.T) {
+func TestEdit_WithComment_AppendsComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "subject")
 
 	runCLI(t, env, dir, "edit", ref, "--priority", "1", "--comment", "bumping for incident")

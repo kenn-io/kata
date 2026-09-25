@@ -3,6 +3,7 @@ package tui
 import "testing"
 
 func TestBuildQueueRows_CollapsedShowsTopLevelOnly(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		testIssue("aaa1", withCounts(1, 1)),
 		testIssue("bbb2", withParent("aaa1")),
@@ -17,6 +18,7 @@ func TestBuildQueueRows_CollapsedShowsTopLevelOnly(t *testing.T) {
 }
 
 func TestBuildQueueRows_ExpandedShowsDirectChildren(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		testIssue("aaa1", withCounts(2, 2)),
 		testIssue("bbb2", withParent("aaa1"), withCounts(1, 1)),
@@ -41,6 +43,7 @@ func TestBuildQueueRows_ExpandedShowsDirectChildren(t *testing.T) {
 }
 
 func TestBuildQueueRows_CrossProjectParentNestsByUID(t *testing.T) {
+	t.Parallel()
 	// hub project (7) holds the real parent aaa1; project 9 holds the child
 	// plus an unrelated issue reusing the short_id aaa1. The child must nest
 	// under its actual parent — matched by UID — never under the
@@ -65,6 +68,7 @@ func TestBuildQueueRows_CrossProjectParentNestsByUID(t *testing.T) {
 }
 
 func TestBuildQueueRows_TopologicalSortResolvesBlockersByUID(t *testing.T) {
+	t.Parallel()
 	// Siblings under one parent may now span projects, so two of them can
 	// share a short_id. W blocks the project-9 vvv1; a bare short_id lookup
 	// binds the edge to whichever sibling landed last in the map — here the
@@ -103,6 +107,7 @@ func TestBuildQueueRows_TopologicalSortResolvesBlockersByUID(t *testing.T) {
 }
 
 func TestBuildQueueRows_TopologicalSortShortIDFallback(t *testing.T) {
+	t.Parallel()
 	// A blocks peer without a UID (older daemon) still orders siblings when
 	// its short_id is unambiguous, and is ignored when two siblings share
 	// the short_id rather than guessing.
@@ -122,6 +127,7 @@ func TestBuildQueueRows_TopologicalSortShortIDFallback(t *testing.T) {
 }
 
 func TestBuildQueueRows_CrossProjectParentAbsentRendersChildTopLevel(t *testing.T) {
+	t.Parallel()
 	foreignParent := testIssue("zzz9", inProject(3))
 	child := testIssue("bbb2", withParentPeer(foreignParent))
 
@@ -133,6 +139,7 @@ func TestBuildQueueRows_CrossProjectParentAbsentRendersChildTopLevel(t *testing.
 }
 
 func TestBuildQueueRows_DefaultsExpandedChildrenToTopologicalOrder(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		testIssue("aaa1", withCounts(3, 3)),
 		testIssue("bbb2", withParent("aaa1")),
@@ -145,6 +152,7 @@ func TestBuildQueueRows_DefaultsExpandedChildrenToTopologicalOrder(t *testing.T)
 }
 
 func TestBuildQueueRows_TemporalChildSortPreservesFetchOrder(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		testIssue("aaa1", withCounts(3, 3)),
 		testIssue("bbb2", withParent("aaa1")),
@@ -162,6 +170,7 @@ func TestBuildQueueRows_TemporalChildSortPreservesFetchOrder(t *testing.T) {
 }
 
 func TestBuildQueueRows_FlatModePreservesFetchOrder(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		testIssue("aaa1", withCounts(1, 1)),
 		testIssue("bbb2", withParent("aaa1")),
@@ -185,6 +194,7 @@ func TestBuildQueueRows_FlatModePreservesFetchOrder(t *testing.T) {
 }
 
 func TestBuildQueueRows_FilteredChildAutoShowsAncestorContext(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		testIssue("aaa1"),
 		testIssue("bbb2", withTitle("detail hint bars incomplete"), withParent("aaa1")),
@@ -205,6 +215,7 @@ func TestBuildQueueRows_FilteredChildAutoShowsAncestorContext(t *testing.T) {
 }
 
 func TestBuildQueueRows_StatusFilterIsClientSide(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		testIssue("aaa1", withStatus("open")),
 		testIssue("bbb2", withStatus("closed")),
@@ -215,6 +226,7 @@ func TestBuildQueueRows_StatusFilterIsClientSide(t *testing.T) {
 }
 
 func TestBuildQueueRows_LabelsFilterAnyOf(t *testing.T) {
+	t.Parallel()
 	issues := []Issue{
 		testIssue("aaa1", withLabels("bug", "ux")),
 		testIssue("bbb2", withLabels("daemon")),

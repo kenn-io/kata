@@ -27,6 +27,7 @@ func expectedHookHandler(mode string) map[string]any {
 }
 
 func TestApplyClaudeHooks_MigratesExactLegacyHandlers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	claudeDir := filepath.Join(dir, ".claude")
 	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
@@ -59,6 +60,7 @@ func TestApplyClaudeHooks_MigratesExactLegacyHandlers(t *testing.T) {
 }
 
 func TestApplyClaudeHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	claudeDir := filepath.Join(dir, ".claude")
 	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
@@ -77,6 +79,7 @@ func TestApplyClaudeHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
 }
 
 func TestApplyClaudeHooks_RefusesSymlinks(t *testing.T) {
+	t.Parallel()
 	t.Run("config directory", func(t *testing.T) {
 		dir := t.TempDir()
 		outside := t.TempDir()

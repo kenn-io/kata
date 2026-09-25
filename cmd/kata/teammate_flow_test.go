@@ -9,7 +9,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestTeammateFlowSharedIssueAndChildHandoff(t *testing.T) {
+func TestTeammateFlowSharedIssueAndChildHandoff(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	env, dir, pid, parent := setupWorkspaceWithIssue(t, "shared goal")
 	initial, err := env.DB.IssueByShortID(t.Context(), pid, parent, db.IncludeDeletedNo)
 	require.NoError(t, err)

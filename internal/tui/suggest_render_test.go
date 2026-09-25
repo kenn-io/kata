@@ -16,7 +16,7 @@ func defaultTestPrompt() inputState {
 
 // TestSuggestMenu_RendersEntries: a populated cache produces a menu
 // with one row per suggestion (top + bottom border + N entry rows).
-func TestSuggestMenu_RendersEntries(t *testing.T) {
+func TestSuggestMenu_RendersEntries(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	s := defaultTestPrompt()
 	suggestions := []LabelCount{
@@ -30,7 +30,7 @@ func TestSuggestMenu_RendersEntries(t *testing.T) {
 
 // TestSuggestMenu_LoadingPlaceholder: a fetching=true entry with no
 // labels renders the loading placeholder instead of an empty list.
-func TestSuggestMenu_LoadingPlaceholder(t *testing.T) {
+func TestSuggestMenu_LoadingPlaceholder(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	s := defaultTestPrompt()
 	got := renderSuggestMenu(s, nil, labelCacheEntry{
@@ -41,7 +41,7 @@ func TestSuggestMenu_LoadingPlaceholder(t *testing.T) {
 
 // TestSuggestMenu_ErrorPlaceholder: an entry with a non-nil err
 // surfaces the error message in the menu body.
-func TestSuggestMenu_ErrorPlaceholder(t *testing.T) {
+func TestSuggestMenu_ErrorPlaceholder(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	s := defaultTestPrompt()
 	got := renderSuggestMenu(s, nil, labelCacheEntry{
@@ -54,7 +54,7 @@ func TestSuggestMenu_ErrorPlaceholder(t *testing.T) {
 // TestSuggestMenu_EmptyPlaceholder: a fetched entry with zero labels
 // surfaces the "no labels" hint so the user knows the project has
 // no labels yet (rather than a confusingly-empty menu).
-func TestSuggestMenu_EmptyPlaceholder(t *testing.T) {
+func TestSuggestMenu_EmptyPlaceholder(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	s := defaultTestPrompt()
 	got := renderSuggestMenu(s, nil, labelCacheEntry{
@@ -67,7 +67,7 @@ func TestSuggestMenu_EmptyPlaceholder(t *testing.T) {
 // suggestions and the highlight at the end, the visible window
 // scrolls so the highlighted row is rendered (would be off-screen
 // without the windowing).
-func TestSuggestMenu_Scrolls_HighlightStaysVisible(t *testing.T) {
+func TestSuggestMenu_Scrolls_HighlightStaysVisible(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	s := defaultTestPrompt()
 	s.suggestHighlight = 9 // out past the menu's row budget
@@ -90,6 +90,7 @@ func TestSuggestMenu_Scrolls_HighlightStaysVisible(t *testing.T) {
 // TestFilterSuggestions_PrefixCaseInsensitive: prefix filter matches
 // case-insensitively and ignores leading whitespace in the prefix.
 func TestFilterSuggestions_PrefixCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	all := []LabelCount{
 		{Label: "Bug", Count: 5},
 		{Label: "design", Count: 3},
@@ -104,6 +105,7 @@ func TestFilterSuggestions_PrefixCaseInsensitive(t *testing.T) {
 // TestFilterSuggestions_SortsByCountThenLabel: count desc primary,
 // label asc secondary. Ties on count fall to alphabetical.
 func TestFilterSuggestions_SortsByCountThenLabel(t *testing.T) {
+	t.Parallel()
 	all := []LabelCount{
 		{Label: "z", Count: 1},
 		{Label: "a", Count: 5},
@@ -126,6 +128,7 @@ func TestFilterSuggestions_SortsByCountThenLabel(t *testing.T) {
 // TestOverlayAtCorner_PlacesAtAnchor: a 1x1 panel placed at (row, col)
 // shows up in the bg at the right cell.
 func TestOverlayAtCorner_PlacesAtAnchor(t *testing.T) {
+	t.Parallel()
 	bg := strings.Join([]string{
 		"......",
 		"......",
@@ -154,7 +157,7 @@ func TestOverlayAtCorner_PlacesAtAnchor(t *testing.T) {
 // computed anchorRow against the original height, so info+footer slid
 // up by menuH while the menu was anchored relative to the natural
 // bottom — collision at the info row, entries past the footer.
-func TestSuggestMenu_InfoLineAndFooterStayAtBottom_WhenMenuOpen(t *testing.T) {
+func TestSuggestMenu_InfoLineAndFooterStayAtBottom_WhenMenuOpen(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := snapLabelPromptModel()
 	m.projectLabels.byProject[7] = labelCacheEntry{
@@ -221,7 +224,7 @@ func TestSuggestMenu_InfoLineAndFooterStayAtBottom_WhenMenuOpen(t *testing.T) {
 // TestSuggestMenuHeight_CountsBordersAndBody: the height includes
 // the top/bottom borders + body rows (max of visible entries vs.
 // placeholder rows).
-func TestSuggestMenuHeight_CountsBordersAndBody(t *testing.T) {
+func TestSuggestMenuHeight_CountsBordersAndBody(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	s := defaultTestPrompt()
 	// Empty cache: 1 placeholder row + 2 borders = 3.

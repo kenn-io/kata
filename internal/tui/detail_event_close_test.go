@@ -14,6 +14,7 @@ import (
 // "closed (done)" with no message or evidence; reviewers had to drop to
 // `kata audit closes` to see what was actually closed.
 func TestEventChunkLines_CloseDetail(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		payload map[string]any
@@ -162,6 +163,7 @@ func TestEventChunkLines_CloseDetail(t *testing.T) {
 // closed and non-closed events. The header line is always present;
 // closed events get the close-detail tail, others don't.
 func TestEventChunkLines_HeaderShape(t *testing.T) {
+	t.Parallel()
 	t.Run("non_close_event_single_line", func(t *testing.T) {
 		e := EventLogEntry{
 			Type:    "issue.commented",
@@ -213,6 +215,7 @@ func TestEventChunkLines_HeaderShape(t *testing.T) {
 // of getting clipped to "... rates and fall…". Reported by the user
 // after the initial close-detail commit landed.
 func TestCloseDetailLines_Wrap(t *testing.T) {
+	t.Parallel()
 	e := EventLogEntry{
 		Type: "issue.closed",
 		Payload: map[string]any{

@@ -15,7 +15,7 @@ import (
 	"go.kenn.io/kit/tui/helplayout"
 )
 
-func TestCredentialsViewCapabilityGateDoesNotFetchWhenUnavailable(t *testing.T) {
+func TestCredentialsViewCapabilityGateDoesNotFetchWhenUnavailable(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	var requests atomic.Int32
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/tokens": func(w http.ResponseWriter, _ *http.Request) {
@@ -35,7 +35,7 @@ func TestCredentialsViewCapabilityGateDoesNotFetchWhenUnavailable(t *testing.T) 
 	assert.Contains(t, stripANSI(out.viewContent()), "credential audit unavailable")
 }
 
-func TestCredentialsViewLoadsThroughUndoClient(t *testing.T) {
+func TestCredentialsViewLoadsThroughUndoClient(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	var requests atomic.Int32
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/tokens": func(w http.ResponseWriter, _ *http.Request) {
@@ -54,7 +54,7 @@ func TestCredentialsViewLoadsThroughUndoClient(t *testing.T) {
 	require.EqualValues(t, 1, requests.Load())
 }
 
-func TestCredentialsViewStartsLoadingWhenCapabilityDiscoveryCompletes(t *testing.T) {
+func TestCredentialsViewStartsLoadingWhenCapabilityDiscoveryCompletes(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	var requests atomic.Int32
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/tokens": func(w http.ResponseWriter, _ *http.Request) {
@@ -88,7 +88,7 @@ func TestCredentialsViewStartsLoadingWhenCapabilityDiscoveryCompletes(t *testing
 	assert.Equal(t, int32(1), requests.Load())
 }
 
-func TestCredentialsViewReportsCapabilityDiscoveryErrorAndRetries(t *testing.T) {
+func TestCredentialsViewReportsCapabilityDiscoveryErrorAndRetries(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.authCapabilitiesRequired = true
 	m.authCapabilitiesReady = false
@@ -113,7 +113,7 @@ func TestCredentialsViewReportsCapabilityDiscoveryErrorAndRetries(t *testing.T) 
 	require.NotNil(t, retryCmd)
 }
 
-func TestCredentialsViewLoadsNewestFirstAndUsesServerState(t *testing.T) {
+func TestCredentialsViewLoadsNewestFirstAndUsesServerState(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	older := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
 	newer := older.Add(24 * time.Hour)
 	observed := newer.Add(time.Hour)
@@ -144,7 +144,7 @@ func TestCredentialsViewLoadsNewestFirstAndUsesServerState(t *testing.T) {
 	assert.Contains(t, rendered, "expired", "server state is authoritative even before expires_at")
 }
 
-func TestCredentialsViewManualAndPeriodicRefreshStayViewScoped(t *testing.T) {
+func TestCredentialsViewManualAndPeriodicRefreshStayViewScoped(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{TokenAuditRead: true}})
 	m, enterCmd := updateModel(m, keyRune('C'))
@@ -170,7 +170,7 @@ func TestCredentialsViewManualAndPeriodicRefreshStayViewScoped(t *testing.T) {
 	assert.Nil(t, staleTickCmd)
 }
 
-func TestCredentialsViewDropsResponsesAfterExitOrDaemonSwitch(t *testing.T) {
+func TestCredentialsViewDropsResponsesAfterExitOrDaemonSwitch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{TokenAuditRead: true}})
 	m, _ = updateModel(m, keyRune('C'))
@@ -193,7 +193,7 @@ func TestCredentialsViewDropsResponsesAfterExitOrDaemonSwitch(t *testing.T) {
 	assert.Equal(t, int64(7), afterSwitch.credentials.tokens[0].ID)
 }
 
-func TestCredentialsViewGlobalExitPreservesUnderlyingReturnView(t *testing.T) {
+func TestCredentialsViewGlobalExitPreservesUnderlyingReturnView(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.daemonTargets = []daemonTarget{{Name: "local", Local: true}}
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{TokenAuditRead: true}})
@@ -210,7 +210,7 @@ func TestCredentialsViewGlobalExitPreservesUnderlyingReturnView(t *testing.T) {
 
 // Opening Inbox leaves the credentials ledger. An unfinished credential
 // load must neither keep the next ledger visit loading nor populate it.
-func TestCredentialsViewInboxKeyExitsLedgerWithInFlightLoad(t *testing.T) {
+func TestCredentialsViewInboxKeyExitsLedgerWithInFlightLoad(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
 	m := newTestModel()
@@ -248,7 +248,7 @@ func TestCredentialsViewInboxKeyExitsLedgerWithInFlightLoad(t *testing.T) {
 
 // Returning to credentials after an Inbox visit must resume periodic
 // refresh, even when a previously scheduled tick fired inside Inbox.
-func TestCredentialsViewInboxKeyDoesNotStrandScheduledRefresh(t *testing.T) {
+func TestCredentialsViewInboxKeyDoesNotStrandScheduledRefresh(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	inbox := ProjectSummary{ID: 2, Name: "example-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
 	m := newTestModel()
@@ -287,7 +287,7 @@ func TestCredentialsViewInboxKeyDoesNotStrandScheduledRefresh(t *testing.T) {
 	require.True(t, armed.credentials.refreshScheduled)
 }
 
-func TestCredentialsViewArmsOnlyOnePeriodicTimerAcrossManualLoads(t *testing.T) {
+func TestCredentialsViewArmsOnlyOnePeriodicTimerAcrossManualLoads(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.view = viewCredentials
 	m.credentials = credentialAuditState{available: true, gen: 3}
@@ -299,7 +299,7 @@ func TestCredentialsViewArmsOnlyOnePeriodicTimerAcrossManualLoads(t *testing.T) 
 	assert.Nil(t, duplicateTick, "manual loads must not multiply periodic refresh loops")
 }
 
-func TestCredentialsViewRendersRedactedFieldsAndSanitizesTerminalContent(t *testing.T) {
+func TestCredentialsViewRendersRedactedFieldsAndSanitizesTerminalContent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	created := time.Date(2026, 9, 15, 10, 11, 12, 0, time.UTC)
 	expires := created.Add(time.Hour)
 	used := created.Add(10 * time.Minute)
@@ -336,6 +336,7 @@ func TestCredentialsViewRendersRedactedFieldsAndSanitizesTerminalContent(t *test
 }
 
 func TestCredentialsViewPublishesContextualFooterBindings(t *testing.T) {
+	t.Parallel()
 	m := Model{view: viewCredentials}
 
 	items := flattenHelpRows(m.helpRows())

@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestIssueRefCommandsAcceptUIDsAndShortIDs(t *testing.T) {
+func TestIssueRefCommandsAcceptUIDsAndShortIDs(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 

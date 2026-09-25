@@ -16,7 +16,7 @@ import (
 // non-empty frame for a model in viewProjects state, even with no
 // projects loaded yet. Required for boot landing where the fetch is
 // still in flight.
-func TestProjectsView_RendersWithoutPanic(t *testing.T) {
+func TestProjectsView_RendersWithoutPanic(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView()
 	m.width = 80 // narrower than the 120 default
 
@@ -33,6 +33,7 @@ func TestProjectsView_RendersWithoutPanic(t *testing.T) {
 // projects sentinel row's Open/Closed are the sum of per-row counts and
 // LastEventAt is the row-max. The sentinel is always at index 0.
 func TestProjectsRows_SentinelSumsAndPinsFirst(t *testing.T) {
+	t.Parallel()
 	t1 := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) // newer
 	byID := map[int64]string{1: "kata", 2: "roborev", 3: "msgvault"}
@@ -55,6 +56,7 @@ func TestProjectsRows_SentinelSumsAndPinsFirst(t *testing.T) {
 // sentinel are sorted by last_event_at desc with name asc as the
 // tiebreak. A row with no events sinks to the bottom.
 func TestProjectsRows_SortByLastEventDesc(t *testing.T) {
+	t.Parallel()
 	t1 := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	byID := map[int64]string{1: "older", 2: "newer", 3: "noevents"}
@@ -78,6 +80,7 @@ func TestProjectsRows_SortByLastEventDesc(t *testing.T) {
 // intentionally randomized), so Enter on the highlighted row would
 // occasionally select the wrong project.
 func TestProjectsRows_StableTiebreakerOnEqualNamesAndTimes(t *testing.T) {
+	t.Parallel()
 	t1 := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	byID := map[int64]string{
 		100: "Kata",
@@ -99,7 +102,7 @@ func TestProjectsRows_StableTiebreakerOnEqualNamesAndTimes(t *testing.T) {
 // TestProjectsView_RendersTable confirms the table renders with the
 // expected column headers and row content for a fixture model. Wide
 // terminal so all columns fit.
-func TestProjectsView_RendersTable(t *testing.T) {
+func TestProjectsView_RendersTable(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	t1 := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	m := setupProjectsView(
 		mockProject{ID: 1, Name: "kata", Ident: "github.com/wesm/kata", Stats: ProjectStatsSummary{Open: 12, Closed: 3, LastEventAt: &t1}},
@@ -115,7 +118,7 @@ func TestProjectsView_RendersTable(t *testing.T) {
 	}
 }
 
-func TestProjectsView_FooterUsesAdaptiveHelpTable(t *testing.T) {
+func TestProjectsView_FooterUsesAdaptiveHelpTable(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(mockProject{ID: 1, Name: "alpha", Ident: "..."})
 
 	out := stripANSI(m.viewContent())
@@ -125,7 +128,7 @@ func TestProjectsView_FooterUsesAdaptiveHelpTable(t *testing.T) {
 	assert.NotContains(t, out, "[F] federation")
 }
 
-func TestProjectsView_FTransitionsToFederationWithHighlightedProjectSelected(t *testing.T) {
+func TestProjectsView_FTransitionsToFederationWithHighlightedProjectSelected(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(
 		mockProject{ID: 11, Name: "alpha-project", Ident: "..."},
 		mockProject{ID: 22, Name: "beta-project", Ident: "..."},
@@ -158,7 +161,7 @@ func TestProjectsView_FTransitionsToFederationWithHighlightedProjectSelected(t *
 	assert.Equal(t, "beta-project", out.federation.draft.SpokeProjectName)
 }
 
-func TestProjectsView_FTransitionSelectedProjectIgnoresStaleFederationDraft(t *testing.T) {
+func TestProjectsView_FTransitionSelectedProjectIgnoresStaleFederationDraft(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(
 		mockProject{ID: 11, Name: "alpha-project", Ident: "..."},
 		mockProject{ID: 22, Name: "beta-project", Ident: "..."},
@@ -175,7 +178,7 @@ func TestProjectsView_FTransitionSelectedProjectIgnoresStaleFederationDraft(t *t
 	assert.NotContains(t, rendered, "selected project: stale-project")
 }
 
-func TestProjectsView_FFromAllProjectsHasNoSelectedFederationProject(t *testing.T) {
+func TestProjectsView_FFromAllProjectsHasNoSelectedFederationProject(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(mockProject{ID: 11, Name: "alpha-project", Ident: "..."})
 	m.scope = homedScope(99, "previous-project")
 	m.projectsCursor = 0
@@ -196,7 +199,7 @@ func TestProjectsView_FFromAllProjectsHasNoSelectedFederationProject(t *testing.
 // projects and a small terminal, the footer + key-hint line stay on
 // screen. Without clipping, every row renders and the chrome falls
 // off the bottom — the user can't see [↑/↓ k/j] move etc.
-func TestProjectsView_ViewportClipsRowsToHeight(t *testing.T) {
+func TestProjectsView_ViewportClipsRowsToHeight(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView()
 	m.height = 14 // chrome=8 + ~5 row slots
 	for i := int64(1); i <= 20; i++ {
@@ -220,7 +223,7 @@ func TestProjectsView_ViewportClipsRowsToHeight(t *testing.T) {
 
 // TestProjectsView_DashWhenNoEvents pins spec §6.1: a row with
 // LastEventAt=nil renders "—" in the Updated column.
-func TestProjectsView_DashWhenNoEvents(t *testing.T) {
+func TestProjectsView_DashWhenNoEvents(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(
 		mockProject{ID: 1, Name: "fresh", Ident: "github.com/wesm/fresh"},
 	)
@@ -231,7 +234,7 @@ func TestProjectsView_DashWhenNoEvents(t *testing.T) {
 // TestProjectsView_ProjectFooterOnHighlight pins spec §5.1:
 // highlighting a real project renders its name beneath the table;
 // highlighting the sentinel renders the description.
-func TestProjectsView_ProjectFooterOnHighlight(t *testing.T) {
+func TestProjectsView_ProjectFooterOnHighlight(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(
 		mockProject{ID: 1, Name: "kata", Ident: "github.com/wesm/kata"},
 	)
@@ -247,7 +250,7 @@ func TestProjectsView_ProjectFooterOnHighlight(t *testing.T) {
 
 // TestProjectsView_JKMoveCursor pins basic vertical navigation. Cursor
 // is clamped at both ends; j moves down, k moves up.
-func TestProjectsView_JKMoveCursor(t *testing.T) {
+func TestProjectsView_JKMoveCursor(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(
 		mockProject{ID: 1, Name: "a", Ident: "..."},
 		mockProject{ID: 2, Name: "b", Ident: "..."},
@@ -270,7 +273,7 @@ func TestProjectsView_JKMoveCursor(t *testing.T) {
 // TestProjectsView_EnterOnProjectTransitions pins spec §5.4: Enter on
 // a real project sets scope to that project and transitions to viewList
 // with a fresh fetch dispatched.
-func TestProjectsView_EnterOnProjectTransitions(t *testing.T) {
+func TestProjectsView_EnterOnProjectTransitions(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(
 		mockProject{ID: 7, Name: "kata", Ident: "..."},
 		mockProject{ID: 9, Name: "roborev", Ident: "..."},
@@ -295,7 +298,7 @@ func TestProjectsView_EnterOnProjectTransitions(t *testing.T) {
 
 // TestProjectsView_EnterOnSentinelTransitions pins that Enter on the
 // All-projects row sets allProjects=true and transitions to viewList.
-func TestProjectsView_EnterOnSentinelTransitions(t *testing.T) {
+func TestProjectsView_EnterOnSentinelTransitions(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(
 		mockProject{ID: 1, Name: "a", Ident: "..."},
 	)
@@ -315,7 +318,7 @@ func TestProjectsView_EnterOnSentinelTransitions(t *testing.T) {
 // TestProjectsView_EnterOnCurrentScopeIsIdempotent pins the idempotent
 // re-selection contract: re-selecting the row that matches the active
 // scope just returns to viewList — no cache invalidation, no refetch.
-func TestProjectsView_EnterOnCurrentScopeIsIdempotent(t *testing.T) {
+func TestProjectsView_EnterOnCurrentScopeIsIdempotent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(
 		mockProject{ID: 7, Name: "kata", Ident: "..."},
 	)
@@ -331,7 +334,7 @@ func TestProjectsView_EnterOnCurrentScopeIsIdempotent(t *testing.T) {
 // TestProjectsView_EscReturnsToPriorList pins spec §1.4: Esc from
 // viewProjects returns to viewList without a refetch when scope is set
 // (the user came from a list via P).
-func TestProjectsView_EscReturnsToPriorList(t *testing.T) {
+func TestProjectsView_EscReturnsToPriorList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView()
 	m.scope = homedScope(7, "kata")
 
@@ -343,7 +346,7 @@ func TestProjectsView_EscReturnsToPriorList(t *testing.T) {
 
 // TestProjectsView_EscNoOpOnBootEntry pins that Esc with no prior scope
 // (boot landed on viewProjects) leaves the view in place. Spec §1.4.
-func TestProjectsView_EscNoOpOnBootEntry(t *testing.T) {
+func TestProjectsView_EscNoOpOnBootEntry(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView()
 	// Default scope is zero (empty=false, projectID=0, allProjects=false)
 	// — this represents the boot landing case.
@@ -355,7 +358,7 @@ func TestProjectsView_EscNoOpOnBootEntry(t *testing.T) {
 
 // TestProjectsView_RRefreshes pins spec §1.4: r dispatches a manual
 // refresh of the projects table. View stays in viewProjects.
-func TestProjectsView_RRefreshes(t *testing.T) {
+func TestProjectsView_RRefreshes(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView()
 
 	out, cmd := m.routeProjectsViewKey(keyRune('r'))
@@ -366,7 +369,7 @@ func TestProjectsView_RRefreshes(t *testing.T) {
 // TestProjectsView_PFromListTransitions pins spec §1.4: P from viewList
 // transitions to viewProjects and dispatches the stats fetch. Scope is
 // preserved on the way out so an Esc-back returns to the same queue.
-func TestProjectsView_PFromListTransitions(t *testing.T) {
+func TestProjectsView_PFromListTransitions(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewList
 	m.scope = homedScope(7, "kata")
@@ -383,7 +386,7 @@ func TestProjectsView_PFromListTransitions(t *testing.T) {
 // TestProjectsView_PWhileInputFocusedRoutesToPrompt pins spec §1.4: P
 // while a search bar / form is focused reaches the prompt instead of
 // transitioning the view.
-func TestProjectsView_PWhileInputFocusedRoutesToPrompt(t *testing.T) {
+func TestProjectsView_PWhileInputFocusedRoutesToPrompt(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewList
 	m.scope = scope{projectID: 7, projectName: "kata"}
@@ -447,7 +450,7 @@ func cursorForTestProject(t *testing.T, m Model, projectID int64) int {
 
 // Selecting another project or All projects clears the previous detail pane
 // so detail actions cannot target a task from the old scope.
-func TestProjectsView_SelectionClearsStaleSplitDetail(t *testing.T) {
+func TestProjectsView_SelectionClearsStaleSplitDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	for _, tc := range []struct {
 		name      string
 		wantAll   bool
@@ -493,7 +496,7 @@ func TestProjectsView_SelectionClearsStaleSplitDetail(t *testing.T) {
 
 // A detail reply from before a project selection must not repopulate
 // the cleared pane.
-func TestProjectsView_SelectionDropsStaleDetailResponse(t *testing.T) {
+func TestProjectsView_SelectionDropsStaleDetailResponse(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, oldIssue := inboxSplitWithOpenDetail(t)
 
 	m, _ = updateModel(m, keyRune('P'))
@@ -510,7 +513,7 @@ func TestProjectsView_SelectionDropsStaleDetailResponse(t *testing.T) {
 // detail-follow debounce tick armed before a scope-changing selection
 // is fenced by the selection: it must not dispatch detail fetches
 // against the old scope's issue.
-func TestProjectsView_SelectionFencesPendingFollowTick(t *testing.T) {
+func TestProjectsView_SelectionFencesPendingFollowTick(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m, _ := inboxSplitWithOpenDetail(t)
 	pendingGen := m.nextDetailFollowGen
 
@@ -525,7 +528,7 @@ func TestProjectsView_SelectionFencesPendingFollowTick(t *testing.T) {
 
 // After a project selection, the fresh list opens the highlighted task
 // in the split detail pane.
-func TestProjectsView_SelectionBootstrapsDetailFromFreshList(t *testing.T) {
+func TestProjectsView_SelectionBootstrapsDetailFromFreshList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	for _, tc := range []struct {
 		name      string
 		wantAll   bool
@@ -569,7 +572,7 @@ func TestProjectsView_SelectionBootstrapsDetailFromFreshList(t *testing.T) {
 
 // Reselecting a project after visiting Inbox must reject old list replies
 // from before Inbox entry, even when they name the same project.
-func TestProjectsViewSelectionDropsPreInboxFetchForSameProject(t *testing.T) {
+func TestProjectsViewSelectionDropsPreInboxFetchForSameProject(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	inbox := ProjectSummary{ID: 2, Name: "capture-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
 	api := &inboxTestAPI{
@@ -635,7 +638,7 @@ func TestProjectsViewSelectionDropsPreInboxFetchForSameProject(t *testing.T) {
 
 // Selecting All projects after visiting Inbox must reject all-projects
 // replies from before Inbox entry.
-func TestProjectsViewSelectionDropsPreInboxFetchForAllProjectsScope(t *testing.T) {
+func TestProjectsViewSelectionDropsPreInboxFetchForAllProjectsScope(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	inbox := ProjectSummary{ID: 2, Name: "capture-project"}
 	inbox.Metadata.Role = jsontext.Value(`"inbox"`)
 	api := &inboxTestAPI{

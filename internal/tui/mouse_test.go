@@ -23,7 +23,7 @@ func mouseWheelUp() tea.MouseMsg {
 	return tea.MouseWheelMsg{Button: tea.MouseWheelUp}
 }
 
-func TestViewMouseModeFollowsOption(t *testing.T) {
+func TestViewMouseModeFollowsOption(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	without := initialModel(Options{}).View()
 	if without.MouseMode != tea.MouseModeNone {
 		t.Fatalf("mouse mode without opt-in = %v, want MouseModeNone", without.MouseMode)
@@ -37,7 +37,7 @@ func TestViewMouseModeFollowsOption(t *testing.T) {
 	}
 }
 
-func TestMouseDisabledIgnoresMouseMsg(t *testing.T) {
+func TestMouseDisabledIgnoresMouseMsg(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := resizeModel(newTestModel(), 120, 30)
 	m.list.issues = makeTestIssues(3)
 	m.list.cursor = 0
@@ -51,7 +51,7 @@ func TestMouseDisabledIgnoresMouseMsg(t *testing.T) {
 	}
 }
 
-func TestMouseClickSelectsIssueListRow(t *testing.T) {
+func TestMouseClickSelectsIssueListRow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := resizeModel(newTestModel(), 120, 30)
 	m.opts.Mouse = true
 	m.list.issues = makeTestIssues(5)
@@ -65,7 +65,7 @@ func TestMouseClickSelectsIssueListRow(t *testing.T) {
 	}
 }
 
-func TestMouseSplitClickFirstIssueRowSelectsFirstVisibleRow(t *testing.T) {
+func TestMouseSplitClickFirstIssueRowSelectsFirstVisibleRow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := resizeModel(newTestModel(), 160, 30)
 	m.opts.Mouse = true
 	m.layout = splitlayout.Split
@@ -78,7 +78,7 @@ func TestMouseSplitClickFirstIssueRowSelectsFirstVisibleRow(t *testing.T) {
 	}
 }
 
-func TestMouseFullScreenHelpIgnoresSplitPaneMouse(t *testing.T) {
+func TestMouseFullScreenHelpIgnoresSplitPaneMouse(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := resizeModel(newTestModel(), 160, 30)
 	m.opts.Mouse = true
 	m.layout = splitlayout.Split
@@ -92,7 +92,7 @@ func TestMouseFullScreenHelpIgnoresSplitPaneMouse(t *testing.T) {
 	}
 }
 
-func TestMouseWheelScrollsIssueDetail(t *testing.T) {
+func TestMouseWheelScrollsIssueDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDetailScenario(t, 120, 30, "line\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nTAIL")
 	m.opts.Mouse = true
 	m.detail.scroll = 0
@@ -107,7 +107,7 @@ func TestMouseWheelScrollsIssueDetail(t *testing.T) {
 	}
 }
 
-func TestMouseClickSelectsProjectsRow(t *testing.T) {
+func TestMouseClickSelectsProjectsRow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupProjectsView(
 		mockProject{ID: 1, Name: "alpha", Ident: "github.com/acme/alpha"},
 		mockProject{ID: 2, Name: "beta", Ident: "github.com/acme/beta"},

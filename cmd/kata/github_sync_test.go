@@ -16,7 +16,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestGitHubSyncEnableExplicitRepoForwardsHostRepoAndInterval(t *testing.T) {
+func TestGitHubSyncEnableExplicitRepoForwardsHostRepoAndInterval(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newGitHubSyncCLIFixture(t)
 
 	out := runCLI(t, f.env, f.dir, "sync", "github", "enable",
@@ -40,7 +40,7 @@ func TestGitHubSyncEnableExplicitRepoForwardsHostRepoAndInterval(t *testing.T) {
 	assert.Equal(t, 600, binding.IntervalSeconds)
 }
 
-func TestGitHubSyncEnableDefaultsHostForExplicitRepo(t *testing.T) {
+func TestGitHubSyncEnableDefaultsHostForExplicitRepo(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newGitHubSyncCLIFixture(t)
 
 	out := runCLI(t, f.env, f.dir, "--agent", "sync", "github", "enable",
@@ -54,7 +54,7 @@ func TestGitHubSyncEnableDefaultsHostForExplicitRepo(t *testing.T) {
 	}}, f.fetcher.calls)
 }
 
-func TestGitHubSyncEnableResolvesRepoFromProjectGitAlias(t *testing.T) {
+func TestGitHubSyncEnableResolvesRepoFromProjectGitAlias(t *testing.T) { //nolint:paralleltest // sets KATA_GITHUB_SYNC_ALLOWED_HOSTS; newRootCmd resets package var flags
 	t.Setenv("KATA_GITHUB_SYNC_ALLOWED_HOSTS", "github.example")
 	f := newGitHubSyncCLIFixture(t)
 	_, err := f.env.DB.AttachAlias(context.Background(), f.projectID, "github.example/example-owner/example-repo", "git")
@@ -70,7 +70,7 @@ func TestGitHubSyncEnableResolvesRepoFromProjectGitAlias(t *testing.T) {
 	}}, f.fetcher.calls)
 }
 
-func TestGitHubSyncEnableFiltersInferredRepoByHost(t *testing.T) {
+func TestGitHubSyncEnableFiltersInferredRepoByHost(t *testing.T) { //nolint:paralleltest // sets KATA_GITHUB_SYNC_ALLOWED_HOSTS; newRootCmd resets package var flags
 	t.Setenv("KATA_GITHUB_SYNC_ALLOWED_HOSTS", "github.example")
 	f := newGitHubSyncCLIFixture(t)
 	_, err := f.env.DB.AttachAlias(context.Background(), f.projectID, "github.com/example-owner/public-repo", "git")
@@ -88,7 +88,7 @@ func TestGitHubSyncEnableFiltersInferredRepoByHost(t *testing.T) {
 	}}, f.fetcher.calls)
 }
 
-func TestGitHubSyncEnableRejectsMissingAndAmbiguousInferredRepo(t *testing.T) {
+func TestGitHubSyncEnableRejectsMissingAndAmbiguousInferredRepo(t *testing.T) { //nolint:paralleltest // sets KATA_GITHUB_SYNC_ALLOWED_HOSTS; newRootCmd resets package var flags
 	t.Run("missing", func(t *testing.T) {
 		f := newGitHubSyncCLIFixture(t)
 
@@ -115,7 +115,7 @@ func TestGitHubSyncEnableRejectsMissingAndAmbiguousInferredRepo(t *testing.T) {
 	})
 }
 
-func TestIssueSyncStatusDisableAndOnceUseDaemonEndpointsAndOutputModes(t *testing.T) {
+func TestIssueSyncStatusDisableAndOnceUseDaemonEndpointsAndOutputModes(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newGitHubSyncCLIFixture(t)
 	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo")
 	binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
@@ -172,7 +172,7 @@ func TestIssueSyncStatusDisableAndOnceUseDaemonEndpointsAndOutputModes(t *testin
 	assert.False(t, disabled.Enabled)
 }
 
-func TestGitHubSyncOnceAllowsLongRunningRequest(t *testing.T) {
+func TestGitHubSyncOnceAllowsLongRunningRequest(t *testing.T) { //nolint:paralleltest // sets KATA_HTTP_TIMEOUT; newRootCmd resets package var flags
 	f := newGitHubSyncCLIFixture(t)
 	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo")
 	f.runner.delay = 250 * time.Millisecond
@@ -184,7 +184,7 @@ func TestGitHubSyncOnceAllowsLongRunningRequest(t *testing.T) {
 	assert.Equal(t, int64(1), f.runner.runs)
 }
 
-func TestRootRegistersSyncGitHub(t *testing.T) {
+func TestRootRegistersSyncGitHub(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	syncCmd, ok := rootSubcommands()["sync"]
 	require.True(t, ok, "root command should register sync")
 	_, _, err := syncCmd.Find([]string{"github"})

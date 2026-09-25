@@ -14,6 +14,7 @@ import (
 )
 
 func TestConnectionDroppedErrnosWindows(t *testing.T) {
+	t.Parallel()
 	for _, errno := range []syscall.Errno{
 		syscall.WSAECONNRESET,
 		syscall.WSAECONNABORTED,

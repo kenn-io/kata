@@ -54,7 +54,7 @@ func (f *fakeLabelLister) ListLabels(_ context.Context, _ int64) ([]LabelCount, 
 // the resulting gen=1 message is rejected. A regression that moved
 // the gen-stamp into the cmd (or dropped the gen check in the
 // handler) would let the stale labels overwrite the cache.
-func TestLabelCache_DispatchStampsGenBeforeResponse(t *testing.T) {
+func TestLabelCache_DispatchStampsGenBeforeResponse(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	pid := int64(7)
 	m := setupScopedModel(t, pid)
 	fake := &fakeLabelLister{labels: []LabelCount{{Label: "from-first", Count: 1}}}
@@ -92,7 +92,7 @@ func TestLabelCache_DispatchStampsGenBeforeResponse(t *testing.T) {
 // acceptance check on response is gen >= cache.gen; older messages
 // are silently discarded so a slow first-dispatch can't overwrite a
 // freshly-invalidated cache entry.
-func TestLabelCache_StaleGenResponseDropped(t *testing.T) {
+func TestLabelCache_StaleGenResponseDropped(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	pid := int64(7)
 	m := setupScopedModel(t, pid)
 	m, _ = m.dispatchLabelFetch(pid) // gen=1
@@ -120,7 +120,7 @@ func TestLabelCache_StaleGenResponseDropped(t *testing.T) {
 // Setup: dispatch for pid=7 (creates entry, fetching=true), switch
 // scope to pid=8, then send the pid=7 response. Assert the pid=7
 // entry IS populated AND fetching=false — that's the new contract.
-func TestLabelCache_InactiveProjectResponseStillPopulatesCache(t *testing.T) {
+func TestLabelCache_InactiveProjectResponseStillPopulatesCache(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupScopedModel(t, 7) // active project is 7
 	// Dispatch creates the entry for pid=7 with gen=1, fetching=true.
 	m, _ = m.dispatchLabelFetch(7)
@@ -153,6 +153,7 @@ func TestLabelCache_InactiveProjectResponseStillPopulatesCache(t *testing.T) {
 // ListLabels fetch. Mirrors maybeRefetchLabels's SSE gate so the two
 // invalidation paths behave identically.
 func TestBatchLabelRefresh_GatesOnCacheExistence(t *testing.T) {
+	t.Parallel()
 	m := setupScopedModel(t, 7)
 	// No cache entry for pid=7 — the user never opened the menu.
 	mut := mutationDoneMsg{
@@ -176,6 +177,7 @@ func TestBatchLabelRefresh_GatesOnCacheExistence(t *testing.T) {
 // against the project at least once), a successful label mutation
 // MUST dispatch a refresh so the menu's count column stays accurate.
 func TestBatchLabelRefresh_DispatchesWhenEntryExists(t *testing.T) {
+	t.Parallel()
 	m := setupScopedModel(t, 7)
 	// Prime an entry as if the user had previously opened the menu.
 	m.projectLabels.byProject[7] = labelCacheEntry{
@@ -205,6 +207,7 @@ func TestBatchLabelRefresh_DispatchesWhenEntryExists(t *testing.T) {
 // batchLabelRefresh, so a create against a project the user never
 // opened the menu for remains a zero-cost no-op.
 func TestMutAffectsLabelCounts_AllRelevantKinds(t *testing.T) {
+	t.Parallel()
 	if !mutAffectsLabelCounts(mutationDoneMsg{kind: "create"}) {
 		t.Fatal("'create' must trigger a label-aggregate refetch " +
 			"(commit 4 form may attach labels)")
@@ -226,7 +229,7 @@ func TestMutAffectsLabelCounts_AllRelevantKinds(t *testing.T) {
 // trigger a refetch (entry.fetching=true, entry.gen advanced). The
 // list/detail refetch path is independent — this test asserts the
 // suggestion-cache invalidation specifically.
-func TestLabelCache_SSEEventInvalidatesSuggestionCacheOnly(t *testing.T) {
+func TestLabelCache_SSEEventInvalidatesSuggestionCacheOnly(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	pid := int64(7)
 	m := setupScopedModel(t, pid)
 	m.cache = newIssueCache()

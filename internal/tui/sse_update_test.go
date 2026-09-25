@@ -78,6 +78,7 @@ func assertDetailRefetchBatch(t *testing.T, cmd tea.Cmd) {
 // TestEventAffectsView_AllProjects: in all-projects scope, any event
 // with a non-zero projectID affects the view; projectID == 0 does not.
 func TestEventAffectsView_AllProjects(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{allProjects: true}
 	if !m.eventAffectsView(eventReceivedMsg{projectID: 1}) {
@@ -94,6 +95,7 @@ func TestEventAffectsView_AllProjects(t *testing.T) {
 // TestEventAffectsView_SingleProject: in single-project scope, only the
 // matching projectID affects the view; other projects do not.
 func TestEventAffectsView_SingleProject(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{projectID: 7}
 	if !m.eventAffectsView(eventReceivedMsg{projectID: 7}) {
@@ -109,6 +111,7 @@ func TestEventAffectsView_SingleProject(t *testing.T) {
 // regardless of scope, so the daemon can broadcast unscoped frames
 // without churning a single-project view.
 func TestEventAffectsView_ZeroProjectID_SingleScope(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{projectID: 7}
 	if m.eventAffectsView(eventReceivedMsg{projectID: 0}) {
@@ -122,6 +125,7 @@ func TestEventAffectsView_ZeroProjectID_SingleScope(t *testing.T) {
 // gate is meaningful, is marked stale so the tick's eventual refetch
 // path will run.
 func TestHandleEventReceived_DispatchesDebouncedRefetch(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{projectID: 7}
 	m.cache.put(cacheKey{projectID: 7}, []Issue{{ShortID: "aaa1"}})
@@ -142,6 +146,7 @@ func TestHandleEventReceived_DispatchesDebouncedRefetch(t *testing.T) {
 // affects-view events coalesce — pendingRefetch stays true and only
 // the first dispatch returns a non-nil cmd.
 func TestHandleEventReceived_CoalescesBursts(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{projectID: 7}
 	out, cmd1 := m.handleEventReceived(eventReceivedMsg{projectID: 7})
@@ -168,6 +173,7 @@ func TestHandleEventReceived_CoalescesBursts(t *testing.T) {
 // project in single-project scope leaves the cache untouched and does
 // not flip pendingRefetch.
 func TestHandleEventReceived_NoEffect_NoStale(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{projectID: 7}
 	out, cmd := m.handleEventReceived(eventReceivedMsg{projectID: 8})
@@ -190,6 +196,7 @@ func TestHandleEventReceived_NoEffect_NoStale(t *testing.T) {
 // directly so we don't have to invoke a 150ms tick to assert on cmd
 // shape.
 func TestHandleEventReceived_DetailViewSingleIssueRefetch(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-OPEN")
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 		projectID: 7, issueShortID: "abc4", issueUID: "01UID-OPEN",
@@ -212,6 +219,7 @@ func TestHandleEventReceived_DetailViewSingleIssueRefetch(t *testing.T) {
 }
 
 func TestHandleEventReceived_ParentLinkInvalidatesQueue(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{projectID: 7}
 	m.cache.put(cacheKey{projectID: 7}, []Issue{{ShortID: "abc4"}})
@@ -233,6 +241,7 @@ func TestHandleEventReceived_ParentLinkInvalidatesQueue(t *testing.T) {
 }
 
 func TestHandleEventReceived_ParentLinkRefetchesOpenParentDetail(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-PARENT")
 
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
@@ -251,6 +260,7 @@ func TestHandleEventReceived_ParentLinkRefetchesOpenParentDetail(t *testing.T) {
 }
 
 func TestHandleEventReceived_ParentLinkRefetchesOpenChildDetail(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "ch43", "01UID-CHILD")
 
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
@@ -272,6 +282,7 @@ func TestHandleEventReceived_ParentLinkRefetchesOpenChildDetail(t *testing.T) {
 // `kata edit --parent X` path: an issue.links_changed event with
 // parent_set must refresh the new parent's detail pane when it's open.
 func TestHandleEventReceived_LinksChangedRefetchesNewParent(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-PARENT")
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 		eventType:    "issue.links_changed",
@@ -289,6 +300,7 @@ func TestHandleEventReceived_LinksChangedRefetchesNewParent(t *testing.T) {
 // the parent-replace case: issue.links_changed carries both parent_set
 // and parent_removed, and either's pane (when open) should refresh.
 func TestHandleEventReceived_LinksChangedRefetchesOldAndNewParents(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		openShortID string
 		openUID     string
@@ -323,6 +335,7 @@ func TestHandleEventReceived_LinksChangedRefetchesOldAndNewParents(t *testing.T)
 // would refresh X's pane only — Y's pane would stay stale until a
 // manual refresh.
 func TestHandleEventReceived_LinksChangedRefetchesBlocksTarget(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		openShortID string
 		openUID     string
@@ -356,6 +369,7 @@ func TestHandleEventReceived_LinksChangedRefetchesBlocksTarget(t *testing.T) {
 // payload; the SSE decoder surfaces every peer in the payload's links
 // array so any open pane on the other end refreshes.
 func TestHandleEventReceived_IssueCreatedRefreshesNonParentPeer(t *testing.T) {
+	t.Parallel()
 	// Detail pane is on `peer5` — the peer of a `--related peer5` create.
 	m := sseDetailFixture(7, "peer5", "01UID-PEER")
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
@@ -379,6 +393,7 @@ func TestHandleEventReceived_IssueCreatedRefreshesNonParentPeer(t *testing.T) {
 // references peer UID-B at short_id "peer5" must NOT refresh an open
 // detail pane on UID-A also at "peer5".
 func TestHandleEventReceived_LinksChangedUIDMismatchSameShortID(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "peer5", "01UID-A")
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 		eventType:    "issue.links_changed",
@@ -400,6 +415,7 @@ func TestHandleEventReceived_LinksChangedUIDMismatchSameShortID(t *testing.T) {
 // detail's UID, the pane refreshes regardless of whether the
 // short_id-keyed Refs slice matches.
 func TestHandleEventReceived_LinksChangedUIDMatchesAuthoritatively(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "peer5", "01UID-B")
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 		eventType:    "issue.links_changed",
@@ -420,6 +436,7 @@ func TestHandleEventReceived_LinksChangedUIDMatchesAuthoritatively(t *testing.T)
 // carry UIDs, so this is mainly belt-and-suspenders for hand-built
 // fixtures.
 func TestHandleEventReceived_LinksChangedFallsBackToShortIDWhenNoUIDs(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "peer5", "01UID-DETAIL")
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 		eventType:    "issue.links_changed",
@@ -438,6 +455,7 @@ func TestHandleEventReceived_LinksChangedFallsBackToShortIDWhenNoUIDs(t *testing
 // refresh because issueUID == openUID (the parent_removed payload is
 // informational; the URL-issue match drives the refetch).
 func TestHandleEventReceived_LinksChangedChildSelfRefetches(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "ch43", "01UID-CHILD")
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 		eventType:    "issue.links_changed",
@@ -459,6 +477,7 @@ func TestHandleEventReceived_LinksChangedChildSelfRefetches(t *testing.T) {
 // payload carries a parent link and refetch the open parent's detail
 // — otherwise the parent's children section stays stale until reload.
 func TestHandleEventReceived_IssueCreatedWithParentRefetchesOpenParent(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-PARENT")
 
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
@@ -484,6 +503,7 @@ func TestHandleEventReceived_IssueCreatedWithParentRefetchesOpenParent(t *testin
 // issueShortID on the resulting eventReceivedMsg. UID rides alongside
 // for canonical matching.
 func TestSSEUpdate_ReadsIssueShortID(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{
 		"type":"issue.created",
 		"project_id":7,
@@ -509,6 +529,7 @@ func TestSSEUpdate_ReadsIssueShortID(t *testing.T) {
 // match it against the open detail. Mirror of the issue.linked test
 // (sse_test.go) but for the issue.created shape the agent path emits.
 func TestDecodeEventReceived_IssueCreatedExtractsParentLink(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{
 		"type":"issue.created",
 		"project_id":7,
@@ -542,6 +563,7 @@ func TestDecodeEventReceived_IssueCreatedExtractsParentLink(t *testing.T) {
 }
 
 func TestHandleEventReceived_NonParentLinkDoesNotRefetchForHierarchy(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-OPEN")
 
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
@@ -572,6 +594,7 @@ func TestHandleEventReceived_NonParentLinkDoesNotRefetchForHierarchy(t *testing.
 // children: maybeRefetchOpenDetail uses m.api (a real *Client), so
 // driving the children would actually hit the network.
 func TestHandleEventReceived_DetailViewRefetchesAllTabs(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-OPEN")
 
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
@@ -585,6 +608,7 @@ func TestHandleEventReceived_DetailViewRefetchesAllTabs(t *testing.T) {
 // detail refetch — maybeRefetchOpenDetail returns nil. Tested directly
 // to avoid invoking the 150ms debounce tick.
 func TestHandleEventReceived_DetailViewMismatch_NoRefetch(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-OPEN")
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
 		projectID: 7, issueShortID: "xy99", issueUID: "01UID-OTHER",
@@ -599,6 +623,7 @@ func TestHandleEventReceived_DetailViewMismatch_NoRefetch(t *testing.T) {
 // not project B's abc4. An event for project B abc4 must NOT trigger a
 // refetch of the open project A abc4 detail.
 func TestHandleEventReceived_CrossProjectMismatch_NoRefetch(t *testing.T) {
+	t.Parallel()
 	// Open detail is project A (abc4); event is project B (abc4).
 	m := sseDetailFixture(7, "abc4", "01UID-A")
 	m.scope = scope{allProjects: true}
@@ -613,6 +638,7 @@ func TestHandleEventReceived_CrossProjectMismatch_NoRefetch(t *testing.T) {
 // TestMaybeRefetchOpenDetail_ListView_NoRefetch: even with a matching
 // short_id, list-view (not detail) must not dispatch a refetch.
 func TestMaybeRefetchOpenDetail_ListView_NoRefetch(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-OPEN")
 	m.view = viewList
 	cmd := m.maybeRefetchOpenDetail(eventReceivedMsg{
@@ -629,6 +655,7 @@ func TestMaybeRefetchOpenDetail_ListView_NoRefetch(t *testing.T) {
 // (each calls into m.api with the real *Client and would hit the
 // network).
 func TestRefetchOpenDetail_BatchShape(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-OPEN")
 
 	assertDetailRefetchBatch(t, m.refetchOpenDetail())
@@ -639,6 +666,7 @@ func TestRefetchOpenDetail_BatchShape(t *testing.T) {
 // stale detail fetches over the wire. A leftover m.detail.issue from
 // a prior open must NOT trigger a refetch.
 func TestRefetchOpenDetail_NoOpInList(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-OPEN")
 	m.view = viewList
 
@@ -651,6 +679,7 @@ func TestRefetchOpenDetail_NoOpInList(t *testing.T) {
 // issue seeded) returns nil so the gen-tagged fetches don't fire
 // against a zero-valued projectID/ref.
 func TestRefetchOpenDetail_NoOpWithoutIssue(t *testing.T) {
+	t.Parallel()
 	m := sseDetailFixture(7, "abc4", "01UID-OPEN")
 	// view is viewDetail but pre-fetch — clear the seeded issue.
 	m.detail.issue = nil
@@ -663,6 +692,7 @@ func TestRefetchOpenDetail_NoOpWithoutIssue(t *testing.T) {
 // the cache, clears pendingRefetch, and seeds a "resynced" toast with
 // a 2s expiry from toastNow.
 func TestHandleResetRequired_DropsCacheAndShowsToast(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{projectID: 7}
 	m.cache.put(cacheKey{projectID: 7}, []Issue{{ShortID: "aaa1"}})
@@ -696,6 +726,7 @@ func TestHandleResetRequired_DropsCacheAndShowsToast(t *testing.T) {
 // dispatches a refetch (cmd is non-nil). We use a real *Client because
 // list.refetchCmd captures it; the lazy cmd is never invoked.
 func TestHandleRefetchTick_ClearsPendingAndDispatchesIfStale(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{projectID: 7}
 	m.api = NewClient("http://kata.invalid", nil)
@@ -717,6 +748,7 @@ func TestHandleRefetchTick_ClearsPendingAndDispatchesIfStale(t *testing.T) {
 // clears pendingRefetch and returns nil — we don't spin a redundant
 // fetch.
 func TestHandleRefetchTick_NoOpIfNotStale(t *testing.T) {
+	t.Parallel()
 	m := sseUpdateFixture()
 	m.scope = scope{projectID: 7}
 	m.cache.put(cacheKey{projectID: 7}, []Issue{{ShortID: "aaa1"}})
@@ -734,6 +766,7 @@ func TestHandleRefetchTick_NoOpIfNotStale(t *testing.T) {
 // TestHandleToastExpired_ClearsToast: with toastNow >= expiresAt, the
 // toast clears.
 func TestHandleToastExpired_ClearsToast(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	m := sseUpdateFixtureAt(now)
 	m.toast = &toast{
@@ -754,6 +787,7 @@ func TestHandleToastExpired_ClearsToast(t *testing.T) {
 // later toastExpired arrives → user already replaced the toast with a
 // fresher one whose expiry hasn't fired yet.
 func TestHandleToastExpired_PreservesNewerToast(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	m := sseUpdateFixtureAt(now)
 	fresher := &toast{
@@ -776,7 +810,7 @@ func TestHandleToastExpired_PreservesNewerToast(t *testing.T) {
 // a project the table is showing flips m.projectsStale and dispatches
 // the debounce timer. The stale-flip also bumps m.projectsGen so an
 // in-flight fetch with the older gen cannot clear stale on response.
-func TestProjectsView_StaleOnIssueEvent(t *testing.T) {
+func TestProjectsView_StaleOnIssueEvent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewProjects
 	m.projectsByID = map[int64]string{7: "kata"}
@@ -793,7 +827,7 @@ func TestProjectsView_StaleOnIssueEvent(t *testing.T) {
 // TestProjectsView_IgnoresEventsWhenInactive pins that the same event
 // is a no-op when viewList is active — the next P-into-viewProjects
 // transition does its own refetch. Spec §6.3.
-func TestProjectsView_IgnoresEventsWhenInactive(t *testing.T) {
+func TestProjectsView_IgnoresEventsWhenInactive(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewList
 	m.projectsByID = map[int64]string{7: "kata"}
@@ -807,7 +841,7 @@ func TestProjectsView_IgnoresEventsWhenInactive(t *testing.T) {
 // TestProjectsView_DebouncesRefetch pins that a burst of SSE events
 // flips projectsStale once and dispatches exactly one debounce timer
 // (no thundering herd). Spec §6.3.
-func TestProjectsView_DebouncesRefetch(t *testing.T) {
+func TestProjectsView_DebouncesRefetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsByID = map[int64]string{7: "kata"}
@@ -834,7 +868,7 @@ func TestProjectsView_DebouncesRefetch(t *testing.T) {
 // signal that a new project has appeared (e.g. `kata init` ran in
 // another terminal); without this refresh, the all-projects table
 // would never learn about it until the user manually refetched.
-func TestProjectsView_StaleOnUnknownProjectEvent(t *testing.T) {
+func TestProjectsView_StaleOnUnknownProjectEvent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsByID = map[int64]string{7: "kata"}
@@ -852,7 +886,7 @@ func TestProjectsView_StaleOnUnknownProjectEvent(t *testing.T) {
 // is NOT cleared at dispatch — a failed fetch must leave the flag
 // armed so the next debounce can retry. The flag is cleared by
 // projectsLoadedMsg when the fetch lands successfully. Spec §6.3.
-func TestProjectsDebounceFire_DispatchesFetchWhenActive(t *testing.T) {
+func TestProjectsDebounceFire_DispatchesFetchWhenActive(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsStale = true
@@ -870,7 +904,7 @@ func TestProjectsDebounceFire_DispatchesFetchWhenActive(t *testing.T) {
 // wakeup is a no-op for the fetch when the user has navigated away
 // from viewProjects, but still clears the pending flag so future
 // invalidations can re-arm. Spec §6.3.
-func TestProjectsDebounceFire_NoFetchWhenInactive(t *testing.T) {
+func TestProjectsDebounceFire_NoFetchWhenInactive(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := sseUpdateFixture()
 	m.view = viewList // user navigated away
 	m.projectsStale = true
@@ -886,7 +920,7 @@ func TestProjectsDebounceFire_NoFetchWhenInactive(t *testing.T) {
 // TestProjectsDebounceFire_NoFetchWhenNotStale pins that the timer's
 // wakeup is a no-op when the stale flag is unset (spurious fire after
 // a manual refresh that consumed staleness). Spec §6.3.
-func TestProjectsDebounceFire_NoFetchWhenNotStale(t *testing.T) {
+func TestProjectsDebounceFire_NoFetchWhenNotStale(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsStale = false
@@ -903,7 +937,7 @@ func TestProjectsDebounceFire_NoFetchWhenNotStale(t *testing.T) {
 // m.projectsStale, so a subsequent debounce fire (timer that was
 // already in flight before the fetch landed) doesn't trigger a
 // redundant refetch. Spec §6.3.
-func TestProjectsLoadedMsg_ClearsStaleOnSuccessfulStatsFetch(t *testing.T) {
+func TestProjectsLoadedMsg_ClearsStaleOnSuccessfulStatsFetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewProjects
 	m.projectsStale = true
@@ -926,7 +960,7 @@ func TestProjectsLoadedMsg_ClearsStaleOnSuccessfulStatsFetch(t *testing.T) {
 // cache maps (which would overwrite a newer in-flight fetch's data)
 // nor clearing the stale flag (which would leave the pending re-fetch
 // thinking the table is fresh).
-func TestProjectsLoadedMsg_DropsOlderResponse(t *testing.T) {
+func TestProjectsLoadedMsg_DropsOlderResponse(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewProjects
 	m.projectsStale = true
@@ -956,7 +990,7 @@ func TestProjectsLoadedMsg_DropsOlderResponse(t *testing.T) {
 // TestProjectsLoadedMsg_PreservesStaleOnFailure pins that a failed
 // projectsLoadedMsg (carrying err) leaves m.projectsStale armed so the
 // next debounce fire retries. Spec §6.3.
-func TestProjectsLoadedMsg_PreservesStaleOnFailure(t *testing.T) {
+func TestProjectsLoadedMsg_PreservesStaleOnFailure(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	m := initialModel(Options{})
 	m.view = viewProjects
@@ -974,7 +1008,7 @@ func TestProjectsLoadedMsg_PreservesStaleOnFailure(t *testing.T) {
 // fetch has already landed successfully and the user is looking at
 // fresh data, an older fetch's error must NOT pop a "failed to load"
 // toast over the (current) UI.
-func TestProjectsLoadedMsg_DropsOlderErrorResponse(t *testing.T) {
+func TestProjectsLoadedMsg_DropsOlderErrorResponse(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewProjects
 	m.projectsGen = 5
@@ -1001,7 +1035,7 @@ func TestProjectsLoadedMsg_DropsOlderErrorResponse(t *testing.T) {
 // valid row. Without clamping, Enter on the visually-highlighted row
 // silently no-ops because applyProjectsViewSelection sees cursor out
 // of range.
-func TestProjectsLoadedMsg_ClampsCursor(t *testing.T) {
+func TestProjectsLoadedMsg_ClampsCursor(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewProjects
 	m.projectsByID = map[int64]string{1: "a", 2: "b", 3: "c"}
@@ -1026,7 +1060,7 @@ func TestProjectsLoadedMsg_ClampsCursor(t *testing.T) {
 // a stats refetch when the user is in viewProjects. Without this,
 // "resynced" would lie to a viewProjects user — the table numbers
 // would lag the daemon. Spec §6.3 / §10 (resync semantics).
-func TestHandleResetRequired_ClearsProjectsState(t *testing.T) {
+func TestHandleResetRequired_ClearsProjectsState(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := sseUpdateFixture()
 	m.view = viewProjects
 	m.projectsStale = true

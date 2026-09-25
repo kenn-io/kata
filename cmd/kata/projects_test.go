@@ -17,7 +17,7 @@ import (
 // TestProjects_ListJSONHasNoNextIssueNumber pins the spec §9.5 invariant on
 // the CLI projection: --json output for `kata projects list` must not include
 // the removed next_issue_number field.
-func TestProjects_ListJSONHasNoNextIssueNumber(t *testing.T) {
+func TestProjects_ListJSONHasNoNextIssueNumber(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	_ = initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 
@@ -39,7 +39,7 @@ func TestProjects_ListJSONHasNoNextIssueNumber(t *testing.T) {
 // one already-resolved daemon connection. A regression back to independently
 // supplied context/client/baseURL values could route the lookup through a
 // different credential or endpoint than the command that consumes it.
-func TestProjectResolutionHelpersUseDaemonAPI(t *testing.T) {
+func TestProjectResolutionHelpersUseDaemonAPI(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	resetFlags(t)
 	flags.Project = "spoke-project"
 
@@ -75,7 +75,7 @@ func TestProjectResolutionHelpersUseDaemonAPI(t *testing.T) {
 	assert.Equal(t, "spoke-project", name)
 }
 
-func TestProjects_ListAgentIncludesStats(t *testing.T) {
+func TestProjects_ListAgentIncludesStats(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "kata")
@@ -92,7 +92,7 @@ func TestProjects_ListAgentIncludesStats(t *testing.T) {
 	assert.Equal(t, "OK projects count=1\n- project=kata id="+itoa(p.ID)+" open=1 closed=1\n", out)
 }
 
-func TestProjectsCreateCreatesProjectWithoutWorkspaceBinding(t *testing.T) {
+func TestProjectsCreateCreatesProjectWithoutWorkspaceBinding(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 
@@ -107,7 +107,7 @@ func TestProjectsCreateCreatesProjectWithoutWorkspaceBinding(t *testing.T) {
 	assert.Equal(t, "example-project", got.Name)
 }
 
-func TestProjectsCreateExistingProjectIsIdempotent(t *testing.T) {
+func TestProjectsCreateExistingProjectIsIdempotent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "example-project")
@@ -118,7 +118,7 @@ func TestProjectsCreateExistingProjectIsIdempotent(t *testing.T) {
 	assert.Equal(t, "project #"+itoa(p.ID)+" (example-project) already exists\n", out)
 }
 
-func TestProjectsCreateJSONReturnsDaemonResponse(t *testing.T) {
+func TestProjectsCreateJSONReturnsDaemonResponse(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	out := requireCmdOutput(t, env, "--json", "projects", "create", "example-project")
@@ -136,7 +136,7 @@ func TestProjectsCreateJSONReturnsDaemonResponse(t *testing.T) {
 	assert.True(t, got.Created)
 }
 
-func TestProjectsCreateFormatJSONReturnsDaemonResponse(t *testing.T) {
+func TestProjectsCreateFormatJSONReturnsDaemonResponse(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	out := requireCmdOutput(t, env, "--format", "json", "projects", "create", "example-project")
@@ -154,7 +154,7 @@ func TestProjectsCreateFormatJSONReturnsDaemonResponse(t *testing.T) {
 	assert.True(t, got.Created)
 }
 
-func TestProjectsCreateAgentOutput(t *testing.T) {
+func TestProjectsCreateAgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 
 	out := requireCmdOutput(t, env, "--agent", "projects", "create", "example-project")
@@ -164,7 +164,7 @@ func TestProjectsCreateAgentOutput(t *testing.T) {
 	assert.Equal(t, "OK project action=create id="+itoa(got.ID)+" project=example-project created=true\n", out)
 }
 
-func TestProjectsCreateRejectsWhitespaceNameBeforeRequest(t *testing.T) {
+func TestProjectsCreateRejectsWhitespaceNameBeforeRequest(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var requests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
@@ -180,7 +180,7 @@ func TestProjectsCreateRejectsWhitespaceNameBeforeRequest(t *testing.T) {
 	assert.Equal(t, 0, requests)
 }
 
-func TestProjectsCreatePreservesArchivedNameConflict(t *testing.T) {
+func TestProjectsCreatePreservesArchivedNameConflict(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "archived-project")
@@ -195,7 +195,7 @@ func TestProjectsCreatePreservesArchivedNameConflict(t *testing.T) {
 	assert.Contains(t, ce.Message, "archived")
 }
 
-func TestProjects_ShowAgentUsesReadShape(t *testing.T) {
+func TestProjects_ShowAgentUsesReadShape(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "kata")
@@ -212,7 +212,7 @@ func TestProjects_ShowAgentUsesReadShape(t *testing.T) {
 	assert.Equal(t, "OK projects count=1\n- project=kata id="+itoa(p.ID)+"\n", out)
 }
 
-func TestProjects_ShowAgentDoesNotFetchStats(t *testing.T) {
+func TestProjects_ShowAgentDoesNotFetchStats(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var statsRequests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -238,7 +238,7 @@ func TestProjects_ShowAgentDoesNotFetchStats(t *testing.T) {
 	assert.Equal(t, 0, statsRequests)
 }
 
-func TestProjects_ShowNumericIDDoesNotListProjects(t *testing.T) {
+func TestProjects_ShowNumericIDDoesNotListProjects(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var listRequests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -262,7 +262,7 @@ func TestProjects_ShowNumericIDDoesNotListProjects(t *testing.T) {
 	assert.Equal(t, 0, listRequests)
 }
 
-func TestProjects_RestoreArchivedProjectByName(t *testing.T) {
+func TestProjects_RestoreArchivedProjectByName(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "retry-import")
@@ -282,7 +282,7 @@ func TestProjects_RestoreArchivedProjectByName(t *testing.T) {
 	assert.Nil(t, got.DeletedAt)
 }
 
-func TestProjects_RenameAgentOutput(t *testing.T) {
+func TestProjects_RenameAgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "old")
@@ -293,7 +293,7 @@ func TestProjects_RenameAgentOutput(t *testing.T) {
 	assert.Equal(t, "OK project action=rename id="+itoa(p.ID)+" project=\"new name\"\n", out)
 }
 
-func TestProjects_RestoreActiveProjectIsNoop(t *testing.T) {
+func TestProjects_RestoreActiveProjectIsNoop(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "active")
@@ -307,7 +307,7 @@ func TestProjects_RestoreActiveProjectIsNoop(t *testing.T) {
 // command being reintroduced after the v8 cutover removed its underlying
 // next_issue_number column (spec §9.5). The daemon's 404 on the endpoint is
 // covered separately by Task 11's handler tests.
-func TestProjects_ResetCounterCommandIsAbsent(t *testing.T) {
+func TestProjects_ResetCounterCommandIsAbsent(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	projects := rootSubcommands()["projects"]
 	require.NotNil(t, projects, "projects subcommand must exist")
 	for _, sub := range projects.Commands() {
@@ -316,7 +316,7 @@ func TestProjects_ResetCounterCommandIsAbsent(t *testing.T) {
 	}
 }
 
-func TestProjectsRewriteAuthorCLIReportsCounts(t *testing.T) {
+func TestProjectsRewriteAuthorCLIReportsCounts(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ctx := context.Background()
 	from, to := "old-agent", "new-agent"
@@ -361,7 +361,7 @@ func TestProjectsRewriteAuthorCLIReportsCounts(t *testing.T) {
 	assert.Equal(t, to, updated.Author)
 }
 
-func TestProjectsRewriteAuthorCLIJSONCounts(t *testing.T) {
+func TestProjectsRewriteAuthorCLIJSONCounts(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ctx := context.Background()
 	from, to := "old-agent", "new-agent"
@@ -392,7 +392,7 @@ func TestProjectsRewriteAuthorCLIJSONCounts(t *testing.T) {
 	assert.Equal(t, int64(1), got.Total)
 }
 
-func TestProjectsRewriteAuthorCLIRejectsEmptyTo(t *testing.T) {
+func TestProjectsRewriteAuthorCLIRejectsEmptyTo(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 
 	_, err := runCLICapture(t, env, dir, "projects", "rewrite-author",
@@ -406,7 +406,7 @@ func TestProjectsRewriteAuthorCLIRejectsEmptyTo(t *testing.T) {
 // reporting path on `kata projects merge`. The two issues share the
 // length-4 short_id `d4ex`, so the merge extends the source-side row to
 // length 5 (`xd4ex`) before moving it onto the target.
-func TestProjects_MergeReportsShortIDExtensions(t *testing.T) {
+func TestProjects_MergeReportsShortIDExtensions(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	const (
 		// last 4 = D4EX, last 5 = XD4EX → extends to xd4ex.
 		srcUID = "01HZNQ7VFPK1XGD8R5MABXD4EX"
@@ -441,7 +441,7 @@ func TestProjects_MergeReportsShortIDExtensions(t *testing.T) {
 	assert.Equal(t, srcUID, got.ShortIDExtensions[0]["uid"])
 }
 
-func TestProjects_PurgeArchivedFreesName(t *testing.T) {
+func TestProjects_PurgeArchivedFreesName(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "spoke-project")
@@ -458,7 +458,7 @@ func TestProjects_PurgeArchivedFreesName(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestProjects_PurgeRequiresForce(t *testing.T) {
+func TestProjects_PurgeRequiresForce(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	// No project created: the --force gate must fire before any daemon lookup,
 	// so the error is the validation error, not a not-found.
@@ -467,7 +467,7 @@ func TestProjects_PurgeRequiresForce(t *testing.T) {
 	assert.Contains(t, ce.Message, "--force")
 }
 
-func TestProjects_PurgeNoConfirmNonTTYFails(t *testing.T) {
+func TestProjects_PurgeNoConfirmNonTTYFails(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	// Force non-TTY so resolveConfirm rejects with confirm_required instead of
 	// prompting; otherwise a TTY stdin would yield confirm_mismatch.
@@ -485,7 +485,7 @@ func TestProjects_PurgeNoConfirmNonTTYFails(t *testing.T) {
 // TestProjects_MergeHumanOutputReportsExtensions covers the non-JSON path: the
 // merged-project summary line drops the legacy `next #N` clause and gains a
 // per-extension `extended <project>#<short> from <pre> to <post>` line.
-func TestProjects_MergeHumanOutputReportsExtensions(t *testing.T) {
+func TestProjects_MergeHumanOutputReportsExtensions(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	const (
 		srcUID = "01HZNQ7VFPK1XGD8R5MABXD4EX"
 		dstUID = "01HZNQ7VFPK1XGD8R5MABCD4EX"

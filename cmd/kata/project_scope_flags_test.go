@@ -9,7 +9,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestCrossProjectCommandsUseAllFlag(t *testing.T) {
+func TestCrossProjectCommandsUseAllFlag(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, command := range [][]string{{"inbox"}, {"events"}, {"digest"}, {"mcp", "serve"}} {
 		t.Run(strings.Join(command, "_"), func(t *testing.T) {
 			args := append(append([]string{}, command...), "--all", "--help")
@@ -25,7 +25,7 @@ func TestCrossProjectCommandsUseAllFlag(t *testing.T) {
 	}
 }
 
-func TestCrossProjectCommandsRejectExplicitScope(t *testing.T) {
+func TestCrossProjectCommandsRejectExplicitScope(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, command := range [][]string{
 		{"inbox", "--for", "reviewer"}, {"list"}, {"ready"}, {"next"},
 		{"events"}, {"digest", "--since", "1h"}, {"mcp", "serve"},

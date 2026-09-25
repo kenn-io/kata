@@ -48,7 +48,7 @@ func bridgeFixtureForRequest(r *http.Request, requestBody map[string]any) map[st
 	return bridge
 }
 
-func TestBridgeRootHelpRegistersEveryCommand(t *testing.T) {
+func TestBridgeRootHelpRegistersEveryCommand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	root := newRootCmd()
 	bridge, _, err := root.Find([]string{"bridge"})
 	require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestBridgeRootHelpRegistersEveryCommand(t *testing.T) {
 	}
 }
 
-func TestBridgeBindDefaultsToQuietOutboundComments(t *testing.T) {
+func TestBridgeBindDefaultsToQuietOutboundComments(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	out, err := runExternalCLI(context.Background(), t, f, "--agent", "--as", "operator", "bridge", "bind", "example-project#abc4", "--connector", "example-connector", "--external", "root-locator")
 	require.NoError(t, err)
@@ -100,7 +100,7 @@ func TestBridgeBindDefaultsToQuietOutboundComments(t *testing.T) {
 	}
 }
 
-func TestBridgeEveryCommandRendersHumanJSONAndAgent(t *testing.T) {
+func TestBridgeEveryCommandRendersHumanJSONAndAgent(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	tests := []struct {
 		name      string
@@ -143,7 +143,7 @@ func TestBridgeEveryCommandRendersHumanJSONAndAgent(t *testing.T) {
 	}
 }
 
-func TestBridgeOutputSortsConflictsAndRendersMissingValuesNeutrally(t *testing.T) {
+func TestBridgeOutputSortsConflictsAndRendersMissingValuesNeutrally(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	resetFlags(t)
 	bridge := generated.ExternalRootBridgeOut{
 		Active: true, Enabled: true, ConnectorInstance: "example-connector",
@@ -174,7 +174,7 @@ func TestBridgeOutputSortsConflictsAndRendersMissingValuesNeutrally(t *testing.T
 	assert.Less(t, strings.Index(agent, "field=deadline_on"), strings.Index(agent, "field=scheduled_on"))
 }
 
-func TestBridgeResolveCommentRequiresExactlyOneModeBeforeHTTP(t *testing.T) {
+func TestBridgeResolveCommentRequiresExactlyOneModeBeforeHTTP(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, args := range [][]string{
 		{"bridge", "resolve-comment", "example-project#abc4"},
 		{"bridge", "resolve-comment", "example-project#abc4", "--retry", "--skip"},
@@ -189,7 +189,7 @@ func TestBridgeResolveCommentRequiresExactlyOneModeBeforeHTTP(t *testing.T) {
 	}
 }
 
-func TestBridgeResolveCommentPreservesOpaqueAdoptID(t *testing.T) {
+func TestBridgeResolveCommentPreservesOpaqueAdoptID(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	const opaque = "opaque ID/with spaces:%25"
 	_, err := runExternalCLI(context.Background(), t, f, "--as", "operator", "bridge", "resolve-comment", "example-project#abc4", "--adopt", opaque)
@@ -199,7 +199,7 @@ func TestBridgeResolveCommentPreservesOpaqueAdoptID(t *testing.T) {
 	assert.Equal(t, map[string]any{"action": "adopt", "actor": "operator", "external_comment_id": opaque}, requests[1].Body)
 }
 
-func TestBridgeResolveFieldRejectsInvalidChoiceBeforeHTTP(t *testing.T) {
+func TestBridgeResolveFieldRejectsInvalidChoiceBeforeHTTP(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, _, err := executeRootCapture(t, context.Background(), "bridge", "resolve-field", "example-project#abc4", "scheduled_on", "--use", "newest")
 	require.Error(t, err)
 	var cli *cliError
@@ -208,7 +208,7 @@ func TestBridgeResolveFieldRejectsInvalidChoiceBeforeHTTP(t *testing.T) {
 	assert.Contains(t, cli.Message, "kata or external")
 }
 
-func TestBridgeQualifiedRefUsesConfiguredRemoteDaemon(t *testing.T) {
+func TestBridgeQualifiedRefUsesConfiguredRemoteDaemon(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER and KATA_HOME; newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	home := setupKataEnv(t)
 	t.Setenv("KATA_SERVER", f.server.URL)
@@ -227,7 +227,7 @@ func TestBridgeQualifiedRefUsesConfiguredRemoteDaemon(t *testing.T) {
 	})
 }
 
-func TestBridgeBareRefUsesExplicitProjectContext(t *testing.T) {
+func TestBridgeBareRefUsesExplicitProjectContext(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	out, err := runExternalCLI(context.Background(), t, f, "--agent", "--project", "example-project", "bridge", "show", "abc4")
 	require.NoError(t, err)
@@ -238,7 +238,7 @@ func TestBridgeBareRefUsesExplicitProjectContext(t *testing.T) {
 	assert.Equal(t, "/api/v1/projects/42/issues/abc4/bridge", requests[1].Path)
 }
 
-func TestBridgeExternalCallsUseLongRunningClient(t *testing.T) {
+func TestBridgeExternalCallsUseLongRunningClient(t *testing.T) { //nolint:paralleltest // sets KATA_HTTP_TIMEOUT; newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	f.delay = true
 	t.Setenv("KATA_HTTP_TIMEOUT", "500ms")
@@ -257,7 +257,7 @@ func TestBridgeExternalCallsUseLongRunningClient(t *testing.T) {
 	}
 }
 
-func TestBridgeLongRunningClientHonorsCancellation(t *testing.T) {
+func TestBridgeLongRunningClientHonorsCancellation(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	f.delay = true
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
@@ -267,7 +267,7 @@ func TestBridgeLongRunningClientHonorsCancellation(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
-func TestBridgeCommandsSendExactQualifiedRefRequests(t *testing.T) {
+func TestBridgeCommandsSendExactQualifiedRefRequests(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	f := newExternalCLIFixture(t)
 	tests := []struct {
 		name   string
@@ -305,7 +305,7 @@ func TestBridgeCommandsSendExactQualifiedRefRequests(t *testing.T) {
 	}
 }
 
-func TestBridgeUnbindResolvesArchivedQualifiedProject(t *testing.T) {
+func TestBridgeUnbindResolvesArchivedQualifiedProject(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var requests []externalCLIRequest
 	f := &externalCLIFixture{t: t}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +341,7 @@ func TestBridgeUnbindResolvesArchivedQualifiedProject(t *testing.T) {
 	}, requests)
 }
 
-func TestBridgeErrorsKeepStableSafeEnvelopes(t *testing.T) {
+func TestBridgeErrorsKeepStableSafeEnvelopes(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	tests := []struct {
 		name    string
 		args    []string

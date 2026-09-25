@@ -38,6 +38,7 @@ func keyed(rows []issueRow) []string {
 // move directly beneath their parent, non-last children get "├─ ", the
 // last child gets "└─ ", and roots keep list order with no prefix.
 func TestTreeRows_GroupsChildrenUnderParent(t *testing.T) {
+	t.Parallel()
 	rows := []issueRow{
 		{ID: "p1"},
 		{ID: "solo"},
@@ -54,6 +55,7 @@ func TestTreeRows_GroupsChildrenUnderParent(t *testing.T) {
 // a child whose parent is not in the fetched set renders flat at top
 // level, in list order, with no connector.
 func TestTreeRows_OrphanedChildRendersFlat(t *testing.T) {
+	t.Parallel()
 	rows := []issueRow{
 		{ID: "a"},
 		{ID: "orphan"},
@@ -69,6 +71,7 @@ func TestTreeRows_OrphanedChildRendersFlat(t *testing.T) {
 // SHORT id collides with a local issue must NOT capture the child —
 // the child renders flat.
 func TestTreeRows_KeysAreQualifiedNotShort(t *testing.T) {
+	t.Parallel()
 	rows := []issueRow{
 		{ID: "abcd"}, // local issue whose short id collides with the foreign parent
 		{ID: "wxyz"}, // child of other-project#abcd, not local abcd
@@ -85,6 +88,7 @@ func TestTreeRows_KeysAreQualifiedNotShort(t *testing.T) {
 // grandchild nests under its parent with the ancestor continuation
 // prefix ("   " when the ancestor was a last child, "│  " otherwise).
 func TestTreeRows_RendersNestedChainsRecursively(t *testing.T) {
+	t.Parallel()
 	rows := []issueRow{
 		{ID: "root"},
 		{ID: "mid1"},
@@ -102,6 +106,7 @@ func TestTreeRows_RendersNestedChainsRecursively(t *testing.T) {
 // TestTreeRows_LastChildDescendantsUseBlankRail pins the counterpart:
 // descendants of a LAST child indent with spaces, not the "│" rail.
 func TestTreeRows_LastChildDescendantsUseBlankRail(t *testing.T) {
+	t.Parallel()
 	rows := []issueRow{
 		{ID: "root"},
 		{ID: "mid"},
@@ -117,6 +122,7 @@ func TestTreeRows_LastChildDescendantsUseBlankRail(t *testing.T) {
 // case: if parent links ever form a cycle, every row still renders
 // exactly once (flat is acceptable; hanging or dropping rows is not).
 func TestTreeRows_ParentCycleDoesNotLoopOrDropRows(t *testing.T) {
+	t.Parallel()
 	rows := []issueRow{
 		{ID: "a"},
 		{ID: "b"},

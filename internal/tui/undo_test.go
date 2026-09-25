@@ -121,7 +121,7 @@ func (f *undoTestAPI) AddComment(_ context.Context, _ int64, _, _, _ string) (*M
 	return f.commentResp, nil
 }
 
-func TestUndoClientRecordsCloseAndBoundsHistory(t *testing.T) {
+func TestUndoClientRecordsCloseAndBoundsHistory(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, ProjectUID: "01JZ0000000000000000000002", ShortID: "abc4", Status: "open", Revision: 3},
 		closeResp: &MutationResp{Issue: &Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "closed", Revision: 4}, Changed: true}}
 	c := newConnectedUndoClient(t, f)
@@ -142,7 +142,7 @@ func TestUndoClientRecordsCloseAndBoundsHistory(t *testing.T) {
 	require.Len(t, h.entries, 20)
 }
 
-func TestUndoClientQueuesSecondWriteUntilCompletion(t *testing.T) {
+func TestUndoClientQueuesSecondWriteUntilCompletion(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	synctest.Test(t, func(t *testing.T) {
 		f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open"},
 			closeResp: &MutationResp{Issue: &Issue{Status: "closed"}, Changed: true}}
@@ -161,7 +161,7 @@ func TestUndoClientQueuesSecondWriteUntilCompletion(t *testing.T) {
 	})
 }
 
-func TestUndoClientCreatesBoundaryForRecurringClose(t *testing.T) {
+func TestUndoClientCreatesBoundaryForRecurringClose(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	recurrenceID := int64(11)
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open", RecurrenceID: &recurrenceID},
 		closeResp: &MutationResp{Issue: &Issue{Status: "closed"}, Changed: true}}
@@ -172,7 +172,7 @@ func TestUndoClientCreatesBoundaryForRecurringClose(t *testing.T) {
 	require.Contains(t, resp.undo.boundary, "recurring")
 }
 
-func TestUndoClientTimedAssignmentClearsHistory(t *testing.T) {
+func TestUndoClientTimedAssignmentClearsHistory(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{timedResp: &MutationResp{Changed: true}}
 	c := newConnectedUndoClient(t, f)
 	resp, err := c.ClaimTimedAssignment(context.Background(), 7, "abc4", "alice", time.Minute)
@@ -181,7 +181,7 @@ func TestUndoClientTimedAssignmentClearsHistory(t *testing.T) {
 	require.Contains(t, resp.undo.boundary, "timed assignment")
 }
 
-func TestUndoClientOwnerEditWithExpiryCreatesBoundary(t *testing.T) {
+func TestUndoClientOwnerEditWithExpiryCreatesBoundary(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	expires := time.Now().Add(time.Hour)
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, AssignmentExpiresOn: &expires},
 		writeResp: &MutationResp{Issue: &Issue{UID: "01JZ0000000000000000000001", ProjectID: 7}, Changed: true}}
@@ -191,7 +191,7 @@ func TestUndoClientOwnerEditWithExpiryCreatesBoundary(t *testing.T) {
 	require.Contains(t, resp.undo.boundary, "expiry")
 }
 
-func TestUndoClientRecordsExactCreatedLink(t *testing.T) {
+func TestUndoClientRecordsExactCreatedLink(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	link := &LinkEntry{ID: 42, Type: "related", From: LinkPeer{UID: "01JZ0000000000000000000001"}, To: LinkPeer{UID: "01JZ0000000000000000000003"}}
 	f := &undoTestAPI{issue: Issue{UID: link.From.UID, ProjectID: 7, Status: "open"},
 		linkResp: &MutationResp{Issue: &Issue{UID: link.From.UID, Status: "open"}, Link: link, Changed: true}}
@@ -202,7 +202,7 @@ func TestUndoClientRecordsExactCreatedLink(t *testing.T) {
 	require.Equal(t, link.To.UID, resp.undo.entry.link.To.UID)
 }
 
-func TestUndoClientRecordsSupportedFieldChanges(t *testing.T) {
+func TestUndoClientRecordsSupportedFieldChanges(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	owner := "alice"
 	priority := int64(0)
 	done := "done"
@@ -250,7 +250,7 @@ func TestUndoClientRecordsSupportedFieldChanges(t *testing.T) {
 	}
 }
 
-func TestUndoClientNoopHasNoEntry(t *testing.T) {
+func TestUndoClientNoopHasNoEntry(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", Status: "open"},
 		writeResp: &MutationResp{Changed: false}}
 	resp, err := newConnectedUndoClient(t, f).AddLabel(context.Background(), 7, "abc4", "urgent", "bob")
@@ -260,7 +260,7 @@ func TestUndoClientNoopHasNoEntry(t *testing.T) {
 	require.Empty(t, resp.undo.boundary)
 }
 
-func TestUndoClientRecordsEvidenceClose(t *testing.T) {
+func TestUndoClientRecordsEvidenceClose(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", Status: "open"},
 		closeResp: &MutationResp{Issue: &Issue{Status: "closed", Revision: 2}, Changed: true}}
 	resp, err := newConnectedUndoClient(t, f).CloseWithEvidence(context.Background(), 7, "abc4", CloseInput{Actor: "bob", Reason: "done", Message: "finished"})
@@ -269,7 +269,7 @@ func TestUndoClientRecordsEvidenceClose(t *testing.T) {
 	require.Equal(t, "bob", resp.undo.entry.actor)
 }
 
-func TestUndoClientUnsafeWritesClearHistory(t *testing.T) {
+func TestUndoClientUnsafeWritesClearHistory(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	for _, tc := range []struct {
 		name   string
 		reason string
@@ -292,7 +292,7 @@ func TestUndoClientUnsafeWritesClearHistory(t *testing.T) {
 	}
 }
 
-func TestUndoClientMissingCreatedLinkIsBoundary(t *testing.T) {
+func TestUndoClientMissingCreatedLinkIsBoundary(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", Status: "open"},
 		linkResp: &MutationResp{Issue: &Issue{Status: "open"}, Changed: true}}
 	resp, err := newConnectedUndoClient(t, f).AddLink(context.Background(), 7, "abc4", LinkBody{Type: "parent", ToRef: "def4"}, "bob")
@@ -301,7 +301,7 @@ func TestUndoClientMissingCreatedLinkIsBoundary(t *testing.T) {
 	require.Contains(t, resp.undo.boundary, "link response")
 }
 
-func TestUndoClientWrongIssueMutationResponseIsBoundary(t *testing.T) {
+func TestUndoClientWrongIssueMutationResponseIsBoundary(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open"},
 		closeResp: &MutationResp{Issue: &Issue{UID: "01JZ0000000000000000000009", ProjectID: 7, Status: "closed"}, Changed: true}}
 	resp, err := newConnectedUndoClient(t, f).Close(context.Background(), 7, "abc4", "bob")
@@ -310,7 +310,7 @@ func TestUndoClientWrongIssueMutationResponseIsBoundary(t *testing.T) {
 	require.Contains(t, resp.undo.boundary, "different issue")
 }
 
-func TestUndoClientUnrelatedCreatedLinkResponseIsBoundary(t *testing.T) {
+func TestUndoClientUnrelatedCreatedLinkResponseIsBoundary(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open"},
 		linkResp: &MutationResp{Issue: &Issue{UID: "01JZ0000000000000000000001", ProjectID: 7}, Changed: true,
 			Link: &LinkEntry{ID: 42, Type: "related", From: LinkPeer{UID: "other-1"}, To: LinkPeer{UID: "other-2"}}}}
@@ -320,7 +320,7 @@ func TestUndoClientUnrelatedCreatedLinkResponseIsBoundary(t *testing.T) {
 	require.Contains(t, resp.undo.boundary, "link")
 }
 
-func TestModelRecordsCompletedWriteBeforeDetailGenerationGuard(t *testing.T) {
+func TestModelRecordsCompletedWriteBeforeDetailGenerationGuard(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open"},
 		closeResp: &MutationResp{Issue: &Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "closed", Revision: 2}, Changed: true}}
 	c := newConnectedUndoClient(t, f)
@@ -337,7 +337,7 @@ func TestModelRecordsCompletedWriteBeforeDetailGenerationGuard(t *testing.T) {
 	require.NoError(t, err, "completion should release the pending write")
 }
 
-func TestModelBoundaryClearsPriorUndoActions(t *testing.T) {
+func TestModelBoundaryClearsPriorUndoActions(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	f := &undoTestAPI{createResp: &MutationResp{Changed: true}}
 	c := newConnectedUndoClient(t, f)
@@ -351,14 +351,14 @@ func TestModelBoundaryClearsPriorUndoActions(t *testing.T) {
 	require.Contains(t, m.undoHistory.boundary, "creation")
 }
 
-func TestModelUndoKeyIgnoresActiveInput(t *testing.T) {
+func TestModelUndoKeyIgnoresActiveInput(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.input = newSearchBar(ListFilter{})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	require.Empty(t, updated.(Model).undoHistory.entries)
 }
 
-func TestUndoClientReopensRecordedCloseAfterFreshStateCheck(t *testing.T) {
+func TestUndoClientReopensRecordedCloseAfterFreshStateCheck(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open", Revision: 3},
 		closeResp: &MutationResp{Issue: &Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "closed", ClosedReason: &done, Revision: 4}, Changed: true},
@@ -376,7 +376,7 @@ func TestUndoClientReopensRecordedCloseAfterFreshStateCheck(t *testing.T) {
 	require.Equal(t, 1, f.reopenCalls)
 }
 
-func TestUndoClientRefusesChangedIssueAndChangedDaemon(t *testing.T) {
+func TestUndoClientRefusesChangedIssueAndChangedDaemon(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "closed", ClosedReason: &done, Revision: 4},
 		writeResp: &MutationResp{Issue: &Issue{Status: "open"}, Changed: true}}
@@ -399,7 +399,7 @@ func TestUndoClientRefusesChangedIssueAndChangedDaemon(t *testing.T) {
 	require.Equal(t, 0, f.reopenCalls)
 }
 
-func TestUndoClientRestoresFieldEdits(t *testing.T) {
+func TestUndoClientRestoresFieldEdits(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	owner := "alice"
 	priority := int64(0)
 	for _, tc := range []struct {
@@ -426,7 +426,7 @@ func TestUndoClientRestoresFieldEdits(t *testing.T) {
 	}
 }
 
-func TestUndoClientRemovesOnlyExactRecordedLink(t *testing.T) {
+func TestUndoClientRemovesOnlyExactRecordedLink(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	link := LinkEntry{ID: 42, Type: "related", From: LinkPeer{UID: "01JZ0000000000000000000001"}, To: LinkPeer{UID: "01JZ0000000000000000000003"}}
 	f := &undoTestAPI{issue: Issue{UID: link.From.UID, ProjectID: 7, Revision: 4}, links: []LinkEntry{link},
 		writeResp: &MutationResp{Issue: &Issue{Revision: 4}, Changed: true}}
@@ -437,7 +437,7 @@ func TestUndoClientRemovesOnlyExactRecordedLink(t *testing.T) {
 	require.Equal(t, int64(42), f.removedLinkID)
 }
 
-func TestModelUndoKeyReopensLastCloseAndConsumesHistory(t *testing.T) {
+func TestModelUndoKeyReopensLastCloseAndConsumesHistory(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	uid := "01JZ0000000000000000000001"
 	f := &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, ShortID: "abc4", Status: "closed", ClosedReason: &done, Revision: 4},
@@ -460,7 +460,7 @@ func TestModelUndoKeyReopensLastCloseAndConsumesHistory(t *testing.T) {
 	require.Contains(t, m.toast.text, "example-project#abc4")
 }
 
-func TestModelUndoKeySkipsConflictingEntry(t *testing.T) {
+func TestModelUndoKeySkipsConflictingEntry(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done, other := "done", "wontfix"
 	uid := "01JZ0000000000000000000001"
 	f := &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, ShortID: "abc4", Status: "closed", ClosedReason: &other, Revision: 4},
@@ -486,7 +486,7 @@ func TestModelUndoKeySkipsConflictingEntry(t *testing.T) {
 	require.Empty(t, updated.(Model).undoHistory.entries)
 }
 
-func TestModelUndoReopenOpensDoneEvidenceForm(t *testing.T) {
+func TestModelUndoReopenOpensDoneEvidenceForm(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	uid := "01JZ0000000000000000000001"
 	f := &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, ShortID: "abc4", Status: "open", Revision: 5}}
@@ -506,7 +506,7 @@ func TestModelUndoReopenOpensDoneEvidenceForm(t *testing.T) {
 	require.Len(t, m.undoHistory.entries, 1)
 }
 
-func TestModelUndoReopenSubmitsExistingEvidenceForm(t *testing.T) {
+func TestModelUndoReopenSubmitsExistingEvidenceForm(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	uid := "01JZ0000000000000000000001"
 	f := &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, ShortID: "abc4", Status: "open", Revision: 5},
@@ -530,7 +530,7 @@ func TestModelUndoReopenSubmitsExistingEvidenceForm(t *testing.T) {
 	require.Empty(t, m.undoHistory.entries)
 }
 
-func TestModelCancelUndoEvidenceFormKeepsEntry(t *testing.T) {
+func TestModelCancelUndoEvidenceFormKeepsEntry(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.undoHistory.push(undoEntry{kind: "reopen"})
 	m = m.openUndoCloseForm()
@@ -540,7 +540,7 @@ func TestModelCancelUndoEvidenceFormKeepsEntry(t *testing.T) {
 	require.Len(t, m.undoHistory.entries, 1)
 }
 
-func TestModelFooterOffersUndoOnlyWhenHistoryExists(t *testing.T) {
+func TestModelFooterOffersUndoOnlyWhenHistoryExists(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewList
 	m.width, m.height = 100, 35
@@ -553,7 +553,7 @@ func TestModelFooterOffersUndoOnlyWhenHistoryExists(t *testing.T) {
 	require.Contains(t, stripANSI(with), "u undo")
 }
 
-func TestUndoClientDefinitiveRefusalKeepsHistory(t *testing.T) {
+func TestUndoClientDefinitiveRefusalKeepsHistory(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open"},
 		closeErr: &APIError{Status: 403, Code: "forbidden", Message: "cannot close"}}
 	c := newConnectedUndoClient(t, f)
@@ -568,7 +568,7 @@ func TestUndoClientDefinitiveRefusalKeepsHistory(t *testing.T) {
 	require.Len(t, updated.(Model).undoHistory.entries, 1)
 }
 
-func TestUndoClientTransportFailureClearsHistory(t *testing.T) {
+func TestUndoClientTransportFailureClearsHistory(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open"},
 		closeErr: context.DeadlineExceeded}
 	c := newConnectedUndoClient(t, f)
@@ -582,7 +582,7 @@ func TestUndoClientTransportFailureClearsHistory(t *testing.T) {
 	require.Empty(t, updated.(Model).undoHistory.entries)
 }
 
-func TestUndoClientRefusesChangedPrincipal(t *testing.T) {
+func TestUndoClientRefusesChangedPrincipal(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	uid := "01JZ0000000000000000000001"
 	f := &undoTestAPI{authActor: "alice", issue: Issue{UID: uid, ProjectID: 7, Status: "open", Revision: 3},
@@ -599,7 +599,7 @@ func TestUndoClientRefusesChangedPrincipal(t *testing.T) {
 	require.Equal(t, 0, f.reopenCalls)
 }
 
-func TestUndoClientAlreadyRestoredConsumesEntryWithoutWrite(t *testing.T) {
+func TestUndoClientAlreadyRestoredConsumesEntryWithoutWrite(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	uid := "01JZ0000000000000000000001"
 	f := &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, Status: "open", Revision: 5}}
@@ -614,7 +614,7 @@ func TestUndoClientAlreadyRestoredConsumesEntryWithoutWrite(t *testing.T) {
 	require.Equal(t, 0, f.reopenCalls)
 }
 
-func TestUndoHistoryDoesNotRebaseUnexpectedRevision(t *testing.T) {
+func TestUndoHistoryDoesNotRebaseUnexpectedRevision(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.undoHistory.push(undoEntry{uid: "issue-a", projectID: 7, instanceUID: "instance-1", revision: 4})
 	m.rebaseUndoRevisions(undoEntry{uid: "issue-a", projectID: 7, instanceUID: "instance-1", kind: "close", before: Issue{Revision: 4}},
@@ -622,7 +622,7 @@ func TestUndoHistoryDoesNotRebaseUnexpectedRevision(t *testing.T) {
 	require.Equal(t, int64(4), m.undoHistory.entries[0].revision)
 }
 
-func TestUndoClientNoopInverseReadbackConsumesRestoredEntry(t *testing.T) {
+func TestUndoClientNoopInverseReadbackConsumesRestoredEntry(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	uid := "01JZ0000000000000000000001"
 	f := &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, Status: "closed", ClosedReason: &done, Revision: 4},
@@ -637,7 +637,7 @@ func TestUndoClientNoopInverseReadbackConsumesRestoredEntry(t *testing.T) {
 	require.Equal(t, 1, f.reopenCalls)
 }
 
-func TestModelChangedPrincipalClearsUndoHistory(t *testing.T) {
+func TestModelChangedPrincipalClearsUndoHistory(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.undoHistory.push(undoEntry{kind: "close"})
 	entryID := m.undoHistory.entries[0].id
@@ -646,7 +646,7 @@ func TestModelChangedPrincipalClearsUndoHistory(t *testing.T) {
 	require.Empty(t, updated.(Model).undoHistory.entries)
 }
 
-func TestModelChangedPrincipalClosesUndoEvidenceForm(t *testing.T) {
+func TestModelChangedPrincipalClosesUndoEvidenceForm(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.undoHistory.push(undoEntry{kind: "reopen"})
 	m = m.openUndoCloseForm()
@@ -659,7 +659,7 @@ func TestModelChangedPrincipalClosesUndoEvidenceForm(t *testing.T) {
 	require.Zero(t, m.undoCloseEntryID)
 }
 
-func TestModelCapabilityRefreshClearsHistoryForChangedPrincipal(t *testing.T) {
+func TestModelCapabilityRefreshClearsHistoryForChangedPrincipal(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.undoHistory.push(undoEntry{kind: "close", auth: AuthInfo{Actor: "alice"}})
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: "bob"}})
@@ -667,7 +667,7 @@ func TestModelCapabilityRefreshClearsHistoryForChangedPrincipal(t *testing.T) {
 	require.Contains(t, m.undoHistory.boundary, "principal")
 }
 
-func TestModelDaemonSwitchClearsHistoryAndLateCompletion(t *testing.T) {
+func TestModelDaemonSwitchClearsHistoryAndLateCompletion(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "open"},
 		closeResp: &MutationResp{Issue: &Issue{UID: "01JZ0000000000000000000001", ProjectID: 7, Status: "closed"}, Changed: true}}
 	oldClient := newConnectedUndoClient(t, f)
@@ -688,7 +688,7 @@ func TestModelDaemonSwitchClearsHistoryAndLateCompletion(t *testing.T) {
 	require.NoError(t, err, "late old completion must release the old client")
 }
 
-func TestModelDropsListFetchDispatchedBeforeUndo(t *testing.T) {
+func TestModelDropsListFetchDispatchedBeforeUndo(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.view = viewList
 	m.scope = scope{projectID: 7}
@@ -701,7 +701,7 @@ func TestModelDropsListFetchDispatchedBeforeUndo(t *testing.T) {
 	require.Equal(t, "corrected", updated.(Model).list.issues[0].Title)
 }
 
-func TestModelUndoRefreshesVisibleDetailImmediately(t *testing.T) {
+func TestModelUndoRefreshesVisibleDetailImmediately(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	uid := "01JZ0000000000000000000001"
 	m := initialModel(Options{})
@@ -718,7 +718,7 @@ func TestModelUndoRefreshesVisibleDetailImmediately(t *testing.T) {
 	require.Empty(t, m.undoHistory.entries)
 }
 
-func TestUndoHistoryRebasesInterleavedSameIssueEntries(t *testing.T) {
+func TestUndoHistoryRebasesInterleavedSameIssueEntries(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.undoHistory.push(undoEntry{uid: "issue-a", projectID: 7, instanceUID: "instance-1", revision: 4})
 	m.undoHistory.push(undoEntry{uid: "issue-b", projectID: 7, instanceUID: "instance-1", revision: 2})
@@ -728,7 +728,7 @@ func TestUndoHistoryRebasesInterleavedSameIssueEntries(t *testing.T) {
 	require.Equal(t, int64(2), m.undoHistory.entries[1].revision)
 }
 
-func TestModelUndoDefinitiveRefusalKeepsEntry(t *testing.T) {
+func TestModelUndoDefinitiveRefusalKeepsEntry(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	done := "done"
 	uid := "01JZ0000000000000000000001"
 	f := &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, Status: "closed", ClosedReason: &done, Revision: 4},
@@ -743,7 +743,7 @@ func TestModelUndoDefinitiveRefusalKeepsEntry(t *testing.T) {
 	require.Len(t, updated.(Model).undoHistory.entries, 1)
 }
 
-func TestModelUndoRejectsOldDetailResultAfterCorrection(t *testing.T) {
+func TestModelUndoRejectsOldDetailResultAfterCorrection(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	// Represent a detail request dispatched before the correction.
 	oldRequestSeq := nextDetailFetchRequestSeq.Add(1)
 	done := "done"
@@ -768,7 +768,7 @@ func (f *undoTestAPI) ListIssues(context.Context, int64, ListFilter) ([]Issue, e
 	return []Issue{f.issue}, nil
 }
 
-func TestModelReplacesListFetchDispatchedBeforeMutation(t *testing.T) {
+func TestModelReplacesListFetchDispatchedBeforeMutation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	for _, initial := range []bool{true, false} {
 		t.Run(map[bool]string{true: "initial", false: "refetch"}[initial], func(t *testing.T) {
 			f := &undoTestAPI{issue: Issue{UID: "issue-a", ProjectID: 7, Status: "closed"}}
@@ -793,7 +793,7 @@ func TestModelReplacesListFetchDispatchedBeforeMutation(t *testing.T) {
 	}
 }
 
-func TestUndoClientReusesConnectionIdentityForWrites(t *testing.T) {
+func TestUndoClientReusesConnectionIdentityForWrites(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "issue-a", ProjectID: 7, Status: "open"},
 		closeResp: &MutationResp{Issue: &Issue{Status: "closed"}, Changed: true}}
 	m := initialModel(Options{})
@@ -817,7 +817,7 @@ func newConnectedUndoClient(t *testing.T, base KataAPI) *undoClient {
 	return c
 }
 
-func TestModelUndoEvidenceConflictSkipsEntry(t *testing.T) {
+func TestModelUndoEvidenceConflictSkipsEntry(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	f := &undoTestAPI{issue: Issue{UID: "issue-a", ProjectID: 7,
 		Status: "closed", ClosedReason: new("wontfix"), Revision: 6}}
 	m := initialModel(Options{})
@@ -836,7 +836,7 @@ func TestModelUndoEvidenceConflictSkipsEntry(t *testing.T) {
 	require.Contains(t, m.toast.text, "skipped")
 }
 
-func TestUndoClientQueuedWriteRespectsCancellation(t *testing.T) {
+func TestUndoClientQueuedWriteRespectsCancellation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	synctest.Test(t, func(t *testing.T) {
 		f := &undoTestAPI{issue: Issue{UID: "issue-a", ProjectID: 7, Status: "open"},
 			closeResp: &MutationResp{Issue: &Issue{Status: "closed"}, Changed: true}}
@@ -858,7 +858,7 @@ func TestUndoClientQueuedWriteRespectsCancellation(t *testing.T) {
 	})
 }
 
-func TestUndoClientPreservesWaitingWriteOrder(t *testing.T) {
+func TestUndoClientPreservesWaitingWriteOrder(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	synctest.Test(t, func(t *testing.T) {
 		f := &undoTestAPI{issue: Issue{UID: "issue-a", ProjectID: 7, Status: "open"},
 			writeResp: &MutationResp{Issue: &Issue{Status: "closed"}, Changed: true}}

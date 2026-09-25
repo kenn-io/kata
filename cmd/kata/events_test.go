@@ -15,7 +15,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestEvents_OneShotPlainOutput(t *testing.T) {
+func TestEvents_OneShotPlainOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	createIssueViaHTTP(t, f.env, f.dir, "first")
 	createIssueViaHTTP(t, f.env, f.dir, "second")
@@ -34,7 +34,7 @@ func TestEvents_OneShotPlainOutput(t *testing.T) {
 	assert.Equal(t, 3, lines)
 }
 
-func TestEventsHumanOutputDoesNotExposeReplayInternals(t *testing.T) {
+func TestEventsHumanOutputDoesNotExposeReplayInternals(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	createIssueViaHTTP(t, f.env, f.dir, "first")
 
@@ -47,7 +47,7 @@ func TestEventsHumanOutputDoesNotExposeReplayInternals(t *testing.T) {
 	assert.NotContains(t, strings.ToLower(out), "federation")
 }
 
-func TestEvents_OneShotJSON(t *testing.T) {
+func TestEvents_OneShotJSON(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	createIssueViaHTTP(t, f.env, f.dir, "only")
 
@@ -79,7 +79,7 @@ func TestEvents_OneShotJSON(t *testing.T) {
 	assert.Equal(t, int64(2), b.NextAfterID)
 }
 
-func TestEvents_OneShotAgentOutput(t *testing.T) {
+func TestEvents_OneShotAgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	first := runCLI(t, env, dir, "--quiet", "--as", "user-a", "create", "first")
 	second := runCLI(t, env, dir, "--quiet", "--as", "user-a", "create", "second")
@@ -94,7 +94,7 @@ func TestEvents_OneShotAgentOutput(t *testing.T) {
 	assert.Equal(t, "- id=3 type=issue.created project=kata issue="+second+" actor=user-a", lines[3])
 }
 
-func TestEvents_OneShotAgentResetRequired(t *testing.T) {
+func TestEvents_OneShotAgentResetRequired(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	short := createIssueViaHTTP(t, env, dir, "doomed")
 
@@ -105,7 +105,7 @@ func TestEvents_OneShotAgentResetRequired(t *testing.T) {
 	assert.Regexp(t, `^OK events reset_required=true reset_after_id=\d+\n?$`, out)
 }
 
-func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
+func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dirA := initBoundWorkspace(t, env.URL, "https://github.com/wesm/a.git")
 	dirB := initBoundWorkspace(t, env.URL, "https://github.com/wesm/b.git")
@@ -123,7 +123,7 @@ func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
 	assert.Len(t, b.Events, 4, "all-projects must include creation and issue events for both projects")
 }
 
-func TestEvents_OneShotAllProjectsAgentIncludesProject(t *testing.T) {
+func TestEvents_OneShotAllProjectsAgentIncludesProject(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dirA := initBoundWorkspace(t, env.URL, "https://github.com/wesm/a.git")
 	dirB := initBoundWorkspace(t, env.URL, "https://github.com/wesm/b.git")
@@ -136,7 +136,7 @@ func TestEvents_OneShotAllProjectsAgentIncludesProject(t *testing.T) {
 	assert.Contains(t, out, "project=b")
 }
 
-func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
+func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 
@@ -169,6 +169,7 @@ func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 }
 
 func TestEvents_TailAgentProgressUsesSSEID(t *testing.T) {
+	t.Parallel()
 	input := strings.Join([]string{
 		"id: 42",
 		"event: issue.created",
@@ -186,6 +187,7 @@ func TestEvents_TailAgentProgressUsesSSEID(t *testing.T) {
 }
 
 func TestEvents_TailAgentResetRequired(t *testing.T) {
+	t.Parallel()
 	input := strings.Join([]string{
 		"id: 100",
 		"event: sync.reset_required",
@@ -203,7 +205,7 @@ func TestEvents_TailAgentResetRequired(t *testing.T) {
 	assert.Equal(t, "OK events reset_required=true reset_after_id=100\n", out.String())
 }
 
-func TestEvents_TailEmitsNDJSON(t *testing.T) {
+func TestEvents_TailEmitsNDJSON(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 
@@ -236,13 +238,13 @@ func TestEvents_TailEmitsNDJSON(t *testing.T) {
 	}
 }
 
-func TestEvents_NegativeAfterRejected(t *testing.T) {
+func TestEvents_NegativeAfterRejected(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, err := runCmdOutput(t, nil, "events", "--all", "--after=-1")
 	ce := requireCLIError(t, err, ExitUsage)
 	assert.Contains(t, ce.Message, "non-negative")
 }
 
-func TestEvents_NegativeLastEventIDRejected(t *testing.T) {
+func TestEvents_NegativeLastEventIDRejected(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, err := runCmdOutput(t, nil, "events", "--all", "--tail", "--last-event-id=-1")
 	ce := requireCLIError(t, err, ExitUsage)
 	assert.Contains(t, ce.Message, "non-negative")
@@ -251,7 +253,7 @@ func TestEvents_NegativeLastEventIDRejected(t *testing.T) {
 // TestEvents_TailFailsFastOn4xx pins the spec §7.2 rule: HTTP 4xx responses
 // are terminal, not retryable. A bad cursor or unknown project must surface
 // to the caller, not spin in the reconnect loop.
-func TestEvents_TailFailsFastOn4xx(t *testing.T) {
+func TestEvents_TailFailsFastOn4xx(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	ctx, cancel := context.WithTimeout(contextWithBaseURL(context.Background(), env.URL), 5*time.Second)
@@ -261,7 +263,7 @@ func TestEvents_TailFailsFastOn4xx(t *testing.T) {
 	assert.Contains(t, err.Error(), "404")
 }
 
-func TestEvents_TailFollowsResetRequired(t *testing.T) {
+func TestEvents_TailFollowsResetRequired(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 	short := createIssueViaHTTP(t, env, dir, "doomed")
@@ -298,7 +300,7 @@ func TestEvents_TailFollowsResetRequired(t *testing.T) {
 // --tail with --limit or --after used to be silently accepted, even
 // though those flags are documented as one-shot mode. --limit 1
 // still streamed indefinitely. Now both reject as kindUsage.
-func TestEvents_TailRejectsOneShotFlags(t *testing.T) {
+func TestEvents_TailRejectsOneShotFlags(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, args := range [][]string{
 		{"events", "--tail", "--limit", "1"},
 		{"events", "--tail", "--after", "5"},
@@ -312,7 +314,7 @@ func TestEvents_TailRejectsOneShotFlags(t *testing.T) {
 // TestEvents_OneShotRejectsTailFlag mirrors the symmetric case:
 // --last-event-id is documented as --tail-only, so passing it without
 // --tail should reject loudly instead of being silently ignored.
-func TestEvents_OneShotRejectsTailFlag(t *testing.T) {
+func TestEvents_OneShotRejectsTailFlag(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, err := runCmdOutput(t, nil, "events", "--last-event-id", "5")
 	_ = requireCLIError(t, err, ExitUsage)
 }
@@ -320,7 +322,7 @@ func TestEvents_OneShotRejectsTailFlag(t *testing.T) {
 // TestEvents_OneShotRejectsNonPositiveLimit: parallel to list/ready,
 // --limit 0/-1 in one-shot mode rejects with kindValidation. Search
 // has the same check after hammer-test #5.
-func TestEvents_OneShotRejectsNonPositiveLimit(t *testing.T) {
+func TestEvents_OneShotRejectsNonPositiveLimit(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, lim := range []string{"0", "-1"} {
 		_, err := runCmdOutput(t, nil, "events", "--limit", lim)
 		_ = requireCLIError(t, err, ExitValidation)
@@ -330,7 +332,7 @@ func TestEvents_OneShotRejectsNonPositiveLimit(t *testing.T) {
 // TestEvents_PayloadShape pins the JSON wire shape: each event row carries
 // issue_short_id (display) and issue_uid (canonical); the legacy
 // issue_number field is gone.
-func TestEvents_PayloadShape(t *testing.T) {
+func TestEvents_PayloadShape(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	createIssueViaHTTP(t, f.env, f.dir, "first")
 

@@ -11,6 +11,7 @@ import (
 // a typed describer the events tab fell back to the raw "links_changed"
 // fragment and dropped the actual add/remove detail (kata#1 follow-up).
 func TestLinksChangedDesc(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		payload map[string]any

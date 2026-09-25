@@ -54,14 +54,14 @@ func stubUpdateClient(t *testing.T, client updateClient) {
 	t.Cleanup(func() { newSelfUpdateClient = orig })
 }
 
-func TestUpdate_IsWiredOnRoot(t *testing.T) {
+func TestUpdate_IsWiredOnRoot(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	root := newRootCmd()
 	_, _, err := root.Find([]string{"update"})
 	require.NoError(t, err)
 }
 
-func TestUpdateInstall_PackageManagedBuildFailsBeforeClientConstruction(t *testing.T) {
+func TestUpdateInstall_PackageManagedBuildFailsBeforeClientConstruction(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	tests := []struct {
 		name         string
 		distribution string
@@ -94,7 +94,7 @@ func TestUpdateInstall_PackageManagedBuildFailsBeforeClientConstruction(t *testi
 	}
 }
 
-func TestUpdateInstall_PackageManagedFormsFailBeforeClientConstruction(t *testing.T) {
+func TestUpdateInstall_PackageManagedFormsFailBeforeClientConstruction(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	forms := [][]string{
 		{"update"},
 		{"update", "--yes"},
@@ -121,7 +121,7 @@ func TestUpdateInstall_PackageManagedFormsFailBeforeClientConstruction(t *testin
 	}
 }
 
-func TestUpdateCheck_PackageManagedFlagCombinationsRemainReadOnly(t *testing.T) {
+func TestUpdateCheck_PackageManagedFlagCombinationsRemainReadOnly(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	forms := [][]string{
 		{"update", "--check", "--yes"},
 		{"update", "--check", "--force"},
@@ -146,7 +146,7 @@ func TestUpdateCheck_PackageManagedFlagCombinationsRemainReadOnly(t *testing.T) 
 	}
 }
 
-func TestUpdateCheck_HumanUpToDate(t *testing.T) {
+func TestUpdateCheck_HumanUpToDate(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.5.0", "abc1234", "2026-06-19T12:00:00Z")
 	fake := &fakeUpdateClient{}
@@ -161,7 +161,7 @@ func TestUpdateCheck_HumanUpToDate(t *testing.T) {
 	assert.Empty(t, fake.installed)
 }
 
-func TestUpdateCheck_HumanUpdateAvailable(t *testing.T) {
+func TestUpdateCheck_HumanUpdateAvailable(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -178,7 +178,7 @@ func TestUpdateCheck_HumanUpdateAvailable(t *testing.T) {
 	assert.Empty(t, fake.installed)
 }
 
-func TestUpdateCheck_HomebrewHumanUpdateAvailable(t *testing.T) {
+func TestUpdateCheck_HomebrewHumanUpdateAvailable(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	stubDistribution(t, "homebrew")
@@ -195,7 +195,7 @@ func TestUpdateCheck_HomebrewHumanUpdateAvailable(t *testing.T) {
 	assert.Empty(t, fake.installed)
 }
 
-func TestUpdateCheck_DevBuildForcesFreshCheckAndShowsOfficialRelease(t *testing.T) {
+func TestUpdateCheck_DevBuildForcesFreshCheckAndShowsOfficialRelease(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.5.0-9-gcf994f5", "cf994f5", "2026-06-24T15:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -215,7 +215,7 @@ func TestUpdateCheck_DevBuildForcesFreshCheckAndShowsOfficialRelease(t *testing.
 	assert.Empty(t, fake.installed)
 }
 
-func TestUpdateCheck_JSONOutput(t *testing.T) {
+func TestUpdateCheck_JSONOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -253,7 +253,7 @@ func TestUpdateCheck_JSONOutput(t *testing.T) {
 	assert.NotContains(t, fields, "upgrade_hint")
 }
 
-func TestUpdateCheck_HomebrewJSONOutput(t *testing.T) {
+func TestUpdateCheck_HomebrewJSONOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	stubDistribution(t, "homebrew")
@@ -277,7 +277,7 @@ func TestUpdateCheck_HomebrewJSONOutput(t *testing.T) {
 	assert.True(t, got.PackageReleaseMayLag)
 }
 
-func TestUpdateCheck_AgentOutput(t *testing.T) {
+func TestUpdateCheck_AgentOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -292,7 +292,7 @@ func TestUpdateCheck_AgentOutput(t *testing.T) {
 	assert.Equal(t, "OK update update_available=true current=v0.4.0 latest=v0.5.0 distribution=\"\" package_release_may_lag=false\n", stdout)
 }
 
-func TestUpdateCheck_HomebrewAgentOutput(t *testing.T) {
+func TestUpdateCheck_HomebrewAgentOutput(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	stubDistribution(t, "homebrew")
@@ -308,7 +308,7 @@ func TestUpdateCheck_HomebrewAgentOutput(t *testing.T) {
 	assert.Equal(t, "OK update update_available=true current=v0.4.0 latest=v0.5.0 distribution=homebrew upgrade_hint=\"brew upgrade kata\" package_release_may_lag=true\n", stdout)
 }
 
-func TestUpdateInstall_HumanShowsDownloadDetailsBeforeConfirmation(t *testing.T) {
+func TestUpdateInstall_HumanShowsDownloadDetailsBeforeConfirmation(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -330,7 +330,7 @@ func TestUpdateInstall_HumanShowsDownloadDetailsBeforeConfirmation(t *testing.T)
 	assert.Empty(t, fake.installed)
 }
 
-func TestUpdateInstall_DevBuildRequiresForce(t *testing.T) {
+func TestUpdateInstall_DevBuildRequiresForce(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.5.0-9-gcf994f5", "cf994f5", "2026-06-24T15:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -354,7 +354,7 @@ func TestUpdateInstall_DevBuildRequiresForce(t *testing.T) {
 	assert.Empty(t, fake.installed)
 }
 
-func TestUpdateInstall_DevBuildForceInstalls(t *testing.T) {
+func TestUpdateInstall_DevBuildForceInstalls(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.5.0-9-gcf994f5", "cf994f5", "2026-06-24T15:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -372,7 +372,7 @@ func TestUpdateInstall_DevBuildForceInstalls(t *testing.T) {
 	assert.Len(t, fake.installed, 1)
 }
 
-func TestUpdateInstall_RefetchesCachedInfoBeforeInstall(t *testing.T) {
+func TestUpdateInstall_RefetchesCachedInfoBeforeInstall(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	first := &selfupdate.Info{CurrentVersion: "v0.4.0", LatestVersion: "v0.5.0", AssetName: "kata_0.5.0_linux_amd64.tar.gz"}
@@ -394,7 +394,7 @@ func TestUpdateInstall_RefetchesCachedInfoBeforeInstall(t *testing.T) {
 	assert.Equal(t, []*selfupdate.Info{second}, fake.installed)
 }
 
-func TestUpdateInstall_JSONRequiresConfirmation(t *testing.T) {
+func TestUpdateInstall_JSONRequiresConfirmation(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -413,7 +413,7 @@ func TestUpdateInstall_JSONRequiresConfirmation(t *testing.T) {
 	assert.Empty(t, fake.installed)
 }
 
-func TestUpdateInstall_JSONOutputAfterConfirmation(t *testing.T) {
+func TestUpdateInstall_JSONOutputAfterConfirmation(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -443,7 +443,7 @@ func TestUpdateInstall_JSONOutputAfterConfirmation(t *testing.T) {
 	assert.Len(t, fake.installed, 1)
 }
 
-func TestUpdateInstall_AgentOutputAfterYes(t *testing.T) {
+func TestUpdateInstall_AgentOutputAfterYes(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
@@ -459,7 +459,7 @@ func TestUpdateInstall_AgentOutputAfterYes(t *testing.T) {
 	assert.Equal(t, "OK update installed=true current=v0.4.0 latest=v0.5.0\n", stdout)
 }
 
-func TestUpdateInstall_WrapsInstallError(t *testing.T) {
+func TestUpdateInstall_WrapsInstallError(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
 	fake := &fakeUpdateClient{
@@ -480,7 +480,7 @@ func TestUpdateInstall_WrapsInstallError(t *testing.T) {
 	assert.Contains(t, ce.Message, "permission denied")
 }
 
-func TestUpdate_DefaultClientConfiguration(t *testing.T) {
+func TestUpdate_DefaultClientConfiguration(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; resetFlags sets package var flags
 	resetFlags(t)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -497,7 +497,7 @@ func TestUpdate_DefaultClientConfiguration(t *testing.T) {
 	assert.Empty(t, got.TrustedPublicKeys)
 }
 
-func TestUpdate_DefaultClientGitHubToken(t *testing.T) {
+func TestUpdate_DefaultClientGitHubToken(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and GH_TOKEN and GITHUB_TOKEN; resetFlags sets package var flags
 	tests := []struct {
 		name        string
 		ghToken     string

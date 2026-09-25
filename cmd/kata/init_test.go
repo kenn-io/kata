@@ -18,7 +18,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestInit_FreshGitRepoBindsViaRemote(t *testing.T) {
+func TestInit_FreshGitRepoBindsViaRemote(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -35,7 +35,7 @@ func TestInit_FreshGitRepoBindsViaRemote(t *testing.T) {
 	assert.FileExists(t, filepath.Join(dir, ".kata.toml"))
 }
 
-func TestInit_AddsLocalToGitignoreWhenAbsent(t *testing.T) {
+func TestInit_AddsLocalToGitignoreWhenAbsent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -52,7 +52,7 @@ func TestInit_AddsLocalToGitignoreWhenAbsent(t *testing.T) {
 	assert.Contains(t, string(content), ".kata.local.toml")
 }
 
-func TestInit_GitignoreIsIdempotent(t *testing.T) {
+func TestInit_GitignoreIsIdempotent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -79,7 +79,7 @@ func TestInit_GitignoreIsIdempotent(t *testing.T) {
 // daemon writes .kata.toml at the git root and reports that root in
 // workspace_root. The CLI must place .gitignore beside .kata.toml at
 // the workspace root, not at the cwd subdirectory.
-func TestInit_GitignoreLandsAtWorkspaceRoot(t *testing.T) {
+func TestInit_GitignoreLandsAtWorkspaceRoot(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	root := t.TempDir()
 	runGit(t, root, "init", "--quiet")
@@ -159,7 +159,7 @@ func (f *fakeDaemon) request() map[string]any {
 // the project name locally and omits start_path from the request body when it
 // can — that's the contract that lets a daemon on another host serve
 // `kata init` without filesystem access to the client workspace.
-func TestInit_RemoteClient_SendsNameNotPath(t *testing.T) {
+func TestInit_RemoteClient_SendsNameNotPath(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
@@ -185,7 +185,7 @@ func TestInit_RemoteClient_SendsNameNotPath(t *testing.T) {
 // TestInit_RemoteClient_WritesGitignore confirms the .gitignore entry
 // still lands beside .kata.toml in the client workspace, even though
 // the daemon doesn't return workspace_root in path-free mode.
-func TestInit_RemoteClient_WritesGitignore(t *testing.T) {
+func TestInit_RemoteClient_WritesGitignore(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
@@ -206,7 +206,7 @@ func TestInit_RemoteClient_WritesGitignore(t *testing.T) {
 // TestInit_RemoteClient_FromSubdir runs init from a subdirectory of
 // the git workspace. .kata.toml must land at the git root, not the
 // subdir, even though the daemon can't see either path.
-func TestInit_RemoteClient_FromSubdir(t *testing.T) {
+func TestInit_RemoteClient_FromSubdir(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	root := t.TempDir()
 	runGit(t, root, "init", "--quiet")
 	runGit(t, root, "remote", "add", "origin", "https://github.com/wesm/kata.git")
@@ -234,7 +234,7 @@ func TestInit_RemoteClient_FromSubdir(t *testing.T) {
 // stale name. The error must also carry the structured
 // "project_binding_conflict" code so --json consumers can branch on
 // it (matching the daemon-side conflict envelope).
-func TestInit_RemoteClient_ConflictDetectedLocally(t *testing.T) {
+func TestInit_RemoteClient_ConflictDetectedLocally(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
@@ -268,7 +268,7 @@ name     = "kata"
 // metadata locally and includes it in the request body. The daemon
 // uses that metadata to attach the alias on its side, so the
 // alias-conflict and --reassign semantics survive the path-free flow.
-func TestInit_RemoteClient_SendsAliasInfo(t *testing.T) {
+func TestInit_RemoteClient_SendsAliasInfo(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
@@ -289,7 +289,7 @@ func TestInit_RemoteClient_SendsAliasInfo(t *testing.T) {
 	assert.Equal(t, "git", alias["kind"])
 }
 
-func TestInit_GitignoreAppendsToExisting(t *testing.T) {
+func TestInit_GitignoreAppendsToExisting(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -310,7 +310,7 @@ func TestInit_GitignoreAppendsToExisting(t *testing.T) {
 	assert.Contains(t, string(content), ".kata.local.toml")
 }
 
-func TestInit_AgentOutputReportsProjectWorkspaceAndChanged(t *testing.T) {
+func TestInit_AgentOutputReportsProjectWorkspaceAndChanged(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	resetFlags(t)
 	flags.Mode = outputAgent
 	dir := t.TempDir()
@@ -324,7 +324,7 @@ func TestInit_AgentOutputReportsProjectWorkspaceAndChanged(t *testing.T) {
 	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
 }
 
-func TestInit_AgentOutputChangedWhenExistingProjectBindsFreshWorkspace(t *testing.T) {
+func TestInit_AgentOutputChangedWhenExistingProjectBindsFreshWorkspace(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	resetFlags(t)
 	flags.Mode = outputAgent
 	env := testenv.New(t)
@@ -340,7 +340,7 @@ func TestInit_AgentOutputChangedWhenExistingProjectBindsFreshWorkspace(t *testin
 	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
 }
 
-func TestInit_HumanOutputKeepsProjectCreatedSemanticsForFreshWorkspace(t *testing.T) {
+func TestInit_HumanOutputKeepsProjectCreatedSemanticsForFreshWorkspace(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	_, err := env.DB.CreateProject(context.Background(), "kata")
@@ -355,7 +355,7 @@ func TestInit_HumanOutputKeepsProjectCreatedSemanticsForFreshWorkspace(t *testin
 	assert.Equal(t, "bound project kata\n", out)
 }
 
-func TestInit_AgentOutputChangedWhenOnlyGitignoreUpdated(t *testing.T) {
+func TestInit_AgentOutputChangedWhenOnlyGitignoreUpdated(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	resetFlags(t)
 	flags.Mode = outputAgent
 	env := testenv.New(t)
@@ -378,7 +378,7 @@ name     = "kata"
 	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
 }
 
-func TestInit_AgentOutputQuotesProjectName(t *testing.T) {
+func TestInit_AgentOutputQuotesProjectName(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	resetFlags(t)
 	flags.Mode = outputAgent
 	dir := t.TempDir()
@@ -392,7 +392,7 @@ func TestInit_AgentOutputQuotesProjectName(t *testing.T) {
 	assert.Equal(t, "OK init project=\"two words\" workspace="+agentValue(dir)+" changed=true\n", out)
 }
 
-func TestInit_MachineOutputSuppressesGitignoreWarning(t *testing.T) {
+func TestInit_MachineOutputSuppressesGitignoreWarning(t *testing.T) { //nolint:paralleltest // swaps package var flags; captureProcessStderr sets package var os.Stderr
 	tests := []struct {
 		name      string
 		configure func()
@@ -436,7 +436,7 @@ func TestInit_MachineOutputSuppressesGitignoreWarning(t *testing.T) {
 	}
 }
 
-func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) {
+func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -455,7 +455,7 @@ func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) {
 	assert.Contains(t, string(content), "Kata is the system of record for intent.")
 }
 
-func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) {
+func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -470,7 +470,7 @@ func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(dir, "AGENTS.md"))
 }
 
-func TestInit_WithAgents_Idempotent(t *testing.T) {
+func TestInit_WithAgents_Idempotent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -491,7 +491,7 @@ func TestInit_WithAgents_Idempotent(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(string(content), agentsBlockEnd))
 }
 
-func TestInit_WithAgents_AppendsToExistingFile(t *testing.T) {
+func TestInit_WithAgents_AppendsToExistingFile(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -512,7 +512,7 @@ func TestInit_WithAgents_AppendsToExistingFile(t *testing.T) {
 	assert.Contains(t, string(content), agentsBlockBegin)
 }
 
-func TestInit_WithAgents_AppendsToExistingClaudeFile(t *testing.T) {
+func TestInit_WithAgents_AppendsToExistingClaudeFile(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -533,7 +533,7 @@ func TestInit_WithAgents_AppendsToExistingClaudeFile(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(dir, "AGENTS.md"))
 }
 
-func TestInit_WithAgents_AppendsToBothAgentFilesWhenBothExist(t *testing.T) {
+func TestInit_WithAgents_AppendsToBothAgentFilesWhenBothExist(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -559,7 +559,7 @@ func TestInit_WithAgents_AppendsToBothAgentFilesWhenBothExist(t *testing.T) {
 	assert.Contains(t, string(claude), agentsBlockBegin)
 }
 
-func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
+func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -585,7 +585,7 @@ func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
 // TestInit_WithAgents_BlockIncludesWorkflowConventions pins the distinction
 // between incomplete work, attention state, and delegation in the managed
 // briefing installed for agents.
-func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
+func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -609,7 +609,7 @@ func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
 	assert.Contains(t, got, "KATA_INBOX_USER=<actor>/<teammate>")
 }
 
-func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testing.T) {
+func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -651,7 +651,7 @@ const oldAgentsBlockBody = "## kata issue tracker\n\n" +
 // repo that ran init before the work.* section existed: the file already carries
 // the marker-delimited block with the older body, and re-running --with-agents
 // must add the work.* section while leaving content outside the markers intact.
-func TestInit_WithAgents_RefreshesPreWorkConventionsBlock(t *testing.T) {
+func TestInit_WithAgents_RefreshesPreWorkConventionsBlock(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; swaps package var flags
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -691,7 +691,7 @@ const beadsFixtureBlock = "<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash
 // When AGENTS.md still carries a beads block, kata must not edit it in place.
 // It leaves the original byte-for-byte and writes a .kata-proposed sidecar with
 // the beads block removed and kata's block added, and warns where to find it.
-func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) {
+func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; captureProcessStderr sets package var os.Stderr
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -732,6 +732,7 @@ func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) {
 // run from a subdirectory (or with --workspace pointing elsewhere), a bare base
 // name would target the wrong directory, so the hint spells out absolute paths.
 func TestBeadsConflictMessage_PathsResolveFromCwd(t *testing.T) {
+	t.Parallel()
 	sidecar := "/repo/AGENTS.md" + agentsProposalSuffix
 
 	fromRoot := beadsConflictMessage("/repo", "/repo/AGENTS.md", sidecar)
@@ -748,6 +749,7 @@ func TestBeadsConflictMessage_PathsResolveFromCwd(t *testing.T) {
 // A workspace path with spaces would, unquoted, parse as extra mv operands, so
 // the adopt command must shell-quote both paths to stay copy-pasteable.
 func TestBeadsConflictMessage_ShellQuotesMvOperands(t *testing.T) {
+	t.Parallel()
 	original := "/Users/me/My Projects/app/AGENTS.md"
 	sidecar := original + agentsProposalSuffix
 
@@ -758,7 +760,7 @@ func TestBeadsConflictMessage_ShellQuotesMvOperands(t *testing.T) {
 
 // A real (non-symlink) CLAUDE.md that still carries a beads block gets the same
 // sidecar treatment as AGENTS.md.
-func TestInit_WithAgents_BeadsBlockInClaude_WritesSidecar(t *testing.T) {
+func TestInit_WithAgents_BeadsBlockInClaude_WritesSidecar(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -790,7 +792,7 @@ func TestInit_WithAgents_BeadsBlockInClaude_WritesSidecar(t *testing.T) {
 // kata's own convention symlinks CLAUDE.md at AGENTS.md. A symlinked CLAUDE.md
 // must never be rewritten or shadowed by a sidecar, even if it resolves to
 // content with a beads block.
-func TestInit_WithAgents_ClaudeSymlink_Skipped(t *testing.T) {
+func TestInit_WithAgents_ClaudeSymlink_Skipped(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -813,7 +815,7 @@ func TestInit_WithAgents_ClaudeSymlink_Skipped(t *testing.T) {
 
 // A hostile repo must not redirect kata's sidecar write through a pre-planted
 // symlink to clobber a file outside the workspace.
-func TestInit_WithAgents_SidecarSymlinkNotFollowed(t *testing.T) {
+func TestInit_WithAgents_SidecarSymlinkNotFollowed(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -838,7 +840,7 @@ func TestInit_WithAgents_SidecarSymlinkNotFollowed(t *testing.T) {
 
 // kata must not write through a symlinked AGENTS.md, which a hostile repo could
 // point at a victim file to have init overwrite it.
-func TestInit_WithAgents_AgentsSymlinkNotFollowed(t *testing.T) {
+func TestInit_WithAgents_AgentsSymlinkNotFollowed(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -859,7 +861,7 @@ func TestInit_WithAgents_AgentsSymlinkNotFollowed(t *testing.T) {
 // A symlinked AGENTS.md whose target carries a beads block must not be migrated:
 // following it would copy the outside file's content into AGENTS.md.kata-proposed
 // inside the repo.
-func TestInit_WithAgents_AgentsBeadsSymlinkNotMigrated(t *testing.T) {
+func TestInit_WithAgents_AgentsBeadsSymlinkNotMigrated(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")

@@ -15,7 +15,7 @@ import (
 // tests in init_hooks_codex_test.go.
 
 // TestE2E_InitWithCodexHooks installs the Codex SessionStart wiring on its own.
-func TestE2E_InitWithCodexHooks(t *testing.T) {
+func TestE2E_InitWithCodexHooks(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir := t.TempDir()
@@ -36,7 +36,7 @@ func TestE2E_InitWithCodexHooks(t *testing.T) {
 // TestE2E_InitWithCodexHooks_ComposesWithAgentsAndHooks runs all three
 // workspace-wiring flags together: guidance block, Claude Code hooks, and
 // Codex hooks all land in one init, and a second identical init is a no-op.
-func TestE2E_InitWithCodexHooks_ComposesWithAgentsAndHooks(t *testing.T) {
+func TestE2E_InitWithCodexHooks_ComposesWithAgentsAndHooks(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir := t.TempDir()

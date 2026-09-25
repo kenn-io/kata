@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClaim_Success(t *testing.T) {
+func TestClaim_Success(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 
@@ -34,7 +34,7 @@ func TestClaim_Success(t *testing.T) {
 	assert.Equal(t, "agent1", *iss.Owner)
 }
 
-func TestClaim_TTLAssignsUntilDaemonDeadline(t *testing.T) {
+func TestClaim_TTLAssignsUntilDaemonDeadline(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	issue := createIssueViaHTTPFull(t, env, dir, "timed claim")
@@ -50,7 +50,7 @@ func TestClaim_TTLAssignsUntilDaemonDeadline(t *testing.T) {
 	assert.LessOrEqual(t, remaining, 2*time.Minute)
 }
 
-func TestClaim_TTLValidation(t *testing.T) {
+func TestClaim_TTLValidation(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, tc := range []struct {
 		value string
 		want  string
@@ -69,7 +69,7 @@ func TestClaim_TTLValidation(t *testing.T) {
 	}
 }
 
-func TestClaim_AlreadyAssignedBySameActor(t *testing.T) {
+func TestClaim_AlreadyAssignedBySameActor(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 
@@ -93,7 +93,7 @@ func TestClaim_AlreadyAssignedBySameActor(t *testing.T) {
 	assert.Equal(t, "agent1", *iss.Owner)
 }
 
-func TestClaim_IfUnownedRejectsSameActor(t *testing.T) {
+func TestClaim_IfUnownedRejectsSameActor(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	issue := createIssueViaHTTPFull(t, env, dir, "guarded claim")
 	runCLIAs(t, env, dir, "agent1", "claim", issue.ShortID)
@@ -105,7 +105,7 @@ func TestClaim_IfUnownedRejectsSameActor(t *testing.T) {
 	assert.NotContains(t, cliErr.Message, "--force")
 }
 
-func TestClaim_ForceAndIfUnownedAreMutuallyExclusive(t *testing.T) {
+func TestClaim_ForceAndIfUnownedAreMutuallyExclusive(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, _, err := executeRootCapture(t, context.Background(),
 		"claim", "abcd", "--force", "--if-unowned")
 
@@ -114,7 +114,7 @@ func TestClaim_ForceAndIfUnownedAreMutuallyExclusive(t *testing.T) {
 	assert.Contains(t, err.Error(), "force")
 }
 
-func TestClaim_Conflict(t *testing.T) {
+func TestClaim_Conflict(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 
 	// Create and claim an issue as agent1
@@ -132,7 +132,7 @@ func TestClaim_Conflict(t *testing.T) {
 	assert.Contains(t, strings.ToLower(ce.Message), "already assigned")
 }
 
-func TestClaim_ForceOverride(t *testing.T) {
+func TestClaim_ForceOverride(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 
@@ -155,7 +155,7 @@ func TestClaim_ForceOverride(t *testing.T) {
 	assert.Equal(t, "agent2", *iss.Owner)
 }
 
-func TestClaim_ForceOverrideShowsPreviousOwner(t *testing.T) {
+func TestClaim_ForceOverrideShowsPreviousOwner(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 
 	issue := createIssueViaHTTPFull(t, env, dir, "test claim force previous")
@@ -169,7 +169,7 @@ func TestClaim_ForceOverrideShowsPreviousOwner(t *testing.T) {
 	require.Contains(t, out, "was: agent1")
 }
 
-func TestClaim_AgentOutputIncludesOwner(t *testing.T) {
+func TestClaim_AgentOutputIncludesOwner(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	issue := createIssueViaHTTPFull(t, env, dir, "test claim agent")
 
@@ -180,7 +180,7 @@ func TestClaim_AgentOutputIncludesOwner(t *testing.T) {
 	assert.Contains(t, out, "Owner: agent1")
 }
 
-func TestClaim_AgentForceOutputIncludesPreviousOwner(t *testing.T) {
+func TestClaim_AgentForceOutputIncludesPreviousOwner(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	issue := createIssueViaHTTPFull(t, env, dir, "test claim agent previous")
 	runCLIAs(t, env, dir, "agent1", "claim", issue.ShortID)
@@ -193,7 +193,7 @@ func TestClaim_AgentForceOutputIncludesPreviousOwner(t *testing.T) {
 	assert.Contains(t, out, "Previous-Owner: agent1")
 }
 
-func TestPrintClaimMutationIncludesAssignmentExpiry(t *testing.T) {
+func TestPrintClaimMutationIncludesAssignmentExpiry(t *testing.T) { //nolint:paralleltest // swaps package var flags
 	const response = `{"issue":{"short_id":"abcd","owner":"agent1","assignment_expires_on":"2026-09-17T21:30:00Z"},"changed":true}`
 
 	t.Run("human", func(t *testing.T) {
@@ -219,7 +219,7 @@ func TestPrintClaimMutationIncludesAssignmentExpiry(t *testing.T) {
 	})
 }
 
-func TestPrintClaimMutationTimedNoOpIncludesAssignmentExpiry(t *testing.T) {
+func TestPrintClaimMutationTimedNoOpIncludesAssignmentExpiry(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	var out bytes.Buffer
 	cmd := &cobra.Command{}
@@ -230,7 +230,7 @@ func TestPrintClaimMutationTimedNoOpIncludesAssignmentExpiry(t *testing.T) {
 	assert.Equal(t, "abcd already assigned to agent1 until 2026-09-17T21:30:00Z (no-op)\n", out.String())
 }
 
-func TestClaim_WithComment(t *testing.T) {
+func TestClaim_WithComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 
 	// Create an unowned issue

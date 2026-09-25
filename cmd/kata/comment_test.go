@@ -12,6 +12,7 @@ import (
 )
 
 func TestPostFollowupCommentFailureRecommendsSafeKeyedRetry(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		http.Error(writer, "temporary failure", http.StatusServiceUnavailable)
 	}))
@@ -23,7 +24,7 @@ func TestPostFollowupCommentFailureRecommendsSafeKeyedRetry(t *testing.T) {
 	assert.Contains(t, err.Error(), "rerun the original kata close command with the same --idempotency-key")
 }
 
-func TestComment_AppendsToIssue(t *testing.T) {
+func TestComment_AppendsToIssue(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	short := createIssueViaHTTP(t, env, dir, "x")
 
@@ -31,7 +32,7 @@ func TestComment_AppendsToIssue(t *testing.T) {
 	assert.True(t, strings.Contains(out, "looks good") || strings.Contains(out, "comment"))
 }
 
-func TestComment_MessageShorthandAppendsToIssue(t *testing.T) {
+func TestComment_MessageShorthandAppendsToIssue(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	short := createIssue(t, env, pid, "x")
 
@@ -42,7 +43,7 @@ func TestComment_MessageShorthandAppendsToIssue(t *testing.T) {
 	assert.Equal(t, "looks good", issue.Comments[0].Body)
 }
 
-func TestComment_EditUpdatesExistingCommentByUID(t *testing.T) {
+func TestComment_EditUpdatesExistingCommentByUID(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	short := createIssue(t, env, pid, "x")
 	runCLI(t, env, dir, "comment", short, "--body", "token=leaked")
@@ -63,7 +64,7 @@ func TestComment_EditUpdatesExistingCommentByUID(t *testing.T) {
 	assert.Contains(t, runCLI(t, env, dir, "--agent", "show", short), "uid="+commentUID)
 }
 
-func TestComment_RelationshipFlagSuggestsEditCommentComposition(t *testing.T) {
+func TestComment_RelationshipFlagSuggestsEditCommentComposition(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 
@@ -75,7 +76,7 @@ func TestComment_RelationshipFlagSuggestsEditCommentComposition(t *testing.T) {
 	assert.Contains(t, stderr, `kata edit abc4 --blocks d4ex --comment "..."`)
 }
 
-func TestComment_AgentOutput(t *testing.T) {
+func TestComment_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	short := createIssueViaHTTP(t, env, dir, "x")
 

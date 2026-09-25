@@ -22,6 +22,7 @@ func catalog(entries ...config.CatalogDaemonConfig) *config.DaemonConfig {
 // TestResolveHubAdminAuthExplicitTokenKeepsBindingURL asserts an explicit
 // --hub-token wins and the target URL stays the binding's hub URL.
 func TestResolveHubAdminAuthExplicitTokenKeepsBindingURL(t *testing.T) {
+	t.Parallel()
 	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "https://other.example", Token: "catalog-token",
 	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub", hubToken: "explicit"})
@@ -42,6 +43,7 @@ func TestResolveHubAdminAuthExplicitTokenKeepsBindingURL(t *testing.T) {
 // a foreign origin (the binding hub); deliberate cross-origin token use is
 // --hub-token only.
 func TestResolveHubAdminAuthNamedEntryURLMismatchErrors(t *testing.T) {
+	t.Parallel()
 	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "https://trusted.example", Token: "catalog-token",
 	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub"})
@@ -55,6 +57,7 @@ func TestResolveHubAdminAuthNamedEntryURLMismatchErrors(t *testing.T) {
 // whose URL matches the binding hub URL (modulo trailing slash) supplies its
 // token, and the target stays the normalized binding URL.
 func TestResolveHubAdminAuthNamedEntryMatchingURLUsesToken(t *testing.T) {
+	t.Parallel()
 	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "https://bound.example/", Token: "catalog-token",
 	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub"})
@@ -70,6 +73,7 @@ func TestResolveHubAdminAuthNamedEntryMatchingURLUsesToken(t *testing.T) {
 }
 
 func TestResolveHubAdminAuthNamedEntryMatchesCanonicalOriginAndKeepsBindingPath(t *testing.T) {
+	t.Parallel()
 	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "HTTPS://BOUND.EXAMPLE:443", Token: "catalog-token",
 	}), hubAuthInputs{hubURL: "https://bound.example/reverse-proxy", hubName: "hub"})
@@ -83,6 +87,7 @@ func TestResolveHubAdminAuthNamedEntryMatchesCanonicalOriginAndKeepsBindingPath(
 // --hub <name> that resolves to no catalog entry must error rather than
 // silently falling through to URL-match or the unauthenticated fallback.
 func TestResolveHubAdminAuthNamedEntryNotFoundErrors(t *testing.T) {
+	t.Parallel()
 	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "https://bound.example", Token: "catalog-token",
 	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "other-hub"})
@@ -95,6 +100,7 @@ func TestResolveHubAdminAuthNamedEntryNotFoundErrors(t *testing.T) {
 // TestResolveHubAdminAuthURLMatchToleratesTrailingSlash asserts the catalog
 // URL match normalizes trailing slashes on both sides (#273).
 func TestResolveHubAdminAuthURLMatchToleratesTrailingSlash(t *testing.T) {
+	t.Parallel()
 	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "https://bound.example/", Token: "catalog-token",
 	}), hubAuthInputs{hubURL: "https://bound.example"})
@@ -110,6 +116,7 @@ func TestResolveHubAdminAuthURLMatchToleratesTrailingSlash(t *testing.T) {
 }
 
 func TestResolveHubAdminAuthAutomaticallyMatchesCanonicalOriginAndKeepsBindingPath(t *testing.T) {
+	t.Parallel()
 	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "HTTP://BOUND.EXAMPLE:80", Token: "catalog-token",
 	}), hubAuthInputs{hubURL: "http://bound.example/reverse-proxy"})
@@ -120,6 +127,7 @@ func TestResolveHubAdminAuthAutomaticallyMatchesCanonicalOriginAndKeepsBindingPa
 }
 
 func TestResolveHubAdminAuthPrefersExactPathWithinSharedOrigin(t *testing.T) {
+	t.Parallel()
 	out, err := resolveHubAdminAuth(catalog(
 		config.CatalogDaemonConfig{
 			Name: "hub-a", URL: "https://bound.example/hub-a", Token: "token-a",
@@ -135,6 +143,7 @@ func TestResolveHubAdminAuthPrefersExactPathWithinSharedOrigin(t *testing.T) {
 }
 
 func TestResolveHubAdminAuthRejectsAmbiguousSharedOrigin(t *testing.T) {
+	t.Parallel()
 	_, err := resolveHubAdminAuth(catalog(
 		config.CatalogDaemonConfig{
 			Name: "hub-a", URL: "https://bound.example/hub-a", Token: "token-a",
@@ -149,6 +158,7 @@ func TestResolveHubAdminAuthRejectsAmbiguousSharedOrigin(t *testing.T) {
 }
 
 func TestResolveHubAdminAuthCanonicalOriginErrors(t *testing.T) {
+	t.Parallel()
 	t.Run("named catalog URL", func(t *testing.T) {
 		_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 			Name: "hub", URL: "https://bound.example:not-a-port", Token: "catalog-token",
@@ -172,6 +182,7 @@ func TestResolveHubAdminAuthCanonicalOriginErrors(t *testing.T) {
 // TestResolveHubAdminAuthUsesBindingAllowInsecure asserts allow_insecure for
 // the hub client comes from the binding, not the catalog entry.
 func TestResolveHubAdminAuthUsesBindingAllowInsecure(t *testing.T) {
+	t.Parallel()
 	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 		Name: "hub", URL: "https://bound.example", Token: "catalog-token", AllowInsecure: false,
 	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub", allowInsecure: true})
@@ -189,6 +200,7 @@ func TestResolveHubAdminAuthUsesBindingAllowInsecure(t *testing.T) {
 // credential (partial-leave recovery). Opt-ins union; a catalog entry can add
 // the opt-in for its origin but never remove the binding's.
 func TestResolveHubAdminAuthUnionsSameOriginCatalogAllowInsecure(t *testing.T) {
+	t.Parallel()
 	t.Run("named entry", func(t *testing.T) {
 		out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
 			Name: "hub", URL: "http://hub.internal:7373", Token: "catalog-token", AllowInsecure: true,
@@ -217,6 +229,7 @@ func TestResolveHubAdminAuthUnionsSameOriginCatalogAllowInsecure(t *testing.T) {
 // TestResolveHubAdminAuthNoEntryGlobalFallback asserts the no-entry case yields
 // an empty token (the caller then falls back to global auth) with no error.
 func TestResolveHubAdminAuthNoEntryGlobalFallback(t *testing.T) {
+	t.Parallel()
 	out, err := resolveHubAdminAuth(catalog(), hubAuthInputs{hubURL: "https://bound.example"})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -232,7 +245,7 @@ func TestResolveHubAdminAuthNoEntryGlobalFallback(t *testing.T) {
 // TestResolveHubAdminAuthSelectedTokenEnvUnsetErrors is Fix 2: when a SELECTED
 // catalog entry (by name) has token_env set but the env var is empty, resolving
 // must error rather than silently fall back to global daemon auth.
-func TestResolveHubAdminAuthSelectedTokenEnvUnsetErrors(t *testing.T) {
+func TestResolveHubAdminAuthSelectedTokenEnvUnsetErrors(t *testing.T) { //nolint:paralleltest // sets KATA_TEST_MISSING_HUB_TOKEN
 	t.Setenv("KATA_TEST_MISSING_HUB_TOKEN", "")
 	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{ //nolint:gosec // G101 false positive: token_env holds an env var NAME, not a credential
 		Name: "hub", URL: "https://bound.example", TokenEnv: "KATA_TEST_MISSING_HUB_TOKEN",
@@ -244,7 +257,7 @@ func TestResolveHubAdminAuthSelectedTokenEnvUnsetErrors(t *testing.T) {
 
 // TestResolveHubAdminAuthURLMatchTokenEnvUnsetErrors is Fix 2 for the URL-match
 // selection branch: a URL-matched entry with an empty token_env also errors.
-func TestResolveHubAdminAuthURLMatchTokenEnvUnsetErrors(t *testing.T) {
+func TestResolveHubAdminAuthURLMatchTokenEnvUnsetErrors(t *testing.T) { //nolint:paralleltest // sets KATA_TEST_MISSING_HUB_TOKEN
 	t.Setenv("KATA_TEST_MISSING_HUB_TOKEN", "")
 	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{ //nolint:gosec // G101 false positive: token_env holds an env var NAME, not a credential
 		Name: "hub", URL: "https://bound.example", TokenEnv: "KATA_TEST_MISSING_HUB_TOKEN",
@@ -256,7 +269,7 @@ func TestResolveHubAdminAuthURLMatchTokenEnvUnsetErrors(t *testing.T) {
 
 // TestResolveHubAdminAuthSelectedTokenEnvSetSucceeds confirms a populated
 // token_env on a selected entry resolves to that token.
-func TestResolveHubAdminAuthSelectedTokenEnvSetSucceeds(t *testing.T) {
+func TestResolveHubAdminAuthSelectedTokenEnvSetSucceeds(t *testing.T) { //nolint:paralleltest // sets KATA_TEST_HUB_TOKEN
 	t.Setenv("KATA_TEST_HUB_TOKEN", "env-token")
 	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{ //nolint:gosec // G101 false positive: token_env holds an env var NAME, not a credential
 		Name: "hub", URL: "https://bound.example", TokenEnv: "KATA_TEST_HUB_TOKEN",
@@ -272,7 +285,7 @@ func TestResolveHubAdminAuthSelectedTokenEnvSetSucceeds(t *testing.T) {
 // TestHubAdminClientNeverSendsGlobalTokenWithoutHubCredential: when no
 // hub-specific credential resolves, the hub client must be unauthenticated —
 // the local daemon's global bearer token must not leak to the hub origin.
-func TestHubAdminClientNeverSendsGlobalTokenWithoutHubCredential(t *testing.T) {
+func TestHubAdminClientNeverSendsGlobalTokenWithoutHubCredential(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN
 	t.Setenv("KATA_AUTH_TOKEN", "local-daemon-secret")
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -290,7 +303,7 @@ func TestHubAdminClientNeverSendsGlobalTokenWithoutHubCredential(t *testing.T) {
 	assert.Empty(t, got, "global daemon token must not be sent to the hub origin")
 }
 
-func TestHubAdminClientHonorsTrustPrivateNetwork(t *testing.T) {
+func TestHubAdminClientHonorsTrustPrivateNetwork(t *testing.T) { //nolint:paralleltest // sets KATA_HOME
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`

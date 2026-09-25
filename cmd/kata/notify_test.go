@@ -32,14 +32,14 @@ func notificationMetadata(t *testing.T, raw jsontext.Value) map[string]string {
 	return values
 }
 
-func TestNotifyAgentOutputUsesCommandHeader(t *testing.T) {
+func TestNotifyAgentOutputUsesCommandHeader(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "agent output")
 	out := runCLIAs(t, env, dir, "agent-a", "--agent", "notify", ref,
 		"--to", "reviewer", "--message", "review it")
 	assert.Contains(t, out, "OK notify "+ref+" to=reviewer changed=true")
 }
 
-func TestNotifyUsesAuthenticatedActor(t *testing.T) {
+func TestNotifyUsesAuthenticatedActor(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspaceOptions(t,
 		testenv.WithAuthToken("bootstrap-token"),
 		testenv.WithRequireTokenIdentity(),
@@ -71,7 +71,7 @@ func TestNotifyUsesAuthenticatedActor(t *testing.T) {
 	assert.Equal(t, "operator", inbox.Requests[0].From)
 }
 
-func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
+func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, kind := range []string{"close", "other recipient"} {
 		t.Run(kind, func(t *testing.T) {
 			env, dir, pid, ref := setupWorkspaceWithIssue(t, "concurrent recipients")
@@ -176,7 +176,7 @@ func issueMetadataJSON(t *testing.T, out string) jsontext.Value {
 	return response.Issue.Metadata
 }
 
-func TestNotifyStoresReplacesAndClearsOneRecipient(t *testing.T) {
+func TestNotifyStoresReplacesAndClearsOneRecipient(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "review the callback")
 
 	runCLIAs(t, env, dir, "agent-a", "notify", ref,
@@ -196,7 +196,7 @@ func TestNotifyStoresReplacesAndClearsOneRecipient(t *testing.T) {
 	assert.Contains(t, metadata, "notify.b3Bz")
 }
 
-func TestNotifyRejectsClosedButClearIsAllowed(t *testing.T) {
+func TestNotifyRejectsClosedButClearIsAllowed(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "closed request")
 	runCLIAs(t, env, dir, "agent-a", "notify", ref,
 		"--to", "reviewer", "--message", "look before close")
@@ -213,7 +213,7 @@ func TestNotifyRejectsClosedButClearIsAllowed(t *testing.T) {
 	assert.NotContains(t, metadata, "notify.cmV2aWV3ZXI")
 }
 
-func TestNotifyValidatesRecipientAndMessage(t *testing.T) {
+func TestNotifyValidatesRecipientAndMessage(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "validation")
 	for _, args := range [][]string{
 		{"notify", ref, "--to", " ", "--message", "hello"},
@@ -227,7 +227,7 @@ func TestNotifyValidatesRecipientAndMessage(t *testing.T) {
 	}
 }
 
-func TestNotifyMessageLimit(t *testing.T) {
+func TestNotifyMessageLimit(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "message limit")
 	message := strings.Repeat("é", 512)
 	runCLIAs(t, env, dir, "sender", "notify", ref,

@@ -16,7 +16,7 @@ import (
 
 // TestE2E_InitWithHooks_ComposesWithAgents runs both flags together: guidance
 // block and the exact exec-form lifecycle hooks land in one init.
-func TestE2E_InitWithHooks_ComposesWithAgents(t *testing.T) {
+func TestE2E_InitWithHooks_ComposesWithAgents(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir := t.TempDir()

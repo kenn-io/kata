@@ -34,7 +34,7 @@ func createInboxIssue(t *testing.T, env *testenv.Env, projectID int64, title, ke
 	return issue.ShortID
 }
 
-func TestAllProjectsInboxFiltersAndQualifiesAcrossActiveProjects(t *testing.T) {
+func TestAllProjectsInboxFiltersAndQualifiesAcrossActiveProjects(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir, spokeID := initLocalBoundWorkspace(t, env, "spoke-project")
@@ -87,7 +87,7 @@ func TestAllProjectsInboxFiltersAndQualifiesAcrossActiveProjects(t *testing.T) {
 	assert.NotContains(t, globalJSON, "archived request")
 }
 
-func TestAllProjectsInboxRejectsOldDaemonBeforeGlobalList(t *testing.T) {
+func TestAllProjectsInboxRejectsOldDaemonBeforeGlobalList(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var globalCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -110,7 +110,7 @@ func TestAllProjectsInboxRejectsOldDaemonBeforeGlobalList(t *testing.T) {
 	assert.Zero(t, globalCalls.Load())
 }
 
-func TestAllProjectsInboxRejectsExplicitProjectSelection(t *testing.T) {
+func TestAllProjectsInboxRejectsExplicitProjectSelection(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, args := range [][]string{
 		{"--project", "spoke-project", "inbox", "--for", "reviewer", "--all"},
 		{"--workspace", t.TempDir(), "inbox", "--for", "reviewer", "--all"},
@@ -130,7 +130,7 @@ func (globalInboxAccess) Authorize(_ context.Context, request daemon.HostAccessR
 	return daemon.HostAccessDecision{}, nil
 }
 
-func TestAllProjectsInboxDoesNotEmitPartialResultsWhenGlobalAccessDenied(t *testing.T) {
+func TestAllProjectsInboxDoesNotEmitPartialResultsWhenGlobalAccessDenied(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	_, pid := initLocalBoundWorkspace(t, env, "spoke-project")
@@ -157,7 +157,7 @@ func TestAllProjectsInboxDoesNotEmitPartialResultsWhenGlobalAccessDenied(t *test
 	assert.Contains(t, stderr, "resource not found")
 }
 
-func TestAllProjectsInboxOutputShapesAndProjectScopeCompatibility(t *testing.T) {
+func TestAllProjectsInboxOutputShapesAndProjectScopeCompatibility(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir, spokeID := initLocalBoundWorkspace(t, env, "spoke-project")
@@ -202,7 +202,7 @@ func TestAllProjectsInboxOutputShapesAndProjectScopeCompatibility(t *testing.T) 
 	assert.Contains(t, globalContext, "issue=\"spoke-project#"+spokeRef+"\" project=\"spoke-project\"")
 }
 
-func TestAllProjectsInboxWarningsEmptyStateAndQuiet(t *testing.T) {
+func TestAllProjectsInboxWarningsEmptyStateAndQuiet(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	dir, pid := initLocalBoundWorkspace(t, env, "spoke-project")
@@ -225,7 +225,7 @@ func TestAllProjectsInboxWarningsEmptyStateAndQuiet(t *testing.T) {
 	assert.Empty(t, context)
 }
 
-func TestAllProjectsInboxReturnsMoreThanDefaultPageAndBoundsContext(t *testing.T) {
+func TestAllProjectsInboxReturnsMoreThanDefaultPageAndBoundsContext(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t)
 	_, spokeID := initLocalBoundWorkspace(t, env, "spoke-project")
@@ -257,6 +257,7 @@ func TestAllProjectsInboxReturnsMoreThanDefaultPageAndBoundsContext(t *testing.T
 }
 
 func TestAllProjectsInboxContextTruncatesOversizedReference(t *testing.T) {
+	t.Parallel()
 	longProject := strings.Repeat("a", inboxContextBudget)
 	requests := []inboxRequest{
 		{

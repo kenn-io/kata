@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
+func TestQuickstart_PrintsAgentInstructions(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newQuickstartCmd()))
 	assert.Contains(t, out, "kata agent quickstart")
@@ -28,7 +28,7 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, "kata notify abc4 --to coordinator/teammate-1 --clear")
 }
 
-func TestQuickstart_GuardsOwnershipRelease(t *testing.T) {
+func TestQuickstart_GuardsOwnershipRelease(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	plain := string(executeRoot(t, newQuickstartCmd()))
 	jsonOutput := executeRoot(t, newRootCmd(), "--json", "quickstart")
@@ -52,7 +52,7 @@ func TestQuickstart_GuardsOwnershipRelease(t *testing.T) {
 	}
 }
 
-func TestQuickstartExplainsTeammateFlow(t *testing.T) {
+func TestQuickstartExplainsTeammateFlow(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "quickstart"))
 	for _, text := range []string{
@@ -72,7 +72,7 @@ func TestQuickstartExplainsTeammateFlow(t *testing.T) {
 	}
 }
 
-func TestQuickstart_IncludesScheduleDeadlineAndSomedayCommands(t *testing.T) {
+func TestQuickstart_IncludesScheduleDeadlineAndSomedayCommands(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newQuickstartCmd()))
 
@@ -83,7 +83,7 @@ func TestQuickstart_IncludesScheduleDeadlineAndSomedayCommands(t *testing.T) {
 	assert.Contains(t, out, "Reached schedules and deadlines use notify.*")
 }
 
-func TestQuickstart_PromotesCloseStep(t *testing.T) {
+func TestQuickstart_PromotesCloseStep(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newQuickstartCmd()))
 	idx := strings.Index(out, "kata close")
@@ -97,7 +97,7 @@ func TestQuickstart_PromotesCloseStep(t *testing.T) {
 	assert.Contains(t, out, "not in a batch")
 }
 
-func TestQuickstart_JSON(t *testing.T) {
+func TestQuickstart_JSON(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := executeRoot(t, newRootCmd(), "--json", "quickstart")
 	var got struct {
@@ -120,7 +120,7 @@ func TestQuickstart_JSON(t *testing.T) {
 	assert.Contains(t, got.Quickstart, "metadata.teammate")
 }
 
-func TestQuickstart_AgentOutput(t *testing.T) {
+func TestQuickstart_AgentOutput(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "--agent", "quickstart"))
 	assert.Truef(t, strings.HasPrefix(out, "OK quickstart\n"), "got %q", out)
@@ -141,7 +141,7 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "metadata.teammate")
 }
 
-func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
+func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
 
@@ -180,7 +180,7 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 
 // The contract is rendered into other projects' AGENTS.md files, so it must
 // describe kata itself rather than any single workspace's local conventions.
-func TestQuickstart_ContractOmitsNonKataConcepts(t *testing.T) {
+func TestQuickstart_ContractOmitsNonKataConcepts(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
 
@@ -195,7 +195,7 @@ func TestQuickstart_ContractOmitsNonKataConcepts(t *testing.T) {
 	}
 }
 
-func TestQuickstart_ContractMatchesManagedBlockBody(t *testing.T) {
+func TestQuickstart_ContractMatchesManagedBlockBody(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "--format", "contract", "quickstart"))
 	managed := agentsManagedBlock()
@@ -207,7 +207,7 @@ func TestQuickstart_ContractMatchesManagedBlockBody(t *testing.T) {
 	assert.Equal(t, out, body)
 }
 
-func TestQuickstart_ContractAliasAndSelectorsPreserveOutput(t *testing.T) {
+func TestQuickstart_ContractAliasAndSelectorsPreserveOutput(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	want := string(executeRoot(t, newRootCmd(), "--format", "contract", "quickstart"))
 
@@ -223,14 +223,14 @@ func TestQuickstart_ContractAliasAndSelectorsPreserveOutput(t *testing.T) {
 	}
 }
 
-func TestQuickstart_AgentInstructionsAliasMentionsAgentOutput(t *testing.T) {
+func TestQuickstart_AgentInstructionsAliasMentionsAgentOutput(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "agent-instructions"))
 	assert.Contains(t, out, "Default to --agent for ordinary kata reads and mutations in agent logs.")
 	assert.Contains(t, out, "Use --json only when your script needs complete structured data")
 }
 
-func TestQuickstart_UsesValidNeedsReviewCommand(t *testing.T) {
+func TestQuickstart_UsesValidNeedsReviewCommand(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags
 	resetFlags(t)
 	out := string(executeRoot(t, newQuickstartCmd()))
 	// kata edit has no --label flag; the needs-review hint must use the real

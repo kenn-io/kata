@@ -92,7 +92,7 @@ func setupHooksDir(t *testing.T) (home, hooksDir, dbHash string) {
 	return
 }
 
-func TestHookRunsRootSeparatesPostgresSchemas(t *testing.T) {
+func TestHookRunsRootSeparatesPostgresSchemas(t *testing.T) { //nolint:paralleltest // sets KATA_DSN and KATA_POSTGRES_SCHEMA; setupKataEnv sets KATA_HOME and KATA_DB
 	home := setupKataEnv(t)
 	t.Setenv("KATA_DSN", "postgres://user@db.example/kata?sslmode=verify-full")
 	t.Setenv("KATA_POSTGRES_SCHEMA", "alpha")
@@ -107,7 +107,7 @@ func TestHookRunsRootSeparatesPostgresSchemas(t *testing.T) {
 	assert.True(t, strings.HasPrefix(beta, filepath.Join(home, "hooks")))
 }
 
-func TestDaemonLogs_Hooks_PrintsChronological(t *testing.T) {
+func TestDaemonLogs_Hooks_PrintsChronological(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, dir, _ := setupHooksDir(t)
 	writeRuns(t, dir, map[string][]map[string]any{
 		"runs.jsonl.2": {{"event_id": 1, "result": "ok"}},
@@ -126,7 +126,7 @@ func TestDaemonLogs_Hooks_PrintsChronological(t *testing.T) {
 	}
 }
 
-func TestDaemonLogs_Hooks_FailedOnly(t *testing.T) {
+func TestDaemonLogs_Hooks_FailedOnly(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, dir, _ := setupHooksDir(t)
 	writeRuns(t, dir, map[string][]map[string]any{
 		"runs.jsonl": {
@@ -146,7 +146,7 @@ func TestDaemonLogs_Hooks_FailedOnly(t *testing.T) {
 	}
 }
 
-func TestDaemonLogs_Hooks_MalformedLineSkippedWithStderrWarning(t *testing.T) {
+func TestDaemonLogs_Hooks_MalformedLineSkippedWithStderrWarning(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, dir, _ := setupHooksDir(t)
 	contents := "{\"event_id\":1,\"result\":\"ok\"}\nnot-json\n{\"event_id\":2,\"result\":\"ok\"}\n"
 	if err := os.WriteFile(filepath.Join(dir, "runs.jsonl"), []byte(contents), 0o600); err != nil {
@@ -163,7 +163,7 @@ func TestDaemonLogs_Hooks_MalformedLineSkippedWithStderrWarning(t *testing.T) {
 	}
 }
 
-func TestDaemonLogs_Hooks_AgentSkipsMalformedLine(t *testing.T) {
+func TestDaemonLogs_Hooks_AgentSkipsMalformedLine(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, dir, _ := setupHooksDir(t)
 	contents := "{\"event_id\":1,\"result\":\"ok\"}\nnot-json\n{\"event_id\":2,\"result\":\"ok\"}\n"
 	if err := os.WriteFile(filepath.Join(dir, "runs.jsonl"), []byte(contents), 0o600); err != nil {
@@ -180,7 +180,7 @@ func TestDaemonLogs_Hooks_AgentSkipsMalformedLine(t *testing.T) {
 	assert.Contains(t, stderr, "skipping malformed line")
 }
 
-func TestDaemonLogs_Hooks_AgentOutputOneLinePerRecord(t *testing.T) {
+func TestDaemonLogs_Hooks_AgentOutputOneLinePerRecord(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, dir, _ := setupHooksDir(t)
 	writeRuns(t, dir, map[string][]map[string]any{
 		"runs.jsonl": {{
@@ -210,6 +210,7 @@ func TestDaemonLogs_Hooks_AgentOutputOneLinePerRecord(t *testing.T) {
 }
 
 func TestFormatAgentHookLogRecordFormatsDecodedRecord(t *testing.T) {
+	t.Parallel()
 	got := formatAgentHookLogRecord(map[string]jsontext.Value{
 		"event_id":   jsontext.Value(`1`),
 		"event_type": jsontext.Value(`"issue.created"`),
@@ -224,7 +225,7 @@ func TestFormatAgentHookLogRecordFormatsDecodedRecord(t *testing.T) {
 // runs.jsonl.N when the active runs.jsonl is missing. Before the fix,
 // the tail loop would early-return with the smallest-numbered rotated
 // file and never observe future writes to runs.jsonl.
-func TestDaemonLogs_Hooks_Tail_RotatedOnlyWaitsForActive(t *testing.T) {
+func TestDaemonLogs_Hooks_Tail_RotatedOnlyWaitsForActive(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, dir, _ := setupHooksDir(t)
 	// Only a rotated file exists at startup.
 	writeHookLog(t, dir, "runs.jsonl.1", map[string]any{"event_id": 99, "result": "ok"})
@@ -247,6 +248,7 @@ func TestDaemonLogs_Hooks_Tail_RotatedOnlyWaitsForActive(t *testing.T) {
 // `read` by len(line)+1, which over-counted the unflushed mid-line by
 // 1 byte and caused later ticks to miss content.
 func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "runs.jsonl")
 	first := `{"event_id":1,"result":"ok"}` + "\n"
@@ -298,6 +300,7 @@ func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 // emits everything currently in the file. This covers the case where
 // the active file appears between one-shot and follow.
 func TestFollowActive_NoMark_EmitsExistingContent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "runs.jsonl")
 	if err := os.WriteFile(path, []byte(`{"event_id":42,"result":"ok"}`+"\n"), 0o600); err != nil {
@@ -319,6 +322,7 @@ func TestFollowActive_NoMark_EmitsExistingContent(t *testing.T) {
 // when runHookLogOnce already consumed the file up to mark.size,
 // follow resumes there and does NOT re-print prior content.
 func TestFollowActive_MarkAtSize_DoesNotReEmit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "runs.jsonl")
 	initial := []byte(`{"event_id":1,"result":"ok"}` + "\n")
@@ -345,7 +349,7 @@ func TestFollowActive_MarkAtSize_DoesNotReEmit(t *testing.T) {
 // TestRunHookLogOnce_Mark_ReportsActiveFileSize verifies that the
 // one-shot pass reports a set mark with the size of runs.jsonl after
 // it was read, so tail can resume at the exact byte offset.
-func TestRunHookLogOnce_Mark_ReportsActiveFileSize(t *testing.T) {
+func TestRunHookLogOnce_Mark_ReportsActiveFileSize(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB
 	_, dir, _ := setupHooksDir(t)
 	contents := `{"event_id":1,"result":"ok"}` + "\n"
 	path := filepath.Join(dir, "runs.jsonl")
@@ -368,7 +372,7 @@ func TestRunHookLogOnce_Mark_ReportsActiveFileSize(t *testing.T) {
 // TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent verifies that the
 // one-shot mark stays unset when runs.jsonl is absent — so follow
 // later starts at offset 0 once the file appears.
-func TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent(t *testing.T) {
+func TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB
 	_, dir, _ := setupHooksDir(t)
 	// Only a rotated file exists.
 	writeHookLog(t, dir, "runs.jsonl.1", map[string]any{"event_id": 99, "result": "ok"})
@@ -382,7 +386,7 @@ func TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent(t *testing.T) {
 	}
 }
 
-func TestDaemonLogs_Hooks_Tail_PicksUpNewLines(t *testing.T) {
+func TestDaemonLogs_Hooks_Tail_PicksUpNewLines(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	_, dir, _ := setupHooksDir(t)
 	path := filepath.Join(dir, "runs.jsonl")
 	writeHookLog(t, dir, "runs.jsonl", map[string]any{"event_id": 1, "result": "ok"})
@@ -403,7 +407,7 @@ func TestDaemonLogs_Hooks_Tail_PicksUpNewLines(t *testing.T) {
 // finding #7 part 1: --limit -1 / --limit 0 used to be silently
 // treated as "no limit", contradicting the help text. Reject with
 // kindValidation so the user sees what actually happened.
-func TestDaemonLogs_RejectsNonPositiveLimit(t *testing.T) {
+func TestDaemonLogs_RejectsNonPositiveLimit(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, lim := range []string{"0", "-1"} {
 		resetFlags(t)
 		_, _, err := executeRootCapture(t, context.Background(),
@@ -419,7 +423,7 @@ func TestDaemonLogs_RejectsNonPositiveLimit(t *testing.T) {
 // finding #7 part 2: --hook-index -2 used to be silently accepted,
 // contradicting the help text where -1 means "all". Anything below
 // -1 is meaningless; reject loudly.
-func TestDaemonLogs_RejectsHookIndexBelowMinusOne(t *testing.T) {
+func TestDaemonLogs_RejectsHookIndexBelowMinusOne(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	_, _, err := executeRootCapture(t, context.Background(),
 		"daemon", "logs", "--hooks", "--hook-index", "-2")

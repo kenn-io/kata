@@ -17,6 +17,7 @@ import (
 )
 
 func TestClientCloseWithEvidenceSendsAuthenticatedCompletion(t *testing.T) {
+	t.Parallel()
 	var got api.CloseActionRequestBody
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/projects/7/issues/abc4/actions/close", r.URL.Path)
@@ -44,6 +45,7 @@ func TestClientCloseWithEvidenceSendsAuthenticatedCompletion(t *testing.T) {
 }
 
 func TestCloseInputFromFormBuildsTypedEvidence(t *testing.T) {
+	t.Parallel()
 	s := newCloseForm(formTarget{projectID: 7, issueShortID: "abc4", origin: "detail"})
 	s.field(fieldCloseReason).radio.set("audit-no-change")
 	s.field(fieldCloseMessage).area.SetValue("Implemented the scoped worker flow and verified its behavior.")
@@ -61,6 +63,7 @@ func TestCloseInputFromFormBuildsTypedEvidence(t *testing.T) {
 }
 
 func TestCloseInputFromFormBuildsWontfixWithoutEvidence(t *testing.T) {
+	t.Parallel()
 	s := newCloseForm(formTarget{projectID: 7, issueShortID: "abc4", origin: "detail"})
 	s.field(fieldCloseReason).radio.set("wontfix")
 	s.field(fieldCloseMessage).area.SetValue("This behavior is intentionally unsupported because it violates the authority boundary.")
@@ -72,7 +75,7 @@ func TestCloseInputFromFormBuildsWontfixWithoutEvidence(t *testing.T) {
 	assert.Empty(t, got.Evidence)
 }
 
-func TestIssueScopedCloseCapabilityOpensEvidenceForm(t *testing.T) {
+func TestIssueScopedCloseCapabilityOpensEvidenceForm(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/instance", r.URL.Path)
 		future := time.Now().UTC().Add(time.Hour)
@@ -102,7 +105,7 @@ func TestIssueScopedCloseCapabilityOpensEvidenceForm(t *testing.T) {
 	assert.Equal(t, "list", got.input.target.origin)
 }
 
-func TestIssueScopedCapabilitiesSuppressParentEditing(t *testing.T) {
+func TestIssueScopedCapabilitiesSuppressParentEditing(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/instance", r.URL.Path)
 		future := time.Now().UTC().Add(time.Hour)
@@ -130,7 +133,7 @@ func TestIssueScopedCapabilitiesSuppressParentEditing(t *testing.T) {
 	assert.Equal(t, inputNone, m.input.kind)
 }
 
-func TestReadOnlyScopedCapabilitiesPreventClose(t *testing.T) {
+func TestReadOnlyScopedCapabilitiesPreventClose(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		future := time.Now().UTC().Add(time.Hour)
 		respondJSON(t, w, InstanceInfo{Auth: AuthInfo{
@@ -157,7 +160,7 @@ func TestReadOnlyScopedCapabilitiesPreventClose(t *testing.T) {
 	assert.Equal(t, inputNone, m.input.kind)
 }
 
-func TestUnscopedCapabilityRefreshPreservesParentPrompt(t *testing.T) {
+func TestUnscopedCapabilityRefreshPreservesParentPrompt(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.input = inputState{kind: inputParentPrompt}
 
@@ -166,7 +169,7 @@ func TestUnscopedCapabilityRefreshPreservesParentPrompt(t *testing.T) {
 	assert.Equal(t, inputParentPrompt, m.input.kind)
 }
 
-func TestFailedCapabilityDiscoveryRetriesBeforeMutationKeys(t *testing.T) {
+func TestFailedCapabilityDiscoveryRetriesBeforeMutationKeys(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	var calls atomic.Int32
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		if calls.Add(1) == 1 {
@@ -204,6 +207,7 @@ func TestFailedCapabilityDiscoveryRetriesBeforeMutationKeys(t *testing.T) {
 }
 
 func TestGetInstanceRejectsPartialScopedCapabilities(t *testing.T) {
+	t.Parallel()
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondJSON(t, w, InstanceInfo{Auth: AuthInfo{
 			Kind:  "db_token",
@@ -218,6 +222,7 @@ func TestGetInstanceRejectsPartialScopedCapabilities(t *testing.T) {
 }
 
 func TestGetInstanceRejectsExpiredScopedCapabilities(t *testing.T) {
+	t.Parallel()
 	expired := time.Now().UTC().Add(-time.Minute)
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondJSON(t, w, InstanceInfo{Auth: AuthInfo{
@@ -235,7 +240,7 @@ func TestGetInstanceRejectsExpiredScopedCapabilities(t *testing.T) {
 	assert.Contains(t, err.Error(), "incomplete issue-scoped capabilities")
 }
 
-func TestScopedTUIClientCompletesIssueWithEvidence(t *testing.T) {
+func TestScopedTUIClientCompletesIssueWithEvidence(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB
 	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(ctx, "example-project")

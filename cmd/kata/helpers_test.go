@@ -31,6 +31,7 @@ func runEmitJSON(t *testing.T, payload any) (string, error) {
 }
 
 func TestResolveBody(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		setup   func(t *testing.T) (BodySources, io.Reader)
@@ -100,7 +101,7 @@ func TestResolveBody(t *testing.T) {
 	}
 }
 
-func TestResolveActor_Precedence(t *testing.T) {
+func TestResolveActor_Precedence(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR and USER
 	t.Run("flag wins", func(t *testing.T) {
 		t.Setenv("KATA_AUTHOR", "env-shouldnt-win")
 		t.Setenv("USER", "user-shouldnt-win")
@@ -139,6 +140,7 @@ func TestResolveActor_Precedence(t *testing.T) {
 }
 
 func TestEmitJSON_AddsAPIVersion(t *testing.T) {
+	t.Parallel()
 	out, err := runEmitJSON(t, map[string]string{"x": "y"})
 	require.NoError(t, err)
 	assert.Contains(t, out, `"kata_api_version":1`)
@@ -147,12 +149,14 @@ func TestEmitJSON_AddsAPIVersion(t *testing.T) {
 }
 
 func TestEmitJSON_EmptyObject(t *testing.T) {
+	t.Parallel()
 	out, err := runEmitJSON(t, struct{}{})
 	require.NoError(t, err)
 	assert.Equal(t, "{\"kata_api_version\":1}\n", out)
 }
 
 func TestEmitJSON_RejectsNonObject(t *testing.T) {
+	t.Parallel()
 	_, err := runEmitJSON(t, "scalar")
 	require.Error(t, err)
 	_, err = runEmitJSON(t, []int{1, 2, 3})
@@ -162,6 +166,7 @@ func TestEmitJSON_RejectsNonObject(t *testing.T) {
 }
 
 func TestEmitJSON_RejectsReservedKey(t *testing.T) {
+	t.Parallel()
 	_, err := runEmitJSON(t, map[string]any{"kata_api_version": "evil"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "kata_api_version")
@@ -174,6 +179,7 @@ func TestEmitJSON_RejectsReservedKey(t *testing.T) {
 // bytes.Contains(`"kata_api_version"`) guard would have let this slip
 // through and produced a duplicate-keyed envelope downstream.
 func TestEmitJSON_RejectsEscapedReservedKey(t *testing.T) {
+	t.Parallel()
 	// Build the escape sequence explicitly — backtick raw strings interpret
 	// the bytes literally, but writing `k` here avoids any rendering
 	// ambiguity in the source file.

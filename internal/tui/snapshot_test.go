@@ -233,7 +233,7 @@ func snapDetailHierarchyFixture() detailModel {
 // TestSnapshot_List_DefaultMixedStatus locks down the steady-state list
 // view at width 120 with three rows and the cursor on row 2. The fixture
 // covers open, closed, and soft-deleted statusChip branches.
-func TestSnapshot_List_DefaultMixedStatus(t *testing.T) {
+func TestSnapshot_List_DefaultMixedStatus(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapListFixture())
 	lm.cursor = 1
@@ -253,7 +253,7 @@ func TestSnapshot_List_DefaultMixedStatus(t *testing.T) {
 // TestSnapshot_List_EmptyAfterFilter exercises the "no rows visible"
 // branch of renderBody: a search filter narrows everything out so the
 // empty-state hint appears.
-func TestSnapshot_List_EmptyAfterFilter(t *testing.T) {
+func TestSnapshot_List_EmptyAfterFilter(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapListFixture())
 	lm.filter = ListFilter{Search: "no-match-anywhere"}
@@ -264,7 +264,7 @@ func TestSnapshot_List_EmptyAfterFilter(t *testing.T) {
 // TestSnapshot_QuitConfirmModal covers the M3.5b quit-confirm
 // modal overlaid on a list view. The modal sits centered over the
 // rendered background; underlying content stays painted around it.
-func TestSnapshot_QuitConfirmModal(t *testing.T) {
+func TestSnapshot_QuitConfirmModal(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapListFixture())
 	lm.cursor = 1
@@ -275,7 +275,7 @@ func TestSnapshot_QuitConfirmModal(t *testing.T) {
 	assertGolden(t, "quit-confirm-modal", got)
 }
 
-func TestSnapshot_CommentDiscardConfirmModal(t *testing.T) {
+func TestSnapshot_CommentDiscardConfirmModal(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := formFixture()
 	m.width, m.height = 120, 30
@@ -294,7 +294,7 @@ func TestSnapshot_CommentDiscardConfirmModal(t *testing.T) {
 	assertGolden(t, "comment-discard-confirm-modal", got)
 }
 
-func TestSnapshot_NewIssueDiscardConfirmModal(t *testing.T) {
+func TestSnapshot_NewIssueDiscardConfirmModal(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := newIssueFormFixture()
 	m.width, m.height = 120, 30
@@ -316,7 +316,7 @@ func TestSnapshot_NewIssueDiscardConfirmModal(t *testing.T) {
 // TestSnapshot_List_SearchBarActive covers the inline command bar
 // in place of the chip strip when chrome.input.kind == inputSearchBar.
 // The footer help row swaps to the bar's enter/esc/ctrl+u keys.
-func TestSnapshot_List_SearchBarActive(t *testing.T) {
+func TestSnapshot_List_SearchBarActive(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapListFixture())
 	chrome := snapViewChrome()
@@ -325,7 +325,7 @@ func TestSnapshot_List_SearchBarActive(t *testing.T) {
 	assertGolden(t, "list-search-bar-active", got)
 }
 
-func TestSnapshot_List_SearchResultsFocused(t *testing.T) {
+func TestSnapshot_List_SearchResultsFocused(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapListFixture())
 	chrome := snapViewChrome()
@@ -339,7 +339,7 @@ func TestSnapshot_List_SearchResultsFocused(t *testing.T) {
 // in the footer status line. With 50 issues and a 30-row terminal, the
 // chrome reserves enough rows that not every issue fits — the
 // indicator surfaces as `[start-end of N issues]` aligned right.
-func TestSnapshot_List_ScrollIndicator(t *testing.T) {
+func TestSnapshot_List_ScrollIndicator(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	issues := make([]Issue, 50)
 	for i := range issues {
@@ -366,7 +366,7 @@ func ptrFormat(n int64) string {
 	return fmt.Sprintf("%d", n)
 }
 
-func TestSnapshot_List_WithFilterChips(t *testing.T) {
+func TestSnapshot_List_WithFilterChips(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel([]Issue{{
 		UID:       "01TEST-aaa1",
@@ -381,14 +381,14 @@ func TestSnapshot_List_WithFilterChips(t *testing.T) {
 	assertGolden(t, "list-with-filter-chips", got)
 }
 
-func TestSnapshot_List_TreeCollapsed(t *testing.T) {
+func TestSnapshot_List_TreeCollapsed(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapTreeFixture())
 	got := lm.View(120, 22, snapViewChrome())
 	assertGolden(t, "list-tree-collapsed", got)
 }
 
-func TestSnapshot_List_TreeExpanded(t *testing.T) {
+func TestSnapshot_List_TreeExpanded(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapTreeFixture())
 	lm.expanded = expansionSet{{projectID: 7, shortID: "p010"}: true}
@@ -396,7 +396,7 @@ func TestSnapshot_List_TreeExpanded(t *testing.T) {
 	assertGolden(t, "list-tree-expanded", got)
 }
 
-func TestSnapshot_List_TreeAutoExpandedMatch(t *testing.T) {
+func TestSnapshot_List_TreeAutoExpandedMatch(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapTreeFixture())
 	lm.filter = ListFilter{Search: "jump target"}
@@ -404,7 +404,7 @@ func TestSnapshot_List_TreeAutoExpandedMatch(t *testing.T) {
 	assertGolden(t, "list-tree-auto-expanded-match", got)
 }
 
-func TestSnapshot_List_TreeContextRow(t *testing.T) {
+func TestSnapshot_List_TreeContextRow(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapTreeFixture())
 	lm.filter = ListFilter{Search: "hint bars"}
@@ -412,7 +412,7 @@ func TestSnapshot_List_TreeContextRow(t *testing.T) {
 	assertGolden(t, "list-tree-context-row", got)
 }
 
-func TestSnapshot_List_TreeNoColor(t *testing.T) {
+func TestSnapshot_List_TreeNoColor(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	lm := snapListModel(snapTreeFixture())
 	lm.expanded = expansionSet{{projectID: 7, shortID: "p010"}: true}
@@ -426,7 +426,7 @@ func TestSnapshot_List_TreeNoColor(t *testing.T) {
 
 // TestSnapshot_Detail_WithLabelPrompt covers the M3b panel-local
 // prompt rendered at the bottom of the detail pane.
-func TestSnapshot_Detail_WithLabelPrompt(t *testing.T) {
+func TestSnapshot_Detail_WithLabelPrompt(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	chrome := viewChrome{
@@ -438,14 +438,14 @@ func TestSnapshot_Detail_WithLabelPrompt(t *testing.T) {
 	assertGolden(t, "detail-with-label-prompt", got)
 }
 
-func TestSnapshot_Detail_WithChildren(t *testing.T) {
+func TestSnapshot_Detail_WithChildren(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailHierarchyFixture()
 	got := dm.View(120, 32, viewChrome{})
 	assertGolden(t, "detail-with-children", got)
 }
 
-func TestSnapshot_Detail_ChildrenFocus(t *testing.T) {
+func TestSnapshot_Detail_ChildrenFocus(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailHierarchyFixture()
 	dm.detailFocus = focusChildren
@@ -458,7 +458,7 @@ func TestSnapshot_Detail_ChildrenFocus(t *testing.T) {
 // indicator: 30 comments on a 30-row terminal forces the visible
 // window to slice into the entries, and the footer shows
 // `[start-end of N comments]`.
-func TestSnapshot_Detail_LongCommentsList(t *testing.T) {
+func TestSnapshot_Detail_LongCommentsList(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
@@ -481,7 +481,7 @@ func TestSnapshot_Detail_LongCommentsList(t *testing.T) {
 // TestSnapshot_Detail_CommentsTab locks the comments tab render. Tab
 // strip shows Comments highlighted; the entry list contains the two
 // fixture comments with author, timestamp, and indented body lines.
-func TestSnapshot_Detail_CommentsTab(t *testing.T) {
+func TestSnapshot_Detail_CommentsTab(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.activeTab = tabComments
@@ -490,7 +490,7 @@ func TestSnapshot_Detail_CommentsTab(t *testing.T) {
 }
 
 // TestSnapshot_Detail_EventsTab same fixture, events tab active.
-func TestSnapshot_Detail_EventsTab(t *testing.T) {
+func TestSnapshot_Detail_EventsTab(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.activeTab = tabEvents
@@ -499,7 +499,7 @@ func TestSnapshot_Detail_EventsTab(t *testing.T) {
 }
 
 // TestSnapshot_Detail_LinksTab same fixture, links tab active.
-func TestSnapshot_Detail_LinksTab(t *testing.T) {
+func TestSnapshot_Detail_LinksTab(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.activeTab = tabLinks
@@ -509,7 +509,7 @@ func TestSnapshot_Detail_LinksTab(t *testing.T) {
 
 // TestSnapshot_Detail_WithLabels exercises the assignment row's chip
 // strip on a wide terminal: owner left, three sorted chips right.
-func TestSnapshot_Detail_WithLabels(t *testing.T) {
+func TestSnapshot_Detail_WithLabels(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.issue.Owner = new("alice")
@@ -518,7 +518,7 @@ func TestSnapshot_Detail_WithLabels(t *testing.T) {
 	assertGolden(t, "detail-with-labels", got)
 }
 
-func TestSnapshot_Detail_DocumentPage80x50(t *testing.T) {
+func TestSnapshot_Detail_DocumentPage80x50(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailHierarchyFixture()
 	dm.issue.Owner = new("alice")
@@ -541,7 +541,7 @@ func TestSnapshot_Detail_DocumentPage80x50(t *testing.T) {
 // so the auto-select-first-non-empty-activity-tab path runs (the
 // real binary's first-open behavior) and Events lights up instead
 // of an empty Comments tab.
-func TestSnapshot_Detail_DocumentWide160x32(t *testing.T) {
+func TestSnapshot_Detail_DocumentWide160x32(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	iss := Issue{
 		ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1",
@@ -565,7 +565,7 @@ func TestSnapshot_Detail_DocumentWide160x32(t *testing.T) {
 	assertGolden(t, "detail-document-wide-160x32", got)
 }
 
-func TestSnapshot_Detail_DocumentNarrow(t *testing.T) {
+func TestSnapshot_Detail_DocumentNarrow(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.issue.Owner = new("alice")
@@ -575,7 +575,7 @@ func TestSnapshot_Detail_DocumentNarrow(t *testing.T) {
 	assertGolden(t, "detail-document-narrow", got)
 }
 
-func TestSnapshot_Detail_DocumentEmpty(t *testing.T) {
+func TestSnapshot_Detail_DocumentEmpty(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	iss := Issue{ProjectID: 7, UID: "01TEST-99zz", ShortID: "99zz", Title: "empty issue", Status: "open"}
 	dm := detailModel{issue: &iss}
@@ -583,7 +583,7 @@ func TestSnapshot_Detail_DocumentEmpty(t *testing.T) {
 	assertGolden(t, "detail-document-empty", got)
 }
 
-func TestSnapshot_Detail_DocumentMarkdown(t *testing.T) {
+func TestSnapshot_Detail_DocumentMarkdown(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	iss := Issue{
 		ProjectID: 7,
@@ -614,7 +614,7 @@ func TestSnapshot_Detail_DocumentMarkdown(t *testing.T) {
 // one item per row at narrow widths) does not crowd the labels
 // row out of the document body — the test is about width-driven
 // chip behaviour, not height-driven layout collapse.
-func TestSnapshot_Detail_LabelsNarrow_OverflowAndDegrade(t *testing.T) {
+func TestSnapshot_Detail_LabelsNarrow_OverflowAndDegrade(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.issue.Owner = new("alice")
@@ -634,7 +634,7 @@ func TestSnapshot_Detail_LabelsNarrow_OverflowAndDegrade(t *testing.T) {
 
 // TestSnapshot_Help_Narrow renders help at width 60 (helpColumnCount=1).
 // Sections stack vertically.
-func TestSnapshot_Help_Narrow(t *testing.T) {
+func TestSnapshot_Help_Narrow(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	got := renderHelp(newKeymap(), 60, ListFilter{})
 	assertGolden(t, "help-narrow", got)
@@ -642,14 +642,14 @@ func TestSnapshot_Help_Narrow(t *testing.T) {
 
 // TestSnapshot_Help_Wide renders help at width 120 (helpColumnCount=3).
 // Sections lay out side-by-side.
-func TestSnapshot_Help_Wide(t *testing.T) {
+func TestSnapshot_Help_Wide(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	got := renderHelp(newKeymap(), 120, ListFilter{})
 	assertGolden(t, "help-wide", got)
 }
 
 // TestSnapshot_Empty renders the onboarding empty state at 80x24.
-func TestSnapshot_Empty(t *testing.T) {
+func TestSnapshot_Empty(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	got := renderEmpty(80, 24)
 	assertGolden(t, "empty-state", got)
@@ -659,7 +659,7 @@ func TestSnapshot_Empty(t *testing.T) {
 // canonical narrow fixture (60x24 — below the 80-cell width
 // threshold). The bordered panel sits centered; q/ctrl+c routing is
 // unaffected (covered by narrow_terminal_test.go).
-func TestSnapshot_NarrowTerminalHint(t *testing.T) {
+func TestSnapshot_NarrowTerminalHint(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	got := renderTooNarrow(60, 24)
 	assertGolden(t, "narrow-terminal-hint", got)
@@ -668,7 +668,7 @@ func TestSnapshot_NarrowTerminalHint(t *testing.T) {
 // TestSnapshot_LabelPrompt_MenuOpen renders the autocomplete menu
 // for a `+` label prompt with 5 suggestions and the highlight on
 // the first row. Pinned to 120x30 like the other detail snapshots.
-func TestSnapshot_LabelPrompt_MenuOpen(t *testing.T) {
+func TestSnapshot_LabelPrompt_MenuOpen(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := snapLabelPromptModel()
 	m.projectLabels.byProject[7] = labelCacheEntry{
@@ -687,7 +687,7 @@ func TestSnapshot_LabelPrompt_MenuOpen(t *testing.T) {
 
 // TestSnapshot_LabelPrompt_Loading renders the loading-placeholder
 // menu state — the cache is fetching but has no entries yet.
-func TestSnapshot_LabelPrompt_Loading(t *testing.T) {
+func TestSnapshot_LabelPrompt_Loading(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := snapLabelPromptModel()
 	m.projectLabels.byProject[7] = labelCacheEntry{
@@ -699,7 +699,7 @@ func TestSnapshot_LabelPrompt_Loading(t *testing.T) {
 
 // TestSnapshot_LabelPrompt_Error renders the error-placeholder menu
 // state — the cache has an err and no labels.
-func TestSnapshot_LabelPrompt_Error(t *testing.T) {
+func TestSnapshot_LabelPrompt_Error(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := snapLabelPromptModel()
 	m.projectLabels.byProject[7] = labelCacheEntry{
@@ -711,7 +711,7 @@ func TestSnapshot_LabelPrompt_Error(t *testing.T) {
 
 // TestSnapshot_LabelPrompt_Empty renders the empty-placeholder menu
 // state — the cache fetched, has no entries, no error.
-func TestSnapshot_LabelPrompt_Empty(t *testing.T) {
+func TestSnapshot_LabelPrompt_Empty(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := snapLabelPromptModel()
 	m.projectLabels.byProject[7] = labelCacheEntry{
@@ -724,7 +724,7 @@ func TestSnapshot_LabelPrompt_Empty(t *testing.T) {
 // TestSnapshot_LabelPrompt_Scroll renders the menu with 12
 // suggestions and the highlight at index 9 — the visible window
 // scrolls past the first entries.
-func TestSnapshot_LabelPrompt_Scroll(t *testing.T) {
+func TestSnapshot_LabelPrompt_Scroll(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := snapLabelPromptModel()
 	suggestions := make([]LabelCount, 12)
@@ -764,7 +764,7 @@ func snapSplitModel(width, height int, focus focusPane) Model {
 
 // TestSnapshot_Split_Wide locks the split rendering at 160x40 with
 // focus on the list pane.
-func TestSnapshot_Split_Wide(t *testing.T) {
+func TestSnapshot_Split_Wide(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := snapSplitModel(160, 40, focusList)
 	got := m.viewContent()
@@ -774,7 +774,7 @@ func TestSnapshot_Split_Wide(t *testing.T) {
 // TestSnapshot_Split_FocusDetail locks the split rendering at 160x40
 // with focus on the detail pane (the borders should swap colors but
 // snapshots run under colorNone so we mainly assert the body shape).
-func TestSnapshot_Split_FocusDetail(t *testing.T) {
+func TestSnapshot_Split_FocusDetail(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := snapSplitModel(160, 40, focusDetail)
 	got := m.viewContent()
@@ -784,7 +784,7 @@ func TestSnapshot_Split_FocusDetail(t *testing.T) {
 // TestSnapshot_Split_AtBreakpoint locks the split rendering at the
 // minimum split-mode terminal size (140x36). This pin catches any
 // regression where the breakpoint thresholds shift unexpectedly.
-func TestSnapshot_Split_AtBreakpoint(t *testing.T) {
+func TestSnapshot_Split_AtBreakpoint(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	m := snapSplitModel(140, 36, focusList)
 	got := m.viewContent()

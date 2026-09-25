@@ -12,6 +12,7 @@ import (
 )
 
 func TestQueueHelpRows_ConditionalItems(t *testing.T) {
+	t.Parallel()
 	withChildren := Model{list: listModel{issues: hierarchyIssues()}}
 	assertHelpItemsPresent(t, withChildren.queueHelpRows(),
 		helplayout.HelpItem{Key: "space", Description: "expand"},
@@ -47,6 +48,7 @@ func TestQueueHelpRows_ConditionalItems(t *testing.T) {
 // link/close/reopen/quit). Children focus swaps the navigation
 // header (↑↓ child / ↵ open child) but keeps the action surface.
 func TestDetailHelpRows_Contexts(t *testing.T) {
+	t.Parallel()
 	activity := Model{detail: detailModel{
 		issue:       &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "issue", Status: "open"},
 		detailFocus: focusActivity,
@@ -85,6 +87,7 @@ func TestDetailHelpRows_Contexts(t *testing.T) {
 }
 
 func TestHelpRows_InputAndModalContexts(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		m    Model
@@ -152,6 +155,7 @@ func TestHelpRows_InputAndModalContexts(t *testing.T) {
 }
 
 func TestViewChromeHelpRows_ModalPrecedesInput(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		modal modalKind
@@ -199,7 +203,7 @@ func TestViewChromeHelpRows_ModalPrecedesInput(t *testing.T) {
 	}
 }
 
-func TestAuxiliaryViewFooters_ModalPrecedesActions(t *testing.T) {
+func TestAuxiliaryViewFooters_ModalPrecedesActions(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	projects := setupProjectsView()
 	daemons := setupDaemonView()
 	federation := setupFederationView()
@@ -246,7 +250,7 @@ func TestAuxiliaryViewFooters_ModalPrecedesActions(t *testing.T) {
 	}
 }
 
-func TestFederationDetailEmpty_ModalFooterPrecedesEarlyReturn(t *testing.T) {
+func TestFederationDetailEmpty_ModalFooterPrecedesEarlyReturn(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupFederationView()
 	m.width, m.height = 120, 24
 	m.federation.mode = federationModeDetail
@@ -273,6 +277,7 @@ func lastRenderedLine(rendered string) string {
 // document refactor split arrows (viewport scroll) from j/k (row
 // cursor) — both must be discoverable from the persistent help row.
 func TestPersistentHelpRowsPreferArrowNotation(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		list:   listModel{issues: hierarchyIssues()},
 		detail: hierarchyDetailModel(focusActivity),
@@ -284,7 +289,7 @@ func TestPersistentHelpRowsPreferArrowNotation(t *testing.T) {
 	}
 }
 
-func TestFooterHelpTableParity(t *testing.T) {
+func TestFooterHelpTableParity(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	oldMode, oldDark := activeColorMode, activeHasDarkBackground
 	defer func() { applyColorMode(oldMode, oldDark) }()
 
@@ -426,6 +431,7 @@ func TestFooterHelpTableParity(t *testing.T) {
 }
 
 func TestRenderHelpTable_ReflowsToFitWidth80(t *testing.T) {
+	t.Parallel()
 	rows := [][]helplayout.HelpItem{{
 		{Key: "↑↓", Description: "move"},
 		{Key: "↵", Description: "open"},
@@ -447,6 +453,7 @@ func TestRenderHelpTable_ReflowsToFitWidth80(t *testing.T) {
 }
 
 func TestReflowHelpRows_ExtremeNarrowFallsBackToOneItemPerRow(t *testing.T) {
+	t.Parallel()
 	rows := [][]helplayout.HelpItem{{
 		{Key: "↑↓", Description: "move"},
 		{Key: "↵", Description: "open"},
@@ -464,6 +471,7 @@ func TestReflowHelpRows_ExtremeNarrowFallsBackToOneItemPerRow(t *testing.T) {
 }
 
 func TestListViewFooterUsesAdaptiveHelpTable(t *testing.T) {
+	t.Parallel()
 	lm := listModel{issues: hierarchyIssues()}
 	got := stripANSI(lm.View(80, 14, viewChrome{}))
 	assertLineCount(t, got, 14)
@@ -474,6 +482,7 @@ func TestListViewFooterUsesAdaptiveHelpTable(t *testing.T) {
 }
 
 func TestDetailViewFooterUsesAdaptiveChildrenFocusHints(t *testing.T) {
+	t.Parallel()
 	dm := hierarchyDetailModel(focusChildren)
 	got := stripANSI(dm.View(80, 18, viewChrome{}))
 	assertLineCount(t, got, 18)

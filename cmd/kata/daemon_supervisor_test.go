@@ -11,6 +11,7 @@ import (
 )
 
 func TestDaemonWorkerGroupJoinsCancelledWorkers(t *testing.T) {
+	t.Parallel()
 	group := newDaemonWorkerGroup()
 	workerCtx, cancel := context.WithCancel(context.Background())
 	exited := make(chan struct{})
@@ -31,6 +32,7 @@ func TestDaemonWorkerGroupJoinsCancelledWorkers(t *testing.T) {
 }
 
 func TestDaemonWorkerGroupReportsUnjoinedWorker(t *testing.T) {
+	t.Parallel()
 	group := newDaemonWorkerGroup()
 	release := make(chan struct{})
 	group.Go(func() { <-release })
@@ -60,6 +62,7 @@ func (s *testHookShutdown) Shutdown(ctx context.Context) error {
 }
 
 func TestDaemonShutdownCoordinatorDrainsHookProducersBeforeStoppingHooks(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	workers := newDaemonWorkerGroup()
 	workerCanceled := make(chan struct{})
@@ -112,6 +115,7 @@ func TestDaemonShutdownCoordinatorDrainsHookProducersBeforeStoppingHooks(t *test
 }
 
 func TestDaemonShutdownCoordinatorWaitsForHTTPHandlersBeforeStoppingHooks(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	hooks := &testHookShutdown{started: make(chan struct{}), release: make(chan struct{})}
 	shutdown := startDaemonShutdownCoordinator(
@@ -135,6 +139,7 @@ func TestDaemonShutdownCoordinatorWaitsForHTTPHandlersBeforeStoppingHooks(t *tes
 }
 
 func TestDaemonShutdownCoordinatorRejectsReadinessAfterShutdownStarts(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	shutdown := startDaemonShutdownCoordinator(
 		ctx,
@@ -159,6 +164,7 @@ func TestDaemonShutdownCoordinatorRejectsReadinessAfterShutdownStarts(t *testing
 }
 
 func TestDaemonShutdownCoordinatorLetsInFlightReadinessWinBeforeShutdown(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	shutdown := startDaemonShutdownCoordinator(
 		ctx,
@@ -208,6 +214,7 @@ func TestDaemonShutdownCoordinatorLetsInFlightReadinessWinBeforeShutdown(t *test
 }
 
 func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenWorkerRemainsUnjoined(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	workers := newDaemonWorkerGroup()
 	workerRelease := make(chan struct{})
@@ -249,6 +256,7 @@ func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenWorkerRemainsUnjoined(t *
 }
 
 func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenHTTPRemainsUnjoined(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	hooks := &testHookShutdown{started: make(chan struct{}), release: make(chan struct{})}
 	shutdown := startDaemonShutdownCoordinator(

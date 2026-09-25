@@ -32,7 +32,7 @@ func stubDistribution(t *testing.T, distribution string) {
 	t.Cleanup(func() { version.Distribution = orig })
 }
 
-func TestVersion_HumanFormatIncludesBuildMetadata(t *testing.T) {
+func TestVersion_HumanFormatIncludesBuildMetadata(t *testing.T) { //nolint:paralleltest // resetFlags sets package var flags; stubVersionInfo sets package var version.BuildDate
 	resetFlags(t)
 	stubVersionInfo(t, "v0.0.1-test", "abc1234", "2026-05-12T11:17:12Z")
 	stubDistribution(t, "homebrew")
@@ -50,7 +50,7 @@ func TestVersion_HumanFormatIncludesBuildMetadata(t *testing.T) {
 	assert.Equal(t, expected, out)
 }
 
-func TestVersion_JSONEnvelope(t *testing.T) {
+func TestVersion_JSONEnvelope(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	resetFlags(t)
 	stubVersionInfo(t, "v0.0.1-test", "abc1234", "2026-05-12T11:17:12Z")
 	stubDistribution(t, "homebrew")
@@ -82,14 +82,14 @@ func TestVersion_JSONEnvelope(t *testing.T) {
 	assert.Equal(t, "homebrew", got.Distribution)
 }
 
-func TestVersion_AgentIncludesFormatVersion(t *testing.T) {
+func TestVersion_AgentIncludesFormatVersion(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	stubDistribution(t, "homebrew")
 	out := string(executeRoot(t, newRootCmd(), "--agent", "version"))
 	assert.Equal(t, "OK version version="+agentValue(version.Version)+" agent_format=1\n", out)
 }
 
-func TestVersion_JSONIncludesAgentFormat(t *testing.T) {
+func TestVersion_JSONIncludesAgentFormat(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	out := executeRoot(t, newRootCmd(), "--json", "version")
 	var got map[string]any
@@ -97,7 +97,7 @@ func TestVersion_JSONIncludesAgentFormat(t *testing.T) {
 	assert.Equal(t, float64(agentFormatVersion), got["agent_format"])
 }
 
-func TestVersion_IsWiredOnRoot(t *testing.T) {
+func TestVersion_IsWiredOnRoot(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetFlags(t)
 	root := newRootCmd()
 	for _, c := range root.Commands() {
@@ -111,7 +111,7 @@ func TestVersion_IsWiredOnRoot(t *testing.T) {
 // The conventional `--version` entry point must produce exactly what the
 // `version` subcommand produces, so tooling that probes either spelling gets
 // the same answer.
-func TestVersion_RootFlagMatchesSubcommand(t *testing.T) {
+func TestVersion_RootFlagMatchesSubcommand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	stubVersionInfo(t, "v0.0.1-test", "abc1234", "2026-05-12T11:17:12Z")
 
 	want := string(executeRoot(t, newRootCmd(), "version"))
@@ -121,7 +121,7 @@ func TestVersion_RootFlagMatchesSubcommand(t *testing.T) {
 
 // --version deliberately has no shorthand: -v conventionally means verbose,
 // and reclaiming it after release would be a breaking change.
-func TestVersion_RootFlagHasNoShorthand(t *testing.T) {
+func TestVersion_RootFlagHasNoShorthand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	assert.Empty(t, newRootCmd().Flags().Lookup("version").Shorthand)
 
 	_, _, err := executeRootCapture(t, context.Background(), "-v")
@@ -129,7 +129,7 @@ func TestVersion_RootFlagHasNoShorthand(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown shorthand flag: 'v'")
 }
 
-func TestVersion_RootFlagHonorsOutputMode(t *testing.T) {
+func TestVersion_RootFlagHonorsOutputMode(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	stubVersionInfo(t, "v0.0.1-test", "abc1234", "2026-05-12T11:17:12Z")
 
 	out := executeRoot(t, newRootCmd(), "--version", "--json")
@@ -150,7 +150,7 @@ func TestVersion_RootFlagHonorsOutputMode(t *testing.T) {
 
 // Wiring RunE onto the root command to serve --version must not swallow the
 // default no-args behavior: bare `kata` still prints help and exits zero.
-func TestRoot_NoArgsPrintsHelp(t *testing.T) {
+func TestRoot_NoArgsPrintsHelp(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, args := range [][]string{nil, {"--json"}} {
 		out := string(executeRoot(t, newRootCmd(), args...))
 		assert.Contains(t, out, "lightweight issue tracker")
@@ -162,7 +162,7 @@ func TestRoot_NoArgsPrintsHelp(t *testing.T) {
 // previously skipped by short-circuiting to help. Global output-mode
 // validation therefore now applies to the root itself; pin that contract so
 // it stays deliberate rather than incidental.
-func TestRoot_NoArgsValidatesGlobalOutputFlags(t *testing.T) {
+func TestRoot_NoArgsValidatesGlobalOutputFlags(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	cases := []struct {
 		name string
 		args []string
@@ -192,7 +192,7 @@ func TestRoot_NoArgsValidatesGlobalOutputFlags(t *testing.T) {
 // The root --version flag must stay root-local. `kata openapi --version 3.0`
 // is a documented release step whose own --version takes a value, so a
 // persistent root flag would silently break it.
-func TestVersion_RootFlagDoesNotShadowSubcommandFlag(t *testing.T) {
+func TestVersion_RootFlagDoesNotShadowSubcommandFlag(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	out := string(executeRoot(t, newRootCmd(), "openapi", "--version", "3.0", "--format", "yaml"))
 	assert.Contains(t, out, "openapi: 3.0.3")
 
@@ -203,7 +203,7 @@ func TestVersion_RootFlagDoesNotShadowSubcommandFlag(t *testing.T) {
 
 // An unknown command must stay a usage error rather than falling through to
 // the root's --version handler.
-func TestRoot_UnknownCommandStillFails(t *testing.T) {
+func TestRoot_UnknownCommandStillFails(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	_, _, err := executeRootCapture(t, context.Background(), "definitely-not-a-command")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown command")

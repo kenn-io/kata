@@ -28,6 +28,7 @@ func layoutTestSetup(t *testing.T) (Model, func()) {
 // must return splitlayout.Stacked. The post-Plan-8 thresholds are
 // width>=140, height>=36.
 func TestLayout_PickLayout_Stacked(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		w, h int
 	}{
@@ -47,6 +48,7 @@ func TestLayout_PickLayout_Stacked(t *testing.T) {
 // BOTH dimensions meet the breakpoint. 140x36 is the minimum split
 // terminal; 200x50 is comfortable.
 func TestLayout_PickLayout_Split(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		w, h int
 	}{
@@ -66,7 +68,7 @@ func TestLayout_PickLayout_Split(t *testing.T) {
 // resulting m.view must be viewDetail (the user's focused pane), and
 // selectedNumber must survive (identity-based, never touched by the
 // layout flip).
-func TestLayout_ResizeSplitToStacked_PreservesSelectionFocusDetail(t *testing.T) {
+func TestLayout_ResizeSplitToStacked_PreservesSelectionFocusDetail(t *testing.T) { //nolint:paralleltest // layoutTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := layoutTestSetup(t)
 	defer cleanup()
 	// Boot into split layout.
@@ -96,7 +98,7 @@ func TestLayout_ResizeSplitToStacked_PreservesSelectionFocusDetail(t *testing.T)
 // TestLayout_ResizeSplitToStacked_PreservesSelectionFocusList covers
 // the split → stacked transition while focusList is active. The
 // resulting m.view must be viewList.
-func TestLayout_ResizeSplitToStacked_PreservesSelectionFocusList(t *testing.T) {
+func TestLayout_ResizeSplitToStacked_PreservesSelectionFocusList(t *testing.T) { //nolint:paralleltest // layoutTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := layoutTestSetup(t)
 	defer cleanup()
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -117,7 +119,7 @@ func TestLayout_ResizeSplitToStacked_PreservesSelectionFocusList(t *testing.T) {
 // TestLayout_ResizeStackedToSplit_PreservesFocusFromList: stacked
 // viewList, resize up to a split-mode-eligible terminal → focus
 // follows view (focusList).
-func TestLayout_ResizeStackedToSplit_PreservesFocusFromList(t *testing.T) {
+func TestLayout_ResizeStackedToSplit_PreservesFocusFromList(t *testing.T) { //nolint:paralleltest // layoutTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := layoutTestSetup(t)
 	defer cleanup()
 	// Start stacked, viewList.
@@ -138,7 +140,7 @@ func TestLayout_ResizeStackedToSplit_PreservesFocusFromList(t *testing.T) {
 // TestLayout_ResizeStackedToSplit_PreservesFocusFromDetail: stacked
 // viewDetail, resize up → focus follows view (focusDetail). Requires
 // dm.issue to be set (otherwise focus falls back to focusList).
-func TestLayout_ResizeStackedToSplit_PreservesFocusFromDetail(t *testing.T) {
+func TestLayout_ResizeStackedToSplit_PreservesFocusFromDetail(t *testing.T) { //nolint:paralleltest // layoutTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := layoutTestSetup(t)
 	defer cleanup()
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -160,6 +162,7 @@ func TestLayout_ResizeStackedToSplit_PreservesFocusFromDetail(t *testing.T) {
 // + border (~100 cells) for the document sheet; everything beyond
 // that goes to the list pane up to a usability cap.
 func TestLayout_SplitListPaneWidth_GrowsWithTerminal(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		termWidth int
 		want      int
@@ -184,7 +187,7 @@ func TestLayout_SplitListPaneWidth_GrowsWithTerminal(t *testing.T) {
 // toggle key in split mode flips to stacked, sets layoutLocked so a
 // subsequent WindowSizeMsg cannot auto-flip back, and migrates view
 // from focus (mirrors the existing handleLayoutFlip path).
-func TestLayout_ToggleLayout_FromSplitToStacked(t *testing.T) {
+func TestLayout_ToggleLayout_FromSplitToStacked(t *testing.T) { //nolint:paralleltest // layoutTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := layoutTestSetup(t)
 	defer cleanup()
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -212,7 +215,7 @@ func TestLayout_ToggleLayout_FromSplitToStacked(t *testing.T) {
 
 // TestLayout_ToggleLayout_FromStackedToSplit: pressing L in stacked
 // mode flips to split when the terminal is large enough.
-func TestLayout_ToggleLayout_FromStackedToSplit(t *testing.T) {
+func TestLayout_ToggleLayout_FromStackedToSplit(t *testing.T) { //nolint:paralleltest // layoutTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := layoutTestSetup(t)
 	defer cleanup()
 	// Boot in a split-eligible terminal but force-stacked first.
@@ -234,7 +237,7 @@ func TestLayout_ToggleLayout_FromStackedToSplit(t *testing.T) {
 // in stacked mode on a terminal too small for split keeps stacked.
 // The lock still sticks (so a resize across the threshold can apply
 // the user's pref), but the rendered layout stays usable.
-func TestLayout_ToggleLayout_RefusesSplitOnTooNarrowTerminal(t *testing.T) {
+func TestLayout_ToggleLayout_RefusesSplitOnTooNarrowTerminal(t *testing.T) { //nolint:paralleltest // layoutTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := layoutTestSetup(t)
 	defer cleanup()
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})

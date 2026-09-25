@@ -14,6 +14,7 @@ import (
 )
 
 func TestProjectedHoldStateDistinguishesLeaseAndAssignment(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.September, 2, 12, 0, 0, 0, time.UTC)
 	before := now.Add(-time.Minute)
 	after := now.Add(time.Minute)
@@ -43,7 +44,7 @@ func TestProjectedHoldStateDistinguishesLeaseAndAssignment(t *testing.T) {
 	}
 }
 
-func TestStatusAgentReportsAuthenticatedIdentityAndAssignment(t *testing.T) {
+func TestStatusAgentReportsAuthenticatedIdentityAndAssignment(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspaceOptions(t,
 		testenv.WithAuthToken("bootstrap-token"),
 		testenv.WithRequireTokenIdentity(),
@@ -74,7 +75,7 @@ func TestStatusAgentReportsAuthenticatedIdentityAndAssignment(t *testing.T) {
 	assert.NotContains(t, out, operatorToken)
 }
 
-func TestStatusAgentReportsActiveTimedLease(t *testing.T) {
+func TestStatusAgentReportsActiveTimedLease(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "report active lease")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref, "--ttl", "30m")
 
@@ -86,7 +87,7 @@ func TestStatusAgentReportsActiveTimedLease(t *testing.T) {
 	assert.True(t, strings.Contains(out, "expires_at="), out)
 }
 
-func TestStatusJSONReportsDaemonActorAndHold(t *testing.T) {
+func TestStatusJSONReportsDaemonActorAndHold(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspaceOptions(t,
 		testenv.WithAuthToken("bootstrap-token"),
 		testenv.WithRequireTokenIdentity(),
@@ -118,7 +119,7 @@ func TestStatusJSONReportsDaemonActorAndHold(t *testing.T) {
 	assert.NotContains(t, out, operatorToken)
 }
 
-func TestStatusHumanShowsLeaseExpiry(t *testing.T) {
+func TestStatusHumanShowsLeaseExpiry(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupFederatedHubIssue(t, "report lease expiry")
 	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref, "--ttl", "30m")
 
@@ -129,7 +130,7 @@ func TestStatusHumanShowsLeaseExpiry(t *testing.T) {
 	assert.Regexp(t, `(?m)^expires: \d{4}-\d{2}-\d{2}T`, out)
 }
 
-func TestStatusDisplaysTimedAssignmentExpiry(t *testing.T) {
+func TestStatusDisplaysTimedAssignmentExpiry(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "timed assignment status")
 	runCLIAs(t, env, dir, "worker", "claim", ref, "--ttl", "2m")

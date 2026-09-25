@@ -18,7 +18,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *testing.T) {
+func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *testing.T) { //nolint:paralleltest // setupKataEnv sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -130,7 +130,7 @@ func TestImportPostgresMergeAfterPurgeAddsOneProjectWithoutChangingExistingProje
 		"a post-merge issue must not reuse the imported tombstone's numeric ID")
 }
 
-func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T) {
+func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T) { //nolint:paralleltest // sets KATA_DSN and KATA_POSTGRES_SCHEMA_MODE and KATA_POSTGRES_SCHEMA_OWNER; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -198,7 +198,7 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
-func TestImportPostgresFailureRemovesFreshTargetSchema(t *testing.T) {
+func TestImportPostgresFailureRemovesFreshTargetSchema(t *testing.T) { //nolint:paralleltest // sets KATA_POSTGRES_SCHEMA; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -224,7 +224,7 @@ func TestImportPostgresFailureRemovesFreshTargetSchema(t *testing.T) {
 	assert.False(t, exists, "cleanup must remove the configured target schema")
 }
 
-func TestImportPostgresFailurePreservesPreexistingEmptySchema(t *testing.T) {
+func TestImportPostgresFailurePreservesPreexistingEmptySchema(t *testing.T) { //nolint:paralleltest // sets KATA_POSTGRES_SCHEMA; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -250,7 +250,7 @@ func TestImportPostgresFailurePreservesPreexistingEmptySchema(t *testing.T) {
 	assert.True(t, exists, "failed import must not drop a schema it did not create")
 }
 
-func TestFreshPostgresCleanupSurvivesCanceledImportContext(t *testing.T) {
+func TestFreshPostgresCleanupSurvivesCanceledImportContext(t *testing.T) { //nolint:paralleltest // sets KATA_POSTGRES_SCHEMA; setupKataEnv sets KATA_HOME and KATA_DB
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}

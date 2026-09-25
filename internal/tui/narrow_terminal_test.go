@@ -45,7 +45,7 @@ func assertHintVisible(t *testing.T, m Model, want bool) {
 // TestNarrowTerminal_NarrowWidthShowsHint verifies that a sub-80-column
 // width trips the M5 short-circuit and renders the centered hint
 // regardless of how tall the terminal is.
-func TestNarrowTerminal_NarrowWidthShowsHint(t *testing.T) {
+func TestNarrowTerminal_NarrowWidthShowsHint(t *testing.T) { //nolint:paralleltest // narrowTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := narrowTestSetup(t)
 	defer cleanup()
 
@@ -57,7 +57,7 @@ func TestNarrowTerminal_NarrowWidthShowsHint(t *testing.T) {
 // terminal still renders the active view when width is sufficient. The
 // list view has compact rendering; blocking on height makes tmux panes
 // unnecessarily unusable.
-func TestNarrowTerminal_ShortHeightRendersNormally(t *testing.T) {
+func TestNarrowTerminal_ShortHeightRendersNormally(t *testing.T) { //nolint:paralleltest // narrowTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := narrowTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "short pane", Status: "open"}}
@@ -72,7 +72,7 @@ func TestNarrowTerminal_ShortHeightRendersNormally(t *testing.T) {
 
 // TestNarrowTerminal_BothNarrowShowsHint covers the width gate when
 // height is also short. Width below threshold is still unreadable.
-func TestNarrowTerminal_BothNarrowShowsHint(t *testing.T) {
+func TestNarrowTerminal_BothNarrowShowsHint(t *testing.T) { //nolint:paralleltest // narrowTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := narrowTestSetup(t)
 	defer cleanup()
 
@@ -85,7 +85,7 @@ func TestNarrowTerminal_BothNarrowShowsHint(t *testing.T) {
 // assert the hint marker is absent rather than checking for a
 // specific list/detail substring so the test stays robust against
 // future chrome wording changes.
-func TestNarrowTerminal_NormalSizeRendersNormally(t *testing.T) {
+func TestNarrowTerminal_NormalSizeRendersNormally(t *testing.T) { //nolint:paralleltest // narrowTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := narrowTestSetup(t)
 	defer cleanup()
 
@@ -98,7 +98,7 @@ func TestNarrowTerminal_NormalSizeRendersNormally(t *testing.T) {
 // opens the quit-confirm modal via routeGlobalKey. This is the
 // primary safety invariant: the user must be able to quit even when
 // the terminal is too small to render normally.
-func TestNarrowTerminal_QStillRoutesToQuitConfirm(t *testing.T) {
+func TestNarrowTerminal_QStillRoutesToQuitConfirm(t *testing.T) { //nolint:paralleltest // narrowTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := narrowTestSetup(t)
 	defer cleanup()
 
@@ -119,7 +119,7 @@ func TestNarrowTerminal_QStillRoutesToQuitConfirm(t *testing.T) {
 // TestNarrowTerminal_CtrlCStillQuits proves ctrl+c remains the
 // power-user immediate-quit even when the hint is up. Mirrors
 // TestQuit_CtrlCFastQuits but at sub-threshold dimensions.
-func TestNarrowTerminal_CtrlCStillQuits(t *testing.T) {
+func TestNarrowTerminal_CtrlCStillQuits(t *testing.T) { //nolint:paralleltest // narrowTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := narrowTestSetup(t)
 	defer cleanup()
 
@@ -138,7 +138,7 @@ func TestNarrowTerminal_CtrlCStillQuits(t *testing.T) {
 // initialModel leaves width=0 (and height=0). Without the gate, the
 // hint would flash on every cold start. We assert View renders the
 // normal body (no hint marker) so the boot path stays clean.
-func TestNarrowTerminal_ZeroWidthBeforeFirstResize_DoesNotShowHint(t *testing.T) {
+func TestNarrowTerminal_ZeroWidthBeforeFirstResize_DoesNotShowHint(t *testing.T) { //nolint:paralleltest // narrowTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := narrowTestSetup(t)
 	defer cleanup()
 	// No WindowSizeMsg; m.width and m.height remain 0.
@@ -158,7 +158,7 @@ func TestNarrowTerminal_ZeroWidthBeforeFirstResize_DoesNotShowHint(t *testing.T)
 // present. We assert on the rounded corner ╭ as the modal-only
 // marker (the hint uses sharp corners), and on the hint's sharp
 // corner ┌ which still pokes out around the smaller modal.
-func TestNarrowTerminal_QuitConfirmModalOverlaysHint(t *testing.T) {
+func TestNarrowTerminal_QuitConfirmModalOverlaysHint(t *testing.T) { //nolint:paralleltest // narrowTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := narrowTestSetup(t)
 	defer cleanup()
 	// Resize to full width and open quit-confirm.
@@ -186,7 +186,7 @@ func TestNarrowTerminal_QuitConfirmModalOverlaysHint(t *testing.T) {
 	}
 }
 
-func TestNarrowTerminal_DaemonViewShowsHintAndToast(t *testing.T) {
+func TestNarrowTerminal_DaemonViewShowsHintAndToast(t *testing.T) { //nolint:paralleltest // narrowTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := narrowTestSetup(t)
 	defer cleanup()
 	m = resizeModel(m, 60, 24)

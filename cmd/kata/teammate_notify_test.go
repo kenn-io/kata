@@ -11,7 +11,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestNotifyTeammateSenderAndExactRecipients(t *testing.T) {
+func TestNotifyTeammateSenderAndExactRecipients(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "shared investigation")
 	t.Setenv("KATA_TEAMMATE", "teammate-1")
 	for _, recipient := range []string{"coordinator", "coordinator/teammate-1", "coordinator/teammate-2"} {
@@ -51,7 +51,7 @@ func TestNotifyTeammateSenderAndExactRecipients(t *testing.T) {
 	assert.NotContains(t, runCLI(t, env, dir, "inbox", "--for", "coordinator/teammate-2", "--context"), "Must not replace")
 }
 
-func TestInboxTeammateMalformedOptionalFieldRetainsRequest(t *testing.T) {
+func TestInboxTeammateMalformedOptionalFieldRetainsRequest(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "valid base request")
 	key := notificationMetadataKey("coordinator/teammate-1")
 	for _, raw := range []string{`42`, `true`, `{}`, `[]`, `"bad/handle"`, `"bad\nhandle"`} {
@@ -80,7 +80,7 @@ func TestInboxTeammateMalformedOptionalFieldRetainsRequest(t *testing.T) {
 	}
 }
 
-func TestNotifyTeammateOverrideAndLegacyShape(t *testing.T) {
+func TestNotifyTeammateOverrideAndLegacyShape(t *testing.T) { //nolint:paralleltest // sets KATA_TEAMMATE; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "sender defaults")
 	t.Setenv("KATA_TEAMMATE", "teammate-1")
 	for _, tc := range []struct {
@@ -110,7 +110,7 @@ func TestNotifyTeammateOverrideAndLegacyShape(t *testing.T) {
 	}
 }
 
-func TestInboxTeammateContextBudgetAndProjectIsolation(t *testing.T) {
+func TestInboxTeammateContextBudgetAndProjectIsolation(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	key := notificationMetadataKey("coordinator/teammate-1")
 	for i := range 30 {

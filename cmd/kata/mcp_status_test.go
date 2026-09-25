@@ -11,7 +11,7 @@ import (
 	"go.kenn.io/kata/internal/mcpdiscovery"
 )
 
-func TestMCPStatusJSONReportsPublishedListener(t *testing.T) {
+func TestMCPStatusJSONReportsPublishedListener(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; newRootCmd resets package var flags
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	cleanup, err := mcpdiscovery.Publish(filepath.Join(home, "mcp"), "127.0.0.1:9876", "", "http://127.0.0.1:4321")
@@ -34,7 +34,7 @@ func TestMCPStatusJSONReportsPublishedListener(t *testing.T) {
 	}
 }
 
-func TestMCPStatusRejectsConflictingOutputModes(t *testing.T) {
+func TestMCPStatusRejectsConflictingOutputModes(t *testing.T) { //nolint:paralleltest // sets KATA_HOME; newRootCmd resets package var flags
 	t.Setenv("KATA_HOME", t.TempDir())
 	_, _, err := executeRootCapture(t, t.Context(), "mcp", "status", "--json", "--format=human")
 	var cli *cliError

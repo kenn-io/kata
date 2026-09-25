@@ -11,7 +11,7 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-func TestMCPRuntimeDirectorySelectsAttachedDaemon(t *testing.T) {
+func TestMCPRuntimeDirectorySelectsAttachedDaemon(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SERVER
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

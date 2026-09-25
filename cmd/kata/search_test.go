@@ -29,7 +29,7 @@ func renderSearch(t *testing.T, mode outputMode, body string) string {
 
 // TestSearch_OutputsShortIDNotNumber pins the JSON wire shape: each search
 // result's nested issue carries short_id; the legacy `number` field is gone.
-func TestSearch_OutputsShortIDNotNumber(t *testing.T) {
+func TestSearch_OutputsShortIDNotNumber(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "matchable title")
 
@@ -49,7 +49,7 @@ func TestSearch_OutputsShortIDNotNumber(t *testing.T) {
 	assert.False(t, hasNumber, "number still present in search hit: %v", issue)
 }
 
-func TestSearch_ReturnsMatchedIssues(t *testing.T) {
+func TestSearch_ReturnsMatchedIssues(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "fix login crash on Safari")
 	createIssue(t, env, pid, "unrelated issue")
@@ -59,7 +59,7 @@ func TestSearch_ReturnsMatchedIssues(t *testing.T) {
 	assert.NotContains(t, out, "unrelated issue")
 }
 
-func TestSearch_AgentOutputEmptyEmitsOnlyHeader(t *testing.T) {
+func TestSearch_AgentOutputEmptyEmitsOnlyHeader(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _ := setupCLIWorkspace(t)
 
 	out, stderr, err := runCLIWithErr(t, env, dir, "--agent", "search", "login race")
@@ -69,7 +69,7 @@ func TestSearch_AgentOutputEmptyEmitsOnlyHeader(t *testing.T) {
 	assert.Equal(t, "OK search count=0 query=\"login race\" mode=lexical\n", out)
 }
 
-func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
+func TestSearch_EmptyQueryIsValidationError(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	f := newCLIFixture(t)
 	_ = requireCLIError(t, f.execute("search", "  "), ExitValidation)
 }
@@ -77,7 +77,7 @@ func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
 // TestSearch_UnquotedMultiTerm verifies that `kata search login Safari`
 // (no quotes) joins the args with spaces and matches the same way as the
 // quoted form. Required by the BM25 implicit-AND contract.
-func TestSearch_UnquotedMultiTerm(t *testing.T) {
+func TestSearch_UnquotedMultiTerm(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "fix login crash on Safari")
 	createIssue(t, env, pid, "unrelated issue")
@@ -90,7 +90,7 @@ func TestSearch_UnquotedMultiTerm(t *testing.T) {
 // TestSearchHumanBaselineLexicalUnchanged pins that plain lexical output (the
 // unconfigured daemon, auto-with-embeddings-off, and explicit --lexical) stays
 // byte-identical to today: no mode header, %.2f scores.
-func TestSearchHumanBaselineLexicalUnchanged(t *testing.T) {
+func TestSearchHumanBaselineLexicalUnchanged(t *testing.T) { //nolint:paralleltest // renderSearch sets package var flags
 	body := `{"query":"login","mode":"lexical","results":[
 	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":1.23,"matched_in":["title"]}]}`
 	out := renderSearch(t, outputHuman, body)
@@ -105,7 +105,7 @@ func TestSearchHumanBaselineLexicalUnchanged(t *testing.T) {
 // TestSearchHumanDegradedAutoPrintsNote pins that a degraded lexical result
 // (auto fell back because the embedder is down) still prints a labeled note so
 // the human knows semantic results are missing.
-func TestSearchHumanDegradedAutoPrintsNote(t *testing.T) {
+func TestSearchHumanDegradedAutoPrintsNote(t *testing.T) { //nolint:paralleltest // renderSearch sets package var flags
 	body := `{"query":"login","mode":"lexical","degraded":true,"degraded_reason":"embedder unreachable","results":[]}`
 	out := renderSearch(t, outputHuman, body)
 	if !strings.Contains(out, "# mode=lexical") || !strings.Contains(out, "degraded") {
@@ -116,7 +116,7 @@ func TestSearchHumanDegradedAutoPrintsNote(t *testing.T) {
 // TestSearchHumanHybridUsesHigherPrecision pins the %.4f precision for hybrid
 // (and semantic) scores, which cluster around 0.01-0.03 and would flatten
 // under %.2f, plus the mode header.
-func TestSearchHumanHybridUsesHigherPrecision(t *testing.T) {
+func TestSearchHumanHybridUsesHigherPrecision(t *testing.T) { //nolint:paralleltest // renderSearch sets package var flags
 	body := `{"query":"login","mode":"hybrid","results":[
 	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":0.0163,"matched_in":["title","semantic"]}]}`
 	out := renderSearch(t, outputHuman, body)
@@ -130,7 +130,7 @@ func TestSearchHumanHybridUsesHigherPrecision(t *testing.T) {
 
 // TestSearchAgentAppendsMode pins the appended agent field order: mode= follows
 // count= and query= without disturbing their names or positions.
-func TestSearchAgentAppendsMode(t *testing.T) {
+func TestSearchAgentAppendsMode(t *testing.T) { //nolint:paralleltest // renderSearch sets package var flags
 	body := `{"query":"login","mode":"lexical","results":[
 	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":1.2,"matched_in":["title"]}]}`
 	out := renderSearch(t, outputAgent, body)
@@ -139,7 +139,7 @@ func TestSearchAgentAppendsMode(t *testing.T) {
 	}
 }
 
-func TestSearchAgentIncludesBoundedTaskContext(t *testing.T) {
+func TestSearchAgentIncludesBoundedTaskContext(t *testing.T) { //nolint:paralleltest // renderSearch sets package var flags
 	body := `{"query":"needle","mode":"lexical","results":[
 	  {"issue":{"short_id":"abc4","title":"Investigate the worker","body":"zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen needle nearby context sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five twenty-six twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two thirty-three distant-tail","status":"open","owner":"alice","priority":2,"revision":7},"score":1.2,"matched_in":["body"]}]}`
 	out := renderSearch(t, outputAgent, body)
@@ -156,6 +156,7 @@ func TestSearchAgentIncludesBoundedTaskContext(t *testing.T) {
 }
 
 func TestSearchAgentExcerptKeepsMatchAfterLongContext(t *testing.T) {
+	t.Parallel()
 	prefix := strings.Repeat("supercalifragilisticexpialidociousword ", 8)
 	excerpt := searchAgentExcerpt("needle", prefix+"needle useful context after the match")
 
@@ -164,6 +165,7 @@ func TestSearchAgentExcerptKeepsMatchAfterLongContext(t *testing.T) {
 }
 
 func TestSearchAgentExcerptSplitsQueryPunctuationLikeSearch(t *testing.T) {
+	t.Parallel()
 	prefix := strings.Repeat("prefix ", 30)
 	excerpt := searchAgentExcerpt("foo-bar", prefix+"foo bar useful context")
 
@@ -171,6 +173,7 @@ func TestSearchAgentExcerptSplitsQueryPunctuationLikeSearch(t *testing.T) {
 }
 
 func TestSearchAgentExcerptDoesNotMatchInsideAnotherToken(t *testing.T) {
+	t.Parallel()
 	body := "catalog " + strings.Repeat("filler ", 30) + "log useful context"
 	excerpt := searchAgentExcerpt("log", body)
 
@@ -178,6 +181,7 @@ func TestSearchAgentExcerptDoesNotMatchInsideAnotherToken(t *testing.T) {
 }
 
 func TestSearchAgentExcerptFoldsDiacriticsLikeSearch(t *testing.T) {
+	t.Parallel()
 	prefix := strings.Repeat("prefix ", 30)
 
 	assert.Contains(t, searchAgentExcerpt("cafe", prefix+"café useful context"), "café useful context")
@@ -186,7 +190,7 @@ func TestSearchAgentExcerptFoldsDiacriticsLikeSearch(t *testing.T) {
 
 // TestSearch_ModeFlagsMutuallyExclusive pins that --lexical/--hybrid/--semantic
 // cannot be combined; each conflicting pair is a validation error.
-func TestSearch_ModeFlagsMutuallyExclusive(t *testing.T) {
+func TestSearch_ModeFlagsMutuallyExclusive(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	pairs := [][]string{
 		{"--lexical", "--hybrid"},
 		{"--lexical", "--semantic"},
@@ -201,7 +205,7 @@ func TestSearch_ModeFlagsMutuallyExclusive(t *testing.T) {
 
 // TestSearchHumanDegradedLexicalKeepsTwoDecimals pins that degraded-lexical
 // results (BM25 scores) keep %.2f — only hybrid/semantic use %.4f.
-func TestSearchHumanDegradedLexicalKeepsTwoDecimals(t *testing.T) {
+func TestSearchHumanDegradedLexicalKeepsTwoDecimals(t *testing.T) { //nolint:paralleltest // renderSearch sets package var flags
 	body := `{"query":"login","mode":"lexical","degraded":true,"degraded_reason":"embedder unreachable","results":[
 	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":2.5,"matched_in":["title"]}]}`
 	out := renderSearch(t, outputHuman, body)
@@ -213,7 +217,7 @@ func TestSearchHumanDegradedLexicalKeepsTwoDecimals(t *testing.T) {
 // TestSearchHumanOldDaemonEmptyModeRendersAsLexical pins that a response with
 // no "mode" field (a pre-0.3.0 daemon, reachable only in remote-client mode)
 // renders as the lexical baseline rather than a bare "# mode=" line.
-func TestSearchHumanOldDaemonEmptyModeRendersAsLexical(t *testing.T) {
+func TestSearchHumanOldDaemonEmptyModeRendersAsLexical(t *testing.T) { //nolint:paralleltest // renderSearch sets package var flags
 	body := `{"query":"login","results":[
 	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":1.23,"matched_in":["title"]}]}`
 	out := renderSearch(t, outputHuman, body)
@@ -229,7 +233,7 @@ func TestSearchHumanOldDaemonEmptyModeRendersAsLexical(t *testing.T) {
 // TestList_RepeatedLabelFiltersRequireEveryLabel: repeated --label flags on
 // `kata search` must AND together, matching only issues carrying every
 // named label.
-func TestSearch_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
+func TestSearch_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	alphaOnly := createIssue(t, env, pid, "sprocket alpha only")
 	alphaBeta := createIssue(t, env, pid, "sprocket alpha beta")
@@ -245,7 +249,7 @@ func TestSearch_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
 // TestSearch_RepeatedNoLabelFiltersExcludeEveryLabel mirrors
 // TestList_RepeatedNoLabelFiltersExcludeEveryLabel: repeated --no-label
 // flags on `kata search` exclude any issue carrying any named label.
-func TestSearch_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
+func TestSearch_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	alpha := createIssue(t, env, pid, "widget alpha candidate")
 	beta := createIssue(t, env, pid, "widget beta candidate")
@@ -263,7 +267,7 @@ func TestSearch_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
 // 0/-1 used to be silently treated as "no limit" because
 // the request only set the param when limit > 0. Now mirrors
 // list/ready/events/daemon-logs validation.
-func TestSearch_RejectsNonPositiveLimit(t *testing.T) {
+func TestSearch_RejectsNonPositiveLimit(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, lim := range []string{"0", "-1"} {
 		_, err := runCmdOutput(t, nil, "search", "x", "--limit", lim)
 		_ = requireCLIError(t, err, ExitValidation)

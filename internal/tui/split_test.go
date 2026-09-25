@@ -12,7 +12,7 @@ import (
 
 // In split Inbox detail, Esc goes back one level in task navigation
 // before leaving Inbox.
-func TestSplit_InboxDetailNavEscPopsNavStack(t *testing.T) {
+func TestSplit_InboxDetailNavEscPopsNavStack(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.scope = scope{projectID: 2, projectName: "capture-project", inbox: true,
@@ -63,7 +63,7 @@ func splitTestSetup(t *testing.T) (Model, func()) {
 	return m, cleanup
 }
 
-func TestEmacsHelpOverlayKeepsHiddenPanesStill(t *testing.T) {
+func TestEmacsHelpOverlayKeepsHiddenPanesStill(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	keys := []struct {
 		name string
 		msg  tea.KeyPressMsg
@@ -120,7 +120,7 @@ func TestEmacsHelpOverlayKeepsHiddenPanesStill(t *testing.T) {
 	}
 }
 
-func TestEmacsSectionSplitFocus(t *testing.T) {
+func TestEmacsSectionSplitFocus(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.detail = detailFixture()
@@ -144,7 +144,7 @@ func TestEmacsSectionSplitFocus(t *testing.T) {
 	}
 }
 
-func TestEmacsInputAndModalOwnNavigationKeys(t *testing.T) {
+func TestEmacsInputAndModalOwnNavigationKeys(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	for _, state := range []struct {
 		name  string
 		apply func(*Model)
@@ -200,7 +200,7 @@ func assertSingleOverlayBox(t *testing.T, view string) {
 // must land m.detail.issue on the third row's issue without waiting
 // for the debounce tick (the fetch is debounced; the dm.issue
 // retarget is immediate).
-func TestSplit_CursorMoveRetargetsDetail(t *testing.T) {
+func TestSplit_CursorMoveRetargetsDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	// Press j twice — the fixture has 3 rows so cursor lands on row 2.
@@ -245,7 +245,7 @@ func splitSearchTransitionFixture(t *testing.T) (Model, func()) {
 	return m, cleanup
 }
 
-func TestSplit_SearchEnterRetargetsDetailToFilteredResult(t *testing.T) {
+func TestSplit_SearchEnterRetargetsDetailToFilteredResult(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
 	startGen := m.nextDetailFollowGen
@@ -265,7 +265,7 @@ func TestSplit_SearchEnterRetargetsDetailToFilteredResult(t *testing.T) {
 	}
 }
 
-func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) {
+func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -310,7 +310,7 @@ func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) {
 	}
 }
 
-func TestStacked_SearchArrowNavigationDoesNotRetargetHiddenDetail(t *testing.T) {
+func TestStacked_SearchArrowNavigationDoesNotRetargetHiddenDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -351,7 +351,7 @@ func TestStacked_SearchArrowNavigationDoesNotRetargetHiddenDetail(t *testing.T) 
 	}
 }
 
-func TestSplit_SearchResultsRefetchRetargetsChangedHighlight(t *testing.T) {
+func TestSplit_SearchResultsRefetchRetargetsChangedHighlight(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -374,7 +374,7 @@ func TestSplit_SearchResultsRefetchRetargetsChangedHighlight(t *testing.T) {
 	}
 }
 
-func TestSplit_SearchResultsRefetchClearsDetailWhenResultsDisappear(t *testing.T) {
+func TestSplit_SearchResultsRefetchClearsDetailWhenResultsDisappear(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -397,7 +397,7 @@ func TestSplit_SearchResultsRefetchClearsDetailWhenResultsDisappear(t *testing.T
 	}
 }
 
-func TestSplit_SearchResultsRefetchKeepsMatchingDetailWithoutFollow(t *testing.T) {
+func TestSplit_SearchResultsRefetchKeepsMatchingDetailWithoutFollow(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -422,7 +422,7 @@ func TestSplit_SearchResultsRefetchKeepsMatchingDetailWithoutFollow(t *testing.T
 	}
 }
 
-func TestSplit_SearchCancelRetargetsDetailToRestoredSelection(t *testing.T) {
+func TestSplit_SearchCancelRetargetsDetailToRestoredSelection(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
 	startGen := m.nextDetailFollowGen
@@ -473,7 +473,7 @@ func TestSplit_SearchCancelRetargetsDetailToRestoredSelection(t *testing.T) {
 	}
 }
 
-func TestSplit_SearchCancelWhileStackedRestoresHiddenDetail(t *testing.T) {
+func TestSplit_SearchCancelWhileStackedRestoresHiddenDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
 	startGen := m.nextDetailFollowGen
@@ -532,7 +532,7 @@ func TestSplit_SearchCancelWhileStackedRestoresHiddenDetail(t *testing.T) {
 	}
 }
 
-func TestSplit_SearchCancelRestoresDetailWhenPreFilterHasNoRows(t *testing.T) {
+func TestSplit_SearchCancelRestoresDetailWhenPreFilterHasNoRows(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -640,7 +640,7 @@ func TestSplit_SearchCancelRestoresDetailWhenPreFilterHasNoRows(t *testing.T) {
 	}
 }
 
-func TestSplit_SearchCancelDoesNotCaptureSearchCreatedDetailAfterResize(t *testing.T) {
+func TestSplit_SearchCancelDoesNotCaptureSearchCreatedDetailAfterResize(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -690,7 +690,7 @@ func TestSplit_SearchCancelDoesNotCaptureSearchCreatedDetailAfterResize(t *testi
 	}
 }
 
-func TestSplit_SearchDetailSnapshotTracksAsyncCompletion(t *testing.T) {
+func TestSplit_SearchDetailSnapshotTracksAsyncCompletion(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -763,7 +763,7 @@ func TestSplit_SearchDetailSnapshotTracksAsyncCompletion(t *testing.T) {
 	}
 }
 
-func TestSplit_SearchCancelPrefersCompletedSnapshotOverStaleMatchingDetail(t *testing.T) {
+func TestSplit_SearchCancelPrefersCompletedSnapshotOverStaleMatchingDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -836,7 +836,7 @@ func TestSplit_SearchCancelPrefersCompletedSnapshotOverStaleMatchingDetail(t *te
 	}
 }
 
-func TestStacked_SearchCancelRefetchesAndCompletesRestoredSnapshot(t *testing.T) {
+func TestStacked_SearchCancelRefetchesAndCompletesRestoredSnapshot(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -907,7 +907,7 @@ func TestStacked_SearchCancelRefetchesAndCompletesRestoredSnapshot(t *testing.T)
 	}
 }
 
-func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
+func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -999,7 +999,7 @@ func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
 	}
 }
 
-func TestSplit_SearchCancelMergesSnapshotMutationIntoNewerMatchingLiveDetail(t *testing.T) {
+func TestSplit_SearchCancelMergesSnapshotMutationIntoNewerMatchingLiveDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	mutationErr := errors.New("mutation rejected")
 	tests := []struct {
 		name       string
@@ -1082,7 +1082,7 @@ func TestSplit_SearchCancelMergesSnapshotMutationIntoNewerMatchingLiveDetail(t *
 	}
 }
 
-func TestSplit_SearchCancelSnapshotInvalidatesDifferentLiveFollow(t *testing.T) {
+func TestSplit_SearchCancelSnapshotInvalidatesDifferentLiveFollow(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -1131,7 +1131,7 @@ func TestSplit_SearchCancelSnapshotInvalidatesDifferentLiveFollow(t *testing.T) 
 	}
 }
 
-func TestSplit_SearchCancelConvergesSnapshotWithSameGenerationMutation(t *testing.T) {
+func TestSplit_SearchCancelConvergesSnapshotWithSameGenerationMutation(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	mutationErr := errors.New("mutation rejected")
 	tests := []struct {
 		name       string
@@ -1210,7 +1210,7 @@ func TestSplit_SearchCancelConvergesSnapshotWithSameGenerationMutation(t *testin
 	}
 }
 
-func TestSplit_SearchRetargetMutationRefetchesSavedDetail(t *testing.T) {
+func TestSplit_SearchRetargetMutationRefetchesSavedDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
 	m.detail.gen = 41
@@ -1281,7 +1281,7 @@ func TestSplit_SearchRetargetMutationRefetchesSavedDetail(t *testing.T) {
 	}
 }
 
-func TestSplit_SearchCancelRejectsOlderSameGenerationFetchResults(t *testing.T) {
+func TestSplit_SearchCancelRejectsOlderSameGenerationFetchResults(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -1340,7 +1340,7 @@ func TestSplit_SearchCancelRejectsOlderSameGenerationFetchResults(t *testing.T) 
 	}
 }
 
-func TestSplit_SearchSnapshotRejectsOlderFetchAfterLiveRetarget(t *testing.T) {
+func TestSplit_SearchSnapshotRejectsOlderFetchAfterLiveRetarget(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.issues = []Issue{
@@ -1426,7 +1426,7 @@ func stackedSearchTransitionFixture(t *testing.T) (Model, func()) {
 	return m, func() { applyDefaultColorMode() }
 }
 
-func TestStacked_SearchResizeIntoSplitThenCancelRestoresDetail(t *testing.T) {
+func TestStacked_SearchResizeIntoSplitThenCancelRestoresDetail(t *testing.T) { //nolint:paralleltest // stackedSearchTransitionFixture sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := stackedSearchTransitionFixture(t)
 	defer cleanup()
 	startGen := m.nextDetailFollowGen
@@ -1487,7 +1487,7 @@ func TestStacked_SearchResizeIntoSplitThenCancelRestoresDetail(t *testing.T) {
 	}
 }
 
-func TestStacked_SearchResizeIntoSplitRetargetsInheritedDetail(t *testing.T) {
+func TestStacked_SearchResizeIntoSplitRetargetsInheritedDetail(t *testing.T) { //nolint:paralleltest // sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
 	applyDefaultColorMode()
@@ -1526,7 +1526,7 @@ func TestStacked_SearchResizeIntoSplitRetargetsInheritedDetail(t *testing.T) {
 	}
 }
 
-func TestStacked_SearchCancelWithoutSplitDetailDoesNotScheduleFollow(t *testing.T) {
+func TestStacked_SearchCancelWithoutSplitDetailDoesNotScheduleFollow(t *testing.T) { //nolint:paralleltest // stackedSearchTransitionFixture sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := stackedSearchTransitionFixture(t)
 	defer cleanup()
 	startGen := m.nextDetailFollowGen
@@ -1545,7 +1545,7 @@ func TestStacked_SearchCancelWithoutSplitDetailDoesNotScheduleFollow(t *testing.
 	}
 }
 
-func TestSplit_SearchNoOpArrowRetargetsDetailToFilteredResult(t *testing.T) {
+func TestSplit_SearchNoOpArrowRetargetsDetailToFilteredResult(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
 	startGen := m.nextDetailFollowGen
@@ -1571,7 +1571,7 @@ func TestSplit_SearchNoOpArrowRetargetsDetailToFilteredResult(t *testing.T) {
 // counter is the load-bearing identifier — verify it advances by N
 // for N keystrokes (or fewer if some keystrokes don't move the
 // cursor because we hit the end).
-func TestSplit_DebounceCoalescesBursts(t *testing.T) {
+func TestSplit_DebounceCoalescesBursts(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	startGen := m.nextDetailFollowGen
@@ -1593,7 +1593,7 @@ func TestSplit_DebounceCoalescesBursts(t *testing.T) {
 // the detail pane. Pre-fix the detail pane stayed empty until the
 // user pressed j/k because scheduleDetailFollow only fires from
 // dispatchListKey on cursor motion.
-func TestSplit_InitialFetchBootstrapsDetailPane(t *testing.T) {
+func TestSplit_InitialFetchBootstrapsDetailPane(t *testing.T) { //nolint:paralleltest // sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
 	applyDefaultColorMode()
@@ -1631,7 +1631,7 @@ func TestSplit_InitialFetchBootstrapsDetailPane(t *testing.T) {
 // that flips us into split must auto-populate the detail pane. Without
 // this, an agent who starts narrow then maximizes their terminal would
 // land on an empty right-hand pane.
-func TestSplit_StackedToSplitResizeBootstrapsDetailPane(t *testing.T) {
+func TestSplit_StackedToSplitResizeBootstrapsDetailPane(t *testing.T) { //nolint:paralleltest // sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
 	applyDefaultColorMode()
@@ -1674,7 +1674,7 @@ func TestSplit_StackedToSplitResizeBootstrapsDetailPane(t *testing.T) {
 // scoped to split layout. In stacked mode the user never sees the
 // detail pane until they explicitly open an issue, so loading detail
 // state on the initial fetch would waste an HTTP round-trip.
-func TestSplit_InitialFetchSkipsBootstrapInStacked(t *testing.T) {
+func TestSplit_InitialFetchSkipsBootstrapInStacked(t *testing.T) { //nolint:paralleltest // sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
 	applyDefaultColorMode()
@@ -1699,7 +1699,7 @@ func TestSplit_InitialFetchSkipsBootstrapInStacked(t *testing.T) {
 // TestSplit_TabMovesFocusToDetail: tab in split mode while focusList
 // flips focus to focusDetail (and the list pane border switches to
 // the inactive style on render).
-func TestSplit_TabMovesFocusToDetail(t *testing.T) {
+func TestSplit_TabMovesFocusToDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	// Seed a detail issue so the tab move actually flips focus (no
@@ -1720,7 +1720,7 @@ func TestSplit_TabMovesFocusToDetail(t *testing.T) {
 // openDetailMsg through the list pane handler; routing the resulting
 // message moves focus to focusDetail (per handleOpenDetail's split-
 // mode branch).
-func TestSplit_EnterMovesFocusToDetail(t *testing.T) {
+func TestSplit_EnterMovesFocusToDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -1740,7 +1740,7 @@ func TestSplit_EnterMovesFocusToDetail(t *testing.T) {
 // TestSplit_EscReturnsFocusToList: esc on focusDetail flips focus
 // back to focusList without consuming the esc on the detail pane
 // (the per-pane back-handler is reserved for the no-input case).
-func TestSplit_EscReturnsFocusToList(t *testing.T) {
+func TestSplit_EscReturnsFocusToList(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	focusFirstIssueDetail(&m)
@@ -1754,7 +1754,7 @@ func TestSplit_EscReturnsFocusToList(t *testing.T) {
 // prompt open on the detail pane, esc closes the prompt but leaves
 // focus on the detail pane (the routeInputKey path absorbs esc
 // before routeLayoutFocusKey runs). A second esc then moves focus.
-func TestSplit_EscDoesNotEscapeWhilePromptActive(t *testing.T) {
+func TestSplit_EscDoesNotEscapeWhilePromptActive(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	focusFirstIssueDetail(&m)
@@ -1783,7 +1783,7 @@ func TestSplit_EscDoesNotEscapeWhilePromptActive(t *testing.T) {
 // the ╭ corners — the modal box has exactly one top-left corner; if
 // the modal accidentally rendered inside a pane the surrounding
 // pane border would inject extras.
-func TestSplit_FilterModalOverlaysWholeTerminal(t *testing.T) {
+func TestSplit_FilterModalOverlaysWholeTerminal(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m, _ = m.openInput(inputFilterForm)
@@ -1796,7 +1796,7 @@ func TestSplit_FilterModalOverlaysWholeTerminal(t *testing.T) {
 
 // TestSplit_NewIssueFormOverlaysWholeTerminal: same property for the
 // new-issue centered form.
-func TestSplit_NewIssueFormOverlaysWholeTerminal(t *testing.T) {
+func TestSplit_NewIssueFormOverlaysWholeTerminal(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m, _ = m.openInput(inputNewIssueForm)
@@ -1813,7 +1813,7 @@ func TestSplit_NewIssueFormOverlaysWholeTerminal(t *testing.T) {
 // like "section" and the action surface "edit"/"comment"). The
 // list footer must not carry detail-only keywords; the detail
 // footer must not carry list-only keywords (search/filter).
-func TestSplit_HelpRowSwapsWithFocus(t *testing.T) {
+func TestSplit_HelpRowSwapsWithFocus(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	listView := m.viewContent()
@@ -1840,7 +1840,7 @@ func TestSplit_HelpRowSwapsWithFocus(t *testing.T) {
 // column range. The menu sits to the right of the list pane; we
 // search for the menu content row ("alpha (1)") and verify it
 // starts at a column >= splitConfig.ListWidth.
-func TestSplit_SuggestionMenuClampedToDetailPane(t *testing.T) {
+func TestSplit_SuggestionMenuClampedToDetailPane(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	focusFirstIssueDetail(&m)
@@ -1871,7 +1871,7 @@ func TestSplit_SuggestionMenuClampedToDetailPane(t *testing.T) {
 // TestSplit_LayoutFlip_FromStackedToSplitFromList: stacked viewList
 // resized up to split → focus goes to focusList, view stays viewList,
 // selection survives.
-func TestSplit_LayoutFlip_FromStackedToSplitFromList(t *testing.T) {
+func TestSplit_LayoutFlip_FromStackedToSplitFromList(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	// Already in split mode from setup — flip back to stacked first.
@@ -1901,7 +1901,7 @@ func TestSplit_LayoutFlip_FromStackedToSplitFromList(t *testing.T) {
 // jump. Fixed by switching the gate to !m.detailIsActive() — the
 // existing helper that abstracts over both layouts (stacked checks
 // m.view; split checks m.focus).
-func TestSplit_JumpDetail_SurvivesCursorFollowFocusDetail(t *testing.T) {
+func TestSplit_JumpDetail_SurvivesCursorFollowFocusDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	// Press j to retarget detail via cursor-follow; m.view stays viewList.
@@ -1934,7 +1934,7 @@ func TestSplit_JumpDetail_SurvivesCursorFollowFocusDetail(t *testing.T) {
 // detail state. The original M6 fix used detailIsActive() which
 // ignored m.view; this test pins the corrected detailPaneVisible()
 // gate across both obscuring views.
-func TestSplit_JumpDetail_DroppedWhenViewObscured(t *testing.T) {
+func TestSplit_JumpDetail_DroppedWhenViewObscured(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	cases := []struct {
 		name string
 		view viewID
@@ -1976,7 +1976,7 @@ func TestSplit_JumpDetail_DroppedWhenViewObscured(t *testing.T) {
 // listIsActive() — split mode keeps focusDetail "active for detail"
 // so list is not active, and the !listIsActive() branch fires the
 // direct applyMutation path on the list.
-func TestSplit_ListMutation_LandsOnListWhileFocusDetail(t *testing.T) {
+func TestSplit_ListMutation_LandsOnListWhileFocusDetail(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.list.actor = "tester"
@@ -2003,7 +2003,7 @@ func TestSplit_ListMutation_LandsOnListWhileFocusDetail(t *testing.T) {
 // visible alongside the list). routeMutation sees !detailIsActive()
 // and routes directly to dm.applyMutation; the gen match is
 // preserved so the dm.status hint lands.
-func TestSplit_DetailMutation_LandsOnDetailWhileFocusList(t *testing.T) {
+func TestSplit_DetailMutation_LandsOnDetailWhileFocusList(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m.detail.issue = &Issue{ProjectID: 7, UID: "01TEST-42aa", ShortID: "42aa", Title: "to edit"}
@@ -2046,6 +2046,7 @@ func TestSplit_DetailMutation_LandsOnDetailWhileFocusList(t *testing.T) {
 // future-proofing in case suggestMenuMaxWidth grows or
 // splitConfig.ListWidth shrinks past the breakpoint.
 func TestSplit_SuggestionMenuClampActuallyFires_AtMinSplit(t *testing.T) {
+	t.Parallel()
 	// Confirm the documented invariant: at the minimum split
 	// breakpoint with the maximum menu width, the natural anchor
 	// is still right of the list-pane boundary, so the clamp is
@@ -2082,7 +2083,7 @@ func TestSplit_SuggestionMenuClampActuallyFires_AtMinSplit(t *testing.T) {
 // from row A (ShortID=aaa1, ProjectID=7) to row B (ShortID=aaa1, ProjectID=8)
 // as a no-op and never retarget the detail pane. Composite identity
 // (project_id, UID) detects the cross-project change correctly.
-func TestSplit_CursorFollow_RetargetsOnSameShortIDDifferentProject(t *testing.T) {
+func TestSplit_CursorFollow_RetargetsOnSameShortIDDifferentProject(t *testing.T) { //nolint:paralleltest // splitTestSetup sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	// Two rows with same ShortID but different ProjectID — the

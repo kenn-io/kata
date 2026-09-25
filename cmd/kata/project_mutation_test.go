@@ -15,6 +15,7 @@ import (
 )
 
 func TestFinishMutationRepairsBindingBeforeReportingDecodeError(t *testing.T) {
+	t.Parallel()
 	decodeErr := errors.New("decode response")
 	repaired := ""
 	p := &projectMutation{name: "old-project", repair: func(name string) error {
@@ -31,7 +32,7 @@ func TestFinishMutationRepairsBindingBeforeReportingDecodeError(t *testing.T) {
 	assert.Equal(t, "renamed-project", repaired)
 }
 
-func TestCreateRepairsRenamedWorkspaceAfterInlineResolution(t *testing.T) {
+func TestCreateRepairsRenamedWorkspaceAfterInlineResolution(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir, pid := initLocalBoundWorkspace(t, env, "old-project")
 	_, err := env.DB.RenameProject(t.Context(), pid, "renamed-project")
@@ -42,7 +43,7 @@ func TestCreateRepairsRenamedWorkspaceAfterInlineResolution(t *testing.T) {
 	assert.Equal(t, "renamed-project", cfg.Project.Name)
 }
 
-func TestBareIssueMutationsFollowWorkspaceAlias(t *testing.T) {
+func TestBareIssueMutationsFollowWorkspaceAlias(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, change := range []string{"rename", "merge"} {
 		for _, operation := range []string{"edit", "comment", "label"} {
 			t.Run(change+"/"+operation, func(t *testing.T) {
@@ -94,7 +95,7 @@ func TestBareIssueMutationsFollowWorkspaceAlias(t *testing.T) {
 	}
 }
 
-func TestIssueMutationExplicitProjectDoesNotFollowWorkspaceAlias(t *testing.T) {
+func TestIssueMutationExplicitProjectDoesNotFollowWorkspaceAlias(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	for _, selector := range []string{"flag", "qualified"} {
 		t.Run(selector, func(t *testing.T) {
 			env := testenv.New(t)
@@ -125,7 +126,7 @@ func TestIssueMutationExplicitProjectDoesNotFollowWorkspaceAlias(t *testing.T) {
 	}
 }
 
-func TestRelationshipEditFollowsRenamedWorkspaceAlias(t *testing.T) {
+func TestRelationshipEditFollowsRenamedWorkspaceAlias(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir, pid := initLocalBoundWorkspace(t, env, "old-project")
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
@@ -147,7 +148,7 @@ func TestRelationshipEditFollowsRenamedWorkspaceAlias(t *testing.T) {
 
 // Local repair is now after the write. A failure must not suggest that
 // creation failed and encourage the caller to create a duplicate issue.
-func TestInlineMutationRepairFailureReportsCommittedWrite(t *testing.T) {
+func TestInlineMutationRepairFailureReportsCommittedWrite(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	env := testenv.New(t)
 	dir, pid := initLocalBoundWorkspace(t, env, "example-project")
 	t.Setenv("KATA_SERVER", env.URL)

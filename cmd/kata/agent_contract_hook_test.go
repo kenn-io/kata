@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAgentContractHook_EmitsCodexSessionStartContext(t *testing.T) {
+func TestAgentContractHook_EmitsCodexSessionStartContext(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	stdout, stderr, err := executeRootCapture(t, context.Background(),
@@ -30,7 +30,7 @@ func TestAgentContractHook_EmitsCodexSessionStartContext(t *testing.T) {
 	assert.Equal(t, agentContractText, specific.AdditionalContext)
 }
 
-func TestAgentContractHook_IgnoresUnmanagedInvocation(t *testing.T) {
+func TestAgentContractHook_IgnoresUnmanagedInvocation(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for name, args := range map[string][]string{
 		"missing source": {"agent-contract-hook"},
 		"wrong source":   {"agent-contract-hook", "--source", "user-command"},

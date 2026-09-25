@@ -12,7 +12,7 @@ import (
 // TestRenderLabelChips_AlphabeticalSort verifies the input slice is
 // rendered alphabetically regardless of caller order. Sort is in-render
 // so callers don't have to pre-sort the daemon's response.
-func TestRenderLabelChips_AlphabeticalSort(t *testing.T) {
+func TestRenderLabelChips_AlphabeticalSort(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderLabelChips([]string{"prio-1", "bug", "needs-design"}, 80)
 	bug := strings.Index(got, "[bug]")
@@ -30,7 +30,7 @@ func TestRenderLabelChips_AlphabeticalSort(t *testing.T) {
 // TestRenderLabelChips_PacksUntilOverflow narrows the available width
 // so not every chip fits; the renderer must drop the tail and append
 // `+N` indicating the count of dropped labels.
-func TestRenderLabelChips_PacksUntilOverflow(t *testing.T) {
+func TestRenderLabelChips_PacksUntilOverflow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderLabelChips([]string{"a", "b", "c", "d", "e"}, 12)
 	if !strings.Contains(got, "+") {
@@ -45,7 +45,7 @@ func TestRenderLabelChips_PacksUntilOverflow(t *testing.T) {
 // TestRenderLabelChips_PlusNOverflowFormat verifies the +N token is
 // formed correctly (literal +, then a base-10 integer >= 1) when the
 // chip pack drops chips.
-func TestRenderLabelChips_PlusNOverflowFormat(t *testing.T) {
+func TestRenderLabelChips_PlusNOverflowFormat(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderLabelChips([]string{"alpha", "beta", "gamma", "delta"}, 14)
 	idx := strings.Index(got, "+")
@@ -62,7 +62,7 @@ func TestRenderLabelChips_PlusNOverflowFormat(t *testing.T) {
 // TestRenderLabelChips_UltraNarrowFallback verifies the "[N labels]"
 // degraded form when even one chip won't fit. The fallback keeps the
 // header informative on tiny terminals.
-func TestRenderLabelChips_UltraNarrowFallback(t *testing.T) {
+func TestRenderLabelChips_UltraNarrowFallback(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderLabelChips([]string{"bug", "prio-1"}, 5)
 	if !strings.Contains(got, "[2 labels]") {
@@ -72,7 +72,7 @@ func TestRenderLabelChips_UltraNarrowFallback(t *testing.T) {
 
 // TestRenderLabelChips_EmptyLabels verifies the empty-labels placeholder
 // renders so the header layout doesn't shift when labels are absent.
-func TestRenderLabelChips_EmptyLabels(t *testing.T) {
+func TestRenderLabelChips_EmptyLabels(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderLabelChips(nil, 80)
 	if !strings.Contains(got, "(no labels)") {
@@ -94,7 +94,7 @@ func TestRenderLabelChips_EmptyLabels(t *testing.T) {
 // If the renderer measured the raw `\x1b[31mカタ` (10+ bytes) instead
 // of the sanitized "カタ" (4 cells), or measured byte length instead
 // of cell width, the math would be wrong and the test would fail.
-func TestRenderLabelChips_WidthMeasureUsesRunewidth(t *testing.T) {
+func TestRenderLabelChips_WidthMeasureUsesRunewidth(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderLabelChips([]string{"\x1b[31mカタ", "bug"}, 11)
 	if strings.Contains(got, "\x1b") {
@@ -115,7 +115,7 @@ func TestRenderLabelChips_WidthMeasureUsesRunewidth(t *testing.T) {
 // sanitized — not just the width measurement. Hostile labels with ANSI
 // escapes and a U+202E RIGHT-TO-LEFT OVERRIDE must not survive into
 // the rendered output.
-func TestRenderLabelChips_RenderedTextSanitized(t *testing.T) {
+func TestRenderLabelChips_RenderedTextSanitized(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	rlo := rune(0x202E)
 	hostile := "ok" + string(rlo) + "pad"
@@ -138,7 +138,7 @@ func TestRenderLabelChips_RenderedTextSanitized(t *testing.T) {
 // only, zero-width joiners only, etc.), the renderer must render
 // `Project: —` rather than the empty `Project: ` form, preserving
 // the "left side never blank" invariant.
-func TestTitleBarLeft_SanitizeEmptyFallsBackToPlaceholder(t *testing.T) {
+func TestTitleBarLeft_SanitizeEmptyFallsBackToPlaceholder(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	// String of pure control runes — sanitizeForDisplay strips them.
 	got := titleBarLeft(scope{projectName: "\x01\x02\x07"})
@@ -159,28 +159,28 @@ func TestTitleBarLeft_SanitizeEmptyFallsBackToPlaceholder(t *testing.T) {
 	}
 }
 
-func TestTitleBarShowsDaemonName(t *testing.T) {
+func TestTitleBarShowsDaemonName(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderTitleBar(100, scope{projectName: "kata"}, "dev", "shared")
 
 	assertContains(t, stripANSI(got), "Daemon: shared", "title bar missing configured daemon name")
 }
 
-func TestTitleBarShowsTaggedVersion(t *testing.T) {
+func TestTitleBarShowsTaggedVersion(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := stripANSI(renderTitleBar(100, scope{projectName: "kata"}, "v0.5.0"))
 
 	assertContains(t, got, "kata カタ · v0.5.0", "title bar missing tagged version")
 }
 
-func TestTitleBarShowsDaemonHostFallback(t *testing.T) {
+func TestTitleBarShowsDaemonHostFallback(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderTitleBar(120, scope{projectName: "kata"}, "dev", "daemon.internal:7777")
 
 	assertContains(t, stripANSI(got), "Daemon: daemon.internal:7777", "title bar missing daemon host fallback")
 }
 
-func TestTitleBarShowsLocalDaemonFallback(t *testing.T) {
+func TestTitleBarShowsLocalDaemonFallback(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	m := initialModel(Options{})
 	m.scope = scope{projectName: "kata"}
@@ -192,14 +192,14 @@ func TestTitleBarShowsLocalDaemonFallback(t *testing.T) {
 	assertContains(t, stripANSI(got), "Daemon: local", "title bar missing local daemon fallback")
 }
 
-func TestTitleBarSanitizesDaemonLabel(t *testing.T) {
+func TestTitleBarSanitizesDaemonLabel(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderTitleBar(100, scope{projectName: "kata"}, "dev", "shared\nbad")
 
 	assertContains(t, stripANSI(got), `Daemon: shared\nbad`, "title bar did not sanitize daemon label")
 }
 
-func TestDetailTitleBarShowsDaemon(t *testing.T) {
+func TestDetailTitleBarShowsDaemon(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	iss := testIssue("abc1")
 	dm := detailModel{issue: &iss}
@@ -215,7 +215,7 @@ func TestDetailTitleBarShowsDaemon(t *testing.T) {
 	assertContains(t, clean, "kata カタ · v0.5.0", "detail title bar missing tagged version")
 }
 
-func TestSplitTitleBarShowsDaemon(t *testing.T) {
+func TestSplitTitleBarShowsDaemon(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; swaps package var kataVersion
 	useNoColor(t)
 	origVersion := kataVersion
 	kataVersion = "v0.5.0"
@@ -248,7 +248,7 @@ func TestSplitTitleBarShowsDaemon(t *testing.T) {
 // leaving " +149" for total=10. Job 248 callout: an earlier draft
 // of this test used budget=30 where both reserves happened to pack
 // the same number of chips, so it would not catch the regression.
-func TestRenderLabelChips_LargeOverflowReservesActualWidth(t *testing.T) {
+func TestRenderLabelChips_LargeOverflowReservesActualWidth(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	labels := make([]string, 150)
 	for i := range labels {
@@ -273,7 +273,7 @@ func TestRenderLabelChips_LargeOverflowReservesActualWidth(t *testing.T) {
 // schema bars newlines in labels (SQLite CHECK at 0001_init.sql:103)
 // but the TUI is the wrong layer to depend on that; this test guards
 // the renderer-level invariant directly.
-func TestRenderLabelChips_NewlineInLabelDoesNotBreakRow(t *testing.T) {
+func TestRenderLabelChips_NewlineInLabelDoesNotBreakRow(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	got := renderLabelChips([]string{"bug\nfoo"}, 80)
 	if strings.ContainsRune(got, '\n') {
@@ -284,7 +284,7 @@ func TestRenderLabelChips_NewlineInLabelDoesNotBreakRow(t *testing.T) {
 	}
 }
 
-func TestDisclosureGlyph(t *testing.T) {
+func TestDisclosureGlyph(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorAuto, true)
 	if got := disclosureGlyph(false, false); got != " " {
 		t.Fatalf("leaf glyph = %q, want blank", got)
@@ -309,7 +309,7 @@ func TestDisclosureGlyph(t *testing.T) {
 // connectors inside the compact nav gutter. The old folded-gutter render
 // gave leaf children only blank space, making a single child hard to
 // distinguish from an unrelated sibling row below.
-func TestNavTreeSlot_ChildGuides(t *testing.T) {
+func TestNavTreeSlot_ChildGuides(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorAuto, true)
 	parent := queueRow{depth: 0, hasChildren: true, expanded: true}
 	got := stripANSI(navTreeSlot(parent))
@@ -370,6 +370,7 @@ func TestNavTreeSlot_ChildGuides(t *testing.T) {
 // TestGroupBanding_ParentChildShareBand verifies that an expanded
 // parent and its expanded children render with the same banding class.
 func TestGroupBanding_ParentChildShareBand(t *testing.T) {
+	t.Parallel()
 	visible := []queueRow{
 		{depth: 0}, // root A
 		{depth: 1}, // child of A
@@ -408,7 +409,7 @@ func TestGroupBanding_ParentChildShareBand(t *testing.T) {
 	}
 }
 
-func TestRenderListBody_UsesQueueRowsWithDisclosureAndChildCounts(t *testing.T) {
+func TestRenderListBody_UsesQueueRowsWithDisclosureAndChildCounts(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	parentSID := "p001"
 	lm := listModel{issues: []Issue{
@@ -428,7 +429,7 @@ func TestRenderListBody_UsesQueueRowsWithDisclosureAndChildCounts(t *testing.T) 
 	assertContainsAll(t, expanded, "-", "child")
 }
 
-func TestRenderListBody_ContextRowHasVisibleMarkerInNoColor(t *testing.T) {
+func TestRenderListBody_ContextRowHasVisibleMarkerInNoColor(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	parentSID := "p001"
 	lm := listModel{
@@ -447,7 +448,7 @@ func TestRenderListBody_ContextRowHasVisibleMarkerInNoColor(t *testing.T) {
 // for the R toggle: in all-projects scope each row's title is prefixed with
 // the owning project's display name from chrome.projectsByID, so the user
 // can tell which project a row belongs to without expanding detail.
-func TestRenderListBody_AllProjectsPrefixesTitle(t *testing.T) {
+func TestRenderListBody_AllProjectsPrefixesTitle(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	lm := listModel{issues: []Issue{
 		{ProjectID: 7, UID: "01TEST-7aaa", ShortID: "7aaa", Title: "alpha bug", Status: "open"},
@@ -465,7 +466,7 @@ func TestRenderListBody_AllProjectsPrefixesTitle(t *testing.T) {
 // row whose project is missing from the cache (e.g. a freshly-created
 // project before the next /projects refresh) renders as "[#PID]" rather
 // than appearing nameless.
-func TestRenderListBody_AllProjectsFallsBackToPID(t *testing.T) {
+func TestRenderListBody_AllProjectsFallsBackToPID(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	lm := listModel{issues: []Issue{
 		{ProjectID: 42, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "ghost project", Status: "open"},
@@ -483,7 +484,7 @@ func TestRenderListBody_AllProjectsFallsBackToPID(t *testing.T) {
 // TestRenderListBody_SingleProjectOmitsPrefix pins the inverse: in
 // single-project scope the prefix is omitted (every row belongs to the
 // same project, so repeating the name is noise).
-func TestRenderListBody_SingleProjectOmitsPrefix(t *testing.T) {
+func TestRenderListBody_SingleProjectOmitsPrefix(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	lm := listModel{issues: []Issue{
 		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "alpha bug", Status: "open"},
@@ -499,7 +500,7 @@ func TestRenderListBody_SingleProjectOmitsPrefix(t *testing.T) {
 	}
 }
 
-func TestRenderListBody_HeaderBackgroundReplacesSeparatorRule(t *testing.T) {
+func TestRenderListBody_HeaderBackgroundReplacesSeparatorRule(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorDark, true)
 	if !styleHasBackground(tableHeaderStyle) {
 		t.Fatal("tableHeaderStyle must carry a background in color modes")
@@ -514,7 +515,7 @@ func TestRenderListBody_HeaderBackgroundReplacesSeparatorRule(t *testing.T) {
 	}
 }
 
-func TestListView_BodyBudgetCountsOnlyTableHeader(t *testing.T) {
+func TestListView_BodyBudgetCountsOnlyTableHeader(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	lm := listModel{issues: []Issue{
 		{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "one", Status: "open"},
@@ -530,7 +531,7 @@ func TestListView_BodyBudgetCountsOnlyTableHeader(t *testing.T) {
 	}
 }
 
-func TestRenderListBody_EmptyStateDoesNotRenderSeparatorRule(t *testing.T) {
+func TestRenderListBody_EmptyStateDoesNotRenderSeparatorRule(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorDark, true)
 	lm := listModel{}
 	got := stripANSI(lm.renderBody(80, 6, viewChrome{}))
@@ -541,7 +542,7 @@ func TestRenderListBody_EmptyStateDoesNotRenderSeparatorRule(t *testing.T) {
 	}
 }
 
-func TestRenderListInfoLine_TruncationNotice(t *testing.T) {
+func TestRenderListInfoLine_TruncationNotice(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	useNoColor(t)
 	lm := listModel{truncated: true, issues: []Issue{{UID: "01TEST-aaa1", ShortID: "aaa1", Status: "open"}}}
 	got := stripANSI(renderListInfoLine(100, viewChrome{}, lm, 10))
@@ -552,6 +553,7 @@ func TestRenderListInfoLine_TruncationNotice(t *testing.T) {
 }
 
 func TestListTableHeaders_UsesSingleNavGutter(t *testing.T) {
+	t.Parallel()
 	wide := listTableHeaders(false)
 	if len(wide) != 8 {
 		t.Fatalf("wide headers len = %d, want 8 (%v)", len(wide), wide)
@@ -569,7 +571,7 @@ func TestListTableHeaders_UsesSingleNavGutter(t *testing.T) {
 	}
 }
 
-func TestBuildRows_FoldsSelectionContextAndDisclosureIntoNavCell(t *testing.T) {
+func TestBuildRows_FoldsSelectionContextAndDisclosureIntoNavCell(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorNone, false)
 	rows := buildRows([]queueRow{
 		{

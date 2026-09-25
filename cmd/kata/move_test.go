@@ -27,7 +27,7 @@ func setupMoveCLIProjects(t *testing.T) (*testenv.Env, string, db.Project, db.Pr
 	return env, dir, source, target, issue
 }
 
-func TestMoveCLI_RoundTrip(t *testing.T) {
+func TestMoveCLI_RoundTrip(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, source, target, issue := setupMoveCLIProjects(t)
 
 	out := runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name)
@@ -40,7 +40,7 @@ func TestMoveCLI_RoundTrip(t *testing.T) {
 	assert.NotEmpty(t, stored.ShortID)
 }
 
-func TestMoveCLI_DryRunDoesNotMoveIssue(t *testing.T) {
+func TestMoveCLI_DryRunDoesNotMoveIssue(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, source, target, issue := setupMoveCLIProjects(t)
 
 	out := runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name, "--dry-run")
@@ -54,7 +54,7 @@ func TestMoveCLI_DryRunDoesNotMoveIssue(t *testing.T) {
 	assert.Equal(t, issue.ShortID, stored.ShortID)
 }
 
-func TestMoveCLI_WithCommentAppendsToMovedIssue(t *testing.T) {
+func TestMoveCLI_WithCommentAppendsToMovedIssue(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, source, target, issue := setupMoveCLIProjects(t)
 
 	runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name,

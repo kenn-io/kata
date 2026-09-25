@@ -15,7 +15,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestRoot_HelpListsUniversalFlags(t *testing.T) {
+func TestRoot_HelpListsUniversalFlags(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	out := string(executeRoot(t, newRootCmd(), "--help"))
 	assert.Contains(t, out, "--format")
 	assert.Contains(t, out, "--json")
@@ -27,23 +27,23 @@ func TestRoot_HelpListsUniversalFlags(t *testing.T) {
 	assertNoFederationStorageInternals(t, out)
 }
 
-func TestRootHelpMentionsFederationWithoutStorageInternals(t *testing.T) {
+func TestRootHelpMentionsFederationWithoutStorageInternals(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	out := string(executeRoot(t, newRootCmd(), "--help"))
 	assert.Contains(t, strings.ToLower(out), "federation")
 	assertNoFederationStorageInternals(t, out)
 }
 
-func TestDaemonHelpDoesNotMentionFederation(t *testing.T) {
+func TestDaemonHelpDoesNotMentionFederation(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	out := string(executeRoot(t, newRootCmd(), "daemon", "--help"))
 	assertNoFederationInternals(t, out)
 }
 
-func TestImportHelpDoesNotMentionFederationInternals(t *testing.T) {
+func TestImportHelpDoesNotMentionFederationInternals(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	out := string(executeRoot(t, newRootCmd(), "import", "--help"))
 	assertNoFederationInternals(t, out)
 }
 
-func TestNormalCommandsDoNotMentionFederation(t *testing.T) {
+func TestNormalCommandsDoNotMentionFederation(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	short := createIssue(t, env, pid, "ordinary work")
 
@@ -89,7 +89,7 @@ func assertNoFederationStorageInternals(t *testing.T, out string, msgAndArgs ...
 	}
 }
 
-func TestNewRootCmdResetsGlobalFlagState(t *testing.T) {
+func TestNewRootCmdResetsGlobalFlagState(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags; swaps package var flags
 	resetFlags(t)
 	flags.Sel = outputSelection{formats: []string{"json"}, json: true, agent: true}
 	flags.Mode = outputJSON
@@ -113,6 +113,7 @@ func TestNewRootCmdResetsGlobalFlagState(t *testing.T) {
 // TestExitCodeFor_PureMapping pins the exit-code decision logic so a future
 // refactor can't silently revert ExitUsage vs ExitInternal classification.
 func TestExitCodeFor_PureMapping(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, ExitUsage, exitCodeFor(assert.AnError, false),
 		"cobra parse error (RunE never entered) maps to ExitUsage")
 	assert.Equal(t, ExitInternal, exitCodeFor(assert.AnError, true),
@@ -121,7 +122,7 @@ func TestExitCodeFor_PureMapping(t *testing.T) {
 
 // TestRunEEntered_FalseOnUnknownCommand verifies cobra rejects an unknown
 // command before PersistentPreRunE fires.
-func TestRunEEntered_FalseOnUnknownCommand(t *testing.T) {
+func TestRunEEntered_FalseOnUnknownCommand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	_, _, err := executeRootCapture(t, context.Background(), "this-command-does-not-exist")
 	require.Error(t, err)
@@ -131,7 +132,7 @@ func TestRunEEntered_FalseOnUnknownCommand(t *testing.T) {
 
 // TestRunEEntered_FalseOnNoArgsViolation confirms the cobra.NoArgs validator
 // on whoami short-circuits before PersistentPreRunE.
-func TestRunEEntered_FalseOnNoArgsViolation(t *testing.T) {
+func TestRunEEntered_FalseOnNoArgsViolation(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	_, _, err := executeRootCapture(t, context.Background(), "whoami", "unexpected-positional-arg")
 	require.Error(t, err)
@@ -141,7 +142,7 @@ func TestRunEEntered_FalseOnNoArgsViolation(t *testing.T) {
 
 // TestRunEEntered_TrueOnSuccessfulRunE confirms PersistentPreRunE fires when
 // args/flags are valid. whoami needs no daemon, so it's a clean witness.
-func TestRunEEntered_TrueOnSuccessfulRunE(t *testing.T) {
+func TestRunEEntered_TrueOnSuccessfulRunE(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, _, err := executeRootCapture(t, context.Background(), "whoami", "--as", "test-actor")
@@ -155,7 +156,7 @@ func TestRunEEntered_TrueOnSuccessfulRunE(t *testing.T) {
 // link-editing commands were retired by kata#1; relationships now flow
 // through `kata edit --parent / --blocks / --blocked-by / --related`
 // (and matching --remove-* flags).
-func TestRoot_Plan2VerbsAdvertised(t *testing.T) {
+func TestRoot_Plan2VerbsAdvertised(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	registered := rootSubcommands()
 	for _, verb := range []string{
 		"label", "labels",
@@ -170,7 +171,7 @@ func TestRoot_Plan2VerbsAdvertised(t *testing.T) {
 // TestRoot_RetiredCommandsAreGone pins the deletion of the 8 dedicated
 // relationship-editing commands. If any of these come back as a registered
 // subcommand, this test surfaces it.
-func TestRoot_RetiredCommandsAreGone(t *testing.T) {
+func TestRoot_RetiredCommandsAreGone(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	registered := rootSubcommands()
 	for _, retired := range []string{
 		"link", "unlink", "parent", "unparent",
@@ -184,7 +185,7 @@ func TestRoot_RetiredCommandsAreGone(t *testing.T) {
 // TestRoot_Plan3VerbsAdvertised mirrors the Plan 2 advertise check for the
 // search-and-destroy verbs Plan 3 introduces. A future regression that
 // drops a `subs` line will surface here, before it bites a user at the help.
-func TestRoot_Plan3VerbsAdvertised(t *testing.T) {
+func TestRoot_Plan3VerbsAdvertised(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	registered := rootSubcommands()
 	for _, verb := range []string{"delete", "restore", "purge", "search"} {
 		_, ok := registered[verb]
@@ -192,7 +193,7 @@ func TestRoot_Plan3VerbsAdvertised(t *testing.T) {
 	}
 }
 
-func TestRoot_LeaseVerbsAreFederationScoped(t *testing.T) {
+func TestRoot_LeaseVerbsAreFederationScoped(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	registered := rootSubcommands()
 	// `claim` lives at root for the simple ownership claim (PR #49); the
 	// federation write-lease verbs stay under `federation lease`.
@@ -205,14 +206,14 @@ func TestRoot_LeaseVerbsAreFederationScoped(t *testing.T) {
 	assert.Equal(t, "lease", lease.Name())
 }
 
-func TestRoot_QuickstartAdvertised(t *testing.T) {
+func TestRoot_QuickstartAdvertised(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	registered := rootSubcommands()
 	quickstart, ok := registered["quickstart"]
 	require.True(t, ok, "root must register quickstart")
 	assert.Contains(t, quickstart.Aliases, "agent-instructions")
 }
 
-func TestHelp_DescribesAgentContractSurfaces(t *testing.T) {
+func TestHelp_DescribesAgentContractSurfaces(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	rootHelp := string(executeRoot(t, newRootCmd(), "--help"))
 	assert.Contains(t, rootHelp, "human|json|agent; contract for quickstart")
 
@@ -220,7 +221,7 @@ func TestHelp_DescribesAgentContractSurfaces(t *testing.T) {
 	assert.Contains(t, initHelp, "Codex CLI contract and work.attention hooks")
 }
 
-func TestHelp_RefFlagsDoNotAdvertiseLegacyNumbers(t *testing.T) {
+func TestHelp_RefFlagsDoNotAdvertiseLegacyNumbers(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, args := range [][]string{
 		{"create", "--help"},
 		{"edit", "--help"},
@@ -250,6 +251,7 @@ func resetRunEEntered(t *testing.T) {
 // instead of "kata: <message>". This is the contract gap that hammer
 // finding #3 flagged.
 func TestEmitError_JSONMode_ProducesParseableEnvelope(t *testing.T) {
+	t.Parallel()
 	cli := &cliError{
 		Message:  "issue not found",
 		Code:     "issue_not_found",
@@ -269,6 +271,7 @@ func TestEmitError_JSONMode_ProducesParseableEnvelope(t *testing.T) {
 // human path so a future refactor doesn't break scripts grepping
 // stderr for "kata:".
 func TestEmitError_HumanMode_StillPrintsKataPrefix(t *testing.T) {
+	t.Parallel()
 	cli := &cliError{
 		Message: "title must not be empty", Kind: kindValidation,
 		ExitCode: ExitValidation,
@@ -279,6 +282,7 @@ func TestEmitError_HumanMode_StillPrintsKataPrefix(t *testing.T) {
 }
 
 func TestEmitError_AgentMode_CommandError(t *testing.T) {
+	t.Parallel()
 	cli := &cliError{
 		Message:  "comment body is required",
 		Code:     "comment_body_required",
@@ -290,7 +294,7 @@ func TestEmitError_AgentMode_CommandError(t *testing.T) {
 	assert.Equal(t, "ERR comment validation: comment body is required\n", buf.String())
 }
 
-func TestEmitError_AgentMode_UnknownCommandUsesKata(t *testing.T) {
+func TestEmitError_AgentMode_UnknownCommandUsesKata(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "cretae")
@@ -299,7 +303,7 @@ func TestEmitError_AgentMode_UnknownCommandUsesKata(t *testing.T) {
 		"stderr should start with agent usage error, got %q", stderr)
 }
 
-func TestEmitError_AgentMode_ParseErrorSingleLine(t *testing.T) {
+func TestEmitError_AgentMode_ParseErrorSingleLine(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "cretae")
@@ -310,7 +314,7 @@ func TestEmitError_AgentMode_ParseErrorSingleLine(t *testing.T) {
 	assert.NotContains(t, stderr, "Did you mean")
 }
 
-func TestEmitError_OutputModeErrorPrecedesUnknownCommand(t *testing.T) {
+func TestEmitError_OutputModeErrorPrecedesUnknownCommand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--format", "xml", "cretae")
@@ -319,7 +323,7 @@ func TestEmitError_OutputModeErrorPrecedesUnknownCommand(t *testing.T) {
 	assert.NotContains(t, stderr, "unknown command")
 }
 
-func TestEmitError_AgentAliasWithInvalidFormatStillUsesAgent(t *testing.T) {
+func TestEmitError_AgentAliasWithInvalidFormatStillUsesAgent(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "--format", "xml", "version")
@@ -329,7 +333,7 @@ func TestEmitError_AgentAliasWithInvalidFormatStillUsesAgent(t *testing.T) {
 	assert.Contains(t, stderr, "unsupported output format")
 }
 
-func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) {
+func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--json", "--agent", "cretae")
@@ -338,7 +342,7 @@ func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) {
 	assert.NotContains(t, stderr, "unknown command")
 }
 
-func TestOutputMode_RepeatedFormatConflicts(t *testing.T) {
+func TestOutputMode_RepeatedFormatConflicts(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	stdout, stderr, err := executeRootCapture(t, context.Background(),
@@ -348,7 +352,7 @@ func TestOutputMode_RepeatedFormatConflicts(t *testing.T) {
 	assert.Contains(t, stderr, "conflicting output modes")
 }
 
-func TestOutputMode_ContractAcceptedOnlyForQuickstart(t *testing.T) {
+func TestOutputMode_ContractAcceptedOnlyForQuickstart(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, command := range []string{"quickstart", "agent-instructions"} {
 		t.Run(command, func(t *testing.T) {
 			resetRunEEntered(t)
@@ -362,7 +366,7 @@ func TestOutputMode_ContractAcceptedOnlyForQuickstart(t *testing.T) {
 	}
 }
 
-func TestOutputMode_ContractRejectedForUnrelatedCommands(t *testing.T) {
+func TestOutputMode_ContractRejectedForUnrelatedCommands(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, args := range [][]string{
 		{"--format", "contract", "version"},
 		{"--format", "contract", "list"},
@@ -377,7 +381,7 @@ func TestOutputMode_ContractRejectedForUnrelatedCommands(t *testing.T) {
 	}
 }
 
-func TestOutputMode_QuickstartUsageListsContractFormat(t *testing.T) {
+func TestOutputMode_QuickstartUsageListsContractFormat(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	stdout, stderr, err := executeRootCapture(t, context.Background(),
@@ -387,7 +391,7 @@ func TestOutputMode_QuickstartUsageListsContractFormat(t *testing.T) {
 	assert.Contains(t, stderr, "want human, json, agent, or contract")
 }
 
-func TestOutputMode_ContractConflictsWithAgentAndJSON(t *testing.T) {
+func TestOutputMode_ContractConflictsWithAgentAndJSON(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, flag := range []string{"--agent", "--json"} {
 		t.Run(flag, func(t *testing.T) {
 			resetRunEEntered(t)
@@ -401,7 +405,7 @@ func TestOutputMode_ContractConflictsWithAgentAndJSON(t *testing.T) {
 	}
 }
 
-func TestEmitError_QuickstartContractConflictUsesAgentFallback(t *testing.T) {
+func TestEmitError_QuickstartContractConflictUsesAgentFallback(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	stdout, stderr, err := executeRootCapture(t, context.Background(),
@@ -413,7 +417,7 @@ func TestEmitError_QuickstartContractConflictUsesAgentFallback(t *testing.T) {
 	assert.Contains(t, stderr, "conflicting output modes")
 }
 
-func TestEmitError_QuickstartContractConflictUsesJSONFallback(t *testing.T) {
+func TestEmitError_QuickstartContractConflictUsesJSONFallback(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	stdout, stderr, err := executeRootCapture(t, context.Background(),
@@ -426,7 +430,7 @@ func TestEmitError_QuickstartContractConflictUsesJSONFallback(t *testing.T) {
 	assert.Equal(t, ExitUsage, got.Error.ExitCode)
 }
 
-func TestEmitError_RawModeScanParsesJSONTrueValue(t *testing.T) {
+func TestEmitError_RawModeScanParsesJSONTrueValue(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--json=true", "cretae")
@@ -436,7 +440,7 @@ func TestEmitError_RawModeScanParsesJSONTrueValue(t *testing.T) {
 	assert.Contains(t, got.Error.Message, "unknown command")
 }
 
-func TestEmitError_RawModeScanParsesAgentTrueValue(t *testing.T) {
+func TestEmitError_RawModeScanParsesAgentTrueValue(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--agent=true", "cretae")
@@ -445,7 +449,7 @@ func TestEmitError_RawModeScanParsesAgentTrueValue(t *testing.T) {
 		"stderr should use agent mode, got %q", stderr)
 }
 
-func TestEmitError_RawModeScanParsesJSONFalseValue(t *testing.T) {
+func TestEmitError_RawModeScanParsesJSONFalseValue(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--json=false", "cretae")
@@ -453,7 +457,7 @@ func TestEmitError_RawModeScanParsesJSONFalseValue(t *testing.T) {
 	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
 }
 
-func TestEmitError_RawModeScanParsesAgentFalseValue(t *testing.T) {
+func TestEmitError_RawModeScanParsesAgentFalseValue(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--agent=false", "cretae")
@@ -461,7 +465,7 @@ func TestEmitError_RawModeScanParsesAgentFalseValue(t *testing.T) {
 	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
 }
 
-func TestEmitError_RawModeScanSkipsWorkspaceFormatValue(t *testing.T) {
+func TestEmitError_RawModeScanSkipsWorkspaceFormatValue(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--workspace", "--format", "show")
@@ -470,7 +474,7 @@ func TestEmitError_RawModeScanSkipsWorkspaceFormatValue(t *testing.T) {
 	assert.NotContains(t, stderr, "unsupported output format")
 }
 
-func TestEmitError_RawModeScanSkipsWorkspaceAgentValue(t *testing.T) {
+func TestEmitError_RawModeScanSkipsWorkspaceAgentValue(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--workspace", "--agent", "show")
@@ -479,7 +483,7 @@ func TestEmitError_RawModeScanSkipsWorkspaceAgentValue(t *testing.T) {
 	assert.NotContains(t, stderr, "ERR ")
 }
 
-func TestEmitError_RawModeScanSkipsCreateBodyJSONValue(t *testing.T) {
+func TestEmitError_RawModeScanSkipsCreateBodyJSONValue(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "create", "--body", "--json")
@@ -488,7 +492,7 @@ func TestEmitError_RawModeScanSkipsCreateBodyJSONValue(t *testing.T) {
 	assert.Falsef(t, strings.HasPrefix(stderr, "{"), "stderr should not be JSON, got %q", stderr)
 }
 
-func TestEmitError_InvalidCommandPathDoesNotSwallowJSON(t *testing.T) {
+func TestEmitError_InvalidCommandPathDoesNotSwallowJSON(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "typo", "create", "--body", "--json")
@@ -498,7 +502,7 @@ func TestEmitError_InvalidCommandPathDoesNotSwallowJSON(t *testing.T) {
 	assert.Contains(t, got.Error.Message, "unknown command")
 }
 
-func TestEmitError_RawModeScanSkipsCreateBodyAgentValue(t *testing.T) {
+func TestEmitError_RawModeScanSkipsCreateBodyAgentValue(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "create", "--body", "--agent")
@@ -507,7 +511,7 @@ func TestEmitError_RawModeScanSkipsCreateBodyAgentValue(t *testing.T) {
 	assert.NotContains(t, stderr, "ERR ")
 }
 
-func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
+func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "show")
@@ -521,7 +525,7 @@ func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
 // PersistentPreRunE resolves an output mode, so the ERR line's mode has to be
 // recovered from argv. Without that, an --agent caller gets a human-shaped
 // error it cannot parse.
-func TestEmitError_AgentMode_FlagParseErrorUsesLeafCommand(t *testing.T) {
+func TestEmitError_AgentMode_FlagParseErrorUsesLeafCommand(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "show", "--nonexistent-flag")
@@ -535,6 +539,7 @@ func TestEmitError_AgentMode_FlagParseErrorUsesLeafCommand(t *testing.T) {
 // still gets a uniform JSON envelope when --json is set, with the
 // kind inferred from the runEReached heuristic.
 func TestEmitError_NonCliError_SynthesizesEnvelope(t *testing.T) {
+	t.Parallel()
 	plain := errors.New("connection refused")
 	var buf bytes.Buffer
 	emitErrorForMode(&buf, plain, outputJSON, true) // runEReached=true → ExitInternal/internal
@@ -547,6 +552,7 @@ func TestEmitError_NonCliError_SynthesizesEnvelope(t *testing.T) {
 // TestKindForExit pins the exit-code → kind mapping so additions to
 // the exit-code table can't silently drift.
 func TestKindForExit(t *testing.T) {
+	t.Parallel()
 	cases := map[int]errKind{
 		ExitOK:            kindInternal, // 0 isn't an error path; defaults
 		ExitInternal:      kindInternal,
@@ -566,6 +572,7 @@ func TestKindForExit(t *testing.T) {
 // TestKindForStatus pins the HTTP-status → kind mapping (used by
 // apiErrFromBody when the daemon returns an error envelope).
 func TestKindForStatus(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, kindValidation, kindForStatus(400))
 	assert.Equal(t, kindNotFound, kindForStatus(404))
 	assert.Equal(t, kindConflict, kindForStatus(409))
@@ -579,7 +586,7 @@ func TestKindForStatus(t *testing.T) {
 // system's actual state, not paper over it. After the fix, health
 // uses discoverDaemon and returns a kindDaemonUnavail cliError when
 // no daemon is found.
-func TestHealth_DoesNotAutoStartDaemon(t *testing.T) {
+func TestHealth_DoesNotAutoStartDaemon(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SERVER; resetFlags sets package var flags
 	// We can't easily test "no daemon" directly because tests share a
 	// daemon namespace, but we CAN verify the discoverDaemon helper
 	// returns a kindDaemonUnavail cliError when discovery fails. The
@@ -600,7 +607,7 @@ func TestHealth_DoesNotAutoStartDaemon(t *testing.T) {
 		"hint must point the user at the right action")
 }
 
-func TestHealthCommandDoesNotAutoStartDaemon(t *testing.T) {
+func TestHealthCommandDoesNotAutoStartDaemon(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SERVER; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", "")
@@ -615,7 +622,7 @@ func TestHealthCommandDoesNotAutoStartDaemon(t *testing.T) {
 	assert.Contains(t, ce.Message, "no daemon running")
 }
 
-func TestHealthReportsLiveUnreachableDaemon(t *testing.T) {
+func TestHealthReportsLiveUnreachableDaemon(t *testing.T) { //nolint:paralleltest // sets KATA_SERVER; resetFlags sets package var flags
 	resetFlags(t)
 	home := setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
@@ -635,7 +642,7 @@ func TestHealthReportsLiveUnreachableDaemon(t *testing.T) {
 	assert.NotContains(t, ce.Message, "no daemon running")
 }
 
-func TestHealth_NamedLocalDaemonDoesNotAutoStart(t *testing.T) {
+func TestHealth_NamedLocalDaemonDoesNotAutoStart(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SERVER; swaps package var flags
 	resetFlags(t)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -662,7 +669,7 @@ local = true
 // probed by discoverDaemon. Without this, `kata health` ignores
 // KATA_SERVER and reports either a stale local daemon or "no daemon
 // running" — both of which contradict the user's explicit selection.
-func TestHealth_HonorsKataServer(t *testing.T) {
+func TestHealth_HonorsKataServer(t *testing.T) { //nolint:paralleltest // sets KATA_HOME and KATA_SERVER; resetFlags sets package var flags
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 
@@ -680,7 +687,7 @@ func TestHealth_HonorsKataServer(t *testing.T) {
 // printed Author, ready printed Owner. List now matches ready by
 // printing Owner; unowned issues render as "(unowned)" so the cell
 // is never empty.
-func TestList_ShowsOwnerInParens(t *testing.T) {
+func TestList_ShowsOwnerInParens(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	body := []byte(`{"actor":"x","title":"T","owner":"alice"}`)
 	resp, err := http.Post(env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
@@ -700,7 +707,7 @@ func TestList_ShowsOwnerInParens(t *testing.T) {
 // used to produce "unknown shorthand flag: '1' in -1" — useless.
 // Now translated into a kindUsage cliError pointing the user at
 // the `--` separator workaround.
-func TestNegativePositional_ProducesUsefulError(t *testing.T) {
+func TestNegativePositional_ProducesUsefulError(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, args := range [][]string{
 		{"show", "-1"},
 		{"delete", "-1"},

@@ -18,6 +18,7 @@ import (
 // project. bootResolveScope should return single-project scope, and the
 // initial list fetch should hit the project-scoped endpoint.
 func TestBoot_ResolvesProject(t *testing.T) {
+	t.Parallel()
 	var sawList bool
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects/resolve": func(w http.ResponseWriter, _ *http.Request) {
@@ -72,6 +73,7 @@ func TestBoot_ResolvesProject(t *testing.T) {
 // TestBoot_UnresolvedWithProjects_LandsViewProjects below, which pins
 // the ≥1 project branch.)
 func TestBoot_EmptyState_NoProjectsRegistered(t *testing.T) {
+	t.Parallel()
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects/resolve": projectNotInitializedHandler,
 		"/api/v1/projects": func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +98,7 @@ func TestBoot_EmptyState_NoProjectsRegistered(t *testing.T) {
 // TestBoot_NonResolveErrorPropagates: a 500 from /resolve should fail Run
 // instead of silently downgrading. Black-screen prevention.
 func TestBoot_NonResolveErrorPropagates(t *testing.T) {
+	t.Parallel()
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects/resolve": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -113,6 +116,7 @@ func TestBoot_NonResolveErrorPropagates(t *testing.T) {
 // filter state. The shape is preserved so a future task can wire one up
 // without changing fetchInitial.
 func TestInitialFilter_ZeroValueByDefault(t *testing.T) {
+	t.Parallel()
 	got := initialFilter(Options{})
 	if got.Status != "" || got.Owner != "" || got.Author != "" ||
 		got.Search != "" || len(got.Labels) != 0 {
@@ -144,6 +148,7 @@ func (f *fakeInitialIssueAPI) ListProjects(context.Context) ([]ProjectSummary, e
 }
 
 func TestResolveInitialIssue_FetchesBareRefInWorkspaceProject(t *testing.T) {
+	t.Parallel()
 	api := &fakeInitialIssueAPI{
 		detail: &IssueDetail{
 			Issue: &Issue{
@@ -166,6 +171,7 @@ func TestResolveInitialIssue_FetchesBareRefInWorkspaceProject(t *testing.T) {
 }
 
 func TestResolveInitialIssue_QualifiedRefSelectsNamedProject(t *testing.T) {
+	t.Parallel()
 	api := &fakeInitialIssueAPI{
 		projects: []ProjectSummary{
 			{ID: 7, Name: "workspace"},
@@ -200,6 +206,7 @@ func TestResolveInitialIssue_QualifiedRefSelectsNamedProject(t *testing.T) {
 }
 
 func TestResolveInitialIssue_QualifiedRefDoesNotRequireWorkspaceScope(t *testing.T) {
+	t.Parallel()
 	api := &fakeInitialIssueAPI{
 		projects: []ProjectSummary{{ID: 9, Name: "other-project"}},
 		detail: &IssueDetail{
@@ -224,6 +231,7 @@ func TestResolveInitialIssue_QualifiedRefDoesNotRequireWorkspaceScope(t *testing
 }
 
 func TestResolveInitialIssue_EmptyRefDoesNotFetch(t *testing.T) {
+	t.Parallel()
 	api := &fakeInitialIssueAPI{}
 	bi := bootInit{scope: scope{projectID: 7}, view: viewList}
 
@@ -234,6 +242,7 @@ func TestResolveInitialIssue_EmptyRefDoesNotFetch(t *testing.T) {
 }
 
 func TestResolveInitialIssue_PropagatesLookupError(t *testing.T) {
+	t.Parallel()
 	want := errors.New("issue not found")
 	api := &fakeInitialIssueAPI{err: want}
 	bi := bootInit{scope: scope{projectID: 7}, view: viewList}
@@ -243,6 +252,7 @@ func TestResolveInitialIssue_PropagatesLookupError(t *testing.T) {
 }
 
 func TestResolveInitialIssue_RequiresProjectScope(t *testing.T) {
+	t.Parallel()
 	api := &fakeInitialIssueAPI{}
 
 	_, err := resolveInitialIssue(t.Context(), api, bootInit{view: viewProjects}, "abc4")
@@ -251,7 +261,7 @@ func TestResolveInitialIssue_RequiresProjectScope(t *testing.T) {
 	assert.Empty(t, api.ref)
 }
 
-func TestBootClient_ResolvesRequestedIssueBeforeReturning(t *testing.T) {
+func TestBootClient_ResolvesRequestedIssueBeforeReturning(t *testing.T) { //nolint:paralleltest // swaps package var bootDaemonConnectionForTUI
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects/7/issues/abc4": func(w http.ResponseWriter, _ *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -286,7 +296,7 @@ func TestBootClient_ResolvesRequestedIssueBeforeReturning(t *testing.T) {
 	assert.Equal(t, "abc4", bi.initialIssue.ShortID)
 }
 
-func TestBootClient_QualifiedRefUsesNamedProjectOverWorkspace(t *testing.T) {
+func TestBootClient_QualifiedRefUsesNamedProjectOverWorkspace(t *testing.T) { //nolint:paralleltest // swaps package var bootDaemonConnectionForTUI
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"projects":[
@@ -334,7 +344,7 @@ func TestBootClient_QualifiedRefUsesNamedProjectOverWorkspace(t *testing.T) {
 	assert.Equal(t, int64(9), bi.initialIssue.ProjectID)
 }
 
-func TestBootClient_ProjectSelectorScopesBareRef(t *testing.T) {
+func TestBootClient_ProjectSelectorScopesBareRef(t *testing.T) { //nolint:paralleltest // swaps package var bootDaemonConnectionForTUI
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"projects":[
@@ -374,7 +384,7 @@ func TestBootClient_ProjectSelectorScopesBareRef(t *testing.T) {
 	assert.Equal(t, int64(9), bi.initialIssue.ProjectID)
 }
 
-func TestBootClient_WorkspaceSelectorScopesBareRef(t *testing.T) {
+func TestBootClient_WorkspaceSelectorScopesBareRef(t *testing.T) { //nolint:paralleltest // swaps package var bootDaemonConnectionForTUI
 	workspace := t.TempDir()
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects/9/issues/abc4": func(w http.ResponseWriter, _ *http.Request) {
@@ -409,7 +419,7 @@ func TestBootClient_WorkspaceSelectorScopesBareRef(t *testing.T) {
 	assert.Equal(t, int64(9), bi.initialIssue.ProjectID)
 }
 
-func TestBootClient_QualifiedRefWorksFromUnboundWorkspace(t *testing.T) {
+func TestBootClient_QualifiedRefWorksFromUnboundWorkspace(t *testing.T) { //nolint:paralleltest // swaps package var bootDaemonConnectionForTUI
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(
@@ -455,6 +465,7 @@ func TestBootClient_QualifiedRefWorksFromUnboundWorkspace(t *testing.T) {
 // surfaces errNotATTY instead of writing alt-screen control sequences
 // into a buffer that cannot honor them.
 func TestOutputIsTerminal_RejectsNonFile(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	if outputIsTerminal(&buf) {
 		t.Fatal("outputIsTerminal(*bytes.Buffer) = true, want false")
@@ -464,7 +475,7 @@ func TestOutputIsTerminal_RejectsNonFile(t *testing.T) {
 // TestRun_NonFileStdout_ReturnsNotATTY: piping into a bytes.Buffer (the
 // natural test rig) must surface errNotATTY rather than panicking deep
 // inside Bubble Tea's renderer.
-func TestRun_NonFileStdout_ReturnsNotATTY(t *testing.T) {
+func TestRun_NonFileStdout_ReturnsNotATTY(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	var buf bytes.Buffer
 	err := Run(t.Context(), Options{Stdout: &buf})
 	if !errors.Is(err, errNotATTY) {
@@ -473,6 +484,7 @@ func TestRun_NonFileStdout_ReturnsNotATTY(t *testing.T) {
 }
 
 func TestSSERestartIgnoresStaleGeneration(t *testing.T) {
+	t.Parallel()
 	root, cancelRoot := context.WithCancel(context.Background())
 	t.Cleanup(cancelRoot)
 
@@ -503,6 +515,7 @@ func TestSSERestartIgnoresStaleGeneration(t *testing.T) {
 // rule: an unresolved cwd plus ≥1 registered project lands on
 // viewProjects, not viewEmpty. Spec §4.2.
 func TestBoot_UnresolvedWithProjects_LandsViewProjects(t *testing.T) {
+	t.Parallel()
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects/resolve": projectNotInitializedHandler,
 		"/api/v1/projects": func(w http.ResponseWriter, r *http.Request) {
@@ -527,6 +540,7 @@ func TestBoot_UnresolvedWithProjects_LandsViewProjects(t *testing.T) {
 }
 
 func TestBootRemoteUnboundPathLandsOnProjects(t *testing.T) {
+	t.Parallel()
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects": func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "stats", r.URL.Query().Get("include"))
@@ -548,7 +562,7 @@ func TestBootRemoteUnboundPathLandsOnProjects(t *testing.T) {
 // rejoin detection reads projectUIDByID; before the async project-list fetch
 // lands, an unseeded cache would let a post-leave adoption rewrite the
 // project's history instead of rebinding it.
-func TestBootScopedResolveSeedsProjectUID(t *testing.T) {
+func TestBootScopedResolveSeedsProjectUID(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/projects/resolve", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
@@ -571,7 +585,7 @@ func TestBootScopedResolveSeedsProjectUID(t *testing.T) {
 // lands on viewProjects, the initial model's cache maps are populated
 // from the boot fetch — no empty-then-fill flicker on the first frame.
 // Spec §4.3.
-func TestBuildRunModel_SeedsViewProjectsCacheFromBoot(t *testing.T) {
+func TestBuildRunModel_SeedsViewProjectsCacheFromBoot(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	t1 := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 	bi := bootInit{
 		view:  viewProjects,
@@ -592,7 +606,7 @@ func TestBuildRunModel_SeedsViewProjectsCacheFromBoot(t *testing.T) {
 	assert.Equal(t, 1, m.projectStats[7].Closed)
 }
 
-func TestBuildRunModel_SeedsInitialIssue(t *testing.T) {
+func TestBuildRunModel_SeedsInitialIssue(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	bi := bootInit{
 		scope: scope{projectID: 7, projectName: "example-project"},
 		view:  viewList,
@@ -612,7 +626,7 @@ func TestBuildRunModel_SeedsInitialIssue(t *testing.T) {
 	assert.Equal(t, int64(7), m.detail.scopePID)
 }
 
-func TestInitialDetail_InitAddsFourDetailFetches(t *testing.T) {
+func TestInitialDetail_InitAddsFourDetailFetches(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	baseInit := bootInit{
 		scope: scope{projectID: 7, projectName: "example-project"},
 		view:  viewList,

@@ -23,7 +23,7 @@ func extractShortID(t *testing.T, jsonOutput string) string {
 	return resp.Issue.ShortID
 }
 
-func TestAgentClaimWorkflow(t *testing.T) {
+func TestAgentClaimWorkflow(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	// Setup
 	env, dir := setupCLIEnv(t)
 

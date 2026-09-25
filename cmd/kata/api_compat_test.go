@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFilteredReadyAllRejectsOldDaemonBeforeQuery(t *testing.T) {
+func TestFilteredReadyAllRejectsOldDaemonBeforeQuery(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var readyCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -37,7 +37,7 @@ func TestFilteredReadyAllRejectsOldDaemonBeforeQuery(t *testing.T) {
 	assert.Zero(t, readyCalls.Load(), "the unfiltered old endpoint must not be queried")
 }
 
-func TestFilteredSearchRejectsOldDaemonBeforeQuery(t *testing.T) {
+func TestFilteredSearchRejectsOldDaemonBeforeQuery(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var searchCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -63,7 +63,7 @@ func TestFilteredSearchRejectsOldDaemonBeforeQuery(t *testing.T) {
 	assert.Zero(t, searchCalls.Load(), "the unfiltered old endpoint must not be queried")
 }
 
-func TestFilteredListAllRejectsDaemonBeforeGlobalListFilters(t *testing.T) {
+func TestFilteredListAllRejectsDaemonBeforeGlobalListFilters(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var listCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -87,7 +87,7 @@ func TestFilteredListAllRejectsDaemonBeforeGlobalListFilters(t *testing.T) {
 	assert.Zero(t, listCalls.Load(), "the unfiltered old endpoint must not be queried")
 }
 
-func TestCloseRetryFlagsMakeOldDaemonRejectCloseBeforeMutation(t *testing.T) {
+func TestCloseRetryFlagsMakeOldDaemonRejectCloseBeforeMutation(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var closeCalls, mutations atomic.Int32
 	var retryProtocol string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +126,7 @@ func TestCloseRetryFlagsMakeOldDaemonRejectCloseBeforeMutation(t *testing.T) {
 	assert.Zero(t, mutations.Load(), "the legacy request schema must reject before mutation")
 }
 
-func TestListAllDefaultsToUnlimited(t *testing.T) {
+func TestListAllDefaultsToUnlimited(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var sentLimit atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/issues" {
@@ -144,7 +144,7 @@ func TestListAllDefaultsToUnlimited(t *testing.T) {
 	assert.False(t, sentLimit.Load(), "list --all must not silently cap a fleet scan at 200 rows")
 }
 
-func TestListSortDaemonCompatibility(t *testing.T) {
+func TestListSortDaemonCompatibility(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	tests := []struct {
 		name            string
 		version         string
@@ -201,6 +201,7 @@ func TestListSortDaemonCompatibility(t *testing.T) {
 }
 
 func TestAPIVersionAtLeast(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		reported string
 		required string

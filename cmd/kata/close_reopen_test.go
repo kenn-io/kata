@@ -13,7 +13,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestCloseReopen_RoundTrip(t *testing.T) {
+func TestCloseReopen_RoundTrip(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 
 	out := runCLI(t, env, dir, "close", ref,
@@ -27,7 +27,7 @@ func TestCloseReopen_RoundTrip(t *testing.T) {
 	assert.NotContains(t, out, "Reminder:")
 }
 
-func TestClose_AgentOutput(t *testing.T) {
+func TestClose_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 
 	out := runCLI(t, env, dir, "--agent", "close", ref,
@@ -42,7 +42,7 @@ func TestClose_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Reminder:")
 }
 
-func TestClose_AgentOutputExternalEvidence(t *testing.T) {
+func TestClose_AgentOutputExternalEvidence(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "coordination task")
 	account := "arranged by email with the venue; calendar hold sent"
 
@@ -58,7 +58,7 @@ func TestClose_AgentOutputExternalEvidence(t *testing.T) {
 	assert.Contains(t, audit, `"evidence_types":["external"]`)
 }
 
-func TestCloseCmd_RetryFlagsReplayOriginalReceipt(t *testing.T) {
+func TestCloseCmd_RetryFlagsReplayOriginalReceipt(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	args := []string{
 		"--json", "close", ref,
@@ -77,7 +77,7 @@ func TestCloseCmd_RetryFlagsReplayOriginalReceipt(t *testing.T) {
 	assert.Contains(t, second, `"original_event":`)
 }
 
-func TestCloseCmd_RejectsBlankIfMatch(t *testing.T) {
+func TestCloseCmd_RejectsBlankIfMatch(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	_, stderr, err := runCLIWithErr(t, env, dir,
 		"close", ref,
@@ -89,7 +89,7 @@ func TestCloseCmd_RejectsBlankIfMatch(t *testing.T) {
 	assert.Contains(t, stderr, "--if-match must not be blank")
 }
 
-func TestCloseCmd_RejectsBlankIdempotencyKey(t *testing.T) {
+func TestCloseCmd_RejectsBlankIdempotencyKey(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	_, stderr, err := runCLIWithErr(t, env, dir,
 		"close", ref,
@@ -103,7 +103,7 @@ func TestCloseCmd_RejectsBlankIdempotencyKey(t *testing.T) {
 	assert.Contains(t, show, `"status":"open"`)
 }
 
-func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
+func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 
 	stdout, stderr, err := runCLIWithErr(t, env, dir, "--agent", "close", ref,
@@ -118,7 +118,7 @@ func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
 	assert.Empty(t, stderr)
 }
 
-func TestReopen_AgentOutput(t *testing.T) {
+func TestReopen_AgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	runCLI(t, env, dir, "close", ref,
 		"--done",
@@ -132,7 +132,7 @@ func TestReopen_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Status: open")
 }
 
-func TestCloseCmd_CanonicalDoneRequiresEvidence(t *testing.T) {
+func TestCloseCmd_CanonicalDoneRequiresEvidence(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 
 	_, stderr, err := runCLIWithErr(t, env, dir,
@@ -143,7 +143,7 @@ func TestCloseCmd_CanonicalDoneRequiresEvidence(t *testing.T) {
 	assert.Contains(t, stderr, "evidence required")
 }
 
-func TestCloseCmd_CanonicalDoneWithCommitEvidence(t *testing.T) {
+func TestCloseCmd_CanonicalDoneWithCommitEvidence(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 
 	out := runCLI(t, env, dir,
@@ -154,7 +154,7 @@ func TestCloseCmd_CanonicalDoneWithCommitEvidence(t *testing.T) {
 	assert.Contains(t, out, "closed")
 }
 
-func TestCloseCmd_SugarDoneWithCommit(t *testing.T) {
+func TestCloseCmd_SugarDoneWithCommit(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	out := runCLI(t, env, dir,
 		"close", ref,
@@ -164,7 +164,7 @@ func TestCloseCmd_SugarDoneWithCommit(t *testing.T) {
 	assert.Contains(t, out, "closed")
 }
 
-func TestCloseCmd_SugarDuplicateOf(t *testing.T) {
+func TestCloseCmd_SugarDuplicateOf(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
 	target := createIssue(t, env, pid, "target")
 	out := runCLI(t, env, dir,
@@ -174,7 +174,7 @@ func TestCloseCmd_SugarDuplicateOf(t *testing.T) {
 	assert.Contains(t, out, "closed")
 }
 
-func TestCloseCmd_SugarConflictsWithCanonical(t *testing.T) {
+func TestCloseCmd_SugarConflictsWithCanonical(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	_, stderr, err := runCLIWithErr(t, env, dir,
 		"close", ref,
@@ -188,7 +188,7 @@ func TestCloseCmd_SugarConflictsWithCanonical(t *testing.T) {
 // TestCloseCmd_MultipleSugarFlagsRejected pins that combining two reason
 // sugar flags (e.g. --done --wontfix) is refused with a clear conflict
 // error rather than silently picking the first match in source order.
-func TestCloseCmd_MultipleSugarFlagsRejected(t *testing.T) {
+func TestCloseCmd_MultipleSugarFlagsRejected(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	_, stderr, err := runCLIWithErr(t, env, dir,
 		"close", ref,
@@ -201,7 +201,7 @@ func TestCloseCmd_MultipleSugarFlagsRejected(t *testing.T) {
 	assert.Contains(t, stderr, "wontfix")
 }
 
-func TestCloseCmd_SugarDuplicateEvidenceConflict(t *testing.T) {
+func TestCloseCmd_SugarDuplicateEvidenceConflict(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
 	target := createIssue(t, env, pid, "target")
 	_, stderr, err := runCLIWithErr(t, env, dir,
@@ -214,16 +214,19 @@ func TestCloseCmd_SugarDuplicateEvidenceConflict(t *testing.T) {
 }
 
 func TestParseEvidenceFlags_RejectsEmptyDuplicateOf(t *testing.T) {
+	t.Parallel()
 	_, err := parseEvidenceFlags([]string{"duplicate-of:"})
 	require.Error(t, err)
 }
 
 func TestParseEvidenceFlags_RejectsEmptySupersededBy(t *testing.T) {
+	t.Parallel()
 	_, err := parseEvidenceFlags([]string{"superseded-by:"})
 	require.Error(t, err)
 }
 
 func TestParseEvidenceFlags_RejectsDuplicateReviewedPath(t *testing.T) {
+	t.Parallel()
 	_, err := parseEvidenceFlags([]string{
 		"reviewed-paths:internal/foo.go",
 		"reviewed-paths:internal/foo.go",
@@ -232,7 +235,7 @@ func TestParseEvidenceFlags_RejectsDuplicateReviewedPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "duplicate path")
 }
 
-func TestCloseCmd_SugarReviewedAndCanonicalReviewedPathConflict(t *testing.T) {
+func TestCloseCmd_SugarReviewedAndCanonicalReviewedPathConflict(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	_, stderr, err := runCLIWithErr(t, env, dir,
 		"close", ref,
@@ -250,7 +253,7 @@ func TestCloseCmd_SugarReviewedAndCanonicalReviewedPathConflict(t *testing.T) {
 // StringSliceVar would split "no-change-audit:Reviewed schemas, queries,
 // and migrations" into three broken evidence items; the audit row's
 // stored evidence must reflect the original prose.
-func TestCloseCmd_EvidenceValueWithCommaIsPreserved(t *testing.T) {
+func TestCloseCmd_EvidenceValueWithCommaIsPreserved(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	runCLI(t, env, dir,
 		"close", ref,
@@ -263,7 +266,7 @@ func TestCloseCmd_EvidenceValueWithCommaIsPreserved(t *testing.T) {
 		"comma-bearing --evidence value must not be split into invalid sub-items")
 }
 
-func TestCloseCmd_DryRunDoesNotMutate(t *testing.T) {
+func TestCloseCmd_DryRunDoesNotMutate(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	out := runCLI(t, env, dir,
 		"close", ref,
@@ -292,7 +295,7 @@ func TestCloseCmd_DryRunDoesNotMutate(t *testing.T) {
 // short-circuit must surface success instead. Shape validation still
 // runs, so the retry uses a different valid reason+message to verify
 // the short-circuit isn't gated on matching prior inputs.
-func TestCloseCmd_AlreadyClosedIsIdempotent(t *testing.T) {
+func TestCloseCmd_AlreadyClosedIsIdempotent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, parent := setupWorkspaceWithIssue(t, "parent issue")
 	runCLI(t, env, dir, "close", parent, "--done",
 		"--message", "Fixed Safari callback double-submit and ran tests.",
@@ -320,7 +323,7 @@ func TestCloseCmd_AlreadyClosedIsIdempotent(t *testing.T) {
 // surface success because the issue is already in the target state.
 // Pre-fix the validator ran first and returned 400 even though no state
 // transition was on the table.
-func TestCloseCmd_AlreadyClosed_RetryWithInvalidPayloadStillIdempotent(t *testing.T) {
+func TestCloseCmd_AlreadyClosed_RetryWithInvalidPayloadStillIdempotent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	runCLI(t, env, dir, "close", ref, "--done",
 		"--message", "Fixed Safari callback double-submit and ran tests.",
@@ -334,14 +337,14 @@ func TestCloseCmd_AlreadyClosed_RetryWithInvalidPayloadStillIdempotent(t *testin
 		"already-closed retry with invalid payload must return success envelope")
 }
 
-func TestCloseCmd_HelpBannerNamesObligation(t *testing.T) {
+func TestCloseCmd_HelpBannerNamesObligation(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	out := string(executeRoot(t, newRootCmd(), "close", "--help"))
 	assert.Contains(t, out, "asserts that the work it describes is complete")
 	assert.Contains(t, out, "do not close it")
 	assert.Contains(t, out, "needs-review")
 }
 
-func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {
+func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	_, stderr, err := runCLIWithErr(t, env, dir,
 		"close", ref, "--done",
@@ -356,7 +359,7 @@ func TestCloseCmd_ErrorTextNamesAlternative(t *testing.T) {
 // or --evidence, so the interactive close keystroke isn't broken by the
 // CLI substance/evidence gate. Posts directly to the loopback daemon
 // endpoint to mirror the wire shape internal/tui/client.Close uses.
-func TestCloseAPI_TUISourceBypassesSubstanceAndEvidence(t *testing.T) {
+func TestCloseAPI_TUISourceBypassesSubstanceAndEvidence(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	env, _, pid, ref := setupWorkspaceWithIssue(t, "issue one")
 	body, err := json.Marshal(map[string]any{
 		"actor":  "alice",
@@ -380,7 +383,7 @@ func TestCloseAPI_TUISourceBypassesSubstanceAndEvidence(t *testing.T) {
 // pass the evidence-target check — otherwise an agent could forge
 // the TUI origin to skip the duplicate-of / superseded-by guard and
 // persist a corrupt audit row.
-func TestCloseAPI_TUISourceWithNonDoneReasonStillValidates(t *testing.T) {
+func TestCloseAPI_TUISourceWithNonDoneReasonStillValidates(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	env, _, pid, ref := setupWorkspaceWithIssue(t, "issue one")
 	body, err := json.Marshal(map[string]any{
 		"actor":  "agent",
@@ -403,7 +406,7 @@ func TestCloseAPI_TUISourceWithNonDoneReasonStillValidates(t *testing.T) {
 
 // TestCloseAPI_NonTUIRequiresSubstance is the symmetric guard: without
 // source="tui", an empty message must surface as 400 validation.
-func TestCloseAPI_NonTUIRequiresSubstance(t *testing.T) {
+func TestCloseAPI_NonTUIRequiresSubstance(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; resetFlags sets package var flags
 	env, _, pid, ref := setupWorkspaceWithIssue(t, "issue one")
 	body, err := json.Marshal(map[string]any{
 		"actor": "alice",
@@ -422,7 +425,7 @@ func TestCloseAPI_NonTUIRequiresSubstance(t *testing.T) {
 
 // TestReopen_SingleRefWorks pins that kata reopen <ref> reopens a single
 // closed issue back to open.
-func TestReopen_SingleRefWorks(t *testing.T) {
+func TestReopen_SingleRefWorks(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "issue one")
 	runCLI(t, env, dir, "close", ref, "--done",
 		"--message", "Closed first issue after thorough review.",
@@ -435,7 +438,7 @@ func TestReopen_SingleRefWorks(t *testing.T) {
 	assert.Contains(t, show, `"status":"open"`)
 }
 
-func TestClose_WithComment_AppendsComment(t *testing.T) {
+func TestClose_WithComment_AppendsComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
 
 	runCLI(t, env, dir, "close", ref,
@@ -450,7 +453,7 @@ func TestClose_WithComment_AppendsComment(t *testing.T) {
 	assert.Equal(t, "closed", got.Issue.Status)
 }
 
-func TestClose_RetryWithCommentAppendsOneComment(t *testing.T) {
+func TestClose_RetryWithCommentAppendsOneComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
 	args := []string{
 		"close", ref,
@@ -468,7 +471,7 @@ func TestClose_RetryWithCommentAppendsOneComment(t *testing.T) {
 	assert.Equal(t, "fixed in abc1234", got.Comments[0].Body)
 }
 
-func TestClose_RetryWithCommentAfterMoveAppendsOneComment(t *testing.T) {
+func TestClose_RetryWithCommentAfterMoveAppendsOneComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, sourceProjectID, ref := setupWorkspaceWithIssue(t, "test issue")
 	args := []string{
 		"close", ref,
@@ -497,7 +500,7 @@ func TestClose_RetryWithCommentAfterMoveAppendsOneComment(t *testing.T) {
 	assert.Equal(t, "fixed in abc1234", comments[0].Body)
 }
 
-func TestReopen_WithComment_AppendsComment(t *testing.T) {
+func TestReopen_WithComment_AppendsComment(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
 	runCLI(t, env, dir, "close", ref,
 		"--done",
@@ -512,7 +515,7 @@ func TestReopen_WithComment_AppendsComment(t *testing.T) {
 	assert.Equal(t, "open", got.Issue.Status)
 }
 
-func TestClose_EmptyComment_Rejected(t *testing.T) {
+func TestClose_EmptyComment_Rejected(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir := setupCLIEnv(t)
 	ref := createIssueViaHTTP(t, env, dir, "x")
 

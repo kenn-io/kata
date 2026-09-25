@@ -14,7 +14,7 @@ import (
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
-func TestDaemonView_DKeyTransitionsFromList(t *testing.T) {
+func TestDaemonView_DKeyTransitionsFromList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonViewSource()
 
 	out, cmd := updateModel(m, keyRune('D'))
@@ -25,7 +25,7 @@ func TestDaemonView_DKeyTransitionsFromList(t *testing.T) {
 	assert.Equal(t, 1, out.daemonCursor, "cursor should land on the active daemon")
 }
 
-func TestDaemonView_DKeyTransitionsFromEmpty(t *testing.T) {
+func TestDaemonView_DKeyTransitionsFromEmpty(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonViewSource()
 	m.view = viewEmpty
 
@@ -37,12 +37,13 @@ func TestDaemonView_DKeyTransitionsFromEmpty(t *testing.T) {
 }
 
 func TestDaemonTargetsMatchImplicitLocalToNamedLocal(t *testing.T) {
+	t.Parallel()
 	assert.True(t,
 		daemonTargetsMatch(daemonTarget{Name: "local", Local: true}, daemonTarget{Local: true}),
 		"implicit active local daemon should match a named local catalog row")
 }
 
-func TestDaemonView_EscReturnsToPreviousView(t *testing.T) {
+func TestDaemonView_EscReturnsToPreviousView(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonViewSource()
 	m.view = viewDetail
 	m.detail = detailModel{issue: &Issue{ShortID: "abc1"}}
@@ -55,7 +56,7 @@ func TestDaemonView_EscReturnsToPreviousView(t *testing.T) {
 	assert.Equal(t, "abc1", out.detail.issue.ShortID)
 }
 
-func TestDaemonView_CursorMovement(t *testing.T) {
+func TestDaemonView_CursorMovement(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonView()
 
 	out, _ := m.routeDaemonsViewKey(keyRune('j'))
@@ -70,7 +71,7 @@ func TestDaemonView_CursorMovement(t *testing.T) {
 	assert.Equal(t, 2, out.daemonCursor)
 }
 
-func TestDaemonView_RenderIncludesDaemonRows(t *testing.T) {
+func TestDaemonView_RenderIncludesDaemonRows(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonView()
 
 	out := stripANSI(renderDaemons(m))
@@ -84,6 +85,7 @@ func TestDaemonView_RenderIncludesDaemonRows(t *testing.T) {
 }
 
 func TestDaemonView_RenderKeepsConfiguredTextSingleLine(t *testing.T) {
+	t.Parallel()
 	row := daemonRow{
 		target: daemonTarget{
 			Name: "shared\nname",
@@ -104,13 +106,14 @@ func TestDaemonView_RenderKeepsConfiguredTextSingleLine(t *testing.T) {
 }
 
 func TestDaemonView_HelpIncludesDaemonBinding(t *testing.T) {
+	t.Parallel()
 	out := stripANSI(renderHelp(newKeymap(), 100, ListFilter{}))
 
 	assertContains(t, out, "D", "help overlay missing daemon binding")
 	assertContains(t, out, "daemons", "help overlay missing daemon description")
 }
 
-func TestDaemonView_EnterDispatchesSwitchCommand(t *testing.T) {
+func TestDaemonView_EnterDispatchesSwitchCommand(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars; swaps package var connectDaemonTargetForTUI
 	oldConnect := connectDaemonTargetForTUI
 	t.Cleanup(func() { connectDaemonTargetForTUI = oldConnect })
 	connectDaemonTargetForTUI = func(_ context.Context, target daemonTarget) (daemonConnection, error) {
@@ -137,7 +140,7 @@ func TestDaemonView_EnterDispatchesSwitchCommand(t *testing.T) {
 	assert.Equal(t, uint64(1), out.daemonSwitchAttempt)
 }
 
-func TestDaemonSwitchDropsOutOfOrderAttempt(t *testing.T) {
+func TestDaemonSwitchDropsOutOfOrderAttempt(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonViewSource()
 	m.connGen = 2
 	m.daemonSwitchAttempt = 2
@@ -155,7 +158,7 @@ func TestDaemonSwitchDropsOutOfOrderAttempt(t *testing.T) {
 	assert.Nil(t, cmd)
 }
 
-func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
+func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	restarted := false
 	m := setupDaemonViewSource()
 	m.connGen = 4
@@ -224,7 +227,7 @@ func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
 // missed six, including the whole leave flow and the adopt-confirmation
 // buffer. Nothing prevented the next daemon's federation view from opening
 // on the previous connection's leave draft or result screen.
-func TestDaemonSwitchClearsAllFederationState(t *testing.T) {
+func TestDaemonSwitchClearsAllFederationState(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonViewSource()
 	m.view = viewFederation
 	m.federation = federationState{
@@ -258,7 +261,7 @@ func TestDaemonSwitchClearsAllFederationState(t *testing.T) {
 	assert.Equal(t, federationModeList, out.federation.mode)
 }
 
-func TestDaemonSwitchToEmptyDaemonEscReturnsToSelector(t *testing.T) {
+func TestDaemonSwitchToEmptyDaemonEscReturnsToSelector(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonView()
 	conn := daemonConnection{
 		api:     &Client{},
@@ -281,7 +284,7 @@ func TestDaemonSwitchToEmptyDaemonEscReturnsToSelector(t *testing.T) {
 	assert.Equal(t, "empty", out.activeDaemon.Name)
 }
 
-func TestDaemonSwitchFailureKeepsCurrentSession(t *testing.T) {
+func TestDaemonSwitchFailureKeepsCurrentSession(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonViewSource()
 	m.connGen = 2
 	m.scope = homedScope(7, "old")
@@ -302,7 +305,7 @@ func TestDaemonSwitchFailureKeepsCurrentSession(t *testing.T) {
 	require.NotNil(t, cmd)
 }
 
-func TestDaemonSwitchFailureSanitizesToast(t *testing.T) {
+func TestDaemonSwitchFailureSanitizesToast(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := setupDaemonViewSource()
 
 	out, _ := updateModel(m, daemonSwitchResultMsg{
@@ -317,7 +320,7 @@ func TestDaemonSwitchFailureSanitizesToast(t *testing.T) {
 	assert.Contains(t, out.toast.text, `\n`)
 }
 
-func TestDaemonSwitchDropsOldSSEMessages(t *testing.T) {
+func TestDaemonSwitchDropsOldSSEMessages(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 2
 	m.cache.put(cacheKey{projectID: 7, limit: queueFetchLimit}, []Issue{testIssue("old1")})
@@ -329,7 +332,7 @@ func TestDaemonSwitchDropsOldSSEMessages(t *testing.T) {
 	assert.NotNil(t, cmd, "dropping stale SSE must still re-arm the SSE bridge")
 }
 
-func TestDaemonSwitchDropsOldListFetch(t *testing.T) {
+func TestDaemonSwitchDropsOldListFetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 2
 	keep := []Issue{testIssue("keep")}
@@ -346,7 +349,7 @@ func TestDaemonSwitchDropsOldListFetch(t *testing.T) {
 	assert.Equal(t, keep, out.list.issues)
 }
 
-func TestDaemonSwitchDropsOldListMutation(t *testing.T) {
+func TestDaemonSwitchDropsOldListMutation(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 2
 	m.view = viewList
@@ -363,7 +366,7 @@ func TestDaemonSwitchDropsOldListMutation(t *testing.T) {
 	assert.Equal(t, "keep", out.list.status)
 }
 
-func TestDaemonSwitchDropsOldOpenDetail(t *testing.T) {
+func TestDaemonSwitchDropsOldOpenDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 2
 
@@ -377,7 +380,7 @@ func TestDaemonSwitchDropsOldOpenDetail(t *testing.T) {
 	assert.Nil(t, out.detail.issue)
 }
 
-func TestDaemonSwitchDropsOldJumpDetail(t *testing.T) {
+func TestDaemonSwitchDropsOldJumpDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 2
 	m.view = viewDetail
@@ -394,7 +397,7 @@ func TestDaemonSwitchDropsOldJumpDetail(t *testing.T) {
 	assert.Equal(t, int64(4), out.detail.gen)
 }
 
-func TestDaemonSwitchDropsOldPopDetail(t *testing.T) {
+func TestDaemonSwitchDropsOldPopDetail(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 2
 	m.view = viewDetail
@@ -408,7 +411,7 @@ func TestDaemonSwitchDropsOldPopDetail(t *testing.T) {
 	assert.Equal(t, focusDetail, out.focus)
 }
 
-func TestDaemonSwitchDropsOldProjectsFetch(t *testing.T) {
+func TestDaemonSwitchDropsOldProjectsFetch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 2
 	m.projectsGen = 3
@@ -424,7 +427,7 @@ func TestDaemonSwitchDropsOldProjectsFetch(t *testing.T) {
 	assert.Equal(t, map[int64]string{7: "keep"}, out.projectsByID)
 }
 
-func TestDaemonSwitchResetsProjectsGeneration(t *testing.T) {
+func TestDaemonSwitchResetsProjectsGeneration(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 2
 	m.projectsGen = 5
@@ -443,7 +446,7 @@ func TestDaemonSwitchResetsProjectsGeneration(t *testing.T) {
 	assert.Equal(t, uint64(0), out.projectsGen)
 }
 
-func TestSwitchDaemonCmdReappliesProjectSelector(t *testing.T) {
+func TestSwitchDaemonCmdReappliesProjectSelector(t *testing.T) { //nolint:paralleltest // swaps package var connectDaemonTargetForTUI
 	srv := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"projects":[{"id":9,"name":"project-b"}]}`))
@@ -469,7 +472,7 @@ func TestSwitchDaemonCmdReappliesProjectSelector(t *testing.T) {
 	assert.Equal(t, "project-b", result.conn.init.scope.projectName)
 }
 
-func TestSwitchDaemonCmdPreservesWorkspaceSelector(t *testing.T) {
+func TestSwitchDaemonCmdPreservesWorkspaceSelector(t *testing.T) { //nolint:paralleltest // swaps package var connectDaemonTargetForTUI
 	workspace := t.TempDir()
 	oldConnect := connectDaemonTargetForTUI
 	t.Cleanup(func() { connectDaemonTargetForTUI = oldConnect })

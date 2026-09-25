@@ -22,7 +22,7 @@ import (
 	"go.kenn.io/kit/selfupdate"
 )
 
-func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
+func TestUpdateInstall_DaemonLifecycle(t *testing.T) { //nolint:paralleltest // changes working directory; newRootCmd resets package var flags
 	if testing.Short() {
 		t.Skip("builds and runs isolated daemon binaries")
 	}

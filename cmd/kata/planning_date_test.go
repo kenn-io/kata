@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDeadlineSetsTimedDeadlineAndClearsIt(t *testing.T) {
+func TestDeadlineSetsTimedDeadlineAndClearsIt(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "timed deadline issue")
 
@@ -22,7 +22,7 @@ func TestDeadlineSetsTimedDeadlineAndClearsIt(t *testing.T) {
 	require.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 }
 
-func TestDeadlineAcceptsUTCInstantAndRejectsNumericOffset(t *testing.T) {
+func TestDeadlineAcceptsUTCInstantAndRejectsNumericOffset(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "deadline instant issue")
 
@@ -36,7 +36,7 @@ func TestDeadlineAcceptsUTCInstantAndRejectsNumericOffset(t *testing.T) {
 	assert.Contains(t, stderr, "invalid_metadata_value")
 }
 
-func TestDeadlineHonorsIfMatch(t *testing.T) {
+func TestDeadlineHonorsIfMatch(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "conditional deadline issue")
 
@@ -50,7 +50,7 @@ func TestDeadlineHonorsIfMatch(t *testing.T) {
 	require.JSONEq(t, `{"deadline_on":"2026-09-01"}`, string(issue.Issue.Metadata))
 }
 
-func TestScheduleSetsTimedGateAndClearsIt(t *testing.T) {
+func TestScheduleSetsTimedGateAndClearsIt(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "timed schedule issue")
 
@@ -65,7 +65,7 @@ func TestScheduleSetsTimedGateAndClearsIt(t *testing.T) {
 	require.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 }
 
-func TestScheduleHonorsIfMatch(t *testing.T) {
+func TestScheduleHonorsIfMatch(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "conditional schedule issue")
 

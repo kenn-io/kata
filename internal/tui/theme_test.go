@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-func TestResolveColorMode_NoColorOverridesAll(t *testing.T) {
+func TestResolveColorMode_NoColorOverridesAll(t *testing.T) { //nolint:paralleltest // sets NO_COLOR and KATA_COLOR_MODE
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("KATA_COLOR_MODE", "dark")
 	if got := resolveColorMode(); got != colorNone {
@@ -15,7 +15,7 @@ func TestResolveColorMode_NoColorOverridesAll(t *testing.T) {
 	}
 }
 
-func TestResolveColorMode_KataColorModeRespected(t *testing.T) {
+func TestResolveColorMode_KataColorModeRespected(t *testing.T) { //nolint:paralleltest // sets NO_COLOR and KATA_COLOR_MODE
 	cases := map[string]colorMode{
 		"":      colorAuto,
 		"auto":  colorAuto,
@@ -34,7 +34,7 @@ func TestResolveColorMode_KataColorModeRespected(t *testing.T) {
 	}
 }
 
-func TestResolveColorMode_InvalidFallsBackToAuto(t *testing.T) {
+func TestResolveColorMode_InvalidFallsBackToAuto(t *testing.T) { //nolint:paralleltest // sets NO_COLOR and KATA_COLOR_MODE
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("KATA_COLOR_MODE", "rainbow")
 	if got := resolveColorMode(); got != colorAuto {
@@ -42,7 +42,7 @@ func TestResolveColorMode_InvalidFallsBackToAuto(t *testing.T) {
 	}
 }
 
-func TestApplyColorMode_NoneStripsForeground(t *testing.T) {
+func TestApplyColorMode_NoneStripsForeground(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorNone, false)
 	// Lip Gloss v2 styles always emit attribute sequences (bold etc.);
 	// colorNone's contract is that no COLOR is set — the text content
@@ -67,7 +67,7 @@ func TestApplyColorMode_NoneStripsForeground(t *testing.T) {
 // that exact value. After applyColorMode(colorNone) every var must
 // have shed the sentinel foreground (colorNone leaves Foreground unset
 // or a different value entirely).
-func TestApplyColorMode_RebuildsAllStyles(t *testing.T) {
+func TestApplyColorMode_RebuildsAllStyles(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	sentinelColor := lipgloss.Color("#0f0f0f")
 	sentinel := lipgloss.NewStyle().Foreground(sentinelColor)
 	titleStyle = sentinel
@@ -133,7 +133,7 @@ func TestApplyColorMode_RebuildsAllStyles(t *testing.T) {
 // Faint so soft-deleted rows read as out-of-band but not alarming.
 // Earlier the codes were gray (243/245) — that didn't differentiate
 // from statusStyle.
-func TestApplyColorMode_DeletedStyleIsRedFaint(t *testing.T) {
+func TestApplyColorMode_DeletedStyleIsRedFaint(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorDark, true)
 	assertStyleForeground(t, deletedStyle, "deletedStyle dark", "196")
 	if !deletedStyle.GetFaint() {
@@ -141,7 +141,7 @@ func TestApplyColorMode_DeletedStyleIsRedFaint(t *testing.T) {
 	}
 }
 
-func TestApplyColorMode_StatusColorsStayDistinctInWarmDisplays(t *testing.T) {
+func TestApplyColorMode_StatusColorsStayDistinctInWarmDisplays(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorDark, true)
 	assertStyleForeground(t, openStyle, "openStyle dark", "46")
 	assertStyleForeground(t, closedStyle, "closedStyle dark", "245")
@@ -154,7 +154,7 @@ func TestApplyColorMode_StatusColorsStayDistinctInWarmDisplays(t *testing.T) {
 // border vars are bound after a normal-mode apply. M0 introduces these
 // vars even though the first usage lands in M3a — locking the values
 // here keeps them honest.
-func TestApplyColorMode_PanelBorderColorsBound(t *testing.T) {
+func TestApplyColorMode_PanelBorderColorsBound(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	applyColorMode(colorDark, true)
 	if panelActiveBorder == nil {
 		t.Fatal("panelActiveBorder must be bound by applyColorMode(colorDark)")

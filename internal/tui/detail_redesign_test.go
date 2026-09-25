@@ -11,7 +11,7 @@ import (
 // detail. Regression for the screenshot bug where the global chrome
 // dropped off and the issue content rendered against column 0 with
 // nothing above it.
-func TestDetailRedesign_StackedHasProjectBarOnFirstLine(t *testing.T) {
+func TestDetailRedesign_StackedHasProjectBarOnFirstLine(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	got := stripANSI(dm.View(160, 32, viewChrome{
@@ -32,7 +32,7 @@ func TestDetailRedesign_StackedHasProjectBarOnFirstLine(t *testing.T) {
 // page reads as a designed surface, not a raw debug dump. Excludes
 // the project/title bar line (which has its own padding), the info
 // line, and the footer help table.
-func TestDetailRedesign_ContentHasLeftGutter(t *testing.T) {
+func TestDetailRedesign_ContentHasLeftGutter(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.issue.Owner = new("alice")
@@ -61,7 +61,7 @@ func TestDetailRedesign_ContentHasLeftGutter(t *testing.T) {
 // screenshot's `��` artifacts. The renderer must never emit the
 // Unicode replacement character regardless of width, scope, or empty
 // metadata fields.
-func TestDetailRedesign_NoReplacementGlyphs(t *testing.T) {
+func TestDetailRedesign_NoReplacementGlyphs(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	cases := []struct {
@@ -113,7 +113,7 @@ func TestDetailRedesign_NoReplacementGlyphs(t *testing.T) {
 // out of the page. Per the redesign spec, `labels: none` and
 // `children: none` should never render — they consume attention with
 // no signal. Owner and parent stay (those absences are informative).
-func TestDetailRedesign_OmitsEmptyLabelsAndChildren(t *testing.T) {
+func TestDetailRedesign_OmitsEmptyLabelsAndChildren(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := simpleDetailModel()
 	got := stripANSI(dm.View(160, 24, viewChrome{
@@ -127,7 +127,7 @@ func TestDetailRedesign_OmitsEmptyLabelsAndChildren(t *testing.T) {
 // first tab with entries instead of stopping on an empty Comments
 // tab. Mirrors the screenshot's "Comments (0) active while Events (1)
 // has data" failure.
-func TestDetailRedesign_DefaultsToFirstNonEmptyActivityTab(t *testing.T) {
+func TestDetailRedesign_DefaultsToFirstNonEmptyActivityTab(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := simpleDetailModel()
 	when := time.Date(2026, 5, 2, 19, 16, 0, 0, time.UTC)
@@ -148,7 +148,7 @@ func TestDetailRedesign_DefaultsToFirstNonEmptyActivityTab(t *testing.T) {
 // has data, activeTab keeps its default (Comments) so the placeholder
 // tab strip still reads naturally. Guards against an over-eager auto-
 // switch that would jump tabs on initial load before fetches complete.
-func TestDetailRedesign_DefaultStaysWhenAllActivityEmpty(t *testing.T) {
+func TestDetailRedesign_DefaultStaysWhenAllActivityEmpty(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := seedActivity(simpleDetailModel(), nil, nil, nil)
 	if dm.activeTab != tabComments {
@@ -161,7 +161,7 @@ func TestDetailRedesign_DefaultStaysWhenAllActivityEmpty(t *testing.T) {
 // a tab explicitly, fetch results must not override it. Without this
 // guard, a late-arriving events fetch would yank focus away from the
 // user's chosen tab.
-func TestDetailRedesign_ExplicitTabPickStaysSticky(t *testing.T) {
+func TestDetailRedesign_ExplicitTabPickStaysSticky(t *testing.T) { //nolint:paralleltest // snapshotInit sets KATA_COLOR_MODE and NO_COLOR; applyColorMode rewrites package style vars
 	defer snapshotInit(t)()
 	dm := simpleDetailModel()
 	// User explicitly cycles to tabLinks before any fetch arrives.
@@ -187,6 +187,7 @@ func TestDetailRedesign_ExplicitTabPickStaysSticky(t *testing.T) {
 // only checks the row content, not the
 // rendered width.
 func TestDetailRedesign_FooterHintsAreComprehensive(t *testing.T) {
+	t.Parallel()
 	dm := detailModel{
 		issue:       &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "issue", Status: "open"},
 		detailFocus: focusActivity,
@@ -220,7 +221,7 @@ func TestDetailRedesign_FooterHintsAreComprehensive(t *testing.T) {
 // previous design wrapped them in detailSectionHeaderStyle with an
 // adaptive background; the redesign drops the background so labels
 // read as plain bold text against the page surface.
-func TestDetailRedesign_SectionHeadersHaveNoBackgroundSlab(t *testing.T) {
+func TestDetailRedesign_SectionHeadersHaveNoBackgroundSlab(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	defer applyDefaultColorMode()
 	applyColorMode(colorDark, true)
 	if styleHasBackground(detailSectionHeaderStyle) {

@@ -12,7 +12,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestUndoClientRealDaemonCloseAndParentLink(t *testing.T) {
+func TestUndoClientRealDaemonCloseAndParentLink(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; applyColorMode rewrites package style vars
 	ctx := context.Background()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "example-project")
@@ -50,7 +50,7 @@ func TestUndoClientRealDaemonCloseAndParentLink(t *testing.T) {
 	require.Empty(t, links)
 }
 
-func TestUndoClientRealDaemonScopedReopenRequiresEvidence(t *testing.T) {
+func TestUndoClientRealDaemonScopedReopenRequiresEvidence(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; applyColorMode rewrites package style vars
 	ctx := context.Background()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(ctx, "example-project")
@@ -97,7 +97,7 @@ func TestUndoClientRealDaemonScopedReopenRequiresEvidence(t *testing.T) {
 	require.Equal(t, "closed", closed.Status)
 }
 
-func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) {
+func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; applyColorMode rewrites package style vars
 	ctx := context.Background()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "example-project")
@@ -123,7 +123,7 @@ func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) {
 	require.Equal(t, "someone else's text", current.Body)
 }
 
-func TestUndoClientRealDaemonDetectsStatusChangedAwayAndBack(t *testing.T) {
+func TestUndoClientRealDaemonDetectsStatusChangedAwayAndBack(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; applyColorMode rewrites package style vars
 	ctx := context.Background()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "example-project")

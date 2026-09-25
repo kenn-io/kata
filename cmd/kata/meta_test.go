@@ -17,7 +17,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestMetaGetUsesMetadataEndpoint(t *testing.T) {
+func TestMetaGetUsesMetadataEndpoint(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	var metadataCalls atomic.Int64
 	var showCalls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +49,7 @@ func TestMetaGetUsesMetadataEndpoint(t *testing.T) {
 	assert.Equal(t, int64(0), showCalls.Load())
 }
 
-func TestMetaSetStoresJSONStringAndGetReturnsValue(t *testing.T) {
+func TestMetaSetStoresJSONStringAndGetReturnsValue(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata string issue")
 
@@ -66,7 +66,7 @@ func TestMetaSetStoresJSONStringAndGetReturnsValue(t *testing.T) {
 	assert.Equal(t, "needs-human", getOut)
 }
 
-func TestMetaSetJSONValueObjectRoundTrips(t *testing.T) {
+func TestMetaSetJSONValueObjectRoundTrips(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata object issue")
 
@@ -81,7 +81,7 @@ func TestMetaSetJSONValueObjectRoundTrips(t *testing.T) {
 		ref), out)
 }
 
-func TestMetaSetJSONValueRejectsInvalidJSONClientSide(t *testing.T) {
+func TestMetaSetJSONValueRejectsInvalidJSONClientSide(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "invalid json metadata issue")
 
@@ -94,7 +94,7 @@ func TestMetaSetJSONValueRejectsInvalidJSONClientSide(t *testing.T) {
 	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaSetJSONValueRejectsNullWithUnsetHint(t *testing.T) {
+func TestMetaSetJSONValueRejectsNullWithUnsetHint(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "null metadata issue")
 
@@ -104,7 +104,7 @@ func TestMetaSetJSONValueRejectsNullWithUnsetHint(t *testing.T) {
 	assert.Contains(t, stderr, "use `kata meta unset`")
 }
 
-func TestMetaUnsetRemovesKey(t *testing.T) {
+func TestMetaUnsetRemovesKey(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "unset metadata issue")
 
@@ -118,7 +118,7 @@ func TestMetaUnsetRemovesKey(t *testing.T) {
 	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaGetEmptyAndMissingKey(t *testing.T) {
+func TestMetaGetEmptyAndMissingKey(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "empty metadata issue")
 
@@ -131,7 +131,7 @@ func TestMetaGetEmptyAndMissingKey(t *testing.T) {
 	assert.Contains(t, stderr, "metadata key not found")
 }
 
-func TestMetaReservedKeyRejectionSurfacesValidation(t *testing.T) {
+func TestMetaReservedKeyRejectionSurfacesValidation(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "reserved metadata issue")
 
@@ -141,7 +141,7 @@ func TestMetaReservedKeyRejectionSurfacesValidation(t *testing.T) {
 	assert.Contains(t, stderr, "invalid_metadata_value")
 }
 
-func TestMetaIfMatchStaleRevisionConflictsAndCorrectRevisionSucceeds(t *testing.T) {
+func TestMetaIfMatchStaleRevisionConflictsAndCorrectRevisionSucceeds(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "if match metadata issue")
 
@@ -154,7 +154,7 @@ func TestMetaIfMatchStaleRevisionConflictsAndCorrectRevisionSucceeds(t *testing.
 	assert.Contains(t, out, "rev-2")
 }
 
-func TestMetaIfMatchRejectsOwnerHandoffAfterStatusRead(t *testing.T) {
+func TestMetaIfMatchRejectsOwnerHandoffAfterStatusRead(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "dispatcher work")
 	statusJSON := runCLI(t, env, dir, "--json", "status", ref)
@@ -182,7 +182,7 @@ func TestMetaIfMatchRejectsOwnerHandoffAfterStatusRead(t *testing.T) {
 	assert.Len(t, after, len(before))
 }
 
-func TestMetaSetIfMatchEmptyValueRejectedAsMalformed(t *testing.T) {
+func TestMetaSetIfMatchEmptyValueRejectedAsMalformed(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "if match empty value issue")
 
@@ -195,7 +195,7 @@ func TestMetaSetIfMatchEmptyValueRejectedAsMalformed(t *testing.T) {
 	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaSetIfMatchWhitespaceValueRejectedAsMalformed(t *testing.T) {
+func TestMetaSetIfMatchWhitespaceValueRejectedAsMalformed(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "if match whitespace value issue")
 
@@ -208,7 +208,7 @@ func TestMetaSetIfMatchWhitespaceValueRejectedAsMalformed(t *testing.T) {
 	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaUnsetIfMatchEmptyValueRejectedAsMalformed(t *testing.T) {
+func TestMetaUnsetIfMatchEmptyValueRejectedAsMalformed(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "if match empty value unset issue")
 	runCLI(t, env, dir, "meta", "set", ref, "work.branch", "feature/example")
@@ -222,7 +222,7 @@ func TestMetaUnsetIfMatchEmptyValueRejectedAsMalformed(t *testing.T) {
 	require.JSONEq(t, `{"work.branch":"feature/example"}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaSetIfMatchAbsentStillUnconditional(t *testing.T) {
+func TestMetaSetIfMatchAbsentStillUnconditional(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "if match absent issue")
 
@@ -233,7 +233,7 @@ func TestMetaSetIfMatchAbsentStillUnconditional(t *testing.T) {
 	require.JSONEq(t, `{"work.attention":"ok"}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaSetIfAbsentUsesConflictExitAndPreservesCurrentValue(t *testing.T) {
+func TestMetaSetIfAbsentUsesConflictExitAndPreservesCurrentValue(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata absent guard issue")
 
@@ -248,7 +248,7 @@ func TestMetaSetIfAbsentUsesConflictExitAndPreservesCurrentValue(t *testing.T) {
 	require.JSONEq(t, `{"deck.rank":"first"}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaSetRejectsExplicitFalseIfAbsent(t *testing.T) {
+func TestMetaSetRejectsExplicitFalseIfAbsent(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata false absent guard issue")
 
@@ -262,7 +262,7 @@ func TestMetaSetRejectsExplicitFalseIfAbsent(t *testing.T) {
 	require.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaSetIfValueRejectsStaleWriterAndAcceptsCurrentWriter(t *testing.T) {
+func TestMetaSetIfValueRejectsStaleWriterAndAcceptsCurrentWriter(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata value guard issue")
 
@@ -277,7 +277,7 @@ func TestMetaSetIfValueRejectsStaleWriterAndAcceptsCurrentWriter(t *testing.T) {
 	require.JSONEq(t, `{"deck.rank":"second"}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaUnsetIfValueRejectsStaleWriterAndAcceptsCurrentWriter(t *testing.T) {
+func TestMetaUnsetIfValueRejectsStaleWriterAndAcceptsCurrentWriter(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata unset guard issue")
 
@@ -291,7 +291,7 @@ func TestMetaUnsetIfValueRejectsStaleWriterAndAcceptsCurrentWriter(t *testing.T)
 	require.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaValueGuardSupportsRawJSON(t *testing.T) {
+func TestMetaValueGuardSupportsRawJSON(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata json guard issue")
 
@@ -303,7 +303,7 @@ func TestMetaValueGuardSupportsRawJSON(t *testing.T) {
 	require.JSONEq(t, `{}`, string(issue.Issue.Metadata))
 }
 
-func TestMetaSetRejectsConflictingValueGuards(t *testing.T) {
+func TestMetaSetRejectsConflictingValueGuards(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "metadata conflicting guard issue")
 
@@ -314,7 +314,7 @@ func TestMetaSetRejectsConflictingValueGuards(t *testing.T) {
 	assert.Contains(t, stderr, "mutually exclusive")
 }
 
-func TestMetaSetAndGetAgentOutput(t *testing.T) {
+func TestMetaSetAndGetAgentOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "agent metadata issue")
 
@@ -333,7 +333,7 @@ func TestMetaSetAndGetAgentOutput(t *testing.T) {
 // must be emitted as a single agent-quoted token so a whitespace-splitting
 // parser cannot break the value= field apart. textsafe.Line alone leaves the
 // space bare; agent quoting wraps the whole JSON value.
-func TestMetaGetAgentQuotesValueWithSpaces(t *testing.T) {
+func TestMetaGetAgentQuotesValueWithSpaces(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "agent metadata spaces")
 
@@ -345,7 +345,7 @@ func TestMetaGetAgentQuotesValueWithSpaces(t *testing.T) {
 	assert.Contains(t, getOut, `value="\"hello world\""`)
 }
 
-func TestMetaSetAndGetJSONOutput(t *testing.T) {
+func TestMetaSetAndGetJSONOutput(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "json metadata issue")
 
@@ -361,7 +361,7 @@ func TestMetaSetAndGetJSONOutput(t *testing.T) {
 		ref), getOut)
 }
 
-func TestMetaUnsetIfMatchStaleRevisionConflictsAndCorrectRevisionSucceeds(t *testing.T) {
+func TestMetaUnsetIfMatchStaleRevisionConflictsAndCorrectRevisionSucceeds(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "if match unset metadata issue")
 

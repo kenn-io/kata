@@ -19,7 +19,7 @@ import (
 // testenv.WithAuthToken also exports KATA_AUTH_TOKEN into the test process,
 // so client.NewHTTPClient — wired into httpClientFor via Opts — sees
 // the same token the daemon enforces.
-func TestCLIInjectsAuthTokenAgainstProtectedDaemon(t *testing.T) {
+func TestCLIInjectsAuthTokenAgainstProtectedDaemon(t *testing.T) { //nolint:paralleltest // testenv.New sets KATA_HOME and KATA_DB; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t, testenv.WithAuthToken("cli-test-tok"))
 
@@ -41,7 +41,7 @@ func TestCLIInjectsAuthTokenAgainstProtectedDaemon(t *testing.T) {
 // surfaces a daemon-side 401 instead of succeeding. Pairs with the success
 // case above so a regression that bypassed bearer auth on the daemon side
 // would also fail loudly here.
-func TestCLIRejectedWithoutAuthTokenEnv(t *testing.T) {
+func TestCLIRejectedWithoutAuthTokenEnv(t *testing.T) { //nolint:paralleltest // sets KATA_AUTH_TOKEN; newRootCmd resets package var flags
 	resetFlags(t)
 	env := testenv.New(t, testenv.WithAuthToken("cli-test-tok"))
 	t.Setenv("KATA_AUTH_TOKEN", "") // strip the testenv-supplied value

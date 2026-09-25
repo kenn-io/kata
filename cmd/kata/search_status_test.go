@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSearchStatusValidation(t *testing.T) {
+func TestSearchStatusValidation(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, status := range []string{"", " ", "OPEN", "all", "pending"} {
 		t.Run(fmt.Sprintf("status=%q", status), func(t *testing.T) {
 			_, _, err := executeRootCapture(t, context.Background(), "search", "work", "--status", status)
@@ -24,7 +24,7 @@ func TestSearchStatusValidation(t *testing.T) {
 	}
 }
 
-func TestSearchStatusDaemonCompatibility(t *testing.T) {
+func TestSearchStatusDaemonCompatibility(t *testing.T) { //nolint:paralleltest // newRootCmd resets package var flags
 	for _, version := range []string{"", "nonsense", "0.18.0", "0.19.0", "0.20.0"} {
 		t.Run(version, func(t *testing.T) {
 			var calls atomic.Int32

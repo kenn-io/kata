@@ -73,6 +73,7 @@ func detailFixture() detailModel {
 
 // TestDetail_Render_Header_Title confirms the title appears in the view.
 func TestDetail_Render_Header_Title(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	out := dm.View(80, 24, viewChrome{})
 	if !strings.Contains(out, "fix login bug on Safari") {
@@ -84,6 +85,7 @@ func TestDetail_Render_Header_Title(t *testing.T) {
 }
 
 func TestDetail_RenderUIDDefaultHidden(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.issue.UID = "01JZ0000000000000000000001"
 	out := stripANSI(dm.View(80, 24, viewChrome{}))
@@ -94,6 +96,7 @@ func TestDetail_RenderUIDDefaultHidden(t *testing.T) {
 }
 
 func TestDetail_RenderUIDShortFormat(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.issue.UID = "01JZ0000000000000000000001"
 	dm.uidFormat = uidDisplayShort
@@ -107,6 +110,7 @@ func TestDetail_RenderUIDShortFormat(t *testing.T) {
 }
 
 func TestDetail_RenderUIDFullFormat(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.issue.UID = "01JZ0000000000000000000001"
 	dm.uidFormat = uidDisplayFull
@@ -116,7 +120,7 @@ func TestDetail_RenderUIDFullFormat(t *testing.T) {
 	}
 }
 
-func TestDetail_OpenCopiesConfiguredUIDFormat(t *testing.T) {
+func TestDetail_OpenCopiesConfiguredUIDFormat(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{DisplayUIDFormat: "short"})
 	out, _ := m.handleOpenDetail(openDetailMsg{issue: Issue{
 		ProjectID: 7,
@@ -136,6 +140,7 @@ func TestDetail_OpenCopiesConfiguredUIDFormat(t *testing.T) {
 }
 
 func TestDetail_CompactSheetDoesNotRenderUID(t *testing.T) {
+	t.Parallel()
 	iss := Issue{
 		UID:     "01JZ0000000000000000000001",
 		ShortID: "42aa",
@@ -151,6 +156,7 @@ func TestDetail_CompactSheetDoesNotRenderUID(t *testing.T) {
 }
 
 func TestRenderHierarchySummary_FormatsParentAndChildren(t *testing.T) {
+	t.Parallel()
 	parent := &IssueRef{ShortID: "12pp", Title: "workspace polish parent", Status: "open"}
 	children := []Issue{
 		{UID: "01TEST-43cc", ShortID: "43cc", Status: "open"},
@@ -173,6 +179,7 @@ func TestRenderHierarchySummary_FormatsParentAndChildren(t *testing.T) {
 }
 
 func TestDetail_RenderHierarchySections(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.parent = &IssueRef{ShortID: "12pp", Title: "workspace polish parent", Status: "open"}
 	dm.children = []Issue{
@@ -199,6 +206,7 @@ func TestDetail_RenderHierarchySections(t *testing.T) {
 // backward, both with wrap-around. Three forward presses returns to
 // Comments; one backward from Comments lands on Links.
 func TestDetail_TabCycle_NextPrev(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	km := newKeymap()
 	tabKey := tea.KeyPressMsg{Code: tea.KeyTab}
@@ -227,6 +235,7 @@ func TestDetail_TabCycle_NextPrev(t *testing.T) {
 // document rather than the viewport so the activity strip is in scope
 // regardless of body length.
 func TestDetail_TabRender_ActiveContent(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	km := newKeymap()
 	docOut := func(d detailModel) string {
@@ -249,6 +258,7 @@ func TestDetail_TabRender_ActiveContent(t *testing.T) {
 // TestDetail_Scroll_BoundsAtTop: with no comments, k at scroll==0 must
 // clamp at zero. The fixture HAS comments so we use a body-only model.
 func TestDetail_Scroll_BoundsAtTop(t *testing.T) {
+	t.Parallel()
 	dm := detailModel{issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Body: "x\ny"}}
 	km := newKeymap()
 	dm, _ = dm.Update(runeKey('k'), km, nil)
@@ -261,6 +271,7 @@ func TestDetail_Scroll_BoundsAtTop(t *testing.T) {
 // active tab has no rows. The fixture comments would steal j, so
 // build a tab-empty model for the body-scroll path.
 func TestDetail_Scroll_DownIncreases(t *testing.T) {
+	t.Parallel()
 	dm := detailModel{issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Body: "x\ny"}}
 	km := newKeymap()
 	dm, _ = dm.Update(runeKey('j'), km, nil)
@@ -278,6 +289,7 @@ func TestDetail_Scroll_DownIncreases(t *testing.T) {
 // is the escape hatch for actually reading the issue body when it's
 // taller than the visible window.
 func TestDetail_Scroll_PageDownScrollsBodyEvenWithActivityRows(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture() // has comments + events + links
 	km := newKeymap()
 	if dm.scroll != 0 {
@@ -295,6 +307,7 @@ func TestDetail_Scroll_PageDownScrollsBodyEvenWithActivityRows(t *testing.T) {
 }
 
 func TestEmacsDetailNavigationScrollsDocument(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.issue.Body = strings.Repeat("line\n", 79) + "tail"
 	dm.lastTermWidth, dm.lastTermHeight = 120, 30
@@ -341,6 +354,7 @@ func TestEmacsDetailNavigationScrollsDocument(t *testing.T) {
 }
 
 func TestEmacsVerticalDetailMovement(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.lastTermWidth, dm.lastTermHeight = 120, 24
 	km := newKeymap()
@@ -365,6 +379,7 @@ func TestEmacsVerticalDetailMovement(t *testing.T) {
 }
 
 func TestEmacsSectionDetailCycling(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.children = []Issue{{UID: "01TEST-child"}}
 	km := newKeymap()
@@ -393,6 +408,7 @@ func TestEmacsSectionDetailCycling(t *testing.T) {
 // TestDetail_Scroll_PageUpClampsAtTop: pgup at the top of the body is
 // a no-op, not a negative scroll.
 func TestDetail_Scroll_PageUpClampsAtTop(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	km := newKeymap()
 	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgUp}, km, nil)
@@ -406,6 +422,7 @@ func TestDetail_Scroll_PageUpClampsAtTop(t *testing.T) {
 // long body can be skimmed even while the cursor is parked on the
 // children list.
 func TestDetail_Scroll_PageDownWorksOnChildrenFocus(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.children = []Issue{{UID: "01TEST-99zz", ShortID: "99zz", Title: "child", Status: "open"}}
 	dm.detailFocus = focusChildren
@@ -424,6 +441,7 @@ func TestDetail_Scroll_PageDownWorksOnChildrenFocus(t *testing.T) {
 // appearing stuck. The clamp keeps dm.scroll bounded so a single
 // PgUp always produces a visible movement.
 func TestDetail_Scroll_PageDownClampsPastEOFAndPageUpResponds(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.lastTermWidth, dm.lastTermHeight = 120, 30
 	km := newKeymap()
@@ -453,6 +471,7 @@ func TestDetail_Scroll_PageDownClampsPastEOFAndPageUpResponds(t *testing.T) {
 // offset unwinds (regression for roborev #17184, retargeted at the
 // unified viewport).
 func TestDetail_Scroll_PageDownClampsToDocument(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.issue.Body = strings.Repeat("line\n", 39) + "tail"
 	width, height := 120, 30
@@ -482,6 +501,7 @@ func TestDetail_Scroll_PageDownClampsToDocument(t *testing.T) {
 // panes are typically much shorter and would otherwise let dm.scroll
 // run far past the rendered EOF.
 func TestDetail_Scroll_SplitViewportClamp(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.issue.Body = strings.Repeat("line\n", 59) + "tail"
 	width, height := 72, 24
@@ -508,6 +528,7 @@ func TestDetail_Scroll_SplitViewportClamp(t *testing.T) {
 // body with focusActivity on an empty tab would snap the viewport
 // back to the activity header on every press.
 func TestDetail_JK_OnEmptyActivityTab_ScrollsViewport(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.issue.Body = strings.Repeat("body line\n", 60) + "tail"
 	dm.links = nil // empty links tab; comments+events keep hasActivity true
@@ -548,7 +569,7 @@ func TestDetail_JK_OnEmptyActivityTab_ScrollsViewport(t *testing.T) {
 // detailFallbackPageStep (8) regardless of how tall the terminal is,
 // and scrollViewportBy skips its EOF clamp until the next
 // WindowSizeMsg arrives.
-func TestDetail_OpenFromList_SeedsViewportCache(t *testing.T) {
+func TestDetail_OpenFromList_SeedsViewportCache(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := scenarioModel(t, 200, 40) // split layout breakpoint is 140x36
 	iss := listFixture()[0]
 	out, _ := m.Update(openDetailMsg{issue: iss})
@@ -578,7 +599,7 @@ func TestDetail_OpenFromList_SeedsViewportCache(t *testing.T) {
 // refreshing the cache the next PgUp/PgDn keeps using the pre-toggle
 // dimensions — overshooting after stacked → split (the split pane is
 // smaller) or leaving slack after split → stacked.
-func TestModel_ToggleLayout_RefreshesViewportCache(t *testing.T) {
+func TestModel_ToggleLayout_RefreshesViewportCache(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := scenarioModel(t, 200, 40) // starts in split
 	iss := listFixture()[0]
 	out, _ := m.Update(openDetailMsg{issue: iss})
@@ -603,6 +624,7 @@ func TestModel_ToggleLayout_RefreshesViewportCache(t *testing.T) {
 // TestDetail_Back_EmitsPopMsg: esc returns a tea.Cmd that emits
 // popDetailMsg when the nav stack is empty.
 func TestDetail_Back_EmitsPopMsg(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	km := newKeymap()
 	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEsc}, km, nil)
@@ -619,7 +641,7 @@ func TestDetail_Back_EmitsPopMsg(t *testing.T) {
 // switches the model to viewDetail, seeds m.detail.issue, and returns
 // a tea.Cmd. (We can't introspect a tea.Batch directly without running
 // it, but we can verify the model state mutated correctly.)
-func TestDetail_OpenFromList_DispatchesBatch(t *testing.T) {
+func TestDetail_OpenFromList_DispatchesBatch(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newDetailHostModel(Options{}, 7)
 	m.connGen = 9
 	m.list.loading = false
@@ -660,7 +682,7 @@ func TestDetail_OpenFromList_DispatchesBatch(t *testing.T) {
 
 // TestDetail_PopReturnsToListPreservingState: detail → esc → list keeps
 // the list cursor and filter state intact.
-func TestDetail_PopReturnsToListPreservingState(t *testing.T) {
+func TestDetail_PopReturnsToListPreservingState(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.scope = scope{projectID: 7}
 	m.list.loading = false
@@ -687,6 +709,7 @@ func TestDetail_PopReturnsToListPreservingState(t *testing.T) {
 
 // TestDetail_Loading_Renders shows the loading hint while issue is nil.
 func TestDetail_Loading_Renders(t *testing.T) {
+	t.Parallel()
 	dm := detailModel{loading: true}
 	out := dm.View(80, 24, viewChrome{})
 	if !strings.Contains(out, "loading") {
@@ -697,6 +720,7 @@ func TestDetail_Loading_Renders(t *testing.T) {
 // TestDetail_FetchedMsgs_Populate: the three tab fetch messages seed
 // the corresponding slices on dm.
 func TestDetail_FetchedMsgs_Populate(t *testing.T) {
+	t.Parallel()
 	dm := detailModel{issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1"}}
 	km := newKeymap()
 	dm, _ = dm.Update(commentsFetchedMsg{
@@ -724,6 +748,7 @@ func TestDetail_FetchedMsgs_Populate(t *testing.T) {
 // The detail-issue dm.err remains a separate signal because it gates
 // the entire view rather than one tab.
 func TestDetail_FetchedMsgs_ErrorRecorded(t *testing.T) {
+	t.Parallel()
 	dm := detailModel{issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1"}}
 	km := newKeymap()
 	dm, _ = dm.Update(commentsFetchedMsg{err: errors.New("boom")}, km, nil)
@@ -736,6 +761,7 @@ func TestDetail_FetchedMsgs_ErrorRecorded(t *testing.T) {
 // loading, the renderer substitutes "(loading…)" for the entry list
 // regardless of whether data is present.
 func TestDetail_TabPlaceholder_LoadingRendered(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.commentsLoading = true
 	lines, _ := dm.detailDocumentLines(80, viewChrome{})
@@ -749,6 +775,7 @@ func TestDetail_TabPlaceholder_LoadingRendered(t *testing.T) {
 // "comments: <err>" (style is theme-dependent so we just assert the
 // substring) so the user can tell which tab failed.
 func TestDetail_TabPlaceholder_ErrorRendered(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.commentsLoading = false
 	dm.commentsErr = errors.New("server down")
@@ -765,7 +792,7 @@ func TestDetail_TabPlaceholder_ErrorRendered(t *testing.T) {
 // was missing the issue fetch, so the seeded list-row Issue (no Labels)
 // stuck around until a manual refresh. Asserted at the batch shape so
 // the children aren't actually run against the real *Client.
-func TestHandleOpenDetail_DispatchesFetchIssue(t *testing.T) {
+func TestHandleOpenDetail_DispatchesFetchIssue(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.api = NewClient("http://kata.invalid", nil)
 	m.scope = scope{projectID: 7}
@@ -790,6 +817,7 @@ func TestHandleOpenDetail_DispatchesFetchIssue(t *testing.T) {
 // pins the hard invariant: detail opens populate labels via the
 // existing fetchIssue helper without any per-field copy.
 func TestDetailFetch_PopulatesIssueLabelsOnOpen(t *testing.T) {
+	t.Parallel()
 	dm := detailModel{
 		gen:   1,
 		issue: &Issue{UID: "01TEST-42aa", ShortID: "42aa", Title: "seed (no labels)"},
@@ -813,6 +841,7 @@ func TestDetailFetch_PopulatesIssueLabelsOnOpen(t *testing.T) {
 }
 
 func TestDetailApplyFetched_PopulatesParentAndChildren(t *testing.T) {
+	t.Parallel()
 	dm := detailModel{gen: 1}
 	msg := detailFetchedMsg{
 		gen:      1,
@@ -833,7 +862,7 @@ func TestDetailApplyFetched_PopulatesParentAndChildren(t *testing.T) {
 // TestDetail_OpenDetail_SeedsLoadingFlags: opening detail through the
 // model-level handler seeds all three per-tab loading flags so the
 // initial render shows "(loading…)" until the tab fetches return.
-func TestDetail_OpenDetail_SeedsLoadingFlags(t *testing.T) {
+func TestDetail_OpenDetail_SeedsLoadingFlags(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newDetailHostModel(Options{}, 7)
 	iss := Issue{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "x"}
 	out, _ := m.Update(openDetailMsg{issue: iss})
@@ -853,6 +882,7 @@ func TestDetail_OpenDetail_SeedsLoadingFlags(t *testing.T) {
 // scope, detailProjectID prefers the issue's ProjectID field over the
 // (zero) sc.projectID so the URL is correct.
 func TestDetail_ProjectID_AllProjectsUsesIssueProjectID(t *testing.T) {
+	t.Parallel()
 	iss := Issue{ProjectID: 42, UID: "01TEST-aaa1", ShortID: "aaa1"}
 	got := detailProjectID(iss, scope{allProjects: true})
 	if got != 42 {
@@ -864,6 +894,7 @@ func TestDetail_ProjectID_AllProjectsUsesIssueProjectID(t *testing.T) {
 // detailProjectID always uses sc.projectID even when the issue carries
 // its own (they should match anyway).
 func TestDetail_ProjectID_SingleProjectUsesScope(t *testing.T) {
+	t.Parallel()
 	iss := Issue{ProjectID: 99, UID: "01TEST-aaa1", ShortID: "aaa1"}
 	got := detailProjectID(iss, scope{projectID: 7})
 	if got != 7 {
@@ -873,6 +904,7 @@ func TestDetail_ProjectID_SingleProjectUsesScope(t *testing.T) {
 
 // TestDetail_HardWrap covers the body-line wrapper.
 func TestDetail_HardWrap(t *testing.T) {
+	t.Parallel()
 	got := hardWrap("abcdefghij", 4)
 	want := []string{"abcd", "efgh", "ij"}
 	if len(got) != len(want) {
@@ -888,6 +920,7 @@ func TestDetail_HardWrap(t *testing.T) {
 // TestDetail_HardWrap_OversizeRune confirms the wrapper makes progress
 // when the leading rune is wider than the requested width.
 func TestDetail_HardWrap_OversizeRune(t *testing.T) {
+	t.Parallel()
 	got := hardWrap("你好世界", 1)
 	if len(got) != 4 {
 		t.Fatalf("expected 4 chunks, got %d: %v", len(got), got)
@@ -1075,6 +1108,7 @@ func (f *fakeDetailAPI) AddComment(
 // TestDetail_FetchCommands_RoundTrip exercises the three fetch wrappers
 // through their tea.Cmd contracts.
 func TestDetail_FetchCommands_RoundTrip(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{
 		commentsResult: []CommentEntry{{ID: 1, Author: "a"}},
 		eventsResult:   []EventLogEntry{{ID: 2, Type: "issue.created"}},
@@ -1110,6 +1144,7 @@ func TestDetail_FetchCommands_RoundTrip(t *testing.T) {
 // viewport's first visible row is documentLines[N], so the user reads
 // later content as the offset grows.
 func TestDetail_Viewport_ScrollAdvancesWindow(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	docLines, _ := dm.detailDocumentLines(120, viewChrome{})
 	want := stripANSI(docLines[5])
@@ -1131,6 +1166,7 @@ func TestDetail_Viewport_ScrollAdvancesWindow(t *testing.T) {
 // clamped against viewportMaxStart so the renderer never produces a
 // window of blanks past the last line.
 func TestDetail_Viewport_ScrollClampsAtEOF(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.scroll = 10000
 	dm.lastTermWidth, dm.lastTermHeight = 120, 30
@@ -1143,7 +1179,7 @@ func TestDetail_Viewport_ScrollClampsAtEOF(t *testing.T) {
 // TestDetail_OpenInAllProjectsScope_UsesIssueProjectID: in all-projects
 // mode, opening an issue dispatches fetches against the issue's own
 // project_id (not the scope's, which is zero in all-projects mode).
-func TestDetail_OpenInAllProjectsScope_UsesIssueProjectID(t *testing.T) {
+func TestDetail_OpenInAllProjectsScope_UsesIssueProjectID(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.api = &Client{}
 	m.scope = scope{allProjects: true}
@@ -1164,7 +1200,7 @@ func TestDetail_OpenInAllProjectsScope_UsesIssueProjectID(t *testing.T) {
 // TestDetail_OpenWithNilAPI_NoCrash: without a wired client (test
 // harness path), the open handler still seeds the model and returns
 // nil instead of panicking on the fetch dispatch.
-func TestDetail_OpenWithNilAPI_NoCrash(t *testing.T) {
+func TestDetail_OpenWithNilAPI_NoCrash(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := initialModel(Options{})
 	m.api = nil
 	out, cmd := m.Update(openDetailMsg{issue: Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Title: "x"}})
@@ -1183,6 +1219,7 @@ func TestDetail_OpenWithNilAPI_NoCrash(t *testing.T) {
 // split is computed inline in View; the floors detailMinBodyRows and
 // detailMinTabRows still cap the inner allocations.
 func TestDetail_TinyTerminal_RendersWithoutPanic(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	out := dm.View(80, 4, viewChrome{})
 	if out == "" {
@@ -1194,6 +1231,7 @@ func TestDetail_TinyTerminal_RendersWithoutPanic(t *testing.T) {
 // per-comment header uses an author + compact timestamp and body lines
 // are indented by 2 spaces under the header.
 func TestDetail_RenderCommentsTab_FormatsAuthorAndIndentsBody(t *testing.T) {
+	t.Parallel()
 	cs := []CommentEntry{
 		{
 			ID: 1, Author: "alice",
@@ -1219,6 +1257,7 @@ func TestDetail_RenderCommentsTab_FormatsAuthorAndIndentsBody(t *testing.T) {
 // placeholder body is the only thing this renderer produces for the
 // zero-comments case.
 func TestDetail_RenderCommentsTab_EmptyShowsHint(t *testing.T) {
+	t.Parallel()
 	out := renderCommentsTab(nil, 80, 5, -1, tabState{})
 	if !strings.Contains(out, "no comments") {
 		t.Fatalf("expected placeholder, got:\n%s", out)
@@ -1228,6 +1267,7 @@ func TestDetail_RenderCommentsTab_EmptyShowsHint(t *testing.T) {
 // TestDetail_RenderEventsTab_FormatsCommonEventTypes covers a slice
 // over the type vocabulary so the description column is in lockstep.
 func TestDetail_RenderEventsTab_FormatsCommonEventTypes(t *testing.T) {
+	t.Parallel()
 	when := time.Date(2025, 1, 2, 15, 4, 0, 0, time.UTC)
 	toShort := "k1l1"
 	es := []EventLogEntry{
@@ -1264,6 +1304,7 @@ func TestDetail_RenderEventsTab_FormatsCommonEventTypes(t *testing.T) {
 // type renders with the "issue." prefix stripped so the row still says
 // something coherent.
 func TestDetail_RenderEventsTab_UnknownTypeFallback(t *testing.T) {
+	t.Parallel()
 	es := []EventLogEntry{{Type: "issue.future_thing", Actor: "a"}}
 	out := renderEventsTab(es, 80, 5, -1, tabState{})
 	if !strings.Contains(out, "future_thing") {
@@ -1273,6 +1314,7 @@ func TestDetail_RenderEventsTab_UnknownTypeFallback(t *testing.T) {
 
 // TestDetail_RenderLinksTab_FormatsLinkLine confirms the link line shape.
 func TestDetail_RenderLinksTab_FormatsLinkLine(t *testing.T) {
+	t.Parallel()
 	when := time.Date(2025, 1, 2, 15, 4, 0, 0, time.UTC)
 	ls := []LinkEntry{
 		{
@@ -1292,6 +1334,7 @@ func TestDetail_RenderLinksTab_FormatsLinkLine(t *testing.T) {
 // TestDetail_RenderLinksTab_EmptyShowsHint shows the placeholder when
 // there are no links.
 func TestDetail_RenderLinksTab_EmptyShowsHint(t *testing.T) {
+	t.Parallel()
 	out := renderLinksTab(nil, 80, 5, -1, tabState{})
 	if !strings.Contains(out, "no links") {
 		t.Fatalf("expected placeholder, got:\n%s", out)
@@ -1301,6 +1344,7 @@ func TestDetail_RenderLinksTab_EmptyShowsHint(t *testing.T) {
 // TestDetail_TabCursor_MovesWithJK: on a tab with rows, j/k moves the
 // tab cursor (not the body scroll).
 func TestDetail_TabCursor_MovesWithJK(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture() // 2 comments
 	km := newKeymap()
 	dm, _ = dm.Update(runeKey('j'), km, nil)
@@ -1323,6 +1367,7 @@ func TestDetail_TabCursor_MovesWithJK(t *testing.T) {
 // TestDetail_TabSwitch_ResetsCursor: switching tabs resets the row
 // cursor so a stale index doesn't carry over to a different-length tab.
 func TestDetail_TabSwitch_ResetsCursor(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	km := newKeymap()
 	dm, _ = dm.Update(runeKey('j'), km, nil)
@@ -1336,6 +1381,7 @@ func TestDetail_TabSwitch_ResetsCursor(t *testing.T) {
 }
 
 func TestDetailFocus_TabCyclesChildrenCommentsEventsLinks(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.children = []Issue{{UID: "01TEST-43cc", ShortID: "43cc"}}
 	km := newKeymap()
@@ -1363,6 +1409,7 @@ func TestDetailFocus_TabCyclesChildrenCommentsEventsLinks(t *testing.T) {
 }
 
 func TestDetailFocus_SkipsChildrenWhenEmpty(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	km := newKeymap()
 
@@ -1377,6 +1424,7 @@ func TestDetailFocus_SkipsChildrenWhenEmpty(t *testing.T) {
 }
 
 func TestDetailChildren_JKMovesChildCursor(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.children = []Issue{{UID: "01TEST-43cc", ShortID: "43cc"}, {UID: "01TEST-44dd", ShortID: "44dd"}}
 	dm.detailFocus = focusChildren
@@ -1397,6 +1445,7 @@ func TestDetailChildren_JKMovesChildCursor(t *testing.T) {
 }
 
 func TestDetailChildren_EnterJumpsToChild(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.children = []Issue{{UID: "01TEST-43cc", ShortID: "43cc"}, {UID: "01TEST-44dd", ShortID: "44dd"}}
 	dm.detailFocus = focusChildren
@@ -1427,6 +1476,7 @@ func jumpMsgFromCmd(t *testing.T, cmd tea.Cmd) jumpDetailMsg {
 // must carry that project_id on the jump so the fetch resolves under the
 // child's project rather than the parent's.
 func TestDetail_EnterOnChild_CarriesChildProjectID(t *testing.T) {
+	t.Parallel()
 	dm := detailFixture()
 	dm.children = []Issue{
 		{UID: "01TEST-43cc", ShortID: "43cc", ProjectID: 7},
@@ -1446,7 +1496,7 @@ func TestDetail_EnterOnChild_CarriesChildProjectID(t *testing.T) {
 // TestHandleJumpDetail_ResolvesForeignProjectByName: a jump carrying a peer's
 // project NAME resolves the fetch project_id through projectsByID, so the
 // post-jump detail is scoped to the foreign project.
-func TestHandleJumpDetail_ResolvesForeignProjectByName(t *testing.T) {
+func TestHandleJumpDetail_ResolvesForeignProjectByName(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.view = viewDetail
 	m.projectsByID = map[int64]string{7: "alpha", 9: "beta"}
@@ -1465,7 +1515,7 @@ func TestHandleJumpDetail_ResolvesForeignProjectByName(t *testing.T) {
 
 // TestHandleJumpDetail_ChildProjectIDWins: an explicit project_id (children)
 // is used directly without a name lookup.
-func TestHandleJumpDetail_ChildProjectIDWins(t *testing.T) {
+func TestHandleJumpDetail_ChildProjectIDWins(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.view = viewDetail
 	m.detail = detailModel{
@@ -1484,7 +1534,7 @@ func TestHandleJumpDetail_ChildProjectIDWins(t *testing.T) {
 // TestHandleJumpDetail_SameProjectNameResolvesToCurrent: a jump whose peer
 // project name resolves to the current project keeps the current project,
 // so a plain in-project link jump is unaffected.
-func TestHandleJumpDetail_SameProjectNameResolvesToCurrent(t *testing.T) {
+func TestHandleJumpDetail_SameProjectNameResolvesToCurrent(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.view = viewDetail
 	m.projectsByID = map[int64]string{7: "alpha"}
@@ -1506,7 +1556,7 @@ func TestHandleJumpDetail_SameProjectNameResolvesToCurrent(t *testing.T) {
 // fetch a foreign bare short_id under the wrong project, opening a
 // same-suffix issue or 404ing). The jump no-ops: no navStack push, the
 // current detail is untouched.
-func TestHandleJumpDetail_UnresolvableProjectNoOps(t *testing.T) {
+func TestHandleJumpDetail_UnresolvableProjectNoOps(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.view = viewDetail
 	m.projectsByID = map[int64]string{7: "alpha"}
@@ -1552,6 +1602,7 @@ func runBatch(cmd tea.Cmd) {
 // at the Model level (Model.handleJumpDetail) so the new gen comes
 // from the monotonic m.nextGen counter.
 func TestDetail_EnterOnEventWithIssueRef_JumpsAndStacks(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{
 		getIssueResult: &Issue{UID: "01TEST-l1l1", ShortID: "l1l1", Title: "linked target"},
 	}
@@ -1576,6 +1627,7 @@ func TestDetail_EnterOnEventWithIssueRef_JumpsAndStacks(t *testing.T) {
 // current project — landing on the right issue when same-project and failing
 // closed (issue_not_found) for a foreign peer rather than the wrong issue.
 func TestDetail_EnterOnLinkEvent_PrefersPeerUID(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{
 		getIssueResult: &Issue{UID: "01TESTPEERUID0000000000000", ShortID: "l1l1"},
 	}
@@ -1595,6 +1647,7 @@ func TestDetail_EnterOnLinkEvent_PrefersPeerUID(t *testing.T) {
 }
 
 func TestDetail_EnterOnCurrentIssueEventDoesNotSelfJump(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{}
 	dm := detailFixture()
 	dm.activeTab = tabEvents
@@ -1613,6 +1666,7 @@ func TestDetail_EnterOnCurrentIssueEventDoesNotSelfJump(t *testing.T) {
 // TestDetail_EnterOnLinkEntry_JumpsToTarget: pressing Enter on a link
 // row emits a jumpDetailMsg targeting the link's To.ShortID.
 func TestDetail_EnterOnLinkEntry_JumpsToTarget(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{
 		getIssueResult: &Issue{UID: "01TEST-7bb", ShortID: "7bb", Title: "target"},
 	}
@@ -1629,6 +1683,7 @@ func TestDetail_EnterOnLinkEntry_JumpsToTarget(t *testing.T) {
 // "X blocks me" entry), Enter must emit a jumpDetailMsg targeting
 // From.ShortID rather than re-opening the current issue.
 func TestDetail_EnterOnIncomingLink_JumpsToFromShortID(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{
 		getIssueResult: &Issue{UID: "01TEST-99zz", ShortID: "99zz", Title: "from"},
 	}
@@ -1655,6 +1710,7 @@ func TestDetail_EnterOnIncomingLink_JumpsToFromShortID(t *testing.T) {
 // current issue, the helper returns the To peer. Pure unit test
 // for the scoping logic.
 func TestLinkJumpTarget_OutgoingPicksTo(t *testing.T) {
+	t.Parallel()
 	links := []LinkEntry{{
 		ID: 1, Type: "blocks",
 		From: LinkPeer{UID: "01TEST-42aa", ShortID: "42aa"},
@@ -1669,6 +1725,7 @@ func TestLinkJumpTarget_OutgoingPicksTo(t *testing.T) {
 // TestLinkJumpTarget_IncomingPicksFrom: when To matches the current
 // issue, the helper picks From.
 func TestLinkJumpTarget_IncomingPicksFrom(t *testing.T) {
+	t.Parallel()
 	links := []LinkEntry{{
 		ID: 1, Type: "blocks",
 		From: LinkPeer{UID: "01TEST-99zz", ShortID: "99zz"},
@@ -1684,6 +1741,7 @@ func TestLinkJumpTarget_IncomingPicksFrom(t *testing.T) {
 // peer in another project carries that peer's project name so the jump
 // fetches under the peer's own project, not the current one.
 func TestLinkJumpTarget_CrossProjectCarriesPeerProject(t *testing.T) {
+	t.Parallel()
 	links := []LinkEntry{{
 		ID: 1, Type: "blocks",
 		From: LinkPeer{UID: "01TEST-42aa", ShortID: "42aa", Project: "alpha"},
@@ -1700,6 +1758,7 @@ func TestLinkJumpTarget_CrossProjectCarriesPeerProject(t *testing.T) {
 // current issue. UID disambiguation keeps the jump targeting the foreign
 // peer rather than collapsing to a self-jump.
 func TestLinkJumpTarget_IncomingMatchesByUID(t *testing.T) {
+	t.Parallel()
 	// Current issue is alpha#42aa. The To side is a DIFFERENT issue in
 	// beta that also happens to carry short_id "42aa". A short_id-only
 	// check would treat To as "current" and wrongly pick From.
@@ -1718,6 +1777,7 @@ func TestLinkJumpTarget_IncomingMatchesByUID(t *testing.T) {
 // height must still produce output that contains the cursor entry. The
 // fixture has 10 events; a budget of 4 lines forces windowing.
 func TestDetail_TabWindow_KeepsCursorVisible(t *testing.T) {
+	t.Parallel()
 	events := make([]EventLogEntry, 10)
 	for i := range events {
 		events[i] = EventLogEntry{
@@ -1739,6 +1799,7 @@ func TestDetail_TabWindow_KeepsCursorVisible(t *testing.T) {
 // renders them without windowing — defensive against the windowing
 // path firing when it shouldn't.
 func TestDetail_TabWindow_NarrowFitsAll(t *testing.T) {
+	t.Parallel()
 	events := []EventLogEntry{
 		{Type: "issue.commented", Actor: "alice"},
 		{Type: "issue.commented", Actor: "bob"},
@@ -1753,6 +1814,7 @@ func TestDetail_TabWindow_NarrowFitsAll(t *testing.T) {
 // multi-line chunks; the windower must still keep the cursor entry
 // visible by sliding entry-by-entry.
 func TestDetail_CommentsTabWindow_KeepsCursorVisible(t *testing.T) {
+	t.Parallel()
 	cs := make([]CommentEntry, 6)
 	for i := range cs {
 		cs[i] = CommentEntry{
@@ -1774,6 +1836,7 @@ func TestDetail_CommentsTabWindow_KeepsCursorVisible(t *testing.T) {
 // TestDetail_LinksTabWindow_KeepsCursorVisible mirrors the events test
 // for the links tab. Each link is one line, so the math is the same.
 func TestDetail_LinksTabWindow_KeepsCursorVisible(t *testing.T) {
+	t.Parallel()
 	ls := make([]LinkEntry, 10)
 	for i := range ls {
 		toSID := fmt.Sprintf("t%03d", i+1)
@@ -1794,6 +1857,7 @@ func TestDetail_LinksTabWindow_KeepsCursorVisible(t *testing.T) {
 // budget that fits a few entries leaves the slice anchored at the
 // top — no spurious sliding.
 func TestWindowChunks_AnchorsAtTopWhenCursorFits(t *testing.T) {
+	t.Parallel()
 	chunks := []entryChunk{
 		{lines: []string{"a"}}, {lines: []string{"b"}},
 		{lines: []string{"c"}}, {lines: []string{"d"}},
@@ -1810,6 +1874,7 @@ func TestWindowChunks_AnchorsAtTopWhenCursorFits(t *testing.T) {
 // TestDetail_EnterOnComment_NoJump: pressing Enter on a comment row
 // does not jump (comments tab has no jump action).
 func TestDetail_EnterOnComment_NoJump(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{}
 	dm := detailFixture() // active tab is tabComments
 	km := newKeymap()
@@ -1825,6 +1890,7 @@ func TestDetail_EnterOnComment_NoJump(t *testing.T) {
 // TestDetail_EscFromStackedDetail_PopsToPrior: Esc on a stacked detail
 // pops the nav stack, restoring the prior detailModel verbatim.
 func TestDetail_EscFromStackedDetail_PopsToPrior(t *testing.T) {
+	t.Parallel()
 	prior := detailModel{
 		issue:     &Issue{UID: "01TEST-42aa", ShortID: "42aa", Title: "prior"},
 		activeTab: tabEvents,
@@ -1855,7 +1921,7 @@ func TestDetail_EscFromStackedDetail_PopsToPrior(t *testing.T) {
 
 // TestDetail_EscFromTopLevelDetail_ReturnsToList: with an empty nav
 // stack, Esc emits popDetailMsg as before.
-func TestDetail_EscFromTopLevelDetail_ReturnsToList(t *testing.T) {
+func TestDetail_EscFromTopLevelDetail_ReturnsToList(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newTestModel()
 	m.connGen = 9
 	m.view = viewDetail
@@ -1876,6 +1942,7 @@ func TestDetail_EscFromTopLevelDetail_ReturnsToList(t *testing.T) {
 // TestDetail_NavStackCappedAtOne: trying to jump from a level-2 detail
 // no-ops because the stack is at cap. Esc still pops as expected.
 func TestDetail_NavStackCappedAtOne(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{getIssueResult: &Issue{UID: "01TEST-99zz", ShortID: "99zz"}}
 	prior := detailModel{issue: &Issue{UID: "01TEST-42aa", ShortID: "42aa"}, activeTab: tabLinks}
 	dm := detailModel{
@@ -1904,6 +1971,7 @@ func TestDetail_NavStackCappedAtOne(t *testing.T) {
 // TestDetail_EnterOnEventWithoutPayload_NoOp: an event whose payload
 // has no to_number/issue_number is not jumpable.
 func TestDetail_EnterOnEventWithoutPayload_NoOp(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{getIssueResult: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1"}}
 	dm := detailModel{
 		issue:     &Issue{UID: "01TEST-11bb", ShortID: "11bb"},
@@ -1920,6 +1988,7 @@ func TestDetail_EnterOnEventWithoutPayload_NoOp(t *testing.T) {
 // TestDetail_ApplyActivityCursor_UsesTextMarker confirms activity rows
 // use a NO_COLOR-visible marker rather than a painted row background.
 func TestDetail_ApplyActivityCursor_UsesTextMarker(t *testing.T) {
+	t.Parallel()
 	plain := applyActivityCursor("hello", false)
 	if plain != "  hello" {
 		t.Fatalf("non-cursor branch should indent text, got %q", plain)
@@ -1933,7 +2002,7 @@ func TestDetail_ApplyActivityCursor_UsesTextMarker(t *testing.T) {
 // TestDetail_StaleFetch_DroppedAcrossOpen: open issue A → in-flight
 // fetch for A lands after the user has popped and reopened B. The B
 // view must not pick up A's comments/events/links/issue.
-func TestDetail_StaleFetch_DroppedAcrossOpen(t *testing.T) {
+func TestDetail_StaleFetch_DroppedAcrossOpen(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newDetailHostModel(Options{}, 7)
 	m.list.loading = false
 	m.list.issues = []Issue{
@@ -1978,7 +2047,7 @@ func TestDetail_StaleFetch_DroppedAcrossOpen(t *testing.T) {
 // dm.gen via Model.handleJumpDetail; an in-flight fetch from before
 // the jump must not seed the post-jump view. The flow is exercised at
 // the Model level so the monotonic m.nextGen counter is the authority.
-func TestDetail_StaleFetch_DroppedAcrossJump(t *testing.T) {
+func TestDetail_StaleFetch_DroppedAcrossJump(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newDetailHostModel(Options{}, 7)
 	m.view = viewDetail
 	m.detail = detailFixture()
@@ -2024,7 +2093,7 @@ func TestDetail_StaleFetch_DroppedAcrossJump(t *testing.T) {
 // This regression test seeds a stale B fetch after the open of C and
 // asserts C's data survives — the gen on C must be strictly greater
 // than B's gen.
-func TestModel_GenMonotonicAcrossJumpBackOpen(t *testing.T) {
+func TestModel_GenMonotonicAcrossJumpBackOpen(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newDetailHostModel(Options{}, 7)
 	// List has issues A (#1) and C (#3); B (#2) is the jump target.
 	m.list.loading = false
@@ -2105,6 +2174,7 @@ func TestModel_GenMonotonicAcrossJumpBackOpen(t *testing.T) {
 // completing after the user opened detail must not steal the detail
 // status line nor trigger a refetch in detail.
 func TestDetail_MutationResp_FromListIgnored(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{}
 	km := newKeymap()
 	dm := dmFixture()
@@ -2127,6 +2197,7 @@ func TestDetail_MutationResp_FromListIgnored(t *testing.T) {
 // flight when the user jumps must not refetch the now-current issue's
 // data with a stale generation.
 func TestDetail_StaleMutationResp_DroppedAcrossJump(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{}
 	km := newKeymap()
 	dm := dmFixture()
@@ -2150,6 +2221,7 @@ func TestDetail_StaleMutationResp_DroppedAcrossJump(t *testing.T) {
 // the list view after the user pops; the list must not seed its status
 // line or refetch from it.
 func TestList_DetailMutation_Ignored(t *testing.T) {
+	t.Parallel()
 	api := &fakeListAPI{}
 	km := newKeymap()
 	sc := scope{projectID: 7}
@@ -2173,7 +2245,7 @@ func TestList_DetailMutation_Ignored(t *testing.T) {
 // model-level handler seeds dm.actor from lm.actor so a detail
 // mutation dispatched through Model.Update reaches the daemon with
 // the resolved identity instead of the empty string.
-func TestDetail_Open_SeedsActorFromList(t *testing.T) {
+func TestDetail_Open_SeedsActorFromList(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; applyColorMode rewrites package style vars
 	t.Setenv("KATA_AUTHOR", "wes")
 	m := newDetailHostModel(Options{}, 7)
 	iss := Issue{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "x"}
@@ -2188,7 +2260,7 @@ func TestDetail_Open_SeedsActorFromList(t *testing.T) {
 // Model.Update reaches the daemon with the seeded actor. Regression
 // for the bug where dm.actor was never populated and the daemon
 // rejected with empty actor.
-func TestDetail_Mutation_ThroughModelCarriesActor(t *testing.T) {
+func TestDetail_Mutation_ThroughModelCarriesActor(t *testing.T) { //nolint:paralleltest // sets KATA_AUTHOR; applyColorMode rewrites package style vars
 	t.Setenv("KATA_AUTHOR", "wes")
 	m := initialModel(Options{})
 	m.scope = scope{projectID: 7}
@@ -2225,6 +2297,7 @@ func TestDetail_Mutation_ThroughModelCarriesActor(t *testing.T) {
 // TestDetail_Jump_PreservesActor: a jump preserves dm.actor so a
 // mutation in the post-jump view still carries the resolved identity.
 func TestDetail_Jump_PreservesActor(t *testing.T) {
+	t.Parallel()
 	api := &fakeDetailAPI{
 		getIssueResult: &Issue{UID: "01TEST-11bb", ShortID: "11bb", Title: "linked"},
 	}
@@ -2245,7 +2318,7 @@ func TestDetail_Jump_PreservesActor(t *testing.T) {
 // TestDetail_Open_AdvancesGenAcrossReopens: opening the same issue
 // twice advances the generation each time so any in-flight fetch from
 // the first open is dropped on the second.
-func TestDetail_Open_AdvancesGenAcrossReopens(t *testing.T) {
+func TestDetail_Open_AdvancesGenAcrossReopens(t *testing.T) { //nolint:paralleltest // applyColorMode rewrites package style vars
 	m := newDetailHostModel(Options{}, 7)
 	iss := Issue{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "x"}
 	out, _ := m.Update(openDetailMsg{issue: iss})

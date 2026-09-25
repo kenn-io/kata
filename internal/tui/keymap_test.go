@@ -7,6 +7,7 @@ import (
 )
 
 func TestKeymapEmacsAliases(t *testing.T) {
+	t.Parallel()
 	km := newKeymap()
 	tests := []struct {
 		name string
@@ -50,6 +51,7 @@ func TestKeymapEmacsAliases(t *testing.T) {
 }
 
 func TestKeymapEmacsVerticalMovement(t *testing.T) {
+	t.Parallel()
 	km := newKeymap()
 	for _, tt := range []struct {
 		name string
@@ -74,6 +76,7 @@ func TestKeymapEmacsVerticalMovement(t *testing.T) {
 }
 
 func TestKeymapEmacsSectionCycling(t *testing.T) {
+	t.Parallel()
 	km := newKeymap()
 	next := tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl, Text: "j"}
 	prev := tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl, Text: "k"}
