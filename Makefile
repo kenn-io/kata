@@ -27,7 +27,7 @@ api-generate:
 	cd pkg/client/generated && find . -maxdepth 1 -type f -name '*.go' ! -name 'generate.go' -delete && go run github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.75.5 -config config.yaml ../openapi.yaml
 
 api-check:
-	go test ./internal/daemon -run 'TestOpenAPI(ArtifactUpToDate|ClientSpecArtifactUpToDate|ClientArtifactUpToDate)$$'
+	env -u KATA_SKIP_OPENAPI_CLIENT_CHECK go test ./internal/daemon -run 'TestOpenAPI(ArtifactUpToDate|ClientSpecArtifactUpToDate|ClientArtifactUpToDate)$$'
 
 # Fail when the committed OpenAPI contract introduces breaking changes for
 # existing clients relative to BASE_REF (default origin/main).
