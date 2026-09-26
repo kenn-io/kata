@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -163,8 +165,9 @@ func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *h
 	// Bind the listener once and hand it directly to Server.Serve so no other
 	// process can grab the port between bind and serve (the close-then-reopen
 	// pattern has a TOCTOU race).
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	l := &trackingListener{Listener: tcp, conns: map[*trackedConn]struct{}{}}
 	addr := l.Addr().(*net.TCPAddr).String() //nolint:forcetypeassert // net.Listen("tcp",...) always returns *net.TCPAddr
 
 	bcast := daemon.NewEventBroadcaster()
@@ -187,6 +190,7 @@ func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *h
 	}()
 	t.Cleanup(func() {
 		cancel()
+		l.closeUnused()
 		<-done
 	})
 
@@ -217,4 +221,56 @@ func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *h
 	require.Truef(t, ready, "daemon did not become ready within %s: %v", daemonReadyTimeout, lastErr)
 	client := &http.Client{Timeout: daemonRequestTimeout}
 	return url, client, bcast
+}
+
+// trackingListener lets cleanup close connections that never sent a byte.
+// http.Server.Shutdown treats those as active for 5s, and client transports
+// leave them behind when a racing dial loses to a reused connection.
+type trackingListener struct {
+	net.Listener
+	mu    sync.Mutex
+	conns map[*trackedConn]struct{}
+}
+
+func (l *trackingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	tracked := &trackedConn{Conn: conn, listener: l}
+	l.mu.Lock()
+	l.conns[tracked] = struct{}{}
+	l.mu.Unlock()
+	return tracked, nil
+}
+
+func (l *trackingListener) closeUnused() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for conn := range l.conns {
+		if !conn.used.Load() {
+			_ = conn.Conn.Close()
+		}
+	}
+}
+
+type trackedConn struct {
+	net.Conn
+	listener *trackingListener
+	used     atomic.Bool
+}
+
+func (c *trackedConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if n > 0 {
+		c.used.Store(true)
+	}
+	return n, err
+}
+
+func (c *trackedConn) Close() error {
+	c.listener.mu.Lock()
+	delete(c.listener.conns, c)
+	c.listener.mu.Unlock()
+	return c.Conn.Close()
 }

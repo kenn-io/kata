@@ -575,11 +575,12 @@ func TestParseMCPStorageTargets(t *testing.T) {
 const currentMCPProtocolVersion = "2026-07-28"
 
 func TestMCPServeSyncOutlivesHandshakeTimeout(t *testing.T) {
-	if testing.Short() {
-		t.Skip("holds a sync response past the 10s SSE handshake timeout")
-	}
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
+	t.Setenv("KATA_HTTP_TIMEOUT", "500ms")
+	savedHandshake := sseHandshakeTimeout
+	sseHandshakeTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { sseHandshakeTimeout = savedHandshake })
 	workspace := t.TempDir()
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if serveMCPTestHealth(writer, request) {
@@ -594,11 +595,11 @@ func TestMCPServeSyncOutlivesHandshakeTimeout(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"projects":[{"id":42,"uid":"01HAAAAAAAAAAAAAAAAAAAAAAA","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`))
 		case "/api/v1/projects/42/issue-sync/github/once":
 			// A sync pass writes nothing, headers included, until it
-			// completes; hold past the 10s SSE handshake timeout.
+			// completes; hold past the SSE handshake and request timeouts.
 			select {
 			case <-request.Context().Done():
 				return
-			case <-time.After(10500 * time.Millisecond):
+			case <-time.After(time.Second):
 			}
 			writer.Header().Set("Content-Type", "application/json")
 			_, _ = writer.Write([]byte(`{
@@ -645,7 +646,7 @@ func TestMCPServeSyncOutlivesHandshakeTimeout(t *testing.T) {
 	send(2, "tools/call", map[string]any{"name": "kata.load_sync", "arguments": map[string]any{}})
 	result := send(3, "tools/call", map[string]any{"name": "kata.sync_once", "arguments": map[string]any{}})
 	require.NotEqual(t, true, result["isError"],
-		"a sync pass whose headers arrive after 10s must not be aborted by a response-header timeout: %v", result)
+		"a sync pass whose headers arrive late must not be aborted by a response-header timeout: %v", result)
 	structured := result["structuredContent"].(map[string]any)
 	require.Equal(t, "idle", structured["status"].(map[string]any)["state"])
 
