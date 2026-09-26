@@ -2368,8 +2368,8 @@ func TestListIssues_BlockedFieldFollowsReadyPredicate(t *testing.T) {
 // per-issue across project boundaries.
 func TestListAllIssues_AcrossProjects(t *testing.T) {
 	env := testenv.New(t)
-	pidA := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/proj-a.git")
-	pidB := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/proj-b.git")
+	pidA := initLocalWorkspace(t, env, "proj-a")
+	pidB := initLocalWorkspace(t, env, "proj-b")
 	createIssueViaHTTP(t, env, pidA, "alpha-1")
 	createIssueViaHTTP(t, env, pidB, "beta-1")
 	createIssueViaHTTP(t, env, pidA, "alpha-2")
@@ -2394,8 +2394,8 @@ func TestListAllIssues_AcrossProjects(t *testing.T) {
 // cross-project endpoint can also serve as a single-project list when needed.
 func TestListAllIssues_ProjectFilter(t *testing.T) {
 	env := testenv.New(t)
-	pidA := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/proj-a.git")
-	pidB := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/proj-b.git")
+	pidA := initLocalWorkspace(t, env, "proj-a")
+	pidB := initLocalWorkspace(t, env, "proj-b")
 	createIssueViaHTTP(t, env, pidA, "alpha-1")
 	createIssueViaHTTP(t, env, pidB, "beta-1")
 
@@ -2462,8 +2462,8 @@ func TestListAllIssues_RejectsRemovedClientTZHeader(t *testing.T) {
 // project_id internally so labels stay scoped to the right issue.
 func TestListAllIssues_HydratesLabelsAcrossProjects(t *testing.T) {
 	env := testenv.New(t)
-	pidA := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/proj-a.git")
-	pidB := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/proj-b.git")
+	pidA := initLocalWorkspace(t, env, "proj-a")
+	pidB := initLocalWorkspace(t, env, "proj-b")
 	a1 := createIssueViaHTTP(t, env, pidA, "alpha-1")
 	b1 := createIssueViaHTTP(t, env, pidB, "beta-1")
 	postLabel(t, env, pidA, a1, "bug")
@@ -2492,8 +2492,8 @@ func TestListAllIssues_HydratesLabelsAcrossProjects(t *testing.T) {
 
 func TestListAllIssues_ComposesOwnerLabelAndMetadataFilters(t *testing.T) {
 	env := testenv.New(t)
-	pidA := initWorkspaceViaHTTP(t, env, "https://example.com/spoke-project.git")
-	pidB := initWorkspaceViaHTTP(t, env, "https://example.com/hub-project.git")
+	pidA := initLocalWorkspace(t, env, "spoke-project")
+	pidB := initLocalWorkspace(t, env, "hub-project")
 
 	var wanted struct {
 		Issue struct {
