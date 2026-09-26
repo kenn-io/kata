@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -932,175 +933,212 @@ func TestRunnerRunSkipsDueBindingWhenDrainAdmissionIsClosed(t *testing.T) {
 	require.Zero(t, h.fetcher.repoCallCount())
 }
 
-func TestRunnerRunRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.T) {
-	reopened := make(chan struct{})
-	var attempts atomic.Int32
-	h := newRunnerHarness(t, withWaitableDrainAdmission(func() (*activity.Lease, bool, <-chan struct{}) {
-		if attempts.Add(1) == 1 {
-			return nil, false, reopened
-		}
-		return activity.NewLease(func() {}, nil), true, nil
-	}))
-	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
-
-	done := make(chan error, 1)
-	go func() { done <- h.runner.Run(h.ctx) }()
-	require.Eventually(t, func() bool { return attempts.Load() == 1 }, time.Second, time.Millisecond)
-	require.Zero(t, h.fetcher.repoCallCount())
-
-	close(reopened)
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("runner did not retry after drain admission reopened")
+func cleanupRunner(t *testing.T, cancel context.CancelFunc, done <-chan error, release func()) {
+	t.Helper()
+	cancel()
+	if release != nil {
+		release()
 	}
-	require.GreaterOrEqual(t, attempts.Load(), int32(3), "retry should admit the scan and due binding")
-	require.Equal(t, 1, h.fetcher.repoCallCount())
+	synctest.Wait()
+	select {
+	case <-done:
+	default:
+	}
+}
+
+func TestRunnerRunRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		reopened := make(chan struct{})
+		var attempts atomic.Int32
+		h := newRunnerHarness(t, withWaitableDrainAdmission(func() (*activity.Lease, bool, <-chan struct{}) {
+			if attempts.Add(1) == 1 {
+				return nil, false, reopened
+			}
+			return activity.NewLease(func() {}, nil), true, nil
+		}))
+		h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		defer cleanupRunner(t, cancel, done, nil)
+		go func() { done <- h.runner.Run(ctx) }()
+		synctest.Wait()
+		require.Equal(t, int32(1), attempts.Load())
+		require.Zero(t, h.fetcher.repoCallCount())
+
+		close(reopened)
+		synctest.Wait()
+		require.NoError(t, <-done)
+		require.GreaterOrEqual(t, attempts.Load(), int32(3), "retry should admit the scan and due binding")
+		require.Equal(t, 1, h.fetcher.repoCallCount())
+	})
 }
 
 func TestRunnerRunRetriesWhenBindingAdmissionReopens(t *testing.T) {
-	reopened := make(chan struct{})
-	var attempts atomic.Int32
-	h := newRunnerHarness(t, withWaitableDrainAdmission(func() (*activity.Lease, bool, <-chan struct{}) {
-		switch attempts.Add(1) {
-		case 1:
-			return activity.NewLease(func() {}, nil), true, nil // first scan
-		case 2:
-			return nil, false, reopened // first binding
-		default:
-			return activity.NewLease(func() {}, nil), true, nil
-		}
-	}))
-	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+	synctest.Test(t, func(t *testing.T) {
+		reopened := make(chan struct{})
+		var attempts atomic.Int32
+		h := newRunnerHarness(t, withWaitableDrainAdmission(func() (*activity.Lease, bool, <-chan struct{}) {
+			switch attempts.Add(1) {
+			case 1:
+				return activity.NewLease(func() {}, nil), true, nil // first scan
+			case 2:
+				return nil, false, reopened // first binding
+			default:
+				return activity.NewLease(func() {}, nil), true, nil
+			}
+		}))
+		h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
 
-	done := make(chan error, 1)
-	go func() { done <- h.runner.Run(h.ctx) }()
-	require.Eventually(t, func() bool { return attempts.Load() == 2 }, time.Second, time.Millisecond)
-	require.Zero(t, h.fetcher.repoCallCount())
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		defer cleanupRunner(t, cancel, done, nil)
+		go func() { done <- h.runner.Run(ctx) }()
+		synctest.Wait()
+		require.Equal(t, int32(2), attempts.Load())
+		require.Zero(t, h.fetcher.repoCallCount())
 
-	close(reopened)
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("runner did not retry after binding admission reopened")
-	}
-	require.GreaterOrEqual(t, attempts.Load(), int32(4), "retry should readmit the scan and binding")
-	require.Equal(t, 1, h.fetcher.repoCallCount())
+		close(reopened)
+		synctest.Wait()
+		require.NoError(t, <-done)
+		require.GreaterOrEqual(t, attempts.Load(), int32(4), "retry should readmit the scan and binding")
+		require.Equal(t, 1, h.fetcher.repoCallCount())
+	})
 }
 
 func TestRunnerRunWaitsForCancellationAfterTerminalDrainDenial(t *testing.T) {
-	var attempts atomic.Int32
-	h := newRunnerHarness(t,
-		withInterval(5*time.Millisecond),
-		withWaitableDrainAdmission(func() (*activity.Lease, bool, <-chan struct{}) {
-			attempts.Add(1)
-			return nil, false, nil
-		}),
-	)
-	ctx, cancel := context.WithCancel(h.ctx)
-	done := make(chan error, 1)
-	go func() { done <- h.runner.Run(ctx) }()
-	require.Eventually(t, func() bool { return attempts.Load() >= 1 }, time.Second, time.Millisecond)
-	time.Sleep(20 * time.Millisecond)
-	require.Equal(t, int32(1), attempts.Load(), "terminal denial must not be polled")
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int32
+		h := newRunnerHarness(t,
+			withInterval(5*time.Millisecond),
+			withWaitableDrainAdmission(func() (*activity.Lease, bool, <-chan struct{}) {
+				attempts.Add(1)
+				return nil, false, nil
+			}),
+		)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		defer cleanupRunner(t, cancel, done, nil)
+		go func() { done <- h.runner.Run(ctx) }()
+		synctest.Wait()
+		require.Equal(t, int32(1), attempts.Load())
+		time.Sleep(20 * time.Millisecond)
+		synctest.Wait()
+		require.Equal(t, int32(1), attempts.Load(), "terminal denial must not be polled")
 
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestRunnerIntervalModeLogsBindingFailuresAndKeepsRunning(t *testing.T) {
-	h := newRunnerHarness(t, withInterval(time.Hour))
-	secondBinding := h.mustCreateBinding("hub-project", "R_second_repo", "second-repo", 202)
-	h.fetcher.repos = map[string]Repository{
-		"second-repo": {NodeID: secondBinding.RemoteID, ID: 202, FullName: "example-owner/second-repo"},
-	}
-	h.fetcher.repoErrs = map[string]error{
-		"example-repo": errors.New("github unavailable"),
-	}
-	h.fetcher.issuesByRepo = map[string][]Issue{
-		"second-repo": {testIssue(201, 1, "second issue", h.now.Add(-time.Hour))},
-	}
+	synctest.Test(t, func(t *testing.T) {
+		h := newRunnerHarness(t, withInterval(time.Hour))
+		secondBinding := h.mustCreateBinding("hub-project", "R_second_repo", "second-repo", 202)
+		h.fetcher.repos = map[string]Repository{
+			"second-repo": {NodeID: secondBinding.RemoteID, ID: 202, FullName: "example-owner/second-repo"},
+		}
+		h.fetcher.repoErrs = map[string]error{
+			"example-repo": errors.New("github unavailable"),
+		}
+		h.fetcher.issuesByRepo = map[string][]Issue{
+			"second-repo": {testIssue(201, 1, "second issue", h.now.Add(-time.Hour))},
+		}
 
-	ctx, cancel := context.WithCancel(h.ctx)
-	runDone := make(chan error, 1)
-	go func() {
-		runDone <- h.runner.Run(ctx)
-	}()
+		ctx, cancel := context.WithCancel(t.Context())
+		runDone := make(chan error, 1)
+		defer cleanupRunner(t, cancel, runDone, nil)
+		go func() {
+			runDone <- h.runner.Run(ctx)
+		}()
 
-	require.Eventually(t, func() bool {
+		synctest.Wait()
 		got, err := h.db.IssueSyncBindingByID(h.ctx, secondBinding.ID)
-		return err == nil && got.LastCursorAt != nil && got.LastCursorAt.Equal(h.now)
-	}, time.Second, time.Millisecond)
-	cancel()
-	require.ErrorIs(t, <-runDone, context.Canceled)
-	assert.Equal(t, []string{"example-repo", "second-repo"}, h.fetcher.repoCallsSnapshot())
+		require.NoError(t, err)
+		require.NotNil(t, got.LastCursorAt)
+		require.Equal(t, h.now, *got.LastCursorAt)
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-runDone, context.Canceled)
+		assert.Equal(t, []string{"example-repo", "second-repo"}, h.fetcher.repoCallsSnapshot())
+	})
 }
 
 func TestGitHubSyncRunnerRunWakesBeforeInterval(t *testing.T) {
-	wake := make(chan struct{}, 1)
-	h := newRunnerHarness(t, withInterval(time.Hour), withWake(wake))
-	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+	synctest.Test(t, func(t *testing.T) {
+		wake := make(chan struct{}, 1)
+		h := newRunnerHarness(t, withInterval(time.Hour), withWake(wake))
+		h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
 
-	ctx, cancel := context.WithCancel(h.ctx)
-	runDone := make(chan error, 1)
-	go func() {
-		runDone <- h.runner.Run(ctx)
-	}()
+		ctx, cancel := context.WithCancel(t.Context())
+		runDone := make(chan error, 1)
+		defer cleanupRunner(t, cancel, runDone, nil)
+		go func() {
+			runDone <- h.runner.Run(ctx)
+		}()
 
-	require.Eventually(t, func() bool {
+		synctest.Wait()
 		got, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
-		return err == nil && got.LastCursorAt != nil && h.fetcher.repoCallCount() == 1
-	}, time.Second, time.Millisecond)
+		require.NoError(t, err)
+		require.NotNil(t, got.LastCursorAt)
+		require.Equal(t, 1, h.fetcher.repoCallCount())
 
-	h.advance(6 * time.Minute)
-	wake <- struct{}{}
+		h.advance(6 * time.Minute)
+		wake <- struct{}{}
 
-	require.Eventually(t, func() bool {
-		return h.fetcher.repoCallCount() == 2
-	}, time.Second, time.Millisecond)
-	cancel()
-	require.ErrorIs(t, <-runDone, context.Canceled)
+		synctest.Wait()
+		require.Equal(t, 2, h.fetcher.repoCallCount())
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-runDone, context.Canceled)
+	})
 }
 
 func TestGitHubSyncRunnerRunDoesNotOverlapWakeWhileBindingIsInFlight(t *testing.T) {
-	wake := make(chan struct{}, 5)
-	h := newRunnerHarness(t, withInterval(time.Hour), withWake(wake))
-	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
-	h.fetcher.blockRepository = make(chan struct{})
-	h.fetcher.releaseRepository = make(chan struct{})
+	synctest.Test(t, func(t *testing.T) {
+		wake := make(chan struct{}, 5)
+		h := newRunnerHarness(t, withInterval(time.Hour), withWake(wake))
+		h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+		h.fetcher.blockRepository = make(chan struct{})
+		h.fetcher.releaseRepository = make(chan struct{})
 
-	ctx, cancel := context.WithCancel(h.ctx)
-	defer cancel()
-	runDone := make(chan error, 1)
-	go func() {
-		runDone <- h.runner.Run(ctx)
-	}()
+		ctx, cancel := context.WithCancel(t.Context())
+		runDone := make(chan error, 1)
+		var releaseOnce sync.Once
+		release := func() {
+			releaseOnce.Do(func() { close(h.fetcher.releaseRepository) })
+		}
+		defer cleanupRunner(t, cancel, runDone, release)
+		go func() {
+			runDone <- h.runner.Run(ctx)
+		}()
 
-	select {
-	case <-h.fetcher.blockRepository:
-	case err := <-runDone:
-		t.Fatalf("Run returned before repository fetch blocked: %v", err)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for repository fetch")
-	}
+		select {
+		case <-h.fetcher.blockRepository:
+		case err := <-runDone:
+			t.Fatalf("Run returned before repository fetch blocked: %v", err)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for repository fetch")
+		}
 
-	for i := 0; i < cap(wake); i++ {
-		wake <- struct{}{}
-	}
-	require.Never(t, func() bool {
-		return h.fetcher.repoCallCount() > 1
-	}, 50*time.Millisecond, time.Millisecond)
+		for i := 0; i < cap(wake); i++ {
+			wake <- struct{}{}
+		}
+		<-time.After(50 * time.Millisecond)
+		synctest.Wait()
+		require.Equal(t, 1, h.fetcher.repoCallCount())
 
-	close(h.fetcher.releaseRepository)
-	require.Eventually(t, func() bool {
+		release()
+		synctest.Wait()
 		got, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
-		return err == nil && got.LastCursorAt != nil
-	}, time.Second, time.Millisecond)
-	cancel()
-	require.ErrorIs(t, <-runDone, context.Canceled)
-	assert.Equal(t, []string{"example-repo"}, h.fetcher.repoCallsSnapshot())
+		require.NoError(t, err)
+		require.NotNil(t, got.LastCursorAt)
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-runDone, context.Canceled)
+		assert.Equal(t, []string{"example-repo"}, h.fetcher.repoCallsSnapshot())
+	})
 }
 
 func TestRunnerRunRequiresStore(t *testing.T) {

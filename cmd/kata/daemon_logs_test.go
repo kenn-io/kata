@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -225,20 +226,22 @@ func TestFormatAgentHookLogRecordFormatsDecodedRecord(t *testing.T) {
 // the tail loop would early-return with the smallest-numbered rotated
 // file and never observe future writes to runs.jsonl.
 func TestDaemonLogs_Hooks_Tail_RotatedOnlyWaitsForActive(t *testing.T) {
-	_, dir, _ := setupHooksDir(t)
-	// Only a rotated file exists at startup.
-	writeHookLog(t, dir, "runs.jsonl.1", map[string]any{"event_id": 99, "result": "ok"})
+	synctest.Test(t, func(t *testing.T) {
+		_, dir, _ := setupHooksDir(t)
+		// Only a rotated file exists at startup.
+		writeHookLog(t, dir, "runs.jsonl.1", map[string]any{"event_id": 99, "result": "ok"})
 
-	resetFlags(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	appendHookLogAsync(filepath.Join(dir, "runs.jsonl"), 300*time.Millisecond,
-		map[string]any{"event_id": 7, "result": "ok"})
+		resetFlags(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		appendHookLogAsync(filepath.Join(dir, "runs.jsonl"), 300*time.Millisecond,
+			map[string]any{"event_id": 7, "result": "ok"})
 
-	out, _, _ := executeRootCapture(t, ctx, "daemon", "logs", "--hooks", "--tail")
-	if !strings.Contains(out, `"event_id":7`) {
-		t.Fatalf("tail must follow runs.jsonl after it appears: %q", out)
-	}
+		out, _, _ := executeRootCapture(t, ctx, "daemon", "logs", "--hooks", "--tail")
+		if !strings.Contains(out, `"event_id":7`) {
+			t.Fatalf("tail must follow runs.jsonl after it appears: %q", out)
+		}
+	})
 }
 
 // TestEmitNewLines_PartialTrailingLine_NotConsumed pins the contract
@@ -383,20 +386,22 @@ func TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent(t *testing.T) {
 }
 
 func TestDaemonLogs_Hooks_Tail_PicksUpNewLines(t *testing.T) {
-	_, dir, _ := setupHooksDir(t)
-	path := filepath.Join(dir, "runs.jsonl")
-	writeHookLog(t, dir, "runs.jsonl", map[string]any{"event_id": 1, "result": "ok"})
+	synctest.Test(t, func(t *testing.T) {
+		_, dir, _ := setupHooksDir(t)
+		path := filepath.Join(dir, "runs.jsonl")
+		writeHookLog(t, dir, "runs.jsonl", map[string]any{"event_id": 1, "result": "ok"})
 
-	resetFlags(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	appendHookLogAsync(path, 200*time.Millisecond,
-		map[string]any{"event_id": 2, "result": "ok"})
+		resetFlags(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		appendHookLogAsync(path, 200*time.Millisecond,
+			map[string]any{"event_id": 2, "result": "ok"})
 
-	out, _, _ := executeRootCapture(t, ctx, "daemon", "logs", "--hooks", "--tail")
-	if !strings.Contains(out, `"event_id":1`) || !strings.Contains(out, `"event_id":2`) {
-		t.Fatalf("tail should print initial + appended: %q", out)
-	}
+		out, _, _ := executeRootCapture(t, ctx, "daemon", "logs", "--hooks", "--tail")
+		if !strings.Contains(out, `"event_id":1`) || !strings.Contains(out, `"event_id":2`) {
+			t.Fatalf("tail should print initial + appended: %q", out)
+		}
+	})
 }
 
 // TestDaemonLogs_RejectsNonPositiveLimit covers hammer-test
