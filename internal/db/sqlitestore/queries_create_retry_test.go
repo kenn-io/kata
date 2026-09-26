@@ -11,9 +11,8 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-func TestCreateIssueRetriesPostCommitReadWithoutDuplicatingIssue(t *testing.T) {
+func TestCreateIssueRetriesPostCommitReadWithoutDuplicatingIssue(t *testing.T) { //nolint:paralleltest // swaps package var readCreatedIssue
 	ctx := context.Background()
-	t.Setenv("KATA_HOME", t.TempDir())
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
@@ -53,9 +52,8 @@ func TestCreateIssueRetriesPostCommitReadWithoutDuplicatingIssue(t *testing.T) {
 	assert.Equal(t, 1, eventCount)
 }
 
-func TestCreateCommentRetriesPostCommitReadWithoutDuplicatingComment(t *testing.T) {
+func TestCreateCommentRetriesPostCommitReadWithoutDuplicatingComment(t *testing.T) { //nolint:paralleltest // swaps package var readCreatedComment
 	ctx := context.Background()
-	t.Setenv("KATA_HOME", t.TempDir())
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })

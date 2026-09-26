@@ -10,6 +10,7 @@ import (
 )
 
 func TestAddLabel_RoundTrips(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	row, err := d.AddLabel(ctx, i.ID, "needs-review", "tester")
@@ -24,6 +25,7 @@ func TestAddLabel_RoundTrips(t *testing.T) {
 }
 
 func TestAddLabel_DuplicateIsErrLabelExists(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	_, err := d.AddLabel(ctx, i.ID, "bug", "tester")
@@ -33,6 +35,7 @@ func TestAddLabel_DuplicateIsErrLabelExists(t *testing.T) {
 }
 
 func TestAddLabel_RejectsBadCharset(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	for _, label := range []string{"UPPER", "with space", "emoji😀", "" /* empty */, "exclam!"} {
@@ -43,6 +46,7 @@ func TestAddLabel_RejectsBadCharset(t *testing.T) {
 }
 
 func TestAddLabel_AcceptsAllAllowedChars(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	for _, label := range []string{"bug", "priority:high", "v1.0", "needs-review", "a-z_0-9"} {
@@ -52,6 +56,7 @@ func TestAddLabel_AcceptsAllAllowedChars(t *testing.T) {
 }
 
 func TestRemoveLabel_RoundTrips(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 	_, err := d.AddLabel(ctx, i.ID, "bug", "tester")
 	require.NoError(t, err)
@@ -68,6 +73,7 @@ func TestRemoveLabel_RoundTrips(t *testing.T) {
 }
 
 func TestAddLabel_BlankAuthorIsNotMisreportedAsInvalidLabel(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	_, err := d.AddLabel(ctx, i.ID, "bug", "" /* blank */)
@@ -77,6 +83,7 @@ func TestAddLabel_BlankAuthorIsNotMisreportedAsInvalidLabel(t *testing.T) {
 }
 
 func TestLabelByEndpoints_FindsExisting(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	created, err := d.AddLabel(ctx, i.ID, "bug", "tester")
@@ -92,6 +99,7 @@ func TestLabelByEndpoints_FindsExisting(t *testing.T) {
 }
 
 func TestLabelCounts_AggregatesPerProject(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
@@ -109,6 +117,7 @@ func TestLabelCounts_AggregatesPerProject(t *testing.T) {
 }
 
 func TestLabelEventsCarryIssueUID(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	_, labeled, err := d.AddLabelAndEvent(ctx, i.ID, db.LabelEventParams{

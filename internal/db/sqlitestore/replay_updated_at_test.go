@@ -56,6 +56,7 @@ func issueByID(ctx context.Context, t *testing.T, d *sqlitestore.Store, id int64
 // back to the event's created_at, a separate clock read, so a replayed
 // projection can diverge from the directly written row.
 func TestIssueMutationsCarryUpdatedAt(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID, Title: "a", Body: "body", Author: "agent",
@@ -164,6 +165,7 @@ func TestIssueMutationsCarryUpdatedAt(t *testing.T) {
 }
 
 func TestMoveIssueCarriesUpdatedAt(t *testing.T) {
+	t.Parallel()
 	d, ctx, src := setupTestProject(t)
 	tgt, err := d.CreateProject(ctx, "target")
 	require.NoError(t, err)

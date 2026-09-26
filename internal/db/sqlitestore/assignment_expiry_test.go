@@ -11,6 +11,7 @@ import (
 )
 
 func TestExpireAssignments_RejectsFederatedSpokeWithPushEnabled(t *testing.T) {
+	t.Parallel()
 	d, ctx, project, issue := setupTestIssue(t)
 	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	_, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{

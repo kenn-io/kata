@@ -11,6 +11,7 @@ import (
 )
 
 func TestMaxEventID_EmptyTable(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	got, err := d.MaxEventID(context.Background())
 	require.NoError(t, err)
@@ -18,6 +19,7 @@ func TestMaxEventID_EmptyTable(t *testing.T) {
 }
 
 func TestMaxEventID_AfterInserts(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "a")
@@ -28,6 +30,7 @@ func TestMaxEventID_AfterInserts(t *testing.T) {
 }
 
 func TestEventsAfter_CrossProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	pa := createProject(ctx, t, d, "a")
@@ -47,6 +50,7 @@ func TestEventsAfter_CrossProject(t *testing.T) {
 }
 
 func TestEventsAfter_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "a")
@@ -75,6 +79,7 @@ func TestEventsAfter_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) {
 }
 
 func TestEventsAfter_PerProjectFilter(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	pa := createProject(ctx, t, d, "a")
@@ -90,6 +95,7 @@ func TestEventsAfter_PerProjectFilter(t *testing.T) {
 }
 
 func TestEventsAfter_RespectsThroughID(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "a")
@@ -101,6 +107,7 @@ func TestEventsAfter_RespectsThroughID(t *testing.T) {
 }
 
 func TestEventsAfter_RespectsLimit(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "a")
@@ -111,6 +118,7 @@ func TestEventsAfter_RespectsLimit(t *testing.T) {
 }
 
 func TestEventsAfter_StrictlyAfterNonZeroID(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "a")
@@ -130,6 +138,7 @@ func TestEventsAfter_StrictlyAfterNonZeroID(t *testing.T) {
 }
 
 func TestEventsInWindow_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "a")
@@ -153,6 +162,7 @@ func TestEventsInWindow_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) 
 }
 
 func TestPurgeResetCheck_NoPurges(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	got, err := d.PurgeResetCheck(context.Background(), 0, 0)
 	require.NoError(t, err)
@@ -160,6 +170,7 @@ func TestPurgeResetCheck_NoPurges(t *testing.T) {
 }
 
 func TestPurgeResetCheck_AfterPurgeWithEvents(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "a")
@@ -179,6 +190,7 @@ func TestPurgeResetCheck_AfterPurgeWithEvents(t *testing.T) {
 }
 
 func TestMaxLocalOriginEventID(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "p")
@@ -195,6 +207,7 @@ func TestMaxLocalOriginEventID(t *testing.T) {
 }
 
 func TestMaxFederationBaselineEventID(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "p")
@@ -206,6 +219,7 @@ func TestMaxFederationBaselineEventID(t *testing.T) {
 }
 
 func TestPurgeResetCheck_PerProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	pa := createProject(ctx, t, d, "a")
@@ -231,6 +245,7 @@ func TestPurgeResetCheck_PerProject(t *testing.T) {
 // is the parent edge, but an archived-project sibling is hidden work and must
 // not refuse an active child's close.
 func TestRecentSiblingCloses_ExcludesArchivedProjectSiblings(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	pa := createProject(ctx, t, d, "alpha")

@@ -14,7 +14,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-func TestOpen_AppliesPragmas(t *testing.T) {
+func TestOpen_AppliesPragmas(t *testing.T) { //nolint:paralleltest // sets KATA_TEST_FAST_SQLITE
 	t.Setenv("KATA_TEST_FAST_SQLITE", "")
 
 	d := openTestDB(t)
@@ -32,7 +32,7 @@ func TestOpen_AppliesPragmas(t *testing.T) {
 // path returns a handle whose meta table and schema_version row are already
 // in place, courtesy of the bootstrap-on-Open transaction.
 func TestOpen_OnFreshDBBootstrapsSchema(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := sqlitestore.Open(ctx, path)
@@ -53,7 +53,7 @@ func TestOpen_OnFreshDBBootstrapsSchema(t *testing.T) {
 // already-bootstrapped DB succeeds and reports the same schema_version and
 // instance_uid.
 func TestOpen_IsIdempotentAfterBootstrap(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
@@ -73,7 +73,7 @@ func TestOpen_IsIdempotentAfterBootstrap(t *testing.T) {
 }
 
 func TestOpen_RejectsVersionZeroExistingTables(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
@@ -90,6 +90,7 @@ func TestOpen_RejectsVersionZeroExistingTables(t *testing.T) {
 }
 
 func TestSchema_IssuesHasShortIDColumn(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	var typ string
 	err := d.QueryRow(
@@ -100,6 +101,7 @@ func TestSchema_IssuesHasShortIDColumn(t *testing.T) {
 }
 
 func TestSchema_IssuesNumberColumnGone(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	var n int
 	err := d.QueryRow(
@@ -110,6 +112,7 @@ func TestSchema_IssuesNumberColumnGone(t *testing.T) {
 }
 
 func TestSchema_ProjectsNextIssueNumberGone(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	var n int
 	err := d.QueryRow(
@@ -120,6 +123,7 @@ func TestSchema_ProjectsNextIssueNumberGone(t *testing.T) {
 }
 
 func TestSchema_EventsIssueNumberGone(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	var n int
 	err := d.QueryRow(
@@ -130,6 +134,7 @@ func TestSchema_EventsIssueNumberGone(t *testing.T) {
 }
 
 func TestSchema_PurgeLogIssueNumberGone(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	var n int
 	err := d.QueryRow(
@@ -140,6 +145,7 @@ func TestSchema_PurgeLogIssueNumberGone(t *testing.T) {
 }
 
 func TestSchema_ProjectNameRejectsHash(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	_, err := d.Exec(
 		`INSERT INTO projects(uid, name) VALUES('01HZNQ7VFPK1XGD8R5MABCD4EX', 'has#hash')`,
@@ -149,6 +155,7 @@ func TestSchema_ProjectNameRejectsHash(t *testing.T) {
 }
 
 func TestSchemaVersion(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	v, err := d.SchemaVersion(ctx)
@@ -157,6 +164,7 @@ func TestSchemaVersion(t *testing.T) {
 }
 
 func TestOpen_TimestampColumnsScanIntoTime(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 
 	projectUID, err := uid.New()
@@ -175,9 +183,8 @@ func TestOpen_TimestampColumnsScanIntoTime(t *testing.T) {
 	assert.True(t, ok, "expected time.Time, got %T", ts)
 }
 
-func TestCheckpointTruncatesWAL(t *testing.T) {
+func TestCheckpointTruncatesWAL(t *testing.T) { //nolint:paralleltest // sets KATA_TEST_FAST_SQLITE
 	t.Setenv("KATA_TEST_FAST_SQLITE", "")
-	t.Setenv("KATA_HOME", t.TempDir())
 
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -214,9 +221,8 @@ func TestCheckpointTruncatesWAL(t *testing.T) {
 	assert.Zero(t, after.Size(), "TRUNCATE checkpoint should leave no WAL bytes")
 }
 
-func TestOpenUsesFastSQLitePragmasWhenTestHarnessRequestsIt(t *testing.T) {
+func TestOpenUsesFastSQLitePragmasWhenTestHarnessRequestsIt(t *testing.T) { //nolint:paralleltest // sets KATA_TEST_FAST_SQLITE
 	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
-	t.Setenv("KATA_HOME", t.TempDir())
 
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")

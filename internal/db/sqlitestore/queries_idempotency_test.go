@@ -13,6 +13,7 @@ import (
 )
 
 func TestFingerprint_DeterministicOverInputOrder(t *testing.T) {
+	t.Parallel()
 	owner := "alice"
 	a := db.Fingerprint("fix login", "details", &owner, []string{"bug", "ui"}, []db.InitialLink{{Type: "blocks", ToNumber: 7}, {Type: "parent", ToNumber: 3}}, nil, nil)
 
@@ -23,6 +24,7 @@ func TestFingerprint_DeterministicOverInputOrder(t *testing.T) {
 }
 
 func TestFingerprint_CanonicalizesWhitespace(t *testing.T) {
+	t.Parallel()
 	a := db.Fingerprint("fix login", "body text", nil, nil, nil, nil, nil)
 	b := db.Fingerprint("  fix\t\n  login  ", "body  text", nil, nil, nil, nil, nil)
 	assert.Equal(t, a, b, "internal whitespace runs and trimming must collapse")
@@ -34,6 +36,7 @@ func TestFingerprint_CanonicalizesWhitespace(t *testing.T) {
 // same idempotency key but flipped direction would silently reuse the
 // wrong issue.
 func TestFingerprint_BlocksVsBlockedByDiffer(t *testing.T) {
+	t.Parallel()
 	out := db.Fingerprint("fix race", "body", nil, nil, []db.InitialLink{{Type: "blocks", ToNumber: 7, Incoming: false}}, nil, nil)
 
 	in := db.Fingerprint("fix race", "body", nil, nil, []db.InitialLink{{Type: "blocks", ToNumber: 7, Incoming: true}}, nil, nil)
@@ -48,6 +51,7 @@ func TestFingerprint_BlocksVsBlockedByDiffer(t *testing.T) {
 // idempotency events must continue to match new fingerprints for
 // outgoing-only requests.
 func TestFingerprint_OutgoingBlocksByteLayoutStable(t *testing.T) {
+	t.Parallel()
 	defaulted := db.Fingerprint("t", "b", nil, nil, []db.InitialLink{{Type: "blocks", ToNumber: 5}}, nil, nil)
 
 	explicit := db.Fingerprint("t", "b", nil, nil, []db.InitialLink{{Type: "blocks", ToNumber: 5, Incoming: false}}, nil, nil)
@@ -61,6 +65,7 @@ func TestFingerprint_OutgoingBlocksByteLayoutStable(t *testing.T) {
 // daemon's lookup path can match idempotency events that were stored
 // before dedupe-in-Fingerprint landed.
 func TestFingerprintLegacy_DiffersOnDuplicates(t *testing.T) {
+	t.Parallel()
 	dup := db.FingerprintLegacy("fix", "b", nil, nil, []db.InitialLink{
 		{Type: "related", ToNumber: 2},
 		{Type: "related", ToNumber: 2},
@@ -80,6 +85,7 @@ func TestFingerprintLegacy_DiffersOnDuplicates(t *testing.T) {
 // against an existing entry with `--related 2` would trip
 // idempotency_mismatch even though the persisted state is identical.
 func TestFingerprint_DedupesLinksBeforeHashing(t *testing.T) {
+	t.Parallel()
 	withDups := db.Fingerprint("fix", "b", nil, nil, []db.InitialLink{
 		{Type: "related", ToNumber: 2},
 		{Type: "related", ToNumber: 2},
@@ -104,6 +110,7 @@ func TestFingerprint_DedupesLinksBeforeHashing(t *testing.T) {
 }
 
 func TestFingerprint_DiffersOnDifferentInputs(t *testing.T) {
+	t.Parallel()
 	base := db.Fingerprint("a", "b", nil, nil, nil, nil, nil)
 	priority := int64(1)
 	cases := []struct {
@@ -125,6 +132,7 @@ func TestFingerprint_DiffersOnDifferentInputs(t *testing.T) {
 }
 
 func TestFingerprint_CaseSensitive(t *testing.T) {
+	t.Parallel()
 	// Spec §3.6: canonical() does NOT lowercase. Title casing matters.
 	a := db.Fingerprint("Fix Login", "", nil, nil, nil, nil, nil)
 	b := db.Fingerprint("fix login", "", nil, nil, nil, nil, nil)
@@ -132,6 +140,7 @@ func TestFingerprint_CaseSensitive(t *testing.T) {
 }
 
 func TestFingerprint_NilAndEmptyOwnerAreEquivalent(t *testing.T) {
+	t.Parallel()
 	empty := ""
 	a := db.Fingerprint("a", "b", nil, nil, nil, nil, nil)
 	b := db.Fingerprint("a", "b", &empty, nil, nil, nil, nil)
@@ -139,6 +148,7 @@ func TestFingerprint_NilAndEmptyOwnerAreEquivalent(t *testing.T) {
 }
 
 func TestFingerprint_HexLowercaseSHA256(t *testing.T) {
+	t.Parallel()
 	got := db.Fingerprint("a", "b", nil, nil, nil, nil, nil)
 	assert.Len(t, got, 64, "sha256 hex is 64 chars")
 	assert.True(t, strings.ToLower(got) == got, "must be lowercase hex")
@@ -148,6 +158,7 @@ func TestFingerprint_HexLowercaseSHA256(t *testing.T) {
 // byte layout, separator order, JSON shape, sort order, or Canonical()
 // behavior immediately breaks the test. This is the cross-language contract.
 func TestFingerprint_Vector(t *testing.T) {
+	t.Parallel()
 	// All-empty inputs: title=\nbody=\nowner=\nlabels=\nlinks=[]
 	// Nil priority MUST omit the priority line so this hash matches the
 	// pre-priority five-line fingerprint shape — existing idempotency events
@@ -169,6 +180,7 @@ func TestFingerprint_Vector(t *testing.T) {
 // priority emits the same canonical bytes as the pre-priority signature, so
 // existing fingerprints stored in databases keep matching after the upgrade.
 func TestFingerprint_PriorityNilPreservesLegacyShape(t *testing.T) {
+	t.Parallel()
 	// Same hash whether priority is nil or omitted entirely.
 	a := db.Fingerprint("a", "b", nil, []string{"bug"}, []db.InitialLink{{Type: "parent", ToNumber: 3}}, nil, nil)
 
@@ -185,6 +197,7 @@ func TestFingerprint_PriorityNilPreservesLegacyShape(t *testing.T) {
 }
 
 func TestLookupIdempotency_ReturnsMatchWithinWindow(t *testing.T) {
+	t.Parallel()
 	// Hand-write an issue.created event with idempotency_key + fingerprint
 	// in the payload so we test LookupIdempotency in isolation from the
 	// CreateIssue extension landing in Task 9.
@@ -203,6 +216,7 @@ func TestLookupIdempotency_ReturnsMatchWithinWindow(t *testing.T) {
 }
 
 func TestLookupIdempotency_OutsideWindowIsNil(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	injectIdempotencyKey(ctx, t, d, issue.ID, "K1", "fp")
 
@@ -214,6 +228,7 @@ func TestLookupIdempotency_OutsideWindowIsNil(t *testing.T) {
 }
 
 func TestLookupIdempotency_DifferentKeyIsNil(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	got, err := d.LookupIdempotency(ctx, p.ID, "no-such-key", time.Now().Add(-1*time.Hour))
 	require.NoError(t, err)
@@ -221,6 +236,7 @@ func TestLookupIdempotency_DifferentKeyIsNil(t *testing.T) {
 }
 
 func TestLookupIdempotency_DifferentProjectIsNil(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p1 := createProject(ctx, t, d, "p1")
@@ -238,6 +254,7 @@ func TestLookupIdempotency_DifferentProjectIsNil(t *testing.T) {
 // returned. The partial index already enforces this; the SQL WHERE clause
 // reinforces it. This test locks both layers.
 func TestLookupIdempotency_OnlyIssueCreatedEvents(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	// Stamp the idempotency_key onto a NON-issue.created row by inserting a
 	// fake issue.edited event. The partial index excludes this row by type;

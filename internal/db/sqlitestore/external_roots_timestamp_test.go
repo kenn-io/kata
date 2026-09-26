@@ -11,6 +11,7 @@ import (
 )
 
 func TestExternalCommentsUseCanonicalSQLiteTimestampOrdering(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)

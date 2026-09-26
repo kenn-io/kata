@@ -14,6 +14,7 @@ import (
 // TestOpenSeedsInstanceUID covers the §8.2 invariant: a fresh db.Open writes
 // meta.instance_uid as a valid 26-char ULID and exposes it via InstanceUID().
 func TestOpenSeedsInstanceUID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	got := d.InstanceUID()
@@ -28,6 +29,7 @@ func TestOpenSeedsInstanceUID(t *testing.T) {
 // TestInstanceUIDStableAcrossReopen covers the spec's "set once at first init,
 // never changes" rule: a second db.Open on the same path returns the same UID.
 func TestInstanceUIDStableAcrossReopen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	first, err := sqlitestore.Open(ctx, path)
@@ -48,6 +50,7 @@ func TestInstanceUIDStableAcrossReopen(t *testing.T) {
 // paths. The daemon reads meta.instance_uid once at Open and treats it as
 // fixed for the process lifetime.
 func TestInstanceUIDCachedAcrossDirectSQLMutation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	original := d.InstanceUID()
@@ -74,6 +77,7 @@ func TestInstanceUIDCachedAcrossDirectSQLMutation(t *testing.T) {
 // the daemon's mutation path has a valid UID and origin_instance_uid matching
 // the local meta.instance_uid.
 func TestEventInsertCarriesUIDAndOrigin(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	p := createKataProject(ctx, t, d)
@@ -85,6 +89,7 @@ func TestEventInsertCarriesUIDAndOrigin(t *testing.T) {
 // TestPurgeInsertCarriesUIDAndOrigin covers §8.3 for purge_log: a purge writes
 // a row with valid uid + origin_instance_uid matching the local instance.
 func TestPurgeInsertCarriesUIDAndOrigin(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	p := createKataProject(ctx, t, d)
@@ -98,6 +103,7 @@ func TestPurgeInsertCarriesUIDAndOrigin(t *testing.T) {
 // TestEventUIDNotNullRejected guards §8.2's NOT NULL contract at runtime: a
 // raw INSERT bypassing the daemon's uid generation is rejected by SQLite.
 func TestEventUIDNotNullRejected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 	p := createKataProject(ctx, t, d)
@@ -122,6 +128,7 @@ func TestEventUIDNotNullRejected(t *testing.T) {
 // TestPurgeLogUIDNotNullRejected guards §8.2 for purge_log: NULL uid or
 // origin_instance_uid must be rejected at runtime.
 func TestPurgeLogUIDNotNullRejected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openTestDB(t)
 

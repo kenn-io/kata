@@ -15,6 +15,7 @@ import (
 // reserved-valid metadata supplied at creation is marshaled into the
 // issues.metadata blob and round-trips verbatim on a subsequent read.
 func TestCreateIssue_MetadataPersistsAndRoundTrips(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	issue, evt, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -47,6 +48,7 @@ func TestCreateIssue_MetadataPersistsAndRoundTrips(t *testing.T) {
 // TestCreateIssue_EmptyMetadataKeepsDefault pins that absent/empty metadata
 // keeps the schema's '{}' default rather than writing null or a literal.
 func TestCreateIssue_EmptyMetadataKeepsDefault(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -64,6 +66,7 @@ func TestCreateIssue_EmptyMetadataKeepsDefault(t *testing.T) {
 // TestCreateIssue_RejectsInvalidReservedValue pins that a reserved key with a
 // type-invalid value fails validation before the row is inserted.
 func TestCreateIssue_RejectsInvalidReservedValue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -86,6 +89,7 @@ func TestCreateIssue_RejectsInvalidReservedValue(t *testing.T) {
 // TestCreateIssue_RejectsNullMetadataValue pins that a JSON null value at
 // creation is rejected (nothing to clear) rather than stored.
 func TestCreateIssue_RejectsNullMetadataValue(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{

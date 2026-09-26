@@ -13,6 +13,7 @@ import (
 )
 
 func TestAPITokensTableExists(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	var n int
 	require.NoError(t, d.QueryRow(`
@@ -24,12 +25,14 @@ func TestAPITokensTableExists(t *testing.T) {
 }
 
 func TestHashTokenSHA256Hex(t *testing.T) {
+	t.Parallel()
 	got := sqlitestore.HashTokenForTest("secret")
 	assert.Equal(t, "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b", got)
 	assert.Len(t, got, 64)
 }
 
 func TestSystemProjectInitializedAndHidden(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 
@@ -46,6 +49,7 @@ func TestSystemProjectInitializedAndHidden(t *testing.T) {
 }
 
 func TestEnsureSystemProjectRejectsConflictingSentinelUID(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	_, err := d.ExecContext(ctx, `DROP TRIGGER trg_projects_uid_immutable`)
@@ -61,6 +65,7 @@ func TestEnsureSystemProjectRejectsConflictingSentinelUID(t *testing.T) {
 }
 
 func TestBatchProjectStatsHidesSystemProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	sys, err := d.SystemProject(ctx)
@@ -72,6 +77,7 @@ func TestBatchProjectStatsHidesSystemProject(t *testing.T) {
 }
 
 func TestCreateAPITokenStoresHashAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	name := "laptop"
@@ -106,6 +112,7 @@ func TestCreateAPITokenStoresHashAndEmitsEvent(t *testing.T) {
 }
 
 func TestCreateAPITokenStoresExpiryInSortableUTCFormat(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	expiresAt := time.Date(2026, time.September, 15, 12, 34, 56, 789000000, time.FixedZone("test", 2*60*60))
@@ -130,6 +137,7 @@ func TestCreateAPITokenStoresExpiryInSortableUTCFormat(t *testing.T) {
 }
 
 func TestRevokeAPITokenSetsRevokedAtAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	name := "laptop"
@@ -155,6 +163,7 @@ func TestRevokeAPITokenSetsRevokedAtAndEmitsEvent(t *testing.T) {
 }
 
 func TestRevokeAPITokenAlreadyRevokedDoesNotEmitDuplicateEvent(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -176,6 +185,7 @@ func TestRevokeAPITokenAlreadyRevokedDoesNotEmitDuplicateEvent(t *testing.T) {
 }
 
 func TestResolveAPITokenReturnsActiveToken(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -192,6 +202,7 @@ func TestResolveAPITokenReturnsActiveToken(t *testing.T) {
 }
 
 func TestResolveAPITokenEnforcesExpiry(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	scope := &db.APITokenScope{
@@ -227,6 +238,7 @@ func TestResolveAPITokenEnforcesExpiry(t *testing.T) {
 }
 
 func TestResolveAPITokenLazilyUpdatesLastUsedAt(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -254,6 +266,7 @@ func TestResolveAPITokenLazilyUpdatesLastUsedAt(t *testing.T) {
 }
 
 func TestResolveAPITokenReturnsTokenWhenLastUsedUpdateFails(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -276,7 +289,7 @@ func TestResolveAPITokenReturnsTokenWhenLastUsedUpdateFails(t *testing.T) {
 	assert.Nil(t, got.LastUsedAt)
 }
 
-func TestResolveAPITokenDoesNotRetryBestEffortLastUsedUpdate(t *testing.T) {
+func TestResolveAPITokenDoesNotRetryBestEffortLastUsedUpdate(t *testing.T) { //nolint:paralleltest // asserts a real-time bound of 250ms
 	d, path := openTestDBWithPath(t)
 	ctx := context.Background()
 	d.SetMaxOpenConns(1)
@@ -312,6 +325,7 @@ func TestResolveAPITokenDoesNotRetryBestEffortLastUsedUpdate(t *testing.T) {
 }
 
 func TestResolveAPITokenRejectsRevokedToken(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -328,6 +342,7 @@ func TestResolveAPITokenRejectsRevokedToken(t *testing.T) {
 }
 
 func TestListAPITokensIncludesRevokedAndHidesHash(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -347,6 +362,7 @@ func TestListAPITokensIncludesRevokedAndHidesHash(t *testing.T) {
 }
 
 func TestCreateAPITokenRejectsReservedBootstrapActorCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 

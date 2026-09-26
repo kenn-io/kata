@@ -11,6 +11,7 @@ import (
 )
 
 func TestUpdateOwner_AssignFromNil(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	owner := "alice"
@@ -31,6 +32,7 @@ func TestUpdateOwner_AssignFromNil(t *testing.T) {
 }
 
 func TestUpdateOwner_UnassignFromValue(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupAssignedIssue(t, "alice")
 
 	updated, evt, changed, err := d.UpdateOwner(ctx, i.ID, nil, "tester")
@@ -46,6 +48,7 @@ func TestUpdateOwner_UnassignFromValue(t *testing.T) {
 }
 
 func TestUpdateOwner_NoOpSameOwner(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupAssignedIssue(t, "alice")
 
 	owner := "alice"
@@ -56,6 +59,7 @@ func TestUpdateOwner_NoOpSameOwner(t *testing.T) {
 }
 
 func TestUpdateOwner_NoOpAlreadyUnassigned(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	_, evt, changed, err := d.UpdateOwner(ctx, i.ID, nil, "tester")
@@ -65,6 +69,7 @@ func TestUpdateOwner_NoOpAlreadyUnassigned(t *testing.T) {
 }
 
 func TestUnassignOwner_ExpectedOwnerMatches(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupAssignedIssue(t, "agent-a")
 	expected := "agent-a"
 
@@ -78,6 +83,7 @@ func TestUnassignOwner_ExpectedOwnerMatches(t *testing.T) {
 }
 
 func TestUnassignOwner_ExpectedOwnerMismatch(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupAssignedIssue(t, "agent-b")
 	expected := "agent-a"
 
@@ -91,6 +97,7 @@ func TestUnassignOwner_ExpectedOwnerMismatch(t *testing.T) {
 }
 
 func TestUnassignOwner_ExpectedOwnerMismatchWhenUnowned(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 	expected := "agent-a"
 
@@ -107,6 +114,7 @@ func TestUnassignOwner_ExpectedOwnerMismatchWhenUnowned(t *testing.T) {
 // json_valid CHECK and rolling back the assignment. Now built via
 // encoding/json so any schema-accepted owner value round-trips cleanly.
 func TestUpdateOwner_ControlByteOwnerProducesValidJSON(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	owner := "alice\x00bob"
@@ -127,6 +135,7 @@ func TestUpdateOwner_ControlByteOwnerProducesValidJSON(t *testing.T) {
 // ClaimOwner tests
 
 func TestClaimOwner_UnownedIssue(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupTestIssue(t)
 
 	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent1"})
@@ -140,6 +149,7 @@ func TestClaimOwner_UnownedIssue(t *testing.T) {
 }
 
 func TestClaimOwner_AlreadyOwnedBySameActor(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupAssignedIssue(t, "agent1")
 
 	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent1"})
@@ -151,6 +161,7 @@ func TestClaimOwner_AlreadyOwnedBySameActor(t *testing.T) {
 }
 
 func TestClaimOwner_IfUnownedAlreadyOwnedBySameActor(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupAssignedIssue(t, "agent1")
 
 	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent1", IfUnowned: true})
@@ -163,6 +174,7 @@ func TestClaimOwner_IfUnownedAlreadyOwnedBySameActor(t *testing.T) {
 }
 
 func TestClaimOwner_AlreadyOwnedByDifferentActor(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupAssignedIssue(t, "agent1")
 
 	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent2"})
@@ -172,6 +184,7 @@ func TestClaimOwner_AlreadyOwnedByDifferentActor(t *testing.T) {
 }
 
 func TestClaimOwner_ForceReassign(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, i := setupAssignedIssue(t, "agent1")
 
 	result, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{IssueID: i.ID, Actor: "agent2", Force: true})
@@ -184,6 +197,7 @@ func TestClaimOwner_ForceReassign(t *testing.T) {
 }
 
 func TestClaimOwner_ReadOnlyFederatedSpokeRejected(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, i := setupTestIssue(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            p.ID,
@@ -202,6 +216,7 @@ func TestClaimOwner_ReadOnlyFederatedSpokeRejected(t *testing.T) {
 }
 
 func TestClaimOwner_TimedAssignmentRenewsAndPermanentRetryPreservesExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 
@@ -235,6 +250,7 @@ func TestClaimOwner_TimedAssignmentRenewsAndPermanentRetryPreservesExpiry(t *tes
 }
 
 func TestClaimOwner_ExpiredAssignmentTakeoverEmitsOrderedEvents(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	_, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{
@@ -262,6 +278,7 @@ func TestClaimOwner_ExpiredAssignmentTakeoverEmitsOrderedEvents(t *testing.T) {
 }
 
 func TestClaimOwner_ForcePermanentAssignmentClearsExpiry(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	_, err := d.ClaimOwner(ctx, db.ClaimOwnerParams{

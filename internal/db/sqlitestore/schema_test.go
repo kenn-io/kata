@@ -10,6 +10,7 @@ import (
 )
 
 func TestIssuesMetadataAndRevisionColumns(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 	var meta string
 	var rev int64
@@ -21,6 +22,7 @@ func TestIssuesMetadataAndRevisionColumns(t *testing.T) {
 }
 
 func TestIssuesMetadataRejectsInvalidJSON(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 	_, err := d.ExecContext(ctx,
 		`UPDATE issues SET metadata = 'not json' WHERE id = ?`, iss.ID,
@@ -33,6 +35,7 @@ func TestIssuesMetadataRejectsInvalidJSON(t *testing.T) {
 // read path's `json.Unmarshal(meta, &map[string]…)` cannot crash on a row
 // corrupted by direct SQL or an upstream bug.
 func TestIssuesMetadataRejectsNonObjectShapes(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 	for _, badShape := range []string{`[]`, `[1,2,3]`, `42`, `"hello"`, `null`, `true`} {
 		_, err := d.ExecContext(ctx,
@@ -44,6 +47,7 @@ func TestIssuesMetadataRejectsNonObjectShapes(t *testing.T) {
 }
 
 func TestIssuesTimedAssignmentSupportsTimedAndPermanentOwnership(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	const expiresAt = "2026-09-17T20:30:00Z"
@@ -70,6 +74,7 @@ func TestIssuesTimedAssignmentSupportsTimedAndPermanentOwnership(t *testing.T) {
 }
 
 func TestIssuesTimedAssignmentRequiresOwner(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, iss := setupTestIssue(t)
 
 	const expiresAt = "2026-09-17T20:30:00Z"
@@ -84,6 +89,7 @@ func TestIssuesTimedAssignmentRequiresOwner(t *testing.T) {
 }
 
 func TestIssuesTimedAssignmentDueLookupUsesExpiryIndex(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	rows, err := d.Query(`
 		EXPLAIN QUERY PLAN
@@ -111,6 +117,7 @@ func TestIssuesTimedAssignmentDueLookupUsesExpiryIndex(t *testing.T) {
 }
 
 func TestProjectsMetadataAndRevisionColumns(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	var meta string
 	var rev int64
@@ -122,6 +129,7 @@ func TestProjectsMetadataAndRevisionColumns(t *testing.T) {
 }
 
 func TestProjectsMetadataRejectsInvalidJSON(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.ExecContext(ctx,
 		`UPDATE projects SET metadata = 'not json' WHERE id = ?`, p.ID,
@@ -132,6 +140,7 @@ func TestProjectsMetadataRejectsInvalidJSON(t *testing.T) {
 // TestProjectsMetadataRejectsNonObjectShapes mirrors the issues check at the
 // projects table — see TestIssuesMetadataRejectsNonObjectShapes for rationale.
 func TestProjectsMetadataRejectsNonObjectShapes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	for _, badShape := range []string{`[]`, `[1,2,3]`, `42`, `"hello"`, `null`, `true`} {
 		_, err := d.ExecContext(ctx,
@@ -143,6 +152,7 @@ func TestProjectsMetadataRejectsNonObjectShapes(t *testing.T) {
 }
 
 func TestProjectAliasesDoNotPersistPathTelemetry(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 
 	rows, err := d.Query(`PRAGMA table_info(project_aliases)`)
@@ -168,6 +178,7 @@ func TestProjectAliasesDoNotPersistPathTelemetry(t *testing.T) {
 // CHECK on recurrences.template_metadata — same rationale as the issue /
 // project checks.
 func TestRecurrencesTemplateMetadataRejectsNonObjectShapes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, _ := setupTestIssue(t)
 	_, err := d.ExecContext(ctx, `INSERT INTO recurrences
         (uid, project_id, rrule, dtstart, timezone, template_title, author)
@@ -188,6 +199,7 @@ func TestRecurrencesTemplateMetadataRejectsNonObjectShapes(t *testing.T) {
 // CHECK on recurrences.template_labels — labels are always a JSON array of
 // strings, so non-array shapes must be rejected at write time.
 func TestRecurrencesTemplateLabelsRejectsNonArrayShapes(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, _ := setupTestIssue(t)
 	_, err := d.ExecContext(ctx, `INSERT INTO recurrences
         (uid, project_id, rrule, dtstart, timezone, template_title, author)
@@ -205,6 +217,7 @@ func TestRecurrencesTemplateLabelsRejectsNonArrayShapes(t *testing.T) {
 }
 
 func TestEventsCarryOriginInstanceUID(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, _ := setupTestIssue(t) // creates project + issue + issue.created event
 
 	var id int64
@@ -218,6 +231,7 @@ func TestEventsCarryOriginInstanceUID(t *testing.T) {
 }
 
 func TestRecurrencesTableAndIssueLinkage(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, _ := setupTestIssue(t)
 
 	_, err := d.ExecContext(ctx, `INSERT INTO recurrences
@@ -244,6 +258,7 @@ func TestRecurrencesTableAndIssueLinkage(t *testing.T) {
 }
 
 func TestSchemaVersionCurrent(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 }

@@ -13,6 +13,7 @@ import (
 )
 
 func TestReplayInvariant_ProjectProjectionMatchesDirectWrites(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,

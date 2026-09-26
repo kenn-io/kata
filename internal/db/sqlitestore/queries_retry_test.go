@@ -14,6 +14,7 @@ import (
 )
 
 func TestWriteMethods_RetryTransientSQLiteBusy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		run  func(context.Context, *testing.T) (*sqlitestore.Store, string, func(context.Context, *testing.T))

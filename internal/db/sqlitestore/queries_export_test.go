@@ -22,6 +22,7 @@ func collectExport[T any](t *testing.T, seq func(yield func(T, error) bool)) []T
 }
 
 func TestExportMeta(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	// Open seeds meta (schema_version, instance_uid). Add a probe that sorts last.
@@ -44,6 +45,7 @@ func TestExportMeta(t *testing.T) {
 }
 
 func TestExportProjects(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	other, err := d.CreateProject(ctx, "other")
 	require.NoError(t, err)
@@ -76,6 +78,7 @@ func TestExportProjects(t *testing.T) {
 }
 
 func TestExportProjectsContextCanceledErrors(t *testing.T) {
+	t.Parallel()
 	d, _, _ := setupTestProject(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // force QueryContext to fail
@@ -88,6 +91,7 @@ func TestExportProjectsContextCanceledErrors(t *testing.T) {
 }
 
 func TestExportProjectsEarlyBreak(t *testing.T) {
+	t.Parallel()
 	d, ctx, _ := setupTestProject(t)
 	_, err := d.CreateProject(ctx, "second")
 	require.NoError(t, err)
@@ -103,6 +107,7 @@ func TestExportProjectsEarlyBreak(t *testing.T) {
 }
 
 func TestExportFederationBindings(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:     p.ID,
@@ -121,6 +126,7 @@ func TestExportFederationBindings(t *testing.T) {
 }
 
 func TestExportFederationSyncStatusEmpty(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	got := collectExport(t, d.ExportFederationSyncStatus(ctx, db.ExportFilter{ProjectID: &p.ID}))
 	// No sync activity, so no rows; the test seeds nothing.
@@ -128,30 +134,35 @@ func TestExportFederationSyncStatusEmpty(t *testing.T) {
 }
 
 func TestExportFederationEnrollments(t *testing.T) {
+	t.Parallel()
 	d, ctx, _ := setupTestProject(t)
 	got := collectExport(t, d.ExportFederationEnrollments(ctx, db.ExportFilter{}))
 	require.Empty(t, got, "no enrollments seeded")
 }
 
 func TestExportFederationQuarantineEmpty(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	got := collectExport(t, d.ExportFederationQuarantine(ctx, db.ExportFilter{ProjectID: &p.ID}))
 	require.Empty(t, got)
 }
 
 func TestExportIssueClaimsEmpty(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, _ := setupTestIssue(t)
 	got := collectExport(t, d.ExportIssueClaims(ctx, db.ExportFilter{}))
 	require.Empty(t, got)
 }
 
 func TestExportPendingClaimRequestsEmpty(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, _ := setupTestIssue(t)
 	got := collectExport(t, d.ExportPendingClaimRequests(ctx, db.ExportFilter{}))
 	require.Empty(t, got)
 }
 
 func TestExportSequences(t *testing.T) {
+	t.Parallel()
 	d, _, _, _ := setupTestIssue(t) // creating rows advances sqlite_sequence
 	ctx := context.Background()
 	got := collectExport(t, d.ExportSequences(ctx))
@@ -162,6 +173,7 @@ func TestExportSequences(t *testing.T) {
 }
 
 func TestExportProjectAliases(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a, err := d.AttachAlias(ctx, p.ID, "alias-x", "git")
 	require.NoError(t, err)
@@ -174,6 +186,7 @@ func TestExportProjectAliases(t *testing.T) {
 }
 
 func TestExportComments(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	_, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "a", Body: "hello"})
 	require.NoError(t, err)
@@ -191,6 +204,7 @@ func TestExportComments(t *testing.T) {
 }
 
 func TestExportIssueLabels(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	_, err := d.AddLabel(ctx, issue.ID, "alpha", "a")
 	require.NoError(t, err)
@@ -204,6 +218,7 @@ func TestExportIssueLabels(t *testing.T) {
 }
 
 func TestExportImportMappings(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	_, err := d.UpsertImportMapping(ctx, db.ImportMappingParams{
 		Source: "github", ExternalID: "ext-1", ObjectType: "issue",
@@ -225,6 +240,7 @@ func TestExportImportMappings(t *testing.T) {
 }
 
 func TestExportPurgeLog(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	_, err := d.PurgeIssue(ctx, issue.ID, "x", nil)
 	require.NoError(t, err)
@@ -236,6 +252,7 @@ func TestExportPurgeLog(t *testing.T) {
 }
 
 func TestExportLinks(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "a", Author: "x"})
 	require.NoError(t, err)
@@ -256,6 +273,7 @@ func TestExportLinks(t *testing.T) {
 }
 
 func TestExportRecurrences(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	rec, _, err := d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: p.ID, Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
@@ -271,6 +289,7 @@ func TestExportRecurrences(t *testing.T) {
 }
 
 func TestExportEvents(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	// setupTestIssue creates an issue, which emits an issue.created event.
 	evs := collectExport(t, d.ExportEvents(ctx, db.ExportFilter{ProjectID: &p.ID}))
@@ -296,6 +315,7 @@ func TestExportEvents(t *testing.T) {
 // out with an orphan related_issue_uid and the links_changed event keeps a
 // stale UID reference.
 func TestExportEvents_UIDOnlyPeerSoftDeleted(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, peer := setupTestIssue(t)
 	// Soft-delete the peer issue so its uid points at a deleted row.
 	_, _, _, err := d.SoftDeleteIssue(ctx, peer.ID, "a")
@@ -345,6 +365,7 @@ func TestExportEvents_UIDOnlyPeerSoftDeleted(t *testing.T) {
 // never receives. A whole-DB export keeps every peer reachable and must not
 // scrub.
 func TestExportEvents_ScrubsOmittedPeerRefs(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	alpha, err := d.CreateProject(ctx, "alpha")
@@ -422,6 +443,7 @@ func TestExportEvents_ScrubsOmittedPeerRefs(t *testing.T) {
 }
 
 func TestExportIssues(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, issue := setupTestIssue(t)
 	deleted, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "d", Author: "a"})
 	require.NoError(t, err)
@@ -449,6 +471,7 @@ func TestExportIssues(t *testing.T) {
 // subject_issue.project_id = events.project_id made the orphan filter drop
 // every event of a moved issue from exports.
 func TestExportEvents_MovedIssueEventsSurvive(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	srcP, err := d.CreateProject(ctx, "src")
@@ -506,6 +529,7 @@ func TestExportEvents_MovedIssueEventsSurvive(t *testing.T) {
 // for every UID-keyed event made first-generation preservation silently
 // decay on re-export.
 func TestExportEvents_MovedIssueEventsSurviveReExport(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	srcP, err := d.CreateProject(ctx, "src")

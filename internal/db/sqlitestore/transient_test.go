@@ -15,6 +15,7 @@ func (e codedSQLiteErr) Error() string { return "sqlite error" }
 func (e codedSQLiteErr) Code() int     { return int(e) }
 
 func TestIsTransientRecognizesSQLiteBusyAndLocked(t *testing.T) {
+	t.Parallel()
 	assert.True(t, IsTransient(codedSQLiteErr(sqlite3.SQLITE_BUSY)))
 	assert.True(t, IsTransient(codedSQLiteErr(sqlite3.SQLITE_LOCKED)))
 	assert.True(t, IsTransient(fmt.Errorf("wrapped: %w",

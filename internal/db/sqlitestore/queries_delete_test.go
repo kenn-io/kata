@@ -13,6 +13,7 @@ import (
 )
 
 func TestSoftDeleteIssue_SetsDeletedAtAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
 	updated, evt, changed, err := d.SoftDeleteIssue(ctx, issue.ID, "agent")
@@ -33,6 +34,7 @@ func TestSoftDeleteIssue_SetsDeletedAtAndEmitsEvent(t *testing.T) {
 }
 
 func TestSoftDeleteIssue_AlreadyDeletedIsNoOp(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupSoftDeletedIssue(t)
 
 	updated, evt, changed, err := d.SoftDeleteIssue(ctx, issue.ID, "agent")
@@ -43,6 +45,7 @@ func TestSoftDeleteIssue_AlreadyDeletedIsNoOp(t *testing.T) {
 }
 
 func TestSoftDeleteIssue_UnknownIssueIsErrNotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	_, _, _, err := d.SoftDeleteIssue(ctx, 9999, "agent")
@@ -50,6 +53,7 @@ func TestSoftDeleteIssue_UnknownIssueIsErrNotFound(t *testing.T) {
 }
 
 func TestRestoreIssue_ClearsDeletedAtAndEmitsEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupSoftDeletedIssue(t)
 
 	updated, evt, changed, err := d.RestoreIssue(ctx, issue.ID, "agent")
@@ -65,6 +69,7 @@ func TestRestoreIssue_ClearsDeletedAtAndEmitsEvent(t *testing.T) {
 }
 
 func TestRestoreIssue_NotDeletedIsNoOp(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupTestIssue(t)
 
 	_, evt, changed, err := d.RestoreIssue(ctx, issue.ID, "agent")
@@ -74,6 +79,7 @@ func TestRestoreIssue_NotDeletedIsNoOp(t *testing.T) {
 }
 
 func TestRestoreIssue_UnknownIssueIsErrNotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	_, _, _, err := d.RestoreIssue(ctx, 9999, "agent")
@@ -81,6 +87,7 @@ func TestRestoreIssue_UnknownIssueIsErrNotFound(t *testing.T) {
 }
 
 func TestSoftDeleteRestore_RoundTripVisibility(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	issue, _ := createTesterIssue(ctx, t, d, p.ID, "round trip")
 
@@ -107,6 +114,7 @@ func TestSoftDeleteRestore_RoundTripVisibility(t *testing.T) {
 }
 
 func TestRestoreIssue_EmitsEventWithPayloadAndRefs(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, issue := setupSoftDeletedIssue(t)
 
 	updated, evt, changed, err := d.RestoreIssue(ctx, issue.ID, "agent")
@@ -124,6 +132,7 @@ func TestRestoreIssue_EmitsEventWithPayloadAndRefs(t *testing.T) {
 }
 
 func TestSoftDeleteIssue_ScopesByIssueID(t *testing.T) {
+	t.Parallel()
 	// SoftDeleteIssue takes an issue ID, not a project ID — it must work
 	// across projects without requiring a project context.
 	d := openTestDB(t)
@@ -150,6 +159,7 @@ func TestSoftDeleteIssue_ScopesByIssueID(t *testing.T) {
 }
 
 func TestPurgeIssue_RemovesAllDependentsAndAudits(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 	p := createKataProject(ctx, t, d)
@@ -270,6 +280,7 @@ func TestPurgeIssue_RemovesAllDependentsAndAudits(t *testing.T) {
 // the broader contract that "asking to add a link that's already there
 // is never an error."
 func TestEditIssueAtomic_AddBlocksHandlesConcurrentInsertGracefully(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a, _ := createTesterIssue(ctx, t, d, p.ID, "subject")
 	b, _ := createTesterIssue(ctx, t, d, p.ID, "target")
@@ -312,6 +323,7 @@ func TestEditIssueAtomic_AddBlocksHandlesConcurrentInsertGracefully(t *testing.T
 // edit batched with a second peer survives. That's a batch-size-
 // dependent bug.
 func TestPurgeIssue_PreservesSinglePeerAggregatedLinksChangedEvent(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	subject, _ := createTesterIssue(ctx, t, d, p.ID, "subject")
 	target, _ := createTesterIssue(ctx, t, d, p.ID, "target")
@@ -353,6 +365,7 @@ func TestPurgeIssue_PreservesSinglePeerAggregatedLinksChangedEvent(t *testing.T)
 // payload) survives intact. The orphan reference in the payload is the
 // accepted trade-off.
 func TestPurgeIssue_PreservesAggregatedLinksChangedEventsOnOtherIssues(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	subject, _ := createTesterIssue(ctx, t, d, p.ID, "subject")
 	target, _ := createTesterIssue(ctx, t, d, p.ID, "target")
@@ -410,6 +423,7 @@ func TestPurgeIssue_PreservesAggregatedLinksChangedEventsOnOtherIssues(t *testin
 // state and emitting an issue.updated event instead of the unassign
 // semantics.
 func TestEditIssueAtomic_OwnerEmptyStringClearsToNil(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	subject, _ := createTesterIssue(ctx, t, d, p.ID, "subject")
 
@@ -435,6 +449,7 @@ func TestEditIssueAtomic_OwnerEmptyStringClearsToNil(t *testing.T) {
 }
 
 func TestEditIssueAtomic_LinksChangedSetsEnvelopePeerForSingleEdge(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	subject, _ := createTesterIssue(ctx, t, d, p.ID, "subject")
 	target, _ := createTesterIssue(ctx, t, d, p.ID, "target")
@@ -466,6 +481,7 @@ func TestEditIssueAtomic_LinksChangedSetsEnvelopePeerForSingleEdge(t *testing.T)
 // envelope level. Leave related_issue_id / related_issue_uid NULL — the
 // payload's *_uids slices remain authoritative for multi-peer edits.
 func TestEditIssueAtomic_LinksChangedNullsEnvelopePeerForMultiEdge(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	subject, _ := createTesterIssue(ctx, t, d, p.ID, "subject")
 	t1, _ := createTesterIssue(ctx, t, d, p.ID, "t1")
@@ -491,6 +507,7 @@ func TestEditIssueAtomic_LinksChangedNullsEnvelopePeerForMultiEdge(t *testing.T)
 }
 
 func TestPurgeIssue_NoEventsLeavesResetCursorNull(t *testing.T) {
+	t.Parallel()
 	// Manually craft an issue row with no events: insert directly so we
 	// bypass CreateIssue's automatic issue.created event. Verify that
 	// PurgeIssue sees zero attached events and leaves PurgeResetAfterEventID
@@ -516,6 +533,7 @@ func TestPurgeIssue_NoEventsLeavesResetCursorNull(t *testing.T) {
 }
 
 func TestPurgeIssue_ReservesSqliteSequenceAboveMaxEventID(t *testing.T) {
+	t.Parallel()
 	d, ctx, p, target := setupTestIssue(t)
 	// Capture max events.id BEFORE purge.
 	var maxBefore int64
@@ -539,12 +557,14 @@ func TestPurgeIssue_ReservesSqliteSequenceAboveMaxEventID(t *testing.T) {
 }
 
 func TestPurgeIssue_UnknownIssueIsErrNotFound(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	_, err := d.PurgeIssue(context.Background(), 9999, "agent", nil)
 	assert.True(t, errors.Is(err, db.ErrNotFound))
 }
 
 func TestPurgeIssue_PersistsReason(t *testing.T) {
+	t.Parallel()
 	// Reason threads through to purge_log.reason and round-trips on the
 	// returned PurgeLog. Catches argument-order regressions in the INSERT.
 	d, ctx, _, target := setupTestIssue(t)
@@ -557,6 +577,7 @@ func TestPurgeIssue_PersistsReason(t *testing.T) {
 }
 
 func TestPurgeIssue_OnSoftDeletedIssue(t *testing.T) {
+	t.Parallel()
 	// PurgeIssue must work on already soft-deleted issues — the destructive
 	// ladder is delete → purge, not delete-XOR-purge. lookupIssueIncludingDeleted
 	// is the right primitive; this test pins the contract so a future swap
@@ -573,6 +594,7 @@ func TestPurgeIssue_OnSoftDeletedIssue(t *testing.T) {
 }
 
 func TestPurgeIssue_SnapshotsShortIDIntoPurgeLog(t *testing.T) {
+	t.Parallel()
 	d, ctx, _, target := setupTestIssue(t)
 	require.NotEmpty(t, target.ShortID, "issue under test must have a short_id")
 
@@ -590,6 +612,7 @@ func TestPurgeIssue_SnapshotsShortIDIntoPurgeLog(t *testing.T) {
 // issue. With the tombstone, assignShortIDIn auto-extends past L=4
 // just as it would against a live sibling.
 func TestPurgeTombstone_BlocksReuseOfShortIDAtSameLength(t *testing.T) {
+	t.Parallel()
 	d, ctx, p := setupTestProject(t)
 	a, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -618,6 +641,7 @@ func TestPurgeTombstone_BlocksReuseOfShortIDAtSameLength(t *testing.T) {
 }
 
 func TestPurgeTombstone_DifferentProjectsDoNotInterfere(t *testing.T) {
+	t.Parallel()
 	// Tombstones are scoped to (project_id, short_id). A purge in project P1
 	// must not gate a create in project P2 with the same ULID suffix.
 	d, ctx, p1 := setupTestProject(t)
@@ -650,6 +674,7 @@ func TestPurgeTombstone_DifferentProjectsDoNotInterfere(t *testing.T) {
 // qualified, and the project is captured in-tx so it cannot race a
 // concurrent move.
 func TestEditIssueAtomic_ChangesCarryPeerProject(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	ctx := context.Background()
 
