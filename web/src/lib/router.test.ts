@@ -59,15 +59,6 @@ describe('canonical Kata routes', () => {
     expect(serializeRoute(route)).toBe('/kata?view=scheduled')
   })
 
-  it('opens retired Upcoming and Deadlines links as Scheduled', () => {
-    for (const legacy of ['upcoming', 'deadlines']) {
-      const route = parseRoute(new URL(`https://daemon.example/kata?view=${legacy}&label=ready`))
-
-      expect(route).toMatchObject({ kind: 'kata', view: 'scheduled' })
-      expect(serializeRoute(route)).toBe('/kata?view=scheduled&label=ready')
-    }
-  })
-
   it('parses credentials as a daemon route without carrying issue workspace state', () => {
     const route = parseRoute(
       new URL(`https://daemon.example/kata?view=credentials&issue=${issueUID}&label=private-actor`),

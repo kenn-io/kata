@@ -64,8 +64,7 @@ individual projects:
 - **Delegated** groups open teammate work by its `author/teammate` attribution.
 - **Scheduled** is the agenda of every open task with a start date or deadline:
   missed deadlines under **Overdue**, actionable tasks under **Today**, then
-  one group per future date. Older `?view=upcoming` and `?view=deadlines` links
-  open Scheduled.
+  one group per future date.
 - **All Open** and **Logbook** remain available as bookmarkable views for
   active and completed work.
 - Project entries scope the collection to one project. Projects without an
