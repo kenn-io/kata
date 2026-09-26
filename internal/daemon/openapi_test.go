@@ -24,6 +24,7 @@ import (
 const artifactPath = "../../api/openapi.yaml"
 const clientSpecArtifactPath = "../../pkg/client/openapi.yaml"
 const clientGeneratedDir = "../../pkg/client/generated"
+const skipOpenAPIClientCheckEnv = "KATA_SKIP_OPENAPI_CLIENT_CHECK"
 
 // TestOpenAPIArtifactUpToDate fails if the committed api/openapi.yaml no longer
 // matches the schema generated from the current routes. Regenerate with
@@ -57,6 +58,9 @@ func TestOpenAPIClientSpecArtifactUpToDate(t *testing.T) {
 }
 
 func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
+	if os.Getenv(skipOpenAPIClientCheckEnv) == "1" {
+		t.Skip("CI runs the client generator check in its own OpenAPI artifacts job")
+	}
 	tmpRoot := t.TempDir()
 	tmpGenerated := filepath.Join(tmpRoot, "generated")
 	if err := os.Mkdir(tmpGenerated, 0o700); err != nil {
