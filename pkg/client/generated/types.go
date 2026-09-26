@@ -3851,6 +3851,35 @@ func (s SearchResponseBody) Validate() error {
 	return errors
 }
 
+type ShowIssueOut struct {
+	AssignmentExpiresOn *time.Time     `json:"assignment_expires_on,omitempty"`
+	Author              string         `json:"author" validate:"required"`
+	Body                string         `json:"body" validate:"required"`
+	ClosedAt            *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason        *string        `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time      `json:"created_at" validate:"required"`
+	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
+	ID                  int64          `json:"id"`
+	Labels              []string       `json:"labels" validate:"required"`
+	Metadata            map[string]any `json:"metadata"`
+	OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
+	Owner               *string        `json:"owner,omitempty"`
+	Priority            *int64         `json:"priority,omitempty"`
+	ProjectID           int64          `json:"project_id"`
+	ProjectUID          *string        `json:"project_uid,omitempty"`
+	RecurrenceID        *int64         `json:"recurrence_id,omitempty"`
+	Revision            int64          `json:"revision"`
+	ShortID             string         `json:"short_id" validate:"required"`
+	Status              string         `json:"status" validate:"required"`
+	Title               string         `json:"title" validate:"required"`
+	UID                 string         `json:"uid" validate:"required"`
+	UpdatedAt           time.Time      `json:"updated_at" validate:"required"`
+}
+
+func (s ShowIssueOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
 type ShowIssueResponseBody struct {
 	Children            []IssueOut          `json:"children,omitempty"`
 	Claim               *IssueClaimOut      `json:"claim,omitempty"`
@@ -3858,7 +3887,7 @@ type ShowIssueResponseBody struct {
 	ClaimViolationCount *int64              `json:"claim_violation_count,omitempty"`
 	ClaimViolations     []ClaimViolationOut `json:"claim_violations,omitempty"`
 	Comments            []Comment           `json:"comments" validate:"required"`
-	Issue               Issue               `json:"issue"`
+	Issue               ShowIssueOut        `json:"issue"`
 	Labels              []IssueLabel        `json:"labels" validate:"required"`
 	Lease               *IssueClaimOut      `json:"lease,omitempty"`
 	LeaseHubNow         *time.Time          `json:"lease_hub_now,omitempty"`

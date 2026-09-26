@@ -3,13 +3,13 @@
  */
 import type { ClaimViolationOut } from './claimViolationOut.ts'
 import type { Comment } from './comment.ts'
-import type { Issue } from './issue.ts'
 import type { IssueClaimOut } from './issueClaimOut.ts'
 import type { IssueLabel } from './issueLabel.ts'
 import type { IssueOut } from './issueOut.ts'
 import type { IssueRef } from './issueRef.ts'
 import type { LinkOut } from './linkOut.ts'
 import type { PendingClaimOut } from './pendingClaimOut.ts'
+import type { ShowIssueOut } from './showIssueOut.ts'
 
 export interface ShowIssueResponseBody {
   children?: IssueOut[]
@@ -18,7 +18,7 @@ export interface ShowIssueResponseBody {
   claim_violation_count?: number
   claim_violations?: ClaimViolationOut[]
   comments: Comment[]
-  issue: Issue
+  issue: ShowIssueOut
   labels: IssueLabel[]
   lease?: IssueClaimOut
   lease_hub_now?: string

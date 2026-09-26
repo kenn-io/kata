@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -83,4 +85,62 @@ func TestComment_AgentOutput(t *testing.T) {
 
 	assert.Regexp(t, `(?m)^OK comment \S+`, out)
 	assert.Contains(t, out, "Comment: appended")
+}
+
+func TestComment_MessageAliasAppendsToIssue(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	short := createIssue(t, env, pid, "x")
+
+	runCLI(t, env, dir, "comment", short, "--message", "looks good")
+
+	issue := fetchIssueViaHTTPWithComments(t, env, pid, short)
+	require.Len(t, issue.Comments, 1)
+	assert.Equal(t, "looks good", issue.Comments[0].Body)
+}
+
+func TestComment_MessageAliasIsTheBodyFlag(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	short := createIssue(t, env, pid, "x")
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	require.NoError(t, os.WriteFile(bodyFile, []byte("from file"), 0o600))
+
+	runCLI(t, env, dir, "comment", short, "--body", "first", "--message", "second")
+	runCLI(t, env, dir, "comment", short, "--message", "third", "--body", "fourth")
+	issue := fetchIssueViaHTTPWithComments(t, env, pid, short)
+	require.Len(t, issue.Comments, 2)
+	assert.Equal(t, "second", issue.Comments[0].Body)
+	assert.Equal(t, "fourth", issue.Comments[1].Body)
+
+	_, out, err := runCLIWithErr(t, env, dir, "comment", short, "--message", "")
+	require.Error(t, err)
+	assert.Contains(t, out, "comment body is required")
+
+	for _, value := range []string{"x", ""} {
+		_, out, err = runCLIWithErr(t, env, dir, "comment", short, "--message", value, "--body-file", bodyFile)
+		require.Error(t, err)
+		assert.Contains(t, out, "must pass exactly one of")
+		_, out, err = runCLIWithErr(t, env, dir, "comment", short, "--message", value, "--body-stdin")
+		require.Error(t, err)
+		assert.Contains(t, out, "must pass exactly one of")
+	}
+}
+
+func TestComment_EditAcceptsMessageAlias(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	short := createIssue(t, env, pid, "x")
+	runCLI(t, env, dir, "comment", short, "--body", "draft")
+	commentUID := fetchIssueViaHTTPWithComments(t, env, pid, short).Comments[0].UID
+
+	runCLI(t, env, dir, "comment", "edit", short, commentUID, "--message", "final")
+
+	updated := fetchIssueViaHTTPWithComments(t, env, pid, short)
+	require.Len(t, updated.Comments, 1)
+	assert.Equal(t, "final", updated.Comments[0].Body)
+
+	_, out, err := runCLIWithErr(t, env, dir, "comment", "edit", short, commentUID, "--message", "")
+	require.Error(t, err)
+	assert.Contains(t, out, "comment body is required")
+	_, out, err = runCLIWithErr(t, env, dir, "comment", "edit", short, commentUID, "--body", "a", "--message", "b", "--body-stdin")
+	require.Error(t, err)
+	assert.Contains(t, out, "must pass exactly one of")
 }
