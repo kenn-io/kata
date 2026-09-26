@@ -24,6 +24,11 @@ import (
 // var (not const) so tests can shorten it.
 var reconnectStatusGrace = 1500 * time.Millisecond
 
+// initialReconnectBackoff is the first reconnect delay after a disconnect.
+//
+// var (not const) so tests can shorten it.
+var initialReconnectBackoff = time.Second
+
 // startSSE is the long-lived consumer goroutine. Loops over
 // readSSEStream, reconnects with exponential backoff (1s → 30s, capped),
 // and resumes via Last-Event-ID once at least one frame was emitted on
@@ -59,7 +64,7 @@ func startSSEForConnection(
 	ctx context.Context, hc *http.Client, base string, projectID *int64, sseCh chan<- tea.Msg, gen uint64,
 ) {
 	const maxBackoff = 30 * time.Second
-	backoff := time.Second
+	backoff := initialReconnectBackoff
 	var lastID int64
 
 	var (
@@ -118,7 +123,7 @@ func startSSEForConnection(
 		}
 		armGrace()
 		if connected {
-			backoff = time.Second
+			backoff = initialReconnectBackoff
 		}
 		select {
 		case <-ctx.Done():
