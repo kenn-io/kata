@@ -73,7 +73,7 @@ func waitForWindowsHelperPID(t *testing.T, readyPath string) int {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(readyPath)
+		data, err := os.ReadFile(readyPath) //nolint:gosec // test-controlled path
 		if err == nil {
 			pid, err := strconv.Atoi(string(data))
 			require.NoError(t, err)
