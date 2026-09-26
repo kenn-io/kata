@@ -299,8 +299,7 @@ func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 // when runHookLogOnce did not see runs.jsonl (mark.set=false), follow
 // emits everything currently in the file. This covers the case where
 // the active file appears between one-shot and follow.
-func TestFollowActive_NoMark_EmitsExistingContent(t *testing.T) {
-	t.Parallel()
+func TestFollowActive_NoMark_EmitsExistingContent(t *testing.T) { //nolint:paralleltest // timing window: followActive's 200ms poll must fire before the 500ms context deadline
 	dir := t.TempDir()
 	path := filepath.Join(dir, "runs.jsonl")
 	if err := os.WriteFile(path, []byte(`{"event_id":42,"result":"ok"}`+"\n"), 0o600); err != nil {
