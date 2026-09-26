@@ -137,6 +137,37 @@ func (c *Client) ProjectFederation(ctx context.Context, hubProjectID int64) (api
 	return body, err
 }
 
+// LookupVectors asks the hub for stored vectors of the requested documents.
+// A hub that predates the route answers 404, surfaced as *HubStatusError.
+func (c *Client) LookupVectors(
+	ctx context.Context,
+	hubProjectID int64,
+	request api.FederationVectorLookupRequestBody,
+) (api.FederationVectorLookupBody, error) {
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	if err != nil {
+		return api.FederationVectorLookupBody{}, err
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		return api.FederationVectorLookupBody{}, err
+	}
+	var payload generated.LookupFederationProjectVectorsBody
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return api.FederationVectorLookupBody{}, err
+	}
+	response, callErr := apiClient.LookupFederationProjectVectorsWithResponse(ctx, &generated.LookupFederationProjectVectorsRequestOptions{
+		PathParams: &generated.LookupFederationProjectVectorsPath{ProjectID: hubProjectID},
+		Body:       &payload,
+	})
+	var body api.FederationVectorLookupBody
+	if response == nil {
+		return body, callErr
+	}
+	err = decodeReplicationResponse(response.HTTPResponse, response.Body, &body)
+	return body, err
+}
+
 // Keep the replication error body bounded before the generated runtime reads it.
 type replicationDoer struct{ client *http.Client }
 

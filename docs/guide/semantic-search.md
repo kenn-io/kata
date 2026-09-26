@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-09-15
+last_edited: 2026-09-24
 ---
 
 # Semantic search
@@ -132,6 +132,16 @@ You can watch the reconciler in `kata health --json` under `embeddings`:
 - `last_error_status`: the HTTP status of the most recent embedding-endpoint
   error response, if any. It is set only when the endpoint answered with an
   HTTP error; an unreachable endpoint (transport failure) leaves it unset.
+- `source`: `replica` when this daemon imports vectors for federated projects
+  from their hub, otherwise `provider`;
+- `source_status`: the most severe federated-project state: `ok`, `pending`,
+  `no_publisher`, `unsupported`, `generation_mismatch`, or `unreachable`
+  (`disabled` when the daemon has no federated projects). `replica_projects`
+  lists the state per project;
+- `replicated`, `awaiting_upstream`, `rejected`, `last_replica_success_at`:
+  documents imported from the hub since the daemon started, documents waiting
+  to retry a hub lookup, hub records that failed validation, and the time of
+  the last successful import.
 
 ## When the endpoint is unavailable
 
@@ -170,7 +180,8 @@ stale `last_success_at` are the signal in that case.
 ## Changing the model
 
 Each stored vector belongs to a generation keyed by a fingerprint of the
-model, dimensionality, and text recipe it was produced under. If you switch
+model, dimensionality, text recipe, and chunking (2000-rune chunks with a
+200-rune overlap) used to produce it. If you switch
 `model`, `dims`, or `fingerprint_salt`, kata builds a new generation in the
 background. While that backfill runs, the vector leg is **unavailable**:
 queries embedded under the new model cannot be scored against the old
@@ -189,16 +200,61 @@ That is the consent boundary. For sensitive projects, prefer a local endpoint
 (such as Ollama on loopback) so issue text never leaves the host. The embedding
 API key is only ever sent to the configured `base_url` origin.
 
-Embeddings are local derived state and **do not federate**: each daemon embeds
-only what it stores, and no vectors are sent to or pulled from federated hubs.
-SQLite keeps them in a sidecar database; PostgreSQL keeps them in pgvector
-tables in its selected Kata schema when that optional extension is installed.
-They are not included in JSONL
-[backup/export](../operations/backup-restore.md); a restore or a storage-format
-upgrade re-embeds from scratch rather than carrying vectors forward. Archives
-exported by older kata versions that still contain
-embedding records import cleanly: those records are skipped and the
-reconciler rebuilds the vectors.
+Vectors are never included in JSONL
+[backup/export](../operations/backup-restore.md); a restore or a
+storage-format upgrade re-embeds (or, on a federation spoke, re-imports)
+rather than carrying vectors forward. SQLite keeps them in a sidecar database;
+PostgreSQL keeps them in pgvector tables in its selected Kata schema when that
+optional extension is installed. Archives exported by older kata versions that
+still contain embedding records import cleanly: those records are skipped and
+the reconciler rebuilds the vectors.
+
+## Federation: spokes import vectors from the hub
+
+!!! warning "Breaking behavior change, no configuration"
+    A federation spoke no longer embeds the issues of its federated projects.
+    It imports their vectors from the hub. There is no setting for this:
+    configuring `[search.embeddings]` remains the only switch.
+
+- **Hub.** A hub with `[search.embeddings]` configured serves the vectors it
+  has already computed to its enrolled spokes over the authenticated
+  federation transport (`POST /api/v1/projects/{id}/federation/vectors:lookup`,
+  `pull` capability). It never embeds on request.
+- **Spoke.** A spoke with `[search.embeddings]` configured imports vectors for
+  every issue in a federated project and makes no provider call for that issue
+  text while its hub supports this. It still embeds its local-only projects and
+  every search query. A spoke without an embedding config stays lexical-only.
+- **Same vector space.** A vector is imported only when the SHA-256 of the
+  spoke's own title and body equals the hub's, and both daemons have the same
+  generation fingerprint (model, dims, recipe, chunking, `fingerprint_salt`).
+  Configure the spoke with the hub's `model`, `dims`, and `fingerprint_salt`;
+  `base_url` and the API key may differ.
+- **Freshness.** A new or edited issue is found lexically at once. It gains
+  semantic recall on the spoke after the hub has embedded that exact text and
+  the spoke's next reconciler turn imports it (seconds to about a minute). A
+  lookup the hub cannot answer yet is retried with backoff (30 seconds,
+  doubling to 30 minutes). Search latency is unchanged: lookups run only in the
+  background reconciler, never while you search.
+
+Automatic fallbacks, per federated project:
+
+| Hub | Spoke behavior | `source_status` |
+| --- | --- | --- |
+| Compatible and reachable | Imports; no provider calls for its issues | `ok` |
+| Not contacted yet | Issues wait; no provider calls | `pending` |
+| Older kata without this feature | Embeds locally, as before | `unsupported` |
+| No embeddings configured | Embeds locally | `no_publisher` |
+| Different fingerprint than the spoke | Embeds locally; imports nothing | `generation_mismatch` |
+| Unreachable, or the enrollment is rejected | Issues wait (no provider calls); lexical search works | `unreachable` |
+
+A spoke checks an `unsupported`, `no_publisher`, or `generation_mismatch` hub
+again every 30 minutes and starts importing once the hub is compatible. Issues
+it embedded locally in the meantime keep their local vectors.
+
+Vectors travel only over the already-authenticated federation channel, and
+only to spokes that already hold the issue text, so importing them discloses
+nothing new. The hub's embedding provider sees each federated issue once; a
+spoke's provider sees only queries and local-only projects.
 
 ## Scope and limits
 

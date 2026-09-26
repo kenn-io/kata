@@ -39,6 +39,10 @@ type SkipFederationQuarantineHeaders struct {
 	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
 }
 
+type LookupFederationProjectVectorsHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
 type CreateIssueHeaders struct {
 	// XKataProjectAlias Workspace alias identity; requires a name: selector
 	XKataProjectAlias *string `json:"X-Kata-Project-Alias,omitempty"`

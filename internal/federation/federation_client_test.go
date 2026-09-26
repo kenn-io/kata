@@ -176,3 +176,50 @@ func TestFederationClientPostJSONRejectsNonJSONResponse(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode hub")
 }
+
+func TestFederationClientLookupVectors(t *testing.T) {
+	var gotAuth string
+	var gotBody api.FederationVectorLookupRequestBody
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/projects/42/federation/vectors:lookup", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		require.NoError(t, json.NewEncoder(w).Encode(api.FederationVectorLookupBody{
+			Generation: &api.FederationVectorGeneration{Fingerprint: "fp", Model: "m", Dims: 2, State: "active"},
+			Records: []api.FederationVectorRecord{{
+				IssueUID: "01HZNQ7VFPK1XGD8R5MABCD4EY", ContentSHA256: gotBody.Docs[0].ContentSHA256,
+				Status: api.FederationVectorStatusOK,
+				Chunks: []api.FederationVectorChunk{{Index: 0, Vector: []byte{0, 0, 128, 63, 0, 0, 0, 0}}},
+			}},
+		}))
+	}))
+	t.Cleanup(srv.Close)
+	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+	require.NoError(t, err)
+	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	body, err := client.LookupVectors(context.Background(), 42, api.FederationVectorLookupRequestBody{
+		Fingerprint: "fp",
+		Docs:        []api.FederationVectorLookupDoc{{IssueUID: "01HZNQ7VFPK1XGD8R5MABCD4EY", ContentSHA256: hash}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer hub-token", gotAuth)
+	assert.Equal(t, "fp", gotBody.Fingerprint)
+	require.NotNil(t, body.Generation)
+	assert.Equal(t, "fp", body.Generation.Fingerprint)
+	require.Len(t, body.Records, 1)
+	assert.Equal(t, []byte{0, 0, 128, 63, 0, 0, 0, 0}, body.Records[0].Chunks[0].Vector)
+}
+
+func TestFederationClientLookupVectorsSurfacesOlderHub404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.NotFound(w, nil)
+	}))
+	t.Cleanup(srv.Close)
+	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+	require.NoError(t, err)
+	_, err = client.LookupVectors(context.Background(), 42, api.FederationVectorLookupRequestBody{Fingerprint: "fp"})
+	var statusErr *HubStatusError
+	require.ErrorAs(t, err, &statusErr)
+	assert.Equal(t, http.StatusNotFound, statusErr.StatusCode)
+}

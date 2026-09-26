@@ -154,6 +154,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		body.VectorGeneration, err = hubVectorGeneration(ctx, cfg)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
 		return &api.ProjectFederationResponse{Body: body}, nil
 	})
 
@@ -673,6 +677,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			PushCursorEventID: result.PushCursorEventID,
 		}}, nil
 	})
+	registerFederationVectorHandlers(humaAPI, cfg)
 }
 
 func validateFederationIngestSchemaVersion(schemaVersion int) error {

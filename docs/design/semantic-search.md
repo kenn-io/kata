@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-25
+last_edited: 2026-09-24
 ---
 
 # Semantic search technical notes
@@ -44,8 +44,9 @@ Non-goals for v1 (future levers, in rough order of expected value):
   untouched.
 - LLM reranking and query expansion (qmd-style stages; they need a
   generation model, which this design deliberately does not require).
-- Federating embeddings. They are local derived state; each daemon embeds
-  what it stores.
+- Delegating the query or the whole vector leg to a federation hub, and
+  cross-model query spaces. Spokes import document vectors (see "Federated
+  vectors") but always embed the query locally, under the same generation.
 - TUI affordances beyond what arrives transparently through the API.
 
 ## Trust, privacy, and credentials
@@ -143,12 +144,14 @@ embedded:
   hit.
 
 The generation fingerprint is `kitvec.Generation{Model, Dimensions,
-Params}.Fingerprint()` over `{model, dims, recipe_version,
-fingerprint_salt}`. Any component change starts a *new generation* rather
-than marking existing rows stale in place: the reconciler fills it in the
-background while the previous generation keeps serving searches, then cuts
-over automatically once the fill completes and reclaims the retired
-generation's storage (see "Storage"). Mid-swap the vector leg is
+Params}.Fingerprint()` over `{model, dims, recipe_version, chunk_max_runes,
+chunk_overlap_runes, fingerprint_salt}`. Chunking joined the fingerprint when
+vectors started crossing daemons: two nodes may exchange per-chunk vectors only
+when they split identical text into identical chunks. Any component change
+starts a *new generation* rather than marking existing rows stale in place:
+the reconciler fills it in the background while retaining the previous
+generation, then cuts over automatically once the fill completes and reclaims
+the retired generation's storage (see "Storage"). Mid-swap the vector leg is
 **unavailable**: the active generation's fingerprint no longer matches the
 configured embedder's, and scoring a new-model query vector against
 old-model stored vectors would be meaningless (same dims) or an error (dims
@@ -567,6 +570,44 @@ version-mismatch handling.
   filtering and `matched_in` contract as SQLite. The backend-native vector
   store uses pgvector `halfvec` exact cosine search and shares the reconciler,
   generation, mode, and result contracts with SQLite.
+
+## Federated vectors
+
+A federation hub serves the vectors it already computed; spokes import them
+instead of re-embedding the same text. Identity is content, not revision:
+`(issue UID, SHA-256 of EmbedText(title, body), generation fingerprint)`.
+Revision counters differ between hub and spoke, so a spoke recomputes the hash
+from its own mirror text and stamps an imported vector with its own revision.
+
+- **Route.** `POST /api/v1/projects/{id}/federation/vectors:lookup`
+  (enrollment bearer, `pull` capability, no transaction fence). The body names
+  up to 64 `(issue_uid, content_sha256)` pairs and the spoke's fingerprint. The
+  response always carries the hub's generation descriptor
+  (`{fingerprint, model, dims, params, state}`, also advertised as
+  `vector_generation` on federation metadata), and returns records only when the
+  fingerprints match. The descriptor is the hub's configured generation,
+  whether `building` or `active`, so spokes follow a hub rebuild instead of
+  falling back. Records are `ok` (little-endian float32 chunks, base64 in
+  JSON), `skipped` (stamped without vectors), `not_ready` (the hub never embeds
+  on request), or `deferred` (past a 16 MiB response budget). The hub answers
+  only for its own project's mirror rows, and only for rows its generation
+  covers at their current revision, with the hash recomputed from the mirror
+  content that was embedded.
+- **Import.** Each reconciler turn runs an import pass before the provider
+  fill. For every enabled spoke-role binding it pages the project's pending
+  rows (`PendingScoped`), skips rows in backoff, looks up batches of 64,
+  validates each record (hash, exact chunk layout from the local split, dims,
+  finite components, L2 norm within 0.99-1.01), and saves through the same
+  revision-checked `SaveVectors` path. Replica projects whose hub is `ok`,
+  `pending`, or `unreachable` are excluded from the fill (`FillExcluding`).
+  Projects whose hub answered 404 (`unsupported`), advertised no generation
+  (`no_publisher`), or has another fingerprint (`generation_mismatch`) embed
+  locally and are probed again every 30 minutes.
+- **Scheduling and state.** `not_ready` and rejected documents back off 30
+  seconds, doubling to 30 minutes, keyed by content hash; unreachable hubs
+  back off per project on the same schedule. The state is in memory, so a
+  restart costs one extra lookup per pending document. The query path is
+  untouched.
 
 ## Future work
 

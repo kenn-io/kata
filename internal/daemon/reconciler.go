@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -30,6 +31,9 @@ type ReconcilerConfig struct {
 	MaxBackoff     time.Duration // default 5m
 	Now            func() time.Time
 	DrainAdmission activity.WaitableAdmission
+	// Upstream imports hub-computed vectors for federated replica projects.
+	// Nil disables import: every row is embedded locally, as before.
+	Upstream VectorUpstream
 }
 
 // ReconcilerHealth is the operator-visible state surfaced in /health.
@@ -45,6 +49,17 @@ type ReconcilerHealth struct {
 	ETASeconds      *int64     `json:"eta_seconds,omitempty"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
+	// Source is "replica" when any federated replica project imports hub
+	// vectors, otherwise "provider".
+	Source string `json:"source"`
+	// SourceStatus is the most severe replica project status, or "disabled"
+	// when the daemon has no federated replica projects.
+	SourceStatus         string                 `json:"source_status"`
+	Replicated           int64                  `json:"replicated"`
+	AwaitingUpstream     int64                  `json:"awaiting_upstream"`
+	Rejected             int64                  `json:"rejected"`
+	LastReplicaSuccessAt *time.Time             `json:"last_replica_success_at,omitempty"`
+	ReplicaProjects      []ReplicaProjectHealth `json:"replica_projects,omitempty"`
 }
 
 // Reconciler keeps the vector sidecar's active generation fresh: it mirrors
@@ -61,6 +76,7 @@ type Reconciler struct {
 	mu       sync.Mutex
 	health   ReconcilerHealth
 	progress embeddingProgress
+	replica  replicaState
 }
 
 type embeddingProgress struct {
@@ -96,7 +112,7 @@ func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg Reconc
 		cfg:    cfg,
 		wake:   make(chan struct{}, 1),
 		now:    cfg.Now,
-		health: ReconcilerHealth{Configured: true},
+		health: ReconcilerHealth{Configured: true, Source: "provider", SourceStatus: ReplicaStatusDisabled},
 	}
 }
 
@@ -129,6 +145,11 @@ func (r *Reconciler) Health() ReconcilerHealth {
 		t := *r.health.LastProgressAt
 		h.LastProgressAt = &t
 	}
+	if r.health.LastReplicaSuccessAt != nil {
+		t := *r.health.LastReplicaSuccessAt
+		h.LastReplicaSuccessAt = &t
+	}
+	h.ReplicaProjects = slices.Clone(r.health.ReplicaProjects)
 	return h
 }
 
@@ -199,7 +220,7 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 		}
 		if err == nil {
 			backoff = r.cfg.MinBackoff
-			timer.Reset(r.cfg.SweepEvery)
+			timer.Reset(r.successDelay())
 		} else {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -247,10 +268,10 @@ func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
 	return next
 }
 
-// reconcileOnce refreshes the mirror, drains the fill for the desired
-// generation, cuts over when the fill completes, and updates health. Fill
-// loops internally until no documents are pending, so a successful return
-// means the desired generation is fully populated and active.
+// reconcileOnce refreshes the mirror, imports replica vectors, fills local
+// rows, and updates health. A successful turn may leave replica rows pending
+// while their hub computes vectors. In that case a replacement generation
+// stays building until the imports complete.
 //
 // Cold start (no active generation: fresh sidecar or first upgrade) cuts the
 // new generation over immediately, before the fill, so search serves partial
@@ -286,14 +307,17 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		return err
 	}
 	r.setCoverage(key, embedded, skipped, backlog)
-	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled); err != nil {
-		if embedded, skipped, backlog, coverageErr := r.idx.Coverage(ctx, key); coverageErr == nil {
-			r.setCoverage(key, embedded, skipped, backlog)
-		}
+	// Federated replica rows take their vectors from the hub. Import first so
+	// the provider fill below never embeds a row the hub can supply.
+	excluded, err := r.importReplicaVectors(ctx, key, gen.Dimensions)
+	if err != nil {
 		r.markError(err)
 		return err
 	}
-	if err := r.idx.CutOver(ctx, key); err != nil {
+	if _, err := r.idx.FillExcluding(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, excluded); err != nil {
+		if embedded, skipped, backlog, coverageErr := r.idx.Coverage(ctx, key); coverageErr == nil {
+			r.setCoverage(key, embedded, skipped, backlog)
+		}
 		r.markError(err)
 		return err
 	}
@@ -301,6 +325,20 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	if err != nil {
 		r.markError(err)
 		return err
+	}
+	activeKey, active, err := r.idx.ActiveGeneration(ctx)
+	if err != nil {
+		r.markError(err)
+		return err
+	}
+	// A cold start serves partial coverage. When replacing a complete active
+	// generation, retain it until every target document is stamped; replica
+	// rows may still be waiting for the hub after the local fill returns.
+	if !active || activeKey == key || backlog == 0 {
+		if err := r.idx.CutOver(ctx, key); err != nil {
+			r.markError(err)
+			return err
+		}
 	}
 	r.setCoverage(key, embedded, skipped, backlog)
 	r.markSuccess()

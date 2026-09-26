@@ -34,6 +34,8 @@ type RetryFederationQuarantineBody = RetryFederationQuarantineRequestBody
 
 type SkipFederationQuarantineBody = SkipFederationQuarantineRequestBody
 
+type LookupFederationProjectVectorsBody = FederationVectorLookupRequestBody
+
 type ImportIssuesBody = ImportRequestBody
 
 type DisableIssueSyncBody = DisableIssueSyncRequestBody

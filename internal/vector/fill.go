@@ -11,14 +11,6 @@ import (
 	kitvec "go.kenn.io/kit/vector"
 )
 
-// Chunking bounds what one encode input carries; the recipe itself no longer
-// truncates. Runes approximate tokens loosely; 2000 runes keeps chunks well
-// under common embedding-model context limits.
-const (
-	splitMaxRunes = 2000
-	splitOverlap  = 200
-)
-
 // Fill embeds every pending mirror document into the generation keyed by key.
 // scanBatch <= 0 uses kit's default. batchOptions controls encode batching.
 //
@@ -31,8 +23,12 @@ const (
 // skipped. Every non-400 error aborts unconditionally — an auth failure must
 // never stamp anything.
 func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool)) (kitvec.FillStats, error) {
-	split := kitvec.SplitOptions{MaxRunes: splitMaxRunes, Overlap: splitOverlap}
-	store := progressStore{Store: ix.flowStore, onDocument: onDocument}
+	return ix.fill(ctx, ix.flowStore, key, enc, scanBatch, batchOptions, onDocument)
+}
+
+func (ix *Index) fill(ctx context.Context, base kitvec.Store[string, string], key string, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool)) (kitvec.FillStats, error) {
+	split := embedding.SplitOptions()
+	store := progressStore{Store: base, onDocument: onDocument}
 	return kitvec.Fill(ctx, store, key, enc,
 		kitvec.WithFillScanBatch[string](scanBatch),
 		kitvec.WithFillSplit[string](split),

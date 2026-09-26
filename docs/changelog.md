@@ -1,11 +1,43 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-09-17
+last_edited: 2026-09-24
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
+
+## Unreleased
+
+**Breaking behavior change, no configuration**
+
+- Federation spokes now import semantic-search vectors from their hub instead
+  of embedding federated issues themselves. A hub with `[search.embeddings]`
+  serves the vectors it already computed; a spoke with `[search.embeddings]`
+  makes no provider calls for its federated issues' text and still embeds its
+  local-only projects and every search query. There is no setting. Give a spoke
+  the same `model`, `dims`, and `fingerprint_salt` as its hub. See
+  [Federation: spokes import vectors from the hub](guide/semantic-search.md#federation-spokes-import-vectors-from-the-hub).
+- Fallbacks are automatic: an older hub or a hub without embeddings leaves the
+  spoke embedding locally as before; a fingerprint mismatch embeds locally and
+  imports nothing; an unreachable hub leaves federated issues waiting (still
+  found lexically) without provider calls. `kata health --json` reports
+  `source`, `source_status`, `replicated`, `awaiting_upstream`, `rejected`, and
+  `last_replica_success_at`.
+- Privacy: vectors travel only over the existing authenticated federation
+  channel to spokes that already hold the issue text.
+
+**Before upgrading**
+
+- The embedding fingerprint now includes chunking (2000-rune chunks, 200-rune
+  overlap). Every daemon with `[search.embeddings]` rebuilds its vectors once
+  after upgrading. The previous generation is retained until the new one is
+  complete. Upgrade hubs first: an upgraded spoke imports from its hub while
+  the hub rebuilds, instead of re-embedding federated issues itself.
+- Upgrade hubs before spokes. A spoke connected to an older hub keeps
+  embedding locally (`source_status: unsupported`) until the hub is upgraded.
+- Daemon API `0.23.0` adds the federation `vectors:lookup` route and the new
+  embeddings health fields.
 
 ## 0.18.0
 <small>2026-09-17</small>

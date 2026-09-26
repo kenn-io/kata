@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-09-22
+last_edited: 2026-09-24
 ---
 
 # Federation
@@ -771,6 +771,13 @@ If a response is lost after the hub commits, retrying the same batch is safe.
 Permanent validation failures or hash conflicts record a quarantine on the
 spoke instead of retrying forever.
 
+Semantic-search vectors are not events and are not part of the pull stream.
+When both daemons have `[search.embeddings]` configured, the spoke's embedding
+reconciler imports vectors for the project's issues from the hub through a
+separate read-only `vectors:lookup` call that uses the same enrollment token
+and `pull` capability. See
+[Federation: spokes import vectors from the hub](../guide/semantic-search.md#federation-spokes-import-vectors-from-the-hub).
+
 ## Leases and write gates
 
 Leases are hub-authoritative. A spoke forwards acquire, renew, release, and
@@ -895,6 +902,11 @@ schema-skew rejection. After upgrading the hub, upgrade and restart each spoke
 on a build with this compatibility behavior. The next sync auto-releases that
 legacy schema-skew quarantine and re-sends the same events without advancing
 the push cursor.
+
+Upgrade hubs before spokes for semantic search too. A spoke that finds an older
+hub (HTTP 404 from `vectors:lookup`) keeps embedding that project locally and
+reports `source_status: unsupported` in `kata health --json`; it switches to
+importing within 30 minutes of the hub's upgrade.
 
 ## Quarantine
 

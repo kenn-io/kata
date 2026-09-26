@@ -98,6 +98,29 @@ type EmbeddingsHealth struct {
 	ETASeconds      *int64     `json:"eta_seconds,omitempty"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
+	// Source is "replica" when federated replica projects import vectors from
+	// their hub, otherwise "provider".
+	Source string `json:"source"`
+	// SourceStatus is the most severe replica project status: ok, pending,
+	// no_publisher, unsupported, generation_mismatch, or unreachable; or
+	// disabled when the daemon has no federated replica projects.
+	SourceStatus string `json:"source_status"`
+	// Replicated counts documents stamped from hub vectors since daemon start.
+	Replicated int64 `json:"replicated"`
+	// AwaitingUpstream counts replica documents waiting to retry a lookup.
+	AwaitingUpstream int64 `json:"awaiting_upstream"`
+	// Rejected counts hub records that failed validation since daemon start.
+	Rejected             int64                      `json:"rejected"`
+	LastReplicaSuccessAt *time.Time                 `json:"last_replica_success_at,omitempty"`
+	ReplicaProjects      []EmbeddingsReplicaProject `json:"replica_projects,omitempty"`
+}
+
+// EmbeddingsReplicaProject is one federated replica project's vector import
+// state.
+type EmbeddingsReplicaProject struct {
+	ProjectUID          string `json:"project_uid"`
+	Status              string `json:"status"`
+	UpstreamFingerprint string `json:"upstream_fingerprint,omitempty"`
 }
 
 // FederationConfigHealth is the sanitized process-local convergence state for

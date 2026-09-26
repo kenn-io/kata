@@ -859,6 +859,9 @@ components:
       type: object
     EmbeddingsHealth:
       properties:
+        awaiting_upstream:
+          format: int64
+          type: integer
         backlog:
           format: int64
           type: integer
@@ -876,15 +879,32 @@ components:
         last_progress_at:
           format: date-time
           type: string
+        last_replica_success_at:
+          format: date-time
+          type: string
         last_success_at:
           format: date-time
           type: string
         rate_per_second:
           format: double
           type: number
+        rejected:
+          format: int64
+          type: integer
+        replica_projects:
+          items:
+            $ref: "#/components/schemas/EmbeddingsReplicaProject"
+          type: array
+        replicated:
+          format: int64
+          type: integer
         skipped:
           format: int64
           type: integer
+        source:
+          type: string
+        source_status:
+          type: string
         started_at:
           format: date-time
           type: string
@@ -893,6 +913,23 @@ components:
         - embedded
         - skipped
         - backlog
+        - source
+        - source_status
+        - replicated
+        - awaiting_upstream
+        - rejected
+      type: object
+    EmbeddingsReplicaProject:
+      properties:
+        project_uid:
+          type: string
+        status:
+          type: string
+        upstream_fingerprint:
+          type: string
+      required:
+        - project_uid
+        - status
       type: object
     EnableIssueSyncRequestBody:
       additionalProperties: false
@@ -1618,6 +1655,90 @@ components:
           type: array
       required:
         - statuses
+      type: object
+    FederationVectorChunk:
+      properties:
+        index:
+          format: int64
+          type: integer
+        vector:
+          format: base64
+          type: string
+      required:
+        - index
+        - vector
+      type: object
+    FederationVectorGeneration:
+      properties:
+        dims:
+          format: int64
+          type: integer
+        fingerprint:
+          type: string
+        model:
+          type: string
+        params:
+          additionalProperties:
+            type: string
+          type: object
+        state:
+          type: string
+      required:
+        - fingerprint
+        - model
+        - dims
+        - params
+        - state
+      type: object
+    FederationVectorLookupBody:
+      properties:
+        generation:
+          $ref: "#/components/schemas/FederationVectorGeneration"
+        records:
+          items:
+            $ref: "#/components/schemas/FederationVectorRecord"
+          type: array
+      required:
+        - records
+      type: object
+    FederationVectorLookupDoc:
+      additionalProperties: false
+      properties:
+        content_sha256:
+          type: string
+        issue_uid:
+          type: string
+      required:
+        - issue_uid
+        - content_sha256
+      type: object
+    FederationVectorLookupRequestBody:
+      additionalProperties: false
+      properties:
+        docs:
+          items:
+            $ref: "#/components/schemas/FederationVectorLookupDoc"
+          type: array
+        fingerprint:
+          type: string
+      required:
+        - fingerprint
+      type: object
+    FederationVectorRecord:
+      properties:
+        chunks:
+          items:
+            $ref: "#/components/schemas/FederationVectorChunk"
+          type: array
+        content_sha256:
+          type: string
+        issue_uid:
+          type: string
+        status:
+          type: string
+      required:
+        - issue_uid
+        - status
       type: object
     FederationViolationSummary:
       properties:
@@ -3016,6 +3137,8 @@ components:
         replay_horizon_event_id:
           format: int64
           type: integer
+        vector_generation:
+          $ref: "#/components/schemas/FederationVectorGeneration"
       required:
         - project_id
         - project_uid
@@ -4461,7 +4584,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.22.0
+  version: 0.23.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -5712,6 +5835,41 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/federation/vectors:lookup:
+    post:
+      description: Returns the hub's stored chunk vectors for issues whose content hash matches. The hub never embeds on request; a missing vector is not_ready.
+      operationId: lookupFederationProjectVectors
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FederationVectorLookupRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationVectorLookupBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Look up hub-computed issue vectors
   /api/v1/projects/{project_id}/imports:
     post:
       operationId: importIssues
