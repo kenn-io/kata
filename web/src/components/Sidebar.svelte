@@ -1,17 +1,15 @@
 <script lang="ts">
   import AlarmClockIcon from '@lucide/svelte/icons/alarm-clock'
-  import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days'
   import InboxIcon from '@lucide/svelte/icons/inbox'
   import KeyRoundIcon from '@lucide/svelte/icons/key-round'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import StarIcon from '@lucide/svelte/icons/star'
   import UsersIcon from '@lucide/svelte/icons/users'
-  import { ScrollBox, showFlash, Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { ScrollBox, showFlash } from '@kenn-io/kit-ui'
 
   import GroupedSidebarSection from './GroupedSidebarSection.svelte'
 
   import type {
-    KataProjectSummary,
     KataTaskMutationResponse,
     KataTaskSearchFilters,
     KataTaskViewName,
@@ -20,37 +18,29 @@
 
   interface Props {
     areas: KataAreaSummary[]
-    projects: readonly KataProjectSummary[]
     currentView: KataCurrentView
     searchFilters: KataTaskSearchFilters
     projectCreationDisabled: boolean
     draftFenceGeneration?: number | undefined
-    inboxProjectUID?: string | undefined
-    inboxDesignationDisabled: boolean
     credentialAuditAvailable?: boolean | undefined
     credentialAuditActive?: boolean | undefined
     onOpenView: (name: KataTaskViewName) => void | Promise<void>
     onOpenProject: (projectUID: string) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
-    onDesignateInbox: (projectUID: string) => Promise<void>
     onOpenCredentials?: (() => void | Promise<void>) | undefined
   }
 
   let {
     areas,
-    projects,
     currentView,
     searchFilters,
     projectCreationDisabled,
     draftFenceGeneration = 0,
-    inboxProjectUID,
-    inboxDesignationDisabled,
     credentialAuditAvailable = false,
     credentialAuditActive = false,
     onOpenView,
     onOpenProject,
     onCreateProject,
-    onDesignateInbox,
     onOpenCredentials = () => {},
   }: Props = $props()
 
@@ -61,9 +51,8 @@
   }> = [
     { name: 'inbox', label: 'Inbox', icon: InboxIcon },
     { name: 'today', label: 'Today', icon: StarIcon },
-    { name: 'upcoming', label: 'Upcoming', icon: CalendarDaysIcon },
     { name: 'delegated', label: 'Delegated', icon: UsersIcon },
-    { name: 'deadlines', label: 'Deadlines', icon: AlarmClockIcon },
+    { name: 'scheduled', label: 'Scheduled', icon: AlarmClockIcon },
   ]
 
   let creatingProject = $state(false)
@@ -71,14 +60,7 @@
   let createSaving = $state(false)
   let createInput: HTMLInputElement | null = $state(null)
   let collapsedAreas = $state<string[]>([])
-  let inboxError = $state('')
   let lastDraftFenceGeneration = $state<number | null>(null)
-  const inboxOptions = $derived.by<TypeaheadOption[]>(() =>
-    projects
-      .map((project) => ({ name: project.uid, label: project.name }))
-      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
-  )
-
   $effect(() => {
     const nextGeneration = draftFenceGeneration
     if (lastDraftFenceGeneration === null) {
@@ -96,17 +78,27 @@
       : [...collapsedAreas, name]
   }
 
+  // Counts come from the list the user is looking at, so a badge never
+  // disagrees with the rows beneath it (Inbox holds future start dates back).
   function viewCount(name: KataTaskViewName): number | undefined {
-    const inboxProject = projects.find((project) => project.metadata.role === 'inbox')
-    if (name === 'inbox') return inboxProject?.open_count
-    if (name === 'today' && currentView.name === 'today' && searchFilters.scope.kind === 'all') {
+    if (
+      (name === 'inbox' || name === 'today') &&
+      currentView.name === name &&
+      searchFilters.scope.kind === 'all'
+    ) {
       return currentView.groups.reduce((sum, group) => sum + group.issues.length, 0)
     }
     return undefined
   }
 
+  // A system view stays highlighted while narrowed to a project; a project row
+  // is highlighted only while browsing that project on its own.
   function isProjectActive(uid: string): boolean {
-    return searchFilters.scope.kind === 'project' && searchFilters.scope.project_uid === uid
+    return (
+      currentView.name === 'all' &&
+      searchFilters.scope.kind === 'project' &&
+      searchFilters.scope.project_uid === uid
+    )
   }
 
   function startCreatingProject(): void {
@@ -137,17 +129,6 @@
       createSaving = false
     }
   }
-
-  async function designateInbox(projectUID: string): Promise<boolean> {
-    inboxError = ''
-    try {
-      await onDesignateInbox(projectUID)
-      return true
-    } catch (err) {
-      inboxError = err instanceof Error ? err.message : 'Could not designate the Inbox project.'
-      return false
-    }
-  }
 </script>
 
 <div class="kata-sidebar" aria-label="Kata navigation">
@@ -158,9 +139,7 @@
         {@const count = viewCount(view.name)}
         <button
           type="button"
-          class:active={!credentialAuditActive &&
-            searchFilters.scope.kind === 'all' &&
-            currentView.name === view.name}
+          class:active={!credentialAuditActive && currentView.name === view.name}
           aria-label={count !== undefined ? `${view.label} ${count}` : view.label}
           onclick={() => {
             void onOpenView(view.name)
@@ -185,20 +164,6 @@
         </button>
       {/if}
     </nav>
-
-    <div class="inbox-project-control">
-      <Typeahead
-        options={inboxOptions}
-        value={inboxProjectUID ?? ''}
-        fallbackLabel="Choose a project"
-        placeholder="Inbox project"
-        triggerPrefix="Inbox project:"
-        emptyLabel="No projects available"
-        disabled={inboxDesignationDisabled || projects.length === 0}
-        error={inboxError}
-        onselect={designateInbox}
-      />
-    </div>
 
     {#each areas as area (area.name)}
       <GroupedSidebarSection
@@ -282,14 +247,6 @@
     display: grid;
     gap: 4px;
     padding: 12px;
-  }
-
-  .inbox-project-control {
-    padding: 0 12px 12px;
-  }
-
-  .inbox-project-control :global(.kit-typeahead) {
-    width: 100%;
   }
 
   .kata-nav button,

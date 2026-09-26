@@ -55,16 +55,12 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
   return render(Sidebar, {
     props: {
       areas,
-      projects,
       currentView,
       searchFilters: allScopeFilters,
       projectCreationDisabled: false,
-      inboxProjectUID: 'project-inbox',
-      inboxDesignationDisabled: false,
       onOpenView: vi.fn(),
       onOpenProject: vi.fn(),
       onCreateProject: vi.fn(),
-      onDesignateInbox: vi.fn(),
       ...overrides,
     },
   })
@@ -80,12 +76,14 @@ describe('Sidebar', () => {
     renderSidebar()
 
     const navigation = screen.getByRole('region', { name: 'Kata navigation' })
-    const systemViewLabels = ['Inbox 2', 'Today 0', 'Upcoming', 'Delegated', 'Deadlines']
+    const systemViewLabels = ['Inbox', 'Today 0', 'Delegated', 'Scheduled']
     const systemViewButtons = systemViewLabels.map((name) =>
       within(navigation).getByRole('button', { name }),
     )
     expect(within(navigation).queryByRole('button', { name: 'All Open' })).toBeNull()
     expect(within(navigation).queryByRole('button', { name: 'Logbook' })).toBeNull()
+    expect(within(navigation).queryByRole('button', { name: 'Upcoming' })).toBeNull()
+    expect(within(navigation).queryByRole('button', { name: /^Deadlines?$/ })).toBeNull()
     const personal = within(navigation).getByRole('button', { name: /^Personal\s+1$/ })
     const work = within(navigation).getByRole('button', { name: /^Work\s+1$/ })
     const create = within(navigation).getByRole('button', { name: 'New project' })
@@ -98,6 +96,62 @@ describe('Sidebar', () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
       )
     }
+  })
+
+  it('counts the visible Inbox aggregate rather than project totals', () => {
+    renderSidebar({
+      currentView: {
+        name: 'inbox',
+        groups: [
+          {
+            id: 'inbox',
+            title: 'Inbox',
+            issues: [{ uid: 'issue-a' }, { uid: 'issue-b' }, { uid: 'issue-c' }] as never,
+          },
+        ],
+      },
+    })
+
+    expect(screen.getByRole('button', { name: 'Inbox 3' })).not.toBeNull()
+  })
+
+  it('has no Inbox project selector', () => {
+    renderSidebar()
+
+    expect(screen.queryByRole('button', { name: /^Inbox project:/ })).toBeNull()
+    expect(screen.queryByText(/Inbox project/)).toBeNull()
+  })
+
+  it('keeps a system view highlighted while it is narrowed to a project', () => {
+    renderSidebar({
+      currentView: { name: 'scheduled', groups: [] },
+      searchFilters: {
+        ...allScopeFilters,
+        scope: { kind: 'project', project_uid: 'project-example' },
+      },
+    })
+
+    expect(screen.getByRole('button', { name: 'Scheduled' }).classList.contains('active')).toBe(
+      true,
+    )
+    expect(
+      screen.getByRole('button', { name: /^example-project\b/ }).classList.contains('active'),
+    ).toBe(false)
+  })
+
+  it('highlights a project row only for plain project browsing', () => {
+    renderSidebar({
+      currentView: { name: 'all', groups: [] },
+      searchFilters: {
+        ...allScopeFilters,
+        scope: { kind: 'project', project_uid: 'project-example' },
+      },
+    })
+
+    expect(
+      screen.getByRole('button', { name: /^example-project\b/ }).classList.contains('active'),
+    ).toBe(true)
+    expect(screen.getByRole('button', { name: 'Inbox' }).classList.contains('active')).toBe(false)
   })
 
   it('keeps area collapse state while mounted and resets it after remount', async () => {
@@ -126,7 +180,7 @@ describe('Sidebar', () => {
 
     renderSidebar({ onOpenView, onOpenProject })
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Inbox 2' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Inbox' }))
     expect(onOpenView).toHaveBeenCalledWith('inbox')
 
     await fireEvent.click(screen.getByRole('button', { name: 'Delegated' }))
@@ -140,6 +194,7 @@ describe('Sidebar', () => {
     const onOpenProject = vi.fn()
     renderSidebar({
       onOpenProject,
+      currentView: { name: 'all', groups: [] },
       searchFilters: {
         ...allScopeFilters,
         scope: { kind: 'project', project_uid: 'project-example' },

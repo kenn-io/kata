@@ -52,6 +52,13 @@ describe('canonical Kata routes', () => {
     expect(serializeRoute(route)).toBe('/kata?view=delegated')
   })
 
+  it('parses and serializes the Scheduled view', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?view=scheduled'))
+
+    expect(route).toMatchObject({ kind: 'kata', view: 'scheduled' })
+    expect(serializeRoute(route)).toBe('/kata?view=scheduled')
+  })
+
   it('parses credentials as a daemon route without carrying issue workspace state', () => {
     const route = parseRoute(
       new URL(`https://daemon.example/kata?view=credentials&issue=${issueUID}&label=private-actor`),

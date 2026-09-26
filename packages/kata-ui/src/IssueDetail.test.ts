@@ -118,4 +118,40 @@ describe('IssueDetail', () => {
     await fireEvent.click(action)
     expect(invoke).toHaveBeenCalledOnce()
   })
+
+  it('aligns status and label chips in the header before the host actions', () => {
+    const { container } = render(IssueDetail, {
+      props: {
+        detail,
+        actions: [{ id: 'edit', label: 'Edit issue', invoke: vi.fn() }],
+      },
+    })
+
+    const header = container.querySelector('header')!
+    const status = within(header).getByText('open')
+    const label = within(header).getByText('integration')
+    const edit = within(header).getByRole('button', { name: 'Edit issue' })
+    expect(status.compareDocumentPosition(label)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(label.compareDocumentPosition(edit)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
+  it('opens parent, child, and linked issues through the host callback', async () => {
+    const onOpenIssue = vi.fn()
+    render(IssueDetail, { props: { detail, onOpenIssue } })
+
+    const links = screen.getByRole('region', { name: 'Links' })
+    await fireEvent.click(within(links).getByRole('button', { name: 'Open parent roadmap#par1' }))
+    await fireEvent.click(within(links).getByRole('button', { name: 'Open child roadmap#chi1' }))
+    await fireEvent.click(within(links).getByRole('button', { name: 'Open blocks roadmap#def5' }))
+
+    expect(onOpenIssue.mock.calls).toEqual([['01PARENT'], ['01CHILD'], ['01PEER']])
+  })
+
+  it('keeps link references as text when the host has no navigation', () => {
+    render(IssueDetail, { props: { detail } })
+
+    const links = screen.getByRole('region', { name: 'Links' })
+    expect(within(links).getByText('roadmap#par1')).toBeTruthy()
+    expect(within(links).queryByRole('button')).toBeNull()
+  })
 })

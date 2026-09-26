@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-09-18
+last_edited: 2026-09-26
 ---
 
 # Web UI
@@ -48,18 +48,29 @@ the standalone `kata ui` command keeps its existing route.
 
 ## Navigate projects and collections
 
-The sidebar combines system collections with individual projects:
+The sidebar lists **Inbox**, **Today**, **Delegated**, and **Scheduled**, then
+individual projects:
 
-- **Inbox** shows the designated inbox project. If none exists, the first new
-  task asks you to choose one. This is separate from `kata inbox`, which reads
+- **Inbox** shows open tasks from every project. A task with a future
+  `scheduled_on` stays out of Inbox until that day; a deadline never hides it.
+  Narrow Inbox to one project with the **Project scope** filter, and sort it
+  from the column headers. New tasks are captured in the designated
+  [Inbox project](../reference/metadata.md#project-inbox-designation); if none
+  exists, the first new task asks you to choose one. To switch it later, select
+  **Change** in the **New task** dialog. This is separate from `kata inbox`,
+  which reads
   [attention requests](../reference/cli.md#teammate-requests) for an actor or
   teammate.
-- **Today**, **Upcoming**, and **Deadlines** organize scheduled work.
+- **Today** shows tasks whose start date or deadline has arrived.
 - **Delegated** groups open teammate work by its `author/teammate` attribution.
+- **Scheduled** is the agenda of every open task with a start date or deadline:
+  missed deadlines under **Overdue**, actionable tasks under **Today**, then
+  one group per future date.
 - **All Open** and **Logbook** remain available as bookmarkable views for
   active and completed work.
-- Project entries scope the collection to one project. **New project** creates
-  a daemon project without changing any workspace files.
+- Project entries scope the collection to one project. Projects without an
+  `area` are listed under **Projects**. **New project** creates a daemon
+  project without changing any workspace files.
 
 The collection toolbar filters by text, project, status, relationship, owner,
 and label. Parent and child issues can be expanded inline, and the column
@@ -76,10 +87,12 @@ side-by-side detail layouts.
 
 Select an issue to open its detail panel. The panel opens as a read-only view
 of the description, properties, checklist, links, comments, recurrence, and
-events, with Markdown rendered in the description and comments. **Edit issue**
-switches the panel to the editor, which can update the title, description,
-schedule, due date, owner, priority, labels, and project, and **Done editing**
-returns to the read-only view. The editor also supports:
+events, with Markdown rendered in the description and comments. Status,
+priority, owner, dates, and labels sit in the header beside the actions. Each
+event shows when it happened, and parent, child, and linked issue references
+open that issue. **Edit issue** switches the panel to the editor, which can
+update the title, description, schedule, due date, owner, priority, labels, and
+project, and **Done editing** returns to the read-only view. The editor also supports:
 
 - starting or renewing a temporary assignment from the **Assignment** control;
   both views show its absolute expiry;

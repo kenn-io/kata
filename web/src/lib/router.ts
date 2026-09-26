@@ -3,9 +3,8 @@ import { applicationRoutePath } from './applicationBase'
 export const systemViews = [
   'inbox',
   'today',
-  'upcoming',
   'delegated',
-  'deadlines',
+  'scheduled',
   'all-open',
   'logbook',
 ] as const

@@ -8,11 +8,21 @@
     open: boolean
     disabled?: boolean | undefined
     draftFenceGeneration?: number | undefined
+    inboxName?: string | undefined
     onClose: () => void
     onSubmit: (title: string) => void | Promise<void>
+    onChangeInbox?: (() => void) | undefined
   }
 
-  let { open, disabled = false, draftFenceGeneration = 0, onClose, onSubmit }: Props = $props()
+  let {
+    open,
+    disabled = false,
+    draftFenceGeneration = 0,
+    inboxName = undefined,
+    onClose,
+    onSubmit,
+    onChangeInbox = undefined,
+  }: Props = $props()
 
   let title = $state('')
   let pending = $state(false)
@@ -75,6 +85,20 @@
       onkeydown={handleKeydown}
       disabled={pending || disabled}
     />
+    {#if inboxName}
+      <p class="capture-destination">
+        Captured in <strong>{inboxName}</strong>
+        {#if onChangeInbox}
+          <button
+            type="button"
+            class="change-inbox"
+            aria-label="Change Inbox project"
+            disabled={pending}
+            onclick={onChangeInbox}>Change</button
+          >
+        {/if}
+      </p>
+    {/if}
   </form>
   {#snippet footer()}
     <Button size="sm" label="Cancel" onclick={onClose} disabled={pending} />
@@ -108,6 +132,29 @@
     color: var(--text-primary);
     font: inherit;
     font-size: var(--font-size-md);
+  }
+
+  .capture-destination {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }
+
+  .change-inbox {
+    border: 0;
+    padding: 0;
+    background: none;
+    color: var(--accent-blue);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .change-inbox:disabled {
+    cursor: default;
+    opacity: 0.55;
   }
 
   .capture-input:focus {

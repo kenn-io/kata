@@ -389,6 +389,31 @@ describe('IssueDetail', () => {
     expect(onAddComment).toHaveBeenCalledWith('issue-1', 'New comment')
   })
 
+  it('opens a related issue from the read view links', async () => {
+    const onSelectIssue = vi.fn()
+    renderDetail({
+      onSelectIssue,
+      issue: {
+        ...makeIssue(),
+        links: [
+          {
+            id: 9,
+            project_id: 1,
+            type: 'related',
+            author: 'user-a',
+            created_at: '2026-06-01T12:00:00Z',
+            from: { uid: 'issue-1', short_id: 'I-1', qualified_id: 'INBOX-1', status: 'open' },
+            to: { uid: 'issue-2', short_id: 'I-2', qualified_id: 'INBOX-2', status: 'closed' },
+          },
+        ],
+      } as KataTaskDetail,
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /^Open related / }))
+
+    expect(onSelectIssue).toHaveBeenCalledWith({ uid: 'issue-2' })
+  })
+
   it('opens the reachable graph for the selected task', async () => {
     const onOpenGraph = vi.fn()
     renderDetail({ onOpenGraph })

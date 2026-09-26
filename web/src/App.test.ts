@@ -1685,7 +1685,7 @@ describe('App', () => {
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
-  it('designates an Inbox project from a fresh catalog', async () => {
+  it('designates the capture Inbox from New task on a fresh catalog', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -1720,10 +1720,11 @@ describe('App', () => {
 
     render(App)
 
+    expect(screen.queryByRole('button', { name: /^Inbox project:/ })).toBeNull()
+    await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
     await fireEvent.click(
-      await screen.findByRole('button', { name: 'Inbox project: Choose a project' }),
+      await screen.findByRole('button', { name: 'Use example-project as Inbox' }),
     )
-    await fireEvent.mouseDown(screen.getByRole('option', { name: /example-project/ }))
 
     await waitFor(() => {
       const mutation = requests.find(
@@ -1741,7 +1742,7 @@ describe('App', () => {
     expect(await mutation.json()).toEqual({ actor: 'kata-web', patch: { role: 'inbox' } })
   })
 
-  it('reassigns Inbox through one atomic designation request', async () => {
+  it('changes the Inbox project from New task through one designation request', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -1793,15 +1794,18 @@ describe('App', () => {
 
     render(App)
 
+    await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+    expect(screen.getByText('Captured in').textContent).toContain('example-project')
+    await fireEvent.click(screen.getByRole('button', { name: 'Change Inbox project' }))
     await fireEvent.click(
-      await screen.findByRole('button', { name: 'Inbox project: example-project' }),
+      await screen.findByRole('button', { name: 'Use example-workspace as Inbox' }),
     )
-    await fireEvent.mouseDown(screen.getByRole('option', { name: /example-workspace/ }))
 
     await waitFor(() => expect(patches).toHaveLength(1))
     expect(patches).toEqual([
       { projectID: 8, body: { actor: 'kata-web', patch: { role: 'inbox' } } },
     ])
+    expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
   })
 
   it('loads, applies, and persists presentation preferences', async () => {

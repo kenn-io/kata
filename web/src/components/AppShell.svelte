@@ -60,7 +60,6 @@
     readOnly?: boolean | undefined
     daemonError?: string | undefined
     credentialTokens?: readonly TokenOut[] | undefined
-    credentialObservedAt?: string | undefined
     credentialLoading?: boolean | undefined
     credentialError?: string | undefined
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
@@ -118,7 +117,6 @@
     readOnly = false,
     daemonError = undefined,
     credentialTokens = [],
-    credentialObservedAt = undefined,
     credentialLoading = false,
     credentialError = undefined,
     onPreferencesChange = () => {},
@@ -229,13 +227,24 @@
     })
   }
 
+  // The landing route has no view and means Inbox, but adding a scope or issue
+  // to it would read as All Open. Pin Inbox so these moves stay in Inbox.
+  function withResolvedView(current: AppRoute): AppRoute {
+    if (current.view || viewName !== 'inbox') return current
+    return { ...current, view: 'inbox' }
+  }
+
   function updateFilters(
     filters: KataTaskSearchFilters,
     changed: keyof KataTaskSearchFilters,
   ): void {
     const shareable = shareableFilters(filters, viewName, changed)
     if (filters.scope.kind === 'project') {
-      navigate({ ...route, projectUID: filters.scope.project_uid, filters: shareable })
+      navigate({
+        ...withResolvedView(route),
+        projectUID: filters.scope.project_uid,
+        filters: shareable,
+      })
       return
     }
     const next = { ...route, filters: shareable }
@@ -245,7 +254,7 @@
 
   function selectIssue(issueUID: string): void {
     navigate({
-      ...route,
+      ...withResolvedView(route),
       issueUID,
       graph: false,
       filters: route.filters,
@@ -254,7 +263,7 @@
 
   function openGraph(issueUID: string): void {
     navigate({
-      ...route,
+      ...withResolvedView(route),
       issueUID,
       graph: true,
       filters: route.filters,
@@ -386,9 +395,8 @@
       [
         { name: 'inbox', label: 'Inbox' },
         { name: 'today', label: 'Today' },
-        { name: 'upcoming', label: 'Upcoming' },
         { name: 'delegated', label: 'Delegated' },
-        { name: 'deadlines', label: 'Deadlines' },
+        { name: 'scheduled', label: 'Scheduled' },
         { name: 'all', label: 'All Open' },
         { name: 'logbook', label: 'Logbook' },
       ].find((view) => view.name === viewName)?.label ?? 'Kata'
@@ -399,7 +407,6 @@
 {#snippet navigationSidebar()}
   <Sidebar
     {areas}
-    projects={projection.projects}
     currentView={{
       name: currentView.view,
       groups: currentView.groups,
@@ -408,14 +415,11 @@
     {searchFilters}
     projectCreationDisabled={!projectWideMutationAllowed || mutationPending}
     {draftFenceGeneration}
-    inboxProjectUID={inboxProject?.uid}
-    inboxDesignationDisabled={!projectWideMutationAllowed || mutationPending}
     credentialAuditAvailable={snapshot.capabilities.token_audit_read === true}
     credentialAuditActive={credentialRoute}
     onOpenView={openView}
     onOpenProject={openProject}
     {onCreateProject}
-    {onDesignateInbox}
     onOpenCredentials={openCredentials}
   />
 {/snippet}
@@ -516,7 +520,6 @@
       {#if credentialRoute}
         <CredentialAudit
           tokens={credentialTokens}
-          observedAt={credentialObservedAt}
           loading={credentialLoading}
           error={snapshot.capabilities.token_audit_read
             ? credentialError
@@ -660,10 +663,17 @@
   open={captureOpen}
   disabled={!newTaskAllowed || mutationPending}
   {draftFenceGeneration}
+  inboxName={scopedAuthority ? undefined : inboxProject?.name}
   onClose={() => {
     captureOpen = false
   }}
   onSubmit={submitCapture}
+  onChangeInbox={projectWideMutationAllowed
+    ? () => {
+        captureOpen = false
+        inboxChooserOpen = true
+      }
+    : undefined}
 />
 
 <InboxProjectChooser

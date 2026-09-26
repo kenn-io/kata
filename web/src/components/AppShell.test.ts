@@ -97,6 +97,50 @@ describe('AppShell', () => {
     })
   })
 
+  test('stays in the landing Inbox while selecting, graphing, and narrowing', async () => {
+    const onNavigate = vi.fn()
+    const landing = {
+      kind: 'kata' as const,
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    }
+    render(AppShell, {
+      props: {
+        route: landing,
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+    expect(onNavigate).toHaveBeenLastCalledWith({
+      ...landing,
+      view: 'inbox',
+      issueUID: '01J00000000000000000000001',
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Open reachable graph' }))
+    expect(onNavigate).toHaveBeenLastCalledWith({
+      ...landing,
+      view: 'inbox',
+      issueUID: '01J00000000000000000000001',
+      graph: true,
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Project scope: All projects/i }))
+    await fireEvent.mouseDown(screen.getByRole('option', { name: /example-project/ }))
+    await waitFor(() =>
+      expect(onNavigate).toHaveBeenLastCalledWith({
+        ...landing,
+        view: 'inbox',
+        projectUID: '01J00000000000000000000002',
+      }),
+    )
+  })
+
   test('gates credential audit navigation on the advertised capability', async () => {
     const onNavigate = vi.fn()
     const authorized = snapshot()
@@ -155,7 +199,6 @@ describe('AppShell', () => {
             revoked_at: null,
           },
         ],
-        credentialObservedAt: '2026-09-15T12:00:00Z',
         onRefreshCredentials: vi.fn(),
         onBackFromCredentials,
         ...mutationProps(),

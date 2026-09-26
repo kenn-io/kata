@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { KataTaskEvent } from '../lib/kata/types'
+  import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
+
   import { describeKataEvent } from '../lib/history/format'
 
   interface Props {
@@ -7,6 +9,17 @@
   }
 
   let { events }: Props = $props()
+
+  const fullTimestamp = new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'full',
+    timeStyle: 'long',
+  })
+
+  function eventTime(value: string): { short: string; full: string } | undefined {
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return undefined
+    return { short: formatTimestamp(value), full: fullTimestamp.format(parsed) }
+  }
 </script>
 
 <section class="events" aria-labelledby="kata-events-title">
@@ -18,11 +31,17 @@
       {#each events as event (event.event_uid)}
         {@const descriptor = describeKataEvent(event)}
         {@const EventIcon = descriptor.icon}
+        {@const time = eventTime(event.created_at)}
         <li class="event-row" data-tone={descriptor.tone}>
           <span class="event-icon" aria-hidden="true">
             <EventIcon size={14} strokeWidth={1.8} />
           </span>
-          <span>{descriptor.label}</span>
+          <span class="event-label">{descriptor.label}</span>
+          {#if time}
+            <time class="event-time" datetime={event.created_at} title={time.full}
+              >{time.short}</time
+            >
+          {/if}
         </li>
       {/each}
     </ul>
@@ -53,15 +72,28 @@
   }
 
   .event-row {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: baseline;
     gap: 8px;
     min-height: 24px;
   }
 
+  .event-label {
+    overflow-wrap: anywhere;
+  }
+
+  .event-time {
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
   .event-icon {
-    flex: 0 0 auto;
     display: inline-flex;
+    align-self: start;
+    padding-top: 2px;
     color: var(--text-muted);
   }
 

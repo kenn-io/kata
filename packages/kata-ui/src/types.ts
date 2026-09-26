@@ -131,4 +131,6 @@ export interface KataIssueHostAction {
 export interface KataIssueDetailProps {
   detail: KataIssueDetailModel
   actions?: readonly KataIssueHostAction[]
+  /** Host navigation for parent, child, and linked issue references. */
+  onOpenIssue?: (uid: string) => void
 }

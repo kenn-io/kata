@@ -5,7 +5,8 @@ import type {
   KataTaskViewName,
   KataTaskViewResponse,
 } from './types'
-import { buildKataTaskView } from './view'
+import { localDateString } from './dates'
+import { buildKataTaskView, kataViewIncludesDates } from './view'
 
 export interface KataAreaSummary {
   name: string
@@ -56,9 +57,13 @@ export function defaultKataTaskSearchFilters(
   }
 }
 
+const defaultArea = 'Projects'
+
+// Projects without an area (or with the retired "Unfiled" label) share one
+// default group.
 function projectArea(project: KataProjectSummary): string {
   const area = project.metadata.area?.trim()
-  return area && area !== 'Unfiled' ? area : 'Unfiled'
+  return area && area !== 'Unfiled' ? area : defaultArea
 }
 
 function compareProjectOrder(a: KataProjectSummary, b: KataProjectSummary): number {
@@ -71,12 +76,11 @@ function compareProjectOrder(a: KataProjectSummary, b: KataProjectSummary): numb
 export function deriveKataAreas(projects: readonly KataProjectSummary[]): KataAreaSummary[] {
   const groups = new Map<string, KataProjectSummary[]>()
   for (const project of projects) {
-    if (project.metadata.role === 'inbox') continue
     const area = projectArea(project)
     groups.set(area, [...(groups.get(area) ?? []), project])
   }
 
-  const preferred = ['Personal', 'Work', 'Unfiled']
+  const preferred = ['Personal', 'Work', defaultArea]
   return [...groups.entries()]
     .sort(([left], [right]) => {
       const leftIndex = preferred.indexOf(left)
@@ -98,12 +102,14 @@ export function deriveKataAreas(projects: readonly KataProjectSummary[]): KataAr
 export function projectKataWorkspaceView(
   options: ProjectKataWorkspaceViewOptions,
 ): KataTaskViewResponse {
+  const today = options.today ?? localDateString()
   const issues = options.issues
     .filter(
       (issue) =>
         options.filters.scope.kind !== 'project' ||
         issue.project_uid === options.filters.scope.project_uid,
     )
+    .filter((issue) => kataViewIncludesDates(options.view, issue, today))
     .map((issue) => ({ ...issue }))
   if (hasActiveFilters(options.view, options.filters)) {
     return {
@@ -117,7 +123,7 @@ export function projectKataWorkspaceView(
     view: options.view,
     issues,
     projects: options.snapshot.projects.map((project) => ({ ...project })),
-    ...(options.today ? { today: options.today } : {}),
+    today,
     fetched_at: options.snapshot.fetched_at,
   })
 }

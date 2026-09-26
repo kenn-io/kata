@@ -66,7 +66,11 @@
 </section>
 {#if !editing}
   <div class="shared-detail">
-    <SharedIssueDetail {detail} {actions} />
+    <SharedIssueDetail
+      {detail}
+      {actions}
+      onOpenIssue={(uid) => void props.onSelectIssue?.({ uid })}
+    />
     {#if props.issue.issue.assignment_expires_on}
       <dl class="assignment-timing" aria-label="Assignment timing">
         <div>
@@ -102,6 +106,14 @@
 
   .assignment-timing {
     margin: 12px 0 0;
+  }
+
+  /* Match the shared detail's section rhythm so Events does not butt against
+     the comments above it. */
+  .shared-detail > :global(.events) {
+    margin-top: 16px;
+    border-top: 1px solid var(--border-muted);
+    padding-top: 16px;
   }
 
   .assignment-timing > div {

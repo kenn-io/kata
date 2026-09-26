@@ -129,7 +129,6 @@
   let referenceAbort: AbortController | undefined
   let referenceGeneration = 0
   let credentialTokens = $state<TokenOut[]>([])
-  let credentialObservedAt = $state<string | undefined>()
   let credentialLoading = $state(false)
   let credentialError = $state<string | undefined>()
   let credentialAbort: AbortController | undefined
@@ -1028,14 +1027,12 @@
       }
       if (result.status === 200) {
         credentialTokens = result.data.tokens
-        credentialObservedAt = result.data.observed_at
         credentialError = undefined
       } else if (result.status === 401) {
         fenceCredentialAudit()
         requireAuthentication()
       } else {
         credentialTokens = []
-        credentialObservedAt = undefined
         credentialError = 'Credential inventory is unavailable.'
       }
     } catch {
@@ -1046,7 +1043,6 @@
         daemonID === activeDaemonID
       ) {
         credentialTokens = []
-        credentialObservedAt = undefined
         credentialError = 'Credential inventory is unavailable.'
       }
     } finally {
@@ -1060,7 +1056,6 @@
     credentialAbort?.abort()
     credentialAbort = undefined
     credentialTokens = []
-    credentialObservedAt = undefined
     credentialLoading = false
     credentialError = undefined
   }
@@ -1145,7 +1140,6 @@
         readOnly={!authority.snapshot.capabilities.writable}
         {daemonError}
         {credentialTokens}
-        {credentialObservedAt}
         {credentialLoading}
         {credentialError}
         onRefreshCredentials={refreshCredentials}

@@ -44,14 +44,14 @@ const tokens: TokenOut[] = [
 describe('CredentialAudit', () => {
   afterEach(cleanup)
 
-  it('shows redacted server-classified metadata at the server observation time', () => {
+  it('shows redacted server-classified metadata without an observation line', () => {
     const { container } = render(CredentialAudit, {
       props: auditProps(),
     })
 
     expect(screen.getByRole('heading', { name: 'Credentials' })).not.toBeNull()
-    expect(screen.getByText('Observed by server')).not.toBeNull()
-    expect(container.querySelector('time[datetime="2026-09-15T12:00:00Z"]')).not.toBeNull()
+    expect(screen.queryByText('Observed by server')).toBeNull()
+    expect(container.querySelector('select')).toBeNull()
     expect(screen.getByRole('columnheader', { name: 'Last observed use' })).not.toBeNull()
     expect(screen.getByText('Build worker')).not.toBeNull()
     expect(screen.getByText('issue subtree')).not.toBeNull()
@@ -68,20 +68,17 @@ describe('CredentialAudit', () => {
 
     expect(screen.getByRole('group', { name: 'Credential filters' })).not.toBeNull()
 
-    await fireEvent.change(screen.getByLabelText('Credential state'), {
-      target: { value: 'live' },
-    })
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Credential state: All' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'Live' }))
     expect(screen.getByText('Build worker')).not.toBeNull()
     expect(screen.queryByText('admin-user')).toBeNull()
 
-    await fireEvent.change(screen.getByLabelText('Credential scope'), {
-      target: { value: 'unscoped' },
-    })
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Credential scope: All' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'Unscoped' }))
     expect(screen.getByText('No credentials match these filters.')).not.toBeNull()
 
-    await fireEvent.change(screen.getByLabelText('Credential state'), {
-      target: { value: 'revoked' },
-    })
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Credential state: Live' }))
+    await fireEvent.click(screen.getByRole('option', { name: 'Revoked' }))
     await fireEvent.input(screen.getByRole('searchbox', { name: 'Search credentials' }), {
       target: { value: 'SCRIPT>ALERT' },
     })
@@ -117,7 +114,6 @@ describe('CredentialAudit', () => {
 function auditProps(overrides: Record<string, unknown> = {}) {
   return {
     tokens,
-    observedAt: '2026-09-15T12:00:00Z',
     loading: false,
     onRefresh: vi.fn(),
     onBack: vi.fn(),
