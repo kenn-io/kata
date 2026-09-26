@@ -654,11 +654,9 @@ func TestMCPServeSyncOutlivesHandshakeTimeout(t *testing.T) {
 }
 
 func TestMCPServeEventWaitOutlivesDefaultClientTimeout(t *testing.T) {
-	if testing.Short() {
-		t.Skip("holds an event wait past the 5s default client timeout")
-	}
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
+	t.Setenv("KATA_HTTP_TIMEOUT", "500ms")
 	workspace := t.TempDir()
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if serveMCPTestHealth(writer, request) {
@@ -673,7 +671,7 @@ func TestMCPServeEventWaitOutlivesDefaultClientTimeout(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"projects":[{"id":42,"uid":"01HAAAAAAAAAAAAAAAAAAAAAAA","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`))
 		case "/api/v1/events/stream":
 			// Send SSE headers immediately, then hold the stream open with
-			// no events past the 5s default client timeout.
+			// no events past the default client timeout.
 			writer.Header().Set("Content-Type", "text/event-stream")
 			writer.WriteHeader(http.StatusOK)
 			writer.(http.Flusher).Flush()
@@ -718,10 +716,10 @@ func TestMCPServeEventWaitOutlivesDefaultClientTimeout(t *testing.T) {
 	started := time.Now()
 	result := send(3, "tools/call", map[string]any{
 		"name":      "kata.events",
-		"arguments": map[string]any{"mode": "wait", "wait_seconds": 6},
+		"arguments": map[string]any{"mode": "wait", "wait_seconds": 1},
 	})
-	require.GreaterOrEqual(t, time.Since(started), 5500*time.Millisecond,
-		"the wait must outlive the 5s default client timeout")
+	require.GreaterOrEqual(t, time.Since(started), 900*time.Millisecond,
+		"the wait must outlive the default client timeout")
 	require.NotEqual(t, true, result["isError"], "%v", result)
 	structured := result["structuredContent"].(map[string]any)
 	require.Equal(t, true, structured["timed_out"],

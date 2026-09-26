@@ -422,6 +422,9 @@ func TestSSE_GracePeriod_TimerVsConnectIsRaceFree(t *testing.T) {
 	saved := reconnectStatusGrace
 	reconnectStatusGrace = 1 * time.Millisecond
 	t.Cleanup(func() { reconnectStatusGrace = saved })
+	savedBackoff := initialReconnectBackoff
+	initialReconnectBackoff = 10 * time.Millisecond
+	t.Cleanup(func() { initialReconnectBackoff = savedBackoff })
 
 	// Server flaps: even-numbered connects send a frame, odd-numbered
 	// close immediately. Two consecutive cycles cover the full

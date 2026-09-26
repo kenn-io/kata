@@ -493,6 +493,8 @@ func TestWaitTimeoutBoundsRefResolution(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects/resolve":
+			// The server notices a client disconnect only after the body is read.
+			_, _ = io.Copy(io.Discard, r.Body)
 			select {
 			case <-r.Context().Done():
 			case <-time.After(5 * time.Second):
@@ -565,6 +567,8 @@ func TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects/resolve":
+			// The server notices a client disconnect only after the body is read.
+			_, _ = io.Copy(io.Discard, r.Body)
 			select {
 			case <-r.Context().Done():
 			case <-time.After(5 * time.Second):
