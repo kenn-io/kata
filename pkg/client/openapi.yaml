@@ -2743,6 +2743,9 @@ components:
       properties:
         actor:
           type: string
+        dry_run:
+          description: Validate without moving; If-Match may be omitted for a preview.
+          type: boolean
         to_project_uid:
           type: string
       required:

@@ -36,6 +36,10 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
+		return out, err
+	}
+
 	var (
 		curRev         int64
 		curShortID     string
@@ -46,15 +50,12 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	if err := tx.QueryRowContext(ctx, `
 		SELECT i.revision, i.short_id, i.recurrence_id, i.uid, p.uid
 		  FROM issues i JOIN projects p ON p.id = i.project_id
-		 WHERE i.id = ? AND i.project_id = ? AND i.deleted_at IS NULL`,
+		 WHERE i.id = ? AND i.project_id = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL`,
 		in.IssueID, in.FromProjectID,
 	).Scan(&curRev, &curShortID, &recurrenceID, &issueUID, &fromProjectUID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return out, fmt.Errorf("issue %d not in project %d", in.IssueID, in.FromProjectID)
+			return out, fmt.Errorf("issue %d not in project %d: %w", in.IssueID, in.FromProjectID, db.ErrNotFound)
 		}
-		return out, err
-	}
-	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
 		return out, err
 	}
 	if err := ensureProjectWritableTx(ctx, tx, in.FromProjectID); err != nil {
@@ -101,6 +102,17 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	}
 	if len(mappingCollisions) > 0 {
 		return out, &db.ProjectMergeImportMappingCollisionError{Mappings: mappingCollisions}
+	}
+
+	if in.DryRun {
+		issue, err := issueByIDTx(ctx, tx, in.IssueID)
+		if err != nil {
+			return out, err
+		}
+		out.Issue = issue
+		out.NewRevision = curRev
+		// Validation may provisionally clear stale claims. Roll it all back.
+		return out, tx.Rollback()
 	}
 
 	newShortID, err := assignShortIDIn(ctx, tx,
