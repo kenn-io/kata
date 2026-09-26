@@ -1664,13 +1664,15 @@ type PatchProjectMetadataResponse struct {
 // MoveIssueRequest is POST /api/v1/projects/{project_id}/issues/{ref}/actions/move.
 // project_id names the source project; the target project is identified by
 // its stable UID in the body. The If-Match header carries the issue's
-// expected revision in the standard `"rev-N"` form.
+// expected revision in the standard `"rev-N"` form. A dry-run may omit it;
+// the daemon then validates the revision from its source lookup.
 type MoveIssueRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	IfMatch   string `header:"If-Match"`
 	Body      struct {
 		Actor        string `json:"actor,omitempty"`
+		DryRun       bool   `json:"dry_run,omitempty" doc:"Validate without moving; If-Match may be omitted for a preview."`
 		ToProjectUID string `json:"to_project_uid" required:"true"`
 	}
 }
@@ -1679,7 +1681,8 @@ type MoveIssueRequest struct {
 // new revision in the standard `"rev-N"` form. NewShortID surfaces the
 // short_id freshly allocated in the target project (which may differ from
 // the issue's previous short_id when the two projects collide on
-// numbering).
+// numbering). A dry-run returns the unchanged source issue/revision, zero
+// EventID, empty NewShortID, and Changed=false.
 type MoveIssueResponse struct {
 	ETag string `header:"ETag"`
 	Body struct {

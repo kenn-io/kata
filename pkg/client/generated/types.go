@@ -2730,8 +2730,11 @@ func (m *MetadataPatchGuard) UnmarshalJSON(data []byte) error {
 }
 
 type MoveIssueRequestBody struct {
-	Actor        *string `json:"actor,omitempty"`
-	ToProjectUID string  `json:"to_project_uid" validate:"required"`
+	Actor *string `json:"actor,omitempty"`
+
+	// DryRun Validate without moving; If-Match may be omitted for a preview.
+	DryRun       *bool  `json:"dry_run,omitempty"`
+	ToProjectUID string `json:"to_project_uid" validate:"required"`
 }
 
 func (m MoveIssueRequestBody) Validate() error {

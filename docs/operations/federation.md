@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-09-22
+last_edited: 2026-09-26
 ---
 
 # Federation
@@ -18,6 +18,18 @@ Use federation when local-first availability and durable offline queues matter
 more than immediate single-copy reads. Use a shared daemon instead when users
 need centralized authorization, strict online-only arbitration, or globally
 fresh reads before acting.
+
+## Moving issues between projects
+
+Cross-project issue moves involving a federated project are unsupported on hubs
+and spokes. Federation replay cannot apply the move event. Disabling sync retains
+the federation binding and replica state, so it does not enable moves.
+
+`kata move <issue-ref> <project> --dry-run` validates this restriction through the
+daemon and returns the same `federated_move_unsupported` conflict as a real move.
+The preview does not change issues or refresh claims. It validates the current
+state without reserving a future move. See the [CLI reference](../reference/cli.md)
+for the other move restrictions.
 
 ## Roles
 
