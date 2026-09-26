@@ -33,9 +33,11 @@ const (
 	webDaemonHeaderName   = "X-Kata-Web-Daemon"
 	webDaemonProxyPrefix  = "/api/v1/ui/proxy"
 	webDaemonHealthTTL    = 5 * time.Second
-	webDaemonProbeTimeout = 2 * time.Second
 	webDaemonProxyTimeout = 30 * time.Second
 )
+
+// webDaemonProbeTimeout is a var so tests can exercise the timeout without waiting it out.
+var webDaemonProbeTimeout = 2 * time.Second
 
 var (
 	errWebDaemonRedirectForbidden = errors.New("daemon redirect forbidden")

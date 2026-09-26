@@ -12,11 +12,13 @@ import (
 func newAPISchemaRegistry() huma.Registry {
 	return &apiSchemaRegistry{
 		Registry: huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer),
+		walked:   map[*huma.Schema]bool{},
 	}
 }
 
 type apiSchemaRegistry struct {
 	huma.Registry
+	walked map[*huma.Schema]bool
 }
 
 func (r *apiSchemaRegistry) MarshalJSON() ([]byte, error) {
@@ -29,8 +31,9 @@ func (r *apiSchemaRegistry) MarshalYAML() (any, error) {
 
 func (r *apiSchemaRegistry) Schema(t reflect.Type, allowRef bool, hint string) *huma.Schema {
 	schema := r.Registry.Schema(t, allowRef, hint)
+	// Registered schemas are final once built, so rewalking them on every call only made registration quadratic.
 	for _, registered := range r.Map() {
-		makeArraysNonNullable(registered, map[*huma.Schema]bool{})
+		makeArraysNonNullable(registered, r.walked)
 	}
 	makeArraysNonNullable(schema, map[*huma.Schema]bool{})
 	return schema

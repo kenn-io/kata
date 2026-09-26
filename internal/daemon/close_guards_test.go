@@ -568,7 +568,7 @@ func TestSiblingThrottle_FourthCloseUnderSameParentRefusedWhenEnabled(t *testing
 // projects must not reset the counter.
 func TestSiblingThrottle_CountsCrossProjectSiblings(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pidA := initWorkspaceViaHTTP(t, env, "https://github.com/example/hub-project.git")
+	pidA := initLocalWorkspace(t, env, "hub-project")
 	pidB := mkProject(t, env, "github.com/example/spoke-project", "spoke-project")
 	parent := createIssueViaHTTP(t, env, pidA, "parent issue")
 	parentIssue, err := env.DB.IssueByID(context.Background(), parent)
@@ -634,7 +634,7 @@ func TestSiblingThrottle_CountsCrossProjectSiblings(t *testing.T) {
 // duplicate.
 func TestRepeatedMessageGuard_CountsCrossProjectSiblings(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pidA := initWorkspaceViaHTTP(t, env, "https://github.com/example/hub-project.git")
+	pidA := initLocalWorkspace(t, env, "hub-project")
 	pidB := mkProject(t, env, "github.com/example/spoke-project", "spoke-project")
 	parent := createIssueViaHTTP(t, env, pidA, "parent issue")
 	parentIssue, err := env.DB.IssueByID(context.Background(), parent)

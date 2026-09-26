@@ -105,7 +105,7 @@ func getReadyGlobal(t *testing.T, env *testenv.Env, query string) readyGlobalRes
 func TestReadyGlobal_ReturnsIssuesFromAllProjects(t *testing.T) {
 	env := testenv.New(t)
 	pid1, _, _ := setupTwoIssues(t, env)
-	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
+	pid2 := initLocalWorkspace(t, env, "other")
 	createIssueViaHTTP(t, env, pid2, "from second project")
 
 	out := getReadyGlobal(t, env, "")
@@ -122,7 +122,7 @@ func TestReadyGlobal_ReturnsIssuesFromAllProjects(t *testing.T) {
 func TestReadyGlobal_ExcludesArchivedProjects(t *testing.T) {
 	env := testenv.New(t)
 	pid1, _, _ := setupTwoIssues(t, env)
-	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
+	pid2 := initLocalWorkspace(t, env, "other")
 	createIssueViaHTTP(t, env, pid2, "doomed")
 
 	// Look up pid2's name BEFORE archiving so we can assert no row carries it.
@@ -153,7 +153,7 @@ func TestReadyGlobal_ExcludesArchivedProjects(t *testing.T) {
 func TestReadyGlobal_HydratesLabelsAndKeepsProjectName(t *testing.T) {
 	env := testenv.New(t)
 	pid1 := initLocalWorkspace(t, env, "kata")
-	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
+	pid2 := initLocalWorkspace(t, env, "other")
 	iss1 := createIssueViaHTTP(t, env, pid1, "p1 labeled")
 	iss2 := createIssueViaHTTP(t, env, pid2, "p2 labeled")
 	postLabel(t, env, pid1, iss1, "epic")
@@ -183,7 +183,7 @@ func TestReadyGlobal_HydratesLabelsAndKeepsProjectName(t *testing.T) {
 func TestReadyGlobal_LimitCapsTotalRows(t *testing.T) {
 	env := testenv.New(t)
 	pid1 := initLocalWorkspace(t, env, "kata")
-	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
+	pid2 := initLocalWorkspace(t, env, "other")
 	for range 3 {
 		createIssueViaHTTP(t, env, pid1, "p1")
 		createIssueViaHTTP(t, env, pid2, "p2")
