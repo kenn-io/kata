@@ -449,7 +449,7 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 			links = append(links, linkSummary(response.Issue.UID, link))
 		}
 	}
-	summary := h.summaryFromIssue(project, response.Issue)
+	summary := h.summaryFromIssue(project, issueFromShow(response.Issue))
 	summary.WebURL = response.WebURL
 	metadata := response.Issue.Metadata
 	if metadata == nil {
@@ -588,7 +588,7 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		if showErr != nil {
 			return nil, EditOutput{}, showErr
 		}
-		issue = response.Issue
+		issue = issueFromShow(response.Issue)
 	}
 	if hasIssueEdit {
 		response, editErr := h.options.Client.EditIssue(ctx, &generated.EditIssueRequestOptions{

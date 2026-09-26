@@ -690,3 +690,23 @@ func assertSchemaPropertyType(t *testing.T, doc *huma.OpenAPI, schemaName, prope
 		t.Fatalf("%s.%s type = %q, want %q", schemaName, propertyName, prop.Type, want)
 	}
 }
+
+func TestOpenAPIDocumentShowIssueCarriesLabelStrings(t *testing.T) {
+	doc := OpenAPIDocument()
+	schemas := doc.Components.Schemas.Map()
+	body := schemas["ShowIssueResponseBody"]
+	require.NotNil(t, body)
+	require.Equal(t, "#/components/schemas/ShowIssueOut", body.Properties["issue"].Ref)
+
+	issue := schemas["ShowIssueOut"]
+	require.NotNil(t, issue, "missing ShowIssueOut schema")
+	labels := issue.Properties["labels"]
+	require.NotNil(t, labels)
+	require.Equal(t, huma.TypeArray, labels.Type)
+	require.False(t, labels.Nullable)
+	require.Equal(t, huma.TypeString, labels.Items.Type)
+	require.Contains(t, issue.Required, "labels")
+	require.Contains(t, issue.Properties, "short_id")
+
+	require.NotContains(t, schemas["Issue"].Properties, "labels")
+}

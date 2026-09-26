@@ -3906,6 +3906,80 @@ components:
         - mode
         - results
       type: object
+    ShowIssueOut:
+      properties:
+        assignment_expires_on:
+          format: date-time
+          type: string
+        author:
+          type: string
+        body:
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        closed_reason:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        labels:
+          items:
+            type: string
+          type: array
+        metadata:
+          additionalProperties: true
+          type: object
+        occurrence_key:
+          type: string
+        owner:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_uid:
+          type: string
+        recurrence_id:
+          format: int64
+          type: integer
+        revision:
+          format: int64
+          type: integer
+        short_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        uid:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - labels
+        - id
+        - uid
+        - project_id
+        - short_id
+        - title
+        - body
+        - status
+        - author
+        - metadata
+        - revision
+        - created_at
+        - updated_at
+      type: object
     ShowIssueResponseBody:
       properties:
         children:
@@ -3929,7 +4003,7 @@ components:
             $ref: "#/components/schemas/Comment"
           type: array
         issue:
-          $ref: "#/components/schemas/Issue"
+          $ref: "#/components/schemas/ShowIssueOut"
         labels:
           items:
             $ref: "#/components/schemas/IssueLabel"

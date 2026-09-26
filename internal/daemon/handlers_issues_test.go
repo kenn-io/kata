@@ -2783,3 +2783,49 @@ func TestIssueBrowserURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestShowIssue_IssueCarriesLabelStrings(t *testing.T) {
+	env := testenv.New(t)
+	pid, _, child := setupTwoIssues(t, env)
+	postLabel(t, env, pid, child, "bug")
+	postLabel(t, env, pid, child, "api")
+
+	var out struct {
+		Issue struct {
+			UID    string   `json:"uid"`
+			Labels []string `json:"labels"`
+		} `json:"issue"`
+		Labels []struct {
+			Label string `json:"label"`
+		} `json:"labels"`
+	}
+	envGetJSON(t, env, issuePath(pid, child, ""), &out)
+	assert.Equal(t, []string{"api", "bug"}, out.Issue.Labels)
+	top := make([]string, 0, len(out.Labels))
+	for _, label := range out.Labels {
+		top = append(top, label.Label)
+	}
+	assert.Equal(t, top, out.Issue.Labels)
+
+	var byUID struct {
+		Issue struct {
+			Labels []string `json:"labels"`
+		} `json:"issue"`
+	}
+	envGetJSON(t, env, "/api/v1/issues/"+out.Issue.UID, &byUID)
+	assert.Equal(t, []string{"api", "bug"}, byUID.Issue.Labels)
+}
+
+func TestShowIssue_UnlabeledIssueHasEmptyLabelArray(t *testing.T) {
+	env := testenv.New(t)
+	pid, parent, _ := setupTwoIssues(t, env)
+
+	_, raw := envGetRaw(t, env, issuePath(pid, parent, ""))
+	var out struct {
+		Issue map[string]json.RawMessage `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out))
+	labels, ok := out.Issue["labels"]
+	require.True(t, ok, "issue.labels must be present")
+	assert.JSONEq(t, `[]`, string(labels))
+}
