@@ -582,7 +582,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		require.Equal(t, issue.UID, today.Issues[0].UID)
 	})
 
-	t.Run("non-calendar views project deadline dates", func(t *testing.T) {
+	t.Run("non-calendar views project start and deadline dates", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
 		ctx := context.Background()
@@ -590,7 +590,8 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "All-open deadline", Author: "user-a",
 			Metadata: map[string]jsontext.Value{
-				"deadline_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
+				"scheduled_on": jsontext.Value(`"2026-09-01T02:00:00Z"`),
+				"deadline_on":  jsontext.Value(`"2026-09-01T00:30:00Z"`),
 			},
 		})
 		require.NoError(t, err)
@@ -602,6 +603,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		require.NoError(t, err)
 		require.Len(t, snapshot.Issues, 1)
 		require.Equal(t, issue.UID, snapshot.Issues[0].UID)
+		require.Equal(t, "2026-08-31", snapshot.Issues[0].ScheduledOnDate)
 		require.Equal(t, "2026-08-31", snapshot.Issues[0].DeadlineOnDate)
 	})
 

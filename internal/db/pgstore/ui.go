@@ -595,29 +595,16 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 				continue
 			}
 		}
-		scheduledOnDate := ""
-		deadlineOnDate := ""
-		if filterCalendarSchedules {
-			var matches bool
-			scheduledOnDate, deadlineOnDate, matches, err = db.MatchUICalendarView(
-				string(issue.Metadata), query,
-				scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
-			)
-			if err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
-			}
-			if !matches {
-				continue
-			}
-		} else {
-			deadlineOnDate, _, err = metadata.DeadlineOnCalendarDate(
-				string(issue.Metadata), query.TimeZone, query.DefaultTimezone,
-			)
-			if err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("read UI issue %s deadline: %w", issue.UID, err)
-			}
+		scheduledOnDate, deadlineOnDate, matches, err := db.MatchUICalendarView(
+			string(issue.Metadata), query,
+			scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
+		)
+		if err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
+		}
+		if !matches {
+			continue
 		}
 		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
 		uiIssue.ScheduledOnDate = scheduledOnDate
