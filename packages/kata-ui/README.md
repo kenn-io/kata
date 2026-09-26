@@ -8,6 +8,10 @@ Pass `onOpenIssue` to let readers open parent, child, and linked issues: the
 package calls it with the peer issue UID and the host decides how to navigate.
 Without it, those references render as plain text.
 
+`IssueDetail` lays itself out from its own width, so give it a definite width
+from its container. Inside a shrink-to-fit parent, such as an inline-block,
+a float, or `width: max-content`, it collapses to zero width.
+
 Forge linkage and other host metadata stay in the host. The package receives
 only Kata wire data and host-supplied actions.
 

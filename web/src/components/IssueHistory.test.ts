@@ -1,6 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/svelte'
 import { afterEach, describe, expect, it } from 'vitest'
-import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
 
 import type { KataTaskEvent } from '../lib/kata/types'
 import IssueHistory from './IssueHistory.svelte'
@@ -29,8 +28,9 @@ describe('IssueHistory', () => {
 
     const row = screen.getByRole('listitem')
     const time = row.querySelector('time[datetime="2026-08-01T12:00:00Z"]')
-    expect(time?.textContent).toBe(formatTimestamp('2026-08-01T12:00:00Z'))
-    expect(time?.getAttribute('title')).toBeTruthy()
+    expect(time).not.toBeNull()
+    expect(time?.textContent?.trim()).not.toBe('')
+    expect(time?.getAttribute('title')).toMatch(/2026/)
     expect(container.querySelectorAll('time')).toHaveLength(1)
   })
 

@@ -87,12 +87,12 @@ side-by-side detail layouts.
 
 Select an issue to open its detail panel. The panel opens as a read-only view
 of the description, properties, checklist, links, comments, recurrence, and
-events, with Markdown rendered in the description and comments. Status and
-label chips sit in the header beside the actions, each event shows when it
-happened, and parent, child, and linked issue references open that issue.
-**Edit issue** switches the panel to the editor, which can update the title, description,
-schedule, due date, owner, priority, labels, and project, and **Done editing**
-returns to the read-only view. The editor also supports:
+events, with Markdown rendered in the description and comments. Status,
+priority, owner, dates, and labels sit in the header beside the actions. Each
+event shows when it happened, and parent, child, and linked issue references
+open that issue. **Edit issue** switches the panel to the editor, which can
+update the title, description, schedule, due date, owner, priority, labels, and
+project, and **Done editing** returns to the read-only view. The editor also supports:
 
 - starting or renewing a temporary assignment from the **Assignment** control;
   both views show its absolute expiry;
