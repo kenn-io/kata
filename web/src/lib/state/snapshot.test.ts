@@ -152,6 +152,38 @@ describe('snapshotIntentForRoute', () => {
     expect(intent.localDate).toBeUndefined()
   })
 
+  it('loads Inbox, Scheduled, and the landing route from the all-open collection', () => {
+    for (const url of [
+      'https://daemon.example/kata',
+      'https://daemon.example/kata?view=inbox',
+      'https://daemon.example/kata?view=scheduled',
+      'https://daemon.example/kata?view=deadlines',
+    ]) {
+      const route = parseRoute(new URL(url))
+      if (route.kind === 'route-error') throw new Error('expected a Kata route')
+
+      const intent = snapshotIntentForRoute(route, new Date('2026-09-01T00:30:00Z'), 'UTC')
+
+      expect(intent.view, url).toBe('all-open')
+      expect(intent.localDate, url).toBeUndefined()
+      expect(intent.timeZone, url).toBe('UTC')
+    }
+  })
+
+  it('keeps Today on the calendar collection with the browser date', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?view=today'))
+    if (route.kind === 'route-error') throw new Error('expected a Kata route')
+
+    const intent = snapshotIntentForRoute(
+      route,
+      new Date('2026-09-01T00:30:00Z'),
+      'America/Los_Angeles',
+    )
+
+    expect(intent.view).toBe('today')
+    expect(intent.localDate).toBe('2026-08-31')
+  })
+
   it('maps the credentials screen to an unselected ordinary authority snapshot', () => {
     const route = parseRoute(
       new URL(

@@ -3,9 +3,8 @@ import { applicationRoutePath } from './applicationBase'
 export const systemViews = [
   'inbox',
   'today',
-  'upcoming',
   'delegated',
-  'deadlines',
+  'scheduled',
   'all-open',
   'logbook',
 ] as const
@@ -45,7 +44,7 @@ export function parseRoute(url: URL, routePath = applicationRoutePath()): KataRo
   if (normalizeRoutePath(url.pathname) !== normalizeRoutePath(routePath)) {
     return { kind: 'route-error', path: url.pathname, reason: 'path' }
   }
-  const view = url.searchParams.get('view')?.trim()
+  const view = canonicalView(url.searchParams.get('view')?.trim())
   if (view === 'credentials') {
     return {
       kind: 'kata',
@@ -120,6 +119,11 @@ function parseFilters(query: URLSearchParams): ShareableFilters {
 
 function sortedUnique(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort()
+}
+
+// Upcoming and Deadlines were folded into Scheduled; keep old links working.
+function canonicalView(value: string | undefined): string | undefined {
+  return value === 'upcoming' || value === 'deadlines' ? 'scheduled' : value
 }
 
 function isSystemView(value: string | undefined): value is SystemView {

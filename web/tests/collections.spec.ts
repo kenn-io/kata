@@ -39,12 +39,12 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   await expect(page).toHaveURL(/text=child/)
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
-  for (const view of ['Inbox', 'Today', 'Upcoming', 'Delegated', 'Deadlines']) {
-    await page
-      .getByRole('button', { name: view === 'Inbox' ? /^Inbox \d+$/ : view, exact: true })
-      .click()
+  for (const view of ['Inbox', 'Today', 'Delegated', 'Scheduled']) {
+    await page.getByRole('button', { name: new RegExp(`^${view}( \\d+)?$`) }).click()
     await expect(page.locator('[aria-label="Issues"]')).toBeVisible()
   }
+  await expect(page).toHaveURL(/view=scheduled/)
+  await expect(page.getByRole('button', { name: 'Upcoming' })).toHaveCount(0)
   await page.getByRole('button', { name: /^example-project \d+$/ }).click()
   await expect(page).toHaveURL(`${kata.origin}/kata?scope=${kata.projectUID}`)
 })

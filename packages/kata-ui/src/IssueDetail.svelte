@@ -9,7 +9,7 @@
   import IssueProperties from './components/IssueProperties.svelte'
   import type { KataIssueDetailProps, KataIssueHostAction } from './types.js'
 
-  let { detail, actions = [] }: KataIssueDetailProps = $props()
+  let { detail, actions = [], onOpenIssue }: KataIssueDetailProps = $props()
 
   function invoke(action: KataIssueHostAction): void {
     if (action.disabled || action.busy) return
@@ -23,21 +23,22 @@
       <span class="reference">{detail.issue.reference}</span>
       <h2>{detail.issue.title}</h2>
     </div>
-    {#if actions.length > 0}
-      <div class="host-actions">
-        {#each actions as action (action.id)}
-          <Button
-            size="sm"
-            disabled={Boolean(action.disabled || action.busy)}
-            label={action.busy ? `${action.label}…` : action.label}
-            onclick={() => invoke(action)}
-          />
-        {/each}
-      </div>
-    {/if}
+    <div class="header-toolbar">
+      <IssueProperties issue={detail.issue} />
+      {#if actions.length > 0}
+        <div class="host-actions">
+          {#each actions as action (action.id)}
+            <Button
+              size="sm"
+              disabled={Boolean(action.disabled || action.busy)}
+              label={action.busy ? `${action.label}…` : action.label}
+              onclick={() => invoke(action)}
+            />
+          {/each}
+        </div>
+      {/if}
+    </div>
   </header>
-
-  <IssueProperties issue={detail.issue} />
 
   <section class="detail-section body-section" aria-label="Description">
     {#if detail.issue.body}
@@ -50,7 +51,12 @@
   </section>
 
   <IssueChecklist items={detail.issue.checklist} />
-  <IssueLinks parent={detail.parent} children={detail.children} links={detail.links} />
+  <IssueLinks
+    parent={detail.parent}
+    children={detail.children}
+    links={detail.links}
+    {onOpenIssue}
+  />
 
   {#if detail.claim || detail.pendingClaims.length > 0}
     <section class="claim-state" aria-label="Claim state">
@@ -66,6 +72,7 @@
 
 <style>
   .kata-issue-detail {
+    container: kata-issue-detail / inline-size;
     display: grid;
     gap: var(--space-6, 16px);
     min-width: 0;
@@ -80,6 +87,17 @@
   }
 
   .heading-copy {
+    flex: 1 1 16rem;
+    min-width: 0;
+  }
+
+  .header-toolbar {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
     min-width: 0;
   }
 
@@ -134,9 +152,15 @@
     margin-bottom: 0;
   }
 
-  @media (max-width: 640px) {
+  /* Stack on the pane's width, not the viewport: the detail pane can be
+     narrow inside a wide window. */
+  @container kata-issue-detail (max-width: 560px) {
     .detail-header {
       display: grid;
+    }
+
+    .header-toolbar {
+      justify-content: flex-start;
     }
   }
 </style>

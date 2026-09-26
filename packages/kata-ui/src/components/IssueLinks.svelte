@@ -1,14 +1,32 @@
 <script lang="ts">
+  import { Button } from '@kenn-io/kit-ui'
+
   import type { KataIssueDetailModel } from '../types.js'
 
   interface Props {
     parent?: KataIssueDetailModel['parent']
     children: KataIssueDetailModel['children']
     links: KataIssueDetailModel['links']
+    onOpenIssue?: ((uid: string) => void) | undefined
   }
 
-  let { parent, children, links }: Props = $props()
+  let { parent, children, links, onOpenIssue }: Props = $props()
 </script>
+
+{#snippet reference(relation: string, label: string, uid: string)}
+  {#if onOpenIssue}
+    <Button
+      size="sm"
+      surface="soft"
+      class="reference-link"
+      label={label}
+      ariaLabel={`Open ${relation} ${label}`}
+      onclick={() => onOpenIssue?.(uid)}
+    />
+  {:else}
+    <strong>{label}</strong>
+  {/if}
+{/snippet}
 
 {#if parent || children.length > 0 || links.length > 0}
   <section class="detail-section" aria-labelledby="kata-links-heading">
@@ -16,17 +34,21 @@
     <ul>
       {#if parent}
         <li>
-          <span>parent</span><strong>{parent.reference}</strong>{parent.title}
+          <span>parent</span>{@render reference('parent', parent.reference, parent.uid)}{parent.title}
         </li>
       {/if}
       {#each children as child (child.uid)}
         <li>
-          <span>child</span><strong>{child.reference}</strong>{child.title}
+          <span>child</span>{@render reference('child', child.reference, child.uid)}{child.title}
         </li>
       {/each}
       {#each links as link (link.id)}
         <li>
-          <span>{link.relation}</span><strong>{link.peerReference}</strong>
+          <span>{link.relation}</span>{@render reference(
+            link.relation,
+            link.peerReference,
+            link.peerUID,
+          )}
           {#if link.peerStatus}<em>{link.peerStatus}</em>{/if}
         </li>
       {/each}
@@ -71,8 +93,14 @@
     font-style: normal;
   }
 
-  li > strong {
+  li > strong,
+  li > :global(.reference-link) {
     font-family: var(--font-mono, ui-monospace, monospace);
     font-size: var(--font-size-sm, 0.875rem);
+  }
+
+  li > :global(.reference-link) {
+    color: var(--accent-blue, #2563eb);
+    font-weight: 650;
   }
 </style>

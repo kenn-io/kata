@@ -1,7 +1,7 @@
 <script lang="ts">
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
   import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw'
-  import { SearchInput } from '@kenn-io/kit-ui'
+  import { SearchInput, SelectDropdown, type SelectDropdownOption } from '@kenn-io/kit-ui'
 
   import type { TokenOut } from '../lib/api/generated'
 
@@ -10,21 +10,25 @@
 
   interface Props {
     tokens: readonly TokenOut[]
-    observedAt?: string | undefined
     loading: boolean
     error?: string | undefined
     onRefresh: () => void | Promise<void>
     onBack: () => void | Promise<void>
   }
 
-  let {
-    tokens,
-    observedAt = undefined,
-    loading,
-    error = undefined,
-    onRefresh,
-    onBack,
-  }: Props = $props()
+  let { tokens, loading, error = undefined, onRefresh, onBack }: Props = $props()
+
+  const stateOptions: SelectDropdownOption[] = [
+    { value: 'all', label: 'All' },
+    { value: 'live', label: 'Live' },
+    { value: 'expired', label: 'Expired' },
+    { value: 'revoked', label: 'Revoked' },
+  ]
+  const scopeOptions: SelectDropdownOption[] = [
+    { value: 'all', label: 'All' },
+    { value: 'scoped', label: 'Scoped' },
+    { value: 'unscoped', label: 'Unscoped' },
+  ]
 
   let stateFilter = $state<StateFilter>('all')
   let scopeFilter = $state<ScopeFilter>('all')
@@ -77,33 +81,29 @@
     </button>
   </header>
 
-  <div class="observation">
-    <span>Observed by server</span>
-    {#if observedAt}
-      <time datetime={observedAt}>{timestamp(observedAt)}</time>
-    {:else}
-      <span>—</span>
-    {/if}
-  </div>
-
   <div class="filters" role="group" aria-label="Credential filters">
-    <label>
-      <span>State</span>
-      <select aria-label="Credential state" bind:value={stateFilter}>
-        <option value="all">All</option>
-        <option value="live">Live</option>
-        <option value="expired">Expired</option>
-        <option value="revoked">Revoked</option>
-      </select>
-    </label>
-    <label>
-      <span>Scope</span>
-      <select aria-label="Credential scope" bind:value={scopeFilter}>
-        <option value="all">All</option>
-        <option value="scoped">Scoped</option>
-        <option value="unscoped">Unscoped</option>
-      </select>
-    </label>
+    <div class="filter-field">
+      <span aria-hidden="true">State</span>
+      <SelectDropdown
+        title="Credential state"
+        value={stateFilter}
+        options={stateOptions}
+        onchange={(value) => {
+          stateFilter = value as StateFilter
+        }}
+      />
+    </div>
+    <div class="filter-field">
+      <span aria-hidden="true">Scope</span>
+      <SelectDropdown
+        title="Credential scope"
+        value={scopeFilter}
+        options={scopeOptions}
+        onchange={(value) => {
+          scopeFilter = value as ScopeFilter
+        }}
+      />
+    </div>
     <div class="search-filter">
       <span>Actor or name</span>
       <SearchInput
@@ -212,8 +212,7 @@
 
   .audit-header,
   .audit-heading,
-  .refresh-button,
-  .observation {
+  .refresh-button {
     display: flex;
     align-items: center;
   }
@@ -234,7 +233,6 @@
   }
 
   .audit-heading p,
-  .observation,
   .refresh-status {
     color: var(--text-muted);
     font-size: var(--font-size-sm);
@@ -271,42 +269,24 @@
     opacity: 0.55;
   }
 
-  .observation {
-    gap: var(--space-2);
-    margin: var(--space-4) 0;
-  }
-
-  .observation span:first-child {
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
   .filters {
     display: grid;
     grid-template-columns: minmax(110px, 160px) minmax(110px, 160px) minmax(180px, 1fr);
     gap: var(--space-3);
-    margin-bottom: var(--space-4);
+    margin: var(--space-4) 0;
   }
 
-  .filters label,
+  .filter-field :global(.kit-select-dropdown) {
+    width: 100%;
+  }
+
+  .filter-field,
   .search-filter {
     display: grid;
     gap: 4px;
     color: var(--text-muted);
     font-size: var(--font-size-xs);
     font-weight: 600;
-  }
-
-  select {
-    width: 100%;
-    min-height: 32px;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
-    background: var(--bg-surface);
-    color: var(--text-primary);
-    padding: 5px 8px;
-    font: inherit;
-    font-size: var(--font-size-sm);
   }
 
   .audit-message {

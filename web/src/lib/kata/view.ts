@@ -29,6 +29,25 @@ function deadlineDate(issue: KataTaskSummary): string | undefined {
   return issue.deadline_on_date ?? issueDate(issue.metadata.deadline_on)
 }
 
+/**
+ * Date membership for views assembled from the all-open collection. It
+ * ignores status so explicit status filters still apply to the same set.
+ * Inbox follows Kata's tickler rule: a future start date holds an issue back
+ * until that day, while deadlines never hide work.
+ */
+export function kataViewIncludesDates(
+  view: KataTaskViewName,
+  issue: KataTaskSummary,
+  today: string,
+): boolean {
+  if (view === 'scheduled') return Boolean(scheduledDate(issue) || deadlineDate(issue))
+  if (view === 'inbox') {
+    const scheduledOn = scheduledDate(issue)
+    return scheduledOn === undefined || scheduledOn <= today
+  }
+  return true
+}
+
 function compareIssues(a: KataTaskSummary, b: KataTaskSummary): number {
   const ap = a.priority ?? Number.MAX_SAFE_INTEGER
   const bp = b.priority ?? Number.MAX_SAFE_INTEGER
@@ -38,35 +57,12 @@ function compareIssues(a: KataTaskSummary, b: KataTaskSummary): number {
   return a.uid.localeCompare(b.uid)
 }
 
-function compareByDeadline(a: KataTaskSummary, b: KataTaskSummary): number {
-  const ad = deadlineDate(a) ?? ''
-  const bd = deadlineDate(b) ?? ''
-  if (ad !== bd) return ad.localeCompare(bd)
-  return compareIssues(a, b)
-}
-
 function projectLookup(projects: KataProjectSummary[]): ProjectLookup {
   return new Map(projects.map((project) => [project.uid, project]))
 }
 
 function projectTitle(issue: KataTaskSummary, projects: ProjectLookup): string {
   return projects.get(issue.project_uid)?.name || issue.project_name || issue.project_uid
-}
-
-function isInboxProject(project: KataProjectSummary | undefined): boolean {
-  if (!project) return false
-  return project.metadata.role === 'inbox'
-}
-
-function compareInboxIssues(
-  projects: ProjectLookup,
-): (a: KataTaskSummary, b: KataTaskSummary) => number {
-  return (a, b) => {
-    const aInbox = isInboxProject(projects.get(a.project_uid))
-    const bInbox = isInboxProject(projects.get(b.project_uid))
-    if (aInbox !== bInbox) return aInbox ? -1 : 1
-    return compareIssues(a, b)
-  }
 }
 
 function groupByProject(issues: KataTaskSummary[], projects: ProjectLookup): KataTaskGroup[] {
@@ -122,27 +118,10 @@ function buildToday(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
     .filter((group) => group.issues.length > 0)
 }
 
-function buildUpcoming(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
-  const groups = new Map<string, KataTaskGroup>()
-  for (const issue of issues) {
-    if (issue.status !== 'open') continue
-    const scheduledOn = scheduledDate(issue)
-    if (!scheduledOn || scheduledOn <= today) continue
-
-    const group = groups.get(scheduledOn) ?? { id: scheduledOn, title: scheduledOn, issues: [] }
-    group.issues.push(issue)
-    groups.set(scheduledOn, group)
-  }
-
-  return [...groups.values()]
-    .map((group) => ({ ...group, issues: [...group.issues].sort(compareIssues) }))
-    .sort((a, b) => a.id.localeCompare(b.id))
-}
-
-function buildInbox(issues: KataTaskSummary[], projects: ProjectLookup): KataTaskGroup[] {
+function buildInbox(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
   const inboxIssues = issues
-    .filter((issue) => issue.status === 'open' && isInboxProject(projects.get(issue.project_uid)))
-    .sort(compareInboxIssues(projects))
+    .filter((issue) => issue.status === 'open' && kataViewIncludesDates('inbox', issue, today))
+    .sort(compareIssues)
   return inboxIssues.length > 0 ? [{ id: 'inbox', title: 'Inbox', issues: inboxIssues }] : []
 }
 
@@ -181,38 +160,39 @@ function buildAll(issues: KataTaskSummary[], projects: ProjectLookup): KataTaskG
   )
 }
 
-function buildDeadlines(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
+// Scheduled folds start dates and deadlines into one agenda. A missed deadline
+// is overdue; otherwise an issue sits on its earliest date, and a start date
+// that has already passed means the work is actionable today.
+function buildScheduled(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
   const overdue: KataTaskGroup = { id: 'overdue', title: 'Overdue', issues: [] }
   const dueToday: KataTaskGroup = { id: 'today', title: 'Today', issues: [] }
   const futureByDate = new Map<string, KataTaskGroup>()
 
   for (const issue of issues) {
     if (issue.status !== 'open') continue
+    const scheduledOn = scheduledDate(issue)
     const deadlineOn = deadlineDate(issue)
-    if (!deadlineOn) continue
+    if (!kataViewIncludesDates('scheduled', issue, today)) continue
+    const dates = [scheduledOn, deadlineOn].filter((date): date is string => Boolean(date))
 
-    if (deadlineOn < today) {
+    if (deadlineOn !== undefined && deadlineOn < today) {
       overdue.issues.push(issue)
-    } else if (deadlineOn === today) {
-      dueToday.issues.push(issue)
-    } else {
-      const group = futureByDate.get(deadlineOn) ?? {
-        id: deadlineOn,
-        title: deadlineOn,
-        issues: [],
-      }
-      group.issues.push(issue)
-      futureByDate.set(deadlineOn, group)
+      continue
     }
+    const keyDate = dates.sort()[0]!
+    if (keyDate <= today) {
+      dueToday.issues.push(issue)
+      continue
+    }
+    const group = futureByDate.get(keyDate) ?? { id: keyDate, title: keyDate, issues: [] }
+    group.issues.push(issue)
+    futureByDate.set(keyDate, group)
   }
 
-  const pinned = [overdue, dueToday]
-    .map((group) => ({ ...group, issues: [...group.issues].sort(compareByDeadline) }))
-    .filter((group) => group.issues.length > 0)
-  const future = [...futureByDate.values()]
+  const future = [...futureByDate.values()].sort((a, b) => a.id.localeCompare(b.id))
+  return [overdue, dueToday, ...future]
     .map((group) => ({ ...group, issues: [...group.issues].sort(compareIssues) }))
-    .sort((a, b) => a.id.localeCompare(b.id))
-  return [...pinned, ...future]
+    .filter((group) => group.issues.length > 0)
 }
 
 function buildLogbook(issues: KataTaskSummary[]): KataTaskGroup[] {
@@ -241,17 +221,14 @@ export function buildKataTaskView(options: BuildKataTaskViewOptions): KataTaskVi
     case 'today':
       groups = buildToday(options.issues, today)
       break
-    case 'upcoming':
-      groups = buildUpcoming(options.issues, today)
-      break
     case 'inbox':
-      groups = buildInbox(options.issues, projects)
+      groups = buildInbox(options.issues, today)
       break
     case 'delegated':
       groups = buildDelegated(options.issues)
       break
-    case 'deadlines':
-      groups = buildDeadlines(options.issues, today)
+    case 'scheduled':
+      groups = buildScheduled(options.issues, today)
       break
     case 'all':
       groups = buildAll(options.issues, projects)

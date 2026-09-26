@@ -138,13 +138,31 @@ describe('kata task view builder', () => {
     ])
   })
 
-  test('builds Upcoming from future scheduled open issues grouped by date', () => {
+  test('builds Scheduled from start dates and deadlines, one row per issue', () => {
     const view = buildKataTaskView({
-      view: 'upcoming',
+      view: 'scheduled',
       issues: [
-        issue('issue-2', 'Next week', 'project-workspace', { scheduled_on: '2026-05-22' }),
-        issue('issue-1', 'Tomorrow', 'project-health', { scheduled_on: '2026-05-16' }),
-        issue('issue-3', 'Today', 'project-workspace', { scheduled_on: '2026-05-15' }),
+        issue('issue-1', 'Pay rent', 'project-workspace', { deadline_on: '2026-05-10' }),
+        issue('issue-2', 'Started last week', 'project-health', { scheduled_on: '2026-05-08' }),
+        issue('issue-3', 'Sign contract', 'project-workspace', { deadline_on: '2026-05-15' }),
+        issue('issue-4', 'Tomorrow', 'project-health', { scheduled_on: '2026-05-16' }),
+        issue('issue-5', 'Due before start', 'project-workspace', {
+          scheduled_on: '2026-05-25',
+          deadline_on: '2026-05-20',
+        }),
+        issue('issue-6', 'Start then due', 'project-workspace', {
+          scheduled_on: '2026-05-20',
+          deadline_on: '2026-05-30',
+        }),
+        issue('issue-7', 'Undated', 'project-workspace'),
+        issue(
+          'issue-8',
+          'Closed deadline',
+          'project-workspace',
+          { deadline_on: '2026-05-10' },
+          'closed',
+          '2026-05-09T00:00:00.000Z',
+        ),
       ],
       projects,
       today,
@@ -154,8 +172,10 @@ describe('kata task view builder', () => {
     expect(
       view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
     ).toEqual([
+      ['overdue', 'Overdue', ['Pay rent']],
+      ['today', 'Today', ['Sign contract', 'Started last week']],
       ['2026-05-16', '2026-05-16', ['Tomorrow']],
-      ['2026-05-22', '2026-05-22', ['Next week']],
+      ['2026-05-20', '2026-05-20', ['Due before start', 'Start then due']],
     ])
   })
 
@@ -226,14 +246,15 @@ describe('kata task view builder', () => {
       'Previous browser day',
     ])
 
-    const upcomingView = buildKataTaskView({
-      view: 'upcoming',
+    const scheduledView = buildKataTaskView({
+      view: 'scheduled',
       issues: [previousBrowserDay, nextBrowserDay],
       projects,
       today: '2026-08-31',
       fetched_at: fetchedAt,
     })
-    expect(upcomingView.groups.map((group) => [group.id, group.issues[0]?.title])).toEqual([
+    expect(scheduledView.groups.map((group) => [group.id, group.issues[0]?.title])).toEqual([
+      ['today', 'Previous browser day'],
       ['2026-09-01', 'Next browser day'],
     ])
   })
@@ -263,27 +284,30 @@ describe('kata task view builder', () => {
       'Previous browser deadline',
     ])
 
-    const deadlinesView = buildKataTaskView({
-      view: 'deadlines',
+    const scheduledView = buildKataTaskView({
+      view: 'scheduled',
       issues: [previousBrowserDay, nextBrowserDay],
       projects,
       today: '2026-08-31',
       fetched_at: fetchedAt,
     })
-    expect(deadlinesView.groups.map((group) => [group.id, group.issues[0]?.title])).toEqual([
+    expect(scheduledView.groups.map((group) => [group.id, group.issues[0]?.title])).toEqual([
       ['today', 'Previous browser deadline'],
       ['2026-09-01', 'Next browser deadline'],
     ])
   })
 
-  test('builds Inbox only from task inbox projects', () => {
+  test('builds Inbox from open issues across projects, holding future start dates', () => {
     const view = buildKataTaskView({
       view: 'inbox',
       issues: [
         issue('issue-1', 'Inbox capture', 'project-inbox'),
         issue('issue-2', 'Icon-only project', 'project-later'),
-        issue('issue-4', 'Generic project named Inbox', 'project-named-inbox'),
         issue('issue-3', 'Regular work', 'project-workspace'),
+        issue('issue-4', 'Starts today', 'project-workspace', { scheduled_on: '2026-05-15' }),
+        issue('issue-5', 'Starts tomorrow', 'project-workspace', { scheduled_on: '2026-05-16' }),
+        issue('issue-6', 'Due next week', 'project-health', { deadline_on: '2026-05-22' }),
+        issue('issue-7', 'Closed', 'project-workspace', {}, 'closed', '2026-05-14T09:00:00.000Z'),
       ],
       projects,
       today,
@@ -292,7 +316,13 @@ describe('kata task view builder', () => {
 
     expect(view.groups).toHaveLength(1)
     expect(view.groups[0]).toMatchObject({ id: 'inbox', title: 'Inbox' })
-    expect(view.groups[0]!.issues.map((item) => item.title)).toEqual(['Inbox capture'])
+    expect(view.groups[0]!.issues.map((item) => item.title).sort()).toEqual([
+      'Due next week',
+      'Icon-only project',
+      'Inbox capture',
+      'Regular work',
+      'Starts today',
+    ])
   })
 
   test('builds All Open from every open issue grouped by project', () => {
@@ -316,39 +346,6 @@ describe('kata task view builder', () => {
       ['project-health', 'Health', ['Free health']],
       ['project-inbox', 'Inbox', ['Inbox capture']],
       ['project-workspace', 'Work', ['Free work', 'Scheduled work']],
-    ])
-  })
-
-  test('builds Deadlines from open issues with deadlines, pinning Overdue and Today', () => {
-    const view = buildKataTaskView({
-      view: 'deadlines',
-      issues: [
-        issue('issue-1', 'Pay rent', 'project-workspace', { deadline_on: '2026-05-10' }),
-        issue('issue-2', 'Sign contract', 'project-workspace', { deadline_on: '2026-05-15' }),
-        issue('issue-3', 'File taxes', 'project-health', { deadline_on: '2026-05-20' }),
-        issue('issue-4', 'Renew domain', 'project-health', { deadline_on: '2026-05-22' }),
-        issue('issue-5', 'No deadline', 'project-workspace'),
-        issue(
-          'issue-6',
-          'Closed deadline',
-          'project-workspace',
-          { deadline_on: '2026-05-10' },
-          'closed',
-          '2026-05-09T00:00:00.000Z',
-        ),
-      ],
-      projects,
-      today,
-      fetched_at: fetchedAt,
-    })
-
-    expect(
-      view.groups.map((group) => [group.id, group.title, group.issues.map((item) => item.title)]),
-    ).toEqual([
-      ['overdue', 'Overdue', ['Pay rent']],
-      ['today', 'Today', ['Sign contract']],
-      ['2026-05-20', '2026-05-20', ['File taxes']],
-      ['2026-05-22', '2026-05-22', ['Renew domain']],
     ])
   })
 

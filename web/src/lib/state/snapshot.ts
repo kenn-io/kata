@@ -236,7 +236,10 @@ export function snapshotIntentForRoute(
       timeZone,
     }
   }
-  const view = route.view ?? (route.projectUID || route.issueUID ? 'all-open' : 'inbox')
+  const resolvedView = route.view ?? (route.projectUID || route.issueUID ? 'all-open' : 'inbox')
+  // Inbox and Scheduled are assembled in the browser from every open issue, so
+  // they share the all-open collection instead of server-side view filters.
+  const view = resolvedView === 'inbox' || resolvedView === 'scheduled' ? 'all-open' : resolvedView
   const intent: UISnapshotIntent = {
     view,
     statuses: [...route.filters.status],
@@ -250,7 +253,7 @@ export function snapshotIntentForRoute(
   if (route.projectUID) intent.projectUID = route.projectUID
   if (route.issueUID) intent.selectedIssueUID = route.issueUID
   if (route.filters.text) intent.text = route.filters.text
-  if (['today', 'upcoming', 'deadlines'].includes(intent.view)) {
+  if (intent.view === 'today') {
     intent.localDate = localDate(now, timeZone)
   }
   return intent
