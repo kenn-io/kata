@@ -1,10 +1,14 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 // TestFederationTransportOperationsMatchTheSelfAuthenticatedRoutes ties the two
@@ -66,4 +70,19 @@ func TestFederationTransportFencesGETsThatWrite(t *testing.T) {
 func TestFederationTransportPollIsNotFenced(t *testing.T) {
 	assert.False(t, federationTransportOperation("pollFederationProjectEvents").Mutation,
 		"a pure read must not demand a transaction fence")
+}
+
+// TestNativeFederationFencePreservesRetryableSQLState guards the retry contract
+// for request-scoped fenced writes. A transient database failure inside the
+// native federation fence must stay recognizable as retryable so the storage
+// layer retries the transaction instead of answering a hard 503.
+func TestNativeFederationFencePreservesRetryableSQLState(t *testing.T) {
+	deadlock := &pgconn.PgError{Code: "40P01"}
+	fence := sanitizeNativeFederationTransactionFence(
+		func(context.Context, db.Transaction) error { return deadlock })
+	err := fence(t.Context(), nil)
+	require.ErrorIs(t, err, errHostFederationAccessUnavailable)
+	var state interface{ SQLState() string }
+	require.ErrorAs(t, err, &state)
+	assert.Equal(t, "40P01", state.SQLState())
 }
