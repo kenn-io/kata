@@ -27,6 +27,10 @@ import (
 // Override at runtime with KATA_HTTP_TIMEOUT (any time.ParseDuration string).
 const defaultHTTPTimeout = client.DefaultHTTPTimeout
 
+// sseHandshakeTimeout bounds response headers on streaming clients; var so
+// tests can shorten it.
+var sseHandshakeTimeout = client.SSEHandshakeTimeout
+
 // envHTTPTimeout reads KATA_HTTP_TIMEOUT, falling back to def on empty or
 // unparseable input. Bulk imports against an FTS-indexed DB can take longer
 // than the default per request, so this knob lets callers extend the budget
@@ -245,7 +249,7 @@ func longRunningClientForResolved(ctx context.Context, resolved client.ResolvedD
 func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	workspaceStart := workspaceStartForRemote()
 	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
-		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
+		ResponseHeaderTimeout: sseHandshakeTimeout,
 		AllowInsecure: client.RemoteAllowInsecureForBaseURL( //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 			baseURL, workspaceStart,
 		),
@@ -260,7 +264,7 @@ func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, erro
 
 func streamingClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) (*http.Client, error) {
 	hc, err := client.NewHTTPClientForResolved(ctx, resolved, client.Opts{
-		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
+		ResponseHeaderTimeout: sseHandshakeTimeout,
 	})
 	if err != nil {
 		return nil, err

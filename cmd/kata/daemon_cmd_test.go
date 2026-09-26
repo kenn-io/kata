@@ -577,6 +577,21 @@ func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) 
 	t.Setenv("PORT", "")
 	t.Setenv(daemon.AutoStartMarkerEnv, "1")
 	t.Setenv("KATA_AUTOSTART_IDLE_TIMEOUT", "10s")
+	var configuredIdle time.Duration
+	runtimeSeen := make(chan struct{})
+	origIdle := newDaemonIdleController
+	newDaemonIdleController = func(timeout time.Duration, onIdle func()) *daemon.IdleController {
+		configuredIdle = timeout
+		// Hold the idle exit until the runtime record is observed, so a slow runner can't skip past it.
+		return origIdle(time.Second, func() {
+			select {
+			case <-runtimeSeen:
+			case <-time.After(5 * time.Second):
+			}
+			onIdle()
+		})
+	}
+	t.Cleanup(func() { newDaemonIdleController = origIdle })
 
 	orig := newTelemetryReporter
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
@@ -608,6 +623,7 @@ func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) 
 		_, statErr := os.Stat(runtimePath)
 		return statErr == nil
 	}, 3*time.Second, 10*time.Millisecond, "daemon did not publish its runtime record")
+	close(runtimeSeen)
 
 	select {
 	case err := <-done:
@@ -615,6 +631,7 @@ func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) 
 	case <-time.After(15 * time.Second):
 		t.Fatal("auto-started daemon did not exit after its idle timeout")
 	}
+	assert.Equal(t, 10*time.Second, configuredIdle)
 	_, err = os.Stat(runtimePath)
 	require.ErrorIs(t, err, os.ErrNotExist, "idle exit left a discoverable runtime record")
 }

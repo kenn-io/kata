@@ -255,7 +255,7 @@ func TestConnectorMapFieldUsesExactBidirectionalPayload(t *testing.T) {
 func TestConnectorProcessCallsUseLongRunningClient(t *testing.T) {
 	f := newExternalCLIFixture(t)
 	f.connectorDelay = true
-	t.Setenv("KATA_HTTP_TIMEOUT", "500ms")
+	t.Setenv("KATA_HTTP_TIMEOUT", "250ms")
 	for _, args := range [][]string{
 		{"connector", "list"},
 		{"connector", "status", "example-connector"},
