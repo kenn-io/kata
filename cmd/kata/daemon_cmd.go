@@ -897,8 +897,11 @@ func newAutostartIdleController(
 	if !daemon.AutostartIdleShutdownEligible(daemonEndpoint, webEndpoint, dcfg) {
 		return nil, true, nil
 	}
-	return daemon.NewIdleController(timeout, func() { onIdle(timeout) }), false, nil
+	return newDaemonIdleController(timeout, func() { onIdle(timeout) }), false, nil
 }
+
+// newDaemonIdleController is a var so tests can wait less than the config floor.
+var newDaemonIdleController = daemon.NewIdleController
 
 // announceIdleShutdown records why an auto-started daemon is exiting. The
 // detached daemon's stderr is its daemon.log, so this is the only trace of an

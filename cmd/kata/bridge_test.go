@@ -13,7 +13,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-func timeAfterForExternalCLITest() <-chan time.Time { return time.After(750 * time.Millisecond) }
+func timeAfterForExternalCLITest() <-chan time.Time { return time.After(400 * time.Millisecond) }
 
 func bridgeFixtureForRequest(r *http.Request, requestBody map[string]any) map[string]any {
 	bridge := map[string]any{
@@ -241,7 +241,7 @@ func TestBridgeBareRefUsesExplicitProjectContext(t *testing.T) {
 func TestBridgeExternalCallsUseLongRunningClient(t *testing.T) {
 	f := newExternalCLIFixture(t)
 	f.delay = true
-	t.Setenv("KATA_HTTP_TIMEOUT", "500ms")
+	t.Setenv("KATA_HTTP_TIMEOUT", "250ms")
 	tests := [][]string{
 		{"bridge", "bind", "example-project#abc4", "--connector", "example-connector", "--external", "root-locator"},
 		{"bridge", "reconcile", "example-project#abc4"},
