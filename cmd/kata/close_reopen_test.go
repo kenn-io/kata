@@ -523,3 +523,29 @@ func TestClose_EmptyComment_Rejected(t *testing.T) {
 		"--comment", "   ")
 	_ = requireCLIError(t, err, ExitValidation)
 }
+
+func TestCloseCmd_MessageShorthand(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	message := "Fixed the parser crash and ran the parser tests."
+
+	out := runCLI(t, env, dir, "close", ref, "--done", "-m", message, "--commit", "abc1234")
+	assert.Contains(t, out, "closed")
+
+	audit := runCLI(t, env, dir, "audit", "closes", "--json")
+	assert.Contains(t, audit, message)
+}
+
+func TestCloseCmd_BodyAliasesMessage(t *testing.T) {
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "test issue")
+	message := "Fixed the parser crash and ran the parser tests."
+
+	out := runCLI(t, env, dir, "close", ref, "--done", "--body", message,
+		"--comment", "follow-up note", "--commit", "abc1234")
+	assert.Contains(t, out, "closed")
+
+	audit := runCLI(t, env, dir, "audit", "closes", "--json")
+	assert.Contains(t, audit, message)
+	issue := fetchIssueViaHTTPWithComments(t, env, pid, ref)
+	require.Len(t, issue.Comments, 1)
+	assert.Equal(t, "follow-up note", issue.Comments[0].Body)
+}

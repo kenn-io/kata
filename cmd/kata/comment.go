@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -23,6 +24,7 @@ func newCommentCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&src.Body, "body", "m", "", "comment body")
 	cmd.Flags().StringVar(&src.File, "body-file", "", "read body from file")
 	cmd.Flags().BoolVar(&src.Stdin, "body-stdin", false, "read body from stdin")
+	cmd.Flags().SetNormalizeFunc(normalizeCommentMessageFlag)
 	cmd.Flags().StringVar(&unsupportedRelationships.Parent, "parent", "", "unsupported on comment; use edit")
 	cmd.Flags().StringVar(&unsupportedRelationships.Blocks, "blocks", "", "unsupported on comment; use edit")
 	cmd.Flags().StringVar(&unsupportedRelationships.BlockedBy, "blocked-by", "", "unsupported on comment; use edit")
@@ -161,7 +163,19 @@ func newCommentEditCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&src.Body, "body", "m", "", "comment body")
 	cmd.Flags().StringVar(&src.File, "body-file", "", "read body from file")
 	cmd.Flags().BoolVar(&src.Stdin, "body-stdin", false, "read body from stdin")
+	cmd.Flags().SetNormalizeFunc(normalizeCommentMessageFlag)
 	return cmd
+}
+
+// normalizeCommentMessageFlag makes --message an alias of --body, so the flag
+// `kata close` uses for its text also works on comment commands. Normalizing
+// instead of registering a second flag keeps Changed("body") and last-wins
+// semantics identical for both spellings.
+func normalizeCommentMessageFlag(_ *pflag.FlagSet, name string) pflag.NormalizedName {
+	if name == "message" {
+		return "body"
+	}
+	return pflag.NormalizedName(name)
 }
 
 func resolveCommentBody(cmd *cobra.Command, src BodySources) (string, error) {

@@ -960,8 +960,12 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
+	labelNames := make([]string, 0, len(labels))
+	for _, label := range labels {
+		labelNames = append(labelNames, label.Label)
+	}
 	out := &api.ShowIssueResponse{}
-	out.Body.Issue = issue
+	out.Body.Issue = api.ShowIssueOut{Issue: issue, Labels: labelNames}
 	out.Body.Comments = comments
 	out.Body.Links = links
 	out.Body.Labels = labels

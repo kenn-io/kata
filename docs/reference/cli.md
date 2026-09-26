@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-22
+last_edited: 2026-09-26
 ---
 
 # CLI reference
@@ -206,6 +206,11 @@ pipelines, including `kata show <issue-ref> --render | less -R`, intentionally
 remain plain text. This version has no force-render option for non-terminal
 output.
 
+`kata show --json` returns `.issue.labels` as a string array, the same shape
+as `.issues[].labels` from `kata list --json`. On `show` the key is always
+present and is `[]` when the issue has no labels. The top-level `.labels`
+array keeps each label's `author` and `created_at`.
+
 `kata status` reports the issue status and revision, daemon identity, effective
 actor, issue owner, and federation lease. Its `hold` value is `active`,
 `expired`, `pending`, `assigned`, `unassigned`, or `closed`. `assigned` means
@@ -341,6 +346,9 @@ kata comment edit <ref> <comment-uid> \
   [--body TEXT | --body-file PATH | --body-stdin]
 ```
 
+`-m` and `--message` are aliases of `--body` on both comment commands, so
+the text flag from `kata close` works here too.
+
 `KATA_TEAMMATE` supplies an optional default for comment creation;
 `--teammate` overrides it and `--teammate=''` suppresses it for one
 command. A nonempty teammate requires daemon API 0.18.0 or newer and is
@@ -369,6 +377,9 @@ kata close <ref> --done --message <text> \
   [--idempotency-key <key>] \
   [--if-match <revision>]
 ```
+
+`-m` is short for `--message`, and `--body` is accepted as an alias, matching
+`kata comment`. `--comment` still posts a separate follow-up comment.
 
 `--idempotency-key` makes a close safe to retry after a lost response. For
 seven days, an exact retry returns the original `issue.closed` event through

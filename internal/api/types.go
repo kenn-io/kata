@@ -719,6 +719,17 @@ type ReachableGraphResponse struct {
 	}
 }
 
+// ShowIssueOut is the issue record inside ShowIssueResponseBody. It embeds
+// db.Issue and adds Labels as plain strings, matching IssueOut.labels so a
+// reader can use .issue.labels on both list rows and show. Unlike IssueOut,
+// the key is always present ([] when the issue has no labels) so a reader can
+// tell "no labels" from a missing field. The top-level Labels array keeps the
+// author and timestamp detail.
+type ShowIssueOut struct {
+	db.Issue
+	Labels []string `json:"labels"`
+}
+
 // ShowIssueResponse is the per-issue read payload (Plan 2: + links, + labels).
 type ShowIssueResponse struct {
 	Body ShowIssueResponseBody
@@ -731,7 +742,7 @@ type ShowIssueResponse struct {
 // the published component and breaks every generated client.
 type ShowIssueResponseBody struct {
 	WebURL              string              `json:"web_url,omitempty" doc:"Browser URL for this issue in the owning daemon."`
-	Issue               db.Issue            `json:"issue"`
+	Issue               ShowIssueOut        `json:"issue"`
 	Comments            []db.Comment        `json:"comments"`
 	Links               []LinkOut           `json:"links"`
 	Labels              []db.IssueLabel     `json:"labels"`
