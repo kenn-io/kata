@@ -63,6 +63,17 @@ func TestMapSQLErrorUsesDomainSentinelWithoutLeakingDetail(t *testing.T) {
 	assert.False(t, errors.As(unknown, &leaked), "unknown constraints must remain sanitized")
 
 	assert.ErrorIs(t, mapSQLError(sql.ErrNoRows, nil), db.ErrNotFound)
+
+	authorizationUnavailable := errors.New("authorization unavailable")
+	joined := errors.Join(authorizationUnavailable, pgErr)
+	for _, input := range []error{joined, mapSQLError(joined, nil)} {
+		mapped := mapSQLError(input, map[string]error{
+			"uniq_one_parent_per_child": db.ErrParentAlreadySet,
+		})
+		assert.ErrorIs(t, mapped, authorizationUnavailable)
+		assert.ErrorIs(t, mapped, db.ErrParentAlreadySet)
+		assert.False(t, errors.As(mapped, &leaked))
+	}
 }
 
 func TestTransactionHelpersRollbackRetryAndReserveIdentityValues(t *testing.T) {
@@ -172,4 +183,47 @@ func TestPurgeWaitsForEventSequenceFence(t *testing.T) {
 	require.NoError(t, result.err)
 	require.NotNil(t, result.log.PurgeResetAfterEventID)
 	assert.Greater(t, *result.log.PurgeResetAfterEventID, reserved)
+}
+
+func TestTransactionFencePostgresFailureKeepsErrorCategory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := t.Context()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := OpenWithConfig(ctx, dsn, Config{
+		Schema: "fence_error_store", SchemaMode: SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	authorizationUnavailable := errors.New("authorization unavailable")
+
+	for _, failFinalization := range []bool{false, true} {
+		name := "authorization"
+		if failFinalization {
+			name = "finalization"
+		}
+		t.Run(name, func(t *testing.T) {
+			fence := func(ctx context.Context, tx db.Transaction) error {
+				_, queryErr := tx.ExecContext(ctx, `SELECT 'private-row-value'::integer`)
+				cause := errors.Join(authorizationUnavailable, queryErr)
+				if failFinalization {
+					return db.AfterTransactionRollback(cause, func(context.Context) error {
+						return errors.New("host recording failed")
+					})
+				}
+				return cause
+			}
+			_, err := store.CreateProject(db.WithTransactionFence(ctx, fence), "rejected-project")
+			require.Error(t, err)
+			assert.ErrorIs(t, err, authorizationUnavailable)
+			assert.Equal(t, failFinalization, errors.Is(err, db.ErrTransactionFinalizationFailed))
+			assert.NotContains(t, err.Error(), "private-row-value")
+			_, exposesDiagnostics := errors.AsType[*pgconn.PgError](err)
+			assert.False(t, exposesDiagnostics)
+		})
+	}
+	_, err = store.ProjectByName(ctx, "rejected-project")
+	assert.ErrorIs(t, err, db.ErrNotFound)
 }

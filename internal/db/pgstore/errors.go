@@ -21,6 +21,7 @@ type SQLError struct {
 	Code       string
 	Constraint string
 	domain     error
+	cause      error
 }
 
 func (e *SQLError) Error() string {
@@ -36,6 +37,10 @@ func (e *SQLError) Unwrap() error {
 	}
 	return nil
 }
+
+// Is preserves outer error categories without exposing the original Postgres
+// diagnostics through Error or Unwrap.
+func (e *SQLError) Is(target error) bool { return errors.Is(e.cause, target) }
 
 // SQLState exposes the five-character Postgres error code for classification.
 func (e *SQLError) SQLState() string { return e.Code }
@@ -72,6 +77,7 @@ func mapSQLError(err error, constraintErrors map[string]error) error {
 				Code:       safeErr.Code,
 				Constraint: safeErr.Constraint,
 				domain:     domain,
+				cause:      err,
 			}
 		}
 		return err
@@ -84,5 +90,6 @@ func mapSQLError(err error, constraintErrors map[string]error) error {
 		Code:       pgErr.Code,
 		Constraint: pgErr.ConstraintName,
 		domain:     constraintErrors[pgErr.ConstraintName],
+		cause:      err,
 	}
 }
