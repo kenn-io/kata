@@ -57,6 +57,14 @@ function compareIssues(a: KataTaskSummary, b: KataTaskSummary): number {
   return a.uid.localeCompare(b.uid)
 }
 
+// Issues without a deadline sort after those with one.
+function compareByDeadline(a: KataTaskSummary, b: KataTaskSummary): number {
+  const ad = deadlineDate(a) ?? '9999-12-31'
+  const bd = deadlineDate(b) ?? '9999-12-31'
+  if (ad !== bd) return ad.localeCompare(bd)
+  return compareIssues(a, b)
+}
+
 function projectLookup(projects: KataProjectSummary[]): ProjectLookup {
   return new Map(projects.map((project) => [project.uid, project]))
 }
@@ -189,10 +197,14 @@ function buildScheduled(issues: KataTaskSummary[], today: string): KataTaskGroup
     futureByDate.set(keyDate, group)
   }
 
-  const future = [...futureByDate.values()].sort((a, b) => a.id.localeCompare(b.id))
-  return [overdue, dueToday, ...future]
+  const pinned = [overdue, dueToday].map((group) => ({
+    ...group,
+    issues: [...group.issues].sort(compareByDeadline),
+  }))
+  const future = [...futureByDate.values()]
     .map((group) => ({ ...group, issues: [...group.issues].sort(compareIssues) }))
-    .filter((group) => group.issues.length > 0)
+    .sort((a, b) => a.id.localeCompare(b.id))
+  return [...pinned, ...future].filter((group) => group.issues.length > 0)
 }
 
 function buildLogbook(issues: KataTaskSummary[]): KataTaskGroup[] {

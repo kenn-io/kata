@@ -179,6 +179,30 @@ describe('kata task view builder', () => {
     ])
   })
 
+  test('orders Overdue and Today by deadline so the most urgent work leads', () => {
+    const view = buildKataTaskView({
+      view: 'scheduled',
+      issues: [
+        issue('issue-1', 'A due yesterday', 'project-workspace', { deadline_on: '2026-05-14' }),
+        issue('issue-2', 'B due last week', 'project-workspace', { deadline_on: '2026-05-08' }),
+        issue('issue-3', 'A started earlier', 'project-health', { scheduled_on: '2026-05-01' }),
+        issue('issue-4', 'B started, due later', 'project-health', {
+          scheduled_on: '2026-05-02',
+          deadline_on: '2026-05-30',
+        }),
+        issue('issue-5', 'C due today', 'project-workspace', { deadline_on: '2026-05-15' }),
+      ],
+      projects,
+      today,
+      fetched_at: fetchedAt,
+    })
+
+    expect(view.groups.map((group) => [group.id, group.issues.map((item) => item.title)])).toEqual([
+      ['overdue', ['B due last week', 'A due yesterday']],
+      ['today', ['C due today', 'B started, due later', 'A started earlier']],
+    ])
+  })
+
   test('builds Delegated from open teammate issues grouped by author and teammate', () => {
     const view = buildKataTaskView({
       view: 'delegated',
