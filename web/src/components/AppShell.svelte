@@ -663,10 +663,17 @@
   open={captureOpen}
   disabled={!newTaskAllowed || mutationPending}
   {draftFenceGeneration}
+  inboxName={scopedAuthority ? undefined : inboxProject?.name}
   onClose={() => {
     captureOpen = false
   }}
   onSubmit={submitCapture}
+  onChangeInbox={projectWideMutationAllowed
+    ? () => {
+        captureOpen = false
+        inboxChooserOpen = true
+      }
+    : undefined}
 />
 
 <InboxProjectChooser

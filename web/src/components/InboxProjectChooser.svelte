@@ -30,7 +30,7 @@
 
 <Modal {open} title="Choose Inbox project" {onClose} width={420}>
   <p class="chooser-copy">
-    New tasks are captured in one Inbox project. Choose it once to continue.
+    New tasks are captured in one Inbox project.
   </p>
   <div class="project-list">
     {#each projects as project (project.uid)}

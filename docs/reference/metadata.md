@@ -86,7 +86,8 @@ The project metadata value `"role": "inbox"` designates the Inbox project,
 regardless of the project's name. The TUI Inbox shows its open tasks, and the
 web UI captures new tasks there. The web Inbox view itself lists open tasks from
 every project. In the web UI, the first **New task** asks you to choose the
-project when none is designated.
+project when none is designated, and **Change** in the **New task** dialog
+switches it later.
 
 API clients can designate it with a project metadata patch:
 

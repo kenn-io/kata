@@ -1742,6 +1742,72 @@ describe('App', () => {
     expect(await mutation.json()).toEqual({ actor: 'kata-web', patch: { role: 'inbox' } })
   })
 
+  it('changes the Inbox project from New task through one designation request', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const accepted = snapshot()
+    accepted.catalog[0]!.project.metadata.role = 'inbox'
+    accepted.catalog.push({
+      project: {
+        active: true,
+        id: 8,
+        uid: '01J00000000000000000000008',
+        name: 'example-workspace',
+        metadata: { area: 'Work' },
+        revision: 1,
+        created_at: '2026-08-01T09:00:00.000Z',
+      },
+      stats: { Open: 0, Closed: 0, LastEventAt: '2026-08-01T12:00:00.000Z' },
+    })
+    const patches: Array<{ projectID: number; body: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const match = request.url.match(/\/api\/v1\/projects\/(\d+)\/metadata$/)
+        if (request.method === 'POST' && match) {
+          const projectID = Number(match[1])
+          const body = await request.json()
+          patches.push({ projectID, body })
+          const project = accepted.catalog.find((entry) => entry.project.id === projectID)!.project
+          for (const entry of accepted.catalog) {
+            delete entry.project.metadata.role
+          }
+          project.metadata.role = 'inbox'
+          return new Response(JSON.stringify({ changed: true, project }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify(accepted), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${patches.length}"` },
+        })
+      }),
+    )
+
+    render(App)
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+    expect(screen.getByText('Captured in').textContent).toContain('example-project')
+    await fireEvent.click(screen.getByRole('button', { name: 'Change Inbox project' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Use example-workspace as Inbox' }),
+    )
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches).toEqual([
+      { projectID: 8, body: { actor: 'kata-web', patch: { role: 'inbox' } } },
+    ])
+    expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
+  })
+
   it('loads, applies, and persists presentation preferences', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     localStorage.setItem(

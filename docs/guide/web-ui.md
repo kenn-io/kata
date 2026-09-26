@@ -56,8 +56,9 @@ individual projects:
   Narrow Inbox to one project with the **Project scope** filter, and sort it
   from the column headers. New tasks are captured in the designated
   [Inbox project](../reference/metadata.md#project-inbox-designation); if none
-  exists, the first new task asks you to choose one. This is separate from
-  `kata inbox`, which reads
+  exists, the first new task asks you to choose one. To switch it later, select
+  **Change** in the **New task** dialog. This is separate from `kata inbox`,
+  which reads
   [attention requests](../reference/cli.md#teammate-requests) for an actor or
   teammate.
 - **Today** shows tasks whose start date or deadline has arrived.
