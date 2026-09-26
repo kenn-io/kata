@@ -43,7 +43,7 @@ func TestMoveCLI_RoundTrip(t *testing.T) {
 func TestMoveCLI_DryRunDoesNotMoveIssue(t *testing.T) {
 	env, dir, source, target, issue := setupMoveCLIProjects(t)
 
-	out := runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name, "--dry-run")
+	out := runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name, "--dry")
 
 	assert.Contains(t, out, "dry-run")
 	assert.Contains(t, out, source.Name+"#"+issue.ShortID)

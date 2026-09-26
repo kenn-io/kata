@@ -2743,6 +2743,9 @@ components:
       properties:
         actor:
           type: string
+        dry_run:
+          description: Validate without moving; If-Match may be omitted for a preview.
+          type: boolean
         to_project_uid:
           type: string
       required:
@@ -2762,7 +2765,6 @@ components:
       required:
         - issue
         - event_id
-        - new_short_id
         - changed
       type: object
     MutationResponseBody:
@@ -4461,7 +4463,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.22.0
+  version: 0.23.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

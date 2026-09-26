@@ -101,14 +101,26 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: target.ID,
 		IfMatchRev: moving.Revision + 10, Actor: "mover",
+		DryRun: true,
 	})
 	var conflict *db.RevisionConflictError
+	assert.ErrorAs(t, err, &conflict)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: moving.Revision + 10, Actor: "mover",
+	})
 	assert.ErrorAs(t, err, &conflict)
 	unchanged, err := store.IssueByID(ctx, moving.ID)
 	if err != nil {
 		return fmt.Errorf("load issue after rejected move: %w", err)
 	}
 	assert.Equal(t, source.ID, unchanged.ProjectID)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: source.ID,
+		IfMatchRev: moving.Revision, Actor: "mover",
+		DryRun: true,
+	})
+	assert.Error(t, err)
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: source.ID,
 		IfMatchRev: moving.Revision, Actor: "mover",
@@ -128,8 +140,14 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: materialized.NewIssueID, FromProjectID: source.ID, ToProjectID: target.ID,
 		IfMatchRev: 1, Actor: "mover",
+		DryRun: true,
 	})
 	var pinned *db.RecurrencePinnedError
+	assert.ErrorAs(t, err, &pinned)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: materialized.NewIssueID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: 1, Actor: "mover",
+	})
 	assert.ErrorAs(t, err, &pinned)
 	bridgeNow := time.Now().UTC()
 	_, claimed, err := store.ClaimExternalRootBinding(
@@ -141,6 +159,12 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	if !claimed {
 		return errors.New("claim moving external root binding: claim not acquired")
 	}
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: moving.Revision, Actor: "mover",
+		DryRun: true,
+	})
+	assert.ErrorIs(t, err, db.ErrExternalRootClaimActive)
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: target.ID,
 		IfMatchRev: moving.Revision, Actor: "mover",
@@ -160,6 +184,61 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	if !claimed {
 		return errors.New("claim stale moving external root binding: claim not acquired")
 	}
+
+	cursor, err := store.MaxEventID(ctx)
+	if err != nil {
+		return err
+	}
+	beforeBinding, err := store.ExternalRootBindingByID(ctx, activeBinding.ID)
+	if err != nil {
+		return err
+	}
+	preview, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: moving.Revision, Actor: "mover", DryRun: true,
+	})
+	if err != nil {
+		return fmt.Errorf("preview issue move: %w", err)
+	}
+	assert.Equal(t, moving, preview.Issue)
+	assert.Equal(t, moving.Revision, preview.NewRevision)
+	assert.Zero(t, preview.EventID)
+	assert.Empty(t, preview.NewShortID)
+	afterBinding, err := store.ExternalRootBindingByID(ctx, activeBinding.ID)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, beforeBinding, afterBinding, "preview must roll back stale claim cleanup")
+	afterCursor, err := store.MaxEventID(ctx)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, cursor, afterCursor)
+	storedPreview, err := store.IssueByID(ctx, moving.ID)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, moving, storedPreview)
+	sourceClaims, err := store.CountLiveClaims(ctx, source.ID)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, int64(1), sourceClaims)
+	sourcePending, err := store.CountPendingClaims(ctx, source.ID)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, int64(1), sourcePending)
+	previewMapping, err := store.ImportMappingBySource(ctx, source.ID, "tracker", "issue", "source-only")
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, &movingID, previewMapping.IssueID)
+	previewLink, err := store.LinkByEndpoints(ctx, moving.ID, peer.ID, "blocks")
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, link, previewLink)
 
 	moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: moving.ID, FromProjectID: source.ID, ToProjectID: target.ID,
@@ -277,6 +356,12 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: collisionMoving.ID, FromProjectID: collisionSource.ID, ToProjectID: collisionTarget.ID,
 		IfMatchRev: collisionMoving.Revision, Actor: "mover",
+		DryRun: true,
+	})
+	assert.ErrorIs(t, err, db.ErrProjectMergeImportMappingCollision)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: collisionMoving.ID, FromProjectID: collisionSource.ID, ToProjectID: collisionTarget.ID,
+		IfMatchRev: collisionMoving.Revision, Actor: "mover",
 	})
 	assert.ErrorIs(t, err, db.ErrProjectMergeImportMappingCollision)
 	retainedIssue, err := store.IssueByID(ctx, collisionMoving.ID)
@@ -346,6 +431,12 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: syncMoving.ID, FromProjectID: syncMoveSource.ID, ToProjectID: syncMoveTarget.ID,
 		IfMatchRev: syncMoving.Revision, Actor: "mover",
+		DryRun: true,
+	})
+	assert.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: syncMoving.ID, FromProjectID: syncMoveSource.ID, ToProjectID: syncMoveTarget.ID,
+		IfMatchRev: syncMoving.Revision, Actor: "mover",
 	})
 	assert.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
 	retainedSyncMoving, readErr := store.IssueByID(ctx, syncMoving.ID)
@@ -386,7 +477,17 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	assert.Equal(t, target.UID, payload.ToProject)
 	assert.Equal(t, moved.NewShortID, payload.ToShortID)
 	assert.NotEmpty(t, payload.UpdatedAt)
-	return nil
+	if _, _, err := store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: source.ID, Actor: "mover", Force: true}); err != nil {
+		return err
+	}
+	for _, dryRun := range []bool{true, false} {
+		_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: peer.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+			IfMatchRev: peer.Revision, Actor: "mover", DryRun: dryRun,
+		})
+		assert.ErrorIs(t, err, db.ErrNotFound, "archived source preview=%t", dryRun)
+	}
+	return checkMoveFederationGates(t, store)
 }
 
 func checkProjectMerge(t *testing.T, store db.Storage) error {
@@ -871,5 +972,66 @@ func checkActiveProjectionExports(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, links, 1)
 	assert.Equal(t, link.ID, links[0].ID)
+	return nil
+}
+
+// Both move modes retain the same gate for every binding, including paused sync.
+func checkMoveFederationGates(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	for _, role := range []db.FederationRole{db.FederationRoleHub, db.FederationRoleSpoke} {
+		for _, enabled := range []bool{false, true} {
+			for _, push := range []bool{false, true} {
+				for _, sourceBound := range []bool{false, true} {
+					name := fmt.Sprintf("move-gate-%s-%t-%t-%t", role, enabled, push, sourceBound)
+					source, err := store.CreateProject(ctx, name+"-source")
+					if err != nil {
+						return err
+					}
+					target, err := store.CreateProject(ctx, name+"-target")
+					if err != nil {
+						return err
+					}
+					issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "move", Author: "tester"})
+					if err != nil {
+						return err
+					}
+					bound := target
+					if sourceBound {
+						bound = source
+					}
+					_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+						ProjectID: bound.ID, Role: role, HubURL: "https://hub.example", HubProjectID: bound.ID,
+						HubProjectUID: bound.UID, Enabled: enabled, PushEnabled: push, Actor: "tester",
+					})
+					if err != nil {
+						return err
+					}
+					cursor, err := store.MaxEventID(ctx)
+					if err != nil {
+						return err
+					}
+					for _, issueID := range []int64{issue.ID, issue.ID + 1000000} {
+						for _, dryRun := range []bool{false, true} {
+							_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+								IssueID: issueID, FromProjectID: source.ID, ToProjectID: target.ID,
+								IfMatchRev: issue.Revision, Actor: "tester", DryRun: dryRun,
+							})
+							assert.ErrorIs(t, err, db.ErrFederatedMoveUnsupported, "%s issue=%d preview=%t", name, issueID, dryRun)
+						}
+					}
+					after, err := store.MaxEventID(ctx)
+					if err != nil {
+						return err
+					}
+					assert.Equal(t, cursor, after)
+					stored, err := store.IssueByID(ctx, issue.ID)
+					if err != nil {
+						return err
+					}
+					assert.Equal(t, issue, stored)
+				}
+			}
+		}
+	}
 	return nil
 }

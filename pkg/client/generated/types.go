@@ -2730,8 +2730,11 @@ func (m *MetadataPatchGuard) UnmarshalJSON(data []byte) error {
 }
 
 type MoveIssueRequestBody struct {
-	Actor        *string `json:"actor,omitempty"`
-	ToProjectUID string  `json:"to_project_uid" validate:"required"`
+	Actor *string `json:"actor,omitempty"`
+
+	// DryRun Validate without moving; If-Match may be omitted for a preview.
+	DryRun       *bool  `json:"dry_run,omitempty"`
+	ToProjectUID string `json:"to_project_uid" validate:"required"`
 }
 
 func (m MoveIssueRequestBody) Validate() error {
@@ -2739,10 +2742,10 @@ func (m MoveIssueRequestBody) Validate() error {
 }
 
 type MoveIssueResponseBody struct {
-	Changed    bool   `json:"changed"`
-	EventID    int64  `json:"event_id"`
-	Issue      Issue  `json:"issue"`
-	NewShortID string `json:"new_short_id" validate:"required"`
+	Changed    bool    `json:"changed"`
+	EventID    int64   `json:"event_id"`
+	Issue      Issue   `json:"issue"`
+	NewShortID *string `json:"new_short_id,omitempty"`
 }
 
 func (m MoveIssueResponseBody) Validate() error {
@@ -2751,9 +2754,6 @@ func (m MoveIssueResponseBody) Validate() error {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Issue", err)
 		}
-	}
-	if err := typesValidator.Var(m.NewShortID, "required"); err != nil {
-		errors = errors.Append("NewShortID", err)
 	}
 	if len(errors) == 0 {
 		return nil

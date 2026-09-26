@@ -8,7 +8,7 @@ DRY_RUN=false
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--dry-run]
+Usage: $(basename "$0") [--dry]
 
 Regenerate and push docs screenshot assets, build and check the docs, then
 deploy the current committed workspace to production Vercel.
@@ -19,7 +19,7 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dry-run)
+    --dry)
       DRY_RUN=true
       shift
       ;;

@@ -166,7 +166,7 @@ Instead, label and comment:
 		"typed evidence, repeatable: commit:<sha>, pr:<url>, test:<cmd>, "+
 			"reviewed-paths:<path>, external:<account>, no-change-audit:<text>, "+
 			"duplicate-of:<N>, superseded-by:<N>")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
+	cmd.Flags().BoolVar(&dryRun, "dry", false,
 		"validate without mutating; reports the would-be close event")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "",
 		"send Idempotency-Key header for safe retry")

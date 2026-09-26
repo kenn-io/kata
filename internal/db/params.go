@@ -507,6 +507,8 @@ type ProjectMergeResult struct {
 
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
 type MoveIssueProjectIn struct {
+	// DryRun validates inside the move transaction, then rolls back without moving.
+	DryRun        bool
 	IssueID       int64
 	FromProjectID int64
 	ToProjectID   int64

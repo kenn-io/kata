@@ -573,3 +573,26 @@ func TestEditIssue_ArchivedPeerRules_QualifiedRef(t *testing.T) {
 	raw = readClose(t, resp)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "remove body: %s", raw)
 }
+
+func TestMoveIssue_FederationErrorNamesMoveRestriction(t *testing.T) {
+	for _, role := range []db.FederationRole{db.FederationRoleHub, db.FederationRoleSpoke} {
+		t.Run(string(role), func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			src, tgt, iss := seedMovePair(t, env)
+			_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
+				ProjectID: src.ID, Role: role, HubURL: "https://hub.example",
+				HubProjectID: src.ID, HubProjectUID: src.UID, Enabled: true,
+			})
+			require.NoError(t, err)
+			body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, tgt.UID)
+			resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, iss.ShortID), body, `"rev-1"`)
+			defer func() { _ = resp.Body.Close() }()
+			raw, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+			assert.Contains(t, string(raw), `"code":"federated_move_unsupported"`)
+			assert.Contains(t, string(raw), "cross-project moves involving a federated project are unsupported")
+			assert.NotContains(t, string(raw), "spoke project is read-only")
+		})
+	}
+}

@@ -50,14 +50,20 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		if err != nil {
 			return nil, err
 		}
-		rev, err := parseIfMatchRevision(in.IfMatch)
-		if err != nil {
-			return nil, err
+		var rev int64
+		if !in.Body.DryRun || in.IfMatch != "" {
+			rev, err = parseIfMatchRevision(in.IfMatch)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		iss, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
+		}
+		if in.Body.DryRun && in.IfMatch == "" {
+			rev = iss.Revision
 		}
 		tgt, err := activeProjectByUID(ctx, cfg.DB, in.Body.ToProjectUID)
 		if err != nil {
@@ -74,6 +80,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			ToProjectID:   tgt.ID,
 			IfMatchRev:    rev,
 			Actor:         actor,
+			DryRun:        in.Body.DryRun,
 		})
 		if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 			return nil, api.NewError(412, "revision_conflict",
@@ -102,8 +109,10 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)
 		out.Body.Issue = res.Issue
 		out.Body.EventID = res.EventID
-		out.Body.NewShortID = res.NewShortID
-		out.Body.Changed = true
+		out.Body.Changed = !in.Body.DryRun
+		if !in.Body.DryRun {
+			out.Body.NewShortID = &res.NewShortID
+		}
 		return out, nil
 	}
 }
