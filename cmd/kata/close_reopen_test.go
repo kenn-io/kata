@@ -110,7 +110,7 @@ func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
 		"--done",
 		"--message", "Fixed Safari callback double-submit and ran tests.",
 		"--commit", "abc1234",
-		"--dry-run")
+		"--dry")
 
 	require.NoError(t, err)
 	assert.Regexp(t, `(?m)^OK close \S+`, stdout)
@@ -270,9 +270,24 @@ func TestCloseCmd_DryRunDoesNotMutate(t *testing.T) {
 		"--done",
 		"--message", "Fixed Safari callback double-submit and ran tests.",
 		"--commit", "abc1234",
-		"--dry-run")
+		"--dry")
 	assert.Contains(t, out, "dry-run")
 	assert.Contains(t, out, "[open]")
+
+	show := runCLI(t, env, dir, "show", ref, "--json")
+	assert.Contains(t, show, `"status":"open"`)
+}
+
+func TestCloseCmd_RejectsDryRunSpelling(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	_, stderr, err := runCLIWithErr(t, env, dir,
+		"close", ref,
+		"--done",
+		"--message", "Fixed the issue and recorded evidence.",
+		"--commit", "abc1234",
+		"--dry-run")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "unknown flag: --dry-run")
 
 	show := runCLI(t, env, dir, "show", ref, "--json")
 	assert.Contains(t, show, `"status":"open"`)

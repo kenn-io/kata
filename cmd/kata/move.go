@@ -31,7 +31,7 @@ assigned in the target project.`,
 			return runMove(cmd, args[0], args[1], dryRun)
 		},
 	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and preview without mutating")
+	cmd.Flags().BoolVar(&dryRun, "dry", false, "validate and preview without mutating")
 	addCommentFlag(cmd)
 	return cmd
 }
@@ -63,6 +63,11 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 	if err != nil {
 		return err
 	}
+	if dryRun {
+		if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionMoveDryRun, "move --dry"); err != nil {
+			return err
+		}
+	}
 	target, err := resolveProjectSelector(
 		daemonAPI{ctx: ctx, client: client, baseURL: baseURL}, targetProject)
 	if err != nil {
@@ -75,24 +80,31 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 			ExitCode: ExitValidation,
 		}
 	}
-	sourceIssue, err := fetchMoveIssue(ctx, client, baseURL, pid, ref.RefForAPI)
-	if err != nil {
-		return err
-	}
-	if dryRun {
-		return printMovePreview(cmd, ref.ProjectName, sourceIssue.ShortID, target.Name)
+	// Showing an issue may refresh federation claims. Previews obtain the
+	// source issue from the validation response instead, without that GET.
+	var sourceIssue moveIssueWire
+	if !dryRun {
+		sourceIssue, err = fetchMoveIssue(ctx, client, baseURL, pid, ref.RefForAPI)
+		if err != nil {
+			return err
+		}
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 	if err != nil {
 		return err
 	}
-	etag := fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)
-	response, callErr := apiClient.MoveIssueWithResponse(ctx, &generated.MoveIssueRequestOptions{
+	request := &generated.MoveIssueRequestOptions{
 		PathParams: &generated.MoveIssuePath{ProjectID: pid, Ref: ref.RefForAPI},
 		Body:       &generated.MoveIssueBody{Actor: &actor, ToProjectUID: target.UID},
-		Header:     &generated.MoveIssueHeaders{IfMatch: &etag},
-	})
+	}
+	if dryRun {
+		request.Body.DryRun = &dryRun
+	} else {
+		etag := fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)
+		request.Header = &generated.MoveIssueHeaders{IfMatch: &etag}
+	}
+	response, callErr := apiClient.MoveIssueWithResponse(ctx, request)
 	if response == nil {
 		return externalCLITransportError(response, callErr)
 	}
@@ -103,6 +115,9 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun bool) erro
 	var moved moveResponseWire
 	if err := json.Unmarshal(bs, &moved); err != nil {
 		return err
+	}
+	if dryRun {
+		return printMovePreview(cmd, ref.ProjectName, moved.Issue.ShortID, target.Name)
 	}
 	if err := postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment, handle); err != nil {
 		return err

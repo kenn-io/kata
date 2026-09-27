@@ -79,6 +79,29 @@ func TestIssueSyncBodyWithoutBindingValidatesAndOmitsBinding(t *testing.T) {
 		"absent issue sync binding must not marshal as an empty object")
 }
 
+func TestMovePreviewResponseWithoutNewShortIDValidatesAndOmitsField(t *testing.T) {
+	issue := generated.Issue{
+		Author:    "tester",
+		Body:      "preview only",
+		CreatedAt: time.Unix(1, 0).UTC(),
+		ShortID:   "abc4",
+		Status:    "open",
+		Title:     "move preview",
+		UID:       "01TESTISSUEAAAAAAAAAAAAAAA",
+		UpdatedAt: time.Unix(1, 0).UTC(),
+	}
+	response := generated.MoveIssueResponseBody{Issue: issue}
+	require.NoError(t, response.Validate(),
+		"a dry-run response has no allocated target short ID")
+
+	out, err := json.Marshal(response)
+	require.NoError(t, err)
+	var roundTrip map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(out, &roundTrip))
+	require.NotContains(t, roundTrip, "new_short_id",
+		"an absent target short ID must not marshal as an empty string")
+}
+
 // The run-once endpoint accepts an empty request object and returns a sync
 // result object. The generated request options must point at the request-body
 // schema so callers can naturally send {} without constructing a response

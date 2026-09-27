@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-22
+last_edited: 2026-09-26
 ---
 
 # CLI reference
@@ -319,15 +319,28 @@ archived projects are rejected with a hint to unarchive the project first.
 Move between projects:
 
 ```sh
-kata move <issue-ref> <project> [--dry-run] [--comment TEXT]
+kata move <issue-ref> <project> [--dry] [--comment TEXT]
 ```
 
 `move` keeps the issue UID and history, then assigns the issue to the target
 project. The target project is resolved the same way as `kata projects show`.
 The issue's target `short_id` is assigned by the daemon during the move, so it
 may differ from the source `short_id` if the target project already has a
-collision. `--dry-run` is a client-side preview: it resolves the source issue
-and target project without mutating anything.
+collision. `--dry` asks the daemon to validate the same move restrictions
+without changing the issue, claims, comments, or event cursor. It rejects
+recurrence-pinned issues, archived projects, federation bindings, active external
+root claims, and import mapping or issue-sync ownership conflicts just as a real
+move does. A preview validates the current state; a later move checks it again.
+The target short ID is assigned only during the real move. `--comment` is ignored
+by a preview. Previews require daemon API 0.23.0 or newer; the CLI checks before
+sending the `dry_run` request field.
+A preview is a move request, so it needs the same write authority as a real
+move. Read-only tokens and `--insecure-readonly` clients cannot preview.
+
+Moves involving any federated project are unsupported on both hubs and spokes,
+including projects whose sync is disabled. The daemon returns
+`federated_move_unsupported` rather than treating a hub as a read-only spoke.
+See [Federation](../operations/federation.md#moving-issues-between-projects).
 
 Links survive a move: `parent`, `blocks`/`blocked-by`, and `related` edges
 are never removed or rewritten. See the link-flag reference above for

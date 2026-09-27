@@ -37,6 +37,32 @@ func TestFilteredReadyAllRejectsOldDaemonBeforeQuery(t *testing.T) {
 	assert.Zero(t, readyCalls.Load(), "the unfiltered old endpoint must not be queried")
 }
 
+func TestMoveDryRunRejectsOldDaemonBeforePreview(t *testing.T) {
+	var moveCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project","uid":"01TESTPROJECTAAAAAAAAAAAAAA"}}`))
+		case "/api/v1/health":
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.22.0"}`))
+		case "/api/v1/projects/1/issues/abc1/actions/move":
+			moveCalls.Add(1)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	_, _, err := executeRootCapture(t,
+		contextWithBaseURL(context.Background(), server.URL),
+		"--project", "example-project", "move", "abc1", "target-project", "--dry")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires daemon API 0.23.0 or newer")
+	assert.Contains(t, err.Error(), "reports 0.22.0")
+	assert.Zero(t, moveCalls.Load(), "the old daemon must not receive the new request field")
+}
+
 func TestFilteredSearchRejectsOldDaemonBeforeQuery(t *testing.T) {
 	var searchCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -405,7 +405,7 @@ func (h toolHandlers) move(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	}
 	return successResult(), MoveOutput{
 		From: from, To: to, Issue: h.summaryFromIssue(to, response.Issue), Changed: response.Changed,
-		EventID: response.EventID, NewShortID: response.NewShortID,
+		EventID: response.EventID, NewShortID: response.Issue.ShortID,
 	}, nil
 }
 

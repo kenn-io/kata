@@ -11,6 +11,9 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// errMovePreview rolls back provisional validation updates on a successful preview.
+var errMovePreview = errors.New("move preview complete")
+
 // MoveIssueProject rehomes one active, non-recurring issue while preserving
 // stable UID relationships and allocating a fresh target-local short ID.
 func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
@@ -19,15 +22,15 @@ func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectI
 		return output, fmt.Errorf("source and target projects are the same")
 	}
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := ensureFederatedMoveAllowedTx(ctx, tx, input.FromProjectID, input.ToProjectID); err != nil {
+			return err
+		}
 		current, source, err := lockedIssueTx(ctx, tx, input.IssueID, false)
 		if err != nil {
 			return err
 		}
 		if current.ProjectID != input.FromProjectID {
 			return db.ErrNotFound
-		}
-		if err := ensureFederatedMoveAllowedTx(ctx, tx, input.FromProjectID, input.ToProjectID); err != nil {
-			return err
 		}
 		if err := ensureProjectWritableTx(ctx, tx, input.FromProjectID); err != nil {
 			return err
@@ -67,6 +70,11 @@ func (s *Store) MoveIssueProject(ctx context.Context, input db.MoveIssueProjectI
 		}
 		if len(mappingCollisions) > 0 {
 			return &db.ProjectMergeImportMappingCollisionError{Mappings: mappingCollisions}
+		}
+		if input.DryRun {
+			output.Issue = current
+			output.NewRevision = current.Revision
+			return errMovePreview
 		}
 		newShortID, err := s.resolveShortIDTx(ctx, tx, target.ID, current.UID, "")
 		if err != nil {
@@ -121,6 +129,9 @@ SET project_id = $1 WHERE issue_id = $2`,
 		output.NewRevision = newRevision
 		return err
 	})
+	if errors.Is(err, errMovePreview) {
+		return output, nil
+	}
 	return output, err
 }
 
