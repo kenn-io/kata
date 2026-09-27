@@ -1037,10 +1037,10 @@ func claimStatusBody(status db.ClaimStatus) api.ClaimStatusBody {
 	return body
 }
 
-const (
-	showClaimStatusRefreshTimeout = 500 * time.Millisecond
-	showClaimStatusRetryAfter     = time.Minute
-)
+const showClaimStatusRetryAfter = time.Minute
+
+// showClaimStatusRefreshTimeout is a var so tests can exercise the budget without waiting it out.
+var showClaimStatusRefreshTimeout = 500 * time.Millisecond
 
 func showIssueClaimRelevant(ctx context.Context, store db.Storage, projectID int64) (bool, error) {
 	binding, err := store.FederationBindingByProject(ctx, projectID)

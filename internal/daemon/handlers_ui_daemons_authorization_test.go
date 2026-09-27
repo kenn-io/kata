@@ -328,10 +328,16 @@ func TestWebDaemonGatewayRejectsOversizedCloseBeforeContactingTarget(t *testing.
 }
 
 func TestWebDaemonGatewayBoundsTargetAuthorityCheck(t *testing.T) {
+	previousTimeout := webDaemonProbeTimeout
+	webDaemonProbeTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { webDaemonProbeTimeout = previousTimeout })
 	var mutationCalls int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/instance" {
-			time.Sleep(2500 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+			case <-time.After(time.Second):
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"web_ui_contract_version": api.UISnapshotContractVersion,

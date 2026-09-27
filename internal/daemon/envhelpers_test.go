@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -141,37 +140,9 @@ func issuePathRef(projectID int64, ref, suffix string) string {
 }
 
 // currentEnvForIssuePath mirrors currentHandleForIssueURL for env-based
-// tests. Set by initWorkspaceViaHTTP; never read in parallel because
+// tests. Set by initLocalWorkspace; never read in parallel because
 // tests in this package do not call t.Parallel().
 var currentEnvForIssuePath *testenv.Env
-
-// initWorkspaceViaHTTP runs git init in a temp dir, adds origin, posts to
-// /api/v1/projects, and returns the resolved project_id.
-func initWorkspaceViaHTTP(t *testing.T, env *testenv.Env, origin string) int64 {
-	t.Helper()
-	dir := t.TempDir()
-	mustRun(t, dir, "git", "init", "--quiet")
-	mustRun(t, dir, "git", "remote", "add", "origin", origin)
-
-	envPostJSON(t, env, "/api/v1/projects", map[string]string{
-		"start_path": dir, "actor": "user-a",
-	}, nil)
-	var out struct {
-		Project struct {
-			ID int64 `json:"id"`
-		} `json:"project"`
-	}
-	envPostJSON(t, env, "/api/v1/projects/resolve", map[string]string{"start_path": dir}, &out)
-	// Register env so issuePath can resolve issue IDs → short_ids at
-	// request time. Tests in this package run sequentially.
-	currentEnvForIssuePath = env
-	t.Cleanup(func() {
-		if currentEnvForIssuePath == env {
-			currentEnvForIssuePath = nil
-		}
-	})
-	return out.Project.ID
-}
 
 // initLocalWorkspace seeds the project state that most daemon handler tests
 // need without paying for git process startup or exercising project init.
@@ -190,14 +161,6 @@ func initLocalWorkspace(t *testing.T, env *testenv.Env, projectName string) int6
 		}
 	})
 	return project.ID
-}
-
-// mustRun runs a command in dir, failing the test on error.
-func mustRun(t *testing.T, dir, name string, args ...string) {
-	t.Helper()
-	cmd := exec.Command(name, args...) //nolint:gosec // G204: test-controlled args
-	cmd.Dir = dir
-	require.NoErrorf(t, cmd.Run(), "%s %v", name, args)
 }
 
 // setupOneIssue creates a workspace + one issue, returns (project_id, issue_number).

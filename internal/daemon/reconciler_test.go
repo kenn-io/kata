@@ -25,6 +25,8 @@ import (
 func newReconcilerTestStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
+	// Search fixtures seed a thousand issues; flushing each commit to disk dominated their runtime.
+	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	if err != nil {
@@ -94,6 +96,7 @@ func TestReconcilerLeaderRetriesWhenDrainAdmissionReopens(t *testing.T) {
 // cleanup.
 func openTestVectorIndex(t *testing.T) *vector.Index {
 	t.Helper()
+	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
 	idx, err := vector.Open(context.Background(), filepath.Join(t.TempDir(), "vectors.db"))
 	if err != nil {
 		t.Fatalf("open vector index: %v", err)
