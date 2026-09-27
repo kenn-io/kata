@@ -787,6 +787,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if m.input.kind == inputSearchBar && m.input.searchFocus == searchFocusResults {
 			return m, nil, true
 		}
+		if m.input.kind.isPanelPrompt() {
+			if m.input.saving {
+				return m, nil, true
+			}
+			m.input.err = ""
+		}
 		if m.modal == modalNone && m.input.kind != inputNone {
 			m.input, _ = m.input.delegateToField(msg)
 			if m.input.kind.isCommandBar() {
@@ -1040,6 +1046,8 @@ func (m Model) openInputFromMsg(msg openInputMsg) (Model, tea.Cmd) {
 	case kind.isPanelPrompt():
 		target := m.panelPromptTarget()
 		m.input = newPanelPrompt(kind, target)
+		m.nextFormGen++
+		m.input.formGen = m.nextFormGen
 		if kind == inputLabelPrompt {
 			return m.dispatchLabelFetchIfNeeded(target.projectID)
 		}
@@ -1126,8 +1134,8 @@ func (m Model) openCommentForm() Model {
 // applies the resulting action. Bars apply their buffer to lm.filter
 // live on every keystroke (no debounce — filters are client-side).
 // Panel prompts (M3b) commit on action only — no live mirror; they
-// dispatch the mutation via dispatchPanelPromptCommit. Commit closes
-// the input; cancel restores any pre-open snapshot (bars only).
+// dispatch the mutation via dispatchPanelPromptCommit. The prompt stays
+// open until the response succeeds; cancel restores any pre-open snapshot (bars only).
 //
 // Label prompts (`+` / `-`) post-process the input: ↑/↓ already
 // adjusted suggestHighlight in inputState.Update; we wrap it modulo
@@ -1135,6 +1143,12 @@ func (m Model) openCommentForm() Model {
 // highlighted suggestion's label (suggestion source is computed at
 // the Model level — see suggestionsForPrompt).
 func (m Model) routeInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if m.input.kind.isPanelPrompt() {
+		if m.input.saving && msg.String() != "esc" {
+			return m, nil
+		}
+		m.input.err = ""
+	}
 	if m.input.kind == inputSearchBar {
 		if next, cmd, handled := m.routeSearchInputKey(msg); handled {
 			return next, cmd
@@ -1607,7 +1621,7 @@ func editorKindFor(k inputKind) string {
 // A's project. Filter form is in isCenteredForm() too — the guard
 // keeps it open whenever a stray non-filter form mutation arrives.
 func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
-	if !m.input.kind.isCenteredForm() {
+	if !m.input.kind.isCenteredForm() && !m.input.kind.isPanelPrompt() {
 		return m, nil
 	}
 	if mut.formGen != m.input.formGen {
@@ -1652,7 +1666,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		mut.gen = target.detailGen
 	} else {
 		mut.origin = "detail"
-		mut.gen = m.detail.gen
+		if !formKind.isPanelPrompt() {
+			mut.gen = m.detail.gen
+		}
 	}
 	return m.routeMutation(mut)
 }
@@ -1711,10 +1727,9 @@ func (m Model) applyLiveBarFilter() Model {
 	return m
 }
 
-// commitInput closes the input shell. For command bars, the live-
-// mirrored filter stays applied. For panel-local prompts, the
-// trimmed buffer dispatches the corresponding detail-side mutation
-// via dispatchPanelPromptCommit before the input clears.
+// commitInput closes command bars, keeping the live-mirrored filter applied.
+// Panel prompts dispatch their trimmed buffer through dispatchPanelPromptCommit
+// and stay open until routeFormMutation accepts a successful response.
 //
 // For centered forms, commitInput keeps the form open with
 // saving=true while the mutation is in flight (so a duplicate
@@ -1746,12 +1761,22 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 		return m.commitFormInput(kind)
 	}
 	trimmed := strings.TrimSpace(rawBuf)
-	m.input = inputState{}
 	if kind.isPanelPrompt() && trimmed != "" {
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.dispatchPanelPromptCommit(m.api, kind, trimmed)
-		return m, cmd
+		if cmd != nil {
+			m.input.saving = true
+			m.input.err = ""
+			formGen := m.input.formGen
+			return m, withConnGen(func() tea.Msg {
+				mut := cmd().(mutationDoneMsg)
+				mut.origin = "form"
+				mut.formGen = formGen
+				return mut
+			}, m.connGen)
+		}
 	}
+	m.input = inputState{}
 	return m, nil
 }
 

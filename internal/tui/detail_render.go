@@ -416,6 +416,12 @@ func documentScrollIndicator(total, scroll, visible int) string {
 // keep it intact (don't sanitize — strips the cursor) and width-clip
 // with ansi.Truncate so escape sequences survive.
 func renderInfoPrompt(s inputState, innerWidth int) string {
+	if s.saving {
+		return ansi.Truncate(s.title+": saving…", innerWidth, "…")
+	}
+	if s.err != "" {
+		return ansi.Truncate(renderFormStatus(s), innerWidth, "…")
+	}
 	field := s.activeField()
 	if field == nil {
 		return ansi.Truncate(s.title+": ", innerWidth, "…")

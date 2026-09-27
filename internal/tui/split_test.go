@@ -462,20 +462,22 @@ func TestSplit_ListRefreshWaitsForEditingInput(t *testing.T) {
 				if tc.cancel {
 					m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 					require.Empty(t, *requestPath)
-				} else if tc.form {
+				} else {
 					var cmd tea.Cmd
-					m, cmd = updateModel(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+					key := tea.KeyPressMsg{Code: tea.KeyEnter}
+					if tc.form {
+						key = tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}
+					}
+					m, cmd = updateModel(m, key)
 					require.True(t, m.input.saving)
 					require.Equal(t, "aaa1", m.detail.issue.ShortID)
+					var duplicate tea.Cmd
+					m, duplicate = updateModel(m, key)
+					require.Nil(t, duplicate, "saving must not dispatch the mutation twice")
 					result := unwrapMutationCmd(t, cmd)
 					require.NoError(t, result.err)
 					require.Contains(t, *requestPath, "/issues/aaa1")
 					m, _ = updateModel(m, result)
-				} else {
-					var cmd tea.Cmd
-					m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-					runBatch(cmd)
-					require.Equal(t, "/api/v1/projects/7/issues/aaa1/actions/priority", *requestPath)
 				}
 				require.Equal(t, inputNone, m.input.kind)
 				if tc.linked {
@@ -498,6 +500,54 @@ func TestSplit_ListRefreshWaitsForEditingInput(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSplit_PromptErrorKeepsEditingTarget(t *testing.T) {
+	for _, finish := range []string{"cancel", "retry"} {
+		t.Run(finish, func(t *testing.T) {
+			m, cleanup := splitTestSetup(t)
+			defer cleanup()
+			api, requestPath := captureCreateIssue(t)
+			m.api = api
+			m.list.issues = []Issue{testIssue("aaa1", withStatus("open")), testIssue("bbb2", withStatus("open"))}
+			m.list.filter.Status = "open"
+			m, _ = m.scheduleDetailFollow()
+			m.focus = focusDetail
+			m, _ = m.openInput(inputPriorityPrompt)
+			m.input.activeField().setValue("9")
+			issues := append([]Issue(nil), m.list.issues...)
+			issues[0].Status = "closed"
+			m, _ = updateModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues})
+
+			m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			require.Equal(t, inputPriorityPrompt, m.input.kind)
+			result := unwrapMutationCmd(t, cmd)
+			require.ErrorContains(t, result.err, "expected 0..4")
+			m, _ = updateModel(m, result)
+			require.Equal(t, inputPriorityPrompt, m.input.kind)
+			require.False(t, m.input.saving)
+			require.Equal(t, "9", m.input.activeField().value())
+			require.Equal(t, "aaa1", m.detail.issue.ShortID)
+			require.Contains(t, stripANSI(m.View().Content), "expected 0..4")
+			require.Empty(t, *requestPath, "invalid priority must not reach the daemon")
+
+			if finish == "retry" {
+				m, _ = updateModel(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+				m, _ = updateModel(m, tea.KeyPressMsg{Code: '2', Text: "2"})
+				require.Empty(t, m.input.err)
+				require.Equal(t, "2", m.input.activeField().value())
+				m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+				result = unwrapMutationCmd(t, cmd)
+				require.NoError(t, result.err)
+				require.Equal(t, "/api/v1/projects/7/issues/aaa1/actions/priority", *requestPath)
+				m, _ = updateModel(m, result)
+			} else {
+				m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+			}
+			require.Equal(t, inputNone, m.input.kind)
+			require.Equal(t, "bbb2", m.detail.issue.ShortID)
+		})
 	}
 }
 
