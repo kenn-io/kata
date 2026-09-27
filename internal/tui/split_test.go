@@ -474,6 +474,10 @@ func TestSplit_ListRefreshWaitsForEditingInput(t *testing.T) {
 					var duplicate tea.Cmd
 					m, duplicate = updateModel(m, key)
 					require.Nil(t, duplicate, "saving must not dispatch the mutation twice")
+					if !tc.form {
+						m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+						require.Equal(t, inputPriorityPrompt, m.input.kind, "Esc must wait for the save response")
+					}
 					result := unwrapMutationCmd(t, cmd)
 					require.NoError(t, result.err)
 					require.Contains(t, *requestPath, "/issues/aaa1")
@@ -522,6 +526,9 @@ func TestSplit_PromptErrorKeepsEditingTarget(t *testing.T) {
 
 			m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 			require.Equal(t, inputPriorityPrompt, m.input.kind)
+			require.NotContains(t, lastRenderedLine(m.View().Content), "esc cancel")
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+			require.Equal(t, inputPriorityPrompt, m.input.kind, "Esc must not discard the pending error")
 			result := unwrapMutationCmd(t, cmd)
 			require.ErrorContains(t, result.err, "expected 0..4")
 			m, _ = updateModel(m, result)
@@ -530,6 +537,7 @@ func TestSplit_PromptErrorKeepsEditingTarget(t *testing.T) {
 			require.Equal(t, "9", m.input.activeField().value())
 			require.Equal(t, "aaa1", m.detail.issue.ShortID)
 			require.Contains(t, stripANSI(m.View().Content), "expected 0..4")
+			require.Contains(t, lastRenderedLine(m.View().Content), "esc cancel")
 			require.Empty(t, *requestPath, "invalid priority must not reach the daemon")
 
 			if finish == "retry" {

@@ -157,11 +157,6 @@ func TestLabelPrompt_EnterCommitsCurrentBuffer(t *testing.T) {
 	if jumped.detail.status != "" {
 		t.Fatalf("old prompt completion changed the new issue's status: %q", jumped.detail.status)
 	}
-	// A canceled request must not close a newer prompt on the same issue.
-	reopened := sendKey(m, tea.KeyEsc)
-	reopened, _ = reopened.openInput(inputLabelPrompt)
-	reopened, _ = updateModel(reopened, result)
-	assertInputKind(t, reopened, inputLabelPrompt)
 	m, _ = updateModel(m, result)
 	assertInputKind(t, m, inputNone)
 }

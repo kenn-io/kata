@@ -1144,7 +1144,7 @@ func (m Model) openCommentForm() Model {
 // the Model level — see suggestionsForPrompt).
 func (m Model) routeInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if m.input.kind.isPanelPrompt() {
-		if m.input.saving && msg.String() != "esc" {
+		if m.input.saving {
 			return m, nil
 		}
 		m.input.err = ""

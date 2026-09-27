@@ -113,6 +113,9 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 	kind := input.kind
 	switch {
 	case kind.isPanelPrompt():
+		if input.saving {
+			return nil
+		}
 		return [][]helplayout.HelpItem{{
 			{Key: "enter", Description: "commit"},
 			{Key: "esc", Description: "cancel"},
