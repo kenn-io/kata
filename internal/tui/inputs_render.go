@@ -99,7 +99,7 @@ func renderCloseForm(s inputState, innerW, innerH int) string {
 	footer := renderFormFooter(s, innerW, s.activeFieldIs(fieldCloseMessage))
 	messageRows := max(innerH-10, 3)
 	if message := s.field(fieldCloseMessage); message != nil {
-		message.area.SetWidth(innerW)
+		message.area.SetWidth(innerW - 2)
 		message.area.SetHeight(messageRows)
 	}
 	parts := []string{titleStyle.Render(s.title)}
@@ -209,7 +209,7 @@ func renderSingleFieldForm(s inputState, innerW, innerH int) string {
 	if f == nil {
 		return ""
 	}
-	f.area.SetWidth(innerW)
+	f.area.SetWidth(innerW - 2)
 	f.area.SetHeight(innerH - 2 /* title + footer */)
 	body := f.area.View()
 	footer := renderFormFooter(s, innerW, true /* allowEditor */)
@@ -248,10 +248,9 @@ func renderNewIssueForm(s inputState, innerW, innerH int) string {
 		reserved++
 	}
 	bodyRows := max(innerH-reserved, 3)
-	// Single-line field width = innerW; resize the body textarea so
-	// it fills the available width and bodyRows.
+	// Reserve the modal's horizontal padding, matching single-line fields.
 	if body := s.field(fieldBody); body != nil {
-		body.area.SetWidth(innerW)
+		body.area.SetWidth(innerW - 2)
 		body.area.SetHeight(bodyRows)
 	}
 	parts := []string{titleStyle.Render(s.title)}

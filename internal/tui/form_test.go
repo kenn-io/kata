@@ -12,6 +12,33 @@ import (
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
+func TestCenteredForm_TextareaWrapsWithinPadding(t *testing.T) {
+	defer snapshotInit(t)()
+	const body = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
+	for _, tt := range []struct {
+		name  string
+		form  inputState
+		field fieldID
+	}{
+		{"new issue", newNewIssueForm(), fieldBody},
+		{"edit body", newBodyEditForm(formTarget{}, ""), fieldBody},
+		{"comment", newCommentForm(formTarget{}), fieldComment},
+		{"completion", newCloseForm(formTarget{}), fieldCloseMessage},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := focusNewIssueField(tt.form, tt.field)
+			// Size the textarea before pasting, as the initial form render does.
+			_ = renderCenteredForm(s, 160, 40)
+			s, _ = s.delegateToField(tea.PasteMsg{Content: body})
+			view := stripANSI(renderCenteredForm(s, 160, 40))
+			// A second wrap by the modal used to leave "labore" on its own row.
+			if !strings.Contains(view, "labore et dolore magna aliqua.") {
+				t.Fatalf("modal rewrapped the textarea's continuation line:\n%s", view)
+			}
+		})
+	}
+}
+
 func TestFormCommitKeys_CtrlOCanonical_CtrlSCompatible(t *testing.T) {
 	for _, kind := range []inputKind{
 		inputBodyEditForm,
