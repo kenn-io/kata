@@ -105,6 +105,7 @@ jobs:
 
       - name: Run tests
         env:
+          KATA_TEST_FAST_SQLITE: "1"
           KATA_TEST_POSTGRES_AUTO_CONTAINER: "0"
         # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
         run: |
@@ -171,6 +172,7 @@ jobs:
 
       - name: Run PostgreSQL backend and operator tests
         env:
+          KATA_TEST_FAST_SQLITE: "1"
           KATA_TEST_POSTGRES_DSN: postgres://kata:kata@127.0.0.1:5432/kata_test?sslmode=disable
         run: >-
           env -u KATA_AUTH_TOKEN go test -count=1 -p 1
