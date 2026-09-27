@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-26
+last_edited: 2026-09-27
 ---
 
 # CLI reference
@@ -101,6 +101,71 @@ not mutate workspace files, and comes from the same canonical text that
 `kata init --with-agents` writes. `contract` is valid only for `quickstart` and
 its `agent-instructions` alias; it conflicts with `--json` and `--agent` like
 the other output modes.
+
+## Agent hooks
+
+Run Kata's contract and attention hooks from coding-agent configurations:
+
+```text
+kata agent-hooks
+  contract <harness>          Read stdin and emit a harness-native contract response
+  attention start <harness>   Establish the attention baseline at session start
+  attention end <harness>     Raise attention if the session ended without a hand-off
+```
+
+These commands are coding-agent hooks. Daemon event hooks configured in
+`hooks.toml` are a
+[separate feature](../design/architecture.md#hooks-local-automation-with-a-hard-boundary).
+
+### Contract injection
+
+Use `contract` with `claude`, `codex`, `copilot`, `cursor`, `gemini`, `hermes`,
+or `qwen`. Factory Droid has no SessionStart hook and is refused. The harness
+name is positional. For example, a Codex SessionStart hook can run:
+
+```sh
+kata agent-hooks contract codex --source kata-agent-contract-hook
+```
+
+The command reads one finite native JSON payload from stdin through EOF and
+prints the unchanged [agent contract](#agent-contract-output) in that harness's
+native response. It works in directories without a `.kata.toml`. Repeating a
+session payload returns the contract again; this command does not deduplicate
+independently configured hooks. Stdout contains only the native response,
+including when `--agent` or `--json` is supplied. Diagnostics go to stderr.
+
+Most harnesses use SessionStart. Hermes instead uses `pre_llm_call` and receives
+the contract only when its native `is_first_turn` flag is `true`. Later turns
+and payloads without that flag receive an empty native response. Hermes's
+`on_session_start` is an observer event and does not inject context.
+
+The optional `--source kata-agent-contract-hook` marks hook ownership and
+does not change runtime behavior. A different marker, an unknown harness,
+or terminal stdin returns usage exit code `2`. At a terminal, use
+`kata quickstart --format contract` for plain text. Payload or encoding errors
+exit nonzero with one stderr line and no partial response on stdout.
+
+### Workspace attention
+
+Use `attention start` and `attention end` with `claude` or `codex`. The launcher
+sets `KATA_REF` to the tracked issue in the bound workspace. For example:
+
+```sh
+KATA_REF=abc4 kata agent-hooks attention start claude --source kata-agent-hook-start
+KATA_REF=abc4 kata agent-hooks attention end codex --source kata-agent-hook-end
+```
+
+Start sets `work.attention` to `ok` for an open issue. End changes an open issue
+from `ok` to `needs-human` and sets `work.attention_msg` to
+`session ended without hand-off`. It preserves a deliberate handoff and leaves
+closed issues unchanged. Both commands ignore stdin, produce no stdout, and
+silently ignore missing refs or daemon failures. `CLAUDE_PROJECT_DIR`, when
+present, supplies the workspace used for project resolution.
+
+The optional source marker must match the mode: `kata-agent-hook-start` or
+`kata-agent-hook-end`. Other harnesses and malformed arguments return usage
+exit code `2`. Workspace hook commands written by `kata init` keep their
+existing spelling and behavior.
 
 ## Model Context Protocol
 
