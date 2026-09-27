@@ -351,6 +351,109 @@ func TestStacked_SearchArrowNavigationDoesNotRetargetHiddenDetail(t *testing.T) 
 	}
 }
 
+func TestSplit_ListRefreshFollowsSelectionAfterClose(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		count   int
+		cursor  int
+		wantRef string
+	}{
+		{"first", 3, 0, "bbb2"},
+		{"middle", 3, 1, "ccc3"},
+		{"last", 3, 2, "bbb2"},
+		{"only", 1, 0, ""},
+	} {
+		for focusName, focus := range map[string]focusPane{"list": focusList, "detail": focusDetail} {
+			for _, fetchKind := range []string{"refetch", "initial"} {
+				t.Run(tc.name+"/"+focusName+"/"+fetchKind, func(t *testing.T) {
+					m, cleanup := splitTestSetup(t)
+					defer cleanup()
+					m.list.issues = []Issue{
+						testIssue("aaa1", withStatus("open")),
+						testIssue("bbb2", withStatus("open")),
+						testIssue("ccc3", withStatus("open")),
+					}[:tc.count]
+					m.list.filter.Status = "open"
+					m.list.cursor = tc.cursor
+					m.list = m.list.syncSelection(m.list.visibleRows())
+					m, _ = m.scheduleDetailFollow()
+					m.focus = focus
+					oldGen, oldFollowGen := m.detail.gen, m.nextDetailFollowGen
+
+					// The queue fetch includes closed issues; the open filter hides them.
+					issues := append([]Issue(nil), m.list.issues...)
+					issues[tc.cursor].Status = "closed"
+					var msg tea.Msg = refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues}
+					if fetchKind == "initial" {
+						msg = initialFetchMsg{dispatchKey: m.currentCacheKey(), issues: issues}
+					}
+					m, cmd := updateModel(m, msg)
+
+					selected, ok := pickHighlightedIssue(m.list)
+					if tc.wantRef == "" {
+						require.False(t, ok)
+						require.Nil(t, m.detail.issue, "closing the last visible issue must clear detail")
+						require.Nil(t, cmd)
+						require.Contains(t, stripANSI(splitDetailBody(m, 80, 35)), "select an issue from the list pane")
+					} else {
+						require.True(t, ok)
+						require.Equal(t, tc.wantRef, selected.ShortID)
+						require.NotNil(t, m.detail.issue)
+						require.Equal(t, tc.wantRef, m.detail.issue.ShortID, "detail must follow the new selection")
+						require.NotNil(t, cmd, "the replacement issue needs a detail fetch")
+						require.Contains(t, stripANSI(splitDetailBody(m, 80, 35)), "issue "+tc.wantRef)
+					}
+					// A response or debounce tick already in flight must not restore the closed issue.
+					wantDetail := m.detail.issue
+					m, _ = updateModel(m, detailFetchedMsg{gen: oldGen, issue: &issues[tc.cursor]})
+					require.Equal(t, wantDetail, m.detail.issue)
+					m, cmd = updateModel(m, detailFollowTickMsg{gen: oldFollowGen})
+					require.Nil(t, cmd)
+				})
+			}
+		}
+	}
+}
+
+func TestSplit_ListRefreshPreservesDetailNavigation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		count  int
+		loaded bool
+	}{
+		{"pending jump", 2, false},
+		{"loaded jump", 2, true},
+		{"empty list pending jump", 1, false},
+		{"empty list loaded jump", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, cleanup := splitTestSetup(t)
+			defer cleanup()
+			m.list.issues = []Issue{
+				testIssue("aaa1", withStatus("open")),
+				testIssue("bbb2", withStatus("open")),
+			}[:tc.count]
+			m.list.filter.Status = "open"
+			m, _ = m.scheduleDetailFollow()
+			m.focus = focusDetail
+			m, _ = updateModel(m, jumpDetailMsg{ref: "ccc3"})
+			if tc.loaded {
+				issue := testIssue("ccc3", withStatus("open"))
+				m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &issue})
+			}
+			jumped := m.detail
+			issues := append([]Issue(nil), m.list.issues...)
+			issues[0].Status = "closed"
+
+			m, cmd := updateModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues})
+			require.Nil(t, cmd)
+			require.Equal(t, jumped.issue, m.detail.issue)
+			require.Equal(t, jumped.gen, m.detail.gen)
+			require.Len(t, m.detail.navStack, 1, "background refresh must preserve Back navigation")
+		})
+	}
+}
+
 func TestSplit_SearchResultsRefetchRetargetsChangedHighlight(t *testing.T) {
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()

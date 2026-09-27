@@ -409,10 +409,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 		m = m.populateCache(msg)
-		if _, isInitial := msg.(initialFetchMsg); isInitial {
+		if _, isInitial := msg.(initialFetchMsg); isInitial && !prevHas {
 			m, postFetchCmd = m.maybeBootstrapSplitDetail()
 		} else {
-			m, postFetchCmd = m.reconcileSearchDetailAfterRefetch(prevPID, prevUID, prevHas)
+			m, postFetchCmd = m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
 		}
 	}
 	if mut, ok := msg.(mutationDoneMsg); ok {
@@ -548,15 +548,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return next, tea.Batch(cmd, postFetchCmd)
 }
 
-// reconcileSearchDetailAfterRefetch applies the same detail-follows-selection
+// reconcileSplitDetailAfterRefetch applies the same detail-follows-selection
 // invariant as keyboard navigation when an accepted list response moves the
-// highlighted search result. Empty results clear the search-owned pane and
-// invalidate any debounce tick for the departed issue.
-func (m Model) reconcileSearchDetailAfterRefetch(
+// highlighted issue. Empty results clear the detail pane and invalidate any
+// debounce tick for the departed issue. Keep independent detail navigation.
+func (m Model) reconcileSplitDetailAfterRefetch(
 	prevPID int64, prevUID string, prevHas bool,
 ) (Model, tea.Cmd) {
-	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusResults ||
-		m.layout != splitlayout.Split {
+	if m.layout != splitlayout.Split || len(m.detail.navStack) > 0 ||
+		(m.input.kind == inputSearchBar && m.input.searchFocus != searchFocusResults) {
 		return m, nil
 	}
 	newPID, newUID, newHas := highlightedIdentity(m.list)
