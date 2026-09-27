@@ -610,3 +610,17 @@ func TestPeerRefForDisplay_SanitizesHostileQualifiedRef(t *testing.T) {
 	assert.NotContains(t, got, "\x07", "BEL must not reach the terminal")
 	assert.Contains(t, got, "#abc4", "the ref itself must survive sanitization")
 }
+
+func TestShow_JSONIssueCarriesLabelStrings(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "labelled")
+	runCLI(t, env, dir, "label", "add", ref, "needs-review")
+
+	out := runCLI(t, env, dir, "show", ref, "--json")
+	var shown struct {
+		Issue struct {
+			Labels []string `json:"labels"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &shown))
+	assert.Equal(t, []string{"needs-review"}, shown.Issue.Labels)
+}

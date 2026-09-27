@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 
@@ -156,7 +157,7 @@ Instead, label and comment:
 	}
 	cmd.Flags().StringVar(&reason, "reason", "",
 		"one of: done, wontfix, duplicate, superseded, audit-no-change")
-	cmd.Flags().StringVar(&message, "message", "",
+	cmd.Flags().StringVarP(&message, "message", "m", "",
 		"substantive message describing scope and verification")
 	// StringArrayVar (not StringSliceVar) so commas inside a single
 	// --evidence value survive intact: no-change-audit:<text> and
@@ -183,6 +184,7 @@ Instead, label and comment:
 	cmd.Flags().StringVar(&sugarTest, "test", "", "sugar for --evidence test:<command>")
 	cmd.Flags().StringArrayVar(&sugarReviewed, "reviewed", nil, "sugar for --evidence reviewed-paths:<path>, repeatable")
 	addCommentFlag(cmd)
+	cmd.Flags().SetNormalizeFunc(normalizeCloseBodyFlag)
 	return cmd
 }
 
@@ -372,4 +374,14 @@ func evidencePayloadKey(e api.Evidence) string {
 		return strings.Join(e.Paths, ",")
 	}
 	return ""
+}
+
+// normalizeCloseBodyFlag makes --body an alias of --message, so the text flag
+// from `kata comment` also sets the close message here. --comment still posts
+// a separate follow-up comment.
+func normalizeCloseBodyFlag(_ *pflag.FlagSet, name string) pflag.NormalizedName {
+	if name == "body" {
+		return "message"
+	}
+	return pflag.NormalizedName(name)
 }
