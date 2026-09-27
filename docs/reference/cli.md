@@ -208,8 +208,10 @@ output.
 
 `kata show --json` returns `.issue.labels` as a string array, the same shape
 as `.issues[].labels` from `kata list --json`. On `show` the key is always
-present and is `[]` when the issue has no labels. The top-level `.labels`
-array keeps each label's `author` and `created_at`.
+present and is `[]` when the issue has no labels. The CLI prints the daemon's
+response as-is, so `.issue.labels` requires daemon API `0.24.0` or newer; an
+older daemon omits the key. The top-level `.labels` array keeps each label's
+`author` and `created_at` on every daemon version.
 
 `kata status` reports the issue status and revision, daemon identity, effective
 actor, issue owner, and federation lease. Its `hold` value is `active`,

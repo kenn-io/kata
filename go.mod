@@ -25,6 +25,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/shirou/gopsutil/v4 v4.26.6
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
 	github.com/teambition/rrule-go v1.8.2
 	github.com/testcontainers/testcontainers-go v0.42.0
@@ -139,7 +140,6 @@ require (
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pathologize v1.1.0 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spf13/viper v1.21.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
