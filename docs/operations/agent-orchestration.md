@@ -129,8 +129,8 @@ change independently. Re-running the command is a no-op, and symlinked
 `.claude` or `settings.json` paths are refused. Kit's shared agent-hook manager
 owns the additive config mutation and preserves unrelated hook entries.
 
-For Codex CLI workspaces, `kata init --with-codex-hooks` installs two
-`SessionStart` hooks in `.codex/hooks.json`. The contract hook injects the
+For Codex CLI workspaces, `kata init --with-codex-hooks` installs attention and,
+when needed, contract `SessionStart` hooks in `.codex/hooks.json`. The contract hook injects the
 canonical marker-free agent briefing through `kata agent-hooks contract codex`
 on startup, resume, clear, and context compaction. The attention hook runs
 `kata agent-hooks attention start` on startup, resume, and clear, but not
@@ -141,6 +141,14 @@ interactive confirmation on first run. Re-running the command is a no-op, and
 symlinked `.codex` or `hooks.json` paths are refused; if `.codex/config.toml`
 already defines a `[hooks]` table, the command prints a non-fatal warning that
 Codex loads both files' hooks together.
+
+When a user contract hook already supplies the briefing, init skips the workspace
+contract and removes an untracked duplicate. Tracked workspace hook files stay
+untouched for teammates. The normal attention entry keeps its trust key; init
+warns when removing a duplicate shifts surviving hooks and requires re-trust
+through `/hooks`. If the user hook is removed, re-run init to restore workspace
+contract injection. See the [init reference](../reference/cli.md#workspace-initialization) for
+ownership, config selection, and the tracked-file exception.
 
 Codex has no stable session-end hook event yet (the upstream event exists but
 is not yet in a stable Codex release), so `--with-codex-hooks` does not wire an

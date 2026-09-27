@@ -10,6 +10,8 @@ import (
 	"os"
 	"reflect"
 
+	"go.kenn.io/kata/internal/jsonutil"
+
 	"go.kenn.io/kit/agenthook"
 	"go.kenn.io/kit/atomicfile"
 )
@@ -34,14 +36,7 @@ func migrateLegacyAgentHooks(configPath string, legacy []legacyAgentHook) (bool,
 	}
 	decoder := jsontext.NewDecoder(bytes.NewReader(data))
 	var root map[string]any
-	if err := json.UnmarshalDecode(decoder, &root, json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, value *any) error {
-		if dec.PeekKind() != '0' {
-			return errors.ErrUnsupported
-		}
-		raw, err := dec.ReadValue()
-		*value = raw.Clone()
-		return err
-	}))); err != nil {
+	if err := json.UnmarshalDecode(decoder, &root, jsonutil.PreserveNumberLiterals()); err != nil {
 		return false, err
 	}
 	var trailing any

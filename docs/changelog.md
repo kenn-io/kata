@@ -16,6 +16,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   use the visible workspace attention commands. Existing workspace hook
   commands and the contract text keep their current behavior.
 
+- Remove an untracked duplicate Codex contract hook by re-running
+  `kata init --with-codex-hooks` when the selected user config already supplies
+  the contract. Attention hooks keep their positions when unchanged, and init
+  reports any surviving hooks that move and require re-trust. Tracked workspace
+  hook files remain untouched for teammates. See the
+  [init reference](reference/cli.md#workspace-initialization).
+
 ## 0.18.0
 <small>2026-09-17</small>
 

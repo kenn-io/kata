@@ -73,7 +73,7 @@ Everything else in `settings.json` is preserved, re-running is a no-op, and a
 symlinked `settings.json` or `.claude` directory is refused. Hook ownership and
 config mutation use kit's shared agent-hook manager.
 
-Pass `--with-codex-hooks` to install two additive `SessionStart` hooks in the
+Pass `--with-codex-hooks` to install additive `SessionStart` hooks in the
 workspace's `.codex/hooks.json`. The contract hook injects the same canonical
 briefing as `kata quickstart --format contract` through
 `kata agent-hooks contract codex` on startup, resume, clear, and context
@@ -87,6 +87,25 @@ after Codex exits. Everything else in `hooks.json` is preserved, re-running is
 a no-op, a symlinked `hooks.json` or `.codex` directory is refused, and a
 pre-existing `[hooks]` table in `.codex/config.toml` produces a non-fatal
 warning because Codex loads both files' hooks together.
+
+If the selected user's Codex config already has a `SessionStart` contract hook
+owned by the `--source kata-agent-contract-hook` marker, init installs only the
+workspace attention hook. It removes an existing untracked workspace contract
+hook and reports the user config path that supplies the contract. If
+`.codex/hooks.json` is tracked by git, init leaves that entire file untouched:
+teammates may not have a user hook. It reports a kept contract only when the
+tracked file contains one. Paths that identify the same config file count as
+one installation and do not trigger removal.
+
+Init checks only the config selected by the current `CODEX_HOME`, or the default
+`~/.codex/hooks.json` when that variable is absent. A workspace shared across
+several Codex homes therefore deduplicates against whichever home runs init.
+If you remove the user contract hook, re-run `kata init --with-codex-hooks` to
+restore the workspace contract hook.
+
+Removing the contract after the attention hook in the usual init order preserves
+attention's trust key. If removal shifts a remaining group or handler, init
+warns that Codex will ask to re-trust those hooks through `/hooks`.
 
 ## Agent contract output
 
