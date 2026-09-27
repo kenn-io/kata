@@ -415,6 +415,92 @@ func TestSplit_ListRefreshFollowsSelectionAfterClose(t *testing.T) {
 	}
 }
 
+func TestSplit_ListRefreshWaitsForEditingInput(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		form   bool
+		cancel bool
+		narrow bool
+		linked bool
+	}{
+		{"save prompt", false, false, false, false},
+		{"cancel prompt", false, true, false, false},
+		{"save form", true, false, false, false},
+		{"cancel form", true, true, false, false},
+		{"resize before save", true, false, true, false},
+		{"resize before cancel", false, true, true, false},
+		{"navigate while stacked", false, true, true, true},
+	} {
+		for listName, count := range map[string]int{"replacement": 2, "empty": 1} {
+			t.Run(tc.name+"/"+listName, func(t *testing.T) {
+				m, cleanup := splitTestSetup(t)
+				defer cleanup()
+				api, requestPath := captureCreateIssue(t)
+				m.api = api
+				m.list.issues = []Issue{
+					testIssue("aaa1", withStatus("open")),
+					testIssue("bbb2", withStatus("open")),
+				}[:count]
+				m.list.filter.Status = "open"
+				m, _ = m.scheduleDetailFollow()
+				m.focus = focusDetail
+				if tc.form {
+					m = m.openBodyEditForm()
+				} else {
+					m, _ = m.openInput(inputPriorityPrompt)
+				}
+				m.input.activeField().setValue("2")
+				issues := append([]Issue(nil), m.list.issues...)
+				issues[0].Status = "closed"
+				m, _ = updateModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues})
+				require.NotNil(t, m.detail.issue)
+				require.Equal(t, "aaa1", m.detail.issue.ShortID, "editing must keep its original issue")
+				if tc.narrow {
+					m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
+				}
+
+				if tc.cancel {
+					m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+					require.Empty(t, *requestPath)
+				} else if tc.form {
+					var cmd tea.Cmd
+					m, cmd = updateModel(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+					require.True(t, m.input.saving)
+					require.Equal(t, "aaa1", m.detail.issue.ShortID)
+					result := unwrapMutationCmd(t, cmd)
+					require.NoError(t, result.err)
+					require.Contains(t, *requestPath, "/issues/aaa1")
+					m, _ = updateModel(m, result)
+				} else {
+					var cmd tea.Cmd
+					m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+					runBatch(cmd)
+					require.Equal(t, "/api/v1/projects/7/issues/aaa1/actions/priority", *requestPath)
+				}
+				require.Equal(t, inputNone, m.input.kind)
+				if tc.linked {
+					m, _ = updateModel(m, jumpDetailMsg{ref: "ccc3"})
+					issue := testIssue("ccc3", withStatus("open"))
+					m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &issue})
+				}
+				if tc.narrow {
+					m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
+				}
+				if tc.linked {
+					require.NotNil(t, m.detail.issue)
+					require.Equal(t, "ccc3", m.detail.issue.ShortID)
+					require.Len(t, m.detail.navStack, 1, "explicit navigation must supersede deferred following")
+				} else if count == 1 {
+					require.Nil(t, m.detail.issue, "finishing input must clear an empty list's detail")
+				} else {
+					require.NotNil(t, m.detail.issue)
+					require.Equal(t, "bbb2", m.detail.issue.ShortID, "finishing input must follow the list")
+				}
+			})
+		}
+	}
+}
+
 func TestSplit_ListRefreshPreservesDetailNavigation(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

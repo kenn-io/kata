@@ -182,6 +182,8 @@ type Model struct {
 	// stale tick (one whose gen < the current value) drops cleanly
 	// without firing a fetch the user no longer wants.
 	nextDetailFollowGen int64
+	// Defer list-follow while an input still owns the current detail issue.
+	pendingDetailFollow bool
 	uidFormat           uidDisplayFormat
 	// Completion and mutation policy comes from initial /instance discovery.
 	closeRequiresEvidence    bool
@@ -387,6 +389,18 @@ func initialFilter(_ Options) ListFilter {
 // comments tab — but the list sub-model is untouched on pop, preserving
 // the user's cursor and filter state across the round trip.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	m = next.(Model)
+	if m.pendingDetailFollow && m.input.kind == inputNone && m.layout == splitlayout.Split {
+		m.pendingDetailFollow = false
+		if len(m.detail.navStack) == 0 {
+			return m.followSearchResultIfNeeded(cmd)
+		}
+	}
+	return m, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m = m.syncSearchDetailSnapshot(msg)
 	if next, cmd, ok := m.routeTopLevel(msg); ok {
 		return next, cmd
@@ -561,6 +575,10 @@ func (m Model) reconcileSplitDetailAfterRefetch(
 	}
 	newPID, newUID, newHas := highlightedIdentity(m.list)
 	if prevHas == newHas && prevPID == newPID && prevUID == newUID {
+		return m, nil
+	}
+	if m.input.kind != inputNone && m.input.kind != inputSearchBar {
+		m.pendingDetailFollow = true
 		return m, nil
 	}
 	if !newHas {
