@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -29,80 +30,90 @@ func (s *observedDueScanStore) ListDueExternalRootBindings(
 }
 
 func TestRunnerRetriesDueScanWhenDrainAdmissionReopens(t *testing.T) {
-	h := newReconcileHarness(t)
-	store := &observedDueScanStore{Storage: h.store}
-	retry := make(chan struct{})
-	var admissions atomic.Int64
-	runner := &Runner{
-		Store: store, Reconciler: h.reconciler, Interval: time.Hour,
-		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
-			if admissions.Add(1) == 1 {
-				return nil, false, retry
-			}
-			return activity.NewLease(nil, nil), true, nil
-		},
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
+	synctest.Test(t, func(t *testing.T) {
+		h := newReconcileHarness(t)
+		store := &observedDueScanStore{Storage: h.store}
+		retry := make(chan struct{})
+		var admissions atomic.Int64
+		runner := &Runner{
+			Store: store, Reconciler: h.reconciler, Interval: time.Hour,
+			DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+				if admissions.Add(1) == 1 {
+					return nil, false, retry
+				}
+				return activity.NewLease(nil, nil), true, nil
+			},
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
 
-	time.Sleep(30 * time.Millisecond)
-	assert.Zero(t, store.calls.Load(), "denied scans must not read durable work")
-	close(retry)
-	require.Eventually(t, func() bool { return store.calls.Load() == 1 }, time.Second, time.Millisecond)
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		time.Sleep(30 * time.Millisecond)
+		synctest.Wait()
+		assert.Zero(t, store.calls.Load(), "denied scans must not read durable work")
+		close(retry)
+		synctest.Wait()
+		require.Equal(t, int64(1), store.calls.Load())
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestRunnerBindingDrainProtectsReconcileAndForksEventDelivery(t *testing.T) {
-	h := newReconcileHarness(t)
-	want := db.Event{ID: 101, Type: "issue.updated", Actor: "connector:example-connector"}
-	var admissions atomic.Int64
-	var scanReleased atomic.Bool
-	var bindingReleased atomic.Bool
-	var forkAdmitted atomic.Bool
-	delivered := make(chan db.Event, 1)
-	runner := &Runner{
-		Store: h.store, Interval: time.Hour,
-		reconcileFn: func(context.Context, int64) (RunResult, error) {
-			assert.False(t, bindingReleased.Load(), "binding lease released during reconciliation")
-			return RunResult{Events: []db.Event{want}}, nil
-		},
-		DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
-			if admissions.Add(1) == 1 {
-				return activity.NewLease(func() { scanReleased.Store(true) }, nil), true, nil
-			}
-			fork := func() (*activity.Lease, bool) {
-				forkAdmitted.Store(true)
-				return activity.NewLease(nil, nil), true
-			}
-			return activity.NewLease(func() { bindingReleased.Store(true) }, fork), true, nil
-		},
-		EventSinkFrom: func(event db.Event, fork activity.Admission) {
-			assert.False(t, bindingReleased.Load(), "binding lease released before event delivery")
-			child, admitted := fork()
-			forkAdmitted.Store(admitted)
-			if child != nil {
-				child.Release()
-			}
-			delivered <- event
-		},
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
+	synctest.Test(t, func(t *testing.T) {
+		h := newReconcileHarness(t)
+		want := db.Event{ID: 101, Type: "issue.updated", Actor: "connector:example-connector"}
+		var admissions atomic.Int64
+		var scanReleased atomic.Bool
+		var bindingReleased atomic.Bool
+		var forkAdmitted atomic.Bool
+		delivered := make(chan db.Event, 1)
+		runner := &Runner{
+			Store: h.store, Interval: time.Hour,
+			reconcileFn: func(context.Context, int64) (RunResult, error) {
+				assert.False(t, bindingReleased.Load(), "binding lease released during reconciliation")
+				return RunResult{Events: []db.Event{want}}, nil
+			},
+			DrainAdmission: func() (*activity.Lease, bool, <-chan struct{}) {
+				if admissions.Add(1) == 1 {
+					return activity.NewLease(func() { scanReleased.Store(true) }, nil), true, nil
+				}
+				fork := func() (*activity.Lease, bool) {
+					forkAdmitted.Store(true)
+					return activity.NewLease(nil, nil), true
+				}
+				return activity.NewLease(func() { bindingReleased.Store(true) }, fork), true, nil
+			},
+			EventSinkFrom: func(event db.Event, fork activity.Admission) {
+				assert.False(t, bindingReleased.Load(), "binding lease released before event delivery")
+				child, admitted := fork()
+				forkAdmitted.Store(admitted)
+				if child != nil {
+					child.Release()
+				}
+				delivered <- event
+			},
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
 
-	select {
-	case got := <-delivered:
-		assert.Equal(t, want, got)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for drain-aware event delivery")
-	}
-	require.Eventually(t, bindingReleased.Load, time.Second, time.Millisecond)
-	assert.True(t, scanReleased.Load())
-	assert.True(t, forkAdmitted.Load())
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		synctest.Wait()
+		select {
+		case got := <-delivered:
+			assert.Equal(t, want, got)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for drain-aware event delivery")
+		}
+		synctest.Wait()
+		require.True(t, bindingReleased.Load())
+		assert.True(t, scanReleased.Load())
+		assert.True(t, forkAdmitted.Load())
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestRunnerDeliversRetainedEventsExactlyOnceWhenReconcileReturnsError(t *testing.T) {
@@ -244,28 +255,34 @@ func (s *transientDueScanStore) ListDueExternalRootBindings(
 }
 
 func TestRunnerRetriesTransientDueScanErrorOnNextTick(t *testing.T) {
-	h := newReconcileHarness(t)
-	store := &transientDueScanStore{Storage: h.store}
-	var reconciles atomic.Int64
-	var reported atomic.Int64
-	runner := &Runner{
-		Store: store, Interval: 5 * time.Millisecond,
-		reconcileFn: func(context.Context, int64) (RunResult, error) {
-			reconciles.Add(1)
-			return RunResult{}, nil
-		},
-		ErrorSink: func(error) { reported.Add(1) },
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
+	synctest.Test(t, func(t *testing.T) {
+		h := newReconcileHarness(t)
+		store := &transientDueScanStore{Storage: h.store}
+		var reconciles atomic.Int64
+		var reported atomic.Int64
+		runner := &Runner{
+			Store: store, Interval: 5 * time.Millisecond,
+			reconcileFn: func(context.Context, int64) (RunResult, error) {
+				reconciles.Add(1)
+				return RunResult{}, nil
+			},
+			ErrorSink: func(error) { reported.Add(1) },
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
 
-	require.Eventually(t, func() bool {
-		return store.calls.Load() >= 2 && reconciles.Load() >= 1
-	}, time.Second, time.Millisecond)
-	assert.Equal(t, int64(1), reported.Load())
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		synctest.Wait()
+		require.Equal(t, int64(1), store.calls.Load())
+		time.Sleep(5 * time.Millisecond)
+		synctest.Wait()
+		require.GreaterOrEqual(t, store.calls.Load(), int64(2))
+		require.GreaterOrEqual(t, reconciles.Load(), int64(1))
+		assert.Equal(t, int64(1), reported.Load())
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestRunnerDoesNotReportDueScanErrorAfterCancellation(t *testing.T) {
@@ -284,34 +301,39 @@ func TestRunnerDoesNotReportDueScanErrorAfterCancellation(t *testing.T) {
 }
 
 func TestRunnerDuplicateWakeAndPollConvergeOnce(t *testing.T) {
-	h := newReconcileHarness(t)
-	var calls atomic.Int64
-	started := make(chan struct{})
-	release := make(chan struct{})
-	runner := &Runner{
-		Store: h.store, Reconciler: h.reconciler, Interval: 5 * time.Millisecond,
-		reconcileFn: func(ctx context.Context, _ int64) (RunResult, error) {
-			calls.Add(1)
-			close(started)
-			select {
-			case <-release:
-			case <-ctx.Done():
-			}
-			return RunResult{}, nil
-		},
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
+	synctest.Test(t, func(t *testing.T) {
+		h := newReconcileHarness(t)
+		var calls atomic.Int64
+		started := make(chan struct{})
+		release := make(chan struct{})
+		runner := &Runner{
+			Store: h.store, Reconciler: h.reconciler, Interval: 5 * time.Millisecond,
+			reconcileFn: func(ctx context.Context, _ int64) (RunResult, error) {
+				calls.Add(1)
+				close(started)
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+				return RunResult{}, nil
+			},
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
 
-	runner.Wake(h.binding.ID)
-	runner.Wake(h.binding.ID)
-	<-started
-	runner.Wake(h.binding.ID)
-	close(release)
-	require.Eventually(t, func() bool { return calls.Load() == 1 }, time.Second, 10*time.Millisecond)
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		runner.Wake(h.binding.ID)
+		runner.Wake(h.binding.ID)
+		synctest.Wait()
+		<-started
+		runner.Wake(h.binding.ID)
+		close(release)
+		synctest.Wait()
+		require.Equal(t, int64(1), calls.Load())
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestExternalRootRetryDelayCapsAndUsesDeterministicJitter(t *testing.T) {
@@ -362,103 +384,114 @@ func TestRunnerStartupPreservesConfiguredRetryStrategyForManualReconcile(t *test
 }
 
 func TestRunnerRecoversBindingPanicAndContinues(t *testing.T) {
-	var calls atomic.Int64
-	reported := make(chan error, 1)
-	runner := &Runner{Interval: time.Hour, ErrorSink: func(err error) { reported <- err }, reconcileFn: func(context.Context, int64) (RunResult, error) {
-		if calls.Add(1) == 1 {
-			panic("private connector diagnostic")
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int64
+		reported := make(chan error, 1)
+		runner := &Runner{Interval: time.Hour, ErrorSink: func(err error) { reported <- err }, reconcileFn: func(context.Context, int64) (RunResult, error) {
+			if calls.Add(1) == 1 {
+				panic("private connector diagnostic")
+			}
+			return RunResult{}, nil
+		}}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
+		runner.Wake(1)
+		synctest.Wait()
+		require.Equal(t, int64(1), calls.Load())
+		select {
+		case err := <-reported:
+			assert.EqualError(t, err, "reconcile external root binding 1: external root reconciliation panicked")
+			assert.NotContains(t, err.Error(), "private connector diagnostic")
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for recovered panic report")
 		}
-		return RunResult{}, nil
-	}}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
-	runner.Wake(1)
-	require.Eventually(t, func() bool { return calls.Load() == 1 }, time.Second, 10*time.Millisecond)
-	select {
-	case err := <-reported:
-		assert.EqualError(t, err, "reconcile external root binding 1: external root reconciliation panicked")
-		assert.NotContains(t, err.Error(), "private connector diagnostic")
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for recovered panic report")
-	}
-	runner.Wake(2)
-	require.Eventually(t, func() bool { return calls.Load() == 2 }, time.Second, 10*time.Millisecond)
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		runner.Wake(2)
+		synctest.Wait()
+		require.Equal(t, int64(2), calls.Load())
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestRunnerConnectorPanicPersistsRetryBeforeReleasingClaim(t *testing.T) {
-	h := newReconcileHarness(t)
-	h.client.beforeReadReturn = func() { panic("private connector diagnostic") }
-	h.reconciler = NewReconciler(h.store, h.registry, ReconcilerConfig{
-		Now: func() time.Time { return h.now },
-		RetryAt: ExternalRootRetryAt(func(_ int64, _ int, base time.Duration) time.Duration {
-			return base / 10
-		}),
-	})
-	runner := &Runner{
-		Store: h.store, Reconciler: h.reconciler, Interval: time.Hour,
-		Now: func() time.Time { return h.now },
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
-	require.Eventually(t, func() bool {
+	synctest.Test(t, func(t *testing.T) {
+		h := newReconcileHarness(t)
+		h.client.beforeReadReturn = func() { panic("private connector diagnostic") }
+		h.reconciler = NewReconciler(h.store, h.registry, ReconcilerConfig{
+			Now: func() time.Time { return h.now },
+			RetryAt: ExternalRootRetryAt(func(_ int64, _ int, base time.Duration) time.Duration {
+				return base / 10
+			}),
+		})
+		runner := &Runner{
+			Store: h.store, Reconciler: h.reconciler, Interval: time.Hour,
+			Now: func() time.Time { return h.now },
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
+		synctest.Wait()
 		binding, err := h.store.ExternalRootBindingByID(t.Context(), h.binding.ID)
-		return err == nil && binding.ConsecutiveFailures == 1
-	}, time.Second, 10*time.Millisecond)
-	binding, err := h.store.ExternalRootBindingByID(t.Context(), h.binding.ID)
-	require.NoError(t, err)
-	assert.Empty(t, binding.ClaimToken)
-	assert.Equal(t, "external connector panicked", binding.LastError)
-	require.NotNil(t, binding.NextAttemptAt)
-	assert.Equal(t, h.now.Add(33*time.Second), *binding.NextAttemptAt)
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		require.NoError(t, err)
+		require.Equal(t, 1, binding.ConsecutiveFailures)
+		assert.Empty(t, binding.ClaimToken)
+		assert.Equal(t, "external connector panicked", binding.LastError)
+		require.NotNil(t, binding.NextAttemptAt)
+		assert.Equal(t, h.now.Add(33*time.Second), *binding.NextAttemptAt)
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestRunnerLimitsConcurrencyToFour(t *testing.T) {
-	h := newReconcileHarness(t)
-	for i := 2; i <= 6; i++ {
-		createRunnerBinding(t, h, i)
-	}
-	var active atomic.Int64
-	var maximum atomic.Int64
-	started := make(chan struct{}, 6)
-	release := make(chan struct{})
-	runner := &Runner{Store: h.store, Interval: time.Hour, MaxConcurrent: 5, reconcileFn: func(ctx context.Context, _ int64) (RunResult, error) {
-		current := active.Add(1)
-		for {
-			prior := maximum.Load()
-			if current <= prior || maximum.CompareAndSwap(prior, current) {
-				break
+	synctest.Test(t, func(t *testing.T) {
+		h := newReconcileHarness(t)
+		for i := 2; i <= 6; i++ {
+			createRunnerBinding(t, h, i)
+		}
+		var active atomic.Int64
+		var maximum atomic.Int64
+		started := make(chan struct{}, 6)
+		release := make(chan struct{})
+		runner := &Runner{Store: h.store, Interval: time.Hour, MaxConcurrent: 5, reconcileFn: func(ctx context.Context, _ int64) (RunResult, error) {
+			current := active.Add(1)
+			for {
+				prior := maximum.Load()
+				if current <= prior || maximum.CompareAndSwap(prior, current) {
+					break
+				}
 			}
+			started <- struct{}{}
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			active.Add(-1)
+			return RunResult{}, nil
+		}}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
+		for range 4 {
+			<-started
 		}
-		started <- struct{}{}
+		assert.Equal(t, int64(4), maximum.Load())
 		select {
-		case <-release:
-		case <-ctx.Done():
+		case <-started:
+			t.Fatal("runner exceeded four concurrent reconciliations")
+		case <-time.After(50 * time.Millisecond):
 		}
-		active.Add(-1)
-		return RunResult{}, nil
-	}}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
-	for range 4 {
-		<-started
-	}
-	assert.Equal(t, int64(4), maximum.Load())
-	select {
-	case <-started:
-		t.Fatal("runner exceeded four concurrent reconciliations")
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(release)
-	require.Eventually(t, func() bool { return active.Load() == 0 }, time.Second, 10*time.Millisecond)
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		synctest.Wait()
+		close(release)
+		synctest.Wait()
+		require.Equal(t, int64(0), active.Load())
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestRunnerWakeQueueSaturationNeverBlocksProducer(t *testing.T) {
@@ -478,53 +511,60 @@ func TestRunnerWakeQueueSaturationNeverBlocksProducer(t *testing.T) {
 }
 
 func TestRunnerPollFallbackExcludesPausedBinding(t *testing.T) {
-	h := newReconcileHarness(t)
-	_, _, err := h.store.PauseExternalRootBinding(t.Context(), db.ExternalRootActionParams{
-		BindingID: h.binding.ID, Actor: "operator", Reason: "operator_pause",
-	})
-	require.NoError(t, err)
-	var calls atomic.Int64
-	runner := &Runner{Store: h.store, Interval: 5 * time.Millisecond, reconcileFn: func(context.Context, int64) (RunResult, error) {
-		calls.Add(1)
-		return RunResult{}, nil
-	}}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
-	time.Sleep(30 * time.Millisecond)
-	assert.Zero(t, calls.Load())
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+	synctest.Test(t, func(t *testing.T) {
+		h := newReconcileHarness(t)
+		_, _, err := h.store.PauseExternalRootBinding(t.Context(), db.ExternalRootActionParams{
+			BindingID: h.binding.ID, Actor: "operator", Reason: "operator_pause",
+		})
+		require.NoError(t, err)
+		var calls atomic.Int64
+		runner := &Runner{Store: h.store, Interval: 5 * time.Millisecond, reconcileFn: func(context.Context, int64) (RunResult, error) {
+			calls.Add(1)
+			return RunResult{}, nil
+		}}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
+		<-time.After(30 * time.Millisecond)
+		synctest.Wait()
+		assert.Zero(t, calls.Load())
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
 
-	_, _, err = h.store.ResumeExternalRootBinding(t.Context(), db.ExternalRootActionParams{BindingID: h.binding.ID, Actor: "operator"})
-	require.NoError(t, err)
-	ctx, cancel = context.WithCancel(t.Context())
-	done = make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
-	require.Eventually(t, func() bool { return calls.Load() > 0 }, time.Second, 10*time.Millisecond)
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+		_, _, err = h.store.ResumeExternalRootBinding(t.Context(), db.ExternalRootActionParams{BindingID: h.binding.ID, Actor: "operator"})
+		require.NoError(t, err)
+		ctx, cancel = context.WithCancel(t.Context())
+		done = make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
+		synctest.Wait()
+		require.Greater(t, calls.Load(), int64(0))
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestRunnerPollRecoversStaleClaim(t *testing.T) {
-	h := newReconcileHarness(t)
-	old := h.now.Add(-10 * time.Minute)
-	_, ok, err := h.store.ClaimExternalRootBinding(t.Context(), h.binding.ID, "stale-claim", old, old.Add(-5*time.Minute))
-	require.NoError(t, err)
-	require.True(t, ok)
-	runner := &Runner{Store: h.store, Reconciler: h.reconciler, Interval: time.Hour, Now: func() time.Time { return h.now }}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx) }()
-	require.Eventually(t, func() bool {
-		binding, readErr := h.store.ExternalRootBindingByID(t.Context(), h.binding.ID)
-		return readErr == nil && binding.LastSuccessAt != nil
-	}, time.Second, 10*time.Millisecond)
-	binding, err := h.store.ExternalRootBindingByID(t.Context(), h.binding.ID)
-	require.NoError(t, err)
-	assert.Empty(t, binding.ClaimToken)
-	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+	synctest.Test(t, func(t *testing.T) {
+		h := newReconcileHarness(t)
+		old := h.now.Add(-10 * time.Minute)
+		_, ok, err := h.store.ClaimExternalRootBinding(t.Context(), h.binding.ID, "stale-claim", old, old.Add(-5*time.Minute))
+		require.NoError(t, err)
+		require.True(t, ok)
+		runner := &Runner{Store: h.store, Reconciler: h.reconciler, Interval: time.Hour, Now: func() time.Time { return h.now }}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- runner.Run(ctx) }()
+		synctest.Wait()
+		binding, err := h.store.ExternalRootBindingByID(t.Context(), h.binding.ID)
+		require.NoError(t, err)
+		require.NotNil(t, binding.LastSuccessAt)
+		assert.Empty(t, binding.ClaimToken)
+		cancel()
+		synctest.Wait()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func createRunnerBinding(t *testing.T, h *reconcileHarness, index int) db.ExternalRootBinding {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -42,34 +43,32 @@ type nopLogger struct{}
 func (nopLogger) Printf(string, ...any) {}
 
 func TestRunReloadLoop_DispatchesOnSignal(t *testing.T) {
-	dir := setupKataEnv(t)
-	path := filepath.Join(dir, "hooks.toml")
-	require.NoError(t, os.WriteFile(path, []byte(`[[hook]]
+	synctest.Test(t, func(t *testing.T) {
+		dir := setupKataEnv(t)
+		path := filepath.Join(dir, "hooks.toml")
+		require.NoError(t, os.WriteFile(path, []byte(`[[hook]]
 event = "issue.created"
 command = "true"
 `), 0o600))
-	rec := &recordingDispatcher{}
-	sigs := make(chan os.Signal, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+		rec := &recordingDispatcher{}
+		sigs := make(chan os.Signal, 1)
+		ctx, cancel := context.WithCancel(t.Context())
 
-	done := make(chan struct{})
-	go func() {
-		runReloadLoop(ctx, sigs, path, rec, nopLogger{})
-		close(done)
-	}()
+		done := make(chan struct{})
+		go func() {
+			runReloadLoop(ctx, sigs, path, rec, nopLogger{})
+			close(done)
+		}()
 
-	sigs <- os.Interrupt
-	require.Eventually(t, func() bool {
+		sigs <- os.Interrupt
+		synctest.Wait()
 		rec.mu.Lock()
-		defer rec.mu.Unlock()
-		return len(rec.reloadCalls) >= 1
-	}, 2*time.Second, 10*time.Millisecond)
-	cancel()
-	<-done
-
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-	require.Len(t, rec.reloadCalls, 1)
-	require.Len(t, rec.reloadCalls[0].Snapshot.Hooks, 1, "expected one hook in reloaded snapshot")
+		reloads := append([]hooks.LoadedConfig(nil), rec.reloadCalls...)
+		rec.mu.Unlock()
+		require.Len(t, reloads, 1)
+		require.Len(t, reloads[0].Snapshot.Hooks, 1, "expected one hook in reloaded snapshot")
+		cancel()
+		synctest.Wait()
+		<-done
+	})
 }

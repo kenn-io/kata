@@ -14,6 +14,23 @@ linters:
     - revive
     - gosec
     - modernize
+    - kennlint
+  settings:
+    custom:
+      kennlint:
+        type: module
+        description: Kit's sleep-in-tests analyzer.
+        original-url: go.kenn.io/kit/lint
+        settings:
+          sleeptest:
+            eventually: true
+          disable:
+            - errtext
+            - nohttpmux
+            - rowserrcheck
+            - sqlcheck
+            - sqlclosecheck
+            - testifyhelper
   exclusions:
     generated: lax
     paths:

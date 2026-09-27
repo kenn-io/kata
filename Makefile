@@ -124,8 +124,21 @@ docs-deploy:
 	vercel build --prod --yes
 	vercel deploy --prebuilt --prod
 
-lint:
-	GOLANGCI_LINT_CACHE="$(CURDIR)/.cache/golangci-lint" golangci-lint run --config .golangci.yml
+# Kit's sleeptest has an existing backlog (fy7j); check new findings until it is cleared.
+ifeq ($(GITHUB_EVENT_NAME),push)
+LINT_NEW_FLAGS ?= --new-from-rev=HEAD^
+else
+LINT_NEW_FLAGS ?= --new-from-merge-base=origin/main
+endif
+
+$(CURDIR)/.cache/golangci-lint/custom-gcl: .custom-gcl.yml go.mod
+	golangci-lint custom --destination "$(CURDIR)/.cache/golangci-lint" --name custom-gcl --version v2.13.1
+
+lint: $(CURDIR)/.cache/golangci-lint/custom-gcl
+	@if [ "$${GITHUB_ACTIONS:-}" = true ] && [ "$$(git rev-parse --is-shallow-repository)" = true ]; then \
+		git fetch --no-tags --unshallow origin main:refs/remotes/origin/main; \
+	fi
+	GOLANGCI_LINT_CACHE="$(CURDIR)/.cache/golangci-lint" "$(CURDIR)/.cache/golangci-lint/custom-gcl" run --config .golangci.yml $(LINT_NEW_FLAGS)
 
 vet:
 	go vet ./...
