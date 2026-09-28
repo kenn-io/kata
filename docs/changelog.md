@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Load the contract in every coding-agent session with
+  `kata agent-hooks install --all`, remove user hooks with `uninstall`, and
+  inspect user/workspace registrations with daemon-free `status`. Repeated
+  canonical installs preserve file bytes and hook indexes. Codex hooks still
+  require `/hooks` trust; Hermes injects on its first `pre_llm_call` turn.
+  See [Contract in every session](workflows/agents.md#contract-in-every-session).
+
 - Run discoverable contract and attention hooks with
   [`kata agent-hooks`](reference/cli.md#agent-hooks). Contract responses use
   each supported harness's native format, including Cursor SessionStart

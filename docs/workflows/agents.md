@@ -7,6 +7,52 @@ last_edited: 2026-09-28
 kata is designed to survive the parts of agent work that chat does not: context
 compaction, multiple workers, incomplete attempts, and close discipline.
 
+## Contract in every session
+
+Install the contract in the user configs of coding agents already installed
+on this machine:
+
+```sh
+kata agent-hooks install --all
+```
+
+Name a harness explicitly, such as `kata agent-hooks install claude codex`,
+to create its config when needed. Kata supports Claude Code, Codex, Copilot,
+Cursor, Gemini CLI, Hermes and Qwen Code. After installing a Codex hook, open
+Codex and run `/hooks` to trust it. Kata does not automate that trust.
+
+Most harnesses load the contract at SessionStart. Hermes uses its first-turn
+`pre_llm_call` hook because its SessionStart event does not inject context.
+The payload must contain a nonempty text `extra.user_message`;
+`extra.is_first_turn: true` selects the first turn. See the
+[Hermes payload limits](../reference/cli.md#contract-injection). The contract
+text is the same inside and outside Kata workspaces.
+Attention hooks stay workspace-only.
+
+For a second Codex home, select its config file:
+
+```sh
+kata agent-hooks install codex --config /path/to/second-codex-home/hooks.json
+kata agent-hooks status codex --config /path/to/second-codex-home/hooks.json
+```
+
+`status` reports the selected user config and the current workspace without a
+daemon. If a workspace also has a Codex contract hook, run
+`kata init --with-codex-hooks` there to apply the
+[workspace deduplication rules](../reference/cli.md#workspace-initialization).
+Kata leaves committed managed guidance in place and reports its overlap as
+informational. Other Codex homes and other workspaces are not edited.
+
+To remove user hooks, run `kata agent-hooks uninstall <harness>...` or
+`kata agent-hooks uninstall --all`. Workspaces initialized while the Codex
+user hook existed may have skipped their contract hook. Rerun
+`kata init --with-codex-hooks` in those workspaces to restore it.
+
+See [user installation and removal](../reference/cli.md#user-installation-and-removal)
+for config overrides, stable executable selection, no-write repeat installs,
+and output fields. These coding-agent hooks are distinct from daemon event
+hooks configured in `hooks.toml`.
+
 ## Session start
 
 Run from the workspace, or pass `--workspace`:
