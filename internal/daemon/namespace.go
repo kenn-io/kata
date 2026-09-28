@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"go.kenn.io/kata/internal/config"
 )
@@ -73,4 +74,13 @@ func (n *Namespace) EnsureDirs() error {
 		return fmt.Errorf("mkdir socket dir: %w", err)
 	}
 	return nil
+}
+
+// NewNamespaceForHome derives a selected profile namespace without consulting
+// the current home's storage configuration or creating directories.
+func NewNamespaceForHome(home, storageID string) (*Namespace, error) {
+	if !filepath.IsAbs(home) || !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(storageID) {
+		return nil, fmt.Errorf("local profile namespace requires an absolute home and a valid storage identity")
+	}
+	return &Namespace{DBHash: storageID, DataDir: filepath.Join(home, "runtime", storageID), SocketDir: socketParent(storageID)}, nil
 }

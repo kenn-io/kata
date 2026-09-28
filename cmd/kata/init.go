@@ -132,7 +132,7 @@ Also adds .kata.local.toml to .gitignore so a developer's per-machine
 overrides (e.g., a remote daemon URL via [server] url = "...") never
 get committed.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			baseURL, err := ensureDaemon(cmd.Context())
+			ctx, baseURL, err := ensureDaemonContext(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("daemon: %w", err)
 			}
@@ -141,8 +141,8 @@ get committed.`,
 				return fmt.Errorf("resolve workspace: %w", err)
 			}
 			callOpts := callInitOpts(opts)
-			callOpts.Actor, _ = resolveActor(cmd.Context(), flags.As, nil)
-			out, err := callInit(cmd.Context(), baseURL, startPath, callOpts)
+			callOpts.Actor, _ = resolveActor(ctx, flags.As, nil)
+			out, err := callInit(ctx, baseURL, startPath, callOpts)
 			if err != nil {
 				return err
 			}

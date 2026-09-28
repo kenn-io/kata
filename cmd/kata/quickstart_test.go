@@ -238,3 +238,15 @@ func TestQuickstart_UsesValidNeedsReviewCommand(t *testing.T) {
 	assert.Contains(t, out, "kata label add <ref> needs-review")
 	assert.NotContains(t, out, "--label needs-review")
 }
+
+func TestQuickstartLocalProfileRecoveryGuidance(t *testing.T) {
+	// Product contract: agents retain selected routing and diagnose stopped
+	// spokes before attempting any initialization or target change.
+	for _, args := range [][]string{{"quickstart"}, {"--agent", "quickstart"}, {"--json", "quickstart"}} {
+		resetFlags(t)
+		out := string(executeRoot(t, newRootCmd(), args...))
+		assert.Contains(t, out, "kata daemon diagnose")
+		assert.Contains(t, out, "kata daemon recover")
+		assert.Contains(t, out, "Never remove a workspace override to repair a stopped daemon")
+	}
+}

@@ -161,6 +161,7 @@ func (f *fakeDaemon) request() map[string]any {
 // can — that's the contract that lets a daemon on another host serve
 // `kata init` without filesystem access to the client workspace.
 func TestInit_RemoteClient_SendsNameNotPath(t *testing.T) {
+	resetFlags(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")

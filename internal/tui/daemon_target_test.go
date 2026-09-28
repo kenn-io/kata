@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +19,10 @@ import (
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/version"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func TestDaemonTargetsFromConfigIncludesConfiguredEntries(t *testing.T) {
@@ -1066,4 +1072,116 @@ func startTUIPingServer(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func TestLocalProfileBootUsesSharedSelectionBeforeActive(t *testing.T) {
+	oldRead, oldEnsure, oldConnect, oldClient := readDaemonConfigForTUI, ensureResolvedForTUI, connectDaemonTargetForTUI, newHTTPClientForTUI
+	t.Cleanup(func() {
+		readDaemonConfigForTUI = oldRead
+		ensureResolvedForTUI = oldEnsure
+		connectDaemonTargetForTUI = oldConnect
+		newHTTPClientForTUI = oldClient
+	})
+	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
+		return &config.DaemonConfig{ActiveDaemon: "personal", Daemons: []config.CatalogDaemonConfig{{Name: "personal", Local: true}, {Name: "work", Local: true, Home: "/work-home"}}}, nil
+	}
+	ensureResolvedForTUI = func(_ context.Context, start string) (clientpkg.ResolvedDaemon, error) {
+		require.Equal(t, "/example-workspace", start)
+		return clientpkg.ResolvedDaemon{Name: "work", BaseURL: clientpkg.UnixBase, LocalProfile: &clientpkg.LocalProfileIdentity{Name: "work", Home: "/work-home"}}, nil
+	}
+	connectDaemonTargetForTUI = func(context.Context, daemonTarget) (daemonConnection, error) {
+		t.Fatal("active entry bypassed shared selection")
+		return daemonConnection{}, nil
+	}
+	newHTTPClientForTUI = func(_ context.Context, _ string, target daemonTarget, _ clientOptsKind) (*http.Client, error) {
+		require.NotNil(t, target.resolved.LocalProfile)
+		assert.Equal(t, "work", target.Name)
+		return &http.Client{}, nil
+	}
+	conn, err := bootDaemonConnection(t.Context(), Options{Workspace: "/example-workspace", ProjectName: "spoke-project"})
+	require.NoError(t, err)
+	assert.Equal(t, "work", conn.target.Name)
+	rows := daemonRows(conn.catalog, conn.target)
+	require.Len(t, rows, 2)
+	assert.False(t, rows[0].current)
+	assert.True(t, rows[1].current)
+}
+
+func TestLocalProfileRowsDoNotAliasImplicitCurrentHome(t *testing.T) {
+	targets := daemonTargetsFromConfig([]config.CatalogDaemonConfig{{Name: "personal", Local: true}, {Name: "work", Local: true, Home: "/work-home"}})
+	rows := daemonRows(targets, daemonTarget{Local: true, Implicit: true})
+	require.Len(t, rows, 2)
+	assert.True(t, rows[0].current)
+	assert.False(t, rows[1].current)
+}
+
+func TestLocalProfileReconnectDoesNotEnsureCurrentHome(t *testing.T) {
+	oldEnsure := ensureLocalRunningTargetForTUI
+	t.Cleanup(func() { ensureLocalRunningTargetForTUI = oldEnsure })
+	ensureLocalRunningTargetForTUI = func(context.Context) (clientpkg.RunningDaemon, error) {
+		t.Fatal("profile reconnect reached current home")
+		return clientpkg.RunningDaemon{}, nil
+	}
+	target := daemonTarget{Local: true, resolved: clientpkg.ResolvedDaemon{BaseURL: clientpkg.UnixBase, LocalProfile: &clientpkg.LocalProfileIdentity{Name: "work", Home: t.TempDir()}}}
+	_, err := localHTTPClientRefreshForTarget(clientpkg.UnixBase, target)(t.Context())
+	require.Error(t, err) // An incomplete snapshot must fail closed.
+}
+
+func TestLocalProfileAPIAndSSEUseSameSocketAndCredentialAfterReconnect(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix transport")
+	}
+	personal, work := t.TempDir(), t.TempDir()
+	t.Setenv("KATA_HOME", personal)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "personal-token")
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(work, "kata.db"))
+	require.NoError(t, err)
+	uid := store.InstanceUID()
+	require.NoError(t, store.Close())
+	require.NoError(t, os.WriteFile(filepath.Join(work, "config.toml"), []byte("[auth]\ntoken=\"work-token\"\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(personal, "config.toml"), []byte(fmt.Sprintf("[[daemon]]\nname=\"work\"\nlocal=true\nhome=%q\ninstance_uid=%q\n", work, uid)), 0600))
+	socketDir, err := os.MkdirTemp("", "profile-socket-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	socket := filepath.Join(socketDir, "kata.sock")
+	listener, err := net.Listen("unix", socket)
+	require.NoError(t, err)
+	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		assert.Equal(t, "Bearer work-token", r.Header.Get("Authorization"))
+		if r.URL.Path == "/api/v1/events" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n")
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+	})}
+	go func() { _ = srv.Serve(listener) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: work, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemon.NewNamespaceForHome(work, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "unix", Address: socket})
+	require.NoError(t, err)
+	conn, err := connectDaemonTarget(t.Context(), daemonTarget{Name: "work", Local: true, Home: work, skipInitialScope: true})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(personal, "config.toml"), []byte("[[daemon]]\nname=\"work\"\nlocal=true\n"), 0600))
+	refreshed, err := conn.api.localHTTPClientRefresh()(t.Context())
+	require.NoError(t, err)
+	for _, hc := range []*http.Client{conn.api.httpClient(), conn.sseHC, refreshed} {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, conn.endpoint+"/api/v1/events", nil)
+		require.NoError(t, err)
+		response, err := hc.Do(request)
+		require.NoError(t, err)
+		body, err := io.ReadAll(response.Body)
+		require.NoError(t, err)
+		require.NoError(t, response.Body.Close())
+		assert.Contains(t, string(body), "heartbeat")
+	}
 }

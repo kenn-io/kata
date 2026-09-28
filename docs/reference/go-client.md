@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-09-23
+last_edited: 2026-09-28
 ---
 
 # Go client
@@ -25,7 +25,7 @@ To host Kata inside a Go program instead of talking to a daemon, see
 ```go
 api, err := client.Discover(ctx, client.DiscoverOptions{Workspace: repoRoot})
 if errors.Is(err, client.ErrDaemonUnavailable) {
-	// Kata is not configured here and no local daemon is running.
+	// No reachable local daemon is available here.
 }
 ```
 
@@ -33,26 +33,32 @@ Discover checks the same sources as
 [`kata daemon locate`](daemon-discovery.md#selection-order), in order:
 
 1. `KATA_SERVER`.
-2. `[server].url` in the nearest `.kata.local.toml`, walking upward from
-   `Workspace`, or from the process working directory when `Workspace` is
-   empty.
-3. The `active_daemon` catalog entry, when it names a remote daemon.
-4. The running local daemon.
+2. `[server].url` or `[server].daemon` in the nearest `.kata.local.toml`,
+   walking upward from `Workspace`, or from the process working directory
+   when `Workspace` is empty. `[server].daemon` selects a pinned local profile.
+3. The `active_daemon` catalog entry, which may be a remote or pinned local
+   profile.
+4. The running default local daemon.
 
 The bearer token comes from the selected source, as it does for the CLI. The
-local daemon uses `KATA_AUTH_TOKEN`, then `[auth].token`.
+default local daemon uses `KATA_AUTH_TOKEN`, then the current home's
+`[auth].token`. A pinned local profile uses its own auth configuration; its
+catalog `token` or `token_env` can select a client credential in identity-token
+mode.
 
-Discover differs from `kata daemon locate` in two ways:
+Discover and `kata daemon locate` both inspect the selected daemon without
+starting it. Use `kata daemon diagnose` for stopped-profile state and recovery
+guidance; `kata daemon recover` can start a local profile after its existing
+storage and identity pass the recovery checks.
 
-- It never starts, restarts, or version-checks a local daemon. Run
-  `kata daemon start` to start one.
-- It does not probe configured remotes. The first request reports whether a
-  remote is reachable.
+Discover does not probe configured remotes. The first request reports whether
+a remote is reachable.
 
 Discover returns an error matching `client.ErrDaemonUnavailable` when no
-source is configured and no local daemon answers. This includes a local daemon
-process whose socket or port cannot be reached; the error text names that
-endpoint.
+daemon is selected or a selected local daemon has no reachable runtime. A
+local profile whose storage or instance identity cannot be verified returns
+the corresponding profile-specific error. A local process whose socket or
+port cannot be reached includes that endpoint in the error.
 
 ## Connect to a known endpoint
 

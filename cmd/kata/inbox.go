@@ -85,7 +85,7 @@ func newInboxCmd() *cobra.Command {
 
 func loadInbox(cmd *cobra.Command, recipient string, allProjects bool) ([]inboxRequest, error) {
 	ctx := cmd.Context()
-	baseURL, err := ensureDaemon(ctx)
+	ctx, baseURL, err := ensureDaemonContext(ctx)
 	if err != nil {
 		return nil, err
 	}

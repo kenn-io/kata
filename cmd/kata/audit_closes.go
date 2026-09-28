@@ -41,7 +41,7 @@ analysis. The text output is a wide table; pass --json for tooling.`,
 			if err != nil {
 				return err
 			}
-			baseURL, err := ensureDaemon(ctx)
+			ctx, baseURL, err := ensureDaemonContext(ctx)
 			if err != nil {
 				return err
 			}

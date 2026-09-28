@@ -83,7 +83,7 @@ cross-project digest.`,
 			}
 
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			ctx, baseURL, err := ensureDaemonContext(ctx)
 			if err != nil {
 				return err
 			}

@@ -48,7 +48,7 @@ func newListCmd() *cobra.Command {
 				return &cliError{Message: "--all is mutually exclusive with --project and --workspace", Kind: kindUsage, ExitCode: ExitUsage}
 			}
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			ctx, baseURL, err := ensureDaemonContext(ctx)
 			if err != nil {
 				return err
 			}

@@ -45,6 +45,7 @@ type ProjectBindings struct {
 // over plain http. Has no effect on https URLs.
 type ServerConfig struct {
 	URL           string `toml:"url,omitempty"`
+	Daemon        string `toml:"daemon,omitempty"`
 	AllowInsecure bool   `toml:"allow_insecure,omitempty"`
 }
 
@@ -74,6 +75,9 @@ func ReadProjectConfig(workspaceRoot string) (*ProjectConfig, error) {
 	}
 	if err := ValidateProjectName(cfg.Project.Name); err != nil {
 		return nil, fmt.Errorf("project.name: %w", err)
+	}
+	if strings.TrimSpace(cfg.Server.Daemon) != "" {
+		fmt.Fprintln(os.Stderr, "kata: warning: server.daemon in .kata.toml is ignored; move it to .kata.local.toml")
 	}
 	return &cfg, nil
 }

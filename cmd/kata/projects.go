@@ -65,7 +65,7 @@ func projectsCreateCmd() *cobra.Command {
 
 			ctx := cmd.Context()
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			baseURL, err := ensureDaemon(ctx)
+			ctx, baseURL, err := ensureDaemonContext(ctx)
 			if err != nil {
 				return err
 			}

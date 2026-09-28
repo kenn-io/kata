@@ -61,3 +61,6 @@ for machine readers.
 - [GitHub repository](https://github.com/kenn-io/kata): source, issues,
   releases
 - [Changelog](https://katatracker.com/docs/changelog.md): release history
+
+- [Local daemon profiles](https://katatracker.com/docs/operations/local-daemon-profiles.md):
+  Pin personal/work homes and recover existing spokes without changing routing.

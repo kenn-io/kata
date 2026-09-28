@@ -20,15 +20,19 @@ type DiscoverOptions struct {
 }
 
 // Discover returns a client for the daemon the kata CLI would use: KATA_SERVER,
-// then .kata.local.toml [server].url, then active_daemon, then the running
-// local daemon. Credentials follow the same source, so a configured remote
-// uses its catalog or global token and the local daemon uses KATA_AUTH_TOKEN or
-// [auth].token.
+// then .kata.local.toml [server].url or [server].daemon, then active_daemon,
+// then the running default local daemon. The workspace [server].daemon source
+// selects a pinned local profile. Credentials follow the same source: a
+// configured remote uses its catalog or global token, the default local daemon
+// uses KATA_AUTH_TOKEN or the current home's [auth].token, and a local profile
+// uses its own auth configuration and any catalog client credential.
 //
-// Unlike the CLI, Discover never starts, restarts, or version-checks a local
-// daemon. When nothing is configured and no local daemon answers, it returns
-// an error matching ErrDaemonUnavailable. Configured remotes are not probed;
-// the first request establishes reachability.
+// Like `kata daemon locate`, Discover never starts the selected daemon. Use
+// `kata daemon diagnose` and `kata daemon recover` to inspect and recover an
+// eligible stopped local profile. A selected local daemon without a reachable
+// runtime returns an error matching ErrDaemonUnavailable; profile storage and
+// identity validation failures keep their profile-specific errors. Configured
+// remotes are not probed; the first request establishes reachability.
 func Discover(ctx context.Context, discover DiscoverOptions, opts ...Option) (*Client, error) {
 	resolved, ok, err := internalclient.DiscoverResolvedInWorkspace(ctx, discover.Workspace)
 	if errors.Is(err, internalclient.ErrLocalDaemonUnreachable) {

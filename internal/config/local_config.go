@@ -46,6 +46,10 @@ func ReadLocalConfig(workspaceRoot string) (*ProjectConfig, error) {
 		}
 	}
 	cfg.Server.URL = strings.TrimSpace(cfg.Server.URL)
+	cfg.Server.Daemon = strings.TrimSpace(cfg.Server.Daemon)
+	if cfg.Server.URL != "" && cfg.Server.Daemon != "" {
+		return nil, errors.New("server.url and server.daemon are mutually exclusive")
+	}
 	return &cfg, nil
 }
 
@@ -67,8 +71,11 @@ func MergeLocalWithStderr(base, local *ProjectConfig, stderr io.Writer) *Project
 	if local.Project.Name != "" {
 		merged.Project.Name = local.Project.Name
 	}
-	if local.Server.URL != "" {
+	if local.Server.Daemon != "" {
+		merged.Server = local.Server
+	} else if local.Server.URL != "" {
 		merged.Server.URL = local.Server.URL
+		merged.Server.Daemon = ""
 	}
 	return &merged
 }

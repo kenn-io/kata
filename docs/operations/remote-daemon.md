@@ -1,7 +1,7 @@
 ---
 title: Remote daemon
 description: Serve Kata to trusted private-network clients with explicit authentication and transport settings.
-last_edited: 2026-09-15
+last_edited: 2026-09-28
 ---
 
 # Remote daemon
@@ -122,10 +122,15 @@ reimplementing the selection order. See
 [Daemon discovery](../reference/daemon-discovery.md) for the schema and Unix
 socket address form.
 
+For an existing home on the same machine, use a pinned
+[local daemon profile](local-daemon-profiles.md) instead of guessing its
+loopback URL. Explicit URL overrides, including tunnels, stay pinned and are
+never automatically converted or removed.
+
 ## Browser access
 
-Plain `kata ui` always starts or discovers the local browser gateway; it does
-not use `KATA_SERVER`. The gateway initially selects `active_daemon` when one
+Plain `kata ui` opens a selected local profile directly; otherwise it starts
+or discovers the local browser gateway and does not use `KATA_SERVER`. The gateway initially selects `active_daemon` when one
 is configured.
 
 To open a remote daemon directly, add it as a named `[[daemon]]` entry and run

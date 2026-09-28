@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -67,4 +68,20 @@ func TestNamespace_SocketDirFallsBackToTmpDir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, ns.SocketDir, "kata-")
 	assert.Contains(t, ns.SocketDir, ns.DBHash)
+}
+
+func TestNamespaceForHomeUsesSelectedHomeWithoutCreatingDirs(t *testing.T) {
+	setupMockEnv(t)
+	home := t.TempDir()
+	hash := config.DBHash(filepath.Join(home, "kata.db"))
+	ns, err := daemon.NewNamespaceForHome(home, hash)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "runtime", hash), ns.DataDir)
+	assert.Equal(t, hash, ns.DBHash)
+	_, err = os.Stat(ns.DataDir)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	for _, invalid := range []string{"../outside", "", "ABCDEF123456"} {
+		_, err = daemon.NewNamespaceForHome(home, invalid)
+		require.Error(t, err)
+	}
 }

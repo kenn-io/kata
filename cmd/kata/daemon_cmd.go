@@ -39,12 +39,13 @@ import (
 	kataweb "go.kenn.io/kata/internal/web"
 	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/safefileio"
 	kitvec "go.kenn.io/kit/vector"
 )
 
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "manage the kata daemon"}
-	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonLocateCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd())
+	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonLocateCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd(), daemonDiagnoseCmd(), daemonRecoverCmd())
 	return cmd
 }
 
@@ -115,9 +116,9 @@ type daemonLocateOutput struct {
 func daemonLocateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "locate",
-		Short: "print or start the selected daemon endpoint",
-		Long: "Print the daemon endpoint selected by Kata, starting it when the selection is local and stopped. Resolution order is " +
-			"--daemon, KATA_SERVER, .kata.local.toml [server].url walking up from " +
+		Short: "inspect the selected daemon endpoint without starting it",
+		Long: "Print the running daemon endpoint selected by Kata without starting or restarting it. Stopped targets return diagnosis and recovery guidance. Resolution order is " +
+			"--daemon, KATA_SERVER, .kata.local.toml [server].url or daemon walking up from " +
 			"--workspace or the current directory, active_daemon, then the local daemon. " +
 			"Local addresses use unix:///path for Unix sockets or host:port for HTTP over TCP; " +
 			"configured remotes use their canonical HTTP(S) URL. Output never includes authentication credentials.",
@@ -149,24 +150,35 @@ func daemonLocateCmd() *cobra.Command {
 }
 
 func locateDaemon(ctx context.Context) (daemonLocateOutput, error) {
-	var (
-		target client.RunningDaemon
-		source = "configured"
-		err    error
-	)
-	if flags.Daemon != "" {
-		target, err = client.LocateNamedRunningTarget(ctx, flags.Daemon)
-		source = "daemon_flag"
+	var target client.RunningDaemon
+	source := "configured"
+	selectedProfile := false
+	if injected, ok := ctx.Value(client.BaseURLKey{}).(string); ok && injected != "" && flags.Daemon == "" {
+		target = client.RunningDaemon{BaseURL: injected, Address: injected, Network: "tcp", Scheme: "http"}
 	} else {
-		target, err = client.LocateRunningTargetInWorkspace(ctx, workspaceStartForRemote())
+		ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
+		defer cancel()
+		selection, err := client.InspectSelection(ctx, workspaceStartForRemote(), flags.Daemon)
+		if err != nil {
+			return daemonLocateOutput{}, cliDaemonTargetError(err)
+		}
+		diagnosis, selection, err := probeDaemonSelection(ctx, selectedDaemonDiagnosis(selection, ""), selection)
+		if err != nil {
+			return daemonLocateOutput{}, err
+		}
+		if diagnosis.State != "ready" {
+			return daemonLocateOutput{}, diagnosisError(diagnosis)
+		}
+		target = selection.Resolved.Running()
+		selectedProfile = selection.Profile != nil
 	}
-	if err != nil {
-		return daemonLocateOutput{}, cliDaemonTargetError(err)
+	if flags.Daemon != "" {
+		source = "daemon_flag"
 	}
 	kind := "remote"
 	if !target.ConfiguredRemote {
 		kind = "local"
-		if flags.Daemon == "" {
+		if flags.Daemon == "" && !selectedProfile {
 			source = "local_default"
 		}
 	}
@@ -174,10 +186,7 @@ func locateDaemon(ctx context.Context) (daemonLocateOutput, error) {
 	if target.Network == "unix" {
 		requestBaseURL = ""
 	}
-	return daemonLocateOutput{
-		Source: source, Kind: kind, Network: target.Network, Scheme: target.Scheme,
-		Address: target.Address, RequestBaseURL: requestBaseURL,
-	}, nil
+	return daemonLocateOutput{Source: source, Kind: kind, Network: target.Network, Scheme: target.Scheme, Address: target.Address, RequestBaseURL: requestBaseURL}, nil
 }
 
 var (
@@ -196,6 +205,9 @@ func daemonStartCmd() *cobra.Command {
 		Use:   "start",
 		Short: "start the daemon",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireCurrentHomeDaemonCommand(); err != nil {
+				return err
+			}
 			if currentOutputMode() == outputAgent {
 				return &cliError{
 					Message:  "kata daemon start does not support --agent; run without output formatting",
@@ -460,11 +472,27 @@ func daemonStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+			var recs []kitdaemon.RuntimeRecord
+			if _, statErr := os.Stat(ns.DataDir); statErr == nil {
+				// Never read runtime records from an unsafe directory. Diagnose below
+				// reports the current home as local_unreachable.
+				if validationErr := safefileio.ValidatePrivateDir(ns.DataDir); validationErr == nil {
+					recs, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+				}
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				return statErr
+			}
 			if err != nil {
 				return err
 			}
 			out := daemonStatusOutput{Daemons: make([]daemonStatusEntry, 0, len(recs))}
+			selected, _, err := diagnoseDaemon(cmd.Context(), "")
+			if err != nil {
+				// Current-home inventory remains useful when workspace routing is
+				// invalid. This partial result never substitutes a selected target.
+				selected = selectionErrorDiagnosis(err)
+			}
+			out.Selected = &selected
 			for _, r := range recs {
 				if daemon.RuntimeProcessAlive(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
@@ -487,13 +515,25 @@ func daemonStatusCmd() *cobra.Command {
 				if len(out.Daemons) == 1 && out.Daemons[0].WebURL != "" {
 					webURL = " web_url=" + out.Daemons[0].WebURL
 				}
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s\n", status, webURL)
+				message := ""
+				if selected.Message != "" {
+					message = " message=" + agentValue(selected.Message)
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s selected_state=%s selected_profile=%s%s\n", status, webURL, selected.State, agentValue(selected.Profile), message)
 				return err
 			case outputJSON:
 				return emitJSON(cmd.OutOrStdout(), out)
 			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Selected daemon: %s (source: %s)\n", selected.State, selected.Source); err != nil {
+				return err
+			}
+			if selected.Message != "" {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  reason: %s\n", selected.Message); err != nil {
+					return err
+				}
+			}
 			if len(out.Daemons) == 0 {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No kata daemon is running.")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No kata daemon is running in the current KATA_HOME.")
 				return nil
 			}
 			for _, d := range out.Daemons {
@@ -521,7 +561,8 @@ func daemonStatusAddress(address string) string {
 }
 
 type daemonStatusOutput struct {
-	Daemons []daemonStatusEntry `json:"daemons"`
+	Selected *daemonDiagnosis    `json:"selected,omitempty"`
+	Daemons  []daemonStatusEntry `json:"daemons"`
 }
 
 type daemonStatusEntry struct {
@@ -545,6 +586,9 @@ func daemonStopCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "request a graceful shutdown of the running daemon",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireCurrentHomeDaemonCommand(); err != nil {
+				return err
+			}
 			ns, err := daemon.NewNamespace()
 			if err != nil {
 				return err
@@ -610,6 +654,9 @@ func daemonRestartCmd() *cobra.Command {
 		Use:   "restart",
 		Short: "restart the daemon",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireCurrentHomeDaemonCommand(); err != nil {
+				return err
+			}
 			startup, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly)
 			if err != nil {
 				return fmt.Errorf("restart: validate replacement: %w", err)
@@ -815,6 +862,9 @@ func daemonReloadCmd() *cobra.Command {
 		Use:   "reload",
 		Short: "ask a running daemon to reload hook config",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireCurrentHomeDaemonCommand(); err != nil {
+				return err
+			}
 			ns, err := daemon.NewNamespace()
 			if err != nil {
 				return err

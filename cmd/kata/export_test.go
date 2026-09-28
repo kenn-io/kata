@@ -48,10 +48,30 @@ func TestExportRejectsExplicitDaemonSelection(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	d := openKataTestDB(t, dbPath)
+	project, err := d.CreateProject(t.Context(), "local-project")
+	require.NoError(t, err)
+	_, _, err = d.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "current-home issue", Author: "tester",
+	})
+	require.NoError(t, err)
 	require.NoError(t, d.Close())
+
+	profileHome := t.TempDir()
+	profileDB := openKataTestDB(t, filepath.Join(profileHome, "kata.db"))
+	profileUID := profileDB.InstanceUID()
+	require.NoError(t, profileDB.Close())
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`[[daemon]]
+name = "work"
+local = true
+home = %q
+instance_uid = %q
+`, profileHome, profileUID)), 0600))
+	t.Setenv("KATA_SERVER", "")
+	t.Chdir(t.TempDir())
+
 	output := filepath.Join(home, "selected-export.jsonl")
 
-	_, err := runCmdOutput(t, nil, "--daemon", "example", "export", "--output", output)
+	_, err = runCmdOutput(t, nil, "--daemon", "work", "export", "--output", output)
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, ce.Message, "host-local")
 	assert.Contains(t, ce.Message, "--daemon")
@@ -282,4 +302,24 @@ func TestExportRefusesRunningDaemonUnlessAllowed(t *testing.T) {
 	_, err := runCmdOutput(t, nil, "export", "--output", filepath.Join(home, "export.jsonl"))
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, ce.Message, "daemon is running")
+}
+
+func TestLocalProfileExportRejectsSelectedProfile(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	profileHome := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`active_daemon = "work"
+[[daemon]]
+name = "work"
+local = true
+home = %q
+instance_uid = "01HZZZZZZZZZZZZZZZZZZZZZ01"
+`, profileHome)), 0600))
+	err := requireHostLocalExport(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "KATA_HOME")
+	_, err = os.Stat(filepath.Join(home, "kata.db"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }

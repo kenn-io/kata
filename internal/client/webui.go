@@ -69,7 +69,7 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 	prepared := PreparedWebUI{
 		BaseURL: baseURL, ConfiguredRemote: configuredRemote, AllowInsecure: allowInsecure,
 		DaemonName:          strings.TrimSpace(opts.DaemonName),
-		TrustPrivateNetwork: resolveAuthConfig().TrustPrivateNetwork, Client: httpClient,
+		TrustPrivateNetwork: resolved.TrustPrivateNetwork, Client: httpClient,
 	}
 	if configuredRemote {
 		if err := validateWebLoginTarget(baseURL, prepared.TrustPrivateNetwork, allowInsecure); err != nil {
@@ -91,11 +91,20 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 		return prepared, nil
 	}
 
-	namespace, err := daemon.NewNamespace()
-	if err != nil {
-		return PreparedWebUI{}, err
+	if resolved.LocalProfile != nil {
+		prepared.DaemonName = ""
 	}
-	runtimeInfo, err := discoverWebRuntimeForBaseURL(ctx, namespace.DataDir, baseURL)
+	var dataDir string
+	if resolved.LocalProfile != nil {
+		dataDir = resolved.LocalProfile.DataDir
+	} else {
+		namespace, err := daemon.NewNamespace()
+		if err != nil {
+			return PreparedWebUI{}, err
+		}
+		dataDir = namespace.DataDir
+	}
+	runtimeInfo, err := discoverWebRuntimeForBaseURL(ctx, dataDir, baseURL, resolved.Address)
 	if err != nil {
 		return PreparedWebUI{}, err
 	}
@@ -109,6 +118,13 @@ func resolveWebUIHostTarget(
 	if opts.DaemonName != "" {
 		return EnsureResolvedNamed(ctx, opts.DaemonName)
 	}
+	selection, err := InspectSelection(ctx, opts.WorkspaceStart, "")
+	if err != nil {
+		return ResolvedDaemon{}, err
+	}
+	if selection.Profile != nil {
+		return EnsureLocalProfileSelection(ctx, selection)
+	}
 	running, err := EnsureLocalRunningTarget(ctx)
 	if err != nil {
 		return ResolvedDaemon{}, err
@@ -120,12 +136,15 @@ func resolveWebUIHostTarget(
 	return resolvedForRunning(source, "", running).withGlobalAuth(), nil
 }
 
-func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL string) (DiscoveredWebRuntime, error) {
+func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL, address string) (DiscoveredWebRuntime, error) {
 	records, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
 	if err != nil {
 		return DiscoveredWebRuntime{}, fmt.Errorf("list daemon runtime records: %w", err)
 	}
 	for _, record := range records {
+		if address != "" && record.Endpoint().ConfigAddress() != address {
+			continue
+		}
 		if !daemon.RuntimeProcessAlive(record) {
 			continue
 		}

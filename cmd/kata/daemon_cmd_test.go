@@ -40,6 +40,7 @@ import (
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/vector"
+	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -48,7 +49,7 @@ func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
 	setupKataEnv(t)
 
 	out := executeRoot(t, newDaemonCmd(), "status")
-	assert.Equal(t, "No kata daemon is running.\n", string(out))
+	assert.Equal(t, "Selected daemon: local_stopped (source: local runtime)\nNo kata daemon is running in the current KATA_HOME.\n", string(out))
 }
 
 func TestDaemonLocate_JSONReportsConfiguredRemoteWithoutSecrets(t *testing.T) {
@@ -211,7 +212,7 @@ func TestDaemonLocate_JSONReportsLocalUnixConfigAddress(t *testing.T) {
 	t.Cleanup(func() { _ = listener.Close() })
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "service": "kata", "version": version.Version})
 	})
 	go func() { _ = http.Serve(listener, mux) }() //nolint:gosec // test-only Unix socket
 
@@ -406,12 +407,39 @@ func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) {
 	assert.JSONEq(t, "[]", string(got.Daemons))
 }
 
+func TestDaemonStatus_JSONDegradesOnNonPrivateRuntimeDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions")
+	}
+	setupKataEnv(t)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Chdir(t.TempDir())
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	require.NoError(t, os.Chmod(ns.DataDir, 0o755)) //nolint:gosec // Deliberately non-private regression fixture.
+
+	stdout, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+
+	require.NoError(t, err)
+	var got struct {
+		Daemons  []json.RawMessage `json:"daemons"`
+		Selected struct {
+			State string `json:"state"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Empty(t, got.Daemons)
+	assert.Equal(t, "local_unreachable", got.Selected.State)
+}
+
 func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
-	assert.Equal(t, "OK daemon status=stopped\n", string(out))
+	assert.Equal(t, "OK daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
 }
 
 func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
@@ -422,7 +450,7 @@ func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
 
-	assert.Equal(t, "OK daemon status=stopped\n", string(out))
+	assert.Equal(t, "OK daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
 }
 
 func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
@@ -439,7 +467,8 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	require.NoError(t, err)
 
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
-	assert.Equal(t, "OK daemon status=running web_url=http://127.0.0.1:28888\n", string(out))
+	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
+	assert.Contains(t, string(out), "unreachable")
 }
 
 func TestRuntimeRecordRedactsPostgresDSN(t *testing.T) {

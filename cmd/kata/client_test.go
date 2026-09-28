@@ -799,3 +799,26 @@ func assertEnvDurationOverride(t *testing.T, envKey, envVal string, fallback, wa
 		t.Fatalf("%s=%q override failed: got %v, want %v", envKey, envVal, got, want)
 	}
 }
+
+func TestLocalProfileCompatibilityClientsKeepResolvedCredential(t *testing.T) {
+	resetFlags(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_AUTH_TOKEN", "personal-token")
+	t.Setenv("KATA_SERVER", "")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer work-token", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	resolved := client.ResolvedDaemon{BaseURL: server.URL, Token: "work-token", LocalProfile: &client.LocalProfileIdentity{Home: t.TempDir()}}
+	ctx := context.WithValue(t.Context(), resolvedDaemonContextKey{}, resolved)
+	for _, build := range []func(context.Context, string) (*http.Client, error){httpClientFor, longRunningClientFor, streamingClientFor, federationSpokeHTTPClient} {
+		hc, err := build(ctx, server.URL)
+		require.NoError(t, err)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/projects", nil)
+		require.NoError(t, err)
+		resp, err := hc.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+	}
+}

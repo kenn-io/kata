@@ -216,6 +216,16 @@
       "permanent": true
     },
     {
+      "source": "/operations/local-daemon-profiles/",
+      "destination": "/docs/operations/local-daemon-profiles/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/local-daemon-profiles.md",
+      "destination": "/docs/operations/local-daemon-profiles.md",
+      "permanent": true
+    },
+    {
       "source": "/operations/remote-daemon/",
       "destination": "/docs/operations/remote-daemon/",
       "permanent": true

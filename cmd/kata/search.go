@@ -72,7 +72,7 @@ func newSearchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			baseURL, err := ensureDaemon(ctx)
+			ctx, baseURL, err := ensureDaemonContext(ctx)
 			if err != nil {
 				return err
 			}

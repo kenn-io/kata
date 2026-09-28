@@ -62,17 +62,6 @@ func ResolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 	return resolveRemoteEndpoint(ctx, workspaceStart)
 }
 
-// DiscoverNamed returns the base URL for a named daemon catalog entry without
-// starting a local daemon. Local entries inspect runtime files only; remote
-// entries are normalized and probed.
-func DiscoverNamed(ctx context.Context, name string) (string, bool, error) {
-	target, ok, err := discoverNamedDaemonTarget(ctx, name)
-	if err != nil || !ok {
-		return "", ok, err
-	}
-	return target.BaseURL, true, nil
-}
-
 // EnsureNamedRunning returns the base URL for a named daemon catalog entry,
 // auto-starting local entries and probing remote entries. It is an explicit
 // per-invocation selection and therefore ignores KATA_SERVER, .kata.local.toml,
@@ -83,39 +72,6 @@ func EnsureNamedRunning(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	return resolved.BaseURL, nil
-}
-
-// LocateNamedRunningTarget ensures a named local daemon is running or probes a
-// named remote, returning sanitized connection metadata without resolving its
-// authentication credential.
-func LocateNamedRunningTarget(ctx context.Context, name string) (RunningDaemon, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return RunningDaemon{}, fmt.Errorf("%w: empty name", ErrNamedDaemonNotFound)
-	}
-	cfg, err := config.ReadDaemonConfig()
-	if err != nil {
-		return RunningDaemon{}, err
-	}
-	for _, daemon := range cfg.Daemons {
-		if daemon.Name != name {
-			continue
-		}
-		if daemon.Local {
-			return EnsureLocalRunningTarget(ctx)
-		}
-		baseURL, err := normalizeRemoteURL(daemon.URL, daemon.AllowInsecure)
-		if err != nil {
-			return RunningDaemon{}, fmt.Errorf("%s daemon %q url %q: %w",
-				daemonConfigSource(), daemon.Name, remoteURLForError(daemon.URL), err)
-		}
-		if !probeRemote(ctx, baseURL) {
-			return RunningDaemon{}, fmt.Errorf("%w: %s (%s daemon %q)",
-				ErrRemoteUnavailable, baseURL, daemonConfigSource(), daemon.Name)
-		}
-		return remoteRunningDaemon(baseURL, true), nil
-	}
-	return RunningDaemon{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
 }
 
 // NormalizeRemoteURL exposes kata's remote URL validation/canonicalization
@@ -229,6 +185,10 @@ func resolveRemoteSelection(
 			return ResolvedDaemon{}, false, nil
 		}
 		return ResolvedDaemon{}, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	if cfg.Server.Daemon != "" {
+		_, err := InspectSelection(ctx, workspaceStart, "")
+		return ResolvedDaemon{}, false, err
 	}
 	if cfg.Server.URL == "" {
 		return resolveActiveRemoteSelection(ctx, mode)
@@ -357,6 +317,17 @@ func resolveNamedDaemon(ctx context.Context, name string) (ResolvedDaemon, error
 }
 
 func resolveNamedDaemonMode(ctx context.Context, name string, mode namedResolutionMode) (ResolvedDaemon, error) {
+	selection, err := InspectSelection(ctx, "", name)
+	if err != nil {
+		return ResolvedDaemon{}, err
+	}
+	if selection.Profile != nil {
+		if mode == namedDiscoverOnly {
+			resolved, _, err := discoverLocalProfile(ctx, selection)
+			return resolved, err
+		}
+		return ensureLocalProfile(ctx, selection)
+	}
 	target, ok, err := buildNamedDaemonTarget(ctx, name, mode)
 	if err != nil {
 		return ResolvedDaemon{}, err

@@ -90,6 +90,13 @@ func requireHostLocalExport(ctx context.Context) error {
 			ExitCode: ExitValidation,
 		}
 	}
+	selection, err := client.InspectSelection(ctx, workspaceStartForRemote(), "")
+	if err != nil {
+		return err
+	}
+	if selection.Profile != nil {
+		return &cliError{Message: "export is a host-local storage operation; select the intended KATA_HOME and clear workspace/active profile selection", Kind: kindValidation, ExitCode: ExitValidation}
+	}
 	_, remote, err := client.ResolveRemote(ctx, workspaceStartForRemote())
 	if err != nil && !errors.Is(err, client.ErrRemoteUnavailable) {
 		return err
