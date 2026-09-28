@@ -32,6 +32,7 @@ type Runner struct {
 
 // RunnerConfig configures a GitHub sync runner.
 type RunnerConfig struct {
+	Progress  *ProgressTracker
 	Store     db.Storage
 	Fetcher   Fetcher
 	Clock     func() time.Time
@@ -84,7 +85,7 @@ func (r *Runner) runOnce(
 	if err := r.validate(); err != nil {
 		return RunResult{}, err
 	}
-	syncStartedAt := r.now()
+	syncStartedAt := r.now().Truncate(time.Millisecond)
 	binding, claimed, err := r.config.Store.ClaimIssueSyncBinding(ctx, bindingID, "github", syncStartedAt, syncStartedAt.Add(-r.staleLockTTL()))
 	if err != nil {
 		return RunResult{}, err
@@ -93,6 +94,11 @@ func (r *Runner) runOnce(
 		return RunResult{Binding: binding}, db.ErrIssueSyncAlreadyRunning
 	}
 
+	r.config.Progress.Begin(bindingID, syncStartedAt)
+	defer r.config.Progress.Finish(bindingID, syncStartedAt)
+	ctx = withProgressReporter(ctx, func(phase string, completed, total int) {
+		r.config.Progress.Update(bindingID, syncStartedAt, phase, completed, total, r.now())
+	})
 	result, err := r.runClaimed(ctx, binding, syncStartedAt, eventFork)
 	if err != nil {
 		return result, err
@@ -238,7 +244,7 @@ func (r *Runner) runClaimed(
 		err := fmt.Errorf("github sync repository node mismatch: binding has %q, fetch returned %q", binding.RemoteID, repo.NodeID)
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
-	binding, ghConfig, err = r.refreshRepository(ctx, binding, ghConfig, repo)
+	binding, ghConfig, err = r.refreshRepository(ctx, binding, ghConfig, repo, syncStartedAt)
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
@@ -249,6 +255,7 @@ func (r *Runner) runClaimed(
 		}
 	}
 
+	reportProgress(ctx, "parents", 0, 0)
 	parentData, err := fetcher.ParentData(ctx, ghConfig.Binding())
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
@@ -259,9 +266,26 @@ func (r *Runner) runClaimed(
 	if reconcileLegacyTitles || parentLinkBackfill {
 		since = nil
 	}
+	cutoff, err := ghConfig.SinceTime()
+	if err != nil {
+		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+	}
+	if cutoff != nil && (since == nil || cutoff.After(*since)) {
+		since = cutoff
+	}
+	reportProgress(ctx, "issues", 0, 0)
 	issues, err := fetcher.Issues(ctx, ghConfig.Binding(), since)
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+	}
+	if cutoff != nil {
+		eligible := make([]Issue, 0, len(issues))
+		for _, issue := range issues {
+			if issue.UpdatedAt != nil && issue.UpdatedAt.After(*cutoff) {
+				eligible = append(eligible, issue)
+			}
+		}
+		issues = eligible
 	}
 	comments, err := r.fetchComments(ctx, fetcher, ghConfig, issues)
 	if err != nil {
@@ -273,7 +297,7 @@ func (r *Runner) runClaimed(
 	batch.PreserveLocalParentConflicts = true
 	if parentData.Scan == ParentScanComplete {
 		batch.ReconcileLinkTypesForUnchanged = map[string]bool{"parent": true}
-		batch.Items, err = r.appendScannedParentReconcileItems(ctx, batch, parentData)
+		batch.Items, err = r.appendScannedParentReconcileItems(ctx, batch, parentData, cutoff != nil)
 		if err != nil {
 			return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 		}
@@ -281,7 +305,7 @@ func (r *Runner) runClaimed(
 	if parentLinkBackfill {
 		batch.ReconcileLinkTypesForUnchanged = map[string]bool{"parent": true}
 	}
-	batch.Items, err = r.filterUnresolvableParentLinks(ctx, batch)
+	batch.Items, err = r.filterUnresolvableParentLinks(ctx, batch, cutoff != nil)
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
@@ -295,6 +319,7 @@ func (r *Runner) runClaimed(
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, importResult)
 	}
+	reportProgress(ctx, "finalizing", 0, 0)
 	cleanupCtx, cleanupCancel := r.cleanupContext(ctx)
 	defer cleanupCancel()
 	if parentLinkBackfill {
@@ -307,6 +332,7 @@ func (r *Runner) runClaimed(
 			BindingID:   binding.ID,
 			DisplayName: backfilledConfig.DisplayName(),
 			Config:      configJSON,
+			StartedAt:   &syncStartedAt,
 		})
 		if err != nil {
 			return r.recordError(ctx, binding, syncStartedAt, err, importResult)
@@ -331,12 +357,13 @@ func (r *Runner) runClaimed(
 	return RunResult{Binding: binding, Status: status, Import: importResult}, nil
 }
 
-func (r *Runner) refreshRepository(ctx context.Context, binding db.IssueSyncBinding, ghConfig Config, repo Repository) (db.IssueSyncBinding, Config, error) {
+func (r *Runner) refreshRepository(ctx context.Context, binding db.IssueSyncBinding, ghConfig Config, repo Repository, startedAt time.Time) (db.IssueSyncBinding, Config, error) {
 	owner, name, ok := strings.Cut(repo.FullName, "/")
 	if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" {
 		return binding, ghConfig, fmt.Errorf("github repository full_name %q is invalid", repo.FullName)
 	}
 	refreshedConfig := Config{
+		Since:              ghConfig.Since,
 		Host:               ghConfig.Host,
 		Owner:              owner,
 		Repo:               name,
@@ -355,8 +382,12 @@ func (r *Runner) refreshRepository(ctx context.Context, binding db.IssueSyncBind
 		BindingID:   binding.ID,
 		DisplayName: refreshedConfig.DisplayName(),
 		Config:      configJSON,
+		StartedAt:   &startedAt,
 	})
-	return refreshed, refreshedConfig, err
+	if err != nil {
+		return binding, ghConfig, err
+	}
+	return refreshed, refreshedConfig, nil
 }
 
 func (r *Runner) fetcherForBinding(ctx context.Context, binding Binding) (Fetcher, error) {
@@ -369,23 +400,32 @@ func (r *Runner) fetcherForBinding(ctx context.Context, binding Binding) (Fetche
 func (r *Runner) fetchComments(ctx context.Context, fetcher Fetcher, ghConfig Config, issues []Issue) (map[int][]Comment, error) {
 	out := make(map[int][]Comment)
 	fetchBinding := ghConfig.Binding()
+	total := 0
+	for _, issue := range issues {
+		if !IsPullRequestIssue(issue) {
+			total++
+		}
+	}
+	reportProgress(ctx, "comments", 0, total)
+	completed := 0
 	for _, issue := range issues {
 		if IsPullRequestIssue(issue) {
 			continue
 		}
-		if issue.Comments == 0 {
-			continue
+		if issue.Comments > 0 {
+			comments, err := fetcher.Comments(ctx, fetchBinding, issue.Number)
+			if err != nil {
+				return nil, err
+			}
+			out[issue.Number] = comments
 		}
-		comments, err := fetcher.Comments(ctx, fetchBinding, issue.Number)
-		if err != nil {
-			return nil, err
-		}
-		out[issue.Number] = comments
+		completed++
+		reportProgress(ctx, "comments", completed, total)
 	}
 	return out, nil
 }
 
-func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db.ImportBatchParams, parentData ParentData) ([]db.ImportItem, error) {
+func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db.ImportBatchParams, parentData ParentData, hasCutoff bool) ([]db.ImportItem, error) {
 	if parentData.Scan != ParentScanComplete || len(parentData.ScannedChildIDs) == 0 {
 		return batch.Items, nil
 	}
@@ -407,11 +447,13 @@ func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db
 		mapping, err := r.config.Store.ImportMappingBySource(ctx, batch.ProjectID, batch.Source, "issue", childExternalID)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
-				r.config.Logger.Warn("github sync skipped parent reconciliation for unmapped scanned child",
-					"source", batch.Source,
-					"child_external_id", childExternalID,
-					"child_number", number,
-				)
+				if !hasCutoff {
+					r.config.Logger.Warn("github sync skipped parent reconciliation for unmapped scanned child",
+						"source", batch.Source,
+						"child_external_id", childExternalID,
+						"child_number", number,
+					)
+				}
 				continue
 			}
 			return nil, fmt.Errorf("lookup github scanned child %q: %w", childExternalID, err)
@@ -461,7 +503,7 @@ func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db
 	return items, nil
 }
 
-func (r *Runner) filterUnresolvableParentLinks(ctx context.Context, batch db.ImportBatchParams) ([]db.ImportItem, error) {
+func (r *Runner) filterUnresolvableParentLinks(ctx context.Context, batch db.ImportBatchParams, hasCutoff bool) ([]db.ImportItem, error) {
 	if len(batch.Items) == 0 {
 		return batch.Items, nil
 	}
@@ -486,11 +528,13 @@ func (r *Runner) filterUnresolvableParentLinks(ctx context.Context, batch db.Imp
 			}
 			if _, err := r.config.Store.ImportMappingBySource(ctx, batch.ProjectID, batch.Source, "issue", link.TargetExternalID); err != nil {
 				if errors.Is(err, db.ErrNotFound) {
-					r.config.Logger.Warn("github sync skipped unresolved parent link",
-						"source", batch.Source,
-						"child_external_id", items[i].ExternalID,
-						"target_external_id", link.TargetExternalID,
-					)
+					if !hasCutoff {
+						r.config.Logger.Warn("github sync skipped unresolved parent link",
+							"source", batch.Source,
+							"child_external_id", items[i].ExternalID,
+							"target_external_id", link.TargetExternalID,
+						)
+					}
 					markParentLinkNonAuthoritative(&items[i])
 					continue
 				}
@@ -516,6 +560,7 @@ func (r *Runner) importChunks(
 	batch db.ImportBatchParams,
 	eventFork activity.Admission,
 ) (db.ImportBatchResult, error) {
+	reportProgress(ctx, "importing", 0, len(batch.Items))
 	chunkSize := r.initialBatchSize()
 	aggregate := db.ImportBatchResult{Source: batch.Source, Errors: []string{}}
 	if len(batch.Items) == 0 {
@@ -537,6 +582,7 @@ func (r *Runner) importChunks(
 		}
 		mergeImportResult(&aggregate, res)
 		r.emitEvents(ctx, binding.ProjectID, events, eventFork)
+		reportProgress(ctx, "importing", end, len(batch.Items))
 	}
 	return aggregate, nil
 }

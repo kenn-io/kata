@@ -42,9 +42,44 @@ func TestHTTPFetcherRepositoryUsesRESTBaseAndDecodesRepository(t *testing.T) {
 	}, repo)
 }
 
+func TestRESTPageProgressSurvivesResourceLabelChange(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertHTTPFetcherHeaders(t, r)
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		writeHTTPFetcherTestResponse(t, w, `[{"id":101,"number":1}]`)
+	}))
+	defer server.Close()
+	fetcher := NewHTTPFetcher(HTTPFetcherConfig{
+		Client:              server.Client(),
+		CredentialResolver:  newStaticHTTPFetcherTestResolver("test-token"),
+		RESTBaseURLOverride: server.URL,
+	})
+	binding := Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}
+	session, err := fetcher.ForBinding(context.Background(), binding)
+	require.NoError(t, err)
+	requestURL, err := fetcher.restEndpointURL(binding, issuesEndpoint(binding, nil))
+	require.NoError(t, err)
+	var counts []int
+	ctx := withProgressReporter(context.Background(), func(phase string, count, total int) {
+		assert.Equal(t, "issues", phase)
+		assert.Zero(t, total)
+		counts = append(counts, count)
+	})
+	issues, err := fetchRESTPagesWithClient[Issue](ctx, fetcher, session.(*httpFetcherBindingSession).client, binding, requestURL, "repository issue records", "issues")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, []int{1}, counts)
+}
+
 func TestHTTPFetcherIssuesPaginatesAndEncodesSince(t *testing.T) {
 	var server *httptest.Server
 	var seenPages []string
+	var counts []int
+	ctx := withProgressReporter(context.Background(), func(phase string, count, total int) {
+		assert.Zero(t, total)
+		assert.Equal(t, "issues", phase)
+		counts = append(counts, count)
+	})
 	since := time.Date(2026, 6, 22, 10, 30, 15, 0, time.UTC)
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assertHTTPFetcherHeaders(t, r)
@@ -64,6 +99,7 @@ func TestHTTPFetcherIssuesPaginatesAndEncodesSince(t *testing.T) {
 			w.Header().Set("Link", fmt.Sprintf(`<%s/repos/example-owner/example-repo/issues?page=2>; rel="next"`, server.URL))
 			writeHTTPFetcherTestResponse(t, w, `[{"id":101,"node_id":"I_first","number":1,"title":"first"}]`)
 		case "2":
+			assert.Equal(t, []int{1}, counts)
 			writeHTTPFetcherTestResponse(t, w, `[{"id":102,"node_id":"I_second","number":2,"title":"second"}]`)
 		default:
 			t.Fatalf("unexpected issues page %q", r.URL.Query().Get("page"))
@@ -77,7 +113,7 @@ func TestHTTPFetcherIssuesPaginatesAndEncodesSince(t *testing.T) {
 		RESTBaseURLOverride: server.URL,
 	})
 
-	issues, err := fetcher.Issues(context.Background(), Binding{
+	issues, err := fetcher.Issues(ctx, Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -88,6 +124,7 @@ func TestHTTPFetcherIssuesPaginatesAndEncodesSince(t *testing.T) {
 	assert.Equal(t, "I_first", issues[0].NodeID)
 	assert.Equal(t, "I_second", issues[1].NodeID)
 	assert.Equal(t, []string{"", "2"}, seenPages)
+	assert.Equal(t, []int{1, 2}, counts)
 }
 
 func TestHTTPFetcherIssuesPaginationUsesOriginGuardWithCanonicalCase(t *testing.T) {

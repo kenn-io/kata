@@ -411,6 +411,7 @@ type gitHubSyncHandlerHarness struct {
 }
 
 type gitHubSyncHarnessOpts struct {
+	progress   *githubsync.ProgressTracker
 	fakeRunner bool
 	// trustedActorHeader, when set, runs the server in trusted-proxy mode on
 	// an allowlisted loopback listener so tests can exercise the
@@ -449,6 +450,7 @@ func newGitHubSyncHandlerHarnessWithOpts(t *testing.T, opts gitHubSyncHarnessOpt
 		FullName: "example-owner/example-repo",
 	}
 	cfg := daemon.ServerConfig{
+		GitHubSyncProgress:       opts.progress,
 		DB:                       d.db,
 		StartedAt:                d.now,
 		Broadcaster:              h.broadcaster,
@@ -603,6 +605,8 @@ type fakeRepositoryCall struct {
 }
 
 type fakeGitHubSyncFetcher struct {
+	issuesBlocked     chan struct{}
+	issuesRelease     chan struct{}
 	repo              githubsync.Repository
 	repositoryErr     error
 	issues            []githubsync.Issue
@@ -624,6 +628,10 @@ func (f *fakeGitHubSyncFetcher) Repository(_ context.Context, host, owner, repo 
 
 func (f *fakeGitHubSyncFetcher) Issues(_ context.Context, _ githubsync.Binding, _ *time.Time) ([]githubsync.Issue, error) {
 	f.issueCalls++
+	if f.issuesBlocked != nil {
+		close(f.issuesBlocked)
+		<-f.issuesRelease
+	}
 	return f.issues, nil
 }
 
@@ -645,4 +653,129 @@ func (r fakeGitHubSyncRunner) RunOnce(_ context.Context, _ int64) (githubsync.Ru
 	defer r.h.mu.Unlock()
 	r.h.runnerRuns++
 	return githubsync.RunResult{}, errors.New("fake runner should not run")
+}
+
+func TestGitHubSyncSinceValidatesBeforeNetwork(t *testing.T) {
+	for _, value := range []any{"bad", 42, true, []string{"2026-01-01"}} {
+		h := newGitHubSyncHandlerHarness(t)
+		resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "enable"), map[string]any{"config": map[string]any{"owner": "example-owner", "repo": "example-repo", "since": value}})
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+		assert.Zero(t, h.fetcher.repositoryCalls)
+	}
+	h := newGitHubSyncHandlerHarness(t)
+	resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "enable"), map[string]any{"config": map[string]any{"owner": "example-owner", "repo": "example-repo", "since": "2026-01-01"}})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	binding, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	require.NoError(t, err)
+	assert.Contains(t, string(binding.Config), `"since":"2026-01-01T00:00:00Z"`)
+}
+
+func TestGitHubSyncSincePreservesOmittedAndClearsExplicitValues(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		config map[string]any
+		want   string
+	}{
+		{"omitted", map[string]any{"owner": "example-owner", "repo": "example-repo"}, "2026-01-01T00:00:00Z"},
+		{"empty", map[string]any{"owner": "example-owner", "repo": "example-repo", "since": ""}, ""},
+		{"null", map[string]any{"owner": "example-owner", "repo": "example-repo", "since": nil}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newGitHubSyncHandlerHarness(t)
+			endpoint := githubSyncEndpoint(h.project.ID, "enable")
+			resp, body := postJSON(t, h.server, endpoint, map[string]any{"config": map[string]any{"owner": "example-owner", "repo": "example-repo", "since": "2026-01-01"}})
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+			resp, body = postJSON(t, h.server, endpoint, map[string]any{"config": tt.config, "interval": "10m"})
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			binding, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+			require.NoError(t, err)
+			cfg, err := githubsync.DecodeConfig(binding.Config)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.Since)
+		})
+	}
+}
+
+func TestGitHubSyncProgressStatusFencesDurableClaim(t *testing.T) {
+	tracker := githubsync.NewProgressTracker()
+	h := newGitHubSyncHandlerHarnessWithOpts(t, gitHubSyncHarnessOpts{progress: tracker})
+	binding := h.mustUpsertBinding(t, true)
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	_, claimed, err := h.store.ClaimIssueSyncBinding(context.Background(), binding.ID, "github", at, at.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, claimed)
+	tracker.Begin(binding.ID, at)
+	tracker.Update(binding.ID, at, "comments", 2, 10, at)
+	_, body := getStatusBody(t, h.server, githubSyncEndpoint(h.project.ID, "status"))
+	var out struct {
+		Status struct {
+			State    string
+			Progress *struct {
+				Phase     string
+				Completed int
+				Total     int
+			}
+		}
+	}
+	decodeJSON(t, body, &out)
+	assert.Equal(t, "running", out.Status.State)
+	require.NotNil(t, out.Status.Progress)
+	assert.Equal(t, "comments", out.Status.Progress.Phase)
+	assert.Equal(t, 2, out.Status.Progress.Completed)
+	assert.Equal(t, 10, out.Status.Progress.Total)
+	tracker.Begin(binding.ID, at.Add(time.Second))
+	_, body = getStatusBody(t, h.server, githubSyncEndpoint(h.project.ID, "status"))
+	decodeJSON(t, body, &out)
+	// Unmarshal into a fresh object, since absent fields retain old values.
+	out.Status.Progress = nil
+	decodeJSON(t, body, &out)
+	assert.Equal(t, "running", out.Status.State)
+	assert.Nil(t, out.Status.Progress)
+	_, err = h.store.DisableIssueSyncBinding(context.Background(), h.project.ID)
+	require.NoError(t, err)
+	_, body = getStatusBody(t, h.server, githubSyncEndpoint(h.project.ID, "status"))
+	decodeJSON(t, body, &out)
+	assert.Equal(t, "disabled", out.Status.State)
+	assert.Nil(t, out.Status.Progress)
+}
+
+func TestGitHubSyncProgressVisibleWhileOnceIsFetching(t *testing.T) {
+	tracker := githubsync.NewProgressTracker()
+	h := newGitHubSyncHandlerHarnessWithOpts(t, gitHubSyncHarnessOpts{progress: tracker})
+	binding := h.mustUpsertBinding(t, true)
+	h.fetcher.issuesBlocked = make(chan struct{})
+	h.fetcher.issuesRelease = make(chan struct{})
+	done := make(chan int, 1)
+	go func() {
+		resp, _ := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "once"), map[string]any{})
+		done <- resp.StatusCode
+	}()
+	select {
+	case <-h.fetcher.issuesBlocked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("once did not reach issue fetch")
+	}
+	_, body := getStatusBody(t, h.server, githubSyncEndpoint(h.project.ID, "status"))
+	var out struct {
+		Status struct {
+			State    string
+			Progress *struct{ Phase string }
+		}
+	}
+	decodeJSON(t, body, &out)
+	assert.Equal(t, "running", out.Status.State)
+	require.NotNil(t, out.Status.Progress)
+	assert.Equal(t, "issues", out.Status.Progress.Phase)
+	close(h.fetcher.issuesRelease)
+	assert.Equal(t, http.StatusOK, <-done)
+	status, err := h.store.IssueSyncStatusByProject(context.Background(), h.project.ID)
+	require.NoError(t, err)
+	assert.Nil(t, status.SyncStartedAt)
+	assert.Nil(t, tracker.Snapshot(binding.ID, time.Now()))
+	_, body = getStatusBody(t, h.server, githubSyncEndpoint(h.project.ID, "status"))
+	out.Status.Progress = nil
+	decodeJSON(t, body, &out)
+	assert.Equal(t, "enabled", out.Status.State)
+	assert.Nil(t, out.Status.Progress)
 }

@@ -1177,8 +1177,9 @@ func runDaemonProcess(
 		}, daemonLog,
 	)
 	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
+	gitHubSyncProgress := githubsync.NewProgressTracker()
 	gitHubSyncWake := startGitHubSyncRunner(
-		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, publisher, daemonLog,
+		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, publisher, daemonLog, gitHubSyncProgress,
 	)
 	externalRootRegistry, err := rootbridge.NewRegistry(ctx, dcfg.Connectors, nil)
 	if err != nil {
@@ -1245,6 +1246,7 @@ func runDaemonProcess(
 		GitHubSyncFetcher:      gitHubSyncFetcher,
 		GitHubSyncConfig:       dcfg.GitHubSync,
 		GitHubSyncWake:         gitHubSyncWake,
+		GitHubSyncProgress:     gitHubSyncProgress,
 		ExternalRootRegistry:   externalRootRegistry,
 		ExternalRootService:    externalRootService,
 		ExternalRootReconciler: externalRootReconciler,
@@ -1767,6 +1769,7 @@ func startGitHubSyncRunner(
 	fetcher githubsync.Fetcher,
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
+	progress *githubsync.ProgressTracker,
 ) func() {
 	wake := make(chan struct{}, 1)
 	wakeRunner := func() {
@@ -1783,6 +1786,7 @@ func startGitHubSyncRunner(
 		logger = slog.New(slog.NewTextHandler(daemonLog.Writer(), nil))
 	}
 	runner := newGitHubSyncDaemonRunner(githubsync.RunnerConfig{
+		Progress:       progress,
 		Store:          store,
 		Fetcher:        fetcher,
 		Logger:         logger,

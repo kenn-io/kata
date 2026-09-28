@@ -154,3 +154,29 @@ Disabling sync stops future polling but preserves history and mappings. A
 project cannot switch an existing binding to a different external source in
 v1, because the imported local state is already mapped to the original source
 identity.
+
+## Filtering and live progress
+
+An optional `since` in the provider config sets an exclusive GitHub last-updated
+cutoff. The REST issue request uses the later of that cutoff and the normal
+cursor overlap. Initial and backfill runs ignore the cursor before applying
+the cutoff. Local filtering removes old or undated rows before comment reads
+and import mapping. Changing or removing the cutoff resets the cursor through
+the existing config-change behavior in both storage backends. Existing issues
+and full-repository parent reconciliation are preserved.
+
+The daemon shares one in-memory progress registry between scheduled and manual
+runners. Entries belong to a binding ID and a UTC millisecond claim timestamp,
+matching the timestamp precision of SQLite and PostgreSQL. Rejected claims do
+not replace entries; updates and cleanup only affect the matching owner. Status
+attaches a copy only when its live entry matches the durable active claim.
+Runner-owned repository refresh and parent-backfill configuration writes also
+check the active claim atomically, preventing superseded runs from restoring
+obsolete filter settings. This adds no persisted objects or schema changes.
+
+Pagination carries a context-local progress reporter so authenticated fetcher
+sessions can report completed parent/issue rows without storing mutable run
+state in shared fetchers. Phase transitions reset counts; comments count
+eligible issues, and importing counts committed items after event delivery.
+Unknown totals remain zero. Successful historical totals retain their existing
+durable semantics and are labeled as the last successful run.

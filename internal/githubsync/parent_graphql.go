@@ -92,6 +92,7 @@ func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Cli
 				data.ParentByChild[node.Number] = int64(node.Parent.FullDatabaseID)
 			}
 		}
+		reportProgress(ctx, "parents", len(data.ScannedChildIDs), 0)
 		if !page.PageInfo.HasNextPage {
 			return data, nil
 		}

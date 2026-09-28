@@ -684,3 +684,24 @@ func TestGitHubSyncMissingBindingReturnsNotFound(t *testing.T) {
 	_, err := d.IssueSyncBindingByID(ctx, 999)
 	require.True(t, errors.Is(err, db.ErrNotFound))
 }
+
+func TestGitHubSyncRefreshRequiresCurrentClaim(t *testing.T) {
+	d, ctx, p := setupGitHubSyncProject(t)
+	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, claimed, err := d.ClaimIssueSyncBinding(ctx, binding.ID, "github", at, at.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, claimed)
+	params := db.IssueSyncBindingUpdateParams{BindingID: binding.ID, DisplayName: binding.DisplayName, Config: binding.Config, StartedAt: &at}
+	_, err = d.RefreshIssueSyncBinding(ctx, params)
+	require.NoError(t, err)
+	newParams := githubSyncBindingParams(p.ID)
+	newParams.Config = []byte(`{"since":"2026-01-01T00:00:00Z"}`)
+	newer, err := d.UpsertIssueSyncBinding(ctx, newParams)
+	require.NoError(t, err)
+	_, err = d.RefreshIssueSyncBinding(ctx, params)
+	require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	got, err := d.IssueSyncBindingByID(ctx, binding.ID)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(newer.Config), string(got.Config))
+}

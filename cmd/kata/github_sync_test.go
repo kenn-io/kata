@@ -192,6 +192,7 @@ func TestRootRegistersSyncGitHub(t *testing.T) {
 }
 
 type githubSyncCLIFixture struct {
+	progress  *githubsync.ProgressTracker
 	env       *testenv.Env
 	dir       string
 	projectID int64
@@ -209,7 +210,9 @@ func newGitHubSyncCLIFixture(t *testing.T) githubSyncCLIFixture {
 		},
 	}
 	runner := &fakeGitHubSyncCLIRunner{}
+	progress := githubsync.NewProgressTracker()
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.GitHubSyncProgress = progress
 		cfg.GitHubSyncFetcher = fetcher
 		cfg.GitHubSyncRunnerFactory = func(daemon.GitHubSyncRunnerConfig) daemon.GitHubSyncRunner {
 			return runner
@@ -217,7 +220,7 @@ func newGitHubSyncCLIFixture(t *testing.T) githubSyncCLIFixture {
 	})
 	dir := initBoundWorkspace(t, env.URL, "https://daemon.example/spoke-project.git")
 	projectID := resolvePIDViaHTTP(t, env.URL, dir)
-	return githubSyncCLIFixture{env: env, dir: dir, projectID: projectID, fetcher: fetcher, runner: runner}
+	return githubSyncCLIFixture{env: env, dir: dir, projectID: projectID, fetcher: fetcher, runner: runner, progress: progress}
 }
 
 type githubSyncFetcherCall struct {
@@ -303,4 +306,90 @@ func mustCmdGitHubSyncConfig(t testing.TB, host, owner, repo string, repoID int6
 		panic(err)
 	}
 	return config
+}
+
+func TestGitHubSyncSinceEnableAndValidation(t *testing.T) {
+	f := newGitHubSyncCLIFixture(t)
+	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--since", "2026-01-01")
+	binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	require.NoError(t, err)
+	assert.Contains(t, string(binding.Config), `"since":"2026-01-01T00:00:00Z"`)
+	_, _, err = runCLIWithErr(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--since", "bad")
+	_ = requireCLIError(t, err, ExitValidation)
+	assert.Len(t, f.fetcher.calls, 1, "invalid cutoff must reject before repository lookup")
+	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--interval", "10m")
+	binding, err = f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	require.NoError(t, err)
+	assert.Contains(t, string(binding.Config), `"since":"2026-01-01T00:00:00Z"`)
+	assert.Equal(t, 600, binding.IntervalSeconds)
+
+	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--since=")
+	binding, err = f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	require.NoError(t, err)
+	assert.NotContains(t, string(binding.Config), `"since"`)
+}
+
+func TestGitHubSyncProgressDetailedStatusAllModes(t *testing.T) {
+	f := newGitHubSyncCLIFixture(t)
+	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--since", "2026-01-01")
+	binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	require.NoError(t, err)
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	_, claimed, err := f.env.DB.ClaimIssueSyncBinding(context.Background(), binding.ID, "github", at, at.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, claimed)
+	f.progress.Begin(binding.ID, at)
+	f.progress.Update(binding.ID, at, "issues", 200, 0, at.Add(time.Second))
+	human := runCLI(t, f.env, f.dir, "sync", "github", "status")
+	for _, want := range []string{"GitHub sync running", "example-owner/example-repo", "issues", "200", "Since:", "Last attempt:", "Started:", "No successful run yet"} {
+		assert.Contains(t, human, want)
+	}
+	agent := runCLI(t, f.env, f.dir, "--agent", "sync", "github", "status")
+	for _, want := range []string{"state=running", "phase=issues", "completed=200", "total=0", "since=2026-01-01T00:00:00Z", "last_attempt_at=", "sync_started_at=", "interval_seconds=300"} {
+		assert.Contains(t, agent, want)
+	}
+	raw := runCLI(t, f.env, f.dir, "--json", "sync", "github", "status")
+	var body struct {
+		Status struct {
+			State    string
+			Progress struct {
+				Phase     string
+				Completed int
+			}
+		}
+	}
+	require.NoError(t, json.Unmarshal([]byte(raw), &body))
+	assert.Equal(t, "running", body.Status.State)
+	assert.Equal(t, "issues", body.Status.Progress.Phase)
+	assert.Equal(t, 200, body.Status.Progress.Completed)
+	f.progress.Finish(binding.ID, at)
+	human = runCLI(t, f.env, f.dir, "sync", "github", "status")
+	assert.Contains(t, human, "GitHub sync running")
+	assert.NotContains(t, human, "Progress:")
+}
+
+func TestGitHubSyncDetailedStatusLabelsPreviousSuccessAfterFailure(t *testing.T) {
+	f := newGitHubSyncCLIFixture(t)
+	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo")
+	binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	require.NoError(t, err)
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	_, _, err = f.env.DB.ClaimIssueSyncBinding(context.Background(), binding.ID, "github", at, at.Add(-time.Hour))
+	require.NoError(t, err)
+	_, err = f.env.DB.RecordIssueSyncSuccess(context.Background(), db.IssueSyncSuccessParams{BindingID: binding.ID, StartedAt: at, At: at, CursorAt: at, LastCreated: 12, LastComments: 34})
+	require.NoError(t, err)
+	later := at.Add(time.Minute)
+	_, _, err = f.env.DB.ClaimIssueSyncBinding(context.Background(), binding.ID, "github", later, at.Add(-time.Hour))
+	require.NoError(t, err)
+	_, err = f.env.DB.RecordIssueSyncError(context.Background(), db.IssueSyncErrorParams{BindingID: binding.ID, StartedAt: later, At: later, Error: "upstream failed"})
+	require.NoError(t, err)
+	human := runCLI(t, f.env, f.dir, "sync", "github", "status")
+	assert.Contains(t, human, "Last successful run:")
+	assert.Contains(t, human, "created=12")
+	assert.Contains(t, human, "comments=34")
+	assert.Contains(t, human, "upstream failed")
+	agent := runCLI(t, f.env, f.dir, "--agent", "sync", "github", "status")
+	assert.Contains(t, agent, "last_success_at=")
+	assert.Contains(t, agent, "last_created=12")
+	assert.Contains(t, agent, "last_comments=34")
 }

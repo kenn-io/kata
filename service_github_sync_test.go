@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -145,6 +146,72 @@ func TestServiceRunProcessesEnabledGitHubSyncBinding(t *testing.T) {
 	}
 }
 
+func TestServiceRunShowsGitHubSyncProgressForScheduledRun(t *testing.T) {
+	ctx := context.Background()
+	fetcher := &serviceGitHubProgressFetcher{
+		issuesStarted: make(chan struct{}),
+		releaseIssues: make(chan struct{}),
+	}
+	service, err := newService(ctx, Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: AuthConfig{TrustCallerAuthentication: true},
+	}, serviceDeps{gitHubSyncFetcher: fetcher})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	project, err := service.store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	bindingConfig, err := githubsync.EncodeConfig(githubsync.Config{
+		Host: "github.com", Owner: "example-owner", Repo: "example-repo", RepoID: 12345,
+	})
+	require.NoError(t, err)
+	_, err = service.store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID: project.ID, Provider: "github", SourceKey: "github:R_exampleNode",
+		RemoteID: "R_exampleNode", DisplayName: "example-owner/example-repo",
+		Config: bindingConfig, IntervalSeconds: 300,
+	})
+	require.NoError(t, err)
+
+	runCtx, cancelRun := context.WithCancel(ctx)
+	runDone := make(chan error, 1)
+	go func() { runDone <- service.Run(runCtx) }()
+	t.Cleanup(func() {
+		fetcher.release()
+		cancelRun()
+		select {
+		case runErr := <-runDone:
+			require.NoError(t, runErr)
+		case <-time.After(5 * time.Second):
+			require.FailNow(t, "Run did not stop after cancellation")
+		}
+	})
+
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+	select {
+	case <-fetcher.issuesStarted:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "scheduled GitHub sync did not reach issue fetch")
+	}
+
+	response, err := http.Get(fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/github/status", server.URL, project.ID))
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	var out struct {
+		Status struct {
+			State    string `json:"state"`
+			Progress *struct {
+				Phase string `json:"phase"`
+			} `json:"progress"`
+		} `json:"status"`
+	}
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&out))
+	assert.Equal(t, "running", out.Status.State)
+	require.NotNil(t, out.Status.Progress)
+	assert.Equal(t, "issues", out.Status.Progress.Phase)
+}
+
 type serviceGitHubFetcher struct {
 	repositoryCalls chan githubsync.Binding
 }
@@ -164,4 +231,37 @@ func (*serviceGitHubFetcher) Comments(context.Context, githubsync.Binding, int) 
 
 func (*serviceGitHubFetcher) ParentData(context.Context, githubsync.Binding) (githubsync.ParentData, error) {
 	return githubsync.ParentData{Scan: githubsync.ParentScanUnsupported}, nil
+}
+
+type serviceGitHubProgressFetcher struct {
+	issuesStarted chan struct{}
+	releaseIssues chan struct{}
+	startedOnce   sync.Once
+	releaseOnce   sync.Once
+}
+
+func (*serviceGitHubProgressFetcher) Repository(context.Context, string, string, string) (githubsync.Repository, error) {
+	return githubsync.Repository{NodeID: "R_exampleNode", ID: 12345, FullName: "example-owner/example-repo"}, nil
+}
+
+func (f *serviceGitHubProgressFetcher) Issues(ctx context.Context, _ githubsync.Binding, _ *time.Time) ([]githubsync.Issue, error) {
+	f.startedOnce.Do(func() { close(f.issuesStarted) })
+	select {
+	case <-f.releaseIssues:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (*serviceGitHubProgressFetcher) Comments(context.Context, githubsync.Binding, int) ([]githubsync.Comment, error) {
+	return nil, nil
+}
+
+func (*serviceGitHubProgressFetcher) ParentData(context.Context, githubsync.Binding) (githubsync.ParentData, error) {
+	return githubsync.ParentData{Scan: githubsync.ParentScanUnsupported}, nil
+}
+
+func (f *serviceGitHubProgressFetcher) release() {
+	f.releaseOnce.Do(func() { close(f.releaseIssues) })
 }

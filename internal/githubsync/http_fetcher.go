@@ -121,7 +121,7 @@ func (f *HTTPFetcher) Comments(ctx context.Context, binding Binding, issueNumber
 	return session.Comments(ctx, binding, issueNumber)
 }
 
-func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client *http.Client, binding Binding, firstURL, resource string) ([]T, error) {
+func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client *http.Client, binding Binding, firstURL, resource, phase string) ([]T, error) {
 	var out []T
 	retryBudget := &gitHubRetryBudget{}
 	for nextURL := firstURL; nextURL != ""; {
@@ -138,6 +138,9 @@ func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client
 			return nil, err
 		}
 		out = append(out, page...)
+		if phase != "" {
+			reportProgress(ctx, phase, len(out), 0)
+		}
 		nextURL, err = nextGitHubLinkURL(currentURL, headers.Get("Link"))
 		if err != nil {
 			return nil, err
@@ -195,7 +198,7 @@ func (s *httpFetcherBindingSession) Issues(ctx context.Context, binding Binding,
 	if err != nil {
 		return nil, err
 	}
-	return fetchRESTPagesWithClient[Issue](ctx, s.fetcher, s.client, binding, requestURL, "GitHub issues")
+	return fetchRESTPagesWithClient[Issue](ctx, s.fetcher, s.client, binding, requestURL, "GitHub issues", "issues")
 }
 
 func (s *httpFetcherBindingSession) Comments(ctx context.Context, binding Binding, issueNumber int) ([]Comment, error) {
@@ -214,7 +217,7 @@ func (s *httpFetcherBindingSession) Comments(ctx context.Context, binding Bindin
 	if err != nil {
 		return nil, err
 	}
-	return fetchRESTPagesWithClient[Comment](ctx, s.fetcher, s.client, binding, requestURL, "GitHub comments for issue "+strconv.Itoa(issueNumber))
+	return fetchRESTPagesWithClient[Comment](ctx, s.fetcher, s.client, binding, requestURL, "GitHub comments for issue "+strconv.Itoa(issueNumber), "")
 }
 
 func (s *httpFetcherBindingSession) ParentData(ctx context.Context, binding Binding) (ParentData, error) {

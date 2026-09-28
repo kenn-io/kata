@@ -125,6 +125,11 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if body.Status.State == "running" && status.SyncStartedAt != nil {
+			if progress := cfg.GitHubSyncProgress.Snapshot(binding.ID, *status.SyncStartedAt); progress != nil {
+				body.Status.Progress = &api.IssueSyncProgressOut{Phase: progress.Phase, Completed: progress.Completed, Total: progress.Total, StartedAt: progress.StartedAt, UpdatedAt: progress.UpdatedAt}
+			}
+		}
 		return &api.IssueSyncResponse{Body: body}, nil
 	})
 
@@ -208,6 +213,37 @@ func githubSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 	if err != nil {
 		return db.UpsertIssueSyncBindingParams{}, err
 	}
+	since := ""
+	if value, ok := in.Body.Config["since"]; ok {
+		switch v := value.(type) {
+		case nil:
+		case string:
+			since = v
+		default:
+			return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", "GitHub sync since must be a string", "", nil)
+		}
+	} else {
+		existing, err := issueSyncBindingByProjectProvider(ctx, cfg.DB, in.ProjectID, issueSyncProviderGitHub)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return db.UpsertIssueSyncBindingParams{}, issueSyncStorageError(err)
+		}
+		if err == nil {
+			stored, err := githubsync.DecodeConfig(existing.Config)
+			if err != nil {
+				return db.UpsertIssueSyncBindingParams{}, err
+			}
+			since = stored.Since
+		}
+	}
+	cutoff, err := githubsync.ParseSince(since)
+	if err != nil {
+		return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
+	}
+	if cutoff != nil {
+		since = cutoff.Format(time.RFC3339)
+	} else {
+		since = ""
+	}
 	fetched, err := githubSyncFetcher(cfg).Repository(ctx, host, owner, repoName)
 	if err != nil {
 		return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
@@ -224,6 +260,7 @@ func githubSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 		repoName = canonicalRepo
 	}
 	ghConfig := githubsync.Config{
+		Since:       since,
 		Host:        host,
 		Owner:       owner,
 		Repo:        repoName,
@@ -316,6 +353,7 @@ func githubSyncRunner(cfg ServerConfig) GitHubSyncRunner {
 		factory = NewDefaultGitHubSyncRunner
 	}
 	return factory(GitHubSyncRunnerConfig{
+		Progress:  cfg.GitHubSyncProgress,
 		Store:     cfg.DB,
 		Fetcher:   githubSyncFetcher(cfg),
 		EventSink: githubSyncEventSink(cfg),
@@ -407,6 +445,9 @@ func issueSyncStatusOut(status db.IssueSyncStatus, provider string, enabled bool
 	state := "disabled"
 	if enabled {
 		state = "enabled"
+		if status.SyncStartedAt != nil {
+			state = "running"
+		}
 	}
 	return api.IssueSyncStatusOut{
 		BindingID:     status.BindingID,

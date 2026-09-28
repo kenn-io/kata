@@ -1,7 +1,7 @@
 ---
 title: GitHub sync
 description: Configure one-way GitHub issue synchronization, credentials, mappings, and operational recovery.
-last_edited: 2026-09-15
+last_edited: 2026-09-28
 ---
 
 # GitHub sync
@@ -105,6 +105,35 @@ Pass `--title-prefix=false` when you want kata titles without the GitHub prefix:
 kata sync github enable --repo example-org/example-repo --title-prefix=false
 ```
 
+### Limit imported history
+
+For a large repository, set an updated-after cutoff:
+
+```sh
+kata sync github enable --repo example-org/example-repo --since 2026-01-01
+```
+
+`--since` accepts `YYYY-MM-DD` (midnight UTC) or an RFC3339 timestamp with whole
+seconds, such as `2026-01-01T12:00:00Z`. It includes issues whose GitHub
+`updated_at` is strictly after the cutoff, including older issues that were
+recently updated. It is not a creation-date filter. Rows without `updated_at`
+are excluded when a cutoff is configured. The daemon applies the same cutoff
+on initial imports, incremental polls, and title or parent-link backfills.
+GitHub's REST `since` query limits issue fetching before comments are fetched.
+
+Re-enable with a different cutoff to change it, or pass `--since=""` to remove
+it. Omitting `--since` keeps the stored cutoff, including when changing
+`--interval`. API clients can clear the cutoff with `"since": ""` or
+`"since": null`; omitting the key preserves it.
+Changing the binding config resets the incremental cursor and fetches eligible
+history again. Existing imported issues remain in kata when a narrower cutoff
+excludes them; filtering never deletes them.
+
+Parent relationships still require a full repository scan because GitHub
+reparenting may not update an issue's timestamp. That scan also reconciles
+links for already imported issues outside the cutoff, so a filtered run can
+still spend time in the `parents` phase.
+
 Enablement validates the repository through the daemon before storing the
 binding. The binding, sync cursor, interval, status, and import mappings live
 in the daemon database, not in `.kata.toml`.
@@ -123,6 +152,34 @@ Inspect the binding and last outcome:
 ```sh
 kata sync github status
 ```
+
+Status shows the repository, polling interval, active cutoff, attempt/success/error
+timestamps, and totals from the **last successful run**. Before the first
+success it reports that no successful run exists. Failed runs do not replace
+those successful totals, even if earlier import chunks committed.
+
+While a run is active, status reports `running` and live phase progress:
+
+```text
+GitHub sync running
+Progress: comments — 25/120 completed; updated 2026-01-02T12:34:56Z
+```
+
+The phases are `repository`, `parents`, `issues`, `comments`, `importing`, and
+`finalizing`. Counts reset when the phase changes. Parent and issue fetches
+count rows as pages arrive; their total is unknown. The issue count includes
+pull-request rows and rows the cutoff may subsequently exclude. Comments count
+eligible issues checked, including issues with no comments, rather than comment
+rows. Importing counts committed batch items, including parent reconciliation
+items. A zero total means unknown or an empty phase; no percentage is guessed.
+
+`once` waits for completion. Run `kata sync github status` in another terminal
+to inspect it, or use `--agent` or `--json` for polling from a script. Live
+counters exist only in the daemon's memory and disappear on completion or
+failure. After a restart, an unrecovered persisted claim may still say `running`
+without live counters until stale-claim recovery; attempt and success timestamps
+remain available. A phase timestamp marks completed work, not a heartbeat: it
+can remain unchanged during a slow request or GitHub retry.
 
 Then browse imported work with normal kata commands:
 

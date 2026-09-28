@@ -75,6 +75,8 @@ type IssueSyncErrorParams struct {
 // IssueSyncBindingUpdateParams refreshes mutable provider-owned display/config
 // fields while preserving the source key and stable remote id.
 type IssueSyncBindingUpdateParams struct {
+	// StartedAt fences runner-owned updates to an active claim when set.
+	StartedAt   *time.Time
 	BindingID   int64
 	DisplayName string
 	Config      jsontext.Value
