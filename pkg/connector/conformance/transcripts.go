@@ -20,6 +20,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kata/pkg/connector"
 )
 
@@ -565,14 +566,7 @@ func (runtime *transcriptRuntime) exchangeStep(ctx context.Context, step protoco
 func decodeTranscriptJSON(encoded []byte) (any, error) {
 	decoder := jsontext.NewDecoder(bytes.NewReader(encoded))
 	var value any
-	if err := json.UnmarshalDecode(decoder, &value, json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, value *any) error {
-		if dec.PeekKind() != '0' {
-			return errors.ErrUnsupported
-		}
-		raw, err := dec.ReadValue()
-		*value = raw.Clone()
-		return err
-	}))); err != nil {
+	if err := json.UnmarshalDecode(decoder, &value, jsonutil.PreserveNumberLiterals()); err != nil {
 		return nil, err
 	}
 	if err := requireTranscriptEOF(decoder); err != nil {
@@ -586,14 +580,7 @@ func decodeTranscriptJSONDocuments(encoded []byte) ([]any, error) {
 	var documents []any
 	for {
 		var value any
-		err := json.UnmarshalDecode(decoder, &value, json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, value *any) error {
-			if dec.PeekKind() != '0' {
-				return errors.ErrUnsupported
-			}
-			raw, err := dec.ReadValue()
-			*value = raw.Clone()
-			return err
-		})))
+		err := json.UnmarshalDecode(decoder, &value, jsonutil.PreserveNumberLiterals())
 		if errors.Is(err, io.EOF) {
 			return documents, nil
 		}

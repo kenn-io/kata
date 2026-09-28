@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
+
+	"go.kenn.io/kata/internal/jsonutil"
 )
 
 // NormalizeJSON removes whitespace and sorts object keys while preserving
@@ -13,14 +14,7 @@ import (
 // Invalid input is returned unchanged.
 func NormalizeJSON(raw jsontext.Value) []byte {
 	var value any
-	if err := json.Unmarshal(raw, &value, json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, value *any) error {
-		if dec.PeekKind() != '0' {
-			return errors.ErrUnsupported
-		}
-		number, err := dec.ReadValue()
-		*value = number.Clone()
-		return err
-	}))); err != nil {
+	if err := json.Unmarshal(raw, &value, jsonutil.PreserveNumberLiterals()); err != nil {
 		return raw
 	}
 	out, err := json.Marshal(value, json.Deterministic(true), jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))

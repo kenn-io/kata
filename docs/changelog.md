@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-09-27
+last_edited: 2026-09-28
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -15,6 +15,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   context and Hermes's first `pre_llm_call` turn. Claude Code and Codex can
   use the visible workspace attention commands. Existing workspace hook
   commands and the contract text keep their current behavior.
+
+- Remove an untracked duplicate Codex contract hook by re-running
+  `kata init --with-codex-hooks` when the selected user config already supplies
+  the contract. Attention hooks keep their positions when unchanged, and init
+  reports any surviving hooks that move and require re-trust. Init installs or
+  updates both hooks in tracked files for teammates without a user hook. See the
+  [init reference](reference/cli.md#workspace-initialization).
 
 ## 0.18.0
 <small>2026-09-17</small>
