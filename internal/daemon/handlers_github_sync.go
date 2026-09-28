@@ -215,10 +215,24 @@ func githubSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 	}
 	since := ""
 	if value, ok := in.Body.Config["since"]; ok {
-		var isString bool
-		since, isString = value.(string)
-		if !isString {
+		switch v := value.(type) {
+		case nil:
+		case string:
+			since = v
+		default:
 			return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", "GitHub sync since must be a string", "", nil)
+		}
+	} else {
+		existing, err := issueSyncBindingByProjectProvider(ctx, cfg.DB, in.ProjectID, issueSyncProviderGitHub)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return db.UpsertIssueSyncBindingParams{}, issueSyncStorageError(err)
+		}
+		if err == nil {
+			stored, err := githubsync.DecodeConfig(existing.Config)
+			if err != nil {
+				return db.UpsertIssueSyncBindingParams{}, err
+			}
+			since = stored.Since
 		}
 	}
 	cutoff, err := githubsync.ParseSince(since)

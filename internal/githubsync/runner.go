@@ -297,7 +297,7 @@ func (r *Runner) runClaimed(
 	batch.PreserveLocalParentConflicts = true
 	if parentData.Scan == ParentScanComplete {
 		batch.ReconcileLinkTypesForUnchanged = map[string]bool{"parent": true}
-		batch.Items, err = r.appendScannedParentReconcileItems(ctx, batch, parentData)
+		batch.Items, err = r.appendScannedParentReconcileItems(ctx, batch, parentData, cutoff != nil)
 		if err != nil {
 			return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 		}
@@ -305,7 +305,7 @@ func (r *Runner) runClaimed(
 	if parentLinkBackfill {
 		batch.ReconcileLinkTypesForUnchanged = map[string]bool{"parent": true}
 	}
-	batch.Items, err = r.filterUnresolvableParentLinks(ctx, batch)
+	batch.Items, err = r.filterUnresolvableParentLinks(ctx, batch, cutoff != nil)
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
@@ -399,6 +399,7 @@ func (r *Runner) fetcherForBinding(ctx context.Context, binding Binding) (Fetche
 
 func (r *Runner) fetchComments(ctx context.Context, fetcher Fetcher, ghConfig Config, issues []Issue) (map[int][]Comment, error) {
 	out := make(map[int][]Comment)
+	fetchBinding := ghConfig.Binding()
 	total := 0
 	for _, issue := range issues {
 		if !IsPullRequestIssue(issue) {
@@ -412,7 +413,7 @@ func (r *Runner) fetchComments(ctx context.Context, fetcher Fetcher, ghConfig Co
 			continue
 		}
 		if issue.Comments > 0 {
-			comments, err := fetcher.Comments(ctx, ghConfig.Binding(), issue.Number)
+			comments, err := fetcher.Comments(ctx, fetchBinding, issue.Number)
 			if err != nil {
 				return nil, err
 			}
@@ -424,7 +425,7 @@ func (r *Runner) fetchComments(ctx context.Context, fetcher Fetcher, ghConfig Co
 	return out, nil
 }
 
-func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db.ImportBatchParams, parentData ParentData) ([]db.ImportItem, error) {
+func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db.ImportBatchParams, parentData ParentData, hasCutoff bool) ([]db.ImportItem, error) {
 	if parentData.Scan != ParentScanComplete || len(parentData.ScannedChildIDs) == 0 {
 		return batch.Items, nil
 	}
@@ -446,11 +447,13 @@ func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db
 		mapping, err := r.config.Store.ImportMappingBySource(ctx, batch.ProjectID, batch.Source, "issue", childExternalID)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
-				r.config.Logger.Warn("github sync skipped parent reconciliation for unmapped scanned child",
-					"source", batch.Source,
-					"child_external_id", childExternalID,
-					"child_number", number,
-				)
+				if !hasCutoff {
+					r.config.Logger.Warn("github sync skipped parent reconciliation for unmapped scanned child",
+						"source", batch.Source,
+						"child_external_id", childExternalID,
+						"child_number", number,
+					)
+				}
 				continue
 			}
 			return nil, fmt.Errorf("lookup github scanned child %q: %w", childExternalID, err)
@@ -500,7 +503,7 @@ func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db
 	return items, nil
 }
 
-func (r *Runner) filterUnresolvableParentLinks(ctx context.Context, batch db.ImportBatchParams) ([]db.ImportItem, error) {
+func (r *Runner) filterUnresolvableParentLinks(ctx context.Context, batch db.ImportBatchParams, hasCutoff bool) ([]db.ImportItem, error) {
 	if len(batch.Items) == 0 {
 		return batch.Items, nil
 	}
@@ -525,11 +528,13 @@ func (r *Runner) filterUnresolvableParentLinks(ctx context.Context, batch db.Imp
 			}
 			if _, err := r.config.Store.ImportMappingBySource(ctx, batch.ProjectID, batch.Source, "issue", link.TargetExternalID); err != nil {
 				if errors.Is(err, db.ErrNotFound) {
-					r.config.Logger.Warn("github sync skipped unresolved parent link",
-						"source", batch.Source,
-						"child_external_id", items[i].ExternalID,
-						"target_external_id", link.TargetExternalID,
-					)
+					if !hasCutoff {
+						r.config.Logger.Warn("github sync skipped unresolved parent link",
+							"source", batch.Source,
+							"child_external_id", items[i].ExternalID,
+							"target_external_id", link.TargetExternalID,
+						)
+					}
 					markParentLinkNonAuthoritative(&items[i])
 					continue
 				}

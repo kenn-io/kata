@@ -366,7 +366,8 @@ func TestRunnerBackfillConfigPersistFailureRecordsErrorAndClearsInFlight(t *test
 }
 
 func TestRunnerMissingParentTargetSkipsLinkAndPreservesExistingParent(t *testing.T) {
-	h := newRunnerHarness(t)
+	var logs bytes.Buffer
+	h := newRunnerHarness(t, withLogger(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))))
 	initialTime := h.now.Add(-2 * time.Hour)
 	seedSourceParentLink(t, h, initialTime)
 	lastCursor := h.now.Add(-10 * time.Minute)
@@ -384,6 +385,7 @@ func TestRunnerMissingParentTargetSkipsLinkAndPreservesExistingParent(t *testing
 
 	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
 	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+	assert.Contains(t, logs.String(), "github sync skipped unresolved parent link")
 }
 
 func TestRunnerParentTargetLookupErrorRecordsFailureAndSkipsImport(t *testing.T) {
@@ -1630,6 +1632,41 @@ func TestRunnerSinceFiltersBeforeCommentsAndSurvivesRename(t *testing.T) {
 	stored, err := DecodeConfig(result.Binding.Config)
 	require.NoError(t, err)
 	assert.Equal(t, cfg.Since, stored.Since)
+}
+
+func TestRunnerSinceSkipsUnmappedChildrenAndParentsWithoutWarnings(t *testing.T) {
+	var logs bytes.Buffer
+	h := newRunnerHarness(t, withLogger(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))))
+	cutoff := h.now.Add(-time.Hour)
+	cfg, err := DecodeConfig(h.binding.Config)
+	require.NoError(t, err)
+	cfg.Since = cutoff.Format(time.RFC3339)
+	raw, err := EncodeConfig(cfg)
+	require.NoError(t, err)
+	_, err = h.db.RefreshIssueSyncBinding(h.ctx, db.IssueSyncBindingUpdateParams{BindingID: h.binding.ID, DisplayName: cfg.DisplayName(), Config: raw})
+	require.NoError(t, err)
+	h.fetcher.issues = []Issue{
+		testIssue(101, 1, "old parent", cutoff.Add(-time.Hour)),
+		testIssue(102, 2, "old issue", cutoff.Add(-time.Hour)),
+		testIssue(103, 3, "recent child", cutoff.Add(time.Minute)),
+	}
+	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanComplete,
+		ParentByChild:   map[int]int64{3: 101},
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102, 3: 103},
+	}
+	h.fetcher.parentDataSet = true
+
+	for range 2 {
+		_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+		require.NoError(t, err)
+		h.now = h.now.Add(time.Minute)
+	}
+
+	assert.Empty(t, logs.String(), "excluded issues are expected on every poll")
+	_, err = h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:101")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	assertNoParent(t, h, "issue-id:103")
 }
 
 func TestRunnerSinceCursorAndBackfills(t *testing.T) {

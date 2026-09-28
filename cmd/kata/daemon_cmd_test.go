@@ -2221,7 +2221,7 @@ func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *te
 
 		ctx, cancel := context.WithCancel(t.Context())
 		workers := newDaemonWorkerGroup()
-		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0))
+		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
 			require.True(t, workers.Wait(context.Background()))
@@ -2257,7 +2257,7 @@ func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		workers := newDaemonWorkerGroup()
-		startGitHubSyncRunner(ctx, workers, nil, store, nil, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0))
+		startGitHubSyncRunner(ctx, workers, nil, store, nil, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
 			require.True(t, workers.Wait(context.Background()))
@@ -2280,7 +2280,7 @@ func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing
 
 		ctx, cancel := context.WithCancel(t.Context())
 		workers := newDaemonWorkerGroup()
-		startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0))
+		startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
 			require.True(t, workers.Wait(context.Background()))
@@ -2310,7 +2310,7 @@ func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		workers := newDaemonWorkerGroup()
-		startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hookSink), log.New(io.Discard, "", 0))
+		startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hookSink), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
 			require.True(t, workers.Wait(context.Background()))
@@ -2349,7 +2349,7 @@ func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testi
 
 		ctx, cancel := context.WithCancel(t.Context())
 		workers := newDaemonWorkerGroup()
-		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0))
+		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
 			require.True(t, workers.Wait(context.Background()))

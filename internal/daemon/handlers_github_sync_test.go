@@ -656,7 +656,7 @@ func (r fakeGitHubSyncRunner) RunOnce(_ context.Context, _ int64) (githubsync.Ru
 }
 
 func TestGitHubSyncSinceValidatesBeforeNetwork(t *testing.T) {
-	for _, value := range []any{"bad", 42, true, nil, []string{"2026-01-01"}} {
+	for _, value := range []any{"bad", 42, true, []string{"2026-01-01"}} {
 		h := newGitHubSyncHandlerHarness(t)
 		resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "enable"), map[string]any{"config": map[string]any{"owner": "example-owner", "repo": "example-repo", "since": value}})
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
@@ -668,6 +668,33 @@ func TestGitHubSyncSinceValidatesBeforeNetwork(t *testing.T) {
 	binding, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
 	require.NoError(t, err)
 	assert.Contains(t, string(binding.Config), `"since":"2026-01-01T00:00:00Z"`)
+}
+
+func TestGitHubSyncSincePreservesOmittedAndClearsExplicitValues(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		config map[string]any
+		want   string
+	}{
+		{"omitted", map[string]any{"owner": "example-owner", "repo": "example-repo"}, "2026-01-01T00:00:00Z"},
+		{"empty", map[string]any{"owner": "example-owner", "repo": "example-repo", "since": ""}, ""},
+		{"null", map[string]any{"owner": "example-owner", "repo": "example-repo", "since": nil}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newGitHubSyncHandlerHarness(t)
+			endpoint := githubSyncEndpoint(h.project.ID, "enable")
+			resp, body := postJSON(t, h.server, endpoint, map[string]any{"config": map[string]any{"owner": "example-owner", "repo": "example-repo", "since": "2026-01-01"}})
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+			resp, body = postJSON(t, h.server, endpoint, map[string]any{"config": tt.config, "interval": "10m"})
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			binding, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+			require.NoError(t, err)
+			cfg, err := githubsync.DecodeConfig(binding.Config)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.Since)
+		})
+	}
 }
 
 func TestGitHubSyncProgressStatusFencesDurableClaim(t *testing.T) {

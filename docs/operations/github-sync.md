@@ -1,7 +1,7 @@
 ---
 title: GitHub sync
 description: Configure one-way GitHub issue synchronization, credentials, mappings, and operational recovery.
-last_edited: 2026-09-15
+last_edited: 2026-09-28
 ---
 
 # GitHub sync
@@ -121,7 +121,10 @@ are excluded when a cutoff is configured. The daemon applies the same cutoff
 on initial imports, incremental polls, and title or parent-link backfills.
 GitHub's REST `since` query limits issue fetching before comments are fetched.
 
-Re-enable with a different cutoff to change it, or omit `--since` to remove it.
+Re-enable with a different cutoff to change it, or pass `--since=""` to remove
+it. Omitting `--since` keeps the stored cutoff, including when changing
+`--interval`. API clients can clear the cutoff with `"since": ""` or
+`"since": null`; omitting the key preserves it.
 Changing the binding config resets the incremental cursor and fetches eligible
 history again. Existing imported issues remain in kata when a narrower cutoff
 excludes them; filtering never deletes them.

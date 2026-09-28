@@ -121,6 +121,8 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 			}}
 			if cutoff != nil {
 				body.Config["since"] = cutoff.Format(time.RFC3339)
+			} else if cmd.Flags().Changed("since") {
+				body.Config["since"] = ""
 			}
 			if strings.TrimSpace(opts.interval) != "" {
 				body.Interval = new(strings.TrimSpace(opts.interval))
@@ -143,7 +145,7 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.repo, "repo", "", "GitHub repository as owner/repo")
 	cmd.Flags().StringVar(&opts.host, "host", "", "GitHub host (default: github.com)")
 	cmd.Flags().StringVar(&opts.interval, "interval", "", "sync interval duration, such as 5m")
-	cmd.Flags().StringVar(&opts.since, "since", "", "only import issues updated after YYYY-MM-DD (UTC) or RFC3339 with whole seconds")
+	cmd.Flags().StringVar(&opts.since, "since", "", "only import issues updated after YYYY-MM-DD (UTC) or RFC3339 with whole seconds; omit to keep the cutoff, use --since= to clear it")
 	cmd.Flags().BoolVar(&opts.titlePrefix, "title-prefix", true, "prefix imported issue titles with [GitHub #N]")
 	return cmd
 }

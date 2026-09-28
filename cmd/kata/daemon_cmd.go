@@ -1719,7 +1719,7 @@ func startGitHubSyncRunner(
 	fetcher githubsync.Fetcher,
 	publisher daemon.EventPublisher,
 	daemonLog *log.Logger,
-	progress ...*githubsync.ProgressTracker,
+	progress *githubsync.ProgressTracker,
 ) func() {
 	wake := make(chan struct{}, 1)
 	wakeRunner := func() {
@@ -1735,12 +1735,8 @@ func startGitHubSyncRunner(
 	if daemonLog != nil {
 		logger = slog.New(slog.NewTextHandler(daemonLog.Writer(), nil))
 	}
-	var tracker *githubsync.ProgressTracker
-	if len(progress) > 0 {
-		tracker = progress[0]
-	}
 	runner := newGitHubSyncDaemonRunner(githubsync.RunnerConfig{
-		Progress:       tracker,
+		Progress:       progress,
 		Store:          store,
 		Fetcher:        fetcher,
 		Logger:         logger,
