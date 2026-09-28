@@ -10,11 +10,7 @@ import (
 	"strings"
 )
 
-var (
-	errEmbeddingCredentialSymlink    = errors.New("embedding credential path contains a symbolic link")
-	errEmbeddingCredentialUnsafeDir  = errors.New("embedding credential parent directory is not trusted")
-	errEmbeddingCredentialWrongOwner = errors.New("embedding credential file is not owned by the daemon user")
-)
+var errEmbeddingCredentialWrongOwner = errors.New("embedding credential file is not owned by the daemon user")
 
 // EmbeddingCredential separates a secret from safe operator diagnostics.
 // Reason is nonempty when the selected source cannot supply a usable key.
@@ -26,7 +22,7 @@ type EmbeddingCredential struct {
 
 // ResolveCredential reads the selected credential at startup or reload.
 // Precedence is inline > file > env; an unusable selected file never falls
-// through to another source. Relative files resolve from the daemon cwd.
+// through to another source. Files must use an absolute path or ~/.
 func (e EmbeddingsConfig) ResolveCredential() EmbeddingCredential {
 	if key := strings.TrimSpace(e.APIKey); key != "" {
 		return EmbeddingCredential{Key: key, Source: "inline"}
@@ -45,34 +41,21 @@ func (e EmbeddingsConfig) ResolveCredential() EmbeddingCredential {
 				path = home
 			}
 		}
-		// Reject nonregular targets before open for a readable error. The Unix
-		// opener rejects symlinks and rechecks each parent through descriptors so
-		// path replacement cannot bypass its directory checks.
-		info, err := os.Stat(path)
-		if err != nil {
-			c.Reason = "no embedding API key (cannot read " + c.Source + ")"
-			return c
-		}
-		if !info.Mode().IsRegular() {
-			c.Reason = "no embedding API key (" + c.Source + " is not a readable regular file)"
+		if !filepath.IsAbs(path) {
+			c.Reason = "no embedding API key (" + c.Source + " must use an absolute path or ~/ path)"
 			return c
 		}
 		f, err := openEmbeddingCredentialFile(path) //nolint:gosec // G304: operator-configured key file; descriptor type, permissions, and size are validated.
 		if err != nil {
-			switch {
-			case errors.Is(err, errEmbeddingCredentialSymlink):
-				c.Reason = "no embedding API key (" + c.Source + " uses a symbolic link; configure the target file directly)"
-			case errors.Is(err, errEmbeddingCredentialUnsafeDir):
-				c.Reason = "no embedding API key (" + c.Source + " parent directories must be owned by root or the daemon user and not writable by other users)"
-			case errors.Is(err, errEmbeddingCredentialWrongOwner):
+			if errors.Is(err, errEmbeddingCredentialWrongOwner) {
 				c.Reason = "no embedding API key (" + c.Source + " must be owned by the daemon user)"
-			default:
+			} else {
 				c.Reason = "no embedding API key (cannot read " + c.Source + ")"
 			}
 			return c
 		}
 		defer func() { _ = f.Close() }()
-		info, err = f.Stat()
+		info, err := f.Stat()
 		if err != nil || !info.Mode().IsRegular() {
 			c.Reason = "no embedding API key (" + c.Source + " is not a readable regular file)"
 			return c
@@ -105,5 +88,5 @@ func (e EmbeddingsConfig) ResolveCredential() EmbeddingCredential {
 		}
 		return c
 	}
-	return EmbeddingCredential{Source: "none", Reason: "no embedding API key (set api_key, api_key_file, or api_key_env)"}
+	return EmbeddingCredential{Source: "none"}
 }

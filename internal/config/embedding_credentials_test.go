@@ -11,9 +11,11 @@ import (
 
 func TestEmbeddingCredentialResolution(t *testing.T) {
 	t.Setenv("EXAMPLE_EMBEDDING_KEY", "env-secret")
+	t.Setenv("EXAMPLE_UNSET_KEY", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Chdir(home)
 	path := filepath.Join(home, "embedding.key")
 	if err := os.WriteFile(path, []byte("file-secret\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -25,11 +27,12 @@ func TestEmbeddingCredentialResolution(t *testing.T) {
 		{name: "env", env: "EXAMPLE_EMBEDDING_KEY", key: "env-secret", source: "env:EXAMPLE_EMBEDDING_KEY"},
 		{name: "missing env", env: "EXAMPLE_UNSET_KEY", source: "env:EXAMPLE_UNSET_KEY", reason: "unset"},
 		{name: "missing file does not fall through", file: path + ".missing", env: "EXAMPLE_EMBEDDING_KEY", source: "file:" + path + ".missing", reason: "cannot read"},
-		{name: "no source", source: "none", reason: "no embedding API key"},
+		{name: "relative file does not fall through", file: "embedding.key", env: "EXAMPLE_EMBEDDING_KEY", source: "file:embedding.key", reason: "absolute path"},
+		{name: "no source allows keyless providers", source: "none"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := (EmbeddingsConfig{APIKey: tt.inline, APIKeyFile: tt.file, APIKeyEnv: tt.env}).ResolveCredential()
-			if c.Key != tt.key || c.Source != tt.source || !strings.Contains(c.Reason, tt.reason) {
+			if c.Key != tt.key || c.Source != tt.source || !strings.Contains(c.Reason, tt.reason) || (tt.reason == "" && c.Reason != "") {
 				t.Fatalf("unexpected credential: source=%q reason=%q key matches=%t", c.Source, c.Reason, c.Key == tt.key)
 			}
 			if strings.Contains(c.Reason, "secret") {
@@ -40,6 +43,7 @@ func TestEmbeddingCredentialResolution(t *testing.T) {
 }
 
 func TestEmbeddingCredentialFileSafety(t *testing.T) {
+	t.Setenv("EXAMPLE_EMBEDDING_KEY", "env-secret")
 	path := filepath.Join(t.TempDir(), "embedding.key")
 	for _, tt := range []struct {
 		name, contents, reason string
@@ -47,6 +51,7 @@ func TestEmbeddingCredentialFileSafety(t *testing.T) {
 	}{
 		{"empty", "\n", "empty", 0600},
 		{"world readable", "file-secret", "group/world-readable", 0644},
+		{"oversized", strings.Repeat("x", (64<<10)+1), "exceeds 64 KiB", 0600},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if runtime.GOOS == "windows" && tt.mode == 0644 {
@@ -58,8 +63,8 @@ func TestEmbeddingCredentialFileSafety(t *testing.T) {
 			if err := os.Chmod(path, tt.mode); err != nil {
 				t.Fatal(err)
 			}
-			c := (EmbeddingsConfig{APIKeyFile: path}).ResolveCredential()
-			if c.Key != "" || !strings.Contains(c.Reason, tt.reason) {
+			c := (EmbeddingsConfig{APIKeyFile: path, APIKeyEnv: "EXAMPLE_EMBEDDING_KEY"}).ResolveCredential() //nolint:gosec // G101: synthetic environment variable name, not a credential.
+			if c.Key != "" || c.Source != "file:"+path || !strings.Contains(c.Reason, tt.reason) {
 				t.Fatalf("unexpected reason %q", c.Reason)
 			}
 		})

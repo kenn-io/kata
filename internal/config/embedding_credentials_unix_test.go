@@ -77,7 +77,7 @@ func TestOpenEmbeddingCredentialFileFIFOIsNonblocking(t *testing.T) {
 	}
 }
 
-func TestEmbeddingCredentialFileRejectsSymlink(t *testing.T) {
+func TestEmbeddingCredentialFileFollowsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.key")
 	if err := os.WriteFile(target, []byte("file-secret"), 0600); err != nil {
@@ -92,12 +92,12 @@ func TestEmbeddingCredentialFileRejectsSymlink(t *testing.T) {
 	}
 
 	c := (EmbeddingsConfig{APIKeyFile: path}).ResolveCredential()
-	if c.Key != "" || !strings.Contains(c.Reason, "symbolic link") {
-		t.Fatalf("expected a readable symlink rejection, got key match=%t reason=%q", c.Key == "file-secret", c.Reason)
+	if c.Key != "file-secret" || c.Reason != "" {
+		t.Fatalf("expected the symlink target credential, got key match=%t reason=%q", c.Key == "file-secret", c.Reason)
 	}
 }
 
-func TestEmbeddingCredentialFileRejectsSymlinkBeforeParentTraversal(t *testing.T) {
+func TestEmbeddingCredentialFileFollowsSymlinkBeforeParentTraversal(t *testing.T) {
 	dir := t.TempDir()
 	targetDir := filepath.Join(dir, "target")
 	if err := os.MkdirAll(filepath.Join(targetDir, "subdir"), 0700); err != nil {
@@ -119,17 +119,17 @@ func TestEmbeddingCredentialFileRejectsSymlinkBeforeParentTraversal(t *testing.T
 	path := dir + string(os.PathSeparator) + "alias" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "embedding.key"
 
 	c := (EmbeddingsConfig{APIKeyFile: path}).ResolveCredential()
-	if c.Key != "" || !strings.Contains(c.Reason, "symbolic link") {
-		t.Fatalf("expected a readable symlink rejection, got key match=%t reason=%q", c.Key == "wrong-secret", c.Reason)
+	if c.Key != "file-secret" || c.Reason != "" {
+		t.Fatalf("expected the symlink target parent credential, got key match=%t reason=%q", c.Key == "file-secret", c.Reason)
 	}
 }
 
-func TestEmbeddingCredentialFileRejectsWritableParent(t *testing.T) {
+func TestEmbeddingCredentialFileAllowsWritableParent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "shared")
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(dir, 0777); err != nil { //nolint:gosec // G302: test-owned unsafe directory fixture.
+	if err := os.Chmod(dir, 0777); err != nil { //nolint:gosec // G302: test-owned shared directory fixture.
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "embedding.key")
@@ -141,7 +141,7 @@ func TestEmbeddingCredentialFileRejectsWritableParent(t *testing.T) {
 	}
 
 	c := (EmbeddingsConfig{APIKeyFile: path}).ResolveCredential()
-	if c.Key != "" || !strings.Contains(c.Reason, "parent directories") {
-		t.Fatalf("expected a readable parent-directory rejection, got key match=%t reason=%q", c.Key == "file-secret", c.Reason)
+	if c.Key != "file-secret" || c.Reason != "" {
+		t.Fatalf("expected the private file credential under a writable parent, got key match=%t reason=%q", c.Key == "file-secret", c.Reason)
 	}
 }
