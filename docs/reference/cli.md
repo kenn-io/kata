@@ -64,9 +64,9 @@ file before using `--with-agents`.
 Pass `--with-hooks` to install the `work.attention` lifecycle hooks from the
 [agent orchestration recipe](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 into the workspace's Claude Code config. It additively installs two command-hook
-entries in `.claude/settings.json`: `SessionStart` runs `kata attention-hook
+entries in `.claude/settings.json`: `SessionStart` runs `kata agent-hooks attention
 start` for new, resumed, and cleared sessions (but not context compaction), and
-`SessionEnd` runs `kata attention-hook end` only for terminal exits rather
+`SessionEnd` runs `kata agent-hooks attention end` only for terminal exits rather
 than clear/resume transitions. Both use the
 launcher-provided `KATA_REF` and intentionally do nothing when it is absent.
 Everything else in `settings.json` is preserved, re-running is a no-op, and a
@@ -75,13 +75,14 @@ config mutation use kit's shared agent-hook manager.
 
 Pass `--with-codex-hooks` to install two additive `SessionStart` hooks in the
 workspace's `.codex/hooks.json`. The contract hook injects the same canonical
-briefing as `kata quickstart --format contract` on startup, resume, clear, and
-context compaction. The
+briefing as `kata quickstart --format contract` through
+`kata agent-hooks contract codex` on startup, resume, clear, and context
+compaction. The
 [attention harness](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
-runs `kata attention-hook start` on startup, resume, and clear, but not
+runs `kata agent-hooks attention start` on startup, resume, and clear, but not
 compaction; it uses the launcher-provided `KATA_REF` and does nothing when the
 variable is absent. Codex has no stable session-end hook event yet, so pair the
-attention hook with a launcher wrapper that runs `kata attention-hook end`
+attention hook with a launcher wrapper that runs `kata agent-hooks attention end`
 after Codex exits. Everything else in `hooks.json` is preserved, re-running is
 a no-op, a symlinked `hooks.json` or `.codex` directory is refused, and a
 pre-existing `[hooks]` table in `.codex/config.toml` produces a non-fatal
@@ -101,6 +102,83 @@ not mutate workspace files, and comes from the same canonical text that
 `kata init --with-agents` writes. `contract` is valid only for `quickstart` and
 its `agent-instructions` alias; it conflicts with `--json` and `--agent` like
 the other output modes.
+
+## Agent hooks
+
+Run Kata's contract and attention hooks from coding-agent configurations:
+
+```text
+kata agent-hooks
+  contract <harness>          Read stdin and emit a harness-native contract response
+  attention start            Establish the attention baseline at session start
+  attention end              Raise attention if the session ended without a hand-off
+```
+
+These commands are coding-agent hooks. Daemon event hooks configured in
+`hooks.toml` are a
+[separate feature](../design/architecture.md#hooks-local-automation-with-a-hard-boundary).
+
+### Contract injection
+
+Use `contract` with `claude`, `codex`, `copilot`, `cursor`, `gemini`, `hermes`,
+or `qwen`. Factory Droid has no SessionStart hook and is refused. The harness
+name is positional. For example, a Codex SessionStart hook can run:
+
+```sh
+kata agent-hooks contract codex --source kata-agent-contract-hook
+```
+
+The command reads one finite native JSON payload from stdin through EOF and
+prints the unchanged [agent contract](#agent-contract-output) in that harness's
+native response. It works in directories without a `.kata.toml`. Repeating a
+session payload returns the contract again; this command does not deduplicate
+independently configured hooks. Stdout contains only the native response,
+including when `--agent` or `--json` is supplied. Diagnostics go to stderr.
+
+Most harnesses use SessionStart. Hermes instead uses `pre_llm_call` and receives
+the contract only when `extra.is_first_turn` is `true` and
+`extra.user_message` is a nonempty string. Kit v0.26.0 rejects empty or multimodal
+messages before Kata's handler runs, on any turn. A session that starts with
+one of those messages receives no contract. Supporting those messages requires
+a fix in Kit. For accepted messages, later turns and payloads without the flag
+receive an empty native response. Hermes's `on_session_start` is an observer
+event and does not inject context.
+
+The optional `--source kata-agent-contract-hook` marks hook ownership and
+does not change runtime behavior. A different marker, an unknown harness,
+or terminal stdin returns usage exit code `2`. At a terminal, use
+`kata quickstart --format contract` for plain text. Payload or encoding errors
+exit nonzero with one stderr line and no partial response on stdout.
+
+### Workspace attention
+
+Use `attention start` and `attention end` without a harness argument. The
+launcher sets `KATA_REF` to the tracked issue in the bound workspace. For example:
+
+```sh
+KATA_REF=abc4 kata agent-hooks attention start --source kata-agent-hook-start
+KATA_REF=abc4 kata agent-hooks attention end --source kata-agent-hook-end
+```
+
+Start sets `work.attention` to `ok` for an open issue. End changes an open issue
+from `ok` to `needs-human` and sets `work.attention_msg` to
+`session ended without hand-off`. It preserves a deliberate handoff and leaves
+closed issues unchanged. Both commands ignore stdin, produce no stdout, and
+silently ignore missing refs or daemon failures. `CLAUDE_PROJECT_DIR`, when
+present, supplies the workspace used for project resolution.
+
+The optional source marker must match the mode: `kata-agent-hook-start` or
+`kata-agent-hook-end`. Malformed arguments return usage exit code `2`.
+
+`kata init --with-hooks` and `--with-codex-hooks` install these visible commands.
+Re-running init replaces managed entries using the same `--source` markers,
+without duplicating hooks or changing unrelated entries. The hidden
+`attention-hook` and `agent-contract-hook` commands remain for existing configs.
+
+Claude Code treats exit code `2` as non-blocking for `SessionStart` and
+`SessionEnd`. If you attach these commands to `UserPromptSubmit` or `Stop`, a
+usage error can block the prompt or prevent the agent from stopping. See
+[Claude Code's exit-code reference](https://code.claude.com/docs/en/hooks#exit-code-2-behavior-per-event).
 
 ## Model Context Protocol
 

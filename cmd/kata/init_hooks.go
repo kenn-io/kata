@@ -71,7 +71,7 @@ func applyClaudeHooks(dir string) (bool, error) {
 			ConfigPath: configPath,
 			Executable: "kata",
 			Arguments: []string{
-				"attention-hook", spec.mode, "--source", attentionHookSource + spec.mode,
+				"agent-hooks", "attention", spec.mode, "--source", attentionHookSource + spec.mode,
 			},
 			Marker: "--source " + attentionHookSource + spec.mode,
 			Hooks: []agenthook.Hook{{

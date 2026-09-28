@@ -9,8 +9,8 @@ import (
 const agentContractHookSource = "kata-agent-contract-hook"
 
 // newAgentContractHookCmd adapts the canonical plain-text contract to Codex's
-// structured SessionStart hook response. It is launcher plumbing installed by
-// init --with-codex-hooks, not a user-facing contract format.
+// structured SessionStart hook response for existing hook configurations.
+// New installs use agent-hooks contract codex.
 func newAgentContractHookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:                "agent-contract-hook",

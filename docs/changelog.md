@@ -1,11 +1,20 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-09-17
+last_edited: 2026-09-27
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
+
+## Unreleased
+
+- Run discoverable contract and attention hooks with
+  [`kata agent-hooks`](reference/cli.md#agent-hooks). Contract responses use
+  each supported harness's native format, including Cursor SessionStart
+  context and Hermes's first `pre_llm_call` turn. Claude Code and Codex can
+  use the visible workspace attention commands. Existing workspace hook
+  commands and the contract text keep their current behavior.
 
 ## 0.18.0
 <small>2026-09-17</small>

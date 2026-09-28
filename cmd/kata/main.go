@@ -132,6 +132,7 @@ func newRootCmd() *cobra.Command {
 		newAssignCmd(),
 		newUnassignCmd(),
 		newClaimCmd(),
+		newAgentHooksCmd(),
 		newAttentionHookCmd(),
 		newAgentContractHookCmd(),
 		newReadyCmd(),

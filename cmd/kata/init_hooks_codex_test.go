@@ -25,8 +25,8 @@ func readCodexHooks(t *testing.T, dir string) map[string]any {
 func expectedCodexHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
-		"command":        "kata attention-hook start --source kata-agent-hook-start",
-		"commandWindows": "kata attention-hook start --source kata-agent-hook-start",
+		"command":        "kata agent-hooks attention start --source kata-agent-hook-start",
+		"commandWindows": "kata agent-hooks attention start --source kata-agent-hook-start",
 		"timeout":        json.Number("10"),
 	}
 }
@@ -34,8 +34,8 @@ func expectedCodexHandler() map[string]any {
 func expectedCodexContractHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
-		"command":        "kata agent-contract-hook --source kata-agent-contract-hook",
-		"commandWindows": "kata agent-contract-hook --source kata-agent-contract-hook",
+		"command":        "kata agent-hooks contract codex --source kata-agent-contract-hook",
+		"commandWindows": "kata agent-hooks contract codex --source kata-agent-contract-hook",
 		"timeout":        json.Number("10"),
 	}
 }
@@ -71,17 +71,21 @@ func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
 	}, readCodexHooks(t, dir))
 }
 
-func TestApplyCodexHooks_UpgradesCurrentAttentionOnlyInstall(t *testing.T) {
+func TestApplyCodexHooks_UpgradesManagedCommands(t *testing.T) {
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
 	require.NoError(t, os.MkdirAll(codexDir, 0o750))
-	current := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"kata attention-hook start --source kata-agent-hook-start","commandWindows":"kata attention-hook start --source kata-agent-hook-start","timeout":10}]}]}}`
+	current := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"kata attention-hook start --source kata-agent-hook-start","commandWindows":"kata attention-hook start --source kata-agent-hook-start","timeout":10}]},{"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":"kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook","timeout":10}]}]}}`
 	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(current), 0o644)) //nolint:gosec // test fixture under TempDir
 
 	changed, warnings, err := applyCodexHooks(dir)
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Empty(t, warnings)
+	assert.Equal(t, expectedCodexSessionStartGroups(),
+		readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
+	_, _, err = applyCodexHooks(dir)
+	require.NoError(t, err)
 	assert.Equal(t, expectedCodexSessionStartGroups(),
 		readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 }
