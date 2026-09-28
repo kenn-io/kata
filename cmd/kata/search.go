@@ -200,11 +200,6 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		}
 		return nil
 	}
-	if b.Degraded && b.Mode == "lexical" {
-		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s; showing lexical results\n", textsafe.Line(b.DegradedReason)); err != nil {
-			return err
-		}
-	}
 	// Header rule keyed on whether this is the plain baseline, not the
 	// effective mode alone: print a leading "# mode=<mode>" line whenever the
 	// mode is hybrid/semantic OR the result is degraded. Baseline lexical

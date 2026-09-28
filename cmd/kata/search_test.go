@@ -270,7 +270,7 @@ func TestSearch_RejectsNonPositiveLimit(t *testing.T) {
 	}
 }
 
-func TestSearchCredentialFallbackWarnsHumanStderrOnly(t *testing.T) {
+func TestSearchCredentialFallbackIsSilentButLabeled(t *testing.T) {
 	for _, mode := range []outputMode{outputHuman, outputAgent, outputJSON} {
 		t.Run(string(mode), func(t *testing.T) {
 			resetFlags(t)
@@ -281,12 +281,11 @@ func TestSearchCredentialFallbackWarnsHumanStderrOnly(t *testing.T) {
 			cmd.SetErr(&stderr)
 			body := `{"query":"credential","mode":"lexical","degraded":true,"degraded_reason":"semantic search unavailable: no embedding API key (env EXAMPLE_KEY is unset)","results":[]}`
 			require.NoError(t, printSearchResults(cmd, []byte(body)))
+			assert.Empty(t, stderr.String())
+			assert.Contains(t, out.String(), "EXAMPLE_KEY")
 			if mode == outputHuman {
-				assert.Equal(t, 1, strings.Count(stderr.String(), "warning:"))
-				assert.Contains(t, stderr.String(), "showing lexical results")
-				assert.Contains(t, stderr.String(), "EXAMPLE_KEY")
+				assert.Contains(t, out.String(), "# mode=lexical degraded:")
 			} else {
-				assert.Empty(t, stderr.String())
 				assert.Contains(t, out.String(), "degraded")
 			}
 		})

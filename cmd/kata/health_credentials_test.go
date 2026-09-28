@@ -22,12 +22,14 @@ func TestHealthCredentialWarningVisibleInHumanAndAgent(t *testing.T) {
 			})
 			out, stderr, err := executeRootCapture(t, contextWithBaseURL(context.Background(), env.URL), args...)
 			require.NoError(t, err)
-			assert.Empty(t, stderr)
-			assert.Contains(t, out, "EXAMPLE_KEY")
 			if args[0] != "--json" {
-				assert.Contains(t, out, "semantic search disabled")
-				assert.Contains(t, out, "lexical only")
+				assert.Contains(t, stderr, "EXAMPLE_KEY")
+				assert.Contains(t, stderr, "semantic search disabled")
+				assert.Contains(t, stderr, "lexical only")
+				assert.NotContains(t, out, "warning:")
 			} else {
+				assert.Empty(t, stderr)
+				assert.Contains(t, out, "EXAMPLE_KEY")
 				assert.Contains(t, out, `"credential":"missing"`)
 			}
 		})

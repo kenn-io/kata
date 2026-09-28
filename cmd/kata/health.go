@@ -72,7 +72,7 @@ func newHealthCmd() *cobra.Command {
 				if b.Embeddings == nil || (b.Embeddings.Credential != "missing" && b.Embeddings.Credential != "rejected") {
 					return nil
 				}
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "warning: embeddings: %s; semantic search disabled, lexical only\n", textsafe.Line(b.Embeddings.CredentialReason))
+				_, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: embeddings: %s; semantic search disabled, lexical only\n", textsafe.Line(b.Embeddings.CredentialReason))
 				return err
 			}
 			mode := currentOutputMode()

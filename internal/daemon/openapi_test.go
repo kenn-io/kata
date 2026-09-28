@@ -201,7 +201,7 @@ func TestOpenAPISearchDocumentsEveryReachableError(t *testing.T) {
 	search := doc.Paths["/api/v1/projects/{project_id}/search"]
 	require.NotNil(t, search, "missing search path")
 	require.NotNil(t, search.Get, "missing search operation")
-	for _, status := range []string{"400", "401", "403", "404", "422", "500", "503"} {
+	for _, status := range []string{"400", "401", "403", "404", "422", "500", "503", "default"} {
 		require.Contains(t, search.Get.Responses, status, "missing documented search error response %s", status)
 	}
 }
