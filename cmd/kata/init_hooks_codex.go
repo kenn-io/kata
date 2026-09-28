@@ -66,7 +66,11 @@ func applyCodexUserContract(dir, configPath, userPath string, warnings []string)
 }
 
 func installCodexWorkspaceHooks(configPath string, warnings []string) (bool, []string, error) {
-	attentionChanged, err := installCodexAttentionHook(configPath, nil)
+	before, err := readCodexHookConfig(configPath)
+	if err != nil {
+		return false, nil, err
+	}
+	attentionChanged, err := installCodexAttentionHook(configPath, before)
 	if err != nil {
 		return false, nil, err
 	}

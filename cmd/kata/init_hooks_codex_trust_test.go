@@ -92,3 +92,38 @@ func TestApplyCodexHooks_RepairsNoncanonicalAttention(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyCodexHooks_PreservesWorkspaceAttentionPositions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		tracked bool
+	}{
+		{"no user contract", false},
+		{"tracked with user contract", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("CODEX_HOME", t.TempDir())
+			groups := []any{
+				map[string]any{"matcher": codexSessionStartMatcher, "hooks": []any{
+					expectedCodexHandler(), map[string]any{"type": "command", "command": "echo example"},
+				}},
+				map[string]any{"matcher": codexContractSessionStartMatcher, "hooks": []any{expectedCodexContractHandler()}},
+			}
+			data, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": groups}})
+			require.NoError(t, err)
+			writeCodexFixture(t, filepath.Join(dir, ".codex", "hooks.json"), string(data))
+			if tc.tracked {
+				runGit(t, dir, "init", "--quiet")
+				runGit(t, dir, "add", "--", ".codex/hooks.json")
+				userCodexContractFixture(t)
+			}
+
+			changed, _, err := applyCodexHooks(dir)
+			require.NoError(t, err)
+			assert.False(t, changed)
+			assert.Equal(t, groups, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"],
+				"unchanged attention and foreign hooks must keep their group and handler positions")
+		})
+	}
+}
