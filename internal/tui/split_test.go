@@ -351,6 +351,253 @@ func TestStacked_SearchArrowNavigationDoesNotRetargetHiddenDetail(t *testing.T) 
 	}
 }
 
+func TestSplit_ListRefreshFollowsSelectionAfterClose(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		count   int
+		cursor  int
+		wantRef string
+	}{
+		{"first", 3, 0, "bbb2"},
+		{"middle", 3, 1, "ccc3"},
+		{"last", 3, 2, "bbb2"},
+		{"only", 1, 0, ""},
+	} {
+		for focusName, focus := range map[string]focusPane{"list": focusList, "detail": focusDetail} {
+			for _, fetchKind := range []string{"refetch", "initial"} {
+				t.Run(tc.name+"/"+focusName+"/"+fetchKind, func(t *testing.T) {
+					m, cleanup := splitTestSetup(t)
+					defer cleanup()
+					m.list.issues = []Issue{
+						testIssue("aaa1", withStatus("open")),
+						testIssue("bbb2", withStatus("open")),
+						testIssue("ccc3", withStatus("open")),
+					}[:tc.count]
+					m.list.filter.Status = "open"
+					m.list.cursor = tc.cursor
+					m.list = m.list.syncSelection(m.list.visibleRows())
+					m, _ = m.scheduleDetailFollow()
+					m.focus = focus
+					oldGen, oldFollowGen := m.detail.gen, m.nextDetailFollowGen
+
+					// The queue fetch includes closed issues; the open filter hides them.
+					issues := append([]Issue(nil), m.list.issues...)
+					issues[tc.cursor].Status = "closed"
+					var msg tea.Msg = refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues}
+					if fetchKind == "initial" {
+						msg = initialFetchMsg{dispatchKey: m.currentCacheKey(), issues: issues}
+					}
+					m, cmd := updateModel(m, msg)
+
+					selected, ok := pickHighlightedIssue(m.list)
+					if tc.wantRef == "" {
+						require.False(t, ok)
+						require.Nil(t, m.detail.issue, "closing the last visible issue must clear detail")
+						require.Nil(t, cmd)
+						require.Contains(t, stripANSI(splitDetailBody(m, 80, 35)), "select an issue from the list pane")
+					} else {
+						require.True(t, ok)
+						require.Equal(t, tc.wantRef, selected.ShortID)
+						require.NotNil(t, m.detail.issue)
+						require.Equal(t, tc.wantRef, m.detail.issue.ShortID, "detail must follow the new selection")
+						require.NotNil(t, cmd, "the replacement issue needs a detail fetch")
+						require.Contains(t, stripANSI(splitDetailBody(m, 80, 35)), "issue "+tc.wantRef)
+					}
+					// A response or debounce tick already in flight must not restore the closed issue.
+					wantDetail := m.detail.issue
+					m, _ = updateModel(m, detailFetchedMsg{gen: oldGen, issue: &issues[tc.cursor]})
+					require.Equal(t, wantDetail, m.detail.issue)
+					m, cmd = updateModel(m, detailFollowTickMsg{gen: oldFollowGen})
+					require.Nil(t, cmd)
+				})
+			}
+		}
+	}
+}
+
+func TestSplit_ListRefreshWaitsForEditingInput(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		form   bool
+		cancel bool
+		narrow bool
+		linked bool
+	}{
+		{"save prompt", false, false, false, false},
+		{"cancel prompt", false, true, false, false},
+		{"save form", true, false, false, false},
+		{"cancel form", true, true, false, false},
+		{"resize before save", true, false, true, false},
+		{"resize before cancel", false, true, true, false},
+		{"navigate while stacked", false, true, true, true},
+	} {
+		for listName, count := range map[string]int{"replacement": 2, "empty": 1} {
+			t.Run(tc.name+"/"+listName, func(t *testing.T) {
+				m, cleanup := splitTestSetup(t)
+				defer cleanup()
+				api, requestPath := captureCreateIssue(t)
+				m.api = api
+				m.list.issues = []Issue{
+					testIssue("aaa1", withStatus("open")),
+					testIssue("bbb2", withStatus("open")),
+				}[:count]
+				m.list.filter.Status = "open"
+				m, _ = m.scheduleDetailFollow()
+				m.focus = focusDetail
+				if tc.form {
+					m = m.openBodyEditForm()
+				} else {
+					m, _ = m.openInput(inputPriorityPrompt)
+				}
+				m.input.activeField().setValue("2")
+				issues := append([]Issue(nil), m.list.issues...)
+				issues[0].Status = "closed"
+				m, _ = updateModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues})
+				require.NotNil(t, m.detail.issue)
+				require.Equal(t, "aaa1", m.detail.issue.ShortID, "editing must keep its original issue")
+				if tc.narrow {
+					m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
+				}
+
+				if tc.cancel {
+					m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+					require.Empty(t, *requestPath)
+				} else {
+					var cmd tea.Cmd
+					key := tea.KeyPressMsg{Code: tea.KeyEnter}
+					if tc.form {
+						key = tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}
+					}
+					m, cmd = updateModel(m, key)
+					require.True(t, m.input.saving)
+					require.Equal(t, "aaa1", m.detail.issue.ShortID)
+					var duplicate tea.Cmd
+					m, duplicate = updateModel(m, key)
+					require.Nil(t, duplicate, "saving must not dispatch the mutation twice")
+					if !tc.form {
+						m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+						require.Equal(t, inputPriorityPrompt, m.input.kind, "Esc must wait for the save response")
+					}
+					result := unwrapMutationCmd(t, cmd)
+					require.NoError(t, result.err)
+					require.Contains(t, *requestPath, "/issues/aaa1")
+					m, _ = updateModel(m, result)
+				}
+				require.Equal(t, inputNone, m.input.kind)
+				if tc.linked {
+					m, _ = updateModel(m, jumpDetailMsg{ref: "ccc3"})
+					issue := testIssue("ccc3", withStatus("open"))
+					m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &issue})
+				}
+				if tc.narrow {
+					m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
+				}
+				if tc.linked {
+					require.NotNil(t, m.detail.issue)
+					require.Equal(t, "ccc3", m.detail.issue.ShortID)
+					require.Len(t, m.detail.navStack, 1, "explicit navigation must supersede deferred following")
+				} else if count == 1 {
+					require.Nil(t, m.detail.issue, "finishing input must clear an empty list's detail")
+				} else {
+					require.NotNil(t, m.detail.issue)
+					require.Equal(t, "bbb2", m.detail.issue.ShortID, "finishing input must follow the list")
+				}
+			})
+		}
+	}
+}
+
+func TestSplit_PromptErrorKeepsEditingTarget(t *testing.T) {
+	for _, finish := range []string{"cancel", "retry"} {
+		t.Run(finish, func(t *testing.T) {
+			m, cleanup := splitTestSetup(t)
+			defer cleanup()
+			api, requestPath := captureCreateIssue(t)
+			m.api = api
+			m.list.issues = []Issue{testIssue("aaa1", withStatus("open")), testIssue("bbb2", withStatus("open"))}
+			m.list.filter.Status = "open"
+			m, _ = m.scheduleDetailFollow()
+			m.focus = focusDetail
+			m, _ = m.openInput(inputPriorityPrompt)
+			m.input.activeField().setValue("9")
+			issues := append([]Issue(nil), m.list.issues...)
+			issues[0].Status = "closed"
+			m, _ = updateModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues})
+
+			m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			require.Equal(t, inputPriorityPrompt, m.input.kind)
+			require.NotContains(t, lastRenderedLine(m.View().Content), "esc cancel")
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+			require.Equal(t, inputPriorityPrompt, m.input.kind, "Esc must not discard the pending error")
+			result := unwrapMutationCmd(t, cmd)
+			require.ErrorContains(t, result.err, "expected 0..4")
+			m, _ = updateModel(m, result)
+			require.Equal(t, inputPriorityPrompt, m.input.kind)
+			require.False(t, m.input.saving)
+			require.Equal(t, "9", m.input.activeField().value())
+			require.Equal(t, "aaa1", m.detail.issue.ShortID)
+			require.Contains(t, stripANSI(m.View().Content), "expected 0..4")
+			require.Contains(t, lastRenderedLine(m.View().Content), "esc cancel")
+			require.Empty(t, *requestPath, "invalid priority must not reach the daemon")
+
+			if finish == "retry" {
+				m, _ = updateModel(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+				m, _ = updateModel(m, tea.KeyPressMsg{Code: '2', Text: "2"})
+				require.Empty(t, m.input.err)
+				require.Equal(t, "2", m.input.activeField().value())
+				m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+				result = unwrapMutationCmd(t, cmd)
+				require.NoError(t, result.err)
+				require.Equal(t, "/api/v1/projects/7/issues/aaa1/actions/priority", *requestPath)
+				m, _ = updateModel(m, result)
+			} else {
+				m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+			}
+			require.Equal(t, inputNone, m.input.kind)
+			require.Equal(t, "bbb2", m.detail.issue.ShortID)
+		})
+	}
+}
+
+func TestSplit_ListRefreshPreservesDetailNavigation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		count  int
+		loaded bool
+	}{
+		{"pending jump", 2, false},
+		{"loaded jump", 2, true},
+		{"empty list pending jump", 1, false},
+		{"empty list loaded jump", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, cleanup := splitTestSetup(t)
+			defer cleanup()
+			m.list.issues = []Issue{
+				testIssue("aaa1", withStatus("open")),
+				testIssue("bbb2", withStatus("open")),
+			}[:tc.count]
+			m.list.filter.Status = "open"
+			m, _ = m.scheduleDetailFollow()
+			m.focus = focusDetail
+			m, _ = updateModel(m, jumpDetailMsg{ref: "ccc3"})
+			if tc.loaded {
+				issue := testIssue("ccc3", withStatus("open"))
+				m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &issue})
+			}
+			jumped := m.detail
+			issues := append([]Issue(nil), m.list.issues...)
+			issues[0].Status = "closed"
+
+			m, cmd := updateModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues})
+			require.Nil(t, cmd)
+			require.Equal(t, jumped.issue, m.detail.issue)
+			require.Equal(t, jumped.gen, m.detail.gen)
+			require.Len(t, m.detail.navStack, 1, "background refresh must preserve Back navigation")
+		})
+	}
+}
+
 func TestSplit_SearchResultsRefetchRetargetsChangedHighlight(t *testing.T) {
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()

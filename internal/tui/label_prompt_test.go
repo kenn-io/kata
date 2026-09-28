@@ -130,14 +130,35 @@ func TestRemoveLabelPrompt_SourceIsAttachedLabelsNotProjectCache(t *testing.T) {
 }
 
 // TestLabelPrompt_EnterCommitsCurrentBuffer: pressing Enter with a
-// free-typed buffer dispatches the label-add mutation (commit
-// closes the input and routes through commitInput → dispatchLabel).
+// free-typed buffer dispatches the label-add mutation and keeps the
+// prompt open until its matching response succeeds.
 func TestLabelPrompt_EnterCommitsCurrentBuffer(t *testing.T) {
 	m := labelPromptFixture()
-	m.input.activeField().input.SetValue("freshlabel")
-	m.input.fields[0] = *m.input.activeField()
-	nm := sendKey(m, tea.KeyEnter)
-	assertInputKind(t, nm, inputNone)
+	m.api, _ = captureCreateIssue(t)
+	m.input.activeField().setValue("al")
+	m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	assertInputKind(t, m, inputLabelPrompt)
+	m = sendKey(m, tea.KeyTab)
+	m, _ = updateModel(m, tea.PasteMsg{Content: "different-label"})
+	if got := m.input.activeField().value(); got != "al" {
+		t.Fatalf("saving prompt changed its buffer to %q", got)
+	}
+	result := unwrapMutationCmd(t, cmd)
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	// A queued navigation command can arrive after the prompt was submitted.
+	jumped := m
+	jumped.nextGen = jumped.detail.gen
+	jumped, _ = updateModel(jumped, jumpDetailMsg{ref: "bbb2"})
+	issue := testIssue("bbb2", withStatus("open"))
+	jumped, _ = updateModel(jumped, detailFetchedMsg{gen: jumped.detail.gen, issue: &issue})
+	jumped, _ = updateModel(jumped, result)
+	if jumped.detail.status != "" {
+		t.Fatalf("old prompt completion changed the new issue's status: %q", jumped.detail.status)
+	}
+	m, _ = updateModel(m, result)
+	assertInputKind(t, m, inputNone)
 }
 
 // TestLabelPrompt_EscClosesPromptAndMenu: esc cancels the input,

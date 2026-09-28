@@ -740,9 +740,7 @@ func TestStopRunningDaemonsReturnsSignalError(t *testing.T) {
 	}
 	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	err = stopRunningDaemons(ctx, ns.DataDir, ns.DBHash)
+	err = stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash)
 	require.ErrorIs(t, err, assert.AnError)
 }
 
