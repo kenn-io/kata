@@ -67,7 +67,11 @@ func TestMappingSourceTimes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "2026-09-27T00:00:00.123Z", batch.Items[0].CreatedAt.Format(time.RFC3339Nano))
 	require.Equal(t, "2026-09-27T01:00:00.123Z", batch.Items[0].UpdatedAt.Format(time.RFC3339Nano))
-	for _, change := range []func(*PageContent){func(p *PageContent) { p.Page.CreatedAt = time.Time{} }, func(p *PageContent) { p.Page.UpdatedAt = time.Time{} }, func(p *PageContent) { p.Page.UpdatedAt = p.Page.CreatedAt.Add(-time.Nanosecond) }, func(p *PageContent) { p.Page.UpdatedAt = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC) }} {
+	p.Page.CreatedAt = time.Date(1, 1, 2, 0, 0, 0, 0, time.UTC)
+	batch, err = BuildImportBatch("notion:"+sourceID, c, []PageContent{p})
+	require.NoError(t, err)
+	require.Equal(t, "0001-01-02T00:00:00Z", batch.Items[0].CreatedAt.Format(time.RFC3339))
+	for _, change := range []func(*PageContent){func(p *PageContent) { p.Page.CreatedAt = time.Time{} }, func(p *PageContent) { p.Page.CreatedAt = time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC) }, func(p *PageContent) { p.Page.UpdatedAt = time.Time{} }, func(p *PageContent) { p.Page.UpdatedAt = p.Page.CreatedAt.Add(-time.Nanosecond) }, func(p *PageContent) { p.Page.UpdatedAt = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC) }} {
 		p := pageFixture()
 		change(&p)
 		_, err := BuildImportBatch("notion:"+sourceID, c, []PageContent{p})

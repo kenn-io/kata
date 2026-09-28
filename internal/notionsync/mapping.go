@@ -108,7 +108,7 @@ func BuildImportBatch(sourceKey string, c Config, pages []PageContent) (db.Impor
 
 func validSourceTime(value time.Time) bool {
 	year := value.UTC().Year()
-	return year >= 0 && year <= 9999
+	return year >= 1 && year <= 9999
 }
 
 func validatePageURL(value string) error {

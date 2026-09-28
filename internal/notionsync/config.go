@@ -76,7 +76,7 @@ func ParseSince(value string) (*time.Time, error) {
 		return nil, fmt.Errorf("notion sync since must be YYYY-MM-DD or RFC3339 with whole seconds")
 	}
 	parsed = parsed.UTC()
-	if parsed.Year() < 0 || parsed.Year() > 9999 {
+	if parsed.Year() < 1 || parsed.Year() > 9999 {
 		return nil, fmt.Errorf("notion sync since must remain a four-digit RFC3339 year in UTC")
 	}
 	return &parsed, nil

@@ -154,7 +154,7 @@ func TestConfigCanonicalStrictJSON(t *testing.T) {
 }
 
 func TestParseSince(t *testing.T) {
-	for _, tt := range []struct{ input, want string }{{"", ""}, {"  ", ""}, {"2026-09-28", "2026-09-28T00:00:00Z"}, {"2026-09-28T01:30:00+01:30", "2026-09-28T00:00:00Z"}} {
+	for _, tt := range []struct{ input, want string }{{"", ""}, {"  ", ""}, {"0001-01-01", "0001-01-01T00:00:00Z"}, {"2026-09-28", "2026-09-28T00:00:00Z"}, {"2026-09-28T01:30:00+01:30", "2026-09-28T00:00:00Z"}} {
 		got, err := ParseSince(tt.input)
 		require.NoError(t, err)
 		if tt.want == "" {
@@ -163,9 +163,9 @@ func TestParseSince(t *testing.T) {
 			require.Equal(t, tt.want, got.Format(time.RFC3339))
 		}
 	}
-	for _, input := range []string{"bad", "2026-02-30", "2026-09-28T00:00:00.1Z", "2026-09-28T00:00:00,1Z", "0000-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"} {
+	for _, input := range []string{"bad", "2026-02-30", "2026-09-28T00:00:00.1Z", "2026-09-28T00:00:00,1Z", "0000-01-01", "0000-01-01T00:00:00Z", "0001-01-01T00:00:00+01:00", "0000-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"} {
 		_, err := ParseSince(input)
-		require.Error(t, err)
+		require.Error(t, err, input)
 	}
 }
 
