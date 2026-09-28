@@ -381,18 +381,26 @@ func (d *Store) RefreshIssueSyncBinding(ctx context.Context, p db.IssueSyncBindi
 		}
 		defer func() { _ = tx.Rollback() }()
 
+		var startedAt any
+		if p.StartedAt != nil {
+			startedAt = p.StartedAt.UTC().Format(sqliteTimeFormat)
+		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE issue_sync_bindings
 			   SET display_name = ?, config_json = ?,
 			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE id = ?`,
-			p.DisplayName, string(p.Config), p.BindingID)
+			 WHERE id = ?
+			 AND (? IS NULL OR (enabled = 1 AND EXISTS (SELECT 1 FROM issue_sync_status WHERE binding_id = issue_sync_bindings.id AND sync_started_at = ?)))`,
+			p.DisplayName, string(p.Config), p.BindingID, startedAt, startedAt)
 		if err != nil {
 			return db.IssueSyncBinding{}, fmt.Errorf("refresh issue sync binding: %w", err)
 		}
 		if affected, err := res.RowsAffected(); err != nil {
 			return db.IssueSyncBinding{}, fmt.Errorf("read issue sync refresh affected rows: %w", err)
 		} else if affected == 0 {
+			if p.StartedAt != nil {
+				return db.IssueSyncBinding{}, db.ErrIssueSyncAlreadyRunning
+			}
 			return db.IssueSyncBinding{}, db.ErrNotFound
 		}
 		binding, err := issueSyncBindingByID(ctx, tx, p.BindingID)

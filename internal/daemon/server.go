@@ -55,6 +55,7 @@ type ServerConfig struct {
 	// DisableFederationRebind omits the rebind operation when the embedding
 	// host does not expose a catalog and exact credential replacement.
 	DisableFederationRebind  bool
+	GitHubSyncProgress       *githubsync.ProgressTracker
 	GitHubSyncFetcher        githubsync.Fetcher
 	GitHubSyncConfig         config.GitHubSyncConfig
 	GitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
@@ -178,6 +179,7 @@ type GitHubSyncRunner interface {
 // GitHubSyncRunnerConfig is the daemon-side configuration passed to a runner
 // factory. Tests use this seam to replace the runner without replacing DB state.
 type GitHubSyncRunnerConfig struct {
+	Progress  *githubsync.ProgressTracker
 	Store     db.Storage
 	Fetcher   githubsync.Fetcher
 	EventSink func(context.Context, int64, []db.Event) error
@@ -190,6 +192,7 @@ type GitHubSyncRunnerFactory func(GitHubSyncRunnerConfig) GitHubSyncRunner
 // NewDefaultGitHubSyncRunner adapts the public daemon seam to githubsync.Runner.
 func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 	return githubsync.NewRunner(githubsync.RunnerConfig{
+		Progress:  cfg.Progress,
 		Store:     cfg.Store,
 		Fetcher:   cfg.Fetcher,
 		EventSink: cfg.EventSink,
@@ -221,6 +224,9 @@ type ListenerBinding struct {
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
+	if cfg.GitHubSyncProgress == nil {
+		cfg.GitHubSyncProgress = githubsync.NewProgressTracker()
+	}
 	if cfg.Broadcaster == nil {
 		cfg.Broadcaster = NewEventBroadcaster()
 	}

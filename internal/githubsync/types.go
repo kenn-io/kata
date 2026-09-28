@@ -72,6 +72,7 @@ type Binding struct {
 // Config is the GitHub-owned issue sync binding configuration stored in the
 // provider-neutral issue_sync_bindings.config_json column.
 type Config struct {
+	Since              string `json:"since,omitempty"`
 	Host               string `json:"host"`
 	Owner              string `json:"owner"`
 	Repo               string `json:"repo"`
@@ -121,7 +122,8 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Host) == "" || strings.TrimSpace(c.Owner) == "" || strings.TrimSpace(c.Repo) == "" {
 		return fmt.Errorf("GitHub sync config requires host, owner, and repo")
 	}
-	return nil
+	_, err := c.SinceTime()
+	return err
 }
 
 // EncodeConfig validates and marshals a GitHub sync config for storage in an
@@ -131,6 +133,11 @@ func EncodeConfig(c Config) (jsontext.Value, error) {
 		return nil, err
 	}
 	c = c.withDefaults()
+	if since, _ := c.SinceTime(); since != nil {
+		c.Since = since.Format(time.RFC3339)
+	} else {
+		c.Since = ""
+	}
 	bs, err := json.Marshal(c)
 	if err != nil {
 		return nil, fmt.Errorf("encode GitHub sync config: %w", err)

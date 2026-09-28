@@ -19,6 +19,12 @@ import (
 
 func TestHTTPFetcherParentDataPaginatesAndIncludesRESTDatabaseIDs(t *testing.T) {
 	var requests []parentGraphQLTestRequest
+	var counts []int
+	ctx := withProgressReporter(context.Background(), func(phase string, count, total int) {
+		assert.Zero(t, total)
+		assert.Equal(t, "parents", phase)
+		counts = append(counts, count)
+	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := decodeParentGraphQLTestRequest(t, r)
 		requests = append(requests, request)
@@ -48,6 +54,7 @@ func TestHTTPFetcherParentDataPaginatesAndIncludesRESTDatabaseIDs(t *testing.T) 
 				}
 			}`)
 		case 2:
+			assert.Equal(t, []int{2}, counts)
 			require.NotNil(t, request.After)
 			assert.Equal(t, "cursor-1", *request.After)
 			writeParentGraphQLTestResponse(t, w, `{
@@ -70,7 +77,7 @@ func TestHTTPFetcherParentDataPaginatesAndIncludesRESTDatabaseIDs(t *testing.T) 
 
 	fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
 
-	data, err := fetcher.ParentData(context.Background(), Binding{
+	data, err := fetcher.ParentData(ctx, Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -81,6 +88,7 @@ func TestHTTPFetcherParentDataPaginatesAndIncludesRESTDatabaseIDs(t *testing.T) 
 	assert.Equal(t, map[int]int64{1: 102}, data.ParentByChild)
 	assert.Equal(t, map[int]int64{1: 101, 2: 102, 3: 103}, data.ScannedChildIDs)
 	assert.Len(t, requests, 2)
+	assert.Equal(t, []int{2, 3}, counts)
 }
 
 func TestHTTPFetcherParentDataReturnsAuthoritativeEmptyForScannedChildrenWithoutParents(t *testing.T) {

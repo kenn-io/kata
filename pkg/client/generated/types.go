@@ -2190,25 +2190,55 @@ func (i IssueSyncBody) Validate() error {
 	return errors
 }
 
+type IssueSyncProgressOut struct {
+	Completed int64     `json:"completed"`
+	Phase     string    `json:"phase" validate:"required"`
+	StartedAt time.Time `json:"started_at" validate:"required"`
+	Total     int64     `json:"total"`
+	UpdatedAt time.Time `json:"updated_at" validate:"required"`
+}
+
+func (i IssueSyncProgressOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(i))
+}
+
 type IssueSyncStatusOut struct {
-	BindingID     int64      `json:"binding_id"`
-	Enabled       bool       `json:"enabled"`
-	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
-	LastComments  int64      `json:"last_comments"`
-	LastCreated   int64      `json:"last_created"`
-	LastError     *string    `json:"last_error,omitempty"`
-	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
-	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
-	LastUnchanged int64      `json:"last_unchanged"`
-	LastUpdated   int64      `json:"last_updated"`
-	ProjectID     int64      `json:"project_id"`
-	Provider      string     `json:"provider" validate:"required"`
-	State         string     `json:"state" validate:"required"`
-	SyncStartedAt *time.Time `json:"sync_started_at,omitempty"`
+	BindingID     int64                 `json:"binding_id"`
+	Enabled       bool                  `json:"enabled"`
+	LastAttemptAt *time.Time            `json:"last_attempt_at,omitempty"`
+	LastComments  int64                 `json:"last_comments"`
+	LastCreated   int64                 `json:"last_created"`
+	LastError     *string               `json:"last_error,omitempty"`
+	LastErrorAt   *time.Time            `json:"last_error_at,omitempty"`
+	LastSuccessAt *time.Time            `json:"last_success_at,omitempty"`
+	LastUnchanged int64                 `json:"last_unchanged"`
+	LastUpdated   int64                 `json:"last_updated"`
+	Progress      *IssueSyncProgressOut `json:"progress,omitempty"`
+	ProjectID     int64                 `json:"project_id"`
+	Provider      string                `json:"provider" validate:"required"`
+	State         string                `json:"state" validate:"required"`
+	SyncStartedAt *time.Time            `json:"sync_started_at,omitempty"`
 }
 
 func (i IssueSyncStatusOut) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(i))
+	var errors runtime.ValidationErrors
+	if i.Progress != nil {
+		if v, ok := any(i.Progress).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Progress", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(i.Provider, "required"); err != nil {
+		errors = errors.Append("Provider", err)
+	}
+	if err := typesValidator.Var(i.State, "required"); err != nil {
+		errors = errors.Append("State", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type LabelCount struct {

@@ -2342,6 +2342,30 @@ components:
       required:
         - status
       type: object
+    IssueSyncProgressOut:
+      additionalProperties: true
+      properties:
+        completed:
+          format: int64
+          type: integer
+        phase:
+          type: string
+        started_at:
+          format: date-time
+          type: string
+        total:
+          format: int64
+          type: integer
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - phase
+        - completed
+        - total
+        - started_at
+        - updated_at
+      type: object
     IssueSyncStatusOut:
       additionalProperties: true
       properties:
@@ -2373,6 +2397,8 @@ components:
         last_updated:
           format: int64
           type: integer
+        progress:
+          $ref: "#/components/schemas/IssueSyncProgressOut"
         project_id:
           format: int64
           type: integer

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"log/slog"
 	"maps"
@@ -1602,4 +1603,187 @@ type testDiscardWriter struct{}
 
 func (testDiscardWriter) Write(p []byte) (int, error) {
 	return len(p), nil
+}
+
+func TestRunnerSinceFiltersBeforeCommentsAndSurvivesRename(t *testing.T) {
+	h := newRunnerHarness(t)
+	cutoff := h.now.Add(-30 * time.Minute)
+	cfg, err := DecodeConfig(h.binding.Config)
+	require.NoError(t, err)
+	cfg.Since = cutoff.Format(time.RFC3339)
+	raw, err := EncodeConfig(cfg)
+	require.NoError(t, err)
+	_, err = h.db.RefreshIssueSyncBinding(h.ctx, db.IssueSyncBindingUpdateParams{BindingID: h.binding.ID, DisplayName: cfg.DisplayName(), Config: raw})
+	require.NoError(t, err)
+	h.fetcher.repo.FullName = "example-owner/renamed-repo"
+	h.fetcher.issues = []Issue{testIssue(101, 1, "old", cutoff.Add(-time.Second)), testIssue(102, 2, "boundary", cutoff), testIssue(103, 3, "new", cutoff.Add(time.Second)), testIssue(104, 4, "unknown", cutoff)}
+	h.fetcher.issues[3].UpdatedAt = nil
+	for i := range h.fetcher.issues {
+		h.fetcher.issues[i].Comments = 1
+	}
+	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Import.Created)
+	assert.Equal(t, []int{3}, h.fetcher.commentCalls)
+	require.NotNil(t, h.fetcher.issueCalls[0].since)
+	assert.Equal(t, cutoff, *h.fetcher.issueCalls[0].since)
+	stored, err := DecodeConfig(result.Binding.Config)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.Since, stored.Since)
+}
+
+func TestRunnerSinceCursorAndBackfills(t *testing.T) {
+	for _, mode := range []string{"incremental", "parent-backfill", "legacy-title"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			cutoff := h.now.Add(-time.Hour)
+			cursor := h.now.Add(-10 * time.Minute)
+			recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, cursor)
+			cfg, err := DecodeConfig(h.binding.Config)
+			require.NoError(t, err)
+			cfg.Since = cutoff.Format(time.RFC3339)
+			cfg.ParentLinksVersion = currentParentLinksVersion
+			raw, err := EncodeConfig(cfg)
+			require.NoError(t, err)
+			if mode == "parent-backfill" {
+				cfg.ParentLinksVersion = 0
+				raw, err = EncodeConfig(cfg)
+				require.NoError(t, err)
+				h.fetcher.parentDataSet = true
+				h.fetcher.parentData = ParentData{Scan: ParentScanComplete}
+			}
+			if mode == "legacy-title" {
+				var values map[string]any
+				require.NoError(t, json.Unmarshal(raw, &values))
+				delete(values, "title_prefix")
+				raw, err = json.Marshal(values)
+				require.NoError(t, err)
+			}
+			_, err = h.db.RefreshIssueSyncBinding(h.ctx, db.IssueSyncBindingUpdateParams{BindingID: h.binding.ID, DisplayName: cfg.DisplayName(), Config: raw})
+			require.NoError(t, err)
+			_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+			require.NoError(t, err)
+			want := cutoff
+			if mode == "incremental" {
+				want = cursor.Add(-2 * time.Minute)
+			}
+			require.NotNil(t, h.fetcher.issueCalls[0].since)
+			assert.Equal(t, want, *h.fetcher.issueCalls[0].since)
+		})
+	}
+}
+
+func TestRunnerSinceSupersededBackfillCannotRestoreOldConfig(t *testing.T) {
+	h := newRunnerHarness(t)
+	h.fetcher.parentDataSet = true
+	h.fetcher.parentData = ParentData{Scan: ParentScanComplete}
+	newCutoff := h.now.Add(-time.Hour).Format(time.RFC3339)
+	h.fetcher.beforeIssuesReturn = func() {
+		cfg, err := DecodeConfig(h.binding.Config)
+		require.NoError(t, err)
+		cfg.Since = newCutoff
+		raw, err := EncodeConfig(cfg)
+		require.NoError(t, err)
+		_, err = h.db.UpsertIssueSyncBinding(h.ctx, db.UpsertIssueSyncBindingParams{ProjectID: h.project.ID, Provider: h.binding.Provider, SourceKey: h.binding.SourceKey, RemoteID: h.binding.RemoteID, DisplayName: h.binding.DisplayName, Config: raw, IntervalSeconds: 300})
+		require.NoError(t, err)
+	}
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	binding, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	cfg, err := DecodeConfig(binding.Config)
+	require.NoError(t, err)
+	assert.Equal(t, newCutoff, cfg.Since)
+}
+
+func TestRunnerSinceSupersededRepositoryRefreshCannotRestoreOldConfig(t *testing.T) {
+	h := newRunnerHarness(t)
+	h.fetcher.repo.FullName = "example-owner/renamed-repo"
+	h.fetcher.blockRepository = make(chan struct{}, 1)
+	h.fetcher.releaseRepository = make(chan struct{})
+	done := make(chan error, 1)
+	go func() { _, err := h.runner.RunOnce(h.ctx, h.binding.ID); done <- err }()
+	<-h.fetcher.blockRepository
+	cfg, err := DecodeConfig(h.binding.Config)
+	require.NoError(t, err)
+	cfg.Since = h.now.Add(-time.Hour).Format(time.RFC3339)
+	raw, err := EncodeConfig(cfg)
+	require.NoError(t, err)
+	_, err = h.db.UpsertIssueSyncBinding(h.ctx, db.UpsertIssueSyncBindingParams{ProjectID: h.project.ID, Provider: h.binding.Provider, SourceKey: h.binding.SourceKey, RemoteID: h.binding.RemoteID, DisplayName: h.binding.DisplayName, Config: raw, IntervalSeconds: 300})
+	require.NoError(t, err)
+	close(h.fetcher.releaseRepository)
+	require.ErrorIs(t, <-done, db.ErrIssueSyncAlreadyRunning)
+	binding, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(raw), string(binding.Config))
+}
+
+func TestRunnerProgressMatchesStoredClaimAndSurvivesRejectedOverlap(t *testing.T) {
+	h := newRunnerHarness(t)
+	h.now = h.now.Add(123456 * time.Nanosecond)
+	tracker := NewProgressTracker()
+	h.runner.config.Progress = tracker
+	h.fetcher.blockRepository = make(chan struct{}, 1)
+	h.fetcher.releaseRepository = make(chan struct{})
+	done := make(chan error, 1)
+	go func() { _, err := h.runner.RunOnce(h.ctx, h.binding.ID); done <- err }()
+	<-h.fetcher.blockRepository
+	status, err := h.db.IssueSyncStatusByProject(h.ctx, h.project.ID)
+	require.NoError(t, err)
+	require.NotNil(t, status.SyncStartedAt)
+	got := tracker.Snapshot(h.binding.ID, *status.SyncStartedAt)
+	require.NotNil(t, got)
+	assert.Equal(t, "repository", got.Phase)
+	_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	require.NotNil(t, tracker.Snapshot(h.binding.ID, *status.SyncStartedAt))
+	close(h.fetcher.releaseRepository)
+	require.NoError(t, <-done)
+	assert.Nil(t, tracker.Snapshot(h.binding.ID, *status.SyncStartedAt))
+}
+
+func TestRunnerProgressClearsAfterFailureAndCancellation(t *testing.T) {
+	for _, mode := range []string{"failure", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			tracker := NewProgressTracker()
+			h.runner.config.Progress = tracker
+			ctx, cancel := context.WithCancel(h.ctx)
+			defer cancel()
+			h.fetcher.beforeIssuesReturn = func() {
+				require.NotNil(t, tracker.Snapshot(h.binding.ID, h.now))
+				if mode == "cancel" {
+					cancel()
+				}
+			}
+			if mode == "failure" {
+				h.fetcher.issuesErr = errors.New("fetch failed")
+			}
+			_, err := h.runner.RunOnce(ctx, h.binding.ID)
+			require.Error(t, err)
+			assert.Nil(t, tracker.Snapshot(h.binding.ID, h.now))
+		})
+	}
+}
+
+func TestRunnerProgressCommentsAndCommittedChunks(t *testing.T) {
+	h := newRunnerHarness(t, withInitialBatchSize(1))
+	tracker := NewProgressTracker()
+	h.runner.config.Progress = tracker
+	h.fetcher.issues = []Issue{testIssue(101, 1, "first", h.now.Add(-time.Minute)), testIssue(102, 2, "second", h.now.Add(-time.Minute))}
+	h.fetcher.issues[0].Comments = 1
+	h.fetcher.comments = map[int][]Comment{1: {{ID: 1001, Body: "comment", User: &User{Login: "example-user"}, CreatedAt: new(h.now)}}}
+	var imports []int
+	h.runner.config.EventSink = func(context.Context, int64, []db.Event) error {
+		got := tracker.Snapshot(h.binding.ID, h.now)
+		require.NotNil(t, got)
+		assert.Equal(t, "importing", got.Phase)
+		assert.Equal(t, 2, got.Total)
+		imports = append(imports, got.Completed)
+		return nil
+	}
+
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []int{0, 1}, imports, "events must be delivered before reporting chunk completion")
 }

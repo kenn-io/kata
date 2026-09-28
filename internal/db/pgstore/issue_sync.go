@@ -335,9 +335,14 @@ func (s *Store) RefreshIssueSyncBinding(
 	}
 	var binding db.IssueSyncBinding
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		var startedAt any
+		if params.StartedAt != nil {
+			startedAt = formatStoredTime(*params.StartedAt)
+		}
 		result, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET
-display_name=$1, config_json=$2, updated_at=$3 WHERE id=$4`,
-			params.DisplayName, string(params.Config), storedTime(time.Now()), params.BindingID)
+display_name=$1, config_json=$2, updated_at=$3 WHERE id=$4
+AND ($5::text IS NULL OR (enabled=1 AND EXISTS (SELECT 1 FROM issue_sync_status WHERE binding_id=issue_sync_bindings.id AND sync_started_at=$5)))`,
+			params.DisplayName, string(params.Config), storedTime(time.Now()), params.BindingID, startedAt)
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -346,6 +351,9 @@ display_name=$1, config_json=$2, updated_at=$3 WHERE id=$4`,
 			return err
 		}
 		if affected == 0 {
+			if params.StartedAt != nil {
+				return db.ErrIssueSyncAlreadyRunning
+			}
 			return db.ErrNotFound
 		}
 		binding, err = scanIssueSyncBinding(tx.QueryRowContext(ctx,

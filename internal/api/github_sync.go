@@ -70,20 +70,21 @@ type IssueSyncBindingOut struct {
 
 // IssueSyncStatusOut summarizes current sync state.
 type IssueSyncStatusOut struct {
-	BindingID     int64      `json:"binding_id"`
-	ProjectID     int64      `json:"project_id"`
-	Provider      string     `json:"provider"`
-	Enabled       bool       `json:"enabled"`
-	State         string     `json:"state"`
-	SyncStartedAt *time.Time `json:"sync_started_at,omitempty"`
-	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
-	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
-	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
-	LastCreated   int        `json:"last_created"`
-	LastUpdated   int        `json:"last_updated"`
-	LastUnchanged int        `json:"last_unchanged"`
-	LastComments  int        `json:"last_comments"`
+	Progress      *IssueSyncProgressOut `json:"progress,omitempty"`
+	BindingID     int64                 `json:"binding_id"`
+	ProjectID     int64                 `json:"project_id"`
+	Provider      string                `json:"provider"`
+	Enabled       bool                  `json:"enabled"`
+	State         string                `json:"state"`
+	SyncStartedAt *time.Time            `json:"sync_started_at,omitempty"`
+	LastAttemptAt *time.Time            `json:"last_attempt_at,omitempty"`
+	LastSuccessAt *time.Time            `json:"last_success_at,omitempty"`
+	LastErrorAt   *time.Time            `json:"last_error_at,omitempty"`
+	LastError     string                `json:"last_error,omitempty"`
+	LastCreated   int                   `json:"last_created"`
+	LastUpdated   int                   `json:"last_updated"`
+	LastUnchanged int                   `json:"last_unchanged"`
+	LastComments  int                   `json:"last_comments"`
 }
 
 // IssueSyncBody is the shared response envelope for enable, disable, and status.
@@ -119,4 +120,14 @@ func DecodeJSONMap(raw jsontext.Value) (JSONMap, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// IssueSyncProgressOut describes live phase-local work for the active sync claim.
+// Total is zero when no reliable total is available.
+type IssueSyncProgressOut struct {
+	Phase     string    `json:"phase"`
+	Completed int       `json:"completed"`
+	Total     int       `json:"total"`
+	StartedAt time.Time `json:"started_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

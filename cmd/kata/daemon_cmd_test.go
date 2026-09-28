@@ -3208,3 +3208,39 @@ command = %q
 	assert.Contains(t, string(body), `"healthy":false`)
 	assert.NotContains(t, string(body), "example-missing-connector")
 }
+
+func TestDaemonGitHubSyncProgressTrackerReachesScheduledRunner(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
+		store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+		defer func() { _ = store.Close() }()
+		fetcher := &daemonGitHubSyncFetcher{}
+		runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
+		var configs []githubsync.RunnerConfig
+		orig := newGitHubSyncDaemonRunner
+		newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
+			configs = append(configs, cfg)
+			return runner
+		}
+		t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
+
+		progress := githubsync.NewProgressTracker()
+		ctx, cancel := context.WithCancel(t.Context())
+		workers := newDaemonWorkerGroup()
+		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(nil, hooks.NewNoop()), log.New(io.Discard, "", 0), progress)
+		defer func() { cancel(); require.True(t, workers.Wait(context.Background())) }()
+
+		synctest.Wait()
+		require.True(t, runner.wasRun())
+		require.Len(t, configs, 1)
+		assert.Same(t, progress, configs[0].Progress)
+		assert.Same(t, store, configs[0].Store)
+		assert.Same(t, fetcher, configs[0].Fetcher)
+		assert.Equal(t, 25*time.Millisecond, configs[0].Interval)
+		assert.NotNil(t, configs[0].Wake)
+		assert.NotNil(t, configs[0].EventSinkFrom)
+		assert.NotNil(t, configs[0].Logger)
+		require.NotNil(t, wake)
+		require.NotPanics(t, wake)
+	})
+}

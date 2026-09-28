@@ -82,6 +82,12 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 	assert.Equal(t, &started, status.SyncStartedAt)
 	assert.Equal(t, &started, status.LastAttemptAt)
 
+	wrongClaim := started.Add(time.Second)
+	_, err = store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{BindingID: binding.ID, DisplayName: binding.DisplayName, Config: binding.Config, StartedAt: &wrongClaim})
+	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	_, err = store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{BindingID: binding.ID, DisplayName: binding.DisplayName, Config: binding.Config, StartedAt: &started})
+	require.NoError(t, err)
+
 	_, err = store.RecordIssueSyncError(ctx, db.IssueSyncErrorParams{
 		BindingID: binding.ID, StartedAt: started.Add(time.Second), At: started.Add(time.Minute), Error: "stale",
 	})

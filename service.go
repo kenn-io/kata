@@ -145,6 +145,7 @@ type Service struct {
 	federationWake         chan struct{}
 	gitHubSyncWake         chan struct{}
 	gitHubSyncFetcher      githubsync.Fetcher
+	gitHubSyncProgress     *githubsync.ProgressTracker
 	federationCredentials  config.FederationCredentialStore
 	logger                 *slog.Logger
 	defaultTimezone        string
@@ -252,6 +253,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		}
 		gitHubSyncFetcher = factory(gitHubSyncConfig)
 	}
+	gitHubSyncProgress := githubsync.NewProgressTracker()
 	var hostAccess daemon.HostAccessController
 	if cfg.Access != nil {
 		hostAccess = hostAccessControllerAdapter{controller: cfg.Access}
@@ -272,6 +274,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		FederationCredentials:   federationCredentials,
 		DisableFederationRebind: true,
 		GitHubSyncFetcher:       gitHubSyncFetcher,
+		GitHubSyncProgress:      gitHubSyncProgress,
 		GitHubSyncConfig:        gitHubSyncConfig,
 		GitHubSyncWake:          wakeGitHubSync,
 		Hooks:                   hookSink,
@@ -290,6 +293,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		federationWake:         federationWake,
 		gitHubSyncWake:         gitHubSyncWake,
 		gitHubSyncFetcher:      gitHubSyncFetcher,
+		gitHubSyncProgress:     gitHubSyncProgress,
 		federationCredentials:  federationCredentials,
 		logger:                 logger,
 		defaultTimezone:        cfg.DefaultTimezone,
@@ -579,6 +583,7 @@ func (s *Service) Run(ctx context.Context) error {
 		},
 	}
 	gitHubSyncRunner := githubsync.NewRunner(githubsync.RunnerConfig{
+		Progress: s.gitHubSyncProgress,
 		Store:    s.store,
 		Fetcher:  s.gitHubSyncFetcher,
 		Logger:   s.logger,

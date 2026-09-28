@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/githubsync"
@@ -22,6 +23,7 @@ type githubSyncOptions struct {
 	host        string
 	interval    string
 	titlePrefix bool
+	since       string
 }
 
 type githubSyncBindingBody struct {
@@ -54,16 +56,21 @@ type githubSyncBindingOut struct {
 }
 
 type githubSyncStatusOut struct {
-	BindingID     int64  `json:"binding_id"`
-	ProjectID     int64  `json:"project_id"`
-	Provider      string `json:"provider"`
-	Enabled       bool   `json:"enabled"`
-	State         string `json:"state"`
-	LastError     string `json:"last_error"`
-	LastCreated   int    `json:"last_created"`
-	LastUpdated   int    `json:"last_updated"`
-	LastUnchanged int    `json:"last_unchanged"`
-	LastComments  int    `json:"last_comments"`
+	Progress      *githubSyncProgressOut `json:"progress,omitempty"`
+	SyncStartedAt *time.Time             `json:"sync_started_at,omitempty"`
+	LastAttemptAt *time.Time             `json:"last_attempt_at,omitempty"`
+	LastSuccessAt *time.Time             `json:"last_success_at,omitempty"`
+	LastErrorAt   *time.Time             `json:"last_error_at,omitempty"`
+	BindingID     int64                  `json:"binding_id"`
+	ProjectID     int64                  `json:"project_id"`
+	Provider      string                 `json:"provider"`
+	Enabled       bool                   `json:"enabled"`
+	State         string                 `json:"state"`
+	LastError     string                 `json:"last_error"`
+	LastCreated   int                    `json:"last_created"`
+	LastUpdated   int                    `json:"last_updated"`
+	LastUnchanged int                    `json:"last_unchanged"`
+	LastComments  int                    `json:"last_comments"`
 }
 
 func newSyncCmd() *cobra.Command {
@@ -96,6 +103,10 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 		Short: "enable GitHub sync for this project",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cutoff, err := githubsync.ParseSince(opts.since)
+			if err != nil {
+				return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
+			}
 			ctx := cmd.Context()
 			a, projectID, err := githubSyncProjectAPI(ctx)
 			if err != nil {
@@ -108,6 +119,9 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 			body := &generated.EnableIssueSyncBody{Config: map[string]any{
 				"host": binding.Host, "owner": binding.Owner, "repo": binding.Repo, "title_prefix": opts.titlePrefix,
 			}}
+			if cutoff != nil {
+				body.Config["since"] = cutoff.Format(time.RFC3339)
+			}
 			if strings.TrimSpace(opts.interval) != "" {
 				body.Interval = new(strings.TrimSpace(opts.interval))
 			}
@@ -129,6 +143,7 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.repo, "repo", "", "GitHub repository as owner/repo")
 	cmd.Flags().StringVar(&opts.host, "host", "", "GitHub host (default: github.com)")
 	cmd.Flags().StringVar(&opts.interval, "interval", "", "sync interval duration, such as 5m")
+	cmd.Flags().StringVar(&opts.since, "since", "", "only import issues updated after YYYY-MM-DD (UTC) or RFC3339 with whole seconds")
 	cmd.Flags().BoolVar(&opts.titlePrefix, "title-prefix", true, "prefix imported issue titles with [GitHub #N]")
 	return cmd
 }
@@ -389,6 +404,9 @@ func githubSyncPrintAgent(w io.Writer, action string, status githubSyncStatusOut
 			return err
 		}
 	}
+	if err := githubSyncPrintAgentDetails(w, status, binding); err != nil {
+		return err
+	}
 	if status.LastError != "" {
 		if _, err := fmt.Fprintf(w, " last_error=%s", agentValue(status.LastError)); err != nil {
 			return err
@@ -424,6 +442,11 @@ func githubSyncPrintHumanBinding(w io.Writer, action string, body githubSyncBind
 	default:
 		state := githubSyncState(body.Status, body.Binding)
 		if _, err := fmt.Fprintf(w, "GitHub sync %s\n", textsafe.Line(state)); err != nil {
+			return err
+		}
+	}
+	if action == "status" {
+		if err := githubSyncPrintHumanDetails(w, body); err != nil {
 			return err
 		}
 	}
