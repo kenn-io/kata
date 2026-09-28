@@ -79,7 +79,10 @@ When `--repo` is omitted, kata attempts to infer the repository from the
 project's Git aliases. v1 accepts `github.com` and exact GitHub Enterprise
 hostnames listed in `KATA_GITHUB_SYNC_ALLOWED_HOSTS`; use `--host` for those
 hosts and `--interval` for the polling interval. Titles are prefixed by default;
-use `--title-prefix=false` to import GitHub titles without the prefix:
+use `--title-prefix=false` to retain GitHub titles and add the plain `github`
+label. Omitted flags preserve the saved choice on re-enable. Same-source
+presentation refreshes preserve local title edits and local labels; upstream
+labels are retained and matching normalized `github` labels are deduplicated:
 
 ```sh
 kata sync github enable \

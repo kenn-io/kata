@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 func TestRunnerFirstSyncFetchesAllImportsCommentsEmitsEventsAndAdvancesCursor(t *testing.T) {
@@ -1758,7 +1759,7 @@ func TestRunnerSinceSupersededRepositoryRefreshCannotRestoreOldConfig(t *testing
 func TestRunnerProgressMatchesStoredClaimAndSurvivesRejectedOverlap(t *testing.T) {
 	h := newRunnerHarness(t)
 	h.now = h.now.Add(123456 * time.Nanosecond)
-	tracker := NewProgressTracker()
+	tracker := issuesync.NewProgressTracker()
 	h.runner.config.Progress = tracker
 	h.fetcher.blockRepository = make(chan struct{}, 1)
 	h.fetcher.releaseRepository = make(chan struct{})
@@ -1823,4 +1824,120 @@ func TestRunnerProgressCommentsAndCommittedChunks(t *testing.T) {
 	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
 	require.NoError(t, err)
 	assert.Equal(t, []int{0, 1}, imports, "events must be delivered before reporting chunk completion")
+}
+
+func TestRunnerTitlePrefixPresentation(t *testing.T) {
+	h := newRunnerHarness(t)
+	h.fetcher.issues = []Issue{testIssue(101, 123, "Source task", h.now.Add(-time.Hour))}
+	h.fetcher.issues[0].Labels = []Label{{Name: "bug"}}
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	mapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:101")
+	require.NoError(t, err)
+	require.NotNil(t, mapping.IssueID)
+	_, err = h.db.AddLabel(h.ctx, *mapping.IssueID, "local", "editor")
+	require.NoError(t, err)
+	for _, prefix := range []bool{false, true, false} {
+		config, err := DecodeConfig(h.binding.Config)
+		require.NoError(t, err)
+		config.TitlePrefix = new(prefix)
+		raw, err := EncodeConfig(config)
+		require.NoError(t, err)
+		saved, err := h.db.UpsertIssueSyncBinding(h.ctx, db.UpsertIssueSyncBindingParams{ProjectID: h.project.ID, Provider: h.binding.Provider, SourceKey: h.binding.SourceKey, RemoteID: h.binding.RemoteID, DisplayName: h.binding.DisplayName, Config: raw, IntervalSeconds: 300})
+		require.NoError(t, err)
+		require.Nil(t, saved.LastCursorAt)
+		h.fetcher.repo.FullName = "example-owner/renamed-repo"
+		h.now = h.now.Add(time.Minute)
+		_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+		require.NoError(t, err)
+		wantTitle := "Source task"
+		wantLabels := []string{"bug", "github", "local"}
+		if prefix {
+			wantTitle = "[GitHub #123] Source task"
+			wantLabels = []string{"bug", "local"}
+		}
+		require.Equal(t, wantTitle, issueTitleByID(h.ctx, t, h.db, *mapping.IssueID))
+		labels, err := h.db.LabelsByIssue(h.ctx, *mapping.IssueID)
+		require.NoError(t, err)
+		names := []string{}
+		for _, label := range labels {
+			names = append(names, label.Label)
+		}
+		require.ElementsMatch(t, wantLabels, names)
+		refreshed, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
+		require.NoError(t, err)
+		decoded, err := DecodeConfig(refreshed.Config)
+		require.NoError(t, err)
+		require.Equal(t, prefix, decoded.UseTitlePrefix())
+		require.Equal(t, "renamed-repo", decoded.Repo)
+		require.Nil(t, h.fetcher.issueCalls[len(h.fetcher.issueCalls)-1].since)
+	}
+}
+
+func TestRunnerParentOnlyRefreshPreservesSourceTag(t *testing.T) {
+	h := newRunnerHarness(t)
+	config, err := DecodeConfig(h.binding.Config)
+	require.NoError(t, err)
+	config.TitlePrefix = new(false)
+	raw, err := EncodeConfig(config)
+	require.NoError(t, err)
+	_, err = h.db.UpsertIssueSyncBinding(h.ctx, db.UpsertIssueSyncBindingParams{ProjectID: h.project.ID, Provider: h.binding.Provider, SourceKey: h.binding.SourceKey, RemoteID: h.binding.RemoteID, DisplayName: h.binding.DisplayName, Config: raw, IntervalSeconds: 300})
+	require.NoError(t, err)
+	h.fetcher.issues = []Issue{testIssue(101, 1, "Source task", h.now.Add(-time.Hour))}
+	_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	mapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:101")
+	require.NoError(t, err)
+	require.NotNil(t, mapping.IssueID)
+	// The parent scan can observe a child omitted from the incremental issue
+	// fetch. Its synthetic item carries only parent authority, no label payload.
+	h.fetcher.issues = nil
+	h.fetcher.parentData = ParentData{Scan: ParentScanComplete, ScannedChildIDs: map[int]int64{1: 101}}
+	h.fetcher.parentDataSet = true
+	h.now = h.now.Add(time.Minute)
+	_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	labels, err := h.db.LabelsByIssue(h.ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Len(t, labels, 1)
+	require.Equal(t, "github", labels[0].Label)
+	require.Equal(t, "Source task", issueTitleByID(h.ctx, t, h.db, *mapping.IssueID))
+}
+
+func TestRunnerParentOnlyRefreshDoesNotObserveLocalEditAsSourceVersion(t *testing.T) {
+	h := newRunnerHarness(t)
+	h.fetcher.issues = []Issue{testIssue(101, 1, "Source task", h.now.Add(-time.Hour))}
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	mapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:101")
+	require.NoError(t, err)
+	require.NotNil(t, mapping.IssueID)
+	localTitle := "Local task"
+	_, _, _, err = h.db.EditIssue(h.ctx, db.EditIssueParams{IssueID: *mapping.IssueID, Actor: "editor", Title: &localTitle})
+	require.NoError(t, err)
+	sourceIssues := h.fetcher.issues
+	h.fetcher.issues = nil
+	h.fetcher.parentData = ParentData{Scan: ParentScanComplete, ScannedChildIDs: map[int]int64{1: 101}}
+	h.fetcher.parentDataSet = true
+	h.now = h.now.Add(time.Minute)
+	_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	// After a parent-only pass, a presentation refresh of the real unchanged
+	// source row must still recognize that source version despite a local edit.
+	h.fetcher.issues = sourceIssues
+	config, err := DecodeConfig(h.binding.Config)
+	require.NoError(t, err)
+	config.TitlePrefix = new(false)
+	raw, err := EncodeConfig(config)
+	require.NoError(t, err)
+	_, err = h.db.UpsertIssueSyncBinding(h.ctx, db.UpsertIssueSyncBindingParams{ProjectID: h.project.ID, Provider: h.binding.Provider, SourceKey: h.binding.SourceKey, RemoteID: h.binding.RemoteID, DisplayName: h.binding.DisplayName, Config: raw, IntervalSeconds: 300})
+	require.NoError(t, err)
+	h.now = h.now.Add(time.Minute)
+	_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	labels, err := h.db.LabelsByIssue(h.ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	require.Len(t, labels, 1)
+	require.Equal(t, "github", labels[0].Label)
+	require.Equal(t, localTitle, issueTitleByID(h.ctx, t, h.db, *mapping.IssueID))
 }

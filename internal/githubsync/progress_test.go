@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 func TestProgressFencesOldClaimsAndReturnsCopies(t *testing.T) {
@@ -60,7 +61,7 @@ func TestProgressReporterIsContextScoped(t *testing.T) {
 		assert.Equal(t, "issues", phase)
 		completed = count
 	})
-	reportProgress(ctx, "issues", 20, 0)
+	issuesync.ReportProgress(ctx, "issues", 20, 0)
 	reportProgress(context.Background(), "issues", 999, 0)
 	assert.Equal(t, 20, completed)
 }

@@ -78,7 +78,7 @@ func newSyncCmd() *cobra.Command {
 		Use:   "sync",
 		Short: "sync external systems",
 	}
-	cmd.AddCommand(newGitHubSyncCmd())
+	cmd.AddCommand(newGitHubSyncCmd(), newNotionSyncCmd())
 	return cmd
 }
 
@@ -117,8 +117,11 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 				return err
 			}
 			body := &generated.EnableIssueSyncBody{Config: map[string]any{
-				"host": binding.Host, "owner": binding.Owner, "repo": binding.Repo, "title_prefix": opts.titlePrefix,
+				"host": binding.Host, "owner": binding.Owner, "repo": binding.Repo,
 			}}
+			if cmd.Flags().Changed("title-prefix") {
+				body.Config["title_prefix"] = opts.titlePrefix
+			}
 			if cutoff != nil {
 				body.Config["since"] = cutoff.Format(time.RFC3339)
 			} else if cmd.Flags().Changed("since") {
@@ -146,7 +149,7 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.host, "host", "", "GitHub host (default: github.com)")
 	cmd.Flags().StringVar(&opts.interval, "interval", "", "sync interval duration, such as 5m")
 	cmd.Flags().StringVar(&opts.since, "since", "", "only import issues updated after YYYY-MM-DD (UTC) or RFC3339 with whole seconds; omit to keep the cutoff, use --since= to clear it")
-	cmd.Flags().BoolVar(&opts.titlePrefix, "title-prefix", true, "prefix imported issue titles with [GitHub #N]")
+	cmd.Flags().BoolVar(&opts.titlePrefix, "title-prefix", true, "prefix titles with [GitHub #N]; false keeps source titles and adds the github label (omitted preserves saved choice)")
 	return cmd
 }
 

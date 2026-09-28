@@ -26,6 +26,8 @@ import (
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/notionsync"
 )
 
 // PostgresSchemaMode controls how a PostgreSQL-backed service treats its
@@ -87,6 +89,12 @@ type GitHubSyncConfig struct {
 	Apps      []GitHubAppConfig
 }
 
+// NotionSyncConfig selects the daemon-owned Notion token environment variable.
+// Empty TokenEnv uses KATA_NOTION_TOKEN; credentials are resolved only for runs.
+type NotionSyncConfig struct {
+	TokenEnv string
+}
+
 // GitHubAppConfig identifies one GitHub App installation credential.
 type GitHubAppConfig struct {
 	Host           string
@@ -103,6 +111,7 @@ type Config struct {
 	Postgres   PostgresConfig
 	Auth       AuthConfig
 	GitHubSync GitHubSyncConfig
+	NotionSync NotionSyncConfig
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -132,6 +141,8 @@ type Config struct {
 }
 
 type serviceDeps struct {
+	notionSyncFetcher        notionsync.Fetcher
+	notionSyncFetcherFactory func(config.NotionSyncConfig) notionsync.Fetcher
 	gitHubSyncFetcher        githubsync.Fetcher
 	gitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
 }
@@ -146,6 +157,9 @@ type Service struct {
 	gitHubSyncWake         chan struct{}
 	gitHubSyncFetcher      githubsync.Fetcher
 	gitHubSyncProgress     *githubsync.ProgressTracker
+	notionSyncWake         chan struct{}
+	notionSyncFetcher      notionsync.Fetcher
+	notionSyncProgress     *issuesync.ProgressTracker
 	federationCredentials  config.FederationCredentialStore
 	logger                 *slog.Logger
 	defaultTimezone        string
@@ -195,6 +209,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	gitHubSyncConfig, err := resolveGitHubSyncConfig(cfg.GitHubSync)
 	if err != nil {
 		return nil, fmt.Errorf("kata: GitHub sync config: %w", err)
+	}
+	notionSyncConfig, err := config.NormalizeNotionSyncConfig(config.NotionSyncConfig{TokenEnv: cfg.NotionSync.TokenEnv})
+	if err != nil {
+		return nil, fmt.Errorf("kata: Notion sync config: %w", err)
 	}
 	publicFederationCredentials := cfg.FederationCredentials
 	if publicFederationCredentials == nil {
@@ -254,6 +272,19 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		gitHubSyncFetcher = factory(gitHubSyncConfig)
 	}
 	gitHubSyncProgress := githubsync.NewProgressTracker()
+	notionSyncWake := make(chan struct{}, 1)
+	wakeNotionSync := func() { signalWake(notionSyncWake) }
+	notionSyncFetcher := deps.notionSyncFetcher
+	if notionSyncFetcher == nil {
+		factory := deps.notionSyncFetcherFactory
+		if factory == nil {
+			factory = func(cfg config.NotionSyncConfig) notionsync.Fetcher {
+				return notionsync.NewClient(notionsync.ClientConfig{TokenEnv: cfg.TokenEnv})
+			}
+		}
+		notionSyncFetcher = factory(notionSyncConfig)
+	}
+	notionSyncProgress := issuesync.NewProgressTracker()
 	var hostAccess daemon.HostAccessController
 	if cfg.Access != nil {
 		hostAccess = hostAccessControllerAdapter{controller: cfg.Access}
@@ -277,6 +308,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		GitHubSyncProgress:      gitHubSyncProgress,
 		GitHubSyncConfig:        gitHubSyncConfig,
 		GitHubSyncWake:          wakeGitHubSync,
+		NotionSyncFetcher:       notionSyncFetcher,
+		NotionSyncProgress:      notionSyncProgress,
+		NotionSyncConfig:        notionSyncConfig,
+		NotionSyncWake:          wakeNotionSync,
 		Hooks:                   hookSink,
 		Auth:                    config.AuthConfig{Token: cfg.Auth.Token},
 		HostAccess:              hostAccess,
@@ -294,6 +329,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		gitHubSyncWake:         gitHubSyncWake,
 		gitHubSyncFetcher:      gitHubSyncFetcher,
 		gitHubSyncProgress:     gitHubSyncProgress,
+		notionSyncWake:         notionSyncWake,
+		notionSyncFetcher:      notionSyncFetcher,
+		notionSyncProgress:     notionSyncProgress,
 		federationCredentials:  federationCredentials,
 		logger:                 logger,
 		defaultTimezone:        cfg.DefaultTimezone,
@@ -501,7 +539,7 @@ func (a hostAccessControllerAdapter) Authorize(
 	}, nil
 }
 
-// Run executes Kata's federation, GitHub synchronization, timed-claim,
+// Run executes Kata's federation, GitHub and Notion synchronization, timed-claim,
 // due-notification, and assignment-expiry workers until ctx is canceled or
 // Close is called. Run does not start a listener and may be called only once
 // at a time.
@@ -594,6 +632,18 @@ func (s *Service) Run(ctx context.Context) error {
 			return nil
 		},
 	})
+	notionSyncRunner := notionsync.NewRunner(notionsync.RunnerConfig{
+		Progress: s.notionSyncProgress,
+		Store:    s.store,
+		Fetcher:  s.notionSyncFetcher,
+		Logger:   s.logger,
+		Interval: 30 * time.Second,
+		Wake:     s.notionSyncWake,
+		EventSink: func(_ context.Context, projectID int64, events []db.Event) error {
+			s.publishWorkerEvents(projectID, events)
+			return nil
+		},
+	})
 	sweeper := daemon.NewTimedClaimSweeper(s.store, s.publish)
 	sweeper.OnError = func(err error) {
 		s.logger.Error("kata timed-claim worker", "err", err)
@@ -609,6 +659,7 @@ func (s *Service) Run(ctx context.Context) error {
 	workers := []namedWorker{
 		{name: "federation", run: runner.Run},
 		{name: "github-sync", run: gitHubSyncRunner.Run},
+		{name: "notion-sync", run: notionSyncRunner.Run},
 		{name: "timed-claim", run: sweeper.Run},
 		{name: "due-notification", run: dueNotificationSweeper.Run},
 		{name: "assignment-expiry", run: assignmentSweeper.Run},
@@ -649,7 +700,7 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 // publishWorkerEvents fans a background worker's events out to both event
-// surfaces. Both workers route through here so neither can grow its own
+// surfaces. Workers route through here so none can grow its own
 // half-wired copy of the pairing again.
 func (s *Service) publishWorkerEvents(projectID int64, events []db.Event) {
 	s.publish.Events(projectID, events)

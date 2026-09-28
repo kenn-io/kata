@@ -39,6 +39,8 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "external import presentation labels stale replay", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "LabelsByIssue", "EditIssue"}, run: checkImportPresentationLabelStaleReplay},
+	{name: "external import presentation labels", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "LabelsByIssue", "AddLabel", "RemoveLabelAndEvent", "EditIssue"}, run: checkImportPresentationLabels},
 	{
 		name:    "issue revision owner",
 		methods: []string{"ClaimOwner", "CreateIssue", "CreateProject", "IssueByID", "PatchIssueMetadata", "UnassignOwner", "UpdateOwner"},
@@ -275,6 +277,11 @@ var storageScenarios = []scenario{
 		run: checkCloseAuditQueries,
 	},
 	{
+		name:    "issue_sync_expected_binding",
+		methods: []string{"CreateProject", "UpsertIssueSyncBinding", "IssueSyncBindingByProject"},
+		run:     checkIssueSyncExpectedBinding,
+	},
+	{
 		name: "issue sync lifecycle",
 		methods: []string{
 			"ClaimIssueSyncBinding", "CreateProject", "DisableIssueSyncBinding", "IssueSyncBindingByID",
@@ -282,6 +289,17 @@ var storageScenarios = []scenario{
 			"RecordIssueSyncError", "RecordIssueSyncSuccess", "RefreshIssueSyncBinding", "UpsertIssueSyncBinding",
 		},
 		run: checkIssueSyncLifecycle,
+	},
+	{
+		name: "notion_sync",
+		methods: []string{
+			"ClaimIssueSyncBinding", "CreateProject", "DisableIssueSyncBinding", "IssueSyncBindingByID",
+			"IssueSyncBindingByProject", "IssueSyncStatusByProject", "ListDueIssueSyncBindings",
+			"RecordIssueSyncError", "RecordIssueSyncSuccess", "RefreshIssueSyncBinding", "UpsertIssueSyncBinding",
+			"ImportBatch", "UpsertFederationBinding", "CreateExternalRootBinding", "RemoveProject",
+			"CreateIssue", "UpsertImportMapping", "ImportMappingBySource", "PauseExternalRootBinding",
+		},
+		run: checkNotionSyncStorage,
 	},
 	{
 		name: "metadata and atomic edit",

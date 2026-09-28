@@ -928,6 +928,51 @@ uses the same successful empty output as compact mode.
 
 ## External sync
 
+### Notion
+
+```sh
+kata sync notion enable --data-source UUID --done-status 'Delivered' [--done-status 'Accepted']
+kata sync notion enable --database UUID-or-URL --done-status 'Delivered'
+kata sync notion enable [--status-property ID-or-name] [--assignee-property ID-or-name] [--interval 5m] [--since 2026-01-01] [--title-prefix=false]
+kata sync notion status
+kata sync notion once
+kata sync notion disable
+```
+
+Initial enable requires one locator (`--data-source` or `--database`) and at
+least one repeatable `--done-status`; later enable may reuse saved choices.
+`--database` parses a supported Notion URL locally and asks the daemon to select
+the database's sole data source. Property and completion selectors are exact,
+case-sensitive IDs or names. Omitted property selectors discover the sole
+`status` and `people` properties; ambiguity is reported by the daemon.
+
+Source/property/completed-option mappings are immutable, including after
+disable. `--interval` accepts a duration or integer seconds (minimum one second),
+defaults initially to five minutes, and preserves its saved value when omitted
+on re-enable. `--since` accepts a UTC date or whole-second RFC3339 timestamp;
+omission preserves the saved cutoff and `--since ''` clears it. A changed
+cutoff resets the cursor; an interval-only update preserves it. `--title-prefix`
+defaults initially to true and omission preserves the saved choice. False retains
+original titles (empty becomes `(untitled)`) and adds the plain `notion` label.
+An explicit true restores `[Notion] ` titles. Presentation changes reset the
+cursor and refresh source-owned titles at equal timestamps while preserving
+local title edits and local labels.
+
+All Notion reads and credentials belong to the daemon. `once` requires an enabled
+binding; `disable` stops polling and transactionally fences further imports.
+Already committed chunks remain, and active upstream reads may continue after
+it returns. Human, `--agent`, and `--json` output show resolved non-secret config,
+timestamps, optional progress, last error, and clearly historical last-success
+counts. A zero progress total is unknown.
+Notion completion maps to closed/done; other statuses map to open. Local changes
+never update Notion. Equal or older source observations preserve local scalar
+edits; newer Notion imports can overwrite those fields and clear local priority
+because Notion supplies nil priority. Deletion/archive reconciliation, dates,
+comments, relations, and write-back are outside v1. See the [Notion sync operating
+guide](../operations/notion-sync.md) for setup, limits, and recovery.
+
+### GitHub
+
 ```sh
 kata sync github enable [--repo example-org/example-repo] [--host github.com] [--interval 5m] [--title-prefix=false]
 kata sync github disable
@@ -942,7 +987,10 @@ missing or ambiguous. v1 accepts `github.com` and exact GitHub Enterprise
 hostnames listed in `KATA_GITHUB_SYNC_ALLOWED_HOSTS`; `--host` selects one of
 those hosts, and `--interval` sets the daemon polling interval. Imported issue
 titles are prefixed as `[GitHub #123] Original title` by default; pass
-`--title-prefix=false` to preserve GitHub titles without the prefix.
+`--title-prefix=false` to preserve GitHub titles and add the plain `github`
+label. Omission on re-enable preserves the saved choice; explicit true restores
+prefixing. Presentation refreshes preserve local title edits and local labels,
+retain upstream labels, and deduplicate matching normalized `github` labels.
 
 GitHub sync is daemon-side. The daemon resolves credentials from a matching
 `[[github_sync.app]]` entry, then `[github_sync].token_env` (default

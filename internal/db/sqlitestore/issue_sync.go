@@ -36,6 +36,11 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 		}
 
 		existing, err := issueSyncBindingByProject(ctx, tx, p.ProjectID)
+		if expected := p.ExpectedBinding; expected != nil && (err == nil || errors.Is(err, db.ErrNotFound)) {
+			if (expected.ID == 0 && err == nil) || (expected.ID != 0 && (err != nil || existing.ID != expected.ID || string(existing.Config) != string(expected.Config) || existing.IntervalSeconds != expected.IntervalSeconds)) {
+				return db.IssueSyncBinding{}, db.ErrIssueSyncBindingChanged
+			}
+		}
 		if err == nil {
 			if existing.Provider != p.Provider || existing.RemoteID != p.RemoteID {
 				return db.IssueSyncBinding{}, db.ErrIssueSyncProjectAlreadyBound

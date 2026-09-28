@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-09-26
+last_edited: 2026-09-28
 ---
 
 # HTTP API schema
@@ -538,9 +538,9 @@ the reachable graph.
 ## Issue Sync Endpoints
 
 Issue sync endpoints are project-scoped and provider-qualified. They configure
-one-way external issue sync into the kata project. GitHub is the only provider
-implemented in v1, and these endpoints back the `kata sync github ...`
-commands.
+one-way external issue sync into the Kata project. Providers `github` and
+`notion` back the `kata sync github ...` and `kata sync notion ...` commands.
+A project can have only one external issue-sync binding.
 
 All GitHub access happens in the daemon process. For provider `github`, v1
 accepts `github.com` and exact GitHub Enterprise hostnames listed in
@@ -587,10 +587,38 @@ Content-Type: application/json
 
 For GitHub, `config.host` defaults to `github.com`. Clients may send
 `interval_seconds` instead of `interval`. `config.title_prefix` defaults to
-`true`; set it to `false` to preserve GitHub issue titles without the
-`[GitHub #123]` prefix. The daemon validates the repository with its configured
+`true` initially; omission on re-enable preserves the saved choice. Set it to
+`false` to retain GitHub issue titles and add the plain `github` label. Explicit
+true restores the `[GitHub #123]` prefix. Local title edits and local labels
+are preserved, and matching upstream `github` labels are deduplicated. The daemon validates the repository with its configured
 GitHub credential chain, stores the repository identity, and returns the
 binding and status.
+
+For Notion, use `/api/v1/projects/{project_id}/issue-sync/notion/enable`.
+All Notion reads use the daemon's token environment variable, selected by
+`[notion_sync].token_env` (default `KATA_NOTION_TOKEN`). The enable request accepts:
+
+| Notion `config` key | Meaning |
+| --- | --- |
+| `data_source_id` | Data source UUID. Initial enable requires this or `database`, never both. |
+| `database` | Database UUID or supported Notion URL containing exactly one data source. |
+| `status_property` | Status property ID or exact name; omitted initially selects the sole Status property. |
+| `assignee_property` | People property ID or exact name. A People property is required; omit the selector initially only when exactly one exists. |
+| `done_statuses` | Array of completed status IDs or exact names; at least one is required initially. |
+| `title_prefix` | Boolean, initially true. False keeps source titles and adds the `notion` label. |
+| `since` | Exclusive updated-after UTC date or whole-second RFC3339 timestamp; empty clears the cutoff. |
+
+Notion re-enable preserves omitted selections, interval, cutoff, and title-prefix
+choice. The response config contains resolved `data_source_id`, `database_id`,
+`title_property_id`, `status_property_id`, `assignee_property_id`,
+`done_status_ids`, `since`, and `title_prefix`. Source and mapping IDs cannot
+change on re-enable. See [Notion sync](../operations/notion-sync.md) for access,
+field ownership, polling limits, and recovery.
+
+A concurrent binding edit during enable returns HTTP `409` with error code
+`issue_sync_binding_changed`. Read current status before retrying the intended
+change. A Notion upstream deadline during enable returns HTTP `504` with error
+code `notion_timeout`.
 
 Disable sync:
 
@@ -602,7 +630,8 @@ Content-Type: application/json
 ```
 
 Disabling stops polling but keeps the binding, cursor, status, and import
-mappings so re-enabling can resume against the same repository identity.
+mappings so re-enabling can resume against the same source identity. Replace
+`github` with `notion` in the disable, status, and once paths for Notion bindings.
 
 Read status:
 
@@ -624,7 +653,8 @@ Content-Type: application/json
 
 `once` runs one immediate daemon-side sync for an enabled binding. It bypasses
 the interval schedule but still respects the in-flight guard; overlapping runs
-return a conflict.
+return a conflict while the claim remains active. Re-enabling clears the claim:
+an older run may continue upstream reads, but cannot import or advance its cursor.
 
 The shared response body contains:
 

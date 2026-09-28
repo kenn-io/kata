@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -36,6 +37,8 @@ import (
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
@@ -3272,4 +3275,431 @@ func TestDaemonGitHubSyncProgressTrackerReachesScheduledRunner(t *testing.T) {
 		require.NotNil(t, wake)
 		require.NotPanics(t, wake)
 	})
+}
+
+func TestDaemonNotionScheduledProgress(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := &runtimeNotionRecordingStore{Storage: openKataTestDB(t, filepath.Join(t.TempDir(), "runtime.db")), recorded: make(chan db.IssueSyncStatus, 1)}
+	defer func() { require.NoError(t, store.Close()) }()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	binding := runtimeNotionBinding(t, store, project.ID)
+	fetcher := newRuntimeNotionFetcher()
+	tracker := issuesync.NewProgressTracker()
+	bcast := daemon.NewEventBroadcaster()
+	sub := bcast.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+	defer sub.Unsub()
+	gitHubProject, err := store.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	raw, err := githubsync.EncodeConfig(githubsync.Config{Host: "github.com", Owner: "example-owner", Repo: "example-repo", RepoID: 101})
+	require.NoError(t, err)
+	githubBinding, err := store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{ProjectID: gitHubProject.ID, Provider: "github", SourceKey: "github:R_exampleNode", RemoteID: "R_exampleNode", DisplayName: "example-owner/example-repo", Config: raw, IntervalSeconds: 300})
+	require.NoError(t, err)
+	githubFetcher := newDaemonGitHubSyncFetcher(githubBinding)
+	githubFetcher.blockRepository = make(chan struct{}, 1)
+	githubFetcher.releaseRepository = make(chan struct{})
+	githubTracker := githubsync.NewProgressTracker()
+	workers := newDaemonWorkerGroup()
+	startGitHubSyncRunner(ctx, workers, nil, store, githubFetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0), githubTracker)
+	wake := startNotionSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0), tracker)
+	defer func() { cancel(); require.True(t, workers.Wait(context.Background())) }()
+	server := daemon.NewServer(daemon.ServerConfig{DB: store, NotionSyncFetcher: fetcher, NotionSyncProgress: tracker, GitHubSyncProgress: githubTracker, GitHubSyncFetcher: githubFetcher})
+	waitRuntimeNotion(t, fetcher.sourceStarted)
+	waitRuntimeNotion(t, githubFetcher.blockRepository)
+	githubResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(githubResponse, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/github/status", gitHubProject.ID), nil))
+	require.Equal(t, http.StatusOK, githubResponse.Code)
+	var githubStatus runtimeNotionStatus
+	require.NoError(t, json.Unmarshal(githubResponse.Body.Bytes(), &githubStatus))
+	require.NotNil(t, githubStatus.Status.Progress)
+	require.Equal(t, "repository", githubStatus.Status.Progress.Phase)
+	status := readRuntimeNotionStatus(t, server.Handler(), project.ID)
+	require.NotNil(t, status.Status.Progress)
+	require.Equal(t, "source", status.Status.Progress.Phase)
+	close(fetcher.releaseSource)
+	waitRuntimeNotion(t, fetcher.contentStarted)
+	status = readRuntimeNotionStatus(t, server.Handler(), project.ID)
+	require.NotNil(t, status.Status.Progress)
+	require.Equal(t, "content", status.Status.Progress.Phase)
+	require.Zero(t, status.Status.Progress.Completed)
+	durable, err := store.IssueSyncStatusByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.NotNil(t, durable.SyncStartedAt)
+	require.Equal(t, *durable.SyncStartedAt, status.Status.Progress.StartedAt)
+	once := httptest.NewRecorder()
+	server.Handler().ServeHTTP(once, newRuntimeNotionPost(fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/once", project.ID), strings.NewReader(`{}`)))
+	require.Equal(t, 409, once.Code, once.Body.String())
+	require.Equal(t, status.Status.Progress, readRuntimeNotionStatus(t, server.Handler(), project.ID).Status.Progress)
+	// Many wakeups coalesce and return while the active content read is blocked.
+	wakeDone := make(chan struct{})
+	go func() {
+		for range 10000 {
+			wake()
+		}
+		close(wakeDone)
+	}()
+	waitRuntimeNotion(t, wakeDone)
+	close(fetcher.releaseContent)
+	committed := waitRuntimeNotionRecord(t, store.recorded)
+	require.NotNil(t, committed.LastSuccessAt)
+	// Drain after the committed success so Finish has removed live progress.
+	cancel()
+	require.True(t, workers.Wait(context.Background()))
+	status = readRuntimeNotionStatus(t, server.Handler(), project.ID)
+	require.Nil(t, status.Status.Progress)
+	require.Equal(t, 1, status.Status.LastCreated)
+	require.Nil(t, tracker.Snapshot(binding.ID, *durable.SyncStartedAt))
+	select {
+	case msg := <-sub.Ch:
+		require.NotNil(t, msg.Event)
+		require.Equal(t, "issue.created", msg.Event.Type)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "missing committed issue event")
+	}
+}
+func TestDaemonNotionScheduledFactorySharesDependencies(t *testing.T) {
+	store := openKataTestDB(t, filepath.Join(t.TempDir(), "runtime.db"))
+	defer func() { require.NoError(t, store.Close()) }()
+	fetcher := newRuntimeNotionFetcher()
+	tracker := issuesync.NewProgressTracker()
+	runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
+	var captured notionsync.RunnerConfig
+	original := newNotionSyncDaemonRunner
+	newNotionSyncDaemonRunner = func(cfg notionsync.RunnerConfig) notionSyncDaemonRunner { captured = cfg; return runner }
+	defer func() { newNotionSyncDaemonRunner = original }()
+	ctx, cancel := context.WithCancel(context.Background())
+	workers := newDaemonWorkerGroup()
+	admission := activity.WaitableAdmission(func() (*activity.Lease, bool, <-chan struct{}) { return nil, false, nil })
+	wake := startNotionSyncRunner(ctx, workers, admission, store, fetcher, daemon.NewEventPublisher(nil, hooks.NewNoop()), nil, tracker)
+	defer func() { cancel(); require.True(t, workers.Wait(context.Background())) }()
+	require.Same(t, tracker, captured.Progress)
+	require.Same(t, fetcher, captured.Fetcher)
+	require.Same(t, store, captured.Store)
+	require.Equal(t, 30*time.Second, captured.Interval)
+	require.NotNil(t, captured.DrainAdmission)
+	require.NotNil(t, captured.EventSinkFrom)
+	for range 10 {
+		wake()
+	}
+	select {
+	case <-captured.Wake:
+	default:
+		require.Fail(t, "wake was lost")
+	}
+	select {
+	case <-captured.Wake:
+		require.Fail(t, "wakeups did not coalesce")
+	default:
+	}
+}
+
+const runtimeNotionSourceID = "11111111-1111-1111-1111-111111111111"
+const runtimeNotionDatabaseID = "22222222-2222-2222-2222-222222222222"
+
+type runtimeNotionFetcher struct {
+	sourceStarted, releaseSource, contentStarted, releaseContent chan struct{}
+	sourceOnce, contentOnce                                      sync.Once
+}
+
+func newRuntimeNotionFetcher() *runtimeNotionFetcher {
+	return &runtimeNotionFetcher{sourceStarted: make(chan struct{}), releaseSource: make(chan struct{}), contentStarted: make(chan struct{}), releaseContent: make(chan struct{})}
+}
+func (f *runtimeNotionFetcher) ForRun(context.Context) (notionsync.Session, error) { return f, nil }
+func (f *runtimeNotionFetcher) DataSource(ctx context.Context, id string) (notionsync.DataSource, error) {
+	f.sourceOnce.Do(func() { close(f.sourceStarted) })
+	select {
+	case <-f.releaseSource:
+	case <-ctx.Done():
+		return notionsync.DataSource{}, ctx.Err()
+	}
+	return notionsync.DataSource{ID: id, DatabaseID: runtimeNotionDatabaseID, Name: "Tasks", Properties: []notionsync.Property{
+		{ID: "title", Name: "Task", Type: "title"}, {ID: "status", Name: "State", Type: "status", Options: []notionsync.Option{{ID: "done", Name: "Delivered"}}}, {ID: "people", Name: "Owner", Type: "people"},
+	}}, nil
+}
+func (*runtimeNotionFetcher) Database(context.Context, string) (notionsync.Database, error) {
+	return notionsync.Database{ID: runtimeNotionDatabaseID, DataSources: []notionsync.Option{{ID: runtimeNotionSourceID, Name: "Tasks"}}}, nil
+}
+func (*runtimeNotionFetcher) Pages(context.Context, notionsync.Config, *time.Time) ([]notionsync.Page, error) {
+	return []notionsync.Page{{ID: "33333333-3333-3333-3333-333333333333", URL: "https://www.notion.so/33333333333333333333333333333333", DataSourceID: runtimeNotionSourceID, CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)}}, nil
+}
+func (f *runtimeNotionFetcher) Content(ctx context.Context, _ notionsync.Config, p notionsync.Page) (notionsync.PageContent, error) {
+	f.contentOnce.Do(func() { close(f.contentStarted) })
+	select {
+	case <-f.releaseContent:
+	case <-ctx.Done():
+		return notionsync.PageContent{}, ctx.Err()
+	}
+	return notionsync.PageContent{Page: p, Title: "Scheduled task", Markdown: "Body"}, nil
+}
+func runtimeNotionBinding(t *testing.T, store db.Storage, projectID int64) db.IssueSyncBinding {
+	t.Helper()
+	raw, err := notionsync.EncodeConfig(notionsync.Config{DataSourceID: runtimeNotionSourceID, DatabaseID: runtimeNotionDatabaseID, TitlePropertyID: "title", StatusPropertyID: "status", AssigneePropertyID: "people", DoneStatusIDs: []string{"done"}})
+	require.NoError(t, err)
+	binding, err := store.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: projectID, Provider: "notion", SourceKey: "notion:" + runtimeNotionSourceID, RemoteID: runtimeNotionSourceID, DisplayName: "Tasks", Config: raw, IntervalSeconds: 300})
+	require.NoError(t, err)
+	return binding
+}
+
+type runtimeNotionStatus struct {
+	Status struct {
+		State       string `json:"state"`
+		LastCreated int    `json:"last_created"`
+		Progress    *struct {
+			Phase            string `json:"phase"`
+			Completed, Total int
+			StartedAt        time.Time `json:"started_at"`
+		} `json:"progress"`
+	} `json:"status"`
+}
+
+func readRuntimeNotionStatus(t *testing.T, handler http.Handler, projectID int64) runtimeNotionStatus {
+	t.Helper()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/status", projectID), nil))
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var status runtimeNotionStatus
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &status))
+	return status
+}
+func waitRuntimeNotion(t *testing.T, started <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "scheduled Notion worker did not reach upstream read")
+	}
+}
+
+func TestNotionWorkerDrainAndShutdown(t *testing.T) {
+	t.Run("admitted events fork during drain", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			store := openKataTestDB(t, filepath.Join(t.TempDir(), "runtime.db"))
+			defer func() { require.NoError(t, store.Close()) }()
+			ctx, cancel := context.WithCancel(t.Context())
+			workers := newDaemonWorkerGroup()
+			defer func() { cancel(); require.True(t, workers.Wait(context.Background())) }()
+			project, err := store.CreateProject(ctx, "example-project")
+			require.NoError(t, err)
+			runtimeNotionBinding(t, store, project.ID)
+			fetcher := newRuntimeNotionFetcher()
+			close(fetcher.releaseSource)
+			idle := make(chan struct{})
+			controller := daemon.NewIdleController(time.Second, func() { close(idle) })
+			controller.Start()
+			sink := &runtimeNotionForkSink{children: make(chan *activity.Lease, 1)}
+			wake := startNotionSyncRunner(ctx, workers, controller.WaitableDrainAdmission(), store, fetcher, daemon.NewEventPublisher(nil, sink), nil, issuesync.NewProgressTracker())
+			synctest.Wait()
+			select {
+			case <-fetcher.contentStarted:
+			default:
+				require.FailNow(t, "content did not start")
+			}
+			time.Sleep(time.Second)
+			synctest.Wait()
+			require.Equal(t, daemon.IdleStateBlocked, controller.Snapshot().State)
+			_, admitted, _ := controller.WaitableDrainAdmission()()
+			require.False(t, admitted)
+			wake()
+			close(fetcher.releaseContent)
+			synctest.Wait()
+			status, err := store.IssueSyncStatusByProject(ctx, project.ID)
+			require.NoError(t, err)
+			require.NotNil(t, status.LastSuccessAt)
+			var child *activity.Lease
+			select {
+			case child = <-sink.children:
+			default:
+				require.FailNow(t, "committed event did not fork hook delivery")
+			}
+			require.Equal(t, daemon.IdleStateBlocked, controller.Snapshot().State)
+			child.Release()
+			synctest.Wait()
+			select {
+			case <-idle:
+			default:
+				require.Fail(t, "idle shutdown did not resume after event delivery")
+			}
+		})
+	})
+	t.Run("Retry-After canceled by shutdown", func(t *testing.T) {
+		store := openKataTestDB(t, filepath.Join(t.TempDir(), "runtime.db"))
+		defer func() { require.NoError(t, store.Close()) }()
+		ctx, cancel := context.WithCancel(context.Background())
+		workers := newDaemonWorkerGroup()
+		t.Cleanup(func() {
+			cancel()
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stopCancel()
+			require.True(t, workers.Wait(stopCtx))
+		})
+		project, err := store.CreateProject(ctx, "example-project")
+		require.NoError(t, err)
+		runtimeNotionBinding(t, store, project.ID)
+		waiting := make(chan struct{})
+		var once sync.Once
+		fetcher := notionsync.NewClient(notionsync.ClientConfig{TokenEnv: "EXAMPLE_NOTION_TOKEN", LookupEnv: func(key string) (string, bool) {
+			assert.Equal(t, "EXAMPLE_NOTION_TOKEN", key)
+			return "example-token", true
+		}, Transport: runtimeNotionRoundTripper(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": []string{"600"}}, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+		}), Wait: func(ctx context.Context, d time.Duration) error {
+			if d > 9*time.Minute {
+				once.Do(func() { close(waiting) })
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}})
+		startNotionSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(nil, hooks.NewNoop()), nil, issuesync.NewProgressTracker())
+		waitRuntimeNotion(t, waiting)
+		cancel()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		require.True(t, workers.Wait(stopCtx))
+	})
+}
+
+type runtimeNotionRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f runtimeNotionRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type runtimeNotionForkSink struct{ children chan *activity.Lease }
+
+func (*runtimeNotionForkSink) Enqueue(db.Event) {}
+func (s *runtimeNotionForkSink) EnqueueFrom(_ db.Event, acquire hooks.AcquireActivity) {
+	child, ok := acquire()
+	if ok {
+		s.children <- child
+	}
+}
+
+func newRuntimeNotionPost(path string, body io.Reader) *http.Request {
+	request := httptest.NewRequest(http.MethodPost, path, body)
+	request.Header.Set("Content-Type", "application/json")
+	return request
+}
+
+func TestDaemonNotionConfigFileClientSharedByEnableAndScheduling(t *testing.T) {
+	scheduledSourceStarted := make(chan struct{})
+	releaseScheduledSource := make(chan struct{})
+	t.Setenv("KATA_NOTION_TOKEN", "default-example-token")
+	t.Setenv("EXAMPLE_NOTION_TOKEN", "configured-example-token")
+	configs := make(chan notionsync.RunnerConfig, 1)
+	var client *notionsync.Client
+	var sourceCalls atomic.Int32
+	originalClient, originalRunner := newNotionSyncClient, newNotionSyncDaemonRunner
+	newNotionSyncClient = func(cfg notionsync.ClientConfig) *notionsync.Client {
+		assert.Equal(t, "EXAMPLE_NOTION_TOKEN", cfg.TokenEnv)
+		cfg.Transport = runtimeNotionRoundTripper(func(req *http.Request) (*http.Response, error) {
+			if req.Header.Get("Authorization") != "Bearer configured-example-token" {
+				return nil, errors.New("wrong configured credential")
+			}
+			var body string
+			switch req.URL.Path {
+			case "/v1/data_sources/" + runtimeNotionSourceID:
+				if sourceCalls.Add(1) == 2 {
+					close(scheduledSourceStarted)
+					select {
+					case <-releaseScheduledSource:
+					case <-req.Context().Done():
+						return nil, req.Context().Err()
+					}
+				}
+				body = `{"object":"data_source","id":"11111111-1111-1111-1111-111111111111","parent":{"type":"database_id","database_id":"22222222-2222-2222-2222-222222222222"},"title":[{"plain_text":"Tasks"}],"properties":{"Task":{"id":"title","type":"title"},"State":{"id":"status","type":"status","status":{"options":[{"id":"done","name":"Delivered"}]}},"Owner":{"id":"people","type":"people"}}}`
+			case "/v1/databases/" + runtimeNotionDatabaseID:
+				body = `{"object":"database","id":"22222222-2222-2222-2222-222222222222","data_sources":[{"id":"11111111-1111-1111-1111-111111111111","name":"Tasks"}]}`
+			case "/v1/data_sources/" + runtimeNotionSourceID + "/query":
+				body = `{"object":"list","results":[],"has_more":false,"next_cursor":null}`
+			default:
+				return nil, errors.New("unexpected upstream path")
+			}
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+		})
+		client = originalClient(cfg)
+		return client
+	}
+	recorded := make(chan db.IssueSyncStatus, 1)
+	newNotionSyncDaemonRunner = func(cfg notionsync.RunnerConfig) notionSyncDaemonRunner {
+		cfg.Store = &runtimeNotionRecordingStore{Storage: cfg.Store, recorded: recorded}
+		configs <- cfg
+		return originalRunner(cfg)
+	}
+	t.Cleanup(func() { newNotionSyncClient = originalClient; newNotionSyncDaemonRunner = originalRunner })
+	base := startDaemonWithFederationConfig(t, "[notion_sync]\ntoken_env = \" EXAMPLE_NOTION_TOKEN \"\n")
+	var cfg notionsync.RunnerConfig
+	select {
+	case cfg = <-configs:
+	case <-time.After(3 * time.Second):
+		require.FailNow(t, "daemon did not construct scheduled runner")
+	}
+	require.Same(t, client, cfg.Fetcher)
+	require.NotNil(t, cfg.Progress)
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	post := func(path, body string) []byte {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+path, strings.NewReader(body))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := httpClient.Do(request)
+		require.NoError(t, err)
+		defer func() { _ = response.Body.Close() }()
+		raw, err := io.ReadAll(response.Body)
+		require.NoError(t, err)
+		require.Equal(t, 200, response.StatusCode, string(raw))
+		return raw
+	}
+	var created struct {
+		Project struct {
+			ID int64 `json:"id"`
+		} `json:"project"`
+	}
+	require.NoError(t, json.Unmarshal(post("/api/v1/projects", `{"name":"example-project","actor":"user-a"}`), &created))
+	require.NotZero(t, created.Project.ID)
+	post(fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/enable", created.Project.ID), `{"config":{"data_source_id":"11111111-1111-1111-1111-111111111111","done_statuses":["Delivered"]}}`)
+	waitRuntimeNotion(t, scheduledSourceStarted)
+	statusResponse, err := httpClient.Get(fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/notion/status", base, created.Project.ID))
+	require.NoError(t, err)
+	var live runtimeNotionStatus
+	require.NoError(t, json.NewDecoder(statusResponse.Body).Decode(&live))
+	require.NoError(t, statusResponse.Body.Close())
+	require.NotNil(t, live.Status.Progress)
+	require.Equal(t, "source", live.Status.Progress.Phase)
+	binding, err := cfg.Store.IssueSyncBindingByProject(context.Background(), created.Project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "source", cfg.Progress.Snapshot(binding.ID, live.Status.Progress.StartedAt).Phase)
+	close(releaseScheduledSource)
+	committed := waitRuntimeNotionRecord(t, recorded)
+	require.NotNil(t, committed.LastSuccessAt)
+	require.Equal(t, int32(2), sourceCalls.Load(), "enable and scheduled poll must use the configured client")
+}
+
+// runtimeNotionRecordingStore exposes the real durable completion to tests.
+// It delegates all product storage behavior before signaling the observer.
+type runtimeNotionRecordingStore struct {
+	db.Storage
+	recorded chan db.IssueSyncStatus
+}
+
+func (s *runtimeNotionRecordingStore) RecordIssueSyncSuccess(ctx context.Context, params db.IssueSyncSuccessParams) (db.IssueSyncStatus, error) {
+	status, err := s.Storage.RecordIssueSyncSuccess(ctx, params)
+	if err == nil {
+		s.recorded <- status
+	}
+	return status, err
+}
+func (s *runtimeNotionRecordingStore) RecordIssueSyncError(ctx context.Context, params db.IssueSyncErrorParams) (db.IssueSyncStatus, error) {
+	status, err := s.Storage.RecordIssueSyncError(ctx, params)
+	if err == nil {
+		s.recorded <- status
+	}
+	return status, err
+}
+func waitRuntimeNotionRecord(t *testing.T, recorded <-chan db.IssueSyncStatus) db.IssueSyncStatus {
+	t.Helper()
+	select {
+	case status := <-recorded:
+		return status
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "scheduled Notion worker did not record durable completion")
+	}
+	return db.IssueSyncStatus{}
 }

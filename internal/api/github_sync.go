@@ -19,9 +19,26 @@ type EnableIssueSyncRequest struct {
 // scheduling options. Config must not contain raw credentials; providers that
 // need credentials should store references or use their own CLI auth.
 type EnableIssueSyncRequestBody struct {
-	Config          JSONMap `json:"config,omitempty"`
-	IntervalSeconds int     `json:"interval_seconds,omitempty,omitzero"`
-	Interval        string  `json:"interval,omitempty"`
+	IntervalSecondsPresent bool    `json:"-"`
+	Config                 JSONMap `json:"config,omitempty"`
+	IntervalSeconds        int     `json:"interval_seconds,omitempty,omitzero"`
+	Interval               string  `json:"interval,omitempty"`
+}
+
+// UnmarshalJSON preserves presence without changing the public integer field or schema.
+func (b *EnableIssueSyncRequestBody) UnmarshalJSON(data []byte) error {
+	type body EnableIssueSyncRequestBody
+	var decoded body
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var members map[string]jsontext.Value
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	_, decoded.IntervalSecondsPresent = members["interval_seconds"]
+	*b = EnableIssueSyncRequestBody(decoded)
+	return nil
 }
 
 // DisableIssueSyncRequest disables durable external issue sync for one project.

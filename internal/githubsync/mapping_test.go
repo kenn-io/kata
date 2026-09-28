@@ -592,3 +592,28 @@ func mustDecodeJSON[T any](t *testing.T, data string) T {
 	require.NoError(t, json.Unmarshal([]byte(data), &out))
 	return out
 }
+
+func TestTitlePrefixSourceLabel(t *testing.T) {
+	now := mustTime(t, "2026-06-22T10:00:00Z")
+	for _, labels := range [][]Label{nil, {{Name: "bug"}}, {{Name: "GitHub"}, {Name: "github"}, {Name: "bug"}}} {
+		issue := Issue{ID: 123, Number: 123, Title: " Original title ", State: "open", CreatedAt: &now, UpdatedAt: &now, Labels: labels}
+		batch := BuildImportBatchWithConfig("github:repo-node", Config{TitlePrefix: new(false)}, []Issue{issue}, nil, ParentData{}, now)
+		assert.Equal(t, " Original title ", batch.Items[0].Title)
+		assert.Contains(t, batch.Items[0].Labels, "github")
+		count := 0
+		for _, label := range batch.Items[0].Labels {
+			if label == "github" {
+				count++
+			}
+		}
+		assert.Equal(t, 1, count)
+		if len(labels) > 0 {
+			assert.Contains(t, batch.Items[0].Labels, "bug")
+		}
+	}
+	for _, config := range []Config{{}, {TitlePrefix: new(true)}} {
+		batch := BuildImportBatchWithConfig("github:repo-node", config, []Issue{{Number: 123, Title: "Original title"}}, nil, ParentData{}, now)
+		assert.Equal(t, "[GitHub #123] Original title", batch.Items[0].Title)
+		assert.Empty(t, batch.Items[0].Labels)
+	}
+}

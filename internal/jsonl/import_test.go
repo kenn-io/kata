@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -624,4 +625,56 @@ func readFilledUIDs(t *testing.T, d *sqlitestore.Store) []string {
 	require.NoError(t, d.QueryRow(`SELECT uid FROM issues WHERE id = 1`).Scan(&issueUID))
 	require.NoError(t, d.QueryRow(`SELECT issue_uid FROM events WHERE id = 1`).Scan(&eventIssueUID))
 	return []string{projectUID, issueUID, eventIssueUID}
+}
+
+func TestNotionSyncRestoreRequiresLocalReenable(t *testing.T) {
+	ctx := context.Background()
+	fixture := exportNotionFixture(t)
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(fixture.exported), target))
+	b, err := target.IssueSyncBindingByProject(ctx, fixture.binding.ProjectID)
+	require.NoError(t, err)
+	require.False(t, b.Enabled)
+	require.Equal(t, fixture.binding.SourceKey, b.SourceKey)
+	require.JSONEq(t, notionFixtureConfig, string(b.Config))
+	assertTimePtrEqual(t, *fixture.binding.LastCursorAt, b.LastCursorAt)
+	status, err := target.IssueSyncStatusByProject(ctx, b.ProjectID)
+	require.NoError(t, err)
+	assertTimePtrEqual(t, fixture.claim, status.SyncStartedAt)
+	mapping, err := target.ImportMappingBySource(ctx, b.ProjectID, b.SourceKey, "issue", "page:22222222-2222-4222-8222-222222222222")
+	require.NoError(t, err)
+	require.Equal(t, &fixture.issue.ID, mapping.IssueID)
+	batch := db.ImportBatchParams{ProjectID: b.ProjectID, Source: b.SourceKey, Actor: "notion-sync", IssueSyncGuard: &db.IssueSyncImportGuard{BindingID: b.ID, Provider: "notion", StartedAt: fixture.claim}, Items: []db.ImportItem{{ExternalID: "page:22222222-2222-4222-8222-222222222222", Title: "Changed task", Author: "notion-unknown", Status: "open", CreatedAt: fixture.issue.CreatedAt, UpdatedAt: fixture.issue.UpdatedAt.Add(time.Hour)}}}
+	_, _, err = target.ImportBatch(ctx, batch)
+	require.ErrorIs(t, err, db.ErrIssueSyncNotEnabled)
+	b, err = target.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{ProjectID: b.ProjectID, Provider: b.Provider, SourceKey: b.SourceKey, RemoteID: b.RemoteID, DisplayName: b.DisplayName, Config: b.Config, IntervalSeconds: b.IntervalSeconds})
+	require.NoError(t, err)
+	require.True(t, b.Enabled)
+	status, err = target.IssueSyncStatusByProject(ctx, b.ProjectID)
+	require.NoError(t, err)
+	require.Nil(t, status.SyncStartedAt)
+	_, _, err = target.ImportBatch(ctx, batch)
+	require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	claim := fixture.claim.Add(time.Hour)
+	_, ok, err := target.ClaimIssueSyncBinding(ctx, b.ID, "notion", claim, fixture.claim)
+	require.NoError(t, err)
+	require.True(t, ok)
+	batch.IssueSyncGuard.StartedAt = claim
+	result, _, err := target.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Updated)
+}
+
+func TestNotionSyncTrustedCutoverPreservesEnabled(t *testing.T) {
+	ctx := context.Background()
+	fixture := exportNotionFixture(t)
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(fixture.exported), target, jsonl.ImportOptions{PreserveIssueSyncBindingEnabled: true}))
+	b, err := target.IssueSyncBindingByProject(ctx, fixture.binding.ProjectID)
+	require.NoError(t, err)
+	require.True(t, b.Enabled)
+	require.JSONEq(t, notionFixtureConfig, string(b.Config))
+	status, err := target.IssueSyncStatusByProject(ctx, b.ProjectID)
+	require.NoError(t, err)
+	assertTimePtrEqual(t, fixture.claim, status.SyncStartedAt)
 }
