@@ -23,7 +23,7 @@ func readSettings(t *testing.T, dir string) map[string]any {
 func expectedHookHandler(mode string) map[string]any {
 	return map[string]any{
 		"type":    "command",
-		"command": "kata attention-hook " + mode + " --source kata-agent-hook-" + mode,
+		"command": "kata agent-hooks attention " + mode + " --source kata-agent-hook-" + mode,
 	}
 }
 
@@ -31,7 +31,7 @@ func TestApplyClaudeHooks_MigratesExactLegacyHandlers(t *testing.T) {
 	dir := t.TempDir()
 	claudeDir := filepath.Join(dir, ".claude")
 	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
-	legacy := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"kata","args":["attention-hook","start"]},{"type":"command","command":"kata attention-hook start"},{"type":"command","command":"notify-session"}]}],"SessionEnd":[{"matcher":"logout|prompt_input_exit|bypass_permissions_disabled|other","hooks":[{"type":"command","command":"kata","args":["attention-hook","end"]},{"type":"command","command":"kata attention-hook end"}]}]}}`
+	legacy := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"kata","args":["attention-hook","start"]},{"type":"command","command":"kata attention-hook start"},{"type":"command","command":"kata attention-hook start --source kata-agent-hook-start"},{"type":"command","command":"notify-session"}]}],"SessionEnd":[{"matcher":"logout|prompt_input_exit|bypass_permissions_disabled|other","hooks":[{"type":"command","command":"kata","args":["attention-hook","end"]},{"type":"command","command":"kata attention-hook end"},{"type":"command","command":"kata attention-hook end --source kata-agent-hook-end"}]}]}}`
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(legacy), 0o644)) //nolint:gosec // test fixture under TempDir
 
 	changed, err := applyClaudeHooks(dir)

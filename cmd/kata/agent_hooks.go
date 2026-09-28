@@ -21,8 +21,8 @@ func newAgentHooksCmd() *cobra.Command {
 func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.Command {
 	group := &cobra.Command{
 		Use:   "agent-hooks",
-		Short: "Manage kata hooks for coding agents",
-		Long: "Manage kata hooks inside coding-agent configurations.\n\n" +
+		Short: "Run Kata hooks for coding agents",
+		Long: "Run Kata's contract and attention hooks from coding-agent configurations.\n\n" +
 			"These contract and attention entry points are distinct from daemon event\n" +
 			"hooks configured in hooks.toml.",
 	}
@@ -32,14 +32,15 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 		Short: "Read stdin and emit a harness-native contract response",
 		Long: "Read a finite native SessionStart JSON payload from stdin through EOF\n" +
 			"and emit the canonical kata contract in the harness's native response.\n\n" +
-			"Hermes uses pre_llm_call instead, injecting only when is_first_turn is true.\n" +
+			"Hermes uses pre_llm_call instead, injecting only when extra.is_first_turn is true.\n" +
+			"Kit v0.26.0 requires a nonempty text extra.user_message; empty or multimodal messages fail.\n" +
 			"Harnesses: claude, codex, copilot, cursor, gemini, hermes, qwen.\n" +
 			"For plain text at a terminal, use kata quickstart --format contract.\n" +
 			"The optional --source kata-agent-contract-hook marker identifies ownership.",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: agentHookHarnessCompletion(true),
+		ValidArgsFunction: agentHookHarnessCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			agent, err := parseAgentHookHarness(args[0], true)
+			agent, err := parseAgentHookHarness(args[0])
 			if err != nil {
 				return err
 			}
@@ -60,7 +61,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 	attention := &cobra.Command{
 		Use:   "attention",
 		Short: "Track workspace attention at session start and end",
-		Long:  "Track work.attention for the workspace issue in KATA_REF.\nSupported harnesses: claude, codex. These hooks do not read stdin.",
+		Long:  "Track work.attention for the workspace issue in KATA_REF.\nThese hooks do not read stdin.",
 		Args:  cobra.NoArgs,
 		RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
@@ -76,19 +77,12 @@ func newAgentHookAttentionCmd(mode string) *cobra.Command {
 		short = "Raise attention if the session ended without a hand-off"
 	}
 	cmd := &cobra.Command{
-		Use:               mode + " <harness>",
+		Use:               mode,
 		Short:             short,
-		Long:              short + ".\n\nUse claude or codex. KATA_REF names the tracked workspace issue.\nThe optional --source " + attentionHookSource + mode + " marker identifies ownership.\nStdin is ignored and daemon failures remain silent.",
-		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: agentHookHarnessCompletion(false),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			agent, err := parseAgentHookHarness(args[0], false)
-			if err != nil {
-				return err
-			}
-			if agent != agenthook.AgentClaude && agent != agenthook.AgentCodex {
-				return agentHookUsage("attention hooks support only claude and codex")
-			}
+		Long:              short + ".\n\nKATA_REF names the tracked workspace issue.\nThe optional --source " + attentionHookSource + mode + " marker identifies ownership.\nStdin is ignored and daemon failures remain silent.",
+		Args:              cobra.NoArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Flags().Changed("source") && source != attentionHookSource+mode {
 				return agentHookUsage("--source must be " + attentionHookSource + mode)
 			}
@@ -104,7 +98,7 @@ func agentHookUsage(message string) error {
 	return &cliError{Message: message, Kind: kindUsage, ExitCode: ExitUsage}
 }
 
-func parseAgentHookHarness(name string, sessionStart bool) (agenthook.Agent, error) {
+func parseAgentHookHarness(name string) (agenthook.Agent, error) {
 	agent, err := agenthook.ParseAgent(name)
 	if err != nil {
 		names := make([]string, 0, len(agenthook.Profiles()))
@@ -114,30 +108,22 @@ func parseAgentHookHarness(name string, sessionStart bool) (agenthook.Agent, err
 		return "", agentHookUsage(fmt.Sprintf("unknown harness %q; accepted: %s", name, strings.Join(names, ", ")))
 	}
 	profile, _ := agenthook.LookupProfile(agent)
-	if sessionStart && !slices.Contains(profile.SupportedEvents, agenthook.EventSessionStart) {
+	if !slices.Contains(profile.SupportedEvents, agenthook.EventSessionStart) {
 		return "", agentHookUsage(profile.DisplayName + " hooks do not support SessionStart")
 	}
 	return agent, nil
 }
 
-func agentHookHarnessCompletion(sessionStart bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-	return func(_ *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
-		var names []string
-		if len(args) == 0 {
-			for _, profile := range agenthook.Profiles() {
-				if sessionStart && !slices.Contains(profile.SupportedEvents, agenthook.EventSessionStart) {
-					continue
-				}
-				if !sessionStart && profile.Agent != agenthook.AgentClaude && profile.Agent != agenthook.AgentCodex {
-					continue
-				}
-				if strings.HasPrefix(string(profile.Agent), prefix) {
-					names = append(names, string(profile.Agent))
-				}
+func agentHookHarnessCompletion(_ *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
+	var names []string
+	if len(args) == 0 {
+		for _, profile := range agenthook.Profiles() {
+			if slices.Contains(profile.SupportedEvents, agenthook.EventSessionStart) && strings.HasPrefix(string(profile.Agent), prefix) {
+				names = append(names, string(profile.Agent))
 			}
 		}
-		return names, cobra.ShellCompDirectiveNoFileComp
 	}
+	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
 func agentHookInputIsTerminal(input io.Reader) bool {
@@ -171,19 +157,14 @@ func (h *nativeAgentContractHandler) UserPromptSubmit(_ context.Context, input a
 	// Hermes on_session_start ignores responses. Its first pre_llm_call
 	// supplies is_first_turn in the native extension preserved by Kit.
 	var native struct {
-		IsFirstTurn jsontext.Value `json:"is_first_turn"`
-		Extra       struct {
+		Extra struct {
 			IsFirstTurn jsontext.Value `json:"is_first_turn"`
 		} `json:"extra"`
 	}
 	if err := json.Unmarshal(input.Raw, &native); err != nil {
 		return agenthook.UserPromptSubmitOutput{}, err
 	}
-	firstTurn := native.IsFirstTurn
-	if len(firstTurn) == 0 {
-		firstTurn = native.Extra.IsFirstTurn
-	}
-	if string(firstTurn) != "true" {
+	if string(native.Extra.IsFirstTurn) != "true" {
 		return agenthook.UserPromptSubmitOutput{}, nil
 	}
 	return agenthook.UserPromptSubmitOutput{AdditionalContext: agentContractText}, nil

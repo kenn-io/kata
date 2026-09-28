@@ -61,7 +61,7 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	attentionResult, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
 		ConfigPath: configPath,
 		Executable: "kata",
-		Arguments:  []string{"attention-hook", "start", "--source", attentionHookSource + "start"},
+		Arguments:  []string{"agent-hooks", "attention", "start", "--source", attentionHookSource + "start"},
 		Marker:     "--source " + attentionHookSource + "start",
 		Hooks: []agenthook.Hook{{
 			Event:   agenthook.EventSessionStart,
@@ -75,7 +75,7 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	contractResult, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
 		ConfigPath: configPath,
 		Executable: "kata",
-		Arguments:  []string{"agent-contract-hook", "--source", agentContractHookSource},
+		Arguments:  []string{"agent-hooks", "contract", "codex", "--source", agentContractHookSource},
 		Marker:     "--source " + agentContractHookSource,
 		Hooks: []agenthook.Hook{{
 			Event:   agenthook.EventSessionStart,

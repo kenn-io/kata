@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-20
+last_edited: 2026-09-28
 ---
 
 # Agent workflows
@@ -90,19 +90,19 @@ Guidance files produce tendency, not contract: an agent can still end a session
 without updating its issue. For Claude Code workspaces,
 `kata init --with-hooks` additionally installs the
 [attention harness hooks](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
-as two command-hook lifecycle entries: `SessionStart` runs `kata attention-hook
+as two command-hook lifecycle entries: `SessionStart` runs `kata agent-hooks attention
 start` for new, resumed, and cleared sessions (but not context compaction), and
-`SessionEnd` runs `kata attention-hook end` only for terminal exits rather
+`SessionEnd` runs `kata agent-hooks attention end` only for terminal exits rather
 than clear/resume transitions. Both use the
 launcher-provided `KATA_REF` and intentionally do nothing when it is absent.
 
 For Codex CLI workspaces, `kata init --with-codex-hooks` installs two
 `SessionStart` hooks in `.codex/hooks.json`. One injects the canonical agent
 contract on startup, resume, clear, and context compaction. The other runs
-`kata attention-hook start` on startup, resume, and clear (but not compaction),
+`kata agent-hooks attention start` on startup, resume, and clear (but not compaction),
 using the same launcher-provided `KATA_REF`. Codex has no stable session-end
 hook event yet, so pair the attention hook with a launcher wrapper that runs
-`kata attention-hook end` after the Codex invocation exits; see
+`kata agent-hooks attention end` after the Codex invocation exits; see
 [agent orchestration](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 for the recipe.
 

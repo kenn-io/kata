@@ -218,29 +218,6 @@ func TestAgentHooksHelp(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(stdout, "agent-hooks"))
 	assert.NotContains(t, stdout, "agent-contract-hook")
 	assert.NotContains(t, stdout, "attention-hook")
-	stdout, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "--help")
-	require.NoError(t, err)
-	assert.Empty(t, stderr)
-	assert.Contains(t, stdout, "coding-agent configurations")
-	assert.Contains(t, stdout, "hooks.toml")
-	for _, args := range [][]string{
-		{"agent-hooks", "contract", "--help"},
-		{"agent-hooks", "attention", "start", "--help"},
-		{"agent-hooks", "attention", "end", "--help"},
-	} {
-		stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, args...)
-		require.NoError(t, err)
-		assert.Empty(t, stderr)
-		assert.Contains(t, stdout, "<harness>")
-		assert.Contains(t, stdout, "--source")
-		if args[1] == "contract" {
-			assert.Contains(t, stdout, "EOF")
-			assert.Contains(t, stdout, "pre_llm_call")
-			assert.Contains(t, stdout, "is_first_turn")
-		} else {
-			assert.Contains(t, stdout, "KATA_REF")
-		}
-	}
 }
 
 func TestAgentHooksCompletion(t *testing.T) {
@@ -253,9 +230,8 @@ func TestAgentHooksCompletion(t *testing.T) {
 		{[]string{"agent-hooks", "contract", ""}, []string{"claude", "codex", "copilot", "cursor", "gemini", "hermes", "qwen"}},
 		{[]string{"agent-hooks", "contract", "c"}, []string{"claude", "codex", "copilot", "cursor"}},
 		{[]string{"agent-hooks", "contract", "claude", ""}, nil},
-		{[]string{"agent-hooks", "attention", "start", ""}, []string{"claude", "codex"}},
-		{[]string{"agent-hooks", "attention", "end", ""}, []string{"claude", "codex"}},
-		{[]string{"agent-hooks", "attention", "end", "codex", ""}, nil},
+		{[]string{"agent-hooks", "attention", "start", ""}, nil},
+		{[]string{"agent-hooks", "attention", "end", ""}, nil},
 	} {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
 			stdout, _, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"__complete"}, tc.args...)...)

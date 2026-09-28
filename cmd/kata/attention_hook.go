@@ -13,7 +13,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// `kata attention-hook <start|end>` is launcher-only lifecycle plumbing for
+// `kata agent-hooks attention <start|end>` is lifecycle plumbing for
 // the work.attention convention. The launcher supplies the tracked issue in
 // KATA_REF for both hooks. No session payload or local state is involved.
 //
@@ -32,7 +32,7 @@ const (
 func newAttentionHookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:                "attention-hook <start|end>",
-		Short:              "launcher attention lifecycle plumbing (installed by kata init --with-hooks)",
+		Short:              "legacy launcher attention lifecycle plumbing",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,7 +66,7 @@ func parseAttentionHookArgs(args []string) (string, bool) {
 }
 
 func runAttentionHook(cmd *cobra.Command, mode string) {
-	// parseAttentionHookArgs is the sole caller, so mode is already validated.
+	// Both command entry points validate mode before calling this function.
 	// Claude Code exposes the workspace it launched from even when hook cwd
 	// differs. Prefer it as the normal project-resolution anchor when present.
 	if projectDir := strings.TrimSpace(os.Getenv("CLAUDE_PROJECT_DIR")); projectDir != "" {

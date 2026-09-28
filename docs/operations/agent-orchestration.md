@@ -1,7 +1,7 @@
 ---
 title: Agent orchestration
 description: Coordinate agent work through Kata issues, attention metadata, branches, and fan-out/join workflows.
-last_edited: 2026-09-15
+last_edited: 2026-09-28
 ---
 
 # Agent orchestration
@@ -119,8 +119,8 @@ whichever fired most recently is the state coordinators see.
 
 For Claude Code workspaces, `kata init --with-hooks` additively installs two
 command hooks in `.claude/settings.json`: `SessionStart` runs
-`kata attention-hook start` for new, resumed, and cleared sessions (but not
-context compaction), and `SessionEnd` runs `kata attention-hook end` only for
+`kata agent-hooks attention start` for new, resumed, and cleared sessions (but not
+context compaction), and `SessionEnd` runs `kata agent-hooks attention end` only for
 terminal exits rather than clear/resume transitions.
 Both use the launcher-provided `KATA_REF` and intentionally do nothing when it
 is absent. The hook logic lives in the installed `kata` binary, so the approved
@@ -131,10 +131,11 @@ owns the additive config mutation and preserves unrelated hook entries.
 
 For Codex CLI workspaces, `kata init --with-codex-hooks` installs two
 `SessionStart` hooks in `.codex/hooks.json`. The contract hook injects the
-canonical marker-free agent briefing on startup, resume, clear, and context
-compaction. The attention hook runs `kata attention-hook start` on startup,
-resume, and clear, but not compaction, using the same launcher-provided
-`KATA_REF` and hidden subcommand as the Claude Code wiring. Codex prompts to
+canonical marker-free agent briefing through `kata agent-hooks contract codex`
+on startup, resume, clear, and context compaction. The attention hook runs
+`kata agent-hooks attention start` on startup, resume, and clear, but not
+compaction, using the same launcher-provided
+`KATA_REF` and command as the Claude Code wiring. Codex prompts to
 trust project-layer hooks the first time it loads them, so expect one
 interactive confirmation on first run. Re-running the command is a no-op, and
 symlinked `.codex` or `hooks.json` paths are refused; if `.codex/config.toml`
@@ -148,11 +149,11 @@ follow-up. Until then, cover the end half with a launcher wrapper around the
 `codex` invocation (this also works for `codex exec`, since hook subprocesses
 inherit the parent environment). Run the end hook from an `EXIT` trap so it
 still fires if `codex` exits non-zero (or under `set -e`), and let the wrapper
-propagate Codex's own exit status rather than the always-succeeding hook's:
+propagate Codex's own exit status rather than the hook's:
 
 ```sh
 export KATA_REF=abc4
-trap 'status=$?; kata attention-hook end; exit "$status"' EXIT
+trap 'status=$?; kata agent-hooks attention end; exit "$status"' EXIT
 codex ...
 ```
 

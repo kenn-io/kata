@@ -18,10 +18,8 @@ func TestAgentHooksAttentionUsage(t *testing.T) {
 	for _, mode := range []string{"start", "end"} {
 		t.Run(mode, func(t *testing.T) {
 			for _, args := range [][]string{
-				nil, {"claude", "codex"}, {"unknown"}, {"copilot"}, {"cursor"},
-				{"droid"}, {"gemini"}, {"hermes"}, {"qwen"},
-				{"claude", "--source", "foreign"}, {"codex", "--source="},
-				{"claude", "--source", "kata-agent-hook-" + map[string]string{"start": "end", "end": "start"}[mode]},
+				{"unexpected"}, {"--source", "foreign"}, {"--source="},
+				{"--source", "kata-agent-hook-" + map[string]string{"start": "end", "end": "start"}[mode]},
 			} {
 				t.Run(strings.Join(args, "_"), func(t *testing.T) {
 					stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "attention", mode}, args...)...)
@@ -31,13 +29,11 @@ func TestAgentHooksAttentionUsage(t *testing.T) {
 					assert.NotEmpty(t, stderr)
 				})
 			}
-			for _, harness := range []string{"claude", "codex"} {
-				for _, marker := range [][]string{nil, {"--source", "kata-agent-hook-" + mode}} {
-					stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "attention", mode, harness}, marker...)...)
-					require.NoError(t, err)
-					assert.Empty(t, stdout)
-					assert.Empty(t, stderr)
-				}
+			for _, marker := range [][]string{nil, {"--source", "kata-agent-hook-" + mode}} {
+				stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "attention", mode}, marker...)...)
+				require.NoError(t, err)
+				assert.Empty(t, stdout)
+				assert.Empty(t, stderr)
 			}
 		})
 	}
@@ -72,64 +68,60 @@ func executeAttentionAtDaemon(t *testing.T, env *testenv.Env, input io.Reader, a
 }
 
 func TestE2E_AgentHooksAttentionParity(t *testing.T) {
-	for _, harness := range []string{"claude", "codex"} {
-		t.Run(harness, func(t *testing.T) {
-			env, dir, pid := setupCLIWorkspace(t)
-			t.Setenv("CLAUDE_PROJECT_DIR", dir)
-			for _, scenario := range []struct {
-				name        string
-				mode        string
-				initial     string
-				closed      bool
-				want        string
-				wantMessage string
-			}{
-				{"start absent", "start", "", false, `"ok"`, `"existing context"`},
-				{"start handoff", "start", `"needs-human"`, false, `"ok"`, `"existing context"`},
-				{"end active", "end", `"ok"`, false, `"needs-human"`, `"session ended without hand-off"`},
-				{"end stuck", "end", `"stuck"`, false, `"stuck"`, `"existing context"`},
-				{"end handoff", "end", `"needs-human"`, false, `"needs-human"`, `"existing context"`},
-				{"end absent", "end", "", false, "", `"existing context"`},
-				{"end number", "end", `7`, false, `7`, `"existing context"`},
-				{"end closed", "end", `"ok"`, true, `"ok"`, `"existing context"`},
-			} {
-				t.Run(scenario.name, func(t *testing.T) {
-					var snapshots []agentHookAttentionSnapshot
-					var deltas []int64
-					for _, visible := range []bool{false, true} {
-						ref := createIssue(t, env, pid, "example tracked work")
-						runCLI(t, env, dir, "meta", "set", ref, attentionMsgKey, "existing context")
-						if scenario.initial != "" {
-							runCLI(t, env, dir, "meta", "set", ref, attentionKey, scenario.initial, "--json-value")
-						}
-						if scenario.closed {
-							runCLIAs(t, env, dir, "example-actor", "close", ref, "--done", "--message",
-								"Completed example work before the session ended; lifecycle must preserve it.", "--commit", "deadbeef")
-						}
-						before := attentionSnapshot(t, env, pid, ref)
-						t.Setenv("KATA_REF", ref)
-						args := []string{"attention-hook", scenario.mode, "--source", "kata-agent-hook-" + scenario.mode}
-						if visible {
-							args = []string{"agent-hooks", "attention", scenario.mode, harness}
-						}
-						payload := `{"hook_event_name":"SessionStart","session_id":"example-session","source":"startup"}`
-						if scenario.mode == "end" {
-							payload = `{"hook_event_name":"SessionEnd","session_id":"example-session","reason":"complete"}`
-						}
-						stdout, stderr, err := executeAttentionAtDaemon(t, env, strings.NewReader(payload), args...)
-						require.NoError(t, err)
-						assert.Empty(t, stdout)
-						assert.Empty(t, stderr)
-						after := attentionSnapshot(t, env, pid, ref)
-						assert.Equal(t, scenario.want, string(after.Issue.Metadata[attentionKey]))
-						assert.Equal(t, scenario.wantMessage, string(after.Issue.Metadata[attentionMsgKey]))
-						snapshots = append(snapshots, after)
-						deltas = append(deltas, after.Issue.Revision-before.Issue.Revision)
-					}
-					assert.Equal(t, snapshots[0].Issue.Metadata, snapshots[1].Issue.Metadata)
-					assert.Equal(t, deltas[0], deltas[1])
-				})
+	env, dir, pid := setupCLIWorkspace(t)
+	t.Setenv("CLAUDE_PROJECT_DIR", dir)
+	for _, scenario := range []struct {
+		name        string
+		mode        string
+		initial     string
+		closed      bool
+		want        string
+		wantMessage string
+	}{
+		{"start absent", "start", "", false, `"ok"`, `"existing context"`},
+		{"start handoff", "start", `"needs-human"`, false, `"ok"`, `"existing context"`},
+		{"end active", "end", `"ok"`, false, `"needs-human"`, `"session ended without hand-off"`},
+		{"end stuck", "end", `"stuck"`, false, `"stuck"`, `"existing context"`},
+		{"end handoff", "end", `"needs-human"`, false, `"needs-human"`, `"existing context"`},
+		{"end absent", "end", "", false, "", `"existing context"`},
+		{"end number", "end", `7`, false, `7`, `"existing context"`},
+		{"end closed", "end", `"ok"`, true, `"ok"`, `"existing context"`},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var snapshots []agentHookAttentionSnapshot
+			var deltas []int64
+			for _, visible := range []bool{false, true} {
+				ref := createIssue(t, env, pid, "example tracked work")
+				runCLI(t, env, dir, "meta", "set", ref, attentionMsgKey, "existing context")
+				if scenario.initial != "" {
+					runCLI(t, env, dir, "meta", "set", ref, attentionKey, scenario.initial, "--json-value")
+				}
+				if scenario.closed {
+					runCLIAs(t, env, dir, "example-actor", "close", ref, "--done", "--message",
+						"Completed example work before the session ended; lifecycle must preserve it.", "--commit", "deadbeef")
+				}
+				before := attentionSnapshot(t, env, pid, ref)
+				t.Setenv("KATA_REF", ref)
+				args := []string{"attention-hook", scenario.mode, "--source", "kata-agent-hook-" + scenario.mode}
+				if visible {
+					args = []string{"agent-hooks", "attention", scenario.mode}
+				}
+				payload := `{"hook_event_name":"SessionStart","session_id":"example-session","source":"startup"}`
+				if scenario.mode == "end" {
+					payload = `{"hook_event_name":"SessionEnd","session_id":"example-session","reason":"complete"}`
+				}
+				stdout, stderr, err := executeAttentionAtDaemon(t, env, strings.NewReader(payload), args...)
+				require.NoError(t, err)
+				assert.Empty(t, stdout)
+				assert.Empty(t, stderr)
+				after := attentionSnapshot(t, env, pid, ref)
+				assert.Equal(t, scenario.want, string(after.Issue.Metadata[attentionKey]))
+				assert.Equal(t, scenario.wantMessage, string(after.Issue.Metadata[attentionMsgKey]))
+				snapshots = append(snapshots, after)
+				deltas = append(deltas, after.Issue.Revision-before.Issue.Revision)
 			}
+			assert.Equal(t, snapshots[0].Issue.Metadata, snapshots[1].Issue.Metadata)
+			assert.Equal(t, deltas[0], deltas[1])
 		})
 	}
 }
