@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-09-27
+last_edited: 2026-09-28
 ---
 
 # Semantic search
@@ -53,21 +53,22 @@ speaks the wire format and never bundles a model.
    [search.embeddings]
    base_url = "http://localhost:11434/v1"   # any OpenAI-compatible /embeddings
    model    = "nomic-embed-text"
-   api_key  = "local"                    # Ollama ignores this nonsecret placeholder
    ```
 
-   `base_url` and `model` are both required once the section exists. A hosted
-   provider needs its real key: use `api_key_file = "~/.config/kata/embedding.key"`
-   with an owner-only file (`chmod 600` on Unix), or inline `api_key`.
-   On Unix, configure the direct file path without symlinks and keep its parent
-   directories owned by root or the daemon user; see the
+   `base_url` and `model` are both required once the section exists. With no
+   credential source configured, Kata sends requests without an `Authorization`
+   header; local Ollama needs no placeholder key. For a provider that requires
+   a key, use `api_key_file = "~/.config/kata/embedding.key"` with an owner-only
+   file (`chmod 600` on Unix), or inline `api_key`. Use an absolute file path
+   or a path starting with `~/`; symlinks are accepted. See the
    [configuration reference](../reference/configuration.md#semantic-search).
    `api_key_env` works when the variable is set in the daemon environment.
    A daemon autostarted by a CLI command inherits that command’s environment;
    it does not pick up keys exported later in another shell. A file or inline
    key is more reliable across autostart and service launches.
-   Credential precedence is inline > file > env. Run `kata daemon reload` after
-   replacing the key file; model or endpoint changes require a restart. See
+   Credential precedence is inline > file > env. An unavailable selected source
+   does not fall back to another source. Run `kata daemon reload` after replacing
+   the key file; model or endpoint changes require a restart. See
    [Configuration](../reference/configuration.md#semantic-search) for every
    field (`dims`, `batch_size`, `model_context_tokens`, `max_batch_tokens`,
    `timeout_seconds`, `fingerprint_salt`, `trust_private_network`). If the
@@ -138,7 +139,8 @@ You can watch the reconciler in `kata health --json` under `embeddings`:
 - `started_at` and `last_progress_at`: when the current backfill began and
   when its most recent issue was persisted, useful for distinguishing slow
   progress from a stalled endpoint;
-- `last_success_at`: when the reconciler last completed a batch;
+- `last_success_at`: when the reconciler last completed a successful cycle,
+  including a cycle with no pending issues; query requests do not update it;
 - `last_error_status`: the HTTP status of the most recent embedding-endpoint
   error response, if any. It is set only when the endpoint answered with an
   HTTP error; an unreachable endpoint (transport failure) leaves it unset.
@@ -225,16 +227,27 @@ For the design rationale and internals, see the
 ### Missing or rejected credentials
 
 `kata health` reports `credential: missing`, `rejected`, or `ok` and the selected
-`credential_source`, never the secret. A rejection includes a readable
+`credential_source`, never the secret. A provider rejection includes a readable
 `last_error` and `last_error_at`, cleared by the next successful provider call.
-`last_success_at` is absent until an actual embedding request succeeds.
-Top-level health `ok` stays compatible: embedding credential problems are
-warnings, while ordinary issue tracking and lexical search keep working.
+Human and agent health output warn on stderr; `--json` includes the diagnostic
+fields without a stderr warning. Top-level health `ok` continues to describe
+daemon/database health, so ordinary issue tracking and lexical search keep
+working during an embedding credential problem.
 
-With a missing key, Kata sends no provider requests and retains the backlog.
-`kata search --semantic` and `--hybrid` fail with a readable validation error.
-Default search falls back to lexical results with one warning on stderr in
-human format; JSON and agent formats retain the readable degradation reason.
-An unconfigured lexical-only daemon has no fallback warning. Local providers
-that accept bearer headers need a nonsecret placeholder key, as in the Ollama
-example above. Running without a key produces no startup or log warning.
+If a selected key file or environment variable cannot supply a key, Kata sends
+no provider requests and retains the backlog. The reason identifies the source
+and the problem. Fix that source and run `kata daemon reload`; credential
+resolution does not fall back to a lower-priority source.
+
+With no credential source configured, requests omit `Authorization`. A provider
+that responds with HTTP 401 then reports that an API key is required. HTTP 401
+with a key reports a rejected key; HTTP 403 reports denied access, which does
+not necessarily mean the key is invalid. Later queries and background embedding
+attempts can retry these provider responses, and a successful request clears
+the error.
+
+Credential errors make `kata search --semantic` and `--hybrid` fail with a
+readable validation error. Default search falls back to lexical results with
+one `# mode=lexical degraded: …` header in human output and no extra stderr
+warning. JSON and agent formats carry the degradation reason. An unconfigured
+lexical-only daemon has no degradation label.
