@@ -48,13 +48,12 @@ func TestApplyCodexHooks_DeduplicatesUserContract(t *testing.T) {
 
 func TestApplyCodexHooks_KeepsTrackedWorkspace(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		data     string
-		contract bool
+		name, data string
+		foreign    bool
 	}{
-		{"legacy attention and contract", "{\n  \"hooks\": {\"SessionStart\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"kata attention-hook start\", \"timeout\": 10}]}, {\"hooks\": [{\"command\": \"kata agent-contract-hook --source kata-agent-contract-hook\"}]}]}\n}\n", true},
-		{"attention only", `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata attention-hook start"}]}]}}`, false},
-		{"foreign only", ` { "hooks": { "SessionStart": [{"hooks":[{"command":"echo example"}]}] } } `, false},
+		{"legacy attention and contract", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]},{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, false},
+		{"attention only", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]}]}}`, false},
+		{"foreign only", ` { "hooks": { "SessionStart": [{"hooks":[{"command":"echo example"}]}] } } `, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -65,52 +64,35 @@ func TestApplyCodexHooks_KeepsTrackedWorkspace(t *testing.T) {
 			userPath := userCodexContractFixture(t)
 			changed, notes, err := applyCodexHooks(dir)
 			require.NoError(t, err)
-			assert.False(t, changed)
-			after, err := os.ReadFile(path) //nolint:gosec // test-owned config under TempDir
-			require.NoError(t, err)
-			assert.Equal(t, tc.data, string(after), "tracked file must return before any serialization or migration")
-			if tc.contract {
-				assert.Equal(t, []string{"kept workspace contract hook: .codex/hooks.json is tracked; " + userPath + " also injects it"}, notes)
-			} else {
-				assert.Empty(t, notes)
+			assert.True(t, changed)
+			want := expectedCodexSessionStartGroups()
+			if tc.foreign {
+				want = append([]any{map[string]any{"hooks": []any{map[string]any{"command": "echo example"}}}}, want...)
 			}
+			assert.Equal(t, want, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
+			assert.Equal(t, []string{"kept workspace contract hook: .codex/hooks.json is tracked; " + userPath + " also injects it"}, notes)
 		})
 	}
 }
 
 func TestApplyCodexHooks_TrackedWorkspaceWarnsOnTomlHooks(t *testing.T) {
-	for _, tc := range []struct {
-		name, data string
-		contract   bool
-	}{
-		{"contract present", ` { "hooks": {"SessionStart": [{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook"}]},{"matcher":"resume","hooks":[{"command":"echo example"}]},{"hooks":[{"command":"kata attention-hook start","timeout":10}]}]} } `, true},
-		{"no contract", ` { "hooks": {"SessionStart": [{"matcher":"resume","hooks":[{"command":"echo example"}]},{"hooks":[{"command":"kata attention-hook start","timeout":10}]}]} } `, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			runGit(t, dir, "init", "--quiet")
-			path := filepath.Join(dir, ".codex", "hooks.json")
-			writeCodexFixture(t, path, tc.data)
-			runGit(t, dir, "add", "--", ".codex/hooks.json")
-			tomlPath := filepath.Join(dir, ".codex", "config.toml")
-			writeCodexFixture(t, tomlPath, "[hooks]\n")
-			before := readCodexHooks(t, dir)
-			userPath := userCodexContractFixture(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	path := filepath.Join(dir, ".codex", "hooks.json")
+	writeCodexFixture(t, path, `{"hooks":{}}`)
+	runGit(t, dir, "add", "--", ".codex/hooks.json")
+	tomlPath := filepath.Join(dir, ".codex", "config.toml")
+	writeCodexFixture(t, tomlPath, "[hooks]\n")
+	userPath := userCodexContractFixture(t)
 
-			changed, notes, err := applyCodexHooks(dir)
-			require.NoError(t, err)
-			assert.False(t, changed)
-			after, err := os.ReadFile(path) //nolint:gosec // test-owned config under TempDir
-			require.NoError(t, err)
-			assert.Equal(t, tc.data, string(after))
-			assert.Equal(t, before, readCodexHooks(t, dir), "all group and handler positions remain untouched")
-			want := []string{tomlPath + " already defines a [hooks] table; Codex loads it together with " + path}
-			if tc.contract {
-				want = append(want, "kept workspace contract hook: .codex/hooks.json is tracked; "+userPath+" also injects it")
-			}
-			assert.Equal(t, want, notes)
-		})
-	}
+	changed, notes, err := applyCodexHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, expectedCodexSessionStartGroups(), readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
+	assert.Equal(t, []string{
+		tomlPath + " already defines a [hooks] table; kata installed its SessionStart hook into " + path + ", which Codex loads in addition to config.toml hooks",
+		"kept workspace contract hook: .codex/hooks.json is tracked; " + userPath + " also injects it",
+	}, notes)
 }
 
 func TestApplyCodexHooks_UserContractDetection(t *testing.T) {
@@ -120,8 +102,8 @@ func TestApplyCodexHooks_UserContractDetection(t *testing.T) {
 	}{
 		{"missing", "", 2},
 		{"legacy", `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 1},
-		{"visible", `{"hooks":{"SessionStart":[{"hooks":[{"command":"/opt/bin/kata agent-hooks contract codex --source kata-agent-contract-hook"}]}]}}`, 1},
-		{"Windows command", `{"hooks":{"SessionStart":[{"hooks":[{"commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 1},
+		{"visible", `{"hooks":{"SessionStart":[{"hooks":[{"command":"/opt/bin/kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 1},
+		{"Windows command", `{"hooks":{"SessionStart":[{"hooks":[{"commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 2},
 		{"unmarked", `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-contract-hook"}]}]}}`, 2},
 		{"other event", `{"hooks":{"Stop":[{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 2},
 		{"empty foreign group", `{"hooks":{"SessionStart":[{"hooks":[]}]}}`, 2},
@@ -249,11 +231,47 @@ func TestApplyCodexHooks_KeepsTrackedNestedAndLinkedWorkspace(t *testing.T) {
 			userPath := userCodexContractFixture(t)
 			changed, notes, err := applyCodexHooks(dir)
 			require.NoError(t, err)
-			assert.False(t, changed)
-			after, err := os.ReadFile(filepath.Join(dir, ".codex", "hooks.json")) //nolint:gosec // test-owned config under TempDir
-			require.NoError(t, err)
-			assert.Equal(t, data, string(after))
+			assert.True(t, changed)
+			assert.Equal(t, expectedCodexSessionStartGroups(), readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 			assert.Equal(t, []string{"kept workspace contract hook: .codex/hooks.json is tracked; " + userPath + " also injects it"}, notes)
+		})
+	}
+}
+
+func TestApplyCodexHooks_UserContractMatcherCoverage(t *testing.T) {
+	for _, tc := range []struct {
+		matcher string
+		dedupe  bool
+	}{
+		{"startup", false},
+		{"startup|resume|clear", false},
+		{"^(compact|clear|resume|startup)$", true},
+		{"*", true},
+		{"", true},
+		{"[", false},
+	} {
+		t.Run(tc.matcher, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("CODEX_HOME", t.TempDir())
+			_, _, err := applyCodexHooks(dir)
+			require.NoError(t, err)
+			userPath := userCodexContractFixture(t)
+			data, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{
+				map[string]any{"matcher": tc.matcher, "hooks": []any{expectedCodexContractHandler()}},
+			}}})
+			require.NoError(t, err)
+			writeCodexFixture(t, userPath, string(data))
+
+			_, notes, err := applyCodexHooks(dir)
+			require.NoError(t, err)
+			want := expectedCodexSessionStartGroups()
+			if tc.dedupe {
+				want = want[:1]
+				assert.Contains(t, notes, "removed workspace contract hook: "+userPath+" already injects it")
+			} else {
+				assert.Empty(t, notes)
+			}
+			assert.Equal(t, want, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 		})
 	}
 }

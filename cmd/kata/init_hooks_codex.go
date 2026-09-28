@@ -30,56 +30,64 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	}
 
 	configPath := filepath.Join(root.Name(), ".codex", "hooks.json")
-	userContract := false
-	userPath, err := agenthook.ConfigPath(agenthook.AgentCodex)
-	// An explicit workspace config does not require a resolvable user home.
-	// Skip only user-path resolution failures; readable config errors still fail.
-	if err == nil {
-		sameConfig, err := sameCodexHookConfig(userPath, configPath)
-		if err != nil {
-			return false, nil, err
-		}
-		if !sameConfig {
-			userContract, err = codexContractHookPresent(userPath)
-			if err != nil {
-				return false, nil, err
-			}
-		}
+	userPath, err := codexUserContractPath(configPath)
+	if err != nil {
+		return false, nil, err
 	}
-	if userContract {
-		tracked, err := codexHookFileTracked(dir)
-		if err != nil {
-			return false, nil, err
-		}
-		if tracked {
-			// Shared config may serve teammates without this user's hook. Return
-			// before migration or kit planning can serialize or mutate it.
-			config, err := readCodexHookConfig(configPath)
-			if err != nil {
-				return false, nil, err
-			}
-			var warnings []string
-			if codexConfigHasTomlHooks(root) {
-				warnings = append(warnings, fmt.Sprintf(
-					"%s already defines a [hooks] table; Codex loads it together with %s",
-					filepath.Join(root.Name(), ".codex/config.toml"), configPath,
-				))
-			}
-			if codexConfigHasContract(config) {
-				warnings = append(warnings, fmt.Sprintf(
-					"kept workspace contract hook: .codex/hooks.json is tracked; %s also injects it", userPath,
-				))
-			}
-			return false, warnings, nil
-		}
+	warnings := codexConfigHooksWarnings(root)
+	if userPath != "" {
+		return applyCodexUserContract(dir, configPath, userPath, warnings)
 	}
-	var before map[string]any
-	if userContract {
-		before, err = readCodexHookConfig(configPath)
-		if err != nil {
-			return false, nil, err
-		}
+	return installCodexWorkspaceHooks(configPath, warnings)
+}
+
+func applyCodexUserContract(dir, configPath, userPath string, warnings []string) (bool, []string, error) {
+	tracked, err := codexHookFileTracked(dir)
+	if err != nil {
+		return false, nil, err
 	}
+	if tracked {
+		// Shared config must also serve teammates without this user's hook.
+		warnings = append(warnings, fmt.Sprintf(
+			"kept workspace contract hook: .codex/hooks.json is tracked; %s also injects it", userPath,
+		))
+		return installCodexWorkspaceHooks(configPath, warnings)
+	}
+	before, err := readCodexHookConfig(configPath)
+	if err != nil {
+		return false, nil, err
+	}
+	attentionChanged, err := installCodexAttentionHook(configPath, before)
+	if err != nil {
+		return false, nil, err
+	}
+	removed, notes, err := dedupeCodexContractHook(configPath, userPath, before)
+	return attentionChanged || removed, append(warnings, notes...), err
+}
+
+func installCodexWorkspaceHooks(configPath string, warnings []string) (bool, []string, error) {
+	attentionChanged, err := installCodexAttentionHook(configPath, nil)
+	if err != nil {
+		return false, nil, err
+	}
+	contractResult, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
+		ConfigPath: configPath,
+		Executable: "kata",
+		Arguments:  []string{"agent-hooks", "contract", "codex", "--source", agentContractHookSource},
+		Marker:     "--source " + agentContractHookSource,
+		Hooks: []agenthook.Hook{{
+			Event:   agenthook.EventSessionStart,
+			Matcher: codexContractSessionStartMatcher,
+			Timeout: 10 * time.Second,
+		}},
+	})
+	if err != nil {
+		return false, nil, err
+	}
+	return attentionChanged || contractResult.Changed, warnings, nil
+}
+
+func installCodexAttentionHook(configPath string, before map[string]any) (bool, error) {
 	legacyHandlers := []map[string]any{
 		{
 			"type":    "command",
@@ -106,7 +114,7 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 		},
 	})
 	if err != nil {
-		return false, nil, err
+		return false, err
 	}
 	attentionOptions := agenthook.InstallOptions{
 		ConfigPath: configPath,
@@ -120,57 +128,40 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 		}},
 	}
 	var attentionResult agenthook.Result
-	if !userContract || !codexAttentionHookCurrent(before) {
+	if !codexAttentionHookCurrent(before) {
 		attentionResult, err = agenthook.Install(agenthook.AgentCodex, attentionOptions)
 		if err != nil {
+			return false, err
+		}
+	}
+	return migrated || attentionResult.Changed, nil
+}
+
+func dedupeCodexContractHook(configPath, userPath string, before map[string]any) (bool, []string, error) {
+	var result agenthook.Result
+	if codexConfigHasContract(before, false) {
+		var err error
+		result, err = agenthook.Uninstall(agenthook.AgentCodex, configPath, "--source "+agentContractHookSource)
+		if err != nil {
 			return false, nil, err
 		}
 	}
-	if userContract {
-		config, err := readCodexHookConfig(configPath)
-		if err != nil {
-			return false, nil, err
-		}
-		warnings := codexConfigHooksWarnings(root)
-		removed := false
-		if codexConfigHasContract(config) {
-			result, err := agenthook.Uninstall(agenthook.AgentCodex, configPath, "--source "+agentContractHookSource)
-			if err != nil {
-				return false, nil, err
-			}
-			removed = result.Changed
-			if removed {
-				warnings = append(warnings, fmt.Sprintf("removed workspace contract hook: %s already injects it", userPath))
-			}
-		}
-		after, err := readCodexHookConfig(configPath)
-		if err != nil {
-			return false, nil, err
-		}
-		shifted, err := codexHookIndexesShifted(before, after)
-		if err != nil {
-			return false, nil, err
-		}
-		if shifted {
-			warnings = append(warnings, "Codex will ask to re-trust shifted hooks; open Codex and run /hooks.")
-		}
-		return migrated || attentionResult.Changed || removed, warnings, nil
+	var warnings []string
+	if result.Changed {
+		warnings = append(warnings, fmt.Sprintf("removed workspace contract hook: %s already injects it", userPath))
 	}
-	contractResult, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
-		ConfigPath: configPath,
-		Executable: "kata",
-		Arguments:  []string{"agent-hooks", "contract", "codex", "--source", agentContractHookSource},
-		Marker:     "--source " + agentContractHookSource,
-		Hooks: []agenthook.Hook{{
-			Event:   agenthook.EventSessionStart,
-			Matcher: codexContractSessionStartMatcher,
-			Timeout: 10 * time.Second,
-		}},
-	})
+	after, err := readCodexHookConfig(configPath)
 	if err != nil {
 		return false, nil, err
 	}
-	return migrated || attentionResult.Changed || contractResult.Changed, codexConfigHooksWarnings(root), nil
+	shifted, err := codexHookIndexesShifted(before, after)
+	if err != nil {
+		return false, nil, err
+	}
+	if shifted {
+		warnings = append(warnings, "Codex will ask to re-trust shifted hooks; open Codex and run /hooks.")
+	}
+	return result.Changed, warnings, nil
 }
 
 // codexConfigHooksWarnings warns when Codex also has TOML-managed hooks.

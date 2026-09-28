@@ -89,19 +89,27 @@ pre-existing `[hooks]` table in `.codex/config.toml` produces a non-fatal
 warning because Codex loads both files' hooks together.
 
 If the selected user's Codex config already has a `SessionStart` contract hook
-owned by the `--source kata-agent-contract-hook` marker, init installs only the
-workspace attention hook. It removes an existing untracked workspace contract
-hook and reports the user config path that supplies the contract. If
-`.codex/hooks.json` is tracked by git, init leaves that entire file untouched:
-teammates may not have a user hook. It reports a kept contract only when the
-tracked file contains one. Paths that identify the same config file count as
-one installation and do not trigger removal.
+whose `command` contains the `--source kata-agent-contract-hook` marker, init
+can use it instead of a workspace contract hook. Its matcher must be absent,
+empty, `*`, or a regex matching all four sources: startup, resume, clear, and
+compact. A `commandWindows` override alone does not qualify.
+
+For an untracked `.codex/hooks.json`, init installs the attention hook, removes
+the workspace contract hook, and reports the user config path supplying it.
+For a tracked file, init installs or updates both hooks and reports that it
+kept the workspace contract for teammates who may lack a user hook. Paths that
+identify the same config file count as one installation and do not trigger
+removal.
 
 Init checks only the config selected by the current `CODEX_HOME`, or the default
 `~/.codex/hooks.json` when that variable is absent. A workspace shared across
 several Codex homes therefore deduplicates against whichever home runs init.
-If you remove the user contract hook, re-run `kata init --with-codex-hooks` to
-restore the workspace contract hook.
+Malformed JSON or an invalid hook layout in the selected user config aborts
+hook setup before changing workspace hooks. Init continues and reports a warning
+in human output mode. When a qualifying user contract exists in a git workspace,
+init also requires a working `git` executable to check whether the workspace hook
+file is tracked. If you remove the user contract hook, re-run
+`kata init --with-codex-hooks` to restore the workspace contract hook.
 
 Removing the contract after the attention hook in the usual init order preserves
 attention's trust key. If removal shifts a remaining group or handler, init

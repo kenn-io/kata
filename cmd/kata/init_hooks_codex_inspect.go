@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
@@ -49,6 +50,24 @@ func sameCodexHookConfig(userPath, workspacePath string) (bool, error) {
 	return os.SameFile(userInfo, workspaceInfo), nil
 }
 
+// codexUserContractPath returns the separate user config supplying the contract.
+func codexUserContractPath(workspacePath string) (string, error) {
+	userPath, err := agenthook.ConfigPath(agenthook.AgentCodex)
+	// An explicit workspace config does not require a resolvable user home.
+	if err != nil {
+		return "", nil
+	}
+	sameConfig, err := sameCodexHookConfig(userPath, workspacePath)
+	if err != nil || sameConfig {
+		return "", err
+	}
+	present, err := codexContractHookPresent(userPath)
+	if err != nil || !present {
+		return "", err
+	}
+	return userPath, nil
+}
+
 func codexContractHookPresent(path string) (bool, error) {
 	// Kit validates the native hook layout and ownership without editing it.
 	// Changed alone is insufficient: it can reflect another event or empty groups.
@@ -59,7 +78,7 @@ func codexContractHookPresent(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return codexConfigHasContract(parsed), nil
+	return codexConfigHasContract(parsed, true), nil
 }
 
 // readCodexHookConfig is inspection only. Kit owns all config mutations.
@@ -83,11 +102,14 @@ func readCodexHookConfig(path string) (map[string]any, error) {
 	return parsed, nil
 }
 
-func codexConfigHasContract(parsed map[string]any) bool {
+func codexConfigHasContract(parsed map[string]any, requireFullMatcher bool) bool {
 	hooks, _ := parsed["hooks"].(map[string]any)
 	groups, _ := hooks[string(agenthook.EventSessionStart)].([]any)
 	for _, rawGroup := range groups {
 		group, _ := rawGroup.(map[string]any)
+		if requireFullMatcher && !codexMatcherCoversContract(group) {
+			continue
+		}
 		handlers, _ := group["hooks"].([]any)
 		for _, rawHandler := range handlers {
 			handler, _ := rawHandler.(map[string]any)
@@ -99,14 +121,34 @@ func codexConfigHasContract(parsed map[string]any) bool {
 	return false
 }
 
-func codexHandlerHasMarker(handler map[string]any, marker string) bool {
-	for _, field := range []string{"command", "commandWindows"} {
-		command, _ := handler[field].(string)
-		if strings.Contains(command, marker) {
-			return true
+func codexMatcherCoversContract(group map[string]any) bool {
+	raw, exists := group["matcher"]
+	if !exists {
+		return true
+	}
+	matcher, ok := raw.(string)
+	if !ok {
+		return false
+	}
+	if matcher == "" || matcher == "*" {
+		return true
+	}
+	pattern, err := regexp.Compile(matcher)
+	if err != nil {
+		return false
+	}
+	for source := range strings.SplitSeq(codexContractSessionStartMatcher, "|") {
+		if !pattern.MatchString(source) {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+func codexHandlerHasMarker(handler map[string]any, marker string) bool {
+	// Match kit's ownership rules; commandWindows alone is not portable.
+	command, _ := handler["command"].(string)
+	return strings.Contains(command, marker)
 }
 
 func codexHookFileTracked(dir string) (bool, error) {
@@ -136,8 +178,8 @@ func codexHookFileTracked(dir string) (bool, error) {
 func codexAttentionHookCurrent(parsed map[string]any) bool {
 	expected := map[string]any{
 		"type":           "command",
-		"command":        "kata attention-hook start --source kata-agent-hook-start",
-		"commandWindows": "kata attention-hook start --source kata-agent-hook-start",
+		"command":        "kata agent-hooks attention start --source " + attentionHookSource + "start",
+		"commandWindows": "kata agent-hooks attention start --source " + attentionHookSource + "start",
 		"timeout":        jsontext.Value("10"),
 	}
 	hooks, _ := parsed["hooks"].(map[string]any)
