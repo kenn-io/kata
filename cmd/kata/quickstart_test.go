@@ -9,6 +9,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestQuickstart_HelpExplainsFormatsAndSessionSetup(t *testing.T) {
+	for _, args := range [][]string{
+		{"quickstart", "--help"},
+		{"agent-instructions", "--help"},
+		{"--agent", "quickstart", "--help"},
+		{"--json", "quickstart", "--help"},
+		{"quickstart", "--format", "contract", "--help"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			out := string(executeRoot(t, newRootCmd(), args...))
+			for _, text := range []string{
+				"Default: full instructions for agents using kata",
+				"--agent: concise instructions for agent logs",
+				"--json: instructions in a JSON response",
+				"--format contract: the canonical managed contract",
+				"exactly what kata agent-hooks contract injects",
+				"kata agent-hooks install --all",
+			} {
+				assert.Contains(t, out, text)
+			}
+		})
+	}
+}
+
 func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	resetFlags(t)
 	out := string(executeRoot(t, newQuickstartCmd()))

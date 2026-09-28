@@ -130,7 +130,11 @@ pass --project to choose the project name explicitly.
 
 Also adds .kata.local.toml to .gitignore so a developer's per-machine
 overrides (e.g., a remote daemon URL via [server] url = "...") never
-get committed.`,
+get committed.
+
+--with-agents: committed guidance for everyone on the repo.
+--with-hooks / --with-codex-hooks: this workspace's Claude Code / Codex hooks.
+kata agent-hooks install <harness>... | --all: the contract in every session on this machine. If a user-level hook exists, --with-codex-hooks skips the workspace contract hook unless the workspace config is tracked.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, baseURL, err := ensureDaemonContext(cmd.Context())
 			if err != nil {

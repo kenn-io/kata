@@ -222,8 +222,18 @@ verified. Close each verified issue promptly with valid evidence and a
 substantive message. [Agent workflows](docs/workflows/agents.md) is the same
 contract in long form.
 
-Agent harnesses can load the shorter managed briefing without changing the
-repository:
+On `main`, install the contract in every coding-agent session on this machine:
+
+```sh
+kata agent-hooks install --all
+```
+
+For Codex, open Codex and run `/hooks` to trust the new hook. See
+[Contract in every session](docs/workflows/agents.md#contract-in-every-session)
+for supported harnesses, Hermes's first-turn behavior, and additional Codex
+homes. These commands are not included in 0.18.0.
+
+Print the shorter managed briefing without changing the repository:
 
 ```sh
 kata quickstart --format contract
@@ -237,31 +247,19 @@ initialized workspace, and performs no workspace mutation. It is rendered from
 the same canonical body that `kata init --with-agents` places between its
 managed markers, so static and session-injected guidance cannot drift.
 
-For example, a user-level Claude Code SessionStart hook can remain inert outside
-Kata workspaces while injecting the installed Kata version's contract:
+If you want silence outside Kata workspaces, use this alternative Claude Code
+SessionStart command instead of the every-session installer:
 
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|resume|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if test -f \"$CLAUDE_PROJECT_DIR/.kata.toml\"; then kata quickstart --format contract --workspace \"$CLAUDE_PROJECT_DIR\"; fi"
-          }
-        ]
-      }
-    ]
-  }
-}
+```sh
+if test -f "$CLAUDE_PROJECT_DIR/.kata.toml"; then
+  kata quickstart --format contract --workspace "$CLAUDE_PROJECT_DIR"
+fi
 ```
 
 Codex SessionStart hooks require structured JSON rather than plain contract
-stdout. `kata init --with-codex-hooks` installs Kata's structured adapter for
-startup, resume, clear, and compaction while keeping attention reset limited to
-startup, resume, and clear.
+stdout. For workspace hooks, use `kata init --with-codex-hooks`; see the
+[init reference](docs/reference/cli.md#workspace-initialization) for contract
+deduplication and the separate attention lifecycle.
 
 ## Contributing
 

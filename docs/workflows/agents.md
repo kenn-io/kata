@@ -9,12 +9,14 @@ compaction, multiple workers, incomplete attempts, and close discipline.
 
 ## Contract in every session
 
-Install the contract in the user configs of coding agents already installed
-on this machine:
+Load Kata's contract in every coding-agent session on this machine:
 
 ```sh
 kata agent-hooks install --all
 ```
+
+These commands are available on `main`; they are not included in 0.18.0.
+The installer adds user-level hooks where harness config roots already exist.
 
 Name a harness explicitly, such as `kata agent-hooks install claude codex`,
 to create its config when needed. Kata supports Claude Code, Codex, Copilot,
@@ -50,8 +52,8 @@ user hook existed may have skipped their contract hook. Rerun
 
 See [user installation and removal](../reference/cli.md#user-installation-and-removal)
 for config overrides, stable executable selection, no-write repeat installs,
-and output fields. These coding-agent hooks are distinct from daemon event
-hooks configured in `hooks.toml`.
+and output fields. The [agent-hooks reference](../reference/cli.md#agent-hooks)
+explains how coding-agent hooks differ from daemon event hooks.
 
 ## Session start
 
@@ -142,9 +144,10 @@ start` for new, resumed, and cleared sessions (but not context compaction), and
 than clear/resume transitions. Both use the
 launcher-provided `KATA_REF` and intentionally do nothing when it is absent.
 
-For Codex CLI workspaces, `kata init --with-codex-hooks` installs two
-`SessionStart` hooks in `.codex/hooks.json`. One injects the canonical agent
-contract on startup, resume, clear, and context compaction. The other runs
+For Codex CLI workspaces, `kata init --with-codex-hooks` installs attention and,
+when needed, contract `SessionStart` hooks in `.codex/hooks.json`. The contract
+hook injects the canonical briefing on startup, resume, clear, and context
+compaction. The attention hook runs
 `kata agent-hooks attention start` on startup, resume, and clear (but not compaction),
 using the same launcher-provided `KATA_REF`. Codex has no stable session-end
 hook event yet, so pair the attention hook with a launcher wrapper that runs
