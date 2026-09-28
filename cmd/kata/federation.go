@@ -271,8 +271,11 @@ func federationSpokeProjectExists(ctx context.Context, projectName, spokeInstanc
 // during federation enroll, KATA_AUTH_TOKEN belongs to the hub and must not be
 // attached to the spoke. Requests still use daemonAPI once that client is built.
 func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance string) (string, bool, error) {
-	explicitDaemon := federationSpokeProbeExplicit(ctx)
-	spokeURL, err := ensureDaemon(ctx)
+	explicitDaemon, err := federationSpokeProbeExplicit(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	ctx, spokeURL, err := ensureSpokeDaemonContext(ctx)
 	if err != nil {
 		if explicitDaemon {
 			return "", false, err
@@ -306,19 +309,23 @@ func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance s
 	return uid, ok, nil
 }
 
-func federationSpokeProbeExplicit(ctx context.Context) bool {
-	if strings.TrimSpace(flags.Daemon) != "" {
-		return true
+func federationSpokeProbeExplicit(ctx context.Context) (bool, error) {
+	selection, err := clientpkg.InspectSelection(ctx, workspaceStartForRemote(), flags.Daemon)
+	if err != nil {
+		return false, err
 	}
-	_, ok, err := clientpkg.ResolveRemote(ctx, workspaceStartForRemote())
-	return ok || err != nil
+	return selection.Profile != nil || selection.Resolved.Source != clientpkg.DaemonSourceLocalRuntime, nil
 }
 
 func federationSpokeProbePreflight(ctx context.Context, spokeInstance string) error {
-	if !federationSpokeProbeExplicit(ctx) {
+	explicitDaemon, err := federationSpokeProbeExplicit(ctx)
+	if err != nil {
+		return err
+	}
+	if !explicitDaemon {
 		return nil
 	}
-	spokeURL, err := ensureDaemon(ctx)
+	ctx, spokeURL, err := ensureSpokeDaemonContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -334,7 +341,23 @@ func federationSpokeProbePreflight(ctx context.Context, spokeInstance string) er
 	return err
 }
 
+// Legacy enrollment can use a hub token in the caller environment. Only a
+// profile supplies a fully independent selected-home credential snapshot.
+func ensureSpokeDaemonContext(ctx context.Context) (context.Context, string, error) {
+	resolved, err := ensureDaemonResolved(ctx)
+	if err != nil {
+		return ctx, "", err
+	}
+	if resolved.LocalProfile != nil {
+		ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
+	}
+	return ctx, resolved.BaseURL, nil
+}
+
 func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Client, error) {
+	if resolved, ok := ctx.Value(resolvedDaemonContextKey{}).(clientpkg.ResolvedDaemon); ok && resolved.BaseURL == spokeURL {
+		return clientpkg.NewHTTPClientForResolved(ctx, resolved, clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
+	}
 	opts := clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)}
 	if strings.TrimSpace(flags.Daemon) == "" {
 		auth, err := federationImplicitSpokeTargetAuth(ctx, spokeURL)
@@ -381,9 +404,6 @@ func federationImplicitSpokeTargetAuth(ctx context.Context, spokeURL string) (cl
 	if err != nil {
 		return clientpkg.TargetAuth{}, err
 	}
-	if !ok || strings.TrimRight(remoteURL, "/") != strings.TrimRight(spokeURL, "/") {
-		return targetAuth, nil
-	}
 	targetAuth.AllowInsecure = clientpkg.RemoteAllowInsecureForBaseURL(spokeURL, workspaceStart) //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 	if os.Getenv("KATA_SERVER") != "" {
 		return targetAuth, nil
@@ -396,7 +416,26 @@ func federationImplicitSpokeTargetAuth(ctx context.Context, spokeURL string) (cl
 		return targetAuth, nil
 	}
 	entry := catalogByName(cfg, cfg.ActiveDaemon)
-	if entry == nil || entry.Local {
+	if entry == nil {
+		return targetAuth, nil
+	}
+	if entry.Local {
+		// A local catalog entry may be the selected legacy daemon even though
+		// it has no profile home. In that case ResolveRemote reports no URL,
+		// but the entry's own credential still belongs on the spoke request.
+		// Do not fall back to KATA_AUTH_TOKEN here: enrollment uses that token
+		// for the hub.
+		if ok {
+			return targetAuth, nil
+		}
+		token, err := selectedCatalogToken(entry)
+		if err != nil {
+			return clientpkg.TargetAuth{}, err
+		}
+		targetAuth.Token = token
+		return targetAuth, nil
+	}
+	if !ok || strings.TrimRight(remoteURL, "/") != strings.TrimRight(spokeURL, "/") {
 		return targetAuth, nil
 	}
 	entryURL, err := clientpkg.NormalizeRemoteURL(entry.URL, entry.AllowInsecure)

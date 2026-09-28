@@ -58,7 +58,7 @@ func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 	}
 
 	ctx := cmd.Context()
-	baseURL, err := ensureDaemon(ctx)
+	ctx, baseURL, err := ensureDaemonContext(ctx)
 	if err != nil {
 		return readyResultForCLI{}, err
 	}

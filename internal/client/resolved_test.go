@@ -505,47 +505,6 @@ url = "http://127.0.0.1:1"
 	require.ErrorIs(t, err, ErrRemoteUnavailable)
 }
 
-func TestCredentialFreeLocatorsDoNotResolveCatalogTokenEnv(t *testing.T) {
-	t.Run("active remote", func(t *testing.T) {
-		srv := startResolvableDaemon(t)
-		home := t.TempDir()
-		t.Setenv("KATA_HOME", home)
-		t.Setenv("KATA_SERVER", "")
-		t.Setenv("KATA_AUTH_TOKEN", "")
-		t.Setenv("KATA_MISSING_TOKEN", "")
-		require.NoError(t, writeRawConfig(home, `
-active_daemon = "shared"
-
-[[daemon]]
-name = "shared"
-url = "`+srv.URL+`"
-token_env = "KATA_MISSING_TOKEN"
-`))
-
-		target, err := LocateRunningTargetInWorkspace(t.Context(), "")
-		require.NoError(t, err)
-		assert.Equal(t, remoteRunningDaemon(srv.URL, true), target)
-	})
-
-	t.Run("named remote", func(t *testing.T) {
-		srv := startResolvableDaemon(t)
-		home := t.TempDir()
-		t.Setenv("KATA_HOME", home)
-		t.Setenv("KATA_AUTH_TOKEN", "")
-		t.Setenv("KATA_MISSING_TOKEN", "")
-		require.NoError(t, writeRawConfig(home, `
-[[daemon]]
-name = "shared"
-url = "`+srv.URL+`"
-token_env = "KATA_MISSING_TOKEN"
-`))
-
-		target, err := LocateNamedRunningTarget(t.Context(), "shared")
-		require.NoError(t, err)
-		assert.Equal(t, remoteRunningDaemon(srv.URL, true), target)
-	})
-}
-
 func TestRemoteResolutionModesShareSelectionWithoutCredentialLeak(t *testing.T) {
 	t.Run("server environment wins for both modes", func(t *testing.T) {
 		srv := startResolvableDaemon(t)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,9 +15,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/importlabels"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/testenv"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func TestImportBeadsRejectsInputAndTargetFlags(t *testing.T) {
@@ -201,6 +206,49 @@ func TestImportBeadsPromptsInitAndRetries(t *testing.T) {
 	assert.FileExists(t, filepath.Join(dir, ".kata.toml"))
 }
 
+func TestImportBeadsInitializesWithSelectedProfileCredential(t *testing.T) {
+	resetFlags(t)
+	stubIsTTY(t, true)
+	env := testenv.New(t, testenv.WithAuthToken("work-token"))
+	personalHome, dir := t.TempDir(), t.TempDir()
+	t.Setenv("KATA_HOME", personalHome)
+	t.Setenv("KATA_DB", filepath.Join(personalHome, "kata.db"))
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "personal-token")
+	installFakeBD(t)
+
+	uid := env.DB.InstanceUID()
+	require.NoError(t, os.WriteFile(filepath.Join(env.Home, "config.toml"),
+		[]byte("[auth]\ntoken = \"work-token\"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(personalHome, "config.toml"),
+		[]byte(fmt.Sprintf("[[daemon]]\nname = \"work\"\nlocal = true\nhome = %q\ninstance_uid = %q\n", env.Home, uid)), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"),
+		[]byte("version = 1\n[project]\nname = \"spoke-project\"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte("version = 1\n[server]\ndaemon = \"work\"\n"), 0o600))
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{
+		Name: "work", Local: true, Home: env.Home, InstanceUID: uid,
+	})
+	require.NoError(t, err)
+	ns, err := daemon.NewNamespaceForHome(env.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Address: strings.TrimPrefix(env.URL, "http://"), Network: "tcp",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.ProjectByName(t.Context(), "spoke-project")
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	out, err := runBeadsImportTTY(t, nil, dir, "y\n", "--as", "importer")
+
+	require.NoError(t, err)
+	assert.Contains(t, out, "imported beads: created 1, updated 0, unchanged 0, comments 1, links 0")
+	_, err = env.DB.ProjectByName(t.Context(), "spoke-project")
+	require.NoError(t, err)
+}
+
 func TestImportBeadsPromptNoReturnsInitValidation(t *testing.T) {
 	resetFlags(t)
 	stubIsTTY(t, true)
@@ -231,7 +279,11 @@ func runBeadsImportTTY(t *testing.T, env *testenv.Env, dir, input string, args .
 	cmd.SetOut(stdout)
 	cmd.SetErr(stdout)
 	cmd.SetArgs(append([]string{"--workspace", dir, "import", "--source-format", "beads"}, args...))
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	ctx := t.Context()
+	if env != nil {
+		ctx = contextWithBaseURL(ctx, env.URL)
+	}
+	cmd.SetContext(ctx)
 	err = cmd.Execute()
 	require.NoError(t, stdout.Sync())
 	bs, readErr := os.ReadFile(stdoutPath) //nolint:gosec // test-controlled path

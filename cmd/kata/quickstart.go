@@ -203,6 +203,17 @@ For live streams:
 The agent tail stream emits one OK event line per event. Use --json only
 when a consumer expects newline-delimited JSON.
 
+# Selected daemon recovery
+
+Never remove a workspace override to repair a stopped daemon. Run
+kata daemon diagnose --json first. A registered local profile uses
+[server].daemon in .kata.local.toml and pins an existing home/instance_uid.
+For stopped_local_profile, run kata daemon recover; optionally add
+--expect-project-uid <uid>. Recovery never initializes storage or projects.
+Explicit server URLs stay pinned; restore their server or tunnel.
+Daemon start/stop/restart/reload/logs administer the current KATA_HOME and
+reject --daemon. Set KATA_HOME explicitly for those operations.
+
 # Remote daemon (optional)
 
 When the kata daemon runs on a different host, point clients at it with
@@ -245,6 +256,10 @@ Close only verified work with substantive prose and typed evidence.
 Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.
 Do not run delete or purge unless explicitly asked for that exact action and issue ref.
 Poll kata events with a saved cursor; reset cached state on reset_required.
+Never remove a workspace override to repair a stopped daemon.
+Run kata daemon diagnose first; kata daemon recover starts only a registered existing local profile.
+Use --expect-project-uid <uid> when project identity is known; never initialize a replacement project.
+Explicit server URLs stay pinned; restore their server or tunnel.
 `
 
 func newQuickstartCmd() *cobra.Command {

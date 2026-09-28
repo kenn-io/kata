@@ -27,7 +27,7 @@ func daemonTargetsMatch(a, b daemonTarget) bool {
 		return a.Name == b.Name
 	}
 	if a.Local || b.Local {
-		return a.Local == b.Local
+		return a.Local == b.Local && a.Home == b.Home
 	}
 	return a.URL == b.URL
 }

@@ -16,6 +16,7 @@ import (
 type daemonTarget struct {
 	Name             string
 	Local            bool
+	Home             string
 	URL              string
 	TokenEnv         string
 	Implicit         bool
@@ -42,7 +43,7 @@ const (
 
 var (
 	readDaemonConfigForTUI         = config.ReadDaemonConfig
-	ensureResolvedForTUI           = client.EnsureResolvedInWorkspace
+	ensureResolvedForTUI           = client.EnsureResolvedInWorkspaceForTUI
 	ensureLocalRunningTargetForTUI = client.EnsureLocalRunningTarget
 	ensureResolvedNamedForTUI      = client.EnsureResolvedNamed
 	normalizeRemoteURLForTUI       = func(v string, allowInsecure bool) (string, error) {
@@ -69,6 +70,7 @@ func daemonTargetsFromConfig(daemons []config.CatalogDaemonConfig) []daemonTarge
 		out = append(out, daemonTarget{
 			Name:     d.Name,
 			Local:    d.Local,
+			Home:     d.Home,
 			URL:      d.URL,
 			TokenEnv: d.TokenEnv,
 			resolved: client.ResolvedDaemon{
@@ -103,7 +105,7 @@ func bootDaemonConnection(ctx context.Context, opts Options) (daemonConnection, 
 	catalog := daemonTargetsWithLaunchSelectors(
 		daemonTargetsFromConfig(cfg.Daemons), opts,
 	)
-	targetName := cfg.ActiveDaemon
+	targetName := ""
 	if strings.TrimSpace(opts.DaemonName) != "" {
 		targetName = strings.TrimSpace(opts.DaemonName)
 	}
@@ -154,6 +156,15 @@ func connectImplicitDaemonTarget(
 	}
 	target := implicitDaemonTarget(resolved.BaseURL)
 	target.resolved = resolved
+	if resolved.Name != "" {
+		target.Name = resolved.Name
+		target.Implicit = false
+	}
+	if resolved.LocalProfile != nil {
+		target.Local = true
+		target.Home = resolved.LocalProfile.Home
+		target.URL = ""
+	}
 	target.workspaceStart = workspaceStart
 	target.skipInitialScope = skipInitialScope
 	return connectResolvedDaemonTarget(ctx, target, resolved.BaseURL)
@@ -192,7 +203,10 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 		return daemonConnection{}, err
 	}
 	c := NewClient(endpoint, hc)
-	if endpoint == client.UnixBase {
+	if target.resolved.LocalProfile != nil {
+		transports := shareLocalProfileTransports(target, hc, sseHC)
+		c.setLocalHTTPClientRefresh(transports.refreshAPI)
+	} else if endpoint == client.UnixBase {
 		c.setLocalHTTPClientRefresh(localHTTPClientRefreshForTarget(endpoint, target))
 	}
 	var bi bootInit
@@ -242,7 +256,13 @@ func localHTTPClientRefreshForTarget(
 ) func(context.Context) (*http.Client, error) {
 	return func(ctx context.Context) (*http.Client, error) {
 		refreshedTarget := target
-		if target.Local || endpoint == client.UnixBase {
+		if target.resolved.LocalProfile != nil {
+			resolved, err := client.EnsureSameLocalProfile(ctx, target.resolved)
+			if err != nil {
+				return nil, err
+			}
+			refreshedTarget.resolved = resolved
+		} else if target.Local || endpoint == client.UnixBase {
 			running, err := ensureLocalRunningTargetForTUI(ctx)
 			if err != nil {
 				return nil, err

@@ -28,7 +28,7 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 	}
 	// Child daemons get only toolchain/OS variables and the test's Kata paths.
 	var childEnv []string
-	allowed := []string{"PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "SYSTEMROOT", "WINDIR", "TMPDIR", "TMP", "TEMP", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOTOOLCHAIN"}
+	allowed := []string{"PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "SYSTEMROOT", "WINDIR", "TMPDIR", "TMP", "TEMP", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOTOOLCHAIN", "CGO_CFLAGS", "CGO_LDFLAGS"}
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
 		lookupKey := key

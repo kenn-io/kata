@@ -20,7 +20,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/daemon"
 )
 
 // defaultHTTPTimeout is the per-request budget for non-streaming CLI calls.
@@ -76,6 +75,15 @@ func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	return resolved, nil
 }
 
+// ensureDaemonContext carries the exact target to legacy URL-only consumers.
+func ensureDaemonContext(ctx context.Context) (context.Context, string, error) {
+	a, err := dialDaemon(ctx)
+	if err != nil {
+		return ctx, "", err
+	}
+	return a.ctx, a.baseURL, nil
+}
+
 // ensureDaemon is the URL-only compatibility view used by command paths that
 // have not moved to the resolved client constructors yet.
 func ensureDaemon(ctx context.Context) (string, error) {
@@ -99,63 +107,51 @@ func workspaceStartForRemote() string {
 	return abs
 }
 
-// discoverDaemon returns the live daemon URL without auto-starting one.
-// Used by health probes and any other surface where "no daemon running"
-// is a meaningful answer rather than a state to paper over.
-//
-// Resolution order matches ensureDaemon so health doesn't disagree
-// with the rest of the CLI about which daemon is "the" daemon:
+// discoverDaemonResolved selects the daemon health should inspect without
+// auto-starting a local runtime. Resolution order matches ensureDaemon so
+// health doesn't disagree with ordinary CLI requests about the selected
+// target:
 //
 //  1. BaseURLKey on the context (test injection).
 //  2. --daemon named catalog entry.
 //  3. Configured remote (KATA_SERVER env, .kata.local.toml [server].url,
-//     or active_daemon). When the remote is set but unreachable,
-//     surface that as ErrRemoteUnavailable so health reports the
-//     explicitly-selected daemon's actual state rather than silently
-//     falling through to a local one.
+//     or active_daemon). These remotes are selected without a
+//     discovery-time probe. If the later request cannot reach the selected
+//     remote, it reports a daemonTransportError mapped to exit 7; discovery
+//     never falls through to a local runtime. A named remote selected with
+//     --daemon is still probed during catalog discovery and can return
+//     ErrRemoteUnavailable here.
 //  4. Local Discover (runtime files).
 //
-// Returns a kindDaemonUnavail cliError when no live daemon is found,
-// matching hammer-test finding #1's expectation that `kata health`
-// doesn't lie about the daemon's actual state.
+// Returns a kindDaemonUnavail cliError when no daemon is found or a named
+// remote probe fails.
 func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	if v, ok := ctx.Value(client.BaseURLKey{}).(string); ok && v != "" {
-		// The injected branch returns before remote resolution or local startup,
-		// while retaining the same global auth policy as ensured injection.
 		return client.EnsureResolvedInWorkspace(ctx, "")
 	}
+	var resolved client.ResolvedDaemon
+	var found bool
+	var err error
 	if flags.Daemon != "" {
-		resolved, err := client.DiscoverResolvedNamed(ctx, flags.Daemon)
-		if err != nil {
-			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
-		}
-		if resolved.BaseURL == "" {
-			return client.ResolvedDaemon{}, noDaemonRunningError()
-		}
-		return resolved, nil
+		resolved, err = client.DiscoverResolvedNamed(ctx, flags.Daemon)
+		found = resolved.BaseURL != ""
+	} else {
+		resolved, found, err = client.DiscoverResolvedInWorkspace(ctx, workspaceStartForRemote())
 	}
-	if resolved, ok, err := client.ResolveRemoteDaemon(ctx, workspaceStartForRemote()); err != nil {
-		if errors.Is(err, client.ErrRemoteUnavailable) {
-			return client.ResolvedDaemon{}, &cliError{
-				Message:  err.Error(),
-				Kind:     kindDaemonUnavail,
-				ExitCode: ExitDaemonUnavail,
+	if err != nil || !found {
+		if resolved.LocalProfile != nil {
+			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
+			if diagnoseErr != nil {
+				return resolved, diagnoseErr
 			}
+			return resolved, diagnosisError(diagnosis)
 		}
-		return client.ResolvedDaemon{}, err
-	} else if ok {
-		return resolved, nil
+		if err != nil {
+			return resolved, cliDaemonTargetError(err)
+		}
+		return resolved, noDaemonRunningError()
 	}
-	ns, err := daemon.NewNamespace()
-	if err != nil {
-		return client.ResolvedDaemon{}, err
-	}
-	if resolved, ok, err := client.DiscoverResolved(ctx, ns.DataDir); err != nil {
-		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
-	} else if ok {
-		return resolved, nil
-	}
-	return client.ResolvedDaemon{}, noDaemonRunningError()
+	return resolved, nil
 }
 
 // discoverDaemon is the URL-only compatibility view used by command paths
@@ -174,6 +170,19 @@ func noDaemonRunningError() error {
 }
 
 func cliDaemonTargetError(err error) error {
+	code := ""
+	switch {
+	case errors.Is(err, client.ErrProfileStorageUnavailable):
+		code = "missing_profile_storage"
+	case errors.Is(err, client.ErrProfileIdentityMismatch):
+		code = "wrong_database"
+	case errors.Is(err, client.ErrProfileSchemaMismatch):
+		code = "version_mismatch"
+	}
+	if code != "" {
+		return &cliError{Message: err.Error() + "; run kata daemon diagnose for the selected profile", Code: code, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+	}
+
 	if errors.Is(err, client.ErrNamedDaemonNotFound) {
 		return &cliError{
 			Message:  err.Error(),
@@ -197,6 +206,9 @@ func cliDaemonTargetError(err error) error {
 // client directly; this wrapper exists only because every existing
 // CLI command site is already named for it.
 func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
+	if resolved, ok := ctx.Value(resolvedDaemonContextKey{}).(client.ResolvedDaemon); ok && resolved.BaseURL == baseURL {
+		return httpClientForResolved(ctx, resolved)
+	}
 	workspaceStart := workspaceStartForRemote()
 	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
 		Timeout:        envHTTPTimeout(defaultHTTPTimeout),
@@ -224,6 +236,9 @@ func httpClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) 
 // commands whose response body is expected to stay open or whose request may
 // legitimately take longer than the default CLI request budget.
 func longRunningClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
+	if resolved, ok := ctx.Value(resolvedDaemonContextKey{}).(client.ResolvedDaemon); ok && resolved.BaseURL == baseURL {
+		return longRunningClientForResolved(ctx, resolved)
+	}
 	workspaceStart := workspaceStartForRemote()
 	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
 		AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart), //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
@@ -247,6 +262,9 @@ func longRunningClientForResolved(ctx context.Context, resolved client.ResolvedD
 // streamingClientFor builds the SSE-friendly variant. Body cancellation comes
 // from the request context.
 func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
+	if resolved, ok := ctx.Value(resolvedDaemonContextKey{}).(client.ResolvedDaemon); ok && resolved.BaseURL == baseURL {
+		return streamingClientForResolved(ctx, resolved)
+	}
 	workspaceStart := workspaceStartForRemote()
 	hc, err := client.NewHTTPClient(ctx, baseURL, client.Opts{
 		ResponseHeaderTimeout: sseHandshakeTimeout,
@@ -515,6 +533,8 @@ func (b *daemonResponseBody) Close() error {
 // dialDaemon is LOCAL-DAEMON-ONLY. A federation hub is reached through hubAPI
 // with a client built by the hub-specific constructors; the local daemon's
 // token must never travel to a hub.
+type resolvedDaemonContextKey struct{}
+
 type daemonAPI struct {
 	ctx      context.Context
 	baseURL  string
@@ -540,6 +560,7 @@ func dialResolved(
 	if err != nil {
 		return daemonAPI{}, err
 	}
+	ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
 	return daemonAPI{ctx: ctx, baseURL: resolved.BaseURL, client: hc, resolved: resolved}, nil
 }
 
@@ -554,6 +575,7 @@ func discoverDaemonAPI(ctx context.Context) (daemonAPI, error) {
 	if err != nil {
 		return daemonAPI{}, err
 	}
+	ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
 	return daemonAPI{ctx: ctx, baseURL: resolved.BaseURL, client: hc, resolved: resolved}, nil
 }
 

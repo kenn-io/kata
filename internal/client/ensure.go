@@ -139,21 +139,6 @@ func ensureRunningTargetInWorkspace(ctx context.Context, workspaceStart string) 
 	return resolved.Running(), err
 }
 
-// LocateRunningTargetInWorkspace selects and probes the same endpoint as
-// EnsureRunningTargetInWorkspace without resolving bearer credentials. Local
-// selections are still started when necessary.
-func LocateRunningTargetInWorkspace(ctx context.Context, workspaceStart string) (RunningDaemon, error) {
-	if v, ok := ctx.Value(BaseURLKey{}).(string); ok && v != "" {
-		return remoteRunningDaemon(v, false), nil
-	}
-	if url, ok, err := resolveRemoteEndpoint(ctx, workspaceStart); err != nil {
-		return RunningDaemon{}, err
-	} else if ok {
-		return remoteRunningDaemon(url, true), nil
-	}
-	return ensureLocalRunningTarget(ctx)
-}
-
 // EnsureLocalRunning returns a live local daemon's base URL, ignoring
 // KATA_SERVER and .kata.local.toml remote overrides. Named "local" TUI
 // daemon entries use this so selecting local never silently resolves to
@@ -321,9 +306,13 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 }
 
 func autoStart(ctx context.Context, dataDir string) (RunningDaemon, error) {
+	return autoStartWithEnvironment(ctx, dataDir, append(os.Environ(), daemon.AutoStartMarkerEnv+"=1"))
+}
+
+func autoStartWithEnvironment(ctx context.Context, dataDir string, env []string) (RunningDaemon, error) {
 	opts := kitdaemon.StartDetachedOptions{
 		Args:            []string{"daemon", "start", "--foreground"},
-		Env:             append(os.Environ(), daemon.AutoStartMarkerEnv+"=1"),
+		Env:             env,
 		RefuseEphemeral: true,
 	}
 	// The auto-started daemon outlives this process, so it must not inherit

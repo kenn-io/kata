@@ -135,13 +135,13 @@ func runBeadsImport(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	baseURL, err := ensureDaemon(ctx)
+	ctx, baseURL, err := ensureDaemonContext(ctx)
 	if err != nil {
 		return err
 	}
 	projectID, err := resolveProjectID(ctx, baseURL, workspace)
 	if err != nil {
-		projectID, err = resolveBeadsProjectOrInit(cmd, baseURL, workspace, err)
+		projectID, err = resolveBeadsProjectOrInit(ctx, cmd, baseURL, workspace, err)
 		if err != nil {
 			return err
 		}
@@ -253,7 +253,7 @@ func runBD(ctx context.Context, workspace, bdPath string, args ...string) ([]byt
 	return out, nil
 }
 
-func resolveBeadsProjectOrInit(cmd *cobra.Command, baseURL, start string, err error) (int64, error) {
+func resolveBeadsProjectOrInit(ctx context.Context, cmd *cobra.Command, baseURL, start string, err error) (int64, error) {
 	var ce *cliError
 	if !errors.As(err, &ce) || ce.Code != "project_not_initialized" {
 		return 0, err
@@ -268,7 +268,7 @@ func resolveBeadsProjectOrInit(cmd *cobra.Command, baseURL, start string, err er
 	if !ok {
 		return 0, beadsInitRequiredError()
 	}
-	out, initErr := callInit(cmd.Context(), baseURL, start, callInitOpts{})
+	out, initErr := callInit(ctx, baseURL, start, callInitOpts{})
 	if initErr != nil {
 		return 0, initErr
 	}
@@ -277,7 +277,7 @@ func resolveBeadsProjectOrInit(cmd *cobra.Command, baseURL, start string, err er
 			return 0, writeErr
 		}
 	}
-	return resolveProjectID(cmd.Context(), baseURL, start)
+	return resolveProjectID(ctx, baseURL, start)
 }
 
 func confirmBeadsInit(cmd *cobra.Command) (bool, error) {

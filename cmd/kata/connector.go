@@ -187,7 +187,7 @@ func newConnectorFieldUnmapCmd() *cobra.Command {
 }
 
 func connectorAPIClient(ctx context.Context, longRunning bool) (*kataclient.Client, error) {
-	baseURL, err := ensureDaemon(ctx)
+	ctx, baseURL, err := ensureDaemonContext(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -14,10 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const (
@@ -200,27 +201,33 @@ func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *h
 	// its first real request.
 	url := "http://" + addr
 	deadline := time.Now().Add(daemonReadyTimeout)
-	probeClient, err := kataclient.NewWithHTTPClient(url, &http.Client{Timeout: daemonReadyTimeout})
+	probeClient := &http.Client{Timeout: daemonReadyTimeout}
+	apiClient, err := generated.NewDefaultClient(url, runtime.WithHTTPClient(testenvProbeRequestDoer{probeClient}))
 	require.NoError(t, err)
 	var lastErr error
 	ready := false
 	for time.Now().Before(deadline) {
-		resp, err := probeClient.PingWithResponse(ctx)
-		if err == nil {
-			status := resp.StatusCode
-			if status == http.StatusOK {
-				ready = true
-				break
-			}
-			lastErr = fmt.Errorf("unexpected /ping status %d", status)
-		} else {
+		ping, err := apiClient.Ping(ctx)
+		if err == nil && ping != nil && ping.Ok && ping.Service == "kata" {
+			ready = true
+			break
+		}
+		if err != nil {
 			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("unexpected /ping response")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	require.Truef(t, ready, "daemon did not become ready within %s: %v", daemonReadyTimeout, lastErr)
 	client := &http.Client{Timeout: daemonRequestTimeout}
 	return url, client, bcast
+}
+
+type testenvProbeRequestDoer struct{ client *http.Client }
+
+func (d testenvProbeRequestDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	return d.client.Do(req.WithContext(ctx)) //nolint:gosec // The URL targets this helper's test-owned loopback listener.
 }
 
 // trackingListener lets cleanup close connections that never sent a byte.

@@ -3,14 +3,20 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/version"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func TestOpenWebUILocalLoopbackOpensDirectly(t *testing.T) {
@@ -379,4 +385,34 @@ func TestOpenWebUIRefusesUnsafeRuntimeMetadata(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.False(t, opened)
+}
+
+func TestLocalProfileBrowserUsesSelectedRuntimeWithoutOuterAlias(t *testing.T) {
+	profile, root := localProfileFixture(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, profile.InstanceUID)
+	}))
+	t.Cleanup(server.Close)
+	ns, err := daemon.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Version: "test", Metadata: map[string]string{"web_origin": "http://127.0.0.1:27123", "web_origin_stable": "true", "web_capabilities": "loopback,sse"}})
+	require.NoError(t, err)
+	t.Setenv("KATA_POSTGRES_SCHEMA", "invalid parent schema")
+	t.Setenv("KATA_DSN", "postgres://user@127.0.0.1:1/personal")
+	for _, name := range []string{"", "work"} {
+		t.Run("name="+name, func(t *testing.T) {
+			prepared, err := PrepareWebUI(t.Context(), PrepareWebUIOptions{WorkspaceStart: root, DaemonName: name})
+			require.NoError(t, err)
+			assert.Empty(t, prepared.DaemonName)
+			assert.Equal(t, "http://127.0.0.1:27123", prepared.Runtime.Origin)
+			var opened WebUILaunch
+			require.NoError(t, OpenWebUI(t.Context(), prepared, "/kata", func(_ context.Context, v WebUILaunch) error { opened = v; return nil }))
+			assert.Equal(t, "http://127.0.0.1:27123/kata", opened.PublicURL)
+		})
+	}
 }

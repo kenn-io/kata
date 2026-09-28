@@ -659,7 +659,7 @@ local = true
 }
 
 // TestHealth_HonorsKataServer ensures a configured remote URL is
-// probed by discoverDaemon. Without this, `kata health` ignores
+// selected by discoverDaemon. Without this, `kata health` ignores
 // KATA_SERVER and reports either a stale local daemon or "no daemon
 // running" — both of which contradict the user's explicit selection.
 func TestHealth_HonorsKataServer(t *testing.T) {

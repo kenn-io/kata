@@ -45,6 +45,7 @@ nav = [
   ]},
   {"Operations" = [
     {"Remote daemon" = "operations/remote-daemon.md"},
+    {"Local daemon profiles" = "operations/local-daemon-profiles.md"},
     {"GitHub sync" = "operations/github-sync.md"},
     {"Federation" = "operations/federation.md"},
     {"Agent orchestration" = "operations/agent-orchestration.md"},

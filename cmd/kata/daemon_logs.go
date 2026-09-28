@@ -37,6 +37,9 @@ func daemonLogsCmd() *cobra.Command {
 		Use:   "logs",
 		Short: "read daemon logs (hook runs)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireCurrentHomeDaemonCommand(); err != nil {
+				return err
+			}
 			if !hooks {
 				return &cliError{Kind: kindUsage, ExitCode: ExitUsage, Message: "currently only --hooks is supported"}
 			}

@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -44,22 +46,59 @@ func newHealthCmd() *cobra.Command {
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
 			}
+			selected := daemonDiagnosis{State: "ready", Source: a.resolved.Source.String(), SourcePath: a.resolved.SourcePath, Kind: "local", BinaryVersion: version.Version, Endpoint: a.resolved.Address, SchemaVersion: b.SchemaVersion}
+			if !b.OK {
+				selected.State = "unhealthy"
+			}
+			if a.resolved.ConfiguredRemote() {
+				selected.Kind = "remote"
+				selected.Endpoint = safeDaemonOrigin(a.baseURL)
+			}
+			if profile := a.resolved.LocalProfile; profile != nil {
+				selected.Kind = "local_profile"
+				selected.Profile = profile.Name
+				selected.Home = profile.Home
+				selected.StorageID = profile.StorageID
+				selected.ExpectedInstanceUID = profile.InstanceUID
+				selected.ObservedInstanceUID = profile.InstanceUID
+			} else if selected.Kind == "local" {
+				selected.Home, _ = config.KataHome()
+			}
+			selected = withDiagnosisAction(selected)
 			mode := currentOutputMode()
 			if mode == outputAgent {
 				daemonStatus := "unhealthy"
 				if b.OK {
 					daemonStatus = "running"
 				}
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK health ok=%t daemon=%s\n", b.OK, daemonStatus)
+				extra := ""
+				if a.resolved.LocalProfile != nil {
+					extra = fmt.Sprintf(" selected_state=%s profile=%s home=%s instance_uid=%s", selected.State, agentValue(selected.Profile), agentValue(selected.Home), selected.ObservedInstanceUID)
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK health ok=%t daemon=%s%s\n", b.OK, daemonStatus, extra)
 				return err
 			}
 			if mode == outputJSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
+				var payload map[string]jsontext.Value
+				if err := json.Unmarshal(bs, &payload); err != nil {
 					return err
 				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+				data, err := json.Marshal(selected)
+				if err != nil {
+					return err
+				}
+				payload["selected"] = data
+				var buf bytes.Buffer
+				if err := emitJSON(&buf, payload); err != nil {
+					return err
+				}
+				_, err = fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
+			}
+			if a.resolved.LocalProfile != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Selected profile: %s home=%s instance_uid=%s\n", selected.Profile, selected.Home, selected.ObservedInstanceUID); err != nil {
+					return err
+				}
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok=%v schema_version=%d uptime=%s db=%s\n",
 				b.OK, b.SchemaVersion, b.Uptime, b.DBPath)

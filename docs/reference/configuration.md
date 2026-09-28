@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-09-17
+last_edited: 2026-09-28
 ---
 
 # Configuration
@@ -127,9 +127,29 @@ Daemon target resolution order is:
 
 1. `--daemon <name>`
 2. `KATA_SERVER`
-3. `.kata.local.toml` `[server].url`
+3. `.kata.local.toml` `[server].url` or `[server].daemon`
 4. `active_daemon` in `<KATA_HOME>/config.toml`
 5. local daemon discovery or auto-start
+
+To pin an existing home on this machine, use `[server].daemon = "work"`
+instead of `url`, and register its identity in the client home's catalog:
+
+```toml
+[[daemon]]
+name = "work"
+local = true
+home = "/absolute/work-home"
+instance_uid = "01J00000000000000000000001"
+```
+
+Use the existing home's observed UID, not the example UID. `home` and
+`instance_uid` are paired, local-only fields; `home` is absolute or starts with
+`~/`. A workspace `server.daemon` accepts only such a profile and cannot coexist
+with `server.url`. Profile startup reads the selected home's config and checks
+its existing database identity and schema before starting a process. Legacy
+`local = true` without `home` retains current-home behavior. See
+[Local daemon profiles](../operations/local-daemon-profiles.md) for registration,
+isolated credentials, PostgreSQL restrictions, and recovery.
 
 Committed `.kata.toml` files bind the project name only; do not put daemon
 routing or tokens there.
@@ -279,9 +299,10 @@ date-time `scheduled_on` values that do not have an issue-level `timezone`. If
 both are unset, Kata uses UTC. RFC 3339 `scheduled_on` values ending in `Z` are
 UTC instants and do not use this setting.
 
-The web UI's daemon selector lists these `[[daemon]]` entries. A plain
-`kata ui` starts or discovers the local browser gateway and initially selects
-`active_daemon`; changing the selection keeps configured tokens on the daemon
+The web UI's daemon selector lists URL entries and home-less local entries.
+Home-bearing profiles are omitted and cannot alias the serving daemon. A plain
+`kata ui` opens a selected local profile directly; otherwise it starts or
+discovers the local browser gateway and initially selects `active_daemon`; changing the selection keeps configured tokens on the daemon
 side. Use `kata ui --daemon <name>` only when opening one named target directly
 is preferred. Identity-authenticated tabs can read remote gateway targets, but
 must open the target directly for writes because the gateway does not delegate

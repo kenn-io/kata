@@ -48,7 +48,7 @@ func newPurgeCmd() *cobra.Command {
 			if reason != "" {
 				extra = map[string]any{"reason": reason}
 			}
-			return runDestructive(cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, "purge", confirm, extra)
+			return runDestructive(ctx, cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, "purge", confirm, extra)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "required to perform the purge")

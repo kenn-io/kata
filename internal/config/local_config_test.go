@@ -97,6 +97,19 @@ func TestMergeLocal_LocalServerWins(t *testing.T) {
 	assert.Empty(t, stderr.String())
 }
 
+func TestMergeLocal_URLOverridePreservesTransportOptIn(t *testing.T) {
+	base := &config.ProjectConfig{Server: config.ServerConfig{URL: "http://100.64.0.5:7777", AllowInsecure: true}}
+	local := &config.ProjectConfig{Server: config.ServerConfig{URL: "http://100.64.0.6:7777"}}
+	got := config.MergeLocal(base, local)
+	require.Equal(t, local.Server.URL, got.Server.URL)
+	require.True(t, got.Server.AllowInsecure)
+	local.Server = config.ServerConfig{Daemon: "work"}
+	got = config.MergeLocal(base, local)
+	require.Equal(t, "work", got.Server.Daemon)
+	require.Empty(t, got.Server.URL)
+	require.False(t, got.Server.AllowInsecure, "a profile uses its own home transport policy")
+}
+
 func TestMergeLocal_LocalNameOverridesBase(t *testing.T) {
 	base := &config.ProjectConfig{
 		Version: 1,

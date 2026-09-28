@@ -434,3 +434,36 @@ func TestWebDaemonProxyDispatchesLocalSelectionInProcess(t *testing.T) {
 	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusOK, response.StatusCode)
 }
+
+func TestLocalProfileGatewayOmitsAndRejectsHomeEntries(t *testing.T) {
+	for _, name := range []string{"work", "local"} {
+		for _, onlyProfile := range []bool{false, true} {
+			t.Run(fmt.Sprint(name, onlyProfile), func(t *testing.T) {
+				d := openTestDB(t)
+				entries := []config.CatalogDaemonConfig{{Name: name, Local: true, Home: "/work-home", InstanceUID: "01J00000000000000000000001"}}
+				if !onlyProfile {
+					entries = append(entries, config.CatalogDaemonConfig{Name: "personal", Local: true})
+				}
+				server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: name, WebDaemons: entries})
+				response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+				require.NoError(t, err)
+				body, err := io.ReadAll(response.Body)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				assert.NotContains(t, string(body), fmt.Sprintf(`"id":%q`, name))
+				assert.NotContains(t, string(body), "/work-home")
+				request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+				require.NoError(t, err)
+				request.Header.Set("X-Kata-Web-Daemon", name)
+				response, err = http.DefaultClient.Do(request)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				assert.Equal(t, http.StatusBadRequest, response.StatusCode)
+				response, err = http.Get(server.URL + "/api/v1/ui/proxy/api/v1/ping")
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				assert.Equal(t, http.StatusOK, response.StatusCode)
+			})
+		}
+	}
+}

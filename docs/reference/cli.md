@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-26
+last_edited: 2026-09-28
 ---
 
 # CLI reference
@@ -889,6 +889,8 @@ after login. Kata never puts a remote token or another credential in the URL.
 kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly]
 kata daemon status
 kata daemon locate [--json | --agent]
+kata daemon diagnose [--expect-project-uid <uid>] [--json | --agent]
+kata daemon recover [--expect-project-uid <uid>] [--json | --agent]
 kata daemon stop
 kata daemon restart [--listen <host:port>] [--insecure-readonly]
 kata daemon reload
@@ -974,11 +976,17 @@ starts a replacement using the configured listener. It validates replacement
 settings before stopping the current daemon; use the restart flags to repeat
 transient startup overrides. Background start and restart output reports the
 resolved web UI URL on its own line after the daemon transport address.
-`daemon status` reports the running daemon's address, web UI URL, PID, version,
-and uptime.
-`daemon locate` selects the same endpoint as ordinary CLI commands, starts a
-stopped local selection, and prints connection metadata without exposing
-credentials. Its JSON form is the supported discovery interface for external
+`daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
+`KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
+`daemon status` reports current-home processes and a separate selected-daemon
+diagnosis. `daemon diagnose` inspects selection, home, database/project identity,
+schema, process, and federation origin without starting or changing anything.
+`daemon recover` starts only a registered existing local profile, verifies its
+pinned database UID, and optionally checks `--expect-project-uid` before and
+after startup. It never initializes storage or projects or changes routing. See
+[Local daemon profiles](../operations/local-daemon-profiles.md) for the workflow.
+`daemon locate` selects the same endpoint as ordinary CLI commands and prints
+connection metadata without starting it or exposing credentials. Its JSON form is the supported discovery interface for external
 clients; see [Daemon discovery](daemon-discovery.md) for precedence, address
 forms, and the output schema.
 When a live local daemon record exists but its endpoint cannot be reached,

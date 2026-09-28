@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -557,6 +559,36 @@ func TestMCPServeDefaultRequiresWorkspaceBinding(t *testing.T) {
 	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
 
 	require.ErrorContains(t, command.Execute(), "--all")
+}
+
+func TestMCPStorageRootRejectsExplicitLocalProfileBeforeStorageSetup(t *testing.T) {
+	home := setupKataEnv(t)
+	currentDB := openKataTestDB(t, filepath.Join(home, "kata.db"))
+	require.NoError(t, currentDB.Close())
+
+	profileHome := t.TempDir()
+	profileDB := openKataTestDB(t, filepath.Join(profileHome, "kata.db"))
+	profileUID := profileDB.InstanceUID()
+	require.NoError(t, profileDB.Close())
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(`[[daemon]]
+name = "work"
+local = true
+home = %q
+instance_uid = %q
+`, profileHome, profileUID)), 0600))
+	t.Setenv("KATA_SERVER", "")
+	t.Chdir(t.TempDir())
+
+	storageRoot := t.TempDir()
+	_, err := runCmdOutput(t, nil,
+		"--daemon", "work", "mcp", "serve", "--all",
+		"--storage-root", storageRoot, "--runtime-dir", t.TempDir())
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, ce.Message, "host-local")
+	assert.Contains(t, ce.Message, "--daemon")
+	entries, readErr := os.ReadDir(storageRoot)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries, "reject the selector before writing host-local storage")
 }
 
 func TestParseMCPStorageTargets(t *testing.T) {

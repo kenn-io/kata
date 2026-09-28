@@ -103,7 +103,7 @@ type eventsPollOptions struct {
 
 func runEventsPoll(cmd *cobra.Command, opts eventsPollOptions) error {
 	ctx := cmd.Context()
-	baseURL, err := ensureDaemon(ctx)
+	ctx, baseURL, err := ensureDaemonContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -277,7 +277,7 @@ var errTerminalHTTP = errors.New("terminal HTTP status")
 
 func runEventsTail(cmd *cobra.Command, opts eventsTailOptions) error {
 	ctx := cmd.Context()
-	baseURL, err := ensureDaemon(ctx)
+	ctx, baseURL, err := ensureDaemonContext(ctx)
 	if err != nil {
 		return err
 	}

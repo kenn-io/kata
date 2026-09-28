@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -52,7 +53,7 @@ func newDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runDestructive(cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, "delete", confirm, nil)
+			return runDestructive(ctx, cmd, baseURL, pid, issue.RefForAPI, issue.QualifiedID, "delete", confirm, nil)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "required to perform the soft delete")
@@ -105,9 +106,8 @@ func resolveConfirm(cmd *cobra.Command, flagVal, expected, prompt string) (strin
 // a qualified ref (`other#abc4` from a workspace bound to a different
 // project) targets the project the ref names rather than the workspace's
 // project.
-func runDestructive(cmd *cobra.Command, baseURL string, pid int64, pathRef, displayRef, verb, confirm string,
+func runDestructive(ctx context.Context, cmd *cobra.Command, baseURL string, pid int64, pathRef, displayRef, verb, confirm string,
 	extraBody map[string]any) error {
-	ctx := cmd.Context()
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	body := &generated.DestructiveActionRequestBody{Actor: actor}
 	if reason, ok := extraBody["reason"].(string); ok {

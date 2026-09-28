@@ -49,6 +49,9 @@ func (s DaemonSource) String() string {
 // for that source. Client construction consumes this value without resolving
 // those inputs again.
 type ResolvedDaemon struct {
+	SourcePath          string
+	LocalProfile        *LocalProfileIdentity
+	profileConfig       *config.LocalProfileConfig
 	Source              DaemonSource
 	Name                string
 	BaseURL             string
@@ -69,6 +72,9 @@ type ResolvedDaemon struct {
 // ConfiguredRemote reports whether resolution selected configured remote
 // endpoint metadata rather than local discovery or an injected test target.
 func (d ResolvedDaemon) ConfiguredRemote() bool {
+	if d.LocalProfile != nil {
+		return false
+	}
 	switch d.Source {
 	case DaemonSourceServerEnv, DaemonSourceLocalConfig, DaemonSourceActiveDaemon:
 		return true
@@ -100,6 +106,9 @@ func (d ResolvedDaemon) WithRunning(running RunningDaemon) ResolvedDaemon {
 	refreshed.AllowInsecure = d.AllowInsecure
 	refreshed.TrustPrivateNetwork = d.TrustPrivateNetwork
 	refreshed.namedRemote = d.namedRemote
+	refreshed.LocalProfile = d.LocalProfile
+	refreshed.profileConfig = d.profileConfig
+	refreshed.SourcePath = d.SourcePath
 	return refreshed
 }
 
@@ -168,6 +177,12 @@ func EnsureResolvedInWorkspace(ctx context.Context, workspaceStart string) (Reso
 	return resolveForClient(ctx, workspaceStart, remoteWithCredentials)
 }
 
+// EnsureResolvedInWorkspaceForTUI preserves active catalog credentials for
+// legacy local entries while retaining the same workspace selection rules.
+func EnsureResolvedInWorkspaceForTUI(ctx context.Context, workspaceStart string) (ResolvedDaemon, error) {
+	return resolveForClientWithActiveLocalCatalogCredential(ctx, workspaceStart, remoteWithCredentials, true)
+}
+
 // PrepareResolvedInWorkspace selects the target and credentials for an API
 // request. Configured remotes are not pinged: the request itself establishes
 // reachability. Local discovery, version checks, and auto-start are unchanged.
@@ -176,10 +191,31 @@ func PrepareResolvedInWorkspace(ctx context.Context, workspaceStart string) (Res
 }
 
 func resolveForClient(ctx context.Context, workspaceStart string, mode remoteResolutionMode) (ResolvedDaemon, error) {
+	return resolveForClientWithActiveLocalCatalogCredential(ctx, workspaceStart, mode, false)
+}
+
+func resolveForClientWithActiveLocalCatalogCredential(
+	ctx context.Context, workspaceStart string, mode remoteResolutionMode, keepActiveLocalCatalogCredential bool,
+) (ResolvedDaemon, error) {
 	if value, ok := ctx.Value(BaseURLKey{}).(string); ok && value != "" {
 		return resolvedForRunning(
 			DaemonSourceInjected, "", remoteRunningDaemon(value, false),
 		).withGlobalAuth(), nil
+	}
+	selection, err := inspectSelection(ctx, workspaceStart, "", keepActiveLocalCatalogCredential)
+	if err != nil {
+		return ResolvedDaemon{}, err
+	}
+	if selection.Profile != nil {
+		return ensureLocalProfile(ctx, selection)
+	}
+	if selection.activeLocalCatalog {
+		running, err := EnsureLocalRunningTarget(ctx)
+		return selection.Resolved.WithRunning(running), err
+	}
+	if selection.Resolved.Name != "" && selection.Resolved.BaseURL == "" {
+		running, err := EnsureLocalRunningTarget(ctx)
+		return selection.Resolved.WithRunning(running), err
 	}
 	if resolved, ok, err := resolveRemoteSelection(ctx, workspaceStart, mode); err != nil {
 		return ResolvedDaemon{}, err
@@ -209,9 +245,16 @@ func PrepareResolvedNamed(ctx context.Context, name string) (ResolvedDaemon, err
 
 // DiscoverResolvedInWorkspace selects the daemon that
 // PrepareResolvedInWorkspace would, but never starts, restarts, or
-// version-checks a local daemon. ok is false when no remote is configured and
+// version-checks a local daemon or opens storage. ok is false when no remote is configured and
 // no live local runtime exists.
 func DiscoverResolvedInWorkspace(ctx context.Context, workspaceStart string) (ResolvedDaemon, bool, error) {
+	selection, err := InspectSelection(ctx, workspaceStart, "")
+	if err != nil {
+		return ResolvedDaemon{}, false, err
+	}
+	if selection.Profile != nil {
+		return discoverLocalProfile(ctx, selection)
+	}
 	if resolved, ok, err := resolveRemoteSelection(ctx, workspaceStart, remoteRequestTarget); err != nil || ok {
 		return resolved, ok, err
 	}
@@ -242,10 +285,17 @@ func DiscoverResolved(ctx context.Context, dataDir string) (ResolvedDaemon, bool
 }
 
 // DiscoverResolvedNamed resolves an explicit catalog selection without
-// starting a local daemon. A configured local entry with no live runtime
-// returns the zero value and no error, matching DiscoverNamed's not-found
-// result while preserving all resolver errors.
+// starting a local daemon or opening storage. A configured local entry with no live runtime
+// returns the zero value and no error while preserving all resolver errors.
 func DiscoverResolvedNamed(ctx context.Context, name string) (ResolvedDaemon, error) {
+	selection, err := InspectSelection(ctx, "", name)
+	if err != nil {
+		return ResolvedDaemon{}, err
+	}
+	if selection.Profile != nil {
+		resolved, _, err := discoverLocalProfile(ctx, selection)
+		return resolved, err
+	}
 	target, ok, err := discoverNamedDaemonTarget(ctx, name)
 	if err != nil {
 		return ResolvedDaemon{}, err

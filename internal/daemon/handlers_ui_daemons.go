@@ -369,10 +369,32 @@ func (g *webDaemonGateway) targetAllowsWebDaemonMutation(
 }
 
 func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
-	if len(g.catalog) > 0 {
-		return g.catalog
+	visible := make([]config.CatalogDaemonConfig, 0, len(g.catalog))
+	for _, entry := range g.catalog {
+		// A home-bearing profile belongs to another process. It cannot alias the
+		// serving daemon in the browser credential broker.
+		if entry.Home == "" {
+			visible = append(visible, entry)
+		}
 	}
-	return []config.CatalogDaemonConfig{{Name: "local", Local: true}}
+	if len(visible) > 0 {
+		return visible
+	}
+	name := "local"
+	for {
+		collision := false
+		for _, entry := range g.catalog {
+			if entry.Name == name {
+				collision = true
+				break
+			}
+		}
+		if !collision {
+			break
+		}
+		name += "-local"
+	}
+	return []config.CatalogDaemonConfig{{Name: name, Local: true}}
 }
 
 func (g *webDaemonGateway) defaultID(catalog []config.CatalogDaemonConfig) string {

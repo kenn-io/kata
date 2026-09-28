@@ -168,6 +168,30 @@ name = "kata"
 	assert.Empty(t, cfg.Server.URL)
 }
 
+func TestReadProjectConfig_WarnsForCommittedDaemonSelection(t *testing.T) {
+	dir := setupKataProjectDir(t, `version = 1
+[project]
+name = "spoke-project"
+[server]
+daemon = "work"
+`)
+	warnings, err := os.CreateTemp(t.TempDir(), "stderr")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = warnings.Close() })
+	stderr := os.Stderr
+	os.Stderr = warnings
+	t.Cleanup(func() { os.Stderr = stderr })
+
+	cfg, err := config.ReadProjectConfig(dir)
+
+	require.NoError(t, err)
+	assert.Equal(t, "spoke-project", cfg.Project.Name)
+	output, err := os.ReadFile(warnings.Name()) //nolint:gosec // test-owned capture file
+	require.NoError(t, err)
+	assert.Contains(t, string(output), "server.daemon in .kata.toml is ignored")
+	assert.Contains(t, string(output), "move it to .kata.local.toml")
+}
+
 func TestFindProjectConfig_FromSubdirectory(t *testing.T) {
 	root := setupKataProjectDir(t, `version = 1
 

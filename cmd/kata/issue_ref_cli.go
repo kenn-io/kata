@@ -70,7 +70,7 @@ func resolveIssueRefForCommandWithOptions(
 	if err != nil {
 		return nil, "", 0, resolvedIssueRef{}, err
 	}
-	return ctx, a.baseURL, pid, resolvedIssueRef{
+	return a.ctx, a.baseURL, pid, resolvedIssueRef{
 		RefForAPI:   parsed.RefForAPI,
 		ProjectName: projectName,
 	}, nil

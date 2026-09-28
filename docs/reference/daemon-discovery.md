@@ -1,7 +1,7 @@
 ---
 title: Daemon discovery
 description: Discover and select the same Kata daemon endpoint and transport precedence used by the CLI.
-last_edited: 2026-09-23
+last_edited: 2026-09-28
 ---
 
 # Daemon discovery
@@ -18,10 +18,14 @@ kata daemon locate --json
 kata --daemon example-remote daemon locate --json
 ```
 
-The command probes the selected endpoint and starts it when the selection is a
-local daemon that is not running. It does not start configured remote daemons.
+The command probes the selected endpoint without starting a daemon. A stopped
+local selection produces an error; use `daemon diagnose` to inspect its identity
+and `daemon recover` for a registered local profile.
 An unavailable configured remote produces an error instead of falling back to
-the local daemon.
+the local daemon. Discovery does not require an initialized project. For the
+default local daemon, a different binary version does not block discovery.
+Discovery reads runtime records without opening the database. Profile discovery
+also checks the live instance against its pinned UID.
 
 ## Selection order
 
@@ -30,14 +34,14 @@ Kata checks these sources in order:
 1. `--daemon <name>`, which selects that `[[daemon]]` catalog entry for this
    invocation and ignores the remaining sources.
 2. `KATA_SERVER`.
-3. `[server].url` in the nearest `.kata.local.toml`, walking upward from
+3. `[server].url` or `[server].daemon` in the nearest eligible `.kata.local.toml`, walking upward from
    `--workspace` when provided or from the current directory otherwise.
-4. The `active_daemon` catalog entry in `<KATA_HOME>/config.toml` when it names
-   a remote daemon.
+4. The `active_daemon` catalog entry in `<KATA_HOME>/config.toml`.
 5. The default local daemon.
 
-A named local catalog entry and the default local selection both use Kata's
-normal local runtime discovery and auto-start behavior. A named remote,
+A home-bearing local profile uses its pinned existing storage and exact home
+runtime. Legacy local entries and the default local selection inspect the
+current home. None auto-start during discovery. A named remote,
 `KATA_SERVER`, workspace override, or active remote is normalized and probed
 but never replaced with another target.
 
@@ -46,7 +50,7 @@ The JSON `source` field groups the selected source as follows:
 | `source` | Selection |
 | --- | --- |
 | `daemon_flag` | An explicit `--daemon <name>` entry. |
-| `configured` | `KATA_SERVER`, `.kata.local.toml`, or a remote `active_daemon`. |
+| `configured` | `KATA_SERVER`, `.kata.local.toml`, or `active_daemon`. |
 | `local_default` | The default local daemon. |
 
 ## Output contract
@@ -107,11 +111,32 @@ See [Agent output format](agent-output.md) for quoting and parsing rules.
 
 ## Credentials
 
-Discovery reports location and transport metadata only. It does not resolve or
-emit bearer tokens from the environment or daemon catalog. Configured remote
+Discovery reports location and transport metadata only and never emits bearer
+tokens. Remote probes are credential-free. Local profile discovery uses the
+selected profile credential internally to verify its pinned instance UID. Configured remote
 URLs are reduced to their canonical origin, and errors do not echo URL user
 info, paths, queries, or fragments that could contain secrets.
 
 Clients must obtain any required credential separately and apply it to API
 requests. See [Remote daemon](../operations/remote-daemon.md) for the supported
 authentication and transport configurations.
+
+## Diagnosis and recovery
+
+`kata daemon diagnose --json` reports the selected source/path, profile/home,
+expected and observed instance UID, storage identity, schema/binary/runtime
+versions, PID/endpoint, bound project UID, federation role/hub origin, and
+`next_action`. Failure details appear in `message`. An absent bound project is
+reported as `project_state=missing_project`; it blocks recovery only when
+`--expect-project-uid` is supplied. Missing values are omitted. `state` can be non-ready without the
+command failing. `daemon status --json` retains `daemons` for the current home
+and adds this diagnosis as `selected`; `health --json` includes selected
+provenance after a successful health request.
+
+For a stopped profile, `kata daemon recover --expect-project-uid <uid>` verifies
+existing storage and project identity before startup, then verifies again.
+Missing or wrong identity, incompatible schema, and unregistered URL targets
+cannot be recovered. Failed recovery and profile locators use exit code 7 and
+an actionable state code such as `wrong_database` or `stopped_local_profile`.
+See [Local daemon profiles](../operations/local-daemon-profiles.md) for the
+state table, registration, and environment boundaries.

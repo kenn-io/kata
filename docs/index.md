@@ -125,6 +125,8 @@ is a local ledger for the work itself. They coexist. See
     the whole daemon.
 -   [__Semantic search__](guide/semantic-search.md). Improve issue discovery
     with opt-in embeddings.
+-   [__Local daemon profiles__](operations/local-daemon-profiles.md). Keep personal
+    and work spokes separate and recover their existing data.
 -   [__GitHub sync__](operations/github-sync.md). Bring GitHub issues into kata.
 -   [__Agent workflows__](workflows/agents.md). The operating contract for agents.
 -   [__Comparisons__](guide/comparisons.md). kata vs. SaaS issue trackers.

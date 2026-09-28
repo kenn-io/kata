@@ -355,7 +355,25 @@ func NewHTTPClientForResolved(ctx context.Context, d ResolvedDaemon, opts Opts) 
 		return nil, errors.New("resolved daemon has no base URL")
 	}
 	if d.UnixSocket != "" {
-		return newUnixHTTPClient(d.UnixSocket, d.Token, d.BaseURL, d.TrustPrivateNetwork, d.AllowInsecure, opts)
+		c, err := newUnixHTTPClient(d.UnixSocket, d.Token, d.BaseURL, d.TrustPrivateNetwork, d.AllowInsecure, opts)
+		if err == nil && d.LocalProfile != nil {
+			c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		}
+		return c, err
+	}
+	if d.LocalProfile != nil {
+		base, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			return nil, errors.New("http.DefaultTransport is not *http.Transport")
+		}
+		transport := base.Clone()
+		transport.Proxy = nil
+		transport.ResponseHeaderTimeout = opts.ResponseHeaderTimeout
+		rt, err := authBearerTransport(transport, d.Token, d.BaseURL, d.TrustPrivateNetwork, d.AllowInsecure)
+		if err != nil {
+			return nil, err
+		}
+		return &http.Client{Transport: rt, Timeout: opts.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, nil
 	}
 	return NewHTTPClientForTarget(ctx, d.BaseURL, TargetAuth{
 		Token:               d.Token,

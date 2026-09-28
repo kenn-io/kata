@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -286,6 +287,9 @@ type CatalogDaemonConfig struct {
 	Name  string `toml:"name"`
 	Local bool   `toml:"local"`
 	URL   string `toml:"url"`
+	// Home and InstanceUID bind a local entry to an existing spoke database.
+	Home        string `toml:"home"`
+	InstanceUID string `toml:"instance_uid"`
 	// Token is the inline bearer token, mutually exclusive with TokenEnv.
 	Token string `toml:"token"`
 	// TokenEnv names an environment variable holding the bearer token, so
@@ -349,6 +353,16 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readDaemonConfig(path, true)
+}
+
+// ReadDaemonConfigForHome reads a selected home's configuration without
+// applying the calling client's daemon environment overrides.
+func ReadDaemonConfigForHome(home string) (*DaemonConfig, error) {
+	return readDaemonConfig(filepath.Join(home, "config.toml"), false)
+}
+
+func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	var cfg DaemonConfig
 	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
 	switch {
@@ -390,7 +404,9 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	default:
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	applyDaemonConfigEnv(&cfg)
+	if mergeEnv {
+		applyDaemonConfigEnv(&cfg)
+	}
 	if _, err := cfg.AutostartIdleTimeoutDuration(); err != nil {
 		return nil, err
 	}
@@ -651,6 +667,9 @@ func normalizeDaemonCatalog(cfg *DaemonConfig) error {
 		}
 		if d.Token != "" && d.TokenEnv != "" {
 			return fmt.Errorf("daemon %q: token and token_env are mutually exclusive", d.Name)
+		}
+		if err := normalizeLocalProfileEntry(d); err != nil {
+			return err
 		}
 	}
 	if cfg.ActiveDaemon != "" {
