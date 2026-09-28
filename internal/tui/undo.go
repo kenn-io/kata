@@ -126,12 +126,16 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 	target := m.undoTarget(entry, out)
 	if out.conflict == "daemon principal changed" || out.conflict == "daemon instance changed" {
 		m.undoHistory.clear(out.conflict)
+		var follow tea.Cmd
 		if formMatches {
 			m.input = inputState{}
 			m.undoCloseEntryID = 0
+			m, follow = m.reconcileSplitDetailAfterInput(false)
 		}
-		return m.undoNotice("cannot undo "+target+": "+out.conflict, toastError)
+		m, notice := m.undoNotice("cannot undo "+target+": "+out.conflict, toastError)
+		return m, tea.Batch(notice, follow)
 	}
+	var follow tea.Cmd
 	if formMatches {
 		m.input.saving = false
 		if out.err != nil && (out.attempt == nil || !out.attempt.unknown) {
@@ -141,6 +145,7 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 		if out.changed || out.already || out.conflict != "" || (out.attempt != nil && out.attempt.unknown) {
 			m.input = inputState{}
 			m.undoCloseEntryID = 0
+			m, follow = m.reconcileSplitDetailAfterInput(false)
 		}
 	}
 	switch {
@@ -148,13 +153,14 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 		return m.openUndoCloseForm(), nil
 	case out.conflict != "":
 		m.undoHistory.entries = m.undoHistory.entries[:len(m.undoHistory.entries)-1]
-		return m.undoNotice("skipped undo for "+target+": "+out.conflict, toastError)
+		m, notice := m.undoNotice("skipped undo for "+target+": "+out.conflict, toastError)
+		return m, tea.Batch(notice, follow)
 	case out.attempt != nil && out.attempt.unknown:
 		m.advanceMutationEpoch()
 		m.undoHistory.clear("undo outcome is unknown")
 		m, refresh := m.refreshAfterUndo(entry, nil)
 		m, notice := m.undoNotice("undo outcome unknown; refreshed issue state", toastError)
-		return m, combineCmds(notice, refresh)
+		return m, tea.Batch(notice, refresh, follow)
 	case out.err != nil:
 		return m.undoNotice("undo failed for "+target+": "+out.err.Error(), toastError)
 	case out.already:
@@ -162,14 +168,14 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 		m.undoHistory.entries = m.undoHistory.entries[:len(m.undoHistory.entries)-1]
 		m, refresh := m.refreshAfterUndo(entry, nil)
 		m, notice := m.undoNotice(target+" already restored; no change made", toastInfo)
-		return m, combineCmds(notice, refresh)
+		return m, tea.Batch(notice, refresh, follow)
 	case out.changed:
 		m.advanceMutationEpoch()
 		m.undoHistory.entries = m.undoHistory.entries[:len(m.undoHistory.entries)-1]
 		m.rebaseUndoRevisions(entry, out.resp)
 		m, refresh := m.refreshAfterUndo(entry, out.resp)
 		m, notice := m.undoNotice("undid "+entry.kind+" on "+target, toastInfo)
-		return m, combineCmds(notice, refresh)
+		return m, tea.Batch(notice, refresh, follow)
 	default:
 		return m.undoNotice("undo made no change", toastInfo)
 	}
