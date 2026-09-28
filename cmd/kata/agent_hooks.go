@@ -21,8 +21,8 @@ func newAgentHooksCmd() *cobra.Command {
 func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.Command {
 	group := &cobra.Command{
 		Use:   "agent-hooks",
-		Short: "Run Kata hooks for coding agents",
-		Long: "Run Kata's contract and attention hooks from coding-agent configurations.\n\n" +
+		Short: "Manage Kata hooks for coding agents",
+		Long: "Manage Kata's contract and attention hooks in coding-agent configurations.\n\n" +
 			"These contract and attention entry points are distinct from daemon event\n" +
 			"hooks configured in hooks.toml.",
 	}
@@ -66,7 +66,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 		RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	attention.AddCommand(newAgentHookAttentionCmd("start"), newAgentHookAttentionCmd("end"))
-	group.AddCommand(contract, attention)
+	group.AddCommand(contract, attention, newAgentHooksInstallCmd(), newAgentHooksUninstallCmd(), newAgentHooksStatusCmd())
 	return group
 }
 

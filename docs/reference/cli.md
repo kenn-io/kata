@@ -139,6 +139,9 @@ kata agent-hooks
   contract <harness>          Read stdin and emit a harness-native contract response
   attention start            Establish the attention baseline at session start
   attention end              Raise attention if the session ended without a hand-off
+  install (<harness>... | --all)  Install the contract in user configs
+  uninstall (<harness>... | --all)  Remove user contract hooks
+  status [<harness>]          Inspect user hooks and the current workspace
 ```
 
 These commands are coding-agent hooks. Daemon event hooks configured in
@@ -176,6 +179,136 @@ does not change runtime behavior. A different marker, an unknown harness,
 or terminal stdin returns usage exit code `2`. At a terminal, use
 `kata quickstart --format contract` for plain text. Payload or encoding errors
 exit nonzero with one stderr line and no partial response on stdout.
+
+### User installation and removal
+
+```sh
+kata agent-hooks install claude codex
+kata agent-hooks install --all
+kata agent-hooks install codex --config /path/to/second-codex-home/hooks.json
+kata agent-hooks install claude --executable /path/to/stable/bin/kata
+kata agent-hooks uninstall codex
+kata agent-hooks uninstall --all
+```
+
+User scope is the only installation scope. Harness names are positional;
+shell completion offers `claude`, `codex`, `copilot`, `cursor`, `gemini`, `hermes`, and `qwen`. An explicitly
+named harness creates its config file if needed. Factory Droid is rejected
+before any config is written because it has no SessionStart event.
+
+`--all` installs only where the harness's config root already exists. Missing
+roots are reported as `skipped (not installed)`; Droid is reported as
+`skipped (no SessionStart)`. Copilot's root may exist without its `hooks/`
+subdirectory. With `GEMINI_CLI_HOME`, Gemini's root is the `.gemini/`
+subdirectory under that override. Config paths come from Kit and honor
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `GEMINI_CLI_HOME`,
+`HERMES_HOME`, and `QWEN_HOME`.
+
+`--config <path>` selects one explicit file and requires exactly one harness.
+It cannot be combined with `--all`. It changes only that selected config;
+other Codex homes and other workspaces are not scanned or edited.
+
+The installed command is
+`<kata> agent-hooks contract <harness> --source kata-agent-contract-hook`.
+Kit quotes the executable and arguments for the harness's platform. Codex
+receives a SessionStart registration with matcher `startup|resume|clear|compact`.
+Claude, Copilot, Cursor, Gemini, and Qwen receive SessionStart with no matcher,
+so every source runs the hook. Hermes receives `pre_llm_call` with no matcher
+and injects the contract only on the first turn. Every registration has a
+10-second timeout, expressed in the harness's native units. User installs
+never add attention hooks.
+
+Kata chooses an absolute executable path in this order:
+
+1. `--executable <path-or-command>`. Bare commands are resolved on `PATH`;
+   relative paths are made absolute. The result must be an existing regular
+   executable file. Invalid values fail before any config is written.
+2. The first executable `kata` on `PATH` whose resolved symlink target matches
+   the running binary. This keeps a stable package-manager shim when possible.
+3. The running binary's path, with a warning that it may not survive an upgrade.
+
+Repeating an install with exactly one complete canonical owned registration
+writes nothing and preserves hook indexes. All owned handler fields, including command, native matcher, timeout,
+platform commands and execution conditions, must match Kit's planned registration. Older paths, duplicate owned
+registrations or changed fields are replaced through Kit; Kata warns that the
+harness may ask to re-trust. Foreign hooks retain their relative order. Legacy
+and hand-written contract hooks are recognized by the same ownership marker.
+All flags, harnesses and config plans are validated before writes begin.
+Writes to several config files are not one transaction; a later filesystem
+write failure names any earlier configs that changed and retains their warnings,
+including Codex trust and restoration instructions.
+
+After installing or replacing a Codex hook, Kata prints:
+
+```text
+Codex runs new hooks only after you trust them: open Codex and run /hooks.
+```
+
+If a distinct current workspace config also has a Codex contract hook,
+installation prints `run kata init --with-codex-hooks here to drop the workspace
+duplicate`. If that file is tracked by Git, the hint instead explains that
+`init` keeps the shared hook for teammates. Installation leaves the workspace
+file untouched. If it cannot inspect the file, installation continues with a
+warning. See the [workspace hook rules](#workspace-initialization).
+
+`uninstall` removes only marker-owned contract hooks and preserves foreign and
+attention hooks. A missing config is a successful no-op. Removing a Codex user
+hook warns that workspaces initialized while it existed may have no contract
+hook; rerun `kata init --with-codex-hooks` in those workspaces to restore it.
+
+### Hook status and output
+
+```sh
+kata agent-hooks status
+kata agent-hooks status codex --config /path/to/second-codex-home/hooks.json --json
+```
+
+`status` needs no daemon or initialized Kata workspace and never writes files.
+It inspects all seven supported user profiles by default, or one named profile.
+It also reports contract and attention registrations in the current workspace's
+`.claude/settings.json` and `.codex/hooks.json`. `--workspace` selects that
+workspace; otherwise Kata discovers the nearest local Kata workspace or Git
+root from the current directory, falling back to the current directory when
+neither exists. Discovery does not contact the daemon.
+
+An unreadable or malformed workspace hook file produces a warning while status
+continues to report user hooks. If Git is unavailable or cannot inspect the
+workspace, status reports no committed guidance and includes a warning. These
+warnings mean the corresponding workspace checks are incomplete. Invalid user
+configs still produce an error.
+
+For each user config, status shows its path, contract presence, commands and
+whether each command's executable exists. `duplicate` means a user contract
+hook and a contract hook in a distinct workspace config for the same harness.
+Two paths to the same file are one installation. `overlap` means a user contract
+hook plus Kata's managed marker in committed `AGENTS.md` or `CLAUDE.md` content.
+Untracked and staged-only guidance do not count. Overlap is informational;
+Kata never removes team guidance. Hermes presence requires `pre_llm_call`;
+a stale `on_session_start` entry is listed without claiming it injects context.
+
+All three subcommands support human, `--agent`, and `--json` output. JSON is one
+complete object with `kata_api_version: 1`; diagnostics never mix with success
+JSON. Empty lists are `[]`. Mutation output contains `action` and `results`.
+Each result has `harness`, `config_path`, `changed`, `state`, `reason`, and
+`warnings`. States are `installed`, `unchanged`, `removed`, `absent`, or
+`skipped`.
+
+Status JSON has this shape:
+
+| Object | Fields |
+| --- | --- |
+| Top level | `kata_api_version`, `harnesses`, `workspace`, `warnings` |
+| Each harness | `harness`, `user`, `duplicate`, `overlap` |
+| User or workspace config | `config_path`, `present`, `entries` |
+| Each entry | `event`, `group_index`, `handler_index`, `matcher`, `command`, `executable`, `executable_exists`, `kind` |
+| Workspace | `path`, `claude`, `codex`, `committed_guidance` |
+
+`kind` is `contract` or `attention`. Native event names are preserved.
+`group_index` is `-1` for profiles with flat handler lists. `present` means a
+contract registration exists on the expected event; it does not assert that
+the harness has trusted or executed it. Harnesses follow Kit's profile order. Events sort by native name, and handlers
+retain their order within each event. `--quiet` suppresses text output while retaining
+requested JSON.
 
 ### Workspace attention
 
