@@ -267,7 +267,15 @@ func newQuickstartCmd() *cobra.Command {
 		Use:     "quickstart",
 		Aliases: []string{"agent-instructions"},
 		Short:   "print instructions for agents using kata",
-		Args:    cobra.NoArgs,
+		Long: `Print instructions for agents using kata.
+
+Default: full instructions for agents using kata.
+--agent: concise instructions for agent logs.
+--json: instructions in a JSON response.
+--format contract: the canonical managed contract, exactly what kata agent-hooks contract injects.
+
+Run kata agent-hooks install --all to load the contract in every session on this machine.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			switch currentOutputMode() {
 			case outputContract:

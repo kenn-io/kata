@@ -130,7 +130,13 @@ not mutate workspace files, and comes from the same canonical text that
 its `agent-instructions` alias; it conflicts with `--json` and `--agent` like
 the other output modes.
 
+[`kata agent-hooks contract <harness>`](#contract-injection) injects exactly
+this text in a harness-native response. To load it in every session, see
+[Contract in every session](../workflows/agents.md#contract-in-every-session).
+
 ## Agent hooks
+
+These commands are available on `main`; they are not included in 0.18.0.
 
 Run Kata's contract and attention hooks from coding-agent configurations:
 

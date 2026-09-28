@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Find every-session contract setup in `kata init --help`,
+  `kata quickstart --help`, the quickstart guide, and the README. Install it
+  with `kata agent-hooks install --all`; Codex requires trust through `/hooks`.
+  See [Contract in every session](workflows/agents.md#contract-in-every-session).
+
 - Load the contract in every coding-agent session with
   `kata agent-hooks install --all`, remove user hooks with `uninstall`, and
   inspect user/workspace registrations with daemon-free `status`. Repeated

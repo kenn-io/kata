@@ -72,6 +72,11 @@ work.branch agent/widget-export` is equivalent and safe to retry.
 
 ## Keep attention truthful with hooks
 
+To load the contract in every session, use
+[`kata agent-hooks install --all`](../workflows/agents.md#contract-in-every-session).
+The [agent-hooks reference](../reference/cli.md#agent-hooks) covers user contract
+hooks and workspace attention hooks. Attention hooks stay workspace-only.
+
 The recommended default is **not** to rely on the agent remembering to update
 attention. Agents forget to clear or raise it, and an issue stuck at a stale
 `ok` is worse than no signal. Instead the launcher installs harness hooks so the

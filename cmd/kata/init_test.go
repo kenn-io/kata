@@ -19,6 +19,27 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
+func TestInit_HelpExplainsAgentSetupScopes(t *testing.T) {
+	for _, args := range [][]string{
+		{"init", "--help"},
+		{"--agent", "init", "--help"},
+		{"--json", "init", "--help"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			out := string(executeRoot(t, newRootCmd(), args...))
+			for _, text := range []string{
+				"--with-agents: committed guidance for everyone on the repo",
+				"--with-hooks / --with-codex-hooks: this workspace's Claude Code / Codex hooks",
+				"kata agent-hooks install <harness>... | --all: the contract in every session on this machine",
+				"If a user-level hook exists, --with-codex-hooks skips the workspace contract hook",
+				"unless the workspace config is tracked",
+			} {
+				assert.Contains(t, out, text)
+			}
+		})
+	}
+}
+
 func TestInit_FreshGitRepoBindsViaRemote(t *testing.T) {
 	env := testenv.New(t)
 	dir := t.TempDir()

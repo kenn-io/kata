@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-15
+last_edited: 2026-09-27
 ---
 
 # Quickstart
@@ -136,6 +136,20 @@ then move `<file>.kata-proposed` over the original to adopt it, or delete it to
 keep the original. kata prints where the sidecar landed. For safety, a symlinked
 `AGENTS.md` is refused before it is read; replace it with a regular file before
 using `--with-agents`.
+
+## Load the contract in every session
+
+With a build from `main`, load Kata's contract in every coding-agent session
+on this machine:
+
+```sh
+kata agent-hooks install --all
+```
+
+For Codex, open Codex and run `/hooks` to trust the new hook. See
+[Contract in every session](../workflows/agents.md#contract-in-every-session)
+for harness selection, Hermes's first-turn behavior, and additional Codex
+homes. These commands are not included in 0.18.0.
 
 ## Create and inspect issues
 
