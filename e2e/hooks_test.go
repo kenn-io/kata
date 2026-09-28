@@ -96,10 +96,7 @@ type e2eDirs struct {
 func newE2EDirs(t *testing.T) e2eDirs {
 	t.Helper()
 	home := t.TempDir()
-	repoDir := t.TempDir()
-	require.NoError(t, runIn(repoDir, "git", "init", "--quiet"))
-	require.NoError(t, runIn(repoDir,
-		"git", "remote", "add", "origin", "https://github.com/wesm/kata-e2e.git"))
+	repoDir := initRepo(t, "https://github.com/example-org/example-workspace.git")
 	// Unix socket paths cap at 104 chars on macOS / 108 on Linux. The
 	// per-test t.TempDir() under macOS's /var/folders blows past that
 	// once /kata/<dbhash>/daemon.sock is appended, so XDG_RUNTIME_DIR
@@ -397,15 +394,4 @@ func verifyDaemonLogsHooks(t *testing.T, bin string, env []string) {
 	require.NoErrorf(t, err, "daemon logs --hooks failed: %s", out)
 	require.Contains(t, string(out), `"result":"ok"`,
 		"daemon logs --hooks output missing run line: %s", out)
-}
-
-// runIn runs the named command in dir, discarding stdout/stderr. Used
-// by initRepo-style helpers to set up a real git repo so the daemon's
-// alias resolution has something to chew on.
-func runIn(dir, name string, args ...string) error {
-	cmd := exec.Command(name, args...) //nolint:gosec // test-controlled args
-	cmd.Dir = dir
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	return cmd.Run()
 }

@@ -897,6 +897,7 @@ components:
           format: date-time
           type: string
         last_success_at:
+          description: Time of the last successful reconciliation, including cycles with no pending issues; query requests do not update it.
           format: date-time
           type: string
         rate_per_second:
@@ -7783,7 +7784,7 @@ paths:
           description: Error
   /api/v1/projects/{project_id}/search:
     get:
-      description: Explicit semantic/hybrid modes return a validation error (400) when the embedding API key is missing or rejected. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.
+      description: Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.
       operationId: searchIssues
       parameters:
         - description: Issue status; omit to search open and closed issues
@@ -7892,6 +7893,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Service Unavailable
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/ready:
     get:
       operationId: readyIssuesGlobal

@@ -22,7 +22,7 @@ import (
 type Config struct {
 	BaseURL             string
 	Model               string
-	APIKey              string
+	Credential          config.EmbeddingCredential
 	Salt                string
 	Dims                int
 	BatchSize           int
@@ -89,8 +89,7 @@ func New(cfg Config) (*Client, error) {
 		dims:      dims,
 		batchSize: batch,
 	}
-	credential := (config.EmbeddingsConfig{APIKey: cfg.APIKey}).ResolveCredential()
-	client.SetCredential(credential)
+	client.SetCredential(cfg.Credential)
 	return client, nil
 }
 
@@ -228,7 +227,9 @@ func (c *Client) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+credential.Key)
+	if credential.Key != "" {
+		req.Header.Set("Authorization", "Bearer "+credential.Key)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("embedding: request: %w", err)

@@ -1133,10 +1133,12 @@ type EmbeddingsHealth struct {
 	LastErrorAt     *time.Time `json:"last_error_at,omitempty"`
 	LastErrorStatus *int64     `json:"last_error_status,omitempty"`
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
-	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
-	RatePerSecond   *float64   `json:"rate_per_second,omitempty"`
-	Skipped         int64      `json:"skipped"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
+
+	// LastSuccessAt Time of the last successful reconciliation, including cycles with no pending issues; query requests do not update it.
+	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
+	RatePerSecond *float64   `json:"rate_per_second,omitempty"`
+	Skipped       int64      `json:"skipped"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
 }
 
 func (e EmbeddingsHealth) Validate() error {

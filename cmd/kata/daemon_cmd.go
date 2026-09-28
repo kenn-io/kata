@@ -1651,7 +1651,7 @@ func preflightEmbeddingStartup(
 	embedder, err := embedding.New(embedding.Config{
 		BaseURL:             ec.BaseURL,
 		Model:               ec.Model,
-		APIKey:              ec.ResolvedAPIKey(),
+		Credential:          ec.ResolveCredential(),
 		Salt:                ec.FingerprintSalt,
 		Dims:                ec.Dims,
 		BatchSize:           ec.BatchSize,
@@ -1661,7 +1661,6 @@ func preflightEmbeddingStartup(
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
 	}
-	embedder.SetCredential(ec.ResolveCredential())
 	batchOptions := embeddingBatchOptions(ec, embedder.BatchSize())
 	if _, err := kitvec.EncodeBatched(
 		context.Background(), embedder.EncodeFunc(), nil, batchOptions...,

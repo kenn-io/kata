@@ -39,7 +39,7 @@ func TestMissingEmbeddingCredentialPreservesBacklogAndExplainsSearch(t *testing.
 		t.Fatal("missing key must leave backfill pending")
 	}
 	h := r.Health()
-	if h.Credential != "missing" || h.CredentialSource != "env:EXAMPLE_KEY" || h.Backlog != 1 || h.Embedded != 0 || h.Skipped != 0 || h.LastSuccessAt != nil {
+	if h.Backlog != 1 || h.Embedded != 0 || h.Skipped != 0 || h.LastSuccessAt != nil {
 		t.Fatalf("unexpected health %+v", h)
 	}
 	for _, mode := range []string{"auto", "semantic", "hybrid", "lexical"} {
@@ -65,8 +65,8 @@ func TestMissingEmbeddingCredentialPreservesBacklogAndExplainsSearch(t *testing.
 	}
 }
 
-func TestEmptyReconcilerDoesNotClaimProviderSuccess(t *testing.T) {
-	c, err := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 2, APIKey: "example-key"})
+func TestEmptyReconcilerReportsSuccessfulReconciliation(t *testing.T) {
+	c, err := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,8 +74,11 @@ func TestEmptyReconcilerDoesNotClaimProviderSuccess(t *testing.T) {
 	if err := r.reconcileOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if r.Health().LastSuccessAt != nil {
-		t.Fatal("empty backfill claimed a provider success")
+	if r.Health().LastSuccessAt == nil {
+		t.Fatal("successful reconciliation must report last_success_at even without a provider call")
+	}
+	if c.CredentialHealth().LastSuccessAt != nil {
+		t.Fatal("empty reconciliation called the provider")
 	}
 }
 
@@ -93,7 +96,7 @@ func TestQueryCredentialRejectionUpdatesHealthAndRecovers(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"embedding":[1,0]}]}`))
 	}))
 	defer srv.Close()
-	c, _ := embedding.New(embedding.Config{BaseURL: srv.URL, Model: "m", Dims: 2, APIKey: "example-key"})
+	c, _ := embedding.New(embedding.Config{BaseURL: srv.URL, Model: "m", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
 	r := NewReconciler(store, idx, c, ReconcilerConfig{})
 	if err := r.reconcileOnce(ctx); err != nil {
 		t.Fatal(err)
@@ -105,7 +108,7 @@ func TestQueryCredentialRejectionUpdatesHealthAndRecovers(t *testing.T) {
 			if !errors.As(err, &me) || me.Status() != 400 || !strings.Contains(err.Error(), "rejected the API key") {
 				t.Fatalf("error %v", err)
 			}
-			h := r.Health()
+			h := c.CredentialHealth()
 			if h.Credential != "rejected" || h.LastErrorAt == nil || h.LastErrorStatus != 401 {
 				t.Fatalf("unexpected health %+v", h)
 			}
@@ -113,7 +116,7 @@ func TestQueryCredentialRejectionUpdatesHealthAndRecovers(t *testing.T) {
 			if err != nil || res.Degraded {
 				t.Fatalf("recovery error %v", err)
 			}
-			h := r.Health()
+			h := c.CredentialHealth()
 			if h.Credential != "ok" || h.LastError != "" || h.LastErrorAt != nil || h.LastSuccessAt == nil {
 				t.Fatalf("unexpected recovery %+v", h)
 			}
@@ -126,14 +129,14 @@ func TestRejectedCredentialExplainsUnavailableOldGeneration(t *testing.T) {
 	store := newReconcilerTestStore(t)
 	idx := openTestVectorIndex(t)
 	p, _ := store.CreateProject(ctx, "spoke-project")
-	old, _ := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:9", Model: "old-model", Dims: 2, APIKey: "example-key"})
+	old, _ := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:9", Model: "old-model", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
 	r := NewReconciler(store, idx, old, ReconcilerConfig{})
 	if err := r.reconcileOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) }))
 	defer srv.Close()
-	current, _ := embedding.New(embedding.Config{BaseURL: srv.URL, Model: "new-model", Dims: 2, APIKey: "example-key"})
+	current, _ := embedding.New(embedding.Config{BaseURL: srv.URL, Model: "new-model", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
 	if _, err := current.Embed(ctx, []string{"query"}); err == nil {
 		t.Fatal("provider must reject key")
 	}

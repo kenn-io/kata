@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
@@ -42,7 +43,7 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedAutoSearchStaysLexical(t 
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{1, 0}}}})
 	}))
 	defer embedderSrv.Close()
-	emb, err := embedding.New(embedding.Config{APIKey: "example-key", BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
+	emb, err := embedding.New(embedding.Config{BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
 	require.NoError(t, err)
 
 	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
@@ -72,7 +73,7 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedExplicitVectorModesRequir
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{1, 0}}}})
 	}))
 	defer embedderSrv.Close()
-	emb, err := embedding.New(embedding.Config{APIKey: "example-key", BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
+	emb, err := embedding.New(embedding.Config{BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
 	require.NoError(t, err)
 
 	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
@@ -171,7 +172,7 @@ func TestSearchEndpoint_EmptyResultsIsArrayNotNull(t *testing.T) {
 }
 
 func TestSearchEndpointMissingKeyIsValidation(t *testing.T) {
-	emb, err := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 2})
+	emb, err := embedding.New(embedding.Config{Credential: config.EmbeddingCredential{Source: "env:EXAMPLE_KEY", Reason: "no embedding API key (env EXAMPLE_KEY is unset)"}, BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 2})
 	require.NoError(t, err)
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder = emb })
 	p, err := env.DB.CreateProject(context.Background(), "spoke-project")

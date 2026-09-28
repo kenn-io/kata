@@ -36,6 +36,9 @@ type CredentialHealth struct {
 // SetCredential replaces the running credential. Unchanged reloads preserve
 // rejection state. A revision fences responses issued with an older key.
 func (c *Client) SetCredential(credential config.EmbeddingCredential) {
+	if credential.Source == "" {
+		credential.Source = "none"
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.credential == credential {
@@ -48,12 +51,8 @@ func (c *Client) SetCredential(credential config.EmbeddingCredential) {
 	c.credentialHealth.LastError = ""
 	c.credentialHealth.LastErrorAt = nil
 	c.credentialHealth.LastErrorStatus = 0
-	if credential.Key == "" {
+	if credential.Reason != "" {
 		c.credentialHealth.Credential = "missing"
-		if credential.Reason == "" {
-			c.credential.Reason = "no embedding API key"
-			c.credentialHealth.CredentialReason = c.credential.Reason
-		}
 	} else {
 		c.credentialHealth.Credential = "ok"
 	}
@@ -77,12 +76,12 @@ func (c *Client) CredentialHealth() CredentialHealth {
 	return h
 }
 
-// MissingCredentialError blocks missing credentials only. Rejected credentials
-// remain retryable: a successful call is the evidence needed to clear them.
+// MissingCredentialError blocks an unusable configured source. With no source,
+// requests are keyless, even after a provider rejection, so they can recover.
 func (c *Client) MissingCredentialError() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.credential.Key == "" {
+	if c.credential.Reason != "" {
 		return &CredentialError{Reason: c.credential.Reason}
 	}
 	return nil
@@ -91,7 +90,7 @@ func (c *Client) MissingCredentialError() error {
 func (c *Client) requestCredential() (config.EmbeddingCredential, uint64, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.credential.Key == "" {
+	if c.credential.Reason != "" {
 		return c.credential, c.credentialRevision, &CredentialError{Reason: c.credential.Reason}
 	}
 	return c.credential, c.credentialRevision, nil
@@ -100,12 +99,20 @@ func (c *Client) requestCredential() (config.EmbeddingCredential, uint64, error)
 func (c *Client) rejectCredential(credential config.EmbeddingCredential, revision uint64, provider *APIError) error {
 	// Do not retain echoed secrets in the wrapped error either.
 	provider.Body = ""
-	e := &CredentialError{Reason: fmt.Sprintf("embedding provider rejected the API key (%d) from %s", provider.StatusCode, credential.Source), Provider: provider}
+	state := "rejected"
+	reason := fmt.Sprintf("embedding provider rejected the API key (%d) from %s", provider.StatusCode, credential.Source)
+	if provider.StatusCode == 403 {
+		reason = "embedding provider denied access (403); check provider permissions and model access"
+	} else if credential.Key == "" {
+		state = "missing"
+		reason = "embedding provider requires an API key (401); set api_key, api_key_file, or api_key_env"
+	}
+	e := &CredentialError{Reason: reason, Provider: provider}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if revision == c.credentialRevision {
 		now := time.Now().UTC()
-		c.credentialHealth.Credential = "rejected"
+		c.credentialHealth.Credential = state
 		c.credentialHealth.CredentialReason = e.Reason
 		c.credentialHealth.LastError = e.Error()
 		c.credentialHealth.LastErrorAt = &now

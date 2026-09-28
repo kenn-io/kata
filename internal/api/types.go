@@ -94,7 +94,7 @@ type EmbeddingsHealth struct {
 	LastError        string     `json:"last_error,omitempty" doc:"Sanitized credential rejection; cleared after the next successful embedding call."`
 	LastErrorAt      *time.Time `json:"last_error_at,omitempty" doc:"Time of the credential rejection; cleared after the next successful embedding call."`
 	Configured       bool       `json:"configured"`
-	LastSuccessAt    *time.Time `json:"last_success_at,omitempty"`
+	LastSuccessAt    *time.Time `json:"last_success_at,omitempty" doc:"Time of the last successful reconciliation, including cycles with no pending issues; query requests do not update it."`
 	LastErrorStatus  int        `json:"last_error_status,omitempty,omitzero"`
 	Embedded         int64      `json:"embedded"`
 	Skipped          int64      `json:"skipped"`

@@ -4479,6 +4479,11 @@ export type searchIssuesResponse503 = {
   status: 503
 }
 
+export type searchIssuesResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 401 | 403 | 404 | 422 | 500 | 503>
+}
+
 export type searchIssuesResponseSuccess = searchIssuesResponse200 & {
   headers: Headers
 }
@@ -4490,6 +4495,7 @@ export type searchIssuesResponseError = (
   | searchIssuesResponse422
   | searchIssuesResponse500
   | searchIssuesResponse503
+  | searchIssuesResponseDefault
 ) & {
   headers: Headers
 }
@@ -4525,7 +4531,7 @@ export const getSearchIssuesUrl = (
 }
 
 /**
- * Explicit semantic/hybrid modes return a validation error (400) when the embedding API key is missing or rejected. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.
+ * Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.
  */
 export const searchIssues = async (
   { projectId }: SearchIssuesPathParameters,

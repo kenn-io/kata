@@ -7,7 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -15,9 +17,14 @@ func TestHealthCredentialWarningVisibleInHumanAndAgent(t *testing.T) {
 	for _, args := range [][]string{{"health"}, {"--agent", "health"}, {"--json", "health"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			resetFlags(t)
+			emb, err := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 2,
+				Credential: config.EmbeddingCredential{Source: "env:EXAMPLE_KEY", Reason: "no embedding API key (env EXAMPLE_KEY is unset)"},
+			})
+			require.NoError(t, err)
 			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+				cfg.Embedder = emb
 				cfg.ReconcilerHealth = func() daemon.ReconcilerHealth {
-					return daemon.ReconcilerHealth{Configured: true, Credential: "missing", CredentialSource: "env:EXAMPLE_KEY", CredentialReason: "no embedding API key (env EXAMPLE_KEY is unset)"} //nolint:gosec // G101: diagnostic fixture state and source names, not credential values.
+					return daemon.ReconcilerHealth{Configured: true}
 				}
 			})
 			out, stderr, err := executeRootCapture(t, contextWithBaseURL(context.Background(), env.URL), args...)

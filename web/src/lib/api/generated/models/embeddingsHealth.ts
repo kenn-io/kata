@@ -20,6 +20,7 @@ export interface EmbeddingsHealth {
   last_error_at?: string
   last_error_status?: number
   last_progress_at?: string
+  /** Time of the last successful reconciliation, including cycles with no pending issues; query requests do not update it. */
   last_success_at?: string
   rate_per_second?: number
   skipped: number

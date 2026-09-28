@@ -1,9 +1,11 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 )
 
 func TestHealth_ReportsSchemaAndUptime(t *testing.T) {
@@ -261,8 +264,12 @@ func mapKeys(values map[string]jsontext.Value) []string {
 
 func TestHealthIncludesSafeEmbeddingCredentialWarning(t *testing.T) {
 	d := openTestDB(t)
-	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ReconcilerHealth: func() daemon.ReconcilerHealth {
-		return daemon.ReconcilerHealth{Configured: true, Credential: "missing", CredentialSource: "env:EXAMPLE_KEY", CredentialReason: "no embedding API key (env EXAMPLE_KEY is unset)"} //nolint:gosec // G101: diagnostic fixture state and source names, not credential values.
+	emb, err := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 2})
+	require.NoError(t, err)
+	emb.SetCredential(config.EmbeddingCredential{Source: "env:EXAMPLE_KEY", Reason: "no embedding API key (env EXAMPLE_KEY is unset)"})
+	last := time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Embedder: emb, ReconcilerHealth: func() daemon.ReconcilerHealth {
+		return daemon.ReconcilerHealth{Configured: true, LastSuccessAt: &last}
 	}})
 	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
@@ -276,15 +283,23 @@ func TestHealthIncludesSafeEmbeddingCredentialWarning(t *testing.T) {
 	assert.Equal(t, "missing", body.Embeddings.Credential)
 	assert.Equal(t, "env:EXAMPLE_KEY", body.Embeddings.CredentialSource)
 	assert.Contains(t, body.Embeddings.CredentialReason, "unset")
-	assert.Nil(t, body.Embeddings.LastSuccessAt)
+	require.NotNil(t, body.Embeddings.LastSuccessAt)
+	assert.True(t, body.Embeddings.LastSuccessAt.Equal(last), "credential state must not replace reconciliation time")
 }
 
 func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {
 	d := openTestDB(t)
-	now := time.Now().UTC()
-	reason := "semantic search unavailable: embedding provider rejected the API key (401) from file:example.key"
-	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ReconcilerHealth: func() daemon.ReconcilerHealth {
-		return daemon.ReconcilerHealth{Configured: true, Credential: "rejected", CredentialSource: "file:example.key", CredentialReason: "embedding provider rejected the API key (401) from file:example.key", LastError: reason, LastErrorAt: &now, LastErrorStatus: 401} //nolint:gosec // G101: diagnostic fixture state and source names, not credential values.
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("provider echoed example-key"))
+	}))
+	defer provider.Close()
+	emb, err := embedding.New(embedding.Config{BaseURL: provider.URL, Model: "m", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
+	require.NoError(t, err)
+	_, err = emb.Embed(context.Background(), []string{"query"})
+	require.Error(t, err)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Embedder: emb, ReconcilerHealth: func() daemon.ReconcilerHealth {
+		return daemon.ReconcilerHealth{Configured: true}
 	}})
 	var body struct {
 		OK         bool                  `json:"ok"`
@@ -293,8 +308,9 @@ func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {
 	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
 	require.True(t, body.OK)
 	require.NotNil(t, body.Embeddings)
-	assert.Equal(t, reason, body.Embeddings.LastError)
+	assert.Contains(t, body.Embeddings.LastError, "rejected the API key (401)")
+	assert.NotContains(t, body.Embeddings.LastError, "example-key")
 	assert.Equal(t, "rejected", body.Embeddings.Credential)
 	require.NotNil(t, body.Embeddings.LastErrorAt)
-	assert.True(t, body.Embeddings.LastErrorAt.Equal(now))
+	assert.Equal(t, http.StatusUnauthorized, body.Embeddings.LastErrorStatus)
 }

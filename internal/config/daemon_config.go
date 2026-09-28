@@ -147,9 +147,6 @@ func (e EmbeddingsConfig) Enabled() bool {
 	return strings.TrimSpace(e.BaseURL) != "" && strings.TrimSpace(e.Model) != ""
 }
 
-// ResolvedAPIKey returns the selected credential value.
-func (e EmbeddingsConfig) ResolvedAPIKey() string { return e.ResolveCredential().Key }
-
 // StorageConfig is the [storage] block of <KATA_HOME>/config.toml. An empty
 // DSN means "no override from the file" — env (KATA_DSN, KATA_DB) or the
 // default <KATA_HOME>/kata.db wins. See config.KataDSN.

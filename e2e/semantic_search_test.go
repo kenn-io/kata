@@ -271,12 +271,17 @@ type fixtureEmbedder struct {
 }
 
 // newFixtureEmbedder starts the fake embedder on a loopback listener. Loopback
-// HTTP needs no trust_private_network. The fixture accepts a synthetic bearer
-// key so credential gating and origin pinning run as in production.
+// HTTP needs no trust_private_network. Like a keyless local provider, the
+// fixture rejects an Authorization header.
 func newFixtureEmbedder(t *testing.T) *fixtureEmbedder {
 	t.Helper()
 	f := &fixtureEmbedder{}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, present := r.Header["Authorization"]; present {
+			t.Error("keyless embedding request included Authorization")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		if r.URL.Path != "/v1/embeddings" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -355,7 +360,6 @@ func writeEmbeddingsConfig(t *testing.T, home, baseURL, model string) {
 	body := fmt.Sprintf(`[search.embeddings]
 base_url = %q
 model = %q
-api_key = "example-key"
 dims = 2
 `, baseURL, model)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o600))
@@ -645,7 +649,6 @@ func TestE2E_EmbeddingCredentialDiagnosticsAndFileReload(t *testing.T) {
 	initial := embeddingHealth(t, client, baseURL)
 	require.Contains(t, initial, `"credential":"missing"`)
 	require.Contains(t, initial, `"credential_source":"env:EXAMPLE_EMBEDDING_KEY"`)
-	require.NotContains(t, initial, "last_success_at")
 	pid := initProjectE2E(t, client, baseURL, dirs.repoDir)
 	pidStr := strconv.FormatInt(pid, 10)
 	short := createIssueWithBody(t, client, baseURL, pid, "credential rotation", "replace embedding provider credentials")
@@ -667,9 +670,9 @@ func TestE2E_EmbeddingCredentialDiagnosticsAndFileReload(t *testing.T) {
 	cmd.Stdout = &out
 	cmd.Stderr = &warning
 	require.NoError(t, cmd.Run())
-	require.Contains(t, warning.String(), "warning:")
-	require.Contains(t, warning.String(), "showing lexical results")
-	require.Equal(t, 1, strings.Count(warning.String(), "warning:"))
+	require.Empty(t, warning.String())
+	require.Contains(t, out.String(), "# mode=lexical degraded:")
+	require.Contains(t, out.String(), "EXAMPLE_EMBEDDING_KEY")
 	require.Zero(t, requests.Load())
 	require.NotContains(t, stderr.String(), "no embedding API key")
 	keyFile := filepath.Join(dirs.home, "embedding.key")

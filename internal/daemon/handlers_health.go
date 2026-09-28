@@ -58,24 +58,28 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if diagnostics && cfg.ReconcilerHealth != nil {
 			h := cfg.ReconcilerHealth()
 			out.Body.Embeddings = &api.EmbeddingsHealth{
-				Configured:       h.Configured,
-				Credential:       h.Credential,
-				CredentialSource: h.CredentialSource,
-				CredentialReason: h.CredentialReason,
-				LastErrorAt:      h.LastErrorAt,
-				LastSuccessAt:    h.LastSuccessAt,
-				LastErrorStatus:  h.LastErrorStatus,
-				Embedded:         h.Embedded,
-				Skipped:          h.Skipped,
-				Backlog:          h.Backlog,
-				RatePerSecond:    h.RatePerSecond,
-				ETASeconds:       h.ETASeconds,
-				StartedAt:        h.StartedAt,
-				LastProgressAt:   h.LastProgressAt,
+				Configured:      h.Configured,
+				LastSuccessAt:   h.LastSuccessAt,
+				LastErrorStatus: h.LastErrorStatus,
+				Embedded:        h.Embedded,
+				Skipped:         h.Skipped,
+				Backlog:         h.Backlog,
+				RatePerSecond:   h.RatePerSecond,
+				ETASeconds:      h.ETASeconds,
+				StartedAt:       h.StartedAt,
+				LastProgressAt:  h.LastProgressAt,
 			}
-			// Raw noncredential errors may contain provider-reflected issue text.
-			if h.Credential == "rejected" {
-				out.Body.Embeddings.LastError = h.LastError
+			if cfg.Embedder != nil {
+				c := cfg.Embedder.CredentialHealth()
+				out.Body.Embeddings.Credential = c.Credential
+				out.Body.Embeddings.CredentialSource = c.CredentialSource
+				out.Body.Embeddings.CredentialReason = c.CredentialReason
+				// Only credential errors exclude provider-reflected issue text.
+				out.Body.Embeddings.LastError = c.LastError
+				out.Body.Embeddings.LastErrorAt = c.LastErrorAt
+				if c.LastErrorStatus != 0 || h.LastErrorStatus == 401 || h.LastErrorStatus == 403 {
+					out.Body.Embeddings.LastErrorStatus = c.LastErrorStatus
+				}
 			}
 		}
 		if diagnostics && cfg.FederationConfigHealth != nil {

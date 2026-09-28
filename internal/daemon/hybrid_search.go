@@ -73,9 +73,9 @@ const knnDeepLimit = 1000
 // hybrid/semantic request that cannot run returns a *modeError for the handler
 // to map to 400 (unconfigured) or 503 (leg failure).
 func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb *embedding.Client, p hybridParams) (hybridResult, error) {
-	// A missing credential must be explained even before an index is ready.
+	// Credential failures must be explained even before an index is ready.
 	// Otherwise retain the existing absent-index lexical-only contract.
-	configured := emb != nil && (idx != nil || emb.MissingCredentialError() != nil || emb.CredentialHealth().Credential == "rejected")
+	configured := emb != nil && (idx != nil || emb.CredentialHealth().Credential != "ok")
 	mode, err := resolveMode(p.Requested, configured)
 	if err != nil {
 		return hybridResult{}, &modeError{status: 400, msg: err.Error()}
@@ -183,7 +183,7 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		return nil, false, err
 	}
 	if idx == nil {
-		if h := emb.CredentialHealth(); h.Credential == "rejected" {
+		if h := emb.CredentialHealth(); h.Credential != "ok" {
 			return nil, false, &embedding.CredentialError{Reason: h.CredentialReason}
 		}
 		return nil, false, errors.New("vector index unavailable")
@@ -193,7 +193,7 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		return nil, false, err
 	}
 	if !ok {
-		if h := emb.CredentialHealth(); h.Credential == "rejected" {
+		if h := emb.CredentialHealth(); h.Credential != "ok" {
 			return nil, false, &embedding.CredentialError{Reason: h.CredentialReason}
 		}
 		return nil, false, errors.New("no active embedding generation (backfill in progress)")
@@ -204,7 +204,7 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// vectors is meaningless (same dims) or an error (dims change), so the leg
 	// is unavailable until cutover.
 	if key != emb.Generation().Fingerprint() {
-		if h := emb.CredentialHealth(); h.Credential == "rejected" {
+		if h := emb.CredentialHealth(); h.Credential != "ok" {
 			return nil, false, &embedding.CredentialError{Reason: h.CredentialReason}
 		}
 		return nil, false, errors.New("embedding model changed; new index is backfilling")

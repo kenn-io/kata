@@ -189,7 +189,7 @@ func countedEmbedder(t *testing.T, model string, calls *atomic.Int64) *embedding
 		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": data}))
 	}))
 	t.Cleanup(server.Close)
-	client, err := embedding.New(embedding.Config{APIKey: "example-key", BaseURL: server.URL, Model: model, Dims: 2})
+	client, err := embedding.New(embedding.Config{BaseURL: server.URL, Model: model, Dims: 2})
 	require.NoError(t, err)
 	return client
 }
@@ -208,7 +208,7 @@ func mappedEmbedder(t *testing.T, vectorFor func(string) []float32) *embedding.C
 		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": data}))
 	}))
 	t.Cleanup(server.Close)
-	client, err := embedding.New(embedding.Config{APIKey: "example-key", BaseURL: server.URL, Model: "pgvector-e2e", Dims: 2})
+	client, err := embedding.New(embedding.Config{BaseURL: server.URL, Model: "pgvector-e2e", Dims: 2})
 	require.NoError(t, err)
 	return client
 }
