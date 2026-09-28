@@ -34,17 +34,21 @@ type ReconcilerConfig struct {
 
 // ReconcilerHealth is the operator-visible state surfaced in /health.
 type ReconcilerHealth struct {
-	Configured      bool       `json:"configured"`
-	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
-	LastError       string     `json:"-"`
-	LastErrorStatus int        `json:"last_error_status,omitempty"`
-	Embedded        int64      `json:"embedded"`
-	Skipped         int64      `json:"skipped"`
-	Backlog         int64      `json:"backlog"`
-	RatePerSecond   *float64   `json:"rate_per_second,omitempty"`
-	ETASeconds      *int64     `json:"eta_seconds,omitempty"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
+	Credential       string     `json:"credential,omitempty"`
+	CredentialSource string     `json:"credential_source,omitempty"`
+	CredentialReason string     `json:"credential_reason,omitempty"`
+	LastErrorAt      *time.Time `json:"last_error_at,omitempty"`
+	Configured       bool       `json:"configured"`
+	LastSuccessAt    *time.Time `json:"last_success_at,omitempty"`
+	LastError        string     `json:"-"`
+	LastErrorStatus  int        `json:"last_error_status,omitempty"`
+	Embedded         int64      `json:"embedded"`
+	Skipped          int64      `json:"skipped"`
+	Backlog          int64      `json:"backlog"`
+	RatePerSecond    *float64   `json:"rate_per_second,omitempty"`
+	ETASeconds       *int64     `json:"eta_seconds,omitempty"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	LastProgressAt   *time.Time `json:"last_progress_at,omitempty"`
 }
 
 // Reconciler keeps the vector sidecar's active generation fresh: it mirrors
@@ -117,8 +121,20 @@ func (r *Reconciler) Health() ReconcilerHealth {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	h := r.health
-	if r.health.LastSuccessAt != nil {
-		t := *r.health.LastSuccessAt
+	if client, ok := r.emb.(*embedding.Client); ok {
+		c := client.CredentialHealth()
+		h.Credential = c.Credential
+		h.CredentialSource = c.CredentialSource
+		h.CredentialReason = c.CredentialReason
+		h.LastError = c.LastError
+		h.LastErrorAt = c.LastErrorAt
+		h.LastSuccessAt = c.LastSuccessAt
+		if c.Credential == "rejected" || h.LastErrorStatus == 401 || h.LastErrorStatus == 403 {
+			h.LastErrorStatus = c.LastErrorStatus
+		}
+	}
+	if h.LastSuccessAt != nil {
+		t := *h.LastSuccessAt
 		h.LastSuccessAt = &t
 	}
 	if r.health.StartedAt != nil {
@@ -286,6 +302,12 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		return err
 	}
 	r.setCoverage(key, embedded, skipped, backlog)
+	if client, ok := r.emb.(*embedding.Client); ok {
+		if err := client.MissingCredentialError(); err != nil {
+			r.markError(err)
+			return err
+		}
+	}
 	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled); err != nil {
 		if embedded, skipped, backlog, coverageErr := r.idx.Coverage(ctx, key); coverageErr == nil {
 			r.setCoverage(key, embedded, skipped, backlog)

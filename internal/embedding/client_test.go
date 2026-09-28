@@ -30,7 +30,7 @@ func newFakeServer(t *testing.T, status int, body string, retryAfter string) *ht
 func TestEmbedNormalizesVectors(t *testing.T) {
 	srv := newFakeServer(t, 200, `{"data":[{"embedding":[3,4]}]}`, "")
 	defer srv.Close()
-	c, err := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	c, err := New(Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestEmbedRejectsNullComponent(t *testing.T) {
 	// and the corrupted vector is stamped as complete.
 	srv := newFakeServer(t, 200, `{"data":[{"embedding":[0.5,null]}]}`, "")
 	defer srv.Close()
-	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	c, _ := New(Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
 	if err == nil || !strings.Contains(err.Error(), "null") {
 		t.Fatalf("want null-component error, got %v", err)
@@ -62,7 +62,7 @@ func TestEmbedRejectsZeroNormVector(t *testing.T) {
 	// poisons search rankings with no signal that a re-embed is needed.
 	srv := newFakeServer(t, 200, `{"data":[{"embedding":[0,0]}]}`, "")
 	defer srv.Close()
-	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	c, _ := New(Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
 	if err == nil || !strings.Contains(err.Error(), "zero norm") {
 		t.Fatalf("want zero-norm error, got %v", err)
@@ -72,7 +72,7 @@ func TestEmbedRejectsZeroNormVector(t *testing.T) {
 func TestEmbedDimsMismatchErrors(t *testing.T) {
 	srv := newFakeServer(t, 200, `{"data":[{"embedding":[1,2,3]}]}`, "")
 	defer srv.Close()
-	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	c, _ := New(Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
 	if err == nil {
 		t.Fatal("expected dims-mismatch error")
@@ -82,7 +82,7 @@ func TestEmbedDimsMismatchErrors(t *testing.T) {
 func TestEmbed401IsDefinitive(t *testing.T) {
 	srv := newFakeServer(t, 401, `{"error":"bad key"}`, "")
 	defer srv.Close()
-	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	c, _ := New(Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || !apiErr.Definitive() {
@@ -93,7 +93,7 @@ func TestEmbed401IsDefinitive(t *testing.T) {
 func TestEmbed429CarriesRetryAfter(t *testing.T) {
 	srv := newFakeServer(t, 429, `{}`, "7")
 	defer srv.Close()
-	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	c, _ := New(Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
@@ -114,7 +114,7 @@ func TestEmbed429RetryAfterHTTPDate(t *testing.T) {
 	future := time.Now().UTC().Add(offset).Format(http.TimeFormat)
 	srv := newFakeServer(t, 429, `{}`, future)
 	defer srv.Close()
-	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	c, _ := New(Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
@@ -135,7 +135,7 @@ func TestEmbed429RetryAfterPastHTTPDateClampsToZero(t *testing.T) {
 	past := time.Now().UTC().Add(-1 * time.Hour).Format(http.TimeFormat)
 	srv := newFakeServer(t, 429, `{}`, past)
 	defer srv.Close()
-	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	c, _ := New(Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
@@ -175,7 +175,7 @@ func TestEmbedBatchesPreserveOrder(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2, BatchSize: 2})
+	c, err := New(Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2, BatchSize: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestGenerationFingerprintComponents(t *testing.T) {
 }
 
 func TestEncodeFuncRecoversPanic(t *testing.T) {
-	c, _ := New(Config{BaseURL: "http://127.0.0.1:9", Model: "m"})
+	c, _ := New(Config{APIKey: "example-key", BaseURL: "http://127.0.0.1:9", Model: "m"})
 	enc := c.EncodeFunc()
 	// nil ctx makes http.NewRequestWithContext panic-free but forcing a panic
 	// requires a hostile transport; instead verify the recover wrapper directly.
@@ -258,7 +258,7 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestEmbedRejectsCrossOriginRedirectWithoutAPIKey(t *testing.T) {
+func TestTransportRejectsCrossOriginRedirectWithoutAPIKey(t *testing.T) {
 	var redirected bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		redirected = true
@@ -275,7 +275,11 @@ func TestEmbedRejectsCrossOriginRedirectWithoutAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new embedding client: %v", err)
 	}
-	_, err = c.Embed(context.Background(), []string{"x"})
+	resp, requestErr := c.http.Post(redirector.URL+"/embeddings", "application/json", strings.NewReader(`{"input":["x"]}`))
+	err = requestErr
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected cross-origin redirect to be rejected without an API key")
 	}

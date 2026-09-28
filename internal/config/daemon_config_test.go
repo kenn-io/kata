@@ -1423,7 +1423,7 @@ model = "nomic-embed-text"
 	assert.Contains(t, err.Error(), "model")
 }
 
-func TestReadDaemonConfig_SearchEmbeddingsRejectsAPIKeyAndAPIKeyEnv(t *testing.T) {
+func TestReadDaemonConfig_SearchEmbeddingsInlineOverridesAPIKeyEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
@@ -1435,9 +1435,7 @@ api_key_env = "Y"
 `), 0o600))
 
 	_, err := config.ReadDaemonConfig()
-	require.Error(t, err, "api_key and api_key_env are mutually exclusive")
-	assert.Contains(t, err.Error(), "api_key")
-	assert.Contains(t, err.Error(), "api_key_env")
+	require.NoError(t, err, "inline api_key takes precedence over api_key_env")
 }
 
 func TestReadDaemonConfig_SearchEmbeddingsRejectsNegativeDims(t *testing.T) {

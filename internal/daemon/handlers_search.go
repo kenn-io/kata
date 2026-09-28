@@ -17,6 +17,8 @@ import (
 func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "searchIssues",
+		Description: "Explicit semantic/hybrid modes return a validation error (400) when the embedding API key is missing or rejected. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.",
+		Errors:      []int{400, 401, 403, 404, 503},
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/search",
 	}, func(ctx context.Context, in *api.SearchRequest) (*api.SearchResponse, error) {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.kenn.io/kata/internal/config"
@@ -31,12 +32,16 @@ type Config struct {
 
 // Client calls an OpenAI-compatible /embeddings endpoint.
 type Client struct {
-	http      *http.Client
-	baseURL   string
-	model     string
-	salt      string
-	dims      int
-	batchSize int
+	http               *http.Client
+	baseURL            string
+	model              string
+	salt               string
+	dims               int
+	batchSize          int
+	mu                 sync.Mutex
+	credential         config.EmbeddingCredential
+	credentialRevision uint64
+	credentialHealth   CredentialHealth
 }
 
 const (
@@ -73,24 +78,25 @@ func New(cfg Config) (*Client, error) {
 		Timeout: timeout,
 		Transport: &embeddingTransport{
 			origin: origin,
-			apiKey: cfg.APIKey,
 			policy: policy,
 		},
 	}
-	return &Client{
+	client := &Client{
 		http:      hc,
 		baseURL:   strings.TrimRight(cfg.BaseURL, "/"),
 		model:     cfg.Model,
 		salt:      cfg.Salt,
 		dims:      dims,
 		batchSize: batch,
-	}, nil
+	}
+	credential := (config.EmbeddingsConfig{APIKey: cfg.APIKey}).ResolveCredential()
+	client.SetCredential(credential)
+	return client, nil
 }
 
 type embeddingTransport struct {
 	base   http.RoundTripper
 	origin string
-	apiKey string
 	policy config.BearerPolicy
 }
 
@@ -105,12 +111,7 @@ func (t *embeddingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if reqOrigin := req.URL.Scheme + "://" + req.URL.Host; reqOrigin != t.origin {
 		return nil, fmt.Errorf("refusing embedding request to origin %q - client is bound to embedding origin %q", reqOrigin, t.origin)
 	}
-	if t.apiKey == "" || req.Header.Get("Authorization") != "" {
-		return base.RoundTrip(req)
-	}
-	clone := req.Clone(req.Context())
-	clone.Header.Set("Authorization", "Bearer "+t.apiKey)
-	return base.RoundTrip(clone)
+	return base.RoundTrip(req)
 }
 
 // Dims returns the configured/expected vector dimensionality.
@@ -214,6 +215,10 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
 func (c *Client) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	credential, revision, err := c.requestCredential()
+	if err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(embedRequest{Model: c.model, Input: texts})
 	if err != nil {
 		return nil, fmt.Errorf("embedding: marshal request: %w", err)
@@ -223,6 +228,7 @@ func (c *Client) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+credential.Key)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("embedding: request: %w", err)
@@ -236,11 +242,15 @@ func (c *Client) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 	maxBytes := int64(c.dims)*int64(len(texts))*16 + (1 << 20)
 	rb, _ := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 	if resp.StatusCode != http.StatusOK {
-		return nil, &APIError{
+		provider := &APIError{
 			StatusCode: resp.StatusCode,
 			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
 			Body:       string(rb),
 		}
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			return nil, c.rejectCredential(credential, revision, provider)
+		}
+		return nil, provider
 	}
 	var er embedResponse
 	if err := json.Unmarshal(rb, &er); err != nil {
@@ -260,6 +270,7 @@ func (c *Client) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 		}
 		vecs[i] = normalized
 	}
+	c.credentialSucceeded(revision)
 	return vecs, nil
 }
 

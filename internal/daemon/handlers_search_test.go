@@ -42,7 +42,7 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedAutoSearchStaysLexical(t 
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{1, 0}}}})
 	}))
 	defer embedderSrv.Close()
-	emb, err := embedding.New(embedding.Config{BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
+	emb, err := embedding.New(embedding.Config{APIKey: "example-key", BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
 	require.NoError(t, err)
 
 	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
@@ -72,7 +72,7 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedExplicitVectorModesRequir
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{1, 0}}}})
 	}))
 	defer embedderSrv.Close()
-	emb, err := embedding.New(embedding.Config{BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
+	emb, err := embedding.New(embedding.Config{APIKey: "example-key", BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
 	require.NoError(t, err)
 
 	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
@@ -168,4 +168,20 @@ func TestSearchEndpoint_EmptyResultsIsArrayNotNull(t *testing.T) {
 	assert.Contains(t, body, `"results":[]`,
 		"empty results must serialize as an array, not null")
 	assert.NotContains(t, body, `"results":null`)
+}
+
+func TestSearchEndpointMissingKeyIsValidation(t *testing.T) {
+	emb, err := embedding.New(embedding.Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 2})
+	require.NoError(t, err)
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder = emb })
+	p, err := env.DB.CreateProject(context.Background(), "spoke-project")
+	require.NoError(t, err)
+	// A configured embedder must explain the credential even before the index
+	// becomes usable. The absent index otherwise looks like unconfigured search.
+	for _, mode := range []string{"semantic", "hybrid"} {
+		resp, bs := envGetRaw(t, env, projectPath(p.ID)+"/search?q=credential&mode="+mode)
+		assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
+		assert.Contains(t, string(bs), "no embedding API key")
+		assert.NotContains(t, string(bs), "internal")
+	}
 }

@@ -860,7 +860,7 @@ func joinInts(values []int, sep string) string {
 func daemonReloadCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "reload",
-		Short: "ask a running daemon to reload hook config",
+		Short: "ask a running daemon to reload hooks and embedding credentials",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
@@ -1134,7 +1134,7 @@ func runDaemonProcess(
 
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
-	embedder, vectorIndex, reconcilerHealth, err := startEmbeddingReconciler(
+	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconciler(
 		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog,
 	)
 	if err != nil {
@@ -1154,7 +1154,11 @@ func runDaemonProcess(
 	// daemon_signaling_{unix,windows}.go.
 	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
 	workers.Go(func() {
-		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
+		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog, func() {
+			if err := reloadEmbeddingCredentials(dcfg.Search.Embeddings, embedder, embeddingWake); err != nil {
+				daemonLog.Printf("embedding credential reload failed: %v", err)
+			}
+		})
 	})
 	restartCleanup := daemonPlatformCleanup(func(context.Context) bool { return true })
 	if restart != nil {
@@ -1657,6 +1661,7 @@ func preflightEmbeddingStartup(
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
 	}
+	embedder.SetCredential(ec.ResolveCredential())
 	batchOptions := embeddingBatchOptions(ec, embedder.BatchSize())
 	if _, err := kitvec.EncodeBatched(
 		context.Background(), embedder.EncodeFunc(), nil, batchOptions...,
@@ -1697,13 +1702,13 @@ func startEmbeddingReconciler(
 	store db.Storage,
 	bcast *daemon.EventBroadcaster,
 	daemonLog *log.Logger,
-) (*embedding.Client, *vector.Index, func() daemon.ReconcilerHealth, error) {
+) (*embedding.Client, *vector.Index, func() daemon.ReconcilerHealth, func(), error) {
 	if embedder == nil {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 	idx, err := openEmbeddingVectorIndex(ctx, store, vectorsPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("embedding index: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("embedding index: %w", err)
 	}
 	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{
 		BatchSize:      ec.BatchSize,
@@ -1717,7 +1722,7 @@ func startEmbeddingReconciler(
 	})
 	startEmbeddingNudge(ctx, workers, bcast, reconciler)
 	reconciler.Wake() // initial backfill sweep
-	return embedder, idx, reconciler.Health, nil
+	return embedder, idx, reconciler.Health, reconciler.Wake, nil
 }
 
 // startEmbeddingNudge subscribes to the broadcaster and wakes the reconciler on

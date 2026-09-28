@@ -31,12 +31,16 @@ func runReloadLoop(
 	configPath string,
 	disp reloadable,
 	lg loopLogger,
+	onReload ...func(),
 ) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-sigs:
+			for _, reload := range onReload {
+				reload()
+			}
 			loaded, err := hooks.LoadReload(configPath, disp.CurrentConfig())
 			if err != nil {
 				lg.Printf("hooks reload failed: %v (keeping previous config)", err)

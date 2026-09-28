@@ -23,6 +23,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
   updates both hooks in tracked files for teammates without a user hook. See the
   [init reference](reference/cli.md#workspace-initialization).
 
+- Surface missing or rejected embedding API keys in health and search without
+  startup warnings. Missing keys make no provider requests, keep the backlog,
+  and leave ordinary daemon health unchanged. Explicit semantic/hybrid searches
+  report readable validation errors; default human search warns on fallback.
+- Add `search.embeddings.api_key_file` with Unix ownership, path, and permission
+  checks plus credential reload. Credentials resolve inline > file > environment;
+  local embedding providers that ignore bearer headers now need a nonsecret
+  placeholder key.
+
 ## 0.18.0
 <small>2026-09-17</small>
 

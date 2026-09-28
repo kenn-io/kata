@@ -1112,16 +1112,46 @@ func (e EditIssueResponseBody) Validate() error {
 }
 
 type EmbeddingsHealth struct {
-	Backlog         int64      `json:"backlog"`
-	Configured      bool       `json:"configured"`
-	Embedded        int64      `json:"embedded"`
-	EtaSeconds      *int64     `json:"eta_seconds,omitempty"`
+	Backlog    int64 `json:"backlog"`
+	Configured bool  `json:"configured"`
+
+	// Credential Embedding credential state; an advisory warning that does not change health.ok.
+	Credential *EmbeddingsHealthCredential `json:"credential,omitempty"`
+
+	// CredentialReason Readable missing or rejected credential reason, without provider response bodies.
+	CredentialReason *string `json:"credential_reason,omitempty"`
+
+	// CredentialSource Selected credential source: inline, file:<path>, env:<NAME>, or none; never the key value.
+	CredentialSource *string `json:"credential_source,omitempty"`
+	Embedded         int64   `json:"embedded"`
+	EtaSeconds       *int64  `json:"eta_seconds,omitempty"`
+
+	// LastError Sanitized credential rejection; cleared after the next successful embedding call.
+	LastError *string `json:"last_error,omitempty"`
+
+	// LastErrorAt Time of the credential rejection; cleared after the next successful embedding call.
+	LastErrorAt     *time.Time `json:"last_error_at,omitempty"`
 	LastErrorStatus *int64     `json:"last_error_status,omitempty"`
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
 	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
 	RatePerSecond   *float64   `json:"rate_per_second,omitempty"`
 	Skipped         int64      `json:"skipped"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
+}
+
+func (e EmbeddingsHealth) Validate() error {
+	var errors runtime.ValidationErrors
+	if e.Credential != nil {
+		if v, ok := any(e.Credential).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Credential", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type EnableIssueSyncRequestBody struct {

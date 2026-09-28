@@ -6078,7 +6078,165 @@ func (c *Client) SearchIssuesWithResponse(ctx context.Context, options *SearchIs
 			}
 		}
 		return out, nil
+	case 400:
+		out.JSON400 = new(SearchIssuesErrorResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON400); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "SearchIssuesErrorResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(SearchIssuesErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 401:
+		out.JSON401 = new(SearchIssuesErrorResponseJSON)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON401); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "SearchIssuesErrorResponseJSON",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(SearchIssuesErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 403:
+		out.JSON403 = new(SearchIssuesErrorResponseJSON403)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON403); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "SearchIssuesErrorResponseJSON403",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(SearchIssuesErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 404:
+		out.JSON404 = new(SearchIssuesErrorResponseJSON404)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON404); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "SearchIssuesErrorResponseJSON404",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(SearchIssuesErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 422:
+		out.JSON422 = new(SearchIssuesErrorResponseJSON422)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON422); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "SearchIssuesErrorResponseJSON422",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(SearchIssuesErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
 	case 500:
+		out.JSON500 = new(SearchIssuesErrorResponseJSON500)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON500); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "SearchIssuesErrorResponseJSON500",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		if len(resp.Content) > 0 {
+			envelope := new(SearchIssuesErrorResponse)
+			if json.Unmarshal(resp.Content, envelope) == nil {
+				if errTarget, ok := any(*envelope).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	case 503:
+		out.JSON503 = new(SearchIssuesErrorResponseJSON503)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON503); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "SearchIssuesErrorResponseJSON503",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
 		if len(resp.Content) > 0 {
 			envelope := new(SearchIssuesErrorResponse)
 			if json.Unmarshal(resp.Content, envelope) == nil {

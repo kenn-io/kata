@@ -864,12 +864,32 @@ components:
           type: integer
         configured:
           type: boolean
+        credential:
+          description: Embedding credential state; an advisory warning that does not change health.ok.
+          enum:
+            - missing
+            - rejected
+            - ok
+          type: string
+        credential_reason:
+          description: Readable missing or rejected credential reason, without provider response bodies.
+          type: string
+        credential_source:
+          description: "Selected credential source: inline, file:<path>, env:<NAME>, or none; never the key value."
+          type: string
         embedded:
           format: int64
           type: integer
         eta_seconds:
           format: int64
           type: integer
+        last_error:
+          description: Sanitized credential rejection; cleared after the next successful embedding call.
+          type: string
+        last_error_at:
+          description: Time of the credential rejection; cleared after the next successful embedding call.
+          format: date-time
+          type: string
         last_error_status:
           format: int64
           type: integer
@@ -7763,6 +7783,7 @@ paths:
           description: Error
   /api/v1/projects/{project_id}/search:
     get:
+      description: Explicit semantic/hybrid modes return a validation error (400) when the embedding API key is missing or rejected. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.
       operationId: searchIssues
       parameters:
         - description: Issue status; omit to search open and closed issues
@@ -7829,12 +7850,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/SearchResponseBody"
           description: OK
-        default:
+        "400":
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-          description: Error
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Service Unavailable
   /api/v1/ready:
     get:
       operationId: readyIssuesGlobal

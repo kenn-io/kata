@@ -58,16 +58,24 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if diagnostics && cfg.ReconcilerHealth != nil {
 			h := cfg.ReconcilerHealth()
 			out.Body.Embeddings = &api.EmbeddingsHealth{
-				Configured:      h.Configured,
-				LastSuccessAt:   h.LastSuccessAt,
-				LastErrorStatus: h.LastErrorStatus,
-				Embedded:        h.Embedded,
-				Skipped:         h.Skipped,
-				Backlog:         h.Backlog,
-				RatePerSecond:   h.RatePerSecond,
-				ETASeconds:      h.ETASeconds,
-				StartedAt:       h.StartedAt,
-				LastProgressAt:  h.LastProgressAt,
+				Configured:       h.Configured,
+				Credential:       h.Credential,
+				CredentialSource: h.CredentialSource,
+				CredentialReason: h.CredentialReason,
+				LastErrorAt:      h.LastErrorAt,
+				LastSuccessAt:    h.LastSuccessAt,
+				LastErrorStatus:  h.LastErrorStatus,
+				Embedded:         h.Embedded,
+				Skipped:          h.Skipped,
+				Backlog:          h.Backlog,
+				RatePerSecond:    h.RatePerSecond,
+				ETASeconds:       h.ETASeconds,
+				StartedAt:        h.StartedAt,
+				LastProgressAt:   h.LastProgressAt,
+			}
+			// Raw noncredential errors may contain provider-reflected issue text.
+			if h.Credential == "rejected" {
+				out.Body.Embeddings.LastError = h.LastError
 			}
 		}
 		if diagnostics && cfg.FederationConfigHealth != nil {

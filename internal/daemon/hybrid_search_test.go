@@ -66,7 +66,7 @@ func failingEmbedClient(t *testing.T, status int) *embedding.Client {
 		_, _ = w.Write([]byte(`{"error":"unavailable"}`))
 	}))
 	t.Cleanup(srv.Close)
-	c, err := embedding.New(embedding.Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	c, err := embedding.New(embedding.Config{APIKey: "example-key", BaseURL: srv.URL, Model: "m", Dims: 2})
 	if err != nil {
 		t.Fatalf("new embedding client: %v", err)
 	}
@@ -111,7 +111,7 @@ func mappedVectorEmbedClient(t *testing.T, model string, dims int, vecFor func(s
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 	t.Cleanup(srv.Close)
-	c, err := embedding.New(embedding.Config{BaseURL: srv.URL, Model: model, Dims: dims})
+	c, err := embedding.New(embedding.Config{APIKey: "example-key", BaseURL: srv.URL, Model: model, Dims: dims})
 	if err != nil {
 		t.Fatalf("new embedding client: %v", err)
 	}
@@ -187,6 +187,42 @@ func TestHybridSearchExplicitHybridLegFailureReturns503(t *testing.T) {
 	}
 	if me.Status() != 503 {
 		t.Fatalf("leg failure under an explicit mode should be 503, got %d", me.Status())
+	}
+}
+
+func TestVectorLegUnavailable_RejectedCredentialWithNilIndexPreservesReason(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "login credential state", Body: "x", Author: "a",
+	})
+	require.NoError(t, err)
+
+	emb := failingEmbedClient(t, http.StatusUnauthorized)
+	_, err = emb.Embed(ctx, []string{"seed rejected credential health"})
+	require.Error(t, err)
+	require.Equal(t, "rejected", emb.CredentialHealth().Credential)
+
+	result, err := hybridSearch(ctx, store, nil /*idx*/, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login", Limit: 10, Requested: "auto",
+	})
+	require.NoError(t, err)
+	require.Equal(t, modeLexical, result.Mode)
+	require.True(t, result.Degraded)
+	require.Contains(t, result.DegradedReason, "rejected the API key (401)")
+	require.Len(t, result.Hits, 1)
+	require.Equal(t, issue.ID, result.Hits[0].Issue.ID)
+
+	for _, mode := range []string{"semantic", "hybrid"} {
+		_, err = hybridSearch(ctx, store, nil /*idx*/, emb, hybridParams{
+			ProjectID: proj.ID, Query: "login", Limit: 10, Requested: mode,
+		})
+		var modeErr *modeError
+		require.ErrorAs(t, err, &modeErr, "explicit %s should retain the credential rejection", mode)
+		require.Equal(t, 400, modeErr.Status())
+		require.Contains(t, modeErr.Error(), "rejected the API key (401)")
 	}
 }
 

@@ -258,3 +258,43 @@ func mapKeys(values map[string]jsontext.Value) []string {
 	}
 	return keys
 }
+
+func TestHealthIncludesSafeEmbeddingCredentialWarning(t *testing.T) {
+	d := openTestDB(t)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ReconcilerHealth: func() daemon.ReconcilerHealth {
+		return daemon.ReconcilerHealth{Configured: true, Credential: "missing", CredentialSource: "env:EXAMPLE_KEY", CredentialReason: "no embedding API key (env EXAMPLE_KEY is unset)"} //nolint:gosec // G101: diagnostic fixture state and source names, not credential values.
+	}})
+	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var body struct {
+		OK         bool                  `json:"ok"`
+		Embeddings *api.EmbeddingsHealth `json:"embeddings"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.True(t, body.OK)
+	require.NotNil(t, body.Embeddings)
+	assert.Equal(t, "missing", body.Embeddings.Credential)
+	assert.Equal(t, "env:EXAMPLE_KEY", body.Embeddings.CredentialSource)
+	assert.Contains(t, body.Embeddings.CredentialReason, "unset")
+	assert.Nil(t, body.Embeddings.LastSuccessAt)
+}
+
+func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {
+	d := openTestDB(t)
+	now := time.Now().UTC()
+	reason := "semantic search unavailable: embedding provider rejected the API key (401) from file:example.key"
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ReconcilerHealth: func() daemon.ReconcilerHealth {
+		return daemon.ReconcilerHealth{Configured: true, Credential: "rejected", CredentialSource: "file:example.key", CredentialReason: "embedding provider rejected the API key (401) from file:example.key", LastError: reason, LastErrorAt: &now, LastErrorStatus: 401} //nolint:gosec // G101: diagnostic fixture state and source names, not credential values.
+	}})
+	var body struct {
+		OK         bool                  `json:"ok"`
+		Embeddings *api.EmbeddingsHealth `json:"embeddings"`
+	}
+	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	require.True(t, body.OK)
+	require.NotNil(t, body.Embeddings)
+	assert.Equal(t, reason, body.Embeddings.LastError)
+	assert.Equal(t, "rejected", body.Embeddings.Credential)
+	require.NotNil(t, body.Embeddings.LastErrorAt)
+	assert.True(t, body.Embeddings.LastErrorAt.Equal(now))
+}
