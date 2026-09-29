@@ -205,9 +205,13 @@
           <span class="link-peer">{linkPeerLabel(link)}</span>
           {#if peer?.title}<span class="link-title">{peer.title}</span>{/if}
           {#if showStateChips && peer}
-            <Chip size="xs" tone={peer.status === 'open' ? 'success' : 'muted'}>{peer.status}</Chip>
+            <Chip size="xs" uppercase={false} tone={peer.status === 'open' ? 'success' : 'muted'}
+              >{peer.status}</Chip
+            >
           {:else if resolution.kind === 'failed'}
-            <Chip size="xs" tone="muted" title="Task state unavailable">unknown</Chip>
+            <Chip size="xs" uppercase={false} tone="muted" title="Task state unavailable"
+              >unknown</Chip
+            >
           {/if}
         </button>
       {/each}
@@ -257,10 +261,9 @@
 
   .section-header h3 {
     margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 650;
-    text-transform: uppercase;
+    color: var(--text-primary);
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
   }
 
   .link-header-actions {

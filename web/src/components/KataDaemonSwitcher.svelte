@@ -79,7 +79,7 @@
   </button>
 
   {#if open}
-    <div class="daemon-menu" role="menu" aria-label="Configured Kata daemons">
+    <div class="daemon-menu kit-popover-card" role="menu" aria-label="Configured Kata daemons">
       {#each daemons as daemon (daemon.id)}
         <button
           type="button"
@@ -197,10 +197,6 @@
     left: 0;
     z-index: 30;
     width: min(280px, calc(100vw - 16px));
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    background: var(--bg-surface);
-    box-shadow: var(--shadow-lg);
     padding: 5px;
   }
 

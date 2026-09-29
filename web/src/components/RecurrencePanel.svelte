@@ -107,10 +107,9 @@
     justify-content: space-between;
   }
   h3 {
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0;
+    font-size: var(--font-size-md);
+    color: var(--text-primary);
+    font-weight: var(--font-weight-semibold);
   }
   .add {
     padding: 2px 8px;

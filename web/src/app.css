@@ -98,3 +98,48 @@ a:hover {
   display: block;
   text-align: left;
 }
+
+/*
+ * kit-ui component retuning. The #app prefix lifts these over kit-ui's
+ * scoped component rules regardless of stylesheet order. Only visual
+ * treatments that kit-ui exposes no token for live here; if kit-ui renames
+ * these classes, the overrides stop applying.
+ */
+#app .kit-button--outline.kit-button--neutral {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+#app .kit-button--outline.kit-button--neutral:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+}
+
+#app .kit-select-dropdown__trigger,
+#app .kit-typeahead__trigger {
+  height: 28px;
+  border-color: var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+#app .kit-modal-panel {
+  border-color: var(--border-muted);
+  box-shadow: var(--shadow-lg);
+}
+
+#app .kit-modal-panel:not([data-kit-tone]) .kit-modal-header {
+  padding: var(--space-5) var(--space-6);
+  border-color: transparent transparent var(--border-muted);
+  background: var(--bg-surface);
+}
+
+#app .kit-modal-title {
+  font-size: var(--font-size-lg);
+}
+
+#app .kit-modal-footer {
+  border-top-color: var(--border-muted);
+}

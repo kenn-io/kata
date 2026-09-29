@@ -1,8 +1,6 @@
 <script lang="ts">
-  /* eslint-disable svelte/no-at-html-tags -- kit-ui sanitizes rendered markdown. */
   /* eslint-disable svelte/prefer-svelte-reactivity -- reference counts are a transient search-result lookup. */
-  import { Button, MentionTextarea, type MentionOption } from '@kenn-io/kit-ui'
-  import { renderMarkdown, renderMarkdownSync } from '@kenn-io/kit-ui/utils/markdown'
+  import { Button, Markdown, MentionTextarea, type MentionOption } from '@kenn-io/kit-ui'
   import {
     formatRelativeTime as timeAgo,
     formatTimestamp as localDateTimeLabel,
@@ -153,20 +151,15 @@
       {#each sortedComments as comment (comment.id)}
         <article class="comment">
           <div class="comment-meta">
-            <span
+            <span class="avatar" aria-hidden="true">{comment.author.slice(0, 1)}</span>
+            <span class="author"
               >{comment.teammate ? `${comment.author} / ${comment.teammate}` : comment.author}</span
             >
             <time datetime={comment.created_at} title={localDateTimeLabel(comment.created_at)}>
               {timeAgo(comment.created_at)}
             </time>
           </div>
-          <div class="comment-body markdown-body">
-            {#await renderMarkdown(comment.body)}
-              {@html renderMarkdownSync(comment.body)}
-            {:then html}
-              {@html html}
-            {/await}
-          </div>
+          <Markdown source={comment.body} class="comment-body" />
         </article>
       {/each}
     </div>
@@ -174,60 +167,64 @@
 </section>
 
 <style>
-  .comments {
-    margin: 0 0 22px;
-  }
-
   .comments h3 {
-    margin: 0 0 8px;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 650;
-    text-transform: uppercase;
+    margin: 0 0 var(--space-4);
+    color: var(--text-primary);
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
   }
 
   .comment-composer {
     display: grid;
-    gap: 8px;
-    margin-bottom: 12px;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
   }
 
   .comment-composer :global(.comment-submit) {
     justify-self: end;
   }
 
-  .comment-list {
-    display: grid;
-    gap: 8px;
+  .comment {
+    padding: var(--space-5) 0;
   }
 
-  .comment {
-    border: 1px solid var(--border-default);
-    border-radius: 6px;
-    background: var(--bg-surface);
-    padding: 8px 10px;
+  .comment + .comment {
+    border-top: 1px solid var(--border-muted);
   }
 
   .comment-meta {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-4);
+    margin-bottom: var(--space-3);
     color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    margin-bottom: 4px;
+    font-size: var(--font-size-sm);
+  }
+
+  .avatar {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+    font-size: var(--font-size-2xs);
+    font-weight: var(--font-weight-semibold);
+    text-transform: uppercase;
+  }
+
+  .author {
+    color: var(--text-primary);
+    font-weight: var(--font-weight-semibold);
   }
 
   .comment-meta time {
-    flex: 0 0 auto;
     white-space: nowrap;
   }
 
-  .comment-body :global(p) {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: var(--font-size-sm);
-    line-height: 1.45;
-    white-space: pre-wrap;
+  .comment > :global(.comment-body) {
+    padding-left: 28px;
   }
 </style>

@@ -797,7 +797,7 @@
     flex: 1 1 auto;
     flex-direction: column;
     overflow: hidden;
-    background: var(--bg-primary);
+    background: var(--bg-surface);
     container-type: inline-size;
     container-name: list-pane;
   }

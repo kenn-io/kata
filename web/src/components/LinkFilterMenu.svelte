@@ -178,7 +178,6 @@
     margin: 0 0 3px;
     color: var(--text-muted);
     font-size: var(--font-size-xs);
-    font-weight: 650;
-    text-transform: uppercase;
+    font-weight: var(--font-weight-medium);
   }
 </style>

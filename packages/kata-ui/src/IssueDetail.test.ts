@@ -67,7 +67,9 @@ describe('IssueDetail', () => {
     const region = screen.getByRole('region', { name: 'Kata issue detail' })
     expect(within(region).getByRole('heading', { name: 'Ship shared detail' })).toBeTruthy()
     expect(within(region).getByText('roadmap#abc4')).toBeTruthy()
-    const description = within(region).getByRole('region', { name: 'Description' })
+    const description = within(region).getByRole('region', {
+      name: 'Description',
+    })
     await vi.waitFor(() => expect(description.textContent).toContain('Shared body'))
     expect(within(region).getByText('P1')).toBeTruthy()
     expect(within(region).getByText('Publish package')).toBeTruthy()

@@ -685,8 +685,7 @@
   .detail-properties dt {
     color: var(--text-muted);
     font-size: var(--font-size-xs);
-    font-weight: 650;
-    text-transform: uppercase;
+    font-weight: var(--font-weight-medium);
   }
 
   .detail-properties dd {

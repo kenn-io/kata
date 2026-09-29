@@ -31,6 +31,7 @@
     {#if onOpenIssue}
       <Button
         size="sm"
+        surface="soft"
         class="reference-link"
         label={reference}
         ariaLabel={`Open ${relationLabel(relation).toLowerCase()} ${reference}`}

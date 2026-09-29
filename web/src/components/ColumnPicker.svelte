@@ -128,10 +128,8 @@
 
   .column-picker__title {
     color: var(--text-muted);
-    font-size: var(--font-size-2xs);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
   }
 
   .column-picker__reset {

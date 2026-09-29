@@ -26,7 +26,8 @@
         <li>
           <header>
             <span class="avatar" aria-hidden="true">{comment.author.slice(0, 1)}</span>
-            <strong>{comment.teammate
+            <strong
+              >{comment.teammate
                 ? `${comment.author} / ${comment.teammate}`
                 : comment.author}</strong
             >
