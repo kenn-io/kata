@@ -227,10 +227,9 @@
 
   .section-header h3 {
     margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 650;
-    text-transform: uppercase;
+    color: var(--text-primary);
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
   }
 
   .checklist-items {
@@ -249,7 +248,7 @@
   }
 
   .checklist-row:hover {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
   }
 
   :global(.checklist-item) {
@@ -288,7 +287,7 @@
   }
 
   .checklist-add:focus-within {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
   }
 
   .checklist-add input {

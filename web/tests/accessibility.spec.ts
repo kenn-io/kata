@@ -1,4 +1,5 @@
 import AxeBuilder from '@axe-core/playwright'
+import type { Locator } from '@playwright/test'
 
 import { expect, test } from './fixtures'
 
@@ -103,6 +104,43 @@ test('dark read-only detail actions keep a dark Kit UI surface', async ({ page, 
     relativeLuminance(appearance.background),
   )
 })
+
+test('dark accent-filled editor controls keep AA text contrast', async ({ page, kata }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  const credentials = await kata.launch(page)
+  const issue = await kata.seedIssue(page, credentials, {
+    title: 'Dark accent example task',
+    body: 'Accent content',
+  })
+  await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
+  await page.getByRole('button', { name: 'Edit issue' }).click()
+
+  await page.getByRole('button', { name: 'Edit description' }).first().click()
+  await page.getByRole('textbox', { name: 'Edit description' }).fill('Changed accent content')
+  const save = page.getByRole('button', { name: 'Save', exact: true })
+  await expect(save).toBeEnabled()
+  expect(await textContrast(save)).toBeGreaterThanOrEqual(4.5)
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  await page.getByRole('button', { name: '+ New recurrence' }).click()
+  const pressed = page.getByRole('dialog').locator('[aria-pressed="true"]')
+  await expect(pressed.first()).toBeVisible()
+  for (const control of await pressed.all()) {
+    expect(await textContrast(control)).toBeGreaterThanOrEqual(4.5)
+  }
+})
+
+async function textContrast(control: Locator): Promise<number> {
+  const colors = await control.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { foreground: style.color, background: style.backgroundColor }
+  })
+  const [lighter, darker] = [
+    relativeLuminance(colors.foreground),
+    relativeLuminance(colors.background),
+  ].sort((a, b) => b - a)
+  return (lighter! + 0.05) / (darker! + 0.05)
+}
 
 function relativeLuminance(cssColor: string): number {
   const channels = cssColor

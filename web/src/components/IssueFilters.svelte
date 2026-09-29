@@ -71,7 +71,6 @@
     <div class="query-field">
       <SearchInput
         value={draft.query}
-        size="sm"
         block
         placeholder="Search tasks..."
         ariaLabel="Search tasks"
@@ -144,15 +143,15 @@
 
 <style>
   .kata-search-panel {
-    padding: 7px 10px;
-    border-bottom: 1px solid var(--border-default);
+    padding: var(--space-4) 12px;
+    border-bottom: 1px solid var(--border-muted);
     background: var(--bg-surface);
   }
 
   .kata-search-toolbar {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-3);
     min-width: 0;
   }
 
@@ -171,18 +170,17 @@
     box-sizing: border-box;
     min-width: 0;
     height: 28px;
-    border: 1px solid var(--border-muted);
-    border-radius: var(--radius-sm);
-    background: var(--bg-primary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
     color: var(--text-primary);
     font: inherit;
-    font-size: var(--font-size-xs);
-    padding: 0 6px;
+    font-size: var(--font-size-sm);
+    padding: 0 var(--space-4);
   }
 
   input:focus {
-    outline: 2px solid var(--accent-blue);
-    outline-offset: -1px;
+    border-color: var(--accent-blue);
   }
 
   .filter-control-project :global(.kit-typeahead) {
@@ -193,11 +191,20 @@
     display: none;
   }
 
-  .filter-control-project :global(.kit-typeahead__trigger),
   .filter-control-project :global(.kit-typeahead__input) {
     height: 28px;
-    font-size: var(--font-size-xs);
-    background: var(--bg-primary);
+    font-size: var(--font-size-sm);
+  }
+
+  .filter-control :global(.kit-select-dropdown__trigger),
+  .filter-control :global(.kit-typeahead__trigger) {
+    height: 28px;
+    border-color: var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
   }
 
   .filter-control-status :global(.kit-select-dropdown) {

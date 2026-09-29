@@ -6,15 +6,19 @@
   }
 
   let { items }: Props = $props()
+
+  const doneCount = $derived(items.filter((item) => item.done).length)
 </script>
 
 {#if items.length > 0}
   <section class="detail-section" aria-labelledby="kata-checklist-heading">
-    <h3 id="kata-checklist-heading">Checklist</h3>
+    <h3 id="kata-checklist-heading">
+      Checklist <span class="count">{doneCount}/{items.length}</span>
+    </h3>
     <ul>
       {#each items as item (item.id)}
         <li class:done={item.done}>
-          <span aria-hidden="true">{item.done ? '✓' : '○'}</span>
+          <span class="mark" aria-hidden="true">{item.done ? '✓' : ''}</span>
           <span>{item.text}</span>
         </li>
       {/each}
@@ -25,22 +29,24 @@
 <style>
   .detail-section {
     min-width: 0;
-    border-top: 1px solid var(--border-muted, #e2e4e8);
-    padding-top: 16px;
   }
 
   h3 {
-    margin: 0 0 9px;
+    margin: 0 0 var(--space-4, 8px);
+    color: var(--text-primary, #202124);
+    font-size: var(--font-size-md, 0.8125rem);
+    font-weight: var(--font-weight-semibold, 600);
+  }
+
+  .count {
+    margin-left: var(--space-2, 4px);
     color: var(--text-muted, #656a73);
-    font-size: var(--font-size-xs, 0.75rem);
-    font-weight: 650;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-weight: var(--font-weight-medium, 500);
   }
 
   ul {
     display: grid;
-    gap: 8px;
+    gap: var(--space-3, 6px);
     margin: 0;
     padding: 0;
     list-style: none;
@@ -49,7 +55,26 @@
   li {
     display: flex;
     align-items: baseline;
-    gap: 8px;
+    gap: var(--space-4, 8px);
+  }
+
+  .mark {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--border-default, #d8dae2);
+    border-radius: var(--radius-sm, 4px);
+    font-size: 10px;
+    line-height: 1;
+    transform: translateY(2px);
+  }
+
+  li.done .mark {
+    border-color: var(--accent-blue, #2563eb);
+    background: var(--accent-blue, #2563eb);
+    color: var(--bg-surface, #ffffff);
   }
 
   li.done > span:last-child {

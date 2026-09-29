@@ -958,7 +958,9 @@
       data-uid={issue.uid}
       onclick={() => selectNow(issue)}
     >
-      <span class="cell cell-id"><span class="id-badge">{displayId(issue)}</span></span>
+      <span class="cell cell-id"
+        ><span class="id-badge" title={issue.qualified_id}>{displayId(issue)}</span></span
+      >
       <span class="cell cell-title">
         {#if expandable}
           <!-- A span (not a button) inside the row's outer <button> — nesting
@@ -1039,7 +1041,7 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    background: var(--bg-primary);
+    background: var(--bg-surface);
     /* Establish a container so column visibility can respond to the
        pane's own width — the horizontal-split layout can leave the list
        under 400px even when the viewport is huge, and a viewport-based
@@ -1051,9 +1053,8 @@
   .pane-header {
     position: relative;
     flex-shrink: 0;
-    padding: 10px 16px 8px;
+    padding: 12px 12px 8px;
     background: var(--bg-surface);
-    border-bottom: 1px solid var(--border-default);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -1084,9 +1085,8 @@
 
   .pane-header h2 {
     font-size: var(--font-size-xl);
-    line-height: 1.1;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    line-height: 1.2;
+    font-weight: var(--font-weight-semibold);
   }
 
   .count {
@@ -1110,18 +1110,18 @@
     min-height: 26px;
     padding: 0 8px;
     border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: var(--bg-surface);
     color: var(--text-secondary);
-    font-size: var(--font-size-xs);
-    font-weight: 500;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
     white-space: nowrap;
     cursor: pointer;
   }
 
   .tree-action:hover:not(:disabled),
   .tree-action:focus-visible {
-    border-color: var(--border-strong);
+    border-color: var(--text-muted);
     color: var(--text-primary);
   }
 
@@ -1147,7 +1147,7 @@
        The title takes the
        leftover via `1fr` so the metadata cluster anchors at the
        right edge with no whitespace pocket. */
-    --table-id-col: 112px; /* room for a qualified ID plus badge padding */
+    --table-id-col: 136px; /* room for a qualified ID; longer ones truncate from the left */
     --table-cols: var(--table-cols-wide);
     --table-gap: 14px;
     --table-min-width: 720px;
@@ -1155,11 +1155,8 @@
 
   .table.table--project-scoped {
     /* Short ids inside a project are typically 4–6 chars so the
-       column can collapse and give the title more room. The badge
-       around each id adds 7px of padding on both sides, so include
-       14px here — otherwise a 6-char id clips against the badge
-       background. */
-    --table-id-col: 60px;
+       column can collapse and give the title more room. */
+    --table-id-col: 52px;
   }
 
   .table-header {
@@ -1171,15 +1168,13 @@
     gap: var(--table-gap);
     width: 100%;
     min-width: var(--table-min-width);
-    padding: 5px 6px;
+    padding: 6px 12px;
     align-items: center;
     background: var(--bg-surface);
-    border-bottom: 1px solid var(--border-default);
-    color: var(--text-faint);
-    font-size: var(--font-size-3xs);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    border-bottom: 1px solid var(--border-muted);
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
   }
 
   .col {
@@ -1192,8 +1187,6 @@
     background: transparent;
     color: inherit;
     font: inherit;
-    letter-spacing: inherit;
-    text-transform: inherit;
     text-align: left;
     cursor: pointer;
     border-radius: var(--radius-sm);
@@ -1232,9 +1225,9 @@
   }
 
   .empty {
-    padding: 32px 12px;
+    padding: 48px 12px;
     color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-md);
     text-align: center;
   }
 
@@ -1242,7 +1235,7 @@
     margin-top: 6px;
   }
 
-  .group:first-child {
+  .group:first-of-type {
     margin-top: 0;
   }
 
@@ -1250,27 +1243,23 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 8px 4px;
-    color: var(--text-secondary);
-    font-size: var(--font-size-2xs);
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    padding: 10px 12px 4px;
+    color: var(--text-primary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
     border-top: 1px solid var(--border-muted);
     margin-top: 4px;
   }
 
-  .group:first-child .group-title {
+  .group:first-of-type .group-title {
     border-top: 0;
     margin-top: 0;
   }
 
   .group-count {
-    color: var(--text-faint);
+    color: var(--text-muted);
     font-variant-numeric: tabular-nums;
-    text-transform: none;
-    letter-spacing: 0;
-    font-weight: 500;
+    font-weight: var(--font-weight-medium);
   }
 
   .row {
@@ -1280,13 +1269,13 @@
     grid-template-columns: var(--table-cols);
     gap: var(--table-gap);
     align-items: center;
-    padding: 3px 6px;
+    padding: 4px 12px;
     border-radius: 0;
     text-align: left;
     border: 0;
     background: transparent;
     color: inherit;
-    min-height: 26px;
+    min-height: 30px;
     transition: background 0.08s;
   }
 
@@ -1300,16 +1289,14 @@
   }
 
   .row.selected {
-    background: color-mix(in srgb, var(--accent-blue) 20%, var(--bg-primary));
-    box-shadow:
-      inset 3px 0 0 var(--accent-blue),
-      inset 0 0 0 1px color-mix(in srgb, var(--accent-blue) 24%, transparent);
+    background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
+    box-shadow: inset 2px 0 0 var(--accent-blue);
     color: var(--text-primary);
   }
 
   .row:focus-visible {
     outline: none;
-    background: var(--accent-blue-soft);
+    background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
   }
 
   .cell {
@@ -1317,38 +1304,32 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
   }
 
-  .cell-id {
-    display: inline-flex;
-    align-items: center;
-  }
-
+  /* Right-to-left overflow keeps the short id visible when a long
+     project name would not fit: "…ample-project#kp5x". The id is a
+     single left-to-right run, so its characters keep their order. */
   .id-badge {
-    display: inline-flex;
-    align-items: center;
-    height: 18px;
-    padding: 0 7px;
-    border-radius: var(--radius-sm);
-    background: var(--bg-inset);
-    color: var(--text-secondary);
+    display: block;
+    overflow: hidden;
+    color: var(--text-muted);
+    direction: rtl;
     font-family: var(--font-mono);
-    font-size: var(--font-size-2xs);
-    font-weight: 500;
+    font-size: var(--font-size-xs);
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.01em;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
+  /* Muted ink falls below AA contrast on the selection tint. */
   .row.selected .id-badge,
-  .row:focus-visible .id-badge {
-    background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
-    color: var(--text-primary);
-  }
-
-  .row.selected .title-text {
-    font-weight: 600;
+  .row:focus-visible .id-badge,
+  .row.selected .cell:not(.cell-title),
+  .row:focus-visible .cell:not(.cell-title) {
+    color: var(--text-secondary);
   }
 
   .cell-title {
@@ -1357,7 +1338,7 @@
     gap: 6px;
     min-width: 0;
     color: var(--text-primary);
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-md);
     white-space: normal;
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -1453,22 +1434,25 @@
     height: 17px;
     padding: 0 6px;
     border-radius: var(--radius-sm);
-    background: var(--accent-amber-soft);
-    color: var(--accent-amber);
-    font-size: var(--font-size-3xs);
-    font-weight: 600;
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
     font-variant-numeric: tabular-nums;
   }
 
   .priority-0 {
-    background: var(--accent-red-soft);
+    background: color-mix(in srgb, var(--accent-red) 14%, transparent);
     color: var(--accent-red);
   }
 
+  .priority-1 {
+    background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
+    color: var(--accent-amber);
+  }
+
   /* Every metadata cell holds at the base 12px set on .cell — only
-     the title (13px) climbs above the row baseline. The old setup mixed
-     11/12/11 across tags/owner/due so each row read as a hand-laid
-     collage instead of one stride of metadata. Color carries the
+     the title (13px) climbs above the row baseline. Color carries the
      hierarchy: muted for low-signal columns, secondary for owner,
      primary for the title. */
   .cell-tags {
@@ -1522,6 +1506,7 @@
     }
 
     .table {
+      --table-id-col: 96px;
       --table-cols: var(--table-cols-compact);
       --table-gap: 12px;
       --table-min-width: 460px;
@@ -1536,13 +1521,17 @@
     }
   }
 
+  /* The hover graph shortcut would cover the priority column here; the
+     detail pane's graph action stays available. */
   @container list (max-width: 520px) {
     .col-due,
-    .cell-due {
+    .cell-due,
+    .graph-action {
       display: none;
     }
 
     .table {
+      --table-id-col: 64px;
       --table-cols: var(--table-cols-narrow);
       --table-gap: 10px;
       --table-min-width: 320px;

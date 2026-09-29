@@ -1,7 +1,9 @@
 <script lang="ts">
-  /* eslint-disable svelte/no-at-html-tags -- kit-ui sanitizes rendered markdown. */
-  import { renderMarkdownSync } from '@kenn-io/kit-ui/utils/markdown'
-  import { formatTimestamp as localDateTimeLabel } from '@kenn-io/kit-ui/utils/time'
+  import { Markdown } from '@kenn-io/kit-ui'
+  import {
+    formatRelativeTime as timeAgo,
+    formatTimestamp as localDateTimeLabel,
+  } from '@kenn-io/kit-ui/utils/time'
 
   import type { KataIssueDetailModel } from '../types.js'
 
@@ -13,7 +15,9 @@
 </script>
 
 <section class="detail-section" aria-labelledby="kata-comments-heading">
-  <h3 id="kata-comments-heading">Comments</h3>
+  <h3 id="kata-comments-heading">
+    Comments{#if comments.length > 0}<span class="count">{comments.length}</span>{/if}
+  </h3>
   {#if comments.length === 0}
     <p>No comments.</p>
   {:else}
@@ -21,17 +25,17 @@
       {#each comments as comment (comment.id)}
         <li>
           <header>
-            <strong>{comment.teammate
+            <span class="avatar" aria-hidden="true">{comment.author.slice(0, 1)}</span>
+            <strong
+              >{comment.teammate
                 ? `${comment.author} / ${comment.teammate}`
                 : comment.author}</strong
             >
-            <time datetime={comment.createdAt} title={comment.createdAt}
-              >{localDateTimeLabel(comment.createdAt)}</time
+            <time datetime={comment.createdAt} title={localDateTimeLabel(comment.createdAt)}
+              >{timeAgo(comment.createdAt)}</time
             >
           </header>
-          <div class="markdown-body">
-            {@html renderMarkdownSync(comment.body)}
-          </div>
+          <Markdown source={comment.body} class="comment-body" />
         </li>
       {/each}
     </ol>
@@ -41,39 +45,59 @@
 <style>
   .detail-section {
     min-width: 0;
-    border-top: 1px solid var(--border-muted, #e2e4e8);
-    padding-top: 16px;
   }
 
   h3 {
-    margin: 0 0 9px;
+    margin: 0 0 var(--space-2, 4px);
+    color: var(--text-primary, #202124);
+    font-size: var(--font-size-md, 0.8125rem);
+    font-weight: var(--font-weight-semibold, 600);
+  }
+
+  .count {
+    margin-left: var(--space-3, 6px);
     color: var(--text-muted, #656a73);
-    font-size: var(--font-size-xs, 0.75rem);
-    font-weight: 650;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-weight: var(--font-weight-medium, 500);
   }
 
   ol {
-    display: grid;
-    gap: 8px;
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
   li {
-    border: 1px solid var(--border-muted, #e2e4e8);
-    border-radius: 8px;
-    padding: 12px;
+    padding: var(--space-5, 12px) 0;
+  }
+
+  li + li {
+    border-top: 1px solid var(--border-muted, #e2e4e8);
   }
 
   header {
     display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-    font-size: var(--font-size-xs, 0.75rem);
+    align-items: center;
+    gap: var(--space-4, 8px);
+    margin-bottom: var(--space-3, 6px);
+    font-size: var(--font-size-sm, 0.75rem);
+  }
+
+  .avatar {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--bg-inset, #ecedf2);
+    color: var(--text-secondary, #555b6e);
+    font-size: var(--font-size-2xs, 0.625rem);
+    font-weight: var(--font-weight-semibold, 600);
+    text-transform: uppercase;
+  }
+
+  strong {
+    font-weight: var(--font-weight-semibold, 600);
   }
 
   time,
@@ -81,13 +105,12 @@
     color: var(--text-muted, #656a73);
   }
 
-  p,
-  .markdown-body :global(:first-child) {
-    margin-top: 0;
+  p {
+    margin: 0;
   }
 
-  p,
-  .markdown-body :global(:last-child) {
-    margin-bottom: 0;
+  /* Indent the body under the author so the avatar column stays clear. */
+  li > :global(.comment-body) {
+    padding-left: 28px;
   }
 </style>

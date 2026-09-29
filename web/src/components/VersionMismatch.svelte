@@ -21,7 +21,7 @@
     padding: 1.5rem;
     border: 1px solid var(--border-default);
     border-radius: 0.75rem;
-    background: var(--surface-raised);
+    background: var(--bg-surface);
     color: var(--text-primary);
   }
 

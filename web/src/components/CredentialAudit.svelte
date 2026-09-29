@@ -261,7 +261,7 @@
 
   .back-button:hover,
   .refresh-button:hover:not(:disabled) {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
   }
 
   .refresh-button:disabled {
@@ -356,7 +356,7 @@
   .state-badge {
     display: inline-block;
     border-radius: 999px;
-    background: var(--accent-red-soft);
+    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
     color: var(--accent-red);
     padding: 1px 7px;
     font-size: var(--font-size-xs);

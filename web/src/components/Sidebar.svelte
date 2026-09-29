@@ -229,24 +229,19 @@
 
 <style>
   .kata-sidebar {
-    --sidebar-list-border: var(--border-default);
-    --sidebar-row-bg: transparent;
-    --sidebar-row-hover-bg: var(--bg-surface-hover);
-    --sidebar-row-padding: 6px 10px;
-
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    border-right: 1px solid var(--border-default);
-    background: var(--bg-inset);
+    border-right: 1px solid var(--border-muted);
+    background: var(--bg-primary);
   }
 
   .kata-nav {
     display: grid;
-    gap: 4px;
-    padding: 12px;
+    gap: var(--space-1);
+    padding: 12px 12px var(--space-4);
   }
 
   .kata-nav button,
@@ -255,30 +250,30 @@
     width: 100%;
     min-height: 30px;
     border: 0;
-    border-radius: 6px;
-    background: var(--sidebar-row-bg);
+    border-radius: var(--radius-md);
+    background: transparent;
     color: var(--text-secondary);
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) auto;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--sidebar-row-padding);
+    gap: var(--space-4);
+    padding: 0 10px;
     text-align: left;
     font: inherit;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-md);
     cursor: pointer;
   }
 
   .kata-nav button:hover,
   .project-select-button:hover,
   .project-create-button:hover {
-    background: var(--sidebar-row-hover-bg);
+    background: var(--bg-surface-hover);
     color: var(--text-primary);
   }
 
   .kata-nav button.active,
   .project-select-button.active {
-    background: var(--bg-row-selected);
+    background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
     color: var(--text-primary);
   }
 
@@ -300,7 +295,7 @@
 
   .kata-nav button.active .nav-label,
   .project-select-button.active .project-name {
-    font-weight: 650;
+    font-weight: var(--font-weight-medium);
   }
 
   .nav-label,
@@ -319,11 +314,12 @@
   }
 
   .project-create {
-    padding: 12px;
+    padding: 0 12px 12px;
   }
 
   .project-select-button {
     grid-template-columns: minmax(0, 1fr) auto;
+    padding-left: 26px;
   }
 
   .project-create-form input {

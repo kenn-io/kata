@@ -90,11 +90,11 @@ describe('Comments', () => {
     expect(searchReferences).toHaveBeenCalledWith('shared')
   })
 
-  it('renders accepted comments newest first', () => {
+  it('renders accepted comments newest first', async () => {
     renderComments()
 
     const comments = screen.getAllByRole('article')
-    expect(comments[0]?.textContent).toContain('Newest comment')
+    await waitFor(() => expect(comments[0]?.textContent).toContain('Newest comment'))
     expect(comments[1]?.textContent).toContain('First comment')
   })
 })

@@ -1,9 +1,7 @@
 <script lang="ts">
-  /* eslint-disable svelte/no-at-html-tags -- kit-ui sanitizes rendered markdown. */
-  import type { TypeaheadOption } from '@kenn-io/kit-ui'
+  import { Markdown, type TypeaheadOption } from '@kenn-io/kit-ui'
   import NetworkIcon from '@lucide/svelte/icons/network'
   import PencilIcon from '@lucide/svelte/icons/pencil'
-  import { renderMarkdown, renderMarkdownSync } from '@kenn-io/kit-ui/utils/markdown'
   import {
     formatRelativeTime as timeAgo,
     formatTimestamp as localDateTimeLabel,
@@ -470,13 +468,7 @@
           </div>
         </div>
       {:else if issue.issue.body}
-        <div class="body-display markdown-body">
-          {#await renderMarkdown(issue.issue.body)}
-            {@html renderMarkdownSync(issue.issue.body)}
-          {:then html}
-            {@html html}
-          {/await}
-        </div>
+        <Markdown source={issue.issue.body} class="body-display" />
       {:else}
         <p class="detail-body-empty">No description.</p>
       {/if}
@@ -618,7 +610,7 @@
   }
 
   .crumb-sep {
-    color: var(--text-faint);
+    color: var(--text-muted);
   }
 
   .detail-heading h2 {
@@ -680,7 +672,7 @@
   }
 
   .icon-detail-action:hover {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
     color: var(--accent-blue);
   }
 
@@ -740,10 +732,9 @@
 
   .section-header h3 {
     margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 650;
-    text-transform: uppercase;
+    color: var(--text-primary);
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
   }
 
   .text-button {
@@ -762,26 +753,8 @@
   }
 
   .text-button:hover {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
     color: var(--text-primary);
-  }
-
-  .body-display {
-    color: var(--text-secondary);
-    line-height: 1.5;
-  }
-
-  .body-display :global(p) {
-    margin: 0;
-  }
-
-  .body-display :global(p + p) {
-    margin-top: 0.8em;
-  }
-
-  .body-display :global(strong) {
-    color: var(--text-primary);
-    font-weight: 650;
   }
 
   .detail-body-empty {
@@ -837,7 +810,7 @@
   .accent-button {
     border: 1px solid var(--accent-blue);
     background: var(--accent-blue);
-    color: white;
+    color: var(--bg-surface);
   }
 
   .ghost-button:disabled,

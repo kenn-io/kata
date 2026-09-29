@@ -79,7 +79,7 @@
   </button>
 
   {#if open}
-    <div class="daemon-menu" role="menu" aria-label="Configured Kata daemons">
+    <div class="daemon-menu kit-popover-card" role="menu" aria-label="Configured Kata daemons">
       {#each daemons as daemon (daemon.id)}
         <button
           type="button"
@@ -150,7 +150,7 @@
   .status-indicator {
     width: 6px;
     height: 6px;
-    border-radius: var(--radius-pill);
+    border-radius: 999px;
     background: var(--accent-amber);
     flex: none;
     visibility: hidden;
@@ -167,7 +167,7 @@
   .dot {
     width: 8px;
     height: 8px;
-    border-radius: var(--radius-pill);
+    border-radius: 999px;
     flex: none;
   }
 
@@ -180,7 +180,7 @@
   }
 
   .dot--down {
-    background: var(--text-faint);
+    background: var(--text-muted);
   }
 
   .dot--upgrade_required {
@@ -197,10 +197,6 @@
     left: 0;
     z-index: 30;
     width: min(280px, calc(100vw - 16px));
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    background: var(--bg-surface);
-    box-shadow: var(--shadow-popover, 0 8px 24px rgb(15 23 42 / 16%));
     padding: 5px;
   }
 

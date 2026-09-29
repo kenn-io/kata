@@ -743,7 +743,7 @@
   }
 
   .toolbar-button:hover {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
     color: var(--text-primary);
   }
 
@@ -762,7 +762,7 @@
   }
 
   .graph-filter-menu :global(.kit-filter-dropdown__btn:hover:not(:disabled)) {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
     color: var(--text-primary);
   }
 
@@ -842,7 +842,7 @@
   }
 
   :global(.kata-graph-pane .svelte-flow__controls-button:hover) {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
   }
 
   :global(.kata-graph-pane .svelte-flow__controls-button svg) {
@@ -862,7 +862,7 @@
   }
 
   :global(.kata-graph-pane .svelte-flow__minimap-node) {
-    fill: var(--bg-hover);
+    fill: var(--bg-surface-hover);
     stroke: var(--border-default);
   }
 

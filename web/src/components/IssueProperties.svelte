@@ -435,11 +435,7 @@
     {/key}
   </div>
 
-  <div
-    class="property-pill property-pill--editing property-pill--select"
-    role="group"
-    aria-label="Temporary assignment"
-  >
+  <div class="property-pill property-pill--select" role="group" aria-label="Temporary assignment">
     <TimerIcon size={13} strokeWidth={1.8} />
     <span>Assignment</span>
     <SelectDropdown
@@ -646,6 +642,8 @@
     height: 28px;
     border-color: transparent;
     background: var(--bg-inset);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
   }
 
   .property-pill--typeahead :global(.kit-typeahead__trigger:hover) {
@@ -685,8 +683,7 @@
   .detail-properties dt {
     color: var(--text-muted);
     font-size: var(--font-size-xs);
-    font-weight: 650;
-    text-transform: uppercase;
+    font-weight: var(--font-weight-medium);
   }
 
   .detail-properties dd {
