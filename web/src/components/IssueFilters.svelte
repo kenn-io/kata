@@ -196,6 +196,17 @@
     font-size: var(--font-size-sm);
   }
 
+  .filter-control :global(.kit-select-dropdown__trigger),
+  .filter-control :global(.kit-typeahead__trigger) {
+    height: 28px;
+    border-color: var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+  }
+
   .filter-control-status :global(.kit-select-dropdown) {
     width: 102px;
   }

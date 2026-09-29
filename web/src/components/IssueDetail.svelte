@@ -138,8 +138,8 @@
   .editor-toolbar {
     display: flex;
     justify-content: flex-end;
-    border-bottom: 1px solid var(--border-default);
-    padding: 8px 22px;
-    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-muted);
+    padding: var(--space-3) var(--space-7);
+    background: var(--bg-surface);
   }
 </style>

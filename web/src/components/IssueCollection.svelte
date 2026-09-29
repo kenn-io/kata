@@ -1225,9 +1225,9 @@
   }
 
   .empty {
-    padding: 32px 12px;
+    padding: 48px 12px;
     color: var(--text-muted);
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-md);
     text-align: center;
   }
 
@@ -1324,8 +1324,11 @@
     white-space: nowrap;
   }
 
+  /* Muted ink falls below AA contrast on the selection tint. */
   .row.selected .id-badge,
-  .row:focus-visible .id-badge {
+  .row:focus-visible .id-badge,
+  .row.selected .cell:not(.cell-title),
+  .row:focus-visible .cell:not(.cell-title) {
     color: var(--text-secondary);
   }
 
@@ -1503,6 +1506,7 @@
     }
 
     .table {
+      --table-id-col: 96px;
       --table-cols: var(--table-cols-compact);
       --table-gap: 12px;
       --table-min-width: 460px;
@@ -1524,6 +1528,7 @@
     }
 
     .table {
+      --table-id-col: 64px;
       --table-cols: var(--table-cols-narrow);
       --table-gap: 10px;
       --table-min-width: 320px;

@@ -114,17 +114,6 @@ a:hover {
   background: var(--bg-surface-hover);
 }
 
-#app .kit-select-dropdown__trigger,
-#app .kit-typeahead__trigger {
-  height: 28px;
-  border-color: var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-}
-
 #app .kit-modal-panel {
   border-color: var(--border-muted);
   box-shadow: var(--shadow-lg);

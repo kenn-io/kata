@@ -62,7 +62,7 @@
   <div class="node-title-row">
     <strong title={data.title}>{data.title}</strong>
     {#if data.priorityLabel}
-      <span class="priority-marker">{data.priorityLabel}</span>
+      <span class="priority-marker" data-priority={data.priorityLabel}>{data.priorityLabel}</span>
     {/if}
   </div>
   <div class="node-meta-row">
@@ -94,11 +94,11 @@
     gap: var(--space-2);
     border: 1px solid var(--border-default);
     border-radius: 6px;
-    background: var(--node-relation-bg, var(--node-status-bg, var(--bg-primary)));
+    background: var(--node-status-bg, var(--bg-surface));
     color: var(--text-primary);
     padding: 9px 10px;
     box-shadow:
-      inset 3px 0 0 var(--node-status-accent, var(--border-default)),
+      inset 3px 0 0 var(--node-relation-accent, var(--node-status-accent, var(--border-default))),
       var(--shadow-sm);
     text-align: left;
     font: inherit;
@@ -115,13 +115,9 @@
 
   .graph-task-node--selected {
     border-color: var(--accent-blue);
-    background: color-mix(
-      in srgb,
-      var(--accent-blue) 12%,
-      var(--node-relation-bg, var(--node-status-bg, var(--bg-primary)))
-    );
+    background: color-mix(in srgb, var(--accent-blue) 8%, var(--node-status-bg, var(--bg-surface)));
     box-shadow:
-      inset 3px 0 0 var(--node-status-accent, var(--border-default)),
+      inset 3px 0 0 var(--node-relation-accent, var(--node-status-accent, var(--border-default))),
       0 0 0 2px color-mix(in srgb, var(--accent-blue) 82%, transparent),
       0 0 0 5px color-mix(in srgb, var(--accent-blue) 18%, transparent),
       var(--shadow-sm);
@@ -129,7 +125,7 @@
 
   .graph-task-node--open {
     --node-status-accent: var(--border-default);
-    --node-status-bg: color-mix(in srgb, var(--text-secondary) 5%, var(--bg-primary));
+    --node-status-bg: var(--bg-surface);
   }
 
   .graph-task-node--closed {
@@ -160,43 +156,23 @@
   }
 
   .graph-task-node--relation-blocks {
-    --node-relation-bg: color-mix(
-      in srgb,
-      var(--accent-blue) 16%,
-      var(--node-status-bg, var(--bg-primary))
-    );
+    --node-relation-accent: var(--accent-blue);
   }
 
   .graph-task-node--relation-blockedBy {
-    --node-relation-bg: color-mix(
-      in srgb,
-      var(--accent-red) 16%,
-      var(--node-status-bg, var(--bg-primary))
-    );
+    --node-relation-accent: var(--accent-red);
   }
 
   .graph-task-node--relation-child {
-    --node-relation-bg: color-mix(
-      in srgb,
-      var(--accent-teal) 15%,
-      var(--node-status-bg, var(--bg-primary))
-    );
+    --node-relation-accent: var(--accent-teal);
   }
 
   .graph-task-node--relation-parent {
-    --node-relation-bg: color-mix(
-      in srgb,
-      var(--accent-amber) 15%,
-      var(--node-status-bg, var(--bg-primary))
-    );
+    --node-relation-accent: var(--accent-amber);
   }
 
   .graph-task-node--relation-related {
-    --node-relation-bg: color-mix(
-      in srgb,
-      var(--accent-purple) 13%,
-      var(--node-status-bg, var(--bg-primary))
-    );
+    --node-relation-accent: var(--accent-purple);
   }
 
   .node-title-row,
@@ -214,7 +190,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: var(--font-size-sm);
-    font-weight: 650;
+    font-weight: var(--font-weight-semibold);
   }
 
   .node-meta-row {
@@ -233,16 +209,23 @@
 
   .priority-marker {
     flex: 0 0 auto;
-    border-radius: 999px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+    padding: 3px 5px;
     font-size: var(--font-size-2xs);
-    font-weight: 700;
+    font-weight: var(--font-weight-semibold);
     line-height: 1;
   }
 
-  .priority-marker {
-    background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
-    color: var(--accent-blue);
-    padding: 3px 5px;
+  .priority-marker[data-priority='P0'] {
+    background: color-mix(in srgb, var(--accent-red) 14%, transparent);
+    color: var(--accent-red);
+  }
+
+  .priority-marker[data-priority='P1'] {
+    background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
+    color: var(--accent-amber);
   }
 
   :global(.graph-task-handle) {
