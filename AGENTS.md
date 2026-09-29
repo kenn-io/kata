@@ -162,6 +162,13 @@ The daemon refuses parent-close while open children remain. Reviewers
 can replay activity with `kata audit closes` and undo specific lazy
 closes with `kata reopen <ref>`.
 
+## CI runners
+
+Public CI profiles use Namespace's
+[Restricted access level](https://namespace.so/docs/solutions/github-actions/runner-controls/access-levels),
+which disables workload access to Namespace features and APIs. GitHub fork
+approvals, token permissions, and secrets are separate controls.
+
 ## Repository-writer trust/threat model
 
 Repository write access is trusted maintainer authority. A hostile party who
