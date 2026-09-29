@@ -37,14 +37,19 @@ func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, sc
 		kitvec.WithFillScanBatch[string](scanBatch),
 		kitvec.WithFillSplit[string](split),
 		kitvec.WithFillBatch[string](batchOptions...),
+		kitvec.WithFillBatchErrorIsolation[string](isBadRequest),
 		kitvec.WithFillEncodeError[string](func(doc string, err error) bool {
-			var apiErr *embedding.APIError
-			if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+			if !isBadRequest(err) {
 				return false
 			}
 			return ix.contentSpecific400(ctx, doc, enc, split, batchOptions)
 		}),
 	)
+}
+
+func isBadRequest(err error) bool {
+	var apiErr *embedding.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest
 }
 
 type progressStore struct {

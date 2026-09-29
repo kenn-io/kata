@@ -184,11 +184,15 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	if err := ix.EnsureBuilding(ctx, key, g); err != nil {
 		t.Fatal(err)
 	}
-	// Poison doc: 400 on one document is skipped, fill continues.
-	badOnce := map[string]bool{}
+	// Poison doc: the endpoint rejects any request carrying its content, so
+	// the shared batch and the document alone both fail. It is skipped and
+	// the fill continues.
+	if _, err := ix.db.ExecContext(ctx,
+		`UPDATE issue_mirror SET content = 'poison' WHERE issue_uid = 'bad'`); err != nil {
+		t.Fatal(err)
+	}
 	enc := func(_ context.Context, texts []string) ([][]float32, error) {
-		if !badOnce["done"] {
-			badOnce["done"] = true
+		if slices.Contains(texts, "poison") {
 			return nil, &embedding.APIError{StatusCode: 400, Body: "rejected"}
 		}
 		out := make([][]float32, len(texts))
