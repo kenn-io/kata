@@ -1903,15 +1903,13 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 	t.Cleanup(hub.Close)
 	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "token"}
 	var delivered []db.Event
-	// Replay delivery requires the event to predate the reset at millisecond precision, and Windows clocks can tick slower than that.
-	require.Eventually(t, func() bool {
-		return time.Now().Truncate(time.Millisecond).After(localEvent.CreatedAt)
-	}, time.Second, time.Millisecond)
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
 	require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered)
+	// Replay delivery needs the reset to land after the event at millisecond precision, and Windows clocks can tick slower than that.
+	require.NoError(t, spoke.DB.RecordFederationSyncReset(ctx, project.ID, localEvent.CreatedAt.Add(time.Millisecond)))
 
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
 	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
