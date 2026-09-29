@@ -25,6 +25,8 @@ import (
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/vector"
 )
@@ -61,6 +63,10 @@ type ServerConfig struct {
 	GitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
 	GitHubSyncRunnerFactory  GitHubSyncRunnerFactory
 	GitHubSyncWake           func()
+	NotionSyncConfig         config.NotionSyncConfig
+	NotionSyncFetcher        notionsync.Fetcher
+	NotionSyncProgress       *issuesync.ProgressTracker
+	NotionSyncWake           func()
 	Hooks                    hooks.Sink
 	ExternalRootRegistry     *rootbridge.Registry
 	ExternalRootService      *rootbridge.Service
@@ -224,6 +230,12 @@ type ListenerBinding struct {
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
+	if cfg.NotionSyncProgress == nil {
+		cfg.NotionSyncProgress = issuesync.NewProgressTracker()
+	}
+	if cfg.NotionSyncFetcher == nil {
+		cfg.NotionSyncFetcher = notionSyncFetcher(cfg)
+	}
 	if cfg.GitHubSyncProgress == nil {
 		cfg.GitHubSyncProgress = githubsync.NewProgressTracker()
 	}

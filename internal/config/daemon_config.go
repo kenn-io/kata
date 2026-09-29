@@ -63,6 +63,7 @@ type DaemonConfig struct {
 	// GitHubSync carries daemon-owned GitHub API credential settings for
 	// background synchronization.
 	GitHubSync GitHubSyncConfig `toml:"github_sync"`
+	NotionSync NotionSyncConfig `toml:"notion_sync"`
 	// Connectors declares operator-controlled external root connector processes.
 	Connectors []ConnectorConfig `toml:"connector"`
 }
@@ -420,6 +421,11 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	if err := validateGitHubSync(cfg.GitHubSync); err != nil {
 		return nil, err
 	}
+	notionSync, err := NormalizeNotionSyncConfig(cfg.NotionSync)
+	if err != nil {
+		return nil, err
+	}
+	cfg.NotionSync = notionSync
 	connectors, err := NormalizeConnectorConfigs(cfg.Connectors)
 	if err != nil {
 		return nil, err

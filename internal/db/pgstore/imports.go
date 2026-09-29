@@ -20,6 +20,7 @@ type importIssueState struct {
 	sourceNewer         bool
 	healed              bool
 	presentationUpdated bool
+	sourceCurrent       bool
 }
 
 // ImportBatch atomically reconciles one normalized external issue batch.
@@ -93,8 +94,8 @@ func (s *Store) ImportBatch(
 			}
 			events = append(events, commentEvents...)
 			result.Comments += count
-			if state.created || state.sourceNewer {
-				labelEvents, err := s.reconcileImportLabels(ctx, tx, attemptParams, state.issue, item, project)
+			if filter, reconcile := db.ImportLabelReconcileFilter(attemptParams, item, state.created, state.sourceNewer, state.sourceCurrent); reconcile {
+				labelEvents, err := s.reconcileImportLabels(ctx, tx, attemptParams, state.issue, item, project, filter)
 				if err != nil {
 					return err
 				}
@@ -242,6 +243,16 @@ func (s *Store) importIssue(
 	if err != nil {
 		return nil, nil, err
 	}
+	sourceCurrent := mapping.SourceUpdatedAt != nil &&
+		(db.SameImportTimestamp(*mapping.SourceUpdatedAt, item.UpdatedAt) || item.UpdatedAt.After(*mapping.SourceUpdatedAt))
+	// Keep older observations from gaining current-version label authority on
+	// their next replay. The source timestamp is independent of local edits.
+	sourceUpdatedAt := item.UpdatedAt
+	_, observedPresentation := params.ReconcileLabelsForUnchanged[item.ExternalID]
+	if params.ReconcileLabelsForUnchanged != nil && mapping.SourceUpdatedAt != nil &&
+		(mapping.SourceUpdatedAt.After(sourceUpdatedAt) || !observedPresentation) {
+		sourceUpdatedAt = *mapping.SourceUpdatedAt
+	}
 	if item.UpdatedAt.After(existing.UpdatedAt) {
 		updated, event, err := s.updateImportedIssue(ctx, tx, params, item, existing, project)
 		if err != nil {
@@ -249,7 +260,7 @@ func (s *Store) importIssue(
 		}
 		if _, err := upsertImportMappingTx(ctx, tx, db.ImportMappingParams{
 			Source: params.Source, ExternalID: item.ExternalID, ObjectType: "issue",
-			ProjectID: params.ProjectID, IssueID: &updated.ID, SourceUpdatedAt: &item.UpdatedAt,
+			ProjectID: params.ProjectID, IssueID: &updated.ID, SourceUpdatedAt: &sourceUpdatedAt,
 		}); err != nil {
 			return nil, nil, err
 		}
@@ -262,11 +273,11 @@ func (s *Store) importIssue(
 		}
 		if _, err := upsertImportMappingTx(ctx, tx, db.ImportMappingParams{
 			Source: params.Source, ExternalID: item.ExternalID, ObjectType: "issue",
-			ProjectID: params.ProjectID, IssueID: &healed.ID, SourceUpdatedAt: &item.UpdatedAt,
+			ProjectID: params.ProjectID, IssueID: &healed.ID, SourceUpdatedAt: &sourceUpdatedAt,
 		}); err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: healed, healed: true}, &event, nil
+		return &importIssueState{item: item, issue: healed, healed: true, sourceCurrent: sourceCurrent}, &event, nil
 	}
 	if db.ImportOwnsSameSourceVersionTitle(mapping, existing, item) {
 		updated, event, err := s.updateImportedPresentationTitle(ctx, tx, params, item, existing, project)
@@ -275,19 +286,19 @@ func (s *Store) importIssue(
 		}
 		if _, err := upsertImportMappingTx(ctx, tx, db.ImportMappingParams{
 			Source: params.Source, ExternalID: item.ExternalID, ObjectType: "issue",
-			ProjectID: params.ProjectID, IssueID: &updated.ID, SourceUpdatedAt: &item.UpdatedAt,
+			ProjectID: params.ProjectID, IssueID: &updated.ID, SourceUpdatedAt: &sourceUpdatedAt,
 		}); err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: updated, presentationUpdated: true}, &event, nil
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &event, nil
 	}
 	if _, err := upsertImportMappingTx(ctx, tx, db.ImportMappingParams{
 		Source: params.Source, ExternalID: item.ExternalID, ObjectType: "issue",
-		ProjectID: params.ProjectID, IssueID: &existing.ID, SourceUpdatedAt: &item.UpdatedAt,
+		ProjectID: params.ProjectID, IssueID: &existing.ID, SourceUpdatedAt: &sourceUpdatedAt,
 	}); err != nil {
 		return nil, nil, err
 	}
-	return &importIssueState{item: item, issue: existing}, nil, nil
+	return &importIssueState{item: item, issue: existing, sourceCurrent: sourceCurrent}, nil, nil
 }
 
 func (s *Store) insertImportedIssue(

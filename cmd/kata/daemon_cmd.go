@@ -32,6 +32,8 @@ import (
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/issuesync"
+	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/vector"
@@ -76,6 +78,16 @@ var newGitHubSyncDaemonRunner = func(config githubsync.RunnerConfig) githubSyncD
 	return githubsync.NewRunner(config)
 }
 
+type notionSyncDaemonRunner interface {
+	Run(context.Context) error
+}
+
+var newNotionSyncDaemonRunner = func(cfg notionsync.RunnerConfig) notionSyncDaemonRunner {
+	return notionsync.NewRunner(cfg)
+}
+
+var newNotionSyncClient = notionsync.NewClient
+
 var newGitHubSyncHTTPFetcher = githubsync.NewHTTPFetcher
 
 var openEmbeddingVectorIndex = func(
@@ -93,6 +105,10 @@ func newConfiguredGitHubSyncFetcher(cfg config.GitHubSyncConfig) githubsync.Fetc
 	return newGitHubSyncHTTPFetcher(githubsync.HTTPFetcherConfig{
 		CredentialResolver: githubsync.NewCredentialResolver(cfg, nil),
 	})
+}
+
+func newConfiguredNotionSyncFetcher(cfg config.NotionSyncConfig) notionsync.Fetcher {
+	return newNotionSyncClient(notionsync.ClientConfig{TokenEnv: cfg.TokenEnv})
 }
 
 type daemonStartOutput struct {
@@ -1185,6 +1201,12 @@ func runDaemonProcess(
 	gitHubSyncWake := startGitHubSyncRunner(
 		ctx, workers, waitableDrainAdmission, store, gitHubSyncFetcher, publisher, daemonLog, gitHubSyncProgress,
 	)
+	notionSyncFetcher := newConfiguredNotionSyncFetcher(dcfg.NotionSync)
+	notionSyncProgress := issuesync.NewProgressTracker()
+	notionSyncWake := startNotionSyncRunner(
+		ctx, workers, waitableDrainAdmission, store, notionSyncFetcher, publisher, daemonLog, notionSyncProgress,
+	)
+
 	externalRootRegistry, err := rootbridge.NewRegistry(ctx, dcfg.Connectors, nil)
 	if err != nil {
 		return err
@@ -1251,6 +1273,10 @@ func runDaemonProcess(
 		GitHubSyncConfig:       dcfg.GitHubSync,
 		GitHubSyncWake:         gitHubSyncWake,
 		GitHubSyncProgress:     gitHubSyncProgress,
+		NotionSyncFetcher:      notionSyncFetcher,
+		NotionSyncConfig:       dcfg.NotionSync,
+		NotionSyncWake:         notionSyncWake,
+		NotionSyncProgress:     notionSyncProgress,
 		ExternalRootRegistry:   externalRootRegistry,
 		ExternalRootService:    externalRootService,
 		ExternalRootReconciler: externalRootReconciler,
@@ -1813,6 +1839,57 @@ func startGitHubSyncRunner(
 				daemonLog.Printf("github sync: %v", err)
 			} else {
 				slog.Warn("github sync", "err", err)
+			}
+		}
+	})
+	return wakeRunner
+}
+
+// startNotionSyncRunner scans durable due bindings and shares the daemon's
+// client, live progress, and finite-work admission with manual sync requests.
+func startNotionSyncRunner(
+	ctx context.Context,
+	workers *daemonWorkerGroup,
+	drainAdmission activity.WaitableAdmission,
+	store db.Storage,
+	fetcher notionsync.Fetcher,
+	publisher daemon.EventPublisher,
+	daemonLog *log.Logger,
+	progress *issuesync.ProgressTracker,
+) func() {
+	wake := make(chan struct{}, 1)
+	wakeRunner := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	if fetcher == nil {
+		fetcher = newConfiguredNotionSyncFetcher(config.NotionSyncConfig{})
+	}
+	logger := slog.Default()
+	if daemonLog != nil {
+		logger = slog.New(slog.NewTextHandler(daemonLog.Writer(), nil))
+	}
+	runner := newNotionSyncDaemonRunner(notionsync.RunnerConfig{
+		Store:          store,
+		Fetcher:        fetcher,
+		Progress:       progress,
+		Logger:         logger,
+		Interval:       30 * time.Second,
+		Wake:           wake,
+		DrainAdmission: drainAdmission,
+		EventSinkFrom: func(_ context.Context, projectID int64, events []db.Event, fork activity.Admission) error {
+			publisher.EventsFrom(projectID, events, fork)
+			return nil
+		},
+	})
+	workers.Go(func() {
+		if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			if daemonLog != nil {
+				daemonLog.Printf("notion sync: %v", err)
+			} else {
+				slog.Warn("notion sync", "err", err)
 			}
 		}
 	})

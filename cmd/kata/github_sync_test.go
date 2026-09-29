@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -392,4 +393,51 @@ func TestGitHubSyncDetailedStatusLabelsPreviousSuccessAfterFailure(t *testing.T)
 	assert.Contains(t, agent, "last_success_at=")
 	assert.Contains(t, agent, "last_created=12")
 	assert.Contains(t, agent, "last_comments=34")
+}
+
+func TestGitHubTitlePrefixReenablePresence(t *testing.T) {
+	f := newGitHubSyncCLIFixture(t)
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{nil, true}, {[]string{"--title-prefix=false"}, false}, {nil, false}, {[]string{"--title-prefix=true"}, true},
+	} {
+		runCLI(t, f.env, f.dir, append([]string{"sync", "github", "enable", "--repo", "example-owner/example-repo"}, tc.args...)...)
+		b, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+		require.NoError(t, err)
+		c, err := githubsync.DecodeConfig(b.Config)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, c.UseTitlePrefix())
+	}
+}
+
+func TestGitHubTitlePrefixStatus(t *testing.T) {
+	for _, mode := range []string{"human", "agent"} {
+		for _, choice := range []string{"legacy", "true", "false"} {
+			t.Run(mode+"/"+choice, func(t *testing.T) {
+				f := newGitHubSyncCLIFixture(t)
+				runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--title-prefix="+fmt.Sprint(choice != "false"))
+				if choice == "legacy" {
+					binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+					require.NoError(t, err)
+					var fields map[string]any
+					require.NoError(t, json.Unmarshal(binding.Config, &fields))
+					delete(fields, "title_prefix")
+					raw, err := json.Marshal(fields)
+					require.NoError(t, err)
+					_, err = f.env.DB.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: binding.ProjectID, Provider: binding.Provider, SourceKey: binding.SourceKey, RemoteID: binding.RemoteID, DisplayName: binding.DisplayName, Config: raw, IntervalSeconds: binding.IntervalSeconds})
+					require.NoError(t, err)
+				}
+				args := []string{"sync", "github", "status"}
+				label := "Title prefix: "
+				if mode == "agent" {
+					args = append([]string{"--agent"}, args...)
+					label = "title_prefix="
+				}
+				out := runCLI(t, f.env, f.dir, args...)
+				require.Contains(t, out, label+fmt.Sprint(choice != "false"))
+			})
+		}
+	}
 }

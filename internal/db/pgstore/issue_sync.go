@@ -48,6 +48,11 @@ func (s *Store) UpsertIssueSyncBinding(
 		}
 		existing, err := scanIssueSyncBinding(tx.QueryRowContext(ctx,
 			issueSyncBindingSelect+` WHERE b.project_id=$1 FOR UPDATE`, params.ProjectID))
+		if expected := params.ExpectedBinding; expected != nil && (err == nil || errors.Is(err, db.ErrNotFound)) {
+			if (expected.ID == 0 && err == nil) || (expected.ID != 0 && (err != nil || existing.ID != expected.ID || string(existing.Config) != string(expected.Config) || existing.IntervalSeconds != expected.IntervalSeconds)) {
+				return db.ErrIssueSyncBindingChanged
+			}
+		}
 		if err == nil {
 			if existing.Provider != params.Provider || existing.RemoteID != params.RemoteID {
 				return db.ErrIssueSyncProjectAlreadyBound

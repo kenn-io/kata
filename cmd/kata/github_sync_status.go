@@ -18,7 +18,7 @@ type githubSyncProgressOut struct {
 
 func githubSyncPrintAgentDetails(w io.Writer, status githubSyncStatusOut, binding *githubSyncBindingOut) error {
 	if binding != nil {
-		if _, err := fmt.Fprintf(w, " interval_seconds=%d", binding.IntervalSeconds); err != nil {
+		if _, err := fmt.Fprintf(w, " interval_seconds=%d title_prefix=%t", binding.IntervalSeconds, githubSyncConfigTitlePrefix(binding.Config)); err != nil {
 			return err
 		}
 		if since := githubSyncConfigString(binding.Config, "since"); since != "" {
@@ -49,7 +49,7 @@ func githubSyncPrintAgentDetails(w io.Writer, status githubSyncStatusOut, bindin
 
 func githubSyncPrintHumanDetails(w io.Writer, body githubSyncBindingBody) error {
 	if body.Binding != nil {
-		if _, err := fmt.Fprintf(w, "Repository: %s\nInterval: %ds\n", textsafe.Line(githubSyncRepoLabel(body.Binding)), body.Binding.IntervalSeconds); err != nil {
+		if _, err := fmt.Fprintf(w, "Repository: %s\nInterval: %ds\nTitle prefix: %t\n", textsafe.Line(githubSyncRepoLabel(body.Binding)), body.Binding.IntervalSeconds, githubSyncConfigTitlePrefix(body.Binding.Config)); err != nil {
 			return err
 		}
 		if since := githubSyncConfigString(body.Binding.Config, "since"); since != "" {
@@ -84,4 +84,9 @@ func githubSyncPrintHumanDetails(w io.Writer, body githubSyncBindingBody) error 
 	}
 	_, err := fmt.Fprintf(w, "Last successful run: created=%d updated=%d unchanged=%d comments=%d\n", status.LastCreated, status.LastUpdated, status.LastUnchanged, status.LastComments)
 	return err
+}
+
+func githubSyncConfigTitlePrefix(config map[string]any) bool {
+	value, present := config["title_prefix"].(bool)
+	return !present || value
 }

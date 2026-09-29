@@ -99,11 +99,22 @@ source:
 [GitHub #123] Original issue title
 ```
 
-Pass `--title-prefix=false` when you want kata titles without the GitHub prefix:
+Pass `--title-prefix=false` to retain original GitHub titles and add the plain
+`github` label:
 
 ```sh
 kata sync github enable --repo example-org/example-repo --title-prefix=false
 ```
+
+The default is true. Re-enable with `--title-prefix=true` to restore prefixing;
+omitting the flag preserves the saved choice. Presentation changes refresh
+source-owned titles at the same source timestamp while preserving local title
+edits. The source tag adds/removes under import ownership rules without losing
+upstream or local labels. A matching upstream `GitHub`/`github` label is normalized
+and deduplicated; a pre-existing local `github` label remains local. If you remove
+a source-managed `github` label by hand, the next fetch of that issue restores
+it with an `issue.labeled` event, even if the issue has not changed. Older source
+replays cannot change the presentation tag.
 
 ### Limit imported history
 

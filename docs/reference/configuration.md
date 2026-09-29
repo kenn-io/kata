@@ -32,6 +32,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
+| `KATA_NOTION_TOKEN` | Default daemon-side read-only Notion credential; `[notion_sync].token_env` can name another environment variable. Client workstations need no Notion token. |
 | `KATA_GITHUB_TOKEN` | Default explicit token source for GitHub sync when no matching `[[github_sync.app]]` credential is configured. It is scoped to `github.com` unless `[github_sync].token_host` names a different host. `[github_sync].token_env` can name a different env var. |
 | `KATA_GITHUB_SYNC_ALLOWED_HOSTS` | Comma-separated exact GitHub Enterprise hostnames trusted for GitHub sync and git-remote inference. `github.com` is always trusted. |
 | `KATA_FEDERATION_PULL_INTERVAL_MS` | Federation runner poll interval for tests or latency-sensitive private deployments. |
@@ -249,6 +250,9 @@ trust_private_network = true
 listen = "127.0.0.1:27777"
 public_origin = "https://daemon.example"
 
+[notion_sync]
+token_env = "KATA_NOTION_TOKEN"
+
 [github_sync]
 token_env = "KATA_GITHUB_TOKEN"
 token_host = "github.com"
@@ -291,7 +295,7 @@ configured interval. Ordinary health probes do not renew the timeout. A running
 sends marked `GET /api/v1/ping` keepalives after applicable listener policy
 checks in both stdio and streamable-HTTP modes so the bridge remains usable for
 its full lifetime. Use an explicit daemon service when
-GitHub sync, federation, or timed-claim maintenance must remain continuously
+GitHub/Notion sync, federation, or timed-claim maintenance must remain continuously
 scheduled without a client present.
 
 The optional top-level `timezone` is the IANA timezone for date-only and local
@@ -351,6 +355,17 @@ environment override for ephemeral deployments. Unlisted Host values are
 rejected before API or browser route handling, even when a request presents a
 bearer header; this prevents credentials from turning DNS rebinding into an
 authority bypass.
+
+`[notion_sync].token_env` names the daemon environment variable containing its
+Notion read-content credential (default `KATA_NOTION_TOKEN`). Share each task
+database with the Notion internal connection. The credential is shared across
+Notion bindings, resolved once per run, and sent only to fixed
+`https://api.notion.com:443`; redirects are rejected. Supply it in the daemon's
+service environment, including for remote daemons, and restart after service
+environment/config changes. Tokens and environment-variable selectors never
+enter binding config or JSONL. Source/mapping IDs, interval, and cutoff are
+project binding settings managed by `kata sync notion enable`, not keys in
+`[notion_sync]`. See [Notion sync](../operations/notion-sync.md).
 
 `[github_sync]` controls daemon-side GitHub credentials. The recommended shared
 daemon path is `[[github_sync.app]]`, matched exactly by normalized `(host,

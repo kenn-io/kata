@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -193,6 +194,7 @@ func TestGitHubSyncHandlers_EnableRejectsFederationSpoke(t *testing.T) {
 	assertAPIError(t, resp.StatusCode, body, http.StatusConflict, "issue_sync_federation_conflict")
 	assert.Contains(t, string(body), "federation spoke")
 	assert.Contains(t, string(body), "hub project")
+	assert.Contains(t, string(body), "project is a federation spoke; enable GitHub sync on the hub project so federation can replicate GitHub issues to spokes")
 	assert.Equal(t, 1, h.fetcher.repositoryCalls, "enable validates repository before storing")
 	assert.Equal(t, 0, h.wakeCount())
 }
@@ -583,6 +585,9 @@ type issueSyncBindingOut struct {
 }
 
 type issueSyncStatusOut struct {
+	Progress *struct {
+		Phase string `json:"phase"`
+	} `json:"progress"`
 	BindingID int64  `json:"binding_id"`
 	ProjectID int64  `json:"project_id"`
 	Enabled   bool   `json:"enabled"`
@@ -778,4 +783,27 @@ func TestGitHubSyncProgressVisibleWhileOnceIsFetching(t *testing.T) {
 	decodeJSON(t, body, &out)
 	assert.Equal(t, "enabled", out.Status.State)
 	assert.Nil(t, out.Status.Progress)
+}
+
+func TestGitHubSyncIntervalPresenceCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		fields  map[string]any
+		seconds int
+	}{
+		{"omitted", nil, 300}, {"zero", map[string]any{"interval_seconds": 0}, 300},
+		{"negative", map[string]any{"interval_seconds": -1}, 300},
+		{"both forms retain duration precedence", map[string]any{"interval_seconds": 120, "interval": "1m"}, 60},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newGitHubSyncHandlerHarness(t)
+			body := map[string]any{"config": map[string]any{"owner": "example-owner", "repo": "example-repo"}}
+			maps.Copy(body, tc.fields)
+			resp, raw := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "enable"), body)
+			require.Equal(t, 200, resp.StatusCode, string(raw))
+			var out issueSyncResponseBody
+			decodeJSON(t, raw, &out)
+			require.Equal(t, tc.seconds, out.Binding.IntervalSeconds)
+		})
+	}
 }

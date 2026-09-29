@@ -38,9 +38,18 @@ type IssueSyncStatus struct {
 	LastComments  int
 }
 
+// IssueSyncBindingPrecondition fences enable validation against a binding snapshot.
+// ID zero expects absence; otherwise config and interval must match exactly.
+type IssueSyncBindingPrecondition struct {
+	ID              int64
+	Config          jsontext.Value
+	IntervalSeconds int
+}
+
 // UpsertIssueSyncBindingParams creates or re-enables the binding for a
 // project. SourceKey is caller-derived, normally "<provider>:<remote_id>".
 type UpsertIssueSyncBindingParams struct {
+	ExpectedBinding *IssueSyncBindingPrecondition
 	ProjectID       int64
 	Provider        string
 	SourceKey       string

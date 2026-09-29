@@ -758,12 +758,21 @@ func checkImportTransactionRollback(ctx context.Context, t *testing.T, store db.
 }
 
 func checkImportIssueSyncGuard(ctx context.Context, t *testing.T, store db.Storage) error {
-	project, err := store.CreateProject(ctx, "external-import-guard")
+	for _, provider := range []string{"example", "github", "notion"} {
+		if err := checkImportIssueSyncGuardProvider(ctx, t, store, provider); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkImportIssueSyncGuardProvider(ctx context.Context, t *testing.T, store db.Storage, provider string) error {
+	project, err := store.CreateProject(ctx, provider+"-import-guard")
 	if err != nil {
 		return err
 	}
 	binding, err := store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
-		ProjectID: project.ID, Provider: "example", SourceKey: "example:guard",
+		ProjectID: project.ID, Provider: provider, SourceKey: provider + ":guard",
 		RemoteID: "guard", DisplayName: "Guarded import", Config: jsontext.Value(`{}`),
 		IntervalSeconds: 60,
 	})
@@ -771,16 +780,16 @@ func checkImportIssueSyncGuard(ctx context.Context, t *testing.T, store db.Stora
 		return err
 	}
 	started := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
-	_, claimed, err := store.ClaimIssueSyncBinding(ctx, binding.ID, "example", started, started.Add(-time.Hour))
+	_, claimed, err := store.ClaimIssueSyncBinding(ctx, binding.ID, provider, started, started.Add(-time.Hour))
 	if err != nil {
 		return err
 	}
 	require.True(t, claimed)
 	at := started.Add(time.Minute)
 	params := db.ImportBatchParams{
-		ProjectID: project.ID, Source: "example:guard", Actor: "sync-agent",
+		ProjectID: project.ID, Source: provider + ":guard", Actor: "sync-agent",
 		IssueSyncGuard: &db.IssueSyncImportGuard{
-			BindingID: binding.ID, Provider: "example", StartedAt: started,
+			BindingID: binding.ID, Provider: provider, StartedAt: started,
 		},
 		Items: []db.ImportItem{{
 			ExternalID: "guarded", Title: "Guarded issue", Author: "sync-agent",
@@ -793,7 +802,7 @@ func checkImportIssueSyncGuard(ctx context.Context, t *testing.T, store db.Stora
 	}
 	assert.Equal(t, 1, result.Created)
 	params.IssueSyncGuard = &db.IssueSyncImportGuard{
-		BindingID: binding.ID, Provider: "example", StartedAt: started.Add(time.Second),
+		BindingID: binding.ID, Provider: provider, StartedAt: started.Add(time.Second),
 	}
 	_, _, err = store.ImportBatch(ctx, params)
 	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)

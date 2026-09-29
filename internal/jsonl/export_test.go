@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1262,4 +1263,76 @@ func assertKindOrder(t *testing.T, records []map[string]any) {
 		require.GreaterOrEqual(t, rank, last, "kind %q out of order", kind)
 		last = rank
 	}
+}
+
+const notionFixtureSource = "11111111-1111-4111-8111-111111111111"
+const notionFixtureConfig = `{"data_source_id":"11111111-1111-4111-8111-111111111111","database_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","title_property_id":"title","status_property_id":"workflow","assignee_property_id":"people","done_status_ids":["complete"],"since":"2026-09-01T00:00:00Z"}`
+
+type notionExportFixture struct {
+	exported []byte
+	binding  db.IssueSyncBinding
+	claim    time.Time
+	issue    db.Issue
+}
+
+func exportNotionFixture(t *testing.T) notionExportFixture {
+	t.Helper()
+	ctx := context.Background()
+	s := openExportTestDB(t)
+	p, err := s.CreateProject(ctx, "example-notion-project")
+	require.NoError(t, err)
+	b, err := s.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "notion", SourceKey: "notion:" + notionFixtureSource, RemoteID: notionFixtureSource, DisplayName: "Example tasks", Config: []byte(notionFixtureConfig), IntervalSeconds: 300})
+	require.NoError(t, err)
+	at := mustParseTime(t, "2026-09-28T01:00:00Z")
+	_, ok, err := s.ClaimIssueSyncBinding(ctx, b.ID, "notion", at, at.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, _, err = s.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: b.SourceKey, Actor: "notion-sync", IssueSyncGuard: &db.IssueSyncImportGuard{BindingID: b.ID, Provider: "notion", StartedAt: at}, Items: []db.ImportItem{{ExternalID: "page:22222222-2222-4222-8222-222222222222", Title: "[Notion] Example task", Body: "Example body", Author: "notion-unknown", Status: "open", CreatedAt: at.Add(-time.Hour), UpdatedAt: at}}})
+	require.NoError(t, err)
+	_, err = s.RecordIssueSyncSuccess(ctx, db.IssueSyncSuccessParams{BindingID: b.ID, StartedAt: at, At: at, CursorAt: at, LastCreated: 1})
+	require.NoError(t, err)
+	claim := at.Add(time.Minute)
+	_, ok, err = s.ClaimIssueSyncBinding(ctx, b.ID, "notion", claim, at.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, ok)
+	b, err = s.IssueSyncBindingByID(ctx, b.ID)
+	require.NoError(t, err)
+	m, err := s.ImportMappingBySource(ctx, p.ID, b.SourceKey, "issue", "page:22222222-2222-4222-8222-222222222222")
+	require.NoError(t, err)
+	require.NotNil(t, m.IssueID)
+	issue, err := s.IssueByID(ctx, *m.IssueID)
+	require.NoError(t, err)
+	var out bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, s, &out, jsonl.ExportOptions{IncludeDeleted: true}))
+	return notionExportFixture{exported: out.Bytes(), binding: b, claim: claim, issue: issue}
+}
+
+func TestNotionSyncExportPreservesConfigSourceAndMappings(t *testing.T) {
+	fixture := exportNotionFixture(t)
+	records := decodeJSONLLines(t, fixture.exported)
+	assertKindOrder(t, records)
+	var binding, status, mapping map[string]any
+	for _, record := range records {
+		data := record["data"].(map[string]any)
+		switch record["kind"] {
+		case "issue_sync_binding":
+			binding = data
+		case "issue_sync_status":
+			status = data
+		case "import_mapping":
+			mapping = data
+		}
+	}
+	require.NotNil(t, binding)
+	require.Equal(t, "notion", binding["provider"])
+	require.Equal(t, "notion:"+notionFixtureSource, binding["source_key"])
+	raw, err := json.Marshal(binding["config"])
+	require.NoError(t, err)
+	require.JSONEq(t, notionFixtureConfig, string(raw))
+	require.Equal(t, true, binding["enabled"])
+	require.NotNil(t, status)
+	require.Equal(t, "2026-09-28T01:01:00.000Z", status["sync_started_at"])
+	require.NotNil(t, mapping)
+	require.Equal(t, "notion:"+notionFixtureSource, mapping["source"])
+	require.Equal(t, "page:22222222-2222-4222-8222-222222222222", mapping["external_id"])
 }

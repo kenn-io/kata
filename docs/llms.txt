@@ -47,6 +47,8 @@ for machine readers.
   hub-and-spoke replication between daemons
 - [GitHub sync](https://katatracker.com/docs/operations/github-sync.md):
   mirror upstream issues into kata
+- [Notion sync](https://katatracker.com/docs/operations/notion-sync.md):
+  mirror one task data source with read-only daemon polling and explicit completion mappings
 - [Configuration](https://katatracker.com/docs/reference/configuration.md):
   config.toml reference
 - [Backup and restore](https://katatracker.com/docs/operations/backup-restore.md):

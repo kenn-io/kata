@@ -16,14 +16,18 @@ import (
 )
 
 func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
+	return checkIssueSyncLifecycleProvider(t, store, "github")
+}
+
+func checkIssueSyncLifecycleProvider(t *testing.T, store db.Storage, provider string) error {
 	t.Helper()
 	ctx := context.Background()
-	project, err := store.CreateProject(ctx, "issue-sync-project")
+	project, err := store.CreateProject(ctx, provider+"-sync-project")
 	if err != nil {
 		return fmt.Errorf("create issue sync project: %w", err)
 	}
 	params := db.UpsertIssueSyncBindingParams{
-		ProjectID: project.ID, Provider: "github", SourceKey: "github:owner/repo", RemoteID: "owner/repo",
+		ProjectID: project.ID, Provider: provider, SourceKey: provider + ":source", RemoteID: "owner/repo",
 		DisplayName: "owner/repo", Config: jsontext.Value(`{"labels":["bug"]}`), IntervalSeconds: 60,
 	}
 	binding, err := store.UpsertIssueSyncBinding(ctx, params)
@@ -54,14 +58,14 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 	assert.Nil(t, status.SyncStartedAt)
 
 	started := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
-	due, err := store.ListDueIssueSyncBindings(ctx, "github", started, started.Add(-time.Hour), 10)
+	due, err := store.ListDueIssueSyncBindings(ctx, provider, started, started.Add(-time.Hour), 10)
 	if err != nil {
 		return fmt.Errorf("list initially due issue sync binding: %w", err)
 	}
 	require.Len(t, due, 1)
 	assert.Equal(t, binding.ID, due[0].ID)
 	claimedBinding, claimed, err := store.ClaimIssueSyncBinding(
-		ctx, binding.ID, "github", started, started.Add(-time.Hour),
+		ctx, binding.ID, provider, started, started.Add(-time.Hour),
 	)
 	if err != nil {
 		return fmt.Errorf("claim issue sync binding: %w", err)
@@ -69,7 +73,7 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 	assert.True(t, claimed)
 	assert.Equal(t, binding.ID, claimedBinding.ID)
 	_, claimed, err = store.ClaimIssueSyncBinding(
-		ctx, binding.ID, "github", started.Add(time.Minute), started.Add(-time.Hour),
+		ctx, binding.ID, provider, started.Add(time.Minute), started.Add(-time.Hour),
 	)
 	if err != nil {
 		return fmt.Errorf("repeat issue sync claim: %w", err)
@@ -102,12 +106,12 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 	assert.Nil(t, status.SyncStartedAt)
 	assert.Equal(t, &failedAt, status.LastErrorAt)
 	assert.Equal(t, "rate limited", status.LastError)
-	due, err = store.ListDueIssueSyncBindings(ctx, "github", started.Add(30*time.Second), started.Add(-time.Hour), 10)
+	due, err = store.ListDueIssueSyncBindings(ctx, provider, started.Add(30*time.Second), started.Add(-time.Hour), 10)
 	if err != nil {
 		return fmt.Errorf("list issue sync binding before interval: %w", err)
 	}
 	assert.Empty(t, due)
-	due, err = store.ListDueIssueSyncBindings(ctx, "github", started.Add(61*time.Second), started.Add(-time.Hour), 10)
+	due, err = store.ListDueIssueSyncBindings(ctx, provider, started.Add(61*time.Second), started.Add(-time.Hour), 10)
 	if err != nil {
 		return fmt.Errorf("list issue sync binding after interval: %w", err)
 	}
@@ -115,7 +119,7 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 
 	secondStarted := started.Add(2 * time.Hour)
 	_, claimed, err = store.ClaimIssueSyncBinding(
-		ctx, binding.ID, "github", secondStarted, secondStarted.Add(-time.Hour),
+		ctx, binding.ID, provider, secondStarted, secondStarted.Add(-time.Hour),
 	)
 	if err != nil {
 		return fmt.Errorf("claim issue sync binding again: %w", err)
@@ -160,7 +164,7 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 	}
 	assert.False(t, disabled.Enabled)
 	_, claimed, err = store.ClaimIssueSyncBinding(
-		ctx, binding.ID, "github", secondStarted.Add(time.Hour), secondStarted,
+		ctx, binding.ID, provider, secondStarted.Add(time.Hour), secondStarted,
 	)
 	if err != nil {
 		return fmt.Errorf("claim disabled issue sync binding: %w", err)
@@ -177,7 +181,7 @@ func checkIssueSyncLifecycle(t *testing.T, store db.Storage) error {
 	assert.Nil(t, reenabled.LastCursorAt, "config changes reset the import cursor")
 	conflicting := params
 	conflicting.RemoteID = "owner/other"
-	conflicting.SourceKey = "github:owner/other"
+	conflicting.SourceKey = provider + ":other"
 	_, err = store.UpsertIssueSyncBinding(ctx, conflicting)
 	assert.ErrorIs(t, err, db.ErrIssueSyncProjectAlreadyBound)
 	_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{ProjectID: project.ID})
@@ -719,5 +723,163 @@ func checkImportMappings(t *testing.T, store db.Storage) error {
 		IssueID: &issueID,
 	})
 	assert.Error(t, err)
+	return nil
+}
+
+// The same claim, ownership, and federation boundaries apply to every mirror provider.
+func checkNotionSyncStorage(t *testing.T, store db.Storage) error {
+	if err := checkIssueSyncLifecycleProvider(t, store, "notion"); err != nil {
+		return err
+	}
+	ctx := context.Background()
+	at := time.Date(2026, 9, 28, 1, 0, 0, 0, time.UTC)
+	newBinding := func(name string) (db.Project, db.IssueSyncBinding, db.UpsertIssueSyncBindingParams) {
+		p, err := store.CreateProject(ctx, name)
+		require.NoError(t, err)
+		params := db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "notion", SourceKey: "notion:" + name, RemoteID: name, DisplayName: "Example source", Config: []byte(`{"since":""}`), IntervalSeconds: 300}
+		b, err := store.UpsertIssueSyncBinding(ctx, params)
+		require.NoError(t, err)
+		return p, b, params
+	}
+	p, b, params := newBinding("notion-guard-project")
+	_, ok, err := store.ClaimIssueSyncBinding(ctx, b.ID, "github", at, at.Add(-time.Hour))
+	require.NoError(t, err)
+	assert.False(t, ok)
+	due, err := store.ListDueIssueSyncBindings(ctx, "github", at, at.Add(-time.Hour), 100)
+	require.NoError(t, err)
+	for _, row := range due {
+		assert.NotEqual(t, b.ID, row.ID)
+	}
+	_, ok, err = store.ClaimIssueSyncBinding(ctx, b.ID, "notion", at, at.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, err = store.RecordIssueSyncSuccess(ctx, db.IssueSyncSuccessParams{BindingID: b.ID, StartedAt: at, At: at, CursorAt: at})
+	require.NoError(t, err)
+	params.IntervalSeconds = 900
+	b, err = store.UpsertIssueSyncBinding(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, &at, b.LastCursorAt)
+	params.Config = []byte(`{"since":"2026-09-27"}`)
+	b, err = store.UpsertIssueSyncBinding(ctx, params)
+	require.NoError(t, err)
+	require.Nil(t, b.LastCursorAt)
+	_, ok, err = store.ClaimIssueSyncBinding(ctx, b.ID, "notion", at, at.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, ok)
+	successor := at.Add(time.Hour)
+	_, ok, err = store.ClaimIssueSyncBinding(ctx, b.ID, "notion", successor, at.Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, err = store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{BindingID: b.ID, DisplayName: "Stale name", Config: params.Config, StartedAt: &at})
+	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	_, err = store.RecordIssueSyncSuccess(ctx, db.IssueSyncSuccessParams{BindingID: b.ID, StartedAt: at, At: at, CursorAt: at})
+	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	_, err = store.RecordIssueSyncError(ctx, db.IssueSyncErrorParams{BindingID: b.ID, StartedAt: at, At: at, Error: "stale"})
+	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	batch := db.ImportBatchParams{ProjectID: p.ID, Source: b.SourceKey, Actor: "notion-sync", IssueSyncGuard: &db.IssueSyncImportGuard{BindingID: b.ID, Provider: "notion", StartedAt: at}, Items: []db.ImportItem{{ExternalID: "page:example", Title: "Example task", Author: "notion-sync", Status: "open", CreatedAt: at, UpdatedAt: at}}}
+	_, _, err = store.ImportBatch(ctx, batch)
+	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	batch.IssueSyncGuard.StartedAt = successor
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectUID: p.UID, ReplayHorizonEventID: 1, Enabled: true})
+	require.NoError(t, err)
+	result, _, err := store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Created)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: p.UID, ReplayHorizonEventID: 1, Enabled: true})
+	assert.ErrorIs(t, err, db.ErrIssueSyncFederationBinding)
+	mapping, err := store.ImportMappingBySource(ctx, p.ID, b.SourceKey, "issue", "page:example")
+	require.NoError(t, err)
+	require.NotNil(t, mapping.IssueID)
+	for _, disabled := range []bool{false, true} {
+		if disabled {
+			_, err = store.DisableIssueSyncBinding(ctx, p.ID)
+			require.NoError(t, err)
+		}
+		_, _, err = store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: p.ID, IssueID: *mapping.IssueID, ConnectorInstance: "example-notes", ExternalRootKey: "example-root", ExternalAccountKey: "example-account", Actor: "editor", ReceiveCommentsAfter: at})
+		assert.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
+	}
+	_, _, err = store.ImportBatch(ctx, batch)
+	assert.ErrorIs(t, err, db.ErrIssueSyncNotEnabled)
+	_, err = store.UpsertIssueSyncBinding(ctx, params)
+	require.NoError(t, err)
+	_, _, err = store.ImportBatch(ctx, batch)
+	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	status, err := store.IssueSyncStatusByProject(ctx, p.ID)
+	require.NoError(t, err)
+	require.Nil(t, status.SyncStartedAt)
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "editor", Force: true})
+	require.NoError(t, err)
+	_, ok, err = store.ClaimIssueSyncBinding(ctx, b.ID, "notion", successor.Add(time.Hour), successor)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	_, _, err = store.ImportBatch(ctx, batch)
+	require.Error(t, err)
+
+	bridgeProject, err := store.CreateProject(ctx, "notion-bridge-project")
+	require.NoError(t, err)
+	bridgeIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: bridgeProject.ID, Title: "Example bridge task", Author: "editor"})
+	require.NoError(t, err)
+	bridgeSource := "notion:bridge-source"
+	_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{ProjectID: bridgeProject.ID, Source: bridgeSource, ExternalID: "page:bridge", ObjectType: "issue", IssueID: &bridgeIssue.ID})
+	require.NoError(t, err)
+	bridge, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: bridgeProject.ID, IssueID: bridgeIssue.ID, ConnectorInstance: "example-notes", ExternalRootKey: "bridge-root", ExternalAccountKey: "example-account", Actor: "editor", ReceiveCommentsAfter: at})
+	require.NoError(t, err)
+	bridgeParams := db.UpsertIssueSyncBindingParams{ProjectID: bridgeProject.ID, Provider: "notion", SourceKey: bridgeSource, RemoteID: "bridge-source", DisplayName: "Example bridge source", Config: []byte(`{}`), IntervalSeconds: 300}
+	_, err = store.UpsertIssueSyncBinding(ctx, bridgeParams)
+	assert.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
+	_, _, err = store.PauseExternalRootBinding(ctx, db.ExternalRootActionParams{BindingID: bridge.ID, Actor: "editor", Reason: "operator pause"})
+	require.NoError(t, err)
+	_, err = store.UpsertIssueSyncBinding(ctx, bridgeParams)
+	assert.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
+	spoke, err := store.CreateProject(ctx, "notion-spoke-project")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: spoke.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: spoke.UID, ReplayHorizonEventID: 1, Enabled: true})
+	require.NoError(t, err)
+	params.ProjectID = spoke.ID
+	params.SourceKey = "notion:spoke-source"
+	params.RemoteID = "spoke-source"
+	_, err = store.UpsertIssueSyncBinding(ctx, params)
+	assert.ErrorIs(t, err, db.ErrIssueSyncFederationBinding)
+	return nil
+}
+
+func checkIssueSyncExpectedBinding(t *testing.T, store db.Storage) error {
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "expected-binding-project")
+	require.NoError(t, err)
+	p := db.UpsertIssueSyncBindingParams{ProjectID: project.ID, Provider: "notion", SourceKey: "notion:source", RemoteID: "source", DisplayName: "Tasks", Config: jsontext.Value(`{"since":"first"}`), IntervalSeconds: 300}
+	p.ExpectedBinding = &db.IssueSyncBindingPrecondition{ID: 999, Config: p.Config, IntervalSeconds: 300}
+	_, err = store.UpsertIssueSyncBinding(ctx, p)
+	require.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
+	p.ExpectedBinding = &db.IssueSyncBindingPrecondition{}
+	initial, err := store.UpsertIssueSyncBinding(ctx, p)
+	require.NoError(t, err)
+	_, err = store.UpsertIssueSyncBinding(ctx, p)
+	require.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
+	observed := &db.IssueSyncBindingPrecondition{ID: initial.ID, Config: initial.Config, IntervalSeconds: initial.IntervalSeconds}
+	p.ExpectedBinding = observed
+	p.Config = jsontext.Value(`{"since":"accepted"}`)
+	accepted, err := store.UpsertIssueSyncBinding(ctx, p)
+	require.NoError(t, err)
+	p.Config = jsontext.Value(`{"since":"stale"}`)
+	_, err = store.UpsertIssueSyncBinding(ctx, p)
+	require.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
+	after, err := store.IssueSyncBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, string(accepted.Config), string(after.Config))
+	p.Config = accepted.Config
+	p.ExpectedBinding = &db.IssueSyncBindingPrecondition{ID: accepted.ID, Config: accepted.Config, IntervalSeconds: 300}
+	p.IntervalSeconds = 120
+	_, err = store.UpsertIssueSyncBinding(ctx, p)
+	require.NoError(t, err)
+	p.IntervalSeconds = 300
+	_, err = store.UpsertIssueSyncBinding(ctx, p)
+	require.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
+	after, err = store.IssueSyncBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, 120, after.IntervalSeconds)
+	p.ExpectedBinding = nil
+	_, err = store.UpsertIssueSyncBinding(ctx, p)
+	require.NoError(t, err)
 	return nil
 }

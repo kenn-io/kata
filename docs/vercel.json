@@ -236,6 +236,16 @@
       "permanent": true
     },
     {
+      "source": "/operations/notion-sync/",
+      "destination": "/docs/operations/notion-sync/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/notion-sync.md",
+      "destination": "/docs/operations/notion-sync.md",
+      "permanent": true
+    },
+    {
       "source": "/operations/github-sync/",
       "destination": "/docs/operations/github-sync/",
       "permanent": true

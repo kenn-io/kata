@@ -160,6 +160,29 @@ func NormalizeImportOwner(owner *string) *string {
 	return owner
 }
 
+// ImportLabelReconcileFilter keeps stale upstream labels out of presentation
+// refreshes. A nil filter reconciles all labels for created/newer issue rows;
+// otherwise only the provider's explicit presentation labels are eligible.
+func ImportLabelReconcileFilter(params ImportBatchParams, item ImportItem, created, sourceNewer, sourceCurrent bool) (map[string]bool, bool) {
+	if created || sourceNewer {
+		return nil, true
+	}
+	labels := params.ReconcileLabelsForUnchanged[item.ExternalID]
+	if !sourceCurrent || len(labels) == 0 {
+		return nil, false
+	}
+	filter := make(map[string]bool, len(labels))
+	for _, label := range labels {
+		filter[label] = true
+	}
+	return filter, true
+}
+
+// ImportLabelAllowed reports whether a presentation refresh includes a label.
+func ImportLabelAllowed(filter map[string]bool, label string) bool {
+	return filter == nil || filter[label]
+}
+
 // ImportLabelExternalID returns the stable source identity for one managed label.
 func ImportLabelExternalID(issueExternalID, label string) string {
 	return issueExternalID + ":label:" + label

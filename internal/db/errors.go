@@ -376,3 +376,6 @@ type MetadataGuardConflictError struct {
 func (e *MetadataGuardConflictError) Error() string {
 	return fmt.Sprintf("metadata guard failed for key %q", e.Key)
 }
+
+// ErrIssueSyncBindingChanged means an enable snapshot is no longer current.
+var ErrIssueSyncBindingChanged = errors.New("issue sync binding changed during validation")

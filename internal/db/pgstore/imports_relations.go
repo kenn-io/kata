@@ -85,10 +85,14 @@ func (s *Store) reconcileImportLabels(
 	issue db.Issue,
 	item db.ImportItem,
 	project db.Project,
+	labelFilter map[string]bool,
 ) ([]db.Event, error) {
 	events := []db.Event{}
 	desired := map[string]string{}
 	for _, label := range dedupeAndSort(item.Labels) {
+		if !db.ImportLabelAllowed(labelFilter, label) {
+			continue
+		}
 		desired[label] = db.ImportLabelExternalID(item.ExternalID, label)
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id,external_id,label FROM import_mappings
@@ -121,6 +125,9 @@ ORDER BY id FOR UPDATE`, params.ProjectID, params.Source, issue.ID)
 
 	existingMappings := map[string]int64{}
 	for _, mapping := range mappings {
+		if labelFilter != nil && (!mapping.label.Valid || !db.ImportLabelAllowed(labelFilter, mapping.label.String)) {
+			continue
+		}
 		if mapping.label.Valid {
 			existingMappings[mapping.label.String] = mapping.id
 		}

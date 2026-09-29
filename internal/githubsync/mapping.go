@@ -23,9 +23,10 @@ func BuildImportBatch(sourceKey string, issues []Issue, comments map[int][]Comme
 // import items using stored provider config for presentation choices.
 func BuildImportBatchWithConfig(sourceKey string, config Config, issues []Issue, comments map[int][]Comment, parentData ParentData, syncStartedAt time.Time) db.ImportBatchParams {
 	batch := db.ImportBatchParams{
-		Source: sourceKey,
-		Actor:  actorGitHubSync,
-		Items:  make([]db.ImportItem, 0, len(issues)),
+		Source:                      sourceKey,
+		ReconcileLabelsForUnchanged: map[string][]string{},
+		Actor:                       actorGitHubSync,
+		Items:                       make([]db.ImportItem, 0, len(issues)),
 	}
 	titlePrefix := config.UseTitlePrefix()
 	for _, issue := range issues {
@@ -45,6 +46,13 @@ func BuildImportBatchWithConfig(sourceKey string, config Config, issues []Issue,
 			UpdatedAt:         updatedAt,
 			Labels:            issueLabels(issue.Labels),
 			Comments:          issueComments(comments[issue.Number], issue.Number, updatedAt, syncStartedAt),
+		}
+		if !titlePrefix {
+			seen := make(map[string]struct{}, len(item.Labels))
+			for _, label := range item.Labels {
+				seen[label] = struct{}{}
+			}
+			item.Labels = importlabels.AppendNormalized(item.Labels, seen, "GitHub")
 		}
 		if item.Status == "closed" {
 			reason := issueClosedReason(issue)
@@ -70,6 +78,7 @@ func BuildImportBatchWithConfig(sourceKey string, config Config, issues []Issue,
 			// Leave LinkTypesAuthoritative nil: the import layer defaults an
 			// absent entry to authoritative.
 		}
+		batch.ReconcileLabelsForUnchanged[item.ExternalID] = []string{"github"}
 		batch.Items = append(batch.Items, item)
 	}
 	return batch

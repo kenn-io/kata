@@ -105,6 +105,12 @@ type ImportBatchParams struct {
 	// links of selected types even when the issue row itself is unchanged. Normal
 	// imports leave unchanged issues' labels and links alone.
 	ReconcileLinkTypesForUnchanged map[string]bool
+	// ReconcileLabelsForUnchanged permits presentation labels to refresh at the
+	// latest observed source version, including after local scalar edits. Keys
+	// identify observed source items; omitted synthetic link-only items have
+	// neither label authority nor a source timestamp observation.
+	// This internal provider allowance is absent from the public import API.
+	ReconcileLabelsForUnchanged map[string][]string
 	// PreserveLocalParentConflicts leaves an existing local parent in place when
 	// a source-managed parent insert would create a second parent. Generic
 	// imports report ErrParentAlreadySet by default.

@@ -21,12 +21,13 @@ type importIssueState struct {
 	sourceNewer         bool
 	healed              bool
 	presentationUpdated bool
+	sourceCurrent       bool
 }
 
 // ImportBatch imports external issues atomically. Issues and comments are
 // upserted through import_mappings; labels and links managed by this source are
-// reconciled only when the source issue version is newer than kata's row (or the
-// issue is newly created).
+// reconciled for newer or newly created rows. Providers may explicitly allow
+// presentation labels to refresh at the latest observed source version.
 func (d *Store) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
 	return retryWrite2(ctx, d, func() (db.ImportBatchResult, []db.Event, error) {
 		return d.importBatch(ctx, p)
@@ -109,8 +110,8 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 		}
 		events = append(events, commentEvents...)
 		result.Comments += n
-		if state.created || state.sourceNewer {
-			labelEvents, err := d.reconcileImportLabels(ctx, tx, p, state.issue, item, projectName)
+		if filter, reconcile := db.ImportLabelReconcileFilter(p, item, state.created, state.sourceNewer, state.sourceCurrent); reconcile {
+			labelEvents, err := d.reconcileImportLabels(ctx, tx, p, state.issue, item, projectName, filter)
 			if err != nil {
 				return db.ImportBatchResult{}, nil, err
 			}
@@ -233,12 +234,22 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 	if err != nil {
 		return nil, nil, err
 	}
+	sourceCurrent := mapping.SourceUpdatedAt != nil &&
+		(db.SameImportTimestamp(*mapping.SourceUpdatedAt, item.UpdatedAt) || item.UpdatedAt.After(*mapping.SourceUpdatedAt))
+	// Keep older observations from gaining current-version label authority on
+	// their next replay. The source timestamp is independent of local edits.
+	sourceUpdatedAt := item.UpdatedAt
+	_, observedPresentation := p.ReconcileLabelsForUnchanged[item.ExternalID]
+	if p.ReconcileLabelsForUnchanged != nil && mapping.SourceUpdatedAt != nil &&
+		(mapping.SourceUpdatedAt.After(sourceUpdatedAt) || !observedPresentation) {
+		sourceUpdatedAt = *mapping.SourceUpdatedAt
+	}
 	if item.UpdatedAt.After(existing.UpdatedAt) {
 		updated, evt, err := d.updateImportedIssue(ctx, tx, p, item, existing, projectName)
 		if err != nil {
 			return nil, nil, err
 		}
-		_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &updated.ID, SourceUpdatedAt: &item.UpdatedAt})
+		_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &updated.ID, SourceUpdatedAt: &sourceUpdatedAt})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -253,28 +264,28 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 		if err != nil {
 			return nil, nil, err
 		}
-		_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &healed.ID, SourceUpdatedAt: &item.UpdatedAt})
+		_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &healed.ID, SourceUpdatedAt: &sourceUpdatedAt})
 		if err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: healed, healed: true}, &evt, nil
+		return &importIssueState{item: item, issue: healed, healed: true, sourceCurrent: sourceCurrent}, &evt, nil
 	}
 	if db.ImportOwnsSameSourceVersionTitle(mapping, existing, item) {
 		updated, evt, err := d.updateImportedPresentationTitle(ctx, tx, p, item, existing, projectName)
 		if err != nil {
 			return nil, nil, err
 		}
-		_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &updated.ID, SourceUpdatedAt: &item.UpdatedAt})
+		_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &updated.ID, SourceUpdatedAt: &sourceUpdatedAt})
 		if err != nil {
 			return nil, nil, err
 		}
-		return &importIssueState{item: item, issue: updated, presentationUpdated: true}, &evt, nil
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &evt, nil
 	}
-	_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &existing.ID, SourceUpdatedAt: &item.UpdatedAt})
+	_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &existing.ID, SourceUpdatedAt: &sourceUpdatedAt})
 	if err != nil {
 		return nil, nil, err
 	}
-	return &importIssueState{item: item, issue: existing}, nil, nil
+	return &importIssueState{item: item, issue: existing, sourceCurrent: sourceCurrent}, nil, nil
 }
 
 func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, projectName, projectUID string) (db.Issue, db.Event, error) {
@@ -488,10 +499,13 @@ func (d *Store) importComments(ctx context.Context, tx *sql.Tx, p db.ImportBatch
 	return events, created, nil
 }
 
-func (d *Store) reconcileImportLabels(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, issue db.Issue, item db.ImportItem, projectName string) ([]db.Event, error) {
+func (d *Store) reconcileImportLabels(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, issue db.Issue, item db.ImportItem, projectName string, labelFilter map[string]bool) ([]db.Event, error) {
 	events := []db.Event{}
 	desired := map[string]string{}
 	for _, label := range dedupeStrings(item.Labels) {
+		if !db.ImportLabelAllowed(labelFilter, label) {
+			continue
+		}
 		desired[label] = db.ImportLabelExternalID(item.ExternalID, label)
 	}
 
@@ -507,6 +521,9 @@ func (d *Store) reconcileImportLabels(ctx context.Context, tx *sql.Tx, p db.Impo
 		var label sql.NullString
 		if err := rows.Scan(&id, &externalID, &label); err != nil {
 			return nil, fmt.Errorf("scan source label mapping: %w", err)
+		}
+		if labelFilter != nil && (!label.Valid || !db.ImportLabelAllowed(labelFilter, label.String)) {
+			continue
 		}
 		if label.Valid {
 			existingMappings[label.String] = id
