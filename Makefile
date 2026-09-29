@@ -143,9 +143,10 @@ lint: $(CURDIR)/.cache/golangci-lint/custom-gcl
 vet:
 	go vet ./...
 
+# Without a soft heap limit, NilAway's heap outgrows 8 GB runners; 5 GiB keeps it under 6 GB with no slowdown.
 nilaway:
 	@module_path="$$(go list -m)"; \
-		nilaway -include-pkgs="$$module_path" \
+		GOMEMLIMIT="$${GOMEMLIMIT:-5GiB}" nilaway -include-pkgs="$$module_path" \
 			-exclude-pkgs="$$module_path/web/node_modules" -test=false ./...
 
 fmt:
