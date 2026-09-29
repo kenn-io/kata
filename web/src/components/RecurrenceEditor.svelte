@@ -908,7 +908,7 @@
   }
   .chip[aria-pressed='true'] {
     background: var(--accent-blue);
-    color: white;
+    color: var(--bg-surface);
     border-color: transparent;
   }
   .monthly,
@@ -971,7 +971,7 @@
   }
   .toggle[aria-pressed='true'] {
     background: var(--accent-blue);
-    color: white;
+    color: var(--bg-surface);
     border-color: transparent;
   }
   .advanced textarea {

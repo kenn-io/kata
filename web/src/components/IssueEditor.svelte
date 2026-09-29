@@ -810,7 +810,7 @@
   .accent-button {
     border: 1px solid var(--accent-blue);
     background: var(--accent-blue);
-    color: white;
+    color: var(--bg-surface);
   }
 
   .ghost-button:disabled,
