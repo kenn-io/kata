@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.kenn.io/kata/internal/config"
@@ -44,6 +45,8 @@ type HTTPFetcher struct {
 	graphQLNow          func() time.Time
 	graphQLSleep        func(context.Context, time.Duration) error
 	parentCapabilities  *parentCapabilityCache
+	statusMu            sync.Mutex
+	statusCooldown      time.Time
 }
 
 var _ Fetcher = (*HTTPFetcher)(nil)
@@ -311,6 +314,9 @@ func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request g
 			req.Header.Set("Content-Type", "application/json")
 		}
 
+		if err := f.statusCooldownError(); err != nil {
+			return nil, err
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			requestErr := fmt.Errorf("request %s: %w", request.Resource, err)
@@ -328,6 +334,9 @@ func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request g
 			statusErr, body, closeErr := gitHubHTTPStatusError(request.Resource, resp)
 			if closeErr != nil {
 				return nil, closeErr
+			}
+			if gitHubRESTStatusRetryable(resp.StatusCode, headers, body) {
+				f.deferStatusRequests(retryWait(headers, f.now()))
 			}
 			if gitHubRESTStatusRetryable(resp.StatusCode, headers, body) && attempt < gitHubMaxRetryAttempts {
 				if err := f.sleepForGitHubRetry(ctx, request.Resource, attempt, headers, budget); err != nil {

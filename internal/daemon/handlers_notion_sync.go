@@ -36,10 +36,13 @@ func notionSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 	titlePrefix := true
 	for key, value := range in.Body.Config {
 		switch key {
-		case "data_source_id", "database", "status_property", "assignee_property", "since":
+		case "data_source_id", "database", "status_property", "assignee_property", "since", "complete_group", "todo_group", "closed_status", "open_status":
 			text, ok := value.(string)
 			if !ok {
 				return empty, notionSyncValidation("Notion " + key + " must be a string")
+			}
+			if (key == "complete_group" || key == "todo_group") && strings.TrimSpace(text) == "" {
+				return empty, notionSyncValidation("Notion " + key + " must be nonempty")
 			}
 			stringsIn[key] = text
 		case "title_prefix":
@@ -88,6 +91,12 @@ func notionSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 			return empty, notionSyncValidation("stored Notion config is invalid")
 		}
 		previous = &decoded
+		selectors.StatusSync = decoded.StatusSync
+		for _, selector := range []struct{ key, saved string }{{"complete_group", decoded.CompleteGroupID}, {"todo_group", decoded.TodoGroupID}, {"closed_status", decoded.ClosedStatusID}, {"open_status", decoded.OpenStatusID}} {
+			if _, present := stringsIn[selector.key]; !present {
+				stringsIn[selector.key] = selector.saved
+			}
+		}
 		if _, present := in.Body.Config["title_prefix"]; !present {
 			titlePrefix = decoded.UseTitlePrefix()
 		}
@@ -106,6 +115,20 @@ func notionSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 			selectors.DoneStatuses = decoded.DoneStatusIDs
 		}
 	}
+	selectors.StatusSync, err = issueSyncMode(in.Body.StatusSync, selectors.StatusSync)
+	if err != nil {
+		return empty, err
+	}
+	if selectors.StatusSync == "two-way" {
+		if _, explicit := in.Body.Config["done_statuses"]; explicit {
+			return empty, notionSyncValidation("Notion done_statuses cannot be combined with two-way status sync")
+		}
+		selectors.DoneStatuses = nil
+	}
+	selectors.CompleteGroup = stringsIn["complete_group"]
+	selectors.TodoGroup = stringsIn["todo_group"]
+	selectors.ClosedStatus = stringsIn["closed_status"]
+	selectors.OpenStatus = stringsIn["open_status"]
 	interval, err = issueSyncIntervalSeconds(in.Body, interval, "Notion")
 	if err != nil {
 		return empty, err

@@ -15,6 +15,11 @@ type Config struct {
 	StatusPropertyID   string   `json:"status_property_id"`
 	AssigneePropertyID string   `json:"assignee_property_id"`
 	DoneStatusIDs      []string `json:"done_status_ids"`
+	CompleteGroupID    string   `json:"complete_group_id,omitempty"`
+	TodoGroupID        string   `json:"todo_group_id,omitempty"`
+	ClosedStatusID     string   `json:"closed_status_id,omitempty"`
+	OpenStatusID       string   `json:"open_status_id,omitempty"`
+	StatusSync         string   `json:"status_sync,omitempty"`
 	Since              string   `json:"since"`
 	TitlePrefix        *bool    `json:"title_prefix"`
 }
@@ -23,15 +28,25 @@ type Config struct {
 type Selectors struct {
 	StatusProperty, AssigneeProperty string
 	DoneStatuses                     []string
+	CompleteGroup, TodoGroup         string
+	ClosedStatus, OpenStatus         string
+	StatusSync                       string
 }
 
 // Option identifies a status option or a child data source.
 type Option struct{ ID, Name string }
 
+// Group preserves Notion's ordered status options and stable workflow identity.
+type Group struct {
+	ID, Name  string
+	OptionIDs []string
+}
+
 // Property contains the source schema needed to validate the selected mapping.
 type Property struct {
 	ID, Name, Type string
 	Options        []Option
+	Groups         []Group
 }
 
 // DataSource is the source identity, parent container, and current schema.

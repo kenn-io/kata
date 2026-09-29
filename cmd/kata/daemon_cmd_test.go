@@ -3287,7 +3287,7 @@ func TestDaemonGitHubSyncProgressTrackerReachesScheduledRunner(t *testing.T) {
 func TestDaemonNotionScheduledProgress(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	store := &runtimeNotionRecordingStore{Storage: openKataTestDB(t, filepath.Join(t.TempDir(), "runtime.db")), recorded: make(chan db.IssueSyncStatus, 1)}
+	store := newRuntimeNotionRecordingStore(openKataTestDB(t, filepath.Join(t.TempDir(), "runtime.db")), make(chan db.IssueSyncStatus, 1))
 	defer func() { require.NoError(t, store.Close()) }()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -3627,7 +3627,7 @@ func TestDaemonNotionConfigFileClientSharedByEnableAndScheduling(t *testing.T) {
 	}
 	recorded := make(chan db.IssueSyncStatus, 1)
 	newNotionSyncDaemonRunner = func(cfg notionsync.RunnerConfig) issueSyncDaemonRunner {
-		cfg.Store = &runtimeNotionRecordingStore{Storage: cfg.Store, recorded: recorded}
+		cfg.Store = newRuntimeNotionRecordingStore(cfg.Store, recorded)
 		configs <- cfg
 		return originalRunner(cfg)
 	}
@@ -3683,7 +3683,24 @@ func TestDaemonNotionConfigFileClientSharedByEnableAndScheduling(t *testing.T) {
 // It delegates all product storage behavior before signaling the observer.
 type runtimeNotionRecordingStore struct {
 	db.Storage
+	db.IssueStatusReader
+	db.IssueStatusWriter
+	db.IssueStatusScanStore
+	db.IssueStatusSummaryReader
+	db.IssueStatusLocatorStore
 	recorded chan db.IssueSyncStatus
+}
+
+func newRuntimeNotionRecordingStore(store db.Storage, recorded chan db.IssueSyncStatus) *runtimeNotionRecordingStore {
+	return &runtimeNotionRecordingStore{
+		Storage:                  store,
+		IssueStatusReader:        store.(db.IssueStatusReader),
+		IssueStatusWriter:        store.(db.IssueStatusWriter),
+		IssueStatusScanStore:     store.(db.IssueStatusScanStore),
+		IssueStatusSummaryReader: store.(db.IssueStatusSummaryReader),
+		IssueStatusLocatorStore:  store.(db.IssueStatusLocatorStore),
+		recorded:                 recorded,
+	}
 }
 
 func (s *runtimeNotionRecordingStore) RecordIssueSyncSuccess(ctx context.Context, params db.IssueSyncSuccessParams) (db.IssueSyncStatus, error) {

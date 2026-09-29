@@ -14,10 +14,12 @@ export interface IssueSyncStatusOut {
   last_success_at?: string
   last_unchanged: number
   last_updated: number
+  pending_count: number
   progress?: IssueSyncProgressOut
   project_id: number
   provider: string
   state: string
+  status_sync: string
   sync_started_at?: string
   [key: string]: unknown
 }

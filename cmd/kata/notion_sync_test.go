@@ -304,7 +304,7 @@ func TestNotionSyncReadOnlyAcceptance(t *testing.T) {
 	editedAt.Store(time.Now().UTC().Format(time.RFC3339Nano))
 	completed.Store(true)
 	sourceTitle.Store([]any{})
-	require.Contains(t, runCLI(t, env, dir, "sync", "notion", "once"), "updated=1")
+	require.Contains(t, runCLI(t, env, dir, "sync", "notion", "once"), "status_updated=1")
 	binding, err = env.DB.IssueSyncBindingByProject(t.Context(), projectID)
 	require.NoError(t, err)
 	require.Equal(t, "Notion data source "+cliNotionSource, binding.DisplayName)

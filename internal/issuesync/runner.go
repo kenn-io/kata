@@ -51,10 +51,18 @@ type RunnerConfig struct {
 
 // RunResult summarizes one completed sync attempt.
 type RunResult struct {
-	Binding db.IssueSyncBinding
-	Status  db.IssueSyncStatus
-	Import  db.ImportBatchResult
+	Binding       db.IssueSyncBinding
+	Status        db.IssueSyncStatus
+	Import        db.ImportBatchResult
+	StatusUpdated int
 }
+
+type contentPreparationFailure struct {
+	cause error
+}
+
+func (e *contentPreparationFailure) Error() string { return e.cause.Error() }
+func (e *contentPreparationFailure) Unwrap() error { return e.cause }
 
 // Adapter prepares provider data after the engine acquires a durable claim.
 type Adapter interface {
@@ -68,6 +76,7 @@ type Adapter interface {
 type Prepared struct {
 	Binding  db.IssueSyncBinding
 	Batch    db.ImportBatchParams
+	Locators []db.IssueStatusLocator
 	Finalize func(context.Context) (db.IssueSyncBinding, error)
 }
 
@@ -115,9 +124,13 @@ func (r *Runner) runOnce(
 
 	r.config.Progress.BeginWithPhase(bindingID, syncStartedAt, r.config.Adapter.InitialPhase())
 	defer r.config.Progress.Finish(bindingID, syncStartedAt)
-	if r.config.RunTimeout > 0 {
+	timeout := r.config.RunTimeout
+	if mode, _ := db.IssueStatusMode(binding.Config); mode == "two-way" && (timeout <= 0 || timeout > statusRunTimeout) {
+		timeout = statusRunTimeout
+	}
+	if timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.config.RunTimeout)
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	ctx = WithProgressReporter(ctx, func(phase string, completed, total int) {
@@ -240,26 +253,35 @@ func (r *Runner) runDue(ctx context.Context) (<-chan struct{}, bool, error) {
 	return nil, false, errors.Join(errs...)
 }
 
-func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, syncStartedAt time.Time, eventFork activity.Admission) (RunResult, error) {
+func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, syncStartedAt time.Time, eventFork activity.Admission) (result RunResult, runErr error) {
+	statusUpdated := 0
+	defer func() { result.StatusUpdated = statusUpdated }()
+	binding, separateStatus, statusErr := r.runStatuses(ctx, binding, syncStartedAt, eventFork, &statusUpdated)
 	prepared, err := r.config.Adapter.Prepare(ctx, binding, syncStartedAt)
 	if err != nil {
 		// A provider may have refreshed mutable metadata before a later read failed.
 		if sameBindingIdentity(binding, prepared.Binding) {
 			binding = prepared.Binding
 		}
-		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+		return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, &contentPreparationFailure{cause: err}), db.ImportBatchResult{})
 	}
 	if !sameBindingIdentity(binding, prepared.Binding) {
-		return r.recordError(ctx, binding, syncStartedAt, fmt.Errorf("issue sync adapter returned a different binding identity"), db.ImportBatchResult{})
+		return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, fmt.Errorf("issue sync adapter returned a different binding identity")), db.ImportBatchResult{})
 	}
 	binding = prepared.Binding
 	batch := prepared.Batch
+	batch.ManageStatusSeparately = separateStatus
 	batch.ProjectID = binding.ProjectID
 	batch.Source = binding.SourceKey
-	batch.IssueSyncGuard = &db.IssueSyncImportGuard{BindingID: binding.ID, Provider: binding.Provider, StartedAt: syncStartedAt}
+	batch.IssueSyncGuard = &db.IssueSyncImportGuard{BindingID: binding.ID, Provider: binding.Provider, StartedAt: syncStartedAt, BindingUpdatedAt: new(binding.UpdatedAt)}
 	importResult, err := r.importChunks(ctx, binding, batch, eventFork)
 	if err != nil {
-		return r.recordError(ctx, binding, syncStartedAt, err, importResult)
+		return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, err), importResult)
+	}
+	if separateStatus && len(prepared.Locators) > 0 {
+		if err := r.saveStatusLocators(ctx, *batch.IssueSyncGuard, prepared.Locators); err != nil {
+			return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, err), importResult)
+		}
 	}
 	ReportProgress(ctx, "finalizing", 0, 0)
 	// GitHub keeps one detached cleanup budget shared by its finalizer and
@@ -270,22 +292,22 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 		defer cleanupCancel()
 		finalizeCtx = cleanupCtx
 	} else if err := ctx.Err(); err != nil {
-		return r.recordError(ctx, binding, syncStartedAt, err, importResult)
+		return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, err), importResult)
 	}
 	if prepared.Finalize != nil {
 		refreshed, err := prepared.Finalize(finalizeCtx)
 		if err != nil {
-			return r.recordError(ctx, binding, syncStartedAt, err, importResult)
+			return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, err), importResult)
 		}
 		if !sameBindingIdentity(binding, refreshed) {
-			return r.recordError(ctx, binding, syncStartedAt, fmt.Errorf("issue sync finalizer returned a different binding identity"), importResult)
+			return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, fmt.Errorf("issue sync finalizer returned a different binding identity")), importResult)
 		}
 		binding = refreshed
 	}
 	successCtx := finalizeCtx
 	if r.config.RunTimeout > 0 {
 		if err := ctx.Err(); err != nil {
-			return r.recordError(ctx, binding, syncStartedAt, err, importResult)
+			return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, err), importResult)
 		}
 		// Start the success-recording budget after finalization, clipped to the
 		// remaining run deadline so an expired run cannot advance its cursor.
@@ -298,21 +320,30 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 			defer cancel()
 		}
 	}
+	if statusErr != nil && !blockedStatusError(statusErr) {
+		return r.recordError(ctx, binding, syncStartedAt, statusErr, importResult)
+	}
+	statusWarning := ""
+	if statusErr != nil {
+		statusWarning = statusErr.Error()
+	}
 	status, err := r.config.Store.RecordIssueSyncSuccess(successCtx, db.IssueSyncSuccessParams{
-		BindingID:     binding.ID,
-		StartedAt:     syncStartedAt,
-		At:            r.now(),
-		CursorAt:      syncStartedAt,
-		LastCreated:   importResult.Created,
-		LastUpdated:   importResult.Updated,
-		LastUnchanged: importResult.Unchanged,
-		LastComments:  importResult.Comments,
+		StatusError:      statusWarning,
+		BindingID:        binding.ID,
+		BindingUpdatedAt: new(binding.UpdatedAt),
+		StartedAt:        syncStartedAt,
+		At:               r.now(),
+		CursorAt:         syncStartedAt,
+		LastCreated:      importResult.Created,
+		LastUpdated:      importResult.Updated,
+		LastUnchanged:    importResult.Unchanged,
+		LastComments:     importResult.Comments,
 	})
 	if err != nil {
-		return r.recordError(ctx, binding, syncStartedAt, err, importResult)
+		return r.recordError(ctx, binding, syncStartedAt, errors.Join(statusErr, err), importResult)
 	}
 	binding.LastCursorAt = &syncStartedAt
-	return RunResult{Binding: binding, Status: status, Import: importResult}, nil
+	return RunResult{Binding: binding, Status: status, Import: importResult}, statusErr
 }
 
 func sameBindingIdentity(a, b db.IssueSyncBinding) bool {
@@ -376,10 +407,11 @@ func (r *Runner) recordError(ctx context.Context, binding db.IssueSyncBinding, s
 	cleanupCtx, cleanupCancel := r.cleanupContext(ctx)
 	defer cleanupCancel()
 	status, recordErr := r.config.Store.RecordIssueSyncError(cleanupCtx, db.IssueSyncErrorParams{
-		BindingID: binding.ID,
-		StartedAt: startedAt,
-		At:        r.now(),
-		Error:     cause.Error(),
+		RetainClaim: ambiguousStatusError(cause),
+		BindingID:   binding.ID,
+		StartedAt:   startedAt,
+		At:          r.now(),
+		Error:       cause.Error(),
 	})
 	if recordErr != nil {
 		return RunResult{Binding: binding, Import: importResult}, recordErr

@@ -776,7 +776,7 @@ func checkNotionSyncStorage(t *testing.T, store db.Storage) error {
 	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
 	_, err = store.RecordIssueSyncError(ctx, db.IssueSyncErrorParams{BindingID: b.ID, StartedAt: at, At: at, Error: "stale"})
 	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
-	batch := db.ImportBatchParams{ProjectID: p.ID, Source: b.SourceKey, Actor: "notion-sync", IssueSyncGuard: &db.IssueSyncImportGuard{BindingID: b.ID, Provider: "notion", StartedAt: at}, Items: []db.ImportItem{{ExternalID: "page:example", Title: "Example task", Author: "notion-sync", Status: "open", CreatedAt: at, UpdatedAt: at}}}
+	batch := db.ImportBatchParams{ProjectID: p.ID, Source: b.SourceKey, Actor: "notion-sync", IssueSyncGuard: &db.IssueSyncImportGuard{BindingID: b.ID, Provider: "notion", StartedAt: at, BindingUpdatedAt: new(b.UpdatedAt)}, Items: []db.ImportItem{{ExternalID: "page:example", Title: "Example task", Author: "notion-sync", Status: "open", CreatedAt: at, UpdatedAt: at}}}
 	_, _, err = store.ImportBatch(ctx, batch)
 	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
 	batch.IssueSyncGuard.StartedAt = successor
@@ -803,10 +803,10 @@ func checkNotionSyncStorage(t *testing.T, store db.Storage) error {
 	_, err = store.UpsertIssueSyncBinding(ctx, params)
 	require.NoError(t, err)
 	_, _, err = store.ImportBatch(ctx, batch)
-	assert.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	assert.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
 	status, err := store.IssueSyncStatusByProject(ctx, p.ID)
 	require.NoError(t, err)
-	require.Nil(t, status.SyncStartedAt)
+	require.Equal(t, &successor, status.SyncStartedAt)
 	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "editor", Force: true})
 	require.NoError(t, err)
 	_, ok, err = store.ClaimIssueSyncBinding(ctx, b.ID, "notion", successor.Add(time.Hour), successor)

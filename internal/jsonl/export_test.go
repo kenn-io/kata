@@ -523,9 +523,7 @@ func TestLegacyProjectExportPreservesMovedIssueHistory(t *testing.T) {
 				require.NoError(t, err)
 				want = append(want, event)
 			}
-			_, err = source.ExecContext(ctx,
-				`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
-			require.NoError(t, err)
+			setSchema30Fixture(ctx, t, source)
 			var exported bytes.Buffer
 			require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{
 				ProjectID: from.ID, IncludeDeleted: includeDeleted,
@@ -613,9 +611,7 @@ func TestLegacyExportUIDOnlyPeersMatchStorageExport(t *testing.T) {
 						event.ProjectUID = "" // ProjectUID is not serialized in event envelopes.
 						want = append(want, event)
 					}
-					_, err = source.ExecContext(ctx,
-						`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
-					require.NoError(t, err)
+					setSchema30Fixture(ctx, t, source)
 					var exported bytes.Buffer
 					require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{
 						ProjectID: project.ID, IncludeDeleted: includeDeleted,

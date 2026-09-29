@@ -130,6 +130,7 @@ func TestPlaneReadOnlyAcceptance(t *testing.T) {
 		require.Equal(t, token, r.Header.Get("X-API-Key"))
 		require.Empty(t, r.Header.Get("Authorization"))
 		base := "/api/v1/workspaces/example-workspace/projects/" + cliPlaneProject + "/"
+		item := map[string]any{"id": cliPlaneItem, "project": cliPlaneProject, "state": cliPlaneState, "sequence_id": 1, "priority": "high", "name": "Imported task", "description_html": "<p>Task <strong>body</strong></p>", "created_by": nil, "assignees": []any{}, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z"}
 		var body any
 		switch r.URL.Path {
 		case base:
@@ -137,7 +138,9 @@ func TestPlaneReadOnlyAcceptance(t *testing.T) {
 		case base + "states/":
 			body = []any{map[string]any{"id": cliPlaneState, "group": group.Load()}}
 		case base + "work-items/":
-			body = map[string]any{"results": []any{map[string]any{"id": cliPlaneItem, "project": cliPlaneProject, "state": cliPlaneState, "sequence_id": 1, "priority": "high", "name": "Imported task", "description_html": "<p>Task <strong>body</strong></p>", "created_by": nil, "assignees": []any{}, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z"}}, "next_page_results": false, "next_cursor": "final"}
+			body = map[string]any{"results": []any{item}, "next_page_results": false, "next_cursor": "final"}
+		case base + "work-items/" + cliPlaneItem + "/":
+			body = item
 		default:
 			return nil, fmt.Errorf("unexpected Plane route")
 		}
@@ -159,7 +162,9 @@ func TestPlaneReadOnlyAcceptance(t *testing.T) {
 	require.Equal(t, new(int64(1)), i.Priority)
 	require.Contains(t, i.Body, "Task **body**")
 	group.Store("completed")
-	require.Contains(t, runCLI(t, env, dir, "sync", "plane", "once"), "updated=1")
+	out := runCLI(t, env, dir, "sync", "plane", "once")
+	require.Contains(t, out, " updated=0 ")
+	require.Contains(t, out, "status_updated=1")
 	closed, err := env.DB.IssueByID(context.Background(), i.ID)
 	require.NoError(t, err)
 	require.Equal(t, "closed", closed.Status)

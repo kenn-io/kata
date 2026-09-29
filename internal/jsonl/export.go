@@ -100,7 +100,7 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 		return err
 	}
 	if sourceSchemaVersion >= 5 {
-		if err := exportImportMappings(ctx, d, enc, opts); err != nil {
+		if err := exportImportMappings(ctx, d, enc, opts, sourceSchemaVersion); err != nil {
 			return err
 		}
 	}
@@ -1056,22 +1056,17 @@ func exportLinksV1(ctx context.Context, d exportQuerier, enc *Encoder, opts Expo
 	})
 }
 
-func exportImportMappings(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
-	type record struct {
-		ID              int64   `json:"id"`
-		Source          string  `json:"source"`
-		ExternalID      string  `json:"external_id"`
-		ObjectType      string  `json:"object_type"`
-		ProjectID       int64   `json:"project_id"`
-		IssueID         *int64  `json:"issue_id,omitempty"`
-		CommentID       *int64  `json:"comment_id,omitempty"`
-		LinkID          *int64  `json:"link_id,omitempty"`
-		Label           *string `json:"label,omitempty"`
-		SourceUpdatedAt *string `json:"source_updated_at,omitempty"`
-		ImportedAt      string  `json:"imported_at"`
+func exportImportMappings(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
+	statusColumns := "NULL,NULL,NULL,NULL,NULL"
+	if sourceSchemaVersion == 30 {
+		statusColumns = "NULL,NULL,NULL,NULL,status_sync_json"
 	}
+	if sourceSchemaVersion >= 31 {
+		statusColumns = "observed_status,CAST(observed_status_at AS TEXT),pending_event_uid,remote_locator,NULL"
+	}
+
 	query := `SELECT id, source, external_id, object_type, project_id, issue_id, comment_id, link_id, label,
-	                 CAST(source_updated_at AS TEXT), CAST(imported_at AS TEXT)
+	                 CAST(source_updated_at AS TEXT), CAST(imported_at AS TEXT), ` + statusColumns + `
 	          FROM import_mappings`
 	clauses := []string{}
 	args := []any{}
@@ -1098,11 +1093,18 @@ func exportImportMappings(ctx context.Context, d exportQuerier, enc *Encoder, op
 	if err != nil {
 		return fmt.Errorf("export import_mappings: %w", err)
 	}
-	return scanRecords(rows, KindImportMapping, enc, func(rows *sql.Rows) (record, error) {
-		var rec record
+	return scanRecords(rows, KindImportMapping, enc, func(rows *sql.Rows) (db.ImportMappingExport, error) {
+		var rec db.ImportMappingExport
+		var status sql.NullString
 		err := rows.Scan(&rec.ID, &rec.Source, &rec.ExternalID, &rec.ObjectType, &rec.ProjectID,
-			&rec.IssueID, &rec.CommentID, &rec.LinkID, &rec.Label, &rec.SourceUpdatedAt, &rec.ImportedAt)
-		return rec, err
+			&rec.IssueID, &rec.CommentID, &rec.LinkID, &rec.Label, &rec.SourceUpdatedAt, &rec.ImportedAt, &rec.ObservedStatus, &rec.ObservedStatusAt, &rec.PendingEventUID, &rec.RemoteLocator, &status)
+		if status.Valid {
+			rec.StatusSync = jsontext.Value(status.String)
+		}
+		if err != nil {
+			return rec, err
+		}
+		return db.NormalizeIssueStatusExport(rec)
 	})
 }
 

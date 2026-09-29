@@ -18,7 +18,7 @@ func newPlaneSyncCmd() *cobra.Command {
 }
 
 func newPlaneSyncEnableCmd() *cobra.Command {
-	var workspace, project, interval, since string
+	var workspace, project, interval, since, statusSync, closedState, openState string
 	var titlePrefix bool
 	cmd := &cobra.Command{Use: "enable", Short: "enable daemon-side Plane sync for this project", Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
@@ -53,6 +53,30 @@ func newPlaneSyncEnableCmd() *cobra.Command {
 			config["title_prefix"] = titlePrefix
 		}
 		body := &generated.EnableIssueSyncBody{Config: config}
+		statusFlagsChanged := false
+		if cmd.Flags().Changed("status-sync") {
+			var err error
+			body.StatusSync, err = issueStatusSyncMode(statusSync)
+			if err != nil {
+				return err
+			}
+			statusFlagsChanged = true
+		}
+		for _, target := range []struct{ flag, key, value string }{{"closed-state", "closed_state_id", closedState}, {"open-state", "open_state_id", openState}} {
+			if !cmd.Flags().Changed(target.flag) {
+				continue
+			}
+			statusFlagsChanged = true
+			value := strings.TrimSpace(target.value)
+			if value != "" {
+				var err error
+				value, err = planesync.CanonicalID(value)
+				if err != nil {
+					return invalid(err.Error())
+				}
+			}
+			config[target.key] = value
+		}
 		if cmd.Flags().Changed("interval") {
 			value := strings.TrimSpace(interval)
 			seconds, err := strconv.Atoi(value)
@@ -69,6 +93,11 @@ func newPlaneSyncEnableCmd() *cobra.Command {
 		a, projectID, err := githubSyncProjectAPI(cmd.Context())
 		if err != nil {
 			return err
+		}
+		if statusFlagsChanged {
+			if err := requireIssueStatusSync(a); err != nil {
+				return err
+			}
 		}
 		a.client, err = longRunningClientForResolved(cmd.Context(), a.resolved)
 		if err != nil {
@@ -92,5 +121,8 @@ func newPlaneSyncEnableCmd() *cobra.Command {
 	cmd.Flags().StringVar(&interval, "interval", "", "poll duration or seconds (initial default: 5m; re-enable preserves saved interval)")
 	cmd.Flags().BoolVar(&titlePrefix, "title-prefix", true, "prefix titles with [Plane IDENTIFIER-N]; false keeps source titles and adds the plane label (omitted preserves saved choice)")
 	cmd.Flags().StringVar(&since, "since", "", "updated-after UTC date or whole-second RFC3339; empty clears, omitted preserves saved cutoff")
+	cmd.Flags().StringVar(&statusSync, "status-sync", "", "status direction: one-way or two-way (omitted preserves saved mode; new bindings default to one-way)")
+	cmd.Flags().StringVar(&closedState, "closed-state", "", "closed write target UUID in the completed group; empty clears override to live group default")
+	cmd.Flags().StringVar(&openState, "open-state", "", "open write target UUID in the unstarted group; empty clears override to live group default")
 	return cmd
 }

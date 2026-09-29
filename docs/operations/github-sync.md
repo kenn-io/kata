@@ -1,15 +1,16 @@
 ---
 title: GitHub sync
-description: Configure one-way GitHub issue synchronization, credentials, mappings, and operational recovery.
-last_edited: 2026-09-28
+description: Configure GitHub issue synchronization, optional two-way status, credentials, mappings, and operational recovery.
+last_edited: 2026-09-29
 ---
 
 # GitHub sync
 
-GitHub sync mirrors GitHub issues into a kata project. It is one-way: kata reads
-GitHub issues, issue comments, and supported sub-issue parent relationships,
-then imports them as native kata issues, comments, and parent links. kata does
-not create, edit, or comment on GitHub issues.
+GitHub sync mirrors GitHub issues, issue comments, and supported sub-issue parent
+relationships into native kata issues, comments, and parent links. Status sync
+defaults to one-way. Opt into two-way status to send explicit local close and
+reopen actions back to GitHub; titles, bodies, comments, and relationships still
+flow inward. Kata does not create GitHub issues.
 
 Use GitHub sync when GitHub Issues is the public or upstream issue tracker, but
 you want kata issues for agent planning, local triage, offline review, or a
@@ -30,7 +31,8 @@ installation_id = 67890
 private_key_path = "/var/lib/kata/github-app.pem"
 ```
 
-The App needs only read access: **Metadata: read** and **Issues: read**. App
+One-way sync needs **Metadata: read** and **Issues: read**. Two-way status also
+requires **Issues: write** on the daemon credential. App
 entries are matched exactly by normalized `(host, owner)`, so a credential for
 `example-org` is not sent to another owner or host.
 
@@ -91,6 +93,32 @@ kata sync github enable \
   --repo example-org/example-repo \
   --interval 10m
 ```
+
+### Two-way status
+
+```sh
+kata sync github enable --repo example-org/example-repo --status-sync=two-way
+```
+
+`--status-sync` accepts `one-way` or `two-way`. Omission preserves the saved mode;
+a new binding defaults to one-way. The CLI checks the selected daemon's
+`issue_status_sync` capability before sending a new mode; upgrade an older
+daemon when the capability is absent.
+
+Two-way status sends explicit Kata close and reopen actions to the existing
+GitHub issue as `closed` or `open`. Enabling it does not send historical local
+closures. Status observations use their own baseline, so an unrelated upstream
+body edit does not undo a local closure. Pending local intent wins until it is
+verified upstream or replaced by a newer local action. A recreated issue with
+the same number cannot replace the saved GitHub issue identity. A genuine
+upstream closure retains its GitHub close time and maps `not_planned` to
+`wontfix`. Same-state observations and delivery acknowledgements preserve
+Kata’s existing close reason, evidence, and close time.
+
+`disable` pauses both imports and status writes while retaining pending intent.
+Explicit local close/reopen actions while paused still update that intent.
+Re-enable resumes it. Switching to `--status-sync=one-way` cancels pending
+outbound intent; switching back does not recreate historical actions.
 
 Imported issue titles are prefixed by default so list views show the upstream
 source:
@@ -158,14 +186,18 @@ catch-up, run one sync immediately:
 kata sync github once
 ```
 
+`once` reports `status_updated` for inward open/closed transitions committed by
+the independent status pass. Content import counters remain separate.
+
 Inspect the binding and last outcome:
 
 ```sh
 kata sync github status
 ```
 
-Status shows the repository, polling interval, active cutoff, attempt/success/error
-timestamps, and totals from the **last successful run**. Before the first
+Status shows the repository, polling interval, active cutoff, saved status mode,
+pending status count, attempt/success/error timestamps, and totals from the
+**last successful run**. Pending count includes retained intent while disabled. Before the first
 success it reports that no successful run exists. Failed runs do not replace
 those successful totals, even if earlier import chunks committed.
 
@@ -274,10 +306,11 @@ a different disposable parent issue.
 
 ## Ownership rules
 
-Synced issues are GitHub-owned for title, body, state, labels, owner, imported
-GitHub comments, and GitHub-sourced parent links. Local kata edits to those
-fields are not written back to GitHub and can be overwritten by a later GitHub
-update.
+Synced issues are GitHub-owned for title, body, labels, owner, imported GitHub
+comments, and GitHub-sourced parent links. Local edits to those fields remain
+local and can be overwritten by a later GitHub update. One-way mode also imports
+status. Two-way mode handles status independently of content timestamps and
+preserves explicit local close/reopen intent until verified delivery.
 
 GitHub-sourced parent links are reconciled only when the GitHub host exposes the
 parent fields kata queries. On older GitHub Enterprise schemas that do not
@@ -320,7 +353,7 @@ GitHub sync v1 does not import:
 - edited or deleted GitHub comments;
 - child issue ordering under a GitHub parent;
 - deleted or transferred GitHub issues;
-- any kata-side writes back to GitHub.
+- kata title, body, comment, label, or relationship writes back to GitHub.
 
 ## Federation
 
@@ -342,7 +375,9 @@ there.
 
 JSONL restore imports issue sync bindings as disabled. Re-enable them locally
 after restore only after the new daemon host has the intended App, env-token,
-or `gh auth token` fallback credentials configured.
+or `gh auth token` fallback credentials configured. Ordinary restore also clears
+provider-status observations, pending outbound status intent, and additional
+API locators. Automatic database cutover preserves that state.
 
 ## Troubleshooting
 
@@ -361,7 +396,8 @@ host exactly, or use a matching App credential or `gh auth login --hostname
 and is not sent to Enterprise hosts.
 
 For GitHub Apps, verify the configured App is installed on the repository owner
-and has Metadata read plus Issues read permissions.
+and has Metadata read plus Issues read permissions; two-way status needs
+Issues write as well.
 
 If issue fields sync but GitHub parent links do not appear, check daemon logs
 for an unsupported parent GraphQL schema message. Older GitHub Enterprise hosts

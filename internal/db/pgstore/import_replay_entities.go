@@ -104,6 +104,13 @@ func pgReplayIssueSyncBinding(
 	if len(configJSON) == 0 {
 		configJSON = jsontext.Value(`{}`)
 	}
+	if !preserveEnabled {
+		var err error
+		configJSON, err = db.PublicIssueSyncConfig(configJSON)
+		if err != nil {
+			return err
+		}
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO issue_sync_bindings(
 id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,
 interval_seconds,last_cursor_at,created_at,updated_at
@@ -114,12 +121,16 @@ interval_seconds,last_cursor_at,created_at,updated_at
 	return pgReplayError(db.ImportKindIssueSyncBinding, err)
 }
 
-func pgReplayIssueSyncStatus(ctx context.Context, tx *sql.Tx, status *db.IssueSyncStatusExport) error {
+func pgReplayIssueSyncStatus(ctx context.Context, tx *sql.Tx, status *db.IssueSyncStatusExport, preserveClaim bool) error {
+	var startedAt *string
+	if preserveClaim {
+		startedAt = status.SyncStartedAt
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO issue_sync_status(
 binding_id,project_id,sync_started_at,last_attempt_at,last_success_at,last_error_at,last_error,
 last_created,last_updated,last_unchanged,last_comments
 ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, status.BindingID, status.ProjectID,
-		status.SyncStartedAt, status.LastAttemptAt, status.LastSuccessAt, status.LastErrorAt,
+		startedAt, status.LastAttemptAt, status.LastSuccessAt, status.LastErrorAt,
 		status.LastError, status.LastCreated, status.LastUpdated, status.LastUnchanged, status.LastComments)
 	return pgReplayError(db.ImportKindIssueSyncStatus, err)
 }
@@ -240,7 +251,9 @@ func pgReplayImportMapping(
 	tx *sql.Tx,
 	mapping *db.ImportMappingExport,
 	skippedLinkIDs map[int64]struct{},
+	preserveStatus bool,
 ) (replayLinkSkip, error) {
+
 	if mapping.LinkID != nil {
 		if _, skipped := skippedLinkIDs[*mapping.LinkID]; skipped {
 			return replayLinkMapping, nil
@@ -257,12 +270,20 @@ func pgReplayImportMapping(
 			))
 		}
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO import_mappings(
-id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at
-) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+	normalized, err := db.NormalizeIssueStatusExport(*mapping)
+	if err != nil {
+		return replayLinkInserted, pgReplayError(db.ImportKindImportMapping, err)
+	}
+	var raw, at, pending, locator *string
+	if preserveStatus {
+		raw, at, pending, locator = normalized.ObservedStatus, normalized.ObservedStatusAt, normalized.PendingEventUID, normalized.RemoteLocator
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO import_mappings(
+id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at,observed_status,observed_status_at,pending_event_uid,remote_locator
+) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		mapping.ID, mapping.Source, mapping.ExternalID, mapping.ObjectType, mapping.ProjectID,
 		mapping.IssueID, mapping.CommentID, mapping.LinkID, mapping.Label, mapping.SourceUpdatedAt,
-		mapping.ImportedAt)
+		mapping.ImportedAt, raw, at, pending, locator)
 	return replayLinkInserted, pgReplayError(db.ImportKindImportMapping, err)
 }
 

@@ -31,7 +31,7 @@ func TestAutoCutoverNoopsAtCurrentSchema(t *testing.T) {
 }
 
 func TestAutoCutoverPreservesIssueContentRevision(t *testing.T) {
-	for _, version := range []int{22, 26, db.CurrentSchemaVersion() - 1} {
+	for _, version := range []int{22, 26, 30} {
 		t.Run(fmt.Sprintf("schema_version=%d", version), func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "kata.db")
@@ -77,9 +77,12 @@ func TestAutoCutoverPreservesIssueContentRevision(t *testing.T) {
 			require.Equal(t, int64(0), before[zeroEdits.UID].ContentRevision)
 			require.NotNil(t, before[deleted.UID].DeletedAt)
 
-			_, err = source.ExecContext(ctx,
-				`UPDATE meta SET value = ? WHERE key = 'schema_version'`, version)
-			require.NoError(t, err)
+			if version == 30 {
+				setSchema30Fixture(ctx, t, source)
+			} else {
+				_, err = source.ExecContext(ctx, `UPDATE meta SET value=? WHERE key='schema_version'`, version)
+				require.NoError(t, err)
+			}
 			require.NoError(t, source.Close())
 
 			require.NoError(t, jsonl.AutoCutover(ctx, path))
@@ -238,9 +241,7 @@ func TestAutoCutoverPreservesUIDOnlyHistory(t *testing.T) {
 	require.NoError(t, err)
 	_, err = source.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, issue.ID)
 	require.NoError(t, err)
-	_, err = source.ExecContext(ctx,
-		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
-	require.NoError(t, err)
+	setSchema30Fixture(ctx, t, source)
 	for _, includeDeleted := range []bool{false, true} {
 		records := exportAndDecode(ctx, t, source, jsonl.ExportOptions{
 			ProjectID: project.ID, IncludeDeleted: includeDeleted,
@@ -420,10 +421,7 @@ func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = d.RevokeAPIToken(ctx, revoked.ID, db.BootstrapActor)
 	require.NoError(t, err)
-	_, err = d.ExecContext(ctx,
-		`UPDATE meta SET value = ? WHERE key = 'schema_version'`,
-		db.CurrentSchemaVersion()-1)
-	require.NoError(t, err)
+	setSchema30Fixture(ctx, t, d)
 	require.NoError(t, d.Close())
 
 	require.NoError(t, jsonl.AutoCutover(ctx, path))

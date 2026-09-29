@@ -123,7 +123,7 @@ func stateGroups(states []State) (map[string]string, error) {
 			return nil, fmt.Errorf("duplicate Plane state identity")
 		}
 		switch s.Group {
-		case "backlog", "unstarted", "started", "completed", "cancelled":
+		case "backlog", "unstarted", "started", "completed", "cancelled", "triage":
 		default:
 			return nil, fmt.Errorf("unsupported Plane state group")
 		}

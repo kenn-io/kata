@@ -953,6 +953,11 @@ components:
         interval_seconds:
           format: int64
           type: integer
+        status_sync:
+          enum:
+            - one-way
+            - two-way
+          type: string
       type: object
     EnableProjectFederationRequestBody:
       additionalProperties: false
@@ -2004,6 +2009,8 @@ components:
           $ref: "#/components/schemas/AuthInfoOut"
         instance_uid:
           type: string
+        issue_status_sync:
+          type: boolean
         issue_subtree_tokens:
           type: boolean
         schema_version:
@@ -2020,6 +2027,7 @@ components:
         - version
         - schema_version
         - web_ui_capabilities
+        - issue_status_sync
         - issue_subtree_tokens
         - auth
       type: object
@@ -2418,6 +2426,9 @@ components:
         last_updated:
           format: int64
           type: integer
+        pending_count:
+          format: int64
+          type: integer
         progress:
           $ref: "#/components/schemas/IssueSyncProgressOut"
         project_id:
@@ -2427,10 +2438,14 @@ components:
           type: string
         state:
           type: string
+        status_sync:
+          type: string
         sync_started_at:
           format: date-time
           type: string
       required:
+        - status_sync
+        - pending_count
         - binding_id
         - project_id
         - provider
@@ -4029,7 +4044,11 @@ components:
           $ref: "#/components/schemas/ImportBatchResult"
         status:
           $ref: "#/components/schemas/IssueSyncStatusOut"
+        status_updated:
+          format: int64
+          type: integer
       required:
+        - status_updated
         - binding
         - status
         - import

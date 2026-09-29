@@ -85,11 +85,11 @@ func TestValidationModeRequiresConfiguredSchemaOwnerBeforeConnecting(t *testing.
 	assert.Contains(t, err.Error(), "postgres schema owner is required in validation mode")
 }
 
-func TestPostgresMigrationRegistryIncludesExpiringAssignments(t *testing.T) {
+func TestPostgresMigrationRegistryIncludesIssueStatusColumns(t *testing.T) {
 	t.Parallel()
 
 	migrations := pgstore.Migrations()
-	require.Len(t, migrations, 4)
+	require.Len(t, migrations, 6)
 	assert.Equal(t, 25, migrations[0].FromVersion)
 	assert.Equal(t, 26, migrations[0].ToVersion)
 	assert.Equal(t, "000026_external_root_bridges.up.sql", migrations[0].Name)
@@ -102,6 +102,12 @@ func TestPostgresMigrationRegistryIncludesExpiringAssignments(t *testing.T) {
 	assert.Equal(t, 28, migrations[3].FromVersion)
 	assert.Equal(t, 29, migrations[3].ToVersion)
 	assert.Equal(t, "000029_expiring_assignments.up.sql", migrations[3].Name)
+	assert.Equal(t, 29, migrations[4].FromVersion)
+	assert.Equal(t, 30, migrations[4].ToVersion)
+	assert.Equal(t, "000030_issue_status_sync.up.sql", migrations[4].Name)
+	assert.Equal(t, 30, migrations[5].FromVersion)
+	assert.Equal(t, 31, migrations[5].ToVersion)
+	assert.Equal(t, "000031_issue_status_columns.up.sql", migrations[5].Name)
 }
 
 func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
@@ -131,7 +137,7 @@ func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 29, version)
+	assert.Equal(t, db.CurrentSchemaVersion(), version)
 
 	project, err := migrated.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -188,7 +194,7 @@ func TestCommentTeammateMigrationUpgradesVersion26(t *testing.T) {
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 29, version)
+	assert.Equal(t, db.CurrentSchemaVersion(), version)
 	comments, err := migrated.CommentsByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
@@ -243,7 +249,7 @@ UPDATE issue_token_upgrade.meta SET value='27' WHERE key='schema_version'`)
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 29, version)
+	assert.Equal(t, db.CurrentSchemaVersion(), version)
 
 	expiresAt := time.Now().UTC().Add(time.Hour)
 	token, _, err := migrated.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -278,6 +284,7 @@ func TestExpiringAssignmentsMigrationUpgradesVersion28(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
+	dropIssueStatusSchema(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `
 DROP INDEX assignment_expiry_upgrade.idx_issues_assignment_expires_on;
 ALTER TABLE assignment_expiry_upgrade.issues
@@ -293,7 +300,7 @@ UPDATE assignment_expiry_upgrade.meta SET value='28' WHERE key='schema_version'`
 	t.Cleanup(func() { _ = migrated.Close() })
 	version, err := migrated.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 29, version)
+	assert.Equal(t, db.CurrentSchemaVersion(), version)
 
 	project, err := migrated.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -411,6 +418,7 @@ func dropExpiringAssignmentsSchema(
 	schema string,
 ) {
 	t.Helper()
+	dropIssueStatusSchema(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`
 DROP INDEX %s.idx_issues_assignment_expires_on;
 ALTER TABLE %s.issues

@@ -174,7 +174,7 @@ func (s *Store) IngestFederationEvents(
 			// The generated claim audit events are never link-bearing, so the
 			// accepted batch alone decides whether the binding-group link fold
 			// has any work to do.
-			if err := s.materializeFederatedProjectTx(ctx, tx, params.ProjectID, linksAffected); err != nil {
+			if err := s.materializeFederatedProjectTx(ctx, tx, params.ProjectID, linksAffected, result.InsertedEventUIDs); err != nil {
 				return err
 			}
 			if !adoptionState.shouldDeferMarker {

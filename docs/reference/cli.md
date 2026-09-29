@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-28
+last_edited: 2026-09-29
 ---
 
 # CLI reference
@@ -931,23 +931,28 @@ uses the same successful empty output as compact mode.
 ### Notion
 
 ```sh
-kata sync notion enable --data-source UUID --done-status 'Delivered' [--done-status 'Accepted']
-kata sync notion enable --database UUID-or-URL --done-status 'Delivered'
+kata sync notion enable --data-source UUID --status-sync=two-way
+kata sync notion enable --database UUID-or-URL [--status-sync=two-way]
 kata sync notion enable [--status-property ID-or-name] [--assignee-property ID-or-name] [--interval 5m] [--since 2026-01-01] [--title-prefix=false]
 kata sync notion status
 kata sync notion once
 kata sync notion disable
 ```
 
-Initial enable requires one locator (`--data-source` or `--database`) and at
-least one repeatable `--done-status`; later enable may reuse saved choices.
+Initial enable requires one locator (`--data-source` or `--database`); later
+enable may reuse saved choices. Workflow groups supply completion automatically.
+Legacy one-way bindings can retain repeatable `--done-status` selectors.
 `--database` parses a supported Notion URL locally and asks the daemon to select
 the database's sole data source. Property and completion selectors are exact,
 case-sensitive IDs or names. Omitted property selectors discover the sole
 `status` and `people` properties; ambiguity is reported by the daemon.
 
-Source/property/completed-option mappings are immutable, including after
-disable. `--interval` accepts a duration or integer seconds (minimum one second),
+Source identity is immutable, including after disable.
+`--status-sync=two-way` propagates explicit close/reopen using live Complete and
+To-do group targets. `--complete-group`, `--todo-group`, `--closed-status`, and
+`--open-status` resolve ambiguity or override the first option. Omitted mode and
+selectors preserve saved choices; changing legacy completion IDs requires an
+explicit transition to two-way. `--interval` accepts a duration or integer seconds (minimum one second),
 defaults initially to five minutes, and preserves its saved value when omitted
 on re-enable. `--since` accepts a UTC date or whole-second RFC3339 timestamp;
 omission preserves the saved cutoff and `--since ''` clears it. A changed
@@ -965,10 +970,12 @@ it returns. Human, `--agent`, and `--json` output show resolved non-secret confi
 timestamps, optional progress, last error, and clearly historical last-success
 counts. A zero progress total is unknown.
 Notion completion maps to closed/done; other statuses map to open. Local changes
-never update Notion. Equal or older source observations preserve local scalar
+update Notion status only through explicit close/reopen events accepted while
+`--status-sync=two-way` is configured. Other local fields stay in Kata.
+Equal or older source observations preserve local scalar
 edits; newer Notion imports can overwrite those fields and clear local priority
 because Notion supplies nil priority. Deletion/archive reconciliation, dates,
-comments, relations, and write-back are outside v1. See the [Notion sync operating
+comments, relations, and outbound fields other than status are outside v1. See the [Notion sync operating
 guide](../operations/notion-sync.md) for setup, limits, and recovery.
 
 ### Plane
@@ -976,6 +983,7 @@ guide](../operations/notion-sync.md) for setup, limits, and recovery.
 ```sh
 kata sync plane enable --plane-workspace example-workspace --plane-project UUID
 kata sync plane enable [--interval 5m] [--since 2026-01-01] [--title-prefix=false]
+kata sync plane enable --status-sync=two-way [--closed-state UUID] [--open-state UUID]
 kata sync plane status
 kata sync plane once
 kata sync plane disable
@@ -985,29 +993,36 @@ Initial enable requires the Plane workspace slug and project UUID. Re-enable
 preserves omitted options; empty `--since` clears the cutoff. Global `--workspace`
 and `--project` still select the native workspace/project. Origins and API keys
 belong to the daemon's `[plane_sync]` config and service environment.
+Returning to `--status-sync=one-way` cancels pending writes even when a retained
+target UUID has disappeared or moved to another workflow group. Two-way enable
+requires valid live targets.
 
 Titles default to `[Plane IDENTIFIER-N] Original title`; disabling prefixing
 adds the `plane` label. Completed state groups close with reason `done`, cancelled
-groups close with `wontfix`, and other groups map to open. Local edits never write
-back to Plane. See [Plane sync](../operations/plane-sync.md) for permissions,
+groups close with `wontfix`, and other groups map to open. Explicit close/reopen writes back when `--status-sync=two-way` is configured;
+other local fields stay in Kata. See [Plane sync](../operations/plane-sync.md) for permissions,
 self-hosting, timestamp ownership, polling limits, and recovery.
 
 ### GitHub
 
 ```sh
-kata sync github enable [--repo example-org/example-repo] [--host github.com] [--interval 5m] [--title-prefix=false]
+kata sync github enable [--repo example-org/example-repo] [--host github.com] [--interval 5m]
+    [--title-prefix=false] [--status-sync=one-way|two-way]
 kata sync github disable
 kata sync github status
 kata sync github once
 ```
 
-`kata sync github enable` configures one-way GitHub issue sync for the current
-project. When `--repo` is omitted, kata tries to infer the GitHub repository
-from the project's git aliases; pass `--repo owner/repo` when inference is
-missing or ambiguous. v1 accepts `github.com` and exact GitHub Enterprise
-hostnames listed in `KATA_GITHUB_SYNC_ALLOWED_HOSTS`; `--host` selects one of
-those hosts, and `--interval` sets the daemon polling interval. Imported issue
-titles are prefixed as `[GitHub #123] Original title` by default; pass
+`--status-sync` accepts `one-way` or `two-way`; a new binding defaults to
+one-way, and omission on re-enable preserves the saved mode. The CLI checks the
+selected daemon's `issue_status_sync` capability before sending a mode change.
+Upgrade an older daemon if that capability is absent. When `--repo` is omitted,
+kata tries to infer the GitHub repository from the project's git aliases; pass
+`--repo owner/repo` when inference is missing or ambiguous. v1 accepts
+`github.com` and exact GitHub Enterprise hostnames listed in
+`KATA_GITHUB_SYNC_ALLOWED_HOSTS`; `--host` selects one of those hosts, and
+`--interval` sets the daemon polling interval. Imported issue titles are
+prefixed as `[GitHub #123] Original title` by default; pass
 `--title-prefix=false` to preserve GitHub titles and add the plain `github`
 label. Omission on re-enable preserves the saved choice; explicit true restores
 prefixing. Presentation refreshes preserve local title edits and local labels,
@@ -1023,19 +1038,24 @@ credential configuration is the one that matters, not the client workstation's.
 JSONL restore imports issue sync bindings as disabled until they are
 re-enabled locally.
 
-Synced issues are GitHub-owned for title, body, state, labels, owner, imported
-GitHub comments, and GitHub-sourced parent links. Treat those fields as
-read-mostly in kata: local issue or comment edits are not written back to GitHub
-and can be overwritten by newer GitHub state. Only the first GitHub assignee
-maps to the kata owner.
+Synced issues are GitHub-owned for title, body, labels, owner, imported GitHub
+comments, and GitHub-sourced parent links. In one-way mode, status also flows
+from GitHub to kata. Two-way mode sends explicit local close and reopen actions
+to the existing GitHub issue as `closed` or `open`; enabling it does not send
+historical local closures. Status observations use their own baseline, so an
+unrelated upstream body edit does not undo a local closure. Treat other
+GitHub-owned fields as read-mostly in kata: local edits are not written back and
+can be overwritten by newer GitHub state. Only the first GitHub assignee maps
+to the kata owner.
 
 `disable` stops polling but preserves the binding and import mappings.
 `status` reports the current binding and last sync outcome. `once` runs an
 immediate sync through the daemon and requires an enabled binding.
 
-V1 does not write back to GitHub, import timeline events, import pull requests,
-propagate deleted or transferred issues, or propagate edited or deleted GitHub
-comments.
+Two-way mode writes only explicit close/reopen status changes to existing
+GitHub issues. Kata does not create GitHub issues, import timeline events or
+pull requests, propagate deleted or transferred issues, or propagate edited or
+deleted GitHub comments.
 
 ## External root bridges
 

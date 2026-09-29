@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/githubsync"
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 func TestGitHubSyncHandlers_EnableValidatesStoresStableSourceAndWakesRunner(t *testing.T) {
@@ -313,6 +314,54 @@ func TestGitHubSyncHandlers_OnceRunsSyncAndBroadcastsImportEvents(t *testing.T) 
 	assert.Equal(t, []string{"github-sync", "github-sync"}, []string{hookEvents[0].Actor, hookEvents[1].Actor})
 }
 
+func TestGitHubSyncHandlers_OnceReturnsImportResultForBlockedStatusWarnings(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		runErr     error
+		wantStatus int
+	}{
+		{
+			name:       "blocked status warning preserves partial success",
+			runErr:     &issuesync.StatusError{Message: "status read blocked", Blocked: true},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "ambiguous status failure remains fatal",
+			runErr:     &issuesync.StatusError{Message: "status write outcome is ambiguous", Blocked: true, Ambiguous: true},
+			wantStatus: http.StatusInternalServerError,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newGitHubSyncHandlerHarnessWithFakeRunner(t)
+			binding := h.mustUpsertBinding(t, true)
+			h.runnerResult = githubsync.RunResult{
+				Binding: binding,
+				Status: db.IssueSyncStatus{
+					BindingID: binding.ID,
+					ProjectID: binding.ProjectID,
+					LastError: "status read blocked",
+				},
+				Import: db.ImportBatchResult{Created: 2, Updated: 1, Unchanged: 3, Comments: 4},
+			}
+			h.runnerErr = tt.runErr
+
+			resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "once"), map[string]any{})
+			require.Equalf(t, tt.wantStatus, resp.StatusCode, "once: %s", string(body))
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
+
+			var out runIssueSyncOnceResponseBody
+			decodeJSON(t, body, &out)
+			assert.Equal(t, 2, out.Import.Created)
+			assert.Equal(t, 1, out.Import.Updated)
+			assert.Equal(t, 3, out.Import.Unchanged)
+			assert.Equal(t, 4, out.Import.Comments)
+			assert.Equal(t, "status read blocked", out.Status.LastError)
+		})
+	}
+}
+
 func TestGitHubSyncHandlers_OnceFallbackUsesHTTPFetcher(t *testing.T) {
 	var captured config.GitHubSyncConfig
 	tokenEnv := "EXAMPLE_" + "GITHUB_TOKEN"
@@ -410,6 +459,8 @@ type gitHubSyncHandlerHarness struct {
 	wakes         int
 	runnerRuns    int
 	runnerFetcher githubsync.Fetcher
+	runnerResult  githubsync.RunResult
+	runnerErr     error
 }
 
 type gitHubSyncHarnessOpts struct {
@@ -592,14 +643,18 @@ type issueSyncStatusOut struct {
 	ProjectID int64  `json:"project_id"`
 	Enabled   bool   `json:"enabled"`
 	State     string `json:"state"`
+	LastError string `json:"last_error"`
 }
 
 type runIssueSyncOnceResponseBody struct {
-	Binding *issueSyncBindingOut `json:"binding"`
-	Status  issueSyncStatusOut   `json:"status"`
-	Import  struct {
-		Created  int `json:"created"`
-		Comments int `json:"comments"`
+	Binding       *issueSyncBindingOut `json:"binding"`
+	Status        issueSyncStatusOut   `json:"status"`
+	StatusUpdated int                  `json:"status_updated"`
+	Import        struct {
+		Created   int `json:"created"`
+		Updated   int `json:"updated"`
+		Unchanged int `json:"unchanged"`
+		Comments  int `json:"comments"`
 	} `json:"import"`
 }
 
@@ -657,7 +712,10 @@ func (r fakeGitHubSyncRunner) RunOnce(_ context.Context, _ int64) (githubsync.Ru
 	r.h.mu.Lock()
 	defer r.h.mu.Unlock()
 	r.h.runnerRuns++
-	return githubsync.RunResult{}, errors.New("fake runner should not run")
+	if r.h.runnerErr == nil && r.h.runnerResult.Binding.ID == 0 {
+		return githubsync.RunResult{}, errors.New("fake runner should not run")
+	}
+	return r.h.runnerResult, r.h.runnerErr
 }
 
 func TestGitHubSyncSinceValidatesBeforeNetwork(t *testing.T) {

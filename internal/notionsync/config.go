@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 var uuidPattern = regexp.MustCompile(`^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`)
@@ -96,8 +98,26 @@ func normalizeConfig(c Config) (Config, error) {
 	if c.TitlePropertyID == c.StatusPropertyID || c.TitlePropertyID == c.AssigneePropertyID || c.StatusPropertyID == c.AssigneePropertyID {
 		return Config{}, fmt.Errorf("notion selected property IDs must be distinct")
 	}
-	if len(c.DoneStatusIDs) == 0 {
+	if c.StatusSync != "" && c.StatusSync != "one-way" && c.StatusSync != "two-way" {
+		return Config{}, fmt.Errorf("notion status sync must be one-way or two-way")
+	}
+	if c.CompleteGroupID == "" && len(c.DoneStatusIDs) == 0 {
 		return Config{}, fmt.Errorf("notion config requires at least one completed status ID")
+	}
+	if c.CompleteGroupID != "" && len(c.DoneStatusIDs) != 0 {
+		return Config{}, fmt.Errorf("notion completion must use either a group or explicit options")
+	}
+	if c.CompleteGroupID == "" && (c.StatusSync == "two-way" || c.TodoGroupID != "" || c.ClosedStatusID != "" || c.OpenStatusID != "") {
+		return Config{}, fmt.Errorf("notion two-way status and write targets require workflow groups")
+	}
+	if c.CompleteGroupID != "" && (strings.TrimSpace(c.CompleteGroupID) == "" || (c.TodoGroupID != "" && strings.TrimSpace(c.TodoGroupID) == "")) {
+		return Config{}, fmt.Errorf("notion workflow group IDs must be nonempty")
+	}
+	if c.TodoGroupID != "" && c.TodoGroupID == c.CompleteGroupID {
+		return Config{}, fmt.Errorf("notion To-do and Complete groups must be distinct")
+	}
+	if c.StatusSync == "two-way" && c.TodoGroupID == "" {
+		return Config{}, fmt.Errorf("notion two-way status requires a To-do group")
 	}
 	for _, id := range c.DoneStatusIDs {
 		if strings.TrimSpace(id) == "" {
@@ -107,6 +127,9 @@ func normalizeConfig(c Config) (Config, error) {
 	c.DoneStatusIDs = slices.Clone(c.DoneStatusIDs)
 	slices.Sort(c.DoneStatusIDs)
 	c.DoneStatusIDs = slices.Compact(c.DoneStatusIDs)
+	if c.CompleteGroupID != "" {
+		c.DoneStatusIDs = nil
+	}
 	since, err := ParseSince(c.Since)
 	if err != nil {
 		return Config{}, err
@@ -136,6 +159,14 @@ func EncodeConfig(c Config) (jsontext.Value, error) {
 
 // DecodeConfig rejects unknown keys and never includes supplied values in errors.
 func DecodeConfig(raw jsontext.Value) (Config, error) {
+	if _, err := db.DecodeIssueStatusScan(raw); err != nil {
+		return Config{}, fmt.Errorf("invalid Notion config JSON")
+	}
+	public, err := db.PublicIssueSyncConfig(raw)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid Notion config JSON")
+	}
+	raw = public
 	// A missing choice defaults to true, but an explicit null is invalid.
 	var fields map[string]jsontext.Value
 	if err := json.Unmarshal(raw, &fields); err != nil {
@@ -171,7 +202,33 @@ func ResolveConfig(ds DataSource, selectors Selectors, since string) (Config, er
 		TitlePropertyID:    title.ID,
 		StatusPropertyID:   status.ID,
 		AssigneePropertyID: assignee.ID,
+		StatusSync:         selectors.StatusSync,
 		Since:              since,
+	}
+	if len(selectors.DoneStatuses) == 0 {
+		complete, err := selectStatusGroup(status.Groups, selectors.CompleteGroup, "Complete", true)
+		if err != nil {
+			return Config{}, err
+		}
+		todo, err := selectStatusGroup(status.Groups, selectors.TodoGroup, "To-do", selectors.StatusSync == "two-way" || selectors.TodoGroup != "")
+		if err != nil {
+			return Config{}, err
+		}
+		c.CompleteGroupID, c.TodoGroupID = complete.ID, todo.ID
+		for _, target := range []struct {
+			selector    string
+			destination *string
+		}{{selectors.ClosedStatus, &c.ClosedStatusID}, {selectors.OpenStatus, &c.OpenStatusID}} {
+			if target.selector != "" {
+				option, err := selectOption(status.Options, target.selector)
+				if err != nil {
+					return Config{}, err
+				}
+				*target.destination = option.ID
+			}
+		}
+	} else if selectors.StatusSync == "two-way" || selectors.CompleteGroup != "" || selectors.TodoGroup != "" || selectors.ClosedStatus != "" || selectors.OpenStatus != "" {
+		return Config{}, fmt.Errorf("notion explicit completed options cannot be combined with two-way status or group selectors")
 	}
 	for _, selector := range selectors.DoneStatuses {
 		option, err := selectOption(status.Options, selector)
@@ -286,6 +343,11 @@ func ValidateSchema(c Config, ds DataSource) error {
 			return fmt.Errorf("selected Notion %s property is missing or has changed type", selection.kind)
 		}
 		if selection.kind == "status" {
+			if c.CompleteGroupID != "" {
+				if _, err := ResolveStatusSchema(c, ds); err != nil {
+					return err
+				}
+			}
 			for _, completed := range c.DoneStatusIDs {
 				count := 0
 				for _, option := range matches[0].Options {
@@ -312,8 +374,20 @@ func ValidateReenable(previous, next Config) error {
 	if err != nil {
 		return err
 	}
-	if previous.DataSourceID != next.DataSourceID || previous.TitlePropertyID != next.TitlePropertyID || previous.StatusPropertyID != next.StatusPropertyID || previous.AssigneePropertyID != next.AssigneePropertyID || !slices.Equal(previous.DoneStatusIDs, next.DoneStatusIDs) {
+	if previous.DataSourceID != next.DataSourceID || previous.TitlePropertyID != next.TitlePropertyID || previous.StatusPropertyID != next.StatusPropertyID || previous.AssigneePropertyID != next.AssigneePropertyID {
 		return fmt.Errorf("notion source and selected mapping IDs cannot change on re-enable")
+	}
+	if previous.CompleteGroupID != "" {
+		initialTodo := previous.TodoGroupID == "" && next.StatusSync == "two-way"
+		if previous.CompleteGroupID != next.CompleteGroupID || (previous.TodoGroupID != next.TodoGroupID && !initialTodo) {
+			return fmt.Errorf("notion selected workflow group IDs cannot change on re-enable")
+		}
+	} else if next.CompleteGroupID != "" {
+		if next.StatusSync != "two-way" {
+			return fmt.Errorf("notion legacy completion changes require explicit two-way opt-in")
+		}
+	} else if !slices.Equal(previous.DoneStatusIDs, next.DoneStatusIDs) {
+		return fmt.Errorf("notion selected completion option IDs cannot change on re-enable")
 	}
 	return nil
 }

@@ -9,6 +9,9 @@ import (
 
 // ValidateImportBatch validates backend-neutral import shape and timestamp rules.
 func ValidateImportBatch(params ImportBatchParams) error {
+	if params.ManageStatusSeparately && params.IssueSyncGuard == nil {
+		return fmt.Errorf("%w: independent status requires a claimed provider import", ErrImportValidation)
+	}
 	if strings.TrimSpace(params.Source) == "" || strings.TrimSpace(params.Actor) == "" {
 		return fmt.Errorf("%w: source and actor are required", ErrImportValidation)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 const maxResponseBytes = 8 << 20
@@ -201,7 +203,10 @@ func (s *clientSession) get(ctx context.Context, path string) ([]byte, error) {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			return nil, fmt.Errorf("plane read request failed")
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, context.DeadlineExceeded
+			}
+			return nil, &issuesync.StatusError{Message: "plane read request failed"}
 		}
 		if response.StatusCode == 429 || response.StatusCode >= 500 {
 			s.client.deferRequests(response.Header.Get("Retry-After"), attempt)
@@ -209,11 +214,11 @@ func (s *clientSession) get(ctx context.Context, path string) ([]byte, error) {
 			if attempt < 3 {
 				continue
 			}
-			return nil, fmt.Errorf("plane API temporarily unavailable (HTTP %d)", response.StatusCode)
+			return nil, &issuesync.StatusError{Message: fmt.Sprintf("plane API temporarily unavailable (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode}
 		}
 		if response.StatusCode != http.StatusOK {
 			_ = response.Body.Close()
-			return nil, fmt.Errorf("plane API read failed (HTTP %d)", response.StatusCode)
+			return nil, &issuesync.StatusError{Message: fmt.Sprintf("plane API read failed (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode, Blocked: response.StatusCode >= 300 && response.StatusCode < 500 && response.StatusCode != 409}
 		}
 		raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 		_ = response.Body.Close()
@@ -221,7 +226,10 @@ func (s *clientSession) get(ctx context.Context, path string) ([]byte, error) {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			return nil, fmt.Errorf("cannot read Plane API response")
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, context.DeadlineExceeded
+			}
+			return nil, &issuesync.StatusError{Message: "cannot read Plane API response"}
 		}
 		if len(raw) > maxResponseBytes {
 			return nil, fmt.Errorf("plane API response exceeds 8 MiB")
@@ -310,9 +318,10 @@ func readRows[T any](ctx context.Context, s *clientSession, resource string, all
 }
 
 type stateWire struct {
-	ID      string `json:"id"`
-	Group   string `json:"group"`
-	Project string `json:"project"`
+	ID       string  `json:"id"`
+	Group    string  `json:"group"`
+	Sequence float64 `json:"sequence"`
+	Project  string  `json:"project"`
 }
 
 // States reads the complete state schema before work-item mapping.
@@ -336,7 +345,7 @@ func (s *clientSession) States(ctx context.Context, input Config) ([]State, erro
 				return nil, fmt.Errorf("plane state belongs to a different project")
 			}
 		}
-		states = append(states, State{ID: id, Group: row.Group})
+		states = append(states, State{ID: id, Group: row.Group, Sequence: row.Sequence})
 	}
 	if _, err := stateGroups(states); err != nil {
 		return nil, err

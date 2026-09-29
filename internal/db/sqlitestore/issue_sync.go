@@ -37,7 +37,15 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 
 		existing, err := issueSyncBindingByProject(ctx, tx, p.ProjectID)
 		if expected := p.ExpectedBinding; expected != nil && (err == nil || errors.Is(err, db.ErrNotFound)) {
-			if (expected.ID == 0 && err == nil) || (expected.ID != 0 && (err != nil || existing.ID != expected.ID || string(existing.Config) != string(expected.Config) || existing.IntervalSeconds != expected.IntervalSeconds)) {
+			matches := false
+			if err == nil && expected.ID != 0 {
+				var matchErr error
+				matches, matchErr = db.IssueSyncConfigMatches(existing.Config, expected.Config)
+				if matchErr != nil {
+					return db.IssueSyncBinding{}, matchErr
+				}
+			}
+			if (expected.ID == 0 && err == nil) || (expected.ID != 0 && (err != nil || existing.ID != expected.ID || !matches || existing.IntervalSeconds != expected.IntervalSeconds)) {
 				return db.IssueSyncBinding{}, db.ErrIssueSyncBindingChanged
 			}
 		}
@@ -45,15 +53,37 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 			if existing.Provider != p.Provider || existing.RemoteID != p.RemoteID {
 				return db.IssueSyncBinding{}, db.ErrIssueSyncProjectAlreadyBound
 			}
+			oldMode, err := db.IssueStatusMode(existing.Config)
+			if err != nil {
+				return db.IssueSyncBinding{}, err
+			}
+			config, err := db.PreserveIssueStatusScanConfig(existing.Config, p.Config)
+			if err != nil {
+				return db.IssueSyncBinding{}, err
+			}
+			nextMode, err := db.IssueStatusMode(config)
+			if err != nil {
+				return db.IssueSyncBinding{}, err
+			}
+			if oldMode == "two-way" && nextMode == "one-way" {
+				if _, err := tx.ExecContext(ctx, `UPDATE import_mappings SET pending_event_uid=NULL WHERE project_id=$1 AND source=$2`, existing.ProjectID, existing.SourceKey); err != nil {
+					return db.IssueSyncBinding{}, err
+				}
+			}
+			matches, err := db.IssueSyncConfigMatches(existing.Config, config)
+			if err != nil {
+				return db.IssueSyncBinding{}, err
+			}
+
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE issue_sync_bindings
 				   SET display_name = ?,
-				       last_cursor_at = CASE WHEN config_json <> ? THEN NULL ELSE last_cursor_at END,
+				       last_cursor_at = CASE WHEN ? THEN NULL ELSE last_cursor_at END,
 				       config_json = ?,
 				       enabled = 1, interval_seconds = ?,
-				       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+				       updated_at = ?
 				 WHERE id = ?`,
-				p.DisplayName, string(p.Config), string(p.Config), p.IntervalSeconds, existing.ID); err != nil {
+				p.DisplayName, !matches, string(config), p.IntervalSeconds, db.NextIssueSyncBindingUpdatedAt(existing.UpdatedAt, time.Now()).Format(sqliteTimeFormat), existing.ID); err != nil {
 				return db.IssueSyncBinding{}, fmt.Errorf("update issue sync binding: %w", err)
 			}
 			if _, err := tx.ExecContext(ctx, `
@@ -62,12 +92,7 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 				ON CONFLICT(binding_id) DO NOTHING`, existing.ID, existing.ProjectID); err != nil {
 				return db.IssueSyncBinding{}, fmt.Errorf("ensure issue sync status: %w", err)
 			}
-			if _, err := tx.ExecContext(ctx, `
-				UPDATE issue_sync_status
-				   SET sync_started_at = NULL
-				 WHERE binding_id = ?`, existing.ID); err != nil {
-				return db.IssueSyncBinding{}, fmt.Errorf("clear issue sync claim: %w", err)
-			}
+
 			updated, err := issueSyncBindingByID(ctx, tx, existing.ID)
 			if err != nil {
 				return db.IssueSyncBinding{}, err
@@ -81,13 +106,17 @@ func (d *Store) UpsertIssueSyncBinding(ctx context.Context, p db.UpsertIssueSync
 			return db.IssueSyncBinding{}, err
 		}
 
+		insertConfig, err := db.PublicIssueSyncConfig(p.Config)
+		if err != nil {
+			return db.IssueSyncBinding{}, err
+		}
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO issue_sync_bindings(
 				project_id, provider, source_key, remote_id, display_name,
 				config_json, enabled, interval_seconds
 			) VALUES(?, ?, ?, ?, ?, ?, 1, ?)`,
 			p.ProjectID, p.Provider, p.SourceKey, p.RemoteID, p.DisplayName,
-			string(p.Config), p.IntervalSeconds)
+			string(insertConfig), p.IntervalSeconds)
 		if err != nil {
 			return db.IssueSyncBinding{}, fmt.Errorf("insert issue sync binding: %w", err)
 		}
@@ -154,16 +183,11 @@ func (d *Store) DisableIssueSyncBinding(ctx context.Context, projectID int64) (d
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE issue_sync_bindings
-			   SET enabled = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE id = ?`, binding.ID); err != nil {
+			   SET enabled = 0, updated_at = ?
+			 WHERE id = ?`, db.NextIssueSyncBindingUpdatedAt(binding.UpdatedAt, time.Now()).Format(sqliteTimeFormat), binding.ID); err != nil {
 			return db.IssueSyncBinding{}, fmt.Errorf("disable issue sync binding: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE issue_sync_status
-			   SET sync_started_at = NULL
-			 WHERE binding_id = ?`, binding.ID); err != nil {
-			return db.IssueSyncBinding{}, fmt.Errorf("clear issue sync claim: %w", err)
-		}
+
 		disabled, err := issueSyncBindingByID(ctx, tx, binding.ID)
 		if err != nil {
 			return db.IssueSyncBinding{}, err
@@ -290,23 +314,29 @@ func (d *Store) RecordIssueSyncSuccess(ctx context.Context, p db.IssueSyncSucces
 		}
 		defer func() { _ = tx.Rollback() }()
 
-		if _, err := issueSyncBindingByID(ctx, tx, p.BindingID); err != nil {
+		binding, err := issueSyncBindingByID(ctx, tx, p.BindingID)
+		if err != nil {
 			return db.IssueSyncStatus{}, err
+		}
+		if p.BindingUpdatedAt != nil && !binding.UpdatedAt.Equal(*p.BindingUpdatedAt) {
+			return db.IssueSyncStatus{}, db.ErrIssueSyncBindingChanged
 		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE issue_sync_status
-			   SET sync_started_at = NULL,
-			       last_success_at = ?,
-			       last_error_at = NULL,
-			       last_error = NULL,
-			       last_created = ?,
-			       last_updated = ?,
-			       last_unchanged = ?,
-			       last_comments = ?
+			   SET sync_started_at = CASE WHEN ? THEN sync_started_at ELSE NULL END,
+			       last_success_at = CASE WHEN ? = '' THEN ? ELSE last_success_at END,
+			       last_error_at = CASE WHEN ? = '' THEN NULL ELSE ? END,
+			       last_error = NULLIF(?, ''),
+			       last_created = CASE WHEN ? = '' THEN ? ELSE last_created END,
+			       last_updated = CASE WHEN ? = '' THEN ? ELSE last_updated END,
+			       last_unchanged = CASE WHEN ? = '' THEN ? ELSE last_unchanged END,
+			       last_comments = CASE WHEN ? = '' THEN ? ELSE last_comments END
 			 WHERE binding_id = ?
 			   AND sync_started_at = ?`,
-			p.At.UTC().Format(sqliteTimeFormat), p.LastCreated, p.LastUpdated,
-			p.LastUnchanged, p.LastComments, p.BindingID,
+			p.RetainClaim, p.StatusError, p.At.UTC().Format(sqliteTimeFormat),
+			p.StatusError, p.At.UTC().Format(sqliteTimeFormat), p.StatusError,
+			p.StatusError, p.LastCreated, p.StatusError, p.LastUpdated,
+			p.StatusError, p.LastUnchanged, p.StatusError, p.LastComments, p.BindingID,
 			p.StartedAt.UTC().Format(sqliteTimeFormat))
 		if err != nil {
 			return db.IssueSyncStatus{}, fmt.Errorf("record issue sync success: %w", err)
@@ -318,9 +348,9 @@ func (d *Store) RecordIssueSyncSuccess(ctx context.Context, p db.IssueSyncSucces
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE issue_sync_bindings
-			   SET last_cursor_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			   SET last_cursor_at = ?, updated_at = ?
 			 WHERE id = ?`,
-			p.CursorAt.UTC().Format(sqliteTimeFormat), p.BindingID); err != nil {
+			p.CursorAt.UTC().Format(sqliteTimeFormat), db.NextIssueSyncBindingUpdatedAt(binding.UpdatedAt, time.Now()).Format(sqliteTimeFormat), p.BindingID); err != nil {
 			return db.IssueSyncStatus{}, fmt.Errorf("advance issue sync cursor: %w", err)
 		}
 		status, err := issueSyncStatusByBinding(ctx, tx, p.BindingID)
@@ -348,12 +378,12 @@ func (d *Store) RecordIssueSyncError(ctx context.Context, p db.IssueSyncErrorPar
 		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE issue_sync_status
-			   SET sync_started_at = NULL,
+			   SET sync_started_at = CASE WHEN ? THEN sync_started_at ELSE NULL END,
 			       last_error_at = ?,
 			       last_error = ?
 			 WHERE binding_id = ?
 			   AND sync_started_at = ?`,
-			p.At.UTC().Format(sqliteTimeFormat), p.Error, p.BindingID,
+			p.RetainClaim, p.At.UTC().Format(sqliteTimeFormat), p.Error, p.BindingID,
 			p.StartedAt.UTC().Format(sqliteTimeFormat))
 		if err != nil {
 			return db.IssueSyncStatus{}, fmt.Errorf("record issue sync error: %w", err)
@@ -386,6 +416,17 @@ func (d *Store) RefreshIssueSyncBinding(ctx context.Context, p db.IssueSyncBindi
 		}
 		defer func() { _ = tx.Rollback() }()
 
+		previous, err := issueSyncBindingByID(ctx, tx, p.BindingID)
+		if err != nil {
+			return db.IssueSyncBinding{}, err
+		}
+		if p.BindingUpdatedAt != nil && !previous.UpdatedAt.Equal(*p.BindingUpdatedAt) {
+			return db.IssueSyncBinding{}, db.ErrIssueSyncBindingChanged
+		}
+		config, err := db.PreserveIssueStatusScanConfig(previous.Config, p.Config)
+		if err != nil {
+			return db.IssueSyncBinding{}, err
+		}
 		var startedAt any
 		if p.StartedAt != nil {
 			startedAt = p.StartedAt.UTC().Format(sqliteTimeFormat)
@@ -393,10 +434,10 @@ func (d *Store) RefreshIssueSyncBinding(ctx context.Context, p db.IssueSyncBindi
 		res, err := tx.ExecContext(ctx, `
 			UPDATE issue_sync_bindings
 			   SET display_name = ?, config_json = ?,
-			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			       updated_at = ?
 			 WHERE id = ?
 			 AND (? IS NULL OR (enabled = 1 AND EXISTS (SELECT 1 FROM issue_sync_status WHERE binding_id = issue_sync_bindings.id AND sync_started_at = ?)))`,
-			p.DisplayName, string(p.Config), p.BindingID, startedAt, startedAt)
+			p.DisplayName, string(config), db.NextIssueSyncBindingUpdatedAt(previous.UpdatedAt, time.Now()).Format(sqliteTimeFormat), p.BindingID, startedAt, startedAt)
 		if err != nil {
 			return db.IssueSyncBinding{}, fmt.Errorf("refresh issue sync binding: %w", err)
 		}

@@ -49,7 +49,15 @@ func (s *Store) UpsertIssueSyncBinding(
 		existing, err := scanIssueSyncBinding(tx.QueryRowContext(ctx,
 			issueSyncBindingSelect+` WHERE b.project_id=$1 FOR UPDATE`, params.ProjectID))
 		if expected := params.ExpectedBinding; expected != nil && (err == nil || errors.Is(err, db.ErrNotFound)) {
-			if (expected.ID == 0 && err == nil) || (expected.ID != 0 && (err != nil || existing.ID != expected.ID || string(existing.Config) != string(expected.Config) || existing.IntervalSeconds != expected.IntervalSeconds)) {
+			matches := false
+			if err == nil && expected.ID != 0 {
+				var matchErr error
+				matches, matchErr = db.IssueSyncConfigMatches(existing.Config, expected.Config)
+				if matchErr != nil {
+					return matchErr
+				}
+			}
+			if (expected.ID == 0 && err == nil) || (expected.ID != 0 && (err != nil || existing.ID != expected.ID || !matches || existing.IntervalSeconds != expected.IntervalSeconds)) {
 				return db.ErrIssueSyncBindingChanged
 			}
 		}
@@ -57,11 +65,33 @@ func (s *Store) UpsertIssueSyncBinding(
 			if existing.Provider != params.Provider || existing.RemoteID != params.RemoteID {
 				return db.ErrIssueSyncProjectAlreadyBound
 			}
-			updatedAt := storedTime(time.Now())
+			oldMode, err := db.IssueStatusMode(existing.Config)
+			if err != nil {
+				return err
+			}
+			config, err := db.PreserveIssueStatusScanConfig(existing.Config, params.Config)
+			if err != nil {
+				return err
+			}
+			nextMode, err := db.IssueStatusMode(config)
+			if err != nil {
+				return err
+			}
+			if oldMode == "two-way" && nextMode == "one-way" {
+				if _, err := tx.ExecContext(ctx, `UPDATE import_mappings SET pending_event_uid=NULL WHERE project_id=$1 AND source=$2`, existing.ProjectID, existing.SourceKey); err != nil {
+					return err
+				}
+			}
+			matches, err := db.IssueSyncConfigMatches(existing.Config, config)
+			if err != nil {
+				return err
+			}
+
+			updatedAt := storedTime(db.NextIssueSyncBindingUpdatedAt(existing.UpdatedAt, time.Now()))
 			if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET
- display_name=$1, last_cursor_at=CASE WHEN config_json <> $2 THEN NULL ELSE last_cursor_at END,
+ display_name=$1, last_cursor_at=CASE WHEN $6 THEN NULL ELSE last_cursor_at END,
  config_json=$2, enabled=1, interval_seconds=$3, updated_at=$4 WHERE id=$5`,
-				params.DisplayName, string(params.Config), params.IntervalSeconds, updatedAt, existing.ID,
+				params.DisplayName, string(config), params.IntervalSeconds, updatedAt, existing.ID, !matches,
 			); err != nil {
 				return mapSQLError(err, nil)
 			}
@@ -69,11 +99,7 @@ func (s *Store) UpsertIssueSyncBinding(
 VALUES($1,$2) ON CONFLICT(binding_id) DO NOTHING`, existing.ID, existing.ProjectID); err != nil {
 				return mapSQLError(err, nil)
 			}
-			if _, err := tx.ExecContext(ctx,
-				`UPDATE issue_sync_status SET sync_started_at=NULL WHERE binding_id=$1`, existing.ID,
-			); err != nil {
-				return mapSQLError(err, nil)
-			}
+
 			binding, err = scanIssueSyncBinding(tx.QueryRowContext(ctx,
 				issueSyncBindingSelect+` WHERE b.id=$1`, existing.ID))
 			return err
@@ -81,12 +107,16 @@ VALUES($1,$2) ON CONFLICT(binding_id) DO NOTHING`, existing.ID, existing.Project
 		if !errors.Is(err, db.ErrNotFound) {
 			return err
 		}
+		insertConfig, err := db.PublicIssueSyncConfig(params.Config)
+		if err != nil {
+			return err
+		}
 		var bindingID int64
 		err = tx.QueryRowContext(ctx, `INSERT INTO issue_sync_bindings(
  project_id, provider, source_key, remote_id, display_name, config_json, enabled, interval_seconds
 ) VALUES($1,$2,$3,$4,$5,$6,1,$7) RETURNING id`,
 			params.ProjectID, params.Provider, params.SourceKey, params.RemoteID,
-			params.DisplayName, string(params.Config), params.IntervalSeconds,
+			params.DisplayName, string(insertConfig), params.IntervalSeconds,
 		).Scan(&bindingID)
 		if err != nil {
 			return mapSQLError(err, nil)
@@ -125,7 +155,7 @@ func rejectExternalRootIssueSyncSourceTx(
 	return db.ErrExternalRootIssueSyncConflict
 }
 
-// DisableIssueSyncBinding disables one project binding and releases its claim.
+// DisableIssueSyncBinding disables new work while retaining an in-flight claim.
 func (s *Store) DisableIssueSyncBinding(ctx context.Context, projectID int64) (db.IssueSyncBinding, error) {
 	var binding db.IssueSyncBinding
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
@@ -138,14 +168,10 @@ func (s *Store) DisableIssueSyncBinding(ctx context.Context, projectID int64) (d
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings
-SET enabled=0, updated_at=$1 WHERE id=$2`, storedTime(time.Now()), current.ID); err != nil {
+SET enabled=0, updated_at=$1 WHERE id=$2`, storedTime(db.NextIssueSyncBindingUpdatedAt(current.UpdatedAt, time.Now())), current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE issue_sync_status SET sync_started_at=NULL WHERE binding_id=$1`, current.ID,
-		); err != nil {
-			return mapSQLError(err, nil)
-		}
+
 		binding, err = scanIssueSyncBinding(tx.QueryRowContext(ctx,
 			issueSyncBindingSelect+` WHERE b.id=$1`, current.ID))
 		return err
@@ -263,16 +289,21 @@ func (s *Store) RecordIssueSyncSuccess(
 ) (db.IssueSyncStatus, error) {
 	var status db.IssueSyncStatus
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		if _, err := scanIssueSyncBinding(tx.QueryRowContext(ctx,
-			issueSyncBindingSelect+` WHERE b.id=$1`, params.BindingID)); err != nil {
+		binding, err := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.id=$1`, params.BindingID))
+		if err != nil {
 			return err
 		}
+		if params.BindingUpdatedAt != nil && !binding.UpdatedAt.Equal(*params.BindingUpdatedAt) {
+			return db.ErrIssueSyncBindingChanged
+		}
 		result, err := tx.ExecContext(ctx, `UPDATE issue_sync_status SET
- sync_started_at=NULL, last_success_at=$1, last_error_at=NULL, last_error=NULL,
- last_created=$2, last_updated=$3, last_unchanged=$4, last_comments=$5
+ sync_started_at=CASE WHEN $8 THEN sync_started_at ELSE NULL END,
+ last_success_at=CASE WHEN $9 = '' THEN $1 ELSE last_success_at END,
+ last_error_at=CASE WHEN $9 = '' THEN NULL ELSE $1 END, last_error=NULLIF($9, ''),
+ last_created=CASE WHEN $9 = '' THEN $2 ELSE last_created END, last_updated=CASE WHEN $9 = '' THEN $3 ELSE last_updated END, last_unchanged=CASE WHEN $9 = '' THEN $4 ELSE last_unchanged END, last_comments=CASE WHEN $9 = '' THEN $5 ELSE last_comments END
 WHERE binding_id=$6 AND sync_started_at=$7`,
 			storedTime(params.At), params.LastCreated, params.LastUpdated,
-			params.LastUnchanged, params.LastComments, params.BindingID, storedTime(params.StartedAt))
+			params.LastUnchanged, params.LastComments, params.BindingID, storedTime(params.StartedAt), params.RetainClaim, params.StatusError)
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -285,7 +316,7 @@ WHERE binding_id=$6 AND sync_started_at=$7`,
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings
 SET last_cursor_at=$1, updated_at=$2 WHERE id=$3`,
-			storedTime(params.CursorAt), storedTime(time.Now()), params.BindingID,
+			storedTime(params.CursorAt), storedTime(db.NextIssueSyncBindingUpdatedAt(binding.UpdatedAt, time.Now())), params.BindingID,
 		); err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -308,9 +339,9 @@ func (s *Store) RecordIssueSyncError(
 			return err
 		}
 		result, err := tx.ExecContext(ctx, `UPDATE issue_sync_status SET
- sync_started_at=NULL, last_error_at=$1, last_error=$2
+ sync_started_at=CASE WHEN $5 THEN sync_started_at ELSE NULL END, last_error_at=$1, last_error=$2
 WHERE binding_id=$3 AND sync_started_at=$4`,
-			storedTime(params.At), params.Error, params.BindingID, storedTime(params.StartedAt))
+			storedTime(params.At), params.Error, params.BindingID, storedTime(params.StartedAt), params.RetainClaim)
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
@@ -340,6 +371,17 @@ func (s *Store) RefreshIssueSyncBinding(
 	}
 	var binding db.IssueSyncBinding
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		previous, err := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.id=$1 FOR UPDATE`, params.BindingID))
+		if err != nil {
+			return err
+		}
+		if params.BindingUpdatedAt != nil && !previous.UpdatedAt.Equal(*params.BindingUpdatedAt) {
+			return db.ErrIssueSyncBindingChanged
+		}
+		config, err := db.PreserveIssueStatusScanConfig(previous.Config, params.Config)
+		if err != nil {
+			return err
+		}
 		var startedAt any
 		if params.StartedAt != nil {
 			startedAt = formatStoredTime(*params.StartedAt)
@@ -347,7 +389,7 @@ func (s *Store) RefreshIssueSyncBinding(
 		result, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET
 display_name=$1, config_json=$2, updated_at=$3 WHERE id=$4
 AND ($5::text IS NULL OR (enabled=1 AND EXISTS (SELECT 1 FROM issue_sync_status WHERE binding_id=issue_sync_bindings.id AND sync_started_at=$5)))`,
-			params.DisplayName, string(params.Config), storedTime(time.Now()), params.BindingID, startedAt)
+			params.DisplayName, string(config), storedTime(db.NextIssueSyncBindingUpdatedAt(previous.UpdatedAt, time.Now())), params.BindingID, startedAt)
 		if err != nil {
 			return mapSQLError(err, nil)
 		}

@@ -60,6 +60,10 @@ func (a *Adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, star
 	if err := ValidateSchema(config, source); err != nil {
 		return prepared, err
 	}
+	liveStatus, err := ResolveStatusSchema(config, source)
+	if err != nil {
+		return prepared, err
+	}
 	databaseID, err := canonicalID(source.DatabaseID)
 	if err != nil {
 		return prepared, err
@@ -86,8 +90,12 @@ func (a *Adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, star
 		return prepared, err
 	}
 	displayName := SourceDisplayName(source)
-	if binding.DisplayName != displayName || string(binding.Config) != string(raw) {
-		binding, err = a.store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{BindingID: binding.ID, DisplayName: displayName, Config: raw, StartedAt: &startedAt})
+	matches, err := db.IssueSyncConfigMatches(binding.Config, raw)
+	if err != nil {
+		return prepared, err
+	}
+	if binding.DisplayName != displayName || !matches {
+		binding, err = a.store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{BindingID: binding.ID, DisplayName: displayName, Config: raw, StartedAt: &startedAt, BindingUpdatedAt: new(binding.UpdatedAt)})
 		if err != nil {
 			return prepared, err
 		}
@@ -140,7 +148,7 @@ func (a *Adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, star
 		if content.Page.StatusID != nil && !statuses[*content.Page.StatusID] {
 			return prepared, fmt.Errorf("notion page %s: status ID is absent from the source schema", page.ID)
 		}
-		mapped, err := BuildImportBatch(binding.SourceKey, config, []PageContent{content})
+		mapped, err := buildImportBatch(binding.SourceKey, config, []PageContent{content}, &liveStatus)
 		if err != nil {
 			return prepared, fmt.Errorf("notion page %s: %w", page.ID, err)
 		}

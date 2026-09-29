@@ -40,6 +40,16 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "external import derived status", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "EditIssue"}, run: checkImportDerivedStatus},
+	{name: "issue status federation intent", methods: []string{"IngestFederationEvents", "MaterializeFederatedProject", "CreateIssue", "UpsertIssueSyncBinding"}, run: checkIssueStatusFederationIntent},
+	{name: "issue status native intent", methods: []string{"CloseIssueWithEvents", "ReopenIssue", "CreateIssue", "UpsertIssueSyncBinding"}, runWithBackend: checkIssueStatusNativeIntent},
+	{name: "issue status mapping reads", methods: []string{"CreateProject", "CreateIssue", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding"}, run: checkIssueStatusMappingReads},
+	{name: "issue status mapping storage", methods: []string{"CreateProject", "CreateIssue", "UpsertImportMapping"}, run: checkIssueStatusMappingStorage},
+	{name: "issue status observation", methods: []string{"CreateProject", "CreateIssue", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding"}, runWithBackend: checkIssueStatusObservation},
+	{name: "issue status content isolation", methods: []string{"CreateProject", "ImportBatch", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding"}, run: checkIssueStatusContentIsolation},
+	{name: "issue status close metadata", methods: []string{"CreateProject", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding", "UpsertImportMapping"}, run: checkIssueStatusProviderCloseMetadata},
+	{name: "issue status archive fence", methods: []string{"CreateProject", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding", "RemoveProject", "RestoreProject"}, run: checkIssueStatusArchiveFence},
+	{name: "issue status locator", methods: []string{"CreateIssue", "CreateProject", "CloseIssue", "ClaimIssueSyncBinding", "SoftDeleteIssue", "UpsertIssueSyncBinding", "UpsertImportMapping"}, runWithBackend: checkIssueStatusLocator},
+	{name: "issue status claim recovery", methods: []string{"CreateProject", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding", "DisableIssueSyncBinding"}, run: checkIssueStatusClaimRecovery},
 	{name: "external import presentation labels stale replay", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "LabelsByIssue", "EditIssue"}, run: checkImportPresentationLabelStaleReplay},
 	{name: "external import presentation labels", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "LabelsByIssue", "AddLabel", "RemoveLabelAndEvent", "EditIssue"}, run: checkImportPresentationLabels},
 	{
@@ -281,6 +291,11 @@ var storageScenarios = []scenario{
 		name:    "issue_sync_expected_binding",
 		methods: []string{"CreateProject", "UpsertIssueSyncBinding", "IssueSyncBindingByProject"},
 		run:     checkIssueSyncExpectedBinding,
+	},
+	{
+		name:    "issue_status_content_warning",
+		methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding", "RecordIssueSyncSuccess", "IssueSyncBindingByID", "IssueSyncStatusByProject"},
+		run:     checkIssueStatusContentWarning,
 	},
 	{
 		name: "issue sync lifecycle",
@@ -618,6 +633,11 @@ var storageScenarios = []scenario{
 			"ListFederationEnrollments", "ListPendingClaimRequests", "ProjectAliases", "ProjectByUID",
 		},
 		run: checkSnapshotReplayExtendedState,
+	},
+	{
+		name:    "snapshot replay rejects malformed retained status scan",
+		methods: []string{"ImportReplay", "CreateProject", "ProjectByUID", "IssueSyncBindingByProject"},
+		run:     checkSnapshotReplayRejectsMalformedRetainedStatusScan,
 	},
 	{
 		name:    "snapshot replay rejects invalid external root frontiers",

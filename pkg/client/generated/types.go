@@ -1157,9 +1157,25 @@ func (e EmbeddingsHealth) Validate() error {
 }
 
 type EnableIssueSyncRequestBody struct {
-	Config          map[string]any `json:"config,omitempty"`
-	Interval        *string        `json:"interval,omitempty"`
-	IntervalSeconds *int64         `json:"interval_seconds,omitempty"`
+	Config          map[string]any                        `json:"config,omitempty"`
+	Interval        *string                               `json:"interval,omitempty"`
+	IntervalSeconds *int64                                `json:"interval_seconds,omitempty"`
+	StatusSync      *EnableIssueSyncRequestBodyStatusSync `json:"status_sync,omitempty"`
+}
+
+func (e EnableIssueSyncRequestBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if e.StatusSync != nil {
+		if v, ok := any(e.StatusSync).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("StatusSync", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type EnableProjectFederationRequestBody struct {
@@ -1951,6 +1967,7 @@ func (i InitProjectResponseBody) Validate() error {
 type InstanceResponseBody struct {
 	Auth                 AuthInfoOut    `json:"auth"`
 	InstanceUID          string         `json:"instance_uid" validate:"required"`
+	IssueStatusSync      bool           `json:"issue_status_sync"`
 	IssueSubtreeTokens   bool           `json:"issue_subtree_tokens"`
 	SchemaVersion        int64          `json:"schema_version"`
 	Version              string         `json:"version" validate:"required"`
@@ -2245,10 +2262,12 @@ type IssueSyncStatusOut struct {
 	LastSuccessAt *time.Time            `json:"last_success_at,omitempty"`
 	LastUnchanged int64                 `json:"last_unchanged"`
 	LastUpdated   int64                 `json:"last_updated"`
+	PendingCount  int64                 `json:"pending_count"`
 	Progress      *IssueSyncProgressOut `json:"progress,omitempty"`
 	ProjectID     int64                 `json:"project_id"`
 	Provider      string                `json:"provider" validate:"required"`
 	State         string                `json:"state" validate:"required"`
+	StatusSync    string                `json:"status_sync" validate:"required"`
 	SyncStartedAt *time.Time            `json:"sync_started_at,omitempty"`
 }
 
@@ -2266,6 +2285,9 @@ func (i IssueSyncStatusOut) Validate() error {
 	}
 	if err := typesValidator.Var(i.State, "required"); err != nil {
 		errors = errors.Append("State", err)
+	}
+	if err := typesValidator.Var(i.StatusSync, "required"); err != nil {
+		errors = errors.Append("StatusSync", err)
 	}
 	if len(errors) == 0 {
 		return nil
@@ -3831,9 +3853,10 @@ func (r RotateFederationEnrollmentRequestBody) Validate() error {
 type RunIssueSyncOnceRequestBody = map[string]any
 
 type RunIssueSyncOnceResponseBody struct {
-	Binding IssueSyncBindingOut `json:"binding"`
-	Import  ImportBatchResult   `json:"import"`
-	Status  IssueSyncStatusOut  `json:"status"`
+	Binding       IssueSyncBindingOut `json:"binding"`
+	Import        ImportBatchResult   `json:"import"`
+	Status        IssueSyncStatusOut  `json:"status"`
+	StatusUpdated int64               `json:"status_updated"`
 }
 
 func (r RunIssueSyncOnceResponseBody) Validate() error {

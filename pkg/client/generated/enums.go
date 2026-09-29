@@ -156,6 +156,23 @@ func (e EmbeddingsHealthCredential) Validate() error {
 	}
 }
 
+type EnableIssueSyncRequestBodyStatusSync string
+
+const (
+	OneWay EnableIssueSyncRequestBodyStatusSync = "one-way"
+	TwoWay EnableIssueSyncRequestBodyStatusSync = "two-way"
+)
+
+// Validate checks if the EnableIssueSyncRequestBodyStatusSync value is valid
+func (e EnableIssueSyncRequestBodyStatusSync) Validate() error {
+	switch e {
+	case OneWay, TwoWay:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid EnableIssueSyncRequestBodyStatusSync value, got: %v", e))
+	}
+}
+
 type IdleShutdownHealthState string
 
 const (

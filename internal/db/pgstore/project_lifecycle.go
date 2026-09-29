@@ -56,9 +56,15 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 		if _, err := tx.ExecContext(ctx, `UPDATE projects SET deleted_at = $1 WHERE id = $2`, archivedAt, project.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET enabled = 0, updated_at = $1
-          WHERE project_id = $2`, archivedAt, project.ID); err != nil {
-			return mapSQLError(err, nil)
+		binding, bindingErr := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.project_id=$1 FOR UPDATE`, project.ID))
+		if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
+			return bindingErr
+		}
+		if bindingErr == nil {
+			updatedAt := storedTime(db.NextIssueSyncBindingUpdatedAt(binding.UpdatedAt, time.Now()))
+			if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET enabled = 0, updated_at = $1 WHERE id = $2`, updatedAt, binding.ID); err != nil {
+				return mapSQLError(err, nil)
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE external_root_bindings
 		     SET enabled = 0,
