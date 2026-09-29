@@ -1521,9 +1521,12 @@
     }
   }
 
+  /* The hover graph shortcut would cover the priority column here; the
+     detail pane's graph action stays available. */
   @container list (max-width: 520px) {
     .col-due,
-    .cell-due {
+    .cell-due,
+    .graph-action {
       display: none;
     }
 
