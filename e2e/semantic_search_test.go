@@ -271,12 +271,17 @@ type fixtureEmbedder struct {
 }
 
 // newFixtureEmbedder starts the fake embedder on a loopback listener. Loopback
-// HTTP needs no trust_private_network and (because the fixture takes no API
-// key) never touches the bearer safety ladder.
+// HTTP needs no trust_private_network. Like a keyless local provider, the
+// fixture rejects an Authorization header.
 func newFixtureEmbedder(t *testing.T) *fixtureEmbedder {
 	t.Helper()
 	f := &fixtureEmbedder{}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, present := r.Header["Authorization"]; present {
+			t.Error("keyless embedding request included Authorization")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		if r.URL.Path != "/v1/embeddings" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -603,4 +608,105 @@ func startDaemonCmd(t *testing.T, bin string, env []string) (*exec.Cmd, *safeBuf
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() { stopDaemon(cmd) })
 	return cmd, stderr
+}
+
+func TestE2E_EmbeddingCredentialDiagnosticsAndFileReload(t *testing.T) {
+	if testing.Short() {
+		t.Skip("e2e tests are slow")
+	}
+	var requests atomic.Int32
+	var reject atomic.Bool
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if reject.Load() {
+			w.WriteHeader(401)
+			_, _ = w.Write([]byte("provider echoed example-key"))
+			return
+		}
+		require.Equal(t, "Bearer example-key", r.Header.Get("Authorization"))
+		var in struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		data := make([]map[string]any, len(in.Input))
+		for i := range data {
+			data[i] = map[string]any{"embedding": []float32{1, 0}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer provider.Close()
+	dirs := newE2EDirs(t)
+	body := fmt.Sprintf("[search.embeddings]\nbase_url=%q\nmodel=\"m\"\ndims=2\napi_key_env=\"EXAMPLE_EMBEDDING_KEY\"\n", provider.URL)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.home, "config.toml"), []byte(body), 0600))
+	bin := buildKataBinary(t)
+	env := append(dirs.env(), "EXAMPLE_EMBEDDING_KEY=")
+	stderr := startDaemon(t, bin, env)
+	baseURL, client := connectDaemon(t, dirs, stderr)
+	initial := embeddingHealth(t, client, baseURL)
+	require.Contains(t, initial, `"credential":"missing"`)
+	require.Contains(t, initial, `"credential_source":"env:EXAMPLE_EMBEDDING_KEY"`)
+	pid := initProjectE2E(t, client, baseURL, dirs.repoDir)
+	pidStr := strconv.FormatInt(pid, 10)
+	short := createIssueWithBody(t, client, baseURL, pid, "credential rotation", "replace embedding provider credentials")
+	//nolint:kennlint // Polls a separate daemon process; synctest cannot control its clock.
+	require.Eventually(t, func() bool { return strings.Contains(embeddingHealth(t, client, baseURL), `"backlog":1`) }, 5*time.Second, 50*time.Millisecond)
+	fallback := searchHybrid(t, client, baseURL, pidStr, "credential", "")
+	require.True(t, fallback.Degraded)
+	require.Contains(t, fallback.DegradedReason, "no embedding API key")
+	require.True(t, containsIssue(fallback, short))
+	for _, mode := range []string{"semantic", "hybrid"} {
+		status, raw := searchStatus(t, client, baseURL, pidStr, "credential", mode)
+		require.Equal(t, 400, status, string(raw))
+		require.Contains(t, string(raw), `"code":"validation"`)
+		require.Contains(t, string(raw), "EXAMPLE_EMBEDDING_KEY")
+	}
+	cmd := exec.Command(bin, "--workspace", dirs.repoDir, "--format", "human", "search", "credential") //nolint:gosec // G204: bin is buildKataBinary's test-owned output.
+	cmd.Env = env
+	var out, warning bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &warning
+	require.NoError(t, cmd.Run())
+	require.Empty(t, warning.String())
+	require.Contains(t, out.String(), "# mode=lexical degraded:")
+	require.Contains(t, out.String(), "EXAMPLE_EMBEDDING_KEY")
+	require.Zero(t, requests.Load())
+	require.NotContains(t, stderr.String(), "no embedding API key")
+	keyFile := filepath.Join(dirs.home, "embedding.key")
+	require.NoError(t, os.WriteFile(keyFile, []byte("example-key\n"), 0600))
+	body += fmt.Sprintf("api_key_file=%q\n", keyFile)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.home, "config.toml"), []byte(body), 0600))
+	reload := exec.Command(bin, "daemon", "reload") //nolint:gosec // G204: bin is buildKataBinary's test-owned output.
+	reload.Env = env
+	reloadOutput, err := reload.CombinedOutput()
+	require.NoError(t, err, string(reloadOutput))
+	waitForSemanticHit(t, client, baseURL, pidStr, "credential", short, stderr)
+	//nolint:kennlint // Polls a separate daemon process; synctest cannot control its clock.
+	require.Eventually(t, func() bool {
+		h := embeddingHealth(t, client, baseURL)
+		return strings.Contains(h, `"credential":"ok"`) && strings.Contains(h, `"backlog":0`) && strings.Contains(h, "last_success_at")
+	}, 5*time.Second, 50*time.Millisecond)
+	require.Positive(t, requests.Load())
+	reject.Store(true)
+	status, raw := searchStatus(t, client, baseURL, pidStr, "credential", "semantic")
+	require.Equal(t, 400, status, string(raw))
+	require.Contains(t, string(raw), "rejected the API key")
+	require.NotContains(t, string(raw), "example-key")
+	h := embeddingHealth(t, client, baseURL)
+	require.Contains(t, h, `"credential":"rejected"`)
+	require.Contains(t, h, `"last_error":`)
+	require.Contains(t, h, `"last_error_at":`)
+	require.NotContains(t, h, "provider echoed")
+	rejectedFallback := searchHybrid(t, client, baseURL, pidStr, "credential", "")
+	require.True(t, rejectedFallback.Degraded)
+	require.Contains(t, rejectedFallback.DegradedReason, "rejected the API key")
+	reject.Store(false)
+	searchHybrid(t, client, baseURL, pidStr, "credential", "semantic")
+	h = embeddingHealth(t, client, baseURL)
+	require.Contains(t, h, `"credential":"ok"`)
+	require.NotContains(t, h, `"last_error":`)
+	require.NotContains(t, h, `"last_error_at":`)
 }

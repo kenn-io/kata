@@ -103,16 +103,18 @@ type SearchConfig struct {
 
 // EmbeddingsConfig is the [search.embeddings] block. It is opt-in: when BaseURL
 // and Model are both empty kata stays on lexical-only search. BaseURL and Model
-// must be set together (a partial config is rejected at load), and APIKey is
-// mutually exclusive with APIKeyEnv, mirroring the [[daemon]] token pattern.
+// must be set together (a partial config is rejected at load). Credentials use
+// inline > file > environment precedence.
 type EmbeddingsConfig struct {
 	// BaseURL is the OpenAI-compatible endpoint base, e.g.
 	// "http://localhost:11434/v1". The client appends "/embeddings".
 	BaseURL string `toml:"base_url"`
 	// Model is the embedding model name sent in each request.
 	Model string `toml:"model"`
-	// APIKey is the inline bearer token, mutually exclusive with APIKeyEnv.
+	// APIKey is the inline bearer token, taking precedence over file and env.
 	APIKey string `toml:"api_key"`
+	// APIKeyFile names an owner-only credential file, read at startup/reload.
+	APIKeyFile string `toml:"api_key_file"`
 	// APIKeyEnv names an environment variable holding the bearer token, so
 	// the secret stays out of the config file.
 	APIKeyEnv string `toml:"api_key_env"`
@@ -143,18 +145,6 @@ type EmbeddingsConfig struct {
 // never sees a half-set section.
 func (e EmbeddingsConfig) Enabled() bool {
 	return strings.TrimSpace(e.BaseURL) != "" && strings.TrimSpace(e.Model) != ""
-}
-
-// ResolvedAPIKey returns the literal api_key, or the value of the environment
-// variable named by api_key_env. Returns "" when neither is set.
-func (e EmbeddingsConfig) ResolvedAPIKey() string {
-	if e.APIKey != "" {
-		return e.APIKey
-	}
-	if e.APIKeyEnv != "" {
-		return os.Getenv(strings.TrimSpace(e.APIKeyEnv))
-	}
-	return ""
 }
 
 // StorageConfig is the [storage] block of <KATA_HOME>/config.toml. An empty
@@ -599,6 +589,7 @@ func trimSearchEmbeddings(cfg *DaemonConfig) {
 	e.Model = strings.TrimSpace(e.Model)
 	e.APIKey = strings.TrimSpace(e.APIKey)
 	e.APIKeyEnv = strings.TrimSpace(e.APIKeyEnv)
+	e.APIKeyFile = strings.TrimSpace(e.APIKeyFile)
 	e.FingerprintSalt = strings.TrimSpace(e.FingerprintSalt)
 }
 
@@ -698,8 +689,8 @@ func validateAuthProxy(p ProxyConfig) error {
 
 // validateEmbeddings rejects partial or contradictory [search.embeddings]
 // config. base_url and model must both be set or both omitted (a half-set
-// section is an operator mistake, not a usable default). api_key and
-// api_key_env are mutually exclusive, mirroring the [[daemon]] token rule.
+// section is an operator mistake, not a usable default). Credential precedence
+// is documented; multiple credential sources are allowed.
 // The numeric knobs are sizes/durations, so negatives are invalid.
 func validateEmbeddings(e EmbeddingsConfig) error {
 	hasBase := strings.TrimSpace(e.BaseURL) != ""
@@ -707,10 +698,6 @@ func validateEmbeddings(e EmbeddingsConfig) error {
 	if hasBase != hasModel {
 		return errors.New(
 			"search.embeddings: base_url and model must both be set or both omitted")
-	}
-	if e.APIKey != "" && e.APIKeyEnv != "" {
-		return errors.New(
-			"search.embeddings: api_key and api_key_env are mutually exclusive")
 	}
 	if e.Dims < 0 || e.BatchSize < 0 || e.TimeoutSeconds < 0 {
 		return errors.New(

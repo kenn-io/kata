@@ -379,6 +379,18 @@ type SearchIssuesResponse = SearchResponseBody
 
 type SearchIssuesErrorResponse = ErrorEnvelope
 
+type SearchIssuesErrorResponseJSON = ErrorEnvelope
+
+type SearchIssuesErrorResponseJSON403 = ErrorEnvelope
+
+type SearchIssuesErrorResponseJSON404 = ErrorEnvelope
+
+type SearchIssuesErrorResponseJSON422 = ErrorEnvelope
+
+type SearchIssuesErrorResponseJSON500 = ErrorEnvelope
+
+type SearchIssuesErrorResponseJSON503 = ErrorEnvelope
+
 type ReadyIssuesGlobalResponse = ReadyGlobalResponseBody
 
 type ReadyIssuesGlobalErrorResponse = ErrorEnvelope
@@ -1151,6 +1163,13 @@ type SearchIssuesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *SearchIssuesResponse
+	JSON400      *SearchIssuesErrorResponse
+	JSON401      *SearchIssuesErrorResponseJSON
+	JSON403      *SearchIssuesErrorResponseJSON403
+	JSON404      *SearchIssuesErrorResponseJSON404
+	JSON422      *SearchIssuesErrorResponseJSON422
+	JSON500      *SearchIssuesErrorResponseJSON500
+	JSON503      *SearchIssuesErrorResponseJSON503
 }
 
 type ReadyIssuesGlobalResp struct {

@@ -7,7 +7,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/textsafe"
 	"go.kenn.io/kata/internal/version"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
@@ -38,10 +40,11 @@ func newHealthCmd() *cobra.Command {
 			}
 			bs := resp.Body
 			var b struct {
-				OK            bool   `json:"ok"`
-				SchemaVersion int    `json:"schema_version"`
-				Uptime        string `json:"uptime"`
-				DBPath        string `json:"db_path"`
+				OK            bool                  `json:"ok"`
+				SchemaVersion int                   `json:"schema_version"`
+				Uptime        string                `json:"uptime"`
+				DBPath        string                `json:"db_path"`
+				Embeddings    *api.EmbeddingsHealth `json:"embeddings"`
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
@@ -65,6 +68,13 @@ func newHealthCmd() *cobra.Command {
 				selected.Home, _ = config.KataHome()
 			}
 			selected = withDiagnosisAction(selected)
+			warning := func() error {
+				if b.Embeddings == nil || (b.Embeddings.Credential != "missing" && b.Embeddings.Credential != "rejected") {
+					return nil
+				}
+				_, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: embeddings: %s; semantic search disabled, lexical only\n", textsafe.Line(b.Embeddings.CredentialReason))
+				return err
+			}
 			mode := currentOutputMode()
 			if mode == outputAgent {
 				daemonStatus := "unhealthy"
@@ -76,7 +86,10 @@ func newHealthCmd() *cobra.Command {
 					extra = fmt.Sprintf(" selected_state=%s profile=%s home=%s instance_uid=%s", selected.State, agentValue(selected.Profile), agentValue(selected.Home), selected.ObservedInstanceUID)
 				}
 				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK health ok=%t daemon=%s%s\n", b.OK, daemonStatus, extra)
-				return err
+				if err != nil {
+					return err
+				}
+				return warning()
 			}
 			if mode == outputJSON {
 				var payload map[string]jsontext.Value
@@ -102,7 +115,10 @@ func newHealthCmd() *cobra.Command {
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok=%v schema_version=%d uptime=%s db=%s\n",
 				b.OK, b.SchemaVersion, b.Uptime, b.DBPath)
-			return err
+			if err != nil {
+				return err
+			}
+			return warning()
 		},
 	}
 }

@@ -69,6 +69,18 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 				StartedAt:       h.StartedAt,
 				LastProgressAt:  h.LastProgressAt,
 			}
+			if cfg.Embedder != nil {
+				c := cfg.Embedder.CredentialHealth()
+				out.Body.Embeddings.Credential = c.Credential
+				out.Body.Embeddings.CredentialSource = c.CredentialSource
+				out.Body.Embeddings.CredentialReason = c.CredentialReason
+				// Only credential errors exclude provider-reflected issue text.
+				out.Body.Embeddings.LastError = c.LastError
+				out.Body.Embeddings.LastErrorAt = c.LastErrorAt
+				if c.LastErrorStatus != 0 || h.LastErrorStatus == 401 || h.LastErrorStatus == 403 {
+					out.Body.Embeddings.LastErrorStatus = c.LastErrorStatus
+				}
+			}
 		}
 		if diagnostics && cfg.FederationConfigHealth != nil {
 			health := cfg.FederationConfigHealth()

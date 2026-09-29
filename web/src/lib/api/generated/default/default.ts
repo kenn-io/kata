@@ -4444,15 +4444,59 @@ export type searchIssuesResponse200 = {
   status: 200
 }
 
+export type searchIssuesResponse400 = {
+  data: ErrorEnvelope
+  status: 400
+}
+
+export type searchIssuesResponse401 = {
+  data: ErrorEnvelope
+  status: 401
+}
+
+export type searchIssuesResponse403 = {
+  data: ErrorEnvelope
+  status: 403
+}
+
+export type searchIssuesResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type searchIssuesResponse422 = {
+  data: ErrorEnvelope
+  status: 422
+}
+
+export type searchIssuesResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type searchIssuesResponse503 = {
+  data: ErrorEnvelope
+  status: 503
+}
+
 export type searchIssuesResponseDefault = {
   data: ErrorEnvelope
-  status: Exclude<HTTPStatusCodes, 200>
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 401 | 403 | 404 | 422 | 500 | 503>
 }
 
 export type searchIssuesResponseSuccess = searchIssuesResponse200 & {
   headers: Headers
 }
-export type searchIssuesResponseError = searchIssuesResponseDefault & {
+export type searchIssuesResponseError = (
+  | searchIssuesResponse400
+  | searchIssuesResponse401
+  | searchIssuesResponse403
+  | searchIssuesResponse404
+  | searchIssuesResponse422
+  | searchIssuesResponse500
+  | searchIssuesResponse503
+  | searchIssuesResponseDefault
+) & {
   headers: Headers
 }
 
@@ -4486,6 +4530,9 @@ export const getSearchIssuesUrl = (
     : `/api/v1/projects/${encodeURIComponent(String(projectId))}/search`
 }
 
+/**
+ * Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.
+ */
 export const searchIssues = async (
   { projectId }: SearchIssuesPathParameters,
   params: SearchIssuesParams,

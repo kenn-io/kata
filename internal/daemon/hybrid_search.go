@@ -73,7 +73,9 @@ const knnDeepLimit = 1000
 // hybrid/semantic request that cannot run returns a *modeError for the handler
 // to map to 400 (unconfigured) or 503 (leg failure).
 func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb *embedding.Client, p hybridParams) (hybridResult, error) {
-	configured := emb != nil && idx != nil
+	// Credential failures must be explained even before an index is ready.
+	// Otherwise retain the existing absent-index lexical-only contract.
+	configured := emb != nil && (idx != nil || emb.CredentialHealth().Credential != "ok")
 	mode, err := resolveMode(p.Requested, configured)
 	if err != nil {
 		return hybridResult{}, &modeError{status: 400, msg: err.Error()}
@@ -127,7 +129,11 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// to lexical, labeled (keeps "silent-but-labeled" honest).
 	if vecErr != nil {
 		if strict {
-			return hybridResult{}, &modeError{status: 503, msg: vecErr.Error()}
+			status := 503
+			if _, ok := errors.AsType[*embedding.CredentialError](vecErr); ok {
+				status = 400
+			}
+			return hybridResult{}, &modeError{status: status, msg: vecErr.Error()}
 		}
 		return hybridResult{
 			Mode: modeLexical, Degraded: true, DegradedReason: vecErr.Error(),
@@ -173,7 +179,13 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 // ceiling, so the leg's short result is a limit of the retrieval depth rather
 // than of the corpus.
 func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb *embedding.Client, p hybridParams, fetch int) ([]db.SearchCandidate, bool, error) {
+	if err := emb.MissingCredentialError(); err != nil {
+		return nil, false, err
+	}
 	if idx == nil {
+		if h := emb.CredentialHealth(); h.Credential != "ok" {
+			return nil, false, &embedding.CredentialError{Reason: h.CredentialReason}
+		}
 		return nil, false, errors.New("vector index unavailable")
 	}
 	key, ok, err := idx.ActiveGeneration(ctx)
@@ -181,6 +193,9 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		return nil, false, err
 	}
 	if !ok {
+		if h := emb.CredentialHealth(); h.Credential != "ok" {
+			return nil, false, &embedding.CredentialError{Reason: h.CredentialReason}
+		}
 		return nil, false, errors.New("no active embedding generation (backfill in progress)")
 	}
 	// The active generation must match the configured embedder's fingerprint.
@@ -189,6 +204,9 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// vectors is meaningless (same dims) or an error (dims change), so the leg
 	// is unavailable until cutover.
 	if key != emb.Generation().Fingerprint() {
+		if h := emb.CredentialHealth(); h.Credential != "ok" {
+			return nil, false, &embedding.CredentialError{Reason: h.CredentialReason}
+		}
 		return nil, false, errors.New("embedding model changed; new index is backfilling")
 	}
 	ectx, cancel := context.WithTimeout(ctx, queryEmbedTimeout)

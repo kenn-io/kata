@@ -269,3 +269,36 @@ func TestSearch_RejectsNonPositiveLimit(t *testing.T) {
 		_ = requireCLIError(t, err, ExitValidation)
 	}
 }
+
+func TestSearchCredentialFallbackIsSilentButLabeled(t *testing.T) {
+	for _, mode := range []outputMode{outputHuman, outputAgent, outputJSON} {
+		t.Run(string(mode), func(t *testing.T) {
+			resetFlags(t)
+			flags.Mode = mode
+			cmd := &cobra.Command{}
+			var out, stderr bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&stderr)
+			body := `{"query":"credential","mode":"lexical","degraded":true,"degraded_reason":"semantic search unavailable: no embedding API key (env EXAMPLE_KEY is unset)","results":[]}`
+			require.NoError(t, printSearchResults(cmd, []byte(body)))
+			assert.Empty(t, stderr.String())
+			assert.Contains(t, out.String(), "EXAMPLE_KEY")
+			if mode == outputHuman {
+				assert.Contains(t, out.String(), "# mode=lexical degraded:")
+			} else {
+				assert.Contains(t, out.String(), "degraded")
+			}
+		})
+	}
+}
+
+func TestSearchPlainLexicalHasNoFallbackWarning(t *testing.T) {
+	resetFlags(t)
+	flags.Mode = outputHuman
+	cmd := &cobra.Command{}
+	var out, stderr bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&stderr)
+	require.NoError(t, printSearchResults(cmd, []byte(`{"query":"credential","mode":"lexical","results":[]}`)))
+	assert.Empty(t, stderr.String())
+}

@@ -674,7 +674,9 @@ daemon embeds each issue's title and body through an OpenAI-compatible
 [search.embeddings]
 base_url = "http://localhost:11434/v1"  # any OpenAI-compatible /embeddings
 model    = "nomic-embed-text"
-# api_key      = "..."          # or api_key_env = "SOME_VAR"; mutually exclusive
+# api_key = "..."               # only for providers that require a key
+# api_key_file = "~/.config/kata/embedding.key"
+# api_key_env  = "VOYAGE_API_KEY"
 # fingerprint_salt = ""         # bump to force re-embed when model weights change
 # dims                          # expected vector dimensionality (default 768)
 # batch_size                    # inputs per request (default 64)
@@ -685,11 +687,41 @@ model    = "nomic-embed-text"
 ```
 
 `base_url` and `model` are both required once the section exists; setting only
-one is a startup error rather than a silent disable. `api_key` and `api_key_env`
-are mutually exclusive. The embedding API key is attached only to requests whose
-origin matches `base_url`, following the same bearer-token trust ladder as
-daemon catalog tokens: HTTPS is always allowed, HTTP to loopback is allowed, and
-HTTP to other private IPs needs `trust_private_network = true`.
+one is a startup error rather than a silent disable. With no credential source
+configured, requests omit the `Authorization` header. Keyless local providers
+such as Ollama need only `base_url` and `model`.
+
+Credential resolution uses `api_key` > `api_key_file` > `api_key_env`. The first
+selected source wins. If its file is missing, unreadable, or empty, or its
+environment variable is unset or empty, Kata makes no provider requests and
+keeps issues in the backlog. It reports the source problem without falling
+back to a lower-priority source.
+
+Key files must use an absolute path or start with `~/`, which expands to the
+daemon user's home directory (not `KATA_HOME`). Other relative paths are
+rejected. Symlinks are accepted, and there is no parent-directory ownership or
+permission policy. Kata validates the opened file: it must be regular and, on
+Unix, owned by the daemon's effective user with no group/world permissions
+(`chmod 600`). Files larger than 64 KiB are refused, and reads are bounded to
+enforce that limit. File contents are trimmed, including a trailing newline.
+
+Kata resolves the selected credential once at startup and once per
+`kata daemon reload`. Reload wakes the embedding backlog; changes to provider
+settings, including `base_url` or `model`, require a restart. An environment key
+must be present in the daemon's environment, not just the shell running a later
+CLI command.
+
+Missing credentials and provider access failures appear in health and search.
+Health warns on stderr in human and agent formats while JSON stays clean.
+Default search labels its lexical fallback without an extra stderr warning;
+explicit semantic/hybrid searches return readable validation errors. See
+[Missing or rejected credentials](../guide/semantic-search.md#missing-or-rejected-credentials)
+for status meanings and recovery.
+
+The embedding API key is attached only to requests whose origin matches
+`base_url`, following the same bearer-token trust ladder as daemon catalog
+tokens: HTTPS is always allowed, HTTP to loopback is allowed, and HTTP to other
+private IPs needs `trust_private_network = true`.
 
 Some providers cap the total input tokens across one embedding request as well
 as the number of inputs. Set `model_context_tokens` to the model's per-input

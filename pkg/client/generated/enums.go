@@ -137,6 +137,25 @@ func (c CreateLinkRequestBodyType) Validate() error {
 	}
 }
 
+// EmbeddingsHealthCredential Embedding credential state; an advisory warning that does not change health.ok.
+type EmbeddingsHealthCredential string
+
+const (
+	Missing  EmbeddingsHealthCredential = "missing"
+	Ok       EmbeddingsHealthCredential = "ok"
+	Rejected EmbeddingsHealthCredential = "rejected"
+)
+
+// Validate checks if the EmbeddingsHealthCredential value is valid
+func (e EmbeddingsHealthCredential) Validate() error {
+	switch e {
+	case Missing, Ok, Rejected:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid EmbeddingsHealthCredential value, got: %v", e))
+	}
+}
+
 type IdleShutdownHealthState string
 
 const (

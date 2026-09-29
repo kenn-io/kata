@@ -1423,7 +1423,7 @@ model = "nomic-embed-text"
 	assert.Contains(t, err.Error(), "model")
 }
 
-func TestReadDaemonConfig_SearchEmbeddingsRejectsAPIKeyAndAPIKeyEnv(t *testing.T) {
+func TestReadDaemonConfig_SearchEmbeddingsInlineOverridesAPIKeyEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
@@ -1435,9 +1435,7 @@ api_key_env = "Y"
 `), 0o600))
 
 	_, err := config.ReadDaemonConfig()
-	require.Error(t, err, "api_key and api_key_env are mutually exclusive")
-	assert.Contains(t, err.Error(), "api_key")
-	assert.Contains(t, err.Error(), "api_key_env")
+	require.NoError(t, err, "inline api_key takes precedence over api_key_env")
 }
 
 func TestReadDaemonConfig_SearchEmbeddingsRejectsNegativeDims(t *testing.T) {
@@ -1455,7 +1453,7 @@ dims = -1
 	assert.Contains(t, err.Error(), "dims")
 }
 
-func TestReadDaemonConfig_SearchEmbeddingsResolvedAPIKey(t *testing.T) {
+func TestReadDaemonConfig_SearchEmbeddingsCredential(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_EMBED_KEY", "secret-from-env")
@@ -1469,7 +1467,7 @@ api_key_env = "KATA_EMBED_KEY"
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
 	assert.Empty(t, cfg.Search.Embeddings.APIKey)
-	assert.Equal(t, "secret-from-env", cfg.Search.Embeddings.ResolvedAPIKey(),
+	assert.Equal(t, "secret-from-env", cfg.Search.Embeddings.ResolveCredential().Key,
 		"api_key_env must resolve from the environment")
 }
 

@@ -117,8 +117,8 @@ func (r *Reconciler) Health() ReconcilerHealth {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	h := r.health
-	if r.health.LastSuccessAt != nil {
-		t := *r.health.LastSuccessAt
+	if h.LastSuccessAt != nil {
+		t := *h.LastSuccessAt
 		h.LastSuccessAt = &t
 	}
 	if r.health.StartedAt != nil {

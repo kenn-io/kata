@@ -17,8 +17,13 @@ import (
 func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "searchIssues",
-		Method:      "GET",
-		Path:        "/api/v1/projects/{project_id}/search",
+		Description: "Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.",
+		Errors:      []int{400, 401, 403, 404, 503},
+		Responses: map[string]*huma.Response{
+			"default": {Description: "Error"},
+		},
+		Method: "GET",
+		Path:   "/api/v1/projects/{project_id}/search",
 	}, func(ctx context.Context, in *api.SearchRequest) (*api.SearchResponse, error) {
 		if strings.TrimSpace(in.Query) == "" {
 			return nil, api.NewError(400, "validation",

@@ -196,6 +196,16 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 	}
 }
 
+func TestOpenAPISearchDocumentsEveryReachableError(t *testing.T) {
+	doc := OpenAPIDocument()
+	search := doc.Paths["/api/v1/projects/{project_id}/search"]
+	require.NotNil(t, search, "missing search path")
+	require.NotNil(t, search.Get, "missing search operation")
+	for _, status := range []string{"400", "401", "403", "404", "422", "500", "503", "default"} {
+		require.Contains(t, search.Get.Responses, status, "missing documented search error response %s", status)
+	}
+}
+
 // TestOpenAPITypedMetadataPropertyKeepsReflectedSchema pins that the document
 // pipeline no longer rewrites schemas by JSON property name. A component whose
 // `metadata` property is a typed struct must keep its reflected shape — a $ref

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.kenn.io/kata/internal/config"
 )
 
 func newFakeServer(t *testing.T, status int, body string, retryAfter string) *httptest.Server {
@@ -209,7 +211,7 @@ func TestEmbedKeyOnlyToConfiguredOrigin(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{1, 0}}}})
 	}))
 	defer srv.Close()
-	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2, APIKey: "secret"})
+	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2, Credential: config.EmbeddingCredential{Key: "secret", Source: "inline"}})
 	if _, err := c.Embed(context.Background(), []string{"x"}); err != nil {
 		t.Fatal(err)
 	}
