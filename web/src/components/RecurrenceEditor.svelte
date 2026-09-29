@@ -907,7 +907,7 @@
     font-size: var(--font-size-sm);
   }
   .chip[aria-pressed='true'] {
-    background: var(--accent-primary);
+    background: var(--accent-blue);
     color: white;
     border-color: transparent;
   }
@@ -921,7 +921,7 @@
   .summary {
     padding: 8px 10px;
     border-radius: var(--radius-sm);
-    background: var(--bg-surface-elevated, var(--bg-surface));
+    background: var(--bg-surface);
     color: var(--text-primary);
     font-size: var(--font-size-sm);
   }
@@ -929,14 +929,14 @@
     padding: 8px 10px;
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent-red) 12%, transparent);
-    color: var(--accent-danger, #c4302b);
+    color: var(--accent-red);
     font-size: var(--font-size-sm);
   }
   .conflict {
     padding: 8px 10px;
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent-red) 12%, transparent);
-    color: var(--accent-danger, #c4302b);
+    color: var(--accent-red);
     font-size: var(--font-size-sm);
     font-weight: 500;
   }
@@ -970,7 +970,7 @@
     border-left: none;
   }
   .toggle[aria-pressed='true'] {
-    background: var(--accent-primary);
+    background: var(--accent-blue);
     color: white;
     border-color: transparent;
   }
@@ -984,7 +984,7 @@
     font-size: var(--font-size-sm);
   }
   .feedback .error {
-    color: var(--accent-danger, #c33);
+    color: var(--accent-red);
   }
   .feedback .hint {
     color: var(--text-secondary);
@@ -995,7 +995,7 @@
   .feedback .link {
     background: none;
     border: none;
-    color: var(--accent-primary);
+    color: var(--accent-blue);
     cursor: pointer;
     padding: 0;
     font: inherit;

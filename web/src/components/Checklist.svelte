@@ -249,7 +249,7 @@
   }
 
   .checklist-row:hover {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
   }
 
   :global(.checklist-item) {
@@ -288,7 +288,7 @@
   }
 
   .checklist-add:focus-within {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
   }
 
   .checklist-add input {

@@ -150,7 +150,7 @@
   .status-indicator {
     width: 6px;
     height: 6px;
-    border-radius: var(--radius-pill);
+    border-radius: 999px;
     background: var(--accent-amber);
     flex: none;
     visibility: hidden;
@@ -167,7 +167,7 @@
   .dot {
     width: 8px;
     height: 8px;
-    border-radius: var(--radius-pill);
+    border-radius: 999px;
     flex: none;
   }
 
@@ -180,7 +180,7 @@
   }
 
   .dot--down {
-    background: var(--text-faint);
+    background: var(--text-muted);
   }
 
   .dot--upgrade_required {
@@ -200,7 +200,7 @@
     border: 1px solid var(--border-default);
     border-radius: var(--radius-md);
     background: var(--bg-surface);
-    box-shadow: var(--shadow-popover, 0 8px 24px rgb(15 23 42 / 16%));
+    box-shadow: var(--shadow-lg);
     padding: 5px;
   }
 

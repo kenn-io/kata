@@ -109,7 +109,7 @@
   .column-picker > button:hover,
   .column-picker > button:focus-visible,
   .column-picker > button[aria-expanded='true'] {
-    border-color: var(--border-strong);
+    border-color: var(--text-muted);
     color: var(--text-primary);
   }
 
@@ -127,8 +127,8 @@
   }
 
   .column-picker__title {
-    color: var(--text-faint);
-    font-size: var(--font-size-3xs);
+    color: var(--text-muted);
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -148,7 +148,7 @@
   }
 
   .column-picker__reset:disabled {
-    color: var(--text-faint);
+    color: var(--text-muted);
     cursor: default;
   }
 </style>

@@ -618,7 +618,7 @@
   }
 
   .crumb-sep {
-    color: var(--text-faint);
+    color: var(--text-muted);
   }
 
   .detail-heading h2 {
@@ -680,7 +680,7 @@
   }
 
   .icon-detail-action:hover {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
     color: var(--accent-blue);
   }
 
@@ -762,7 +762,7 @@
   }
 
   .text-button:hover {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
     color: var(--text-primary);
   }
 

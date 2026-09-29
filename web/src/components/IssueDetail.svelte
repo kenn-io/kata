@@ -96,29 +96,25 @@
   }
 
   .shared-detail {
+    display: grid;
+    align-content: start;
+    gap: var(--space-7);
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
     overflow: auto;
-    background: var(--bg-primary);
-    padding: 18px 22px;
+    background: var(--bg-surface);
+    padding: var(--space-6) var(--space-7) var(--space-8);
   }
 
-  .assignment-timing {
-    margin: 12px 0 0;
-  }
-
-  /* Match the shared detail's section rhythm so Events does not butt against
-     the comments above it. */
-  .shared-detail > :global(.events) {
-    margin-top: 16px;
-    border-top: 1px solid var(--border-muted);
-    padding-top: 16px;
+  /* Keep prose at a readable measure on wide panes. */
+  .shared-detail > :global(*) {
+    max-width: 880px;
   }
 
   .assignment-timing > div {
     display: flex;
-    gap: 8px;
+    gap: var(--space-4);
     color: var(--text-secondary);
     font-size: var(--font-size-sm);
   }

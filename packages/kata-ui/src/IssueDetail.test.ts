@@ -61,15 +61,14 @@ const detail: KataIssueDetailModel = {
 describe('IssueDetail', () => {
   afterEach(cleanup)
 
-  it('renders the complete read-only issue presentation', () => {
+  it('renders the complete read-only issue presentation', async () => {
     render(IssueDetail, { props: { detail } })
 
     const region = screen.getByRole('region', { name: 'Kata issue detail' })
     expect(within(region).getByRole('heading', { name: 'Ship shared detail' })).toBeTruthy()
     expect(within(region).getByText('roadmap#abc4')).toBeTruthy()
-    expect(within(region).getByRole('region', { name: 'Description' }).textContent).toContain(
-      'Shared body',
-    )
+    const description = within(region).getByRole('region', { name: 'Description' })
+    await vi.waitFor(() => expect(description.textContent).toContain('Shared body'))
     expect(within(region).getByText('P1')).toBeTruthy()
     expect(within(region).getByText('Publish package')).toBeTruthy()
     expect(within(region).getByText('integration')).toBeTruthy()

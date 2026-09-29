@@ -50,11 +50,10 @@
 
 <style>
   .events h3 {
-    margin: 0 0 8px;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    font-weight: 650;
-    text-transform: uppercase;
+    margin: 0 0 var(--space-4);
+    color: var(--text-primary);
+    font-size: var(--font-size-md);
+    font-weight: var(--font-weight-semibold);
   }
 
   .events p {

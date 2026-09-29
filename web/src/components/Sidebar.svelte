@@ -278,7 +278,7 @@
 
   .kata-nav button.active,
   .project-select-button.active {
-    background: var(--bg-row-selected);
+    background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-surface));
     color: var(--text-primary);
   }
 

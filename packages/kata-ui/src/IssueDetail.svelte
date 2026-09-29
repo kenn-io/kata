@@ -1,7 +1,5 @@
 <script lang="ts">
-  /* eslint-disable svelte/no-at-html-tags -- kit-ui sanitizes rendered markdown. */
-  import { Button } from '@kenn-io/kit-ui'
-  import { renderMarkdownSync } from '@kenn-io/kit-ui/utils/markdown'
+  import { Button, Markdown } from '@kenn-io/kit-ui'
 
   import IssueChecklist from './components/IssueChecklist.svelte'
   import IssueComments from './components/IssueComments.svelte'
@@ -23,28 +21,24 @@
       <span class="reference">{detail.issue.reference}</span>
       <h2>{detail.issue.title}</h2>
     </div>
-    <div class="header-toolbar">
-      <IssueProperties issue={detail.issue} />
-      {#if actions.length > 0}
-        <div class="host-actions">
-          {#each actions as action (action.id)}
-            <Button
-              size="sm"
-              disabled={Boolean(action.disabled || action.busy)}
-              label={action.busy ? `${action.label}…` : action.label}
-              onclick={() => invoke(action)}
-            />
-          {/each}
-        </div>
-      {/if}
-    </div>
+    <IssueProperties issue={detail.issue} />
+    {#if actions.length > 0}
+      <div class="host-actions">
+        {#each actions as action (action.id)}
+          <Button
+            size="sm"
+            disabled={Boolean(action.disabled || action.busy)}
+            label={action.busy ? `${action.label}…` : action.label}
+            onclick={() => invoke(action)}
+          />
+        {/each}
+      </div>
+    {/if}
   </header>
 
-  <section class="detail-section body-section" aria-label="Description">
+  <section class="body-section" aria-label="Description">
     {#if detail.issue.body}
-      <div class="markdown-body">
-        {@html renderMarkdownSync(detail.issue.body)}
-      </div>
+      <Markdown source={detail.issue.body} />
     {:else}
       <p class="empty">No description.</p>
     {/if}
@@ -74,31 +68,34 @@
   .kata-issue-detail {
     container: kata-issue-detail / inline-size;
     display: grid;
-    gap: var(--space-6, 16px);
+    gap: var(--space-7, 24px);
     min-width: 0;
     color: var(--text-primary, #202124);
   }
 
+  /* Properties follow the title in reading order; the host actions sit
+     beside the title on wide panes. */
   .detail-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'copy actions'
+      'properties properties';
+    align-items: start;
+    gap: var(--space-4, 8px) var(--space-6, 16px);
   }
 
   .heading-copy {
-    flex: 1 1 16rem;
+    grid-area: copy;
     min-width: 0;
   }
 
-  .header-toolbar {
-    display: flex;
-    flex: 0 1 auto;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    min-width: 0;
+  .detail-header > :global(.properties) {
+    grid-area: properties;
+  }
+
+  .host-actions {
+    grid-area: actions;
   }
 
   .reference,
@@ -112,55 +109,45 @@
   }
 
   h2 {
-    margin: 4px 0 0;
-    font-size: var(--font-size-xl, 1.35rem);
-    line-height: 1.25;
+    margin: var(--space-1, 2px) 0 0;
+    font-size: var(--font-size-xl, 1.125rem);
+    font-weight: var(--font-weight-semibold, 600);
+    line-height: 1.3;
+    overflow-wrap: anywhere;
   }
 
   .host-actions,
   .claim-state {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--space-3, 6px);
   }
 
   .claim-state > span {
     border: 1px solid var(--border-muted, #e2e4e8);
     border-radius: 999px;
-    padding: 3px 8px;
+    padding: 1px 8px;
+    color: var(--text-secondary, #555b6e);
     font-size: var(--font-size-xs, 0.75rem);
   }
 
-  .detail-section {
-    min-width: 0;
-    border-top: 1px solid var(--border-muted, #e2e4e8);
-    padding-top: 16px;
-  }
-
   .body-section {
-    border-top: 0;
-    padding-top: 0;
+    min-width: 0;
   }
 
-  .markdown-body :global(:first-child),
   .empty {
-    margin-top: 0;
-  }
-
-  .markdown-body :global(:last-child),
-  .empty {
-    margin-bottom: 0;
+    margin: 0;
   }
 
   /* Stack on the pane's width, not the viewport: the detail pane can be
      narrow inside a wide window. */
   @container kata-issue-detail (max-width: 560px) {
     .detail-header {
-      display: grid;
-    }
-
-    .header-toolbar {
-      justify-content: flex-start;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        'copy'
+        'properties'
+        'actions';
     }
   }
 </style>

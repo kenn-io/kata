@@ -307,7 +307,7 @@
   }
 
   .link-row:hover:not(:disabled) {
-    background: var(--bg-hover);
+    background: var(--bg-surface-hover);
   }
 
   .link-kind {

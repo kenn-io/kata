@@ -1121,7 +1121,7 @@
 
   .tree-action:hover:not(:disabled),
   .tree-action:focus-visible {
-    border-color: var(--border-strong);
+    border-color: var(--text-muted);
     color: var(--text-primary);
   }
 
@@ -1175,8 +1175,8 @@
     align-items: center;
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border-default);
-    color: var(--text-faint);
-    font-size: var(--font-size-3xs);
+    color: var(--text-muted);
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -1266,7 +1266,7 @@
   }
 
   .group-count {
-    color: var(--text-faint);
+    color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     text-transform: none;
     letter-spacing: 0;
@@ -1309,7 +1309,7 @@
 
   .row:focus-visible {
     outline: none;
-    background: var(--accent-blue-soft);
+    background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
   }
 
   .cell {
@@ -1453,15 +1453,15 @@
     height: 17px;
     padding: 0 6px;
     border-radius: var(--radius-sm);
-    background: var(--accent-amber-soft);
+    background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
     color: var(--accent-amber);
-    font-size: var(--font-size-3xs);
+    font-size: var(--font-size-2xs);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
 
   .priority-0 {
-    background: var(--accent-red-soft);
+    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
     color: var(--accent-red);
   }
 

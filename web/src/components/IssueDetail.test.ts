@@ -79,7 +79,7 @@ describe('IssueDetail', () => {
     vi.useRealTimers()
   })
 
-  it('renders the package-owned presentation before entering Kata editing mode', () => {
+  it('renders the package-owned presentation before entering Kata editing mode', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T13:00:00Z'))
     renderDetail()
@@ -87,7 +87,7 @@ describe('IssueDetail', () => {
     const detail = screen.getByRole('region', { name: 'Kata issue detail' })
     expect(within(detail).getByRole('heading', { name: 'Ship the thing' })).toBeTruthy()
     expect(within(detail).getByText('INBOX-1')).toBeTruthy()
-    expect(within(detail).getByText('Initial body')).toBeTruthy()
+    await vi.waitFor(() => expect(within(detail).getByText('Initial body')).toBeTruthy())
     expect(within(detail).getByRole('button', { name: 'Edit issue' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Task detail' })).toBeNull()
   })

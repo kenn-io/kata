@@ -689,7 +689,7 @@
   .kata-feature {
     height: 100%;
     min-height: 0;
-    background: var(--bg-app);
+    background: var(--bg-primary);
     color: var(--text-primary);
     display: flex;
     flex-direction: column;
@@ -723,7 +723,7 @@
     border: 1px solid var(--accent-amber);
     border-radius: var(--radius-sm);
     background: var(--bg-surface);
-    box-shadow: var(--shadow-popover, 0 8px 24px rgb(15 23 42 / 14%));
+    box-shadow: var(--shadow-lg);
     color: var(--text-primary);
     padding: var(--space-2) var(--space-4);
     font-size: var(--font-size-sm);
@@ -748,7 +748,7 @@
     border: 1px solid var(--accent-blue);
     border-radius: var(--radius-sm);
     background: var(--accent-blue);
-    color: var(--text-on-accent);
+    color: var(--bg-surface);
     min-height: 28px;
     padding: 4px 10px;
     font: inherit;

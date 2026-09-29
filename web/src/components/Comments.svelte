@@ -204,7 +204,7 @@
   .comment {
     border: 1px solid var(--border-default);
     border-radius: 6px;
-    background: var(--bg-secondary);
+    background: var(--bg-surface);
     padding: 8px 10px;
   }
 
