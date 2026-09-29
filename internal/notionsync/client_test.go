@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -215,6 +216,37 @@ func TestClientRetryAndSharedPacing(t *testing.T) {
 		require.ErrorIs(t, e, context.Canceled)
 		require.Equal(t, 1, n)
 	})
+}
+
+func TestClientAttemptTimeoutPreservesCauseAfterRetries(t *testing.T) {
+	for _, phase := range []string{"headers", "body"} {
+		t.Run(phase, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				c := NewClient(ClientConfig{
+					LookupEnv: func(string) (string, bool) { return "example-token", true },
+					Transport: notionTransport(func(r *http.Request) (*http.Response, error) {
+						calls++
+						if phase == "headers" {
+							<-r.Context().Done()
+							return nil, errors.New("test-secret transport failure")
+						}
+						reader, writer := io.Pipe()
+						go func() {
+							<-r.Context().Done()
+							_ = writer.CloseWithError(errors.New("test-secret response read failure"))
+						}()
+						return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: reader}, nil
+					}),
+				})
+				_, err := session(t, c).Database(t.Context(), databaseID)
+				require.Equal(t, 5, calls)
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				require.NotContains(t, err.Error(), "test-secret")
+				require.NoError(t, t.Context().Err(), "only the attempt deadlines expired")
+			})
+		})
+	}
 }
 
 func TestClientDatabaseAndSchema(t *testing.T) {

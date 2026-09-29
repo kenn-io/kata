@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -207,6 +208,9 @@ func (s *clientSession) request(ctx context.Context, method, path string, body a
 				safeErr = fmt.Errorf("notion transport or response read failed")
 			} else {
 				safeErr = fmt.Errorf("notion HTTP %d: %s (response read failed)", status, safeNotionCode(remote.Code))
+			}
+			if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+				safeErr = fmt.Errorf("%v: %w", safeErr, context.DeadlineExceeded)
 			}
 		}
 		if !retryable {
