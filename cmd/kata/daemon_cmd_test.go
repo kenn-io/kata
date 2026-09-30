@@ -2826,13 +2826,20 @@ func writeRuntimePID(t *testing.T, home string, pid int) {
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
+	// Record the process identity like a real daemon's runtime record. Without
+	// it, liveness falls back to comparing the OS process creation time with
+	// StartedAt, and Windows can stamp the child's creation after this
+	// process's coarser time.Now reading, making a live child look reused.
+	identity, ok := kitdaemon.ReadProcessIdentity(pid)
+	require.True(t, ok)
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		PID:       pid,
-		Network:   "unix",
-		Address:   filepath.Join(home, "daemon.sock"),
-		Metadata:  map[string]string{"db_path": filepath.Join(home, "kata.db")},
-		Version:   "v-test",
-		StartedAt: time.Now().UTC(),
+		PID:               pid,
+		ProcessIdentityV2: identity,
+		Network:           "unix",
+		Address:           filepath.Join(home, "daemon.sock"),
+		Metadata:          map[string]string{"db_path": filepath.Join(home, "kata.db")},
+		Version:           "v-test",
+		StartedAt:         time.Now().UTC(),
 	})
 	require.NoError(t, err)
 	// On Windows, daemon stop/reload signal via per-daemon named events that
