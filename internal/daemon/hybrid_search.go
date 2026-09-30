@@ -273,7 +273,10 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 // request in the window before that refresh runs (include_deleted ranks
 // deleted issues through the lexical leg alone).
 func hydrateVectorHits(ctx context.Context, store db.Storage, hits []kitvec.Hit[string], p hybridParams, fetch int, labels labelFilter) ([]db.SearchCandidate, error) {
-	hits = kitvec.RollupByDocument(hits)
+	hits, err := kitvec.RollupByDocument(hits)
+	if err != nil {
+		return nil, err
+	}
 	candidates := make([]db.SearchCandidate, 0, min(fetch, len(hits)))
 	var issueIDs []int64
 	var allowed map[int64]struct{}

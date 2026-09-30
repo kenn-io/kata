@@ -447,7 +447,10 @@ func TestReconcileFillErrorRefreshesPartialBacklog(t *testing.T) {
 		model: "m1", dims: 2, batchSize: 1, failAfter: 1,
 		err: &embedding.APIError{StatusCode: 500, Body: "down"},
 	}
-	r := NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 64})
+	r := NewReconciler(store, idx, emb, ReconcilerConfig{
+		BatchSize:    64,
+		BatchOptions: []kitvec.BatchOption{kitvec.WithBatchSize(1)},
+	})
 
 	if err := r.reconcileOnce(ctx); err == nil {
 		t.Fatal("expected fill error")
