@@ -3,9 +3,7 @@
 package vector
 
 import (
-	vecext "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3" // cgo SQLite driver registered as "sqlite3"; provides C sqlite symbols for kit's sqlite-vec cgo bindings
-	kitvec "go.kenn.io/kit/vector"
 )
 
 // sidecarDriver selects the database/sql driver the vector sidecar opens
@@ -24,9 +22,4 @@ func sidecarDSN(path string, fast bool) string {
 		dsn += "&_synchronous=OFF"
 	}
 	return dsn
-}
-
-func sidecarVectorValue(vector kitvec.Vector) (string, any, error) {
-	blob, err := vecext.SerializeFloat32(vector)
-	return "?", blob, err
 }

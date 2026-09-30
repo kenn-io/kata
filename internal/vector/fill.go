@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"go.kenn.io/kata/internal/embedding"
+	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
 )
 
@@ -48,7 +48,7 @@ func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, sc
 }
 
 func isBadRequest(err error) bool {
-	var apiErr *embedding.APIError
+	var apiErr *embedclient.APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
 		return false
 	}

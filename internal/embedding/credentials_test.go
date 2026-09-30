@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"go.kenn.io/kit/embedclient"
+
 	"go.kenn.io/kata/internal/config"
 )
 
@@ -62,7 +64,7 @@ func TestKeylessProviderRequestsAndRecovery(t *testing.T) {
 					t.Fatalf("keyless embedding: %v, %v", vectors, err)
 				}
 			} else {
-				var apiErr *APIError
+				var apiErr *embedclient.APIError
 				if !errors.As(err, &apiErr) || apiErr.StatusCode != firstStatus {
 					t.Fatalf("provider error: %v", err)
 				}
@@ -110,7 +112,7 @@ func TestCredentialRejectionAndRecovery(t *testing.T) {
 			c.SetCredential(config.EmbeddingCredential{Key: "example-secret", Source: "file:example.key"})
 			_, err := c.Embed(context.Background(), []string{"query"})
 			var ce *CredentialError
-			var ae *APIError
+			var ae *embedclient.APIError
 			wantReason := "rejected the API key"
 			if status == 403 {
 				wantReason = "provider denied access (403)"

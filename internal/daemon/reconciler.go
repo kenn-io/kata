@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net/http"
 	"sync"
 	"time"
 
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
+	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
 )
 
@@ -235,8 +236,8 @@ func (r *Reconciler) reconcileAdmitted(ctx context.Context) (bool, error) {
 }
 
 func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
-	if apiErr, ok := errors.AsType[*embedding.APIError](err); ok {
-		if apiErr.Definitive() {
+	if apiErr, ok := errors.AsType[*embedclient.APIError](err); ok {
+		if apiErr.InputRejected() || apiErr.CredentialsRejected() || apiErr.StatusCode == http.StatusNotFound {
 			return r.cfg.MaxBackoff
 		}
 		if apiErr.RetryAfter > 0 {
@@ -333,7 +334,7 @@ func (r *Reconciler) markError(err error) {
 	defer r.mu.Unlock()
 	r.health.LastError = err.Error()
 	r.health.ETASeconds = nil
-	if apiErr, ok := errors.AsType[*embedding.APIError](err); ok {
+	if apiErr, ok := errors.AsType[*embedclient.APIError](err); ok {
 		r.health.LastErrorStatus = apiErr.StatusCode
 	} else {
 		r.health.LastErrorStatus = 0

@@ -14,8 +14,8 @@ import (
 	"go.kenn.io/kata/internal/activity"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
+	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
 )
 
@@ -278,7 +278,7 @@ func TestReconcileErrorReportsPendingBacklog(t *testing.T) {
 		}
 	}
 	idx := openTestVectorIndex(t)
-	emb := &fakeEmbedder{model: "m1", dims: 2, err: &embedding.APIError{StatusCode: 500, Body: "down"}}
+	emb := &fakeEmbedder{model: "m1", dims: 2, err: &embedclient.APIError{StatusCode: 500}}
 	r := NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 64})
 
 	if err := r.reconcileOnce(ctx); err == nil {
@@ -445,7 +445,7 @@ func TestReconcileFillErrorRefreshesPartialBacklog(t *testing.T) {
 	// fails, aborting the fill with one document embedded and one pending.
 	emb := &fakeEmbedder{
 		model: "m1", dims: 2, batchSize: 1, failAfter: 1,
-		err: &embedding.APIError{StatusCode: 500, Body: "down"},
+		err: &embedclient.APIError{StatusCode: 500},
 	}
 	r := NewReconciler(store, idx, emb, ReconcilerConfig{
 		BatchSize:    64,
@@ -469,14 +469,14 @@ func TestReconcileDefinitiveErrorPinsHealth(t *testing.T) {
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	_, _, _ = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"})
 	idx := openTestVectorIndex(t)
-	emb := &fakeEmbedder{model: "m1", dims: 2, err: &embedding.APIError{StatusCode: 401, Body: "bad key"}}
+	emb := &fakeEmbedder{model: "m1", dims: 2, err: &embedclient.APIError{StatusCode: 401}}
 	r := NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 64})
 
 	err := r.reconcileOnce(ctx)
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if _, ok := errors.AsType[*embedding.APIError](err); !ok {
+	if _, ok := errors.AsType[*embedclient.APIError](err); !ok {
 		t.Fatalf("want APIError, got %v", err)
 	}
 	if h := r.Health(); h.LastError == "" {
@@ -489,16 +489,16 @@ func TestNextBackoffClassifiesErrors(t *testing.T) {
 		ReconcilerConfig{MinBackoff: time.Second, MaxBackoff: 5 * time.Minute})
 
 	// Definitive 4xx pins straight to the max, regardless of current backoff.
-	if got := r.nextBackoff(time.Second, &embedding.APIError{StatusCode: 401}); got != 5*time.Minute {
+	if got := r.nextBackoff(time.Second, &embedclient.APIError{StatusCode: 401}); got != 5*time.Minute {
 		t.Fatalf("definitive: got %v, want max 5m", got)
 	}
 	// 429 with Retry-After honors the server's delay.
-	got := r.nextBackoff(time.Second, &embedding.APIError{StatusCode: 429, RetryAfter: 7 * time.Second})
+	got := r.nextBackoff(time.Second, &embedclient.APIError{StatusCode: 429, RetryAfter: 7 * time.Second})
 	if got != 7*time.Second {
 		t.Fatalf("429 retry-after: got %v, want 7s", got)
 	}
 	// 429 without Retry-After falls back to exponential doubling.
-	if got := r.nextBackoff(2*time.Second, &embedding.APIError{StatusCode: 429}); got != 4*time.Second {
+	if got := r.nextBackoff(2*time.Second, &embedclient.APIError{StatusCode: 429}); got != 4*time.Second {
 		t.Fatalf("429 no retry-after: got %v, want 4s", got)
 	}
 	// Transient (non-APIError) errors double, capped at MaxBackoff.

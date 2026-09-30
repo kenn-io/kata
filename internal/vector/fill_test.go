@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"go.kenn.io/kata/internal/embedding"
+	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
 )
 
@@ -118,10 +118,10 @@ func TestFillAbortsOnRequestLevel400(t *testing.T) {
 		t.Fatal(err)
 	}
 	enc := func(_ context.Context, _ []string) ([][]float32, error) {
-		return nil, &embedding.APIError{StatusCode: 400, Body: "invalid model"}
+		return nil, &embedclient.APIError{StatusCode: 400}
 	}
 	stats, err := ix.Fill(ctx, key, enc, 0, nil, nil)
-	var apiErr *embedding.APIError
+	var apiErr *embedclient.APIError
 	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Fatalf("request-level 400 must abort the fill, got %v", err)
 	}
@@ -160,12 +160,12 @@ func TestFillAbortsOnBatchShape400(t *testing.T) {
 	}
 	enc := func(_ context.Context, texts []string) ([][]float32, error) {
 		if len(texts) > 1 {
-			return nil, &embedding.APIError{StatusCode: 400, Body: "batch too large"}
+			return nil, &embedclient.APIError{StatusCode: 400}
 		}
 		return [][]float32{{1, 0, 0, 0}}, nil
 	}
 	stats, err := ix.Fill(ctx, key, enc, 0, nil, nil)
-	var apiErr *embedding.APIError
+	var apiErr *embedclient.APIError
 	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Fatalf("shape-level 400 must abort the fill, got %v", err)
 	}
@@ -193,7 +193,7 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	}
 	enc := func(_ context.Context, texts []string) ([][]float32, error) {
 		if slices.Contains(texts, "poison") {
-			return nil, &embedding.APIError{StatusCode: 400, Body: "rejected"}
+			return nil, &embedclient.APIError{StatusCode: 400}
 		}
 		out := make([][]float32, len(texts))
 		for i := range texts {
@@ -219,10 +219,10 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	// Auth failure: 401 aborts the fill, nothing is stamped as skipped.
 	seedMirror(t, ix, "u3", 1)
 	authFail := func(_ context.Context, _ []string) ([][]float32, error) {
-		return nil, &embedding.APIError{StatusCode: 401, Body: "no"}
+		return nil, &embedclient.APIError{StatusCode: 401}
 	}
 	_, err = ix.Fill(ctx, key, authFail, 0, nil, nil)
-	var apiErr *embedding.APIError
+	var apiErr *embedclient.APIError
 	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 401 {
 		t.Fatalf("401 must abort the fill, got %v", err)
 	}

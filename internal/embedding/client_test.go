@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kit/embedclient"
 )
 
 func newFakeServer(t *testing.T, status int, body string, retryAfter string) *httptest.Server {
@@ -86,8 +87,8 @@ func TestEmbed401IsDefinitive(t *testing.T) {
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || !apiErr.Definitive() {
+	var apiErr *embedclient.APIError
+	if !errors.As(err, &apiErr) || !apiErr.CredentialsRejected() {
 		t.Fatalf("want definitive APIError, got %v", err)
 	}
 }
@@ -97,11 +98,11 @@ func TestEmbed429CarriesRetryAfter(t *testing.T) {
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
-	var apiErr *APIError
+	var apiErr *embedclient.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("want APIError, got %v", err)
 	}
-	if apiErr.Definitive() {
+	if apiErr.InputRejected() || apiErr.CredentialsRejected() || apiErr.StatusCode == http.StatusNotFound {
 		t.Fatal("429 must not be definitive")
 	}
 	if apiErr.RetryAfter != 7*time.Second {
@@ -118,7 +119,7 @@ func TestEmbed429RetryAfterHTTPDate(t *testing.T) {
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
-	var apiErr *APIError
+	var apiErr *embedclient.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("want APIError, got %v", err)
 	}
@@ -139,7 +140,7 @@ func TestEmbed429RetryAfterPastHTTPDateClampsToZero(t *testing.T) {
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
 	_, err := c.Embed(context.Background(), []string{"x"})
-	var apiErr *APIError
+	var apiErr *embedclient.APIError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("want APIError, got %v", err)
 	}
@@ -194,10 +195,8 @@ func TestEmbedBatchesPreserveOrder(t *testing.T) {
 		t.Fatalf("server received %d calls, want 3", calls)
 	}
 	for i := range inputs {
-		want, err := normalize([]float32{float32(i + 1), 1})
-		if err != nil {
-			t.Fatal(err)
-		}
+		length := float32(math.Sqrt(float64((i+1)*(i+1) + 1)))
+		want := []float32{float32(i+1) / length, 1 / length}
 		if math.Abs(float64(vecs[i][0]-want[0])) > 1e-6 || math.Abs(float64(vecs[i][1]-want[1])) > 1e-6 {
 			t.Fatalf("vec[%d] = %v, want %v (out of order or wrong batch)", i, vecs[i], want)
 		}
