@@ -1619,6 +1619,19 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		require.NoError(t, err)
 		_, err = hub.EnableProjectFederation(ctx, hubProject.ID, "operator")
 		require.NoError(t, err)
+		// A joined spoke has pulled the hub baseline before it projects, so its
+		// later edits order after the baseline snapshot. Without that causal
+		// link, edits in the same millisecond can fold before the snapshot and
+		// lose to it.
+		baseline, err := hub.EventsAfter(ctx, db.EventsAfterParams{
+			ProjectID: hubProject.ID, IssueUID: spokeIssue.UID, Types: []string{"issue.snapshot"}, Limit: 1,
+		})
+		require.NoError(t, err)
+		require.Len(t, baseline, 1)
+		inserted, err := store.InsertRemoteEvent(ctx, spokeProject.ID, remoteEventFromStored(baseline[0]))
+		require.NoError(t, err)
+		require.True(t, inserted)
+		require.NoError(t, store.MaterializeFederatedProject(ctx, spokeProject.ID))
 
 		observedAt := time.Date(2026, 8, 20, 12, 0, 0, 123456789, time.UTC)
 		binding, bindingEvent, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{

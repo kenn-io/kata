@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -1105,14 +1106,6 @@ func createClaimForwardingPair(
 	spoke := testenv.New(t)
 	spokeProject, err := spoke.DB.CreateProjectWithUID(ctx, hubProject.Name, hubProject.UID)
 	require.NoError(t, err)
-	_, _, err = spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID:       spokeProject.ID,
-		Title:           issue.Title,
-		Author:          "tester",
-		UID:             issue.UID,
-		ShortIDOverride: issue.ShortID,
-	})
-	require.NoError(t, err)
 	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            spokeProject.ID,
 		Role:                 db.FederationRoleSpoke,
@@ -1125,8 +1118,29 @@ func createClaimForwardingPair(
 		PushEnabled:          true,
 	})
 	require.NoError(t, err)
-	created := createClaimEnrollment(t, hub, hubProject.ID, spoke.DB.InstanceUID(), capabilities)
-	return hub, spoke, hubProject, spokeProject, issue, created.Token
+	// The spoke replica comes from pulling the hub's issue.created, as it does
+	// in production. A separate spoke-side create would be concurrent with the
+	// hub's later writes, and within one millisecond the HLC may fold it after
+	// them.
+	hubCreated, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: hubProject.ID, IssueUID: issue.UID, Types: []string{"issue.created"}, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, hubCreated, 1)
+	created := hubCreated[0]
+	inserted, err := spoke.DB.InsertRemoteEvent(ctx, spokeProject.ID, db.RemoteEvent{
+		EventUID: created.UID, OriginInstanceUID: created.OriginInstanceUID,
+		ProjectUID: created.ProjectUID, ProjectName: created.ProjectName,
+		IssueUID: created.IssueUID, RelatedIssueUID: created.RelatedIssueUID,
+		Type: created.Type, Actor: created.Actor,
+		HLCPhysicalMS: created.HLCPhysicalMS, HLCCounter: created.HLCCounter,
+		ContentHash: created.ContentHash, Payload: jsontext.Value(created.Payload), CreatedAt: created.CreatedAt,
+	})
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, spoke.DB.MaterializeFederatedProject(ctx, spokeProject.ID))
+	enrollment := createClaimEnrollment(t, hub, hubProject.ID, spoke.DB.InstanceUID(), capabilities)
+	return hub, spoke, hubProject, spokeProject, issue, enrollment.Token
 }
 
 func setClaimBindingHubURL(t *testing.T, spoke *testenv.Env, projectID int64, hubURL string) {
