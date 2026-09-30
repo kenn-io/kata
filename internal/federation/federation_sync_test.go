@@ -1908,6 +1908,8 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered)
+	// Replay delivery needs the reset to land after the event at millisecond precision, and Windows clocks can tick slower than that.
+	require.NoError(t, spoke.DB.RecordFederationSyncReset(ctx, project.ID, localEvent.CreatedAt.Add(time.Millisecond)))
 
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
 	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
