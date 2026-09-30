@@ -49,7 +49,10 @@ func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, sc
 
 func isBadRequest(err error) bool {
 	var apiErr *embedding.APIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	return true
 }
 
 type progressStore struct {
