@@ -39,24 +39,25 @@ func issueSyncPrintOnce(w io.Writer, raw []byte, provider string) error {
 		return err
 	}
 	if currentOutputMode() == outputAgent {
-		return issueSyncPrintStatus(w, provider, "once", body.Status, &body.Binding)
+		return issueSyncPrintStatus(w, provider, "once", body.Status, &body.Binding, body.StatusUpdated)
 	}
-	_, err := fmt.Fprintf(w, "%s sync ran: created=%d updated=%d unchanged=%d\n", issueSyncLabel(provider), body.Import.Created, body.Import.Updated, body.Import.Unchanged)
+	_, err := fmt.Fprintf(w, "%s sync ran: created=%d updated=%d unchanged=%d status_updated=%d\n", issueSyncLabel(provider), body.Import.Created, body.Import.Updated, body.Import.Unchanged, body.StatusUpdated)
 	return err
 }
 
-func issueSyncPrintStatus(w io.Writer, provider, action string, status generated.IssueSyncStatusOut, binding *generated.IssueSyncBindingOut) error {
+func issueSyncPrintStatus(w io.Writer, provider, action string, status generated.IssueSyncStatusOut, binding *generated.IssueSyncBindingOut, statusUpdated ...int64) error {
 	// Buffer once so write failures cannot be lost among optional detail fields.
 	var out strings.Builder
 	agent := currentOutputMode() == outputAgent
 	if agent {
 		fmt.Fprintf(&out, "OK %s-sync action=%s state=%s enabled=%t", provider, agentValue(action), agentValue(status.State), status.Enabled)
+		fmt.Fprintf(&out, " status_sync=%s pending_count=%d", agentValue(issueStatusSyncDisplayMode(status.StatusSync)), status.PendingCount)
 	} else {
 		label := status.State
 		if action != "status" {
 			label = action
 		}
-		fmt.Fprintf(&out, "%s sync %s\n", issueSyncLabel(provider), textsafe.Line(label))
+		fmt.Fprintf(&out, "%s sync %s\nStatus sync: %s\nPending status changes: %d\n", issueSyncLabel(provider), textsafe.Line(label), textsafe.Line(issueStatusSyncDisplayMode(status.StatusSync)), status.PendingCount)
 	}
 	if binding != nil {
 		if agent {
@@ -64,12 +65,22 @@ func issueSyncPrintStatus(w io.Writer, provider, action string, status generated
 		} else {
 			fmt.Fprintf(&out, "Source: %s\nInterval: %ds\n", textsafe.Line(binding.DisplayName), binding.IntervalSeconds)
 		}
-		fields := []struct{ key, label string }{{"data_source_id", "Data source"}, {"database_id", "Database"}, {"title_property_id", "Title property"}, {"status_property_id", "Status property"}, {"assignee_property_id", "Assignee property"}, {"done_status_ids", "Completed options"}, {"since", "Since"}, {"title_prefix", "Title prefix"}}
+		fields := []struct{ key, label string }{{"data_source_id", "Data source"}, {"database_id", "Database"}, {"title_property_id", "Title property"}, {"status_property_id", "Status property"}, {"assignee_property_id", "Assignee property"}, {"done_status_ids", "Completed options"}, {"complete_group_id", "Complete group"}, {"todo_group_id", "To-do group"}, {"closed_status_id", "Closed target"}, {"open_status_id", "Open target"}, {"since", "Since"}, {"title_prefix", "Title prefix"}}
 		if provider == "plane" {
-			fields = []struct{ key, label string }{{"api_origin", "API origin"}, {"web_origin", "Web origin"}, {"workspace", "Workspace"}, {"project_id", "Plane project"}, {"since", "Since"}, {"title_prefix", "Title prefix"}}
+			fields = []struct{ key, label string }{{"api_origin", "API origin"}, {"web_origin", "Web origin"}, {"workspace", "Workspace"}, {"project_id", "Plane project"}, {"closed_state_id", "Closed target"}, {"open_state_id", "Open target"}, {"since", "Since"}, {"title_prefix", "Title prefix"}}
 		}
 		for _, field := range fields {
 			value := issueSyncConfigValue(binding.Config, field.key)
+			defaultGroupKey := ""
+			switch field.key {
+			case "closed_status_id":
+				defaultGroupKey = "complete_group_id"
+			case "open_status_id":
+				defaultGroupKey = "todo_group_id"
+			}
+			if value == "" && defaultGroupKey != "" && issueSyncConfigValue(binding.Config, defaultGroupKey) != "" {
+				value = "live group default"
+			}
 			if value == "" {
 				continue
 			}
@@ -120,6 +131,9 @@ func issueSyncPrintStatus(w io.Writer, provider, action string, status generated
 		}
 	}
 	if agent {
+		if len(statusUpdated) > 0 {
+			fmt.Fprintf(&out, " status_updated=%d", statusUpdated[0])
+		}
 		out.WriteByte('\n')
 	}
 	_, err := io.WriteString(w, out.String())

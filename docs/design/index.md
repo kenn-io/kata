@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-15
+last_edited: 2026-10-01
 ---
 
 # Design Notes
@@ -20,6 +20,7 @@ constraints that are too detailed for the main documentation.
 - [GitHub sync](github-sync.md)
 - [Hosted mode technical notes](hosted-mode.md)
 - [Issue-scoped credentials](issue-scoped-credentials.md)
+- [Issue status sync](issue-status-sync.md)
 - [Semantic search technical notes](semantic-search.md)
 
 These notes are the curated home for kata's design rationale. Earlier planning

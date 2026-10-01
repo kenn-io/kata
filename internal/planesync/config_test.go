@@ -66,3 +66,42 @@ func TestConfigRejectsUnsafeIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, cutoff)
 }
+
+func TestStatusConfigSupportsModeTargetsAndPrivateCheckpoint(t *testing.T) {
+	raw := `{"api_origin":"https://api.plane.so","web_origin":"https://app.plane.so","workspace":"example-workspace","project_id":"11111111-1111-4111-8111-111111111111","status_sync":"two-way","closed_state_id":"55555555-5555-4555-8555-555555555555","open_state_id":"33333333-3333-4333-8333-333333333333","_status_sync":{"pending":{"after":2,"through":7}}}`
+	c, err := DecodeConfig([]byte(raw))
+	require.NoError(t, err)
+	encoded, err := EncodeConfig(c)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"status_sync":"two-way"`)
+	require.Contains(t, string(encoded), `"closed_state_id":"55555555-5555-4555-8555-555555555555"`)
+	require.Contains(t, string(encoded), `"open_state_id":"33333333-3333-4333-8333-333333333333"`)
+	require.NotContains(t, string(encoded), "_status_sync")
+	for _, key := range []string{"closed_state_id", "open_state_id"} {
+		original := `"closed_state_id":"55555555-5555-4555-8555-555555555555"`
+		expected := "abcdefab-cdef-4abc-8def-abcdefabcdef"
+		canonicalInput := strings.Replace(raw, original, `"`+key+`":"ABCDEFABCDEF4ABC8DEFABCDEFABCDEF"`, 1)
+		if key == "open_state_id" {
+			canonicalInput = strings.Replace(raw, `"open_state_id":"33333333-3333-4333-8333-333333333333"`, `"open_state_id":"ABCDEFABCDEF4ABC8DEFABCDEFABCDEF"`, 1)
+		}
+		decoded, err := DecodeConfig([]byte(canonicalInput))
+		require.NoError(t, err)
+		target := decoded.ClosedStateID
+		if key == "open_state_id" {
+			target = decoded.OpenStateID
+		}
+		require.Equal(t, expected, target)
+		invalid := strings.Replace(canonicalInput, `"ABCDEFABCDEF4ABC8DEFABCDEFABCDEF"`, `"../invalid"`, 1)
+		_, err = DecodeConfig([]byte(invalid))
+		require.Error(t, err)
+	}
+
+	for _, mode := range []string{"none", "", "null"} {
+		bad := strings.Replace(raw, `"two-way"`, `"`+mode+`"`, 1)
+		if mode == "null" {
+			bad = strings.Replace(raw, `"two-way"`, `null`, 1)
+		}
+		_, err := DecodeConfig([]byte(bad))
+		require.Error(t, err)
+	}
+}

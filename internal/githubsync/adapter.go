@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -107,6 +108,12 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 	}
 	batch.Items = orderImportItemsForLinkTargets(batch.Items)
 	prepared := issuesync.Prepared{Binding: binding, Batch: batch}
+	for _, issue := range issues {
+		if !IsPullRequestIssue(issue) && issue.ID > 0 && issue.Number > 0 {
+			prepared.Locators = append(prepared.Locators, db.IssueStatusLocator{ExternalID: issueExternalID(issue), LegacyExternalIDs: statusLocatorAliases(issue), Locator: strconv.Itoa(issue.Number)})
+		}
+	}
+
 	if parentLinkBackfill {
 		prepared.Finalize = func(ctx context.Context) (db.IssueSyncBinding, error) {
 			backfilledConfig := ghConfig.WithParentLinksBackfilled()
@@ -115,10 +122,11 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 				return binding, err
 			}
 			return r.config.Store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{
-				BindingID:   binding.ID,
-				DisplayName: backfilledConfig.DisplayName(),
-				Config:      configJSON,
-				StartedAt:   &syncStartedAt,
+				BindingID:        binding.ID,
+				DisplayName:      backfilledConfig.DisplayName(),
+				Config:           configJSON,
+				StartedAt:        &syncStartedAt,
+				BindingUpdatedAt: new(binding.UpdatedAt),
 			})
 		}
 	}
@@ -132,6 +140,7 @@ func (r *adapter) refreshRepository(ctx context.Context, binding db.IssueSyncBin
 	}
 	refreshedConfig := Config{
 		Since:              ghConfig.Since,
+		StatusSync:         ghConfig.StatusSync,
 		Host:               ghConfig.Host,
 		Owner:              owner,
 		Repo:               name,
@@ -143,14 +152,19 @@ func (r *adapter) refreshRepository(ctx context.Context, binding db.IssueSyncBin
 	if err != nil {
 		return binding, ghConfig, err
 	}
-	if binding.DisplayName == refreshedConfig.DisplayName() && string(binding.Config) == string(configJSON) {
+	matches, err := db.IssueSyncConfigMatches(binding.Config, configJSON)
+	if err != nil {
+		return binding, ghConfig, err
+	}
+	if binding.DisplayName == refreshedConfig.DisplayName() && matches {
 		return binding, refreshedConfig, nil
 	}
 	refreshed, err := r.config.Store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{
-		BindingID:   binding.ID,
-		DisplayName: refreshedConfig.DisplayName(),
-		Config:      configJSON,
-		StartedAt:   &startedAt,
+		BindingID:        binding.ID,
+		DisplayName:      refreshedConfig.DisplayName(),
+		Config:           configJSON,
+		StartedAt:        &startedAt,
+		BindingUpdatedAt: new(binding.UpdatedAt),
 	})
 	if err != nil {
 		return binding, ghConfig, err

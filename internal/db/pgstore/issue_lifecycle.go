@@ -434,6 +434,10 @@ func (s *Store) closeIssueWithEvents(
 		if err != nil {
 			return err
 		}
+		if err := enqueueIssueStatusIntentTx(ctx, tx, created); err != nil {
+			return err
+		}
+
 		events, changed = []db.Event{created}, true
 		auditEvents, err := s.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
 			Project: project, Issue: current, EventType: "issue.closed", Actor: p.Actor,
@@ -553,6 +557,11 @@ func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string
 		created, err := s.insertEventTx(ctx, tx, issueEventInput(current, project, eventType, actor, string(body)))
 		if err != nil {
 			return err
+		}
+		if eventType == "issue.reopened" {
+			if err := enqueueIssueStatusIntentTx(ctx, tx, created); err != nil {
+				return err
+			}
 		}
 		event, changed = &created, true
 		issue, err = scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = $1`, current.ID))

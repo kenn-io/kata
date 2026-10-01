@@ -131,6 +131,7 @@ type InstanceResponse struct {
 		SchemaVersion        int64          `json:"schema_version"`
 		WebUIContractVersion string         `json:"web_ui_contract_version,omitempty"`
 		WebUICapabilities    UICapabilities `json:"web_ui_capabilities"`
+		IssueStatusSync      bool           `json:"issue_status_sync"`
 		IssueSubtreeTokens   bool           `json:"issue_subtree_tokens"`
 		Auth                 AuthInfoOut    `json:"auth"`
 	}

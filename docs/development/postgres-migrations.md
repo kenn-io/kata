@@ -62,3 +62,18 @@ and cannot migrate. Preserve those properties in every future migration.
 
 See [PostgreSQL operations](../operations/postgres.md) for the production
 upgrade ceremony and role grants.
+
+## Schema 30: issue status fields
+
+The 29→30 migration adds four nullable TEXT columns to `import_mappings`:
+`observed_status`, `observed_status_at`, `pending_event_uid`, and
+`remote_locator`. Existing mappings keep their identities and receive NULL in
+all four, so upgrading creates no outbound status intent. The migration adds no
+table, index, trigger, function, or extension.
+
+Stop the daemon and use schema-owner credentials for `kata storage postgres
+migrate`, then start the matching binary. Adding the columns takes a brief
+exclusive lock on `import_mappings`; schedule the operation while imports are
+stopped. Existing table grants cover the new columns. Validation-only runtime
+credentials cannot perform this upgrade. Schema 29 binaries cannot reopen
+schema 30; rollback requires the pre-upgrade backup and matching older binary.

@@ -14,6 +14,36 @@ func pageFixture() PageContent {
 	return PageContent{Page: Page{ID: "22222222-2222-4222-8222-222222222222", URL: "https://www.notion.so/example-page", DataSourceID: sourceID, CreatorID: "44444444-4444-4444-8444-444444444444", CreatedAt: time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)}, Title: "Example task", Markdown: "# Content\n"}
 }
 
+func TestBuildImportBatchClassifiesLiveGroupMembership(t *testing.T) {
+	ds := groupSchema()
+	c, err := ResolveConfig(ds, Selectors{}, "")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		id   *string
+		want string
+	}{{nil, "open"}, {new("ready"), "open"}, {new("active"), "open"}, {new("complete-a"), "closed"}, {new("complete-b"), "closed"}} {
+		page := pageFixture()
+		page.Page.StatusID = tc.id
+		batch, err := BuildImportBatchWithSchema("notion:"+sourceID, c, ds, []PageContent{page})
+		require.NoError(t, err)
+		require.Equal(t, tc.want, batch.Items[0].Status)
+		if tc.want == "closed" {
+			require.Equal(t, "done", *batch.Items[0].ClosedReason)
+			require.Equal(t, page.Page.UpdatedAt, *batch.Items[0].ClosedAt)
+		} else {
+			require.Nil(t, batch.Items[0].ClosedReason)
+			require.Nil(t, batch.Items[0].ClosedAt)
+		}
+	}
+	page := pageFixture()
+	page.Page.StatusID = new("missing")
+	_, err = BuildImportBatchWithSchema("notion:"+sourceID, c, ds, []PageContent{page})
+	require.Error(t, err)
+	// Group configs must never silently classify a page without its live schema.
+	_, err = BuildImportBatch("notion:"+sourceID, c, []PageContent{page})
+	require.Error(t, err)
+}
+
 func TestBuildImportBatchLifecycle(t *testing.T) {
 	c := configFixture(t)
 	page := pageFixture()

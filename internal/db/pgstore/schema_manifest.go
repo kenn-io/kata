@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "f46458bfdd656755b4921c995d8785dcd43033626ef0dc5bee6e7e4d5c1d12cf"
+	canonicalColumnFingerprint     = "296b297d7f2e06a90d7d93e89fc851903eba4a8d7d41316aca0a4db6dca8e103"
 	canonicalConstraintFingerprint = "184a76b16fd874ccbf2a59d0e100f9958ea3dc799ddddbcda86d800363a0e92f"
 	canonicalIndexFingerprint      = "a827a2c2fa61f2ac0782385bec439033625c9869c656d2190dc80e30a33ab543"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
@@ -33,7 +33,7 @@ var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column 
 	"federation_enrollments":  "id,token_hash,spoke_instance_uid,project_id,capabilities,bound_actor,allow_adoption_snapshot_authors,adoption_baseline_open,adoption_baseline_next_source_event_id,adoption_baseline_end_source_event_id,created_at,updated_at,revoked_at",
 	"federation_quarantine":   "id,project_id,direction,first_event_id,last_event_id,event_uids,error,created_at,skipped_at,skipped_by,skip_reason",
 	"federation_sync_status":  "project_id,last_pull_started_at,last_pull_success_at,last_push_started_at,last_push_success_at,last_error_at,last_error,last_reset_at",
-	"import_mappings":         "id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at",
+	"import_mappings":         "id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at,observed_status,observed_status_at,pending_event_uid,remote_locator",
 	"issue_claims":            "id,claim_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,purpose,claim_kind,acquired_at,expires_at,released_at,release_reason,revision,updated_at",
 	"issue_labels":            "issue_id,label,author,created_at",
 	"issue_sync_bindings":     "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at",

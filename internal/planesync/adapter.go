@@ -89,7 +89,7 @@ func (a *Adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, star
 		name = "Plane project " + project.ID
 	}
 	if name != binding.DisplayName {
-		binding, err = a.store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{BindingID: binding.ID, DisplayName: name, Config: binding.Config, StartedAt: &startedAt})
+		binding, err = a.store.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{BindingID: binding.ID, DisplayName: name, Config: binding.Config, StartedAt: &startedAt, BindingUpdatedAt: new(binding.UpdatedAt)})
 		if err != nil {
 			return prepared, err
 		}

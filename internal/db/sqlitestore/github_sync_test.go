@@ -18,11 +18,10 @@ func TestGitHubSyncSchemaVersion(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
 
-	assert.Equal(t, 29, db.CurrentSchemaVersion())
 	got, err := d.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 29, got)
-	assertSchemaVersion(t, d, 29)
+	assert.Equal(t, db.CurrentSchemaVersion(), got)
+	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 }
 
 func TestGitHubSyncEnableAndReenableSameRepository(t *testing.T) {
@@ -482,7 +481,7 @@ func TestGitHubSyncImportGuardRejectsDisabledBinding(t *testing.T) {
 	assert.Empty(t, mappings)
 }
 
-func TestGitHubSyncImportGuardRejectsClaimInvalidatedByDisableReenable(t *testing.T) {
+func TestGitHubSyncImportGuardRejectsOldBindingAfterDisableReenable(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupGitHubSyncProject(t)
 	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
@@ -496,11 +495,11 @@ func TestGitHubSyncImportGuardRejectsClaimInvalidatedByDisableReenable(t *testin
 	require.NoError(t, err)
 
 	_, _, err = d.ImportBatch(ctx, guardedGitHubImport(p.ID, binding, started))
-	require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	require.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
 
 	status, err := d.IssueSyncStatusByProject(ctx, p.ID)
 	require.NoError(t, err)
-	assert.Nil(t, status.SyncStartedAt)
+	assert.Equal(t, &started, status.SyncStartedAt)
 	mappings, err := d.ImportMappingsByProjectSource(ctx, p.ID, binding.SourceKey)
 	require.NoError(t, err)
 	assert.Empty(t, mappings)
@@ -652,9 +651,10 @@ func guardedGitHubImport(projectID int64, binding db.IssueSyncBinding, started t
 		Source:    binding.SourceKey,
 		Actor:     "github-sync",
 		IssueSyncGuard: &db.IssueSyncImportGuard{
-			BindingID: binding.ID,
-			Provider:  binding.Provider,
-			StartedAt: started,
+			BindingID:        binding.ID,
+			Provider:         binding.Provider,
+			StartedAt:        started,
+			BindingUpdatedAt: new(binding.UpdatedAt),
 		},
 		Items: []db.ImportItem{{
 			ExternalID: "issue:I_guarded_1",
@@ -692,7 +692,7 @@ func TestGitHubSyncRefreshRequiresCurrentClaim(t *testing.T) {
 	_, claimed, err := d.ClaimIssueSyncBinding(ctx, binding.ID, "github", at, at.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, claimed)
-	params := db.IssueSyncBindingUpdateParams{BindingID: binding.ID, DisplayName: binding.DisplayName, Config: binding.Config, StartedAt: &at}
+	params := db.IssueSyncBindingUpdateParams{BindingID: binding.ID, DisplayName: binding.DisplayName, Config: binding.Config, StartedAt: &at, BindingUpdatedAt: new(binding.UpdatedAt)}
 	_, err = d.RefreshIssueSyncBinding(ctx, params)
 	require.NoError(t, err)
 	newParams := githubSyncBindingParams(p.ID)
@@ -700,7 +700,7 @@ func TestGitHubSyncRefreshRequiresCurrentClaim(t *testing.T) {
 	newer, err := d.UpsertIssueSyncBinding(ctx, newParams)
 	require.NoError(t, err)
 	_, err = d.RefreshIssueSyncBinding(ctx, params)
-	require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	require.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
 	got, err := d.IssueSyncBindingByID(ctx, binding.ID)
 	require.NoError(t, err)
 	assert.JSONEq(t, string(newer.Config), string(got.Config))

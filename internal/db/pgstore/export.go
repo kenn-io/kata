@@ -353,7 +353,7 @@ func (s *Store) ExportProjectAliases(ctx context.Context, filter db.ExportFilter
 // ExportImportMappings streams source identities retained by the selected project data.
 func (s *Store) ExportImportMappings(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.ImportMappingExport, error] {
 	query := `SELECT id, source, external_id, object_type, project_id, issue_id,
-       comment_id, link_id, label, source_updated_at, imported_at FROM import_mappings`
+       comment_id, link_id, label, source_updated_at, imported_at, observed_status, CAST(observed_status_at AS TEXT), pending_event_uid, remote_locator FROM import_mappings`
 	var clauses []string
 	var args []any
 	if filter.ProjectID != nil {
@@ -378,10 +378,10 @@ WHERE links.id = import_mappings.link_id
 			var record db.ImportMappingExport
 			if err := rows.Scan(&record.ID, &record.Source, &record.ExternalID, &record.ObjectType,
 				&record.ProjectID, &record.IssueID, &record.CommentID, &record.LinkID, &record.Label,
-				&record.SourceUpdatedAt, &record.ImportedAt); err != nil {
+				&record.SourceUpdatedAt, &record.ImportedAt, &record.ObservedStatus, &record.ObservedStatusAt, &record.PendingEventUID, &record.RemoteLocator); err != nil {
 				return db.ImportMappingExport{}, pgExportScanError("import_mapping", err)
 			}
-			return record, nil
+			return db.NormalizeIssueStatusExport(record)
 		})
 }
 

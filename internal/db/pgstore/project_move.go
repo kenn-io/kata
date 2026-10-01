@@ -96,8 +96,11 @@ WHERE id = $5`, target.ID, newShortID, newRevision, updatedAt, current.ID); err 
 			return fmt.Errorf("rehome pending claim requests: %w", mapSQLError(err, nil))
 		}
 
+		// Status state belongs to the source binding; its pending event stays behind.
 		if _, err := tx.ExecContext(ctx, `UPDATE import_mappings
-SET project_id = $1 WHERE issue_id = $2 AND project_id = $3`,
+SET project_id = $1, observed_status = NULL, observed_status_at = NULL,
+    pending_event_uid = NULL, remote_locator = NULL
+WHERE issue_id = $2 AND project_id = $3`,
 			target.ID, current.ID, source.ID); err != nil {
 			return fmt.Errorf("rehome import mappings: %w", mapSQLError(err, nil))
 		}

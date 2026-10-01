@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 const sourceID = "11111111-1111-4111-8111-111111111111"
@@ -151,6 +152,22 @@ func TestConfigCanonicalStrictJSON(t *testing.T) {
 		_, err := DecodeConfig(jsontext.Value(value))
 		require.Error(t, err)
 	}
+}
+
+func TestConfigReadsValidatedDaemonScanProgress(t *testing.T) {
+	config := configFixture(t)
+	raw, err := EncodeConfig(config)
+	require.NoError(t, err)
+	withProgress, err := db.SetIssueStatusScanConfig(raw, db.IssueStatusScanState{Sweep: db.IssueStatusScanCursor{After: 1, Through: 2}})
+	require.NoError(t, err)
+	decoded, err := DecodeConfig(withProgress)
+	require.NoError(t, err)
+	public, err := EncodeConfig(decoded)
+	require.NoError(t, err)
+	require.JSONEq(t, string(raw), string(public))
+	bad := jsontext.Value(strings.TrimSuffix(string(raw), "}") + `,"_status_sync":{"sweep":{"after":3,"through":1}}}`)
+	_, err = DecodeConfig(bad)
+	require.Error(t, err)
 }
 
 func TestParseSince(t *testing.T) {

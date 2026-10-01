@@ -101,6 +101,9 @@ type ImportBatchParams struct {
 	Source         string
 	Actor          string
 	IssueSyncGuard *IssueSyncImportGuard
+	// ManageStatusSeparately preserves existing native status and close fields
+	// during content imports. Only a claimed internal provider run may set it.
+	ManageStatusSeparately bool
 	// ReconcileLinkTypesForUnchanged asks ImportBatch to reconcile source-managed
 	// links of selected types even when the issue row itself is unchanged. Normal
 	// imports leave unchanged issues' labels and links alone.
@@ -130,6 +133,9 @@ type IssueSyncImportGuard struct {
 	BindingID int64
 	Provider  string
 	StartedAt time.Time
+	// BindingUpdatedAt fences operator disable/re-enable and selector edits while
+	// retaining the original claim until its worker retires safely.
+	BindingUpdatedAt *time.Time
 }
 
 // ImportItem is one normalized issue in an import batch. ExternalID is the

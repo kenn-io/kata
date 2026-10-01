@@ -11,6 +11,8 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -92,7 +94,7 @@ func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, erro
 		fmt.Sprintf("_pragma=synchronous(%s)", synchronous),
 		"_pragma=busy_timeout(5000)",
 	)
-	dsn := fmt.Sprintf("file:%s?%s", path, strings.Join(pragmas, "&"))
+	dsn := fmt.Sprintf("file:%s?%s", sqliteURIPath(path), strings.Join(pragmas, "&"))
 	sdb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -262,7 +264,7 @@ func (d *Store) ensureInstanceUIDOnce(ctx context.Context) error {
 func openReadOnly(ctx context.Context, path string) (*Store, error) {
 	dsn := fmt.Sprintf(
 		"file:%s?mode=ro&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)",
-		path,
+		sqliteURIPath(path),
 	)
 	sdb, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -452,3 +454,6 @@ func (d *Store) hasUserTables(ctx context.Context) (bool, error) {
 	}
 	return n > 0, nil
 }
+
+// SQLite opens a URI, so literal #/?/% in a filesystem path must be escaped.
+func sqliteURIPath(path string) string { return (&url.URL{Path: filepath.ToSlash(path)}).EscapedPath() }

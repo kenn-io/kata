@@ -27,6 +27,15 @@ func (a *testAdapter) Prepare(ctx context.Context, b db.IssueSyncBinding, at tim
 	return a.prepare(ctx, b, at)
 }
 
+type statusErrorTestAdapter struct {
+	*testAdapter
+	statusErr error
+}
+
+func (a *statusErrorTestAdapter) OpenStatus(context.Context, db.IssueSyncBinding, time.Time) (StatusRun, error) {
+	return nil, a.statusErr
+}
+
 func testStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
@@ -104,6 +113,48 @@ func TestRunnerAdapterIsolationAndReplay(t *testing.T) {
 	require.Equal(t, eventsAfterFirst, events)
 }
 
+func TestRunnerOnceOnlyClassifiesStatusPassBlocksAsWarnings(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		contentErr  error
+		wantWarning bool
+		wantCreated int
+	}{
+		{name: "blocked content read is fatal", contentErr: &StatusError{Message: "content read blocked", Blocked: true}},
+		{name: "blocked status pass preserves successful content", wantWarning: true, wantCreated: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			b := testBinding(t, s, "example-project", "synthetic")
+			b, err := s.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: b.ProjectID, Provider: b.Provider, SourceKey: b.SourceKey, RemoteID: b.RemoteID, DisplayName: b.DisplayName, Config: []byte(`{"status_sync":"two-way"}`), IntervalSeconds: 300})
+			require.NoError(t, err)
+			at := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+			statusErr := &StatusError{Message: "status read blocked", Blocked: true}
+			a := &statusErrorTestAdapter{
+				testAdapter: &testAdapter{prepare: func(_ context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
+					if tc.contentErr != nil {
+						return Prepared{}, tc.contentErr
+					}
+					return testPrepared(binding, at), nil
+				}},
+				statusErr: statusErr,
+			}
+			r := NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at }})
+
+			result, err := r.RunOnce(context.Background(), b.ID)
+
+			if tc.contentErr != nil {
+				require.ErrorIs(t, err, tc.contentErr)
+				require.ErrorContains(t, err, statusErr.Error())
+			} else {
+				require.ErrorIs(t, err, statusErr)
+			}
+			require.Equal(t, tc.wantWarning, IsBlockedStatusWarning(err))
+			require.Equal(t, tc.wantCreated, result.Import.Created)
+		})
+	}
+}
+
 // Binding-local deadline failures must not terminate the parent worker or skip other due bindings.
 func TestRunnerBindingDeadlineKeepsSchedulerAlive(t *testing.T) {
 	s := &completedSuccessStore{Storage: testStore(t), completed: make(chan db.IssueSyncStatus, 4)}
@@ -174,7 +225,7 @@ func TestRunnerClaimFences(t *testing.T) {
 					if mode == "finalizer-failure" {
 						return b, errors.New("finalizer failed")
 					}
-					return s.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{BindingID: b.ID, StartedAt: &started, DisplayName: "old metadata", Config: []byte(`{}`)})
+					return s.RefreshIssueSyncBinding(ctx, db.IssueSyncBindingUpdateParams{BindingID: b.ID, StartedAt: &started, BindingUpdatedAt: new(b.UpdatedAt), DisplayName: "old metadata", Config: []byte(`{}`)})
 				}
 				switch mode {
 				case "disable-reenable":
@@ -210,7 +261,10 @@ func TestRunnerClaimFences(t *testing.T) {
 			}})
 			result, err := r.RunOnce(ctx, b.ID)
 			require.Error(t, err)
-			if mode == "disable-reenable" || mode == "stale-replacement" || mode == "stale-finalizer" {
+			switch mode {
+			case "disable-reenable":
+				require.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
+			case "stale-replacement", "stale-finalizer":
 				require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
 			}
 			if mode == "cancel-between-chunks" {

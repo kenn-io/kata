@@ -79,6 +79,7 @@ type Config struct {
 	RepoID             int64  `json:"repo_id"`
 	TitlePrefix        *bool  `json:"title_prefix"`
 	ParentLinksVersion int    `json:"parent_links_version,omitzero"`
+	StatusSync         string `json:"status_sync,omitempty"`
 }
 
 const currentParentLinksVersion = 1
@@ -119,6 +120,9 @@ func (c Config) WithParentLinksBackfilled() Config {
 // Validate reports whether the config has the GitHub repository identity needed
 // for fetch operations.
 func (c Config) Validate() error {
+	if c.StatusSync != "" && c.StatusSync != "one-way" && c.StatusSync != "two-way" {
+		return fmt.Errorf("GitHub status sync must be one-way or two-way")
+	}
 	if strings.TrimSpace(c.Host) == "" || strings.TrimSpace(c.Owner) == "" || strings.TrimSpace(c.Repo) == "" {
 		return fmt.Errorf("GitHub sync config requires host, owner, and repo")
 	}

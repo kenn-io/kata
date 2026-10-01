@@ -146,7 +146,9 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE import_mappings
-		   SET project_id = ?
+		   SET project_id = ?,
+		       observed_status = NULL, observed_status_at = NULL,
+		       pending_event_uid = NULL, remote_locator = NULL
 		 WHERE issue_id = ? AND project_id = ?`,
 		in.ToProjectID, in.IssueID, in.FromProjectID,
 	); err != nil {

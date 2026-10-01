@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.kenn.io/kata/internal/config"
@@ -44,6 +45,9 @@ type HTTPFetcher struct {
 	graphQLNow          func() time.Time
 	graphQLSleep        func(context.Context, time.Duration) error
 	parentCapabilities  *parentCapabilityCache
+	statusMu            sync.Mutex
+	// statusCooldown pauses requests per repository after a rate limit.
+	statusCooldown map[Binding]time.Time
 }
 
 var _ Fetcher = (*HTTPFetcher)(nil)
@@ -91,6 +95,7 @@ func (f *HTTPFetcher) repositoryWithClient(ctx context.Context, client *http.Cli
 		URL:      requestURL,
 		Resource: "GitHub repository",
 		Out:      &out,
+		Binding:  binding,
 	}); err != nil {
 		return Repository{}, err
 	}
@@ -133,6 +138,7 @@ func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client
 			Resource:    resource,
 			Out:         &page,
 			RetryBudget: retryBudget,
+			Binding:     binding,
 		})
 		if err != nil {
 			return nil, err
@@ -168,9 +174,10 @@ func (f *HTTPFetcher) ForBinding(ctx context.Context, binding Binding) (Fetcher,
 }
 
 type httpFetcherBindingSession struct {
-	fetcher *HTTPFetcher
-	binding Binding
-	client  *http.Client
+	fetcher        *HTTPFetcher
+	binding        Binding
+	client         *http.Client
+	verifiedRepoID int64
 }
 
 func (s *httpFetcherBindingSession) Repository(ctx context.Context, host, owner, repo string) (Repository, error) {
@@ -280,6 +287,7 @@ type gitHubJSONRequest struct {
 	Body        io.Reader
 	Out         any
 	RetryBudget *gitHubRetryBudget
+	Binding     Binding
 }
 
 func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request gitHubJSONRequest) (http.Header, error) {
@@ -311,6 +319,9 @@ func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request g
 			req.Header.Set("Content-Type", "application/json")
 		}
 
+		if err := f.statusCooldownError(request.Binding); err != nil {
+			return nil, err
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			requestErr := fmt.Errorf("request %s: %w", request.Resource, err)
@@ -328,6 +339,9 @@ func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request g
 			statusErr, body, closeErr := gitHubHTTPStatusError(request.Resource, resp)
 			if closeErr != nil {
 				return nil, closeErr
+			}
+			if gitHubRESTStatusRetryable(resp.StatusCode, headers, body) {
+				f.deferStatusRequests(request.Binding, retryWait(headers, f.now()))
 			}
 			if gitHubRESTStatusRetryable(resp.StatusCode, headers, body) && attempt < gitHubMaxRetryAttempts {
 				if err := f.sleepForGitHubRetry(ctx, request.Resource, attempt, headers, budget); err != nil {

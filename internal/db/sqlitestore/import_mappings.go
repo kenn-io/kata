@@ -85,6 +85,10 @@ func upsertImportMappingWithExternalRootAccess(
 		source, external_id, object_type, project_id, issue_id, comment_id, link_id, label, source_updated_at
 	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source, external_id, object_type, project_id) DO UPDATE SET
+		observed_status=CASE WHEN import_mappings.issue_id IS excluded.issue_id AND import_mappings.comment_id IS excluded.comment_id AND import_mappings.link_id IS excluded.link_id AND import_mappings.label IS excluded.label THEN import_mappings.observed_status ELSE NULL END,
+		observed_status_at=CASE WHEN import_mappings.issue_id IS excluded.issue_id AND import_mappings.comment_id IS excluded.comment_id AND import_mappings.link_id IS excluded.link_id AND import_mappings.label IS excluded.label THEN import_mappings.observed_status_at ELSE NULL END,
+		pending_event_uid=CASE WHEN import_mappings.issue_id IS excluded.issue_id AND import_mappings.comment_id IS excluded.comment_id AND import_mappings.link_id IS excluded.link_id AND import_mappings.label IS excluded.label THEN import_mappings.pending_event_uid ELSE NULL END,
+		remote_locator=CASE WHEN import_mappings.issue_id IS excluded.issue_id AND import_mappings.comment_id IS excluded.comment_id AND import_mappings.link_id IS excluded.link_id AND import_mappings.label IS excluded.label THEN import_mappings.remote_locator ELSE NULL END,
 		issue_id=excluded.issue_id,
 		comment_id=excluded.comment_id,
 		link_id=excluded.link_id,

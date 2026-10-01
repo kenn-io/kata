@@ -103,6 +103,23 @@ func seedCursor(t *testing.T, s db.Storage, b db.IssueSyncBinding, at time.Time)
 	require.NoError(t, err)
 }
 
+func TestNotionRunUsesLiveCompleteGroup(t *testing.T) {
+	store := adapterStore(t)
+	c, err := ResolveConfig(groupSchema(), Selectors{}, "")
+	require.NoError(t, err)
+	binding := adapterBinding(t, store, c)
+	p := pageFixture()
+	p.Page.StatusID = new("complete-a")
+	session := newAdapterSession(p)
+	session.source = groupSchema()
+	at := p.Page.UpdatedAt.Add(time.Hour)
+	_, err = adapterRunner(store, session, &at).RunOnce(t.Context(), binding.ID)
+	require.NoError(t, err)
+	issue := importedIssue(t, store, binding, p.Page.ID)
+	require.Equal(t, "closed", issue.Status)
+	require.Equal(t, "done", *issue.ClosedReason)
+}
+
 // Missing source-version guards would overwrite local edits or reopen an older replay.
 func TestNotionRunImportsAndReplays(t *testing.T) {
 	s := adapterStore(t)
@@ -662,4 +679,25 @@ func TestNotionRunTitlePrefixPresentation(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, labels, 1)
 	require.Equal(t, "local", labels[0].Label)
+}
+
+func TestNotionMetadataRefreshIgnoresPrivateScanProgress(t *testing.T) {
+	s := adapterStore(t)
+	c := configFixture(t)
+	b := adapterBinding(t, s, c)
+	f := newAdapterSession()
+	at := pageFixture().Page.UpdatedAt.Add(time.Hour)
+	_, claimed, err := s.ClaimIssueSyncBinding(t.Context(), b.ID, "notion", at, at.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, claimed)
+	// First prepare normalizes the live display name and parent identity.
+	prepared, err := NewAdapter(s, f).Prepare(t.Context(), b, at)
+	require.NoError(t, err)
+	b = prepared.Binding
+	guard := db.IssueSyncImportGuard{BindingID: b.ID, Provider: b.Provider, StartedAt: at, BindingUpdatedAt: new(b.UpdatedAt)}
+	b, err = s.UpdateIssueStatusScan(t.Context(), guard, db.IssueStatusScanState{Sweep: db.IssueStatusScanCursor{After: 1, Through: 2}})
+	require.NoError(t, err)
+	prepared, err = NewAdapter(s, f).Prepare(t.Context(), b, at)
+	require.NoError(t, err)
+	require.Equal(t, b.UpdatedAt, prepared.Binding.UpdatedAt, "scan progress alone must not refresh provider metadata")
 }

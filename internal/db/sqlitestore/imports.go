@@ -173,6 +173,15 @@ func validateIssueSyncImportGuardTx(ctx context.Context, tx *sql.Tx, p db.Import
 		g.BindingID, p.ProjectID, provider, g.StartedAt.UTC().Format(sqliteTimeFormat)).
 		Scan(&id)
 	if err == nil {
+		if g.BindingUpdatedAt != nil {
+			binding, err := issueSyncBindingByID(ctx, tx, g.BindingID)
+			if err != nil {
+				return err
+			}
+			if !binding.UpdatedAt.Equal(*g.BindingUpdatedAt) {
+				return db.ErrIssueSyncBindingChanged
+			}
+		}
 		return nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -233,6 +242,9 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 	existing, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ? AND i.deleted_at IS NULL`, *mapping.IssueID))
 	if err != nil {
 		return nil, nil, err
+	}
+	if p.ManageStatusSeparately {
+		item.Status, item.ClosedReason, item.ClosedAt = existing.Status, existing.ClosedReason, existing.ClosedAt
 	}
 	sourceCurrent := mapping.SourceUpdatedAt != nil &&
 		(db.SameImportTimestamp(*mapping.SourceUpdatedAt, item.UpdatedAt) || item.UpdatedAt.After(*mapping.SourceUpdatedAt))

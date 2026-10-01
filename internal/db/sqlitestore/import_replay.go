@@ -39,7 +39,7 @@ func (d *Store) ImportReplay(ctx context.Context, recs []db.ImportRecord, opts d
 }
 
 func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts db.ImportOptions) error {
-	if err := db.ValidateImportRecords(recs); err != nil {
+	if err := db.ValidateImportReplay(recs, opts); err != nil {
 		return err
 	}
 
@@ -348,7 +348,7 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 	case *db.IssueSyncBindingExport:
 		return linkSkipNone, importIssueSyncBinding(ctx, tx, rec, opts.PreserveIssueSyncBindingEnabled)
 	case *db.IssueSyncStatusExport:
-		return linkSkipNone, importIssueSyncStatus(ctx, tx, rec)
+		return linkSkipNone, importIssueSyncStatus(ctx, tx, rec, opts.PreserveIssueSyncBindingEnabled && !opts.MergeProject)
 	case *db.RecurrenceExport:
 		return linkSkipNone, importRecurrence(ctx, tx, rec)
 	case *db.IssueExport:
@@ -362,7 +362,7 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 	case *db.LinkExport:
 		return importLink(ctx, tx, rec)
 	case *db.ImportMappingExport:
-		return importMapping(ctx, tx, rec, skippedLinkIDs)
+		return importMapping(ctx, tx, rec, skippedLinkIDs, opts.PreserveIssueSyncBindingEnabled && !opts.MergeProject)
 	case *db.ExternalFieldMappingExport:
 		return linkSkipNone, importExternalFieldMapping(ctx, tx, rec, opts.MergeProject)
 	case *db.ExternalRootBindingExport:
@@ -477,6 +477,14 @@ func importAlias(ctx context.Context, tx *sql.Tx, a *db.AliasExport) error {
 }
 
 func importIssueSyncBinding(ctx context.Context, tx *sql.Tx, b *db.IssueSyncBindingExport, preserveEnabled bool) error {
+	config := b.Config
+	if !preserveEnabled {
+		var err error
+		config, err = db.PublicIssueSyncConfig(config)
+		if err != nil {
+			return err
+		}
+	}
 	enabled := 0
 	if preserveEnabled && b.Enabled {
 		enabled = 1
@@ -488,12 +496,16 @@ func importIssueSyncBinding(ctx context.Context, tx *sql.Tx, b *db.IssueSyncBind
 		 )
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ID, b.ProjectID, b.Provider, b.SourceKey, b.RemoteID, b.DisplayName,
-		string(b.Config), enabled, b.IntervalSeconds, b.LastCursorAt, b.CreatedAt,
+		string(config), enabled, b.IntervalSeconds, b.LastCursorAt, b.CreatedAt,
 		b.UpdatedAt)
 	return wrapImportErr(db.ImportKindIssueSyncBinding, err)
 }
 
-func importIssueSyncStatus(ctx context.Context, tx *sql.Tx, s *db.IssueSyncStatusExport) error {
+func importIssueSyncStatus(ctx context.Context, tx *sql.Tx, s *db.IssueSyncStatusExport, preserveClaim bool) error {
+	var startedAt *string
+	if preserveClaim {
+		startedAt = s.SyncStartedAt
+	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO issue_sync_status(
 		   binding_id, project_id, sync_started_at, last_attempt_at,
@@ -501,7 +513,7 @@ func importIssueSyncStatus(ctx context.Context, tx *sql.Tx, s *db.IssueSyncStatu
 		   last_created, last_updated, last_unchanged, last_comments
 		 )
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.BindingID, s.ProjectID, s.SyncStartedAt, s.LastAttemptAt,
+		s.BindingID, s.ProjectID, startedAt, s.LastAttemptAt,
 		s.LastSuccessAt, s.LastErrorAt, s.LastError, s.LastCreated,
 		s.LastUpdated, s.LastUnchanged, s.LastComments)
 	return wrapImportErr(db.ImportKindIssueSyncStatus, err)
@@ -637,7 +649,8 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) (linkSkip, e
 	return linkSkipNone, wrapImportErr(db.ImportKindLink, err)
 }
 
-func importMapping(ctx context.Context, tx *sql.Tx, m *db.ImportMappingExport, skippedLinkIDs map[int64]struct{}) (linkSkip, error) {
+func importMapping(ctx context.Context, tx *sql.Tx, m *db.ImportMappingExport, skippedLinkIDs map[int64]struct{}, preserveStatus bool) (linkSkip, error) {
+
 	if m.LinkID != nil {
 		if _, skipped := skippedLinkIDs[*m.LinkID]; skipped {
 			return linkSkipMapping, nil
@@ -654,11 +667,19 @@ func importMapping(ctx context.Context, tx *sql.Tx, m *db.ImportMappingExport, s
 			))
 		}
 	}
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO import_mappings(id, source, external_id, object_type, project_id, issue_id, comment_id, link_id, label, source_updated_at, imported_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	normalized, err := db.NormalizeIssueStatusExport(*m)
+	if err != nil {
+		return linkSkipNone, wrapImportErr(db.ImportKindImportMapping, err)
+	}
+	var raw, at, pending, locator *string
+	if preserveStatus {
+		raw, at, pending, locator = normalized.ObservedStatus, normalized.ObservedStatusAt, normalized.PendingEventUID, normalized.RemoteLocator
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO import_mappings(id, source, external_id, object_type, project_id, issue_id, comment_id, link_id, label, source_updated_at, imported_at, observed_status,observed_status_at,pending_event_uid,remote_locator)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.Source, m.ExternalID, m.ObjectType, m.ProjectID, m.IssueID, m.CommentID,
-		m.LinkID, m.Label, m.SourceUpdatedAt, m.ImportedAt)
+		m.LinkID, m.Label, m.SourceUpdatedAt, m.ImportedAt, raw, at, pending, locator)
 	return linkSkipNone, wrapImportErr(db.ImportKindImportMapping, err)
 }
 

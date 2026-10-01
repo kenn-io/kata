@@ -163,7 +163,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	issue.Owner = cloneStringPtr(in.Owner)
 	setFoldAssignmentExpiry(&issue, in.AssignmentExpiresOn)
 	issue.Priority = cloneInt64Ptr(in.Priority)
-	issue.Status = in.Status
+	setFoldStatus(&issue, in.Status, e, false)
 	issue.ClosedReason = cloneStringPtr(in.ClosedReason)
 	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
 	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
@@ -214,7 +214,7 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 		issue.Priority = priority
 	}
 	if v, ok := stringValue(payload["status"]); ok {
-		issue.Status = v
+		setFoldStatus(&issue, v, e, false)
 	}
 	if reason, ok := optionalString(payload["closed_reason"]); ok {
 		issue.ClosedReason = reason
@@ -341,7 +341,7 @@ func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]jsontext.Va
 		return
 	}
 	issue := p.ensureIssue(uid)
-	issue.Status = "closed"
+	setFoldStatus(&issue, "closed", e, true)
 	clearFoldAssignmentExpiry(&issue)
 	if reason, ok := stringValue(payload["reason"]); ok {
 		issue.ClosedReason = &reason
@@ -361,7 +361,7 @@ func (p *FoldProjection) applyReopened(e FoldEvent, payload map[string]jsontext.
 		return
 	}
 	issue := p.ensureIssue(uid)
-	issue.Status = "open"
+	setFoldStatus(&issue, "open", e, true)
 	issue.ClosedReason = nil
 	issue.ClosedAt = nil
 	advanceIssueUpdatedAt(&issue, issueUpdatedAt(e, payload))
@@ -381,6 +381,19 @@ func (p *FoldProjection) applyDeleted(e FoldEvent, payload map[string]jsontext.V
 	issue.DeletedAt = &deletedAt
 	advanceIssueUpdatedAt(&issue, deletedAt)
 	p.Issues[uid] = issue
+}
+
+// setFoldStatus tracks explicit provenance separately from ordinary content.
+// Same-state snapshots keep the carrier, but a real non-user transition breaks
+// it even if a later snapshot returns to the older explicit event's state.
+func setFoldStatus(issue *FoldIssue, state string, event FoldEvent, explicit bool) {
+	if explicit {
+		issue.StatusIntentUID = event.UID
+	} else if issue.Status != state {
+		issue.StatusIntentUID = ""
+	}
+	issue.Status = state
+	issue.StatusClock = clockOf(event)
 }
 
 func (p *FoldProjection) applyRestored(e FoldEvent, payload map[string]jsontext.Value) {

@@ -19,6 +19,7 @@ type EnableIssueSyncRequest struct {
 // scheduling options. Config must not contain raw credentials; providers that
 // need credentials should store references or use their own CLI auth.
 type EnableIssueSyncRequestBody struct {
+	StatusSync             *string `json:"status_sync,omitempty" enum:"one-way,two-way"`
 	IntervalSecondsPresent bool    `json:"-"`
 	Config                 JSONMap `json:"config,omitempty"`
 	IntervalSeconds        int     `json:"interval_seconds,omitempty,omitzero"`
@@ -87,6 +88,8 @@ type IssueSyncBindingOut struct {
 
 // IssueSyncStatusOut summarizes current sync state.
 type IssueSyncStatusOut struct {
+	StatusSync    string                `json:"status_sync"`
+	PendingCount  int                   `json:"pending_count"`
 	Progress      *IssueSyncProgressOut `json:"progress,omitempty"`
 	BindingID     int64                 `json:"binding_id"`
 	ProjectID     int64                 `json:"project_id"`
@@ -117,9 +120,10 @@ type IssueSyncResponse struct {
 
 // RunIssueSyncOnceResponseBody extends the normal sync body with the import summary.
 type RunIssueSyncOnceResponseBody struct {
-	Binding *IssueSyncBindingOut `json:"binding"`
-	Status  IssueSyncStatusOut   `json:"status"`
-	Import  db.ImportBatchResult `json:"import"`
+	StatusUpdated int                  `json:"status_updated"`
+	Binding       *IssueSyncBindingOut `json:"binding"`
+	Status        IssueSyncStatusOut   `json:"status"`
+	Import        db.ImportBatchResult `json:"import"`
 }
 
 // RunIssueSyncOnceResponse wraps RunIssueSyncOnceResponseBody.

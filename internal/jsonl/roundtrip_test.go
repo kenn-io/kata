@@ -597,7 +597,7 @@ func TestGitHubSyncRoundTrip(t *testing.T) {
 	gotStatus, err := dstDB.IssueSyncStatusByProject(ctx, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, binding.ID, gotStatus.BindingID)
-	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T09:58:00.000Z"), gotStatus.SyncStartedAt)
+	assert.Nil(t, gotStatus.SyncStartedAt, "ordinary restore discards host-local claims")
 	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T09:58:00.000Z"), gotStatus.LastAttemptAt)
 	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T10:00:00.000Z"), gotStatus.LastSuccessAt)
 	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T10:02:00.000Z"), gotStatus.LastErrorAt)

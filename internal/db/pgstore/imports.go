@@ -156,6 +156,15 @@ WHERE b.id=$1 AND b.project_id=$2 AND b.provider=$3 AND b.enabled=1
   AND p.deleted_at IS NULL AND s.sync_started_at=$4`,
 		guard.BindingID, params.ProjectID, provider, formatStoredTime(guard.StartedAt)).Scan(&id)
 	if err == nil {
+		if guard.BindingUpdatedAt != nil {
+			binding, err := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.id=$1`, guard.BindingID))
+			if err != nil {
+				return err
+			}
+			if !binding.UpdatedAt.Equal(*guard.BindingUpdatedAt) {
+				return db.ErrIssueSyncBindingChanged
+			}
+		}
 		return nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -242,6 +251,9 @@ func (s *Store) importIssue(
 		issueSelect+` WHERE i.id=$1 AND i.deleted_at IS NULL FOR UPDATE OF i`, *mapping.IssueID))
 	if err != nil {
 		return nil, nil, err
+	}
+	if params.ManageStatusSeparately {
+		item.Status, item.ClosedReason, item.ClosedAt = existing.Status, existing.ClosedReason, existing.ClosedAt
 	}
 	sourceCurrent := mapping.SourceUpdatedAt != nil &&
 		(db.SameImportTimestamp(*mapping.SourceUpdatedAt, item.UpdatedAt) || item.UpdatedAt.After(*mapping.SourceUpdatedAt))

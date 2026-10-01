@@ -1602,6 +1602,10 @@ func (d *Store) closeIssueGuarded(
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
+	if err := enqueueIssueStatusIntentTx(ctx, tx, evt); err != nil {
+		return db.Issue{}, nil, false, err
+	}
+
 	events := []db.Event{evt}
 	auditEvents, err := d.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
 		ProjectID:         issue.ProjectID,
@@ -1751,6 +1755,10 @@ func (d *Store) reopenIssue(
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
+	if err := enqueueIssueStatusIntentTx(ctx, tx, evt); err != nil {
+		return db.Issue{}, nil, false, err
+	}
+
 	updated, err := issueByIDTx(ctx, tx, issueID)
 	if err != nil {
 		return db.Issue{}, nil, false, err

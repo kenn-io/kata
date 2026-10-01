@@ -383,7 +383,10 @@ func TestHTTPFetcherRESTRetryTotalBudgetSpansPages(t *testing.T) {
 		CredentialResolver:  newStaticHTTPFetcherTestResolver("test-token"),
 		RESTBaseURLOverride: server.URL,
 	})
+	now := time.Now()
+	fetcher.graphQLNow = func() time.Time { return now }
 	fetcher.graphQLSleep = func(_ context.Context, d time.Duration) error {
+		now = now.Add(d)
 		sleeps = append(sleeps, d)
 		return nil
 	}

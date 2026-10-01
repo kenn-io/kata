@@ -18,7 +18,7 @@ func newNotionSyncCmd() *cobra.Command {
 }
 
 func newNotionSyncEnableCmd() *cobra.Command {
-	var source, database, status, assignee, interval, since string
+	var source, database, status, assignee, interval, since, statusSync, completeGroup, todoGroup, closedStatus, openStatus string
 	var done []string
 	var titlePrefix bool
 	cmd := &cobra.Command{Use: "enable", Short: "enable daemon-side Notion sync for this project", Args: cobra.NoArgs}
@@ -73,6 +73,25 @@ func newNotionSyncEnableCmd() *cobra.Command {
 			config["title_prefix"] = titlePrefix
 		}
 		body := &generated.EnableIssueSyncBody{Config: config}
+		if cmd.Flags().Changed("status-sync") {
+			var err error
+			body.StatusSync, err = issueStatusSyncMode(statusSync)
+			if err != nil {
+				return err
+			}
+			if statusSync == "two-way" && cmd.Flags().Changed("done-status") {
+				return invalid("Notion --done-status cannot be combined with two-way status sync")
+			}
+		}
+		for _, selector := range []struct{ flag, key, value string }{{"complete-group", "complete_group", completeGroup}, {"todo-group", "todo_group", todoGroup}, {"closed-status", "closed_status", closedStatus}, {"open-status", "open_status", openStatus}} {
+			if !cmd.Flags().Changed(selector.flag) {
+				continue
+			}
+			if (selector.flag == "complete-group" || selector.flag == "todo-group") && strings.TrimSpace(selector.value) == "" {
+				return invalid("Notion --" + selector.flag + " must be nonempty")
+			}
+			config[selector.key] = selector.value
+		}
 		if cmd.Flags().Changed("interval") {
 			value := strings.TrimSpace(interval)
 			seconds, err := strconv.Atoi(value)
@@ -89,6 +108,11 @@ func newNotionSyncEnableCmd() *cobra.Command {
 		a, projectID, err := githubSyncProjectAPI(cmd.Context())
 		if err != nil {
 			return err
+		}
+		if notionStatusSyncFlagsChanged(cmd) {
+			if err := requireIssueStatusSync(a); err != nil {
+				return err
+			}
 		}
 		a.client, err = longRunningClientForResolved(cmd.Context(), a.resolved)
 		if err != nil {
@@ -107,11 +131,16 @@ func newNotionSyncEnableCmd() *cobra.Command {
 		}
 		return issueSyncPrintBinding(cmd.OutOrStdout(), response.Body, "notion", "enabled")
 	}
+	cmd.Flags().StringVar(&statusSync, "status-sync", "", "status direction: one-way or two-way (omitted preserves saved mode; new bindings default to one-way)")
+	cmd.Flags().StringVar(&completeGroup, "complete-group", "", "Complete workflow group ID or exact name (default: Complete)")
+	cmd.Flags().StringVar(&todoGroup, "todo-group", "", "To-do workflow group ID or exact name (default: To-do)")
+	cmd.Flags().StringVar(&closedStatus, "closed-status", "", "closed write target ID or exact name; empty clears override to live Complete group default")
+	cmd.Flags().StringVar(&openStatus, "open-status", "", "open write target ID or exact name; empty clears override to live To-do group default")
 	cmd.Flags().StringVar(&source, "data-source", "", "Notion data source UUID (initial enable requires a locator)")
 	cmd.Flags().StringVar(&database, "database", "", "Notion database UUID or URL; must contain exactly one data source")
 	cmd.Flags().StringVar(&status, "status-property", "", "status property ID or exact case-sensitive name (default: sole status property)")
 	cmd.Flags().StringVar(&assignee, "assignee-property", "", "required People property: ID or exact case-sensitive name (selector may be omitted when exactly one exists)")
-	cmd.Flags().StringArrayVar(&done, "done-status", nil, "completed status option ID or exact name; repeat for each option (required initially)")
+	cmd.Flags().StringArrayVar(&done, "done-status", nil, "completed status option ID or exact name; repeat for each option (legacy one-way completion mapping)")
 	cmd.Flags().StringVar(&interval, "interval", "", "poll duration or seconds (initial default: 5m; re-enable preserves saved interval)")
 	cmd.Flags().BoolVar(&titlePrefix, "title-prefix", true, "prefix titles with [Notion]; false keeps source titles and adds the notion label (omitted preserves saved choice)")
 	cmd.Flags().StringVar(&since, "since", "", "updated-after UTC date or whole-second RFC3339; empty clears, omitted preserves saved cutoff")

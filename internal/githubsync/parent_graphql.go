@@ -159,6 +159,9 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Api-Version", githubAPIVersionHeader)
 
+	if err := f.statusCooldownError(binding); err != nil {
+		return parentGraphQLIssues{}, gitHubRetry{}, err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return parentGraphQLIssues{}, gitHubRetry{Retryable: true}, fmt.Errorf("request %s: %w", parentGraphQLResource, err)
@@ -173,6 +176,7 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 		}
 		statusErr := gitHubGraphQLStatusError(resp.Status, body)
 		if graphQLHTTPStatusRetryable(resp.StatusCode, resp.Header, body) {
+			f.deferStatusRequests(binding, retryWait(resp.Header, f.now()))
 			return parentGraphQLIssues{}, gitHubRetry{
 				Retryable: true,
 				Wait:      retryWait(resp.Header, f.now()),
@@ -187,6 +191,7 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 	}
 	if len(out.Errors) > 0 {
 		if graphQLErrorsRateLimited(out.Errors) {
+			f.deferStatusRequests(binding, retryWait(resp.Header, f.now()))
 			return parentGraphQLIssues{}, gitHubRetry{
 				Retryable: true,
 				Wait:      retryWait(resp.Header, f.now()),

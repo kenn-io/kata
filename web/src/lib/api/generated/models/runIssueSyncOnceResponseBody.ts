@@ -9,5 +9,6 @@ export interface RunIssueSyncOnceResponseBody {
   binding: IssueSyncBindingOut
   import: ImportBatchResult
   status: IssueSyncStatusOut
+  status_updated: number
   [key: string]: unknown
 }

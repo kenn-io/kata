@@ -59,7 +59,7 @@ func TestRunnerFirstSyncFetchesAllImportsCommentsEmitsEventsAndAdvancesCursor(t 
 	assert.Equal(t, h.project.ID, h.sinkCalls[0].projectID)
 }
 
-func TestRunnerUsesBindingSessionFetcherForOneRun(t *testing.T) {
+func TestRunnerCapturesBindingSessionForContent(t *testing.T) {
 	h := newRunnerHarness(t)
 	issueTime := h.now.Add(-time.Hour)
 	session := &fakeRunnerFetcher{
@@ -75,7 +75,7 @@ func TestRunnerUsesBindingSessionFetcherForOneRun(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, result.Import.Created)
-	assert.Equal(t, []Binding{{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}}, sessionFetcher.bindings)
+	assert.Equal(t, []Binding{{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}}, sessionFetcher.bindings, "one-way runs open no status session")
 	require.Len(t, session.issueCalls, 1)
 	assert.Empty(t, sessionFetcher.issueCalls)
 }
@@ -1726,7 +1726,7 @@ func TestRunnerSinceSupersededBackfillCannotRestoreOldConfig(t *testing.T) {
 		require.NoError(t, err)
 	}
 	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
-	require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
+	require.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
 	binding, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
 	require.NoError(t, err)
 	cfg, err := DecodeConfig(binding.Config)
@@ -1750,7 +1750,7 @@ func TestRunnerSinceSupersededRepositoryRefreshCannotRestoreOldConfig(t *testing
 	_, err = h.db.UpsertIssueSyncBinding(h.ctx, db.UpsertIssueSyncBindingParams{ProjectID: h.project.ID, Provider: h.binding.Provider, SourceKey: h.binding.SourceKey, RemoteID: h.binding.RemoteID, DisplayName: h.binding.DisplayName, Config: raw, IntervalSeconds: 300})
 	require.NoError(t, err)
 	close(h.fetcher.releaseRepository)
-	require.ErrorIs(t, <-done, db.ErrIssueSyncAlreadyRunning)
+	require.ErrorIs(t, <-done, db.ErrIssueSyncBindingChanged)
 	binding, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
 	require.NoError(t, err)
 	assert.JSONEq(t, string(raw), string(binding.Config))

@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/githubsync"
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 const defaultGitHubSyncIntervalSeconds = 300
@@ -62,6 +63,9 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := issueSyncStatusSummary(ctx, cfg.DB, binding, &body.Status); err != nil {
+			return nil, err
+		}
 		return &api.IssueSyncResponse{Body: body}, nil
 	})
 
@@ -95,6 +99,9 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := issueSyncStatusSummary(ctx, cfg.DB, binding, &body.Status); err != nil {
+			return nil, err
+		}
 		return &api.IssueSyncResponse{Body: body}, nil
 	})
 
@@ -114,10 +121,11 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if errors.Is(err, db.ErrNotFound) {
 			return &api.IssueSyncResponse{Body: api.IssueSyncBody{
 				Status: api.IssueSyncStatusOut{
-					ProjectID: in.ProjectID,
-					Provider:  provider,
-					Enabled:   false,
-					State:     "not_enabled",
+					ProjectID:  in.ProjectID,
+					Provider:   provider,
+					StatusSync: "one-way",
+					Enabled:    false,
+					State:      "not_enabled",
 				},
 			}}, nil
 		}
@@ -143,6 +151,9 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if progress := tracker.Snapshot(binding.ID, *status.SyncStartedAt); progress != nil {
 				body.Status.Progress = &api.IssueSyncProgressOut{Phase: progress.Phase, Completed: progress.Completed, Total: progress.Total, StartedAt: progress.StartedAt, UpdatedAt: progress.UpdatedAt}
 			}
+		}
+		if err := issueSyncStatusSummary(ctx, cfg.DB, binding, &body.Status); err != nil {
+			return nil, err
 		}
 		return &api.IssueSyncResponse{Body: body}, nil
 	})
@@ -182,17 +193,22 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 			runner = githubSyncRunner(cfg)
 		}
 		result, err := runner.RunOnce(ctx, binding.ID)
-		if err != nil {
+		if err != nil && !issuesync.IsBlockedStatusWarning(err) {
 			return nil, issueSyncRunError(err)
+		}
+		summary := issueSyncStatusOut(result.Status, result.Binding.Provider, result.Binding.Enabled)
+		if err := issueSyncStatusSummary(ctx, cfg.DB, result.Binding, &summary); err != nil {
+			return nil, err
 		}
 		bindingOut, err := issueSyncBindingOut(result.Binding)
 		if err != nil {
 			return nil, err
 		}
 		return &api.RunIssueSyncOnceResponse{Body: api.RunIssueSyncOnceResponseBody{
-			Binding: new(bindingOut),
-			Status:  issueSyncStatusOut(result.Status, result.Binding.Provider, result.Binding.Enabled),
-			Import:  result.Import,
+			Binding:       new(bindingOut),
+			Status:        summary,
+			StatusUpdated: result.StatusUpdated,
+			Import:        result.Import,
 		}}, nil
 	})
 }
@@ -235,19 +251,30 @@ func githubSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 	if err != nil {
 		return db.UpsertIssueSyncBindingParams{}, err
 	}
+	statusSync := ""
 	titlePrefixDefault := true
-	if _, present := in.Body.Config["title_prefix"]; !present {
-		existing, err := cfg.DB.IssueSyncBindingByProject(ctx, in.ProjectID)
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return db.UpsertIssueSyncBindingParams{}, issueSyncStorageError(err, issueSyncProviderGitHub)
+	var previous *githubsync.Config
+	expected := &db.IssueSyncBindingPrecondition{}
+	existing, existingErr := cfg.DB.IssueSyncBindingByProject(ctx, in.ProjectID)
+	if existingErr != nil && !errors.Is(existingErr, db.ErrNotFound) {
+		return db.UpsertIssueSyncBindingParams{}, issueSyncStorageError(existingErr, issueSyncProviderGitHub)
+	}
+	if existingErr == nil {
+		if existing.Provider != issueSyncProviderGitHub {
+			return db.UpsertIssueSyncBindingParams{}, issueSyncStorageError(db.ErrIssueSyncProjectAlreadyBound, issueSyncProviderGitHub)
 		}
-		if err == nil && existing.Provider == issueSyncProviderGitHub {
-			previous, err := githubsync.DecodeConfig(existing.Config)
-			if err != nil {
-				return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", "stored GitHub config is invalid", "", nil)
-			}
-			titlePrefixDefault = previous.UseTitlePrefix()
+		decoded, err := githubsync.DecodeConfig(existing.Config)
+		if err != nil {
+			return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", "stored GitHub config is invalid", "", nil)
 		}
+		previous = &decoded
+		statusSync = decoded.StatusSync
+		titlePrefixDefault = decoded.UseTitlePrefix()
+		expected = &db.IssueSyncBindingPrecondition{ID: existing.ID, Config: existing.Config, IntervalSeconds: existing.IntervalSeconds}
+	}
+	statusSync, err = issueSyncMode(in.Body.StatusSync, statusSync)
+	if err != nil {
+		return db.UpsertIssueSyncBindingParams{}, err
 	}
 	titlePrefix, err := issueSyncConfigBool(in.Body.Config, "title_prefix", titlePrefixDefault)
 	if err != nil {
@@ -262,18 +289,8 @@ func githubSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 		default:
 			return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", "GitHub sync since must be a string", "", nil)
 		}
-	} else {
-		existing, err := issueSyncBindingByProjectProvider(ctx, cfg.DB, in.ProjectID, issueSyncProviderGitHub)
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return db.UpsertIssueSyncBindingParams{}, issueSyncStorageError(err, issueSyncProviderGitHub)
-		}
-		if err == nil {
-			stored, err := githubsync.DecodeConfig(existing.Config)
-			if err != nil {
-				return db.UpsertIssueSyncBindingParams{}, err
-			}
-			since = stored.Since
-		}
+	} else if previous != nil {
+		since = previous.Since
 	}
 	cutoff, err := githubsync.ParseSince(since)
 	if err != nil {
@@ -300,6 +317,7 @@ func githubSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 		repoName = canonicalRepo
 	}
 	ghConfig := githubsync.Config{
+		StatusSync:  statusSync,
 		Since:       since,
 		Host:        host,
 		Owner:       owner,
@@ -317,6 +335,7 @@ func githubSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 		SourceKey:       "github:" + fetched.NodeID,
 		RemoteID:        fetched.NodeID,
 		DisplayName:     ghConfig.DisplayName(),
+		ExpectedBinding: expected,
 		Config:          configJSON,
 		IntervalSeconds: intervalSeconds,
 	}, nil
@@ -471,7 +490,11 @@ func issueSyncBody(binding *db.IssueSyncBinding, status db.IssueSyncStatus) (api
 }
 
 func issueSyncBindingOut(binding db.IssueSyncBinding) (api.IssueSyncBindingOut, error) {
-	config, err := api.DecodeJSONMap(binding.Config)
+	public, err := db.PublicIssueSyncConfig(binding.Config)
+	if err != nil {
+		return api.IssueSyncBindingOut{}, api.NewError(http.StatusInternalServerError, "internal", "issue sync binding config is invalid", "", nil)
+	}
+	config, err := api.DecodeJSONMap(public)
 	if err != nil {
 		return api.IssueSyncBindingOut{}, api.NewError(http.StatusInternalServerError, "internal", "issue sync binding config is invalid", "", nil)
 	}
@@ -515,4 +538,29 @@ func issueSyncStatusOut(status db.IssueSyncStatus, provider string, enabled bool
 		LastUnchanged: status.LastUnchanged,
 		LastComments:  status.LastComments,
 	}
+}
+
+func issueSyncMode(requested *string, saved string) (string, error) {
+	if requested == nil {
+		return saved, nil
+	}
+	if *requested != "one-way" && *requested != "two-way" {
+		return "", api.NewError(http.StatusBadRequest, "validation", "status_sync must be one-way or two-way", "", nil)
+	}
+	return *requested, nil
+}
+
+func issueSyncStatusSummary(ctx context.Context, store db.Storage, binding db.IssueSyncBinding, status *api.IssueSyncStatusOut) error {
+	mode, err := db.IssueStatusMode(binding.Config)
+	if err != nil {
+		return internalAPIError(err)
+	}
+	status.StatusSync = mode
+	if reader, ok := store.(db.IssueStatusSummaryReader); ok {
+		status.PendingCount, err = reader.CountPendingIssueStatuses(ctx, binding.ID)
+		if err != nil {
+			return issueSyncStorageError(err, binding.Provider)
+		}
+	}
+	return nil
 }

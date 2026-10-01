@@ -62,31 +62,39 @@ type UpsertIssueSyncBindingParams struct {
 // IssueSyncSuccessParams records a completed sync and advances the import
 // cursor to CursorAt.
 type IssueSyncSuccessParams struct {
-	BindingID     int64
-	StartedAt     time.Time
-	At            time.Time
-	CursorAt      time.Time
-	LastCreated   int
-	LastUpdated   int
-	LastUnchanged int
-	LastComments  int
+	// StatusError retains a blocked status warning while content advances.
+	// An empty value records complete success and clears the previous warning.
+	StatusError string
+	// RetainClaim is used only when an admitted provider write may still finish.
+	RetainClaim      bool
+	BindingUpdatedAt *time.Time
+	BindingID        int64
+	StartedAt        time.Time
+	At               time.Time
+	CursorAt         time.Time
+	LastCreated      int
+	LastUpdated      int
+	LastUnchanged    int
+	LastComments     int
 }
 
 // IssueSyncErrorParams records a failed sync attempt without advancing the
 // import cursor.
 type IssueSyncErrorParams struct {
-	BindingID int64
-	StartedAt time.Time
-	At        time.Time
-	Error     string
+	RetainClaim bool
+	BindingID   int64
+	StartedAt   time.Time
+	At          time.Time
+	Error       string
 }
 
 // IssueSyncBindingUpdateParams refreshes mutable provider-owned display/config
 // fields while preserving the source key and stable remote id.
 type IssueSyncBindingUpdateParams struct {
 	// StartedAt fences runner-owned updates to an active claim when set.
-	StartedAt   *time.Time
-	BindingID   int64
-	DisplayName string
-	Config      jsontext.Value
+	StartedAt        *time.Time
+	BindingUpdatedAt *time.Time
+	BindingID        int64
+	DisplayName      string
+	Config           jsontext.Value
 }

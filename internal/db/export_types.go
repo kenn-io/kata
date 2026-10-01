@@ -185,17 +185,21 @@ func (*IssueLabelExport) ImportKind() string { return ImportKindIssueLabel }
 
 // ImportMappingExport is one import_mappings row in export shape.
 type ImportMappingExport struct {
-	ID              int64   `json:"id"`
-	Source          string  `json:"source"`
-	ExternalID      string  `json:"external_id"`
-	ObjectType      string  `json:"object_type"`
-	ProjectID       int64   `json:"project_id"`
-	IssueID         *int64  `json:"issue_id,omitempty"`
-	CommentID       *int64  `json:"comment_id,omitempty"`
-	LinkID          *int64  `json:"link_id,omitempty"`
-	Label           *string `json:"label,omitempty"`
-	SourceUpdatedAt *string `json:"source_updated_at,omitempty"`
-	ImportedAt      string  `json:"imported_at"`
+	ID               int64   `json:"id"`
+	Source           string  `json:"source"`
+	ExternalID       string  `json:"external_id"`
+	ObjectType       string  `json:"object_type"`
+	ProjectID        int64   `json:"project_id"`
+	IssueID          *int64  `json:"issue_id,omitempty"`
+	CommentID        *int64  `json:"comment_id,omitempty"`
+	LinkID           *int64  `json:"link_id,omitempty"`
+	Label            *string `json:"label,omitempty"`
+	SourceUpdatedAt  *string `json:"source_updated_at,omitempty"`
+	ImportedAt       string  `json:"imported_at"`
+	ObservedStatus   *string `json:"observed_status,omitempty"`
+	ObservedStatusAt *string `json:"observed_status_at,omitempty"`
+	PendingEventUID  *string `json:"pending_event_uid,omitempty"`
+	RemoteLocator    *string `json:"remote_locator,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.
