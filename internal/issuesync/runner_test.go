@@ -126,6 +126,8 @@ func TestRunnerOnceOnlyClassifiesStatusPassBlocksAsWarnings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := testStore(t)
 			b := testBinding(t, s, "example-project", "synthetic")
+			b, err := s.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: b.ProjectID, Provider: b.Provider, SourceKey: b.SourceKey, RemoteID: b.RemoteID, DisplayName: b.DisplayName, Config: []byte(`{"status_sync":"two-way"}`), IntervalSeconds: 300})
+			require.NoError(t, err)
 			at := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
 			statusErr := &StatusError{Message: "status read blocked", Blocked: true}
 			a := &statusErrorTestAdapter{

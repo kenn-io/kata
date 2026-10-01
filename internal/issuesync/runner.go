@@ -124,13 +124,9 @@ func (r *Runner) runOnce(
 
 	r.config.Progress.BeginWithPhase(bindingID, syncStartedAt, r.config.Adapter.InitialPhase())
 	defer r.config.Progress.Finish(bindingID, syncStartedAt)
-	timeout := r.config.RunTimeout
-	if mode, _ := db.IssueStatusMode(binding.Config); mode == "two-way" && (timeout <= 0 || timeout > statusRunTimeout) {
-		timeout = statusRunTimeout
-	}
-	if timeout > 0 {
+	if r.config.RunTimeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
+		ctx, cancel = context.WithTimeout(ctx, r.config.RunTimeout)
 		defer cancel()
 	}
 	ctx = WithProgressReporter(ctx, func(phase string, completed, total int) {

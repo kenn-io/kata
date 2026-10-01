@@ -77,7 +77,14 @@ func TestGitHubStatusNewImportsCaptureVerifiedAPIIdentifier(t *testing.T) {
 	fetcher := &statusRunnerFetcher{fakeRunnerFetcher: h.fetcher}
 	h.runner.config.Fetcher = fetcher
 	h.runner.config.Store = h.db
-	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	cfg, err := DecodeConfig(h.binding.Config)
+	require.NoError(t, err)
+	cfg.StatusSync = "two-way"
+	raw, err := EncodeConfig(cfg)
+	require.NoError(t, err)
+	b, err := h.db.UpsertIssueSyncBinding(h.ctx, db.UpsertIssueSyncBindingParams{ProjectID: h.binding.ProjectID, Provider: "github", SourceKey: h.binding.SourceKey, RemoteID: h.binding.RemoteID, DisplayName: h.binding.DisplayName, Config: raw, IntervalSeconds: 300})
+	require.NoError(t, err)
+	result, err := h.runner.RunOnce(h.ctx, b.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Import.Created)
 	var found bool

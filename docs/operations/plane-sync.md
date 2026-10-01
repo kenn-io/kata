@@ -1,7 +1,7 @@
 ---
 title: Plane sync
 description: Mirror a Plane project into native Kata issues with daemon-owned API credentials and optional two-way status sync.
-last_edited: 2026-09-30
+last_edited: 2026-10-01
 ---
 
 # Plane sync
@@ -151,9 +151,10 @@ rebuild; missing or moved overrides block writes until corrected.
 
 Only explicit close/reopen events accepted while two-way is configured queue
 writes. Initial opt-in creates no bulk outbound changes. Pending local intent
-wins until verified readback acknowledges that exact event. Status polling visits
-existing mappings independently of `--since` and content conversion, so a content
-failure cannot suppress a status transition. Incoming cancellation closes with
+wins until verified readback acknowledges that exact event. In two-way mode,
+status polling visits existing mappings independently of `--since` and content
+conversion, so a content failure cannot suppress a status transition. One-way
+mode takes status from content imports. Incoming cancellation closes with
 `wontfix`; completion closes with `done`. Same-state observations preserve native
 closure evidence. Unavailable, archived, deleted, and moved items remain local.
 

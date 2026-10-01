@@ -73,12 +73,14 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 	if err != nil {
 		return binding, false, err
 	}
+	// One-way bindings take status from content imports, as before two-way
+	// sync existed, so a local change stays until the provider changes.
+	if mode != "two-way" {
+		return binding, false, nil
+	}
 	adapter, ok := r.config.Adapter.(StatusAdapter)
 	if !ok {
-		if mode == "two-way" {
-			return binding, true, &StatusError{Message: "provider does not support two-way status sync", Blocked: true}
-		}
-		return binding, false, nil
+		return binding, true, &StatusError{Message: "provider does not support two-way status sync", Blocked: true}
 	}
 	statusCtx, cancel := context.WithTimeout(ctx, statusRunTimeout)
 	defer cancel()
@@ -87,10 +89,7 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 		return binding, true, err
 	}
 	if run == nil {
-		if mode == "two-way" {
-			return binding, true, &StatusError{Message: "provider does not support two-way status sync", Blocked: true}
-		}
-		return binding, false, nil
+		return binding, true, &StatusError{Message: "provider does not support two-way status sync", Blocked: true}
 	}
 	reader, readOK := r.config.Store.(db.IssueStatusReader)
 	writer, writeOK := r.config.Store.(db.IssueStatusWriter)
@@ -119,7 +118,10 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 		}
 		if err == nil {
 			state.LocatorPage = next
-			binding, err = scans.UpdateIssueStatusScan(statusCtx, guard, state)
+			var refreshed db.IssueSyncBinding
+			if refreshed, err = scans.UpdateIssueStatusScan(statusCtx, guard, state); err == nil {
+				binding = refreshed
+			}
 		}
 		if err != nil {
 			failures = append(failures, err)
@@ -129,9 +131,6 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 		}
 	}
 	for _, pending := range []bool{true, false} {
-		if pending && mode != "two-way" {
-			continue
-		}
 		cursor := state.Sweep
 		if pending {
 			cursor = state.Pending
@@ -208,7 +207,9 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 					}
 				}
 			}
-			if err != nil {
+			// A newer local close or reopen superseded this write; the next lap
+			// delivers it.
+			if err != nil && !errors.Is(err, errStatusIntentChanged) {
 				failures = append(failures, err)
 			}
 			// Persist each attempted item before another provider call. A slow

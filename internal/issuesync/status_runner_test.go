@@ -207,7 +207,11 @@ func TestStatusRunnerAdmissionRejectsSupersededIntentAndExpiredHorizon(t *testin
 				return StatusObservation{}, err
 			}}
 			_, err = NewRunner(RunnerConfig{Store: s, Adapter: statusAdapter(b, run), Clock: func() time.Time { return clock }}).RunOnce(t.Context(), b.ID)
-			require.Error(t, err)
+			if kind == "newer-event" {
+				require.NoError(t, err, "superseded intent waits for the next lap")
+			} else {
+				require.Error(t, err)
+			}
 			require.Zero(t, writes)
 			require.NotNil(t, privateMapping(t, s, ms[0]).PendingEventUID)
 		})

@@ -238,7 +238,10 @@ before outbound writes. New completed options automatically count as closed;
 regrouping an existing option changes its classification. Group membership,
 rather than option names, colors, or top-level group order, defines completion.
 
-Run a bounded rotating sweep of existing issue mappings. Persist a mapping-ID
+One-way bindings keep content-driven status: content imports apply the
+provider status, no status sweep runs, and a local close or reopen stays until
+the provider item changes. In two-way mode, content imports leave status alone
+and a bounded rotating sweep of existing issue mappings applies it. Persist a mapping-ID
 cursor in existing binding config, advance it after each attempted observation,
 and wrap at the end. Capture a lap high-water mapping ID so continuous new
 mappings cannot postpone the next visit to older ones. Failures do not stop

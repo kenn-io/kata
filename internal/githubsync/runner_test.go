@@ -59,7 +59,7 @@ func TestRunnerFirstSyncFetchesAllImportsCommentsEmitsEventsAndAdvancesCursor(t 
 	assert.Equal(t, h.project.ID, h.sinkCalls[0].projectID)
 }
 
-func TestRunnerCapturesBindingSessionsForStatusAndContent(t *testing.T) {
+func TestRunnerCapturesBindingSessionForContent(t *testing.T) {
 	h := newRunnerHarness(t)
 	issueTime := h.now.Add(-time.Hour)
 	session := &fakeRunnerFetcher{
@@ -75,7 +75,7 @@ func TestRunnerCapturesBindingSessionsForStatusAndContent(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, result.Import.Created)
-	assert.Equal(t, []Binding{{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, {Host: "github.com", Owner: "example-owner", Repo: "example-repo"}}, sessionFetcher.bindings)
+	assert.Equal(t, []Binding{{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}}, sessionFetcher.bindings, "one-way runs open no status session")
 	require.Len(t, session.issueCalls, 1)
 	assert.Empty(t, sessionFetcher.issueCalls)
 }
