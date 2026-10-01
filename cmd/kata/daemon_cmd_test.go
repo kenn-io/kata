@@ -2000,7 +2000,7 @@ func TestNewDaemonTelemetryReporterUsesInstanceUID(t *testing.T) {
 	assert.True(t, createdAt.Equal(got.InstalledAt))
 }
 
-func TestNewDaemonTelemetryReporterTreatsUnstampedInstanceAsOld(t *testing.T) {
+func TestNewDaemonTelemetryReporterSendsUnstampedInstanceWithoutAge(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kata.db")
 	store := openKataTestDB(t, path)
 	_, err := store.ExecContext(t.Context(), `DELETE FROM meta WHERE key=?`, db.MetaKeyInstanceCreatedAt)
@@ -2020,27 +2020,30 @@ func TestNewDaemonTelemetryReporterTreatsUnstampedInstanceAsOld(t *testing.T) {
 	newDaemonTelemetryReporter(t.Context(), store)
 
 	assert.Equal(t, store.InstanceUID(), got.DistinctID)
-	assert.True(t, got.InstalledAt.IsZero(), "existing install passed %v", got.InstalledAt)
+	assert.True(t, got.InstalledAt.IsZero(), "unstamped install passed %v", got.InstalledAt)
 }
 
-func TestNewDaemonTelemetryReporterDisablesWhenCreationTimeUnreadable(t *testing.T) {
+func TestNewDaemonTelemetryReporterSendsWithoutAgeWhenCreationTimeUnreadable(t *testing.T) {
 	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
 	defer func() { _ = store.Close() }()
 	_, err := store.ExecContext(t.Context(), `UPDATE meta SET value='not-a-time' WHERE key=?`, db.MetaKeyInstanceCreatedAt)
 	require.NoError(t, err)
 
 	called := false
+	var got telemetry.Options
 	orig := newTelemetryReporter
-	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+	newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 		called = true
+		got = opts
 		return &fakeTelemetryReporter{}
 	}
 	t.Cleanup(func() { newTelemetryReporter = orig })
 
-	reporter := newDaemonTelemetryReporter(t.Context(), store)
+	newDaemonTelemetryReporter(t.Context(), store)
 
-	assert.False(t, called, "an unreadable creation time must not build a live reporter")
-	assert.False(t, reporter.Enabled())
+	require.True(t, called, "an unreadable creation time still builds a reporter")
+	assert.Equal(t, store.InstanceUID(), got.DistinctID)
+	assert.True(t, got.InstalledAt.IsZero(), "unreadable creation time passed %v", got.InstalledAt)
 }
 
 func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {

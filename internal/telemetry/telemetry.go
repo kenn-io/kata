@@ -31,8 +31,9 @@ type Reporter = kittelemetry.PostHogReporter
 // Options configures a telemetry reporter instance.
 type Options struct {
 	DistinctID string
-	// InstalledAt is when DistinctID was created; zero marks an install that
-	// predates recording it, which reports immediately.
+	// InstalledAt is when DistinctID was created; events carry its age as
+	// install_age_hours. Zero, for an install that predates recording it,
+	// sends events without an age.
 	InstalledAt time.Time
 	Version     string
 	Commit      string

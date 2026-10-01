@@ -154,7 +154,7 @@ func checkInstanceCreatedAt(t *testing.T, store db.Storage) error {
 	}
 	assert.Equal(t, time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC), got.UTC())
 
-	// A restored identity without one reads as an old install, never as new.
+	// A restored identity without one has no install age, never a fresh one.
 	legacyInstanceUID, err := uid.New()
 	if err != nil {
 		return err

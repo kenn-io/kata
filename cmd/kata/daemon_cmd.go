@@ -1533,9 +1533,9 @@ func webAuthenticationMode(
 func newDaemonTelemetryReporter(ctx context.Context, store db.Storage) telemetry.Client {
 	installedAt, err := store.InstanceCreatedAt(ctx)
 	if err != nil {
-		// Zero would read as an old install and skip the hold, so send nothing this run.
-		slog.Warn("telemetry disabled: read instance creation time", "err", err)
-		return telemetry.DisabledReporter()
+		// Zero sends events without an install age instead of going silent.
+		slog.Warn("telemetry install age unavailable: read instance creation time", "err", err)
+		installedAt = time.Time{}
 	}
 	return newTelemetryReporter(telemetry.Options{
 		DistinctID:  store.InstanceUID(),
