@@ -80,8 +80,8 @@ The current `work-items/` API is required; legacy `issues/` endpoints are not us
 Re-enable may omit every option to reuse saved settings. Explicit empty
 `--since ''` clears the cutoff; explicit true restores title prefixes. Dates
 mean midnight UTC and timestamp offsets normalize to UTC. Fractional seconds
-are rejected. Config changes reset the stored cursor; interval-only changes
-preserve it. The cursor records successful run starts for diagnostics. Every
+are rejected. Config changes reset the stored cursor; interval-only changes and
+status-only changes (`--status-sync`, `--closed-state`, `--open-state`) preserve it. The cursor records successful run starts for diagnostics. Every
 run traverses the whole collection and applies the cutoff locally, so workflow
 schema changes and items missed during concurrent pagination can arrive later.
 This is eventual polling, not an atomic Plane snapshot.

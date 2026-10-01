@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-09-29
+last_edited: 2026-10-01
 ---
 
 # CLI reference
@@ -956,7 +956,8 @@ explicit transition to two-way. `--interval` accepts a duration or integer secon
 defaults initially to five minutes, and preserves its saved value when omitted
 on re-enable. `--since` accepts a UTC date or whole-second RFC3339 timestamp;
 omission preserves the saved cutoff and `--since ''` clears it. A changed
-cutoff resets the cursor; an interval-only update preserves it. `--title-prefix`
+cutoff resets the cursor; interval-only and status-only updates (`--status-sync`
+and status targets) preserve it. `--title-prefix`
 defaults initially to true and omission preserves the saved choice. False retains
 original titles (empty becomes `(untitled)`) and adds the plain `notion` label.
 An explicit true restores `[Notion] ` titles. Presentation changes reset the

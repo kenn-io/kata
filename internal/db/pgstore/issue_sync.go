@@ -82,7 +82,7 @@ func (s *Store) UpsertIssueSyncBinding(
 					return err
 				}
 			}
-			matches, err := db.IssueSyncConfigMatches(existing.Config, config)
+			matches, err := db.IssueSyncContentConfigMatches(existing.Config, config)
 			if err != nil {
 				return err
 			}

@@ -103,6 +103,20 @@ func PublicIssueSyncConfig(config jsontext.Value) (jsontext.Value, error) {
 // IssueSyncConfigMatches compares user-selected fields without allowing daemon
 // scan progress or top-level object ordering to invalidate an operator snapshot.
 func IssueSyncConfigMatches(left, right jsontext.Value) (bool, error) {
+	return issueSyncConfigMatches(left, right, nil)
+}
+
+// issueStatusSettingKeys select status sync mode and write targets. Content
+// imports never read them.
+var issueStatusSettingKeys = []string{"status_sync", "todo_group_id", "closed_status_id", "open_status_id", "closed_state_id", "open_state_id"}
+
+// IssueSyncContentConfigMatches reports whether two configs produce the same
+// content imports, so a change between them keeps the content cursor.
+func IssueSyncContentConfigMatches(left, right jsontext.Value) (bool, error) {
+	return issueSyncConfigMatches(left, right, issueStatusSettingKeys)
+}
+
+func issueSyncConfigMatches(left, right jsontext.Value, ignored []string) (bool, error) {
 	var normalized [2][]byte
 	for i, raw := range []jsontext.Value{left, right} {
 		public, err := PublicIssueSyncConfig(raw)
@@ -112,6 +126,9 @@ func IssueSyncConfigMatches(left, right jsontext.Value) (bool, error) {
 		var fields map[string]jsontext.Value
 		if err := json.Unmarshal(public, &fields); err != nil {
 			return false, err
+		}
+		for _, key := range ignored {
+			delete(fields, key)
 		}
 		normalized[i], err = json.Marshal(fields, json.Deterministic(true))
 		if err != nil {
