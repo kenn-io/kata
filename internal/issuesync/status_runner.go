@@ -101,182 +101,244 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 	if err != nil {
 		return binding, true, err
 	}
-	guard := db.IssueSyncImportGuard{BindingID: binding.ID, Provider: binding.Provider, StartedAt: startedAt, BindingUpdatedAt: new(binding.UpdatedAt)}
-	attempted := map[int64]bool{}
+	pass := &statusPass{
+		r: r, ctx: ctx, statusCtx: statusCtx, run: run, reader: reader, writer: writer, scans: scans,
+		guard:   db.IssueSyncImportGuard{BindingID: binding.ID, Provider: binding.Provider, StartedAt: startedAt, BindingUpdatedAt: new(binding.UpdatedAt)},
+		binding: binding, state: state, startedAt: startedAt, eventFork: eventFork, updated: statusUpdated,
+	}
+	err = pass.execute()
+	return pass.binding, true, err
+}
+
+// statusPass carries one run's status session and claim-fenced storage.
+type statusPass struct {
+	r         *Runner
+	ctx       context.Context
+	statusCtx context.Context
+	run       StatusRun
+	reader    db.IssueStatusReader
+	writer    db.IssueStatusWriter
+	scans     db.IssueStatusScanStore
+	guard     db.IssueSyncImportGuard
+	binding   db.IssueSyncBinding
+	state     db.IssueStatusScanState
+	startedAt time.Time
+	eventFork activity.Admission
+	updated   *int
+}
+
+func (p *statusPass) execute() error {
 	var failures []error
-	if locatorRun, ok := run.(StatusLocatorRun); ok {
-		page := state.LocatorPage
-		if page == 0 {
-			page = 1
-		}
-		locators, next, err := locatorRun.Locators(statusCtx, page)
-		if err == nil && (len(locators) > statusPageSize || next < 0 || (next != 0 && next != page+1)) {
-			err = fmt.Errorf("invalid bounded status locator page")
-		}
-		if err == nil {
-			err = r.saveStatusLocators(statusCtx, guard, locators)
-		}
-		if err == nil {
-			state.LocatorPage = next
-			var refreshed db.IssueSyncBinding
-			if refreshed, err = scans.UpdateIssueStatusScan(statusCtx, guard, state); err == nil {
-				binding = refreshed
-			}
-		}
-		if err != nil {
+	if locatorRun, ok := p.run.(StatusLocatorRun); ok {
+		if err := p.refreshLocators(locatorRun); err != nil {
 			failures = append(failures, err)
-			if errors.Is(err, db.ErrIssueSyncAlreadyRunning) || errors.Is(err, db.ErrIssueSyncBindingChanged) || errors.Is(err, db.ErrIssueSyncNotEnabled) || statusCtx.Err() != nil {
-				return binding, true, errors.Join(failures...)
+			if p.stopsPass(err) {
+				return errors.Join(failures...)
 			}
 		}
 	}
+	attempted := map[int64]bool{}
 	for _, pending := range []bool{true, false} {
-		cursor := state.Sweep
-		if pending {
-			cursor = state.Pending
-		}
-		page, err := reader.ListIssueStatusMappings(statusCtx, db.IssueStatusQuery{Guard: guard, AfterID: cursor.After, ThroughID: cursor.Through, Limit: statusPageSize, PendingOnly: pending})
+		stop, err := p.lap(pending, attempted, &failures)
 		if err != nil {
-			return binding, true, errors.Join(append(failures, err)...)
+			return errors.Join(append(failures, err)...)
 		}
-		cursor.Through = page.HighWaterID
-		for _, m := range page.Mappings {
-			if err := statusCtx.Err(); err != nil {
-				return binding, true, errors.Join(append(failures, err)...)
-			}
-			previousAfter := cursor.After
-			cursor.After = m.Mapping.ID
-			if attempted[m.Mapping.ID] {
-				continue
-			}
-			if !pending && m.State.PendingEventUID != "" {
-				continue
-			}
-			attempted[m.Mapping.ID] = true
-			serviced := ""
-			var obs StatusObservation
-			if m.LoadError != nil {
-				// Invalid local state cannot change until repaired, so content proceeds.
-				err = &StatusError{Message: m.LoadError.Error(), Blocked: true}
-			} else if pending {
-				if m.PendingEvent == nil {
-					err = fmt.Errorf("pending issue status event is unavailable")
-				} else {
-					serviced = m.PendingEvent.UID
-					desired := "open"
-					if m.PendingEvent.Type == "issue.closed" {
-						desired = "closed"
-					}
-					admit := func() error {
-						if err := statusCtx.Err(); err != nil {
-							return err
-						}
-						// Request timeouts are at most30s. Leave five minutes before abandoned
-						// claims can be recovered, including queued pacing and delayed cleanup.
-						horizon := min(statusRunTimeout, r.staleLockTTL()-5*time.Minute)
-						if horizon <= 0 || !r.now().Before(startedAt.Add(horizon)) {
-							return fmt.Errorf("issue status dispatch recovery horizon expired")
-						}
-						fresh, err := reader.IssueStatusMappingByID(statusCtx, guard, m.Mapping.ID)
-						if err != nil {
-							return err
-						}
-						if fresh.Mapping.ExternalID != m.Mapping.ExternalID || fresh.Mapping.IssueID == nil || m.Mapping.IssueID == nil || *fresh.Mapping.IssueID != *m.Mapping.IssueID || fresh.State.PendingEventUID != serviced || fresh.PendingEvent == nil || fresh.PendingEvent.Type != m.PendingEvent.Type {
-							return errStatusIntentChanged
-						}
-						return nil
-					}
-					obs, err = run.WriteStatus(statusCtx, m, desired, admit)
-				}
-			} else {
-				obs, err = run.ReadStatus(statusCtx, m)
-			}
-			if err == nil {
-				issue, loadErr := r.config.Store.IssueByID(statusCtx, *m.Mapping.IssueID)
-				err = loadErr
-				if err == nil {
-					p := db.IssueStatusObservationParams{Guard: guard, MappingID: m.Mapping.ID, ExternalID: m.Mapping.ExternalID, IssueUID: issue.UID, Observation: db.IssueStatusObservation{Raw: obs.RawStatus, Version: obs.Version}, Status: obs.Status, ClosedReason: obs.ClosedReason, ClosedAt: obs.ClosedAt, ServicedEventUID: serviced}
-					// Notion's page UUID is already external_id. Only an additional provider
-					// API identifier, such as the GitHub issue number, belongs in the locator.
-					if binding.Provider == "github" && obs.Locator != "" {
-						p.RemoteLocator = new(obs.Locator)
-					}
-					changed, events, saveErr := writer.ObserveIssueStatus(statusCtx, p)
-					err = saveErr
-					if saveErr == nil {
-						if changed {
-							(*statusUpdated)++
-						}
-						r.emitEvents(ctx, binding.ProjectID, events, eventFork)
-					}
-				}
-			}
-			// A newer local close or reopen superseded this write; the next lap
-			// delivers it.
-			if err != nil && !errors.Is(err, errStatusIntentChanged) {
-				failures = append(failures, err)
-			}
-			// A rate limit fails every later request fast. Leave this mapping for
-			// the next run rather than consuming the rest of the lap as failures.
-			var limited *StatusError
-			rateLimited := errors.As(err, &limited) && limited.RetryAfter > 0 && !limited.Ambiguous
-			if rateLimited {
-				cursor.After = previousAfter
-			}
-			// Persist each attempted item before another provider call. A slow
-			// prefix must not reset the whole page when the run expires. The
-			// cleanup budget keeps canceled attempts durable under the same claim.
-			if pending {
-				state.Pending = cursor
-			} else {
-				state.Sweep = cursor
-			}
-			checkpointCtx := statusCtx
-			var cleanupCancel context.CancelFunc
-			if statusCtx.Err() != nil {
-				checkpointCtx, cleanupCancel = r.cleanupContext(statusCtx)
-			}
-			refreshed, checkpointErr := scans.UpdateIssueStatusScan(checkpointCtx, guard, state)
-			// Cancellation can race the checkpoint admission above. Retry once
-			// with the detached budget; the store still rechecks live authority.
-			if checkpointErr != nil && cleanupCancel == nil && statusCtx.Err() != nil {
-				checkpointCtx, cleanupCancel = r.cleanupContext(statusCtx)
-				refreshed, checkpointErr = scans.UpdateIssueStatusScan(checkpointCtx, guard, state)
-			}
-			if cleanupCancel != nil {
-				cleanupCancel()
-			}
-			if checkpointErr != nil {
-				return binding, true, errors.Join(append(failures, checkpointErr)...)
-			}
-			binding = refreshed
-			if rateLimited {
-				return binding, true, errors.Join(failures...)
-			}
-			if err != nil {
-				if ambiguousStatusError(err) {
-					return binding, true, errors.Join(failures...)
-				}
-				if errors.Is(err, db.ErrIssueSyncAlreadyRunning) || errors.Is(err, db.ErrIssueSyncBindingChanged) || errors.Is(err, db.ErrIssueSyncNotEnabled) || statusCtx.Err() != nil {
-					return binding, true, errors.Join(failures...)
-				}
-			}
+		if stop {
+			break
 		}
-		if len(page.Mappings) < statusPageSize || cursor.After >= cursor.Through {
-			cursor = db.IssueStatusScanCursor{}
-		}
-		if pending {
-			state.Pending = cursor
-		} else {
-			state.Sweep = cursor
-		}
-		refreshed, err := scans.UpdateIssueStatusScan(statusCtx, guard, state)
-		if err != nil {
-			return binding, true, errors.Join(append(failures, err)...)
-		}
-		binding = refreshed
 	}
-	return binding, true, errors.Join(failures...)
+	return errors.Join(failures...)
+}
+
+// stopsPass reports errors after which no further item in this run can succeed.
+func (p *statusPass) stopsPass(err error) bool {
+	return errors.Is(err, db.ErrIssueSyncAlreadyRunning) || errors.Is(err, db.ErrIssueSyncBindingChanged) || errors.Is(err, db.ErrIssueSyncNotEnabled) || p.statusCtx.Err() != nil
+}
+
+func (p *statusPass) refreshLocators(run StatusLocatorRun) error {
+	page := p.state.LocatorPage
+	if page == 0 {
+		page = 1
+	}
+	locators, next, err := run.Locators(p.statusCtx, page)
+	if err != nil {
+		return err
+	}
+	if len(locators) > statusPageSize || next < 0 || (next != 0 && next != page+1) {
+		return fmt.Errorf("invalid bounded status locator page")
+	}
+	if err := p.r.saveStatusLocators(p.statusCtx, p.guard, locators); err != nil {
+		return err
+	}
+	p.state.LocatorPage = next
+	refreshed, err := p.scans.UpdateIssueStatusScan(p.statusCtx, p.guard, p.state)
+	if err != nil {
+		return err
+	}
+	p.binding = refreshed
+	return nil
+}
+
+// lap visits one page of pending or sweep mappings, checkpointing each item.
+// It reports stop when the rest of the pass must wait for another run.
+func (p *statusPass) lap(pending bool, attempted map[int64]bool, failures *[]error) (bool, error) {
+	cursor := p.state.Sweep
+	if pending {
+		cursor = p.state.Pending
+	}
+	page, err := p.reader.ListIssueStatusMappings(p.statusCtx, db.IssueStatusQuery{Guard: p.guard, AfterID: cursor.After, ThroughID: cursor.Through, Limit: statusPageSize, PendingOnly: pending})
+	if err != nil {
+		return true, err
+	}
+	cursor.Through = page.HighWaterID
+	for _, m := range page.Mappings {
+		if err := p.statusCtx.Err(); err != nil {
+			return true, err
+		}
+		previousAfter := cursor.After
+		cursor.After = m.Mapping.ID
+		if attempted[m.Mapping.ID] || (!pending && m.State.PendingEventUID != "") {
+			continue
+		}
+		attempted[m.Mapping.ID] = true
+		itemErr := p.service(m, pending)
+		// A newer local close or reopen superseded this write; the next lap
+		// delivers it.
+		if itemErr != nil && !errors.Is(itemErr, errStatusIntentChanged) {
+			*failures = append(*failures, itemErr)
+		}
+		// A rate limit fails every later request fast. Leave this mapping for
+		// the next run rather than consuming the rest of the lap as failures.
+		var limited *StatusError
+		rateLimited := errors.As(itemErr, &limited) && limited.RetryAfter > 0 && !limited.Ambiguous
+		if rateLimited {
+			cursor.After = previousAfter
+		}
+		if err := p.checkpoint(pending, cursor); err != nil {
+			return true, err
+		}
+		if rateLimited || itemErr != nil && (ambiguousStatusError(itemErr) || p.stopsPass(itemErr)) {
+			return true, nil
+		}
+	}
+	if len(page.Mappings) < statusPageSize || cursor.After >= cursor.Through {
+		cursor = db.IssueStatusScanCursor{}
+	}
+	p.setCursor(pending, cursor)
+	refreshed, err := p.scans.UpdateIssueStatusScan(p.statusCtx, p.guard, p.state)
+	if err != nil {
+		return true, err
+	}
+	p.binding = refreshed
+	return false, nil
+}
+
+func (p *statusPass) setCursor(pending bool, cursor db.IssueStatusScanCursor) {
+	if pending {
+		p.state.Pending = cursor
+	} else {
+		p.state.Sweep = cursor
+	}
+}
+
+// checkpoint persists each attempted item before another provider call. A
+// slow prefix must not reset the whole page when the run expires. The cleanup
+// budget keeps canceled attempts durable under the same claim.
+func (p *statusPass) checkpoint(pending bool, cursor db.IssueStatusScanCursor) error {
+	p.setCursor(pending, cursor)
+	checkpointCtx := p.statusCtx
+	var cleanupCancel context.CancelFunc
+	if p.statusCtx.Err() != nil {
+		checkpointCtx, cleanupCancel = p.r.cleanupContext(p.statusCtx)
+	}
+	refreshed, err := p.scans.UpdateIssueStatusScan(checkpointCtx, p.guard, p.state)
+	// Cancellation can race the checkpoint admission above. Retry once
+	// with the detached budget; the store still rechecks live authority.
+	if err != nil && cleanupCancel == nil && p.statusCtx.Err() != nil {
+		checkpointCtx, cleanupCancel = p.r.cleanupContext(p.statusCtx)
+		refreshed, err = p.scans.UpdateIssueStatusScan(checkpointCtx, p.guard, p.state)
+	}
+	if cleanupCancel != nil {
+		cleanupCancel()
+	}
+	if err != nil {
+		return err
+	}
+	p.binding = refreshed
+	return nil
+}
+
+// service reads or delivers one mapping's status and records the result.
+func (p *statusPass) service(m db.IssueStatusMapping, pending bool) error {
+	if m.LoadError != nil {
+		// Invalid local state cannot change until repaired, so content proceeds.
+		return &StatusError{Message: m.LoadError.Error(), Blocked: true}
+	}
+	if !pending {
+		obs, err := p.run.ReadStatus(p.statusCtx, m)
+		if err != nil {
+			return err
+		}
+		return p.observe(m, obs, "")
+	}
+	if m.PendingEvent == nil {
+		return fmt.Errorf("pending issue status event is unavailable")
+	}
+	desired := "open"
+	if m.PendingEvent.Type == "issue.closed" {
+		desired = "closed"
+	}
+	obs, err := p.run.WriteStatus(p.statusCtx, m, desired, p.admission(m))
+	if err != nil {
+		return err
+	}
+	return p.observe(m, obs, m.PendingEvent.UID)
+}
+
+// admission runs immediately before a PATCH. It refuses dispatch when the
+// claim may soon be recovered or a newer local mutation replaced the intent.
+func (p *statusPass) admission(m db.IssueStatusMapping) func() error {
+	return func() error {
+		if err := p.statusCtx.Err(); err != nil {
+			return err
+		}
+		// Request timeouts are at most30s. Leave five minutes before abandoned
+		// claims can be recovered, including queued pacing and delayed cleanup.
+		horizon := min(statusRunTimeout, p.r.staleLockTTL()-5*time.Minute)
+		if horizon <= 0 || !p.r.now().Before(p.startedAt.Add(horizon)) {
+			return fmt.Errorf("issue status dispatch recovery horizon expired")
+		}
+		fresh, err := p.reader.IssueStatusMappingByID(p.statusCtx, p.guard, m.Mapping.ID)
+		if err != nil {
+			return err
+		}
+		if fresh.Mapping.ExternalID != m.Mapping.ExternalID || fresh.Mapping.IssueID == nil || m.Mapping.IssueID == nil || *fresh.Mapping.IssueID != *m.Mapping.IssueID || fresh.State.PendingEventUID != m.PendingEvent.UID || fresh.PendingEvent == nil || fresh.PendingEvent.Type != m.PendingEvent.Type {
+			return errStatusIntentChanged
+		}
+		return nil
+	}
+}
+
+func (p *statusPass) observe(m db.IssueStatusMapping, obs StatusObservation, serviced string) error {
+	issue, err := p.r.config.Store.IssueByID(p.statusCtx, *m.Mapping.IssueID)
+	if err != nil {
+		return err
+	}
+	params := db.IssueStatusObservationParams{Guard: p.guard, MappingID: m.Mapping.ID, ExternalID: m.Mapping.ExternalID, IssueUID: issue.UID, Observation: db.IssueStatusObservation{Raw: obs.RawStatus, Version: obs.Version}, Status: obs.Status, ClosedReason: obs.ClosedReason, ClosedAt: obs.ClosedAt, ServicedEventUID: serviced}
+	// Notion's page UUID is already external_id. Only an additional provider
+	// API identifier, such as the GitHub issue number, belongs in the locator.
+	if p.binding.Provider == "github" && obs.Locator != "" {
+		params.RemoteLocator = new(obs.Locator)
+	}
+	changed, events, err := p.writer.ObserveIssueStatus(p.statusCtx, params)
+	if err != nil {
+		return err
+	}
+	if changed {
+		(*p.updated)++
+	}
+	p.r.emitEvents(p.ctx, p.binding.ProjectID, events, p.eventFork)
+	return nil
 }
 
 // StatusLocatorRun enumerates one verified provider page without fetching any
