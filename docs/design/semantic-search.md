@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-25
+last_edited: 2026-10-01
 ---
 
 # Semantic search technical notes
@@ -240,9 +240,10 @@ Failure classes:
   fill continues past it. If the replay also fails, the 400 is request-level
   and handled as definitive misconfiguration below; a systemic 400 must
   never stamp the corpus as skipped.
-- 401 / 403 / 404 / request-level 400 is definitive misconfiguration: pin
-  backoff at the maximum immediately (no hot loop) and surface the error in
-  health.
+- Any other 4xx except 408 and 429 (401, 403, 404, 422, request-level 400)
+  is definitive misconfiguration: pin backoff at the maximum immediately (no
+  hot loop) and surface the error in health. This includes a 4xx that Kit
+  cannot classify, because the same request fails the same way on retry.
 - 429: honor `Retry-After` when present, otherwise normal backoff.
 - 5xx / timeouts / connection errors: exponential backoff, 1s doubling to a
   5m cap. The backlog gauge is published before each fill starts, decreases

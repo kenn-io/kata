@@ -237,7 +237,7 @@ func (r *Reconciler) reconcileAdmitted(ctx context.Context) (bool, error) {
 
 func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
 	if apiErr, ok := errors.AsType[*embedclient.APIError](err); ok {
-		if apiErr.InputRejected() || apiErr.CredentialsRejected() || apiErr.StatusCode == http.StatusNotFound {
+		if requestRejected(apiErr) {
 			return r.cfg.MaxBackoff
 		}
 		if apiErr.RetryAfter > 0 {
@@ -246,6 +246,19 @@ func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
 	}
 	next := min(cur*2, r.cfg.MaxBackoff)
 	return next
+}
+
+// requestRejected reports a client error that will fail the same way on the
+// next attempt: a refused key, an unknown model or route, an unsupported
+// field, or an input the endpoint refuses. Every Kit Reason for a 4xx other
+// than 408 and 429 means that, including ReasonUnknown, so the status decides.
+// Waiting the full backoff keeps a misconfiguration from being retried like a
+// transient failure. Whether a document is skipped is decided separately by
+// the fill's replay probe.
+func requestRejected(apiErr *embedclient.APIError) bool {
+	return apiErr.StatusCode >= http.StatusBadRequest &&
+		apiErr.StatusCode < http.StatusInternalServerError &&
+		!apiErr.Retryable()
 }
 
 // reconcileOnce refreshes the mirror, drains the fill for the desired

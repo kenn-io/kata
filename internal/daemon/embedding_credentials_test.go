@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -146,5 +147,53 @@ func TestRejectedCredentialExplainsUnavailableOldGeneration(t *testing.T) {
 		if !errors.As(err, &me) || me.Status() != 400 || !strings.Contains(err.Error(), "rejected the API key") {
 			t.Fatalf("%s returned %v", mode, err)
 		}
+	}
+}
+
+// A request-wide 4xx that Kit cannot attribute to one input (an unsupported
+// field, an unknown model) fails the same way on every retry. The fill must
+// leave documents pending, and the reconciler must wait the full backoff
+// instead of retrying it like a transient failure.
+func TestRequestWideRejectionKeepsBacklogAndWaitsMaxBackoff(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"unattributed 400", http.StatusBadRequest, `{"error":{"message":"Unsupported parameter: 'encoding_format'"}}`},
+		{"unknown model 400", http.StatusBadRequest, `{"error":{"message":"The model 'example-model' does not exist"}}`},
+		{"unattributed 422", http.StatusUnprocessableEntity, `{"detail":"validation failed"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := newReconcilerTestStore(t)
+			idx := openTestVectorIndex(t)
+			p, _ := store.CreateProject(ctx, "spoke-project")
+			if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "t", Body: "b", Author: "agent"}); err != nil {
+				t.Fatal(err)
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			c, err := embedding.New(embedding.Config{BaseURL: srv.URL, Model: "example-model", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := NewReconciler(store, idx, c, ReconcilerConfig{MinBackoff: time.Second, MaxBackoff: 5 * time.Minute})
+			err = r.reconcileOnce(ctx)
+			if err == nil {
+				t.Fatal("request-wide rejection must fail the fill")
+			}
+			if h := r.Health(); h.Backlog != 1 || h.Skipped != 0 || h.Embedded != 0 || h.LastErrorStatus != tc.status {
+				t.Fatalf("unexpected health %+v", h)
+			}
+			if got := r.nextBackoff(time.Second, err); got != 5*time.Minute {
+				t.Fatalf("backoff = %v, want max 5m", got)
+			}
+		})
 	}
 }

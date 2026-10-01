@@ -12,7 +12,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.
   Embedding requests no longer send `"dimensions": 0` unless dimensions are
   requested, so servers no longer refuse the request or return empty vectors.
-  The fix comes from Kit v0.29.1.
+  When the embedding server refuses every request, for example because the
+  model name is wrong or it rejects a field, Kata waits the full retry backoff
+  (5 minutes by default) instead of retrying quickly, and leaves documents
+  pending. The fixes come from Kit v0.29.2.
 
 - Find every-session contract setup in `kata init --help`,
   `kata quickstart --help`, the quickstart guide, and the README. Install it
