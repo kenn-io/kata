@@ -1763,7 +1763,7 @@ func startEmbeddingReconciler(
 	})
 	startEmbeddingNudge(ctx, workers, bcast, reconciler)
 	reconciler.Wake() // initial backfill sweep
-	return embedder, idx, reconciler.Health, reconciler.Wake, nil
+	return embedder, idx, reconciler.Health, reconciler.RetryNow, nil
 }
 
 // startEmbeddingNudge subscribes to the broadcaster and wakes the reconciler on

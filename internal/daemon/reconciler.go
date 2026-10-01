@@ -57,6 +57,7 @@ type Reconciler struct {
 	emb   embedder
 	cfg   ReconcilerConfig
 	wake  chan struct{}
+	retry chan struct{}
 	now   func() time.Time
 
 	mu       sync.Mutex
@@ -96,15 +97,26 @@ func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg Reconc
 		emb:    emb,
 		cfg:    cfg,
 		wake:   make(chan struct{}, 1),
+		retry:  make(chan struct{}, 1),
 		now:    cfg.Now,
 		health: ReconcilerHealth{Configured: true},
 	}
 }
 
 // Wake nudges the reconciler to run a cycle soon (non-blocking, coalesced).
+// After a definitive request rejection, pending work waits for backoff expiry.
 func (r *Reconciler) Wake() {
 	select {
 	case r.wake <- struct{}{}:
+	default:
+	}
+}
+
+// RetryNow retries pending work after an explicit credential reload, bypassing
+// the rejection backoff (non-blocking, coalesced).
+func (r *Reconciler) RetryNow() {
+	select {
+	case r.retry <- struct{}{}:
 	default:
 	}
 }
@@ -181,6 +193,7 @@ func (b *leaseRetryBackoff) afterAttempt(leadershipAcquired bool, err error) tim
 
 func (r *Reconciler) runLeader(ctx context.Context) error {
 	backoff := r.cfg.MinBackoff
+	rejected := false
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -188,6 +201,10 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-r.wake:
+			if rejected {
+				continue // The timer will drain pending work without extending the delay.
+			}
+		case <-r.retry:
 		case <-timer.C:
 		}
 		attempted, err := r.reconcileAdmitted(ctx)
@@ -199,6 +216,7 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 			continue
 		}
 		if err == nil {
+			rejected = false
 			backoff = r.cfg.MinBackoff
 			timer.Reset(r.cfg.SweepEvery)
 		} else {
@@ -209,6 +227,8 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 				return errors.Join(err, leaseErr)
 			}
 			backoff = r.nextBackoff(backoff, err)
+			apiErr, ok := errors.AsType[*embedclient.APIError](err)
+			rejected = ok && requestRejected(apiErr)
 			timer.Reset(backoff)
 		}
 	}
@@ -237,7 +257,7 @@ func (r *Reconciler) reconcileAdmitted(ctx context.Context) (bool, error) {
 
 func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
 	if apiErr, ok := errors.AsType[*embedclient.APIError](err); ok {
-		if apiErr.InputRejected() || apiErr.CredentialsRejected() || apiErr.StatusCode == http.StatusNotFound {
+		if requestRejected(apiErr) {
 			return r.cfg.MaxBackoff
 		}
 		if apiErr.RetryAfter > 0 {
@@ -246,6 +266,19 @@ func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
 	}
 	next := min(cur*2, r.cfg.MaxBackoff)
 	return next
+}
+
+// requestRejected reports a client error that will fail the same way on the
+// next attempt: a refused key, an unknown model or route, an unsupported
+// field, or an input the endpoint refuses. Every Kit Reason for a 4xx other
+// than 408 and 429 means that, including ReasonUnknown, so the status decides.
+// Waiting the full backoff keeps a misconfiguration from being retried like a
+// transient failure. Whether a document is skipped is decided separately by
+// the fill's replay probe.
+func requestRejected(apiErr *embedclient.APIError) bool {
+	return apiErr.StatusCode >= http.StatusBadRequest &&
+		apiErr.StatusCode < http.StatusInternalServerError &&
+		!apiErr.Retryable()
 }
 
 // reconcileOnce refreshes the mirror, drains the fill for the desired

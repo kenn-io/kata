@@ -1,13 +1,27 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-09-28
+last_edited: 2026-10-01
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Use OpenAI-compatible embedding servers that reject a `dimensions` field.
+  Embedding requests no longer send `"dimensions": 0` unless dimensions are
+  requested, so servers no longer refuse the request or return empty vectors.
+  When the embedding server refuses every request, for example because the
+  model name is wrong or it rejects a field, Kata waits the full retry backoff
+  (5 minutes by default) instead of retrying quickly, and leaves documents
+  pending. Project activity cannot bypass this delay; `kata daemon reload`
+  retries immediately after reloading embedding credentials. Uses Kit v0.29.2.
+
+- Keep semantic search indexing past an issue that is too long for the
+  embedding model. The embedding server's error now decides the skip: an issue
+  it reports as too long or refused by policy is skipped and the rest keep
+  indexing, instead of every later index pass stopping at that issue.
 
 - Find every-session contract setup in `kata init --help`,
   `kata quickstart --help`, the quickstart guide, and the README. Install it
