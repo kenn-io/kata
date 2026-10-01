@@ -344,7 +344,7 @@ func (d *Store) ExportIssueLabels(ctx context.Context, f db.ExportFilter) iter.S
 // drop unless IncludeDeleted is true.
 func (d *Store) ExportImportMappings(ctx context.Context, f db.ExportFilter) iter.Seq2[db.ImportMappingExport, error] {
 	query := `SELECT id, source, external_id, object_type, project_id, issue_id, comment_id, link_id, label,
-	                 CAST(source_updated_at AS TEXT), CAST(imported_at AS TEXT)
+	                 CAST(source_updated_at AS TEXT), CAST(imported_at AS TEXT), observed_status, CAST(observed_status_at AS TEXT), pending_event_uid, remote_locator
 	          FROM import_mappings`
 	var clauses []string
 	var args []any
@@ -371,10 +371,10 @@ func (d *Store) ExportImportMappings(ctx context.Context, f db.ExportFilter) ite
 		func(rows *sql.Rows) (db.ImportMappingExport, error) {
 			var rec db.ImportMappingExport
 			if err := rows.Scan(&rec.ID, &rec.Source, &rec.ExternalID, &rec.ObjectType, &rec.ProjectID,
-				&rec.IssueID, &rec.CommentID, &rec.LinkID, &rec.Label, &rec.SourceUpdatedAt, &rec.ImportedAt); err != nil {
+				&rec.IssueID, &rec.CommentID, &rec.LinkID, &rec.Label, &rec.SourceUpdatedAt, &rec.ImportedAt, &rec.ObservedStatus, &rec.ObservedStatusAt, &rec.PendingEventUID, &rec.RemoteLocator); err != nil {
 				return db.ImportMappingExport{}, scanError("import_mapping", err)
 			}
-			return rec, nil
+			return db.NormalizeIssueStatusExport(rec)
 		})
 }
 

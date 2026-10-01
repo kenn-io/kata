@@ -20,6 +20,26 @@ const maxImportItemBytes = 64 << 20
 // BuildImportBatch projects complete page content without supplying poll times,
 // comments, upstream labels, or relationships. The caller attaches the project and guard.
 func BuildImportBatch(sourceKey string, c Config, pages []PageContent) (db.ImportBatchParams, error) {
+	if c.CompleteGroupID != "" {
+		return db.ImportBatchParams{}, fmt.Errorf("notion group completion requires the live status schema")
+	}
+	return buildImportBatch(sourceKey, c, pages, nil)
+}
+
+// BuildImportBatchWithSchema classifies each page using validated live group
+// membership; saved option names or order never determine completion.
+func BuildImportBatchWithSchema(sourceKey string, c Config, source DataSource, pages []PageContent) (db.ImportBatchParams, error) {
+	if err := ValidateSchema(c, source); err != nil {
+		return db.ImportBatchParams{}, err
+	}
+	status, err := ResolveStatusSchema(c, source)
+	if err != nil {
+		return db.ImportBatchParams{}, err
+	}
+	return buildImportBatch(sourceKey, c, pages, &status)
+}
+
+func buildImportBatch(sourceKey string, c Config, pages []PageContent, liveStatus *StatusSchema) (db.ImportBatchParams, error) {
 	c, err := normalizeConfig(c)
 	if err != nil {
 		return db.ImportBatchParams{}, err
@@ -84,8 +104,15 @@ func BuildImportBatch(sourceKey string, c Config, pages []PageContent) (db.Impor
 			owner := "notion:" + ownerID
 			item.Owner = &owner
 		}
-		if page.StatusID != nil && slices.Contains(c.DoneStatusIDs, *page.StatusID) {
+		if liveStatus != nil {
+			item.Status, err = liveStatus.Classify(page.StatusID)
+			if err != nil {
+				return db.ImportBatchParams{}, err
+			}
+		} else if page.StatusID != nil && slices.Contains(c.DoneStatusIDs, *page.StatusID) {
 			item.Status = "closed"
+		}
+		if item.Status == "closed" {
 			reason, closedAt := "done", item.UpdatedAt
 			item.ClosedReason, item.ClosedAt = &reason, &closedAt
 		}

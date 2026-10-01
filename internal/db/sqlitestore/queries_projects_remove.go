@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"time"
 
@@ -57,13 +58,15 @@ func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db
 		project.ID); err != nil {
 		return db.Project{}, nil, fmt.Errorf("archive project: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE issue_sync_bindings
-		   SET enabled = 0,
-		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE project_id = ?`,
-		project.ID); err != nil {
-		return db.Project{}, nil, fmt.Errorf("disable issue sync for archived project: %w", err)
+	binding, bindingErr := issueSyncBindingByProject(ctx, tx, project.ID)
+	if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
+		return db.Project{}, nil, bindingErr
+	}
+	if bindingErr == nil {
+		updatedAt := db.NextIssueSyncBindingUpdatedAt(binding.UpdatedAt, time.Now()).Format(sqliteTimeFormat)
+		if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET enabled = 0, updated_at = ? WHERE id = ?`, updatedAt, binding.ID); err != nil {
+			return db.Project{}, nil, fmt.Errorf("disable issue sync for archived project: %w", err)
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE external_root_bindings

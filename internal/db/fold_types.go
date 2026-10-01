@@ -54,6 +54,15 @@ type FoldIssue struct {
 	ProjectUID          string
 	CreatedAt           string
 	UpdatedAt           string
+
+	// StatusIntentUID is in-memory provenance, not exported snapshot state.
+	// Callers may enqueue only newly accepted explicit events or retain their
+	// existing pending UID; folding history alone never grants write authority.
+	StatusIntentUID string `json:"-"`
+	// StatusClock is the latest status-bearing writer, including same-state
+	// restatements. Newly accepted intent must outrank the previous projection's
+	// writer; an older delayed event cannot manufacture a pending pointer.
+	StatusClock FoldClock `json:"-"`
 }
 
 // FoldComment is the replayed comment state keyed by stable comment UID.

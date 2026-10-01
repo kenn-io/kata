@@ -318,6 +318,42 @@ func TestClientRetryAndCancellation(t *testing.T) {
 	require.NotContains(t, err.Error(), "example-api-key")
 }
 
+func TestClientPreservesDeadlineFromRequestExecution(t *testing.T) {
+	c := testConfig()
+	client := NewClient(ClientConfig{
+		Daemon:    config.PlaneSyncConfig{APIOrigin: c.APIOrigin},
+		LookupEnv: func(string) (string, bool) { return "example-api-key", true },
+		Transport: planeRoundTrip(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	})
+	s, err := client.ForRun(context.Background(), c)
+	require.NoError(t, err)
+
+	_, err = s.Project(context.Background(), c)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestClientPreservesDeadlineFromResponseBodyRead(t *testing.T) {
+	c := testConfig()
+	client := NewClient(ClientConfig{
+		Daemon:    config.PlaneSyncConfig{APIOrigin: c.APIOrigin},
+		LookupEnv: func(string) (string, bool) { return "example-api-key", true },
+		Transport: planeRoundTrip(func(*http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(planeErrorReader{err: context.DeadlineExceeded}),
+			}, nil
+		}),
+	})
+	s, err := client.ForRun(context.Background(), c)
+	require.NoError(t, err)
+
+	_, err = s.Project(context.Background(), c)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
 func TestClientCollectionBounds(t *testing.T) {
 	for _, kind := range []string{"pages", "items"} {
 		t.Run(kind, func(t *testing.T) {
@@ -367,6 +403,10 @@ func TestClientBoundsAggregateCollectionMemory(t *testing.T) {
 type planeRoundTrip func(*http.Request) (*http.Response, error)
 
 func (f planeRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type planeErrorReader struct{ err error }
+
+func (r planeErrorReader) Read([]byte) (int, error) { return 0, r.err }
 
 func TestClientAdmissionCancellationWhileAnotherCallerWaits(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})

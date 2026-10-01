@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go.kenn.io/kata/internal/issuesync"
 )
 
 const notionOrigin = "https://api.notion.com"
@@ -142,6 +144,14 @@ func (c *Client) deferRequests(delay time.Duration, cause error) {
 // request bounds decoded bytes before parsing and never reports raw remote data.
 // POST is used exclusively for the idempotent data-source query operation.
 func (s *clientSession) request(ctx context.Context, method, path string, body any, out any) error {
+	return s.requestWithAdmission(ctx, method, path, body, out, nil)
+}
+
+func (s *clientSession) requestWithAdmission(ctx context.Context, method, path string, body any, out any, admission func() error) error {
+	mutating := method == http.MethodPatch
+	if mutating && admission == nil {
+		return fmt.Errorf("notion status writes require delivery admission")
+	}
 	var payload []byte
 	if body != nil {
 		var err error
@@ -155,6 +165,7 @@ func (s *clientSession) request(ctx context.Context, method, path string, body a
 			return err
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		attemptCtx, sent := issuesync.TrackRequestWrite(attemptCtx)
 		req, err := http.NewRequestWithContext(attemptCtx, method, notionOrigin+path, bytes.NewReader(payload))
 		if err != nil {
 			cancel()
@@ -166,6 +177,16 @@ func (s *clientSession) request(ctx context.Context, method, path string, body a
 		if body != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
+		if mutating {
+			if err := admission(); err != nil {
+				cancel()
+				return err
+			}
+			if err := attemptCtx.Err(); err != nil {
+				cancel()
+				return err
+			}
+		}
 		res, err := s.client.http.Do(req)
 		var raw []byte
 		status := 0
@@ -176,7 +197,15 @@ func (s *clientSession) request(ctx context.Context, method, path string, body a
 			raw, err = io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 			_ = res.Body.Close()
 		}
+		attemptErr := attemptCtx.Err()
 		cancel()
+		if mutating {
+			contextErr := ctx.Err()
+			if contextErr == nil {
+				contextErr = attemptErr
+			}
+			return s.statusResponse(raw, status, retryAfter, err, contextErr, sent(), out)
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -199,7 +228,7 @@ func (s *clientSession) request(ctx context.Context, method, path string, body a
 			_ = json.Unmarshal(raw, &remote)
 		}
 		if status == 429 && remote.Additional.Reason == "public_api_request_blocked" {
-			return fmt.Errorf("notion HTTP 429: public_api_request_blocked")
+			return &issuesync.StatusError{Message: "notion HTTP 429: public_api_request_blocked", HTTPStatus: status, Blocked: true}
 		}
 		retryable := (err != nil && (status == 0 || (status >= 200 && status < 300))) || status == 429 || status == 529 || status == 500 || status == 502 || status == 503 || status == 504
 		safeErr := fmt.Errorf("notion HTTP %d: %s", status, safeNotionCode(remote.Code))
@@ -209,11 +238,14 @@ func (s *clientSession) request(ctx context.Context, method, path string, body a
 			} else {
 				safeErr = fmt.Errorf("notion HTTP %d: %s (response read failed)", status, safeNotionCode(remote.Code))
 			}
-			if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+			if errors.Is(attemptErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 				safeErr = fmt.Errorf("%v: %w", safeErr, context.DeadlineExceeded)
 			}
 		}
 		if !retryable {
+			if err == nil {
+				return &issuesync.StatusError{Message: safeErr.Error(), HTTPStatus: status, Blocked: status >= 300 && status < 500 && status != 409 && status != 429}
+			}
 			return safeErr
 		}
 		//nolint:gosec // Retry jitter is non-security randomness, never a credential or identifier.
@@ -227,6 +259,45 @@ func (s *clientSession) request(ctx context.Context, method, path string, body a
 		}
 	}
 	panic("unreachable")
+}
+
+// statusResponse returns after one PATCH dispatch. A lost response or server
+// failure may follow a committed change, so callers must re-read before retry.
+func (s *clientSession) statusResponse(raw []byte, status int, retryAfter string, readErr, contextErr error, sent bool, out any) error {
+	if readErr == nil && contextErr == nil && len(raw) <= maxResponseBytes && status >= 200 && status < 300 {
+		if json.Unmarshal(raw, out) == nil {
+			return nil
+		}
+		return &issuesync.StatusError{Message: "invalid Notion status response JSON", HTTPStatus: status, Ambiguous: true}
+	}
+	var remote struct {
+		Code       string `json:"code"`
+		Additional struct {
+			Reason string `json:"rate_limit_reason"`
+		} `json:"additional_data"`
+	}
+	if len(raw) <= maxResponseBytes {
+		_ = json.Unmarshal(raw, &remote)
+	}
+	delivery := &issuesync.StatusError{
+		Message:    fmt.Sprintf("notion HTTP %d: %s", status, safeNotionCode(remote.Code)),
+		HTTPStatus: status,
+		Ambiguous:  status == 0 && sent || status >= 500 || status >= 200 && status < 300,
+		Blocked:    status >= 300 && status < 400 || status >= 400 && status < 500 && status != 409 && status != 429,
+	}
+	if readErr != nil || contextErr != nil || len(raw) > maxResponseBytes {
+		delivery.Message = "notion status transport or response read failed"
+	}
+	if status == 429 && remote.Additional.Reason == "public_api_request_blocked" {
+		delivery.Message = "notion HTTP 429: public_api_request_blocked"
+		delivery.Blocked = true
+		return delivery
+	}
+	if status == 429 || status >= 500 || status == 0 {
+		delivery.RetryAfter = max(time.Second, notionRetryAfter(retryAfter, s.client.cfg.Now()))
+		s.client.deferRequests(delivery.RetryAfter, delivery)
+	}
+	return delivery
 }
 func safeNotionCode(code string) string {
 	switch code {
@@ -303,6 +374,11 @@ func (s *clientSession) DataSource(ctx context.Context, id string) (DataSource, 
 					ID   string `json:"id"`
 					Name string `json:"name"`
 				} `json:"options"`
+				Groups []struct {
+					ID        string   `json:"id"`
+					Name      string   `json:"name"`
+					OptionIDs []string `json:"option_ids"`
+				} `json:"groups"`
 			} `json:"status"`
 		} `json:"properties"`
 	}
@@ -332,6 +408,9 @@ func (s *clientSession) DataSource(ctx context.Context, id string) (DataSource, 
 				return DataSource{}, fmt.Errorf("invalid Notion status option")
 			}
 			p.Options = append(p.Options, Option{ID: option.ID, Name: option.Name})
+		}
+		for _, group := range property.Status.Groups {
+			p.Groups = append(p.Groups, Group{ID: group.ID, Name: group.Name, OptionIDs: group.OptionIDs})
 		}
 		result.Properties = append(result.Properties, p)
 	}

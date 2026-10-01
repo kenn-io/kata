@@ -420,7 +420,10 @@ func TestHTTPFetcherParentDataGraphQLRateLimitRetriesHTTP200Errors(t *testing.T)
 
 	var sleeps []time.Duration
 	fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
+	now := time.Now()
+	fetcher.graphQLNow = func() time.Time { return now }
 	fetcher.graphQLSleep = func(_ context.Context, d time.Duration) error {
+		now = now.Add(d)
 		sleeps = append(sleeps, d)
 		return nil
 	}
@@ -561,7 +564,10 @@ func TestHTTPFetcherParentDataRetryTotalBudgetSpansPages(t *testing.T) {
 
 	var sleeps []time.Duration
 	fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
+	now := time.Now()
+	fetcher.graphQLNow = func() time.Time { return now }
 	fetcher.graphQLSleep = func(_ context.Context, d time.Duration) error {
+		now = now.Add(d)
 		sleeps = append(sleeps, d)
 		return nil
 	}

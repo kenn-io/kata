@@ -132,6 +132,42 @@ func TestAdapterImportsReplaysAndWorkflowGroupChanges(t *testing.T) {
 	require.Equal(t, "Local work", got.Body)
 }
 
+func TestRunnerPlaneDisplayNameRefreshCannotRestoreSupersededConfig(t *testing.T) {
+	ctx := context.Background()
+	store := adapterStore(t)
+	c := statusConfig(t, "https://api.plane.so")
+	binding := adapterBinding(t, store, c)
+	source := newAdapterSession()
+	source.project.Name = "Renamed project"
+	source.beforeItems = func(ctx context.Context) error {
+		operatorConfig := c
+		operatorConfig.StatusSync = "one-way"
+		raw, err := EncodeConfig(operatorConfig)
+		require.NoError(t, err)
+		_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+			ProjectID:       binding.ProjectID,
+			Provider:        binding.Provider,
+			SourceKey:       binding.SourceKey,
+			RemoteID:        binding.RemoteID,
+			DisplayName:     binding.DisplayName,
+			Config:          raw,
+			IntervalSeconds: 300,
+		})
+		return err
+	}
+	runner := NewRunner(RunnerConfig{Store: store, Fetcher: source})
+
+	_, err := runner.RunOnce(ctx, binding.ID)
+	require.ErrorIs(t, err, db.ErrIssueSyncBindingChanged)
+
+	stored, err := store.IssueSyncBindingByID(ctx, binding.ID)
+	require.NoError(t, err)
+	storedConfig, err := DecodeConfig(stored.Config)
+	require.NoError(t, err)
+	require.Equal(t, "one-way", storedConfig.StatusSync)
+	require.Equal(t, binding.DisplayName, stored.DisplayName)
+}
+
 func TestAdapterFailsPreparationBeforeImportAndKeepsCursor(t *testing.T) {
 	for _, kind := range []string{"unknown state", "partial content", "wrong project", "fetch failure", "disabled"} {
 		t.Run(kind, func(t *testing.T) {

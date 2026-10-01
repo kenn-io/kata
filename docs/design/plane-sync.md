@@ -4,7 +4,7 @@
 and existing import storage, with no persisted schema change. See the
 [operator guide](../operations/plane-sync.md) for setup and limits.
 
-`internal/planesync` owns canonical source config, GET-only API sessions,
+`internal/planesync` owns canonical source config, origin-pinned API sessions,
 collection pagination, state-group mapping, and local HTML-to-Markdown conversion.
 Both daemon runtimes share one configured client, wake channel, and progress
 tracker with manual requests. The shared runner owns durable claims, deadlines,
@@ -27,15 +27,22 @@ recovers omissions caused by concurrent removals. Missing descriptions or
 expanded identity objects are rejected before any import.
 
 Plane state groups can change without advancing work-item updated timestamps.
-The import policy therefore offers opt-in status-only reconciliation when all
-three persisted-millisecond timestamps match: source observation, import mapping,
-and native issue. This correction changes status/closure only and preserves other
-scalars. Providers default to ordinary strictly-newer source rules. Existing
-presentation and label reconciliation retain their independent ownership rules.
+The status worker reads existing mappings independently of the content cutoff
+and native issue update time. These observations change status and closure only;
+title, body, owner, and priority keep their ordinary strictly-newer source rules.
+Presentation and label reconciliation retain their independent ownership rules.
 
-Source deletions, comments, relationships, webhook ingestion, and upstream status
-writes are deferred. This adapter only reads Plane; write-back belongs to the
-later two-way status-sync feature.
+Opt-in two-way status uses the shared worker and four nullable import-mapping
+columns described in [issue status sync](issue-status-sync.md). Incoming workflow
+reads run separately from content, and outbound writes change only `state` after
+fresh admission. Exact-event acknowledgement follows verified identity/state
+readback; Plane uses its existing item UUID and needs no extra locator.
+Live target membership is required only for two-way bindings. Returning to
+one-way cancels pending writes even when a saved target has disappeared or moved
+to another group; the binding retains its canonical target UUIDs for later edits.
+Disable and re-enable fence the earlier binding snapshot but retain its claim
+until the worker retires or the 30-minute stale-claim horizon permits recovery.
+Source deletions, comments, relationships, and webhook ingestion remain deferred.
 
 API behavior was checked against [Plane's API documentation](https://developers.plane.so/api-reference/introduction)
 and [Plane API source](https://github.com/makeplane/plane/tree/preview/apps/api/plane/api).

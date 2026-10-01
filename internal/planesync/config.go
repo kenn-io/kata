@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 )
 
 var uuidPattern = regexp.MustCompile(`^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`)
@@ -41,6 +42,22 @@ func ParseSince(value string) (*time.Time, error) {
 }
 
 func normalizeConfig(c Config) (Config, error) {
+	if c.StatusSync == "" {
+		c.StatusSync = "one-way"
+	}
+	if c.StatusSync != "one-way" && c.StatusSync != "two-way" {
+		return Config{}, fmt.Errorf("plane status_sync must be one-way or two-way")
+	}
+	for _, id := range []*string{&c.ClosedStateID, &c.OpenStateID} {
+		if *id != "" {
+			canonical, err := CanonicalID(*id)
+			if err != nil {
+				return Config{}, err
+			}
+			*id = canonical
+		}
+	}
+
 	var err error
 	if c.APIOrigin == "" || c.WebOrigin == "" {
 		return Config{}, fmt.Errorf("plane config requires API and web origins")
@@ -86,8 +103,20 @@ func EncodeConfig(c Config) (jsontext.Value, error) {
 
 // DecodeConfig accepts only public binding fields and redacts invalid input.
 func DecodeConfig(raw jsontext.Value) (Config, error) {
+	if _, err := db.DecodeIssueStatusScan(raw); err != nil {
+		return Config{}, fmt.Errorf("invalid Plane config JSON")
+	}
+	public, err := db.PublicIssueSyncConfig(raw)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid Plane config JSON")
+	}
+	raw = public
+
 	var fields map[string]jsontext.Value
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return Config{}, fmt.Errorf("invalid Plane config JSON")
+	}
+	if value, ok := fields["status_sync"]; ok && (string(value) == "null" || string(value) == `""`) {
 		return Config{}, fmt.Errorf("invalid Plane config JSON")
 	}
 	if value, ok := fields["title_prefix"]; ok && string(value) == "null" {

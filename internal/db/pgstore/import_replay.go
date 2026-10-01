@@ -18,7 +18,7 @@ import (
 // Explicit source identities are preserved, identity sequences are advanced,
 // and the token projection is rebuilt from its authoritative events.
 func (s *Store) ImportReplay(ctx context.Context, records []db.ImportRecord, opts db.ImportOptions) error {
-	if err := db.ValidateImportRecords(records); err != nil {
+	if err := db.ValidateImportReplay(records, opts); err != nil {
 		return err
 	}
 	var finalInstanceUID string
@@ -193,7 +193,7 @@ func (s *Store) importReplayRecord(
 			ctx, tx, rec, opts.PreserveIssueSyncBindingEnabled,
 		)
 	case *db.IssueSyncStatusExport:
-		return replayLinkInserted, pgReplayIssueSyncStatus(ctx, tx, rec)
+		return replayLinkInserted, pgReplayIssueSyncStatus(ctx, tx, rec, opts.PreserveIssueSyncBindingEnabled && !opts.MergeProject)
 	case *db.RecurrenceExport:
 		return replayLinkInserted, pgReplayRecurrence(ctx, tx, rec)
 	case *db.IssueExport:
@@ -207,7 +207,7 @@ func (s *Store) importReplayRecord(
 	case *db.LinkExport:
 		return pgReplayLink(ctx, tx, rec)
 	case *db.ImportMappingExport:
-		return pgReplayImportMapping(ctx, tx, rec, skippedLinkIDs)
+		return pgReplayImportMapping(ctx, tx, rec, skippedLinkIDs, opts.PreserveIssueSyncBindingEnabled && !opts.MergeProject)
 	case *db.ExternalFieldMappingExport:
 		return replayLinkInserted, pgReplayExternalFieldMapping(ctx, tx, rec, opts.MergeProject)
 	case *db.ExternalRootBindingExport:

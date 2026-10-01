@@ -29,6 +29,11 @@ func (b *responseReadErrorBody) Read(p []byte) (int, error) {
 }
 func (*responseReadErrorBody) Close() error { return nil }
 
+type deadlineReadErrorBody struct{}
+
+func (deadlineReadErrorBody) Read([]byte) (int, error) { return 0, context.DeadlineExceeded }
+func (deadlineReadErrorBody) Close() error             { return nil }
+
 func response(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
@@ -249,6 +254,26 @@ func TestClientAttemptTimeoutPreservesCauseAfterRetries(t *testing.T) {
 	}
 }
 
+func TestClientTransportAndBodyDeadlineErrorsPreserveCause(t *testing.T) {
+	for _, phase := range []string{"request", "response body"} {
+		t.Run(phase, func(t *testing.T) {
+			calls := 0
+			c, _ := testClient(t, func(*http.Request) (*http.Response, error) {
+				calls++
+				if phase == "request" {
+					return nil, context.DeadlineExceeded
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: deadlineReadErrorBody{}}, nil
+			})
+
+			_, err := session(t, c).Database(t.Context(), databaseID)
+
+			require.Equal(t, 5, calls)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+		})
+	}
+}
+
 func TestClientDatabaseAndSchema(t *testing.T) {
 	c, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
 		require.Equal(t, "/v1/data_sources/"+sourceID, r.URL.Path)
@@ -262,6 +287,15 @@ func TestClientDatabaseAndSchema(t *testing.T) {
 		_, e := session(t, c).Database(t.Context(), databaseID)
 		require.Error(t, e)
 	}
+}
+
+func TestClientDataSourcePreservesStatusGroupOptionOrder(t *testing.T) {
+	c, _ := testClient(t, func(*http.Request) (*http.Response, error) {
+		return response(200, `{"object":"data_source","id":"11111111-1111-4111-8111-111111111111","parent":{"type":"database_id","database_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},"properties":{"Workflow":{"id":"s%3A1","type":"status","status":{"options":[{"id":"complete-a","name":"Accepted"},{"id":"complete-b","name":"Delivered"}],"groups":[{"id":"g-done","name":"Complete","color":"green","option_ids":["complete-b","complete-a"]}]}}}}`), nil
+	})
+	ds, err := session(t, c).DataSource(t.Context(), sourceID)
+	require.NoError(t, err)
+	require.Equal(t, []Group{{ID: "g-done", Name: "Complete", OptionIDs: []string{"complete-b", "complete-a"}}}, ds.Properties[0].Groups)
 }
 
 func TestClientConcurrentSessions(t *testing.T) {

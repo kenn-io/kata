@@ -192,7 +192,7 @@ func (d *Store) ingestFederationEventsOnce(
 		// The generated claim audit events are never link-bearing, so the
 		// accepted batch alone decides whether the binding-group link fold has
 		// any work to do.
-		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID, linksAffected); err != nil {
+		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID, linksAffected, result.InsertedEventUIDs); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {

@@ -21,7 +21,6 @@ func TestFederationSchemaVersionAndTable(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 
-	assert.Equal(t, 29, db.CurrentSchemaVersion())
 	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 	assertSchemaObject(t, d, "federation_bindings")
 	assertSchemaObject(t, d, "idx_federation_bindings_role_enabled")

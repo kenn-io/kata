@@ -19,6 +19,7 @@ import (
 )
 
 type githubSyncOptions struct {
+	statusSync  string
 	repo        string
 	host        string
 	interval    string
@@ -32,9 +33,10 @@ type githubSyncBindingBody struct {
 }
 
 type githubSyncOnceBody struct {
-	Binding *githubSyncBindingOut `json:"binding"`
-	Status  githubSyncStatusOut   `json:"status"`
-	Import  struct {
+	StatusUpdated int                   `json:"status_updated"`
+	Binding       *githubSyncBindingOut `json:"binding"`
+	Status        githubSyncStatusOut   `json:"status"`
+	Import        struct {
 		Created   int `json:"created"`
 		Updated   int `json:"updated"`
 		Unchanged int `json:"unchanged"`
@@ -56,6 +58,8 @@ type githubSyncBindingOut struct {
 }
 
 type githubSyncStatusOut struct {
+	StatusSync    string                 `json:"status_sync"`
+	PendingCount  int                    `json:"pending_count"`
 	Progress      *githubSyncProgressOut `json:"progress,omitempty"`
 	SyncStartedAt *time.Time             `json:"sync_started_at,omitempty"`
 	LastAttemptAt *time.Time             `json:"last_attempt_at,omitempty"`
@@ -103,6 +107,14 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 		Short: "enable GitHub sync for this project",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			var mode *generated.EnableIssueSyncRequestBodyStatusSync
+			if cmd.Flags().Changed("status-sync") {
+				var err error
+				mode, err = issueStatusSyncMode(opts.statusSync)
+				if err != nil {
+					return err
+				}
+			}
 			cutoff, err := githubsync.ParseSince(opts.since)
 			if err != nil {
 				return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
@@ -112,11 +124,16 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if mode != nil {
+				if err := requireIssueStatusSync(a); err != nil {
+					return err
+				}
+			}
 			binding, err := githubSyncResolveBinding(a, projectID, opts)
 			if err != nil {
 				return err
 			}
-			body := &generated.EnableIssueSyncBody{Config: map[string]any{
+			body := &generated.EnableIssueSyncBody{StatusSync: mode, Config: map[string]any{
 				"host": binding.Host, "owner": binding.Owner, "repo": binding.Repo,
 			}}
 			if cmd.Flags().Changed("title-prefix") {
@@ -145,6 +162,7 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 			return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, "enabled")
 		},
 	}
+	cmd.Flags().StringVar(&opts.statusSync, "status-sync", "", "status direction: one-way or two-way (omitted preserves saved mode; new bindings default to one-way)")
 	cmd.Flags().StringVar(&opts.repo, "repo", "", "GitHub repository as owner/repo")
 	cmd.Flags().StringVar(&opts.host, "host", "", "GitHub host (default: github.com)")
 	cmd.Flags().StringVar(&opts.interval, "interval", "", "sync interval duration, such as 5m")
@@ -296,18 +314,18 @@ func githubSyncPrintOnceBody(w io.Writer, bs []byte) error {
 		return err
 	}
 	if currentOutputMode() == outputAgent {
-		if err := githubSyncPrintAgent(w, "once", body.Status, body.Binding); err != nil {
+		if err := githubSyncPrintAgent(w, "once", body.Status, body.Binding, body.StatusUpdated); err != nil {
 			return err
 		}
 		return nil
 	}
 	_, err := fmt.Fprintf(w,
-		"GitHub sync ran: created=%d updated=%d unchanged=%d comments=%d links=%d\n",
-		body.Import.Created, body.Import.Updated, body.Import.Unchanged, body.Import.Comments, body.Import.Links)
+		"GitHub sync ran: created=%d updated=%d unchanged=%d comments=%d links=%d status_updated=%d\n",
+		body.Import.Created, body.Import.Updated, body.Import.Unchanged, body.Import.Comments, body.Import.Links, body.StatusUpdated)
 	return err
 }
 
-func githubSyncPrintAgent(w io.Writer, action string, status githubSyncStatusOut, binding *githubSyncBindingOut) error {
+func githubSyncPrintAgent(w io.Writer, action string, status githubSyncStatusOut, binding *githubSyncBindingOut, statusUpdated ...int) error {
 	if _, err := fmt.Fprintf(w, "OK github-sync action=%s state=%s enabled=%s",
 		agentValue(action), agentValue(githubSyncState(status, binding)), strconv.FormatBool(githubSyncEnabled(status, binding))); err != nil {
 		return err
@@ -322,6 +340,11 @@ func githubSyncPrintAgent(w io.Writer, action string, status githubSyncStatusOut
 	}
 	if status.LastError != "" {
 		if _, err := fmt.Fprintf(w, " last_error=%s", agentValue(status.LastError)); err != nil {
+			return err
+		}
+	}
+	if len(statusUpdated) > 0 {
+		if _, err := fmt.Fprintf(w, " status_updated=%d", statusUpdated[0]); err != nil {
 			return err
 		}
 	}
@@ -355,6 +378,11 @@ func githubSyncPrintHumanBinding(w io.Writer, action string, body githubSyncBind
 	default:
 		state := githubSyncState(body.Status, body.Binding)
 		if _, err := fmt.Fprintf(w, "GitHub sync %s\n", textsafe.Line(state)); err != nil {
+			return err
+		}
+	}
+	if action != "status" {
+		if _, err := fmt.Fprintf(w, "Status sync: %s\nPending status changes: %d\n", textsafe.Line(issueStatusSyncDisplayMode(body.Status.StatusSync)), body.Status.PendingCount); err != nil {
 			return err
 		}
 	}

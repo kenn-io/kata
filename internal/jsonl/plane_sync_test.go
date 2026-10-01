@@ -96,7 +96,7 @@ func TestPlaneSyncRestoreRequiresLocalReenable(t *testing.T) {
 	assertTimePtrEqual(t, *fixture.binding.LastCursorAt, b.LastCursorAt)
 	status, err := target.IssueSyncStatusByProject(ctx, b.ProjectID)
 	require.NoError(t, err)
-	assertTimePtrEqual(t, fixture.claim, status.SyncStartedAt)
+	require.Nil(t, status.SyncStartedAt, "ordinary restore drops the host-local provider claim")
 	mapping, err := target.ImportMappingBySource(ctx, b.ProjectID, b.SourceKey, "issue", "work-item:22222222-2222-4222-8222-222222222222")
 	require.NoError(t, err)
 	require.Equal(t, &fixture.issue.ID, mapping.IssueID)

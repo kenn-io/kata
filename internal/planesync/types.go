@@ -5,12 +5,15 @@ import "time"
 
 // Config is the canonical non-secret binding identity and presentation policy.
 type Config struct {
-	APIOrigin   string `json:"api_origin"`
-	WebOrigin   string `json:"web_origin"`
-	Workspace   string `json:"workspace"`
-	ProjectID   string `json:"project_id"`
-	Since       string `json:"since"`
-	TitlePrefix *bool  `json:"title_prefix"`
+	APIOrigin     string `json:"api_origin"`
+	WebOrigin     string `json:"web_origin"`
+	Workspace     string `json:"workspace"`
+	ProjectID     string `json:"project_id"`
+	Since         string `json:"since"`
+	StatusSync    string `json:"status_sync,omitempty"`
+	ClosedStateID string `json:"closed_state_id,omitempty"`
+	OpenStateID   string `json:"open_state_id,omitempty"`
+	TitlePrefix   *bool  `json:"title_prefix"`
 }
 
 // SourceKey separates work items from different Plane instances and projects.
@@ -26,7 +29,10 @@ func (c Config) UseTitlePrefix() bool { return c.TitlePrefix == nil || *c.TitleP
 type Project struct{ ID, Name, Identifier string }
 
 // State contains a canonical workflow identity and documented Plane group.
-type State struct{ ID, Group string }
+type State struct {
+	ID, Group string
+	Sequence  float64
+}
 
 // WorkItem holds a complete unexpanded source observation.
 type WorkItem struct {

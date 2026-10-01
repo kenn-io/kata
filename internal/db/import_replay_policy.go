@@ -27,6 +27,28 @@ func ReplayEventProjectName(event *EventExport, currentName string, recomputeHas
 	return name, nil
 }
 
+// ValidateImportReplay checks normalized records and the private binding scan
+// state retained by trusted cutover before a backend starts its transaction.
+// Ordinary restores discard that scan state instead of retaining it.
+func ValidateImportReplay(records []ImportRecord, opts ImportOptions) error {
+	if err := ValidateImportRecords(records); err != nil {
+		return err
+	}
+	if !opts.PreserveIssueSyncBindingEnabled {
+		return nil
+	}
+	for i, record := range records {
+		binding, ok := record.(*IssueSyncBindingExport)
+		if !ok || len(binding.Config) == 0 {
+			continue
+		}
+		if _, err := DecodeIssueStatusScan(binding.Config); err != nil {
+			return fmt.Errorf("import record %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
 // ValidateImportRecords checks the normalized replay union before a backend
 // opens a transaction. A malformed envelope therefore cannot partially mutate
 // either storage implementation. It rejects missing or unsupported record
@@ -40,7 +62,45 @@ func ValidateImportRecords(records []ImportRecord) error {
 	if err := validateReplayExternalFieldMappingIdentities(records); err != nil {
 		return err
 	}
+	if err := validateReplayStatusIntent(records); err != nil {
+		return err
+	}
 	return validateReplayBindingScopedMappings(records)
+}
+
+func validateReplayStatusIntent(records []ImportRecord) error {
+	issues := make(map[int64]*IssueExport)
+	events := make(map[string]*EventExport)
+	for _, record := range records {
+		switch record := record.(type) {
+		case *IssueExport:
+			issues[record.ID] = record
+		case *EventExport:
+			events[record.UID] = record
+		}
+	}
+	for _, record := range records {
+		mapping, ok := record.(*ImportMappingExport)
+		if !ok {
+			continue
+		}
+		normalized, err := NormalizeIssueStatusExport(*mapping)
+		if err != nil {
+			return err
+		}
+		if normalized.PendingEventUID == nil {
+			continue
+		}
+		if mapping.ObjectType != "issue" || mapping.IssueID == nil {
+			return invalidIssueStatusState()
+		}
+		issue := issues[*mapping.IssueID]
+		event := events[*normalized.PendingEventUID]
+		if issue == nil || event == nil || issue.ProjectID != mapping.ProjectID || event.ProjectID != mapping.ProjectID || event.IssueID == nil || *event.IssueID != issue.ID || event.IssueUID == nil || *event.IssueUID != issue.UID || (event.Type != "issue.closed" && event.Type != "issue.reopened") {
+			return invalidIssueStatusState()
+		}
+	}
+	return nil
 }
 
 func validateReplayExternalFieldMappingIdentities(records []ImportRecord) error {
@@ -190,7 +250,11 @@ func validateImportRecord(record ImportRecord) error {
 	case *LinkExport:
 		return requireImportPayload(rec, ImportKindLink)
 	case *ImportMappingExport:
-		return requireImportPayload(rec, ImportKindImportMapping)
+		if err := requireImportPayload(rec, ImportKindImportMapping); err != nil {
+			return err
+		}
+		_, err := NormalizeIssueStatusExport(*rec)
+		return err
 	case *ExternalFieldMappingExport:
 		return requireImportPayload(rec, ImportKindExternalFieldMapping)
 	case *ExternalRootBindingExport:

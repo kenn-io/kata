@@ -653,29 +653,34 @@ Content-Type: application/json
 
 `once` runs one immediate daemon-side sync for an enabled binding. It bypasses
 the interval schedule but still respects the in-flight guard; overlapping runs
-return a conflict while the claim remains active. Re-enabling clears the claim:
-an older run may continue upstream reads, but cannot import or advance its cursor.
+return a conflict while the claim remains active. Operator edits fence an older run from further writes/imports while retaining
+its claim until it finishes or the stale horizon expires.
 
 The shared response body contains:
 
 | Field | Meaning |
 | --- | --- |
 | `binding` | The stored provider binding, including provider, stable source key, remote ID, display name, opaque config, enabled flag, interval, cursor, and timestamps. It is absent only for a project with no binding for the requested provider. |
-| `status` | Current state and the last attempt, success, error, and import counts. |
+| `status` | Current state, `status_sync` mode, `pending_count`, and the last attempt, success, error, and import counts. |
+| `status_updated` | Present on `once`; incoming status transitions committed separately from content imports. |
 | `import` | Present only on `once`; reports created, updated, unchanged, comment, and link counts from the import run. |
 
 Synced issues are GitHub-owned for title, body, state, labels, owner, and
 imported GitHub comments. API clients should treat those fields as read-mostly
-in kata: kata does not write back to GitHub, and newer GitHub updates can
-overwrite local issue or comment edits to those fields.
+in Kata: newer GitHub updates can overwrite local edits to those fields.
+Explicit close/reopen writes back when `status_sync` is `two-way`; other fields
+remain incoming-only.
 
-V1 does not support GitHub write-back, timeline events, pull requests, deleted
+V1 does not support outbound fields other than status, timeline events, pull requests, deleted
 or transferred issue propagation, edited or deleted comment propagation, or
 multiple assignees beyond the first GitHub assignee.
 
 Plane uses the same issue-sync routes with provider `plane`. Initial enable config
 requires string `workspace` and UUID string `project_id`; optional `since` and
-boolean `title_prefix` preserve omission on re-enable. Intervals accept one of
+boolean `title_prefix` preserve omission on re-enable. Top-level `status_sync`
+selects `one-way` or `two-way`; omitted mode preserves the saved choice. Optional
+config strings `closed_state_id` and `open_state_id` select UUIDs in the completed
+and unstarted groups. Empty strings clear overrides. Intervals accept one of
 `interval` or `interval_seconds`. Origins and tokens are daemon-owned and rejected
 as request config. Source identity is immutable; validation reads project and
 states before a guarded upsert. See [Plane sync](../operations/plane-sync.md).

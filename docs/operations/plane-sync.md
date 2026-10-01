@@ -1,20 +1,22 @@
 ---
 title: Plane sync
-description: Mirror a Plane project into native Kata issues with daemon-owned read-only API credentials.
-last_edited: 2026-09-30
+description: Mirror a Plane project into native Kata issues with daemon-owned API credentials and optional two-way status sync.
+last_edited: 2026-10-01
 ---
 
 # Plane sync
 
 Plane sync mirrors one Plane project into one Kata project. The daemon reads
 Plane and imports native issues every five minutes by default. Local issue edits,
-including completion, stay in Kata. Status write-back will be a separate feature.
+stay in Kata. Enable `--status-sync=two-way` to send explicit Kata close/reopen
+changes back to Plane. Other fields remain incoming-only.
 
 ## Configure the daemon
 
 Create a Plane API key that can read the selected project, its states, and its
 work items. Scoped keys need `projects:read`, `projects.states:read`, and
-`projects.work_items:read`. Supply the key as `KATA_PLANE_TOKEN` in the daemon's
+`projects.work_items:read`. Two-way status additionally requires
+`projects.work_items:write`. Supply the key as `KATA_PLANE_TOKEN` in the daemon's
 service environment. The client workstation needs only its normal Kata daemon
 credentials. See Plane's [API authentication guide](https://developers.plane.so/api-reference/introduction).
 
@@ -70,13 +72,16 @@ The current `work-items/` API is required; legacy `issues/` endpoints are not us
 | `--plane-project` | Plane project UUID; required initially, then immutable. |
 | `--interval` | Duration or integer seconds, at least one second; initially `5m`. |
 | `--since` | Exclusive updated-after UTC date or whole-second RFC3339 timestamp. |
+| `--status-sync` | `one-way` (initial default) or `two-way`; omission preserves the saved mode. |
+| `--closed-state` | Optional completed-state UUID; empty clears the override. |
+| `--open-state` | Optional unstarted-state UUID; empty clears the override. |
 | `--title-prefix=false` | Keep source titles and add the source-managed `plane` label. |
 
 Re-enable may omit every option to reuse saved settings. Explicit empty
 `--since ''` clears the cutoff; explicit true restores title prefixes. Dates
 mean midnight UTC and timestamp offsets normalize to UTC. Fractional seconds
-are rejected. Config changes reset the stored cursor; interval-only changes
-preserve it. The cursor records successful run starts for diagnostics. Every
+are rejected. Config changes reset the stored cursor; interval-only changes and
+status-only changes (`--status-sync`, `--closed-state`, `--open-state`) preserve it. The cursor records successful run starts for diagnostics. Every
 run traverses the whole collection and applies the cutoff locally, so workflow
 schema changes and items missed during concurrent pagination can arrive later.
 This is eventual polling, not an atomic Plane snapshot.
@@ -97,12 +102,12 @@ Existing external-root ownership protections apply to managed issues.
 | Description HTML | Markdown with a Plane attribution link; tables, lists, links, and images are retained when convertible. Unsupported or malformed link targets are removed while link text is kept. |
 | Mention tags (`<mention-component>`) | Labels stored in tag attributes are omitted; literal text and surrounding description text are retained. |
 | Priority | `urgent` → P0, `high` → P1, `medium` → P2, `low` → P3, `none` → unassigned. |
-| `backlog`, `unstarted`, `started` state groups | `open`. |
+| `backlog`, `unstarted`, `started`, `triage` state groups | `open`. |
 | `completed` group | `closed`, reason `done`. |
 | `cancelled` group | `closed`, reason `wontfix`. |
 | First assignee UUID | Owner `plane:<uuid>`; no assignees means unassigned. |
 | Creator UUID | Author `plane:<uuid>`, or `plane-unknown` when absent. |
-| Source timestamps | Created/updated timestamps normalized to persisted milliseconds; closure uses source updated time. |
+| Source timestamps | Created/updated timestamps normalized to persisted milliseconds; status observations use `completed_at` for completion when supplied, otherwise updated time. Cancellation uses updated time. |
 
 External UUID identities are not mapped automatically to local users. State
 names, colors, and ordering do not affect completion. Unknown state groups or
@@ -114,8 +119,9 @@ Source scalar edits apply only when their updated timestamp is strictly newer
 than the native issue. Newer local edits survive until Plane has a later source
 edit. Equal or older observations preserve title, body, owner, and priority.
 A state-group edit may leave the work item's timestamp unchanged: status alone
-can reconcile when the observed timestamp, latest mapping timestamp, and native
-issue timestamp all match. A newer local edit prevents this correction.
+reconciles through independent workflow observations. These observations do not
+depend on the content cutoff or native issue update time and preserve local
+title, body, owner, and priority edits.
 
 Changing title-prefix presentation refreshes source-owned titles at the same
 source version while preserving local title edits. The `plane` label is managed
@@ -124,14 +130,53 @@ Archived/deleted/unavailable work items are retained locally. Absence never
 closes or deletes an imported issue. Disable retains the binding and mappings.
 JSONL restore disables polling until a local operator re-enables it.
 
+## Two-way status
+
+```sh
+kata sync plane enable --status-sync=two-way
+kata close abc4 --done --message "Completed the imported task" --commit <sha>
+kata reopen abc4
+kata sync plane once
+kata sync plane status
+```
+
+A close selects the first state in the `completed` group by workflow `sequence`;
+reopen selects the first `unstarted` state. UUID order breaks ties. Set
+`--closed-state UUID` or `--open-state UUID` to pin a target in the respective
+group. Enabling two-way requires both groups; a one-way project can omit them,
+including when it retains a saved override that has disappeared or moved.
+Kata preserves the current Plane substate when it already matches open/closed,
+including `started` and `cancelled`. Workflow rename and reorder need no mapping
+rebuild; missing or moved overrides block writes until corrected.
+
+Only explicit close/reopen events accepted while two-way is configured queue
+writes. Initial opt-in creates no bulk outbound changes. Pending local intent
+wins until verified readback acknowledges that exact event. In two-way mode,
+status polling visits existing mappings independently of `--since` and content
+conversion, so a content failure cannot suppress a status transition. One-way
+mode takes status from content imports. Incoming cancellation closes with
+`wontfix`; completion closes with `done`. Same-state observations preserve native
+closure evidence. Unavailable, archived, deleted, and moved items remain local.
+
+Status output shows mode, pending count, and the latest sanitized run error;
+`once` also reports incoming status updates separately from content imports.
+Failures retain pending intent for another scan. PATCH responses are never
+blindly retried. Disable pauses delivery while retaining mappings and intent;
+returning to `--status-sync=one-way` cancels pending writes. Re-enable preserves
+saved targets and mode. A mode-only return to one-way succeeds even when a saved
+target is missing or outside its original group; two-way still requires valid
+live targets. Ordinary JSONL restore clears private observations and
+pending intent and leaves the binding disabled until explicit re-enable.
+
 ## Progress, bounds, and recovery
 
 Status shows the saved source, origins, interval, cutoff, last attempts, success,
 errors, historical successful-run counts, and optional live progress (`project`,
 `states`, `work-items`, `content`, and `import`). A zero total means unknown.
 Manual and scheduled runs share a durable claim, pacing, and progress tracker.
-A second run receives a conflict while one is active. Re-enable clears the old
-claim and fences the earlier run from importing or advancing its cursor.
+A second run receives a conflict while one is active. Disable and re-enable
+fence the earlier binding snapshot but retain its claim until that worker
+retires or the 30-minute stale-claim horizon permits recovery.
 
 Each run has a 20-minute deadline; each HTTP request has a 30-second timeout.
 All bindings share at most one request per second per daemon, with up to four

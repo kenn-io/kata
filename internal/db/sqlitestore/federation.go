@@ -1052,7 +1052,7 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := d.materializeFederatedProjectTx(ctx, tx, projectID, true); err != nil {
+	if err := d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1070,6 +1070,7 @@ func (d *Store) materializeFederatedProjectTx(
 	tx *sql.Tx,
 	projectID int64,
 	reconcileLinks bool,
+	acceptedEventUIDs []string,
 ) error {
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
@@ -1089,6 +1090,9 @@ func (d *Store) materializeFederatedProjectTx(
 	projection := db.FoldEvents(events)
 	issueIDs, err := reconcileFederatedIssues(ctx, tx, projectID, projection)
 	if err != nil {
+		return err
+	}
+	if err := reconcileFederatedStatusIntentTx(ctx, tx, projectID, events, acceptedEventUIDs, projection); err != nil {
 		return err
 	}
 	if err := reconcileFederatedComments(ctx, tx, projectID, issueIDs, projection); err != nil {

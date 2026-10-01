@@ -363,7 +363,7 @@ func federationIssueRecurrenceUID(ctx context.Context, tx *sql.Tx, recurrenceID 
 // MaterializeFederatedProject rebuilds one project's read model from portable events.
 func (s *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		return s.materializeFederatedProjectTx(ctx, tx, projectID, true)
+		return s.materializeFederatedProjectTx(ctx, tx, projectID, true, nil)
 	})
 }
 
@@ -416,6 +416,7 @@ func (s *Store) materializeFederatedProjectTx(
 	tx *sql.Tx,
 	projectID int64,
 	reconcileLinks bool,
+	acceptedEventUIDs []string,
 ) error {
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
@@ -444,6 +445,9 @@ func (s *Store) materializeFederatedProjectTx(
 	}
 	issueIDs, err := s.reconcileFederatedIssues(ctx, tx, m, projection)
 	if err != nil {
+		return err
+	}
+	if err := reconcileFederatedStatusIntentTx(ctx, tx, projectID, events, acceptedEventUIDs, projection); err != nil {
 		return err
 	}
 	if err := reconcileFederatedComments(ctx, tx, projectID, issueIDs, projection); err != nil {

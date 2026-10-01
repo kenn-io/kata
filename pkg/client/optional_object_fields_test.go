@@ -63,9 +63,10 @@ func TestIssueOutWithoutParentValidatesAndOmitsParent(t *testing.T) {
 func TestIssueSyncBodyWithoutBindingValidatesAndOmitsBinding(t *testing.T) {
 	body := generated.IssueSyncBody{
 		Status: generated.IssueSyncStatusOut{
-			ProjectID: 42,
-			Provider:  "github",
-			State:     "not_enabled",
+			ProjectID:  42,
+			StatusSync: "one-way",
+			Provider:   "github",
+			State:      "not_enabled",
 		},
 	}
 	require.NoError(t, body.Validate(),

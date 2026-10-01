@@ -290,6 +290,33 @@ func TestLocalProfileEnvironmentIncludesPlaneToken(t *testing.T) {
 	}
 }
 
+func TestLocalProfileEnvironmentIncludesConfiguredNotionAndPlaneTokenEnvs(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		notionEnv string
+		planeEnv  string
+	}{
+		{name: "defaults"},
+		{name: "custom", notionEnv: "EXAMPLE_NOTION_TOKEN", planeEnv: "EXAMPLE_PLANE_TOKEN"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			notionSync, err := config.NormalizeNotionSyncConfig(config.NotionSyncConfig{TokenEnv: tc.notionEnv})
+			require.NoError(t, err)
+			planeSync, err := config.NormalizePlaneSyncConfig(config.PlaneSyncConfig{TokenEnv: tc.planeEnv})
+			require.NoError(t, err)
+			t.Setenv(notionSync.TokenEnv, "example-notion-token")
+			t.Setenv(planeSync.TokenEnv, "example-plane-token")
+			profile := config.LocalProfileConfig{Home: t.TempDir(), Config: &config.DaemonConfig{NotionSync: notionSync, PlaneSync: planeSync}}
+
+			env, err := config.LocalProfileEnvironment(profile, true)
+
+			require.NoError(t, err)
+			assert.Contains(t, env, notionSync.TokenEnv+"=example-notion-token")
+			assert.Contains(t, env, planeSync.TokenEnv+"=example-plane-token")
+		})
+	}
+}
+
 func TestLocalProfileEnvironmentRejectsReservedCredentialReferences(t *testing.T) {
 	for _, key := range []string{"KATA_AUTH_TOKEN", "KATA_SERVER", "KATA_GITHUB_SYNC_ALLOWED_HOSTS", "PGPASSWORD", "HTTPS_PROXY", "PORT", "PATH"} {
 		t.Run(key, func(t *testing.T) {

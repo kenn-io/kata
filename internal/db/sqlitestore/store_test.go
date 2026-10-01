@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -241,4 +242,36 @@ func TestOpenUsesFastSQLitePragmasWhenTestHarnessRequestsIt(t *testing.T) { //no
 	var tempStore int
 	require.NoError(t, d.QueryRow("PRAGMA temp_store").Scan(&tempStore))
 	assert.Equal(t, 2, tempStore)
+}
+
+func TestOpenURICharactersUseExactPath(t *testing.T) {
+	ctx := t.Context()
+	t.Setenv("KATA_HOME", t.TempDir())
+	names := []string{"example#database.db", "example%2Fdatabase.db"}
+	if runtime.GOOS != "windows" {
+		names = append(names, "example?mode=ro.db")
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), name)
+			store, err := sqlitestore.Open(ctx, path)
+			require.NoError(t, err)
+			project, err := store.CreateProject(ctx, "example-project")
+			require.NoError(t, err)
+			instance := store.InstanceUID()
+			require.NoError(t, store.Close())
+			info, err := os.Stat(path)
+			require.NoError(t, err)
+			require.Positive(t, info.Size(), "the exact path, including URI punctuation, holds the database")
+			store, err = sqlitestore.Open(ctx, path, db.ReadOnly())
+			require.NoError(t, err)
+			defer func() { require.NoError(t, store.Close()) }()
+			restored, err := store.ProjectByID(ctx, project.ID)
+			require.NoError(t, err)
+			require.Equal(t, project.UID, restored.UID)
+			var restoredInstance string
+			require.NoError(t, store.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&restoredInstance))
+			require.Equal(t, instance, restoredInstance)
+		})
+	}
 }

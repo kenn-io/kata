@@ -17,6 +17,9 @@ type githubSyncProgressOut struct {
 }
 
 func githubSyncPrintAgentDetails(w io.Writer, status githubSyncStatusOut, binding *githubSyncBindingOut) error {
+	if _, err := fmt.Fprintf(w, " status_sync=%s pending_count=%d", agentValue(issueStatusSyncDisplayMode(status.StatusSync)), status.PendingCount); err != nil {
+		return err
+	}
 	if binding != nil {
 		if _, err := fmt.Fprintf(w, " interval_seconds=%d title_prefix=%t", binding.IntervalSeconds, githubSyncConfigTitlePrefix(binding.Config)); err != nil {
 			return err
@@ -48,6 +51,9 @@ func githubSyncPrintAgentDetails(w io.Writer, status githubSyncStatusOut, bindin
 }
 
 func githubSyncPrintHumanDetails(w io.Writer, body githubSyncBindingBody) error {
+	if _, err := fmt.Fprintf(w, "Status sync: %s\nPending status changes: %d\n", textsafe.Line(issueStatusSyncDisplayMode(body.Status.StatusSync)), body.Status.PendingCount); err != nil {
+		return err
+	}
 	if body.Binding != nil {
 		if _, err := fmt.Fprintf(w, "Repository: %s\nInterval: %ds\nTitle prefix: %t\n", textsafe.Line(githubSyncRepoLabel(body.Binding)), body.Binding.IntervalSeconds, githubSyncConfigTitlePrefix(body.Binding.Config)); err != nil {
 			return err
