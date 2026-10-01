@@ -95,7 +95,9 @@ func statusMappingPageTx(ctx context.Context, tx *sql.Tx, binding db.IssueSyncBi
 	page := db.IssueStatusPage{HighWaterID: high, Mappings: make([]db.IssueStatusMapping, 0, len(ids))}
 	for _, id := range ids {
 		mapping, err := loadIssueStatusMappingTx(ctx, tx, binding, id)
-		if err != nil {
+		if errors.Is(err, db.ErrImportValidation) {
+			mapping = db.IssueStatusMapping{Mapping: db.ImportMapping{ID: id, ProjectID: binding.ProjectID, Source: binding.SourceKey}, LoadError: err}
+		} else if err != nil {
 			return db.IssueStatusPage{}, err
 		}
 		page.Mappings = append(page.Mappings, mapping)

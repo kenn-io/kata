@@ -77,6 +77,9 @@ type IssueStatusMapping struct {
 	Mapping      ImportMapping
 	State        IssueStatusState
 	PendingEvent *Event
+	// LoadError reports invalid private state for this mapping only. Page
+	// reads return it in place so a scan can record it and move on.
+	LoadError error
 }
 
 // IssueStatusQuery bounds one scan lap independently of the content cursor.

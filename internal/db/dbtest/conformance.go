@@ -51,6 +51,7 @@ var storageScenarios = []scenario{
 	{name: "issue status locator", methods: []string{"CreateIssue", "CreateProject", "CloseIssue", "ClaimIssueSyncBinding", "SoftDeleteIssue", "UpsertIssueSyncBinding", "UpsertImportMapping"}, runWithBackend: checkIssueStatusLocator},
 	{name: "issue status move", methods: []string{"CreateProject", "CreateIssue", "CloseIssueWithEvents", "MoveIssueProject", "UpsertIssueSyncBinding", "UpsertImportMapping"}, run: checkIssueStatusMove},
 	{name: "issue status settings keep content cursor", methods: []string{"CreateProject", "UpsertIssueSyncBinding"}, run: checkIssueStatusSettingsKeepContentCursor},
+	{name: "issue status page isolates invalid mapping", methods: []string{"CreateProject", "CreateIssue", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding", "UpsertImportMapping"}, run: checkIssueStatusPageIsolatesInvalidMapping},
 	{name: "issue status claim recovery", methods: []string{"CreateProject", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding", "DisableIssueSyncBinding"}, run: checkIssueStatusClaimRecovery},
 	{name: "external import presentation labels stale replay", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "LabelsByIssue", "EditIssue"}, run: checkImportPresentationLabelStaleReplay},
 	{name: "external import presentation labels", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "LabelsByIssue", "AddLabel", "RemoveLabelAndEvent", "EditIssue"}, run: checkImportPresentationLabels},

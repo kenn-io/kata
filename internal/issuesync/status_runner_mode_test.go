@@ -100,3 +100,29 @@ func TestStatusRunnerTwoWayDoesNotCapContentRun(t *testing.T) {
 	_, err := NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at }}).RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 }
+
+func TestStatusRunnerInvalidMappingDoesNotStopTheSweep(t *testing.T) {
+	for name, corrupt := range map[string]string{
+		"missing pending event": `UPDATE import_mappings SET pending_event_uid='01HZZZZZZZZZZZZZZZZZZZZZ99' WHERE id=$1`,
+		"invalid observation":   `UPDATE import_mappings SET observed_status_at='invalid' WHERE id=$1`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, b, ms, at := statusFixture(t, 2)
+			_, err := s.ExecContext(t.Context(), corrupt, ms[0].Mapping.ID)
+			require.NoError(t, err)
+			var read []int64
+			run := &statusTestRun{read: func(_ context.Context, m db.IssueStatusMapping) (StatusObservation, error) {
+				read = append(read, m.Mapping.ID)
+				return observed("closed", at), nil
+			}, write: func(context.Context, db.IssueStatusMapping, string, func() error) (StatusObservation, error) {
+				t.Fatal("an unloadable mapping is never written")
+				return StatusObservation{}, nil
+			}}
+			result, err := NewRunner(RunnerConfig{Store: s, Adapter: statusAdapter(b, run), Clock: func() time.Time { return at }}).RunOnce(t.Context(), b.ID)
+			require.Error(t, err)
+			require.True(t, IsBlockedStatusWarning(err), "invalid local state is reported without failing content")
+			require.Equal(t, []int64{ms[1].Mapping.ID}, read)
+			require.Equal(t, 1, result.StatusUpdated)
+		})
+	}
+}

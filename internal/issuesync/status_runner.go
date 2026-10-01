@@ -154,7 +154,10 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 			attempted[m.Mapping.ID] = true
 			serviced := ""
 			var obs StatusObservation
-			if pending {
+			if m.LoadError != nil {
+				// Invalid local state cannot change until repaired, so content proceeds.
+				err = &StatusError{Message: m.LoadError.Error(), Blocked: true}
+			} else if pending {
 				if m.PendingEvent == nil {
 					err = fmt.Errorf("pending issue status event is unavailable")
 				} else {
