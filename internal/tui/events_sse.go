@@ -69,7 +69,6 @@ func startSSEForConnection(
 	bo.InitialInterval = initialReconnectBackoff
 	bo.MaxInterval = maxBackoff
 	bo.Multiplier = 2
-	bo.RandomizationFactor = 0
 	var lastID int64
 
 	var (

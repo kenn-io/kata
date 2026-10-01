@@ -304,7 +304,6 @@ func runEventsTail(cmd *cobra.Command, opts eventsTailOptions) error {
 	bo.InitialInterval = tailBackoffStart
 	bo.MaxInterval = tailBackoffMax
 	bo.Multiplier = 2
-	bo.RandomizationFactor = 0
 	var streamErr error
 	_, err = backoff.Retry(ctx, func() (struct{}, error) {
 		if ctx.Err() != nil {
