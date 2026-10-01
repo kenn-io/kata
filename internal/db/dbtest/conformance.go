@@ -39,6 +39,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "external import derived status", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "EditIssue"}, run: checkImportDerivedStatus},
 	{name: "external import presentation labels stale replay", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "LabelsByIssue", "EditIssue"}, run: checkImportPresentationLabelStaleReplay},
 	{name: "external import presentation labels", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "LabelsByIssue", "AddLabel", "RemoveLabelAndEvent", "EditIssue"}, run: checkImportPresentationLabels},
 	{

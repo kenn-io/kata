@@ -111,6 +111,10 @@ type ImportBatchParams struct {
 	// neither label authority nor a source timestamp observation.
 	// This internal provider allowance is absent from the public import API.
 	ReconcileLabelsForUnchanged map[string][]string
+	// ReconcileStatusForUnchanged permits a provider's derived workflow status
+	// to refresh only when observation, mapping, and issue timestamps match.
+	// Newer local edits remain authoritative. The public import API omits it.
+	ReconcileStatusForUnchanged bool
 	// PreserveLocalParentConflicts leaves an existing local parent in place when
 	// a source-managed parent insert would create a second parent. Generic
 	// imports report ErrParentAlreadySet by default.

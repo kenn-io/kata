@@ -971,6 +971,27 @@ because Notion supplies nil priority. Deletion/archive reconciliation, dates,
 comments, relations, and write-back are outside v1. See the [Notion sync operating
 guide](../operations/notion-sync.md) for setup, limits, and recovery.
 
+### Plane
+
+```sh
+kata sync plane enable --plane-workspace example-workspace --plane-project UUID
+kata sync plane enable [--interval 5m] [--since 2026-01-01] [--title-prefix=false]
+kata sync plane status
+kata sync plane once
+kata sync plane disable
+```
+
+Initial enable requires the Plane workspace slug and project UUID. Re-enable
+preserves omitted options; empty `--since` clears the cutoff. Global `--workspace`
+and `--project` still select the native workspace/project. Origins and API keys
+belong to the daemon's `[plane_sync]` config and service environment.
+
+Titles default to `[Plane IDENTIFIER-N] Original title`; disabling prefixing
+adds the `plane` label. Completed state groups close with reason `done`, cancelled
+groups close with `wontfix`, and other groups map to open. Local edits never write
+back to Plane. See [Plane sync](../operations/plane-sync.md) for permissions,
+self-hosting, timestamp ownership, polling limits, and recovery.
+
 ### GitHub
 
 ```sh

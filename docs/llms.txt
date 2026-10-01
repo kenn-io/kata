@@ -66,3 +66,5 @@ for machine readers.
 
 - [Local daemon profiles](https://katatracker.com/docs/operations/local-daemon-profiles.md):
   Pin personal/work homes and recover existing spokes without changing routing.
+
+- [Plane sync](https://katatracker.com/docs/operations/plane-sync.md): Mirror a Plane project using daemon-owned read-only API credentials.

@@ -1,0 +1,87 @@
+package main
+
+import (
+	"github.com/spf13/cobra"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
+)
+
+func issueSyncLabel(provider string) string {
+	switch provider {
+	case "github":
+		return "GitHub"
+	case "notion":
+		return "Notion"
+	case "plane":
+		return "Plane"
+	default:
+		return provider
+	}
+}
+
+func newIssueSyncDisableCmd(provider string) *cobra.Command {
+	return &cobra.Command{Use: "disable", Short: "disable " + issueSyncLabel(provider) + " polling and retain imported issues", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		a, projectID, err := githubSyncProjectAPI(cmd.Context())
+		if err != nil {
+			return err
+		}
+		client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+		if err != nil {
+			return err
+		}
+		response, callErr := client.DisableIssueSyncWithResponse(a.ctx, &generated.DisableIssueSyncRequestOptions{PathParams: &generated.DisableIssueSyncPath{ProjectID: projectID, Provider: provider}, Body: &generated.DisableIssueSyncBody{}})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		return issueSyncPrintBinding(cmd.OutOrStdout(), response.Body, provider, "disabled")
+	}}
+}
+
+func newIssueSyncStatusCmd(provider string) *cobra.Command {
+	return &cobra.Command{Use: "status", Short: "show " + issueSyncLabel(provider) + " source and sync progress", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		a, projectID, err := githubSyncProjectAPI(cmd.Context())
+		if err != nil {
+			return err
+		}
+		client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+		if err != nil {
+			return err
+		}
+		response, callErr := client.GetIssueSyncStatusWithResponse(a.ctx, &generated.GetIssueSyncStatusRequestOptions{PathParams: &generated.GetIssueSyncStatusPath{ProjectID: projectID, Provider: provider}})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		return issueSyncPrintBinding(cmd.OutOrStdout(), response.Body, provider, "status")
+	}}
+}
+
+func newIssueSyncOnceCmd(provider string) *cobra.Command {
+	return &cobra.Command{Use: "once", Short: "run one daemon-side " + issueSyncLabel(provider) + " sync now", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		a, projectID, err := githubSyncProjectAPI(cmd.Context())
+		if err != nil {
+			return err
+		}
+		a.client, err = longRunningClientForResolved(cmd.Context(), a.resolved)
+		if err != nil {
+			return err
+		}
+		client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+		if err != nil {
+			return err
+		}
+		response, callErr := client.RunIssueSyncOnceWithResponse(a.ctx, &generated.RunIssueSyncOnceRequestOptions{PathParams: &generated.RunIssueSyncOncePath{ProjectID: projectID, Provider: provider}, Body: &generated.RunIssueSyncOnceBody{}})
+		if err := externalCLITransportError(response, callErr); err != nil {
+			return err
+		}
+		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+			return err
+		}
+		return issueSyncPrintOnce(cmd.OutOrStdout(), response.Body, provider)
+	}}
+}

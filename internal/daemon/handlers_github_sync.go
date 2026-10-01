@@ -45,8 +45,11 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, issueSyncStorageError(err, provider)
 		}
 		wake := cfg.GitHubSyncWake
-		if provider == issueSyncProviderNotion {
+		switch provider {
+		case issueSyncProviderNotion:
 			wake = cfg.NotionSyncWake
+		case issueSyncProviderPlane:
+			wake = cfg.PlaneSyncWake
 		}
 		if wake != nil {
 			wake()
@@ -131,8 +134,11 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if body.Status.State == "running" && status.SyncStartedAt != nil {
 			tracker := cfg.GitHubSyncProgress
-			if provider == issueSyncProviderNotion {
+			switch provider {
+			case issueSyncProviderNotion:
 				tracker = cfg.NotionSyncProgress
+			case issueSyncProviderPlane:
+				tracker = cfg.PlaneSyncProgress
 			}
 			if progress := tracker.Snapshot(binding.ID, *status.SyncStartedAt); progress != nil {
 				body.Status.Progress = &api.IssueSyncProgressOut{Phase: progress.Phase, Completed: progress.Completed, Total: progress.Total, StartedAt: progress.StartedAt, UpdatedAt: progress.UpdatedAt}
@@ -167,9 +173,12 @@ func registerIssueSyncHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusBadRequest, "validation", "issue sync is disabled for this project", "", nil)
 		}
 		var runner GitHubSyncRunner
-		if provider == issueSyncProviderNotion {
+		switch provider {
+		case issueSyncProviderNotion:
 			runner = notionSyncRunner(cfg)
-		} else {
+		case issueSyncProviderPlane:
+			runner = planeSyncRunner(cfg)
+		default:
 			runner = githubSyncRunner(cfg)
 		}
 		result, err := runner.RunOnce(ctx, binding.ID)
@@ -193,7 +202,7 @@ func validateIssueSyncProvider(provider string) (string, error) {
 	if provider == "" {
 		return "", api.NewError(http.StatusBadRequest, "validation", "issue sync provider is required", "", nil)
 	}
-	if provider != issueSyncProviderGitHub && provider != issueSyncProviderNotion {
+	if provider != issueSyncProviderGitHub && provider != issueSyncProviderNotion && provider != issueSyncProviderPlane {
 		return "", api.NewError(http.StatusBadRequest, "validation", fmt.Sprintf("issue sync provider %q is not supported", provider), "", nil)
 	}
 	return provider, nil
@@ -205,6 +214,8 @@ func issueSyncEnableParams(ctx context.Context, cfg ServerConfig, provider strin
 		return githubSyncEnableParams(ctx, cfg, in)
 	case issueSyncProviderNotion:
 		return notionSyncEnableParams(ctx, cfg, in)
+	case issueSyncProviderPlane:
+		return planeSyncEnableParams(ctx, cfg, in)
 	default:
 		return db.UpsertIssueSyncBindingParams{}, api.NewError(http.StatusBadRequest, "validation", fmt.Sprintf("issue sync provider %q is not supported", provider), "", nil)
 	}
@@ -420,8 +431,11 @@ func issueSyncStorageError(err error, provider string) error {
 	}
 	if errors.Is(err, db.ErrIssueSyncFederationBinding) {
 		name := "GitHub"
-		if provider == issueSyncProviderNotion {
+		switch provider {
+		case issueSyncProviderNotion:
 			name = "Notion"
+		case issueSyncProviderPlane:
+			name = "Plane"
 		}
 		return api.NewError(http.StatusConflict, "issue_sync_federation_conflict",
 			fmt.Sprintf("project is a federation spoke; enable %s sync on the hub project so federation can replicate %s issues to spokes", name, name), "", nil)

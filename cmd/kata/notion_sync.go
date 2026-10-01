@@ -13,7 +13,7 @@ import (
 
 func newNotionSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "notion", Short: "mirror Notion tasks into this project"}
-	cmd.AddCommand(newNotionSyncEnableCmd(), newNotionSyncDisableCmd(), newNotionSyncStatusCmd(), newNotionSyncOnceCmd())
+	cmd.AddCommand(newNotionSyncEnableCmd(), newIssueSyncDisableCmd("notion"), newIssueSyncStatusCmd("notion"), newIssueSyncOnceCmd("notion"))
 	return cmd
 }
 
@@ -105,7 +105,7 @@ func newNotionSyncEnableCmd() *cobra.Command {
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return err
 		}
-		return notionSyncPrintBinding(cmd.OutOrStdout(), response.Body, "enabled")
+		return issueSyncPrintBinding(cmd.OutOrStdout(), response.Body, "notion", "enabled")
 	}
 	cmd.Flags().StringVar(&source, "data-source", "", "Notion data source UUID (initial enable requires a locator)")
 	cmd.Flags().StringVar(&database, "database", "", "Notion database UUID or URL; must contain exactly one data source")
@@ -116,71 +116,4 @@ func newNotionSyncEnableCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&titlePrefix, "title-prefix", true, "prefix titles with [Notion]; false keeps source titles and adds the notion label (omitted preserves saved choice)")
 	cmd.Flags().StringVar(&since, "since", "", "updated-after UTC date or whole-second RFC3339; empty clears, omitted preserves saved cutoff")
 	return cmd
-}
-
-func newNotionSyncDisableCmd() *cobra.Command {
-	return &cobra.Command{Use: "disable", Short: "disable Notion polling and retain imported issues", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		a, projectID, err := githubSyncProjectAPI(cmd.Context())
-		if err != nil {
-			return err
-		}
-		client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
-		if err != nil {
-			return err
-		}
-		response, callErr := client.DisableIssueSyncWithResponse(a.ctx, &generated.DisableIssueSyncRequestOptions{PathParams: &generated.DisableIssueSyncPath{ProjectID: projectID, Provider: "notion"}, Body: &generated.DisableIssueSyncBody{}})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return err
-		}
-		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-			return err
-		}
-		return notionSyncPrintBinding(cmd.OutOrStdout(), response.Body, "disabled")
-	}}
-}
-
-func newNotionSyncStatusCmd() *cobra.Command {
-	return &cobra.Command{Use: "status", Short: "show Notion source, resolved mappings, and sync progress", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		a, projectID, err := githubSyncProjectAPI(cmd.Context())
-		if err != nil {
-			return err
-		}
-		client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
-		if err != nil {
-			return err
-		}
-		response, callErr := client.GetIssueSyncStatusWithResponse(a.ctx, &generated.GetIssueSyncStatusRequestOptions{PathParams: &generated.GetIssueSyncStatusPath{ProjectID: projectID, Provider: "notion"}})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return err
-		}
-		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-			return err
-		}
-		return notionSyncPrintBinding(cmd.OutOrStdout(), response.Body, "status")
-	}}
-}
-
-func newNotionSyncOnceCmd() *cobra.Command {
-	return &cobra.Command{Use: "once", Short: "run one daemon-side Notion sync now", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		a, projectID, err := githubSyncProjectAPI(cmd.Context())
-		if err != nil {
-			return err
-		}
-		a.client, err = longRunningClientForResolved(cmd.Context(), a.resolved)
-		if err != nil {
-			return err
-		}
-		client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
-		if err != nil {
-			return err
-		}
-		response, callErr := client.RunIssueSyncOnceWithResponse(a.ctx, &generated.RunIssueSyncOnceRequestOptions{PathParams: &generated.RunIssueSyncOncePath{ProjectID: projectID, Provider: "notion"}, Body: &generated.RunIssueSyncOnceBody{}})
-		if err := externalCLITransportError(response, callErr); err != nil {
-			return err
-		}
-		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-			return err
-		}
-		return notionSyncPrintOnce(cmd.OutOrStdout(), response.Body)
-	}}
 }

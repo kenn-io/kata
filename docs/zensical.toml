@@ -48,6 +48,7 @@ nav = [
     {"Local daemon profiles" = "operations/local-daemon-profiles.md"},
     {"GitHub sync" = "operations/github-sync.md"},
     {"Notion sync" = "operations/notion-sync.md"},
+    {"Plane sync" = "operations/plane-sync.md"},
     {"Federation" = "operations/federation.md"},
     {"Agent orchestration" = "operations/agent-orchestration.md"},
     {"Hosted mode" = "operations/hosted-mode.md"},

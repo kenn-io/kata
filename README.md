@@ -205,6 +205,8 @@ The [docs site](docs/) is the definitive reference:
 - Workflows: [Agent workflows](docs/workflows/agents.md) ·
   [Sharing models](docs/workflows/sharing.md)
 - Operations: [GitHub sync](docs/operations/github-sync.md) ·
+  [Notion sync](docs/operations/notion-sync.md) ·
+  [Plane sync](docs/operations/plane-sync.md) ·
   [Remote daemon](docs/operations/remote-daemon.md) ·
   [Federation](docs/operations/federation.md) ·
   [Hosted mode](docs/operations/hosted-mode.md) ·

@@ -27,6 +27,7 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/notionsync"
+	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
 	"go.kenn.io/kata/internal/vector"
 )
@@ -67,6 +68,10 @@ type ServerConfig struct {
 	NotionSyncFetcher        notionsync.Fetcher
 	NotionSyncProgress       *issuesync.ProgressTracker
 	NotionSyncWake           func()
+	PlaneSyncConfig          config.PlaneSyncConfig
+	PlaneSyncFetcher         planesync.Fetcher
+	PlaneSyncProgress        *issuesync.ProgressTracker
+	PlaneSyncWake            func()
 	Hooks                    hooks.Sink
 	ExternalRootRegistry     *rootbridge.Registry
 	ExternalRootService      *rootbridge.Service
@@ -230,6 +235,12 @@ type ListenerBinding struct {
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
+	if cfg.PlaneSyncProgress == nil {
+		cfg.PlaneSyncProgress = issuesync.NewProgressTracker()
+	}
+	if cfg.PlaneSyncFetcher == nil {
+		cfg.PlaneSyncFetcher = planeSyncFetcher(cfg)
+	}
 	if cfg.NotionSyncProgress == nil {
 		cfg.NotionSyncProgress = issuesync.NewProgressTracker()
 	}

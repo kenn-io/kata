@@ -78,7 +78,7 @@ func newSyncCmd() *cobra.Command {
 		Use:   "sync",
 		Short: "sync external systems",
 	}
-	cmd.AddCommand(newGitHubSyncCmd(), newNotionSyncCmd())
+	cmd.AddCommand(newGitHubSyncCmd(), newNotionSyncCmd(), newPlaneSyncCmd())
 	return cmd
 }
 
@@ -89,9 +89,9 @@ func newGitHubSyncCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newGitHubSyncEnableCmd(),
-		newGitHubSyncDisableCmd(),
-		newIssueSyncStatusCmd(),
-		newGitHubSyncOnceCmd(),
+		newIssueSyncDisableCmd("github"),
+		newIssueSyncStatusCmd("github"),
+		newIssueSyncOnceCmd("github"),
 	)
 	return cmd
 }
@@ -151,98 +151,6 @@ func newGitHubSyncEnableCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.since, "since", "", "only import issues updated after YYYY-MM-DD (UTC) or RFC3339 with whole seconds; omit to keep the cutoff, use --since= to clear it")
 	cmd.Flags().BoolVar(&opts.titlePrefix, "title-prefix", true, "prefix titles with [GitHub #N]; false keeps source titles and adds the github label (omitted preserves saved choice)")
 	return cmd
-}
-
-func newGitHubSyncDisableCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "disable",
-		Short: "disable GitHub sync for this project",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return githubSyncDisable(cmd)
-		},
-	}
-}
-
-func newIssueSyncStatusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "show GitHub sync status for this project",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			a, projectID, err := githubSyncProjectAPI(ctx)
-			if err != nil {
-				return err
-			}
-			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
-			if err != nil {
-				return err
-			}
-			response, callErr := apiClient.GetIssueSyncStatusWithResponse(a.ctx, &generated.GetIssueSyncStatusRequestOptions{PathParams: &generated.GetIssueSyncStatusPath{ProjectID: projectID, Provider: "github"}})
-			if err := externalCLITransportError(response, callErr); err != nil {
-				return err
-			}
-			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-				return err
-			}
-			bs := response.Body
-			return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, "status")
-		},
-	}
-}
-
-func newGitHubSyncOnceCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "once",
-		Short: "run GitHub sync once for this project",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			a, projectID, err := githubSyncProjectAPI(ctx)
-			if err != nil {
-				return err
-			}
-			a.client, err = longRunningClientForResolved(ctx, a.resolved)
-			if err != nil {
-				return err
-			}
-			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
-			if err != nil {
-				return err
-			}
-			response, callErr := apiClient.RunIssueSyncOnceWithResponse(a.ctx, &generated.RunIssueSyncOnceRequestOptions{PathParams: &generated.RunIssueSyncOncePath{ProjectID: projectID, Provider: "github"}, Body: &generated.RunIssueSyncOnceBody{}})
-			if err := externalCLITransportError(response, callErr); err != nil {
-				return err
-			}
-			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-				return err
-			}
-			bs := response.Body
-			return githubSyncPrintOnceBody(cmd.OutOrStdout(), bs)
-		},
-	}
-}
-
-func githubSyncDisable(cmd *cobra.Command) error {
-	ctx := cmd.Context()
-	a, projectID, err := githubSyncProjectAPI(ctx)
-	if err != nil {
-		return err
-	}
-	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
-	if err != nil {
-		return err
-	}
-	response, callErr := apiClient.DisableIssueSyncWithResponse(a.ctx, &generated.DisableIssueSyncRequestOptions{PathParams: &generated.DisableIssueSyncPath{ProjectID: projectID, Provider: "github"}, Body: &generated.DisableIssueSyncBody{}})
-	if response == nil {
-		return externalCLITransportError(response, callErr)
-	}
-	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-		return err
-	}
-	bs := response.Body
-	return githubSyncPrintBindingBody(cmd.OutOrStdout(), bs, "disabled")
 }
 
 // githubSyncProjectAPI is the connected daemon plus the workspace's project

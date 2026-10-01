@@ -128,6 +128,7 @@ is a local ledger for the work itself. They coexist. See
 -   [__Local daemon profiles__](operations/local-daemon-profiles.md). Keep personal
     and work spokes separate and recover their existing data.
 -   [__GitHub sync__](operations/github-sync.md). Bring GitHub issues into kata.
+-   [__Plane sync__](operations/plane-sync.md). Mirror a Plane project into native issues.
 -   [__Agent workflows__](workflows/agents.md). The operating contract for agents.
 -   [__Comparisons__](guide/comparisons.md). kata vs. SaaS issue trackers.
 
