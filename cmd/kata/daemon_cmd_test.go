@@ -2023,6 +2023,26 @@ func TestNewDaemonTelemetryReporterTreatsUnstampedInstanceAsOld(t *testing.T) {
 	assert.True(t, got.InstalledAt.IsZero(), "existing install passed %v", got.InstalledAt)
 }
 
+func TestNewDaemonTelemetryReporterDisablesWhenCreationTimeUnreadable(t *testing.T) {
+	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+	defer func() { _ = store.Close() }()
+	_, err := store.ExecContext(t.Context(), `UPDATE meta SET value='not-a-time' WHERE key=?`, db.MetaKeyInstanceCreatedAt)
+	require.NoError(t, err)
+
+	called := false
+	orig := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+		called = true
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = orig })
+
+	reporter := newDaemonTelemetryReporter(t.Context(), store)
+
+	assert.False(t, called, "an unreadable creation time must not build a live reporter")
+	assert.False(t, reporter.Enabled())
+}
+
 func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
 	tmp := t.TempDir()
 	store := openKataTestDB(t, filepath.Join(tmp, "kata.db"))
