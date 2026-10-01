@@ -159,9 +159,9 @@ func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
-	// Schema 30 stored status checkpoints in one JSON column. Recreate that
-	// table shape so cutover exercises the real legacy export contract.
-	stageLegacyPreCutoverFixture(t, path, 30)
+	// Stand up a fixture and rewrite meta.schema_version to a pre-current
+	// value so storeopen routes through cutover.
+	stageLegacyPreCutoverFixture(t, path, db.CurrentSchemaVersion()-1)
 
 	s, err := storeopen.Open(ctx, path)
 	require.NoError(t, err)
@@ -189,22 +189,15 @@ func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {
 }
 
 // stageLegacyPreCutoverFixture creates a real kata-shaped SQLite DB at path
-// and recreates the schema-30 import mapping shape when requested. Version zero
-// exercises refusal to bootstrap over existing product tables.
+// and rewrites meta.schema_version to a value below the current version so
+// jsonl.AutoCutover treats it as legacy. Open gives us all the tables
+// AutoCutover's export step expects without hand-writing a baseline schema.
 func stageLegacyPreCutoverFixture(t *testing.T, path string, version int) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
-	if version == 30 {
-		for _, column := range []string{"observed_status", "observed_status_at", "pending_event_uid", "remote_locator"} {
-			_, err = d.ExecContext(ctx, `ALTER TABLE import_mappings DROP COLUMN `+column)
-			require.NoError(t, err)
-		}
-		_, err = d.ExecContext(ctx, `ALTER TABLE import_mappings ADD COLUMN status_sync_json TEXT`)
-		require.NoError(t, err)
-	}
 	_, err = d.ExecContext(ctx,
 		`UPDATE meta SET value=? WHERE key='schema_version'`, strconv.Itoa(version))
 	require.NoError(t, err)

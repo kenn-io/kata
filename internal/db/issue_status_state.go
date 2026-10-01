@@ -2,10 +2,7 @@ package db
 
 import (
 	"context"
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"fmt"
-	"strconv"
 	"time"
 
 	"go.kenn.io/kata/internal/uid"
@@ -28,50 +25,6 @@ type IssueStatusObservation struct {
 
 func invalidIssueStatusState() error {
 	return fmt.Errorf("%w: invalid private issue status checkpoint", ErrImportValidation)
-}
-
-// DecodeIssueStatusState reads the legacy schema-30 JSON checkpoint. Opaque
-// identities and provider content are not included in diagnostic errors.
-func DecodeIssueStatusState(raw jsontext.Value) (IssueStatusState, error) {
-	var state struct {
-		Observed          *IssueStatusObservation `json:"observed,omitzero"`
-		PendingEventUID   string                  `json:"pending_event_uid,omitzero"`
-		GitHubIssueNumber int64                   `json:"github_issue_number,omitzero"`
-	}
-	if len(raw) == 0 {
-		return IssueStatusState{}, nil
-	}
-	var fields map[string]jsontext.Value
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-		return IssueStatusState{}, invalidIssueStatusState()
-	}
-	if err := json.Unmarshal(raw, &state, json.RejectUnknownMembers(true)); err != nil {
-		return IssueStatusState{}, invalidIssueStatusState()
-	}
-	if observation, present := fields["observed"]; present {
-		var observed map[string]jsontext.Value
-		if err := json.Unmarshal(observation, &observed); err != nil || observed == nil || state.Observed == nil {
-			return IssueStatusState{}, invalidIssueStatusState()
-		}
-		if _, present := observed["raw"]; !present {
-			return IssueStatusState{}, invalidIssueStatusState()
-		}
-		if state.Observed.Version.IsZero() {
-			return IssueStatusState{}, invalidIssueStatusState()
-		}
-		state.Observed.Version = state.Observed.Version.UTC()
-	}
-	if _, present := fields["pending_event_uid"]; present && !uid.Valid(state.PendingEventUID) {
-		return IssueStatusState{}, invalidIssueStatusState()
-	}
-	if _, present := fields["github_issue_number"]; present && state.GitHubIssueNumber <= 0 {
-		return IssueStatusState{}, invalidIssueStatusState()
-	}
-	result := IssueStatusState{Observed: state.Observed, PendingEventUID: state.PendingEventUID}
-	if state.GitHubIssueNumber != 0 {
-		result.RemoteLocator = strconv.FormatInt(state.GitHubIssueNumber, 10)
-	}
-	return result, nil
 }
 
 // DecodeIssueStatusColumns validates nullable persisted values. An observation
@@ -104,30 +57,9 @@ func DecodeIssueStatusColumns(raw, observedAt, pending, locator *string) (IssueS
 	return state, nil
 }
 
-// NormalizeIssueStatusExport converts the former JSON checkpoint when reading
-// legacy exports. New exports contain only the four nullable mapping columns.
+// NormalizeIssueStatusExport validates the four nullable status columns and
+// canonicalizes the observation timestamp to UTC.
 func NormalizeIssueStatusExport(record ImportMappingExport) (ImportMappingExport, error) {
-	if len(record.StatusSync) != 0 {
-		if record.ObservedStatus != nil || record.ObservedStatusAt != nil || record.PendingEventUID != nil || record.RemoteLocator != nil {
-			return record, invalidIssueStatusState()
-		}
-		state, err := DecodeIssueStatusState(record.StatusSync)
-		if err != nil {
-			return record, err
-		}
-		if state.Observed != nil {
-			record.ObservedStatus = state.Observed.Raw
-			stamp := state.Observed.Version.Format(time.RFC3339Nano)
-			record.ObservedStatusAt = &stamp
-		}
-		if state.PendingEventUID != "" {
-			record.PendingEventUID = &state.PendingEventUID
-		}
-		if state.RemoteLocator != "" {
-			record.RemoteLocator = &state.RemoteLocator
-		}
-		record.StatusSync = nil
-	}
 	state, err := DecodeIssueStatusColumns(record.ObservedStatus, record.ObservedStatusAt, record.PendingEventUID, record.RemoteLocator)
 	if err != nil {
 		return record, err

@@ -96,13 +96,19 @@ func checkIssueStatusMappingStorage(t *testing.T, store db.Storage) error {
 	}
 	for _, record := range records {
 		if checkpoint, ok := record.(*db.ImportMappingExport); ok {
-			for _, invalid := range []string{`[]`, `{"observed":{"version":"2026-09-29T12:00:00Z"}}`, `{"pending_event_uid":"bad"}`, `{"desired_state":"closed"}`} {
-				checkpoint.StatusSync = []byte(invalid)
+			valid := *checkpoint
+			raw, badStamp, badUID, empty := "closed", "invalid", "bad", ""
+			for _, invalid := range []db.ImportMappingExport{
+				{ObservedStatus: &raw}, {ObservedStatusAt: &badStamp}, {PendingEventUID: &badUID}, {RemoteLocator: &empty},
+			} {
+				checkpoint.ObservedStatus, checkpoint.ObservedStatusAt = invalid.ObservedStatus, invalid.ObservedStatusAt
+				checkpoint.PendingEventUID, checkpoint.RemoteLocator = invalid.PendingEventUID, invalid.RemoteLocator
 				for _, trusted := range []bool{false, true} {
 					require.Error(t, store.ImportReplay(ctx, records, db.ImportOptions{PreserveIssueSyncBindingEnabled: trusted}), "malformed checkpoint must be rejected even when it would be cleared")
 					require.Equal(t, state, read(), "failed replay must retain the prior store")
 				}
 			}
+			*checkpoint = valid
 		}
 	}
 	return nil

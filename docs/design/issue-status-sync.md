@@ -1,9 +1,7 @@
 # Two-way issue status sync for Notion, GitHub, and Plane
 
-**Status: implemented on this branch.** This document defines the status-sync
-contract and the explicitly approved four-column storage replacement.
-Kata tracking: `54ev`; implementation: `dfjd`; independent reviews: `fpab` and
-lean-storage review `3dxr`.
+**Status: implemented.** This document defines the status-sync contract and its
+four-column storage.
 
 ## Outcome and scope
 
@@ -114,18 +112,17 @@ were checked on 2026-09-29.
 
 ## Lean storage decision
 
-A second GPT-6 Astra review at xhigh examined smaller persistence alternatives.
 The approved design reuses import mappings and binding claims, with exactly
 four nullable columns on each backend's existing `import_mappings` table:
 `observed_status`, `observed_status_at`, `pending_event_uid`, and `remote_locator`.
-These replace the schema-30 JSON column in schema 31. Add no status table,
-indexes, second lease, generic outbound queue, or speculative provider metadata.
+Add no status table, indexes, second lease, generic outbound queue, or
+speculative provider metadata.
 
 | Storage approach | Consequence | Decision |
 | --- | --- | --- |
 | Events plus binding checkpoints, with no schema changes | Possible, but needs per-object acknowledgement events and replay eligibility rules; a single cursor alone causes blocking and replay errors | Reject for this scope: less DDL produces more state-processing code |
 | Four nullable columns on existing import mappings | Keep the observation, exact pending event reference, and necessary API locator beside existing identity; reuse transactional mutation points | Approved |
-| Private JSON column on existing import mappings | Stores the same small fixed contract inside an extra JSON layer | Replaced by typed columns; preserve existing data during the version-30 upgrade |
+| Private JSON column on existing import mappings | Stores the same small fixed contract inside an extra JSON layer | Rejected: typed columns validate each field at the storage boundary |
 | Separate status table and per-object delivery machinery | Duplicates mapping identity and adds scan generations, retry scheduling, and attempt state | Superseded by the lean design |
 
 The pending event reference is simpler than deriving an outbox from historical
@@ -363,7 +360,7 @@ opt-in creates no pending pointers for historical local differences.
 
 ## Approved persisted state
 
-Schema 31 has exactly four nullable status-sync columns on `import_mappings`:
+Schema 30 has exactly four nullable status-sync columns on `import_mappings`:
 
 | Column | SQLite type | PostgreSQL type | Meaning |
 | --- | --- | --- | --- |
@@ -393,22 +390,15 @@ exact-UID acknowledgement remain transactional and claim-fenced on both
 backends. Acknowledgement saves both observation columns and clears only the
 serviced `pending_event_uid` in the same transaction.
 
-Preserve PostgreSQL migration history: add a version-30-to-31 forward migration
-that converts `status_sync_json` into the four columns before removing that
-column. Preserve observed raw values, observed nulls, provider timestamps,
-pending event UIDs, and verified GitHub numbers converted to decimal locator
-text. Fresh canonical schemas use version 31. SQLite reaches the same shape
-through its existing version-aware JSONL cutover, including databases from
-before version 30 that have no status-sync column. Follow the
+PostgreSQL adds the four columns with one version-29-to-30 forward migration;
+existing mappings receive null in all four. Fresh canonical schemas use version
+30. SQLite reaches the same shape through its existing version-aware JSONL
+cutover. Follow the
 [PostgreSQL migration rules](../development/postgres-migrations.md).
 
 Export the four columns as optional fields with those names on existing
-`import_mapping` JSONL records; add no record kind. Readers convert legacy
-`status_sync` objects into these fields, including `observed.raw` null and
-`github_issue_number` to `remote_locator`. If a record supplies legacy and new
-fields, reject inconsistent values rather than choosing one silently. Current
-exports never emit the old `status_sync` field. Validate malformed legacy or
-new state before any restore changes, even when the restore would clear it.
+`import_mapping` JSONL records; add no record kind. Validate malformed state
+before any restore changes, even when the restore would clear it.
 
 Ordinary restore clears all four private columns and scan cursors and leaves
 bindings disabled, requiring fresh observation after explicit re-enable.

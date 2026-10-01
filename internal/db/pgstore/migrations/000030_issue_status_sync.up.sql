@@ -1,5 +1,7 @@
--- Status checkpoints belong to an existing identity mapping. Existing rows
--- intentionally have no observation or outbound intent after upgrade.
+-- Status sync fields belong to an existing identity mapping. Existing rows
+-- receive NULL, so upgrading creates no observation or outbound intent.
 ALTER TABLE import_mappings
-  ADD COLUMN status_sync_json TEXT DEFAULT NULL
-    CHECK (status_sync_json IS NULL OR (status_sync_json IS JSON OBJECT));
+  ADD COLUMN observed_status TEXT,
+  ADD COLUMN observed_status_at TEXT,
+  ADD COLUMN pending_event_uid TEXT,
+  ADD COLUMN remote_locator TEXT;

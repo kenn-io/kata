@@ -1057,12 +1057,9 @@ func exportLinksV1(ctx context.Context, d exportQuerier, enc *Encoder, opts Expo
 }
 
 func exportImportMappings(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
-	statusColumns := "NULL,NULL,NULL,NULL,NULL"
-	if sourceSchemaVersion == 30 {
-		statusColumns = "NULL,NULL,NULL,NULL,status_sync_json"
-	}
-	if sourceSchemaVersion >= 31 {
-		statusColumns = "observed_status,CAST(observed_status_at AS TEXT),pending_event_uid,remote_locator,NULL"
+	statusColumns := "NULL,NULL,NULL,NULL"
+	if sourceSchemaVersion >= 30 {
+		statusColumns = "observed_status,CAST(observed_status_at AS TEXT),pending_event_uid,remote_locator"
 	}
 
 	query := `SELECT id, source, external_id, object_type, project_id, issue_id, comment_id, link_id, label,
@@ -1095,12 +1092,9 @@ func exportImportMappings(ctx context.Context, d exportQuerier, enc *Encoder, op
 	}
 	return scanRecords(rows, KindImportMapping, enc, func(rows *sql.Rows) (db.ImportMappingExport, error) {
 		var rec db.ImportMappingExport
-		var status sql.NullString
 		err := rows.Scan(&rec.ID, &rec.Source, &rec.ExternalID, &rec.ObjectType, &rec.ProjectID,
-			&rec.IssueID, &rec.CommentID, &rec.LinkID, &rec.Label, &rec.SourceUpdatedAt, &rec.ImportedAt, &rec.ObservedStatus, &rec.ObservedStatusAt, &rec.PendingEventUID, &rec.RemoteLocator, &status)
-		if status.Valid {
-			rec.StatusSync = jsontext.Value(status.String)
-		}
+			&rec.IssueID, &rec.CommentID, &rec.LinkID, &rec.Label, &rec.SourceUpdatedAt, &rec.ImportedAt,
+			&rec.ObservedStatus, &rec.ObservedStatusAt, &rec.PendingEventUID, &rec.RemoteLocator)
 		if err != nil {
 			return rec, err
 		}

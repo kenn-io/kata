@@ -1,8 +1,6 @@
 package db_test
 
 import (
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"testing"
 	"time"
 
@@ -10,7 +8,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestIssueStatusColumnsPreserveNullAndLegacyIntent(t *testing.T) {
+func TestIssueStatusColumnsPreserveNullObservation(t *testing.T) {
 	stamp := "2026-09-29T14:00:00+02:00"
 	pending := "01HZZZZZZZZZZZZZZZZZZZZZ13"
 	locator := "7"
@@ -24,21 +22,10 @@ func TestIssueStatusColumnsPreserveNullAndLegacyIntent(t *testing.T) {
 	require.Equal(t, time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC), observed.Observed.Version)
 	require.Equal(t, pending, observed.PendingEventUID)
 	require.Equal(t, locator, observed.RemoteLocator)
-	legacy := db.ImportMappingExport{StatusSync: jsontext.Value(`{"observed":{"raw":null,"version":"2026-09-29T14:00:00+02:00"},"pending_event_uid":"01HZZZZZZZZZZZZZZZZZZZZZ13","github_issue_number":7}`)}
-	converted, err := db.NormalizeIssueStatusExport(legacy)
+	converted, err := db.NormalizeIssueStatusExport(db.ImportMappingExport{ObservedStatusAt: &stamp, PendingEventUID: &pending, RemoteLocator: &locator})
 	require.NoError(t, err)
-	require.Nil(t, converted.StatusSync)
 	require.Nil(t, converted.ObservedStatus)
 	require.Equal(t, "2026-09-29T12:00:00Z", *converted.ObservedStatusAt)
-	require.Equal(t, pending, *converted.PendingEventUID)
-	require.Equal(t, locator, *converted.RemoteLocator)
-	raw, err := json.Marshal(converted)
-	require.NoError(t, err)
-	require.NotContains(t, string(raw), "status_sync")
-	require.NotContains(t, string(raw), "github_issue_number")
-	converted.StatusSync = legacy.StatusSync
-	_, err = db.NormalizeIssueStatusExport(converted)
-	require.Error(t, err, "mixed contracts must not silently discard authority")
 }
 
 func TestIssueStatusColumnsRejectIncompleteOrMalformedValues(t *testing.T) {

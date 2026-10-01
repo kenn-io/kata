@@ -200,8 +200,6 @@ type ImportMappingExport struct {
 	ObservedStatusAt *string `json:"observed_status_at,omitempty"`
 	PendingEventUID  *string `json:"pending_event_uid,omitempty"`
 	RemoteLocator    *string `json:"remote_locator,omitempty"`
-	// StatusSync is accepted only when converting legacy schema-30 exports.
-	StatusSync jsontext.Value `json:"status_sync,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.
