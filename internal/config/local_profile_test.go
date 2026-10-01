@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -260,6 +261,33 @@ func TestLocalProfileEnvironmentIncludesDefaultGitHubTokenEnv(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, env, "KATA_GITHUB_TOKEN=profile-github-token")
+}
+
+func TestLocalProfileEnvironmentIncludesPlaneToken(t *testing.T) {
+	t.Setenv("KATA_PLANE_TOKEN", "default-plane-token")
+	t.Setenv("EXAMPLE_PLANE_TOKEN", "custom-plane-token")
+	for _, tc := range []struct {
+		name, config, want string
+	}{
+		{"default", "", "KATA_PLANE_TOKEN=default-plane-token"},
+		{"custom", "[plane_sync]\ntoken_env = \"EXAMPLE_PLANE_TOKEN\"\n", "EXAMPLE_PLANE_TOKEN=custom-plane-token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if tc.config != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0o600))
+			}
+			profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{
+				Name: "example-profile", Local: true, Home: home, InstanceUID: "01HZZZZZZZZZZZZZZZZZZZZZ01",
+			})
+			require.NoError(t, err)
+
+			env, err := config.LocalProfileEnvironment(profile, true)
+
+			require.NoError(t, err)
+			assert.True(t, slices.Contains(env, tc.want), "child environment must include the selected Plane token")
+		})
+	}
 }
 
 func TestLocalProfileEnvironmentRejectsReservedCredentialReferences(t *testing.T) {
