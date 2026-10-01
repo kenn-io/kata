@@ -675,3 +675,9 @@ federation enrollment to survive restarts should implement
 The embedded service does not read a listener address, install signal handlers,
 or take over the host application's logger. Pass a `*slog.Logger` in
 `Config.Logger` when kata should use an application-specific logger.
+
+Plane polling uses `Config.PlaneSync` with `APIOrigin`, `WebOrigin`, and `TokenEnv`.
+Defaults match `[plane_sync]`; service construction validates origins without
+reading secrets. `Run` starts the Plane worker alongside Notion/GitHub workers.
+Manual routes and polling share the client, live progress, and committed-event
+publication. See [Plane sync](../operations/plane-sync.md).

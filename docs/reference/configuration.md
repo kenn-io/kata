@@ -32,6 +32,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
+| `KATA_PLANE_TOKEN` | Default daemon-side Plane API key; `[plane_sync].token_env` can select another environment variable. |
 | `KATA_NOTION_TOKEN` | Default daemon-side read-only Notion credential; `[notion_sync].token_env` can name another environment variable. Client workstations need no Notion token. |
 | `KATA_GITHUB_TOKEN` | Default explicit token source for GitHub sync when no matching `[[github_sync.app]]` credential is configured. It is scoped to `github.com` unless `[github_sync].token_host` names a different host. `[github_sync].token_env` can name a different env var. |
 | `KATA_GITHUB_SYNC_ALLOWED_HOSTS` | Comma-separated exact GitHub Enterprise hostnames trusted for GitHub sync and git-remote inference. `github.com` is always trusted. |
@@ -250,6 +251,11 @@ trust_private_network = true
 listen = "127.0.0.1:27777"
 public_origin = "https://daemon.example"
 
+[plane_sync]
+api_origin = "https://api.plane.so"
+web_origin = "https://app.plane.so"
+token_env = "KATA_PLANE_TOKEN"
+
 [notion_sync]
 token_env = "KATA_NOTION_TOKEN"
 
@@ -295,7 +301,7 @@ configured interval. Ordinary health probes do not renew the timeout. A running
 sends marked `GET /api/v1/ping` keepalives after applicable listener policy
 checks in both stdio and streamable-HTTP modes so the bridge remains usable for
 its full lifetime. Use an explicit daemon service when
-GitHub/Notion sync, federation, or timed-claim maintenance must remain continuously
+GitHub/Notion/Plane sync, federation, or timed-claim maintenance must remain continuously
 scheduled without a client present.
 
 The optional top-level `timezone` is the IANA timezone for date-only and local
@@ -840,3 +846,12 @@ Do not put federation enrollment tokens in `.kata.toml`.
 When `PORT` is set and no explicit listener is configured, a foreground daemon
 binds `0.0.0.0:$PORT`. Hosted mode still requires daemon API auth and explicit
 private-network trust. See [Hosted mode](../operations/hosted-mode.md).
+
+`[plane_sync]` sets daemon-owned `api_origin`, `web_origin`, and `token_env`.
+Cloud defaults are `https://api.plane.so`, `https://app.plane.so`, and
+`KATA_PLANE_TOKEN`. A self-hosted API origin also becomes the default web origin.
+Origins must be root HTTPS origins, or HTTP on literal loopback IPs. API keys
+are resolved once per run and sent only to the configured API origin through
+`X-API-Key`; redirects are rejected. Binding requests cannot choose origins or
+credentials. Workspace, project UUID, cutoff, interval, and title presentation
+are set with `kata sync plane enable`. See [Plane sync](../operations/plane-sync.md).

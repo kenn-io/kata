@@ -2245,7 +2245,7 @@ func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *te
 		runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
 		var configs []githubsync.RunnerConfig
 		orig := newGitHubSyncDaemonRunner
-		newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
+		newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) issueSyncDaemonRunner {
 			configs = append(configs, cfg)
 			return runner
 		}
@@ -2281,7 +2281,7 @@ func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
 		runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
 		var configs []githubsync.RunnerConfig
 		orig := newGitHubSyncDaemonRunner
-		newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
+		newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) issueSyncDaemonRunner {
 			configs = append(configs, cfg)
 			return runner
 		}
@@ -3257,7 +3257,7 @@ func TestDaemonGitHubSyncProgressTrackerReachesScheduledRunner(t *testing.T) {
 		runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
 		var configs []githubsync.RunnerConfig
 		orig := newGitHubSyncDaemonRunner
-		newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
+		newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) issueSyncDaemonRunner {
 			configs = append(configs, cfg)
 			return runner
 		}
@@ -3373,7 +3373,7 @@ func TestDaemonNotionScheduledFactorySharesDependencies(t *testing.T) {
 	runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
 	var captured notionsync.RunnerConfig
 	original := newNotionSyncDaemonRunner
-	newNotionSyncDaemonRunner = func(cfg notionsync.RunnerConfig) notionSyncDaemonRunner { captured = cfg; return runner }
+	newNotionSyncDaemonRunner = func(cfg notionsync.RunnerConfig) issueSyncDaemonRunner { captured = cfg; return runner }
 	defer func() { newNotionSyncDaemonRunner = original }()
 	ctx, cancel := context.WithCancel(context.Background())
 	workers := newDaemonWorkerGroup()
@@ -3626,7 +3626,7 @@ func TestDaemonNotionConfigFileClientSharedByEnableAndScheduling(t *testing.T) {
 		return client
 	}
 	recorded := make(chan db.IssueSyncStatus, 1)
-	newNotionSyncDaemonRunner = func(cfg notionsync.RunnerConfig) notionSyncDaemonRunner {
+	newNotionSyncDaemonRunner = func(cfg notionsync.RunnerConfig) issueSyncDaemonRunner {
 		cfg.Store = &runtimeNotionRecordingStore{Storage: cfg.Store, recorded: recorded}
 		configs <- cfg
 		return originalRunner(cfg)

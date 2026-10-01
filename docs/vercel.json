@@ -429,6 +429,16 @@
       "source": "/assets/screenshots/:path*",
       "destination": "/docs/assets/screenshots/:path*",
       "permanent": true
+    },
+    {
+      "source": "/operations/plane-sync/",
+      "destination": "/docs/operations/plane-sync/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/plane-sync.md",
+      "destination": "/docs/operations/plane-sync.md",
+      "permanent": true
     }
   ]
 }

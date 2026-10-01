@@ -249,8 +249,8 @@ func (s *Store) importIssue(
 	// their next replay. The source timestamp is independent of local edits.
 	sourceUpdatedAt := item.UpdatedAt
 	_, observedPresentation := params.ReconcileLabelsForUnchanged[item.ExternalID]
-	if params.ReconcileLabelsForUnchanged != nil && mapping.SourceUpdatedAt != nil &&
-		(mapping.SourceUpdatedAt.After(sourceUpdatedAt) || !observedPresentation) {
+	if (params.ReconcileLabelsForUnchanged != nil || params.ReconcileStatusForUnchanged) && mapping.SourceUpdatedAt != nil &&
+		(mapping.SourceUpdatedAt.After(sourceUpdatedAt) || (params.ReconcileLabelsForUnchanged != nil && !observedPresentation)) {
 		sourceUpdatedAt = *mapping.SourceUpdatedAt
 	}
 	if item.UpdatedAt.After(existing.UpdatedAt) {
@@ -265,6 +265,13 @@ func (s *Store) importIssue(
 			return nil, nil, err
 		}
 		return &importIssueState{item: item, issue: updated, sourceNewer: true}, &event, nil
+	}
+	if db.ImportOwnsSameSourceVersionStatus(params, mapping, existing, item) {
+		updated, event, err := s.updateImportedIssue(ctx, tx, params, db.ImportedStatusOnlyItem(existing, item), existing, project)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &event, nil
 	}
 	if item.CreatedAt.Before(existing.CreatedAt) {
 		healed, event, err := s.healImportedCreatedAt(ctx, tx, params, item, existing, project)

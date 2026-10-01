@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -108,7 +106,7 @@ func notionSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 			selectors.DoneStatuses = decoded.DoneStatusIDs
 		}
 	}
-	interval, err = notionSyncIntervalSeconds(in.Body, interval)
+	interval, err = issueSyncIntervalSeconds(in.Body, interval, "Notion")
 	if err != nil {
 		return empty, err
 	}
@@ -138,7 +136,7 @@ func notionSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 		return empty, notionSyncValidation(err.Error())
 	}
 	// Preflight avoids upstream work; the upsert transaction rechecks authority.
-	if err := notionSyncEnableAuthority(ctx, cfg.DB, in.ProjectID); err != nil {
+	if err := issueSyncEnableAuthority(ctx, cfg.DB, in.ProjectID, issueSyncProviderNotion); err != nil {
 		return empty, err
 	}
 	session, err := notionSyncFetcher(cfg).ForRun(ctx)
@@ -205,48 +203,6 @@ func notionSyncEnableParams(ctx context.Context, cfg ServerConfig, in *api.Enabl
 		ProjectID: in.ProjectID, Provider: issueSyncProviderNotion, SourceKey: "notion:" + resolved.DataSourceID, RemoteID: resolved.DataSourceID,
 		DisplayName: notionsync.SourceDisplayName(schema), Config: raw, IntervalSeconds: interval, ExpectedBinding: expected,
 	}, nil
-}
-
-func notionSyncEnableAuthority(ctx context.Context, store db.Storage, projectID int64) error {
-	binding, err := store.FederationBindingByProject(ctx, projectID)
-	if errors.Is(err, db.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return issueSyncStorageError(err, issueSyncProviderNotion)
-	}
-	if binding.Role == db.FederationRoleSpoke && binding.Enabled {
-		return issueSyncStorageError(db.ErrIssueSyncFederationBinding, issueSyncProviderNotion)
-	}
-	return nil
-}
-
-func notionSyncIntervalSeconds(body api.EnableIssueSyncRequestBody, fallback int) (int, error) {
-	interval := strings.TrimSpace(body.Interval)
-	present := body.IntervalSecondsPresent || body.IntervalSeconds != 0
-	if interval != "" && present {
-		return 0, notionSyncValidation("provide only one Notion sync interval form")
-	}
-	if present {
-		if body.IntervalSeconds < 1 {
-			return 0, notionSyncValidation("Notion sync interval must be at least one second")
-		}
-		return body.IntervalSeconds, nil
-	}
-	if interval == "" {
-		return fallback, nil
-	}
-	if seconds, err := strconv.Atoi(interval); err == nil {
-		if seconds < 1 {
-			return 0, notionSyncValidation("Notion sync interval must be at least one second")
-		}
-		return seconds, nil
-	}
-	duration, err := time.ParseDuration(interval)
-	if err != nil || duration < time.Second {
-		return 0, notionSyncValidation("Notion sync interval must be at least one second")
-	}
-	return int(duration.Round(time.Second) / time.Second), nil
 }
 
 func notionSyncFetcher(cfg ServerConfig) notionsync.Fetcher {

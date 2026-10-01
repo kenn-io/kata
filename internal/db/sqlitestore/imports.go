@@ -240,8 +240,8 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 	// their next replay. The source timestamp is independent of local edits.
 	sourceUpdatedAt := item.UpdatedAt
 	_, observedPresentation := p.ReconcileLabelsForUnchanged[item.ExternalID]
-	if p.ReconcileLabelsForUnchanged != nil && mapping.SourceUpdatedAt != nil &&
-		(mapping.SourceUpdatedAt.After(sourceUpdatedAt) || !observedPresentation) {
+	if (p.ReconcileLabelsForUnchanged != nil || p.ReconcileStatusForUnchanged) && mapping.SourceUpdatedAt != nil &&
+		(mapping.SourceUpdatedAt.After(sourceUpdatedAt) || (p.ReconcileLabelsForUnchanged != nil && !observedPresentation)) {
 		sourceUpdatedAt = *mapping.SourceUpdatedAt
 	}
 	if item.UpdatedAt.After(existing.UpdatedAt) {
@@ -254,6 +254,13 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 			return nil, nil, err
 		}
 		return &importIssueState{item: item, issue: updated, sourceNewer: true}, &evt, nil
+	}
+	if db.ImportOwnsSameSourceVersionStatus(p, mapping, existing, item) {
+		updated, evt, err := d.updateImportedIssue(ctx, tx, p, db.ImportedStatusOnlyItem(existing, item), existing, projectName)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true, sourceCurrent: sourceCurrent}, &evt, nil
 	}
 	// The source is not newer overall, but a corrected earlier created_at must
 	// still heal a row whose stored created_at was synthesized late by an older

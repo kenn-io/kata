@@ -672,3 +672,10 @@ overwrite local issue or comment edits to those fields.
 V1 does not support GitHub write-back, timeline events, pull requests, deleted
 or transferred issue propagation, edited or deleted comment propagation, or
 multiple assignees beyond the first GitHub assignee.
+
+Plane uses the same issue-sync routes with provider `plane`. Initial enable config
+requires string `workspace` and UUID string `project_id`; optional `since` and
+boolean `title_prefix` preserve omission on re-enable. Intervals accept one of
+`interval` or `interval_seconds`. Origins and tokens are daemon-owned and rejected
+as request config. Source identity is immutable; validation reads project and
+states before a guarded upsert. See [Plane sync](../operations/plane-sync.md).

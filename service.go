@@ -28,6 +28,7 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/notionsync"
+	"go.kenn.io/kata/internal/planesync"
 )
 
 // PostgresSchemaMode controls how a PostgreSQL-backed service treats its
@@ -89,6 +90,10 @@ type GitHubSyncConfig struct {
 	Apps      []GitHubAppConfig
 }
 
+// PlaneSyncConfig selects the daemon-owned Plane origins and token selector.
+// The API key is resolved from the environment and never stored in bindings.
+type PlaneSyncConfig struct{ APIOrigin, WebOrigin, TokenEnv string }
+
 // NotionSyncConfig selects the daemon-owned Notion token environment variable.
 // Empty TokenEnv uses KATA_NOTION_TOKEN; credentials are resolved only for runs.
 type NotionSyncConfig struct {
@@ -112,6 +117,7 @@ type Config struct {
 	Auth       AuthConfig
 	GitHubSync GitHubSyncConfig
 	NotionSync NotionSyncConfig
+	PlaneSync  PlaneSyncConfig
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -143,6 +149,8 @@ type Config struct {
 type serviceDeps struct {
 	notionSyncFetcher        notionsync.Fetcher
 	notionSyncFetcherFactory func(config.NotionSyncConfig) notionsync.Fetcher
+	planeSyncFetcher         planesync.Fetcher
+	planeSyncFetcherFactory  func(config.PlaneSyncConfig) planesync.Fetcher
 	gitHubSyncFetcher        githubsync.Fetcher
 	gitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
 }
@@ -160,6 +168,9 @@ type Service struct {
 	notionSyncWake         chan struct{}
 	notionSyncFetcher      notionsync.Fetcher
 	notionSyncProgress     *issuesync.ProgressTracker
+	planeSyncWake          chan struct{}
+	planeSyncFetcher       planesync.Fetcher
+	planeSyncProgress      *issuesync.ProgressTracker
 	federationCredentials  config.FederationCredentialStore
 	logger                 *slog.Logger
 	defaultTimezone        string
@@ -213,6 +224,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	notionSyncConfig, err := config.NormalizeNotionSyncConfig(config.NotionSyncConfig{TokenEnv: cfg.NotionSync.TokenEnv})
 	if err != nil {
 		return nil, fmt.Errorf("kata: Notion sync config: %w", err)
+	}
+	planeSyncConfig, err := config.NormalizePlaneSyncConfig(config.PlaneSyncConfig{APIOrigin: cfg.PlaneSync.APIOrigin, WebOrigin: cfg.PlaneSync.WebOrigin, TokenEnv: cfg.PlaneSync.TokenEnv})
+	if err != nil {
+		return nil, fmt.Errorf("kata: Plane sync config: %w", err)
 	}
 	publicFederationCredentials := cfg.FederationCredentials
 	if publicFederationCredentials == nil {
@@ -285,6 +300,19 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		notionSyncFetcher = factory(notionSyncConfig)
 	}
 	notionSyncProgress := issuesync.NewProgressTracker()
+	planeSyncWake := make(chan struct{}, 1)
+	wakePlaneSync := func() { signalWake(planeSyncWake) }
+	planeSyncFetcher := deps.planeSyncFetcher
+	if planeSyncFetcher == nil {
+		factory := deps.planeSyncFetcherFactory
+		if factory == nil {
+			factory = func(cfg config.PlaneSyncConfig) planesync.Fetcher {
+				return planesync.NewClient(planesync.ClientConfig{Daemon: cfg})
+			}
+		}
+		planeSyncFetcher = factory(planeSyncConfig)
+	}
+	planeSyncProgress := issuesync.NewProgressTracker()
 	var hostAccess daemon.HostAccessController
 	if cfg.Access != nil {
 		hostAccess = hostAccessControllerAdapter{controller: cfg.Access}
@@ -312,6 +340,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		NotionSyncProgress:      notionSyncProgress,
 		NotionSyncConfig:        notionSyncConfig,
 		NotionSyncWake:          wakeNotionSync,
+		PlaneSyncFetcher:        planeSyncFetcher,
+		PlaneSyncProgress:       planeSyncProgress,
+		PlaneSyncConfig:         planeSyncConfig,
+		PlaneSyncWake:           wakePlaneSync,
 		Hooks:                   hookSink,
 		Auth:                    config.AuthConfig{Token: cfg.Auth.Token},
 		HostAccess:              hostAccess,
@@ -332,6 +364,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		notionSyncWake:         notionSyncWake,
 		notionSyncFetcher:      notionSyncFetcher,
 		notionSyncProgress:     notionSyncProgress,
+		planeSyncWake:          planeSyncWake,
+		planeSyncFetcher:       planeSyncFetcher,
+		planeSyncProgress:      planeSyncProgress,
 		federationCredentials:  federationCredentials,
 		logger:                 logger,
 		defaultTimezone:        cfg.DefaultTimezone,
@@ -539,7 +574,7 @@ func (a hostAccessControllerAdapter) Authorize(
 	}, nil
 }
 
-// Run executes Kata's federation, GitHub and Notion synchronization, timed-claim,
+// Run executes Kata's federation, GitHub, Notion, and Plane synchronization, timed-claim,
 // due-notification, and assignment-expiry workers until ctx is canceled or
 // Close is called. Run does not start a listener and may be called only once
 // at a time.
@@ -644,6 +679,18 @@ func (s *Service) Run(ctx context.Context) error {
 			return nil
 		},
 	})
+	planeSyncRunner := planesync.NewRunner(planesync.RunnerConfig{
+		Progress: s.planeSyncProgress,
+		Store:    s.store,
+		Fetcher:  s.planeSyncFetcher,
+		Logger:   s.logger,
+		Interval: 30 * time.Second,
+		Wake:     s.planeSyncWake,
+		EventSink: func(_ context.Context, projectID int64, events []db.Event) error {
+			s.publishWorkerEvents(projectID, events)
+			return nil
+		},
+	})
 	sweeper := daemon.NewTimedClaimSweeper(s.store, s.publish)
 	sweeper.OnError = func(err error) {
 		s.logger.Error("kata timed-claim worker", "err", err)
@@ -660,6 +707,7 @@ func (s *Service) Run(ctx context.Context) error {
 		{name: "federation", run: runner.Run},
 		{name: "github-sync", run: gitHubSyncRunner.Run},
 		{name: "notion-sync", run: notionSyncRunner.Run},
+		{name: "plane-sync", run: planeSyncRunner.Run},
 		{name: "timed-claim", run: sweeper.Run},
 		{name: "due-notification", run: dueNotificationSweeper.Run},
 		{name: "assignment-expiry", run: assignmentSweeper.Run},

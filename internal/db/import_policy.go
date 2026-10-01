@@ -86,6 +86,26 @@ func ImportOwnsSameSourceVersionTitle(mapping ImportMapping, existing Issue, ite
 		SameImportTimestamp(existing.UpdatedAt, item.UpdatedAt)
 }
 
+// ImportOwnsSameSourceVersionStatus permits derived workflow changes only
+// while the provider owns the exact stored scalar version. It cannot override
+// a newer local edit or give an older replay current-version authority.
+func ImportOwnsSameSourceVersionStatus(params ImportBatchParams, mapping ImportMapping, existing Issue, item ImportItem) bool {
+	if !params.ReconcileStatusForUnchanged || mapping.SourceUpdatedAt == nil ||
+		!SameImportTimestamp(*mapping.SourceUpdatedAt, item.UpdatedAt) ||
+		!SameImportTimestamp(existing.UpdatedAt, item.UpdatedAt) {
+		return false
+	}
+	return item.Status != existing.Status || !equalImportOptionalString(item.ClosedReason, existing.ClosedReason)
+}
+
+// ImportedStatusOnlyItem preserves unrelated scalars when the provider's
+// workflow schema changes without advancing its item version.
+func ImportedStatusOnlyItem(existing Issue, item ImportItem) ImportItem {
+	item.Title, item.Body, item.Owner, item.Priority = existing.Title, existing.Body, existing.Owner, existing.Priority
+	item.Author, item.CreatedAt, item.UpdatedAt = existing.Author, existing.CreatedAt, existing.UpdatedAt
+	return item
+}
+
 // ImportedPresentationTitlePayload builds the replayable title-only correction.
 func ImportedPresentationTitlePayload(source, externalID string, existing Issue, item ImportItem) (string, error) {
 	payload := map[string]any{

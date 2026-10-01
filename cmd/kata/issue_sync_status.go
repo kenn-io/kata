@@ -13,7 +13,10 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-func notionSyncPrintBinding(w io.Writer, raw []byte, action string) error {
+func issueSyncPrintBinding(w io.Writer, raw []byte, provider, action string) error {
+	if provider == "github" {
+		return githubSyncPrintBindingBody(w, raw, action)
+	}
 	if currentOutputMode() == outputJSON {
 		return emitJSON(w, jsontext.Value(raw))
 	}
@@ -21,10 +24,13 @@ func notionSyncPrintBinding(w io.Writer, raw []byte, action string) error {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return err
 	}
-	return notionSyncPrintStatus(w, action, body.Status, body.Binding)
+	return issueSyncPrintStatus(w, provider, action, body.Status, body.Binding)
 }
 
-func notionSyncPrintOnce(w io.Writer, raw []byte) error {
+func issueSyncPrintOnce(w io.Writer, raw []byte, provider string) error {
+	if provider == "github" {
+		return githubSyncPrintOnceBody(w, raw)
+	}
 	if currentOutputMode() == outputJSON {
 		return emitJSON(w, jsontext.Value(raw))
 	}
@@ -33,24 +39,24 @@ func notionSyncPrintOnce(w io.Writer, raw []byte) error {
 		return err
 	}
 	if currentOutputMode() == outputAgent {
-		return notionSyncPrintStatus(w, "once", body.Status, &body.Binding)
+		return issueSyncPrintStatus(w, provider, "once", body.Status, &body.Binding)
 	}
-	_, err := fmt.Fprintf(w, "Notion sync ran: created=%d updated=%d unchanged=%d\n", body.Import.Created, body.Import.Updated, body.Import.Unchanged)
+	_, err := fmt.Fprintf(w, "%s sync ran: created=%d updated=%d unchanged=%d\n", issueSyncLabel(provider), body.Import.Created, body.Import.Updated, body.Import.Unchanged)
 	return err
 }
 
-func notionSyncPrintStatus(w io.Writer, action string, status generated.IssueSyncStatusOut, binding *generated.IssueSyncBindingOut) error {
+func issueSyncPrintStatus(w io.Writer, provider, action string, status generated.IssueSyncStatusOut, binding *generated.IssueSyncBindingOut) error {
 	// Buffer once so write failures cannot be lost among optional detail fields.
 	var out strings.Builder
 	agent := currentOutputMode() == outputAgent
 	if agent {
-		fmt.Fprintf(&out, "OK notion-sync action=%s state=%s enabled=%t", agentValue(action), agentValue(status.State), status.Enabled)
+		fmt.Fprintf(&out, "OK %s-sync action=%s state=%s enabled=%t", provider, agentValue(action), agentValue(status.State), status.Enabled)
 	} else {
 		label := status.State
 		if action != "status" {
 			label = action
 		}
-		fmt.Fprintf(&out, "Notion sync %s\n", textsafe.Line(label))
+		fmt.Fprintf(&out, "%s sync %s\n", issueSyncLabel(provider), textsafe.Line(label))
 	}
 	if binding != nil {
 		if agent {
@@ -58,8 +64,12 @@ func notionSyncPrintStatus(w io.Writer, action string, status generated.IssueSyn
 		} else {
 			fmt.Fprintf(&out, "Source: %s\nInterval: %ds\n", textsafe.Line(binding.DisplayName), binding.IntervalSeconds)
 		}
-		for _, field := range []struct{ key, label string }{{"data_source_id", "Data source"}, {"database_id", "Database"}, {"title_property_id", "Title property"}, {"status_property_id", "Status property"}, {"assignee_property_id", "Assignee property"}, {"done_status_ids", "Completed options"}, {"since", "Since"}, {"title_prefix", "Title prefix"}} {
-			value := notionSyncConfigValue(binding.Config, field.key)
+		fields := []struct{ key, label string }{{"data_source_id", "Data source"}, {"database_id", "Database"}, {"title_property_id", "Title property"}, {"status_property_id", "Status property"}, {"assignee_property_id", "Assignee property"}, {"done_status_ids", "Completed options"}, {"since", "Since"}, {"title_prefix", "Title prefix"}}
+		if provider == "plane" {
+			fields = []struct{ key, label string }{{"api_origin", "API origin"}, {"web_origin", "Web origin"}, {"workspace", "Workspace"}, {"project_id", "Plane project"}, {"since", "Since"}, {"title_prefix", "Title prefix"}}
+		}
+		for _, field := range fields {
+			value := issueSyncConfigValue(binding.Config, field.key)
 			if value == "" {
 				continue
 			}
@@ -116,7 +126,7 @@ func notionSyncPrintStatus(w io.Writer, action string, status generated.IssueSyn
 	return err
 }
 
-func notionSyncConfigValue(config map[string]any, key string) string {
+func issueSyncConfigValue(config map[string]any, key string) string {
 	if key == "title_prefix" {
 		value, ok := config[key].(bool)
 		return strconv.FormatBool(!ok || value)

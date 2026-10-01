@@ -142,7 +142,7 @@ func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]stri
 	}
 	references := []string{profile.Catalog.TokenEnv}
 	if profile.Config != nil {
-		references = append(references, profile.Config.Search.Embeddings.APIKeyEnv, profile.Config.GitHubSync.TokenEnvName())
+		references = append(references, profile.Config.Search.Embeddings.APIKeyEnv, profile.Config.GitHubSync.TokenEnvName(), profile.Config.PlaneSync.TokenEnv)
 		for _, entry := range profile.Config.Daemons {
 			references = append(references, entry.TokenEnv)
 		}
