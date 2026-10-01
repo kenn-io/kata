@@ -326,9 +326,9 @@ generation is `active`. The reconciler runs `kitvec.Fill` against the
 building generation while the active one keeps answering searches
 unchanged. When a fill completes for a non-active generation, `CutOver`
 activates it and marks every other generation `retired`, then reclaims each
-retired generation's storage (drops its `vec0` table and deletes its
-`_chunks`/`_stamps` rows) with local SQL, since kit has no reclamation API
-yet (a workaround other kit consumers share). Reclaim is unconditional and
+retired SQLite generation's storage through Kit's `sqlitevec.Store.Reclaim`
+API (drops its `vec0` table and deletes its `_chunks`/`_stamps` rows).
+PostgreSQL reclamation remains in Kata. Reclaim is unconditional and
 idempotent, so a crash between retire and reclaim self-heals on the next
 cutover. Cold start is the deliberate exception to build-then-cutover: when
 no generation is active (fresh vector storage, or the first start after an
