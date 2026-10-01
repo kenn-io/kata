@@ -31,12 +31,8 @@ func (s *httpFetcherBindingSession) StatusLocators(ctx context.Context, cfg Conf
 	if err != nil || binding != s.binding || cfg.RepoID <= 0 || page <= 0 {
 		return nil, 0, fmt.Errorf("GitHub locator scan requires the bound repository and a positive page")
 	}
-	var repo Repository
-	if err := s.statusRequest(ctx, http.MethodGet, repositoryEndpoint(binding), nil, &repo, nil); err != nil {
+	if err := s.verifyStatusRepository(ctx, cfg); err != nil {
 		return nil, 0, err
-	}
-	if repo.ID != cfg.RepoID || !strings.EqualFold(repo.FullName, cfg.DisplayName()) {
-		return nil, 0, fmt.Errorf("GitHub locator repository identity changed")
 	}
 	query := url.Values{"state": {"all"}, "sort": {"created"}, "direction": {"asc"}, "per_page": {"100"}, "page": {strconv.Itoa(page)}}
 	endpoint := repositoryEndpoint(binding) + "/issues?" + query.Encode()

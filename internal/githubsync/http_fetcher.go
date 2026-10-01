@@ -174,9 +174,10 @@ func (f *HTTPFetcher) ForBinding(ctx context.Context, binding Binding) (Fetcher,
 }
 
 type httpFetcherBindingSession struct {
-	fetcher *HTTPFetcher
-	binding Binding
-	client  *http.Client
+	fetcher        *HTTPFetcher
+	binding        Binding
+	client         *http.Client
+	verifiedRepoID int64
 }
 
 func (s *httpFetcherBindingSession) Repository(ctx context.Context, host, owner, repo string) (Repository, error) {

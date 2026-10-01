@@ -426,3 +426,24 @@ func TestGitHubRateLimitCooldownStaysWithItsRepository(t *testing.T) {
 	_, err = otherSession.Repository(t.Context(), "github.com", "example-owner", "other-repo")
 	require.NoError(t, err, "another repository's content reads are not paused")
 }
+
+func TestGitHubStatusSessionVerifiesRepositoryOnce(t *testing.T) {
+	repoReads := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/example-owner/example-repo" {
+			repoReads++
+			require.NoError(t, json.MarshalWrite(w, map[string]any{"id": 123, "full_name": "example-owner/example-repo"}))
+			return
+		}
+		require.NoError(t, json.MarshalWrite(w, statusIssueWire("open")))
+	}))
+	defer server.Close()
+	f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL})
+	raw, err := f.ForBinding(t.Context(), statusConfig().Binding())
+	require.NoError(t, err)
+	for range 3 {
+		_, err = raw.(StatusSession).ReadStatus(t.Context(), statusConfig(), "issue-id:456", 7)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 1, repoReads)
+}

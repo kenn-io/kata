@@ -53,12 +53,8 @@ func (s *httpFetcherBindingSession) ReadStatus(ctx context.Context, cfg Config, 
 	if err != nil {
 		return zero, err
 	}
-	var repo Repository
-	if err := s.statusRequest(ctx, http.MethodGet, repositoryEndpoint(s.binding), nil, &repo, nil); err != nil {
+	if err := s.verifyStatusRepository(ctx, cfg); err != nil {
 		return zero, err
-	}
-	if repo.ID != cfg.RepoID || !strings.EqualFold(repo.FullName, cfg.DisplayName()) {
-		return zero, fmt.Errorf("GitHub status repository identity changed")
 	}
 	endpoint := repositoryEndpoint(s.binding) + "/issues/" + strconv.Itoa(number)
 	var wire statusIssue
@@ -75,6 +71,23 @@ func (s *httpFetcherBindingSession) ReadStatus(ctx context.Context, cfg Config, 
 		obs.ClosedAt = wire.ClosedAt
 	}
 	return obs, nil
+}
+
+// verifyStatusRepository checks the bound repository identity once per session,
+// which spans one sync run.
+func (s *httpFetcherBindingSession) verifyStatusRepository(ctx context.Context, cfg Config) error {
+	if s.verifiedRepoID == cfg.RepoID {
+		return nil
+	}
+	var repo Repository
+	if err := s.statusRequest(ctx, http.MethodGet, repositoryEndpoint(s.binding), nil, &repo, nil); err != nil {
+		return err
+	}
+	if repo.ID != cfg.RepoID || !strings.EqualFold(repo.FullName, cfg.DisplayName()) {
+		return fmt.Errorf("GitHub status repository identity changed")
+	}
+	s.verifiedRepoID = cfg.RepoID
+	return nil
 }
 
 func (s *httpFetcherBindingSession) validateStatusIssue(wire statusIssue, id int64, number int) error {
@@ -102,6 +115,10 @@ func (s *httpFetcherBindingSession) WriteStatus(ctx context.Context, cfg Config,
 	if cfg.StatusSync != "two-way" || admission == nil || desired != "open" && desired != "closed" {
 		return zero, fmt.Errorf("GitHub status writes require two-way mode, valid state and delivery admission")
 	}
+	id, err := s.statusConfig(cfg, externalID, number)
+	if err != nil {
+		return zero, err
+	}
 	observed, err := s.ReadStatus(ctx, cfg, externalID, number)
 	if err != nil || observed.Status == desired {
 		return observed, err
@@ -111,7 +128,6 @@ func (s *httpFetcherBindingSession) WriteStatus(ctx context.Context, cfg Config,
 	if err := s.statusRequest(ctx, http.MethodPatch, endpoint, map[string]string{"state": desired}, &wire, admission); err != nil {
 		return zero, err
 	}
-	id, _ := s.statusConfig(cfg, externalID, number)
 	if wire.ID != id || wire.Number != number || wire.PullRequest != nil {
 		return zero, &issuesync.StatusError{Message: "GitHub status response has wrong object identity", Ambiguous: true}
 	}
