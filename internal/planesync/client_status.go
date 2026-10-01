@@ -97,7 +97,7 @@ func (s *clientSession) readStatusCached(ctx context.Context, c Config, id strin
 	if !ok {
 		return zero, schema, blockedStatus("Plane work item state is absent from the project workflow")
 	}
-	observed := issuesync.StatusObservation{RawStatus: &state, Status: "open", Version: item.UpdatedAt.UTC().Truncate(time.Millisecond), SchemaFingerprint: schema.fingerprint}
+	observed := issuesync.StatusObservation{RawStatus: &state, Status: "open", Version: item.UpdatedAt.UTC().Truncate(time.Millisecond)}
 	if group == "completed" || group == "cancelled" {
 		observed.Status = "closed"
 		observed.ClosedReason = "done"

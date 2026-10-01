@@ -21,7 +21,7 @@ func checkIssueStatusProviderCloseMetadata(t *testing.T, store db.Storage) error
 	_, ok, err := store.ClaimIssueSyncBinding(ctx, b.ID, b.Provider, at, at.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, ok)
-	p := db.IssueStatusObservationParams{Guard: db.IssueSyncImportGuard{BindingID: b.ID, Provider: b.Provider, StartedAt: at}, MappingID: m.ID, ExternalID: m.ExternalID, IssueUID: f.Issue.UID, Observation: db.IssueStatusObservation{Raw: new("closed"), Version: at}, Status: "closed", ClosedReason: "wontfix", ClosedAt: &closedAt, Authoritative: true}
+	p := db.IssueStatusObservationParams{Guard: db.IssueSyncImportGuard{BindingID: b.ID, Provider: b.Provider, StartedAt: at}, MappingID: m.ID, ExternalID: m.ExternalID, IssueUID: f.Issue.UID, Observation: db.IssueStatusObservation{Raw: new("closed"), Version: at}, Status: "closed", ClosedReason: "wontfix", ClosedAt: &closedAt}
 	changed, events, err := store.(db.IssueStatusWriter).ObserveIssueStatus(ctx, p)
 	require.NoError(t, err)
 	require.True(t, changed)

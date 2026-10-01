@@ -32,7 +32,7 @@ func checkIssueStatusContentIsolation(t *testing.T, store db.Storage) error {
 	complete := "complete-a"
 	changed, _, err := store.(db.IssueStatusWriter).ObserveIssueStatus(ctx, db.IssueStatusObservationParams{
 		Guard: guard, MappingID: statusMapping.ID, ExternalID: statusMapping.ExternalID, IssueUID: statusIssue.UID,
-		Observation: db.IssueStatusObservation{Raw: &complete, Version: statusAt}, Status: "closed", Authoritative: true,
+		Observation: db.IssueStatusObservation{Raw: &complete, Version: statusAt}, Status: "closed",
 	})
 	require.NoError(t, err)
 	require.True(t, changed)

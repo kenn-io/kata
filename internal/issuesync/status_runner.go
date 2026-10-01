@@ -195,7 +195,7 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 				issue, loadErr := r.config.Store.IssueByID(statusCtx, *m.Mapping.IssueID)
 				err = loadErr
 				if err == nil {
-					p := db.IssueStatusObservationParams{Guard: guard, MappingID: m.Mapping.ID, ExternalID: m.Mapping.ExternalID, IssueUID: issue.UID, Observation: db.IssueStatusObservation{Raw: obs.RawStatus, Version: obs.Version}, Status: obs.Status, ClosedReason: obs.ClosedReason, ClosedAt: obs.ClosedAt, ServicedEventUID: serviced, Authoritative: true}
+					p := db.IssueStatusObservationParams{Guard: guard, MappingID: m.Mapping.ID, ExternalID: m.Mapping.ExternalID, IssueUID: issue.UID, Observation: db.IssueStatusObservation{Raw: obs.RawStatus, Version: obs.Version}, Status: obs.Status, ClosedReason: obs.ClosedReason, ClosedAt: obs.ClosedAt, ServicedEventUID: serviced}
 					// Notion's page UUID is already external_id. Only an additional provider
 					// API identifier, such as the GitHub issue number, belongs in the locator.
 					if binding.Provider == "github" && obs.Locator != "" {

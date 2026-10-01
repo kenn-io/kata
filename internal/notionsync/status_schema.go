@@ -1,18 +1,15 @@
 package notionsync
 
 import (
-	"crypto/sha256"
-	"encoding/json/v2"
 	"fmt"
 	"slices"
 	"strings"
 )
 
 // StatusSchema is a validated live view; never persist its option order as a
-// second completion authority. Fingerprint excludes names, colors and order.
+// second completion authority.
 type StatusSchema struct {
 	CompleteGroup, TodoGroup Group
-	Fingerprint              string
 	closedTarget, openTarget string
 	options, completed       map[string]bool
 }
@@ -136,20 +133,6 @@ func ResolveStatusSchema(c Config, ds DataSource) (StatusSchema, error) {
 			*target.destination = target.group.OptionIDs[0]
 		}
 	}
-	type entry struct{ OptionID, GroupID string }
-	entries := make([]entry, 0, len(r.options))
-	for option := range r.options {
-		entries = append(entries, entry{option, membership[option]})
-	}
-	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.OptionID, b.OptionID) })
-	raw, err := json.Marshal(struct {
-		CompleteGroupID string
-		Membership      []entry
-	}{c.CompleteGroupID, entries})
-	if err != nil {
-		return StatusSchema{}, fmt.Errorf("cannot encode Notion workflow membership")
-	}
-	r.Fingerprint = fmt.Sprintf("%x", sha256.Sum256(raw))
 	return r, nil
 }
 

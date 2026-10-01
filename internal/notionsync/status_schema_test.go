@@ -46,11 +46,11 @@ func TestStatusSchemaClassificationAndTargets(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestLiveGroupOrderAndNamesDoNotChangeMembershipFingerprint(t *testing.T) {
+func TestLiveGroupOrderAndNamesDoNotChangeClassification(t *testing.T) {
 	ds := groupSchema()
 	c, err := ResolveConfig(ds, Selectors{StatusSync: "two-way"}, "")
 	require.NoError(t, err)
-	before, err := ResolveStatusSchema(c, ds)
+	_, err = ResolveStatusSchema(c, ds)
 	require.NoError(t, err)
 	ds.Properties[1].Groups[0].Name = "Renamed completion"
 	ds.Properties[1].Groups[0].OptionIDs = []string{"complete-a", "complete-b"}
@@ -59,7 +59,6 @@ func TestLiveGroupOrderAndNamesDoNotChangeMembershipFingerprint(t *testing.T) {
 	ds.Properties[1].Options[0].Name = "Renamed option"
 	after, err := ResolveStatusSchema(c, ds)
 	require.NoError(t, err)
-	require.Equal(t, before.Fingerprint, after.Fingerprint)
 	target, err := after.Target("closed")
 	require.NoError(t, err)
 	require.Equal(t, "complete-a", target)
@@ -67,7 +66,6 @@ func TestLiveGroupOrderAndNamesDoNotChangeMembershipFingerprint(t *testing.T) {
 	ds.Properties[1].Groups[2].OptionIDs = append(ds.Properties[1].Groups[2].OptionIDs, "active")
 	changed, err := ResolveStatusSchema(c, ds)
 	require.NoError(t, err)
-	require.NotEqual(t, before.Fingerprint, changed.Fingerprint)
 	state, err := changed.Classify(new("active"))
 	require.NoError(t, err)
 	require.Equal(t, "closed", state)

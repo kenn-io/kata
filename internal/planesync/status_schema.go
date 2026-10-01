@@ -2,19 +2,15 @@ package planesync
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
-	"fmt"
 	"sort"
-	"strings"
 
 	"go.kenn.io/kata/internal/issuesync"
 )
 
 type statusSchema struct {
-	states      []State
-	groups      map[string]string
-	fingerprint string
+	states []State
+	groups map[string]string
 }
 
 func blockedStatus(message string) error {
@@ -42,17 +38,7 @@ func resolveStatusSchema(states []State) (statusSchema, error) {
 		}
 		return ordered[i].Sequence < ordered[j].Sequence
 	})
-
-	ids := make([]string, 0, len(groups))
-	for id := range groups {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	var membership strings.Builder
-	for _, id := range ids {
-		membership.WriteString(id + ":" + groups[id] + "\n")
-	}
-	return statusSchema{states: ordered, groups: groups, fingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(membership.String())))}, nil
+	return statusSchema{states: ordered, groups: groups}, nil
 }
 func (schema statusSchema) target(c Config, desired string) (string, error) {
 	group, override := "completed", c.ClosedStateID

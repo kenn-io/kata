@@ -116,7 +116,6 @@ type IssueStatusObservationParams struct {
 	ClosedAt         *time.Time
 	RemoteLocator    *string
 	ServicedEventUID string
-	Authoritative    bool
 }
 
 // IssueStatusWriter atomically records a provider observation and its exact
@@ -128,29 +127,19 @@ type IssueStatusWriter interface {
 // PlanIssueStatusObservation separates provider timestamp authority from local
 // content clocks. Only an exact pending event can be acknowledged; older
 // acknowledgements never become inward status writes after cancellation.
-func PlanIssueStatusObservation(current IssueStatusMapping, p IssueStatusObservationParams, localStatus string) (accept, apply, ack bool, err error) {
+func PlanIssueStatusObservation(current IssueStatusMapping, p IssueStatusObservationParams, localStatus string) (accept, apply bool, err error) {
 	if (p.ClosedReason != "" && p.ClosedReason != "done" && p.ClosedReason != "wontfix") || p.MappingID <= 0 || p.ExternalID == "" || !uid.Valid(p.IssueUID) || p.Observation.Version.IsZero() || (p.Status != "open" && p.Status != "closed") || (p.ServicedEventUID != "" && !uid.Valid(p.ServicedEventUID)) || (p.RemoteLocator != nil && *p.RemoteLocator == "") {
-		return false, false, false, invalidIssueStatusState()
+		return false, false, invalidIssueStatusState()
 	}
-	if prior := current.State.Observed; prior != nil {
-		if p.Observation.Version.Before(prior.Version) {
-			return false, false, false, nil
-		}
-		if p.Observation.Version.Equal(prior.Version) && !p.Authoritative && !sameStatusRaw(prior.Raw, p.Observation.Raw) {
-			return false, false, false, invalidIssueStatusState()
-		}
+	if prior := current.State.Observed; prior != nil && p.Observation.Version.Before(prior.Version) {
+		return false, false, nil
 	}
-	ack = p.ServicedEventUID != "" && p.ServicedEventUID == current.State.PendingEventUID
-	if ack {
+	if p.ServicedEventUID != "" && p.ServicedEventUID == current.State.PendingEventUID {
 		if current.PendingEvent == nil || (current.PendingEvent.Type == "issue.closed" && p.Status != "closed") || (current.PendingEvent.Type == "issue.reopened" && p.Status != "open") {
-			return false, false, false, invalidIssueStatusState()
+			return false, false, invalidIssueStatusState()
 		}
 	}
-	return true, current.State.PendingEventUID == "" && p.ServicedEventUID == "" && localStatus != p.Status, ack, nil
-}
-
-func sameStatusRaw(a, b *string) bool {
-	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
+	return true, current.State.PendingEventUID == "" && p.ServicedEventUID == "" && localStatus != p.Status, nil
 }
 
 // IssueStatusSummaryReader exposes only a count to operator status output.

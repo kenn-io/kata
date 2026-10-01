@@ -65,7 +65,7 @@ func (s *Store) observeIssueStatusTx(ctx context.Context, tx *sql.Tx, p db.Issue
 			return false, nil, db.ErrIssueSyncNotEnabled
 		}
 	}
-	accept, apply, _, err := db.PlanIssueStatusObservation(current, p, issue.Status)
+	accept, apply, err := db.PlanIssueStatusObservation(current, p, issue.Status)
 	if err != nil || !accept {
 		return false, nil, err
 	}

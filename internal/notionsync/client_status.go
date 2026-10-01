@@ -122,7 +122,7 @@ func (s *clientSession) readStatusCached(ctx context.Context, cfg Config, pageID
 			return zero, schema, blockedStatusPageError(err)
 		}
 	}
-	return issuesync.StatusObservation{RawStatus: page.StatusID, Status: state, Version: page.UpdatedAt, Locator: page.ID, SchemaFingerprint: schema.Fingerprint}, schema, nil
+	return issuesync.StatusObservation{RawStatus: page.StatusID, Status: state, Version: page.UpdatedAt, Locator: page.ID}, schema, nil
 }
 
 // ReadStatus fetches page metadata and workflow membership without page content.

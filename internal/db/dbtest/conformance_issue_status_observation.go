@@ -39,7 +39,7 @@ func checkIssueStatusObservation(t *testing.T, store db.Storage, backend Backend
 	writer := store.(db.IssueStatusWriter)
 	reader := store.(db.IssueStatusReader)
 	complete, todo := "complete-a", "todo-a"
-	params := db.IssueStatusObservationParams{Guard: guard, MappingID: mapping.ID, ExternalID: mapping.ExternalID, IssueUID: issue.UID, Observation: db.IssueStatusObservation{Raw: &complete, Version: base}, Status: "closed", Authoritative: true}
+	params := db.IssueStatusObservationParams{Guard: guard, MappingID: mapping.ID, ExternalID: mapping.ExternalID, IssueUID: issue.UID, Observation: db.IssueStatusObservation{Raw: &complete, Version: base}, Status: "closed"}
 	changed, events, err := writer.ObserveIssueStatus(ctx, params)
 	require.NoError(t, err)
 	require.True(t, changed, "provider status authority is independent of a newer local title")
@@ -81,12 +81,6 @@ func checkIssueStatusObservation(t *testing.T, store db.Storage, backend Backend
 	current, err = reader.IssueStatusMappingByID(ctx, guard, mapping.ID)
 	require.NoError(t, err)
 	require.Equal(t, complete, *current.State.Observed.Raw)
-	// A changed raw value at the same timestamp requires a fresh read.
-	params.Observation.Version = current.State.Observed.Version
-	params.Authoritative = false
-	_, _, err = writer.ObserveIssueStatus(ctx, params)
-	require.ErrorIs(t, err, db.ErrImportValidation)
-	params.Authoritative = true
 	// A live group reclassification can change the binary state without a
 	// newer raw option or provider edit timestamp, after an authoritative read.
 	params.Observation = *current.State.Observed
