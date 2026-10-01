@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/httpurl"
+	"go.kenn.io/kit/pathresolve"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -702,7 +703,7 @@ func gitWorktreePresent(dir string) bool {
 	if dotGitInAncestors(dir) {
 		return true
 	}
-	resolved, err := filepath.EvalSymlinks(dir)
+	resolved, err := pathresolve.EvalSymlinks(dir)
 	if err != nil {
 		return true
 	}

@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sync/atomic"
 
 	kitdaemon "go.kenn.io/kit/daemon"
+
+	"go.kenn.io/kit/pathresolve"
 )
 
 // daemonRestart carries a restart request from the platform signal source to
@@ -32,7 +33,7 @@ var resolveDaemonExecutable = os.Executable
 func newDaemonRestart(stderr io.Writer) *daemonRestart {
 	executable, err := resolveDaemonExecutable()
 	if err == nil {
-		executable, err = filepath.EvalSymlinks(executable)
+		executable, err = pathresolve.EvalSymlinks(executable)
 	}
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "kata daemon: automatic restart after updates disabled: %v\n", err)

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go.kenn.io/kit/pathresolve"
 	"go.kenn.io/kit/safefileio"
 )
 
@@ -33,7 +34,7 @@ func Reserve(path string) (*Reservation, error) {
 		return nil, fmt.Errorf("resolve token file path: %w", err)
 	}
 	parent := filepath.Dir(abs)
-	physicalParent, err := filepath.EvalSymlinks(parent)
+	physicalParent, err := pathresolve.EvalSymlinks(parent)
 	if err != nil {
 		return nil, fmt.Errorf("resolve token file directory %s: %w", parent, err)
 	}

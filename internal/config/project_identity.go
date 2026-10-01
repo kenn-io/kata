@@ -15,6 +15,8 @@ import (
 	gitcmd "go.kenn.io/kit/git/cmd"
 	gitremote "go.kenn.io/kit/git/remote"
 	gitrepo "go.kenn.io/kit/git/repo"
+
+	"go.kenn.io/kit/pathresolve"
 )
 
 // NameChoice is the project name resolved by PickInitName.
@@ -141,7 +143,7 @@ func DiscoverPaths(startPath string) (DiscoveredPaths, error) {
 	if err != nil {
 		return DiscoveredPaths{}, fmt.Errorf("stat %s: %w", abs, err)
 	}
-	resolved, err := filepath.EvalSymlinks(abs)
+	resolved, err := pathresolve.EvalSymlinks(abs)
 	if err != nil {
 		return DiscoveredPaths{}, fmt.Errorf("resolve symlinks %s: %w", abs, err)
 	}
@@ -169,7 +171,7 @@ func DiscoverPaths(startPath string) (DiscoveredPaths, error) {
 		}
 		return d, nil
 	}
-	resolvedLexicalGitRoot, resolveErr := filepath.EvalSymlinks(lexicalGitRoot)
+	resolvedLexicalGitRoot, resolveErr := pathresolve.EvalSymlinks(lexicalGitRoot)
 	if resolveErr == nil && resolvedLexicalGitRoot == physicalGitRoot {
 		d.GitRoot = lexicalGitRoot
 		if d.WorkspaceRoot, err = walkUp(lexicalWalkRoot, ProjectConfigFilename, false, lexicalGitRoot); err != nil {
