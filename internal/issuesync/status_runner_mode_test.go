@@ -2,6 +2,7 @@ package issuesync
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,4 +146,18 @@ func TestStatusRunnerRateLimitStopsTheLapWithoutConsumingMappings(t *testing.T) 
 	scan, err := db.DecodeIssueStatusScan(b.Config)
 	require.NoError(t, err)
 	require.Less(t, scan.Sweep.After, ms[0].Mapping.ID, "the rate-limited mapping is retried first")
+}
+
+func TestStatusRunnerSummarizesManyBlockedItems(t *testing.T) {
+	s, b, _, at := statusFixture(t, 20)
+	run := &statusTestRun{read: func(context.Context, db.IssueStatusMapping) (StatusObservation, error) {
+		return StatusObservation{}, &StatusError{Message: "status read blocked", HTTPStatus: 403, Blocked: true}
+	}, write: func(context.Context, db.IssueStatusMapping, string, func() error) (StatusObservation, error) {
+		t.Fatal("no pending intent")
+		return StatusObservation{}, nil
+	}}
+	result, err := NewRunner(RunnerConfig{Store: s, Adapter: statusAdapter(b, run), Clock: func() time.Time { return at }}).RunOnce(t.Context(), b.ID)
+	require.Error(t, err)
+	require.LessOrEqual(t, strings.Count(result.Status.LastError, "status read blocked"), 3)
+	require.Contains(t, result.Status.LastError, "17 more")
 }

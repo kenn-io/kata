@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/activity"
@@ -321,7 +322,7 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 	}
 	statusWarning := ""
 	if statusErr != nil {
-		statusWarning = statusErr.Error()
+		statusWarning = storedErrorText(statusErr)
 	}
 	status, err := r.config.Store.RecordIssueSyncSuccess(successCtx, db.IssueSyncSuccessParams{
 		StatusError:      statusWarning,
@@ -407,12 +408,24 @@ func (r *Runner) recordError(ctx context.Context, binding db.IssueSyncBinding, s
 		BindingID:   binding.ID,
 		StartedAt:   startedAt,
 		At:          r.now(),
-		Error:       cause.Error(),
+		Error:       storedErrorText(cause),
 	})
 	if recordErr != nil {
 		return RunResult{Binding: binding, Import: importResult}, recordErr
 	}
 	return RunResult{Binding: binding, Status: status, Import: importResult}, cause
+}
+
+const maxStoredErrorLines = 3
+
+// storedErrorText keeps a binding's last error readable when a status lap
+// joins one failure per item.
+func storedErrorText(err error) string {
+	lines := strings.Split(err.Error(), "\n")
+	if len(lines) <= maxStoredErrorLines {
+		return err.Error()
+	}
+	return fmt.Sprintf("%s\n... and %d more", strings.Join(lines[:maxStoredErrorLines], "\n"), len(lines)-maxStoredErrorLines)
 }
 
 func (r *Runner) cleanupContext(parent context.Context) (context.Context, context.CancelFunc) {
