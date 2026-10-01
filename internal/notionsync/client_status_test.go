@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"testing"
 	"time"
 
@@ -94,6 +95,7 @@ func TestAmbiguousStatusWriteIsNeverBlindlyRetried(t *testing.T) {
 						patches++
 						state = "complete-a"
 						if transportFailure {
+							wroteHeaders(r)
 							return nil, errors.New("test-secret transport diagnostic")
 						}
 						return response(503, `{"code":"service_unavailable","message":"test-secret private response"}`), nil
@@ -268,11 +270,37 @@ func TestStatusMutationFailuresAreClassifiedAndSanitized(t *testing.T) {
 	}
 }
 
+func TestStatusWriteThatNeverConnectsIsNotAmbiguous(t *testing.T) {
+	patches := 0
+	c, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/v1/data_sources/" + sourceID:
+			return jsonResponse(t, statusSchemaWire()), nil
+		case "/v1/databases/" + databaseID:
+			return jsonResponse(t, databaseWire()), nil
+		default:
+			if r.Method == http.MethodPatch {
+				patches++
+				return nil, errors.New("dial tcp: connection refused")
+			}
+			return jsonResponse(t, statusPageWire(new("active"))), nil
+		}
+	})
+	cfg, err := ResolveConfig(groupSchema(), Selectors{StatusSync: "two-way"}, "")
+	require.NoError(t, err)
+	_, err = session(t, c).(StatusSession).WriteStatus(t.Context(), cfg, testPageID, "closed", func() error { return nil })
+	var delivery *issuesync.StatusError
+	require.ErrorAs(t, err, &delivery)
+	require.False(t, delivery.Ambiguous, "headers never reached a connection")
+	require.Equal(t, 1, patches)
+}
+
 func TestStatusWriteCancelledAfterDispatchIsAmbiguous(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	c, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
 		if r.Method == http.MethodPatch {
+			wroteHeaders(r)
 			cancel()
 			return nil, ctx.Err()
 		}
@@ -502,4 +530,12 @@ func TestStatusReadSchemaPermissionRemainsRetryable(t *testing.T) {
 	require.ErrorAs(t, err, &classified)
 	require.False(t, classified.Blocked)
 	require.False(t, classified.Ambiguous)
+}
+
+// wroteHeaders reports a dispatched request the way http.Transport does, so a
+// fake transport can simulate a response lost after the server received it.
+func wroteHeaders(r *http.Request) {
+	if trace := httptrace.ContextClientTrace(r.Context()); trace != nil && trace.WroteHeaders != nil {
+		trace.WroteHeaders()
+	}
 }

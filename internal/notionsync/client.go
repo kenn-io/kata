@@ -165,6 +165,7 @@ func (s *clientSession) requestWithAdmission(ctx context.Context, method, path s
 			return err
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		attemptCtx, sent := issuesync.TrackRequestWrite(attemptCtx)
 		req, err := http.NewRequestWithContext(attemptCtx, method, notionOrigin+path, bytes.NewReader(payload))
 		if err != nil {
 			cancel()
@@ -203,7 +204,7 @@ func (s *clientSession) requestWithAdmission(ctx context.Context, method, path s
 			if contextErr == nil {
 				contextErr = attemptErr
 			}
-			return s.statusResponse(raw, status, retryAfter, err, contextErr, out)
+			return s.statusResponse(raw, status, retryAfter, err, contextErr, sent(), out)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -262,7 +263,7 @@ func (s *clientSession) requestWithAdmission(ctx context.Context, method, path s
 
 // statusResponse returns after one PATCH dispatch. A lost response or server
 // failure may follow a committed change, so callers must re-read before retry.
-func (s *clientSession) statusResponse(raw []byte, status int, retryAfter string, readErr, contextErr error, out any) error {
+func (s *clientSession) statusResponse(raw []byte, status int, retryAfter string, readErr, contextErr error, sent bool, out any) error {
 	if readErr == nil && contextErr == nil && len(raw) <= maxResponseBytes && status >= 200 && status < 300 {
 		if json.Unmarshal(raw, out) == nil {
 			return nil
@@ -281,7 +282,7 @@ func (s *clientSession) statusResponse(raw []byte, status int, retryAfter string
 	delivery := &issuesync.StatusError{
 		Message:    fmt.Sprintf("notion HTTP %d: %s", status, safeNotionCode(remote.Code)),
 		HTTPStatus: status,
-		Ambiguous:  status == 0 || status >= 500 || status >= 200 && status < 300,
+		Ambiguous:  status == 0 && sent || status >= 500 || status >= 200 && status < 300,
 		Blocked:    status >= 300 && status < 400 || status >= 400 && status < 500 && status != 409 && status != 429,
 	}
 	if readErr != nil || contextErr != nil || len(raw) > maxResponseBytes {

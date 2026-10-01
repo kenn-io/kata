@@ -154,7 +154,8 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, id, desired s
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, s.config.APIOrigin+s.path()+"work-items/"+id+"/", bytes.NewReader(payload))
+	traced, sent := issuesync.TrackRequestWrite(ctx)
+	req, err := http.NewRequestWithContext(traced, http.MethodPatch, s.config.APIOrigin+s.path()+"work-items/"+id+"/", bytes.NewReader(payload))
 	if err != nil {
 		return zero, err
 	}
@@ -162,6 +163,9 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, id, desired s
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	response, err := s.client.http.Do(req)
+	if err != nil && !sent() {
+		return zero, &issuesync.StatusError{Message: "Plane status write could not connect"}
+	}
 	if err != nil {
 		return zero, &issuesync.StatusError{Message: "Plane status write response was lost", Ambiguous: true}
 	}

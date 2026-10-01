@@ -148,6 +148,7 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 	}
 	attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	attemptCtx, sent := issuesync.TrackRequestWrite(attemptCtx)
 	req, err := http.NewRequestWithContext(attemptCtx, method, requestURL, bytes.NewReader(encoded))
 	if err != nil {
 		return fmt.Errorf("invalid GitHub status request")
@@ -175,7 +176,7 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 	client.CheckRedirect = noFollowGitHubRedirects
 	resp, err := client.Do(req)
 	if err != nil {
-		return &issuesync.StatusError{Message: "GitHub status transport failed", Ambiguous: method == http.MethodPatch}
+		return &issuesync.StatusError{Message: "GitHub status transport failed", Ambiguous: method == http.MethodPatch && sent()}
 	}
 	if headers != nil {
 		*headers = resp.Header.Clone()

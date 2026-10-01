@@ -5,12 +5,14 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/issuesync"
 )
 
@@ -210,4 +212,39 @@ func TestPlaneStatusReadBodyFailureIsTransient(t *testing.T) {
 	require.ErrorAs(t, err, &classified)
 	require.False(t, classified.Blocked)
 	require.NotContains(t, err.Error(), "private transport diagnostics")
+}
+
+func TestPlaneStatusWriteThatNeverConnectsIsNotAmbiguous(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path[len(r.URL.Path)-7:] == "states/":
+			sendPlaneJSON(t, w, wirePage(workflowRows(), false, ""))
+		case r.URL.Path[len(r.URL.Path)-len(testItemID)-1:] == testItemID+"/":
+			sendPlaneJSON(t, w, map[string]any{"id": testItemID, "project": testProjectID, "state": testStateID, "updated_at": "2026-09-29T10:00:00Z"})
+		default:
+			sendPlaneJSON(t, w, map[string]any{"id": testProjectID, "name": "Example project", "identifier": "EX"})
+		}
+	}))
+	defer server.Close()
+	c := statusConfig(t, server.URL)
+	client := NewClient(ClientConfig{Daemon: config.PlaneSyncConfig{APIOrigin: server.URL}, LookupEnv: func(string) (string, bool) { return "example-api-key", true }, Wait: func(ctx context.Context, _ time.Duration) error { return ctx.Err() }, Transport: patchDialFailure{reads: server.Client().Transport}})
+	raw, err := client.ForRun(context.Background(), c)
+	require.NoError(t, err)
+	_, err = raw.(testStatusSession).WriteStatus(context.Background(), c, testItemID, "closed", func() error { return nil })
+	var statusErr *issuesync.StatusError
+	require.ErrorAs(t, err, &statusErr)
+	require.False(t, statusErr.Ambiguous, "a write that never connected was not sent")
+}
+
+// patchDialFailure serves reads normally and fails PATCH requests at dial time.
+type patchDialFailure struct{ reads http.RoundTripper }
+
+func (p patchDialFailure) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method != http.MethodPatch {
+		return p.reads.RoundTrip(r)
+	}
+	refused := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	}}
+	return refused.RoundTrip(r)
 }

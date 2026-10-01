@@ -1,10 +1,12 @@
 package githubsync
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -356,4 +358,36 @@ func TestGitHubContentRateLimitFencesNextStatusRead(t *testing.T) {
 			require.Equal(t, 1, calls)
 		})
 	}
+}
+
+func TestGitHubStatusWriteThatNeverConnectsIsNotAmbiguous(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/example-owner/example-repo" {
+			require.NoError(t, json.MarshalWrite(w, map[string]any{"id": 123, "full_name": "example-owner/example-repo"}))
+			return
+		}
+		require.NoError(t, json.MarshalWrite(w, statusIssueWire("open")))
+	}))
+	defer server.Close()
+	client := &http.Client{Transport: patchDialFailure{reads: server.Client().Transport}}
+	f := NewHTTPFetcher(HTTPFetcherConfig{Client: client, CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL})
+	raw, err := f.ForBinding(t.Context(), statusConfig().Binding())
+	require.NoError(t, err)
+	_, err = raw.(StatusSession).WriteStatus(t.Context(), statusConfig(), "issue-id:456", 7, "closed", func() error { return nil })
+	var delivery *issuesync.StatusError
+	require.ErrorAs(t, err, &delivery)
+	require.False(t, delivery.Ambiguous, "a write that never connected was not sent")
+}
+
+// patchDialFailure serves reads normally and fails PATCH requests at dial time.
+type patchDialFailure struct{ reads http.RoundTripper }
+
+func (p patchDialFailure) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method != http.MethodPatch {
+		return p.reads.RoundTrip(r)
+	}
+	refused := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	}}
+	return refused.RoundTrip(r)
 }
