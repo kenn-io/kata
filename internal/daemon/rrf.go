@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kit/search/rrf"
 )
 
 type searchMode string
@@ -44,37 +45,44 @@ func resolveMode(requested string, configured bool) (searchMode, error) {
 // weights), deduping by issue id and unioning matched_in. Ties break by RRF
 // score desc, then updated_at desc, then issue id asc. The resulting Score is
 // the RRF score.
-func mergeRRF(lexical, vector []db.SearchCandidate, limit int) []db.SearchCandidate {
+func mergeRRF(lexical, vector []db.SearchCandidate, limit int) ([]db.SearchCandidate, error) {
 	type agg struct {
 		issue   db.Issue
-		score   float64
 		matched map[string]bool
 	}
-	byID := map[int64]*agg{}
-	add := func(leg []db.SearchCandidate) {
-		for rank, c := range leg {
-			a := byID[c.Issue.ID]
-			if a == nil {
-				a = &agg{issue: c.Issue, matched: map[string]bool{}}
+	byID := map[int64]agg{}
+	add := func(leg []db.SearchCandidate) []int64 {
+		keys := make([]int64, len(leg))
+		for position, c := range leg {
+			keys[position] = c.Issue.ID
+			a, exists := byID[c.Issue.ID]
+			if !exists {
+				a = agg{issue: c.Issue, matched: map[string]bool{}}
 				byID[c.Issue.ID] = a
 			}
-			a.score += 1.0 / float64(rrfK+rank+1)
 			for _, m := range c.MatchedIn {
 				a.matched[m] = true
 			}
 		}
+		return keys
 	}
-	add(lexical)
-	add(vector)
+	hits, err := rrf.Fuse(rrfK, []rrf.Leg[int64]{
+		{Name: "lexical", Weight: 1, Keys: add(lexical)},
+		{Name: "semantic", Weight: 1, Keys: add(vector)},
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	out := make([]db.SearchCandidate, 0, len(byID))
-	for _, a := range byID {
+	for _, hit := range hits {
+		a := byID[hit.Key]
 		matched := make([]string, 0, len(a.matched))
 		for m := range a.matched {
 			matched = append(matched, m)
 		}
 		sort.Strings(matched)
-		out = append(out, db.SearchCandidate{Issue: a.issue, Score: a.score, MatchedIn: matched})
+		out = append(out, db.SearchCandidate{Issue: a.issue, Score: hit.Score, MatchedIn: matched})
 	}
 	// Deterministic order: RRF score desc, then most-recently-updated first,
 	// then issue id asc as the final tiebreak (matches the design note).
@@ -90,5 +98,5 @@ func mergeRRF(lexical, vector []db.SearchCandidate, limit int) []db.SearchCandid
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
-	return out
+	return out, nil
 }

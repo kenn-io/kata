@@ -3,10 +3,8 @@
 package vector
 
 import (
-	"strconv"
 	"strings"
 
-	kitvec "go.kenn.io/kit/vector"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver registered as "sqlite"; kit's sqlitevec registers modernc.org/sqlite/vec extension at init
 )
 
@@ -30,17 +28,4 @@ func sidecarDSN(path string, fast bool) string {
 		)
 	}
 	return path + "?" + strings.Join(pragmas, "&")
-}
-
-func sidecarVectorValue(vector kitvec.Vector) (string, any, error) {
-	var value strings.Builder
-	value.WriteByte('[')
-	for i, component := range vector {
-		if i > 0 {
-			value.WriteByte(',')
-		}
-		value.WriteString(strconv.FormatFloat(float64(component), 'g', -1, 32))
-	}
-	value.WriteByte(']')
-	return "vec_f32(?)", value.String(), nil
 }

@@ -16,7 +16,8 @@ func cand(id int64, score float64, matched ...string) db.SearchCandidate {
 func TestMergeRRFCombinesAndDedupes(t *testing.T) {
 	lex := []db.SearchCandidate{cand(1, 5, "title"), cand(2, 4, "body")}
 	vec := []db.SearchCandidate{cand(2, 0.9, "semantic"), cand(3, 0.8, "semantic")}
-	merged := mergeRRF(lex, vec, 10)
+	merged, err := mergeRRF(lex, vec, 10)
+	require.NoError(t, err)
 
 	// Issue 2 appears in both legs → ranks first.
 	if merged[0].Issue.ID != 2 {
@@ -32,11 +33,15 @@ func TestMergeRRFCombinesAndDedupes(t *testing.T) {
 }
 
 func TestMergeRRFEmptyLegs(t *testing.T) {
-	if got := mergeRRF(nil, nil, 10); len(got) != 0 {
+	got, err := mergeRRF(nil, nil, 10)
+	require.NoError(t, err)
+	if len(got) != 0 {
 		t.Fatalf("empty legs should yield empty, got %d", len(got))
 	}
 	lex := []db.SearchCandidate{cand(1, 5, "title")}
-	if got := mergeRRF(lex, nil, 10); len(got) != 1 || got[0].Issue.ID != 1 {
+	got, err = mergeRRF(lex, nil, 10)
+	require.NoError(t, err)
+	if len(got) != 1 || got[0].Issue.ID != 1 {
 		t.Fatalf("lexical-only passthrough failed: %#v", got)
 	}
 }
@@ -44,7 +49,8 @@ func TestMergeRRFEmptyLegs(t *testing.T) {
 func TestMergeRRFRespectsLimit(t *testing.T) {
 	lex := []db.SearchCandidate{cand(1, 5, "title"), cand(2, 4, "body")}
 	vec := []db.SearchCandidate{cand(2, 0.9, "semantic"), cand(3, 0.8, "semantic")}
-	merged := mergeRRF(lex, vec, 2)
+	merged, err := mergeRRF(lex, vec, 2)
+	require.NoError(t, err)
 
 	require.Len(t, merged, 2)
 	// Issue 2 is in both legs (highest RRF), so it survives the truncation; the
@@ -62,7 +68,8 @@ func TestMergeRRFTieBreaksByLowerIssueID(t *testing.T) {
 	// or reversed.
 	lex := []db.SearchCandidate{cand(7, 5, "title")}
 	vec := []db.SearchCandidate{cand(3, 0.9, "semantic")}
-	merged := mergeRRF(lex, vec, 10)
+	merged, err := mergeRRF(lex, vec, 10)
+	require.NoError(t, err)
 
 	require.Len(t, merged, 2)
 	require.InDelta(t, merged[0].Score, merged[1].Score, 1e-12, "scores must be an exact RRF tie")
@@ -79,7 +86,8 @@ func TestMergeRRFTieBreaksByMostRecentlyUpdated(t *testing.T) {
 	newer := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	lex := []db.SearchCandidate{{Issue: db.Issue{ID: 1, UpdatedAt: older}, MatchedIn: []string{"title"}}}
 	vec := []db.SearchCandidate{{Issue: db.Issue{ID: 2, UpdatedAt: newer}, MatchedIn: []string{"semantic"}}}
-	merged := mergeRRF(lex, vec, 10)
+	merged, err := mergeRRF(lex, vec, 10)
+	require.NoError(t, err)
 
 	require.Len(t, merged, 2)
 	require.InDelta(t, merged[0].Score, merged[1].Score, 1e-12, "scores must be an exact RRF tie")

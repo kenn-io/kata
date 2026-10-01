@@ -151,7 +151,11 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	case modeSemantic:
 		res = hybridResult{Mode: modeSemantic, Hits: truncate(vector, p.Limit)}
 	default: // hybrid
-		res = hybridResult{Mode: modeHybrid, Hits: mergeRRF(lexical, vector, p.Limit)}
+		hits, err := mergeRRF(lexical, vector, p.Limit)
+		if err != nil {
+			return hybridResult{}, err
+		}
+		res = hybridResult{Mode: modeHybrid, Hits: hits}
 	}
 	if scopedLexicalFallback {
 		res.Degraded = true
@@ -203,7 +207,11 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// one backfills; ranking a new-model query vector against old-model stored
 	// vectors is meaningless (same dims) or an error (dims change), so the leg
 	// is unavailable until cutover.
-	if key != emb.Generation().Fingerprint() {
+	matches, err := emb.Space().Matches(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if !matches || key != emb.Generation().Fingerprint() {
 		if h := emb.CredentialHealth(); h.Credential != "ok" {
 			return nil, false, &embedding.CredentialError{Reason: h.CredentialReason}
 		}

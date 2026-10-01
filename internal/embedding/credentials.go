@@ -5,13 +5,14 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kit/embedclient"
 )
 
 // CredentialError is an operator-actionable embedding availability error.
 // Provider response bodies are deliberately excluded from its diagnostics.
 type CredentialError struct {
 	Reason   string
-	Provider *APIError
+	Provider *embedclient.APIError
 }
 
 func (e *CredentialError) Error() string { return "semantic search unavailable: " + e.Reason }
@@ -96,9 +97,7 @@ func (c *Client) requestCredential() (config.EmbeddingCredential, uint64, error)
 	return c.credential, c.credentialRevision, nil
 }
 
-func (c *Client) rejectCredential(credential config.EmbeddingCredential, revision uint64, provider *APIError) error {
-	// Do not retain echoed secrets in the wrapped error either.
-	provider.Body = ""
+func (c *Client) rejectCredential(credential config.EmbeddingCredential, revision uint64, provider *embedclient.APIError) error {
 	state := "rejected"
 	reason := fmt.Sprintf("embedding provider rejected the API key (%d) from %s", provider.StatusCode, credential.Source)
 	if provider.StatusCode == 403 {

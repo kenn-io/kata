@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kit/search/lexical"
+	"go.kenn.io/kit/search/sqlitefts"
+	"go.kenn.io/kit/search/sqlquery"
 )
 
 // SearchFTS runs an FTS5 BM25-ranked query against issues_fts, joins back to
@@ -56,35 +59,23 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		limit = 200
 	}
 
-	// Split the user query on whitespace, quote each whitespace-delimited
-	// segment as an FTS5 phrase. This keeps every segment opaque to FTS5's
-	// special characters (`:`, `*`, parens, `OR`/`AND`/`NOT` as bare words);
-	// embedded double quotes are doubled per FTS5 quoting rules. The top-level
-	// phrase joins quoted tokens by mode (space → implicit AND, " OR " →
-	// explicit OR).
-	var quoted []string
-	for w := range strings.FieldsSeq(q) {
-		quoted = append(quoted, `"`+strings.ReplaceAll(w, `"`, `""`)+`"`)
+	analyzer := lexical.Literal()
+	prepared, err := analyzer.PrepareLiteral(q)
+	if err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
 	}
-	if len(quoted) == 0 {
-		return nil, nil
+	phrases := make([]string, 0)
+	for word := range strings.FieldsSeq(q) {
+		term, err := analyzer.PrepareLiteral(word)
+		if err != nil {
+			return nil, fmt.Errorf("search fts: %w", err)
+		}
+		phrases = append(phrases, term.Match)
 	}
-	var topPhrase string
-	switch r.mode {
-	case searchAny:
-		topPhrase = strings.Join(quoted, " OR ")
-	default:
-		topPhrase = strings.Join(quoted, " ")
-	}
-	// Per-column MATCH always uses OR-of-tokens regardless of the top-level
-	// mode: matched_in answers "which columns contributed at least one term?"
-	// — under implicit-AND a cross-column match (e.g. title="login",
-	// body="Safari" for "login Safari") is a valid hit but no single column
-	// holds all the tokens, so an AND per-column subquery would mark every
-	// column as not-matched and matched_in would be empty.
-	colPhrase := topPhrase
-	if r.mode == searchAll && len(quoted) > 1 {
-		colPhrase = strings.Join(quoted, " OR ")
+	colPhrase := strings.Join(phrases, " OR ")
+	topPhrase := prepared.Match
+	if r.mode == searchAny {
+		topPhrase = colPhrase
 	}
 
 	rowFilter := "AND i.deleted_at IS NULL"
@@ -114,33 +105,38 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		filterArgs = append(filterArgs, scope.RootIssueUID, scope.ProjectUID, scope.ProjectUID)
 	}
 	rowFilter += scopeFilter.String()
-	// Per-column MATCH subqueries replace highlight() because issues_fts is
-	// declared content='' (contentless), and highlight() returns NULL for every
-	// column on contentless tables. Each subquery returns 1 if the row's
-	// title/body/comments column matches the per-column phrase, 0 otherwise.
-	query := fmt.Sprintf(`
+	helper, err := sqlitefts.New(
+		sqlitefts.WithIndexTable("issues_fts"), sqlitefts.WithIndexKey("rowid"),
+		sqlitefts.WithSourceTable("issues"), sqlitefts.WithSourceKey("id"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
+	}
+	candidates, err := helper.Build(sqlitefts.Request{
+		Match: topPhrase, CandidateLimit: limit,
+		SourcePredicate: sqlquery.Predicate{
+			SQL:  "d.project_id = ? " + strings.ReplaceAll(rowFilter, "i.", "d."),
+			Args: append([]any{r.params.ProjectID}, filterArgs...),
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
+	}
+	query := fmt.Sprintf(`WITH candidates AS (%s)
 		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
 		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision,
 		       i.recurrence_id, i.occurrence_key,
 		       i.created_at, i.updated_at, i.closed_at, i.deleted_at,
-		       bm25(issues_fts),
-		       (issues_fts.rowid IN (SELECT rowid FROM issues_fts WHERE title    MATCH ?)) AS in_title,
-		       (issues_fts.rowid IN (SELECT rowid FROM issues_fts WHERE body     MATCH ?)) AS in_body,
-		       (issues_fts.rowid IN (SELECT rowid FROM issues_fts WHERE comments MATCH ?)) AS in_comments
-		FROM issues_fts
-		JOIN issues i ON i.id = issues_fts.rowid
+		       candidates.score,
+		       (i.id IN (SELECT rowid FROM issues_fts WHERE title MATCH ?)) AS in_title,
+		       (i.id IN (SELECT rowid FROM issues_fts WHERE body MATCH ?)) AS in_body,
+		       (i.id IN (SELECT rowid FROM issues_fts WHERE comments MATCH ?)) AS in_comments
+		FROM candidates
+		JOIN issues i ON i.id = candidates.doc_key
 		JOIN projects p ON p.id = i.project_id
-		WHERE issues_fts MATCH ?
-		  AND i.project_id = ?
-		  %s
-		ORDER BY bm25(issues_fts) ASC
-		LIMIT %d`, rowFilter, limit)
+		ORDER BY candidates.score DESC, i.id ASC`, candidates.SQL)
+	args := append(candidates.Args, colPhrase, colPhrase, colPhrase)
 
-	// Bind order: colPhrase (×3 — title MATCH, body MATCH, comments MATCH),
-	// then topPhrase (top-level MATCH), then projectID, then one bind per
-	// filter predicate in rowFilter. Reordering the SELECT/WHERE clauses
-	// without updating the bind list will silently transpose binds.
-	args := append([]any{colPhrase, colPhrase, colPhrase, topPhrase, r.params.ProjectID}, filterArgs...)
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
@@ -151,14 +147,14 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	for rows.Next() {
 		var (
 			i                           db.Issue
-			rawScore                    float64
+			score                       float64
 			inTitle, inBody, inComments bool
 		)
 		if err := rows.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status,
 			&i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision,
 			&i.RecurrenceID, &i.OccurrenceKey,
 			&i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt,
-			&rawScore, &inTitle, &inBody, &inComments); err != nil {
+			&score, &inTitle, &inBody, &inComments); err != nil {
 			return nil, fmt.Errorf("scan search row: %w", err)
 		}
 		matched := make([]string, 0, 3)
@@ -171,11 +167,9 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		if inComments {
 			matched = append(matched, "comments")
 		}
-		// FTS5 BM25 returns negative numbers; invert so callers compare with
-		// "higher = better" semantics.
 		out = append(out, db.SearchCandidate{
 			Issue:     i,
-			Score:     -rawScore,
+			Score:     score,
 			MatchedIn: matched,
 		})
 	}

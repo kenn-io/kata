@@ -3,9 +3,13 @@ package pgstore
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kit/search/postgres"
+	"go.kenn.io/kit/search/sqlquery"
 )
 
 // SearchFTS returns issues that contain all normalized query terms.
@@ -34,11 +38,15 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	} else if limit > 200 {
 		limit = 200
 	}
-	matchQuery := "queries.all_query"
+	anyQuery := `(SELECT CASE WHEN count(*) = 0 THEN NULL
+		ELSE to_tsquery('kata_simple_unaccent', string_agg(quote_literal(term), ' | ')) END
+		FROM unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', ?))) AS term)`
+	matchQuery := "plainto_tsquery('kata_simple_unaccent', ?)"
 	if request.any {
-		matchQuery = "queries.any_query"
+		matchQuery = anyQuery
 	}
-	args := []any{request.params.ProjectID, queryText, limit}
+	args := []any{request.params.ProjectID}
+
 	rowFilter := `AND i.deleted_at IS NULL`
 	if request.params.IncludeDeleted {
 		rowFilter = ""
@@ -65,37 +73,42 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	appendIssueScopePostgres(&scopeFilter, &args, request.params.IssueScope)
 	rowFilter += scopeFilter.String()
 
-	// plainto_tsquery provides the all-terms form without interpreting user
-	// input as tsquery syntax. The any-terms form is rebuilt from the normalized
-	// lexemes so it has the same tokenizer and dictionary behavior.
-	query := fmt.Sprintf(`WITH queries AS (
-  SELECT plainto_tsquery('kata_simple_unaccent', $2) AS all_query,
-         (
-           SELECT CASE WHEN count(*) = 0 THEN NULL
-                       ELSE to_tsquery('kata_simple_unaccent', string_agg(quote_literal(term), ' | '))
-                  END
-             FROM unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', $2))) AS term
-         ) AS any_query
+	predicate := "EXISTS (SELECT 1 FROM issues i WHERE i.id = d.issue_id AND i.project_id = $1 " + rowFilter + ")"
+	var predicateArgs []any
+	predicate = regexp.MustCompile(`\$[0-9]+`).ReplaceAllStringFunc(predicate, func(parameter string) string {
+		position, _ := strconv.Atoi(parameter[1:])
+		predicateArgs = append(predicateArgs, args[position-1])
+		return "?"
+	})
+	relation, err := postgres.BuildLexical(postgres.LexicalRequest{
+		Mapping: postgres.LexicalMapping{SourceTable: "issues_search", SourceKey: "issue_id", Vector: "d.tsv"},
+		Config:  "kata_simple_unaccent", TSQuery: matchQuery, TSQueryArgs: []any{queryText},
+		Rank: postgres.RankCover, CandidateLimit: limit,
+		SourcePredicate: sqlquery.Predicate{SQL: predicate, Args: predicateArgs},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
+	}
+	relation.SQL = strings.Replace(relation.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY score DESC, doc_key DESC", 1)
+	query := fmt.Sprintf(`WITH candidates AS (%s), queries AS (
+  SELECT %s AS any_query
 )
 SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
        i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
        i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at,
-       ts_rank_cd(search.tsv, %[1]s) AS score,
+       candidates.score,
        to_tsvector('kata_simple_unaccent', i.title) @@ queries.any_query AS in_title,
        to_tsvector('kata_simple_unaccent', i.body) @@ queries.any_query AS in_body,
        to_tsvector('kata_simple_unaccent', COALESCE((
          SELECT string_agg(c.body, ' ' ORDER BY c.id) FROM comments c WHERE c.issue_id = i.id
        ), '')) @@ queries.any_query AS in_comments
-  FROM issues_search search
-  JOIN issues i ON i.id = search.issue_id
+  FROM candidates
+  JOIN issues i ON i.id = candidates.doc_key
   JOIN projects p ON p.id = i.project_id
  CROSS JOIN queries
- WHERE i.project_id = $1
-   AND %[1]s IS NOT NULL
-   AND search.tsv @@ %[1]s
-   %[2]s
- ORDER BY score DESC, i.id DESC
- LIMIT $3`, matchQuery, rowFilter)
+ ORDER BY candidates.score DESC, i.id DESC`, relation.SQL, strings.Replace(anyQuery, "?", "$1", 1))
+	args = relation.Args
+
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", mapSQLError(err, nil))

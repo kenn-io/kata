@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"go.kenn.io/kit/embedconfig"
+	"go.kenn.io/kit/secretref"
 )
 
 var errEmbeddingCredentialWrongOwner = errors.New("embedding credential file is not owned by the daemon user")
@@ -82,9 +85,12 @@ func (e EmbeddingsConfig) ResolveCredential() EmbeddingCredential {
 		return c
 	}
 	if name := strings.TrimSpace(e.APIKeyEnv); name != "" {
-		c := EmbeddingCredential{Key: strings.TrimSpace(os.Getenv(name)), Source: "env:" + name}
-		if c.Key == "" {
+		c := EmbeddingCredential{Source: "env:" + name}
+		secret, err := (embedconfig.Embedder{APIKey: secretref.Ref{Env: name}}).ResolveAPIKey()
+		if err != nil {
 			c.Reason = fmt.Sprintf("no embedding API key (env %s is unset or empty)", name)
+		} else {
+			c.Key = strings.TrimSpace(secret.Value)
 		}
 		return c
 	}
