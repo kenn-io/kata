@@ -46,7 +46,8 @@ type HTTPFetcher struct {
 	graphQLSleep        func(context.Context, time.Duration) error
 	parentCapabilities  *parentCapabilityCache
 	statusMu            sync.Mutex
-	statusCooldown      time.Time
+	// statusCooldown pauses requests per repository after a rate limit.
+	statusCooldown map[Binding]time.Time
 }
 
 var _ Fetcher = (*HTTPFetcher)(nil)
@@ -94,6 +95,7 @@ func (f *HTTPFetcher) repositoryWithClient(ctx context.Context, client *http.Cli
 		URL:      requestURL,
 		Resource: "GitHub repository",
 		Out:      &out,
+		Binding:  binding,
 	}); err != nil {
 		return Repository{}, err
 	}
@@ -136,6 +138,7 @@ func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client
 			Resource:    resource,
 			Out:         &page,
 			RetryBudget: retryBudget,
+			Binding:     binding,
 		})
 		if err != nil {
 			return nil, err
@@ -283,6 +286,7 @@ type gitHubJSONRequest struct {
 	Body        io.Reader
 	Out         any
 	RetryBudget *gitHubRetryBudget
+	Binding     Binding
 }
 
 func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request gitHubJSONRequest) (http.Header, error) {
@@ -314,7 +318,7 @@ func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request g
 			req.Header.Set("Content-Type", "application/json")
 		}
 
-		if err := f.statusCooldownError(); err != nil {
+		if err := f.statusCooldownError(request.Binding); err != nil {
 			return nil, err
 		}
 		resp, err := client.Do(req)
@@ -336,7 +340,7 @@ func (f *HTTPFetcher) doJSON(ctx context.Context, client *http.Client, request g
 				return nil, closeErr
 			}
 			if gitHubRESTStatusRetryable(resp.StatusCode, headers, body) {
-				f.deferStatusRequests(retryWait(headers, f.now()))
+				f.deferStatusRequests(request.Binding, retryWait(headers, f.now()))
 			}
 			if gitHubRESTStatusRetryable(resp.StatusCode, headers, body) && attempt < gitHubMaxRetryAttempts {
 				if err := f.sleepForGitHubRetry(ctx, request.Resource, attempt, headers, budget); err != nil {

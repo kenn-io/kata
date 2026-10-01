@@ -132,7 +132,7 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.fetcher.statusCooldownError(); err != nil {
+	if err := s.fetcher.statusCooldownError(s.binding); err != nil {
 		return err
 	}
 	requestURL, err := s.fetcher.restEndpointURL(s.binding, endpoint)
@@ -196,7 +196,7 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 		if resp.StatusCode == 429 && wait == 0 {
 			wait = time.Second
 		}
-		s.fetcher.deferStatusRequests(wait)
+		s.fetcher.deferStatusRequests(s.binding, wait)
 	}
 	return &issuesync.StatusError{
 		Message: fmt.Sprintf("GitHub status HTTP %d", resp.StatusCode), HTTPStatus: resp.StatusCode,
@@ -206,22 +206,25 @@ func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context
 	}
 }
 
-func (f *HTTPFetcher) deferStatusRequests(delay time.Duration) {
+func (f *HTTPFetcher) deferStatusRequests(binding Binding, delay time.Duration) {
 	if delay <= 0 {
 		return
 	}
 	f.statusMu.Lock()
 	defer f.statusMu.Unlock()
 	until := f.now().Add(delay)
-	if until.After(f.statusCooldown) {
-		f.statusCooldown = until
+	if until.After(f.statusCooldown[binding]) {
+		if f.statusCooldown == nil {
+			f.statusCooldown = map[Binding]time.Time{}
+		}
+		f.statusCooldown[binding] = until
 	}
 }
 
-func (f *HTTPFetcher) statusCooldownError() error {
+func (f *HTTPFetcher) statusCooldownError(binding Binding) error {
 	f.statusMu.Lock()
 	defer f.statusMu.Unlock()
-	if wait := f.statusCooldown.Sub(f.now()); wait > 0 {
+	if wait := f.statusCooldown[binding].Sub(f.now()); wait > 0 {
 		return &issuesync.StatusError{Message: "GitHub status requests are cooling down", RetryAfter: wait}
 	}
 	return nil

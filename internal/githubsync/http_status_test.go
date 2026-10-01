@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -390,4 +391,38 @@ func (p patchDialFailure) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, errors.New("connection refused")
 	}}
 	return refused.RoundTrip(r)
+}
+
+func TestGitHubRateLimitCooldownStaysWithItsRepository(t *testing.T) {
+	limited := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if limited && strings.HasPrefix(r.URL.Path, "/repos/example-owner/example-repo") {
+			limited = false
+			w.Header().Set("Retry-After", "600")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		if r.URL.Path == "/repos/example-owner/other-repo" {
+			require.NoError(t, json.MarshalWrite(w, map[string]any{"id": 124, "full_name": "example-owner/other-repo"}))
+			return
+		}
+		row := statusIssueWire("open")
+		row["url"] = strings.Replace(row["url"].(string), "example-repo", "other-repo", 1)
+		require.NoError(t, json.MarshalWrite(w, row))
+	}))
+	defer server.Close()
+	f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL})
+	limitedSession, err := f.ForBinding(t.Context(), statusConfig().Binding())
+	require.NoError(t, err)
+	_, err = limitedSession.(StatusSession).ReadStatus(t.Context(), statusConfig(), "issue-id:456", 7)
+	require.Error(t, err)
+
+	other := statusConfig()
+	other.Repo, other.RepoID = "other-repo", 124
+	otherSession, err := f.ForBinding(t.Context(), other.Binding())
+	require.NoError(t, err)
+	_, err = otherSession.(StatusSession).ReadStatus(t.Context(), other, "issue-id:456", 7)
+	require.NoError(t, err, "another repository's status reads are not paused")
+	_, err = otherSession.Repository(t.Context(), "github.com", "example-owner", "other-repo")
+	require.NoError(t, err, "another repository's content reads are not paused")
 }
