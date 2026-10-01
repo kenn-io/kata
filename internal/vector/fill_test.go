@@ -137,12 +137,11 @@ func TestFillAbortsOnRequestLevel400(t *testing.T) {
 	}
 }
 
-// TestFillAbortsOnBatchShape400 pins the probe against shape-level 400s: an
-// endpoint that rejects the document's request shape (here, any multi-text
-// batch) but accepts trivial single-text requests is not rejecting the
-// document's content, so the fill must abort rather than poison-skip. The
-// probe has to replay the document's actual request shape, not a one-item
-// canary.
+// TestFillAbortsOnBatchShape400 pins shape-level 400s: an endpoint that
+// rejects the document's request shape (here, any multi-text batch) but
+// accepts single-text requests is not rejecting the document's content. kit
+// cannot attribute that 400 to the input, so the fill must abort rather than
+// poison-skip.
 func TestFillAbortsOnBatchShape400(t *testing.T) {
 	ctx := context.Background()
 	ix := openTestIndex(t)
@@ -174,6 +173,54 @@ func TestFillAbortsOnBatchShape400(t *testing.T) {
 	}
 }
 
+// TestFillSkipsInputTooLongDocument covers a document over the model's input
+// limit. kit classifies the 400 as input too long, so only that document is
+// skipped and the fill continues. Any request carrying text that long fails,
+// so a check that replays the document's shape could never confirm it, and
+// the document would block every later fill.
+func TestFillSkipsInputTooLongDocument(t *testing.T) {
+	ctx := context.Background()
+	ix := openTestIndex(t)
+	seedMirror(t, ix, "long", 1)
+	seedMirror(t, ix, "short", 1)
+	if _, err := ix.db.ExecContext(ctx,
+		`UPDATE issue_mirror SET content = ? WHERE issue_uid = 'long'`,
+		strings.Repeat("a", 1500)); err != nil {
+		t.Fatal(err)
+	}
+	g := testGen("m1")
+	key := g.Fingerprint()
+	if err := ix.EnsureBuilding(ctx, key, g); err != nil {
+		t.Fatal(err)
+	}
+	enc := func(_ context.Context, texts []string) ([][]float32, error) {
+		for _, text := range texts {
+			if len(text) > 1000 {
+				return nil, &embedclient.APIError{StatusCode: 400, Reason: embedclient.ReasonInputTooLong}
+			}
+		}
+		out := make([][]float32, len(texts))
+		for i := range texts {
+			out[i] = []float32{1, 0, 0, 0}
+		}
+		return out, nil
+	}
+	stats, err := ix.Fill(ctx, key, enc, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("an input-too-long document must not abort the fill: %v", err)
+	}
+	if stats.Skipped != 1 || stats.Documents != 1 {
+		t.Fatalf("stats = %+v; want 1 skipped, 1 embedded", stats)
+	}
+	backlog, err := ix.Backlog(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backlog != 0 {
+		t.Fatalf("backlog = %d, want 0", backlog)
+	}
+}
+
 func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	ctx := context.Background()
 	ix := openTestIndex(t)
@@ -184,16 +231,16 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	if err := ix.EnsureBuilding(ctx, key, g); err != nil {
 		t.Fatal(err)
 	}
-	// Poison doc: the endpoint rejects any request carrying its content, so
-	// the shared batch and the document alone both fail. It is skipped and
-	// the fill continues.
+	// Poison doc: the endpoint refuses any request carrying its content under
+	// its content policy, so the shared batch and the document alone both
+	// fail. It is skipped and the fill continues.
 	if _, err := ix.db.ExecContext(ctx,
 		`UPDATE issue_mirror SET content = 'poison' WHERE issue_uid = 'bad'`); err != nil {
 		t.Fatal(err)
 	}
 	enc := func(_ context.Context, texts []string) ([][]float32, error) {
 		if slices.Contains(texts, "poison") {
-			return nil, &embedclient.APIError{StatusCode: 400}
+			return nil, &embedclient.APIError{StatusCode: 400, Reason: embedclient.ReasonContentPolicy}
 		}
 		out := make([][]float32, len(texts))
 		for i := range texts {

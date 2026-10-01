@@ -18,6 +18,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   pending. Project activity cannot bypass this delay; `kata daemon reload`
   retries immediately after reloading embedding credentials. Uses Kit v0.29.2.
 
+- Keep semantic search indexing past an issue that is too long for the
+  embedding model. The embedding server's error now decides the skip: an issue
+  it reports as too long or refused by policy is skipped and the rest keep
+  indexing, instead of every later index pass stopping at that issue.
+
 - Find every-session contract setup in `kata init --help`,
   `kata quickstart --help`, the quickstart guide, and the README. Install it
   with `kata agent-hooks install --all`; Codex requires trust through `/hooks`.

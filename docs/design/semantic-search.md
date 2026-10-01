@@ -230,16 +230,15 @@ buys a simpler, exact dirty signal over carrying a content hash.
 
 Failure classes:
 
-- 400 is ambiguous: the same status covers a request-level problem (bad model
-  name, malformed request, oversized batch) and a document the model
-  permanently rejects. The fill verifies which by replaying the failing
-  document's exact request shape (same chunk count, per-chunk lengths, and
-  batching) with benign text. If the replay succeeds, the 400 was
-  content-specific: the document is stamped as skipped (it stops being
-  pending and gains no semantic recall until its content changes) and the
-  fill continues past it. If the replay also fails, the 400 is request-level
-  and handled as definitive misconfiguration below; a systemic 400 must
-  never stamp the corpus as skipped.
+- A document the model permanently rejects is skipped. Kit classifies each
+  failed response from its status and the provider's error code or message,
+  and the fill skips a document only when Kit reports an input rejection: the
+  input is too long or refused by content policy. The document is stamped as
+  skipped (it stops being pending and gains no semantic recall until its
+  content changes) and the fill continues past it. A 400 Kit cannot attribute
+  to the input (bad model name, unsupported field, malformed request,
+  oversized batch) is handled as definitive misconfiguration below; a
+  systemic 400 must never stamp the corpus as skipped.
 - Any other 4xx except 408 and 429 (401, 403, 404, 422, request-level 400)
   is definitive misconfiguration: pin backoff at the maximum immediately (no
   hot loop) and surface the error in health. This includes a 4xx that Kit

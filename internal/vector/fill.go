@@ -3,9 +3,6 @@ package vector
 import (
 	"context"
 	"errors"
-	"net/http"
-	"strings"
-	"unicode/utf8"
 
 	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
@@ -22,14 +19,13 @@ const (
 // Fill embeds every pending mirror document into the generation keyed by key.
 // scanBatch <= 0 uses kit's default. batchOptions controls encode batching.
 //
-// Only a content-definitive HTTP 400 skips a document (poison-document
-// stamping). The embedding API reports request-level problems (bad model,
-// malformed request, oversized batch) with the same status, so a 400 is
-// verified by replaying the document's exact request shape with benign text:
-// if the replay also fails, the rejection was not the content and the fill
-// aborts so the reconciler can back off instead of stamping the corpus as
-// skipped. Every non-400 error aborts unconditionally — an auth failure must
-// never stamp anything.
+// Only an input rejection skips a document (poison-document stamping): kit
+// classifies a failed response from its status and the provider's error code
+// or message, and reports InputRejected only for an input that is too long or
+// refused by policy. A 400 kit cannot attribute to the input (bad model,
+// unsupported field, malformed request) and every non-400 error abort the
+// fill, so the reconciler backs off instead of stamping the corpus as
+// skipped. An auth failure never stamps anything.
 func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch int, batchOptions []kitvec.BatchOption, onDocument func(bool)) (kitvec.FillStats, error) {
 	split := kitvec.SplitOptions{MaxRunes: splitMaxRunes, Overlap: splitOverlap}
 	store := progressStore{Store: ix.flowStore, onDocument: onDocument}
@@ -37,22 +33,16 @@ func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, sc
 		kitvec.WithFillScanBatch[string](scanBatch),
 		kitvec.WithFillSplit[string](split),
 		kitvec.WithFillBatch[string](batchOptions...),
-		kitvec.WithFillBatchErrorIsolation[string](isBadRequest),
-		kitvec.WithFillEncodeError[string](func(doc string, err error) bool {
-			if !isBadRequest(err) {
-				return false
-			}
-			return ix.contentSpecific400(ctx, doc, enc, split, batchOptions)
+		kitvec.WithFillBatchErrorIsolation[string](isInputRejected),
+		kitvec.WithFillEncodeError[string](func(_ string, err error) bool {
+			return isInputRejected(err)
 		}),
 	)
 }
 
-func isBadRequest(err error) bool {
-	var apiErr *embedclient.APIError
-	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
-		return false
-	}
-	return true
+func isInputRejected(err error) bool {
+	apiErr, ok := errors.AsType[*embedclient.APIError](err)
+	return ok && apiErr.InputRejected()
 }
 
 type progressStore struct {
@@ -68,24 +58,4 @@ func (s progressStore) SaveVectors(ctx context.Context, gen, doc string, revisio
 		s.onDocument(len(vectors) > 0)
 	}
 	return nil
-}
-
-// contentSpecific400 reports whether a 400 from encoding doc is provably
-// content-specific. It rebuilds the document's request shape — same chunk
-// count, same per-chunk rune lengths, same batching — with benign text and
-// re-encodes it. Success means the endpoint accepts that shape, so the
-// rejection was the content itself and poison-skip is safe. Any replay
-// failure (shape-level 400, transient error, missing mirror row) keeps the
-// document pending by aborting the fill.
-func (ix *Index) contentSpecific400(ctx context.Context, doc string, enc kitvec.EncodeFunc, split kitvec.SplitOptions, batchOptions []kitvec.BatchOption) bool {
-	content, err := ix.mirrorContent(ctx, doc)
-	if err != nil {
-		return false
-	}
-	chunks := kitvec.Split(content, split)
-	for i := range chunks {
-		chunks[i].Text = strings.Repeat("a", utf8.RuneCountInString(chunks[i].Text))
-	}
-	_, err = kitvec.EncodeBatched(ctx, enc, chunks, batchOptions...)
-	return err == nil
 }
