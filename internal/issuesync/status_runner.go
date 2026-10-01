@@ -209,8 +209,8 @@ func (p *statusPass) lap(pending bool, attempted map[int64]bool, failures *[]err
 		}
 		// A rate limit fails every later request fast. Leave this mapping for
 		// the next run rather than consuming the rest of the lap as failures.
-		var limited *StatusError
-		rateLimited := errors.As(itemErr, &limited) && limited.RetryAfter > 0 && !limited.Ambiguous
+		limited, ok := errors.AsType[*StatusError](itemErr)
+		rateLimited := ok && limited != nil && limited.RetryAfter > 0 && !limited.Ambiguous
 		if rateLimited {
 			cursor.After = previousAfter
 		}

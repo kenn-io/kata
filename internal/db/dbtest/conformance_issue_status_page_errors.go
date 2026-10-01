@@ -28,26 +28,26 @@ func checkIssueStatusPageIsolatesInvalidMapping(t *testing.T, store db.Storage) 
 	require.NoError(t, err)
 	require.True(t, claimed)
 	guard := db.IssueSyncImportGuard{BindingID: binding.ID, Provider: "notion", StartedAt: now}
-	var ids []int64
-	for range 2 {
+	mapIssue := func() int64 {
 		issue, err := createFixtureIssue(ctx, store, project.ID, "Mapped task", "worker", nil)
 		require.NoError(t, err)
 		m, err := store.UpsertImportMapping(ctx, db.ImportMappingParams{ProjectID: project.ID, Source: binding.SourceKey, ExternalID: issue.UID, ObjectType: "issue", IssueID: &issue.ID})
 		require.NoError(t, err)
-		ids = append(ids, m.ID)
+		return m.ID
 	}
-	_, err = sqlStore.ExecContext(ctx, `UPDATE import_mappings SET pending_event_uid=$1 WHERE id=$2`, "01HZZZZZZZZZZZZZZZZZZZZZ99", ids[0])
+	invalidID, validID := mapIssue(), mapIssue()
+	_, err = sqlStore.ExecContext(ctx, `UPDATE import_mappings SET pending_event_uid=$1 WHERE id=$2`, "01HZZZZZZZZZZZZZZZZZZZZZ99", invalidID)
 	require.NoError(t, err)
 
 	for _, pending := range []bool{false, true} {
 		page, err := reader.ListIssueStatusMappings(ctx, db.IssueStatusQuery{Guard: guard, Limit: 100, PendingOnly: pending})
 		require.NoError(t, err, "one invalid mapping must not fail the page")
 		require.NotEmpty(t, page.Mappings)
-		require.Equal(t, ids[0], page.Mappings[0].Mapping.ID)
+		require.Equal(t, invalidID, page.Mappings[0].Mapping.ID)
 		require.ErrorIs(t, page.Mappings[0].LoadError, db.ErrImportValidation)
 		if !pending {
 			require.Len(t, page.Mappings, 2)
-			require.Equal(t, ids[1], page.Mappings[1].Mapping.ID)
+			require.Equal(t, validID, page.Mappings[1].Mapping.ID)
 			require.NoError(t, page.Mappings[1].LoadError)
 		}
 	}
