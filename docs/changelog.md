@@ -1,13 +1,18 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-09-28
+last_edited: 2026-10-01
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Use OpenAI-compatible embedding servers that reject a `dimensions` field.
+  Embedding requests no longer send `"dimensions": 0` unless dimensions are
+  requested, so servers no longer refuse the request or return empty vectors.
+  The fix comes from Kit v0.29.1.
 
 - Find every-session contract setup in `kata init --help`,
   `kata quickstart --help`, the quickstart guide, and the README. Install it
