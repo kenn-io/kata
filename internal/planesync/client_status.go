@@ -174,7 +174,11 @@ func (s *clientSession) WriteStatus(ctx context.Context, c Config, id, desired s
 		s.client.deferRequests(response.Header.Get("Retry-After"), 0)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return zero, &issuesync.StatusError{Message: fmt.Sprintf("Plane status write failed (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode, Ambiguous: response.StatusCode >= 500, Blocked: response.StatusCode >= 300 && response.StatusCode < 500 && response.StatusCode != 429 && response.StatusCode != 409}
+		delivery := &issuesync.StatusError{Message: fmt.Sprintf("Plane status write failed (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode, Ambiguous: response.StatusCode >= 500, Blocked: response.StatusCode >= 300 && response.StatusCode < 500 && response.StatusCode != 429 && response.StatusCode != 409}
+		if response.StatusCode == 429 {
+			delivery.RetryAfter = s.client.cooldownRemaining()
+		}
+		return zero, delivery
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil || len(raw) > maxResponseBytes {

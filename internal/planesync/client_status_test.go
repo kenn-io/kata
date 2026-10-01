@@ -248,3 +248,39 @@ func (p patchDialFailure) RoundTrip(r *http.Request) (*http.Response, error) {
 	}}
 	return refused.RoundTrip(r)
 }
+
+func TestPlaneRateLimitReportsRetryDelay(t *testing.T) {
+	for _, write := range []bool{true, false} {
+		t.Run(map[bool]string{true: "write", false: "read"}[write], func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				itemRead := r.Method == http.MethodGet && r.URL.Path[len(r.URL.Path)-len(testItemID)-1:] == testItemID+"/"
+				if r.Method == http.MethodPatch || (!write && itemRead) {
+					w.Header().Set("Retry-After", "30")
+					w.WriteHeader(http.StatusTooManyRequests)
+					return
+				}
+				switch {
+				case r.URL.Path[len(r.URL.Path)-7:] == "states/":
+					sendPlaneJSON(t, w, wirePage(workflowRows(), false, ""))
+				case itemRead:
+					sendPlaneJSON(t, w, map[string]any{"id": testItemID, "project": testProjectID, "state": testStateID, "updated_at": "2026-09-29T10:00:00Z"})
+				default:
+					sendPlaneJSON(t, w, map[string]any{"id": testProjectID, "name": "Example project", "identifier": "EX"})
+				}
+			}))
+			defer server.Close()
+			c := statusConfig(t, server.URL)
+			session := statusSession(t, c)
+			var err error
+			if write {
+				_, err = session.WriteStatus(context.Background(), c, testItemID, "closed", func() error { return nil })
+			} else {
+				_, err = session.ReadStatus(context.Background(), c, testItemID)
+			}
+			var statusErr *issuesync.StatusError
+			require.ErrorAs(t, err, &statusErr)
+			require.False(t, statusErr.Ambiguous)
+			require.Positive(t, statusErr.RetryAfter, "the runner stops the lap only when the delay is reported")
+		})
+	}
+}

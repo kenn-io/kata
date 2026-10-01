@@ -172,6 +172,13 @@ func (c *Client) deferRequests(header string, attempt int) {
 	}
 }
 
+// cooldownRemaining reports how long requests stay deferred after a rate limit.
+func (c *Client) cooldownRemaining() time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return max(c.cooldown.Sub(c.cfg.Now()), 0)
+}
+
 func (s *clientSession) validate(input Config) error {
 	input, err := normalizeConfig(input)
 	if err != nil {
@@ -214,7 +221,7 @@ func (s *clientSession) get(ctx context.Context, path string) ([]byte, error) {
 			if attempt < 3 {
 				continue
 			}
-			return nil, &issuesync.StatusError{Message: fmt.Sprintf("plane API temporarily unavailable (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode}
+			return nil, &issuesync.StatusError{Message: fmt.Sprintf("plane API temporarily unavailable (HTTP %d)", response.StatusCode), HTTPStatus: response.StatusCode, RetryAfter: s.client.cooldownRemaining()}
 		}
 		if response.StatusCode != http.StatusOK {
 			_ = response.Body.Close()
