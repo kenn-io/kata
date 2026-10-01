@@ -126,3 +126,23 @@ func TestStatusRunnerInvalidMappingDoesNotStopTheSweep(t *testing.T) {
 		})
 	}
 }
+
+func TestStatusRunnerRateLimitStopsTheLapWithoutConsumingMappings(t *testing.T) {
+	s, b, ms, at := statusFixture(t, 3)
+	reads := 0
+	run := &statusTestRun{read: func(context.Context, db.IssueStatusMapping) (StatusObservation, error) {
+		reads++
+		return StatusObservation{}, &StatusError{Message: "rate limited", HTTPStatus: 429, RetryAfter: time.Minute}
+	}, write: func(context.Context, db.IssueStatusMapping, string, func() error) (StatusObservation, error) {
+		t.Fatal("no pending intent")
+		return StatusObservation{}, nil
+	}}
+	_, err := NewRunner(RunnerConfig{Store: s, Adapter: statusAdapter(b, run), Clock: func() time.Time { return at }}).RunOnce(t.Context(), b.ID)
+	require.ErrorContains(t, err, "rate limited")
+	require.Equal(t, 1, reads, "later mappings wait for the next run")
+	b, err = s.IssueSyncBindingByID(t.Context(), b.ID)
+	require.NoError(t, err)
+	scan, err := db.DecodeIssueStatusScan(b.Config)
+	require.NoError(t, err)
+	require.Less(t, scan.Sweep.After, ms[0].Mapping.ID, "the rate-limited mapping is retried first")
+}

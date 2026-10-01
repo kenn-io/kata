@@ -144,6 +144,7 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 			if err := statusCtx.Err(); err != nil {
 				return binding, true, errors.Join(append(failures, err)...)
 			}
+			previousAfter := cursor.After
 			cursor.After = m.Mapping.ID
 			if attempted[m.Mapping.ID] {
 				continue
@@ -215,6 +216,13 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 			if err != nil && !errors.Is(err, errStatusIntentChanged) {
 				failures = append(failures, err)
 			}
+			// A rate limit fails every later request fast. Leave this mapping for
+			// the next run rather than consuming the rest of the lap as failures.
+			var limited *StatusError
+			rateLimited := errors.As(err, &limited) && limited.RetryAfter > 0 && !limited.Ambiguous
+			if rateLimited {
+				cursor.After = previousAfter
+			}
 			// Persist each attempted item before another provider call. A slow
 			// prefix must not reset the whole page when the run expires. The
 			// cleanup budget keeps canceled attempts durable under the same claim.
@@ -242,6 +250,9 @@ func (r *Runner) runStatuses(ctx context.Context, binding db.IssueSyncBinding, s
 				return binding, true, errors.Join(append(failures, checkpointErr)...)
 			}
 			binding = refreshed
+			if rateLimited {
+				return binding, true, errors.Join(failures...)
+			}
 			if err != nil {
 				if ambiguousStatusError(err) {
 					return binding, true, errors.Join(failures...)
