@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -576,6 +577,46 @@ func (f *flakyEmbedder) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls
+}
+
+func TestRunEventWakeRespectsRejectionBackoff(t *testing.T) {
+	for _, status := range []int{400, 401, 422} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				store := newReconcilerTestStore(t)
+				proj, err := store.CreateProject(ctx, "spoke-project")
+				require.NoError(t, err)
+				_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "pending", Author: "agent"})
+				require.NoError(t, err)
+				emb := &flakyEmbedder{model: "m1", dims: 2, failUntil: 100, err: &embedclient.APIError{StatusCode: status}}
+				r := NewReconciler(store, openTestVectorIndex(t), emb, ReconcilerConfig{MaxBackoff: 5 * time.Minute})
+				done := make(chan error, 1)
+				go func() { done <- r.Run(ctx) }()
+				defer func() {
+					cancel()
+					synctest.Wait()
+					require.ErrorIs(t, <-done, context.Canceled)
+				}()
+				time.Sleep(time.Nanosecond)
+				synctest.Wait()
+				calls := emb.callCount()
+				require.Positive(t, calls)
+				require.Equal(t, int64(1), r.Health().Backlog)
+
+				// Committed events must neither retry early nor restart the delay.
+				for range 4 {
+					time.Sleep(time.Minute)
+					r.Wake()
+					synctest.Wait()
+					require.Equal(t, calls, emb.callCount(), "event wake bypassed rejection backoff")
+				}
+				time.Sleep(time.Minute)
+				synctest.Wait()
+				require.Greater(t, emb.callCount(), calls, "pending work was not retried when backoff expired")
+			})
+		})
+	}
 }
 
 func TestRunDrainsAfterTransientFailureThenExitsOnCancel(t *testing.T) {

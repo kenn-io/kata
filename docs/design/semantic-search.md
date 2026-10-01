@@ -244,6 +244,8 @@ Failure classes:
   is definitive misconfiguration: pin backoff at the maximum immediately (no
   hot loop) and surface the error in health. This includes a 4xx that Kit
   cannot classify, because the same request fails the same way on retry.
+  Committed events leave pending work for that retry without shortening or
+  extending the delay. An explicit credential reload retries immediately.
 - 429: honor `Retry-After` when present, otherwise normal backoff.
 - 5xx / timeouts / connection errors: exponential backoff, 1s doubling to a
   5m cap. The backlog gauge is published before each fill starts, decreases

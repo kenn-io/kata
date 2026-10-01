@@ -57,6 +57,7 @@ type Reconciler struct {
 	emb   embedder
 	cfg   ReconcilerConfig
 	wake  chan struct{}
+	retry chan struct{}
 	now   func() time.Time
 
 	mu       sync.Mutex
@@ -96,15 +97,26 @@ func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg Reconc
 		emb:    emb,
 		cfg:    cfg,
 		wake:   make(chan struct{}, 1),
+		retry:  make(chan struct{}, 1),
 		now:    cfg.Now,
 		health: ReconcilerHealth{Configured: true},
 	}
 }
 
 // Wake nudges the reconciler to run a cycle soon (non-blocking, coalesced).
+// After a definitive request rejection, pending work waits for backoff expiry.
 func (r *Reconciler) Wake() {
 	select {
 	case r.wake <- struct{}{}:
+	default:
+	}
+}
+
+// RetryNow retries pending work after an explicit credential reload, bypassing
+// the rejection backoff (non-blocking, coalesced).
+func (r *Reconciler) RetryNow() {
+	select {
+	case r.retry <- struct{}{}:
 	default:
 	}
 }
@@ -181,6 +193,7 @@ func (b *leaseRetryBackoff) afterAttempt(leadershipAcquired bool, err error) tim
 
 func (r *Reconciler) runLeader(ctx context.Context) error {
 	backoff := r.cfg.MinBackoff
+	rejected := false
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -188,6 +201,10 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-r.wake:
+			if rejected {
+				continue // The timer will drain pending work without extending the delay.
+			}
+		case <-r.retry:
 		case <-timer.C:
 		}
 		attempted, err := r.reconcileAdmitted(ctx)
@@ -199,6 +216,7 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 			continue
 		}
 		if err == nil {
+			rejected = false
 			backoff = r.cfg.MinBackoff
 			timer.Reset(r.cfg.SweepEvery)
 		} else {
@@ -209,6 +227,8 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 				return errors.Join(err, leaseErr)
 			}
 			backoff = r.nextBackoff(backoff, err)
+			apiErr, ok := errors.AsType[*embedclient.APIError](err)
+			rejected = ok && requestRejected(apiErr)
 			timer.Reset(backoff)
 		}
 	}

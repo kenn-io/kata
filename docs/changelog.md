@@ -15,7 +15,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   When the embedding server refuses every request, for example because the
   model name is wrong or it rejects a field, Kata waits the full retry backoff
   (5 minutes by default) instead of retrying quickly, and leaves documents
-  pending. The fixes come from Kit v0.29.2.
+  pending. Project activity cannot bypass this delay; `kata daemon reload`
+  retries immediately after reloading embedding credentials. Uses Kit v0.29.2.
 
 - Find every-session contract setup in `kata init --help`,
   `kata quickstart --help`, the quickstart guide, and the README. Install it
