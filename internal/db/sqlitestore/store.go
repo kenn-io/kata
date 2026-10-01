@@ -162,6 +162,21 @@ func (d *Store) RefreshInstanceUID(ctx context.Context) error {
 	return nil
 }
 
+// InstanceCreatedAt reads meta.instance_created_at, returning zero when the
+// instance UID predates it.
+func (d *Store) InstanceCreatedAt(ctx context.Context) (time.Time, error) {
+	var v string
+	err := d.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key=?`, db.MetaKeyInstanceCreatedAt).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read %s: %w", db.MetaKeyInstanceCreatedAt, err)
+	}
+	return db.ParseInstanceCreatedAt(v)
+}
+
 // bootstrap initializes a fresh database from schema.sql or refuses to open
 // an older database. An existing database at the current schema version is
 // left untouched; older databases return ErrSchemaCutoverRequired so the
@@ -245,10 +260,29 @@ func (d *Store) ensureInstanceUIDOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("generate instance_uid: %w", err)
 	}
-	if _, err := d.ExecContext(ctx,
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin seed instance_uid: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO meta(key, value) VALUES('instance_uid', ?)
-		 ON CONFLICT(key) DO NOTHING`, fresh); err != nil {
+		 ON CONFLICT(key) DO NOTHING`, fresh)
+	if err != nil {
 		return fmt.Errorf("seed instance_uid: %w", err)
+	}
+	// Only the opener that created the UID records its creation time.
+	if seeded, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("seed instance_uid: %w", err)
+	} else if seeded == 1 {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO NOTHING`,
+			db.MetaKeyInstanceCreatedAt, db.FormatInstanceCreatedAt(time.Now())); err != nil {
+			return fmt.Errorf("seed %s: %w", db.MetaKeyInstanceCreatedAt, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit seed instance_uid: %w", err)
 	}
 	var stored string
 	if err := d.QueryRowContext(ctx,

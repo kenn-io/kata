@@ -139,6 +139,21 @@ func (s *Store) RefreshInstanceUID(ctx context.Context) error {
 	return nil
 }
 
+// InstanceCreatedAt reads meta.instance_created_at, returning zero when the
+// instance UID predates it.
+func (s *Store) InstanceCreatedAt(ctx context.Context) (time.Time, error) {
+	var v string
+	err := s.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key=$1`, db.MetaKeyInstanceCreatedAt).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read %s: %w", db.MetaKeyInstanceCreatedAt, err)
+	}
+	return db.ParseInstanceCreatedAt(v)
+}
+
 // SchemaVersion reads meta.schema_version. Errors when missing or unparseable.
 func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
 	var v string

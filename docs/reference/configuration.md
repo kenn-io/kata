@@ -821,6 +821,12 @@ collection is disabled and PostHog person-profile processing is explicitly
 turned off. Use distinct `daemon_active` counts for active-install reporting;
 `daemon_started` is only for startup-volume diagnostics.
 
+A new database records when it created its `instance_uid` in the `meta` key
+`instance_created_at`. Until that database is a day old, the daemon holds its
+events in memory and sends them, with their original times, once the day has
+passed; a daemon that stops before then sends nothing. Databases created
+before kata recorded this time report right away.
+
 Disable telemetry with:
 
 ```sh

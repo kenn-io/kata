@@ -97,6 +97,11 @@ var storageScenarios = []scenario{
 		run:     checkLifecycle,
 	},
 	{
+		name:    "instance creation time",
+		methods: []string{"ImportReplay", "InstanceCreatedAt", "InstanceUID"},
+		run:     checkInstanceCreatedAt,
+	},
+	{
 		name: "projects",
 		methods: []string{
 			"CreateProject", "CreateProjectAndEvent", "CreateProjectWithUID", "CreateProjectWithUIDAndEvent",

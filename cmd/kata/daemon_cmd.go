@@ -1102,7 +1102,7 @@ func runDaemonProcess(
 	}()
 	hookCfgPath := startup.HookConfigPath
 
-	telemetryReporter := newDaemonTelemetryReporter(store)
+	telemetryReporter := newDaemonTelemetryReporter(ctx, store)
 	defer func() {
 		if !closeDependencies {
 			return
@@ -1530,11 +1530,18 @@ func webAuthenticationMode(
 	}
 }
 
-func newDaemonTelemetryReporter(store db.Storage) telemetry.Client {
+func newDaemonTelemetryReporter(ctx context.Context, store db.Storage) telemetry.Client {
+	installedAt, err := store.InstanceCreatedAt(ctx)
+	if err != nil {
+		// Zero reports like an existing install rather than going silent.
+		slog.Warn("read instance creation time for telemetry", "err", err)
+		installedAt = time.Time{}
+	}
 	return newTelemetryReporter(telemetry.Options{
-		DistinctID: store.InstanceUID(),
-		Version:    version.Version,
-		Commit:     version.Commit,
+		DistinctID:  store.InstanceUID(),
+		InstalledAt: installedAt,
+		Version:     version.Version,
+		Commit:      version.Commit,
 	})
 }
 

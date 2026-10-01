@@ -116,6 +116,63 @@ func checkLifecycle(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkInstanceCreatedAt(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+
+	createdAt, err := store.InstanceCreatedAt(ctx)
+	if err != nil {
+		return fmt.Errorf("instance created at: %w", err)
+	}
+	assert.WithinDuration(t, time.Now(), createdAt, time.Hour, "a fresh instance records its creation time")
+
+	// NewInstance keeps the target identity, so it keeps the target's creation time too.
+	sourceCreatedAt := "2020-01-02T03:04:05Z"
+	if err := store.ImportReplay(ctx, []db.ImportRecord{
+		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
+		&db.MetaKV{Key: db.MetaKeyInstanceCreatedAt, Value: sourceCreatedAt},
+	}, db.ImportOptions{NewInstance: true}); err != nil {
+		return fmt.Errorf("new-instance replay: %w", err)
+	}
+	got, err := store.InstanceCreatedAt(ctx)
+	if err != nil {
+		return err
+	}
+	assert.True(t, createdAt.Equal(got), "new-instance replay kept %v, want %v", got, createdAt)
+
+	// A restored identity carries the source's creation time.
+	if err := store.ImportReplay(ctx, []db.ImportRecord{
+		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
+		&db.MetaKV{Key: db.MetaKeyInstanceCreatedAt, Value: sourceCreatedAt},
+	}, db.ImportOptions{}); err != nil {
+		return fmt.Errorf("restore replay: %w", err)
+	}
+	assert.Equal(t, replayInstanceUID, store.InstanceUID())
+	got, err = store.InstanceCreatedAt(ctx)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC), got.UTC())
+
+	// A restored identity without one reads as an old install, never as new.
+	legacyInstanceUID, err := uid.New()
+	if err != nil {
+		return err
+	}
+	if err := store.ImportReplay(ctx, []db.ImportRecord{
+		&db.MetaKV{Key: "instance_uid", Value: legacyInstanceUID},
+	}, db.ImportOptions{}); err != nil {
+		return fmt.Errorf("legacy restore replay: %w", err)
+	}
+	assert.Equal(t, legacyInstanceUID, store.InstanceUID())
+	got, err = store.InstanceCreatedAt(ctx)
+	if err != nil {
+		return err
+	}
+	assert.True(t, got.IsZero(), "restored identity without a creation time read %v", got)
+	return nil
+}
+
 func checkProjects(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := context.Background()

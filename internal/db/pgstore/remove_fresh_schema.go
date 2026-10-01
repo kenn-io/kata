@@ -160,7 +160,7 @@ func validateFreshSchema(
 			COUNT(*),
 			COALESCE(MAX(value) FILTER (WHERE key='instance_uid'), ''),
 			COALESCE(MAX(value) FILTER (WHERE key='schema_version'), '')
-		FROM meta`).Scan(&metaRows, &instanceUID, &schemaVersion); err != nil {
+		FROM meta WHERE key<>$1`, db.MetaKeyInstanceCreatedAt).Scan(&metaRows, &instanceUID, &schemaVersion); err != nil {
 		return fmt.Errorf("inspect fresh schema metadata: %w", mapSQLError(err, nil))
 	}
 	if metaRows != 3 || instanceUID != expectedInstanceUID ||
