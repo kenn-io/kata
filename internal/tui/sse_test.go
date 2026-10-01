@@ -198,23 +198,6 @@ func TestSSEParser_LinkPayloadDecodesDaemonWireShape(t *testing.T) {
 	}
 }
 
-// TestNextBackoff_Doubles_Caps: doubles each call until the ceiling,
-// then stays at ceiling.
-func TestNextBackoff_Doubles_Caps(t *testing.T) {
-	ceiling := 30 * time.Second
-	d := time.Second
-	want := []time.Duration{
-		2 * time.Second, 4 * time.Second, 8 * time.Second,
-		16 * time.Second, 30 * time.Second, 30 * time.Second,
-	}
-	for i, w := range want {
-		d = nextBackoff(d, ceiling)
-		if d != w {
-			t.Fatalf("step %d: backoff = %v, want %v", i, d, w)
-		}
-	}
-}
-
 // TestSSE_StreamForwardsMessages drives readSSEStream against an
 // httptest.Server emitting two frames and asserts both arrive on the
 // channel as the matching tea.Msg variants. The first message is the

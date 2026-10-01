@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/cenkalti/backoff/v7"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -64,7 +65,10 @@ func startSSEForConnection(
 	ctx context.Context, hc *http.Client, base string, projectID *int64, sseCh chan<- tea.Msg, gen uint64,
 ) {
 	const maxBackoff = 30 * time.Second
-	backoff := initialReconnectBackoff
+	bo := backoff.NewExponentialBackOff()
+	bo.InitialInterval = initialReconnectBackoff
+	bo.MaxInterval = maxBackoff
+	bo.Multiplier = 2
 	var lastID int64
 
 	var (
@@ -111,40 +115,20 @@ func startSSEForConnection(
 		stateMu.Unlock()
 	}()
 
-	for {
+	_, _ = backoff.Retry(ctx, func() (struct{}, error) {
 		if ctx.Err() != nil {
-			return
+			return struct{}{}, nil
 		}
-		connected, err := readSSEStream(
-			ctx, hc, base, projectID, lastID, sseCh, &lastID, publishConnected, gen,
-		)
+		connected, err := readSSEStream(ctx, hc, base, projectID, lastID, sseCh, &lastID, publishConnected, gen)
 		if err == nil || ctx.Err() != nil {
-			return
+			return struct{}{}, nil
 		}
 		armGrace()
 		if connected {
-			backoff = initialReconnectBackoff
+			bo.Reset()
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(backoff):
-		}
-		backoff = nextBackoff(backoff, maxBackoff)
-	}
-}
-
-// nextBackoff doubles d but caps at ceiling so the goroutine doesn't
-// spin at 1s forever yet doesn't sleep longer than the reconnect cap.
-func nextBackoff(d, ceiling time.Duration) time.Duration {
-	if d >= ceiling {
-		return ceiling
-	}
-	d *= 2
-	if d > ceiling {
-		d = ceiling
-	}
-	return d
+		return struct{}{}, err
+	}, backoff.WithBackOff(bo), backoff.WithMaxTries(0), backoff.WithMaxElapsedTime(0))
 }
 
 // notifyStatus pushes an sseStatusMsg without blocking past ctx cancel.
