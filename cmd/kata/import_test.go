@@ -38,6 +38,9 @@ func TestImportCreatesTargetDB(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "kata", got.Name)
 	assert.Contains(t, out, target)
+	temps, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".target.db.import-*"))
+	require.NoError(t, err)
+	require.Empty(t, temps, "successful import must remove temporary files, including locks")
 }
 
 func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
@@ -490,6 +493,9 @@ func TestImportFailureRemovesNewPartialTarget(t *testing.T) {
 
 	_, statErr := os.Stat(target)
 	assert.True(t, os.IsNotExist(statErr), "failed import must not leave a partial target DB")
+	temps, err := filepath.Glob(filepath.Join(home, ".target.db.import-*"))
+	require.NoError(t, err)
+	require.Empty(t, temps, "failed import must remove temporary files, including locks")
 }
 
 func TestInstallImportedTargetForcePreservesUserDirectoryAtDeterministicBackupSidecarPath(t *testing.T) {

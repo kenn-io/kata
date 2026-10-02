@@ -42,6 +42,8 @@ func testDevKataWrapperIsolation(t *testing.T, interpreter string) {
 	}
 	bin := t.TempDir()
 	compiler := `#!/bin/bash
+[ "$GOPROXY" = https://proxy.example ] || { echo 'compiler lost GOPROXY'; exit 1; }
+[ "$GOTOOLCHAIN" = go1.27.0 ] || { echo 'compiler lost GOTOOLCHAIN'; exit 1; }
 while [ "$#" -gt 0 ]; do
  if [ "$1" = -o ]; then output="$2"; shift 2; else shift; fi
 done
@@ -68,6 +70,7 @@ chmod +x "$output"
 	t.Setenv("KATA_AUTH_TOKEN", "example-token")
 	t.Setenv("PORT", "7777")
 	t.Setenv("GOPROXY", "https://proxy.example")
+	t.Setenv("GOTOOLCHAIN", "go1.27.0")
 	t.Setenv("NO_COLOR", "")
 	for _, mode := range []string{"version", "--demo"} {
 		command := exec.Command(interpreter, "../../scripts/dev-kata.sh", mode) //nolint:gosec // G204: exercise the wrapper through the selected test shell.
@@ -107,6 +110,12 @@ func main() { if len(os.Args)>1 && os.Args[1]=="daemon" {return}; fmt.Println("i
 `
 	require.NoError(t, os.WriteFile(filepath.Join(fixture, "cmd", "kata", "main.go"), []byte(main), 0600))
 	init := exec.Command(realGit, "init", "--quiet", fixture) //nolint:gosec // G204: initialize only the test-owned temporary fixture.
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_") {
+			init.Env = append(init.Env, entry)
+		}
+	}
+	init.Env = append(init.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+filepath.Join(fixture, "gitconfig"))
 	require.NoError(t, init.Run())
 	bin := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nexit 1\n"), 0700)) //nolint:gosec // G306: the fake Git command must be executable.

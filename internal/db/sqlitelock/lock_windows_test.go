@@ -1,4 +1,4 @@
-package daemon
+package sqlitelock
 
 import (
 	"os/exec"
@@ -17,12 +17,12 @@ func TestDatabaseLockFreshPathBelowJunction(t *testing.T) {
 	if err != nil {
 		t.Skipf("junction creation unavailable: %s: %v", out, err)
 	}
-	release, err := AcquireDatabaseLock(filepath.Join(junction, "new.db"))
+	lock, err := Acquire(filepath.Join(junction, "new.db"))
 	require.NoError(t, err)
-	defer release()
-	second, err := AcquireDatabaseLock(filepath.Join(target, "new.db"))
+	defer lock.Release()
+	second, err := Acquire(filepath.Join(target, "new.db"))
 	if second != nil {
-		second()
+		second.Release()
 	}
 	require.ErrorContains(t, err, "daemon already running")
 }

@@ -16,6 +16,7 @@ import (
 
 const (
 	defaultVersion   = "dev"
+	modulePath       = "go.kenn.io/kata"
 	unknown          = "unknown"
 	shortHashLen     = 7
 	settingRevision  = "vcs.revision"
@@ -60,6 +61,21 @@ func init() {
 func versionFromVCS() string {
 	info, ok := readBuildInfo()
 	if !ok {
+		return defaultVersion
+	}
+	// VCS settings and Main describe the executable, which may embed Kata.
+	if info.Main.Path != modulePath {
+		for _, dep := range info.Deps {
+			if dep.Path == modulePath {
+				if dep.Replace != nil {
+					dep = dep.Replace
+				}
+				if semver.IsValid(dep.Version) {
+					return dep.Version
+				}
+				break
+			}
+		}
 		return defaultVersion
 	}
 	var rev string
@@ -123,6 +139,7 @@ func buildDateFromVCS() string {
 }
 
 var describeVersion = regexp.MustCompile(`-[0-9]+-g[0-9a-f]+$`)
+var fullVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+]|$)`)
 
 // IsDevelopment reports builds without a clean release version, including
 // bare VCS revisions and git-describe builds ahead of a release tag.
@@ -131,5 +148,6 @@ func IsDevelopment() bool {
 	if !strings.HasPrefix(v, "v") {
 		v = "v" + v
 	}
-	return !semver.IsValid(v) || module.IsPseudoVersion(v) || strings.Contains(v, "dirty") || describeVersion.MatchString(v)
+	return !fullVersion.MatchString(v) || !semver.IsValid(v) || module.IsPseudoVersion(v) ||
+		strings.Contains(v, "dirty") || strings.Contains(strings.ToLower(v), "snapshot") || describeVersion.MatchString(v)
 }

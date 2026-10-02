@@ -4,15 +4,46 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+func TestRuntimeGuardSkipsUnusableNamespacesWithWarning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix directory permissions")
+	}
+	for _, current := range []bool{false, true} {
+		t.Run(map[bool]string{false: "other", true: "current"}[current], func(t *testing.T) {
+			home := setupKataEnv(t)
+			path := filepath.Join(home, "kata.db")
+			require.NoError(t, os.WriteFile(path, nil, 0600))
+			ns, err := daemon.NewNamespace()
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			badDir := filepath.Join(filepath.Dir(ns.DataDir), "stray")
+			if current {
+				badDir = ns.DataDir
+			}
+			require.NoError(t, os.MkdirAll(badDir, 0700))
+			require.NoError(t, os.Chmod(badDir, 0755)) //nolint:gosec // G302: deliberately unusable runtime directory.
+			stderr := captureProcessStderr(t, func() {
+				_, found, err := liveSQLiteDaemonRecord(ns.DataDir, path)
+				require.NoError(t, err)
+				require.False(t, found)
+			})
+			require.Contains(t, stderr, "warning:")
+			require.Contains(t, stderr, badDir)
+		})
+	}
+}
 
 // Contract vmr7: a live daemon from another version must prevent opening or
 // migrating its database even when its listener differs from the requested one.
@@ -90,9 +121,9 @@ func TestDaemonRefusesDatabaseHeldOutsideHome(t *testing.T) {
 	s, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
 	require.NoError(t, s.Close())
-	release, err := daemon.AcquireDatabaseLock(path)
+	lock, err := sqlitelock.Acquire(path)
 	require.NoError(t, err)
-	defer release()
+	defer lock.Release()
 	t.Setenv("KATA_HOME", t.TempDir())
 	// Leave KATA_DB pointing to the same file, but use another home and socket.
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)

@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitelock"
@@ -203,7 +202,7 @@ func TestOpenWritableSQLiteLocksCutoverAndHandleLifetime(t *testing.T) {
 
 	before, err := os.ReadFile(path) //nolint:gosec // G304: fixture path under t.TempDir.
 	require.NoError(t, err)
-	release, err := daemon.AcquireDatabaseLock(path)
+	lock, err := sqlitelock.Acquire(path)
 	require.NoError(t, err)
 	store, err := storeopen.Open(t.Context(), path)
 	if store != nil {
@@ -213,20 +212,20 @@ func TestOpenWritableSQLiteLocksCutoverAndHandleLifetime(t *testing.T) {
 	require.NoError(t, readErr)
 	require.ErrorContains(t, err, "daemon already running")
 	require.Equal(t, before, after, "a locked source must not be cut over")
-	release()
+	lock.Release()
 
 	store, err = storeopen.Open(t.Context(), path)
 	require.NoError(t, err)
-	secondRelease, err := daemon.AcquireDatabaseLock(path)
-	if secondRelease != nil {
-		secondRelease()
+	secondLock, err := sqlitelock.Acquire(path)
+	if secondLock != nil {
+		secondLock.Release()
 	}
 	require.ErrorContains(t, err, "daemon already running", "the returned writable handle owns its lock")
 	require.NoError(t, store.Close())
 
-	release, err = daemon.AcquireDatabaseLock(path)
+	lock, err = sqlitelock.Acquire(path)
 	require.NoError(t, err)
-	release()
+	lock.Release()
 }
 
 func TestOpenWithConfigReusesPreAcquiredSQLiteLock(t *testing.T) {
@@ -240,16 +239,16 @@ func TestOpenWithConfigReusesPreAcquiredSQLiteLock(t *testing.T) {
 	store, err := storeopen.OpenWithConfig(t.Context(), path, config)
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
-	secondLock, err := daemon.AcquireDatabaseLock(path)
+	secondLock, err := sqlitelock.Acquire(path)
 	if secondLock != nil {
-		secondLock()
+		secondLock.Release()
 	}
 	require.ErrorContains(t, err, "daemon already running", "storeopen must leave a caller-owned lock held")
 
 	lock.Release()
-	secondLock, err = daemon.AcquireDatabaseLock(path)
+	secondLock, err = sqlitelock.Acquire(path)
 	require.NoError(t, err)
-	secondLock()
+	secondLock.Release()
 }
 
 func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {

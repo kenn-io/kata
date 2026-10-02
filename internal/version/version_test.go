@@ -23,7 +23,7 @@ func mockBuildInfo(t *testing.T, revision, buildTime string, modified bool) {
 		settings = append(settings, debug.BuildSetting{Key: settingModified, Value: "true"})
 	}
 	readBuildInfo = func() (*debug.BuildInfo, bool) {
-		return &debug.BuildInfo{Settings: settings}, true
+		return &debug.BuildInfo{Main: debug.Module{Path: "go.kenn.io/kata"}, Settings: settings}, true
 	}
 }
 
@@ -72,13 +72,51 @@ func TestModuleBuildMigrationClassification(t *testing.T) {
 			originalReader, originalVersion := readBuildInfo, Version
 			t.Cleanup(func() { readBuildInfo, Version = originalReader, originalVersion })
 			readBuildInfo = func() (*debug.BuildInfo, bool) {
-				return &debug.BuildInfo{Main: debug.Module{Version: tc.moduleVersion}}, true
+				return &debug.BuildInfo{Main: debug.Module{Path: "go.kenn.io/kata", Version: tc.moduleVersion}}, true
 			}
 			Version = versionFromVCS()
 			assert.Equal(t, tc.development, IsDevelopment())
 			if tc.moduleVersion != "" && tc.moduleVersion != "(devel)" {
 				assert.Equal(t, tc.moduleVersion, Version)
 			}
+		})
+	}
+}
+
+func TestEmbeddedVersionIgnoresHostBuild(t *testing.T) {
+	for _, hostVersion := range []string{"v1.2.3", "(devel)"} {
+		t.Run(hostVersion, func(t *testing.T) {
+			original := readBuildInfo
+			t.Cleanup(func() { readBuildInfo = original })
+			info := &debug.BuildInfo{
+				Main: debug.Module{Path: "example.com/host", Version: hostVersion},
+				Deps: []*debug.Module{{Path: "go.kenn.io/kata", Version: "v0.18.0"}},
+			}
+			if hostVersion == "(devel)" {
+				info.Settings = []debug.BuildSetting{{Key: settingRevision, Value: "abcdef012345"}, {Key: settingModified, Value: "true"}}
+			}
+			readBuildInfo = func() (*debug.BuildInfo, bool) { return info, true }
+			assert.Equal(t, "v0.18.0", versionFromVCS())
+			info.Deps[0].Replace = &debug.Module{Path: "../kata"}
+			assert.Equal(t, "dev", versionFromVCS(), "a local replacement has no release identity")
+		})
+	}
+}
+
+func TestDevelopmentVersionStrings(t *testing.T) {
+	original := Version
+	t.Cleanup(func() { Version = original })
+	for _, tc := range []struct {
+		version     string
+		development bool
+	}{
+		{"1234567", true}, {"v1234567", true}, {"v1.2", true},
+		{"v0.18.0-SNAPSHOT-abcdef0", true},
+		{"v0.18.0", false}, {"0.18.0", false}, {"v0.19.0-rc.1", false},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			Version = tc.version
+			assert.Equal(t, tc.development, IsDevelopment())
 		})
 	}
 }
