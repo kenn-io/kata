@@ -1480,3 +1480,26 @@ func TestClient_ResolveProject_RewritesStaleKataToml(t *testing.T) {
 	assert.Equal(t, "canonical-name", cfg.Project.Name,
 		"stale .kata.toml must be rewritten to the daemon's canonical name")
 }
+
+func TestClientReportAppOpenedPostsTUISurface(t *testing.T) {
+	var method, path, body string
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		method, path, body = r.Method, r.URL.Path, string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"queued"}`))
+	})
+
+	require.NoError(t, client.ReportAppOpened(t.Context()))
+	assert.Equal(t, http.MethodPost, method)
+	assert.Equal(t, "/api/v1/ui/telemetry", path)
+	assert.JSONEq(t, `{"event":"app_opened","properties":{"surface":"tui"}}`, body)
+
+	missing := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"status":404,"error":{"code":"not_found","message":"no such route"}}`))
+	})
+	assert.Error(t, missing.ReportAppOpened(t.Context()))
+}

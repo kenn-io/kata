@@ -70,7 +70,9 @@ func NewReporter(opts Options) (*Reporter, error) {
 		kittelemetry.WithAllowedEvent("daemon_started",
 			kittelemetry.AllowTelemetryProperty("project_count", kittelemetry.AllowTelemetryNumber),
 		),
-		kittelemetry.WithAllowedEvent("app_opened"),
+		kittelemetry.WithAllowedEvent("app_opened",
+			kittelemetry.AllowTelemetryProperty("surface", kittelemetry.AllowTelemetryStringValues("web", "tui")),
+		),
 	)
 }
 
