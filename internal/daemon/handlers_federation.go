@@ -202,9 +202,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, api.NewError(http.StatusBadRequest, "validation", "hub_url must be an HTTP(S) base URL allowed by transport policy", "", nil)
 			}
-			origin, _ := httpurl.CanonicalHTTPOrigin(baseURL)
-			if target := resolveWebDaemon(config.CatalogDaemonConfig{URL: origin, AllowInsecure: allowInsecure}); target.baseURL == "" {
-				return nil, api.NewError(http.StatusBadRequest, "validation", "hub_url must be an HTTP(S) base URL allowed by transport policy", "", nil)
+			policy := config.BearerPolicy{AllowInsecurePlaintext: allowInsecure}
+			if _, err := policy.OriginForBaseURL(baseURL); err != nil {
+				return nil, api.NewError(http.StatusBadRequest, "validation", "hub_url requires HTTPS or allow_insecure=true for non-loopback HTTP", "", nil)
 			}
 			hubURL = baseURL
 			allowInsecure, _ = httpurl.EffectiveHTTPAllowInsecure(hubURL, allowInsecure)

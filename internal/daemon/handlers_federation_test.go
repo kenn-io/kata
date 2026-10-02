@@ -18,10 +18,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -4113,6 +4115,44 @@ func TestFederationEnrollmentLegacyWithoutOriginMayPrecedeEnable(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &out))
 			assert.NotEmpty(t, out.Token)
 			assert.Nil(t, out.Join)
+		})
+	}
+}
+
+func TestFederationEnrollmentPrivateHTTPRequiresExplicitOptIn(t *testing.T) {
+	for _, allowInsecure := range []bool{false, true} {
+		t.Run(fmt.Sprintf("allow_insecure=%t", allowInsecure), func(t *testing.T) {
+			env := testenv.New(t)
+			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+			t.Setenv("KATA_ALLOW_INSECURE", "")
+			project := createFederatedHubProject(t, env, "hub-project")
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+				"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID,
+				"capabilities": "pull", "actor": "example-agent", "hub_url": "http://192.168.1.10:7777",
+				"allow_insecure": allowInsecure,
+			}, nil)
+			if !allowInsecure {
+				assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+				var failure struct {
+					Error struct {
+						Message string `json:"message"`
+					} `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &failure))
+				assert.Contains(t, failure.Error.Message, "allow_insecure=true")
+				grants, err := env.DB.ListFederationEnrollments(t.Context())
+				require.NoError(t, err)
+				assert.Empty(t, grants, "reject the request before issuing a durable token")
+				return
+			}
+			require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+			var out api.FederationEnrollmentOut
+			require.NoError(t, json.Unmarshal(raw, &out))
+			require.NotNil(t, out.Join)
+			assert.Contains(t, out.Join.JoinCommand, "--allow-insecure")
+			// Client construction validates the target without making a connection.
+			_, err := federation.NewClient(t.Context(), out.Join.HubURL, out.Join.Token, clientpkg.Opts{AllowInsecure: out.Join.AllowInsecure})
+			require.NoError(t, err)
 		})
 	}
 }
