@@ -350,6 +350,61 @@ func TestNativePluginsValidation(t *testing.T) {
 	}
 }
 
+func TestOpenCodeV2NativeProjectSourceUsesWorkspaceFromNestedCWD(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if runtime.GOOS == "windows" {
+		t.Skip("native executable fixture uses a Unix shebang")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for native plugin execution fixture")
+	}
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	nested := filepath.Join(workspace, "nested")
+	for _, dir := range []string{
+		filepath.Join(workspace, "prompts"),
+		filepath.Join(nested, "prompts"),
+	} {
+		if err = os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = os.WriteFile(filepath.Join(workspace, "prompts", "contract.md"), []byte("workspace contract"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(nested, "prompts", "contract.md"), []byte("nested decoy"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(root, "kata")
+	reader, err := os.ReadFile("testdata/agent-hooks/native-source-reader.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(executable, reader, 0700); err != nil { //nolint:gosec // G306: the temporary fixture must be executable for the native process runner.
+		t.Fatal(err)
+	}
+	opts := nativeAgentHookOptions{
+		Agent: "opencode", API: "v2", Scope: "project", Home: root, Dir: workspace,
+		Executable: executable, Contract: true,
+		Source: "prompts/contract.md", SourceSet: true,
+	}
+	plan, err := planOpenCodeAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = publishNativeAgentHookPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(node, "testdata/agent-hooks/plugins-project-source.mjs", plan.Path, workspace, nested) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
+	command.Env = append(os.Environ(), "KATA_INBOX_USER=")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("nested OpenCode project source: %v\n%s", err, output)
+	}
+}
+
 func TestNativePluginsRejectAuthoredPackage(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	root := t.TempDir()

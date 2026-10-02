@@ -262,9 +262,9 @@ export default function kataHooks(pi) {
       ctx.ui?.notify("Kata context unavailable: Pi 0.99.1 structured prompt API is required.", "warning");
       return;
     }
-    async function read(args, kind, parse) {
+    async function read(args, kind, parse, cwd = ctx.cwd) {
       try {
-        const result = await pi.exec(options.executable, args, { cwd: ctx.cwd, timeout: 10000 });
+        const result = await pi.exec(options.executable, args, { cwd, timeout: 10000 });
         if (result.code !== 0 || result.killed) throw new Error("command failed");
         return parse(result.stdout);
       } catch {
@@ -274,11 +274,13 @@ export default function kataHooks(pi) {
     }
     const args = ["agent-contract-hook"];
     if (options.sourceSet) args.push("--source", options.source);
+    const sourceCwd = options.scope === "project" && options.sourceSet && !path.isAbsolute(options.source)
+      ? options.workspace : ctx.cwd;
     const contract = await read(args, "contract", stdout => {
       const text = JSON.parse(stdout)?.hookSpecificOutput?.additionalContext;
       if (typeof text !== "string") throw new Error("invalid contract response");
       return text;
-    });
+    }, sourceCwd);
     const recipient = process.env.KATA_INBOX_USER;
     const inbox = recipient ? await read(["inbox", "--context", "--for", recipient], "inbox", stdout => stdout) : "";
     target.sections.kata_contract = contract;

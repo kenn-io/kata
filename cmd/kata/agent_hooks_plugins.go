@@ -877,7 +877,9 @@ async function readContext(cwd, includeContract, onContractLoaded) {
     const args = ["agent-contract-hook"];
     if (options.sourceSet) args.push("--source", options.source);
     try {
-      const text = JSON.parse(await run(args, cwd))?.hookSpecificOutput?.additionalContext;
+      const sourceCwd = options.scope === "project" && options.sourceSet && !path.isAbsolute(options.source)
+        ? options.workspace : cwd;
+      const text = JSON.parse(await run(args, sourceCwd))?.hookSpecificOutput?.additionalContext;
       if (typeof text !== "string") throw new Error("invalid contract response");
       contract = text;
       onContractLoaded?.();
