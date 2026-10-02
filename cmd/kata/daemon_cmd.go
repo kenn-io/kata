@@ -467,12 +467,25 @@ func effectiveDaemonListenWithConfig(listen string, dcfg *config.DaemonConfig) s
 	return ""
 }
 
-func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
-	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
-	if err != nil {
-		return kitdaemon.RuntimeRecord{}, false
+// Unusable runtime folders do not block unrelated daemons. Apply the same
+// skip-and-warn policy to the current namespace and to legacy namespaces.
+func daemonRuntimeRecords(dataDir string) []kitdaemon.RuntimeRecord {
+	if err := safefileio.ValidatePrivateDir(dataDir); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "warning: skipping daemon runtime namespace %s: %v\n", dataDir, err)
+		}
+		return nil
 	}
-	for _, rec := range recs {
+	records, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skipping daemon runtime namespace %s: %v\n", dataDir, err)
+		return nil
+	}
+	return records
+}
+
+func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
+	for _, rec := range daemonRuntimeRecords(dataDir) {
 		if pid != 0 && rec.PID != pid {
 			continue
 		}
@@ -514,14 +527,7 @@ func liveSQLiteDaemonRecord(dataDir, dbPath string) (kitdaemon.RuntimeRecord, bo
 			continue
 		}
 		candidateDir := filepath.Join(runtimeRoot, entry.Name())
-		if err := safefileio.ValidatePrivateDir(candidateDir); err != nil {
-			return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("validate daemon runtime namespace: %w", err)
-		}
-		records, err := (kitdaemon.RuntimeStore{Dir: candidateDir}).List()
-		if err != nil {
-			return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("read daemon runtime namespace: %w", err)
-		}
-		for _, rec := range records {
+		for _, rec := range daemonRuntimeRecords(candidateDir) {
 			if !daemon.RuntimeProcessAlive(rec) {
 				continue
 			}

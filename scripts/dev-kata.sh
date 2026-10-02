@@ -29,7 +29,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 cd "$repo_root"
-run_isolated go build -buildvcs=false -tags kit_posthog_disabled -o "$run_root/kata" ./cmd/kata
+go build -buildvcs=false -tags kit_posthog_disabled -o "$run_root/kata" ./cmd/kata
 cd "$run_root/workspace"
 if [[ "${1:-}" == --demo ]]; then
   run_isolated "$run_root/kata" init --project example-project >/dev/null

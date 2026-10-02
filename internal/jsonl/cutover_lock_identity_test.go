@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 )
@@ -21,14 +21,14 @@ func TestAutoCutoverPreservesSymlinkDatabaseLockIdentity(t *testing.T) {
 	if err := os.Symlink(target, alias); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	release, err := daemon.AcquireDatabaseLock(alias)
+	lock, err := sqlitelock.Acquire(alias)
 	require.NoError(t, err)
-	defer release()
+	defer lock.Release()
 	require.NoError(t, jsonl.AutoCutover(t.Context(), alias))
 
-	secondRelease, err := daemon.AcquireDatabaseLock(alias)
-	if secondRelease != nil {
-		defer secondRelease()
+	secondLock, err := sqlitelock.Acquire(alias)
+	if secondLock != nil {
+		defer secondLock.Release()
 	}
 	require.ErrorContains(t, err, "daemon already running")
 	info, err := os.Lstat(alias)

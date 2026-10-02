@@ -31,11 +31,13 @@ make dev-kata ARGS="daemon start --foreground"
 ```
 
 Each invocation builds a disposable binary and runs it with a temporary
-`KATA_HOME`, `KATA_DB`, and workspace. The wrapper passes only OS and toolchain
-settings to child processes. It clears inherited daemon/database targets,
-credentials, proxies, and hosted `PORT` settings. When the command exits, it
+`KATA_HOME`, `KATA_DB`, and workspace. The build uses your normal environment,
+including Go toolchain, module-proxy, and private-module settings. The wrapper
+passes only OS and toolchain settings to the Kata process. It clears inherited
+daemon/database targets, credentials, proxies, and hosted `PORT` settings. When the command exits, it
 stops the temporary daemon and removes that invocation's state. `make tui`
-uses the same wrapper. These Go-only checks use the web asset stub; use
+uses the same wrapper and opens an empty temporary workspace. Use `make tui-demo`
+for sample issues. These Go-only checks use the web asset stub; use
 [Browser UI development](#browser-ui-development) for the full UI.
 
 Always isolate direct `go run`, built-binary checks, and test subprocesses in
