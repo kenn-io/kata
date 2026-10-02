@@ -258,7 +258,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 			if !remove && errors.Is(err, errMuseAttentionPermission) {
 				canPrompt := !automatic && len(targets) == 1 && scope == "user" && currentOutputMode() == outputHuman && !flags.Quiet && !cmd.Flags().Changed("managed-attention") && isTerminal(cmd.InOrStdin())
 				if canPrompt {
-					if _, promptErr := fmt.Fprint(cmd.ErrOrStderr(), "Muse clears hook environments. Allow managed attention hooks to forward Kata issue, routing, identity and authentication variables from your launching environment? Only variable names are stored; user policy is retained on uninstall. [y/N] "); promptErr != nil {
+					if _, promptErr := fmt.Fprint(cmd.ErrOrStderr(), "Muse clears hook environments. Its user-wide managed_hooks_env_vars allowlist is forwarded to every managed hook, including hooks from other tools. Allow all managed hooks to receive Kata issue, routing, identity and authentication variables, including KATA_AUTH_TOKEN when set, from your launching environment? Only variable names are stored; this policy is retained on uninstall. [y/N] "); promptErr != nil {
 						return promptErr
 					}
 					answer, readErr := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
@@ -335,7 +335,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 		cmd.Flags().StringVar(&executable, "executable", "", "existing executable path or command on PATH to install")
 		cmd.Flags().StringVar(&source, "source", "", "contract prompt file for an owned native code adapter")
 		cmd.Flags().StringVar(&api, "api", "", "advanced OpenCode API override: v1 or v2 (default: probe opencode --version)")
-		cmd.Flags().BoolVar(&managed, "managed-attention", false, "explicitly configure Muse managed-hook environment forwarding")
+		cmd.Flags().BoolVar(&managed, "managed-attention", false, "grant Muse global forwarding of Kata variables, including KATA_AUTH_TOKEN, to all Muse managed hooks")
 	}
 	return cmd
 }

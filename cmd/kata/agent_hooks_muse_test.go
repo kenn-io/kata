@@ -4,6 +4,7 @@ import (
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -50,6 +51,9 @@ func TestMuseManagedAttentionPreservesOperatorPolicyAndBundle(t *testing.T) {
 	require.NoError(t, os.WriteFile(managedPath, []byte(managed), 0600))
 	plan, err := planExtraAgentHooks(opts, false)
 	require.NoError(t, err)
+	managedWarning := strings.Join(plan.Warnings, "\n")
+	require.Contains(t, managedWarning, "all managed hooks")
+	require.Contains(t, managedWarning, "KATA_AUTH_TOKEN")
 	require.Len(t, plan.Changes, 2)
 	require.True(t, plan.AttentionStart)
 	require.True(t, plan.AttentionEnd)

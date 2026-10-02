@@ -305,7 +305,11 @@ single-Muse user setup at a terminal may request that grant once. A valid
 managed path with a sufficient allowlist is reused. Automatic, project, JSON,
 agent-output and noninteractive setup never prompt or expand user policy;
 without permission they install the contract and report `state: partial` with
-an attention-permission reason. Uninstall preserves managed environment policy.
+an attention-permission reason. Muse forwards these allowlisted variables to
+every managed hook, including hooks from other tools; the grant includes
+`KATA_AUTH_TOKEN` when it is set in Muse's launching environment. Review the
+complete managed-hook set before granting. Uninstall preserves this policy;
+remove the names from Muse settings to revoke it.
 
 `--config` requires one harness and cannot accompany `--all`; code adapters
 without a native config override reject it. Default roots honor the original

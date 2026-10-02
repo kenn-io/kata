@@ -154,6 +154,9 @@ func planMuseAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHo
 	plan.CurrentAttentionStart, plan.CurrentAttentionEnd = false, false
 	plan.AttentionStart, plan.AttentionEnd = false, false
 	plan.Warnings = append(plan.Warnings, "Muse ordinary hooks use a cleared environment; attention needs the Kata launcher or authorized user managed forwarding. Project hooks also require Muse workspace trust")
+	if opts.Attention && (opts.ManagedAttention || reuseManaged) {
+		plan.Warnings = append(plan.Warnings, "Muse's user-wide managed_hooks_env_vars policy forwards allowlisted variables, including KATA_AUTH_TOKEN when set, to every managed hook; review all managed hooks before relying on this policy")
+	}
 	if managedPath != "" {
 		managedData, managedExists, err := readNativeAgentHookFile(managedPath)
 		if err != nil {

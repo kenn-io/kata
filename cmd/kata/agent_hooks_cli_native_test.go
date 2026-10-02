@@ -11,6 +11,14 @@ import (
 	"go.kenn.io/kit/agenthook"
 )
 
+func TestAgentHooksManagedAttentionHelpDisclosesGlobalScope(t *testing.T) {
+	resetFlags(t)
+	out, _, err := executeAgentHook(t, strings.NewReader(""), "agent-hooks", "install", "--help")
+	require.NoError(t, err)
+	require.Contains(t, out, "all Muse managed hooks")
+	require.Contains(t, out, "KATA_AUTH_TOKEN")
+}
+
 func TestAgentHooksCLIProjectBundle(t *testing.T) {
 	isolateAgentHookHomes(t)
 	dir := t.TempDir()

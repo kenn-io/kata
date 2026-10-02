@@ -205,15 +205,19 @@ Gateway session reset/new RPC and graceful shutdown were exercised against
 
 Ordinary Muse hooks clear inherited Kata environment. An explicit single-Muse
 user installation at a terminal can ask once to forward the required variable
-names. `--managed-attention` supplies that grant for automation and implies
-attention. A valid existing managed path and sufficient allowlist can be reused
-without another grant. Automatic discovery, project setup, JSON, agent output,
-and noninteractive runs never prompt or expand user policy; they report
-`partial` when attention needs permission. The grant stores no credential
-values, preserves existing operator paths/policy, and retains that policy on
-uninstall. Its launching environment must supply `KATA_REF` and
-the usual Kata routing/identity variables. Project Muse hooks use launcher
-attention. Native project discovery for Hermes, Kimi CLI, Kimi Code and ZCode
+names. Muse passes the user-wide `managed_hooks_env_vars` allowlist to every
+managed hook, including hooks installed by other tools; it includes
+`KATA_AUTH_TOKEN` when set. Review all managed hooks before granting.
+`--managed-attention` supplies that grant for automation and implies attention.
+A valid existing managed path and sufficient allowlist can be reused without
+another grant. Automatic discovery, project setup, JSON, agent output, and
+noninteractive runs never prompt or expand user policy; they report `partial`
+when attention needs permission. The grant stores no credential values,
+preserves existing operator paths/policy, and retains that policy on uninstall.
+Remove the names from Muse settings to revoke it. Its launching environment
+must supply `KATA_REF` and the usual Kata routing/identity variables. Project
+Muse hooks use launcher attention. Native project discovery for Hermes, Kimi
+CLI, Kimi Code and ZCode
 is unverified, so `--scope project` is rejected for them.
 
 ### Inspect, customize and remove

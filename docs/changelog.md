@@ -31,7 +31,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `kata init --agent-hooks=codex,pi` during initialization. Bare status shows
   both scopes. OpenCode selects its API from a bounded runtime version probe;
   Muse asks for managed environment permission only during explicit interactive
-  user setup and otherwise reports partial setup. Existing generated commands,
+  user setup and otherwise reports partial setup. That user-wide allowlist is
+  forwarded to every managed hook, including `KATA_AUTH_TOKEN` when set.
+  Existing generated commands,
   custom hooks, legacy init flags and trust identities remain compatible.
   Native session ownership fences delayed cleanup; Hermes uses terminal
   finalization and Codex init gains SessionEnd. See

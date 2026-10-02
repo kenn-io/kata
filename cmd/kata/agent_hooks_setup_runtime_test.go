@@ -144,6 +144,8 @@ func TestAgentHooksMuseSetupConsent(t *testing.T) {
 			out, diagnostic, err := runMuseSetup(t, true, strings.NewReader(answer), "muse", "--executable", os.Args[0])
 			require.NoError(t, err)
 			require.Contains(t, diagnostic, "forward")
+			require.Contains(t, diagnostic, "all managed hooks")
+			require.Contains(t, diagnostic, "KATA_AUTH_TOKEN")
 			plan, err := planMuseAgentHooks(nativeAgentHookOptions{Agent: "muse", Scope: "user", Home: home}, true)
 			require.NoError(t, err)
 			require.True(t, plan.CurrentContract)
