@@ -817,7 +817,7 @@ func splicePluginAgentHookBytes(data []byte, start, end int, insert []byte) []by
 }
 
 const pluginAgentHookCommonJS = `import path from "node:path";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 // OpenCode hosts can load both scopes and reload registrations. Amp uses a
@@ -851,11 +851,39 @@ function nativeDirectory(value) {
   if (typeof value !== "string" || !path.isAbsolute(value)) throw new Error("native workspace unavailable");
   return path.resolve(value);
 }
+const maxOutputBytes = 16 * 1024 * 1024;
 function run(args, cwd, env = process.env) {
   return new Promise((resolve, reject) => {
-    const child = execFile(options.executable, ["--workspace", cwd, ...args],
-      { cwd, env: { ...env }, timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true },
-      (error, stdout) => error ? reject(error) : resolve(stdout));
+    const child = spawn(options.executable, ["--workspace", cwd, ...args],
+      { cwd, env: { ...env }, timeout: 10000, windowsHide: true });
+    const stdout = [];
+    let outputBytes = 0;
+    let outputExceeded = false;
+    child.stdout.on("data", chunk => {
+      if (outputExceeded) return;
+      outputBytes += chunk.length;
+      if (outputBytes > maxOutputBytes) {
+        outputExceeded = true;
+        stdout.length = 0;
+        child.kill();
+        return;
+      }
+      stdout.push(chunk);
+    });
+    // Drain stderr without buffering it; callers only consume successful stdout.
+    child.stderr.resume();
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (outputExceeded) {
+        reject(new Error("native command output exceeded 16 MiB"));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error("native command exited with " + (signal ?? "code " + code)));
+        return;
+      }
+      resolve(Buffer.concat(stdout).toString("utf8"));
+    });
     // Native bridges never require event stdin. Closing it also prevents a
     // malformed executable from indefinitely waiting for input.
     child.stdin?.end();

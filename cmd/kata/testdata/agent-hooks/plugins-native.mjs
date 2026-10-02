@@ -53,6 +53,12 @@ async function prompt(id){
  if(api!=='amp'){assert.deepEqual(system[0],api==='v2'?{type:'text',text:'authored'}:'authored');messages=system.slice(1).map(s=>typeof s==='string'?s:s.text)}
  assert.equal(messages.length,1,'one selected context contribution');return messages[0];
 }
+if(mode==='large-contract'||mode==='oversized-contract'){
+ const context=await prompt('native-session');
+ if(mode==='large-contract')assert.ok(context.includes('x'.repeat(Number(process.env.KATA_PLUGIN_CONTRACT_SIZE))), 'large contract response was not preserved in the prompt context');
+ else assert.ok(context.includes('Kata contract context is unavailable for this prompt.'), 'oversized contract response should fall back without crashing the plugin host');
+ if(cleanup)await cleanup();
+}else{
 if(pendingSetup){assert.match(await prompt('native-session'),/fresh request/);releaseContext();cleanup=await pendingSetup;}
 await start('native-session');await start('native-session');
 if(api!=='amp'){
@@ -98,4 +104,5 @@ for(const [index,c] of starts.entries()){const nativeWorkspace=index===1&&api!==
 assert.equal(starts[0].args[starts[0].args.indexOf('--ref')+1],'spoke-project#abc4');
 for(const c of calls.filter(c=>c.args.includes('agent-contract-hook')||c.args.includes('inbox'))){assert.ok([workspace,otherWorkspace].includes(c.args[c.args.indexOf('--workspace')+1]));assert.equal(c.server,'http://127.0.0.1:7777');if(c.args.includes('inbox'))assert.equal(c.args[c.args.indexOf('--for')+1],'actor/worker');}
 assert.equal(await fs.stat(path.join(workspace,'bad')).then(()=>true,()=>false),false);
+}
 console.log('native plugin fixture passed');
