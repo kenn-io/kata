@@ -235,20 +235,23 @@ func TestBuildImportBatchUsesParentDataAuthority(t *testing.T) {
 		ScannedChildIDs: map[int]int64{1: 101, 2: 102},
 	}
 
-	batch := BuildImportBatchWithConfig("github:repo-node", Config{}, issues, nil, parentData, syncStartedAt)
+	for _, scan := range []ParentScan{ParentScanComplete, ParentScanIncremental} {
+		parentData.Scan = scan
+		batch := BuildImportBatchWithConfig("github:repo-node", Config{}, issues, nil, parentData, syncStartedAt)
 
-	child := itemByExternalID(t, batch.Items, "issue-id:101")
-	require.Len(t, child.Links, 1)
-	assert.Equal(t, db.ImportLink{Type: "parent", TargetExternalID: "issue-id:102"}, child.Links[0])
-	assert.Equal(t, map[string]bool{"parent": true}, child.LinkTypesAuthoritative)
+		child := itemByExternalID(t, batch.Items, "issue-id:101")
+		require.Len(t, child.Links, 1)
+		assert.Equal(t, db.ImportLink{Type: "parent", TargetExternalID: "issue-id:102"}, child.Links[0])
+		assert.Equal(t, map[string]bool{"parent": true}, child.LinkTypesAuthoritative)
 
-	parentless := itemByExternalID(t, batch.Items, "issue-id:102")
-	assert.Empty(t, parentless.Links)
-	assert.Equal(t, map[string]bool{"parent": true}, parentless.LinkTypesAuthoritative)
+		parentless := itemByExternalID(t, batch.Items, "issue-id:102")
+		assert.Empty(t, parentless.Links)
+		assert.Equal(t, map[string]bool{"parent": true}, parentless.LinkTypesAuthoritative)
 
-	notScanned := itemByExternalID(t, batch.Items, "issue-id:103")
-	assert.Empty(t, notScanned.Links)
-	assert.Equal(t, map[string]bool{"parent": false}, notScanned.LinkTypesAuthoritative)
+		notScanned := itemByExternalID(t, batch.Items, "issue-id:103")
+		assert.Empty(t, notScanned.Links)
+		assert.Equal(t, map[string]bool{"parent": false}, notScanned.LinkTypesAuthoritative)
+	}
 }
 
 func TestBuildImportBatchUnsupportedParentDataIsNotAuthoritative(t *testing.T) {

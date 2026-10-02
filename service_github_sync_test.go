@@ -229,7 +229,7 @@ func (*serviceGitHubFetcher) Comments(context.Context, githubsync.Binding, int) 
 	return nil, nil
 }
 
-func (*serviceGitHubFetcher) ParentData(context.Context, githubsync.Binding) (githubsync.ParentData, error) {
+func (*serviceGitHubFetcher) ParentData(context.Context, githubsync.Binding, githubsync.ParentRequest) (githubsync.ParentData, error) {
 	return githubsync.ParentData{Scan: githubsync.ParentScanUnsupported}, nil
 }
 
@@ -258,7 +258,7 @@ func (*serviceGitHubProgressFetcher) Comments(context.Context, githubsync.Bindin
 	return nil, nil
 }
 
-func (*serviceGitHubProgressFetcher) ParentData(context.Context, githubsync.Binding) (githubsync.ParentData, error) {
+func (*serviceGitHubProgressFetcher) ParentData(context.Context, githubsync.Binding, githubsync.ParentRequest) (githubsync.ParentData, error) {
 	return githubsync.ParentData{Scan: githubsync.ParentScanUnsupported}, nil
 }
 

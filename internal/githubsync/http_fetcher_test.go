@@ -557,7 +557,7 @@ func TestHTTPFetcherBindingSessionReusesCredentialTransport(t *testing.T) {
 	require.NoError(t, err)
 	_, err = session.Comments(context.Background(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, 1)
 	require.NoError(t, err)
-	_, err = session.ParentData(context.Background(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"})
+	_, err = session.ParentData(context.Background(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, resolver.calls)
@@ -608,7 +608,7 @@ func TestHTTPFetcherUnboundReadsResolveCredentialsOncePerCall(t *testing.T) {
 	require.NoError(t, err)
 	_, err = fetcher.Comments(context.Background(), binding, 1)
 	require.NoError(t, err)
-	data, err := fetcher.ParentData(context.Background(), binding)
+	data, err := fetcher.ParentData(context.Background(), binding, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanComplete, data.Scan)

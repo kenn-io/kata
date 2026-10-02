@@ -227,7 +227,7 @@ func (s *httpFetcherBindingSession) Comments(ctx context.Context, binding Bindin
 	return fetchRESTPagesWithClient[Comment](ctx, s.fetcher, s.client, binding, requestURL, "GitHub comments for issue "+strconv.Itoa(issueNumber), "")
 }
 
-func (s *httpFetcherBindingSession) ParentData(ctx context.Context, binding Binding) (ParentData, error) {
+func (s *httpFetcherBindingSession) ParentData(ctx context.Context, binding Binding, request ParentRequest) (ParentData, error) {
 	binding, err := normalizeBinding(binding)
 	if err != nil {
 		return ParentData{}, err
@@ -236,7 +236,7 @@ func (s *httpFetcherBindingSession) ParentData(ctx context.Context, binding Bind
 		return ParentData{}, fmt.Errorf("GitHub fetcher session for %s/%s/%s cannot read %s/%s/%s",
 			s.binding.Host, s.binding.Owner, s.binding.Repo, binding.Host, binding.Owner, binding.Repo)
 	}
-	return s.fetcher.parentDataWithClient(ctx, s.client, binding)
+	return s.fetcher.parentDataWithClient(ctx, s.client, binding, request)
 }
 
 func (f *HTTPFetcher) clientForBinding(ctx context.Context, binding Binding) (*http.Client, error) {

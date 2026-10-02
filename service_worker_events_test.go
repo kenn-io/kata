@@ -54,7 +54,7 @@ func (*workerEventFetcher) Comments(context.Context, githubsync.Binding, int) ([
 	return nil, nil
 }
 
-func (*workerEventFetcher) ParentData(context.Context, githubsync.Binding) (githubsync.ParentData, error) {
+func (*workerEventFetcher) ParentData(context.Context, githubsync.Binding, githubsync.ParentRequest) (githubsync.ParentData, error) {
 	return githubsync.ParentData{Scan: githubsync.ParentScanUnsupported}, nil
 }
 
