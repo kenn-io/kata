@@ -29,6 +29,7 @@ func TestE2E_InitWithCodexHooks(t *testing.T) {
 	assert.Equal(t, map[string]any{
 		"hooks": map[string]any{
 			"SessionStart": expectedCodexSessionStartGroups(),
+			"SessionEnd":   expectedCodexSessionEndGroups(),
 		},
 	}, readCodexHooks(t, dir))
 }
@@ -67,6 +68,7 @@ func TestE2E_InitWithCodexHooks_ComposesWithAgentsAndHooks(t *testing.T) {
 	assert.Equal(t, map[string]any{
 		"hooks": map[string]any{
 			"SessionStart": expectedCodexSessionStartGroups(),
+			"SessionEnd":   expectedCodexSessionEndGroups(),
 		},
 	}, readCodexHooks(t, dir))
 

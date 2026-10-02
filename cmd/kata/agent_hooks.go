@@ -31,33 +31,47 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 		Use:   "contract <harness>",
 		Short: "Read stdin and emit a harness-native contract response",
 		Long: "Read a finite native SessionStart JSON payload from stdin through EOF\n" +
-			"and emit the canonical kata contract in the harness's native response.\n\n" +
+			"and emit the kata contract in the harness's native response.\n\n" +
 			"Hermes uses pre_llm_call instead, injecting only when extra.is_first_turn is true.\n" +
 			"Kit v0.26.0 requires a nonempty text extra.user_message; empty or multimodal messages fail.\n" +
-			"Harnesses: claude, codex, copilot, cursor, gemini, hermes, qwen.\n" +
+			"Command harnesses: claude, codex, copilot, cursor, gemini, hermes, qwen, droid, antigravity, kimi-code, muse, zcode.\n" +
 			"For plain text at a terminal, use kata quickstart --format contract.\n" +
-			"The optional --source kata-agent-contract-hook marker identifies ownership.",
+			"--source selects a local UTF-8 prompt file, replacing the entire contract.\n" +
+			"Relative paths use cwd; missing files use the built-in contract; empty files supply an empty prompt.",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: agentHookHarnessCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			agent, err := parseAgentHookHarness(args[0])
+			capability, err := lookupAgentHookCapability(args[0])
 			if err != nil {
 				return err
 			}
-			if cmd.Flags().Changed("source") && source != agentContractHookSource {
-				return agentHookUsage("--source must be " + agentContractHookSource)
+			if capability.Name == "pi" || capability.Name == "openclaw" || capability.Name == "amp" || capability.Name == "opencode" {
+				return agentHookUsage(capability.Name + " uses a native extension; install it with kata agent-hooks install " + capability.Name)
+			}
+			if !capability.Contract {
+				return agentHookUsage(capability.Name + " does not consume hook contract context; use committed AGENTS.md")
+			}
+			text, err := readAgentContractSource(source, cmd.Flags().Changed("source"))
+			if err != nil {
+				return err
 			}
 			input := cmd.InOrStdin()
 			if isTerminal(input) {
 				return agentHookUsage("contract requires a finite JSON payload on stdin; use kata quickstart --format contract for plain text")
 			}
-			if err := writeNativeAgentContract(cmd.Context(), agent, input, cmd.OutOrStdout()); err != nil {
+			var renderErr error
+			if agentHookUsesKit(capability.Name) {
+				renderErr = writeNativeAgentContract(cmd.Context(), agenthook.Agent(capability.Name), input, cmd.OutOrStdout(), text)
+			} else {
+				renderErr = writeExtraAgentContract(capability.Name, input, cmd.OutOrStdout(), text)
+			}
+			if err := renderErr; err != nil {
 				return &cliError{Message: firstLine(err.Error()), Kind: kindInternal, ExitCode: ExitInternal}
 			}
 			return nil
 		},
 	}
-	contract.Flags().StringVar(&source, "source", "", "optional ownership marker: kata-agent-contract-hook")
+	contract.Flags().StringVar(&source, "source", "", "local UTF-8 prompt file (missing file uses built-in contract)")
 	attention := &cobra.Command{
 		Use:   "attention",
 		Short: "Track workspace attention at session start and end",
@@ -66,7 +80,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 		RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	attention.AddCommand(newAgentHookAttentionCmd("start"), newAgentHookAttentionCmd("end"))
-	group.AddCommand(contract, attention, newAgentHooksInstallCmd(), newAgentHooksUninstallCmd(), newAgentHooksStatusCmd(), newAgentInstructionsCmd())
+	group.AddCommand(contract, attention, newNativeAgentAttentionCmd(), newNativeAgentHooksMutationCmdWithTerminalCheck(false, isTerminal), newAgentHooksUninstallCmd(), newAgentHooksStatusCmd(), newAgentInstructionsCmd())
 	return group
 }
 
@@ -79,18 +93,18 @@ func newAgentHookAttentionCmd(mode string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               mode,
 		Short:             short,
-		Long:              short + ".\n\nKATA_REF names the tracked workspace issue.\nThe optional --source " + attentionHookSource + mode + " marker identifies ownership.\nStdin is ignored and daemon failures remain silent.",
+		Long:              short + ".\n\nKATA_REF names the tracked workspace issue.\nThe optional --source " + legacyAttentionHookSource + mode + " marker identifies ownership.\nStdin is ignored and daemon failures remain silent.",
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if cmd.Flags().Changed("source") && source != attentionHookSource+mode {
-				return agentHookUsage("--source must be " + attentionHookSource + mode)
+			if cmd.Flags().Changed("source") && source != legacyAttentionHookSource+mode {
+				return agentHookUsage("--source must be " + legacyAttentionHookSource + mode)
 			}
 			runAttentionHook(cmd, mode)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&source, "source", "", "optional ownership marker: "+attentionHookSource+mode)
+	cmd.Flags().StringVar(&source, "source", "", "optional ownership marker: "+legacyAttentionHookSource+mode)
 	return cmd
 }
 
@@ -117,9 +131,9 @@ func parseAgentHookHarness(name string) (agenthook.Agent, error) {
 func agentHookHarnessCompletion(_ *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
 	var names []string
 	if len(args) == 0 {
-		for _, profile := range agenthook.Profiles() {
-			if slices.Contains(profile.SupportedEvents, agenthook.EventSessionStart) && strings.HasPrefix(string(profile.Agent), prefix) {
-				names = append(names, string(profile.Agent))
+		for _, capability := range agentHookCapabilities() {
+			if capability.Contract && capability.Name != "pi" && capability.Name != "openclaw" && capability.Name != "amp" && capability.Name != "opencode" && strings.HasPrefix(capability.Name, prefix) {
+				names = append(names, capability.Name)
 			}
 		}
 	}
@@ -135,6 +149,7 @@ type nativeAgentContractHandler struct {
 	agenthook.NoopHandler
 	agent         agenthook.Agent
 	cursorContext string
+	text          string
 }
 
 func (h *nativeAgentContractHandler) SessionStart(context.Context, agenthook.SessionStartInput) (agenthook.SessionStartOutput, error) {
@@ -144,10 +159,10 @@ func (h *nativeAgentContractHandler) SessionStart(context.Context, agenthook.Ses
 	if h.agent == agenthook.AgentCursor {
 		// Kit v0.26.0 cannot encode Cursor SessionStart context. Return a
 		// neutral response for Kit to encode, then bridge the captured context.
-		h.cursorContext = agentContractText
+		h.cursorContext = h.text
 		return agenthook.SessionStartOutput{}, nil
 	}
-	return agenthook.SessionStartOutput{AdditionalContext: agentContractText}, nil
+	return agenthook.SessionStartOutput{AdditionalContext: h.text}, nil
 }
 
 func (h *nativeAgentContractHandler) UserPromptSubmit(_ context.Context, input agenthook.UserPromptSubmitInput) (agenthook.UserPromptSubmitOutput, error) {
@@ -167,5 +182,5 @@ func (h *nativeAgentContractHandler) UserPromptSubmit(_ context.Context, input a
 	if string(native.Extra.IsFirstTurn) != "true" {
 		return agenthook.UserPromptSubmitOutput{}, nil
 	}
-	return agenthook.UserPromptSubmitOutput{AdditionalContext: agentContractText}, nil
+	return agenthook.UserPromptSubmitOutput{AdditionalContext: h.text}, nil
 }

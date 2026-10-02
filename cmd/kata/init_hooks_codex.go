@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json/jsontext"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 const (
 	codexSessionStartMatcher         = "startup|resume|clear"
 	codexContractSessionStartMatcher = "startup|resume|clear|compact"
+	codexDefaultContractTimeoutSecs  = 10
 )
 
 func applyCodexHooks(dir string) (bool, []string, error) {
@@ -74,15 +74,15 @@ func installCodexWorkspaceHooks(configPath string, warnings []string) (bool, []s
 	if err != nil {
 		return false, nil, err
 	}
-	contractResult, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
+	contractResult, err := installOwnedAgentHooks(agenthook.AgentCodex, agenthook.InstallOptions{
 		ConfigPath: configPath,
 		Executable: "kata",
-		Arguments:  []string{"agent-hooks", "contract", "codex", "--source", agentContractHookSource},
-		Marker:     "--source " + agentContractHookSource,
+		Arguments:  []string{"agent-contract-hook"},
+		Marker:     "agent-contract-hook",
 		Hooks: []agenthook.Hook{{
 			Event:   agenthook.EventSessionStart,
 			Matcher: codexContractSessionStartMatcher,
-			Timeout: 10 * time.Second,
+			Timeout: codexDefaultContractTimeoutSecs * time.Second,
 		}},
 	})
 	if err != nil {
@@ -92,39 +92,11 @@ func installCodexWorkspaceHooks(configPath string, warnings []string) (bool, []s
 }
 
 func installCodexAttentionHook(configPath string, before map[string]any) (bool, error) {
-	legacyHandlers := []map[string]any{
-		{
-			"type":    "command",
-			"command": "kata attention-hook start",
-			"timeout": jsontext.Value("10"),
-		},
-		{
-			"type":           "command",
-			"command":        "kata attention-hook start",
-			"commandWindows": "kata attention-hook start",
-			"timeout":        jsontext.Value("10"),
-		},
-	}
-	migrated, err := migrateLegacyAgentHooks(configPath, []legacyAgentHook{
-		{
-			event:         agenthook.EventSessionStart,
-			matcherAbsent: true,
-			handlers:      legacyHandlers,
-		},
-		{
-			event:    agenthook.EventSessionStart,
-			matcher:  codexSessionStartMatcher,
-			handlers: legacyHandlers,
-		},
-	})
-	if err != nil {
-		return false, err
-	}
 	attentionOptions := agenthook.InstallOptions{
 		ConfigPath: configPath,
 		Executable: "kata",
-		Arguments:  []string{"agent-hooks", "attention", "start", "--source", attentionHookSource + "start"},
-		Marker:     "--source " + attentionHookSource + "start",
+		Arguments:  []string{"attention-hook", "start"},
+		Marker:     "attention-hook start",
 		Hooks: []agenthook.Hook{{
 			Event:   agenthook.EventSessionStart,
 			Matcher: codexSessionStartMatcher,
@@ -132,20 +104,25 @@ func installCodexAttentionHook(configPath string, before map[string]any) (bool, 
 		}},
 	}
 	var attentionResult agenthook.Result
+	var err error
 	if !codexAttentionHookCurrent(before) {
-		attentionResult, err = agenthook.Install(agenthook.AgentCodex, attentionOptions)
+		attentionResult, err = installOwnedAgentHooks(agenthook.AgentCodex, attentionOptions)
 		if err != nil {
 			return false, err
 		}
 	}
-	return migrated || attentionResult.Changed, nil
+	endResult, err := installOwnedAgentHooks(agenthook.AgentCodex, agenthook.InstallOptions{
+		ConfigPath: configPath, Executable: "kata", Arguments: []string{"attention-hook", "end"}, Marker: "attention-hook end",
+		Hooks: []agenthook.Hook{{Event: agenthook.EventSessionEnd, Timeout: 10 * time.Second}},
+	})
+	return attentionResult.Changed || endResult.Changed, err
 }
 
 func dedupeCodexContractHook(configPath, userPath string, before map[string]any) (bool, []string, error) {
 	var result agenthook.Result
 	if codexConfigHasContract(before, false) {
 		var err error
-		result, err = agenthook.Uninstall(agenthook.AgentCodex, configPath, "--source "+agentContractHookSource)
+		result, err = uninstallOwnedAgentHooks(agenthook.AgentCodex, configPath, contractHook)
 		if err != nil {
 			return false, nil, err
 		}

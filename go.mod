@@ -17,6 +17,7 @@ require (
 	github.com/danielgtaylor/huma/v2 v2.37.3
 	github.com/doordash-oss/oapi-codegen-dd/v3 v3.75.5
 	github.com/go-playground/validator/v10 v10.30.1
+	github.com/gofrs/flock v0.13.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/klauspost/compress v1.19.1
@@ -92,7 +93,6 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
-	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/go-github/v88 v88.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect

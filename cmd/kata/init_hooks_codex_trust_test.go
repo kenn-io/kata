@@ -43,7 +43,7 @@ func TestApplyCodexHooks_DedupeTrustAndPreservation(t *testing.T) {
 			changed, notes, err := applyCodexHooks(dir)
 			require.NoError(t, err)
 			assert.True(t, changed)
-			assert.Equal(t, map[string]any{"retain": "root setting", "hooks": map[string]any{"SessionStart": tc.after, "Stop": []any{foreign}}}, readCodexHooks(t, dir))
+			assert.Equal(t, map[string]any{"retain": "root setting", "hooks": map[string]any{"SessionStart": tc.after, "SessionEnd": expectedCodexSessionEndGroups(), "Stop": []any{foreign}}}, readCodexHooks(t, dir))
 			wantNotes := []string{"removed workspace contract hook: " + userPath + " already injects it"}
 			if tc.shifted {
 				wantNotes = append(wantNotes, "Codex will ask to re-trust shifted hooks; open Codex and run /hooks.")
@@ -121,7 +121,7 @@ func TestApplyCodexHooks_PreservesWorkspaceAttentionPositions(t *testing.T) {
 
 			changed, _, err := applyCodexHooks(dir)
 			require.NoError(t, err)
-			assert.False(t, changed)
+			assert.True(t, changed, "adding terminal hook preserves existing start identities")
 			assert.Equal(t, groups, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"],
 				"unchanged attention and foreign hooks must keep their group and handler positions")
 		})

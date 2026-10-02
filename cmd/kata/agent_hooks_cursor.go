@@ -16,8 +16,8 @@ import (
 // https://cursor.com/docs/hooks#sessionstart but absent from Kit v0.26.0's
 // response encoder. The bridge adds only that field to Kit's neutral response.
 // Remove the bridge once released Kit encodes this SessionStart context itself.
-func writeNativeAgentContract(ctx context.Context, agent agenthook.Agent, input io.Reader, output io.Writer) error {
-	handler := &nativeAgentContractHandler{agent: agent}
+func writeNativeAgentContract(ctx context.Context, agent agenthook.Agent, input io.Reader, output io.Writer, text string) error {
+	handler := &nativeAgentContractHandler{agent: agent, text: text}
 	var native bytes.Buffer
 	if err := agenthook.Handle(ctx, agent, input, &native, handler); err != nil {
 		return err

@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
+const [root,projectPath,userPath,cwd]=process.argv.slice(2);
+const {ExtensionRunner}=await import(pathToFileURL(root+'/core/extensions/runner.js'));
+const {createExtensionRuntime,loadExtensionFromFactory}=await import(pathToFileURL(root+'/core/extensions/loader.js'));
+const {createEventBus}=await import(pathToFileURL(root+'/core/event-bus.js'));
+const {SessionManager}=await import(pathToFileURL(root+'/core/session-manager.js'));
+const {buildSystemPrompt}=await import(pathToFileURL(root+'/core/system-prompt.js'));
+const project=(await import(pathToFileURL(projectPath))).default,user=(await import(pathToFileURL(userPath))).default;
+const stateFile=process.env.KATA_PI_TEST_STATE;
+const update=value=>writeFileSync(stateFile,JSON.stringify(value));
+const calls=()=>readFileSync(process.env.KATA_PI_TEST_CALLS,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
+const runtime=createExtensionRuntime(),bus=createEventBus(),manager=SessionManager.inMemory(cwd);
+let errors=[];
+const before=await loadExtensionFromFactory(pi=>pi.on('before_agent_start',()=>({systemPrompt:'earlier authored forced'})),cwd,bus,runtime,cwd+'/early.js');
+const userExt=await loadExtensionFromFactory(user,cwd,bus,runtime,userPath);
+const projectExt=await loadExtensionFromFactory(project,cwd,bus,runtime,projectPath);
+let runner=new ExtensionRunner([before,userExt,projectExt],runtime,cwd,manager,{});runner.onError(error=>errors.push(error));
+update({contract:'native contract A',inbox:'native request A'});
+await runner.emit({type:'session_start',reason:'startup'});
+const base={customPrompt:'original base',cwd,sections:{other:'other preserved'}};
+let result=await runner.emitBeforeAgentStart('first prompt',undefined,base),prompt=buildSystemPrompt(result.systemPromptOptions);
+assert(prompt.includes('earlier authored forced'));assert.equal(prompt.split('native contract A').length-1,1);assert(prompt.includes('native request A'));assert.equal(result.systemPromptOptions.sections.other,'other preserved');assert.deepEqual(base.sections,{other:'other preserved'});
+update({contract:'native contract B',inbox:''});
+result=await runner.emitBeforeAgentStart('second prompt',undefined,base);prompt=buildSystemPrompt(result.systemPromptOptions);assert(!prompt.includes('native request A'));assert(prompt.includes('native contract B'));
+update({contract:'native contract C',inbox:'stale request',failInbox:true,failContract:true});
+result=await runner.emitBeforeAgentStart('failed prompt',undefined,base);prompt=buildSystemPrompt(result.systemPromptOptions);assert(!prompt.includes('native contract B'));assert(!prompt.includes('stale request'));assert(prompt.includes('unavailable'));
+update({contract:'native contract D',inbox:'request D'});
+const later=await loadExtensionFromFactory(pi=>pi.on('before_agent_start',()=>({systemPrompt:'later authored override'})),cwd,bus,runtime,cwd+'/later.js');
+const lateRunner=new ExtensionRunner([userExt,projectExt,later],runtime,cwd,manager,{});
+const late=await lateRunner.emitBeforeAgentStart('later prompt',undefined,base);assert.equal(buildSystemPrompt(late.systemPromptOptions),'later authored override');
+// Structured normal composition preserves base and other extensions.
+const plainRunner=new ExtensionRunner([userExt,projectExt],runtime,cwd,manager,{});
+const plain=await plainRunner.emitBeforeAgentStart('plain prompt',undefined,base);prompt=buildSystemPrompt(plain.systemPromptOptions);assert(prompt.includes('original base'));assert(prompt.includes('other preserved'));assert.equal(prompt.split('native contract D').length-1,1);
+await runner.emit({type:'session_shutdown',reason:'reload'});const reloadedUser=await loadExtensionFromFactory(user,cwd,bus,runtime,userPath);const reloadedProject=await loadExtensionFromFactory(project,cwd,bus,runtime,projectPath);runner=new ExtensionRunner([reloadedUser,reloadedProject],runtime,cwd,manager,{});await runner.emit({type:'session_start',reason:'reload'});await runner.emit({type:'agent_end',messages:[]});
+for(const reason of ['new','resume','fork']) {await runner.emit({type:'session_shutdown',reason});runner.invalidate();const nextManager=SessionManager.inMemory(cwd),nextRuntime=createExtensionRuntime();const nextUser=await loadExtensionFromFactory(user,cwd,bus,nextRuntime,userPath),nextProject=await loadExtensionFromFactory(project,cwd,bus,nextRuntime,projectPath);runner=new ExtensionRunner([nextUser,nextProject],nextRuntime,cwd,nextManager,{});await runner.emit({type:'session_start',reason});}
+await runner.emit({type:'session_shutdown',reason:'quit'});await runner.emit({type:'session_shutdown',reason:'quit'});
+assert.deepEqual(calls().filter(c=>c.args[0]==='agent-hooks').map(c=>c.args[3]),['start','start','start','start','end']);
+assert.equal(calls().filter(c=>c.args[0]==='agent-contract-hook').length,5);
+for(const call of calls()) {assert.equal(call.cwd,cwd);assert.equal(call.server,'https://daemon.example');assert.equal(call.author,'actor');assert.equal(call.teammate,'teammate');assert.equal(call.recipient,'actor/teammate');if(call.args[0]==='agent-contract-hook')assert.deepEqual(call.args,['agent-contract-hook','--source',"contract '$;`.txt"]);}
+assert.deepEqual(errors,[]);
+console.log('Pi installed runner passed: native lifecycle, actual subprocess, structured/forced precedence, fresh and unavailable context');

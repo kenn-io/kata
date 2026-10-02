@@ -23,6 +23,34 @@ All notable changes to kata, grouped by release. Versioned releases start with
   daemon catalog entry matching `--hub-url`. The local daemon token is no longer
   sent to the hub. See the [enrollment runbook](operations/federation.md#external-agent-onboarding-without-hooks).
 
+- Set up configured coding agents with `kata agent-hooks install`, or choose
+  names explicitly. Setup covers 18 native targets and now enables the contract
+  plus every available attention hook by default; scripts needing contract-only
+  setup should pass `--contract-only` or `--attention=false`. Default uninstall
+  removes the full owned bundle. Use `--local` for project scope or
+  `kata init --agent-hooks=codex,pi` during initialization. Bare status shows
+  both scopes. OpenCode selects its API from a bounded runtime version probe;
+  Muse asks for managed environment permission only during explicit interactive
+  user setup and otherwise reports partial setup. Existing generated commands,
+  custom hooks, legacy init flags and trust identities remain compatible.
+  Native session ownership fences delayed cleanup; Hermes uses terminal
+  finalization and Codex init gains SessionEnd. See
+  [target coverage](workflows/agents.md#hook-target-coverage) for runtime limits.
+
+- Run `kata agent-contract-hook` directly to emit the built-in Codex briefing.
+  Optional `--source <path>` replaces the entire prompt with a local UTF-8 file;
+  missing files use the default and empty files supply an empty prompt. Native
+  contract commands share the option. Relative sources stay within the
+  invocation directory; parent traversal and symlink escapes fail. Default hook
+  installations use bare commands, preserve custom prompt hooks, and normalize
+  old generated source markers. Visible attention commands accept only the
+  legacy source marker matching `start` or `end` for compatibility; rerun the
+  matching init option to normalize installed hooks to the bare form.
+  Codex user hooks suppress the workspace contract only when both native
+  command platforms are complete and no explicit timeout is below 10 seconds;
+  normalize an older incomplete entry with `kata agent-hooks install codex`
+  before rerunning init.
+
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.
   Embedding requests no longer send `"dimensions": 0` unless dimensions are
   requested, so servers no longer refuse the request or return empty vectors.
@@ -53,8 +81,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   [`kata agent-hooks`](reference/cli.md#agent-hooks). Contract responses use
   each supported harness's native format, including Cursor SessionStart
   context and Hermes's first `pre_llm_call` turn. Claude Code and Codex can
-  use the visible workspace attention commands. Existing workspace hook
-  commands and the contract text keep their current behavior.
+  use the visible workspace attention commands. The canonical contract text
+  stays unchanged.
 
 - Remove an untracked duplicate Codex contract hook by re-running
   `kata init --with-codex-hooks` when the selected user config already supplies

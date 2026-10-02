@@ -25,8 +25,8 @@ func TestAgentHooksUninstallAllProfiles(t *testing.T) {
 				hook.Event = agenthook.EventUserPromptSubmit
 			}
 			installHookFixture(t, profile.Agent, path, "before", "example-before", hook)
-			installHookFixture(t, profile.Agent, path, "kata", agentContractHookSource, hook)
-			installHookFixture(t, profile.Agent, path, "attention", attentionHookSource+"start", hook)
+			installHookFixture(t, profile.Agent, path, "kata", legacyAgentContractHookSource, hook)
+			installHookFixture(t, profile.Agent, path, "attention", legacyAttentionHookSource+"start", hook)
 			installHookFixture(t, profile.Agent, path, "after", "example-after", hook)
 			out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "uninstall", string(profile.Agent))
 			require.NoError(t, err, stderr)
@@ -37,7 +37,7 @@ func TestAgentHooksUninstallAllProfiles(t *testing.T) {
 			}
 			handlers := nativeContractHandlers(t, profile.Agent, path)
 			require.Len(t, handlers, 3)
-			for i, marker := range []string{"example-before", attentionHookSource + "start", "example-after"} {
+			for i, marker := range []string{"example-before", legacyAttentionHookSource + "start", "example-after"} {
 				command, _ := handlers[i]["command"].(string)
 				if command == "" {
 					command, _ = handlers[i]["bash"].(string)
@@ -73,7 +73,7 @@ func TestAgentHooksUninstallMissingAndOverride(t *testing.T) {
 	entries, err := os.ReadDir(home)
 	require.NoError(t, err)
 	require.Empty(t, entries)
-	installHookFixture(t, agenthook.AgentCodex, config, "kata", agentContractHookSource, agenthook.Hook{Event: agenthook.EventSessionStart})
+	installHookFixture(t, agenthook.AgentCodex, config, "kata", legacyAgentContractHookSource, agenthook.Hook{Event: agenthook.EventSessionStart})
 	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "uninstall", "codex", "--config", config)
 	require.NoError(t, err, stderr)
 	entries, err = os.ReadDir(home)
@@ -88,7 +88,7 @@ func TestAgentHooksUninstallPreflightAndModes(t *testing.T) {
 	require.NoError(t, err)
 	codex, err := agenthook.ConfigPath(agenthook.AgentCodex)
 	require.NoError(t, err)
-	installHookFixture(t, agenthook.AgentClaude, claude, "kata", agentContractHookSource, agenthook.Hook{Event: agenthook.EventSessionStart})
+	installHookFixture(t, agenthook.AgentClaude, claude, "kata", legacyAgentContractHookSource, agenthook.Hook{Event: agenthook.EventSessionStart})
 	before, err := os.ReadFile(claude) //nolint:gosec // G304: isolated hook config fixture under TempDir.
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(codex), 0o700))
@@ -109,7 +109,7 @@ func TestAgentHooksUninstallPreflightAndModes(t *testing.T) {
 	out, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "uninstall", "claude", "--quiet", "--json")
 	require.NoError(t, err, stderr)
 	require.Contains(t, out, `"kata_api_version":1`)
-	for _, args := range [][]string{{}, {"claude", "--all"}, {"claude", "droid"}, {"--all", "--config", "example"}, {"codex", "--config="}} {
+	for _, args := range [][]string{{}, {"claude", "--all"}, {"claude", "unknown"}, {"--all", "--config", "example"}, {"codex", "--config="}} {
 		out, stderr, err = executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "uninstall"}, args...)...)
 		require.Error(t, err)
 		require.Empty(t, out)

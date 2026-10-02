@@ -30,6 +30,10 @@ type initOptions struct {
 	WithAgents     bool
 	WithHooks      bool
 	WithCodexHooks bool
+	WithAgentHooks []string
+	AgentHooks     []string
+	ContractOnly   bool
+	OpenCodeAPI    string
 	Actor          string
 }
 
@@ -41,6 +45,10 @@ type callInitOpts struct {
 	WithAgents     bool
 	WithHooks      bool
 	WithCodexHooks bool
+	WithAgentHooks []string
+	AgentHooks     []string
+	ContractOnly   bool
+	OpenCodeAPI    string
 	Actor          string
 }
 
@@ -119,6 +127,7 @@ func kindForStatus(status int) errKind {
 // newInitCmd returns the cobra.Command for `kata init`.
 func newInitCmd() *cobra.Command {
 	var opts initOptions
+	var agentHooksCSV string
 
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -135,17 +144,38 @@ get committed.
 
 --with-agents: committed guidance for everyone on the repo.
 --with-hooks / --with-codex-hooks: this workspace's Claude Code / Codex hooks.
-kata agent-hooks install <harness>... | --all: the contract in every session on this machine. If a user-level hook exists, --with-codex-hooks skips the workspace contract hook unless the workspace config is tracked.`,
+--agent-hooks=codex,pi: project contract and available attention hooks; --contract-only opts out of attention.
+--with-agent-hooks <harness>: legacy project bundle (repeatable).
+kata agent-hooks install: discover configured agents and install contract plus available attention hooks.
+Name agents for explicit setup; use --local for project scope. If a user-level hook exists, --with-codex-hooks skips the workspace contract hook unless the workspace config is tracked.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if cmd.Flags().Changed("agent-hooks") {
+				for name := range strings.SplitSeq(agentHooksCSV, ",") {
+					name = strings.TrimSpace(name)
+					if name == "" {
+						return agentHookUsage("--agent-hooks requires nonempty comma-separated agent names")
+					}
+					opts.AgentHooks = append(opts.AgentHooks, name)
+				}
+			}
+			if cmd.Flags().Changed("contract-only") && len(opts.AgentHooks) == 0 {
+				return agentHookUsage("init --contract-only requires --agent-hooks")
+			}
+			callOpts, err := prepareInitHookOptions(cmd.Context(), callInitOpts(opts))
+			if err != nil {
+				return err
+			}
+			startPath, err := resolveStartPath(flags.Workspace)
+			if err != nil {
+				return err
+			}
+			if _, _, err := planInitHookOptions(callOpts, startPath); err != nil {
+				return err
+			}
 			ctx, baseURL, err := ensureDaemonContext(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("daemon: %w", err)
 			}
-			startPath, err := resolveStartPath(flags.Workspace)
-			if err != nil {
-				return fmt.Errorf("resolve workspace: %w", err)
-			}
-			callOpts := callInitOpts(opts)
 			callOpts.Actor, _ = resolveActor(ctx, flags.As, nil)
 			out, err := callInit(ctx, baseURL, startPath, callOpts)
 			if err != nil {
@@ -160,6 +190,9 @@ kata agent-hooks install <harness>... | --all: the contract in every session on 
 	cmd.Flags().BoolVar(&opts.Reassign, "reassign", false, "move an existing alias to this project")
 	cmd.Flags().BoolVar(&opts.WithAgents, "with-agents", false, "write kata agent guidance into AGENTS.md/CLAUDE.md in the workspace")
 	cmd.Flags().BoolVar(&opts.WithHooks, "with-hooks", false, "install work.attention harness hooks into the workspace's Claude Code config (.claude/)")
+	cmd.Flags().StringVar(&agentHooksCSV, "agent-hooks", "", "install project contract and available attention hooks for comma-separated agents")
+	cmd.Flags().BoolVar(&opts.ContractOnly, "contract-only", false, "with --agent-hooks, install contracts without adding attention")
+	cmd.Flags().StringArrayVar(&opts.WithAgentHooks, "with-agent-hooks", nil, "install a project contract and available attention hooks; repeat per harness")
 	cmd.Flags().BoolVar(&opts.WithCodexHooks, "with-codex-hooks", false, "install Codex CLI contract and work.attention hooks (.codex/hooks.json)")
 
 	return cmd
@@ -176,6 +209,14 @@ kata agent-hooks install <harness>... | --all: the contract in every session on 
 // the path-based request only when local derivation can't produce an
 // name, so the daemon (or its absence) emits the validation error.
 func callInit(ctx context.Context, baseURL, startPath string, opts callInitOpts) (string, error) {
+	var err error
+	opts, err = prepareInitHookOptions(ctx, opts)
+	if err != nil {
+		return "", err
+	}
+	if _, _, err := planInitHookOptions(opts, startPath); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(opts.Actor) == "" {
 		opts.Actor, _ = resolveActor(ctx, "", nil)
 	}
@@ -350,7 +391,11 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 		emitHookWarnings(warnings)
 	}
 
-	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged)
+	nativeHooksChanged, hookResults, err := applyInitHookOptions(opts, dest)
+	if err != nil {
+		return "", err
+	}
+	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged || nativeHooksChanged, hookResults)
 }
 
 // runStartPathInit is the fallback used when the client cannot derive a name
@@ -420,9 +465,13 @@ func runStartPathInit(ctx context.Context, baseURL, startPath string, opts callI
 		emitHookWarnings(warnings)
 	}
 
+	nativeHooksChanged, hookResults, err := applyInitHookOptions(opts, gitignoreDir)
+	if err != nil {
+		return "", err
+	}
 	// The path-based daemon flow writes workspace files remotely and exposes no
 	// local file-change bit today; project creation is the closest stable signal.
-	return formatInitOutput(bs, resp.Project.Name, gitignoreDir, resp.Created, resp.Created || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged)
+	return formatInitOutput(bs, resp.Project.Name, gitignoreDir, resp.Created, resp.Created || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged || nativeHooksChanged, hookResults)
 }
 
 func warnGitignoreUpdate(err error) {
@@ -551,23 +600,53 @@ func needsTomlWrite(existing *config.ProjectConfig, name string) bool {
 
 // formatInitOutput renders the selected output mode for init, shared between
 // the path-free and path-based flows.
-func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed bool) (string, error) {
+func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed bool, hookResults []agentHookMutation) (string, error) {
 	switch currentOutputMode() {
 	case outputJSON:
+		if hookResults != nil {
+			var response map[string]jsontext.Value
+			if err := json.Unmarshal(bs, &response); err != nil {
+				return "", err
+			}
+			if response == nil {
+				return "", errors.New("init response must be a JSON object")
+			}
+			encoded, err := json.Marshal(hookResults)
+			if err != nil {
+				return "", err
+			}
+			response["agent_hooks"] = encoded
+			bs, err = json.Marshal(response)
+			if err != nil {
+				return "", err
+			}
+		}
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return "", fmt.Errorf("emit json: %w", err)
 		}
 		return buf.String(), nil
 	case outputAgent:
-		return fmt.Sprintf("OK init project=%s workspace=%s changed=%t\n",
-			agentValue(name), agentValue(workspace), changed), nil
+		var out strings.Builder
+		fmt.Fprintf(&out, "OK init project=%s workspace=%s changed=%t\n", agentValue(name), agentValue(workspace), changed)
+		for _, result := range hookResults {
+			fmt.Fprintf(&out, "agent_hooks_harness=%s agent_hooks_state=%s changed=%t reason=%s\n", agentValue(result.Harness), result.State, result.Changed, agentValue(result.Reason))
+		}
+		return out.String(), nil
 	}
 	action := "bound"
 	if projectCreated {
 		action = "created and bound"
 	}
-	return fmt.Sprintf("%s project %s\n", action, textsafe.Line(name)), nil
+	var out strings.Builder
+	fmt.Fprintf(&out, "%s project %s\n", action, textsafe.Line(name))
+	for _, result := range hookResults {
+		fmt.Fprintf(&out, "%s: %s — %s\n", result.Harness, result.State, textsafe.Line(result.ConfigPath))
+		if result.Reason != "" {
+			out.WriteString(textsafe.Line(result.Reason) + "\n")
+		}
+	}
+	return out.String(), nil
 }
 
 // resolveStartPath returns the absolute path to use as the daemon's

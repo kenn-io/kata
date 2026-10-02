@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 
@@ -13,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
-	"go.kenn.io/kit/pathresolve"
 
 	"go.kenn.io/kit/agenthook"
 )
@@ -125,10 +123,6 @@ type agentHookMutation struct {
 
 type agentHookInstaller func(agenthook.Agent, agenthook.InstallOptions) (agenthook.Result, error)
 
-func newAgentHooksInstallCmd() *cobra.Command {
-	return newAgentHooksInstallCmdWithInstaller(agenthook.Install)
-}
-
 func newAgentHooksInstallCmdWithInstaller(install agentHookInstaller) *cobra.Command {
 	var all bool
 	var config, executable string
@@ -147,7 +141,7 @@ func newAgentHooksInstallCmdWithInstaller(install agentHookInstaller) *cobra.Com
 			if err != nil {
 				return err
 			}
-			path, warning, err := resolveAgentHookExecutable(executable, agentHookExecutableEnv{Executable: os.Executable, EvalSymlinks: pathresolve.EvalSymlinks, Path: os.Getenv("PATH"), GOOS: runtime.GOOS})
+			path, warning, err := resolveAgentHookExecutable(executable, defaultAgentHookExecutableEnv())
 			if err != nil {
 				return err
 			}
@@ -169,24 +163,14 @@ func validateAgentHookConfigFlag(cmd *cobra.Command, config string) error {
 
 func agentHookUserCompletion(single bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(_ *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
-		var names []string
-		if !single || len(args) == 0 {
-			for _, p := range sessionStartProfiles() {
-				name := string(p.Agent)
-				already := false
-				for _, arg := range args {
-					if strings.EqualFold(arg, name) {
-						already = true
-					}
-				}
-				if !already && strings.HasPrefix(name, prefix) {
-					names = append(names, name)
-				}
-			}
+		if single && len(args) > 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		return names, cobra.ShellCompDirectiveNoFileComp
+		return nativeHookNames(prefix, args), cobra.ShellCompDirectiveNoFileComp
 	}
 }
+
+func newAgentHooksUninstallCmd() *cobra.Command { return newNativeAgentHooksMutationCmd(true) }
 
 type agentHookInstallPlan struct {
 	Target   agentHookTarget
@@ -210,12 +194,13 @@ func runAgentHookInstall(cmd *cobra.Command, targets []agentHookTarget, executab
 			continue
 		}
 		plan.Options = agenthook.InstallOptions{ConfigPath: target.ConfigPath, Executable: executable,
-			Arguments: []string{"agent-hooks", "contract", string(target.Agent), "--source", agentContractHookSource},
-			Marker:    agentContractMarker, Hooks: []agenthook.Hook{contractRegistrationHook(target.Agent)}}
-		plan.Result, err = agenthook.PlanInstall(target.Agent, plan.Options)
-		if err != nil {
-			return err
+			Arguments: []string{"agent-hooks", "contract", string(target.Agent)},
+			Marker:    "contract", Hooks: []agenthook.Hook{contractRegistrationHook(target.Agent)}}
+		ownedPlan, planErr := planOwnedAgentHookInstall(target.Agent, plan.Options)
+		if planErr != nil {
+			return planErr
 		}
+		plan.Result = ownedPlan.result
 		current, err := inspectAgentHookEntries(target.Agent, target.ConfigPath)
 		if err != nil {
 			return err
@@ -320,58 +305,4 @@ func printAgentHookMutations(cmd *cobra.Command, verb string, results []agentHoo
 		}
 	}
 	return nil
-}
-
-func newAgentHooksUninstallCmd() *cobra.Command {
-	var all bool
-	var config string
-	cmd := &cobra.Command{
-		Use: "uninstall (<harness>... | --all)", Short: "Remove user contract hooks while preserving foreign hooks",
-		Long:              "Remove marker-owned contract hooks from user configs through Kit. Missing configs are a successful no-op.\n\nUser scope is the default and only scope; --config requires exactly one harness.\nWorkspaces that skipped their Codex contract hook may need kata init --with-codex-hooks afterward.",
-		ValidArgsFunction: agentHookUserCompletion(false),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validateAgentHookConfigFlag(cmd, config); err != nil {
-				return err
-			}
-			targets, err := selectAgentHookTargets(args, all, config)
-			if err != nil {
-				return err
-			}
-			// Preflight all configs before publishing any removal.
-			for _, target := range targets {
-				if target.SkipReason != "" {
-					continue
-				}
-				if _, err := agenthook.PlanUninstall(target.Agent, target.ConfigPath, agentContractMarker); err != nil {
-					return err
-				}
-			}
-			results := make([]agentHookMutation, 0, len(targets))
-			for _, target := range targets {
-				result := agentHookMutation{Harness: string(target.Agent), ConfigPath: target.ConfigPath, State: "absent", Warnings: []string{}}
-				if target.SkipReason != "" {
-					result.State = "skipped"
-					result.Reason = target.SkipReason
-				} else {
-					removed, err := agenthook.Uninstall(target.Agent, target.ConfigPath, agentContractMarker)
-					if err != nil {
-						return agentHookWriteError(result, results, err)
-					}
-					result.Changed = removed.Changed
-					if result.Changed {
-						result.State = "removed"
-						if target.Agent == agenthook.AgentCodex {
-							result.Warnings = append(result.Warnings,
-								"workspaces initialized while the user hook existed may have no contract hook; run kata init --with-codex-hooks there to restore it")
-						}
-					}
-				}
-				results = append(results, result)
-			}
-			return printAgentHookMutations(cmd, "uninstall", results)
-		},
-	}
-	cmd.Flags().BoolVar(&all, "all", false, "select every supported harness with an existing config root")
-	cmd.Flags().StringVar(&config, "config", "", "explicit config file; requires exactly one harness")
-	return cmd
 }

@@ -19,6 +19,9 @@ func isolateAgentHookHomes(t *testing.T) string {
 			t.Setenv(p.ConfigEnvironment, filepath.Join(home, string(p.Agent)))
 		}
 	}
+	for _, name := range []string{"XDG_CONFIG_HOME", "PI_CODING_AGENT_DIR", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_PROFILE", "OPENCLAW_HOME", "GROK_HOME", "KIMI_CODE_HOME"} {
+		t.Setenv(name, "")
+	}
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
 	return home
 }
@@ -93,8 +96,8 @@ func TestAgentHooksKitContractRegistration(t *testing.T) {
 		}
 		_, err := agenthook.PlanInstall(profile.Agent, agenthook.InstallOptions{
 			ConfigPath: filepath.Join(t.TempDir(), profile.ConfigFilename), Executable: os.Args[0],
-			Arguments: []string{"agent-hooks", "contract", string(profile.Agent), "--source", agentContractHookSource},
-			Marker:    "--source " + agentContractHookSource, Hooks: []agenthook.Hook{hook},
+			Arguments: []string{"agent-hooks", "contract", string(profile.Agent), "--source", legacyAgentContractHookSource},
+			Marker:    "--source " + legacyAgentContractHookSource, Hooks: []agenthook.Hook{hook},
 		})
 		require.NoError(t, err)
 	}

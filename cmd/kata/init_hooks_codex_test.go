@@ -25,17 +25,21 @@ func readCodexHooks(t *testing.T, dir string) map[string]any {
 func expectedCodexHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
-		"command":        "kata agent-hooks attention start --source kata-agent-hook-start",
-		"commandWindows": "kata agent-hooks attention start --source kata-agent-hook-start",
+		"command":        "kata attention-hook start",
+		"commandWindows": "kata attention-hook start",
 		"timeout":        json.Number("10"),
 	}
+}
+
+func expectedCodexSessionEndGroups() []any {
+	return []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "kata attention-hook end", "commandWindows": "kata attention-hook end", "timeout": json.Number("10")}}}}
 }
 
 func expectedCodexContractHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
-		"command":        "kata agent-hooks contract codex --source kata-agent-contract-hook",
-		"commandWindows": "kata agent-hooks contract codex --source kata-agent-contract-hook",
+		"command":        "kata agent-contract-hook",
+		"commandWindows": "kata agent-contract-hook",
 		"timeout":        json.Number("10"),
 	}
 }
@@ -67,6 +71,7 @@ func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
 	assert.Equal(t, map[string]any{
 		"hooks": map[string]any{
 			"SessionStart": expectedCodexSessionStartGroups(),
+			"SessionEnd":   expectedCodexSessionEndGroups(),
 		},
 	}, readCodexHooks(t, dir))
 }
@@ -90,7 +95,7 @@ func TestApplyCodexHooks_UpgradesManagedCommands(t *testing.T) {
 		readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 }
 
-func TestApplyCodexHooks_PreservesLegacyCommandWithExplicitNonScopedMatcher(t *testing.T) {
+func TestApplyCodexHooks_NormalizesDefaultWithNonScopedMatcher(t *testing.T) {
 	tests := []struct {
 		name    string
 		matcher any
@@ -122,9 +127,7 @@ func TestApplyCodexHooks_PreservesLegacyCommandWithExplicitNonScopedMatcher(t *t
 			require.NoError(t, err)
 			hooks := readCodexHooks(t, dir)["hooks"].(map[string]any)
 			groups := hooks["SessionStart"].([]any)
-			require.Len(t, groups, 3)
-			assert.Equal(t, tt.matcher, groups[0].(map[string]any)["matcher"])
-			assert.Equal(t, []any{legacyHandler}, groups[0].(map[string]any)["hooks"])
+			assert.Equal(t, expectedCodexSessionStartGroups(), groups)
 		})
 	}
 }
@@ -134,7 +137,7 @@ func TestApplyCodexHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
 	codexDir := filepath.Join(dir, ".codex")
 	require.NoError(t, os.MkdirAll(codexDir, 0o750))
 	userCommand := "notify-wrapper kata attention-hook start"
-	settings := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"` + userCommand + `"},{"type":"command","command":"kata attention-hook start","timeout":11}]}]}}`
+	settings := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"` + userCommand + `"},{"type":"command","command":"kata attention-hook start --source custom.txt","timeout":11}]}]}}`
 	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(settings), 0o644)) //nolint:gosec // test fixture under TempDir
 
 	_, _, err := applyCodexHooks(dir)
@@ -143,7 +146,7 @@ func TestApplyCodexHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
 	groups := hooks["SessionStart"].([]any)
 	assert.Equal(t, []any{
 		map[string]any{"type": "command", "command": userCommand},
-		map[string]any{"type": "command", "command": "kata attention-hook start", "timeout": json.Number("11")},
+		map[string]any{"type": "command", "command": "kata attention-hook start --source custom.txt", "timeout": json.Number("11")},
 	}, groups[0].(map[string]any)["hooks"])
 }
 
@@ -189,4 +192,25 @@ func TestApplyCodexHooks_WarnsOnConfigTomlHooks(t *testing.T) {
 	assert.True(t, changed)
 	require.Len(t, warnings, 1)
 	assert.Contains(t, warnings[0], "already defines a [hooks] table")
+}
+
+func TestApplyCodexHooksTerminalLifecyclePreservesStartIdentity(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := applyCodexHooks(dir)
+	require.NoError(t, err)
+	hooks := readCodexHooks(t, dir)["hooks"].(map[string]any)
+	groups, ok := hooks["SessionEnd"].([]any)
+	require.True(t, ok, "native SessionEnd must be installed")
+	require.Len(t, groups, 1)
+	handler := groups[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+	require.Equal(t, "kata attention-hook end", handler["command"])
+	require.Equal(t, expectedCodexSessionStartGroups(), hooks["SessionStart"])
+	before, err := os.ReadFile(filepath.Join(dir, ".codex", "hooks.json")) //nolint:gosec // G304: fixture file is created by the test under its temporary home or SDK setup.
+	require.NoError(t, err)
+	changed, _, err := applyCodexHooks(dir)
+	require.NoError(t, err)
+	require.False(t, changed)
+	after, err := os.ReadFile(filepath.Join(dir, ".codex", "hooks.json")) //nolint:gosec // G304: fixture file is created by the test under its temporary home or SDK setup.
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 }

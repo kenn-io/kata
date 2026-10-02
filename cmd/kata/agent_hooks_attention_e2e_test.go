@@ -102,7 +102,7 @@ func TestE2E_AgentHooksAttentionParity(t *testing.T) {
 				}
 				before := attentionSnapshot(t, env, pid, ref)
 				t.Setenv("KATA_REF", ref)
-				args := []string{"attention-hook", scenario.mode, "--source", "kata-agent-hook-" + scenario.mode}
+				args := []string{"attention-hook", scenario.mode}
 				if visible {
 					args = []string{"agent-hooks", "attention", scenario.mode}
 				}

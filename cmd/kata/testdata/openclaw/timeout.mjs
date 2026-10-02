@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+const [plugin,workspace]=process.argv.slice(2),root=process.env.OPENCLAW_TEST_ROOT;
+const mod=(await import(pathToFileURL(plugin))).default,handlers=new Map();
+mod.register({config:{plugins:{entries:{[mod.id]:{enabled:true,hooks:{allowConversationAccess:true}}}}},on:(n,f)=>handlers.set(n,f),lifecycle:{onDispose(){}}});
+const context=sessionId=>({sessionId,sessionKey:'agent:example-agent:main',agentId:'example-agent',workspaceDir:workspace,hookInvocation:{assertActive(){}}});
+assert.equal(await handlers.get('before_prompt_build')({},context('one')),undefined);
+fs.writeFileSync(path.join(root,'slow-attention'),'');
+const prompts=['two','three','four'].map(id=>handlers.get('before_prompt_build')({},context(id)));
+await new Promise(r=>setTimeout(r,30));
+const start=Date.now();await handlers.get('session_end')({sessionId:'one',sessionKey:'agent:example-agent:main',reason:'shutdown'},context('one'));
+assert.ok(Date.now()-start<900,'terminal callback must fit bounded native drain despite queued starts');
+await Promise.all(prompts);await new Promise(r=>setTimeout(r,50));
+const calls=fs.readFileSync(path.join(root,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+assert.equal(calls.filter(c=>c.args[3]==='end').length,0,'expired queued cleanup must not write late');
+console.log('queued terminal cleanup bounds passed');

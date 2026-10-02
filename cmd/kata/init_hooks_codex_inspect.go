@@ -71,7 +71,7 @@ func codexUserContractPath(workspacePath string) (string, error) {
 func codexContractHookPresent(path string) (bool, error) {
 	// Kit validates the native hook layout and ownership without editing it.
 	// Changed alone is insufficient: it can reflect another event or empty groups.
-	if _, err := agenthook.PlanUninstall(agenthook.AgentCodex, path, "--source "+agentContractHookSource); err != nil {
+	if _, err := agenthook.PlanUninstall(agenthook.AgentCodex, path, "--source "+legacyAgentContractHookSource); err != nil {
 		return false, err
 	}
 	parsed, err := readCodexHookConfig(path)
@@ -113,7 +113,8 @@ func codexConfigHasContract(parsed map[string]any, requireFullMatcher bool) bool
 		handlers, _ := group["hooks"].([]any)
 		for _, rawHandler := range handlers {
 			handler, _ := rawHandler.(map[string]any)
-			if codexHandlerHasMarker(handler, "--source "+agentContractHookSource) {
+			entry := makeAgentHookEntry(agenthook.AgentCodex, string(agenthook.EventSessionStart), 0, 0, group, handler)
+			if entry.Contract && (!requireFullMatcher || effectiveAgentHookDefault(agenthook.AgentCodex, entry)) {
 				return true
 			}
 		}
@@ -145,12 +146,6 @@ func codexMatcherCoversContract(group map[string]any) bool {
 	return true
 }
 
-func codexHandlerHasMarker(handler map[string]any, marker string) bool {
-	// Match kit's ownership rules; commandWindows alone is not portable.
-	command, _ := handler["command"].(string)
-	return strings.Contains(command, marker)
-}
-
 func codexHookFileTracked(dir string) (bool, error) {
 	discovered, err := config.DiscoverPaths(dir)
 	if err != nil {
@@ -178,8 +173,8 @@ func codexHookFileTracked(dir string) (bool, error) {
 func codexAttentionHookCurrent(parsed map[string]any) bool {
 	expected := map[string]any{
 		"type":           "command",
-		"command":        "kata agent-hooks attention start --source " + attentionHookSource + "start",
-		"commandWindows": "kata agent-hooks attention start --source " + attentionHookSource + "start",
+		"command":        "kata attention-hook start",
+		"commandWindows": "kata attention-hook start",
 		"timeout":        jsontext.Value("10"),
 	}
 	hooks, _ := parsed["hooks"].(map[string]any)
@@ -192,7 +187,7 @@ func codexAttentionHookCurrent(parsed map[string]any) bool {
 			handlers, _ := group["hooks"].([]any)
 			for _, rawHandler := range handlers {
 				handler, _ := rawHandler.(map[string]any)
-				if !codexHandlerHasMarker(handler, "--source "+attentionHookSource+"start") {
+				if classifyAgentHookHandler(agenthook.AgentCodex, handler) != attentionStartHook {
 					continue
 				}
 				owned++

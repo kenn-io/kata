@@ -5,7 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"go.kenn.io/kit/pathresolve"
 )
 
 type agentHookExecutableEnv struct {
@@ -13,6 +16,13 @@ type agentHookExecutableEnv struct {
 	EvalSymlinks func(string) (string, error)
 	Path         string
 	GOOS         string
+}
+
+func defaultAgentHookExecutableEnv() agentHookExecutableEnv {
+	return agentHookExecutableEnv{
+		Executable: os.Executable, EvalSymlinks: pathresolve.EvalSymlinks,
+		Path: os.Getenv("PATH"), GOOS: runtime.GOOS,
+	}
 }
 
 func resolveAgentHookExecutable(override string, env agentHookExecutableEnv) (string, string, error) {

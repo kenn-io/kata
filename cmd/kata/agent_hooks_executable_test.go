@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/agenthook"
+	"go.kenn.io/kit/fslink"
 )
 
 func TestAgentHookExecutableResolution(t *testing.T) {
@@ -51,9 +52,36 @@ func TestAgentHookExecutableResolution(t *testing.T) {
 	require.Equal(t, override, got)
 }
 
+func TestDefaultAgentHookExecutableEnvPreservesStableDirectoryAlias(t *testing.T) {
+	root := t.TempDir()
+	versioned := filepath.Join(root, "versioned")
+	stable := filepath.Join(root, "stable")
+	require.NoError(t, os.Mkdir(versioned, 0700))
+	name := "kata"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	running := filepath.Join(versioned, name)
+	require.NoError(t, os.WriteFile(running, []byte("fixture"), 0700)) //nolint:gosec // G306: isolated owner-only executable fixture for PATH selection.
+	if runtime.GOOS == "windows" {
+		if err := fslink.CreateJunction(versioned, stable); err != nil {
+			t.Skipf("junction unavailable: %v", err)
+		}
+	} else {
+		require.NoError(t, os.Symlink(versioned, stable))
+	}
+	t.Setenv("PATH", stable)
+	env := defaultAgentHookExecutableEnv()
+	env.Executable = func() (string, error) { return running, nil }
+	got, warning, err := resolveAgentHookExecutable("", env)
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(stable, name), got)
+	require.Empty(t, warning)
+}
+
 func TestAgentHookExecutableCommandParsing(t *testing.T) {
 	for _, path := range []string{"/tmp/example/bin/kata", "/tmp/example path/kata", "/tmp/example's path/kata", `C:\Program Files\example\kata.exe`, `C:\example\quoted"kata.exe`, `C:\example path\`} {
-		commands, err := agenthook.BuildCommand(path, "agent-hooks", "contract", "codex", "--source", agentContractHookSource)
+		commands, err := agenthook.BuildCommand(path, "agent-hooks", "contract", "codex", "--source", legacyAgentContractHookSource)
 		require.NoError(t, err)
 		for _, tc := range []struct {
 			command, goos string

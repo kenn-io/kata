@@ -21,7 +21,7 @@ func userCodexContractFixture(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
 	path := filepath.Join(home, "hooks.json")
-	writeCodexFixture(t, path, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`)
+	writeCodexFixture(t, path, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`)
 	return path
 }
 
@@ -38,9 +38,34 @@ func TestApplyCodexHooks_DeduplicatesUserContract(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, []string{"removed workspace contract hook: " + userPath + " already injects it"}, notes)
-	assert.Equal(t, map[string]any{"hooks": map[string]any{"SessionStart": []any{
+	assert.Equal(t, map[string]any{"hooks": map[string]any{"SessionEnd": expectedCodexSessionEndGroups(), "SessionStart": []any{
 		map[string]any{"matcher": codexSessionStartMatcher, "hooks": []any{expectedCodexHandler()}},
 	}}}, readCodexHooks(t, dir))
+	userAfter, err := os.ReadFile(userPath) //nolint:gosec // test-owned config under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, userBefore, userAfter)
+}
+
+func TestApplyCodexHooks_UserContractWithShortTimeoutKeepsWorkspaceDefault(t *testing.T) {
+	dir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	handler := expectedCodexContractHandler()
+	handler["timeout"] = json.Number("2")
+	data, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{
+		map[string]any{"matcher": codexContractSessionStartMatcher, "hooks": []any{handler}},
+	}}})
+	require.NoError(t, err)
+	userPath := filepath.Join(home, "hooks.json")
+	writeCodexFixture(t, userPath, string(data))
+	userBefore, err := os.ReadFile(userPath) //nolint:gosec // test-owned config under TempDir
+	require.NoError(t, err)
+
+	changed, notes, err := applyCodexHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Empty(t, notes)
+	assert.Equal(t, expectedCodexSessionStartGroups(), readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 	userAfter, err := os.ReadFile(userPath) //nolint:gosec // test-owned config under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, userBefore, userAfter)
@@ -51,7 +76,7 @@ func TestApplyCodexHooks_KeepsTrackedWorkspace(t *testing.T) {
 		name, data string
 		foreign    bool
 	}{
-		{"legacy attention and contract", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]},{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, false},
+		{"legacy attention and contract", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]},{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, false},
 		{"attention only", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]}]}}`, false},
 		{"foreign only", ` { "hooks": { "SessionStart": [{"hooks":[{"command":"echo example"}]}] } } `, true},
 	} {
@@ -101,11 +126,12 @@ func TestApplyCodexHooks_UserContractDetection(t *testing.T) {
 		wantGroups int
 	}{
 		{"missing", "", 2},
-		{"legacy", `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 1},
-		{"visible", `{"hooks":{"SessionStart":[{"hooks":[{"command":"/opt/bin/kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 1},
+		{"legacy", `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 1},
+		{"visible", `{"hooks":{"SessionStart":[{"hooks":[{"command":"/opt/bin/kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"/opt/bin/kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 1},
 		{"Windows command", `{"hooks":{"SessionStart":[{"hooks":[{"commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 2},
-		{"unmarked", `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-contract-hook"}]}]}}`, 2},
-		{"other event", `{"hooks":{"Stop":[{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 2},
+		{"bare", `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-contract-hook","commandWindows":"kata agent-contract-hook"}]}]}}`, 1},
+		{"incomplete platform", `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-contract-hook"}]}]}}`, 2},
+		{"other event", `{"hooks":{"Stop":[{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, 2},
 		{"empty foreign group", `{"hooks":{"SessionStart":[{"hooks":[]}]}}`, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -163,6 +189,7 @@ func TestApplyCodexHooks_InstallsWorkspaceWithoutUserHome(t *testing.T) {
 	assert.Empty(t, notes)
 	assert.Equal(t, map[string]any{"hooks": map[string]any{
 		"SessionStart": expectedCodexSessionStartGroups(),
+		"SessionEnd":   expectedCodexSessionEndGroups(),
 	}}, readCodexHooks(t, dir))
 }
 
@@ -220,7 +247,7 @@ func TestApplyCodexHooks_KeepsTrackedNestedAndLinkedWorkspace(t *testing.T) {
 			if kind == "nested" {
 				dir = filepath.Join(repo, "example-workspace")
 			}
-			data := ` { "hooks": {"SessionStart": [{"hooks": [{"command":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]} } `
+			data := ` { "hooks": {"SessionStart": [{"hooks": [{"command":"kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]} } `
 			writeCodexFixture(t, filepath.Join(dir, ".codex", "hooks.json"), data)
 			runGit(t, repo, "add", "--all")
 			if kind == "linked" {
