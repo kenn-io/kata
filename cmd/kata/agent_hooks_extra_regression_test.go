@@ -62,7 +62,7 @@ func TestExtraZCodeUsesArgvAndEnablesNativeHooks(t *testing.T) {
 	opts := extraOptions(t, "zcode")
 	opts.ConfigPath = filepath.Join(opts.Home, "config.json")
 	opts.Executable = "/opt/example path/kata'$(echo literal)"
-	require.NoError(t, os.WriteFile(opts.ConfigPath, []byte(`{"theme":"dark","hooks":{"timeoutMs":30000,"events":{"Stop":[{"matcher":".*","hooks":[{"type":"process","command":"echo","args":["keep"]}]}]}}}`), 0600))
+	require.NoError(t, os.WriteFile(opts.ConfigPath, []byte(`{"theme":"dark","hooks":{"timeoutMs":30000,"events":{}}}`), 0600))
 	plan, err := planExtraAgentHooks(opts, false)
 	require.NoError(t, err)
 	_, err = publishNativeAgentHookPlan(plan)
@@ -82,7 +82,6 @@ func TestExtraZCodeUsesArgvAndEnablesNativeHooks(t *testing.T) {
 		require.Equal(t, want, handler["args"])
 		require.Equal(t, float64(10000), handler["timeoutMs"])
 	}
-	require.Contains(t, events, "Stop")
 	require.NotContains(t, events, "SessionEnd")
 }
 

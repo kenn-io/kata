@@ -125,6 +125,44 @@ func TestExtraZCodePreservesExplicitDisabledGlobalPolicy(t *testing.T) {
 	require.Equal(t, false, root["hooks"].(map[string]any)["enabled"])
 }
 
+func TestExtraZCodePreservesUnsetDisabledPolicyWhenForeignHooksExist(t *testing.T) {
+	opts := extraOptions(t, "zcode")
+	opts.ConfigPath = filepath.Join(opts.Home, "config.json")
+	before := []byte(`{"hooks":{"timeoutMs":30000,"events":{"Stop":[{"hooks":[{"type":"process","command":"foreign-stop"}]}]}}}`)
+	require.NoError(t, os.WriteFile(opts.ConfigPath, before, 0600))
+
+	plan, err := planExtraAgentHooks(opts, false)
+	require.NoError(t, err)
+	require.False(t, plan.Contract)
+	require.False(t, plan.AttentionStart)
+	require.False(t, plan.AttentionEnd)
+	require.Contains(t, plan.Warnings, "ZCode hooks.enabled is unset while other hooks are present; preserving the disabled policy. Set hooks.enabled=true to activate configured hooks")
+	_, err = publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+	data, err := os.ReadFile(opts.ConfigPath)
+	require.NoError(t, err)
+	root, err := parseExtraJSON(data, true)
+	require.NoError(t, err)
+	hooks := root["hooks"].(map[string]any)
+	require.NotContains(t, hooks, "enabled")
+	events := hooks["events"].(map[string]any)
+	require.Equal(t, "foreign-stop", events["Stop"].([]any)[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"])
+
+	removal, err := planExtraAgentHooks(opts, true)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(removal)
+	require.NoError(t, err)
+	data, err = os.ReadFile(opts.ConfigPath)
+	require.NoError(t, err)
+	root, err = parseExtraJSON(data, true)
+	require.NoError(t, err)
+	hooks = root["hooks"].(map[string]any)
+	require.NotContains(t, hooks, "enabled")
+	events = hooks["events"].(map[string]any)
+	require.Equal(t, "foreign-stop", events["Stop"].([]any)[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"])
+	require.NotContains(t, events, "SessionStart")
+}
+
 func TestExtraTOMLStatusAndReinstallHonorRestrictiveMatcher(t *testing.T) {
 	for _, tc := range []struct{ target, event, mode string }{
 		{"kimi-code", "UserPromptSubmit", "contract"},
