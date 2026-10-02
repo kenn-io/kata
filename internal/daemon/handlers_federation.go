@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/federation/joincommand"
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -18,6 +21,20 @@ import (
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
 )
+
+func isLoopbackHTTPOrigin(raw string) bool {
+	origin, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(origin.Hostname()), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ipHost, _, _ := strings.Cut(host, "%")
+	ip := net.ParseIP(ipHost)
+	return ip != nil && ip.IsLoopback()
+}
 
 func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
@@ -150,7 +167,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		body, err := projectFederationBody(ctx, cfg.DB, in.ProjectID)
+		body, err := enabledHubFederationBody(ctx, cfg.DB, in.ProjectID)
 		if err != nil {
 			return nil, err
 		}
@@ -194,6 +211,49 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := db.ValidateTokenActor(actor); err != nil {
 			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
 		}
+		hubURL := in.Body.HubURL
+		allowInsecure := in.Body.AllowInsecure
+		if hubURL == "" && cfg.WebSessions != nil {
+			browserOrigin := cfg.WebSessions.Origin()
+			if !isLoopbackHTTPOrigin(browserOrigin) {
+				hubURL = browserOrigin
+				// The configured browser origin already passed deployment policy.
+				allowInsecure = allowInsecure || cfg.Auth.TrustPrivateNetwork
+			}
+		}
+		if hubURL != "" {
+			baseURL, err := httpurl.CanonicalHTTPBaseURL(hubURL)
+			if err != nil {
+				return nil, api.NewError(http.StatusBadRequest, "validation", "hub_url must be an HTTP(S) base URL allowed by transport policy", "", nil)
+			}
+			origin, _ := httpurl.CanonicalHTTPOrigin(baseURL)
+			if target := resolveWebDaemon(config.CatalogDaemonConfig{URL: origin, AllowInsecure: allowInsecure}); target.baseURL == "" {
+				return nil, api.NewError(http.StatusBadRequest, "validation", "hub_url must be an HTTP(S) base URL allowed by transport policy", "", nil)
+			}
+			hubURL = baseURL
+			allowInsecure, _ = httpurl.EffectiveHTTPAllowInsecure(hubURL, allowInsecure)
+		}
+		// Resolve all response metadata before issuing a durable credential.
+		var join *api.FederationJoinInstructions
+		if in.Body.ProjectID != nil {
+			metadata, err := enabledHubFederationBody(ctx, cfg.DB, *in.Body.ProjectID)
+			var metadataErr *api.APIError
+			optionalMetadataUnavailable := in.Body.HubURL == "" && errors.As(err, &metadataErr) &&
+				(metadataErr.Code == "federation_not_found" || metadataErr.Code == "federation_not_enabled")
+			if err != nil && !optionalMetadataUnavailable {
+				return nil, err
+			}
+			// Legacy callers omitting hub_url may issue a grant before enabling the hub.
+			// They receive no join instructions until an enabled hub is available.
+			if err == nil {
+				join = &api.FederationJoinInstructions{
+					HubURL: hubURL, HubProjectID: metadata.ProjectID, HubProjectUID: metadata.ProjectUID,
+					ProjectName: metadata.ProjectName, BaselineThroughEventID: metadata.BaselineThroughEventID,
+					ReplayHorizonEventID: metadata.ReplayHorizonEventID, AllowInsecure: allowInsecure,
+					AdoptExisting: in.Body.AllowAdoptionSnapshotAuthors,
+				}
+			}
+		}
 		created, err := cfg.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 			Token:                        in.Body.Token,
 			SpokeInstanceUID:             in.Body.SpokeInstanceUID,
@@ -209,9 +269,14 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		return &api.CreateFederationEnrollmentResponse{
-			Body: federationEnrollmentToOut(created.Enrollment, created.Token),
-		}, nil
+		out := federationEnrollmentToOut(created.Enrollment, created.Token)
+		if join != nil {
+			join.Token, join.Actor, join.Capabilities = created.Token, created.Enrollment.Actor, created.Enrollment.Capabilities
+			join.PushEnabled = slices.Contains(strings.Split(created.Enrollment.Capabilities, ","), "push")
+			join.JoinCommand = joincommand.Build(*join)
+			out.Join = join
+		}
+		return &api.CreateFederationEnrollmentResponse{Body: out}, nil
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -1170,6 +1235,17 @@ func latestTime(times ...*time.Time) *time.Time {
 		}
 	}
 	return latest
+}
+
+func enabledHubFederationBody(ctx context.Context, store db.Storage, projectID int64) (api.ProjectFederationBody, error) {
+	binding, err := store.FederationBindingByProject(ctx, projectID)
+	if err != nil {
+		return api.ProjectFederationBody{}, federationError(err)
+	}
+	if binding.Role != db.FederationRoleHub || !binding.Enabled {
+		return api.ProjectFederationBody{}, api.NewError(http.StatusConflict, "federation_not_enabled", "project must be an enabled federation hub", "", nil)
+	}
+	return projectFederationBody(ctx, store, projectID)
 }
 
 func projectFederationBody(ctx context.Context, store db.Storage, projectID int64) (api.ProjectFederationBody, error) {

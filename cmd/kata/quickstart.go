@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/config"
 )
 
 const agentQuickstartText = `# kata agent quickstart
@@ -262,6 +263,146 @@ Use --expect-project-uid <uid> when project identity is known; never initialize 
 Explicit server URLs stay pinned; restore their server or tunnel.
 `
 
+const externalAgentOnboardingText = `
+# External agent without hooks
+
+Run kata quickstart at session start when your harness has no session hooks.
+It does not install hooks, polling processes, or configuration.
+
+Keep ordinary commands pointed at your spoke daemon. Obtain its durable UID:
+
+   kata federation identity --json
+
+Give that instance_uid, the intended project, and actor to the hub administrator.
+Keep the selected daemon pointed at the spoke because it identifies the spoke
+project. For a registered local spoke profile, pass its selector explicitly.
+The hub catalog entry with a matching origin supplies credentials based on
+--hub-url:
+
+For a request-actor hub, the administrator selects the agent actor with --actor;
+this example uses external-agent. Identity-mode enrollment is attributed to the
+administrator's identity token, so --actor cannot override it.
+
+   kata --daemon <spoke-profile> federation enroll hub-project \
+     --hub-url https://hub.example \
+     --spoke-instance <spoke-instance-uid> --actor external-agent
+
+The administrator returns the generated kata federation join command, with its
+separate enrollment token. Run it against the spoke, not the hub. For example:
+
+   kata federation join --project spoke-project \
+     --hub-url https://hub.example --hub-project-id <hub-project-id> \
+     --token <enrollment-token> --capabilities claim,pull,push \
+     --actor external-agent --push
+
+Prefer the generated command and preserve its project UID, replay/baseline
+cursors, actor, and capabilities. Existing standalone projects need matching
+adoption permission and --adopt-existing; a new replica needs neither adoption
+nor prior kata init. Do not request the hub's administration token for the agent.
+Treat the generated join command as a secret.
+
+Use the HTTPS hostname matching the hub certificate. An IP substitution may
+fail certificate validation. --allow-insecure does not bypass TLS certificate
+checks; it opts into plaintext transport on a trusted private network.
+
+For request-actor spokes, set KATA_AUTHOR to the actor from the generated join
+command. Identity-mode spokes use the identity token's actor; KATA_AUTHOR cannot
+override it, so the token actor must match the enrollment actor:
+
+   export KATA_AUTHOR='<actor-from-generated-join-command>'
+   export KATA_INBOX_USER=external-agent
+   kata whoami
+   kata federation status --project spoke-project --json
+   kata inbox --project spoke-project --for external-agent --json
+   kata events --project spoke-project --after 0 --limit 100 --json
+
+Push-enabled bindings attribute local-origin work to that actor. Check
+pull/push status before claiming work. Poll the
+exact inbox while idle. Save event cursors per daemon/project and resume with
+--after <cursor>. On reset_required, discard cached state, refresh reads, and
+resume from the returned reset cursor. Reads may lag the hub until sync pulls.
+Clear requests only after handling, then read the inbox again:
+
+   kata notify abc4 --project spoke-project --to external-agent --clear
+   kata inbox --project spoke-project --for external-agent --json
+`
+
+const externalAgentOnboardingCompactText = `For an external agent without hooks, run quickstart at session start and poll its exact idle inbox.
+On the spoke: kata federation identity --json; give instance_uid and intended actor/project to the hub administrator.
+Keep the selected daemon pointed at the spoke; --hub-url selects credentials from a hub catalog entry with the matching origin. Enroll with: kata --daemon <spoke-profile> federation enroll hub-project --hub-url https://hub.example --spoke-instance <uid> --actor external-agent. Identity-mode hubs use the administrator's identity-token actor regardless of --actor.
+Run the returned kata federation join command against the spoke; preserve project UID, cursors, actor, capabilities, and adoption options. Treat its enrollment token as a secret.
+Use the HTTPS hostname matching the certificate; --allow-insecure does not bypass TLS certificate checks.
+For request-actor spokes, set KATA_AUTHOR to the actor from the generated join command. Identity-mode spokes use an identity token whose actor matches the enrollment actor; KATA_AUTHOR cannot override it.
+Check kata whoami and kata federation status before claiming; spoke inbox/events can lag the hub.
+`
+
+const embeddingsSetupText = `
+Embeddings are optional; lexical search works without configuration.
+This checks only local <KATA_HOME>/config.toml, without contacting any daemon
+or reading key files. For a remote daemon or another profile, configure that
+daemon's home and inspect its runtime with kata health --json.
+
+For Voyage, add this block to the intended daemon's config.toml only if wanted:
+
+   [search.embeddings]
+   base_url = "https://api.voyageai.com/v1"
+   model = "voyage-3-large"
+   dims = 1024
+   api_key_file = "~/.config/kata/embedding.key"
+
+Have your secret manager supply the key file. Use an absolute or ~/ path; on
+Unix make it owner-only (chmod 600). Never put a literal key in config.toml.
+Alternatively use api_key_env = "VOYAGE_API_KEY" and supply that variable to
+the daemon's launch environment; exporting it only in a later CLI shell does
+not update the running daemon. Existing inline api_key takes precedence over
+file/environment sources; remove it when switching to a secure source.
+
+An OpenAI-compatible provider uses its own endpoint, model, and dimensions.
+For OpenAI: base_url = "https://api.openai.com/v1", model =
+"text-embedding-3-small", dims = 1536; use api_key_file or api_key_env =
+"OPENAI_API_KEY". Configure one provider block, without duplicate TOML sections.
+Hosted embeddings send issue titles and bodies to the configured provider.
+Configure the intended search daemon's settings, not an unrelated CLI home.
+
+Restart the intended daemon after adding/changing provider settings. An existing
+provider's replaced key file needs kata daemon reload. Lifecycle commands use
+the current KATA_HOME, not --daemon; a remote daemon's operator reloads it.
+
+   kata health --json
+   kata search "words from existing work" --agent
+   kata search "words from existing work" --semantic --agent
+
+Check embeddings credential status, last_success_at, and backlog in health;
+ok=true alone does not establish working credentials. Default search can fall
+back to lexical; explicit --semantic exposes missing/rejected keys. Verify with
+existing work instead of creating a practice issue. Quickstart writes nothing.
+`
+
+const embeddingsSetupCompactText = `Embeddings are optional; lexical search works without configuration. Quickstart writes nothing and checks only local KATA_HOME/config.toml, without reading key files or contacting a daemon.
+For optional Voyage: [search.embeddings] base_url="https://api.voyageai.com/v1", model="voyage-3-large", dims=1024; for OpenAI: base_url="https://api.openai.com/v1", model="text-embedding-3-small", dims=1536.
+Keep keys outside config.toml: api_key_file="~/.config/kata/embedding.key" (owner-only, chmod 600), or api_key_env="VOYAGE_API_KEY"/"OPENAI_API_KEY" supplied to the daemon launch environment. Remove overriding inline api_key when switching sources.
+Restart the intended search daemon for provider settings; reload existing key files with kata daemon reload using its KATA_HOME. Hosted providers receive issue titles/bodies.
+Use kata health --json on the selected daemon to check embeddings credentials, last_success_at, and backlog; ok=true alone is insufficient.
+Verify existing work with kata search "words from existing work" --agent and kata search "words from existing work" --semantic --agent; default search can fall back to lexical.
+`
+
+func quickstartEmbeddingsStatus() string {
+	home, err := config.KataHome()
+	if err != nil {
+		return "could not inspect; check the intended daemon's configuration"
+	}
+	cfg, err := config.ReadDaemonConfigForHome(home)
+	if err != nil {
+		// Parser errors may contain inline credentials. Keep quickstart useful
+		// with malformed configuration without printing its contents.
+		return "could not inspect; check the intended daemon's configuration"
+	}
+	if cfg.Search.Embeddings.Enabled() {
+		return "configured (credentials and running daemon not checked)"
+	}
+	return "not configured (lexical search is available)"
+}
+
 func newQuickstartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "quickstart",
@@ -274,27 +415,33 @@ Default: full instructions for agents using kata.
 --json: instructions in a JSON response.
 --format contract: the canonical managed contract, exactly what kata agent-hooks contract injects.
 
-Run kata agent-hooks install --all to load the contract in every session on this machine.`,
+Run kata agent-hooks install --all to load the contract in every session on this machine.
+Without hooks, run kata quickstart at session start.
+Reads local embeddings settings without changing config or contacting a daemon.
+The managed contract format stays static.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			switch currentOutputMode() {
-			case outputContract:
+			if currentOutputMode() == outputContract {
 				_, err := fmt.Fprint(cmd.OutOrStdout(), agentContractText)
 				return err
+			}
+			status := "Local embeddings config: " + quickstartEmbeddingsStatus() + "\n"
+			full := agentQuickstartText + externalAgentOnboardingText + "\n# Optional embeddings setup\n\n" + status + embeddingsSetupText
+			switch currentOutputMode() {
 			case outputJSON:
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, map[string]string{
-					"quickstart": agentQuickstartText,
+					"quickstart": full,
 				}); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
 			case outputAgent:
-				_, err := fmt.Fprint(cmd.OutOrStdout(), "OK quickstart\n"+agentQuickstartCompactText)
+				_, err := fmt.Fprint(cmd.OutOrStdout(), "OK quickstart\n"+agentQuickstartCompactText+externalAgentOnboardingCompactText+status+embeddingsSetupCompactText)
 				return err
 			}
-			_, err := fmt.Fprint(cmd.OutOrStdout(), agentQuickstartText)
+			_, err := fmt.Fprint(cmd.OutOrStdout(), full)
 			return err
 		},
 	}

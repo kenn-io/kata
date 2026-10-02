@@ -7,6 +7,7 @@ services:
       - hub-data:/data/kata
     environment:
       KATA_HOME: /data/kata
+      KATA_DB: /data/kata/kata.db
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_TRUST_PRIVATE_NETWORK: "1"
       KATA_WEB_ALLOWED_HOSTS: "hub:7373"
@@ -26,6 +27,7 @@ services:
       - spoke-a-data:/data/kata
     environment:
       KATA_HOME: /data/kata
+      KATA_DB: /data/kata/kata.db
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_TRUST_PRIVATE_NETWORK: "1"
       KATA_WEB_ALLOWED_HOSTS: "spoke-a:7374"
@@ -45,6 +47,7 @@ services:
       - spoke-b-data:/data/kata
     environment:
       KATA_HOME: /data/kata
+      KATA_DB: /data/kata/kata.db
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_TRUST_PRIVATE_NETWORK: "1"
       KATA_WEB_ALLOWED_HOSTS: "spoke-b:7375"
@@ -72,6 +75,7 @@ services:
       - runner-data:/data/kata
     environment:
       KATA_HOME: /data/kata
+      KATA_DB: /data/kata/kata.db
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_ALLOW_INSECURE: "1"
       KATA_HTTP_TIMEOUT: 15s

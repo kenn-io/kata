@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	hubclient "go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -125,6 +126,7 @@ func federationEnableCmd() *cobra.Command {
 func federationEnrollCmd() *cobra.Command {
 	var spokeInstance string
 	var hubURL string
+	var hubToken string
 	var capabilities string
 	var token string
 	var actor string
@@ -159,10 +161,11 @@ func federationEnrollCmd() *cobra.Command {
 				}
 			}
 			hubBaseURL := strings.TrimRight(hubURL, "/")
-			hubClient, err := federationEnrollHTTPClient(ctx, hubBaseURL, allowInsecure)
+			hubClient, effectiveAllowInsecure, err := federationEnrollHTTPClientPolicy(ctx, hubBaseURL, allowInsecure, hubToken)
 			if err != nil {
 				return federationEnrollHTTPClientError(err)
 			}
+			allowInsecure = effectiveAllowInsecure
 			hub := hubAPI(ctx, hubBaseURL, hubClient)
 			requestActor := strings.TrimSpace(actor)
 			if requestActor == "" {
@@ -194,7 +197,7 @@ func federationEnrollCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			callResp, callErr := apiClient.CreateFederationEnrollmentWithResponse(hub.ctx, &generated.CreateFederationEnrollmentRequestOptions{Body: &generated.CreateFederationEnrollmentBody{SpokeInstanceUID: spokeInstance, ProjectID: project.ID, Capabilities: internalCaps, Token: &token, Actor: &requestActor, AllowAdoptionSnapshotAuthors: &adoptExisting}})
+			callResp, callErr := apiClient.CreateFederationEnrollmentWithResponse(hub.ctx, &generated.CreateFederationEnrollmentRequestOptions{Body: &generated.CreateFederationEnrollmentBody{HubURL: &hubBaseURL, AllowInsecure: &allowInsecure, SpokeInstanceUID: spokeInstance, ProjectID: project.ID, Capabilities: internalCaps, Token: &token, Actor: &requestActor, AllowAdoptionSnapshotAuthors: &adoptExisting}})
 			if err := externalCLITransportError(callResp, callErr); err != nil {
 				return err
 			}
@@ -221,12 +224,21 @@ func federationEnrollCmd() *cobra.Command {
 				AllowInsecure:          allowInsecure,
 			}
 			bundle.AdoptExisting = adoptExisting
+			if enrollment.Join != nil {
+				bundle.HubURL = enrollment.Join.HubURL
+				bundle.HubProjectID = enrollment.Join.HubProjectID
+				bundle.HubProjectUID = enrollment.Join.HubProjectUID
+				bundle.ReplayHorizonEventID = enrollment.Join.ReplayHorizonEventID
+				bundle.BaselineThroughEventID = enrollment.Join.BaselineThroughEventID
+				bundle.AllowInsecure = enrollment.Join.AllowInsecure
+			}
 			return printFederationEnrollment(cmd, project.Name, spokeInstance, enrollment, bundle)
 		},
 	}
 	cmd.Flags().StringVar(&spokeInstance, "spoke-instance", "", "spoke instance UID from `kata federation identity`")
 	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub URL reachable by the spoke")
-	cmd.Flags().StringVar(&capabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease")
+	cmd.Flags().StringVar(&hubToken, "hub-token", "", "explicit admin token for the target hub (use when no matching catalog credential is configured)")
+	cmd.Flags().StringVar(&capabilities, "capabilities", "claim,pull,push", "comma-separated capabilities: claim,pull,push (lease is an alias for claim)")
 	cmd.Flags().StringVar(&token, "token", "", "explicit enrollment token (default: generated)")
 	cmd.Flags().StringVar(&actor, "actor", "", "actor bound to this spoke enrollment")
 	cmd.Flags().BoolVar(&allowInsecure, "allow-insecure", false, "allow plaintext HTTP hub URL for enrollment and later spoke transport")
@@ -235,17 +247,42 @@ func federationEnrollCmd() *cobra.Command {
 }
 
 func federationEnrollHTTPClient(ctx context.Context, hubBaseURL string, allowInsecure bool) (*http.Client, error) {
-	httpClient, err := clientpkg.NewHTTPClient(ctx, hubBaseURL, clientpkg.Opts{
-		Timeout:       envHTTPTimeout(defaultHTTPTimeout),
-		AllowInsecure: allowInsecure,
-	})
+	client, _, err := federationEnrollHTTPClientPolicy(ctx, hubBaseURL, allowInsecure, "")
+	return client, err
+}
+
+func federationEnrollHTTPClientPolicy(ctx context.Context, hubBaseURL string, allowInsecure bool, hubToken string) (*http.Client, bool, error) {
+	// Hub credentials come only from hub-specific catalog entries whose origin
+	// matches this target. The local daemon's global token never authorizes a hub.
+	cat, err := config.ReadDaemonConfig()
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	in := hubAuthInputs{hubURL: hubBaseURL, hubToken: hubToken, allowInsecure: allowInsecure}
+	if selected := catalogByName(cat, flags.Daemon); selected != nil {
+		selectedOrigin, originErr := httpurl.CanonicalHTTPOrigin(selected.URL)
+		hubOrigin, hubErr := httpurl.CanonicalHTTPOrigin(hubBaseURL)
+		if originErr == nil && hubErr == nil && selectedOrigin == hubOrigin {
+			in.hubName = selected.Name
+		}
+	}
+	auth, err := resolveHubAdminAuth(cat, in)
+	if err != nil {
+		return nil, false, err
+	}
+	allowInsecure = auth.allowInsecure
+	httpClient, err := hubAdminClient(ctx, auth)
+	if err != nil {
+		return nil, false, err
 	}
 	if err := clientpkg.ConfigureOriginPinnedRedirects(httpClient, hubBaseURL); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return httpClient, nil
+	effective, err := httpurl.EffectiveHTTPAllowInsecure(hubBaseURL, allowInsecure)
+	if err != nil {
+		return nil, false, err
+	}
+	return httpClient, effective, nil
 }
 
 func federationEnrollHTTPClientError(err error) error {
@@ -582,11 +619,12 @@ func federationJoinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "join",
 		Short: "join a hub project as a spoke",
+		Long:  "Join a hub project as a spoke.\n\n--project <name> is the local project name to bind on this spoke.\nRun the complete join command returned by federation enroll on the spoke.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			projectName := strings.TrimSpace(flags.Project)
 			if projectName == "" {
-				return &cliError{Message: "--project is required", Kind: kindValidation, ExitCode: ExitValidation}
+				return &cliError{Message: "--project <local project name> is required to bind the hub project on this spoke", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			bundle.ProjectName = projectName
 			if bundle.HubURL == "" || bundle.HubProjectID <= 0 || bundle.Token == "" {
@@ -658,7 +696,7 @@ func federationJoinCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&bundle.ReplayHorizonEventID, "replay-horizon", 0, "hub replay horizon event ID")
 	cmd.Flags().Int64Var(&bundle.BaselineThroughEventID, "baseline-through", 0, "baseline-through event ID")
 	cmd.Flags().StringVar(&bundle.Token, "token", "", "enrollment token")
-	cmd.Flags().StringVar(&bundle.DisplayCapabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease")
+	cmd.Flags().StringVar(&bundle.DisplayCapabilities, "capabilities", "claim,pull,push", "comma-separated capabilities: claim,pull,push (lease is an alias for claim)")
 	cmd.Flags().StringVar(&bundle.Actor, "actor", "", "actor bound to this spoke")
 	cmd.Flags().BoolVar(&bundle.AllowInsecure, "allow-insecure", false, "allow plaintext HTTP hub hostnames for private overlay networks")
 	cmd.Flags().BoolVar(&bundle.PushEnabled, "push", false, "enable spoke push")
@@ -1189,10 +1227,11 @@ type federationJoinBundle struct {
 	HubProjectUID          string `json:"hub_project_uid"`
 	ProjectName            string `json:"project_name"`
 	ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
-	BaselineThroughEventID int64  `json:"baseline_through_event_id,omitzero"`
+	BaselineThroughEventID int64  `json:"baseline_through_event_id"`
 	Token                  string `json:"token"`
 	Capabilities           string `json:"capabilities,omitempty"`
 	DisplayCapabilities    string `json:"-"`
+	JoinCommand            string `json:"join_command"`
 	Actor                  string `json:"actor,omitempty"`
 	AllowInsecure          bool   `json:"allow_insecure,omitzero"`
 	PushEnabled            bool   `json:"push_enabled,omitzero"`
@@ -1350,6 +1389,7 @@ func printFederationEnrollment(
 	enrollment api.FederationEnrollmentOut,
 	bundle federationJoinBundle,
 ) error {
+	bundle.JoinCommand = federationJoinCommand(bundle)
 	if currentOutputMode() == outputJSON {
 		return emitJSON(cmd.OutOrStdout(), struct {
 			Enrollment api.FederationEnrollmentOut `json:"enrollment"`
@@ -1509,7 +1549,7 @@ func normalizeFederationCapabilities(raw string) (internalCaps, displayCaps stri
 			ExitCode: ExitValidation,
 		}
 	}
-	return capabilities.API, capabilities.Display, nil
+	return capabilities.API, capabilities.API, nil
 }
 
 func federationCapabilitiesContain(capabilities, want string) bool {
@@ -1540,29 +1580,17 @@ func validateFederationJoinCapabilities(capabilities string, pushEnabled bool) e
 }
 
 func federationJoinCommand(bundle federationJoinBundle) string {
-	args := []string{
-		invokedKataCommand(), "federation", "join",
-		"--project", bundle.ProjectName,
-		"--hub-url", bundle.HubURL,
-		"--hub-project-id", strconv.FormatInt(bundle.HubProjectID, 10),
-		"--token", bundle.Token,
-		"--capabilities", bundle.DisplayCapabilities,
-		"--actor", bundle.Actor,
+	command := hubclient.JoinCommand(api.FederationJoinInstructions{
+		HubURL: bundle.HubURL, HubProjectID: bundle.HubProjectID, HubProjectUID: bundle.HubProjectUID,
+		ProjectName: bundle.ProjectName, ReplayHorizonEventID: bundle.ReplayHorizonEventID,
+		BaselineThroughEventID: bundle.BaselineThroughEventID, Token: bundle.Token, Actor: bundle.Actor,
+		Capabilities: bundle.Capabilities, PushEnabled: bundle.PushEnabled,
+		AdoptExisting: bundle.AdoptExisting, AllowInsecure: bundle.AllowInsecure,
+	})
+	if command == "" {
+		return ""
 	}
-	if bundle.PushEnabled {
-		args = append(args, "--push")
-	}
-	if bundle.AllowInsecure {
-		args = append(args, "--allow-insecure")
-	}
-	if bundle.AdoptExisting {
-		args = append(args, "--adopt-existing")
-	}
-	quoted := make([]string, 0, len(args))
-	for _, arg := range args {
-		quoted = append(quoted, shellQuote(arg))
-	}
-	return strings.Join(quoted, " ")
+	return shellQuote(invokedKataCommand()) + strings.TrimPrefix(command, "kata")
 }
 
 func invokedKataCommand() string {

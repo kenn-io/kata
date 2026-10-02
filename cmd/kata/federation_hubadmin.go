@@ -55,13 +55,25 @@ type hubAdminAuth struct {
 // the global daemon token, which would send the wrong credential to the hub.
 func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAuth, error) {
 	out := hubAdminAuth{url: strings.TrimRight(in.hubURL, "/"), allowInsecure: in.allowInsecure}
-	if strings.TrimSpace(in.hubToken) != "" {
-		out.token = in.hubToken
-		return out, nil
-	}
 	hubOrigin, err := httpurl.CanonicalHTTPOrigin(out.url)
 	if err != nil {
 		return hubAdminAuth{}, fmt.Errorf("canonicalize spoke hub origin: %w", err)
+	}
+	if strings.TrimSpace(in.hubToken) != "" {
+		out.token = in.hubToken
+		// The explicit token selects the credential, but transport policy still
+		// comes from a catalog entry at this hub origin. Never read that entry's
+		// token when an explicit token was supplied.
+		if cat != nil {
+			e, err := catalogByOrigin(cat, hubOrigin, out.url)
+			if err != nil {
+				return hubAdminAuth{}, err
+			}
+			if e != nil {
+				out.allowInsecure = out.allowInsecure || e.AllowInsecure
+			}
+		}
+		return out, nil
 	}
 	if name := strings.TrimSpace(in.hubName); name != "" {
 		var e *config.CatalogDaemonConfig
