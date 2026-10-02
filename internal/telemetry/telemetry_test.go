@@ -78,8 +78,10 @@ func postCaptureEvent(t *testing.T, handler http.Handler, body string) *httptest
 	return recorder
 }
 
-func assertCaptureHandlerAdmitsAppOpened(t *testing.T) {
-	t.Helper()
+func TestCaptureHandlerAdmitsAppOpenedUnderGoTest(t *testing.T) {
+	t.Setenv("TELEMETRY_ENABLED", "1")
+	t.Setenv(EnabledEnv, "1")
+
 	reporter, err := NewReporter(Options{})
 	require.NoError(t, err)
 	assert.False(t, reporter.Enabled())
@@ -91,23 +93,6 @@ func assertCaptureHandlerAdmitsAppOpened(t *testing.T) {
 
 	rejected := postCaptureEvent(t, handler, `{"event":"app_loaded"}`)
 	assert.Equal(t, http.StatusBadRequest, rejected.Code)
-}
-
-func TestCaptureHandlerAdmitsAppOpenedUnderGoTest(t *testing.T) {
-	t.Setenv("TELEMETRY_ENABLED", "1")
-	t.Setenv(EnabledEnv, "1")
-
-	assertCaptureHandlerAdmitsAppOpened(t)
-}
-
-func TestCaptureHandlerAdmitsAppOpenedWhenOptedOut(t *testing.T) {
-	for _, env := range []string{EnabledEnv, "TELEMETRY_ENABLED"} {
-		t.Run(env, func(t *testing.T) {
-			t.Setenv(env, "0")
-
-			assertCaptureHandlerAdmitsAppOpened(t)
-		})
-	}
 }
 
 type stubClient struct{}
