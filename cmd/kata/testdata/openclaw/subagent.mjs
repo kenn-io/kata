@@ -15,22 +15,22 @@ const parentPrompt=await registrations.get('before_prompt_build')({},parent);
 assert.equal(parentPrompt.prependSystemContext,'contract:shared contract');
 
 const progressChild={agentId:'worker',sessionId:'progress-child-session',sessionKey:'agent:worker:subagent:progress-run',workspaceDir:workspace};
+await registrations.get('session_start')({sessionId:progressChild.sessionId,sessionKey:progressChild.sessionKey},{...progressChild});
+const progressPrompt=await registrations.get('before_prompt_build')({},progressChild);
+assert.equal(progressPrompt.prependSystemContext,'contract:shared contract');
 await registrations.get('subagent_progress')?.(
  {phase:'started',runId:'progress-run',childSessionKey:progressChild.sessionKey},
  {runId:'progress-run',childSessionKey:progressChild.sessionKey,requesterSessionKey:parent.sessionKey},
 );
-await registrations.get('session_start')({sessionId:progressChild.sessionId,sessionKey:progressChild.sessionKey},{...progressChild});
-const progressPrompt=await registrations.get('before_prompt_build')({},progressChild);
-assert.equal(progressPrompt.prependSystemContext,'contract:shared contract');
 
 const spawnedChild={agentId:'worker',sessionId:'spawned-child-session',sessionKey:'agent:worker:subagent:spawned-run',workspaceDir:workspace};
+await registrations.get('session_start')({sessionId:spawnedChild.sessionId,sessionKey:spawnedChild.sessionKey},{...spawnedChild});
+const spawnedPrompt=await registrations.get('before_prompt_build')({},spawnedChild);
+assert.equal(spawnedPrompt.prependSystemContext,'contract:shared contract');
 await registrations.get('subagent_spawned')?.(
  {runId:'spawned-run',childSessionKey:spawnedChild.sessionKey,agentId:'worker',mode:'run',threadRequested:false},
  {runId:'spawned-run',childSessionKey:spawnedChild.sessionKey,requesterSessionKey:parent.sessionKey},
 );
-await registrations.get('session_start')({sessionId:spawnedChild.sessionId,sessionKey:spawnedChild.sessionKey},{...spawnedChild});
-const spawnedPrompt=await registrations.get('before_prompt_build')({},spawnedChild);
-assert.equal(spawnedPrompt.prependSystemContext,'contract:shared contract');
 
 for (const child of [progressChild,spawnedChild]) {
  await registrations.get('session_end')(
@@ -46,6 +46,10 @@ await registrations.get('session_end')(
 const calls=fs.readFileSync(path.join(root,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
 const attention=calls.filter(call=>call.args[0]==='agent-hooks'&&call.args[1]==='attention-native');
 assert.deepEqual(attention.map(call=>call.args.slice(3,6)),[
+ ['start','--session','parent-session'],
+ ['start','--session','progress-child-session'],
+ ['start','--session','parent-session'],
+ ['start','--session','spawned-child-session'],
  ['start','--session','parent-session'],
  ['end','--session','parent-session'],
 ]);

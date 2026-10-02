@@ -501,12 +501,39 @@ function allowed(api,id=options.id) {
 }
 function rememberChild(event,ctx) {
  const key=event?.childSessionKey||ctx?.childSessionKey;
- if(typeof key==='string'&&key)host.children.add(key);
+ if(typeof key!=='string'||!key)return Promise.resolve();
+ host.children.add(key);
+ const tasks=[];
+ for(const pendingKey of host.pending.keys()) {
+  const parts=pendingKey.split('\u0000');
+  if(parts.length===3&&parts[2]===key) {
+   host.childSessions.set(parts[1],key);
+   host.pending.delete(pendingKey);
+  }
+ }
+ for(const row of host.sessions.values()) {
+  if(row.key!==key)continue;
+  host.childSessions.set(row.session,key);
+  tasks.push(serial(row.slot,async()=>{
+   if(host.sessions.get(row.slot)!==row)return;
+   await reconcileChildAttention(row);
+  }));
+ }
+ return Promise.all(tasks);
 }
 function childSession(session,key) {
  if(typeof key==='string'&&host.children.has(key))return key;
  const known=host.childSessions.get(session);
  return typeof known==='string'&&host.children.has(known)?known:undefined;
+}
+async function reconcileChildAttention(row) {
+ if(host.sessions.get(row.slot)===row)host.sessions.delete(row.slot);
+ const owner=[...host.sessions.values()].find(candidate=>candidate.workspace===row.workspace&&candidate.ref===row.ref&&candidate.started);
+ try {
+  if(owner)await command(attentionArgs('start',owner),owner.workspace,500,owner.executable||options.executable);
+  else await command(attentionArgs('end',row),row.workspace,500,row.executable||options.executable);
+ }catch{if(owner)owner.started=false}
+ saveState();
 }
 function serial(slot,task) {
  const previous=host.queues.get(slot)||Promise.resolve();
@@ -558,7 +585,11 @@ export default {
       host.pending.delete(pendingKey);
       if(!ref)return;
       const row={slot,session,key,workspace:path.resolve(workspace),ref,owner:options.id,executable:options.executable,started:true,time:Date.now()};
-      try {await command(attentionArgs('start',row),row.workspace,500);host.sessions.set(slot,row);while(host.sessions.size>64)host.sessions.delete(host.sessions.keys().next().value);saveState()}catch{}
+      try {
+       await command(attentionArgs('start',row),row.workspace,500);
+       if(childSession(session,key)){await reconcileChildAttention(row);return}
+       host.sessions.set(slot,row);while(host.sessions.size>64)host.sessions.delete(host.sessions.keys().next().value);saveState();
+      }catch{}
      });
      ctx.hookInvocation?.assertActive();
     }
@@ -578,7 +609,7 @@ export default {
    // These accepted-spawn hooks carry OpenClaw's exact child session key.
    // Keep contract injection available in child prompts; attention uses only
    // verified lifecycle identity, never session-key spelling heuristics.
-   api.on('subagent_progress',(event,ctx)=>{if(event.phase==='started')rememberChild(event,ctx)}, {timeoutMs:700});
+   api.on('subagent_progress',(event,ctx)=>event.phase==='started'?rememberChild(event,ctx):undefined, {timeoutMs:700});
    api.on('subagent_spawned',rememberChild, {timeoutMs:700});
    // Native session_start has no verified workspace. The first prompt captures
    // it, including image-only and resumed sessions; start is idempotent per host.
