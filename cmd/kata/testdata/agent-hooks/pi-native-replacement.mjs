@@ -33,6 +33,7 @@ for(const reason of ['new','resume','fork','reload']) {
  const current=await load(manager,false);
  await current.emit({type:'session_start',reason});
  assert.equal(calls().filter(c=>c.args[0]==='agent-hooks').length,before+(reason==='reload'?0:1),'user attention fallback must become active');
+ const activeStart=calls().filter(c=>c.args[0]==='agent-hooks').at(-1);
  writeFileSync(process.env.KATA_PI_TEST_STATE,JSON.stringify({contract:'fresh user contract',inbox:'fresh user request'}));
  const fresh=await current.emitBeforeAgentStart('replacement',undefined,base);
  assert.equal(fresh.systemPromptOptions.sections.kata_contract,'fresh user contract',reason+' must retire stale project contract');
@@ -43,6 +44,7 @@ for(const reason of ['new','resume','fork','reload']) {
  await current.emit({type:'session_shutdown',reason:'quit'});
  const terminal=calls().filter(c=>c.args[0]==='agent-hooks').at(-1);
  assert.equal(terminal.args[3],'end');assert.equal(terminal.args[9],'captured-'+reason,'cleanup retains captured ref across replacement/reload');
+ assert.equal(terminal.executable,activeStart.executable,'cleanup uses the executable that started this session');
  current.invalidate();
 }
 assert.deepEqual(errors,[]);

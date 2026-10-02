@@ -15,11 +15,15 @@ assert.equal(calls.find(c=>c.args[0]==='agent-hooks').executable,mode==='attenti
 // A removed project adapter does not survive native resource reload.
 await emit('session_shutdown',{reason:'reload'});user(pi);await emit('session_start',{reason:'reload'});
 const next={systemPromptOptions:{sections:{}}};await emit('before_agent_start',next);assert.equal(next.systemPromptOptions.sections.kata_contract,'user-kata');
-// Native baseline remains across reload, and old runtime cleanup is fenced.
+await emit('session_shutdown',{reason:'quit'});
+const reloadedEnd=calls.filter(c=>c.args[0]==='agent-hooks').at(-1);
+assert.equal(reloadedEnd.args[3],'end');
+assert.equal(reloadedEnd.executable,mode==='attention'?'project-kata':'user-kata','reload cleanup uses the executable that started attention');
+// Detached callbacks cannot end the replacement session.
 const retiring=[...(handlers.get('session_shutdown')||[])],oldSession=session;
 await emit('session_shutdown',{reason:'new'});session='session-B';user(pi);await emit('session_start',{reason:'new'});
 for(const fn of retiring)await fn({reason:'quit'},{...ctx,sessionManager:{getSessionId:()=>oldSession}});
-assert.equal(calls.filter(c=>c.args[0]==='agent-hooks'&&c.args[3]==='end').length,0);
+assert.equal(calls.filter(c=>c.args[0]==='agent-hooks'&&c.args[3]==='end').length,1);
 process.env.KATA_REF='replacement-ref';await emit('session_shutdown',{reason:'quit'});await emit('session_shutdown',{reason:'quit'});
-const attention=calls.filter(c=>c.args[0]==='agent-hooks');assert.deepEqual(attention.map(c=>c.args[3]),['start','start','end']);assert.equal(attention[2].args[9],'issue-ref');
+const attention=calls.filter(c=>c.args[0]==='agent-hooks');assert.deepEqual(attention.map(c=>c.args[3]),['start','end','start','end']);assert.equal(attention[3].args[9],'issue-ref');
 console.log('Pi capability precedence and reload fencing passed');

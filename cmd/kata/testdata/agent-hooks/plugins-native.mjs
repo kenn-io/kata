@@ -34,7 +34,10 @@ if(api==='amp'){
  registrations.push(await user.KataPlugin({directory:workspace,client:v1Client}));if(mode!=='project-unloaded')registrations.push(await project.KataPlugin({directory:workspace,client:v1Client}));
 }else{
  for(const mod of mode==='project-unloaded'?[user]:[user,project]){
-  const hooks=new Map();const setup=mod.default.setup({location:{directory:'/wrong/location'},session:{get:async({sessionID})=>sessionInfo(sessionID),hook:async(name,fn)=>{
+  const hooks=new Map();const setup=mod.default.setup({location:{directory:'/wrong/location'},session:{get:async({sessionID})=>{
+   if(mod===project&&mode==='project-context-lookup-failure')throw new Error('native lookup failed');
+   return sessionInfo(sessionID);
+  },hook:async(name,fn)=>{
    if(mod===project&&mode==='project-pending-context'&&name==='context')await new Promise(resolve=>releaseContext=resolve);
    hooks.set(name,fn);return{dispose:async()=>hooks.delete(name)}}}});
   if(mod===project&&mode==='project-pending-context'){pendingSetup=setup;await new Promise(resolve=>setImmediate(resolve));}else cleanup=await setup;
@@ -53,7 +56,18 @@ async function prompt(id){
  if(api!=='amp'){assert.deepEqual(system[0],api==='v2'?{type:'text',text:'authored'}:'authored');messages=system.slice(1).map(s=>typeof s==='string'?s:s.text)}
  assert.equal(messages.length,1,'one selected context contribution');return messages[0];
 }
-if(mode==='large-contract'||mode==='oversized-contract'){
+if(mode==='project-context-lookup-failure'){
+ const system=[{type:'text',text:'authored'}];
+ await registrations[0].get('context')({sessionID:'other-session',system});
+ assert.match(system[1].text,/contract:source/);assert.match(system[1].text,/fresh request/);
+ const before=[...system];
+ await registrations[1].get('context')({sessionID:'other-session',system});
+ assert.deepEqual(system,before,'an unresolved adapter must preserve another adapter context');
+ const unresolved=[{type:'text',text:'authored'}];
+ await registrations[0].get('context')({sessionID:'lookup-failure',system:unresolved});
+ assert.deepEqual(unresolved,[{type:'text',text:'authored'}],'unresolved workspace leaves authored context unchanged');
+ if(cleanup)await cleanup();
+}else if(mode==='large-contract'||mode==='oversized-contract'){
  const context=await prompt('native-session');
  if(mode==='large-contract')assert.ok(context.includes('x'.repeat(Number(process.env.KATA_PLUGIN_CONTRACT_SIZE))), 'large contract response was not preserved in the prompt context');
  else assert.ok(context.includes('Kata contract context is unavailable for this prompt.'), 'oversized contract response should fall back without crashing the plugin host');

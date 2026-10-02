@@ -593,6 +593,10 @@ func TestPiNativeInstalledRuntimeReplacement(t *testing.T) {
 	}
 	opts.Scope = "user"
 	opts.Source = "user.txt"
+	opts.Executable = filepath.Join(artifacts, "user-kata.mjs")
+	if err = os.WriteFile(opts.Executable, executable, 0700); err != nil { //nolint:gosec // G306: isolated executable recorder must be runnable.
+		t.Fatal(err)
+	}
 	plan, err = planPiAgentHooks(opts, false)
 	if err != nil {
 		t.Fatal(err)

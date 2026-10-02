@@ -1036,7 +1036,7 @@ export default Plugin.define({
       if (options.contract) { registrations.push(await ctx.session.hook("context", async event => {
         let cwd;
         try { cwd = await workspace(event.sessionID); }
-        catch { appendContext(event.system, "Kata context unavailable: native session workspace could not be resolved.", true); return; }
+        catch { return; /* Unresolved adapters must leave existing context intact. */ }
         if (!selected(adapter, cwd, "contract")) return;
         const text = await readContext(cwd, true);
         if (selected(adapter, cwd, "contract")) appendContext(event.system, text, true);

@@ -191,7 +191,7 @@ export default function kataHooks(pi) {
   }
   async function attention(mode, baseline) {
     try {
-      const result = await pi.exec(options.executable, ["agent-hooks", "attention-native", "pi", mode,
+      const result = await pi.exec(baseline.executable, ["agent-hooks", "attention-native", "pi", mode,
         "--session", baseline.id, "--host-pid", String(process.pid), "--ref", baseline.ref,
         "--workspace", baseline.cwd], { cwd: baseline.cwd, timeout: 10000 });
       return result.code === 0 && !result.killed;
@@ -218,7 +218,7 @@ export default function kataHooks(pi) {
       const cwd = path.resolve(ctx.cwd);
       const previous = registry.active.get(cwd);
       const baseline = previous?.id === id && !previous.ended ? previous :
-        { id, cwd, ref: process.env.KATA_REF || "", started: false, ended: false };
+        { id, cwd, executable: options.executable, ref: process.env.KATA_REF || "", started: false, ended: false };
       if (baseline.started || baseline.pending) return;
       registry.active.set(cwd, baseline);
       await transition("start", baseline);

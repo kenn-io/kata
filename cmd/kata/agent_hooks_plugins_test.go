@@ -169,6 +169,7 @@ func TestNativePluginsRuntime(t *testing.T) {
 		modes := []string{"both", "project-contract", "project-attention", "project-unloaded"}
 		if api == "v2" {
 			modes = append(modes, "project-pending-context")
+			modes = append(modes, "project-context-lookup-failure")
 			modes = append(modes, "oversized-contract")
 		}
 		if api == "amp" {
