@@ -130,6 +130,28 @@ func TestMuseRejectsUnsupportedManagedPoliciesBeforeWrites(t *testing.T) {
 	require.ErrorContains(t, err, "strict")
 }
 
+func TestMuseStatusAndUninstallPreserveExistingProviderAllowlist(t *testing.T) {
+	opts := extraOptions(t, "muse")
+	opts.ConfigPath = filepath.Join(opts.Home, "settings.json")
+	before := []byte(`{"schema_version":1,"managed_hooks_env_vars":["ANTHROPIC_API_KEY"],"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hooks contract muse","timeout":10}]}]}}`)
+	require.NoError(t, os.WriteFile(opts.ConfigPath, before, 0600))
+
+	status, err := planExtraAgentHooks(opts, true)
+	require.NoError(t, err)
+	require.True(t, status.CurrentContract)
+
+	removal, err := planExtraAgentHooks(opts, true)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(removal)
+	require.NoError(t, err)
+	data, err := os.ReadFile(opts.ConfigPath)
+	require.NoError(t, err)
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+	require.Equal(t, []any{"ANTHROPIC_API_KEY"}, settings["managed_hooks_env_vars"])
+	require.NotContains(t, settings["hooks"].(map[string]any), "SessionStart")
+}
+
 func TestMuseExistingManagedContractUsesSharedOwnership(t *testing.T) {
 	opts := extraOptions(t, "muse")
 	opts.Attention = false
