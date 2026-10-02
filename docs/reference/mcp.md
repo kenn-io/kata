@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-09-20
+last_edited: 2026-09-30
 ---
 
 # Model Context Protocol server
@@ -175,19 +175,20 @@ compatibility floor.
 
 ## Progressive tool catalog
 
-The initial catalog contains 14 read-only section loaders. Call the applicable
+The initial catalog contains 16 read-only section loaders. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
-typed tools needed for the current task instead of placing all 67 tools in the
+typed tools needed for the current task instead of placing all 74 tools in the
 model context at startup.
 
 | Loader | Detailed tools |
 | --- | --- |
 | `kata.load_issue_discovery` | `kata.search`, `kata.list`, `kata.show`, `kata.ready`, `kata.next`, `kata.labels`, `kata.graph` |
 | `kata.load_issue_mutation` | `kata.create`, `kata.edit`, `kata.comment`, `kata.edit_comment`, `kata.claim`, `kata.set_label`, `kata.set_metadata`, `kata.set_schedule`, `kata.set_deadline`, `kata.move` |
+| `kata.load_coordination` | `kata.assign`, `kata.unassign`, `kata.inbox`, `kata.status` |
 | `kata.load_issue_lifecycle` | `kata.close`, `kata.reopen`, `kata.delete`, `kata.restore`, `kata.purge`, `kata.wait`, `kata.audit_closes` |
 | `kata.load_leases` | `kata.lease_status`, `kata.lease`, `kata.lease_force_release`, `kata.lease_steal` |
-| `kata.load_projects` | `kata.projects`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
+| `kata.load_projects` | `kata.projects`, `kata.project_show`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
 | `kata.load_tokens` | `kata.tokens`, `kata.token_create`, `kata.token_revoke` when `--enable-token-admin` is set in daemon-wide mode |
 | `kata.load_system` | `kata.system` |
 | `kata.load_federation` | `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine` |
@@ -197,11 +198,26 @@ model context at startup.
 | `kata.load_import` | `kata.import_issues` |
 | `kata.load_external_roots` | `kata.connectors`, `kata.connector_fields`, `kata.connector_field_map`, `kata.connector_field_unmap`, `kata.bridge_bind`, `kata.bridge_show`, `kata.bridge_reconcile`, `kata.bridge_pause`, `kata.bridge_resume`, `kata.bridge_resolve_field`, `kata.bridge_resolve_comment`, `kata.bridge_unbind` |
 | `kata.load_storage` | `kata.storage_export`, `kata.storage_import` when host storage is enabled |
+| `kata.load_docs` | `kata.search_docs`, `kata.read_doc` |
 
 `kata.connectors`, `kata.connector_fields`, `kata.connector_field_map`,
 `kata.connector_field_unmap`, and `kata.bridge_bind` require the
 `--all` daemon-wide scope. The remaining bridge tools operate on
 already-bound issues inside the startup project scope.
+
+`kata.inbox` lists open issues that carry a request for one recipient's
+attention, the same requests `kata inbox` shows, and never clears them. It
+reads up to `limit` issues and sets `truncated` when more carry requests.
+`kata.status` reports an issue's owner, hold, and lease along with the actor
+the server writes as. `kata.unassign` accepts `expected_owner` so a handoff
+clears ownership only while that actor still holds the issue.
+`kata.project_show` returns one project's metadata and workspace aliases.
+
+`kata.search_docs` and `kata.read_doc` search and read the user documentation
+bundled into the `kata` binary: the overview, getting-started, guide,
+workflow, reference, and operations pages. Search returns section ids and
+short excerpts; `kata.read_doc` returns one section's Markdown. They work
+without network access and describe the documentation of the running build.
 
 Loaders are idempotent. A loader reports `available=false` when its optional
 startup dependency is absent. Loaded tools keep their individual input and
@@ -357,8 +373,11 @@ available through MCP.
 
 Kata delegates protocol negotiation to the official Go MCP SDK. Stateless
 clients can use `server/discover`; session clients can use `initialize` and
-`notifications/initialized`. JSON-RPC batches are rejected. Each compact JSON
-message is limited to 8 MiB.
+`notifications/initialized`. Stdio accepts both. The Streamable HTTP listener
+keeps sessions so section loaders can send tool-list changes, so it answers
+other calls that carry 2026-07-28 per-request metadata with an
+unsupported-version error listing the session versions it accepts. JSON-RPC
+batches are rejected. Each compact JSON message is limited to 8 MiB.
 
 Kata advertises tools only, including tool-list changes. It does not advertise prompts, resources, roots,
 logging, sampling, subscriptions, or server-to-client requests. Discovery uses

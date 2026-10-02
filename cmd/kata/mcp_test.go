@@ -221,6 +221,42 @@ func TestMCPServeHTTPBearerProtectsMCPButNotHealth(t *testing.T) {
 	require.NoError(t, session.Close())
 }
 
+// The session listener keeps loaders' list-changed notifications working, so a
+// per-request 2026-07-28 call must learn which session versions it can use.
+func TestMCPServeHTTPPerRequestProtocolListsSessionVersions(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
+		http.NotFound(writer, request)
+	}))
+	t.Cleanup(daemon.Close)
+
+	endpoint := startMCPHTTPTestServer(t, daemon.URL)
+	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"` + currentMCPProtocolVersion + `","io.modelcontextprotocol/clientCapabilities":{}}}}`)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, body)
+	require.NoError(t, err)
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Authorization", "Bearer test-mcp-token")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+	require.Equal(t, http.StatusBadRequest, response.StatusCode)
+	var decoded struct {
+		Error struct {
+			Code int64                                 `json:"code"`
+			Data sdkmcp.UnsupportedProtocolVersionData `json:"data"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&decoded))
+	require.EqualValues(t, sdkmcp.CodeUnsupportedProtocolVersion, decoded.Error.Code)
+	require.Contains(t, decoded.Error.Data.Supported, "2025-11-25")
+	require.NotContains(t, decoded.Error.Data.Supported, currentMCPProtocolVersion)
+}
+
 func TestMCPServeHTTPCrossOriginBrowserMutationRejected(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")

@@ -13,6 +13,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/time/rate"
 
+	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/storageadmin"
 	"go.kenn.io/kata/internal/teammate"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -394,6 +395,22 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 	case "kata.audit_closes":
 		setNumberBounds("limit", 1, maximumResultLimit)
 		setStringBounds("cursor", 1, 64)
+	case "kata.assign":
+		setStringBounds("ref", 1, 256)
+		setStringBounds("owner", 1, 0)
+	case "kata.unassign":
+		setStringBounds("ref", 1, 256)
+		setStringBounds("expected_owner", 1, 0)
+	case "kata.status":
+		setStringBounds("ref", 1, 256)
+	case "kata.inbox":
+		setStringBounds("for", 1, notification.RecipientMaxBytes)
+		setNumberBounds("limit", 1, maximumResultLimit)
+	case "kata.search_docs":
+		setStringBounds("query", 1, maximumQueryBytes)
+		setNumberBounds("limit", 1, maximumResultLimit)
+	case "kata.read_doc":
+		setStringBounds("id", 1, 512)
 	}
 	switch len(forbidden) {
 	case 0:
@@ -741,6 +758,7 @@ type IssueSummary struct {
 	ScheduledOn         *string   `json:"scheduled_on,omitempty"`
 	Timezone            *string   `json:"timezone,omitempty"`
 	updatedAt           time.Time
+	metadata            map[string]any
 }
 
 // IssueListOutput is a bounded collection without issue bodies or comments.
