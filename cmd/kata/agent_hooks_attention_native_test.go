@@ -216,7 +216,7 @@ func TestNativeAttentionRejectsAmbiguousWorkspaceIdentity(t *testing.T) {
 		"multiple workspace roots":        {"session_id": "one", "hook_event_name": "SessionStart", "workspace_roots": []string{one, two}},
 		"multiple workspace paths":        {"session_id": "one", "hook_event_name": "SessionStart", "workspacePaths": []string{one, two}},
 		"conflicting workspace selectors": {"session_id": "one", "hook_event_name": "SessionStart", "cwd": one, "workspace_roots": []string{two}},
-		"malformed workspace roots":       {"session_id": "one", "hook_event_name": "SessionStart", "workspace_roots": "/workspace/one"},
+		"malformed workspace roots":       {"session_id": "one", "hook_event_name": "SessionStart", "workspace_roots": "not-an-array"},
 		"empty workspace root":            {"session_id": "one", "hook_event_name": "SessionStart", "workspace_roots": []string{}},
 		"invalid cwd type":                {"session_id": "one", "hook_event_name": "SessionStart", "cwd": 3},
 		"empty cwd":                       {"session_id": "one", "hook_event_name": "SessionStart", "cwd": ""},
@@ -367,22 +367,22 @@ func TestE2E_NativeAttentionRejectsWrongEventAndSubagent(t *testing.T) {
 func TestNativeAttentionLifecyclePayload(t *testing.T) {
 	cursorWorkspace := nativeAttentionTestWorkspace(t, "cursor")
 	copilotWorkspace := nativeAttentionTestWorkspace(t, "copilot")
-	invalidReasonWorkspace := nativeAttentionTestWorkspace(t, "invalid-reason")
+	unsupportedStopReasonWorkspace := nativeAttentionTestWorkspace(t, "unsupported-stop-reason")
 	for _, tc := range []struct {
-		target, mode, raw string
-		valid             bool
+		name, target, mode, raw string
+		valid                   bool
 	}{
-		{"hermes", "start", `{"session_id":"one","hook_event_name":"on_session_reset"}`, true},
-		{"hermes", "end", `{"session_id":"one","hook_event_name":"on_session_finalize"}`, true},
-		{"hermes", "end", `{"session_id":"one","hook_event_name":"on_session_end"}`, false},
-		{"cursor", "start", nativeAttentionTestPayload(t, map[string]any{"conversation_id": "one", "hook_event_name": "sessionStart", "workspace_roots": []string{cursorWorkspace}}), true},
-		{"copilot", "start", nativeAttentionTestPayload(t, map[string]any{"sessionId": "one", "source": "resume", "cwd": copilotWorkspace}), true},
-		{"copilot", "end", nativeAttentionTestPayload(t, map[string]any{"sessionId": "one", "reason": "user_exit", "cwd": copilotWorkspace}), true},
-		{"copilot", "end", nativeAttentionTestPayload(t, map[string]any{"sessionId": "one", "stopReason": "end_turn", "cwd": invalidReasonWorkspace}), false},
-		{"claude", "start", `{"session_id":"one","hook_event_name":"SessionEnd"}`, false},
-		{"grok", "end", `{"sessionId":"one","hookEventName":"SessionEnd","hook_event_name":"Stop"}`, false},
+		{"hermes start reset", "hermes", "start", `{"session_id":"one","hook_event_name":"on_session_reset"}`, true},
+		{"hermes end finalize", "hermes", "end", `{"session_id":"one","hook_event_name":"on_session_finalize"}`, true},
+		{"hermes rejects nonterminal event", "hermes", "end", `{"session_id":"one","hook_event_name":"on_session_end"}`, false},
+		{"cursor start", "cursor", "start", nativeAttentionTestPayload(t, map[string]any{"conversation_id": "one", "hook_event_name": "sessionStart", "workspace_roots": []string{cursorWorkspace}}), true},
+		{"copilot start", "copilot", "start", nativeAttentionTestPayload(t, map[string]any{"sessionId": "one", "source": "resume", "cwd": copilotWorkspace}), true},
+		{"copilot end", "copilot", "end", nativeAttentionTestPayload(t, map[string]any{"sessionId": "one", "reason": "user_exit", "cwd": copilotWorkspace}), true},
+		{"copilot rejects unsupported stop reason", "copilot", "end", nativeAttentionTestPayload(t, map[string]any{"sessionId": "one", "stopReason": "end_turn", "cwd": unsupportedStopReasonWorkspace}), false},
+		{"claude rejects unsupported SessionEnd", "claude", "start", `{"session_id":"one","hook_event_name":"SessionEnd"}`, false},
+		{"grok rejects conflicting lifecycle fields", "grok", "end", `{"sessionId":"one","hookEventName":"SessionEnd","hook_event_name":"Stop"}`, false},
 	} {
-		t.Run(tc.target+tc.mode+tc.raw, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := readNativeAttentionPayloadFor(tc.target, tc.mode, strings.NewReader(tc.raw))
 			if tc.valid {
 				require.NoError(t, err)
