@@ -517,10 +517,17 @@ func browserSessionRequired(r *http.Request, policy ListenerPolicy, manager *Web
 	if !manager.Writable() && r.Method == http.MethodGet && r.URL.Path != pathEventsStreamPath {
 		return r.Header.Get(webSessionHeader) != ""
 	}
+	// Login-mode listeners also serve ordinary bearer clients. Only configured
+	// bearer authentication can take this path; a keyless browser listener must
+	// never upgrade an arbitrary Authorization header to owner authority.
+	if (manager.auth.Token != "" || manager.auth.RequireTokenIdentity) && ordinaryAPIBearerRequest(r) {
+		return false
+	}
 	if policy.Kind == ListenerSharedTCP {
 		if manager.auth.Token != "" && r.Header.Get(authHeader) != "" &&
 			r.Header.Get("Origin") == "" && r.Header.Get(webSessionHeader) == "" &&
-			r.Header.Get("Cookie") == "" {
+			r.Header.Get("Cookie") == "" &&
+			r.Header.Get(webCSRFHeader) == "" && r.Header.Get("Sec-Fetch-Site") == "" {
 			return false
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/v1/ui/") {
@@ -533,7 +540,8 @@ func browserSessionRequired(r *http.Request, policy ListenerPolicy, manager *Web
 			}
 			return true
 		}
-		if r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" {
+		if r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" ||
+			r.Header.Get(webCSRFHeader) != "" || r.Header.Get("Sec-Fetch-Site") != "" {
 			return true
 		}
 		if _, err := r.Cookie(manager.CookieName()); err == nil {

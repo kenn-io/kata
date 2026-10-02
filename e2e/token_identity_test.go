@@ -187,6 +187,7 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 		"federation", "enroll", projectName,
 		"--spoke-instance", spokeIdentity.InstanceUID,
 		"--hub-url", "http://"+hubAddr,
+		"--hub-token", identityBootstrapToken,
 		"--actor", "wesm")
 	require.Error(t, bootstrapErr, "bootstrap token must not create identity-mode federation enrollments")
 	assert.Contains(t, bootstrapOut, "bootstrap token cannot perform attributed writes")
@@ -200,6 +201,7 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 		"federation", "enroll", projectName,
 		"--spoke-instance", spokeIdentity.InstanceUID,
 		"--hub-url", "http://"+hubAddr,
+		"--hub-token", userToken,
 		"--capabilities", "pull,push,lease",
 		"--actor", "mallory")
 	joinCommand := extractFederationJoinCommand(t, enrollOut)

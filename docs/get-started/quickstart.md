@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-09-27
+last_edited: 2026-10-02
 ---
 
 # Quickstart
@@ -151,6 +151,93 @@ For Codex, open Codex and run `/hooks` to trust the new hook. See
 for harness selection, Hermes's first-turn behavior, and additional Codex
 homes. These commands are not included in 0.18.0.
 
+## External agents without session hooks
+
+An external agent can read `kata quickstart` at the start of each session
+without installing hooks. This prints the session contract and links to
+federation and optional embeddings setup. The compact `--agent` and structured
+`--json` formats include the same setup links. Quickstart does not contact a
+daemon or read or write configuration. `--format contract` remains the static
+managed contract.
+
+When work is shared through federation, first run `kata federation identity`
+against the agent's spoke daemon and give that instance UID to the hub
+administrator. The administrator creates an actor-bound enrollment and returns
+the generated join command. Run that command against the spoke, using the
+hub's HTTPS hostname that matches its certificate. On request-actor spokes, set
+`KATA_AUTHOR` to the actor in that command. Identity-mode spokes use an identity
+token whose actor matches the enrollment actor; `KATA_AUTHOR` cannot override
+it. Check `kata whoami` and inspect `kata federation status` before claiming
+work. Follow the
+[external-agent federation runbook](../operations/federation.md#external-agent-onboarding-without-hooks)
+for the administrator command, join options, and polling loop.
+
+Poll the exact inbox recipient while the agent is idle; reading it does not
+acknowledge a request. After handling it, run `kata notify <ref> --to <recipient>
+--clear` and read the inbox again. Save the cursor from `kata events --json`
+and resume with `--after <cursor>`. On `reset_required`, discard cached state,
+refresh it, and resume from the returned reset cursor. Federation is eventual:
+the spoke's local inbox and events reflect what it has pulled from the hub.
+
+## Optional first-run embeddings setup
+
+Lexical search works immediately. Embeddings are optional; quickstart's local
+configuration check does not contact the selected daemon or validate a key.
+When a remote daemon or another local profile is selected, configure that
+daemon's home and use `kata health --json` to inspect its actual runtime state.
+
+For a hosted provider, keep the key outside `config.toml`. A reliable option
+for service and autostart launches is an owner-only file supplied through your
+secret manager. Use an absolute path or a path beginning with `~/`; on Unix,
+restrict the file to its owner with `chmod 600`. For example, once the secret
+manager has created `~/.config/kata/embedding.key`, add:
+
+```toml
+[search.embeddings]
+base_url = "https://api.voyageai.com/v1"
+model = "voyage-3-large"
+dims = 1024
+api_key_file = "~/.config/kata/embedding.key"
+```
+
+This example uses Voyage's [documented embedding endpoint and model dimensions](https://docs.voyageai.com/docs/embeddings).
+For an OpenAI-compatible provider, use its endpoint, model, and matching
+dimensions. For example, OpenAI's
+[`text-embedding-3-small`](https://developers.openai.com/api/docs/guides/embeddings)
+uses `base_url = "https://api.openai.com/v1"` and `dims = 1536`.
+Choose one provider block; do not append duplicate TOML sections.
+
+Alternatively, replace `api_key_file` with `api_key_env = "VOYAGE_API_KEY"`
+(or your provider's environment variable name). Supply that variable to the
+daemon's launch environment through your service or secret manager. Exporting
+it only in a later CLI shell does not update an already running daemon.
+Do not put a literal API key in `config.toml`, repository files, or command
+examples. An existing inline `api_key` takes precedence over file and
+environment sources, so remove it when switching to a secure source.
+
+Restart the intended daemon after adding or changing the endpoint or model.
+For an existing provider configuration, replacing the key file needs only
+`kata daemon reload`. These lifecycle commands operate on the current
+`KATA_HOME`; set that home explicitly when administering a registered local
+profile. For a remote daemon, its operator performs the restart or reload.
+
+```sh
+kata health --json
+kata search "words from existing work" --agent
+kata search "words from existing work" --semantic --agent
+```
+
+Check the health response's `embeddings` object for credential status,
+`last_success_at`, and a draining backlog. Top-level `ok=true` alone does not
+prove that credentials work. Default search may fall back to lexical; the
+explicit semantic check exposes a missing or rejected key. Use existing work
+for verification instead of creating a practice issue. See
+[Semantic search](../guide/semantic-search.md) for keyless local providers,
+credential errors, batching limits, and backfill behavior. Configuring a hosted
+provider sends issue titles and bodies to it. Configure the daemon that should
+serve semantic search and inspect that daemon's health, rather than assuming
+the CLI's local configuration describes the selected server.
+
 ## Create and inspect issues
 
 ```sh
@@ -253,7 +340,7 @@ Actor precedence is:
 For an agent session:
 
 ```sh
-export KATA_AUTHOR=codex-wesm-laptop
+export KATA_AUTHOR=external-agent
 kata whoami
 ```
 

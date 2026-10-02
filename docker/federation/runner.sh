@@ -126,6 +126,7 @@ cli_enroll_out=$(
     kata --daemon spoke-a --project "$cli_project" federation enroll \
       --spoke-instance "$spoke_a_uid" \
       --hub-url "$hub_hostname" \
+      --hub-token "$hub_token" \
       --capabilities pull,push \
       --token "$cli_token" \
       --actor cli-agent \

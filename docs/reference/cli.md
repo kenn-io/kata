@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-01
+last_edited: 2026-10-02
 ---
 
 # CLI reference
@@ -1504,7 +1504,7 @@ to inject its value into the consuming process. Revoke the token during teardown
 kata federation identity
 kata federation enable --project <project>
 kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url> \
-  --actor <actor> [--allow-insecure]
+  --actor <actor> [--hub-token <token>] [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation join --project <existing-project> --hub-url <url> \
@@ -1524,13 +1524,21 @@ kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --re
 ```
 
 `kata federation enroll --project <project> --hub-url <url>` sends the
-enrollment API call to `<url>` using normal daemon API auth
-(`KATA_AUTH_TOKEN` or `[auth].token`). It creates `<project>` on that hub if it
-does not already exist, then enables federation and creates the enrollment. The
-CLI should otherwise remain pointed at the spoke daemon so the printed join
+enrollment API call to `<url>` using `--hub-token` or a daemon catalog
+credential whose URL matches the hub origin. When entries share an origin,
+the matching URL path takes precedence. A selected `--daemon` entry chooses
+the hub credential only when its full base URL matches `--hub-url`.
+It never forwards the local
+daemon's global `KATA_AUTH_TOKEN` to the hub; callers that used that variable
+for enrollment must pass the hub credential through `--hub-token` or a matching
+catalog entry. It creates `<project>` on that hub if it does
+not already exist, then enables federation and creates the enrollment. The CLI
+should otherwise remain pointed at the spoke daemon so the printed join
 command can include `--adopt-existing` when the spoke project already exists.
 Use `kata federation enroll --adopt-existing` when adopting a differently named
-spoke project, then edit the printed join command's `--project` value.
+spoke project, then edit the printed join command's `--project` value. Join
+fetches the current hub metadata when run. CLI and TUI output call the coordination
+capability `lease`; JSON and API fields use `claim`.
 
 `--adopt-existing` is a current-state cutover. It removes the spoke project's
 pre-adoption event history from the live event stream and queues fresh snapshots

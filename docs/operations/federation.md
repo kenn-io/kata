@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-09-26
+last_edited: 2026-10-02
 ---
 
 # Federation
@@ -65,9 +65,11 @@ not match the enrollment actor.
 Enrollment tokens are not general daemon API tokens.
 
 `kata federation enroll` is a normal daemon API call to the hub, not a
-spoke-to-hub transport call. The command sends that hub API call to
-`--hub-url` and authenticates it with `KATA_AUTH_TOKEN` or `[auth].token`. The
-CLI's default daemon should be the spoke being enrolled; that spoke can be the
+spoke-to-hub transport call. The command sends the hub API request to
+`--hub-url` and uses `--hub-token` or an admin credential from a daemon catalog
+entry whose URL matches the hub origin. The local daemon's global
+`KATA_AUTH_TOKEN` or `[auth].token` is never forwarded to the hub. The CLI's
+default daemon should be the spoke being enrolled; that spoke can be the
 implicit local daemon or a remote daemon selected by `KATA_SERVER` or
 `.kata.local.toml`. `enroll` uses the default/spoke daemon only to detect
 whether the named project already exists on the spoke and should print
@@ -82,6 +84,112 @@ daemon derives the enrollment actor from the token actor and ignores
 client-supplied actor strings such as `--actor`, `--as`, or `KATA_AUTHOR`.
 If you only have the bootstrap token, first mint a personal token as described
 in [Identity tokens](remote-daemon.md#identity-tokens).
+
+## External-agent onboarding without hooks
+
+An external coding agent needs no session-hook integration to use federation.
+Run `kata quickstart` at session start, and keep ordinary commands pointed at
+the intended spoke daemon throughout this workflow. For a registered local
+profile, pass its `--daemon` selector explicitly. The hub administrator can run
+enrollment from an environment that can select the spoke daemon; do not give
+the agent the hub's administration token.
+
+1. On the spoke, read its durable instance identity:
+
+   ```sh
+   kata federation identity --json
+   ```
+
+   Send the returned `instance_uid` to the hub administrator, along with the
+   intended project and actor. This UID identifies the spoke daemon, not an
+   actor or workspace. Use the spoke's identity rather than the hub's.
+
+2. The hub administrator uses a configured catalog entry with hub
+   administration credentials to enroll that spoke. Keep the selected daemon
+   pointed at the spoke because it identifies the local project. The exact
+   `--hub-url` selects credentials from a hub catalog entry with the matching
+   origin; do not select the hub profile with `--daemon`:
+
+   For a request-actor hub, `--actor external-agent` selects the agent actor
+   in this example. Identity-mode enrollment uses the administrator's
+   personal identity token actor; `--actor` cannot override it. The returned
+   join command is authoritative for the actor in either mode.
+
+   ```sh
+   kata --daemon <spoke-profile> federation enroll hub-project \
+     --hub-url https://hub.example \
+     --spoke-instance <spoke-instance-uid> \
+     --actor external-agent
+   ```
+
+   In identity mode, a personal identity token determines the actor; an actor
+   string cannot override it. The bootstrap token cannot perform the
+   attributed enrollment setup. Check the returned actor and capabilities.
+   Enrollment returns a separate transport token and a generated join command
+   for the agent; treat that command as a secret when transferring or storing
+   it. It does not grant general hub API access.
+
+3. On the spoke, run the generated `kata federation join` command. Keep its
+   hub URL, project ID, actor, and capability values intact. Join reads the
+   current project UID and replay/baseline cursors from the hub when it runs.
+   A manual command has this shape:
+
+   ```sh
+   kata federation join --project spoke-project \
+     --hub-url https://hub.example \
+     --hub-project-id <hub-project-id> \
+     --token <enrollment-token> \
+     --capabilities pull,push,lease \
+     --actor external-agent --push
+   ```
+
+   Use `--adopt-existing` only for an existing standalone spoke project, with
+   the administrator's matching adoption-enabled enrollment. A new replica
+   needs neither prior `kata init` nor adoption. Use the operator's HTTPS
+   hostname that matches the certificate: substituting an IP address can fail
+   certificate validation. `--allow-insecure` does not bypass TLS certificate
+   checks; it is a plaintext private-network opt-in.
+
+4. Set the intended actor according to the spoke's authentication mode, then
+   inspect status before taking work. On a request-actor spoke, use the actor
+   from the generated join command:
+
+   ```sh
+   # Request-actor spoke only.
+   export KATA_AUTHOR='<actor-from-generated-join-command>'
+   export KATA_INBOX_USER=external-agent
+   kata whoami
+   kata federation status --project spoke-project --json
+   kata inbox --project spoke-project --for external-agent --json
+   kata events --project spoke-project --after 0 --limit 100 --json
+   ```
+
+   Replace the `KATA_AUTHOR` placeholder with the actor from the generated
+   join command. Identity-mode spokes ignore `KATA_AUTHOR` and use the identity
+   token's actor; that actor must match the enrollment actor for push-enabled
+   bindings. Confirm pull/push health and inspect existing work instead of
+   creating a practice issue. Inbox and event reads are local to the selected
+   spoke and may lag the hub.
+
+For an agent without hooks, its harness polls the exact inbox address while
+idle. Save the returned event cursor and resume with `--after <cursor>`; keep
+cursors scoped to the selected daemon and project. On `reset_required`, discard
+cached issue state, refresh reads, and resume from the reset cursor. A live
+`kata events --tail --json` stream can wake the harness too; reconnect using
+`--last-event-id <cursor>`. Reading an inbox never clears its request. Clear only after
+handling the work, then read the inbox again:
+
+```sh
+kata notify abc4 --project spoke-project --to external-agent --clear
+kata inbox --project spoke-project --for external-agent --json
+```
+
+Map teammate recipients such as `external-agent/teammate-1` separately; the
+actor inbox does not aggregate child inboxes. Attention signals can be replaced,
+so coalesce updates and reconcile state after each wakeup. `kata quickstart`
+prints this contract without installing hooks, polling processes, or
+configuration. Configure optional embeddings on the intended search daemon;
+see [first-run embeddings setup](../get-started/quickstart.md#optional-first-run-embeddings-setup).
 
 ## Config-driven enrollment
 
@@ -110,7 +218,7 @@ token, the hub uses its identity as the enrollment and binding actor and
 ignores the configured actor value.
 
 On daemon start, the mapping ensures or creates `hub-project`, enables it for
-federation, creates a project-scoped `pull,push,lease` enrollment, and binds
+federation, creates a project-scoped `claim,pull,push` enrollment, and binds
 `spoke-project` with push enabled. A missing local project is created
 automatically; an existing standalone project is adopted. After ensuring the
 hub project, the spoke generates and durably reserves an enrollment secret
@@ -356,16 +464,16 @@ instance: <spoke-instance-uid>
 
 Step 2: create the hub enrollment from the same machine. Leave normal kata
 commands pointed at the spoke daemon; `--hub-url` is the explicit hub API
-target for this command, and `KATA_AUTH_TOKEN` is the hub daemon API token. If
+target for this command. Pass the hub's personal identity token with
+`--hub-token`, or configure a daemon catalog entry for the same hub URL. If
 `<hub-project>` does not already exist on the hub, this command creates it
 before enabling federation and creating the enrollment:
 
 ```sh
-export KATA_AUTH_TOKEN=<personal-identity-token>
-
 kata federation enroll --project <hub-project> \
   --spoke-instance <spoke-instance-uid> \
   --hub-url <hub-api-url> \
+  --hub-token <personal-identity-token> \
   --actor <actor>
 ```
 
@@ -433,11 +541,10 @@ lease requests. Use this only on trusted private networks; use HTTPS for public
 networks.
 
 ```sh
-export KATA_AUTH_TOKEN=<personal-identity-token>
-
 kata federation enroll --project <hub-project> \
   --spoke-instance <spoke-instance-uid> \
   --hub-url http://hub.internal:7787 \
+  --hub-token <personal-identity-token> \
   --actor <actor> \
   --allow-insecure
 ```
@@ -482,15 +589,18 @@ Get each spoke's instance UID from that spoke daemon:
 kata federation identity
 ```
 
-Create one enrollment per trusted spoke. `--hub-url` selects the hub daemon for
-this command, and `KATA_AUTH_TOKEN` or `[auth].token` authenticates the hub API
-request:
+Create one enrollment per trusted spoke. `--hub-url` selects the hub daemon
+for this command. The hub API request uses `--hub-token` or a daemon catalog
+credential whose URL matches the hub origin; the local daemon's global token
+is not forwarded. If you previously exported `KATA_AUTH_TOKEN` for enrollment,
+pass that hub credential with `--hub-token` or store it in a matching catalog
+entry instead. A hub `401` explains these options:
 
 ```sh
-export KATA_AUTH_TOKEN=<personal-identity-token>
 kata federation enroll --project fedlab \
   --spoke-instance 01H... \
   --hub-url http://100.64.0.5:7787 \
+  --hub-token <personal-identity-token> \
   --actor wesm
 ```
 
@@ -509,8 +619,8 @@ fragment.
 The CLI prints a pasteable `kata federation join ...` command containing the
 generated token. Treat that command as secret-bearing material.
 
-The CLI exposes capabilities as `pull,push,lease`. The daemon stores the lease
-capability internally as `claim`.
+CLI and TUI output use `lease` for coordination. The API and JSON capability
+fields use the canonical `claim` name; both spellings are accepted as input.
 
 ## Spoke setup
 

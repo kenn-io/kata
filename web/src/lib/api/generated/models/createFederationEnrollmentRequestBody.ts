@@ -5,7 +5,9 @@
 export interface CreateFederationEnrollmentRequestBody {
   actor?: string
   allow_adoption_snapshot_authors?: boolean
+  allow_insecure?: boolean
   capabilities: string
+  hub_url?: string
   /** @nullable */
   project_id: number | null
   spoke_instance_uid: string

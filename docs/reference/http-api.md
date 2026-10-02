@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-09-28
+last_edited: 2026-10-02
 ---
 
 # HTTP API schema
@@ -377,7 +377,19 @@ boundary.
 The URL reported by `kata daemon status` and local `kata ui` both open that
 loopback origin directly. Configured origins exchange a bearer or identity
 token at `POST /api/v1/ui/session/login`. Logout is
-`DELETE /api/v1/ui/session`; there is no browser-session refresh endpoint.
+`DELETE /api/v1/ui/session`; send the issued cookie, `X-Kata-Web-Session`,
+`X-Kata-CSRF`, and the exact configured `Origin`. A successful logout returns
+204 and revokes that tab's session immediately, including its event stream;
+other tabs remain valid. `/api/v1/ui/session/logout` is not a route, and there
+is no browser-session refresh endpoint.
+
+CLI federation enrollment can use the hub's admin bearer token, even when the
+web UI uses `login` mode. The CLI takes that credential from `--hub-token` or a
+daemon catalog entry whose URL matches the hub origin; it never forwards the
+local daemon's global token to the hub. Ordinary API requests without browser
+credentials use daemon bearer authentication on both browser and shared TCP
+listeners. Host validation still applies; requests carrying browser credentials
+or Fetch Metadata follow browser session and Origin checks.
 Session-authentication errors advertise the canonical browser origin in
 `X-Kata-Web-Origin` and its `loopback` or `login` mode in
 `X-Kata-Web-Authentication`, allowing `kata ui` to distinguish a configured
@@ -407,6 +419,29 @@ different attributes, or after its enrollment was revoked, returns `409` with
 `federation_enrollment_token_conflict`. Token-auth identity resolution happens
 before this comparison, so a DB-backed identity token's actor overrides the
 request body's `actor`.
+
+Enrollment creation accepts both `lease` and `claim`; the API returns sorted,
+de-duplicated capabilities using the canonical `claim` name. A project-scoped
+grant with a supplied hub URL requires enabled hub federation. Once federation
+is enabled, creation returns a `join` object containing
+its hub project ID/UID, local project name, baseline and replay cursors, actor,
+capabilities, token, transport options, and `join_command`. Supply `hub_url`
+as an HTTP(S) base URL reachable by the spoke, optionally with a federation
+API reverse-proxy prefix. The server does not infer a federation address
+from its browser origin; dedicated browser listeners and authentication proxies
+may not serve federation transport. Non-loopback HTTP URLs, including private
+IP addresses, require `allow_insecure: true`. Without it, enrollment returns
+`400` before issuing a token. The returned join command carries
+`--allow-insecure`; HTTPS still verifies certificates.
+
+The returned command includes `--project` and the hub project ID, plus any
+push/adoption options. Join fetches the current UID and cursors from the hub
+when it runs, so a purge after enrollment does not leave it using an old baseline.
+Treat the response and command as secrets. Wildcard grants have no project join object; grants without `pull`, or servers without a
+supplied hub URL, have no runnable join command. Legacy API callers
+omitting `hub_url` may issue a grant before enabling federation; those responses
+omit `join` until hub metadata exists. Listing grants
+never returns plaintext tokens or join commands.
 
 `POST /api/v1/federation/enrollments/actions/rotate` repairs a project-scoped
 spoke whose local binding exists but whose enrollment credential was lost. It

@@ -459,7 +459,11 @@ components:
           type: string
         allow_adoption_snapshot_authors:
           type: boolean
+        allow_insecure:
+          type: boolean
         capabilities:
+          type: string
+        hub_url:
           type: string
         project_id:
           format: int64
@@ -1405,6 +1409,8 @@ components:
         id:
           format: int64
           type: integer
+        join:
+          $ref: "#/components/schemas/FederationJoinInstructions"
         project_id:
           format: int64
           type:
@@ -1510,6 +1516,53 @@ components:
           type: integer
       required:
         - schema_version
+      type: object
+    FederationJoinInstructions:
+      additionalProperties: true
+      properties:
+        actor:
+          type: string
+        adopt_existing:
+          type: boolean
+        allow_insecure:
+          type: boolean
+        baseline_through_event_id:
+          format: int64
+          type: integer
+        capabilities:
+          type: string
+        hub_project_id:
+          format: int64
+          type: integer
+        hub_project_uid:
+          type: string
+        hub_url:
+          type: string
+        join_command:
+          type: string
+        project_name:
+          type: string
+        push_enabled:
+          type: boolean
+        replay_horizon_event_id:
+          format: int64
+          type: integer
+        token:
+          type: string
+      required:
+        - hub_url
+        - hub_project_id
+        - hub_project_uid
+        - project_name
+        - baseline_through_event_id
+        - replay_horizon_event_id
+        - token
+        - actor
+        - capabilities
+        - push_enabled
+        - adopt_existing
+        - allow_insecure
+        - join_command
       type: object
     FederationProjectStatus:
       additionalProperties: true

@@ -18,10 +18,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -3939,4 +3941,218 @@ func TestLeaveFederationReplicaRouteArchiveResumeFinishesTeardown(t *testing.T) 
 			t.Fatalf("stale credential should be cleaned, got %q", got)
 		}
 	})
+}
+
+func TestFederationEnrollmentJoinInstructions(t *testing.T) {
+	for _, tc := range []struct {
+		name, supplied, origin, caps, wantHubURL string
+		adopt, insecure                          bool
+	}{
+		{name: "supplied URL with lease alias", supplied: "https://HUB.example:443/", caps: "lease,pull,push", wantHubURL: "https://hub.example", adopt: true},
+		{name: "reverse proxy API prefix", supplied: "https://hub.example/tasks", caps: "pull", wantHubURL: "https://hub.example/tasks"},
+		{name: "browser origin is not a federation address", origin: "https://browser.example", caps: "claim,pull"},
+		{name: "explicit private HTTP", supplied: "http://hub.example", caps: "pull,push", wantHubURL: "http://hub.example", insecure: true},
+		{name: "without URL compatibility", caps: "pull"},
+		{name: "inferred loopback origin is not runnable remotely", origin: "http://127.0.0.1:7373", caps: "pull"},
+		{name: "explicit loopback URL remains usable", supplied: "http://127.0.0.1:7373", caps: "pull", wantHubURL: "http://127.0.0.1:7373"},
+		{name: "without pull is not runnable", supplied: "https://hub.example", caps: "push", wantHubURL: "https://hub.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+				if tc.origin != "" {
+					manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: tc.origin, InstanceID: "enrollment_join"})
+					require.NoError(t, err)
+					cfg.WebSessions = manager
+				}
+			})
+			project := createFederatedHubProject(t, env, "hub-project")
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+				"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": tc.caps,
+				"token": "join-token", "actor": "Example User", "hub_url": tc.supplied, "allow_insecure": tc.insecure,
+				"allow_adoption_snapshot_authors": tc.adopt,
+			}, nil)
+			require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(raw, &out))
+			join, ok := out["join"].(map[string]any)
+			require.True(t, ok, "project-scoped response must include join data: %s", raw)
+			expectedCaps := map[string]string{"lease,pull,push": "claim,pull,push", "claim,pull": "claim,pull", "pull,push": "pull,push", "pull": "pull", "push": "push"}[tc.caps]
+			assert.Equal(t, expectedCaps, out["capabilities"])
+			assert.Equal(t, expectedCaps, join["capabilities"])
+			assert.Equal(t, float64(project.ID), join["hub_project_id"])
+			assert.Equal(t, project.UID, join["hub_project_uid"])
+			assert.Equal(t, "hub-project", join["project_name"])
+			assert.Equal(t, "join-token", join["token"])
+			assert.Equal(t, "Example User", join["actor"])
+			assert.Equal(t, tc.adopt, join["adopt_existing"])
+			assert.Equal(t, strings.Contains(tc.caps, "push"), join["push_enabled"])
+			_, hasBaseline := join["baseline_through_event_id"]
+			assert.True(t, hasBaseline, "zero baseline must be included")
+			_, hasHorizon := join["replay_horizon_event_id"]
+			assert.True(t, hasHorizon)
+			assert.Equal(t, tc.wantHubURL, join["hub_url"])
+			if tc.wantHubURL == "" || tc.caps == "push" {
+				assert.Empty(t, join["join_command"])
+			} else {
+				command, ok := join["join_command"].(string)
+				require.True(t, ok)
+				assert.Contains(t, command, "kata federation join --project hub-project --hub-url "+tc.wantHubURL)
+				assert.Contains(t, command, "--actor 'Example User'")
+				assert.Equal(t, tc.insecure, strings.Contains(command, "--allow-insecure"))
+				assert.Equal(t, tc.adopt, strings.Contains(command, "--adopt-existing"))
+			}
+			if strings.Contains(tc.caps, "lease") {
+				grant, err := env.DB.AuthorizeFederationToken(t.Context(), "join-token", project.ID, "claim")
+				require.NoError(t, err)
+				assert.Equal(t, "claim,pull,push", grant.Capabilities)
+			}
+		})
+	}
+}
+
+func TestFederationEnrollmentInvalidHubURLDoesNotIssueGrant(t *testing.T) {
+	for _, hubURL := range []string{"file:///tmp/hub", "https://user:secret@hub.example", "https://hub.example?token=x", "https://hub.example#fragment", "https://hub.example:0", "http://hub.example"} {
+		t.Run(hubURL, func(t *testing.T) {
+			env := testenv.New(t)
+			project := createFederatedHubProject(t, env, "hub-project")
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+				"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": "pull", "actor": "tester", "hub_url": hubURL,
+			}, nil)
+			assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "%s", raw)
+			grants, err := env.DB.ListFederationEnrollments(t.Context())
+			require.NoError(t, err)
+			assert.Empty(t, grants)
+		})
+	}
+}
+
+func TestFederationEnrollmentWildcardOmitsJoinInstructions(t *testing.T) {
+	env := testenv.New(t)
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+		"spoke_instance_uid": federationTestSpokeUID, "project_id": nil, "capabilities": "lease,pull", "actor": "tester", "hub_url": "https://hub.example",
+	}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.Equal(t, "claim,pull", out["capabilities"])
+	_, hasJoin := out["join"]
+	assert.False(t, hasJoin)
+}
+
+// Fail the response metadata read while retaining the real enrollment store.
+type enrollmentMetadataFailureStore struct{ db.Storage }
+
+func (s enrollmentMetadataFailureStore) MaxFederationBaselineEventID(context.Context, int64, int64) (int64, error) {
+	return 0, errors.New("metadata unavailable")
+}
+
+func TestFederationEnrollmentMetadataFailureDoesNotStrandGrant(t *testing.T) {
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DB = enrollmentMetadataFailureStore{cfg.DB} })
+	project := createFederatedHubProject(t, env, "hub-project")
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+		"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": "pull", "actor": "tester",
+	}, nil)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode, "%s", raw)
+	grants, err := env.DB.ListFederationEnrollments(t.Context())
+	require.NoError(t, err)
+	assert.Empty(t, grants)
+}
+
+func TestFederationMetadataRequiresEnabledHub(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		role    db.FederationRole
+		enabled bool
+	}{
+		{name: "disabled hub", role: db.FederationRoleHub},
+		{name: "spoke", role: db.FederationRoleSpoke, enabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testenv.New(t)
+			project := createFederatedHubProject(t, env, "hub-project")
+			grant, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+				Token: "metadata-token", SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
+			})
+			require.NoError(t, err)
+			binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
+			require.NoError(t, err)
+			binding.Role, binding.Enabled = tc.role, tc.enabled
+			if tc.role == db.FederationRoleSpoke {
+				binding.HubURL, binding.HubProjectID, binding.HubProjectUID = "https://hub.example", 42, project.UID
+			}
+			_, err = env.DB.UpsertFederationBinding(t.Context(), binding)
+			require.NoError(t, err)
+			resp, raw := envDoRaw(t, env, http.MethodGet, projectPath(project.ID)+"/federation/metadata", nil, bearer(grant.Token))
+			assert.Equal(t, http.StatusForbidden, resp.StatusCode, "%s", raw)
+			resp, raw = envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+				"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": "pull", "actor": "tester", "hub_url": "https://hub.example",
+			}, nil)
+			assert.Equal(t, http.StatusConflict, resp.StatusCode, "%s", raw)
+			grants, err := env.DB.ListFederationEnrollments(t.Context())
+			require.NoError(t, err)
+			assert.Len(t, grants, 1, "rejected enrollment must not create a second grant")
+		})
+	}
+}
+
+func TestFederationEnrollmentLegacyWithoutOriginMayPrecedeEnable(t *testing.T) {
+	for _, origin := range []string{"", "https://hub.example"} {
+		t.Run("configured_origin="+origin, func(t *testing.T) {
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+				if origin != "" {
+					manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: origin, InstanceID: "legacy_enrollment"})
+					require.NoError(t, err)
+					cfg.WebSessions = manager
+				}
+			})
+			project, err := env.DB.CreateProject(t.Context(), "hub-project")
+			require.NoError(t, err)
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+				"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": "pull", "actor": "tester",
+			}, nil)
+			require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+			var out api.FederationEnrollmentOut
+			require.NoError(t, json.Unmarshal(raw, &out))
+			assert.NotEmpty(t, out.Token)
+			assert.Nil(t, out.Join)
+		})
+	}
+}
+
+func TestFederationEnrollmentPrivateHTTPRequiresExplicitOptIn(t *testing.T) {
+	for _, allowInsecure := range []bool{false, true} {
+		t.Run(fmt.Sprintf("allow_insecure=%t", allowInsecure), func(t *testing.T) {
+			env := testenv.New(t)
+			t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+			t.Setenv("KATA_ALLOW_INSECURE", "")
+			project := createFederatedHubProject(t, env, "hub-project")
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+				"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID,
+				"capabilities": "pull", "actor": "example-agent", "hub_url": "http://192.168.1.10:7777",
+				"allow_insecure": allowInsecure,
+			}, nil)
+			if !allowInsecure {
+				assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+				var failure struct {
+					Error struct {
+						Message string `json:"message"`
+					} `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &failure))
+				assert.Contains(t, failure.Error.Message, "allow_insecure=true")
+				grants, err := env.DB.ListFederationEnrollments(t.Context())
+				require.NoError(t, err)
+				assert.Empty(t, grants, "reject the request before issuing a durable token")
+				return
+			}
+			require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+			var out api.FederationEnrollmentOut
+			require.NoError(t, json.Unmarshal(raw, &out))
+			require.NotNil(t, out.Join)
+			assert.Contains(t, out.Join.JoinCommand, "--allow-insecure")
+			// Client construction validates the target without making a connection.
+			_, err := federation.NewClient(t.Context(), out.Join.HubURL, out.Join.Token, clientpkg.Opts{AllowInsecure: out.Join.AllowInsecure})
+			require.NoError(t, err)
+		})
+	}
 }

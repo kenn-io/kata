@@ -262,6 +262,15 @@ Use --expect-project-uid <uid> when project identity is known; never initialize 
 Explicit server URLs stay pinned; restore their server or tunnel.
 `
 
+const optionalSetupText = `
+Optional setup:
+For federation, run kata federation identity on the spoke and give its instance UID
+and intended actor/project to the hub administrator. Keep the selected daemon pointed at the spoke.
+Enrollment, joining, and polling: https://katatracker.com/docs/operations/federation/
+Embeddings are optional; lexical search works without them. Setup and credentials:
+https://katatracker.com/docs/guide/semantic-search/
+`
+
 func newQuickstartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "quickstart",
@@ -274,27 +283,32 @@ Default: full instructions for agents using kata.
 --json: instructions in a JSON response.
 --format contract: the canonical managed contract, exactly what kata agent-hooks contract injects.
 
-Run kata agent-hooks install --all to load the contract in every session on this machine.`,
+Run kata agent-hooks install --all to load the contract in every session on this machine.
+Without hooks, run kata quickstart at session start.
+Setup guides cover federation enrollment and optional embeddings.
+The managed contract format stays static.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			switch currentOutputMode() {
-			case outputContract:
+			if currentOutputMode() == outputContract {
 				_, err := fmt.Fprint(cmd.OutOrStdout(), agentContractText)
 				return err
+			}
+			full := agentQuickstartText + optionalSetupText
+			switch currentOutputMode() {
 			case outputJSON:
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, map[string]string{
-					"quickstart": agentQuickstartText,
+					"quickstart": full,
 				}); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
 			case outputAgent:
-				_, err := fmt.Fprint(cmd.OutOrStdout(), "OK quickstart\n"+agentQuickstartCompactText)
+				_, err := fmt.Fprint(cmd.OutOrStdout(), "OK quickstart\n"+agentQuickstartCompactText+optionalSetupText)
 				return err
 			}
-			_, err := fmt.Fprint(cmd.OutOrStdout(), agentQuickstartText)
+			_, err := fmt.Fprint(cmd.OutOrStdout(), full)
 			return err
 		},
 	}
