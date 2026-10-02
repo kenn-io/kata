@@ -530,9 +530,16 @@ async function reconcileChildAttention(row) {
  if(host.sessions.get(row.slot)===row)host.sessions.delete(row.slot);
  const owner=[...host.sessions.values()].find(candidate=>candidate.workspace===row.workspace&&candidate.ref===row.ref&&candidate.started);
  try {
-  if(owner)await command(attentionArgs('start',owner),owner.workspace,500,owner.executable||options.executable);
+  if(owner)await serial(owner.slot,async()=>{
+   if(host.sessions.get(owner.slot)!==owner||!owner.started) {
+    await command(attentionArgs('end',row),row.workspace,500,row.executable||options.executable);
+    return;
+   }
+   await command(attentionArgs('start',owner),owner.workspace,500,owner.executable||options.executable);
+   if(host.sessions.get(owner.slot)!==owner||!owner.started)await command(attentionArgs('end',owner),owner.workspace,500,owner.executable||options.executable);
+  });
   else await command(attentionArgs('end',row),row.workspace,500,row.executable||options.executable);
- }catch{if(owner)owner.started=false}
+ }catch{if(owner&&host.sessions.get(owner.slot)===owner)owner.childFallback=row}
  saveState();
 }
 function serial(slot,task) {
@@ -579,7 +586,14 @@ export default {
        return;
       }
       const existing=host.sessions.get(slot);
-      if(existing?.session===session&&existing.started){existing.owner=options.id;saveState();return;}
+      if(existing?.session===session&&existing.started){
+       existing.owner=options.id;
+       if(existing.childFallback)try {
+        await command(attentionArgs('start',existing),existing.workspace,500,existing.executable||options.executable);
+        if(host.sessions.get(slot)===existing&&existing.started)delete existing.childFallback;
+       }catch{}
+       saveState();return;
+      }
       const pendingKey=options.id+'\u0000'+session+'\u0000'+key;
       const ref=host.pending.get(pendingKey)?.ref || process.env.KATA_REF;
       host.pending.delete(pendingKey);
@@ -641,6 +655,15 @@ export default {
     const work=Promise.all(rows.map(row=>serial(row.slot,async()=>{
      const executable=row.executable || (row.owner===options.id?options.executable:undefined);
      if(Date.now()>=deadline || !executable || !owns(row.workspace,'attention')||host.sessions.get(row.slot)!==row||!row.started)return;
+     if(row.childFallback) {
+      let complete=true;
+      for(const owner of [row,row.childFallback]) {
+       if(Date.now()>=deadline){complete=false;break}
+       try {await command(attentionArgs('end',owner),owner.workspace,Math.min(650,Math.max(1,deadline-Date.now())),owner.executable||executable)}catch{complete=false}
+      }
+      if(complete&&host.sessions.get(row.slot)===row){host.sessions.delete(row.slot);saveState()}
+      return;
+     }
      try {await command(attentionArgs('end',row),row.workspace,Math.min(650,Math.max(1,deadline-Date.now())),executable);if(host.sessions.get(row.slot)===row)host.sessions.delete(row.slot);saveState()}catch{}
     })));
     let timer;try {await Promise.race([work,new Promise(resolve=>{timer=setTimeout(resolve,750)})])}finally{clearTimeout(timer)}
