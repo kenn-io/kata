@@ -161,6 +161,29 @@ components:
         - connector
         - external
       type: object
+    CaptureTelemetryEventRequestBody:
+      additionalProperties: false
+      properties:
+        event:
+          minLength: 1
+          type: string
+        properties:
+          additionalProperties: true
+          type: object
+      required:
+        - event
+      type: object
+    CaptureTelemetryEventResponseBody:
+      additionalProperties: true
+      properties:
+        status:
+          enum:
+            - queued
+            - disabled
+          type: string
+      required:
+        - status
+      type: object
     ChildCounts:
       additionalProperties: true
       properties:
@@ -4797,7 +4820,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.24.0
+  version: 0.25.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -8423,3 +8446,26 @@ paths:
         "304":
           description: Snapshot unchanged
       summary: Read a coherent browser snapshot
+  /api/v1/ui/telemetry:
+    post:
+      operationId: captureTelemetryEvent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaptureTelemetryEventRequestBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaptureTelemetryEventResponseBody"
+          description: Accepted
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Report a browser telemetry event

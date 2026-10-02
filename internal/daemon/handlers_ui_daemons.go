@@ -763,7 +763,8 @@ func webDaemonProxyRequestAllowed(r *http.Request, path string) bool {
 	if strings.HasPrefix(path, webDaemonProxyPrefix) {
 		return false
 	}
-	if path == "/api/v1/ui/daemons" {
+	// The roster and browser telemetry belong to the daemon serving the page.
+	if path == "/api/v1/ui/daemons" || path == "/api/v1/ui/telemetry" {
 		return false
 	}
 	if (path == pathPing || path == pathHealth) && r.Method == http.MethodGet {

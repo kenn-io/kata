@@ -32,7 +32,7 @@ require (
 	github.com/teambition/rrule-go v1.8.2
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
-	go.kenn.io/kit v0.30.0
+	go.kenn.io/kit v0.30.2-0.20261003003746-c4dd642ae68f
 	golang.org/x/mod v0.37.0
 	golang.org/x/net v0.57.0
 	golang.org/x/sync v0.22.0
