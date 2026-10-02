@@ -462,7 +462,9 @@ import path from 'node:path';
 const options = __OPTIONS__;
 const run = promisify(execFile);
 const stateSymbol = Symbol.for('kata.openclaw.hooks.v1');
-const host = globalThis[stateSymbol] ||= { registrations: new Map(), sessions: new Map(), pending: new Map(), queues: new Map(), launch: String(process.pid)+'-'+String(Math.round(Date.now()-process.uptime()*1000)) };
+const host = globalThis[stateSymbol] ||= { registrations: new Map(), sessions: new Map(), pending: new Map(), queues: new Map(), children: new Set(), childSessions: new Map(), launch: String(process.pid)+'-'+String(Math.round(Date.now()-process.uptime()*1000)) };
+host.children ||= new Set();
+host.childSessions ||= new Map();
 const stateDir = path.join(os.tmpdir(),'kata-openclaw-'+String(process.getuid?.() ?? 'owner')+'-'+host.launch);
 const statePath = path.join(stateDir,'sessions.json');
 function privatePath(p, directory) {
@@ -496,6 +498,15 @@ loadState();
 function allowed(api,id=options.id) {
  const p=api.config?.plugins,e=p?.entries?.[id],h=e?.hooks;
  return p?.enabled!==false && e?.enabled===true && (!Array.isArray(p?.allow)||p.allow.length===0||p.allow.includes(id)) && !p?.deny?.includes(id) && h?.allowConversationAccess===true && h?.allowPromptInjection!==false;
+}
+function rememberChild(event,ctx) {
+ const key=event?.childSessionKey||ctx?.childSessionKey;
+ if(typeof key==='string'&&key)host.children.add(key);
+}
+function childSession(session,key) {
+ if(typeof key==='string'&&host.children.has(key))return key;
+ const known=host.childSessions.get(session);
+ return typeof known==='string'&&host.children.has(known)?known:undefined;
 }
 function serial(slot,task) {
  const previous=host.queues.get(slot)||Promise.resolve();
@@ -536,6 +547,10 @@ export default {
      await serial(slot,async()=>{
       ctx.hookInvocation?.assertActive();
       if(!owns(workspace,'attention'))return;
+      if(childSession(session,key)) {
+       host.pending.delete(options.id+'\u0000'+session+'\u0000'+key);
+       return;
+      }
       const existing=host.sessions.get(slot);
       if(existing?.session===session&&existing.started){existing.owner=options.id;saveState();return;}
       const pendingKey=options.id+'\u0000'+session+'\u0000'+key;
@@ -560,10 +575,19 @@ export default {
    }catch{return}
   },{timeoutMs:1500});
   if(options.attention) {
+   // These accepted-spawn hooks carry OpenClaw's exact child session key.
+   // Keep contract injection available in child prompts; attention uses only
+   // verified lifecycle identity, never session-key spelling heuristics.
+   api.on('subagent_progress',(event,ctx)=>{if(event.phase==='started')rememberChild(event,ctx)}, {timeoutMs:700});
+   api.on('subagent_spawned',rememberChild, {timeoutMs:700});
    // Native session_start has no verified workspace. The first prompt captures
    // it, including image-only and resumed sessions; start is idempotent per host.
    api.on('session_start',(event,ctx)=>{
     const session=event.sessionId||ctx.sessionId,key=event.sessionKey||ctx.sessionKey||ctx.agentId,ref=process.env.KATA_REF;
+    if(registration.active && typeof session==='string' && typeof key==='string' && host.children.has(key)){
+     host.childSessions.set(session,key);
+     return;
+    }
     if(registration.active && typeof session==='string' && typeof key==='string' && ref){
      host.pending.set(options.id+'\u0000'+session+'\u0000'+key,{ref});
      while(host.pending.size>64)host.pending.delete(host.pending.keys().next().value);
@@ -572,6 +596,13 @@ export default {
    api.on('session_end',async(event,ctx)=>{
     const session=event.sessionId||ctx.sessionId,key=event.sessionKey||ctx.sessionKey;
     if(typeof session!=='string')return;
+    const child=childSession(session,key);
+    if(child){
+     host.childSessions.delete(session);
+     host.children.delete(child);
+     host.pending.delete(options.id+'\u0000'+session+'\u0000'+child);
+     return;
+    }
     // A project can unload or lose authority before another prompt. Terminal
     // responsibility follows active scope policy and the captured executable.
     const rows=[...host.sessions.values()].filter(row=>row.session===session&&(!key||row.key===key));
