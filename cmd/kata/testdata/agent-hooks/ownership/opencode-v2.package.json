@@ -1,0 +1,9 @@
+{
+  "kataNativeAgentHooksSHA256": "6d0bc4831149d9e70956e592984c2c86f27a6159845f9c0b8145c53f28ccf6ec",
+  "name": "kata-native-agent-hooks",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": "./index.js",
+  "dependencies": {"@opencode/plugin": "^2.0.0"},
+  "kataNativeAgentHooks": {"format":"kata-plugin","version":1,"agent":"opencode","api":"v2","scope":"user","workspace":"","executable":"kata","source":"","sourceSet":false,"contract":true,"attention":true,"configPath":"","configOwned":false,"configProperty":false}
+}

@@ -296,13 +296,14 @@ func extraHookArguments(target string, kind agentHookKind) []string {
 }
 
 func extraHookHandler(opts nativeAgentHookOptions, kind agentHookKind) (map[string]any, error) {
+	args := agentHookOwnershipArgs(opts.Executable, extraHookArguments(opts.Agent, kind), kind)
 	if opts.Agent == "zcode" {
 		if strings.TrimSpace(opts.Executable) == "" {
 			return nil, errors.New("hook executable is required")
 		}
-		return map[string]any{"type": "process", "command": opts.Executable, "args": extraHookArguments(opts.Agent, kind), "timeoutMs": 10000}, nil
+		return map[string]any{"type": "process", "command": opts.Executable, "args": args, "timeoutMs": 10000}, nil
 	}
-	commands, err := agenthook.BuildCommand(opts.Executable, extraHookArguments(opts.Agent, kind)...)
+	commands, err := agenthook.BuildCommand(opts.Executable, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -385,11 +386,19 @@ func extraHookArgvKind(target string, argv []string) agentHookKind {
 	if executable == "" || (strings.Contains(executable, "=") && !strings.ContainsAny(executable, "/\\")) {
 		return ""
 	}
-	if executable != "kata" && executable != "kata.exe" && !strings.ContainsAny(executable, "/\\") {
+	if !isKataHookExecutable(executable) && !strings.ContainsAny(executable, "/\\") {
 		return ""
 	}
 	for _, kind := range []agentHookKind{contractHook, attentionStartHook, attentionEndHook} {
-		if slices.Equal(argv[1:], extraHookArguments(target, kind)) {
+		args := extraHookArguments(target, kind)
+		if isKataHookExecutable(executable) && slices.Equal(argv[1:], args) {
+			return kind
+		}
+		source := legacyAgentContractHookSource
+		if kind != contractHook {
+			source = legacyAttentionHookSource + string(kind)
+		}
+		if slices.Equal(argv[1:], append(args, "--source", source)) {
 			return kind
 		}
 	}
@@ -463,6 +472,7 @@ func renderExtraJSONValue(raw []byte, old, value any) ([]byte, error) {
 		}
 		sort.Strings(added)
 		order = append(order, added...)
+		spacing, closing := extraJSONContainerSpacing(raw)
 		var output bytes.Buffer
 		output.WriteByte('{')
 		first := true
@@ -475,15 +485,20 @@ func renderExtraJSONValue(raw []byte, old, value any) ([]byte, error) {
 				output.WriteByte(',')
 			}
 			first = false
+			output.Write(spacing)
 			name, _ := json.Marshal(key)
 			output.Write(name)
 			output.WriteByte(':')
+			if len(spacing) > 0 {
+				output.WriteByte(' ')
+			}
 			encoded, err := renderExtraJSONValue(children[key], oldObject[key], child)
 			if err != nil {
 				return nil, err
 			}
 			output.Write(encoded)
 		}
+		output.Write(closing)
 		output.WriteByte('}')
 		return output.Bytes(), nil
 	}
@@ -503,12 +518,14 @@ func renderExtraJSONValue(raw []byte, old, value any) ([]byte, error) {
 				raws = append(raws, bytes.Clone(child))
 			}
 		}
+		spacing, closing := extraJSONContainerSpacing(raw)
 		var output bytes.Buffer
 		output.WriteByte('[')
 		for i, child := range array {
 			if i > 0 {
 				output.WriteByte(',')
 			}
+			output.Write(spacing)
 			var oldChild any
 			var oldRaw []byte
 			for j, candidate := range oldArray {
@@ -524,8 +541,21 @@ func renderExtraJSONValue(raw []byte, old, value any) ([]byte, error) {
 			}
 			output.Write(encoded)
 		}
+		output.Write(closing)
 		output.WriteByte(']')
 		return output.Bytes(), nil
 	}
 	return json.Marshal(value, json.Deterministic(true))
+}
+
+// Reuse the container's own indentation without reformatting unchanged child
+// values, which can deliberately use different spacing or numeric literals.
+func extraJSONContainerSpacing(raw []byte) (spacing, closing []byte) {
+	if len(raw) < 2 || (raw[0] != '{' && raw[0] != '[') {
+		return nil, nil
+	}
+	inner := raw[1 : len(raw)-1]
+	spacing = inner[:len(inner)-len(bytes.TrimLeft(inner, " \t\r\n"))]
+	closing = inner[len(bytes.TrimRight(inner, " \t\r\n")):]
+	return spacing, closing
 }

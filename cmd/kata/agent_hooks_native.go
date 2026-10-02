@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/gofrs/flock"
+	"go.kenn.io/kit/pathresolve"
 )
 
 // Native providers only inspect files. Publication is shared so one target's
@@ -30,29 +32,14 @@ type nativeAgentHookPlan struct {
 	Contract, AttentionStart, AttentionEnd                      bool
 	CurrentContract, CurrentAttentionStart, CurrentAttentionEnd bool
 	CurrentOwnedContract                                        bool
+	CurrentAPI                                                  string
 	Warnings                                                    []string
 }
 
-// Inspect lock paths without reading their contents: Windows byte-range locks
-// deny reads even when the path is a valid regular file.
+// Configs may be managed through dotfile symlinks, including a linked home.
+// Publication resolves the destination before replacing it to preserve the link.
 func inspectNativeAgentHookFile(path string) (os.FileInfo, error) {
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return nil, err
-	}
-	for current := path; ; current = filepath.Dir(current) {
-		info, err := os.Lstat(current)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-		if err == nil && info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("refusing symlinked native hook path %q", current)
-		}
-		if current == filepath.Dir(current) {
-			break
-		}
-	}
-	info, err := os.Lstat(path)
+	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -65,6 +52,47 @@ func inspectNativeAgentHookFile(path string) (os.FileInfo, error) {
 	return info, nil
 }
 
+// Resolve existing ancestors as well as the final file. New configs and dangling
+// link targets may be created, while the selected link itself stays intact.
+func resolveNativeAgentHookPath(path string) (string, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := pathresolve.EvalSymlinks(path)
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		return resolved, err
+	}
+	if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		target, readErr := os.Readlink(path)
+		if readErr != nil {
+			return "", readErr
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+		return resolveNativeAgentHookPath(target)
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return "", err
+	}
+	resolved, err = resolveNativeAgentHookPath(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolved, filepath.Base(path)), nil
+}
+
+func nativeAgentHookLockPath(path string) (string, error) {
+	resolved, err := resolveNativeAgentHookPath(path)
+	if err != nil {
+		return "", err
+	}
+	root := filepath.Join(os.TempDir(), fmt.Sprintf("kata-agent-hook-locks-%d", os.Getuid()))
+	return filepath.Join(root, fmt.Sprintf("%x.lock", sha256.Sum256([]byte(resolved)))), nil
+}
+
 func readNativeAgentHookFile(path string) ([]byte, bool, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -74,7 +102,7 @@ func readNativeAgentHookFile(path string) ([]byte, bool, error) {
 	if err != nil || info == nil {
 		return nil, false, err
 	}
-	data, err := os.ReadFile(path) //nolint:gosec // G304: provider-selected hook artifact after regular-file/symlink checks.
+	data, err := os.ReadFile(path) //nolint:gosec // G304: provider-selected hook artifact after regular-file validation.
 	return data, true, err
 }
 
@@ -103,7 +131,7 @@ func publishNativeAgentHookPlanWithFileOps(plan nativeAgentHookPlan, stage func(
 	paths := make([]string, 0, len(plan.Changes))
 	seen := map[string]bool{}
 	for _, change := range plan.Changes {
-		path, e := filepath.Abs(change.Path)
+		path, e := resolveNativeAgentHookPath(change.Path)
 		if e != nil {
 			return false, e
 		}
@@ -128,9 +156,9 @@ func publishNativeAgentHookPlanWithFileOps(plan nativeAgentHookPlan, stage func(
 	// Locks serialize cooperating Kata writers. Snapshot checks detect external
 	// edits before publication, but cannot exclude noncooperating writers in the
 	// final check/rename window.
-	// Create mutation parents before acquiring any locks so overlapping writers
-	// see each other's lock directories. Absent read-only guards must not create
-	// discovery directories that a harness could interpret as installed plugins.
+	// Create mutation parents before staging. Absent read-only guards must not
+	// create discovery directories that a harness could interpret as installed
+	// plugins.
 	for _, change := range changes {
 		if e := os.MkdirAll(filepath.Dir(change.Path), 0700); e != nil {
 			return false, e
@@ -149,8 +177,11 @@ func publishNativeAgentHookPlanWithFileOps(plan nativeAgentHookPlan, stage func(
 		} else if e != nil {
 			return false, e
 		}
-		lockPath := path + ".kata-hook.lock"
-		if _, e := inspectNativeAgentHookFile(lockPath); e != nil {
+		lockPath, e := nativeAgentHookLockPath(path)
+		if e != nil {
+			return false, e
+		}
+		if e := os.MkdirAll(filepath.Dir(lockPath), 0700); e != nil {
 			return false, e
 		}
 		lock := flock.New(lockPath)

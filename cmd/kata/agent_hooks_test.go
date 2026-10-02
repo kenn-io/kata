@@ -60,6 +60,7 @@ func assertNativePrompt(t *testing.T, agent agenthook.Agent, output, expected st
 
 func executeAgentHook(t *testing.T, input io.Reader, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	resetFlags(t)
 	return executeAgentHookRoot(t, newRootCmd(), input, args...)
 }
 
@@ -78,6 +79,7 @@ func executeAgentHookRoot(t *testing.T, cmd *cobra.Command, input io.Reader, arg
 }
 
 func TestAgentHooksContractTerminal(t *testing.T) {
+	resetFlags(t)
 	root := newRootCmd()
 	group, _, err := root.Find([]string{"agent-hooks"})
 	require.NoError(t, err)

@@ -170,7 +170,7 @@ func TestAttentionHooks_IgnoreEmptyAndDashLeadingRefs(t *testing.T) {
 	}
 }
 
-func TestAttentionHookCommand_InvalidInvocationsRejectWithoutDaemonActivity(t *testing.T) {
+func TestAttentionHookCommand_InvalidInvocationsSilentlySkipDaemonActivity(t *testing.T) {
 	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
@@ -185,8 +185,8 @@ func TestAttentionHookCommand_InvalidInvocationsRejectWithoutDaemonActivity(t *t
 		{"-bogus"},
 		{"start", "extra"},
 		{"end", "extra"},
-		{"start", "--source", "kata-agent-hook-start"},
-		{"end", "--source", "kata-agent-hook-end"},
+		{"start", "--source", "other"},
+		{"end", "--source", "kata-agent-hook-start"},
 	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			resetFlags(t)
@@ -197,7 +197,7 @@ func TestAttentionHookCommand_InvalidInvocationsRejectWithoutDaemonActivity(t *t
 			cmd.SetArgs(append([]string{"attention-hook"}, args...))
 			cmd.SetContext(contextWithBaseURL(context.Background(), server.URL))
 
-			assert.Error(t, cmd.Execute())
+			assert.NoError(t, cmd.Execute())
 			assert.Empty(t, output.String())
 		})
 	}

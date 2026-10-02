@@ -145,7 +145,7 @@ get committed.
 --with-agents: committed guidance for everyone on the repo.
 --with-hooks / --with-codex-hooks: this workspace's Claude Code / Codex hooks.
 --agent-hooks=codex,pi: project contract and available attention hooks; --contract-only opts out of attention.
---with-agent-hooks <harness>: legacy project bundle (repeatable).
+--with-agent-hooks <harness>: project contract and available attention hooks (repeatable).
 kata agent-hooks install: discover configured agents and install contract plus available attention hooks.
 Name agents for explicit setup; use --local for project scope. If a user-level hook exists, --with-codex-hooks skips the workspace contract hook unless the workspace config is tracked.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -393,7 +393,7 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 
 	nativeHooksChanged, hookResults, err := applyInitHookOptions(opts, dest)
 	if err != nil {
-		return "", err
+		return "", initAgentHooksFailure(bs, resp.Project.Name, dest, resp.Created, nativeHooksChanged, err)
 	}
 	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged || nativeHooksChanged, hookResults)
 }
@@ -467,7 +467,7 @@ func runStartPathInit(ctx context.Context, baseURL, startPath string, opts callI
 
 	nativeHooksChanged, hookResults, err := applyInitHookOptions(opts, gitignoreDir)
 	if err != nil {
-		return "", err
+		return "", initAgentHooksFailure(bs, resp.Project.Name, gitignoreDir, resp.Created, nativeHooksChanged, err)
 	}
 	// The path-based daemon flow writes workspace files remotely and exposes no
 	// local file-change bit today; project creation is the closest stable signal.
@@ -616,7 +616,7 @@ func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed
 				return "", err
 			}
 			response["agent_hooks"] = encoded
-			bs, err = json.Marshal(response)
+			bs, err = json.Marshal(response, json.Deterministic(true))
 			if err != nil {
 				return "", err
 			}

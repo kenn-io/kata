@@ -43,6 +43,25 @@ make lint
 make nilaway
 ```
 
+### Native agent plugins
+
+The `native-agent-plugins` job in
+[test.yml](https://github.com/kenn-io/kata/blob/main/.github/workflows/test.yml)
+installs pinned published packages into a temporary directory and runs the
+native loader and SDK checks. Use the same install and test commands locally.
+The tests use temporary application state and do not need provider credentials.
+
+| Variable | Package location |
+| --- | --- |
+| `KATA_NATIVE_PLUGIN_SDK_ROOT` | Install prefix containing the Amp and OpenCode SDKs in `node_modules`. |
+| `KATA_PI_TEST_RUNTIME` | Absolute `dist` directory of the published Pi package. |
+| `KATA_OPENCLAW_TEST_RUNTIME` | Published OpenClaw package directory. |
+
+Pi and OpenClaw tests exercise their native loaders and runners. Amp and
+OpenCode checks compile against published declarations and exercise callbacks;
+the OpenCode v2 checks also load the published `Plugin.define` implementation.
+These checks do not replace a session in each agent's full application.
+
 ### Browser UI development
 
 The web toolchain is pinned to Node `26.5.1` and Bun `1.3.14`; use those exact

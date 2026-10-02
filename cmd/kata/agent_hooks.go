@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"fmt"
 	"io"
-	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -37,6 +35,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 			"Command harnesses: claude, codex, copilot, cursor, gemini, hermes, qwen, droid, antigravity, kimi-code, muse, zcode.\n" +
 			"For plain text at a terminal, use kata quickstart --format contract.\n" +
 			"--source selects a local UTF-8 prompt file, replacing the entire contract.\n" +
+			"The reserved source kata-agent-contract-hook keeps the built-in contract; use ./kata-agent-contract-hook for a file with that name.\n" +
 			"Relative paths use cwd; missing files use the built-in contract; empty files supply an empty prompt.",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: agentHookHarnessCompletion,
@@ -110,22 +109,6 @@ func newAgentHookAttentionCmd(mode string) *cobra.Command {
 
 func agentHookUsage(message string) error {
 	return &cliError{Message: message, Kind: kindUsage, ExitCode: ExitUsage}
-}
-
-func parseAgentHookHarness(name string) (agenthook.Agent, error) {
-	agent, err := agenthook.ParseAgent(name)
-	if err != nil {
-		names := make([]string, 0, len(agenthook.Profiles()))
-		for _, profile := range agenthook.Profiles() {
-			names = append(names, string(profile.Agent))
-		}
-		return "", agentHookUsage(fmt.Sprintf("unknown harness %q; accepted: %s", name, strings.Join(names, ", ")))
-	}
-	profile, _ := agenthook.LookupProfile(agent)
-	if !slices.Contains(profile.SupportedEvents, agenthook.EventSessionStart) {
-		return "", agentHookUsage(profile.DisplayName + " hooks do not support SessionStart")
-	}
-	return agent, nil
 }
 
 func agentHookHarnessCompletion(_ *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {

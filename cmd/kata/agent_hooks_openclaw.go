@@ -135,11 +135,8 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 		if !ok || !bytes.HasPrefix(line, []byte(openClawManagedPrefix)) || json.Unmarshal(line[len(openClawManagedPrefix):], &old) != nil || old.Version != 1 || old.ID != id || old.Workspace != workspace {
 			return plan, fmt.Errorf("OpenClaw package %q is authored or unsupported; preserve it and choose another native package", root)
 		}
-		generated := openClawAssets(old)
-		for i := range 3 {
-			if !plan.Changes[i].OriginalExists || !bytes.Equal(plan.Changes[i].Original, generated[i]) {
-				return plan, fmt.Errorf("OpenClaw owned package %q has authored edits; preserve it and reconcile with native plugin management", paths[i])
-			}
+		if !plan.Changes[1].OriginalExists || !plan.Changes[2].OriginalExists || !nativeAgentHookCodeUnedited(plan.Changes[0].Original, plan.Changes[1].Original, plan.Changes[2].Original) {
+			return plan, fmt.Errorf("OpenClaw owned package %q has authored edits; preserve it and reconcile with native plugin management", root)
 		}
 	} else {
 		for i := 1; i < 3; i++ {
@@ -254,7 +251,10 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 				desired.AddedAllow = desired.AddedAllow || changed
 			}
 		}
-		assets := openClawAssets(desired)
+		assets, e := openClawAssets(desired)
+		if e != nil {
+			return plan, e
+		}
 		for i := range 3 {
 			plan.Changes[i].Content = assets[i]
 		}
@@ -307,19 +307,9 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 			plan.Changes[i].Remove = true
 		}
 	}
-	encoded, err := json.Marshal(cfg, jsontext.WithIndent("  "), json.Deterministic(true))
+	encoded, err := renderExtraJSON(raw, cfg)
 	if err != nil {
 		return plan, err
-	}
-	encoded = append(encoded, '\n')
-	// Preserve original bytes when the semantic config is unchanged.
-	originalCfg, originalErr := openClawDecodeConfig(raw)
-	if len(raw) > 0 && originalErr == nil {
-		a, _ := json.Marshal(originalCfg, json.Deterministic(true))
-		b, _ := json.Marshal(cfg, json.Deterministic(true))
-		if bytes.Equal(a, b) {
-			encoded = raw
-		}
 	}
 	if !owned && remove {
 		encoded = raw
@@ -446,12 +436,22 @@ func openClawHasInclude(value any) bool {
 	}
 	return false
 }
-func openClawAssets(m openClawManaged) [3][]byte {
-	metadata, _ := json.Marshal(m)
+func openClawAssets(m openClawManaged) ([3][]byte, error) {
+	metadata, err := json.Marshal(m, nativeAgentHookOwnedJSONOptions)
+	if err != nil {
+		return [3][]byte{}, err
+	}
 	code := openClawManagedPrefix + string(metadata) + "\n" + strings.ReplaceAll(openClawModule, "__OPTIONS__", string(metadata))
-	pkg, _ := json.Marshal(map[string]any{"name": m.ID, "version": "1.0.0", "type": "module", "openclaw": map[string]any{"extensions": []string{"./index.js"}, "compat": map[string]string{"pluginApi": ">=2026.9.7", "minGatewayVersion": "2026.9.7"}}}, jsontext.WithIndent("  "), json.Deterministic(true))
-	manifest, _ := json.Marshal(map[string]any{"id": m.ID, "name": "Kata agent hooks", "activation": map[string]bool{"onStartup": true}, "configSchema": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{}}}, jsontext.WithIndent("  "), json.Deterministic(true))
-	return [3][]byte{[]byte(code), append(pkg, '\n'), append(manifest, '\n')}
+	pkg, err := json.Marshal(map[string]any{"name": m.ID, "version": "1.0.0", "type": "module", "openclaw": map[string]any{"extensions": []string{"./index.js"}, "compat": map[string]string{"pluginApi": ">=2026.9.7", "minGatewayVersion": "2026.9.7"}}}, jsontext.WithIndent("  "), json.Deterministic(true))
+	if err != nil {
+		return [3][]byte{}, err
+	}
+	manifest, err := json.Marshal(map[string]any{"id": m.ID, "name": "Kata agent hooks", "activation": map[string]bool{"onStartup": true}, "configSchema": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{}}}, jsontext.WithIndent("  "), json.Deterministic(true))
+	if err != nil {
+		return [3][]byte{}, err
+	}
+	pkg, manifest = append(pkg, '\n'), append(manifest, '\n')
+	return [3][]byte{sealNativeAgentHookCode([]byte(code), pkg, manifest), pkg, manifest}, nil
 }
 
 const openClawModule = `import { execFile } from 'node:child_process';

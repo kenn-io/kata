@@ -80,16 +80,24 @@ the detected API choice remains fixed through publication. New CSV setup adds an
 `agent_hooks` array to init JSON, with per-target mutation fields (`harness`,
 `config_path`, `changed`, `state`, `reason`, and `warnings`). Agent output includes
 `agent_hooks_harness` and `agent_hooks_state` lines. Muse project attention is
-reported as `partial` unless `--contract-only` was selected. Legacy init output
-is unchanged.
+reported as `partial` unless `--contract-only` was selected.
 
-Repeatable `--with-agent-hooks <harness>` retains its existing full project
-bundle behavior. `--with-agent-hooks opencode` detects and pins the installed
-runtime API before daemon contact while preserving legacy output. The older
+Repeatable `--with-agent-hooks <harness>` also selects full project bundles;
+its output does not include the per-target `agent_hooks` array.
+`--with-agent-hooks opencode` detects and pins the installed runtime API before
+daemon contact. The older
 `--with-hooks` and `--with-codex-hooks` also preserve their commands and trust
-identities. Combining any legacy hook selector with `--agent-hooks` or
+identities. Combining another hook selector with `--agent-hooks` or
 `--contract-only` is rejected before writes; `--with-agents` may accompany
 either setup flow.
+
+If publication fails after `--agent-hooks` or `--with-agent-hooks` creates or
+binds the project, init exits nonzero and reports that completed outcome.
+JSON errors use `error.code: init_agent_hooks_failed`; `error.data` preserves
+the daemon's project result and adds `bound`, `workspace_root`,
+`agent_hooks_error`, and `agent_hooks_changed`. The last field reports whether
+hook writes remain after the failed publication. Fix the reported error and
+rerun init to complete hook setup.
 
 Pass `--with-codex-hooks` to install additive `SessionStart` and `SessionEnd` hooks in the
 workspace's `.codex/hooks.json`. The contract hook injects the same canonical
@@ -107,7 +115,9 @@ warning because Codex loads both files' hooks together.
 
 If the selected user's Codex config already has a `SessionStart` contract hook
 that invokes a built-in Kata contract command directly, init can use it instead
-of a workspace contract hook. Custom `--source` files, shell wrappers, conditional
+of a workspace contract hook. This applies to `--agent-hooks=codex`,
+`--with-agent-hooks codex`, and `--with-codex-hooks`.
+Custom `--source` files, shell wrappers, conditional
 registrations and extra handler arguments do not qualify. Its matcher must be absent,
 empty, `*`, or a regex matching all four sources: startup, resume, clear, and
 compact. A `commandWindows` override alone does not qualify. An explicit
@@ -120,9 +130,9 @@ runs. Normalize the user config with `kata agent-hooks install codex`, then
 rerun `kata init --with-codex-hooks`; init removes an untracked duplicate and
 keeps a tracked workspace hook for teammates.
 
-For an untracked `.codex/hooks.json`, init installs the attention hook, removes
+For an untracked `.codex/hooks.json`, init installs the selected attention hooks, removes
 the workspace contract hook, and reports the user config path supplying it.
-For a tracked file, init installs or updates both hooks and reports that it
+For a tracked file, init installs or updates the selected hooks and reports that it
 kept the workspace contract for teammates who may lack a user hook. Paths that
 identify the same config file count as one installation and do not trigger
 removal.
@@ -131,8 +141,10 @@ Init checks only the config selected by the current `CODEX_HOME`, or the default
 `~/.codex/hooks.json` when that variable is absent. A workspace shared across
 several Codex homes therefore deduplicates against whichever home runs init.
 Malformed JSON or an invalid hook layout in the selected user config aborts
-hook setup before changing workspace hooks. Init continues and reports a warning
-in human output mode. When a qualifying user contract exists in a git workspace,
+hook setup before changing workspace hooks. The `--agent-hooks` and
+`--with-agent-hooks` selectors reject it before project creation;
+`--with-codex-hooks` continues init and reports a warning in human output mode.
+When a qualifying user contract exists in a git workspace,
 init also requires a working `git` executable to check whether the workspace hook
 file is tracked. If you remove the user contract hook, re-run
 `kata init --with-codex-hooks` to restore the workspace contract hook.
@@ -245,8 +257,9 @@ file deliberately supplies an empty prompt; native harnesses may encode that
 as a neutral response. Directories, unreadable files, invalid UTF-8, an empty
 option value and malformed arguments return an error before emitting a
 response. Paths are used literally, without URL fetching, shell expansion or
-template processing. Old ownership labels have no special runtime meaning:
-`--source` always selects a file.
+template processing. The shipped ownership marker
+`--source kata-agent-contract-hook` keeps the built-in contract even when a file
+has that name. Use `--source ./kata-agent-contract-hook` to select that file.
 
 An unknown harness or terminal stdin on the native form returns usage exit code
 `2`. At a terminal, use `kata quickstart --format contract` for plain text.
@@ -284,8 +297,8 @@ kata init --agent-hooks=codex,pi
 kata agent-hooks uninstall pi --contract-only
 ```
 
-Installation now requests contracts plus every available native attention
-direction by default, deliberately changing earlier script behavior. Use
+Installation requests contracts plus every available native attention
+direction by default. Use
 `--contract-only` or `--attention=false` for contract-only setup. `--attention`
 remains accepted. Contract-only reinstall preserves existing attention; default
 uninstall removes the full owned bundle, while contract-only uninstall preserves
@@ -296,7 +309,8 @@ output and timeout. Supported stable v1 releases start at 1.0.154; stable v2
 releases start at 2.0.0. Prerelease, unsupported, or ambiguous version output
 cannot select an API. `--api v1|v2` is an advanced override for unavailable
 detection; known incompatible runtime evidence is still rejected. Existing
-owned API metadata and discovery paths are retained. An API mismatch requires
+owned API metadata and discovery paths are retained; reinstall can reuse that
+API when the version probe is unavailable. An API mismatch requires
 uninstalling the existing bundle before choosing another API. Automatic setup
 can skip a failed probe while configuring other agents. Amp supports user or
 project installations, with conflicts detected across recorded project scopes.
@@ -331,7 +345,9 @@ uses `on_session_finalize`, never per-turn `on_session_end`. Bare
 `attention-hook` entry points and the older init flags retain their compatible
 commands; bare hooks do not provide session-ownership fencing.
 
-Kata chooses an absolute executable path in this order:
+Project setup uses the portable `kata` command by default so teammates do not
+inherit the installer's machine-specific path. `--executable` overrides it.
+User setup chooses an absolute executable path in this order:
 
 1. `--executable <path-or-command>`. Bare commands are resolved on `PATH`;
    relative paths are made absolute. The result must be an existing regular
@@ -345,16 +361,24 @@ writes nothing and preserves hook indexes. All owned handler fields, including c
 platform commands and execution conditions, must match the planned registration.
 Older paths, duplicate defaults and old generated source-marked commands are
 normalized; Kata warns that the harness may ask to re-trust. Ownership uses
-exact direct command recognition across all platform variants. Custom prompt
+exact direct command recognition across all platform variants. A renamed Kata
+executable carries an explicit ownership marker so later updates can recognize
+it. Custom prompt
 commands and unrelated wrappers remain untouched, retaining their relative order.
+Generated Pi, Amp, OpenCode and OpenClaw artifacts record a digest of their
+installed code and metadata. Unedited artifacts can be inspected, upgraded or
+removed after Kata's generator changes. Edited code, metadata and package
+manifests are preserved; move them aside after saving your changes before
+rerunning setup.
 All flags, harnesses and config plans are validated before writes begin.
 Artifacts are snapshot-checked, locked and staged before publication. A failed
 bundle rolls back its writes when their afterimages still match. External edits
 are preserved and retained artifacts are named when safe rollback is impossible.
 These checks serialize cooperating Kata writers; they do not prevent arbitrary
-external writes between the last check and rename. Adjacent `*.kata-hook.lock`
-files remain for cooperating-writer synchronization. Add that pattern to the
-workspace Git ignore rules when installing project hooks.
+external writes between the last check and rename. Lock files live in the OS
+temporary directory under `kata-agent-hook-locks-<uid>/`, outside agent configs
+and workspaces. Config symlinks are preserved; publication updates their resolved
+target.
 
 After installing or replacing a Codex hook, Kata prints:
 
@@ -371,9 +395,9 @@ warning. See the [workspace hook rules](#workspace-initialization).
 
 `uninstall` removes built-in contract hooks, including old source-marked
 defaults recognized by their direct commands. It preserves custom prompts,
-wrappers and unrelated handlers. Default uninstall retains attention; selecting
-`--attention` removes the full selected bundle. An attention-only extension may
-remain after contract removal. A missing config is a
+wrappers and unrelated handlers. Default uninstall removes the full selected
+bundle; `--contract-only` preserves attention. An attention-only extension may
+remain after contract-only removal. A missing config is a
 successful no-op. Removing a Codex user hook warns that workspaces initialized
 while it existed may have no contract hook; rerun
 `kata init --with-codex-hooks` in those workspaces to restore it.
@@ -387,9 +411,11 @@ kata agent-hooks status codex --config /path/to/second-codex-home/hooks.json --j
 
 `status` needs no daemon or initialized Kata workspace and never writes files.
 Bare status inspects user and supported project scopes. A named target defaults
-to user scope; explicit `--scope` or `--local` selects one scope. In JSON, bare
-status adds project rows identified by `(harness, scope)` without changing the
-existing fields. Status and uninstall never execute OpenCode version probes.
+to user scope; explicit `--scope` or `--local` selects one scope. In bare JSON
+status, top-level `harnesses` contains one user row per agent and
+`workspace.harnesses` contains project rows. User rows use `user` for config
+details; project rows use `config`. With a single selected scope, rows stay in
+top-level `harnesses`. Status and uninstall never execute OpenCode version probes.
 Capabilities and configured contract/start/end
 are separate, and offline state cannot prove runtime loading or native trust.
 It also reports contract and attention registrations in the current workspace's
@@ -402,10 +428,13 @@ An unreadable or malformed workspace hook file produces a warning while status
 continues to report user hooks. If Git is unavailable or cannot inspect the
 workspace, status reports no committed guidance and includes a warning. These
 warnings mean the corresponding workspace checks are incomplete. An unreadable,
-malformed or unsupported native user config produces a target-specific warning
-and `inspection_error` in JSON; status still reports the other targets. The
-failed target’s configured fields are unknown, and text output says inspection
-is unavailable. Invalid command arguments still return an error.
+malformed or unsupported config in a selected scope produces `inspection_error`
+with the target, scope and file path. Status collects the other targets, then
+exits nonzero with `error.code: agent_hooks_inspection_failed`. JSON sends the
+report in `error.data` on stderr and leaves stdout empty. Human and agent output
+print the report before the error. The failed target's configured fields are
+unknown, and text output says inspection is unavailable. Invalid command
+arguments also return an error.
 
 For each user config, status shows its path, contract presence, commands and
 whether each command's executable exists. `duplicate` means a user contract
@@ -422,8 +451,8 @@ JSON. Empty lists are `[]`. Mutation output contains `action` and `results`.
 Each result has `harness`, `config_path`, `changed`, `state`, `reason`, and
 `warnings`. States are `installed`, `unchanged`, `removed`, `absent`,
 `skipped`, or `partial`. Automatic skips and Muse partial setup return success
-with structured reasons. Bare install with no configured agents returns usage
-exit code `2` and makes no changes. Explicit detection failures, runtime/API
+with structured reasons. Bare install and `--all` with no configured agents
+return a successful skipped report and make no changes. Explicit detection failures, runtime/API
 mismatches, and foreign or edited artifacts fail before publication.
 
 Status JSON has this shape:
@@ -431,12 +460,12 @@ Status JSON has this shape:
 | Object | Fields |
 | --- | --- |
 | Top level | `kata_api_version`, `harnesses`, `workspace`, `warnings` |
-| Each harness | `harness`, `scope`, `capabilities`, `configured`, `user`, `duplicate`, `overlap` |
+| Each harness | `harness`, `scope`, `capabilities`, `configured`, `user` (user scope) or `config` (project scope), `duplicate`, `overlap`, optional `inspection_error` |
 | Configured components | `contract`, `attention_start`, `attention_end` |
 | Capabilities | `name`, `contract`, `attention_start`, `attention_end`, `project_scope`, optional `note` |
 | User or workspace config | `config_path`, `present`, `entries` |
 | Each entry | `event`, `group_index`, `handler_index`, `matcher`, `command`, `executable`, `executable_exists`, `kind` |
-| Workspace | `path`, `claude`, `codex`, `committed_guidance` |
+| Workspace | `path`, `claude`, `codex`, `committed_guidance`, `harnesses` when both scopes are selected |
 
 `kind` is `contract` or `attention`. Native event names are preserved.
 `group_index` is `-1` for profiles with flat handler lists. `present` means a

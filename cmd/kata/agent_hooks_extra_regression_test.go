@@ -75,7 +75,7 @@ func TestExtraZCodeUsesArgvAndEnablesNativeHooks(t *testing.T) {
 	require.Equal(t, true, hooks["enabled"])
 	events := hooks["events"].(map[string]any)
 	groups := events["SessionStart"].([]any)
-	for i, want := range [][]any{{"agent-hooks", "contract", "zcode"}, {"agent-hooks", "attention-native", "zcode", "start"}} {
+	for i, want := range [][]any{{"agent-hooks", "contract", "zcode", "--source", "kata-agent-contract-hook"}, {"agent-hooks", "attention-native", "zcode", "start", "--source", "kata-agent-hook-start"}} {
 		handler := groups[i].(map[string]any)["hooks"].([]any)[0].(map[string]any)
 		require.Equal(t, "process", handler["type"])
 		require.Equal(t, opts.Executable, handler["command"])

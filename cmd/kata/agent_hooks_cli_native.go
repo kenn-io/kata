@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -179,15 +180,6 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 		if err != nil {
 			return err
 		}
-		if !all && len(args) == 0 {
-			configured := false
-			for _, target := range targets {
-				configured = configured || target.skip == ""
-			}
-			if !configured {
-				return agentHookUsage("no configured agents found; no setup performed. Name agents explicitly, for example: kata agent-hooks install codex pi")
-			}
-		}
 		automatic := all || len(args) == 0
 		if automatic && !remove && !attention {
 			for i := range targets {
@@ -215,9 +207,13 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 		}
 		warning := ""
 		if !remove {
-			executable, warning, err = resolveAgentHookExecutable(executable, defaultAgentHookExecutableEnv())
-			if err != nil {
-				return err
+			if scope == "project" && executable == "" {
+				executable = "kata"
+			} else {
+				executable, warning, err = resolveAgentHookExecutable(executable, defaultAgentHookExecutableEnv())
+				if err != nil {
+					return err
+				}
 			}
 		}
 		results := make([]agentHookMutation, 0, len(targets))
@@ -243,11 +239,16 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 				// skip this target. An unset API retains any owned SDK/layout choice.
 				inspection := opts
 				inspection.API = ""
-				if _, err := planNativeAgentHooks(inspection, false); err != nil {
-					return err
+				installed, err := planNativeAgentHooks(inspection, false)
+				if err != nil {
+					return fmt.Errorf("plan %s (%s) config %q: %w", opts.Agent, scope, target.path, err)
+				}
+				selectedAPI := api
+				if selectedAPI == "" {
+					selectedAPI = installed.CurrentAPI
 				}
 				var runtimeWarning string
-				opts.API, runtimeWarning, err = resolveOpenCodeRuntimeAPI(cmd.Context(), api)
+				opts.API, runtimeWarning, err = resolveOpenCodeRuntimeAPI(cmd.Context(), selectedAPI)
 				if err != nil {
 					if !automatic {
 						return err
@@ -281,7 +282,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 				plan, err = planNativeAgentHooks(opts, false)
 			}
 			if err != nil {
-				return err
+				return fmt.Errorf("plan %s (%s) config %q: %w", opts.Agent, scope, target.path, err)
 			}
 			result.ConfigPath = plan.Path
 			result.Warnings = append(result.Warnings, plan.Warnings...)
@@ -331,7 +332,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 		}
 		return printAgentHookMutations(cmd, verb, results)
 	}
-	cmd.Flags().BoolVar(&all, "all", false, "discover configured harnesses (also the install default)")
+	cmd.Flags().BoolVar(&all, "all", false, "discover configured harnesses")
 	cmd.Flags().BoolVar(&local, "local", false, "use project scope in the selected workspace")
 	cmd.Flags().BoolVar(&contractOnly, "contract-only", false, "select only contract hooks; preserve existing attention on install")
 	cmd.Flags().StringVar(&scope, "scope", "user", "installation scope: user or project")
@@ -404,11 +405,20 @@ func newAgentHooksStatusCmd() *cobra.Command {
 			}
 			targets = append(targets, selected...)
 		}
-		report, err := collectAgentHookStatus(nil, dir)
-		if err != nil {
-			return err
-		}
+		report := collectAgentHookWorkspaceStatus(dir)
 		report.Warnings = append(report.Warnings, "Offline status reports owned configured artifacts; it cannot confirm native loading, hook trust, or runtime permissions.")
+		var inspectionErrors []error
+		appendStatus := func(row agentHookHarnessStatus) {
+			if row.Scope == "project" {
+				row.Config = new(row.User)
+				row.User = agentHookUserStatus{}
+				if len(scopes) > 1 {
+					report.Workspace.Harnesses = append(report.Workspace.Harnesses, row)
+					return
+				}
+			}
+			report.Harnesses = append(report.Harnesses, row)
+		}
 		for _, target := range targets {
 			scope := target.options.Scope
 			plan, err := planNativeAgentHooks(target.options, true)
@@ -417,16 +427,20 @@ func newAgentHooksStatusCmd() *cobra.Command {
 				if path == "" {
 					path = target.path
 				}
-				report.Harnesses = append(report.Harnesses, agentHookHarnessStatus{Harness: target.capability.Name, Scope: scope, Capabilities: target.capability, InspectionError: err.Error(), User: agentHookUserStatus{ConfigPath: path, Entries: []agentHookStatusEntry{}}})
-				report.Warnings = append(report.Warnings, target.capability.Name+": "+err.Error())
+				err = fmt.Errorf("inspect %s (%s) config %q: %w", target.capability.Name, scope, path, err)
+				inspectionErrors = append(inspectionErrors, err)
+				appendStatus(agentHookHarnessStatus{Harness: target.capability.Name, Scope: scope, Capabilities: target.capability, InspectionError: err.Error(), User: agentHookUserStatus{ConfigPath: path, Entries: []agentHookStatusEntry{}}})
+				report.Warnings = append(report.Warnings, err.Error())
 				continue
 			}
 			user := agentHookUserStatus{ConfigPath: plan.Path, Present: plan.CurrentContract, Entries: []agentHookStatusEntry{}}
 			if agentHookUsesKit(target.capability.Name) {
 				user, err = readAgentHookStatus(agenthook.Agent(target.capability.Name), plan.Path, dir)
 				if err != nil {
-					report.Harnesses = append(report.Harnesses, agentHookHarnessStatus{Harness: target.capability.Name, Scope: scope, Capabilities: target.capability, InspectionError: err.Error(), User: user})
-					report.Warnings = append(report.Warnings, target.capability.Name+": "+err.Error())
+					err = fmt.Errorf("inspect %s (%s) config %q: %w", target.capability.Name, scope, plan.Path, err)
+					inspectionErrors = append(inspectionErrors, err)
+					appendStatus(agentHookHarnessStatus{Harness: target.capability.Name, Scope: scope, Capabilities: target.capability, InspectionError: err.Error(), User: user})
+					report.Warnings = append(report.Warnings, err.Error())
 					continue
 				}
 			}
@@ -439,11 +453,23 @@ func newAgentHooksStatusCmd() *cobra.Command {
 					row.Duplicate = user.Present && report.Workspace.Codex.Present && !sameAgentHookFile(plan.Path, report.Workspace.Codex.ConfigPath)
 				}
 			}
-			report.Harnesses = append(report.Harnesses, row)
+			appendStatus(row)
 			report.Warnings = append(report.Warnings, plan.Warnings...)
 			if target.capability.Note != "" {
 				report.Warnings = append(report.Warnings, target.capability.Name+": "+target.capability.Note)
 			}
+		}
+		if err := errors.Join(inspectionErrors...); err != nil {
+			if currentOutputMode() != outputJSON {
+				if printErr := printAgentHookStatus(cmd, report); printErr != nil {
+					return errors.Join(err, printErr)
+				}
+			}
+			data, marshalErr := json.Marshal(report)
+			if marshalErr != nil {
+				return errors.Join(err, marshalErr)
+			}
+			return &cliError{Message: err.Error(), Kind: kindInternal, Code: "agent_hooks_inspection_failed", ExitCode: ExitInternal, Data: data}
 		}
 		return printAgentHookStatus(cmd, report)
 	}

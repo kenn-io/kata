@@ -59,7 +59,7 @@ func TestExtraJSONOwnershipPreservesForeignHandlers(t *testing.T) {
 	require.JSONEq(t, string(foreign), string(data))
 }
 
-func TestExtraJSONRejectsMalformedAndSymlinkedFiles(t *testing.T) {
+func TestExtraJSONRejectsMalformedFilesAndFollowsDotfileLinks(t *testing.T) {
 	for _, input := range []string{`null`, `{"SessionStart":null}`, `{"SessionStart":{}}`, `{"SessionStart":[{"hooks":{}}]}`, `{"SessionStart":[],"SessionStart":[]}`, `{"SessionStart":[1]}`} {
 		opts := extraOptions(t, "droid")
 		opts.ConfigPath = filepath.Join(opts.Home, "hooks.json")
@@ -77,6 +77,14 @@ func TestExtraJSONRejectsMalformedAndSymlinkedFiles(t *testing.T) {
 	if err := os.Symlink(target, opts.ConfigPath); err != nil {
 		t.Skip(err)
 	}
-	_, err := planExtraAgentHooks(opts, false)
-	require.ErrorContains(t, err, "symlink")
+	plan, err := planExtraAgentHooks(opts, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+	info, err := os.Lstat(opts.ConfigPath)
+	require.NoError(t, err)
+	require.NotZero(t, info.Mode()&os.ModeSymlink)
+	data, err := os.ReadFile(target) //nolint:gosec // G304: isolated dotfile target under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, plan.Changes[0].Content, data)
 }

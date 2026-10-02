@@ -24,7 +24,7 @@ const attentionSessionKey = "work.attention_session"
 // Installed adapters carry session ownership. The legacy bare hook remains a
 // separate stdin-ignoring compatibility entry point.
 func newNativeAgentAttentionCmd() *cobra.Command {
-	var session, ref string
+	var session, ref, source string
 	var hostPID int
 	cmd := &cobra.Command{
 		Use: "attention-native <harness> <start|end>", Short: "Track a native session's attention ownership", Hidden: true,
@@ -37,6 +37,9 @@ func newNativeAgentAttentionCmd() *cobra.Command {
 			}
 			if args[1] != "start" && args[1] != "end" {
 				return agentHookUsage("attention-native requires start or end")
+			}
+			if cmd.Flags().Changed("source") && source != legacyAttentionHookSource+args[1] {
+				return agentHookUsage("--source must be " + legacyAttentionHookSource + args[1])
 			}
 			if cmd.Flags().Changed("session") && strings.TrimSpace(session) == "" {
 				return agentHookUsage("--session must not be empty")
@@ -102,6 +105,8 @@ func newNativeAgentAttentionCmd() *cobra.Command {
 	cmd.Flags().StringVar(&session, "session", "", "native session ID; bypasses stdin")
 	cmd.Flags().IntVar(&hostPID, "host-pid", 0, "native extension host PID for launch identity")
 	cmd.Flags().StringVar(&ref, "ref", "", "captured tracked issue reference (default KATA_REF)")
+	cmd.Flags().StringVar(&source, "source", "", "optional built-in hook ownership marker")
+	_ = cmd.Flags().MarkHidden("source")
 	return cmd
 }
 

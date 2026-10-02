@@ -246,16 +246,7 @@ func TestPiNativeAttentionRetriesFailures(t *testing.T) {
 				if err = os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
 					t.Fatal(err)
 				}
-				previousBody, err := os.ReadFile("testdata/agent-hooks/pi-before-attention-retry.js.txt")
-				if err != nil {
-					t.Fatal(err)
-				}
-				previous := filepath.Join(filepath.Dir(extension), "previous.mjs")
-				previousContent := append(bytes.TrimSuffix(plan.Changes[0].Content, []byte(piAgentHookJS)), previousBody...)
-				if err = os.WriteFile(previous, previousContent, 0600); err != nil { //nolint:gosec // G703: previous fixture is adjacent to extension inside t.TempDir.
-					t.Fatal(err)
-				}
-				command := exec.Command(node, "testdata/agent-hooks/pi-attention-retry.mjs", extension, opts.Dir, mode, failure, previous) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
+				command := exec.Command(node, "testdata/agent-hooks/pi-attention-retry.mjs", extension, opts.Dir, mode, failure) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
 				if output, err := command.CombinedOutput(); err != nil {
 					t.Fatalf("Pi attention %s/%s: %v\n%s", mode, failure, err, output)
 				}
@@ -264,53 +255,6 @@ func TestPiNativeAttentionRetriesFailures(t *testing.T) {
 	}
 }
 
-func TestPiNativePreviousAttentionExtensionOwnership(t *testing.T) {
-	body, err := os.ReadFile("testdata/agent-hooks/pi-before-attention-retry.js.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	metadata := `{"format":"kata-pi","version":1,"scope":"user","workspace":"","executable":"kata","source":"","sourceSet":false,"contract":true,"attention":true}`
-	artifact := append([]byte(piAgentHookMetadataPrefix+metadata+"\nconst options = "+metadata+";\n"), body...)
-	opts := piTestOptions(t)
-	opts.Scope = "user"
-	path := filepath.Join(opts.Home, ".pi", "agent", "extensions", "kata.js")
-	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(path, artifact, 0600); err != nil { //nolint:gosec // G703: owned-extension fixture is rooted in the test's temporary home.
-		t.Fatal(err)
-	}
-	status := opts
-	status.Contract = false
-	plan, err := planPiAgentHooks(status, true)
-	if err != nil || !plan.CurrentContract || !plan.CurrentAttentionStart {
-		t.Fatalf("previous owned extension status: %+v %v", plan, err)
-	}
-	if changed, err := publishNativeAgentHookPlan(plan); err != nil || changed {
-		t.Fatalf("status must preserve previous extension: %v %v", changed, err)
-	}
-	plan, err = planPiAgentHooks(opts, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed, err := publishNativeAgentHookPlan(plan); err != nil || !changed {
-		t.Fatalf("previous extension upgrade: %v %v", changed, err)
-	}
-	if plan, err = planPiAgentHooks(opts, true); err != nil {
-		t.Fatalf("upgraded ownership: %v", err)
-	}
-	if plan.Contract || !plan.AttentionStart || !plan.CurrentContract || !plan.CurrentAttentionStart {
-		t.Fatalf("default uninstall must preserve previous attention: %+v", plan)
-	}
-	// Matching metadata cannot authorize edits in the previous runtime body.
-	artifact = append(artifact, []byte("// authored edit\n")...)
-	if err = os.WriteFile(path, artifact, 0600); err != nil { //nolint:gosec // G703: edited-extension fixture is rooted in the test's temporary home.
-		t.Fatal(err)
-	}
-	if _, err = planPiAgentHooks(opts, false); err == nil {
-		t.Fatal("edited previous extension adopted")
-	}
-}
 func FuzzPiNativeOwnershipRejectsEdits(f *testing.F) {
 	f.Add("// changed\n")
 	f.Add("\x00")
@@ -415,28 +359,45 @@ func TestPiNativeSnapshotsAndAuthoredSettings(t *testing.T) {
 	}
 }
 
-func TestPiNativeInstalledRunner(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("Node unavailable")
+// An explicit published package root makes CI independent of CLI wrappers.
+func piNativeTestRuntime(t *testing.T) string {
+	t.Helper()
+	if root := os.Getenv("KATA_PI_TEST_RUNTIME"); root != "" {
+		if !filepath.IsAbs(root) {
+			t.Fatal("KATA_PI_TEST_RUNTIME must be an absolute Pi dist directory")
+		}
+		if _, err := os.Stat(filepath.Join(root, "core", "extensions", "runner.js")); err != nil { //nolint:gosec // G703: explicitly selected absolute published runtime root for integration tests.
+			t.Fatalf("KATA_PI_TEST_RUNTIME does not contain the published Pi runner: %v", err)
+		}
+		return root
 	}
 	pi, err := exec.LookPath("pi")
 	if err != nil {
-		t.Skip("installed Pi runtime unavailable")
+		t.Skip("set KATA_PI_TEST_RUNTIME to an isolated published Pi dist directory")
 	}
 	resolved, err := filepath.EvalSymlinks(pi)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Homebrew's public entry point wraps the package-local executable. npm's
-	// entry point resolves straight into dist. No auth/provider API is loaded.
-	root := filepath.Join(filepath.Dir(filepath.Dir(resolved)), "libexec", "lib", "node_modules", "@earendil-works", "pi-coding-agent", "dist")
-	if _, err = os.Stat(filepath.Join(root, "core", "extensions", "runner.js")); err != nil {
-		root = filepath.Dir(resolved)
-		if _, err = os.Stat(filepath.Join(root, "core", "extensions", "runner.js")); err != nil {
-			t.Skip("installed Pi runner package not discoverable")
+	// Homebrew wrappers, npm dist/cli.js, and npm dist/bundle/cli.js.
+	for _, root := range []string{
+		filepath.Join(filepath.Dir(filepath.Dir(resolved)), "libexec", "lib", "node_modules", "@earendil-works", "pi-coding-agent", "dist"),
+		filepath.Dir(resolved), filepath.Dir(filepath.Dir(resolved)),
+	} {
+		if _, err := os.Stat(filepath.Join(root, "core", "extensions", "runner.js")); err == nil {
+			return root
 		}
 	}
+	t.Skip("installed Pi runner not discoverable; set KATA_PI_TEST_RUNTIME to its dist directory")
+	return ""
+}
+
+func TestPiNativeInstalledRunner(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	root := piNativeTestRuntime(t)
 	opts := piTestOptions(t)
 	opts.Attention = true
 	opts.SourceSet = true
@@ -527,21 +488,7 @@ func TestPiNativeRealKataTransport(t *testing.T) {
 	if err != nil {
 		t.Skip("Node unavailable")
 	}
-	pi, err := exec.LookPath("pi")
-	if err != nil {
-		t.Skip("installed Pi unavailable")
-	}
-	resolved, err := filepath.EvalSymlinks(pi)
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := filepath.Join(filepath.Dir(filepath.Dir(resolved)), "libexec", "lib", "node_modules", "@earendil-works", "pi-coding-agent", "dist")
-	if _, err = os.Stat(filepath.Join(root, "core", "extensions", "runner.js")); err != nil {
-		root = filepath.Dir(resolved)
-		if _, err = os.Stat(filepath.Join(root, "core", "extensions", "runner.js")); err != nil {
-			t.Skip("installed Pi runner not discoverable")
-		}
-	}
+	root := piNativeTestRuntime(t)
 	opts := piTestOptions(t)
 	opts.Attention = true
 	opts.SourceSet = true
@@ -621,21 +568,7 @@ func TestPiNativeInstalledRuntimeReplacement(t *testing.T) {
 	if err != nil {
 		t.Skip("Node unavailable")
 	}
-	pi, err := exec.LookPath("pi")
-	if err != nil {
-		t.Skip("installed Pi runtime unavailable")
-	}
-	resolved, err := filepath.EvalSymlinks(pi)
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := filepath.Join(filepath.Dir(filepath.Dir(resolved)), "libexec", "lib", "node_modules", "@earendil-works", "pi-coding-agent", "dist")
-	if _, err = os.Stat(filepath.Join(root, "core", "extensions", "runner.js")); err != nil {
-		root = filepath.Dir(resolved)
-		if _, err = os.Stat(filepath.Join(root, "core", "extensions", "runner.js")); err != nil {
-			t.Skip("installed Pi runner not discoverable")
-		}
-	}
+	root := piNativeTestRuntime(t)
 	opts := piTestOptions(t)
 	opts.Attention = true
 	opts.SourceSet = true
@@ -675,18 +608,4 @@ func TestPiNativeInstalledRuntimeReplacement(t *testing.T) {
 		t.Fatalf("Pi installed runtime replacement: %v\n%s", err, output)
 	}
 	t.Log(strings.TrimSpace(string(output)))
-}
-
-func TestPiAgentHooksLegacyJSONMetadataBytes(t *testing.T) {
-	meta := piAgentHookMetadata{Format: "kata-pi", Version: 1, Scope: "user", Executable: "kata", Source: "<>&\u2028\u2029", SourceSet: true, Contract: true}
-	legacy := `{"format":"kata-pi","version":1,"scope":"user","workspace":"","executable":"kata","source":"\u003c\u003e\u0026\u2028\u2029","sourceSet":true,"contract":true,"attention":false}`
-	artifact := []byte(piAgentHookMetadataPrefix + legacy + "\nconst options = " + legacy + ";\n" + piAgentHookJS)
-	generated, err := generatePiAgentHooks(meta)
-	if err != nil || !bytes.Equal(generated, artifact) {
-		t.Fatalf("legacy generated bytes changed: %v", err)
-	}
-	parsed, err := parsePiAgentHookMetadata(artifact)
-	if err != nil || parsed != meta {
-		t.Fatalf("legacy owned extension rejected: %+v %v", parsed, err)
-	}
 }

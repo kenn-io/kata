@@ -93,7 +93,7 @@ func TestAgentHooksInstallAllProfiles(t *testing.T) {
 			}
 			handlers := nativeContractHandlers(t, profile.Agent, path)
 			require.Len(t, handlers, 2)
-			commands, err := agenthook.BuildCommand(executable, "agent-hooks", "contract", string(profile.Agent))
+			commands, err := agenthook.BuildCommand(executable, "agent-hooks", "contract", string(profile.Agent), "--source", "kata-agent-contract-hook")
 			require.NoError(t, err)
 			owned := handlers[1]
 			command := owned["command"]
@@ -200,31 +200,6 @@ func TestAgentHooksInstallCompleteOwnedSet(t *testing.T) {
 	}
 }
 
-func TestAgentHooksInstallCanonicalNeverCallsKitInstall(t *testing.T) {
-	isolateAgentHookHomes(t)
-	t.Chdir(t.TempDir())
-	path := filepath.Join(t.TempDir(), "hooks.json")
-	_, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
-		ConfigPath: path, Executable: os.Args[0], Arguments: []string{"agent-hooks", "contract", "codex"},
-		Marker: "contract", Hooks: []agenthook.Hook{contractRegistrationHook(agenthook.AgentCodex)},
-	})
-	require.NoError(t, err)
-	root := newRootCmd()
-	group, _, err := root.Find([]string{"agent-hooks"})
-	require.NoError(t, err)
-	original, _, err := group.Find([]string{"install"})
-	require.NoError(t, err)
-	group.RemoveCommand(original)
-	calls := 0
-	group.AddCommand(newAgentHooksInstallCmdWithInstaller(func(agenthook.Agent, agenthook.InstallOptions) (agenthook.Result, error) {
-		calls++
-		return agenthook.Result{}, nil
-	}))
-	_, stderr, err := executeAgentHookRoot(t, root, unreadableHookInput{}, "agent-hooks", "install", "codex", "--config", path, "--executable", os.Args[0])
-	require.NoError(t, err, stderr)
-	require.Zero(t, calls)
-}
-
 func TestAgentHooksInstallPreflight(t *testing.T) {
 	home := isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
@@ -233,7 +208,7 @@ func TestAgentHooksInstallPreflight(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 	require.NoError(t, os.WriteFile(path, []byte("{broken"), 0o600))
 	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "claude", "codex", "--executable", os.Args[0], "--json")
-	require.Error(t, err)
+	require.ErrorContains(t, err, path)
 	require.Empty(t, out)
 	_, err = os.Stat(filepath.Join(home, "claude"))
 	require.ErrorIs(t, err, os.ErrNotExist)
@@ -241,7 +216,7 @@ func TestAgentHooksInstallPreflight(t *testing.T) {
 
 func TestAgentHooksInstallUsageAndCompletion(t *testing.T) {
 	isolateAgentHookHomes(t)
-	for _, args := range [][]string{{}, {"--all", "claude"}, {"claude", "kimi", "--contract-only"}, {"unknown"}, {"--all", "--config", "x"}, {"--config", "x"}, {"claude", "codex", "--config", "x"}, {"claude", "--config="}, {"claude", "--executable="}} {
+	for _, args := range [][]string{{"--all", "claude"}, {"claude", "kimi", "--contract-only"}, {"unknown"}, {"--all", "--config", "x"}, {"--config", "x"}, {"claude", "codex", "--config", "x"}, {"claude", "--config="}, {"claude", "--executable="}} {
 		out, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "install"}, args...)...)
 		require.Error(t, err, strings.Join(args, " "))
 		require.Empty(t, out)

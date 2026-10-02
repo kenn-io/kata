@@ -25,7 +25,7 @@ func TestE2E_NativeAttentionExplicitIdentity(t *testing.T) {
 	invoke := func(mode, session string) {
 		t.Helper()
 		resetFlags(t)
-		out, stderr, err := executeAttentionAtDaemon(t, env, unreadableHookInput{}, "agent-hooks", "attention-native", "pi", mode, "--session", session, "--host-pid", strconv.Itoa(os.Getpid()), "--ref", ref, "--workspace", dir)
+		out, stderr, err := executeAttentionAtDaemon(t, env, unreadableHookInput{}, "agent-hooks", "attention-native", "pi", mode, "--session", session, "--host-pid", strconv.Itoa(os.Getpid()), "--ref", ref, "--workspace", dir, "--source", "kata-agent-hook-"+mode)
 		require.NoError(t, err)
 		require.Empty(t, out)
 		require.Empty(t, stderr)
@@ -146,6 +146,7 @@ func TestNativeAttentionReportsTransientMetadataWriteFailure(t *testing.T) {
 
 func executeNativeAttentionForTest(t *testing.T, baseURL string, args ...string) (string, error) {
 	t.Helper()
+	resetFlags(t)
 	cmd := newRootCmd()
 	flags.Project = "example-project"
 	cmd.SetContext(contextWithBaseURL(t.Context(), baseURL))

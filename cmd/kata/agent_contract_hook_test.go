@@ -51,7 +51,7 @@ func TestAgentContractHookCustomSource(t *testing.T) {
 		{"spaces", "custom prompt.txt", "exact trailing newline\n", true},
 		{"empty", "empty.txt", "", true},
 		{"missing", "missing.txt", agentContractText, false},
-		{"old marker is a path", "kata-agent-contract-hook", "a file named like the old marker", true},
+		{"explicit marker filename", "./kata-agent-contract-hook", "a file named like the old marker", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.exists {
@@ -70,6 +70,21 @@ func TestAgentContractHookCustomSource(t *testing.T) {
 	out, _, err := executeRootCapture(t, context.Background(), "agent-contract-hook", "--source", absolute)
 	require.NoError(t, err)
 	assertCodexPrompt(t, out, "absolute")
+}
+
+func TestAgentContractHooksLegacyMarkerKeepsBuiltInContract(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, content := range []string{"authored replacement", ""} {
+		require.NoError(t, os.WriteFile("kata-agent-contract-hook", []byte(content), 0o600))
+		out, stderr, err := executeRootCapture(t, context.Background(), "agent-contract-hook", "--source", "kata-agent-contract-hook")
+		require.NoError(t, err, stderr)
+		assertCodexPrompt(t, out, agentContractText)
+		for _, agent := range []agenthook.Agent{agenthook.AgentClaude, agenthook.AgentCodex} {
+			out, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agent)), "agent-hooks", "contract", string(agent), "--source", "kata-agent-contract-hook")
+			require.NoError(t, err, stderr)
+			assertNativePrompt(t, agent, out, agentContractText)
+		}
+	}
 }
 
 func TestAgentContractHookFileErrors(t *testing.T) {

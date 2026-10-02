@@ -21,6 +21,7 @@ func newAgentContractHookCmd() *cobra.Command {
 		Short: "Emit the agent contract as Codex SessionStart context",
 		Long: "Emit the built-in agent contract as a Codex SessionStart response.\n\n" +
 			"--source selects a local UTF-8 prompt file that replaces the entire contract.\n" +
+			"The reserved source kata-agent-contract-hook keeps the built-in contract; use ./kata-agent-contract-hook for a file with that name.\n" +
 			"Relative paths stay within the current directory; parent traversal and symlink escapes fail.\n" +
 			"Absolute paths use the specified file; a missing file uses the built-in contract.\n" +
 			"An empty file supplies an intentionally empty prompt. Stdin is ignored.",
@@ -46,7 +47,9 @@ func newAgentContractHookCmd() *cobra.Command {
 }
 
 func readAgentContractSource(path string, specified bool) (string, error) {
-	if !specified {
+	// The literal marker belongs to released hook registrations. A prompt
+	// file with that name remains selectable through ./kata-agent-contract-hook.
+	if !specified || path == legacyAgentContractHookSource {
 		return agentContractText, nil
 	}
 	if path == "" {

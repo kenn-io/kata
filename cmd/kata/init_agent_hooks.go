@@ -3,10 +3,37 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json/v2"
 	"fmt"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/jsonutil"
+	"go.kenn.io/kata/internal/textsafe"
 )
+
+// Hook publication happens after project creation and workspace binding. Keep
+// those completed outcomes in the existing error envelope so callers can retry
+// setup without mistaking a hook failure for an uninitialized workspace.
+func initAgentHooksFailure(response []byte, name, workspace string, created, hooksChanged bool, cause error) error {
+	action := "bound"
+	if created {
+		action = "created and bound"
+	}
+	message := fmt.Sprintf("%s project %s; %v", action, textsafe.Line(name), cause)
+	data := make(map[string]any)
+	if err := json.Unmarshal(response, &data, jsonutil.PreserveNumberLiterals()); err != nil {
+		return fmt.Errorf("%s; decode init result: %w", message, err)
+	}
+	data["workspace_root"] = workspace
+	data["bound"] = true
+	data["agent_hooks_error"] = cause.Error()
+	data["agent_hooks_changed"] = hooksChanged
+	encoded, err := json.Marshal(data, json.Deterministic(true))
+	if err != nil {
+		return fmt.Errorf("%s; encode init result: %w", message, err)
+	}
+	return &cliError{Message: message, Kind: kindInternal, Code: "init_agent_hooks_failed", ExitCode: ExitInternal, Data: encoded}
+}
 
 func planInitAgentHookSelection(names []string, start string, attention bool, api string) (nativeAgentHookPlan, []agentHookMutation, error) {
 	var combined nativeAgentHookPlan
@@ -37,7 +64,12 @@ func planInitAgentHookSelection(names []string, start string, attention bool, ap
 			result.Reason = "Muse project contract configured; attention requires launcher tracking or authorized user managed attention"
 			result.Warnings = append(result.Warnings, result.Reason)
 		}
-		plan, err := planNativeAgentHooks(opts, false)
+		var plan nativeAgentHookPlan
+		if opts.Agent == "codex" {
+			plan, err = planInitCodexHooks(opts)
+		} else {
+			plan, err = planNativeAgentHooks(opts, false)
+		}
 		if err != nil {
 			return combined, nil, err
 		}
@@ -69,7 +101,7 @@ func prepareInitHookOptions(ctx context.Context, opts callInitOpts) (callInitOpt
 		return opts, agentHookUsage("init --contract-only requires --agent-hooks")
 	}
 	if modern && (opts.WithHooks || opts.WithCodexHooks || len(opts.WithAgentHooks) > 0) {
-		return opts, agentHookUsage("--agent-hooks cannot be combined with legacy --with-hooks, --with-codex-hooks or --with-agent-hooks")
+		return opts, agentHookUsage("--agent-hooks cannot be combined with --with-hooks, --with-codex-hooks or --with-agent-hooks")
 	}
 	names := opts.WithAgentHooks
 	if modern {

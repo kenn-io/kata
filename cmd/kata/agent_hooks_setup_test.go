@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -129,7 +130,7 @@ func TestAgentHooksSetupBareStatusBothScopes(t *testing.T) {
 	var report agentHookStatusReport
 	require.NoError(t, json.Unmarshal([]byte(out), &report))
 	found := map[string]bool{}
-	for _, row := range report.Harnesses {
+	for _, row := range slices.Concat(report.Harnesses, report.Workspace.Harnesses) {
 		if row.Harness == "codex" {
 			found[row.Scope] = row.Configured.Contract
 		}

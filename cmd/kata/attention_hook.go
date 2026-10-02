@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,8 +18,8 @@ import (
 // the work.attention convention. The launcher supplies the tracked issue in
 // KATA_REF for both hooks. No session payload or local state is involved.
 //
-// Valid lifecycle invocations exit zero and silently
-// ignores invalid refs, unavailable daemons, stale revisions, and other
+// Legacy invocations exit zero and silently
+// ignore invalid arguments, invalid refs, unavailable daemons, stale revisions, and other
 // internal failures.
 
 const (
@@ -30,20 +31,23 @@ const (
 
 func newAttentionHookCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:    "attention-hook <start|end>",
-		Short:  "Track attention at session start and end",
-		Long:   "Track work.attention for the issue in KATA_REF.\nStdin is ignored; daemon failures remain silent.",
-		Hidden: true,
-		Args: func(cmd *cobra.Command, args []string) error {
-			if err := cobra.ExactArgs(1)(cmd, args); err != nil {
-				return err
+		Use:                "attention-hook <start|end>",
+		Short:              "Track attention at session start and end",
+		Long:               "Track work.attention for the issue in KATA_REF.\nStdin is ignored; daemon failures remain silent.",
+		Hidden:             true,
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Released launchers use an optional ownership marker and expect
+			// malformed lifecycle calls to remain silent, including unknown flags.
+			if len(args) == 0 || (args[0] != "start" && args[0] != "end") {
+				return nil
 			}
-			if args[0] != "start" && args[0] != "end" {
-				return agentHookUsage("attention-hook requires start or end")
+			if len(args) != 1 && !slices.Equal(args[1:], []string{"--source", legacyAttentionHookSource + args[0]}) {
+				return nil
 			}
+			runAttentionHook(cmd, args[0])
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, args []string) error { runAttentionHook(cmd, args[0]); return nil },
 	}
 }
 

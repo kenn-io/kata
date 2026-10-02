@@ -298,8 +298,16 @@ func TestAgentHooksCLIStatusUnmanageableNativeConfig(t *testing.T) {
 			require.NoError(t, os.WriteFile(path, content, 0600))
 			for _, names := range [][]string{nil, {target}} {
 				resetFlags(t)
-				out, _, err := executeAgentHook(t, strings.NewReader(""), append(append([]string{"agent-hooks", "status", "--scope", "user"}, names...), "--json")...)
-				require.NoError(t, err)
+				out, diagnostic, err := executeAgentHook(t, strings.NewReader(""), append(append([]string{"agent-hooks", "status", "--scope", "user"}, names...), "--json")...)
+				require.Error(t, err)
+				require.Empty(t, out)
+				require.Contains(t, err.Error(), path)
+				var failure struct {
+					Error struct {
+						Data json.RawMessage `json:"data"`
+					} `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(diagnostic), &failure))
 				var report struct {
 					Harnesses []struct {
 						Harness         string              `json:"harness"`
@@ -307,7 +315,7 @@ func TestAgentHooksCLIStatusUnmanageableNativeConfig(t *testing.T) {
 						Capabilities    agentHookCapability `json:"capabilities"`
 					} `json:"harnesses"`
 				}
-				require.NoError(t, json.Unmarshal([]byte(out), &report))
+				require.NoError(t, json.Unmarshal(failure.Error.Data, &report))
 				if len(names) == 0 {
 					require.Len(t, report.Harnesses, 18)
 				} else {

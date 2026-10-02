@@ -21,7 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Historical installer decorations are recognized only in configuration.
+// Released source markers identify built-in hooks, including renamed executables.
 const (
 	legacyAgentContractHookSource = "kata-agent-contract-hook"
 	legacyAttentionHookSource     = "kata-agent-hook-"
@@ -38,7 +38,7 @@ const (
 var agentHookCommandFields = []string{"command", "commandWindows", "bash", "powershell"}
 
 // Ownership is an exact direct invocation, across every populated platform.
-// Source markers are compatibility data here, never runtime capabilities.
+// An explicit built-in source marker also identifies a renamed executable.
 func classifyAgentHookHandler(agent agenthook.Agent, handler map[string]any) agentHookKind {
 	if raw, exists := handler["type"]; exists && raw != "command" {
 		return ""
@@ -103,10 +103,10 @@ func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agen
 		return ""
 	}
 	executable := argv[0]
-	if executable == "" || strings.Contains(executable, "=") {
+	if executable == "" || (strings.Contains(executable, "=") && !strings.ContainsAny(executable, "/\\")) {
 		return ""
 	}
-	if executable != "kata" && executable != "kata.exe" && !strings.ContainsAny(executable, "/\\") {
+	if !isKataHookExecutable(executable) && !strings.ContainsAny(executable, "/\\") {
 		return ""
 	}
 	args := argv[1:]
@@ -122,7 +122,7 @@ func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agen
 	case len(args) >= 3 && args[0] == "agent-hooks" && args[1] == "contract" && args[2] == string(agent):
 		kind = contractHook
 		tail = args[3:]
-	case len(args) == 4 && args[0] == "agent-hooks" && args[1] == "attention-native" && args[2] == string(agent) && (args[3] == "start" || args[3] == "end"):
+	case len(args) >= 4 && args[0] == "agent-hooks" && args[1] == "attention-native" && args[2] == string(agent) && (args[3] == "start" || args[3] == "end"):
 		kind = agentHookKind(args[3])
 		tail = args[4:]
 	case len(args) >= 3 && args[0] == "agent-hooks" && args[1] == "attention" && (args[2] == "start" || args[2] == "end"):
@@ -131,7 +131,7 @@ func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agen
 	default:
 		return ""
 	}
-	if len(tail) == 0 {
+	if len(tail) == 0 && isKataHookExecutable(executable) {
 		return kind
 	}
 	source := legacyAgentContractHookSource
@@ -142,6 +142,26 @@ func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agen
 		return kind
 	}
 	return ""
+}
+
+func isKataHookExecutable(executable string) bool {
+	// Inspect both separators regardless of the platform reading the config.
+	name := executable[strings.LastIndexAny(executable, "/\\")+1:]
+	return name == "kata" || name == "kata.exe"
+}
+
+func agentHookOwnershipArgs(executable string, args []string, kind agentHookKind) []string {
+	if isKataHookExecutable(executable) {
+		return args
+	}
+	source := legacyAgentContractHookSource
+	if kind != contractHook {
+		source = legacyAttentionHookSource + string(kind)
+	}
+	if len(args) >= 2 && slices.Equal(args[len(args)-2:], []string{"--source", source}) {
+		return args
+	}
+	return append(args, "--source", source)
 }
 
 func literalAgentHookWords(command string, powershell, windows bool) ([]string, bool) {
@@ -339,7 +359,7 @@ type ownedAgentHookPlan struct {
 }
 
 func planOwnedAgentHookInstall(agent agenthook.Agent, opts agenthook.InstallOptions) (ownedAgentHookPlan, error) {
-	commands, err := agenthook.BuildCommand(opts.Executable, opts.Arguments...)
+	commands, err := agenthook.BuildCommand("kata", opts.Arguments...)
 	if err != nil {
 		return ownedAgentHookPlan{}, err
 	}
@@ -347,6 +367,7 @@ func planOwnedAgentHookInstall(agent agenthook.Agent, opts agenthook.InstallOpti
 	if kind == "" {
 		return ownedAgentHookPlan{}, errors.New("installer requires a built-in hook command")
 	}
+	opts.Arguments = agentHookOwnershipArgs(opts.Executable, opts.Arguments, kind)
 	return planOwnedAgentHookMutation(agent, opts.ConfigPath, kind, &opts)
 }
 func installOwnedAgentHooks(agent agenthook.Agent, opts agenthook.InstallOptions) (agenthook.Result, error) {

@@ -14,13 +14,6 @@ import (
 
 const pluginAgentHookMetadataPrefix = "// kata-native-plugin "
 
-// Owned files predate JSONv2. Preserve their deterministic v1 string and nil
-// container encoding so an API migration cannot invalidate exact ownership.
-var nativeAgentHookOwnedJSONOptions = json.JoinOptions(
-	jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true), jsontext.AllowInvalidUTF8(true),
-	json.FormatNilSliceAsNull(true), json.FormatNilMapAsNull(true), json.Deterministic(true),
-)
-
 type pluginAgentHookMetadata struct {
 	Format         string `json:"format"`
 	Version        int    `json:"version"`
@@ -171,7 +164,6 @@ func planPluginAgentHooks(opts nativeAgentHookOptions, agent string, remove bool
 		exists = true
 	}
 	recovered := false
-	legacyIncomplete := false
 	var recoveryMeta pluginAgentHookMetadata
 	var recoveryPackage []byte
 	if agent == "opencode" && !exists {
@@ -181,15 +173,11 @@ func planPluginAgentHooks(opts nativeAgentHookOptions, agent string, remove bool
 		}
 		if present {
 			recoveryPackage = manifest
-			if bytes.Equal(manifest, pluginAgentHookPackage) {
-				legacyIncomplete = true
-			} else {
-				recoveryMeta, e = parsePluginAgentHookPackage(manifest)
-				if e != nil {
-					return plan, fmt.Errorf("preserving authored plugin package: %w", e)
-				}
-				recovered = true
+			recoveryMeta, e = parsePluginAgentHookPackage(manifest)
+			if e != nil {
+				return plan, fmt.Errorf("preserving authored plugin package: %w", e)
 			}
+			recovered = true
 		}
 	}
 	meta := pluginAgentHookMetadata{Format: "kata-plugin", Version: 1, Agent: agent, API: api, Scope: scope, Workspace: workspace, Executable: opts.Executable}
@@ -211,6 +199,7 @@ func planPluginAgentHooks(opts nativeAgentHookOptions, agent string, remove bool
 		}
 		plan.CurrentContract = exists && meta.Contract
 		plan.CurrentAttentionStart = exists && meta.Attention
+		plan.CurrentAPI = meta.API
 	}
 	if meta.API == "" {
 		meta.API = "v2"
@@ -234,9 +223,6 @@ func planPluginAgentHooks(opts nativeAgentHookOptions, agent string, remove bool
 	}
 	if recovered {
 		plan.Warnings = append(plan.Warnings, "Owned plugin entrypoint is missing; package metadata permits recovery, but no contract or attention start is currently configured.")
-	}
-	if legacyIncomplete {
-		plan.Warnings = append(plan.Warnings, "Plugin entrypoint is missing and legacy package metadata cannot prove config registration ownership; preserving the registration. Remove any dangling entry manually after checking authored config.")
 	}
 	originalMeta := meta
 	if !remove {
@@ -277,7 +263,7 @@ func planPluginAgentHooks(opts nativeAgentHookOptions, agent string, remove bool
 	}
 	if meta.API == "v2" {
 		manifestPath := filepath.Join(filepath.Dir(file), "package.json")
-		manifest, manifestExists := recoveryPackage, recovered || legacyIncomplete
+		manifest, manifestExists := recoveryPackage, recovered
 		if !manifestExists {
 			var e error
 			manifest, manifestExists, e = readSnapshot(manifestPath)
@@ -285,8 +271,11 @@ func planPluginAgentHooks(opts nativeAgentHookOptions, agent string, remove bool
 				return plan, e
 			}
 		}
-		if manifestExists && !bytes.Equal(manifest, pluginAgentHookPackage) && !bytes.Equal(manifest, generatePluginAgentHookPackage(originalMeta)) {
-			return plan, fmt.Errorf("preserving authored plugin package %q", manifestPath)
+		if manifestExists {
+			packageMeta, e := parsePluginAgentHookPackage(manifest)
+			if e != nil || packageMeta != originalMeta {
+				return plan, fmt.Errorf("preserving authored plugin package %q", manifestPath)
+			}
 		}
 		if scope == "user" {
 			cfg := meta.ConfigPath
@@ -351,7 +340,11 @@ func planPluginAgentHooks(opts nativeAgentHookOptions, agent string, remove bool
 			}
 		}
 		if active && (!remove || opts.Contract || opts.Attention) {
-			plan.Changes = append(plan.Changes, nativeAgentHookChange{Path: manifestPath, Original: manifest, OriginalExists: manifestExists, Content: generatePluginAgentHookPackage(meta)})
+			content, e := generatePluginAgentHookPackage(meta)
+			if e != nil {
+				return plan, e
+			}
+			plan.Changes = append(plan.Changes, nativeAgentHookChange{Path: manifestPath, Original: manifest, OriginalExists: manifestExists, Content: content})
 		} else if !active && (exists || recovered) && manifestExists {
 			plan.Changes = append(plan.Changes, nativeAgentHookChange{Path: manifestPath, Original: manifest, OriginalExists: true, Remove: true})
 		}
@@ -370,6 +363,11 @@ func planPluginAgentHooks(opts nativeAgentHookOptions, agent string, remove bool
 			change.Remove = true
 			plan.Changes = append(plan.Changes, change)
 		}
+		return finalize(), nil
+	}
+	if remove && !opts.Contract && !opts.Attention {
+		change.Content = data
+		plan.Changes = append(plan.Changes, change)
 		return finalize(), nil
 	}
 	change.Content, err = generatePluginAgentHooks(meta)
@@ -491,17 +489,20 @@ func planAmpAgentHookScopeIndex(opts nativeAgentHookOptions, meta pluginAgentHoo
 
 var pluginAgentHookPackage = []byte("{\n  \"name\": \"kata-native-agent-hooks\",\n  \"version\": \"1.0.0\",\n  \"type\": \"module\",\n  \"exports\": \"./index.js\",\n  \"dependencies\": {\"@opencode/plugin\": \"^2.0.0\"}\n}\n")
 
-// The owned package retains config ownership independently of index.js. Exact
-// byte reconstruction rejects authored edits; legacy manifests remain readable
-// only while an owned entrypoint can provide their missing metadata.
-func generatePluginAgentHookPackage(meta pluginAgentHookMetadata) []byte {
-	encoded, _ := json.Marshal(meta, nativeAgentHookOwnedJSONOptions)
+// The package independently retains config ownership if index.js is missing.
+// Its digest covers exact package bytes, excluding only the digest member.
+func generatePluginAgentHookPackage(meta pluginAgentHookMetadata) ([]byte, error) {
+	encoded, err := json.Marshal(meta, nativeAgentHookOwnedJSONOptions)
+	if err != nil {
+		return nil, err
+	}
 	var out bytes.Buffer
 	out.Write(pluginAgentHookPackage[:len(pluginAgentHookPackage)-3])
 	out.WriteString(",\n  \"kataNativeAgentHooks\": ")
 	out.Write(encoded)
 	out.WriteString("\n}\n")
-	return out.Bytes()
+	data := out.Bytes()
+	return []byte("{\n  \"kataNativeAgentHooksSHA256\": \"" + nativeAgentHookDigest(data) + "\",\n" + string(data[2:])), nil
 }
 func parsePluginAgentHookPackage(data []byte) (pluginAgentHookMetadata, error) {
 	var value struct {
@@ -511,7 +512,12 @@ func parsePluginAgentHookPackage(data []byte) (pluginAgentHookMetadata, error) {
 		return value.Metadata, err
 	}
 	meta := value.Metadata
-	if meta.Format != "kata-plugin" || meta.Version != 1 || meta.Agent != "opencode" || meta.API != "v2" || meta.Executable == "" || (meta.Scope != "user" && meta.Scope != "project") || !bytes.Equal(data, generatePluginAgentHookPackage(meta)) {
+	unsigned, ok := bytes.CutPrefix(data, []byte("{\n  \"kataNativeAgentHooksSHA256\": \""))
+	digest, remainder, found := bytes.Cut(unsigned, []byte("\",\n"))
+	if !ok || !found || string(digest) != nativeAgentHookDigest(append([]byte("{\n"), remainder...)) {
+		return meta, fmt.Errorf("generated plugin package was edited or has no ownership digest")
+	}
+	if meta.Format != "kata-plugin" || meta.Version != 1 || meta.Agent != "opencode" || meta.API != "v2" || meta.Executable == "" || (meta.Scope != "user" && meta.Scope != "project") {
 		return meta, fmt.Errorf("authored or unrecognized plugin package metadata")
 	}
 	return meta, nil
@@ -529,11 +535,7 @@ func parsePluginAgentHookMetadata(data []byte) (pluginAgentHookMetadata, error) 
 	if meta.Format != "kata-plugin" || meta.Version != 1 || meta.Executable == "" || (meta.Scope != "user" && meta.Scope != "project") || (meta.Agent != "amp" && meta.Agent != "opencode") || (meta.Agent == "amp" && meta.API != "amp") || (meta.Agent == "opencode" && meta.API != "v1" && meta.API != "v2") {
 		return meta, fmt.Errorf("unrecognized plugin metadata")
 	}
-	generated, err := generatePluginAgentHooks(meta)
-	if err != nil {
-		return meta, err
-	}
-	if !bytes.Equal(data, generated) {
+	if !nativeAgentHookCodeUnedited(data) {
 		return meta, fmt.Errorf("generated plugin was edited; preserve edits and move it aside before rerunning")
 	}
 	return meta, nil
@@ -554,7 +556,7 @@ func generatePluginAgentHooks(meta pluginAgentHookMetadata) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported native plugin API")
 	}
-	return []byte(pluginAgentHookMetadataPrefix + string(encoded) + "\nconst options = " + string(encoded) + ";\n" + body), nil
+	return sealNativeAgentHookCode([]byte(pluginAgentHookMetadataPrefix + string(encoded) + "\nconst options = " + string(encoded) + ";\n" + body)), nil
 }
 
 // Strip only JSONC comments and trailing commas, retaining byte offsets for

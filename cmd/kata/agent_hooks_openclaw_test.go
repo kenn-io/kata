@@ -17,6 +17,32 @@ func openClawTestOptions(t *testing.T) nativeAgentHookOptions {
 	root := t.TempDir()
 	return nativeAgentHookOptions{Agent: "openclaw", Scope: "user", Home: root, Dir: filepath.Join(root, "workspace"), Executable: "/usr/bin/kata", Contract: true, Attention: true}
 }
+
+func TestOpenClawGeneratedSourceRemainsData(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	for _, separator := range []string{"\u2028", "\u2029"} {
+		opts := openClawTestOptions(t)
+		opts.SourceSet = true
+		opts.Source = opts.Home + string(os.PathSeparator) + separator + "globalThis.KATA_REVIEW_MARKER=1;//"
+		plan, err := planOpenClawAgentHooks(opts, false)
+		require.NoError(t, err)
+		extension := filepath.Join(t.TempDir(), "extension.mjs")
+		require.NoError(t, os.WriteFile(extension, plan.Changes[0].Content, 0600))
+		//nolint:gosec // G204: Node imports only the generated fixture in the temporary directory.
+		command := exec.Command(node, "--input-type=module", "-e", `
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+const plugin = await import(pathToFileURL(process.argv[1]));
+assert.equal(typeof plugin.default.register, 'function');
+assert.equal(globalThis.KATA_REVIEW_MARKER, undefined, 'source escaped its metadata comment');
+`, extension)
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+	}
+}
 func TestOpenClawObjectRejectsNilMap(t *testing.T) {
 	parent := map[string]any{"hooks": map[string]any(nil)}
 	value, err := openClawObject(parent, "hooks", true)

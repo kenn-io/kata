@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json/v2"
 	"fmt"
 	"os"
@@ -149,18 +148,8 @@ func parsePiAgentHookMetadata(data []byte) (piAgentHookMetadata, error) {
 	if meta.Format != "kata-pi" || meta.Version != 1 || (meta.Scope != "user" && meta.Scope != "project") || meta.Executable == "" {
 		return meta, fmt.Errorf("unrecognized generated adapter version or options")
 	}
-	generated, err := generatePiAgentHooks(meta)
-	if err != nil {
-		return meta, err
-	}
-	if !bytes.Equal(generated, data) {
-		// Recognize only the exact previously generated runtime, together with
-		// its canonical metadata/options prefix. Local edits remain foreign.
-		prefix := bytes.TrimSuffix(generated, []byte(piAgentHookJS))
-		body, ok := bytes.CutPrefix(data, prefix)
-		if !ok || fmt.Sprintf("%x", sha256.Sum256(body)) != piAgentHookPreviousJSChecksum {
-			return meta, fmt.Errorf("generated adapter was edited; preserve edits and rerun after moving it aside")
-		}
+	if !nativeAgentHookCodeUnedited(data) {
+		return meta, fmt.Errorf("generated adapter was edited; preserve edits and rerun after moving it aside")
 	}
 	return meta, nil
 }
@@ -170,14 +159,8 @@ func generatePiAgentHooks(meta piAgentHookMetadata) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []byte(piAgentHookMetadataPrefix + string(options) + "\n" + "const options = " + string(options) + ";\n" + piAgentHookJS), nil
+	return sealNativeAgentHookCode([]byte(piAgentHookMetadataPrefix + string(options) + "\n" + "const options = " + string(options) + ";\n" + piAgentHookJS)), nil
 }
-
-// SHA-256 of the previous generated Pi runtime. When piAgentHookJS changes,
-// retain recognized historical digests and add the outgoing runtime with an
-// exact test fixture so existing owned extensions remain upgradeable.
-// Keeping the digest avoids shipping an inactive runtime copy.
-const piAgentHookPreviousJSChecksum = "d7ac0a4079bbb450d50a63369ef6bab2d2357ad02d4bfd3fff41a8ae22fd168c"
 
 const piAgentHookJS = `import path from "node:path";
 
@@ -236,9 +219,7 @@ export default function kataHooks(pi) {
       const previous = registry.active.get(cwd);
       const baseline = previous?.id === id && !previous.ended ? previous :
         { id, cwd, ref: process.env.KATA_REF || "", started: false, ended: false };
-      // Older adapters stored only successful/assumed active baselines and
-      // had no started field. Retain those across native resource reloads.
-      if (baseline.started !== false || baseline.pending) return;
+      if (baseline.started || baseline.pending) return;
       registry.active.set(cwd, baseline);
       await transition("start", baseline);
     });

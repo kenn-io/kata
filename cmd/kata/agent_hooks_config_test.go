@@ -23,6 +23,8 @@ func TestAgentHooksExactOwnershipInspection(t *testing.T) {
 		{"old", "kata agent-hooks contract codex --source kata-agent-contract-hook", "", true},
 		{"custom", "kata agent-contract-hook --source prompt.txt", "", false},
 		{"wrapper", "notify kata agent-hooks contract codex --source kata-agent-contract-hook", "", false},
+		{"wrapper path", "/opt/wrappers/notify agent-hooks contract codex", "", false},
+		{"Windows wrapper path", "kata agent-hooks contract codex", `"C:\\wrappers\\notify.exe" agent-hooks contract codex`, false},
 		{"pipeline", "kata agent-contract-hook | cat", "", false},
 		{"environment", "MODE=1 kata agent-contract-hook", "", false},
 		{"wrong harness", "kata agent-hooks contract claude", "", false},
@@ -98,6 +100,7 @@ func TestAgentHooksInstallAndUninstallProtectForeignVariants(t *testing.T) {
 		{"type": "command", "command": "notify kata agent-hooks contract codex --source kata-agent-contract-hook"},
 		{"type": "command", "command": "kata agent-hooks contract codex --source kata-agent-contract-hook", "commandWindows": "kata agent-contract-hook --source windows.txt"},
 		{"type": "command", "command": "kata agent-contract-hook", "args": []any{"--source", "extra.txt"}},
+		{"type": "command", "command": "/opt/wrappers/notify agent-hooks contract codex"},
 	}
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	raw, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": foreign}}}})
@@ -108,16 +111,16 @@ func TestAgentHooksInstallAndUninstallProtectForeignVariants(t *testing.T) {
 	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "--contract-only", "codex", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	handlers := nativeContractHandlers(t, agenthook.AgentCodex, path)
-	require.Len(t, handlers, 5)
+	require.Len(t, handlers, len(foreign)+1)
 	for i, expected := range foreign {
 		delete(handlers[i], "matcher")
 		require.Equal(t, expected, handlers[i])
 	}
-	require.NotContains(t, handlers[4]["command"], "--source")
+	require.Contains(t, handlers[len(foreign)]["command"], "--source kata-agent-contract-hook")
 	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "uninstall", "codex", "--config", path)
 	require.NoError(t, err, stderr)
 	handlers = nativeContractHandlers(t, agenthook.AgentCodex, path)
-	require.Len(t, handlers, 4)
+	require.Len(t, handlers, len(foreign))
 	for i, expected := range foreign {
 		delete(handlers[i], "matcher")
 		require.Equal(t, expected, handlers[i])
@@ -388,7 +391,7 @@ func TestAgentHooksInstallKeepsCanonicalContractInMixedGroup(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "hooks.json")
-	commands, err := agenthook.BuildCommand(os.Args[0], "agent-hooks", "contract", "codex")
+	commands, err := agenthook.BuildCommand(os.Args[0], "agent-hooks", "contract", "codex", "--source", "kata-agent-contract-hook")
 	require.NoError(t, err)
 	raw, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{
 		"matcher": "startup|resume|clear|compact", "note": "keep registration metadata",

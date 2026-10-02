@@ -35,6 +35,17 @@ func TestExtraAgentCommandFixture(_ *testing.T) {
 		fmt.Fprintln(os.Stderr, "unexpected native hook argv")
 		os.Exit(2)
 	}
+	if len(argv) >= 2 && argv[len(argv)-2] == "--source" {
+		marker := "kata-agent-contract-hook"
+		if argv[1] == "attention-native" && len(argv) == 6 {
+			marker = "kata-agent-hook-" + argv[3]
+		}
+		if argv[len(argv)-1] != marker {
+			fmt.Fprintln(os.Stderr, "unexpected hook ownership marker")
+			os.Exit(2)
+		}
+		argv = argv[:len(argv)-2]
+	}
 	if argv[1] == "contract" && len(argv) == 3 {
 		if err := writeExtraAgentContract(argv[2], os.Stdin, os.Stdout, "fixture contract"); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -166,7 +177,7 @@ func TestExtraAgentEmittedCommandsConsumeNativeFixtures(t *testing.T) {
 }
 
 func TestExtraOwnershipHandlesLiteralExecutablePathsAcrossPlatforms(t *testing.T) {
-	for _, path := range []string{"/opt/example/kata", `/opt/example path/kata'$(printf owned)`, `/opt/example/kata=value`, `C:\Program Files\Example\kata.exe`} {
+	for _, path := range []string{"/opt/example/kata", `/opt/example path'$(printf owned)/kata`, `/opt/example=value/kata`, `C:\Program Files\Example\kata.exe`} {
 		for _, kind := range []agentHookKind{contractHook, attentionStartHook, attentionEndHook} {
 			commands, err := agenthook.BuildCommand(path, extraHookArguments("droid", kind)...)
 			require.NoError(t, err)

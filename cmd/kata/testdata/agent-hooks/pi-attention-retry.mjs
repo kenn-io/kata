@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-const [extension, cwd, mode, failure, previousExtension] = process.argv.slice(2);
+const [extension, cwd, mode, failure] = process.argv.slice(2);
 const factory = (await import(pathToFileURL(extension))).default;
 const handlers = new Map(), calls = [];
 let session = 'session-A', pending;
@@ -106,17 +106,4 @@ await Promise.all([start, quit, quitDuplicate]);
 assert.equal(calls.length, joining + 1, 'quit callbacks join pending start and end once');
 assert.equal(calls.at(-1).args[3], 'end');
 assertRoute(calls.at(-1), session, 'joined-ref');
-if (previousExtension) {
-  const previousFactory = (await import(pathToFileURL(previousExtension))).default;
-  session = 'legacy-session'; previousFactory(pi); process.env.KATA_REF = 'legacy-ref';
-  await emit('session_start', {reason: 'startup'});
-  await emit('session_shutdown', {reason: 'reload'});
-  factory(pi); process.env.KATA_REF = 'later-ref';
-  const beforeUpgrade = calls.length;
-  await emit('session_start', {reason: 'resume'});
-  assert.equal(calls.length, beforeUpgrade, 'upgrading an active legacy baseline cannot restart or erase a handoff');
-  await emit('session_shutdown', {reason: 'quit'});
-  assert.equal(calls.length, beforeUpgrade + 1);
-  assertRoute(calls.at(-1), session, 'legacy-ref');
-}
 console.log('Pi attention retry and in-flight fencing passed');

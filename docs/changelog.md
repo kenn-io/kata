@@ -28,16 +28,37 @@ All notable changes to kata, grouped by release. Versioned releases start with
   plus every available attention hook by default; scripts needing contract-only
   setup should pass `--contract-only` or `--attention=false`. Default uninstall
   removes the full owned bundle. Use `--local` for project scope or
-  `kata init --agent-hooks=codex,pi` during initialization. Bare status shows
-  both scopes. OpenCode selects its API from a bounded runtime version probe;
+  `kata init --agent-hooks=codex,pi` during initialization. Project installs use
+  the portable `kata` command unless an executable override is supplied.
+  OpenCode selects its API from a bounded runtime version probe;
   Muse asks for managed environment permission only during explicit interactive
   user setup and otherwise reports partial setup. That user-wide allowlist is
   forwarded to every managed hook, including `KATA_AUTH_TOKEN` when set.
-  Existing generated commands,
-  custom hooks, legacy init flags and trust identities remain compatible.
+  Uninstall retains the allowlist; remove names from Muse settings to revoke it.
+  Existing generated commands, custom hooks and the older init flags remain
+  compatible; repeatable `--with-agent-hooks` also selects project bundles.
   Native session ownership fences delayed cleanup; Hermes uses terminal
   finalization and Codex init gains SessionEnd. See
   [target coverage](workflows/agents.md#hook-target-coverage) for runtime limits.
+
+- Inspect both hook scopes with bare `kata agent-hooks status`. JSON keeps user
+  rows in `harnesses` and project rows in `workspace.harnesses`, with project
+  details under `config`. An unreadable or malformed selected config now exits
+  nonzero and returns the partial report in `error.data`. See
+  [hook status](reference/cli.md#hook-status-and-output).
+
+- Upgrade or remove unchanged generated agent extensions after Kata's templates
+  change. Stored digests distinguish installed code from local edits; edited
+  code, metadata and package manifests remain untouched. Reinstall also reuses
+  an owned OpenCode API selection when its runtime probe is unavailable.
+  Hook publication locks now live outside workspace configs, in the OS
+  temporary directory.
+
+- Retry hook setup after an init publication failure without losing the project
+  result. Init errors now report whether the project was created and bound,
+  alongside the hook error. All Codex init selectors apply the same user-hook
+  deduplication and tracked-workspace policy. See the
+  [init reference](reference/cli.md#workspace-initialization).
 
 - Run `kata agent-contract-hook` directly to emit the built-in Codex briefing.
   Optional `--source <path>` replaces the entire prompt with a local UTF-8 file;
@@ -45,7 +66,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   contract commands share the option. Relative sources stay within the
   invocation directory; parent traversal and symlink escapes fail. Default hook
   installations use bare commands, preserve custom prompt hooks, and normalize
-  old generated source markers. Visible attention commands accept only the
+  old generated source markers. The shipped
+  `--source kata-agent-contract-hook` marker still selects the built-in contract;
+  prefix that filename with `./` to select it as a file. Visible and native
+  attention commands accept only the
   legacy source marker matching `start` or `end` for compatibility; rerun the
   matching init option to normalize installed hooks to the bare form.
   Codex user hooks suppress the workspace contract only when both native

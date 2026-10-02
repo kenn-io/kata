@@ -10,8 +10,130 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kit/agenthook"
 )
+
+func TestInitAgentHooksPublicationFailureReportsProjectAndBinding(t *testing.T) {
+	for _, mode := range []outputMode{outputJSON, outputAgent, outputHuman} {
+		t.Run(string(mode), func(t *testing.T) {
+			isolateAgentHookHomes(t)
+			env := testenv.New(t)
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".codex", "hooks.json")
+			lockPath, err := nativeAgentHookLockPath(path)
+			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(filepath.Dir(lockPath), 0700))
+			lock := flock.New(lockPath)
+			require.NoError(t, lock.Lock())
+			t.Cleanup(func() { require.NoError(t, lock.Unlock()) })
+			for _, created := range []bool{true, false} {
+				args := []string{"init", "--agent-hooks=codex", "--project", "example-project", "--as", "example-actor"}
+				if mode != outputHuman {
+					args = append(args, "--"+string(mode))
+				}
+				out, err := runCLICapture(t, env, dir, args...)
+				require.Error(t, err)
+				require.Empty(t, out)
+				project, dbErr := env.DB.ProjectByName(t.Context(), "example-project")
+				require.NoError(t, dbErr)
+				binding, bindingErr := config.ReadProjectConfig(dir)
+				require.NoError(t, bindingErr)
+				require.Equal(t, project.Name, binding.Project.Name)
+				requireCodexComponents(t, path, false, false, false)
+				require.Equal(t, ExitInternal, exitCodeForErr(err, true))
+				var cli *cliError
+				require.ErrorAs(t, err, &cli)
+				require.Equal(t, "init_agent_hooks_failed", cli.Code)
+				var data struct {
+					Project struct {
+						Name string `json:"name"`
+					} `json:"project"`
+					Created       bool   `json:"created"`
+					Bound         bool   `json:"bound"`
+					WorkspaceRoot string `json:"workspace_root"`
+					HookError     string `json:"agent_hooks_error"`
+					HooksChanged  bool   `json:"agent_hooks_changed"`
+				}
+				require.NoError(t, json.Unmarshal(cli.Data, &data))
+				require.Equal(t, project.Name, data.Project.Name)
+				require.Equal(t, created, data.Created)
+				require.True(t, data.Bound)
+				require.Equal(t, dir, data.WorkspaceRoot)
+				require.Contains(t, data.HookError, "is being updated")
+				require.False(t, data.HooksChanged)
+				var rendered bytes.Buffer
+				emitErrorForMode(&rendered, err, mode, true)
+				require.Contains(t, rendered.String(), "bound project example-project")
+				if created {
+					require.Contains(t, rendered.String(), "created and bound")
+				}
+				if mode == outputJSON {
+					var envelope struct {
+						Error struct {
+							Data json.RawMessage `json:"data"`
+						} `json:"error"`
+					}
+					require.NoError(t, json.Unmarshal(rendered.Bytes(), &envelope))
+					require.JSONEq(t, string(cli.Data), string(envelope.Error.Data))
+				}
+			}
+		})
+	}
+}
+
+func TestInitAgentHooksCodexRespectsUserContractAndTrackedWorkspace(t *testing.T) {
+	for _, tracked := range []bool{false, true} {
+		for _, contractOnly := range []bool{false, true} {
+			t.Run(map[bool]string{false: "untracked", true: "tracked"}[tracked]+"/"+map[bool]string{false: "bundle", true: "contract"}[contractOnly], func(t *testing.T) {
+				home := isolateAgentHookHomes(t)
+				t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+				t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, "gitconfig"))
+				dir := t.TempDir()
+				runGit(t, dir, "init", "--quiet")
+				path := filepath.Join(dir, ".codex", "hooks.json")
+				// A pre-existing workspace contract must be removed only when local.
+				writeCodexFixture(t, path, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-contract-hook","commandWindows":"kata agent-contract-hook"}]}]}}`)
+				if tracked {
+					runGit(t, dir, "add", ".codex/hooks.json")
+				}
+				_, err := runHookSetup(t, "install", "codex", "--contract-only", "--executable", "kata")
+				require.NoError(t, err)
+				userPath, err := agenthook.ConfigPath(agenthook.AgentCodex)
+				require.NoError(t, err)
+				userBefore, err := os.ReadFile(userPath) //nolint:gosec // Isolated user hook fixture.
+				require.NoError(t, err)
+				args := []string{"--agent-hooks=codex", "--workspace", dir, "--project", "example-project", "--as", "example-actor"}
+				if contractOnly {
+					args = append(args, "--contract-only")
+				}
+				daemon := newFakeDaemon(t)
+				require.NoError(t, executeInitSetup(t, daemon.srv.URL, args...))
+				requireCodexComponents(t, path, tracked, !contractOnly, !contractOnly)
+				userAfter, err := os.ReadFile(userPath) //nolint:gosec // Isolated user hook fixture.
+				require.NoError(t, err)
+				require.Equal(t, userBefore, userAfter)
+			})
+		}
+	}
+}
+
+func TestFormatInitOutputJSONHasStableHookFieldOrder(t *testing.T) {
+	resetFlags(t)
+	flags.Mode = outputJSON
+	hooks := []agentHookMutation{{Harness: "codex", State: "installed", Warnings: []string{}}}
+	response := []byte(`{"project":{"name":"example-project"},"created":true,"extra":42}`)
+	for range 30 {
+		output, err := formatInitOutput(response, "example-project", "", true, true, hooks)
+		require.NoError(t, err)
+		require.Less(t, strings.Index(output, `"agent_hooks":`), strings.Index(output, `"created":`))
+		require.Less(t, strings.Index(output, `"created":`), strings.Index(output, `"extra":`))
+		require.Less(t, strings.Index(output, `"extra":`), strings.Index(output, `"project":`))
+	}
+}
 
 func TestFormatInitOutputJSONRejectsNonObjects(t *testing.T) {
 	for _, response := range []string{"null", " \n\tnull\r\n ", "[]", `"unexpected"`, "42", "true"} {

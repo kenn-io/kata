@@ -53,14 +53,14 @@ func TestNativeAgentHookPublish(t *testing.T) {
 			t.Skip(err)
 		}
 		path := filepath.Join(root, "extensions", "kata.js")
-		if _, _, err := readNativeAgentHookFile(path); err == nil {
-			t.Fatal("accepted symlink ancestor")
+		if _, exists, err := readNativeAgentHookFile(path); err != nil || exists {
+			t.Fatalf("new linked config: exists=%t err=%v", exists, err)
 		}
-		if _, err := publishNativeAgentHookPlan(nativeAgentHookPlan{Changes: []nativeAgentHookChange{{Path: path, Content: []byte("managed")}}}); err == nil {
-			t.Fatal("wrote through symlink")
+		if _, err := publishNativeAgentHookPlan(nativeAgentHookPlan{Changes: []nativeAgentHookChange{{Path: path, Content: []byte("managed")}}}); err != nil {
+			t.Fatal(err)
 		}
-		if _, err := os.Stat(filepath.Join(outside, "kata.js")); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("outside write: %v", err)
+		if data, err := os.ReadFile(filepath.Join(outside, "kata.js")); err != nil || string(data) != "managed" { //nolint:gosec // G304: isolated symlink target under TempDir.
+			t.Fatalf("linked config: %q %v", data, err)
 		}
 	})
 	t.Run("all snapshots validated before publication", func(t *testing.T) {
@@ -204,7 +204,14 @@ func TestNativeAgentHookPublishLocksUnchangedArtifacts(t *testing.T) {
 				}
 				configChange = nativeAgentHookChange{Path: config, OriginalExists: true, Original: []byte("unchanged"), Content: []byte("unchanged")}
 			}
-			lock := flock.New(config + ".kata-hook.lock")
+			lockPath, err := nativeAgentHookLockPath(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(lockPath), 0700); err != nil {
+				t.Fatal(err)
+			}
+			lock := flock.New(lockPath)
 			if err := lock.Lock(); err != nil {
 				t.Fatal(err)
 			}

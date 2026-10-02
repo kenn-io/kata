@@ -54,6 +54,7 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 			if kind != contractHook {
 				marker = "attention-native " + opts.Agent + " " + string(kind)
 			}
+			args = agentHookOwnershipArgs(opts.Executable, args, kind)
 			install = &agenthook.InstallOptions{ConfigPath: opts.ConfigPath, Executable: opts.Executable, Arguments: args, Marker: marker, Hooks: []agenthook.Hook{hook}}
 		}
 		if agent == agenthook.AgentHermes && kind != contractHook {

@@ -1,14 +1,75 @@
 package main
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kit/agenthook"
 )
+
+// Keep init's user-contract and tracked-workspace policy while publishing the
+// complete native bundle together with the other selected integrations.
+func planInitCodexHooks(opts nativeAgentHookOptions) (nativeAgentHookPlan, error) {
+	userPath, err := codexUserContractPath(opts.ConfigPath)
+	if err != nil {
+		return nativeAgentHookPlan{}, err
+	}
+	tracked := false
+	if userPath != "" {
+		tracked, err = codexHookFileTracked(opts.Dir)
+		if err != nil {
+			return nativeAgentHookPlan{}, err
+		}
+		if !tracked {
+			opts.Contract = false
+		}
+	}
+	plan, err := planNativeAgentHooks(opts, false)
+	if err != nil {
+		return plan, err
+	}
+	root, err := os.OpenRoot(opts.Dir)
+	if err != nil {
+		return plan, err
+	}
+	defer func() { _ = root.Close() }()
+	plan.Warnings = append(plan.Warnings, codexConfigHooksWarnings(root)...)
+	if userPath == "" {
+		return plan, nil
+	}
+	if tracked {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf("kept workspace contract hook: .codex/hooks.json is tracked; %s also injects it", userPath))
+		return plan, nil
+	}
+	change := &plan.Changes[0]
+	removal, err := planOwnedAgentHookSnapshot(agenthook.AgentCodex, change.Path, change.Content, !change.Remove, contractHook, nil)
+	if err != nil {
+		return plan, err
+	}
+	plan.Contract = false
+	if !removal.result.Changed {
+		return plan, nil
+	}
+	change.Content = removal.result.Data
+	plan.Warnings = append(plan.Warnings, fmt.Sprintf("removed workspace contract hook: %s already injects it", userPath))
+	var before, after map[string]any
+	if err := json.Unmarshal(change.Original, &before, jsonutil.PreserveNumberLiterals()); err != nil {
+		return plan, err
+	}
+	if err := json.Unmarshal(change.Content, &after, jsonutil.PreserveNumberLiterals()); err != nil {
+		return plan, err
+	}
+	shifted, err := codexHookIndexesShifted(before, after)
+	if shifted {
+		plan.Warnings = append(plan.Warnings, "Codex will ask to re-trust shifted hooks; open Codex and run /hooks.")
+	}
+	return plan, err
+}
 
 // `kata init --with-codex-hooks` wires the work.attention lifecycle into a
 // Codex CLI workspace. Kit owns config parsing, hook ownership, and updates.

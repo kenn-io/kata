@@ -114,11 +114,18 @@ plus available attention directions. Add `--contract-only` to omit attention.
 configured user agents as evidence, selecting only project-capable targets.
 Conflicting scope or component flags fail before writes.
 
-The default deliberately changed from contract only to both hooks. Existing
-scripts that need contract-only setup should pass `--contract-only` or
-`--attention=false`; `--attention` remains accepted. The older
-`init --with-agent-hooks`, `--with-hooks`, and `--with-codex-hooks` keep their
-behavior and trust identities. Do not combine them with the new CSV selector.
+Use `--contract-only` or `--attention=false` when a script only needs the
+contract; `--attention` remains accepted. Repeatable `init --with-agent-hooks`
+also installs project bundles. The older `--with-hooks` and
+`--with-codex-hooks` retain their commands and trust identities. Do not combine
+another hook selector with `--agent-hooks`.
+
+Project hooks use `kata` from each teammate's PATH. Use `--executable` on
+`agent-hooks install` to choose another executable explicitly; user setup
+defaults to an absolute path. If init reports a hook error after creating or
+binding the project, the binding remains. Fix the error and rerun init. Its
+[structured error](../reference/cli.md#workspace-initialization) records the
+completed project result separately from the hook failure.
 
 Most contract hooks use SessionStart; Hermes uses first-turn
 `pre_llm_call`, Kimi Code uses UserPromptSubmit, and Antigravity uses its first
@@ -188,7 +195,8 @@ newer) and a separate generator. V1 discovers `plugin/kata-user.js` or
 v2 release. Prerelease, unsupported, or ambiguous output does not select an API.
 Use `--api v1|v2` as an advanced override when runtime detection is unavailable;
 it cannot override a known incompatible runtime. Reinstall preserves owned API
-metadata and discovery paths. A runtime/API mismatch fails before writes;
+metadata and discovery paths, including when the runtime probe is unavailable.
+A runtime/API mismatch fails before writes;
 uninstall the existing bundle before changing its API. Follow the installed
 plugin's dependency/reload guidance. An exact owned v2 package manifest retains
 registration ownership if its generated entrypoint is missing, so repair and
@@ -232,9 +240,13 @@ kata agent-hooks uninstall pi --contract-only
 
 `status` stays offline and reports capabilities separately from owned configured
 contract/start/end components. It cannot prove loading, trust or permissions.
-Bare `status` shows both scopes; a named target defaults to user scope.
+Bare `status` shows both scopes; a named target defaults to user scope. Bare JSON
+keeps user rows in `harnesses` and project rows in `workspace.harnesses`.
 `--local` or `--scope project` inspects the selected workspace configuration.
 OpenCode status and uninstall never run a version probe.
+An unreadable or malformed selected config makes status exit nonzero after
+collecting the other targets. JSON puts that partial report in `error.data`;
+each failed row identifies the config path in `inspection_error`.
 `--config` requires one target and a supported native config-file override;
 Pi and Amp auto-discovered extensions reject it. An executable override can pin
 stable Kata commands. Installer `--source` is data for owned code extensions;
@@ -246,17 +258,21 @@ selected workspace.
 Contract-only reinstall is additive and leaves existing attention enabled.
 Default uninstall removes the full owned bundle; `uninstall --contract-only`
 (or `--attention=false`) removes contracts while preserving independent
-attention, including attention-only extensions where needed. Foreign hooks and
-edited owned extension files are preserved.
+attention, including attention-only extensions where needed. Generated code
+records a digest so unchanged extensions remain upgradeable and removable
+when Kata's templates change. Foreign hooks and edited code, metadata or
+package manifests are preserved.
 Automatic skips and Muse partial setup return success with per-target reasons.
-Bare installation with no configured agents returns a usage error and makes no
-changes. Explicit OpenCode detection failures and foreign artifacts are errors.
+Bare installation and `--all` with no configured agents return a successful
+skipped report and make no changes. Explicit OpenCode detection failures and
+foreign artifacts are errors.
 All targets are planned before publication. The shared publisher snapshots,
 locks and stages artifacts, then rolls back its unchanged writes after failure;
 it reports retained artifacts when external changes prevent safe rollback.
+Runtime locks stay in the OS temporary directory, outside workspace configs.
 
 If user and workspace Codex contract hooks overlap, run
-`kata init --with-codex-hooks` there for the
+`kata init --agent-hooks=codex` or `kata init --with-codex-hooks` there for the
 [workspace deduplication rules](../reference/cli.md#workspace-initialization).
 Tracked workspace hooks remain for teammates. Removing a user contract may
 require rerunning that init flag to restore a previously skipped workspace hook.

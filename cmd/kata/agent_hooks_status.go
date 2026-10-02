@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -33,10 +34,11 @@ type agentHookUserStatus struct {
 }
 
 type agentHookWorkspaceStatus struct {
-	Path              string              `json:"path"`
-	Claude            agentHookUserStatus `json:"claude"`
-	Codex             agentHookUserStatus `json:"codex"`
-	CommittedGuidance []string            `json:"committed_guidance"`
+	Path              string                   `json:"path"`
+	Claude            agentHookUserStatus      `json:"claude"`
+	Codex             agentHookUserStatus      `json:"codex"`
+	CommittedGuidance []string                 `json:"committed_guidance"`
+	Harnesses         []agentHookHarnessStatus `json:"harnesses,omitempty"`
 }
 
 type agentHookConfigured struct {
@@ -46,14 +48,15 @@ type agentHookConfigured struct {
 }
 
 type agentHookHarnessStatus struct {
-	InspectionError string              `json:"inspection_error,omitempty"`
-	Scope           string              `json:"scope"`
-	Capabilities    agentHookCapability `json:"capabilities"`
-	Configured      agentHookConfigured `json:"configured"`
-	Harness         string              `json:"harness"`
-	User            agentHookUserStatus `json:"user"`
-	Duplicate       bool                `json:"duplicate"`
-	Overlap         bool                `json:"overlap"`
+	InspectionError string               `json:"inspection_error,omitempty"`
+	Scope           string               `json:"scope"`
+	Capabilities    agentHookCapability  `json:"capabilities"`
+	Configured      agentHookConfigured  `json:"configured"`
+	Harness         string               `json:"harness"`
+	User            agentHookUserStatus  `json:"user,omitzero"`
+	Config          *agentHookUserStatus `json:"config,omitempty"`
+	Duplicate       bool                 `json:"duplicate"`
+	Overlap         bool                 `json:"overlap"`
 }
 
 type agentHookStatusReport struct {
@@ -129,7 +132,7 @@ func agentHookCommandForPlatform(agent agenthook.Agent, entry agentHookEntry, go
 	return entry.Command, false
 }
 
-func collectAgentHookStatus(targets []agentHookTarget, workspace string) (agentHookStatusReport, error) {
+func collectAgentHookWorkspaceStatus(workspace string) agentHookStatusReport {
 	report := agentHookStatusReport{Harnesses: []agentHookHarnessStatus{}, Workspace: agentHookWorkspaceStatus{Path: workspace}, Warnings: []string{}}
 	var err error
 	report.Workspace.Claude, err = readAgentHookStatus(agenthook.AgentClaude, filepath.Join(workspace, ".claude", "settings.json"), workspace)
@@ -145,25 +148,7 @@ func collectAgentHookStatus(targets []agentHookTarget, workspace string) (agentH
 		report.Workspace.CommittedGuidance = []string{}
 		report.Warnings = append(report.Warnings, fmt.Sprintf("inspect committed guidance: %v", err))
 	}
-	for _, target := range targets {
-		user, err := readAgentHookStatus(target.Agent, target.ConfigPath, workspace)
-		if err != nil {
-			return report, err
-		}
-		status := agentHookHarnessStatus{Harness: string(target.Agent), User: user, Overlap: user.Present && len(report.Workspace.CommittedGuidance) > 0}
-		var local *agentHookUserStatus
-		switch target.Agent {
-		case agenthook.AgentClaude:
-			local = &report.Workspace.Claude
-		case agenthook.AgentCodex:
-			local = &report.Workspace.Codex
-		}
-		if local != nil {
-			status.Duplicate = user.Present && local.Present && !sameAgentHookFile(user.ConfigPath, local.ConfigPath)
-		}
-		report.Harnesses = append(report.Harnesses, status)
-	}
-	return report, nil
+	return report
 }
 
 // Overlap means committed team guidance, not a local or staged-only marker.
@@ -221,7 +206,7 @@ func printAgentHookStatus(cmd *cobra.Command, report agentHookStatusReport) erro
 			return err
 		}
 	}
-	for _, harness := range report.Harnesses {
+	for _, harness := range slices.Concat(report.Harnesses, report.Workspace.Harnesses) {
 		if harness.InspectionError != "" {
 			if currentOutputMode() == outputAgent {
 				_, err := fmt.Fprintf(cmd.OutOrStdout(), "harness=%s scope=%s inspection_error=%s observation=offline\n", harness.Harness, harness.Scope, agentValue(harness.InspectionError))
@@ -254,7 +239,11 @@ func printAgentHookStatus(cmd *cobra.Command, report agentHookStatusReport) erro
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(), format, harness.Configured.Contract, harness.Configured.AttentionStart, harness.Configured.AttentionEnd); err != nil {
 			return err
 		}
-		if err := printAgentHookScope(cmd, scope, harness.Harness, harness.User); err != nil {
+		config := harness.User
+		if harness.Config != nil {
+			config = *harness.Config
+		}
+		if err := printAgentHookScope(cmd, scope, harness.Harness, config); err != nil {
 			return err
 		}
 	}

@@ -19,11 +19,11 @@ func TestAgentHooksSetupEmptyDiscoveryAndSharedDirectories(t *testing.T) {
 		require.NoError(t, os.Mkdir(filepath.Join(dir, name), 0700))
 	}
 	out, err := runHookSetup(t, "install", "--local", "--workspace", dir, "--executable", os.Args[0], "--json")
-	require.ErrorContains(t, err, "no configured agents")
-	require.Equal(t, ExitUsage, exitCodeForErr(err, true))
-	require.Empty(t, out)
+	require.NoError(t, err)
+	bare := out
 	out, err = runHookSetup(t, "install", "--all", "--local", "--workspace", dir, "--executable", os.Args[0], "--json")
 	require.NoError(t, err)
+	require.Equal(t, bare, out)
 	var report struct {
 		Results []agentHookMutation `json:"results"`
 	}
@@ -141,7 +141,7 @@ func TestAgentHooksStatusInspectionErrorNamesScope(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(dir, ".muse"), 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".muse", "hooks.json"), []byte("{invalid"), 0600))
 	out, err := runHookSetup(t, "status", "muse", "--local", "--workspace", dir)
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.Contains(t, out, "muse (project): inspection unavailable")
 }
 
