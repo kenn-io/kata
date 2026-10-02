@@ -88,6 +88,31 @@ func TestOpenClawPlanBundleLifecycle(t *testing.T) {
 	_, err = publishNativeAgentHookPlan(p)
 	require.NoError(t, err)
 }
+
+func TestOpenClawPreservesEmptyPluginAllowList(t *testing.T) {
+	opts := openClawTestOptions(t)
+	opts.ConfigPath = filepath.Join(opts.Home, "config.json")
+	require.NoError(t, os.WriteFile(opts.ConfigPath, []byte(`{"plugins":{"allow":[]}}`), 0600))
+
+	plan, err := planOpenClawAgentHooks(opts, false)
+	require.NoError(t, err)
+	require.True(t, plan.Contract)
+	require.True(t, plan.AttentionStart)
+	require.True(t, plan.AttentionEnd)
+
+	changed, err := publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	data, err := os.ReadFile(opts.ConfigPath)
+	require.NoError(t, err)
+	var config map[string]any
+	require.NoError(t, json.Unmarshal(data, &config))
+	plugins, ok := config["plugins"].(map[string]any)
+	require.True(t, ok)
+	require.Empty(t, plugins["allow"])
+}
+
 func TestOpenClawPreservesPolicyAndRejectsUnsupportedConfig(t *testing.T) {
 	for _, config := range []string{`{"$include":"other.json"}`, `{// comment\n}`, `{"plugins":{"entries":{"kata-hooks-user":{"enabled":false,"hooks":{"allowConversationAccess":false}}}},"foreign":7}`} {
 		t.Run(config, func(t *testing.T) {

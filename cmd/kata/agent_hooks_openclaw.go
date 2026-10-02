@@ -244,12 +244,15 @@ func planOpenClawAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAge
 			return plan, e
 		}
 		desired.AddedPath = desired.AddedPath || changed
-		if _, ok := plugins["allow"]; ok {
-			changed, e = openClawAddString(plugins, "allow", id, true)
-			if e != nil {
-				return plan, e
+		if rawAllow, ok := plugins["allow"]; ok {
+			allow, isList := rawAllow.([]any)
+			if !isList || len(allow) > 0 {
+				changed, e = openClawAddString(plugins, "allow", id, true)
+				if e != nil {
+					return plan, e
+				}
+				desired.AddedAllow = desired.AddedAllow || changed
 			}
-			desired.AddedAllow = desired.AddedAllow || changed
 		}
 		assets := openClawAssets(desired)
 		for i := range 3 {
