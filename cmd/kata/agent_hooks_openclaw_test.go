@@ -160,9 +160,16 @@ func TestOpenClawGeneratedNativeBehavior(t *testing.T) {
 	for _, platform := range []string{"native", "windows-mode"} {
 		t.Run(platform, func(t *testing.T) { openClawGeneratedNativeBehavior(t, platform) })
 	}
+	t.Run("large contract", func(t *testing.T) {
+		openClawGeneratedNativeBehaviorWithContract(t, "native", strings.Repeat("x", 96*1024))
+	})
 }
 
 func openClawGeneratedNativeBehavior(t *testing.T, platform string) {
+	openClawGeneratedNativeBehaviorWithContract(t, platform, "first")
+}
+
+func openClawGeneratedNativeBehaviorWithContract(t *testing.T, platform, contract string) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node unavailable")
@@ -178,6 +185,7 @@ func openClawGeneratedNativeBehavior(t *testing.T, platform string) {
 	require.NoError(t, err)
 	_, err = publishNativeAgentHookPlan(p)
 	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(opts.Home, "contract"), []byte(contract), 0600))
 	plugin := ""
 	for _, c := range p.Changes {
 		if filepath.Base(c.Path) == "index.js" {

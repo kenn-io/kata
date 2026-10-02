@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 const [plugin,workspace]=process.argv.slice(2),root=process.env.OPENCLAW_TEST_ROOT;
-fs.writeFileSync(path.join(root,'contract'),'first');fs.writeFileSync(path.join(root,'inbox'),'request-one');
+const initialContract=fs.readFileSync(path.join(root,'contract'),'utf8');fs.writeFileSync(path.join(root,'inbox'),'request-one');
 // Windows Node exposes synthetic POSIX modes rather than filesystem ACLs.
 if(process.env.OPENCLAW_TEST_PLATFORM==='windows-mode') {
  Object.defineProperty(process,'platform',{value:'win32'});
@@ -18,7 +18,7 @@ assert.equal(registrations.has('agent_end'),false);
 let checks=0;const ctx={agentId:'example-agent',sessionId:'one',sessionKey:'agent:example-agent:main',workspaceDir:workspace,hookInvocation:{assertActive(){checks++}}};
 await registrations.get('session_start')({sessionId:'one',sessionKey:ctx.sessionKey},{sessionId:'one',sessionKey:ctx.sessionKey,agentId:ctx.agentId});
 const prompt=await registrations.get('before_prompt_build')({prompt:'',messages:[{role:'user',content:[{type:'image'}]}]},ctx);
-assert.equal(prompt.prependSystemContext,'contract:first');assert.equal(prompt.prependContext,'request-one');assert.ok(checks>=2);
+assert.equal(prompt.prependSystemContext,'contract:'+initialContract);assert.equal(prompt.prependContext,'request-one');assert.ok(checks>=2);
 let calls=()=>fs.readFileSync(path.join(root,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
 const start=calls().find(c=>c.args[0]==='agent-hooks');assert.deepEqual(start.args,['agent-hooks','attention-native','openclaw','start','--session','one','--host-pid',String(process.pid),'--ref','abcd','--workspace',workspace]);
 assert.equal(start.cwd,workspace);assert.equal(start.recipient,'actor/worker');
