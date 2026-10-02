@@ -96,31 +96,96 @@ func (f *HTTPFetcher) incrementalParentData(ctx context.Context, client *http.Cl
 	if err != nil {
 		return ParentData{}, err
 	}
+	// Check the selected children before listing sub-issues, so a host without
+	// parent support is detected before it can reject the sub-issue endpoint.
+	err = f.checkParentBatches(ctx, client, binding, requestURL, budget, numbers, 0, &data)
+	if err == nil && len(request.ChildrenOf) > 0 {
+		err = f.checkChildrenOf(ctx, client, binding, requestURL, budget, request.ChildrenOf, numbers, &data)
+	}
+	if errors.Is(err, errParentFeatureUnsupported) {
+		f.parentCapabilityCache().markUnsupported(binding.Host)
+		return ParentData{Scan: ParentScanUnsupported}, nil
+	}
+	if err != nil {
+		return ParentData{}, err
+	}
+	return data, nil
+}
+
+// checkChildrenOf checks the same-repository sub-issues of parents that were
+// not already selected.
+func (f *HTTPFetcher) checkChildrenOf(ctx context.Context, client *http.Client, binding Binding, requestURL string, budget *gitHubRetryBudget, parents, selected []int, data *ParentData) error {
+	children, err := f.sameRepositorySubIssues(ctx, client, binding, parents)
+	if err != nil {
+		return err
+	}
+	slices.Sort(children)
+	children = slices.Compact(children)
+	children = slices.DeleteFunc(children, func(n int) bool {
+		_, found := slices.BinarySearch(selected, n)
+		return n <= 0 || found
+	})
+	if len(children) == 0 {
+		return nil
+	}
+	return f.checkParentBatches(ctx, client, binding, requestURL, budget, children, len(selected), data)
+}
+
+// checkParentBatches reads the current parent of each number in GraphQL batches
+// and records the results in data. done is the count already reported.
+func (f *HTTPFetcher) checkParentBatches(ctx context.Context, client *http.Client, binding Binding, requestURL string, budget *gitHubRetryBudget, numbers []int, done int, data *ParentData) error {
 	for start := 0; start < len(numbers); start += parentQueryBatchSize {
 		end := min(start+parentQueryBatchSize, len(numbers))
 		page, err := f.fetchParentGraphQLPage(ctx, client, requestURL, binding, nil, budget, numbers[start:end])
 		if err != nil {
-			if errors.Is(err, errParentFeatureUnsupported) {
-				f.parentCapabilityCache().markUnsupported(binding.Host)
-				return ParentData{Scan: ParentScanUnsupported}, nil
-			}
-			return ParentData{}, err
+			return err
 		}
 		for _, node := range page.Nodes {
 			if node.FullDatabaseID <= 0 {
-				return ParentData{}, fmt.Errorf("%s child issue %d missing fullDatabaseId", parentGraphQLResource, node.Number)
+				return fmt.Errorf("%s child issue %d missing fullDatabaseId", parentGraphQLResource, node.Number)
 			}
 			data.ScannedChildIDs[node.Number] = int64(node.FullDatabaseID)
 			if node.Parent != nil {
 				if node.Parent.FullDatabaseID <= 0 {
-					return ParentData{}, fmt.Errorf("%s parent for child issue %d missing fullDatabaseId", parentGraphQLResource, node.Number)
+					return fmt.Errorf("%s parent for child issue %d missing fullDatabaseId", parentGraphQLResource, node.Number)
 				}
 				data.ParentByChild[node.Number] = int64(node.Parent.FullDatabaseID)
 			}
 		}
-		reportProgress(ctx, "parents", end, len(numbers))
+		reportProgress(ctx, "parents", done+end, done+len(numbers))
 	}
-	return data, nil
+	return nil
+}
+
+type subIssue struct {
+	Number     int `json:"number"`
+	Repository *struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+}
+
+// sameRepositorySubIssues lists the sub-issues of each parent. It keeps only
+// children in the bound repository, because a child number from another
+// repository would name a different issue here.
+func (f *HTTPFetcher) sameRepositorySubIssues(ctx context.Context, client *http.Client, binding Binding, parents []int) ([]int, error) {
+	fullName := binding.Owner + "/" + binding.Repo
+	var children []int
+	for _, parent := range parents {
+		requestURL, err := f.restEndpointURL(binding, repositoryEndpoint(binding)+"/issues/"+strconv.Itoa(parent)+"/sub_issues?per_page=100")
+		if err != nil {
+			return nil, err
+		}
+		subIssues, err := fetchRESTPagesWithClient[subIssue](ctx, f, client, binding, requestURL, "GitHub sub-issues for issue "+strconv.Itoa(parent), "")
+		if err != nil {
+			return nil, err
+		}
+		for _, sub := range subIssues {
+			if sub.Repository != nil && strings.EqualFold(sub.Repository.FullName, fullName) {
+				children = append(children, sub.Number)
+			}
+		}
+	}
+	return children, nil
 }
 
 type parentIssueEvent struct {

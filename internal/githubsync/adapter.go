@@ -97,10 +97,14 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 				numbers = append(numbers, issue.Number)
 			}
 		}
+		childrenOf, err := r.firstImportsBeforeCutoff(ctx, binding, issues, cutoff)
+		if err != nil {
+			return issuesync.Prepared{Binding: binding}, err
+		}
 		reportProgress(ctx, "parents", 0, len(numbers))
 		// Relationship changes do not update updatedAt. Event discovery uses the
 		// cursor overlap even if the issue cutoff excludes an already imported child.
-		parentData, err = fetcher.ParentData(ctx, ghConfig.Binding(), ParentRequest{Since: syncSince(binding.LastCursorAt), IssueNumbers: numbers})
+		parentData, err = fetcher.ParentData(ctx, ghConfig.Binding(), ParentRequest{Since: syncSince(binding.LastCursorAt), IssueNumbers: numbers, ChildrenOf: childrenOf})
 		if err != nil {
 			return issuesync.Prepared{Binding: binding}, err
 		}
@@ -226,6 +230,31 @@ func (r *adapter) fetchComments(ctx context.Context, fetcher Fetcher, ghConfig C
 		reportProgress(ctx, "comments", completed, total)
 	}
 	return out, nil
+}
+
+// firstImportsBeforeCutoff returns issues created before the cutoff that have no
+// import mapping yet. Earlier runs dropped links from imported children to these
+// issues, so their children need a parent check once they are imported.
+func (r *adapter) firstImportsBeforeCutoff(ctx context.Context, binding db.IssueSyncBinding, issues []Issue, cutoff *time.Time) ([]int, error) {
+	if cutoff == nil {
+		return nil, nil
+	}
+	var numbers []int
+	for _, issue := range issues {
+		if IsPullRequestIssue(issue) || issue.Number <= 0 || issue.CreatedAt == nil || issue.CreatedAt.After(*cutoff) {
+			continue
+		}
+		externalID := issueExternalID(issue)
+		_, err := r.config.Store.ImportMappingBySource(ctx, binding.ProjectID, binding.SourceKey, "issue", externalID)
+		if errors.Is(err, db.ErrNotFound) {
+			numbers = append(numbers, issue.Number)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("lookup github issue mapping %q: %w", externalID, err)
+		}
+	}
+	return numbers, nil
 }
 
 func (r *adapter) appendScannedParentReconcileItems(ctx context.Context, batch db.ImportBatchParams, parentData ParentData, hasCutoff bool) ([]db.ImportItem, error) {

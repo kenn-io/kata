@@ -66,10 +66,13 @@ func (d ParentData) ChildScanned(childNumber int) bool {
 }
 
 // ParentRequest selects a full scan (nil Since) or changed children plus recent
-// parent relationship events since the inclusive lower bound.
+// parent relationship events since the inclusive lower bound. ChildrenOf names
+// issues imported for the first time; their same-repository sub-issues are also
+// checked, because a link to a parent outside the cutoff was dropped earlier.
 type ParentRequest struct {
 	Since        *time.Time
 	IssueNumbers []int
+	ChildrenOf   []int
 }
 
 // Fetcher reads GitHub repository data needed by the sync importer.

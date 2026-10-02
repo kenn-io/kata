@@ -2013,6 +2013,41 @@ func TestRunnerIncrementalParentReconcilesEventOnlyChildOutsideCutoff(t *testing
 	}
 }
 
+// A child imported while its parent was outside the cutoff has its parent link
+// dropped. When that parent is imported later, its children must be re-checked.
+func TestRunnerIncrementalParentRechecksChildrenOfNewlyImportedOldIssues(t *testing.T) {
+	h := newRunnerHarness(t)
+	cutoff := h.now.Add(-5 * time.Minute)
+	setParentRunnerConfig(t, h, true, &cutoff)
+	child := testIssue(101, 1, "child", h.now.Add(-time.Minute))
+	mapped := testIssue(104, 4, "mapped old issue", h.now.Add(-time.Minute))
+	batch := BuildImportBatch(h.binding.SourceKey, []Issue{child, mapped}, nil, h.now)
+	batch.ProjectID = h.project.ID
+	_, _, err := h.db.ImportBatch(h.ctx, batch)
+	require.NoError(t, err)
+	cursor := h.now.Add(-time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, cursor)
+
+	oldParent := testIssue(102, 2, "old parent", h.now)
+	oldParent.CreatedAt = new(cutoff.Add(-time.Hour))
+	newIssue := testIssue(103, 3, "new issue", h.now)
+	newIssue.CreatedAt = new(cutoff.Add(time.Minute))
+	mapped.CreatedAt = new(cutoff.Add(-time.Hour))
+	mapped.UpdatedAt = new(h.now)
+	h.fetcher.issues = []Issue{oldParent, newIssue, mapped}
+	h.fetcher.parentDataSet = true
+	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanIncremental,
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102, 3: 103, 4: 104},
+		ParentByChild:   map[int]int64{1: 102},
+	}
+	_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	require.Len(t, h.fetcher.parentRequests, 1)
+	assert.Equal(t, []int{2}, h.fetcher.parentRequests[0].ChildrenOf)
+	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
+}
+
 func TestRunnerUnsupportedPendingParentBackfillKeepsIncrementalREST(t *testing.T) {
 	h := newRunnerHarness(t)
 	cursor := h.now.Add(-10 * time.Minute)

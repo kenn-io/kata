@@ -124,6 +124,74 @@ func TestIncrementalParentTruncatedEventFeedFallsBackToFullScan(t *testing.T) {
 	assert.Equal(t, map[int]int64{8: 101}, data.ParentByChild)
 }
 
+func TestIncrementalParentRechecksSameRepositoryChildrenOfNewParents(t *testing.T) {
+	var subIssuePaths []string
+	var batches [][]int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if r.URL.Path == "/repos/example-owner/example-repo/issues/events" {
+				_, _ = fmt.Fprint(w, `[]`)
+				return
+			}
+			subIssuePaths = append(subIssuePaths, r.URL.Path)
+			_, _ = fmt.Fprint(w, `[`+
+				`{"number":1,"repository":{"full_name":"example-owner/example-repo"}},`+
+				`{"number":7,"repository":{"full_name":"other-owner/other-repo"}}]`)
+			return
+		}
+		var request parentGraphQLRequest
+		require.NoError(t, json.UnmarshalRead(r.Body, &request))
+		var batch []int
+		nodes := map[string]any{}
+		for _, match := range testParentAlias.FindAllStringSubmatch(request.Query, -1) {
+			n, _ := strconv.Atoi(match[2])
+			batch = append(batch, n)
+			var parent any
+			if n == 1 {
+				parent = map[string]any{"number": 2, "fullDatabaseId": 102}
+			}
+			nodes["i"+match[1]] = map[string]any{"number": n, "fullDatabaseId": 100 + n, "parent": parent}
+		}
+		batches = append(batches, batch)
+		require.NoError(t, json.MarshalWrite(w, map[string]any{"data": map[string]any{"repository": nodes}}))
+	}))
+	defer server.Close()
+	f := newParentGraphQLTestFetcher(server.URL + "/graphql")
+	f.restBaseURLOverride = server.URL + "/"
+	since := time.Now()
+	data, err := f.ParentData(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{Since: &since, IssueNumbers: []int{2}, ChildrenOf: []int{2}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/repos/example-owner/example-repo/issues/2/sub_issues"}, subIssuePaths)
+	assert.Equal(t, [][]int{{2}, {1}}, batches)
+	assert.Equal(t, ParentScanIncremental, data.Scan)
+	assert.Equal(t, map[int]int64{1: 101, 2: 102}, data.ScannedChildIDs)
+	assert.Equal(t, map[int]int64{1: 102}, data.ParentByChild)
+}
+
+func TestIncrementalParentUnsupportedHostSkipsSubIssueLookup(t *testing.T) {
+	var subIssueRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if r.URL.Path != "/repos/example-owner/example-repo/issues/events" {
+				subIssueRequests++
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = fmt.Fprint(w, `[]`)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"errors":[{"type":"undefinedField","message":"Field 'parent' doesn't exist on type 'Issue'"}]}`)
+	}))
+	defer server.Close()
+	f := newParentGraphQLTestFetcher(server.URL + "/graphql")
+	f.restBaseURLOverride = server.URL + "/"
+	since := time.Now()
+	data, err := f.ParentData(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{Since: &since, IssueNumbers: []int{2}, ChildrenOf: []int{2}})
+	require.NoError(t, err)
+	assert.Equal(t, ParentScanUnsupported, data.Scan)
+	assert.Zero(t, subIssueRequests)
+}
+
 func TestIncrementalParentBatchesBoundedSelection(t *testing.T) {
 	var counts []int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

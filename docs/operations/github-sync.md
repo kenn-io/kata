@@ -174,8 +174,11 @@ reads their current parents in GraphQL batches of at most 100 children. GitHub
 parent changes do not update the child's `updated_at`, so the event feed is
 needed to reconcile relationship-only changes. Event discovery uses the sync
 cursor with a two-minute overlap and also reconciles already imported children
-outside the cutoff; it does not import old, unmapped event children. An idle
-incremental run makes no parent GraphQL requests. GitHub serves only the newest
+outside the cutoff; it does not import old, unmapped event children. With a
+cutoff, a child's link to a parent outside the cutoff is skipped. When a later
+run first imports an issue created before the cutoff, it lists that issue's
+sub-issues and checks the parents of those in the same repository, so skipped
+links are restored. An idle incremental run makes no parent GraphQL requests. GitHub serves only the newest
 30,000 repository issue events. When the events since the last cursor exceed
 that limit, such as after a long pause, the run falls back to a full repository
 parent scan.
