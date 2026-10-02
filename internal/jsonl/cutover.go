@@ -10,6 +10,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kit/pathresolve"
 )
 
 // ErrCutoverInProgress means a previous JSONL cutover left temp files behind.
@@ -33,7 +34,23 @@ func AutoCutover(ctx context.Context, path string) error {
 	if version >= db.CurrentSchemaVersion() {
 		return nil
 	}
+	// Replace the physical database rather than a configured symlink. The
+	// daemon's lock must still name this same database after the swap.
+	canonical, err := pathresolve.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("resolve cutover database: %w", err)
+	}
+	if canonical != path {
+		path = canonical
+		tmpJSONL, tmpDB = path+".import.tmp.jsonl", path+".import.tmp.db"
+		if err := rejectCutoverTemps(tmpJSONL, tmpDB); err != nil {
+			return err
+		}
+	}
 
+	if err := checkCutoverIntegrity(ctx, path); err != nil {
+		return err
+	}
 	report, err := PreflightSourceFKs(ctx, path)
 	if err != nil {
 		return err
@@ -60,13 +77,20 @@ func AutoCutover(ctx context.Context, path string) error {
 		return err
 	}
 
-	backup := fmt.Sprintf("%s.bak.%s", path, time.Now().UTC().Format("20060102T150405Z"))
-	if err := os.Rename(path, backup); err != nil {
-		return fmt.Errorf("backup source db: %w", err)
+	backup := fmt.Sprintf("%s.bak.%s", path, time.Now().UTC().Format("20060102T150405.000000000Z"))
+	if err := backupCutoverSource(ctx, path, backup); err != nil {
+		return err
+	}
+	if err := checkCutoverIntegrity(ctx, tmpDB); err != nil {
+		return err
+	}
+	// Bring the source main file up to date before replacing it. A live
+	// daemon is excluded by its process-lifetime database lock.
+	if err := checkpointCutoverSource(ctx, path); err != nil {
+		return err
 	}
 	if err := os.Rename(tmpDB, path); err != nil {
-		_ = os.Rename(backup, path)
-		return fmt.Errorf("install cutover db: %w", err)
+		return fmt.Errorf("install cutover db (backup at %s): %w", backup, err)
 	}
 	cleanupTemps = false
 	removeSQLiteFileSet(tmpJSONL)

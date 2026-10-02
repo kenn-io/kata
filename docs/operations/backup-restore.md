@@ -21,7 +21,14 @@ mode, so recent writes can live in `kata.db-wal`; a plain file copy can look
 successful while missing recent data.
 
 The `kata.db.bak.*` files created by schema cutover are temporary rollback
-files, not scheduled backups.
+files, not scheduled backups. Cutover runs SQLite `integrity_check` on the
+source before export and copying, on the copied backup, and on the replacement
+database before installation. An unhealthy source stops the upgrade without
+replacing it; repair or recover it before retrying. The physical backup includes
+committed WAL data and retains the old schema for use with the matching binary.
+Keep all other database users stopped throughout cutover.
+When the database path is a symlink, cutover replaces its resolved target and
+keeps the link. The daemon lock continues to protect the same database path.
 
 SQLite schema cutover preserves a moved issue's audit events in their original
 projects. Before replacing the database, it checks the imported event count

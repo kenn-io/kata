@@ -16,6 +16,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_HOME` | Data directory. Defaults to `~/.kata`. |
 | `KATA_DSN` | Explicit database DSN. Accepts a bare SQLite path, `sqlite://...`, `postgres://...`, or `postgresql://...`. |
 | `KATA_DB` | Legacy explicit SQLite database path. Used when `KATA_DSN` is unset. |
+| `KATA_ALLOW_DEV_MIGRATION` | Set to `1` to consent to a development build upgrading existing SQLite state. See [daemon commands](cli.md#daemon-and-diagnostics). |
 | `KATA_POSTGRES_SCHEMA` | Dedicated Postgres schema. Defaults to `kata`. |
 | `KATA_POSTGRES_SCHEMA_MODE` | Postgres startup policy: `bootstrap` or `validate`. Defaults to `bootstrap`. |
 | `KATA_POSTGRES_SCHEMA_OWNER` | Trusted owner role for the selected schema. Required in `validate` mode. |

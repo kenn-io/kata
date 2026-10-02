@@ -12,8 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/testenv"
@@ -46,6 +48,26 @@ func TestOpen_SQLiteSchemeBootstrapsFreshSQLite(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	_, err = store.CreateProject(ctx, "sqlite-scheme-project")
 	require.NoError(t, err)
+}
+
+func TestOpenWritableSQLitePreservesOptionalStorageInterfaces(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	store, err := storeopen.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	_, ok := store.(db.UIStore)
+	require.True(t, ok, "writable SQLite storage must preserve its UIStore capability")
+	_, ok = store.(db.IssueStatusReader)
+	require.True(t, ok, "writable SQLite storage must preserve issue status reads")
+	_, ok = store.(db.IssueStatusWriter)
+	require.True(t, ok, "writable SQLite storage must preserve issue status writes")
+	_, ok = store.(db.IssueStatusSummaryReader)
+	require.True(t, ok, "writable SQLite storage must preserve issue status summaries")
+	_, ok = store.(db.IssueStatusScanStore)
+	require.True(t, ok, "writable SQLite storage must preserve issue status scans")
+	_, ok = store.(db.IssueStatusLocatorStore)
+	require.True(t, ok, "writable SQLite storage must preserve issue status locators")
 }
 
 func TestValidateAcceptsPostgresSchemes(t *testing.T) {
@@ -155,6 +177,7 @@ func TestOpen_UnknownSchemeIsUnsupported(t *testing.T) {
 // schema_version is below db.CurrentSchemaVersion() and confirms storeopen
 // runs jsonl.AutoCutover before opening.
 func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
+	t.Setenv("KATA_ALLOW_DEV_MIGRATION", "1")
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -172,7 +195,65 @@ func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	assert.Equal(t, db.CurrentSchemaVersion(), v)
 }
 
+func TestOpenWritableSQLiteLocksCutoverAndHandleLifetime(t *testing.T) {
+	t.Setenv("KATA_ALLOW_DEV_MIGRATION", "1")
+	t.Setenv("KATA_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "kata.db")
+	stageLegacyPreCutoverFixture(t, path, db.CurrentSchemaVersion()-1)
+
+	before, err := os.ReadFile(path) //nolint:gosec // G304: fixture path under t.TempDir.
+	require.NoError(t, err)
+	release, err := daemon.AcquireDatabaseLock(path)
+	require.NoError(t, err)
+	store, err := storeopen.Open(t.Context(), path)
+	if store != nil {
+		require.NoError(t, store.Close())
+	}
+	after, readErr := os.ReadFile(path) //nolint:gosec // G304: fixture path under t.TempDir.
+	require.NoError(t, readErr)
+	require.ErrorContains(t, err, "daemon already running")
+	require.Equal(t, before, after, "a locked source must not be cut over")
+	release()
+
+	store, err = storeopen.Open(t.Context(), path)
+	require.NoError(t, err)
+	secondRelease, err := daemon.AcquireDatabaseLock(path)
+	if secondRelease != nil {
+		secondRelease()
+	}
+	require.ErrorContains(t, err, "daemon already running", "the returned writable handle owns its lock")
+	require.NoError(t, store.Close())
+
+	release, err = daemon.AcquireDatabaseLock(path)
+	require.NoError(t, err)
+	release()
+}
+
+func TestOpenWithConfigReusesPreAcquiredSQLiteLock(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "kata.db")
+	lock, err := sqlitelock.Acquire(path)
+	require.NoError(t, err)
+	config := storeopen.DefaultConfig()
+	config.SQLiteLock = lock
+
+	store, err := storeopen.OpenWithConfig(t.Context(), path, config)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	secondLock, err := daemon.AcquireDatabaseLock(path)
+	if secondLock != nil {
+		secondLock()
+	}
+	require.ErrorContains(t, err, "daemon already running", "storeopen must leave a caller-owned lock held")
+
+	lock.Release()
+	secondLock, err = daemon.AcquireDatabaseLock(path)
+	require.NoError(t, err)
+	secondLock()
+}
+
 func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {
+	t.Setenv("KATA_ALLOW_DEV_MIGRATION", "1")
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -309,6 +390,7 @@ func TestOpenResolvedFromStorageDSNKeepsPasswordOutOfError(t *testing.T) {
 // separately by TestImport_LinkWithStrayProjectIDKeyIsIgnored in
 // internal/jsonl/cutover_test.go.
 func TestOpen_V14CutoverCarriesLinks(t *testing.T) {
+	t.Setenv("KATA_ALLOW_DEV_MIGRATION", "1")
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")

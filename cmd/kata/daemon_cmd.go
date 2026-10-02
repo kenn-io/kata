@@ -27,6 +27,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
@@ -219,10 +220,11 @@ var (
 
 func daemonStartCmd() *cobra.Command {
 	var (
-		listen           string
-		insecureReadonly bool
-		foreground       bool
-		noAutoToken      bool
+		listen            string
+		insecureReadonly  bool
+		foreground        bool
+		allowDevMigration bool
+		noAutoToken       bool
 	)
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -238,6 +240,7 @@ func daemonStartCmd() *cobra.Command {
 					ExitCode: ExitUsage,
 				}
 			}
+			cmd.SetContext(storeopen.WithDevMigrationAllowed(cmd.Context(), allowDevMigration))
 			if foreground {
 				ctx, cancel := context.WithCancel(cmd.Context())
 				defer cancel()
@@ -266,6 +269,8 @@ func daemonStartCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&allowDevMigration, "allow-dev-migration", false,
+		"allow this development build to upgrade an existing SQLite database (also KATA_ALLOW_DEV_MIGRATION=1)")
 	cmd.Flags().BoolVar(&foreground, "foreground", false,
 		"run the daemon in the current process instead of starting it in the background")
 	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
@@ -354,10 +359,11 @@ func daemonRecordAdvertisesIdleShutdown(ctx context.Context, rec kitdaemon.Runti
 	return health.IdleShutdown != nil
 }
 
-func defaultLaunchDetachedDaemon(
-	ctx context.Context, dataDir, listen string, insecureReadonly, noAutoToken bool,
-) (daemonStartOutput, error) {
+func detachedDaemonArgs(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) []string {
 	args := []string{"daemon", "start", "--foreground"}
+	if storeopen.DevMigrationAllowed(ctx) {
+		args = append(args, "--allow-dev-migration")
+	}
 	if listen != "" {
 		args = append(args, "--listen", listen)
 	}
@@ -367,6 +373,13 @@ func defaultLaunchDetachedDaemon(
 	if noAutoToken {
 		args = append(args, "--no-auto-token")
 	}
+	return args
+}
+
+func defaultLaunchDetachedDaemon(
+	ctx context.Context, dataDir, listen string, insecureReadonly, noAutoToken bool,
+) (daemonStartOutput, error) {
+	args := detachedDaemonArgs(ctx, listen, insecureReadonly, noAutoToken)
 	opts := kitdaemon.StartDetachedOptions{
 		Args:            args,
 		Env:             os.Environ(),
@@ -468,6 +481,69 @@ func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
 		}
 	}
 	return kitdaemon.RuntimeRecord{}, false
+}
+
+// liveSQLiteDaemonRecord also checks other namespaces in this home for legacy
+// daemons that recorded a different spelling of the same SQLite database path.
+func liveSQLiteDaemonRecord(dataDir, dbPath string) (kitdaemon.RuntimeRecord, bool, error) {
+	if rec, ok := liveDaemonRecord(dataDir, 0); ok {
+		return rec, true, nil
+	}
+	databasePath, ok := sqliteRuntimePath(dbPath)
+	if !ok {
+		return kitdaemon.RuntimeRecord{}, false, nil
+	}
+	databaseInfo, err := os.Stat(databasePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return kitdaemon.RuntimeRecord{}, false, nil
+	}
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("stat SQLite database for runtime guard: %w", err)
+	}
+	if !databaseInfo.Mode().IsRegular() {
+		return kitdaemon.RuntimeRecord{}, false, nil
+	}
+
+	runtimeRoot := filepath.Dir(dataDir)
+	entries, err := os.ReadDir(runtimeRoot)
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("read daemon runtime namespaces: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == filepath.Base(dataDir) {
+			continue
+		}
+		candidateDir := filepath.Join(runtimeRoot, entry.Name())
+		if err := safefileio.ValidatePrivateDir(candidateDir); err != nil {
+			return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("validate daemon runtime namespace: %w", err)
+		}
+		records, err := (kitdaemon.RuntimeStore{Dir: candidateDir}).List()
+		if err != nil {
+			return kitdaemon.RuntimeRecord{}, false, fmt.Errorf("read daemon runtime namespace: %w", err)
+		}
+		for _, rec := range records {
+			if !daemon.RuntimeProcessAlive(rec) {
+				continue
+			}
+			recordedPath, ok := sqliteRuntimePath(rec.Metadata["db_path"])
+			if !ok {
+				continue
+			}
+			recordedInfo, err := os.Stat(recordedPath)
+			if err == nil && os.SameFile(databaseInfo, recordedInfo) {
+				return rec, true, nil
+			}
+		}
+	}
+	return kitdaemon.RuntimeRecord{}, false, nil
+}
+
+func sqliteRuntimePath(dbPath string) (string, bool) {
+	if strings.HasPrefix(dbPath, "postgres://") || strings.HasPrefix(dbPath, "postgresql://") || dbPath == "" {
+		return "", false
+	}
+	path, err := filepath.Abs(strings.TrimPrefix(dbPath, "sqlite://"))
+	return path, err == nil
 }
 
 func daemonStartTimeoutError(dataDir string) error {
@@ -1071,6 +1147,21 @@ func runDaemonProcess(
 	hooksClosed := false
 
 	dbPath := startup.DBPath
+	if backend, _ := storeopen.BackendForDSN(dbPath); backend == storeopen.BackendSQLite {
+		// Runtime records also fence older releases that predate the file lock.
+		// Process identity is checked independently of version and listener.
+		if rec, ok, err := liveSQLiteDaemonRecord(ns.DataDir, dbPath); err != nil {
+			return err
+		} else if ok {
+			return fmt.Errorf("daemon already running pid=%d version=%s for database %s; stop it before starting", rec.PID, rec.Version, dbPath)
+		}
+		lock, err := sqlitelock.Acquire(strings.TrimPrefix(dbPath, "sqlite://"))
+		if err != nil {
+			return err
+		}
+		defer lock.Release()
+		startup.StoreConfig.SQLiteLock = lock
+	}
 	store, err := storeopen.OpenWithConfig(ctx, dbPath, startup.StoreConfig, db.Serving())
 	if err != nil {
 		return err
