@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -301,7 +302,7 @@ func TestAgentHooksCLIStatusUnmanageableNativeConfig(t *testing.T) {
 				out, diagnostic, err := executeAgentHook(t, strings.NewReader(""), append(append([]string{"agent-hooks", "status", "--scope", "user"}, names...), "--json")...)
 				require.Error(t, err)
 				require.Empty(t, out)
-				require.Contains(t, err.Error(), path)
+				require.ErrorContains(t, err, strconv.Quote(path))
 				var failure struct {
 					Error struct {
 						Data json.RawMessage `json:"data"`

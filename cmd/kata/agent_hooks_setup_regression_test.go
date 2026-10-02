@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -89,7 +90,7 @@ func TestAgentHooksStatusReturnsParseFailureWithFileAndPartialReport(t *testing.
 		} `json:"error"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(diagnostic), &response))
-	require.Contains(t, response.Error.Message, path)
+	require.Contains(t, response.Error.Message, strconv.Quote(path))
 	require.Len(t, response.Error.Data.Harnesses, 1)
 	require.NotEmpty(t, response.Error.Data.Harnesses[0].InspectionError)
 }

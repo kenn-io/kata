@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -208,7 +209,7 @@ func TestAgentHooksInstallPreflight(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 	require.NoError(t, os.WriteFile(path, []byte("{broken"), 0o600))
 	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "claude", "codex", "--executable", os.Args[0], "--json")
-	require.ErrorContains(t, err, path)
+	require.ErrorContains(t, err, strconv.Quote(path))
 	require.Empty(t, out)
 	_, err = os.Stat(filepath.Join(home, "claude"))
 	require.ErrorIs(t, err, os.ErrNotExist)
