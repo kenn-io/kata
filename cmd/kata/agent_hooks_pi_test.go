@@ -311,6 +311,58 @@ func TestPiNativePreviousAttentionExtensionOwnership(t *testing.T) {
 		t.Fatal("edited previous extension adopted")
 	}
 }
+
+func TestPiNativePublishedProjectSourceExtensionOwnership(t *testing.T) {
+	opts := piTestOptions(t)
+	opts.Source = "prompts/contract.md"
+	opts.SourceSet = true
+	opts.Attention = true
+	meta := piAgentHookMetadata{
+		Format: "kata-pi", Version: 1, Scope: "project", Workspace: opts.Dir,
+		Executable: opts.Executable, Source: opts.Source, SourceSet: true,
+		Contract: true, Attention: true,
+	}
+	generated, err := generatePiAgentHooks(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousBody, err := os.ReadFile("testdata/agent-hooks/pi-before-project-source.js.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := append(bytes.TrimSuffix(generated, []byte(piAgentHookJS)), previousBody...)
+	extension := filepath.Join(opts.Dir, ".pi", "extensions", "kata.js")
+	if err = os.MkdirAll(filepath.Dir(extension), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(extension, previous, 0600); err != nil { //nolint:gosec // G703: previous extension fixture is rooted in the project TempDir.
+		t.Fatal(err)
+	}
+
+	status := opts
+	status.Contract = false
+	status.Attention = false
+	status.SourceSet = false
+	plan, err := planPiAgentHooks(status, true)
+	if err != nil {
+		t.Fatalf("status for the previously published extension: %v", err)
+	}
+	if !plan.CurrentContract || !plan.CurrentAttentionStart {
+		t.Fatalf("previously published extension ownership: %+v", plan)
+	}
+	if changed, err := publishNativeAgentHookPlan(plan); err != nil || changed {
+		t.Fatalf("status must preserve the previously published extension: %v %v", changed, err)
+	}
+
+	plan, err = planPiAgentHooks(opts, false)
+	if err != nil {
+		t.Fatalf("upgrade of the previously published extension: %v", err)
+	}
+	if changed, err := publishNativeAgentHookPlan(plan); err != nil || !changed {
+		t.Fatalf("previously published extension upgrade: %v %v", changed, err)
+	}
+}
+
 func FuzzPiNativeOwnershipRejectsEdits(f *testing.F) {
 	f.Add("// changed\n")
 	f.Add("\x00")

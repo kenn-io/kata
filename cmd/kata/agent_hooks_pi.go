@@ -158,11 +158,21 @@ func parsePiAgentHookMetadata(data []byte) (piAgentHookMetadata, error) {
 		// its canonical metadata/options prefix. Local edits remain foreign.
 		prefix := bytes.TrimSuffix(generated, []byte(piAgentHookJS))
 		body, ok := bytes.CutPrefix(data, prefix)
-		if !ok || fmt.Sprintf("%x", sha256.Sum256(body)) != piAgentHookPreviousJSChecksum {
+		if !ok || !isPreviousPiAgentHookRuntime(body) {
 			return meta, fmt.Errorf("generated adapter was edited; preserve edits and rerun after moving it aside")
 		}
 	}
 	return meta, nil
+}
+
+func isPreviousPiAgentHookRuntime(body []byte) bool {
+	checksum := fmt.Sprintf("%x", sha256.Sum256(body))
+	for _, previous := range piAgentHookPreviousJSChecksums {
+		if checksum == previous {
+			return true
+		}
+	}
+	return false
 }
 
 func generatePiAgentHooks(meta piAgentHookMetadata) ([]byte, error) {
@@ -173,11 +183,14 @@ func generatePiAgentHooks(meta piAgentHookMetadata) ([]byte, error) {
 	return []byte(piAgentHookMetadataPrefix + string(options) + "\n" + "const options = " + string(options) + ";\n" + piAgentHookJS), nil
 }
 
-// SHA-256 of the previous generated Pi runtime. When piAgentHookJS changes,
-// retain recognized historical digests and add the outgoing runtime with an
+// SHA-256 checksums of recognized previous Pi runtimes. When piAgentHookJS
+// changes, retain historical digests and add the outgoing runtime with an
 // exact test fixture so existing owned extensions remain upgradeable.
-// Keeping the digest avoids shipping an inactive runtime copy.
-const piAgentHookPreviousJSChecksum = "d7ac0a4079bbb450d50a63369ef6bab2d2357ad02d4bfd3fff41a8ae22fd168c"
+// Keeping checksums avoids shipping inactive runtime copies.
+var piAgentHookPreviousJSChecksums = [...]string{
+	"d7ac0a4079bbb450d50a63369ef6bab2d2357ad02d4bfd3fff41a8ae22fd168c", // pi-before-attention-retry.js.txt
+	"494048b27822f71fecd5f213d4413911430a3f940700a2448226d4e3589b9da6", // pi-before-project-source.js.txt
+}
 
 const piAgentHookJS = `import path from "node:path";
 
