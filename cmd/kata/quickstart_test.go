@@ -9,44 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ne8p requires hookless setup in quickstart itself, not only command help.
-func TestQuickstartHooklessGuidance(t *testing.T) {
-	for _, mode := range []string{"plain", "agent", "json", "contract"} {
-		t.Run(mode, func(t *testing.T) {
-			resetFlags(t)
-			args := []string{"quickstart"}
-			switch mode {
-			case "agent":
-				args = append(args, "--agent")
-			case "json":
-				args = append(args, "--json")
-			case "contract":
-				args = append(args, "--format", "contract")
-			}
-			out := string(executeRoot(t, newRootCmd(), args...))
-			if mode == "contract" {
-				require.Equal(t, agentContractText, out)
-				return
-			}
-			if mode == "json" {
-				var decoded struct{ Quickstart string }
-				require.NoError(t, json.Unmarshal([]byte(out), &decoded))
-				out = decoded.Quickstart
-			}
-			for _, text := range []string{
-				"kata agent-hooks instructions install muse --actor <actor> --dry.",
-				"standing instructions, a skill and a scheduled poll spec",
-				"instruction-following, not enforcement",
-				"no native attention support",
-				"Choose authentication explicitly",
-				"create the scheduled task through Muse itself",
-			} {
-				assert.Contains(t, out, text)
-			}
-		})
-	}
-}
-
 func TestQuickstart_HelpExplainsFormatsAndSessionSetup(t *testing.T) {
 	for _, args := range [][]string{
 		{"quickstart", "--help"},

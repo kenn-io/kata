@@ -10,7 +10,7 @@ import (
 const hooklessQuickstartText = `
 # Hookless consumer Muse
 
-Preview setup: kata agent-hooks instructions install muse --actor <actor> --dry.
+Preview setup: kata agent-hooks instructions install muse --home <path> --actor <actor> --dry.
 This generates standing instructions, a skill and a scheduled poll spec. It relies on
 instruction-following, not enforcement, and provides no native attention support.
 Choose authentication explicitly; create the scheduled task through Muse itself.
@@ -244,7 +244,7 @@ in <KATA_HOME>/config.toml; otherwise they use the local daemon: Unix socket
 on Unix platforms, loopback TCP on Windows. A configured-but-down remote
 returns exit 7 (kata server not responding) — no silent fallback to spawning
 a local daemon.
-` + hooklessQuickstartText
+`
 
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
 Do not create practice, tutorial, example, or scratchpad issues.
@@ -269,7 +269,7 @@ Never remove a workspace override to repair a stopped daemon.
 Run kata daemon diagnose first; kata daemon recover starts only a registered existing local profile.
 Use --expect-project-uid <uid> when project identity is known; never initialize a replacement project.
 Explicit server URLs stay pinned; restore their server or tunnel.
-` + hooklessQuickstartText
+`
 
 func newQuickstartCmd() *cobra.Command {
 	return &cobra.Command{

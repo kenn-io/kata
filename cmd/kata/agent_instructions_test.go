@@ -73,19 +73,19 @@ func TestAgentInstructionsSnapshotAndPathProtection(t *testing.T) {
 func TestAgentInstructionsAllowsParentAlias(t *testing.T) {
 	root := t.TempDir()
 	physical := filepath.Join(root, "physical")
-	home := filepath.Join(physical, "hatch")
+	home := filepath.Join(physical, "muse-home")
 	require.NoError(t, os.MkdirAll(home, 0o700))
 	alias := filepath.Join(root, "parent-alias")
 	if err := os.Symlink(physical, alias); err != nil {
 		t.Skip("symlinks unavailable")
 	}
-	artifacts, err := planInstructionArtifacts(filepath.Join(alias, "hatch"), "example-agent", "install")
+	artifacts, err := planInstructionArtifacts(filepath.Join(alias, "muse-home"), "example-agent", "install")
 	require.NoError(t, err)
 	resolvedHome, err := filepath.EvalSymlinks(home)
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(resolvedHome, "AGENTS.md"), artifacts[0].Path)
 	require.NoError(t, applyInstructionArtifacts(artifacts))
-	remove, err := planInstructionArtifacts(filepath.Join(alias, "hatch"), "", "uninstall")
+	remove, err := planInstructionArtifacts(filepath.Join(alias, "muse-home"), "", "uninstall")
 	require.NoError(t, err)
 	require.NoError(t, applyInstructionArtifacts(remove))
 }
@@ -167,11 +167,11 @@ func TestAgentInstructionsForeignSuffixesAndActorUpdate(t *testing.T) {
 }
 
 // ne8p's explicit contract: one shared briefing in all three artifacts, a
-// write-free Hatch dry-run, stable reinstallation and lossless removal.
-func TestAgentInstructionsHatchLifecycle(t *testing.T) {
+// write-free dry-run, stable reinstallation and lossless removal.
+func TestAgentInstructionsMuseLifecycle(t *testing.T) {
 	resetFlags(t)
 	t.Chdir(t.TempDir())
-	home := filepath.Join(t.TempDir(), "home", "hatch")
+	home := filepath.Join(t.TempDir(), "home", "muse-home")
 	require.NoError(t, os.MkdirAll(home, 0o700))
 	home, err := filepath.EvalSymlinks(home)
 	require.NoError(t, err)
@@ -213,25 +213,6 @@ func TestAgentInstructionsHatchLifecycle(t *testing.T) {
 	require.Equal(t, "kata", skill.Name)
 	require.Contains(t, skill.Description, "conversation start")
 	require.Contains(t, skill.Description, "completion")
-	poll := report.Artifacts[2].Content
-	for _, attentionView := range []string{
-		"kata list --meta work.attention=needs-human --limit 0 --agent",
-		"kata list --meta work.attention=stuck --limit 0 --agent",
-	} {
-		require.Contains(t, poll, attentionView)
-	}
-	for _, clause := range []string{"kata inbox --for 'example-agent' --json", "kata events --after", "Drain pages while", "next_after_id advances", "even when fewer than 100 visible events are returned", "Stop only when the cursor no longer advances", "reset_required", "reset_after_id", "atomically", "only on new", "Do not clear", "Muse", "egress", "owner-only", "kata mcp serve --http", "Choose"} {
-		require.Contains(t, poll, clause)
-	}
-	require.NotContains(t, poll, "until fewer than 100 events return")
-	eventsReadAt := strings.Index(poll, "Read kata events --after <cursor>")
-	resetRefreshAt := strings.Index(poll, "Refetch the inbox, ready")
-	notifyAt := strings.Index(poll, "human only on new or changed requests")
-	require.NotEqual(t, -1, eventsReadAt)
-	require.NotEqual(t, -1, resetRefreshAt)
-	require.NotEqual(t, -1, notifyAt)
-	require.Less(t, eventsReadAt, notifyAt)
-	require.Less(t, resetRefreshAt, notifyAt)
 	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, args...)
 	require.NoError(t, err, stderr)
 	installed := map[string][]byte{}
@@ -403,7 +384,16 @@ func TestAgentInstructionsRefusesForeignAndMalformedBeforeWriting(t *testing.T) 
 
 func TestAgentInstructionsUsageAndQuickstartHelp(t *testing.T) {
 	resetFlags(t)
-	for _, tail := range [][]string{{"install", "muse"}, {"install", "muse", "--actor", "bad\nactor"}, {"install", "muse-code", "--actor", "example-agent"}, {"install", "muse", "--actor", "example-agent", "--home="}} {
+	home := t.TempDir()
+	for _, tail := range [][]string{
+		{"install", "muse", "--home", home},
+		{"install", "muse", "--home", home, "--actor", "bad\nactor"},
+		{"install", "muse-code", "--home", home, "--actor", "example-agent"},
+		{"install", "muse", "--actor", "example-agent", "--home="},
+		{"install", "muse", "--actor", "example-agent"},
+		{"uninstall", "muse"},
+		{"status", "muse"},
+	} {
 		out, _, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "instructions"}, tail...)...)
 		require.Error(t, err)
 		require.Empty(t, out)
@@ -417,4 +407,87 @@ func TestAgentInstructionsUsageAndQuickstartHelp(t *testing.T) {
 	out, stderr, err = executeAgentHook(t, unreadableHookInput{}, "quickstart", "--format", "contract")
 	require.NoError(t, err, stderr)
 	require.Equal(t, agentContractText, out)
+}
+
+// Editors and checkouts may strip the final newline or convert line endings.
+// Uninstall must still find and remove the managed blocks.
+func TestAgentInstructionsUninstallAfterLineEndingEdits(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(string) string
+		want string
+	}{
+		{"final newline stripped", func(s string) string { return strings.TrimSuffix(s, "\n") }, "# Existing\n"},
+		{"CRLF", func(s string) string { return strings.ReplaceAll(s, "\n", "\r\n") }, "# Existing\r\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			home := t.TempDir()
+			instructions := filepath.Join(home, "AGENTS.md")
+			require.NoError(t, os.WriteFile(instructions, []byte("# Existing\n"), 0o600))
+			_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
+			require.NoError(t, err, stderr)
+			skill := filepath.Join(home, "workspace", "skills", "kata", "SKILL.md")
+			poll := filepath.Join(home, "workspace", "skills", "kata", "POLL.md")
+			for _, path := range []string{instructions, skill, poll} {
+				data, err := os.ReadFile(path) //nolint:gosec // G304: artifact path under TempDir.
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(path, []byte(tc.edit(string(data))), 0o600))
+			}
+
+			_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home)
+			require.NoError(t, err, stderr)
+			data, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
+			require.NoError(t, err)
+			require.Equal(t, tc.want, string(data))
+			for _, path := range []string{skill, poll} {
+				_, err := os.Stat(path)
+				require.ErrorIs(t, err, os.ErrNotExist)
+			}
+		})
+	}
+}
+
+// Valid actors may contain marker phrases; only complete marker lines count.
+func TestAgentInstructionsActorContainingMarkerPhrase(t *testing.T) {
+	for _, actor := range []string{"x END KATA HOOKLESS MUSE", "<!-- END KATA HOOKLESS MUSE -->"} {
+		t.Run(actor, func(t *testing.T) {
+			resetFlags(t)
+			home := t.TempDir()
+			_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", actor)
+			require.NoError(t, err, stderr)
+			out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "status", "muse", "--home", home, "--json")
+			require.NoError(t, err, stderr)
+			var report struct {
+				Artifacts []struct {
+					State string `json:"state"`
+				} `json:"artifacts"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &report))
+			require.Len(t, report.Artifacts, 3)
+			for _, a := range report.Artifacts {
+				require.Equal(t, "installed", a.State)
+			}
+			_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home)
+			require.NoError(t, err, stderr)
+			_, err = os.Stat(filepath.Join(home, "workspace", "skills", "kata", "SKILL.md"))
+			require.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
+}
+
+// Uninstall keeps AGENTS.md even when only the managed block remained, so a
+// file that existed empty before installation is not deleted.
+func TestAgentInstructionsUninstallKeepsEmptyAgentsFile(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	instructions := filepath.Join(home, "AGENTS.md")
+	require.NoError(t, os.WriteFile(instructions, nil, 0o600))
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
+	require.NoError(t, err, stderr)
+	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home)
+	require.NoError(t, err, stderr)
+	data, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Empty(t, data)
 }

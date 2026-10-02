@@ -143,13 +143,13 @@ Consumer Muse can use a standing instruction block, skill, and recurring poll
 specification. Preview the bundle before installing it:
 
 ```sh
-kata agent-hooks instructions install muse --actor example-agent --dry --json
+kata agent-hooks instructions install muse --home /path/to/muse-home --actor example-agent --dry --json
 ```
 
 This unreleased support relies on instruction-following and has no native
 attention hooks. Choose authentication explicitly and create the task in Muse.
-Follow [Hookless harnesses](../workflows/agents.md#hookless-harnesses) for installation,
-the vault constraint, and both authentication options.
+Follow [Hookless harnesses](../workflows/agents.md#hookless-harnesses) for installation
+and both authentication options.
 
 ## Load the contract in every session
 

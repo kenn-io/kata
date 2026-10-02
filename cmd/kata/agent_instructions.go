@@ -11,23 +11,32 @@ import (
 	"go.kenn.io/kit/atomicfile"
 )
 
-const hooklessEnd = "<!-- END KATA HOOKLESS MUSE -->\n"
+const (
+	hooklessBeginComment = "<!-- BEGIN KATA HOOKLESS MUSE -->"
+	hooklessBeginYAML    = "# BEGIN KATA HOOKLESS MUSE"
+	hooklessEndMarker    = "<!-- END KATA HOOKLESS MUSE -->"
+)
 
 type instructionArtifact struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
-	Changed bool   `json:"changed"`
-	State   string `json:"state"`
-	begin   string
-	before  string
-	exists  bool
-	mode    os.FileMode
+	Path        string
+	Content     string
+	Changed     bool
+	State       string
+	beginMarker string
+	// fence is the line install writes before beginMarker. When empty, the
+	// block owns only the line ending that separates it from preceding text.
+	fence string
+	// retainEmpty keeps the file when uninstall leaves it empty.
+	retainEmpty bool
+	before      string
+	exists      bool
+	mode        os.FileMode
 }
 
 func newAgentInstructionsCmd() *cobra.Command {
 	group := &cobra.Command{
 		Use: "instructions", Short: "Manage instruction bundles for hookless harnesses",
-		Long: "Manage consumer Muse's standing instructions, skill and scheduled poll specification.\nThese rely on instruction-following, not enforcement; there is no native attention support.\nMuse Code native hooks are separate. No authentication option or scheduled task is installed.",
+		Long: "Manage consumer Muse's standing instructions, skill and scheduled poll specification.\nThese rely on instruction-following, not enforcement; there is no native attention support.\nNo authentication option or scheduled task is installed.",
 	}
 	for _, verb := range []string{"install", "uninstall", "status"} {
 		group.AddCommand(newAgentInstructionsActionCmd(verb))
@@ -49,10 +58,10 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if args[0] != "muse" {
-				return agentHookUsage("hookless instructions support consumer muse only; Muse Code uses native hooks")
+				return agentHookUsage("hookless instructions support consumer muse only")
 			}
 			if strings.TrimSpace(home) == "" {
-				return agentHookUsage("--home must not be empty")
+				return agentHookUsage("--home is required")
 			}
 			if verb == "install" {
 				var err error
@@ -77,7 +86,7 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 			return printInstructionArtifacts(cmd, verb, dryRun, artifacts)
 		},
 	}
-	cmd.Flags().StringVar(&home, "home", "/home/hatch", "harness home containing AGENTS.md and workspace/skills")
+	cmd.Flags().StringVar(&home, "home", "", "required harness home containing AGENTS.md and workspace/skills")
 	if verb == "install" {
 		cmd.Flags().StringVar(&actor, "actor", "", "required exact actor or actor/teammate inbox address")
 	}
@@ -90,8 +99,9 @@ func newAgentInstructionsActionCmd(verb string) *cobra.Command {
 // All artifacts consume the same contract as native prompt injection. Only
 // hookless setup and delivery instructions differ between them.
 func museInstructionArtifacts(home, actor string) []instructionArtifact {
-	start := "\n<!-- BEGIN KATA HOOKLESS MUSE -->\n"
-	skillStart := "---\n# BEGIN KATA HOOKLESS MUSE\n"
+	start := "\n" + hooklessBeginComment + "\n"
+	skillStart := "---\n" + hooklessBeginYAML + "\n"
+	end := hooklessEndMarker + "\n"
 	briefing := fmt.Sprintf(`At every conversation start and before claiming completion, read this Kata contract.
 Run from the bound project workspace with the explicitly selected daemon and actor.
 At conversation start, run:
@@ -109,11 +119,12 @@ native attention support, automatic idle wakeup, or guaranteed session-end hook.
 
 `, "'"+strings.ReplaceAll(actor, "'", "'\"'\"'")+"'")
 	return []instructionArtifact{
-		{Path: filepath.Join(home, "AGENTS.md"), begin: start, Content: start + briefing + agentContractText + hooklessEnd},
-		{Path: filepath.Join(home, "workspace", "skills", "kata", "SKILL.md"), begin: skillStart,
-			Content: skillStart + "name: kata\ndescription: Use at conversation start and before claiming completion for Kata issue work.\n---\n\n" + briefing + agentContractText + hooklessEnd},
-		{Path: filepath.Join(home, "workspace", "skills", "kata", "POLL.md"), begin: start,
-			Content: start + musePollSpec(actor) + briefing + agentContractText + hooklessEnd},
+		{Path: filepath.Join(home, "AGENTS.md"), beginMarker: hooklessBeginComment, retainEmpty: true,
+			Content: start + briefing + agentContractText + end},
+		{Path: filepath.Join(home, "workspace", "skills", "kata", "SKILL.md"), beginMarker: hooklessBeginYAML, fence: "---",
+			Content: skillStart + "name: kata\ndescription: Use at conversation start and before claiming completion for Kata issue work.\n---\n\n" + briefing + agentContractText + end},
+		{Path: filepath.Join(home, "workspace", "skills", "kata", "POLL.md"), beginMarker: hooklessBeginComment,
+			Content: start + musePollSpec(actor) + briefing + agentContractText + end},
 	}
 }
 
@@ -125,14 +136,13 @@ Proposed interval: every five minutes. The human confirms interval, bound worksp
 selected daemon, exact recipient %q, and notification destination before enabling it.
 Kata does not install cron or create the task. Cancel it in Muse before uninstalling.
 
-Choose authentication with the human before running any poll. Muse's vault substitutes
-secrets only on egress; the CLI never receives a vault secret. Neither option is selected:
+Choose authentication with the human before running any poll. Neither option is selected:
 - Provision a token file with owner-only mode 0600 in a 0700 directory; a private
   launcher reads it into KATA_AUTH_TOKEN for CLI calls. Never echo it, enable shell
   tracing, pass the token on argv, or store it in poll state. There is no client
   auth.token_file setting. This exposes the secret to the local process and filesystem.
 - Configure a custom connector to an HTTPS endpoint hosting kata mcp serve --http.
-  Supply the separate inbound MCP bearer through vault substitution on egress;
+  Supply the separate inbound MCP bearer through the connector's secret settings;
   the bridge keeps its daemon credential server-side. Follow Kata's MCP HTTP transport
   rules. Map the CLI reads below to equivalent connector tools and validate cursor
   and notification behavior before enabling a connector task; this spec is not a connector.
@@ -173,21 +183,28 @@ The task follows the same contract as the standing instructions and skill:
 `, actor, strings.ReplaceAll(actor, "'", "'\"'\"'"))
 }
 
-func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, error) {
-	// OS aliases such as macOS /var live above the managed home. Resolve that
-	// prefix, including the nearest existing parent when installing a new home.
+// resolveInstructionHome resolves OS aliases such as macOS /var that live above
+// the managed home, using the nearest existing parent when the home is new.
+// The home itself is not resolved, so a symlinked home is still refused.
+func resolveInstructionHome(home string) (string, error) {
 	parent, suffix := filepath.Dir(home), filepath.Base(home)
 	for {
 		resolved, err := filepath.EvalSymlinks(parent)
 		if err == nil {
-			home = filepath.Join(resolved, suffix)
-			break
+			return filepath.Join(resolved, suffix), nil
 		}
 		if !errors.Is(err, os.ErrNotExist) || filepath.Dir(parent) == parent {
-			return nil, err
+			return "", err
 		}
 		suffix = filepath.Join(filepath.Base(parent), suffix)
 		parent = filepath.Dir(parent)
+	}
+}
+
+func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, error) {
+	home, err := resolveInstructionHome(home)
+	if err != nil {
+		return nil, err
 	}
 	artifacts := museInstructionArtifacts(home, actor)
 	for i := range artifacts {
@@ -208,7 +225,7 @@ func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, 
 			}
 			a.mode = info.Mode().Perm()
 		}
-		begin, end, err := instructionBlockSpan(a.before, a.begin)
+		begin, end, err := instructionBlockSpan(a.before, a.beginMarker, a.fence)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", a.Path, err)
 		}
@@ -240,19 +257,58 @@ func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, 
 	return artifacts, nil
 }
 
-func instructionBlockSpan(content, beginMarker string) (int, int, error) {
-	begin := strings.Index(content, beginMarker)
-	if begin < 0 && !strings.Contains(content, "BEGIN KATA HOOKLESS MUSE") && !strings.Contains(content, "END KATA HOOKLESS MUSE") {
+// instructionBlockSpan locates the managed block by complete marker lines. It
+// accepts LF and CRLF line endings and a final line without a newline, so
+// marker phrases inside other text, such as an actor name, are not markers.
+// It returns -1, -1 when the content has no markers.
+func instructionBlockSpan(content, beginMarker, fence string) (int, int, error) {
+	begins := markerLines(content, beginMarker)
+	ends := markerLines(content, hooklessEndMarker)
+	if len(begins) == 0 && len(ends) == 0 {
 		return -1, -1, nil
 	}
-	if begin < 0 || strings.Count(content, "BEGIN KATA HOOKLESS MUSE") != 1 || strings.Count(content, "END KATA HOOKLESS MUSE") != 1 {
+	if len(begins) != 1 || len(ends) != 1 {
 		return 0, 0, errors.New("malformed or duplicate hookless markers")
 	}
-	end := strings.Index(content, hooklessEnd)
-	if end < begin+len(beginMarker) {
-		return 0, 0, errors.New("missing or misplaced hookless end marker")
+	if ends[0].start < begins[0].end {
+		return 0, 0, errors.New("misplaced hookless end marker")
 	}
-	return begin, end + len(hooklessEnd), nil
+	begin, err := managedBlockStart(content, begins[0].start, fence)
+	if err != nil {
+		return 0, 0, err
+	}
+	return begin, ends[0].end, nil
+}
+
+type lineSpan struct{ start, end int }
+
+// markerLines returns the spans of lines equal to marker, each including its
+// line ending.
+func markerLines(content, marker string) []lineSpan {
+	var spans []lineSpan
+	start := 0
+	for line := range strings.Lines(content) {
+		end := start + len(line)
+		if strings.TrimRight(line, "\r\n") == marker {
+			spans = append(spans, lineSpan{start, end})
+		}
+		start = end
+	}
+	return spans
+}
+
+// managedBlockStart extends the block before its begin marker to include what
+// install wrote there: the fence line, or else the separating line ending.
+func managedBlockStart(content string, marker int, fence string) (int, error) {
+	preceding := strings.TrimSuffix(strings.TrimSuffix(content[:marker], "\n"), "\r")
+	if fence == "" {
+		return len(preceding), nil
+	}
+	lineStart := strings.LastIndexByte(preceding, '\n') + 1
+	if preceding[lineStart:] != fence {
+		return 0, fmt.Errorf("missing %q line before hookless begin marker", fence)
+	}
+	return lineStart, nil
 }
 
 func checkInstructionPath(path, home string) error {
@@ -277,8 +333,8 @@ func applyInstructionArtifacts(artifacts []instructionArtifact) error {
 func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write func(string, string, bool, os.FileMode) error) error {
 	// Check every preimage before mutating any file. Each file write is atomic;
 	// restore completed writes if a later artifact fails.
+	home := filepath.Dir(artifacts[0].Path)
 	for _, a := range artifacts {
-		home := filepath.Dir(artifacts[0].Path)
 		if err := checkInstructionPath(a.Path, home); err != nil {
 			return err
 		}
@@ -294,7 +350,7 @@ func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write 
 		if !a.Changed {
 			continue
 		}
-		if err := write(a.Path, a.Content, false, a.mode); err != nil {
+		if err := write(a.Path, a.Content, a.retainEmpty, a.mode); err != nil {
 			rollbackEnd := i
 			if errors.Is(err, atomicfile.ErrPublished) {
 				rollbackEnd++
@@ -310,8 +366,8 @@ func applyInstructionArtifactsWithWriter(artifacts []instructionArtifact, write 
 	return nil
 }
 
-// keepEmpty distinguishes restoration of an existing empty preimage from
-// removal of an artifact whose managed block was its entire content.
+// keepEmpty writes an empty file instead of removing it. Rollback uses it to
+// restore an existing empty preimage; uninstall uses it to retain AGENTS.md.
 func writeInstructionArtifact(path, content string, keepEmpty bool, mode os.FileMode) error {
 	if content == "" && !keepEmpty {
 		err := os.Remove(path)

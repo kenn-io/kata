@@ -148,9 +148,9 @@ kata agent-hooks
   install (<harness>... | --all)  Install the contract in user configs
   uninstall (<harness>... | --all)  Remove user contract hooks
   status [<harness>]          Inspect user hooks and the current workspace
-  instructions install muse  Install a hookless instruction bundle
-  instructions uninstall muse  Remove the hookless managed blocks
-  instructions status muse   Inspect hookless artifacts without a daemon
+  instructions install muse --home <path>  Install a hookless instruction bundle
+  instructions uninstall muse --home <path>  Remove the hookless managed blocks
+  instructions status muse --home <path>  Inspect hookless artifacts without a daemon
 ```
 
 These commands are coding-agent hooks. Daemon event hooks configured in
@@ -159,22 +159,22 @@ These commands are coding-agent hooks. Daemon event hooks configured in
 
 ### Hookless instructions
 
-`kata agent-hooks instructions install muse --actor <actor> [--home <path>]
+`kata agent-hooks instructions install muse --home <path> --actor <actor>
 [--dry]` generates consumer Muse's instruction block, skill, and scheduled
-poll specification. `--actor` is required and may name an exact actor/teammate
-inbox. `--home` defaults to `/home/hatch`. With `--dry --json`, the response
+poll specification. `--home` and `--actor` are required; `--actor` may name an
+exact actor/teammate inbox. With `--dry --json`, the response
 includes the exact proposed file contents; no files or directories are created.
 The install response lists artifact paths and whether each would change.
 
-`instructions uninstall muse [--home <path>] [--dry]` removes only managed
-blocks. `instructions status muse [--home <path>]` reads files without contacting
+`instructions uninstall muse --home <path> [--dry]` removes only managed
+blocks. `instructions status muse --home <path>` reads files without contacting
 a daemon. All three commands support human, `--agent`, and `--json` output.
 `native_attention` is always false; file presence does not prove runtime loading.
 These instructions do not appear in native `install --all` selection.
 
 See [Hookless harnesses](../workflows/agents.md#hookless-harnesses) for file
 ownership, scheduled polling, cleanup, and the required explicit authentication
-choice. Muse Code's native hook integration is separate.
+choice.
 
 ### Contract injection
 
