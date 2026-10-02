@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-09-26
+last_edited: 2026-10-02
 ---
 
 # Federation
@@ -819,7 +819,13 @@ current time. It does not add 30 minutes to the old expiry. The duration must
 be a whole number followed by `s`, `m`, or `h`, from `60s` through `24h`
 inclusive. A lease without an expiry does not need timed renewal.
 
-Spokes refresh cached lease state before checking exclusivity when online.
+Before an ordinary issue mutation, each spoke lease-status refresh gets a
+500 ms budget. If the hub stalls or is unavailable, the spoke checks its cached
+lease state and continues the local operation. A cached live lease held by
+another principal still denies the edit. A received hub rejection remains an
+error, even if its response body stalls. The budget applies to each refresh,
+not the complete mutation; relationship edits can check several endpoints.
+
 When offline, cached hard leases can still be used as a continuity hint, but
 they are not proof that exclusivity still holds. Timed leases expire by hub
 time and stop blocking edits once expired.
