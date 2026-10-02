@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Set up consumer Muse with standing instructions, a Kata skill, and a recurring
+  poll specification using `kata agent-hooks instructions install muse`.
+  Preview the files with `--dry --json`. Reinstall preserves file bytes;
+  uninstall keeps foreign content. This relies on instruction-following and
+  provides no native attention support. Choose CLI token-file or connector
+  authentication explicitly. See [Hookless harnesses](workflows/agents.md#hookless-harnesses).
+
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.
   Embedding requests no longer send `"dimensions": 0` unless dimensions are
   requested, so servers no longer refuse the request or return empty vectors.

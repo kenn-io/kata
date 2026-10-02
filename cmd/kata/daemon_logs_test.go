@@ -250,6 +250,7 @@ func TestDaemonLogs_Hooks_Tail_RotatedOnlyWaitsForActive(t *testing.T) {
 // `read` by len(line)+1, which over-counted the unflushed mid-line by
 // 1 byte and caused later ticks to miss content.
 func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
+	resetFlags(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "runs.jsonl")
 	first := `{"event_id":1,"result":"ok"}` + "\n"
