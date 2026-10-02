@@ -448,6 +448,25 @@ func TestAgentInstructionsUninstallAfterLineEndingEdits(t *testing.T) {
 	}
 }
 
+// Removing the blank separator must not make uninstall join foreign lines.
+func TestAgentInstructionsUninstallAfterBlankLineRemoved(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	path := filepath.Join(home, "AGENTS.md")
+	require.NoError(t, os.WriteFile(path, []byte("# Existing\n"), 0o600))
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
+	require.NoError(t, err, stderr)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	edited := strings.Replace(string(data), "# Existing\n\n", "# Existing\n", 1) + "# Additional instructions\n"
+	require.NoError(t, os.WriteFile(path, []byte(edited), 0o600)) //nolint:gosec // G703: path is the test-owned AGENTS.md under TempDir.
+	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home)
+	require.NoError(t, err, stderr)
+	data, err = os.ReadFile(path) //nolint:gosec // G304: fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, "# Existing\n# Additional instructions\n", string(data))
+}
+
 // Valid actors may contain marker phrases; only complete marker lines count.
 func TestAgentInstructionsActorContainingMarkerPhrase(t *testing.T) {
 	for _, actor := range []string{"x END KATA HOOKLESS MUSE", "<!-- END KATA HOOKLESS MUSE -->"} {

@@ -15,6 +15,7 @@ const (
 	hooklessBeginComment = "<!-- BEGIN KATA HOOKLESS MUSE -->"
 	hooklessBeginYAML    = "# BEGIN KATA HOOKLESS MUSE"
 	hooklessEndMarker    = "<!-- END KATA HOOKLESS MUSE -->"
+	hooklessAddedNewline = "<!-- KATA HOOKLESS MUSE ADDED PREFIX NEWLINE -->"
 )
 
 type instructionArtifact struct {
@@ -23,8 +24,7 @@ type instructionArtifact struct {
 	Changed     bool
 	State       string
 	beginMarker string
-	// fence is the line install writes before beginMarker. When empty, the
-	// block owns only the line ending that separates it from preceding text.
+	// fence is the line install writes before beginMarker, if any.
 	fence string
 	// retainEmpty keeps the file when uninstall leaves it empty.
 	retainEmpty bool
@@ -243,6 +243,15 @@ func planInstructionArtifacts(home, actor, verb string) ([]instructionArtifact, 
 				a.State = "removed"
 			}
 		case "install":
+			prefix := a.before
+			if begin >= 0 {
+				prefix = prefix[:begin]
+			}
+			if i == 0 && prefix != "" && !strings.HasSuffix(prefix, "\n") {
+				// Remember that the separator terminates an existing line, so
+				// uninstall can restore it without guessing who owns the newline.
+				a.Content = strings.Replace(a.Content, a.beginMarker+"\n", a.beginMarker+"\n"+hooklessAddedNewline+"\n", 1)
+			}
 			if begin >= 0 {
 				a.Content = a.before[:begin] + a.Content + a.before[end:]
 			} else if i == 0 {
@@ -273,7 +282,8 @@ func instructionBlockSpan(content, beginMarker, fence string) (int, int, error) 
 	if ends[0].start < begins[0].end {
 		return 0, 0, errors.New("misplaced hookless end marker")
 	}
-	begin, err := managedBlockStart(content, begins[0].start, fence)
+	addedNewline := len(markerLines(content[begins[0].end:ends[0].start], hooklessAddedNewline)) > 0
+	begin, err := managedBlockStart(content, begins[0].start, fence, addedNewline)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -298,10 +308,13 @@ func markerLines(content, marker string) []lineSpan {
 }
 
 // managedBlockStart extends the block before its begin marker to include what
-// install wrote there: the fence line, or else the separating line ending.
-func managedBlockStart(content string, marker int, fence string) (int, error) {
+// install wrote there: the fence line, a blank separator, or a recorded newline.
+func managedBlockStart(content string, marker int, fence string, addedNewline bool) (int, error) {
 	preceding := strings.TrimSuffix(strings.TrimSuffix(content[:marker], "\n"), "\r")
 	if fence == "" {
+		if preceding != "" && !strings.HasSuffix(preceding, "\n") && !addedNewline {
+			return marker, nil
+		}
 		return len(preceding), nil
 	}
 	lineStart := strings.LastIndexByte(preceding, '\n') + 1
