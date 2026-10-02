@@ -145,12 +145,16 @@ func TestNativeAttentionReportsTransientMetadataWriteFailure(t *testing.T) {
 }
 
 func executeNativeAttentionForTest(t *testing.T, baseURL string, args ...string) (string, error) {
+	return executeNativeAttentionPayloadForTest(t, baseURL, "", args...)
+}
+
+func executeNativeAttentionPayloadForTest(t *testing.T, baseURL, payload string, args ...string) (string, error) {
 	t.Helper()
 	cmd := newRootCmd()
 	flags.Project = "example-project"
 	cmd.SetContext(contextWithBaseURL(t.Context(), baseURL))
 	var output bytes.Buffer
-	cmd.SetIn(strings.NewReader(""))
+	cmd.SetIn(strings.NewReader(payload))
 	cmd.SetOut(&output)
 	cmd.SetErr(&output)
 	cmd.SetArgs(args)
@@ -178,12 +182,50 @@ func TestNativeAttentionPayload(t *testing.T) {
 		{`{"session_id":"native-one","cwd":"/example/workspace"}`, "native-one", "/example/workspace"},
 		{`{"sessionId":"copilot-one","cwd":"/example/workspace"}`, "copilot-one", "/example/workspace"},
 		{`{"conversation_id":"cursor-one","workspace_roots":["/example/workspace"]}`, "cursor-one", "/example/workspace"},
+		{`{"session_id":"same-workspace","cwd":"/example/workspace","workspace_roots":["/example/workspace"]}`, "same-workspace", "/example/workspace"},
 	} {
 		id, dir, err := readNativeAttentionPayload(strings.NewReader(tc.raw))
 		require.NoError(t, err)
 		require.Equal(t, tc.wantID, id)
 		require.Equal(t, tc.wantDir, dir)
 	}
+}
+
+func TestNativeAttentionRejectsAmbiguousWorkspaceIdentity(t *testing.T) {
+	for name, raw := range map[string]string{
+		"multiple workspace roots":        `{"session_id":"one","hook_event_name":"SessionStart","workspace_roots":["/workspace/one","/workspace/two"]}`,
+		"multiple workspace paths":        `{"session_id":"one","hook_event_name":"SessionStart","workspacePaths":["/workspace/one","/workspace/two"]}`,
+		"conflicting workspace selectors": `{"session_id":"one","hook_event_name":"SessionStart","cwd":"/workspace/one","workspace_roots":["/workspace/two"]}`,
+		"malformed workspace roots":       `{"session_id":"one","hook_event_name":"SessionStart","workspace_roots":"/workspace/one"}`,
+		"empty workspace root":            `{"session_id":"one","hook_event_name":"SessionStart","workspace_roots":[]}`,
+		"invalid cwd type":                `{"session_id":"one","hook_event_name":"SessionStart","cwd":3}`,
+		"empty cwd":                       `{"session_id":"one","hook_event_name":"SessionStart","cwd":""}`,
+		"relative workspace":              `{"session_id":"one","hook_event_name":"SessionStart","cwd":"workspace/one"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := readNativeAttentionPayloadFor("pi", "start", strings.NewReader(raw))
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestNativeAttentionAmbiguousWorkspaceStopsBeforeDaemonLookup(t *testing.T) {
+	resetFlags(t)
+	t.Setenv("KATA_REF", "abc4")
+	t.Setenv("KATA_SESSION_ID", "test-launch")
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	stderr, err := executeNativeAttentionPayloadForTest(t, server.URL,
+		`{"session_id":"native-session","hook_event_name":"SessionStart","workspace_roots":["/workspace/one","/workspace/two"]}`,
+		"agent-hooks", "attention-native", "pi", "start")
+	require.NoError(t, err)
+	require.Empty(t, stderr)
+	require.Zero(t, requests.Load(), "ambiguous native workspace must fail closed before daemon lookup")
 }
 
 func TestNativeAttentionEndConflictRechecksSessionOwner(t *testing.T) {

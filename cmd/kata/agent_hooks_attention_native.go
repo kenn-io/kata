@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -214,21 +215,56 @@ func nativeAttentionPayloadIdentity(payload map[string]any) (session, workspace 
 	if session == "" {
 		return "", "", errors.New("native session identity missing")
 	}
+	var workspaces []string
 	if raw, exists := payload["cwd"]; exists {
-		var ok bool
-		workspace, ok = raw.(string)
-		if !ok {
-			return "", "", errors.New("invalid native workspace")
+		path, err := nativeAttentionWorkspacePath(raw)
+		if err != nil {
+			return "", "", err
 		}
+		workspaces = append(workspaces, path)
 	}
-	if workspace == "" {
-		for _, key := range []string{"workspace_roots", "workspacePaths"} {
-			if raw, ok := payload[key].([]any); ok && len(raw) == 1 {
-				workspace, _ = raw[0].(string)
+	for _, key := range []string{"workspace_roots", "workspacePaths"} {
+		raw, exists := payload[key]
+		if !exists {
+			continue
+		}
+		paths, ok := raw.([]any)
+		if !ok {
+			return "", "", fmt.Errorf("invalid native workspace identity in %s", key)
+		}
+		if len(paths) != 1 {
+			return "", "", fmt.Errorf("ambiguous native workspace identity in %s", key)
+		}
+		path, err := nativeAttentionWorkspacePath(paths[0])
+		if err != nil {
+			return "", "", err
+		}
+		workspaces = append(workspaces, path)
+	}
+	if len(workspaces) > 0 {
+		workspace = workspaces[0]
+		for _, candidate := range workspaces[1:] {
+			if !sameNativeAttentionWorkspace(workspace, candidate) {
+				return "", "", errors.New("conflicting native workspace identities")
 			}
 		}
 	}
 	return session, workspace, nil
+}
+
+func nativeAttentionWorkspacePath(raw any) (string, error) {
+	path, ok := raw.(string)
+	if !ok || path == "" || !filepath.IsAbs(path) {
+		return "", errors.New("invalid native workspace identity")
+	}
+	return filepath.Clean(path), nil
+}
+
+func sameNativeAttentionWorkspace(left, right string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 func nativeAttentionLaunchGeneration(pid int) (string, error) {
