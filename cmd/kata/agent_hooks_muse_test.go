@@ -152,6 +152,32 @@ func TestMuseStatusAndUninstallPreserveExistingProviderAllowlist(t *testing.T) {
 	require.NotContains(t, settings["hooks"].(map[string]any), "SessionStart")
 }
 
+func TestMuseReusedManagedAttentionRejectsProviderCredentials(t *testing.T) {
+	opts := extraOptions(t, "muse")
+	opts.ConfigPath = filepath.Join(opts.Home, "settings.json")
+	allowlist := append(append([]string(nil), extraMuseAttentionEnv...), "ANTHROPIC_API_KEY")
+	settings, err := json.Marshal(map[string]any{
+		"schema_version":         1,
+		"managed_hooks_path":     "operator-hooks.json",
+		"managed_hooks_env_vars": allowlist,
+	})
+	require.NoError(t, err)
+	managed := []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"echo existing","timeout":10}]}]}}`)
+	managedPath := filepath.Join(opts.Home, "operator-hooks.json")
+	require.NoError(t, os.WriteFile(opts.ConfigPath, settings, 0600))
+	require.NoError(t, os.WriteFile(managedPath, managed, 0600))
+
+	_, err = planExtraAgentHooks(opts, false)
+	require.ErrorContains(t, err, "provider credential")
+
+	gotSettings, err := os.ReadFile(opts.ConfigPath)
+	require.NoError(t, err)
+	require.Equal(t, settings, gotSettings)
+	gotManaged, err := os.ReadFile(managedPath) //nolint:gosec // G304: fixture path is created under this test's temporary directory.
+	require.NoError(t, err)
+	require.Equal(t, managed, gotManaged)
+}
+
 func TestMuseExistingManagedContractUsesSharedOwnership(t *testing.T) {
 	opts := extraOptions(t, "muse")
 	opts.Attention = false

@@ -623,6 +623,9 @@ export default {
    // These accepted-spawn hooks carry OpenClaw's exact child session key.
    // Keep contract injection available in child prompts; attention uses only
    // verified lifecycle identity, never session-key spelling heuristics.
+   // Retain each identity until its exact session_end: a completed child run
+   // can reuse its session, so run completion or bounded eviction can let a
+   // live child acquire parent attention.
    api.on('subagent_progress',(event,ctx)=>event.phase==='started'?rememberChild(event,ctx):undefined, {timeoutMs:700});
    api.on('subagent_spawned',rememberChild, {timeoutMs:700});
    // Native session_start has no verified workspace. The first prompt captures

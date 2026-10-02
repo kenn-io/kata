@@ -98,7 +98,7 @@ func planMuseAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHo
 			settings["schema_version"] = 1
 		}
 	}
-	allowlist, err := validateExtraMuseAllowlist(settings, opts.ManagedAttention && !remove)
+	allowlist, err := validateExtraMuseAllowlist(settings, false)
 	if err != nil {
 		return nativeAgentHookPlan{}, err
 	}
@@ -135,6 +135,11 @@ func planMuseAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHo
 		return nativeAgentHookPlan{}, errors.New("Muse managed_hooks_path cannot refer to its settings file") //nolint:staticcheck // ST1005: preserve the native product name in this user-facing payload error.
 	}
 	reuseManaged := opts.Scope == "user" && configuredManaged && extraMuseForwardsAttention(allowlist)
+	if !remove && opts.Attention && (opts.ManagedAttention || reuseManaged) {
+		if _, err := validateExtraMuseAllowlist(settings, true); err != nil {
+			return nativeAgentHookPlan{}, err
+		}
+	}
 	if !remove && opts.Attention && !opts.ManagedAttention && !reuseManaged {
 		return nativeAgentHookPlan{}, errMuseAttentionPermission
 	}
