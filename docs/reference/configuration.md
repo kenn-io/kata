@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-09-28
+last_edited: 2026-10-02
 ---
 
 # Configuration
@@ -820,6 +820,12 @@ names, issue refs, issue content, comments, labels, paths, or actor names. GeoIP
 collection is disabled and PostHog person-profile processing is explicitly
 turned off. Use distinct `daemon_active` counts for active-install reporting;
 `daemon_started` is only for startup-volume diagnostics.
+
+A new database records when it created its `instance_uid` in the `meta` key
+`instance_created_at`. Events from a database with this time carry
+`install_age_hours`, the whole hours since that time, so reports can tell new
+installs from established ones. Databases created before kata recorded this
+time send events without it.
 
 Disable telemetry with:
 

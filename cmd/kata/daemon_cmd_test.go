@@ -1988,12 +1988,62 @@ func TestNewDaemonTelemetryReporterUsesInstanceUID(t *testing.T) {
 	}
 	t.Cleanup(func() { newTelemetryReporter = orig })
 
-	reporter := newDaemonTelemetryReporter(store)
+	reporter := newDaemonTelemetryReporter(t.Context(), store)
 
 	require.NotNil(t, reporter)
 	assert.Equal(t, store.InstanceUID(), got.DistinctID)
 	assert.NotEmpty(t, got.Version)
 	assert.NotEmpty(t, got.Commit)
+	createdAt, err := store.InstanceCreatedAt(t.Context())
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Now(), got.InstalledAt, time.Minute, "a fresh install passes its creation time")
+	assert.True(t, createdAt.Equal(got.InstalledAt))
+}
+
+func TestNewDaemonTelemetryReporterSendsUnstampedInstanceWithoutAge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kata.db")
+	store := openKataTestDB(t, path)
+	_, err := store.ExecContext(t.Context(), `DELETE FROM meta WHERE key=?`, db.MetaKeyInstanceCreatedAt)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	store = openKataTestDB(t, path)
+	defer func() { _ = store.Close() }()
+
+	var got telemetry.Options
+	orig := newTelemetryReporter
+	newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
+		got = opts
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = orig })
+
+	newDaemonTelemetryReporter(t.Context(), store)
+
+	assert.Equal(t, store.InstanceUID(), got.DistinctID)
+	assert.True(t, got.InstalledAt.IsZero(), "unstamped install passed %v", got.InstalledAt)
+}
+
+func TestNewDaemonTelemetryReporterSendsWithoutAgeWhenCreationTimeUnreadable(t *testing.T) {
+	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+	defer func() { _ = store.Close() }()
+	_, err := store.ExecContext(t.Context(), `UPDATE meta SET value='not-a-time' WHERE key=?`, db.MetaKeyInstanceCreatedAt)
+	require.NoError(t, err)
+
+	called := false
+	var got telemetry.Options
+	orig := newTelemetryReporter
+	newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
+		called = true
+		got = opts
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = orig })
+
+	newDaemonTelemetryReporter(t.Context(), store)
+
+	require.True(t, called, "an unreadable creation time still builds a reporter")
+	assert.Equal(t, store.InstanceUID(), got.DistinctID)
+	assert.True(t, got.InstalledAt.IsZero(), "unreadable creation time passed %v", got.InstalledAt)
 }
 
 func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {

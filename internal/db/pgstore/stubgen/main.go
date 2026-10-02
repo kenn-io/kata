@@ -176,6 +176,7 @@ var alreadyImplemented = map[string]bool{
 	"HasLabel":                             true, // labels.go
 	"ImportBatch":                          true, // imports.go
 	"ImportReplay":                         true, // import_replay.go
+	"InstanceCreatedAt":                    true, // store.go
 	"InstanceUID":                          true, // store.go
 	"InsertCloseThrottledEvent":            true, // events.go
 	"IngestFederationEvents":               true, // federation_ingest.go
