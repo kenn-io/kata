@@ -59,6 +59,10 @@ func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Cli
 	if request.Since != nil {
 		return f.incrementalParentData(ctx, client, binding, request)
 	}
+	return f.fullParentData(ctx, client, binding)
+}
+
+func (f *HTTPFetcher) fullParentData(ctx context.Context, client *http.Client, binding Binding) (ParentData, error) {
 	requestURL, err := f.graphQLEndpointURL(binding)
 	if err != nil {
 		return ParentData{}, err
@@ -74,7 +78,7 @@ func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Cli
 		page, err := f.fetchParentGraphQLPage(ctx, client, requestURL, binding, after, retryBudget, nil)
 		if err != nil {
 			if errors.Is(err, errParentFeatureUnsupported) {
-				cache.markUnsupported(binding.Host)
+				f.parentCapabilityCache().markUnsupported(binding.Host)
 				return ParentData{Scan: ParentScanUnsupported}, nil
 			}
 			return ParentData{}, err
@@ -197,8 +201,9 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 	if err := json.UnmarshalRead(resp.Body, &out); err != nil {
 		return parentGraphQLIssues{}, gitHubRetry{}, fmt.Errorf("decode %s: %w", parentGraphQLResource, err)
 	}
+	var missingChildren map[int]bool
 	if numbers != nil {
-		out.Errors = parentErrorsWithoutMissingChildren(out.Errors, out.Data, len(numbers))
+		out.Errors, missingChildren = parentErrorsWithoutMissingChildren(out.Errors, out.Data, len(numbers))
 	}
 	if len(out.Errors) > 0 {
 		if graphQLErrorsRateLimited(out.Errors) {
@@ -224,7 +229,7 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 				return page, gitHubRetry{}, fmt.Errorf("%s response missing child %d", parentGraphQLResource, number)
 			}
 			if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-				if missingParentChild(out.Data, i) {
+				if missingChildren[i] {
 					continue
 				}
 				return page, gitHubRetry{}, fmt.Errorf("%s response null child %d", parentGraphQLResource, number)
@@ -416,8 +421,7 @@ type parentGraphQLResponse struct {
 }
 
 type parentGraphQLData struct {
-	Repository      map[string]jsontext.Value `json:"repository"`
-	missingChildren map[int]bool
+	Repository map[string]jsontext.Value `json:"repository"`
 }
 
 type parentGraphQLIssues struct {

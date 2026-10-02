@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,42 @@ func TestIncrementalParentIdleMakesNoGraphQLRequests(t *testing.T) {
 	assert.Equal(t, 1, requests)
 	assert.Equal(t, ParentScanIncremental, data.Scan)
 	assert.Empty(t, data.ScannedChildIDs)
+}
+
+// GitHub stops the repository issue-event feed at page 300 with a full page
+// and no next link, so a gap of more than 30,000 events never reaches the cursor.
+func TestIncrementalParentTruncatedEventFeedFallsBackToFullScan(t *testing.T) {
+	var eventPages int
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			eventPages++
+			events := make([]string, 100)
+			for i := range events {
+				events[i] = `{"event":"labeled","created_at":"2026-09-20T00:00:00Z","issue":{"number":9}}`
+			}
+			_, _ = fmt.Fprint(w, "["+strings.Join(events, ",")+"]")
+			return
+		}
+		var request parentGraphQLRequest
+		require.NoError(t, json.UnmarshalRead(r.Body, &request))
+		queries = append(queries, request.Query)
+		_, _ = fmt.Fprint(w, `{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[`+
+			`{"number":7,"fullDatabaseId":107,"parent":null},`+
+			`{"number":8,"fullDatabaseId":108,"parent":{"number":1,"fullDatabaseId":101}}]}}}}`)
+	}))
+	defer server.Close()
+	f := newParentGraphQLTestFetcher(server.URL + "/graphql")
+	f.restBaseURLOverride = server.URL + "/"
+	since := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	data, err := f.ParentData(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{Since: &since, IssueNumbers: []int{8}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, eventPages)
+	require.Len(t, queries, 1)
+	assert.Contains(t, queries[0], "issues(first: 100")
+	assert.Equal(t, ParentScanComplete, data.Scan)
+	assert.Equal(t, map[int]int64{7: 107, 8: 108}, data.ScannedChildIDs)
+	assert.Equal(t, map[int]int64{8: 101}, data.ParentByChild)
 }
 
 func TestIncrementalParentBatchesBoundedSelection(t *testing.T) {
