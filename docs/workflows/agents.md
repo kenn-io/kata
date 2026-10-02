@@ -239,6 +239,9 @@ OpenCode status and uninstall never run a version probe.
 Pi and Amp auto-discovered extensions reject it. An executable override can pin
 stable Kata commands. Installer `--source` is data for owned code extensions;
 command-hook installers reject it and preserve authored custom-source commands.
+Relative user-scope source paths are saved as absolute paths from the install
+command's working directory. Project-scope source paths stay relative to the
+selected workspace.
 
 Contract-only reinstall is additive and leaves existing attention enabled.
 Default uninstall removes the full owned bundle; `uninstall --contract-only`

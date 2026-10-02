@@ -80,7 +80,9 @@ func TestAgentHooksCLISourceDataAndAttentionOnlyArtifact(t *testing.T) {
 	require.NoError(t, err)
 	meta, err := parsePiAgentHookMetadata(data)
 	require.NoError(t, err)
-	require.Equal(t, "prompt with spaces.md", meta.Source)
+	wantSource, err := filepath.Abs("prompt with spaces.md")
+	require.NoError(t, err)
+	require.Equal(t, wantSource, meta.Source)
 	resetFlags(t)
 	_, _, err = executeAgentHook(t, strings.NewReader(""), "agent-hooks", "uninstall", "pi", "--contract-only")
 	require.NoError(t, err)
@@ -93,6 +95,41 @@ func TestAgentHooksCLISourceDataAndAttentionOnlyArtifact(t *testing.T) {
 	resetFlags(t)
 	_, _, err = executeAgentHook(t, strings.NewReader(""), "agent-hooks", "install", "claude", "--source", "custom.md", "--executable", os.Args[0])
 	require.ErrorContains(t, err, "--source")
+}
+
+func TestAgentHooksCLIUserSourceIsAnchoredToInstallWorkingDirectory(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installDir := t.TempDir()
+	source := filepath.Join("prompts", "contract.md")
+	require.NoError(t, os.Mkdir(filepath.Join(installDir, "prompts"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(installDir, source), []byte("custom contract"), 0600))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(home, "pi-runtime"))
+	t.Chdir(installDir)
+	resetFlags(t)
+	_, _, err := executeAgentHook(t, strings.NewReader(""), "agent-hooks", "install", "pi", "--attention", "--source", source, "--executable", os.Args[0])
+	require.NoError(t, err)
+	data, err := os.ReadFile(filepath.Join(home, "pi-runtime", "extensions", "kata.js")) //nolint:gosec // G304: generated configuration fixture stays inside the isolated test home.
+	require.NoError(t, err)
+	meta, err := parsePiAgentHookMetadata(data)
+	require.NoError(t, err)
+	want, err := filepath.Abs(filepath.Join(installDir, source))
+	require.NoError(t, err)
+	require.Equal(t, want, meta.Source)
+}
+
+func TestAgentHooksCLIProjectSourceStaysWorkspaceRelative(t *testing.T) {
+	isolateAgentHookHomes(t)
+	workspace := t.TempDir()
+	t.Chdir(t.TempDir())
+	source := filepath.Join("prompts", "contract.md")
+	resetFlags(t)
+	_, _, err := executeAgentHook(t, strings.NewReader(""), "agent-hooks", "install", "pi", "--scope", "project", "--workspace", workspace, "--attention", "--source", source, "--executable", os.Args[0])
+	require.NoError(t, err)
+	data, err := os.ReadFile(filepath.Join(workspace, ".pi", "extensions", "kata.js")) //nolint:gosec // G304: generated configuration fixture stays in TempDir.
+	require.NoError(t, err)
+	meta, err := parsePiAgentHookMetadata(data)
+	require.NoError(t, err)
+	require.Equal(t, source, meta.Source)
 }
 
 func TestAgentHooksCLIStatusConfiguredCapabilities(t *testing.T) {

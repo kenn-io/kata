@@ -64,25 +64,27 @@ func planInitAgentHookSelection(names []string, start string, attention bool, ap
 // Retain runtime selection in the options before daemon contact. Artifact
 // planners stay offline, including all planning repeated before publication.
 func prepareInitHookOptions(ctx context.Context, opts callInitOpts) (callInitOpts, error) {
-	if len(opts.AgentHooks) == 0 {
-		if opts.ContractOnly {
-			return opts, agentHookUsage("init --contract-only requires --agent-hooks")
-		}
-		return opts, nil
+	modern := len(opts.AgentHooks) > 0
+	if !modern && opts.ContractOnly {
+		return opts, agentHookUsage("init --contract-only requires --agent-hooks")
 	}
-	if opts.WithHooks || opts.WithCodexHooks || len(opts.WithAgentHooks) > 0 {
+	if modern && (opts.WithHooks || opts.WithCodexHooks || len(opts.WithAgentHooks) > 0) {
 		return opts, agentHookUsage("--agent-hooks cannot be combined with legacy --with-hooks, --with-codex-hooks or --with-agent-hooks")
 	}
+	names := opts.WithAgentHooks
+	if modern {
+		names = opts.AgentHooks
+	}
 	openCode := false
-	for _, name := range opts.AgentHooks {
+	for _, name := range names {
 		capability, err := lookupAgentHookCapability(name)
 		if err != nil {
 			return opts, err
 		}
-		if !capability.Project {
+		if modern && !capability.Project {
 			return opts, agentHookUsage(capability.Name + " has no verified project hook discovery; use kata agent-hooks install in user scope")
 		}
-		if !capability.Contract && opts.ContractOnly {
+		if modern && !capability.Contract && opts.ContractOnly {
 			return opts, agentHookUsage(capability.Name + " supports attention only; omit --contract-only")
 		}
 		openCode = openCode || capability.Name == "opencode"
@@ -99,7 +101,7 @@ func prepareInitHookOptions(ctx context.Context, opts callInitOpts) (callInitOpt
 
 func planInitHookOptions(opts callInitOpts, start string) (nativeAgentHookPlan, []agentHookMutation, error) {
 	if len(opts.AgentHooks) == 0 {
-		return planInitAgentHookSelection(opts.WithAgentHooks, start, true, "")
+		return planInitAgentHookSelection(opts.WithAgentHooks, start, true, opts.OpenCodeAPI)
 	}
 	return planInitAgentHookSelection(opts.AgentHooks, start, !opts.ContractOnly, opts.OpenCodeAPI)
 }

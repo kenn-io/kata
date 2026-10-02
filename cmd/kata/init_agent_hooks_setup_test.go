@@ -157,6 +157,25 @@ func TestInitAgentHooksOpenCodePinsPreflightSelection(t *testing.T) {
 	require.FileExists(t, filepath.Join(dir, ".opencode", "plugin", "kata-project.js"))
 }
 
+func TestInitLegacyAgentHooksOpenCodeDetectsAndPinsAPI(t *testing.T) {
+	isolateAgentHookHomes(t)
+	_, marker := installOpenCodeVersionFixture(t, `printf '%s\n' "$KATA_HOOK_TEST_VERSION"`)
+	t.Setenv("KATA_HOOK_TEST_VERSION", "1.0.154")
+	dir := t.TempDir()
+	daemon := newFakeDaemon(t)
+	require.NoError(t, executeInitSetup(t, daemon.srv.URL, "--with-agent-hooks", "opencode", "--workspace", dir, "--project", "example-project", "--as", "example-actor"))
+	calls, err := os.ReadFile(marker) //nolint:gosec // G304: isolated runtime probe recorder.
+	require.NoError(t, err)
+	require.Equal(t, "probe\n", string(calls))
+	path := filepath.Join(dir, ".opencode", "plugin", "kata-project.js")
+	data, err := os.ReadFile(path) //nolint:gosec // G304: generated plugin stays under the isolated workspace.
+	require.NoError(t, err)
+	meta, err := parsePluginAgentHookMetadata(data)
+	require.NoError(t, err)
+	require.Equal(t, "v1", meta.API)
+	require.NoFileExists(t, filepath.Join(dir, ".opencode", "plugins", "kata-project", "index.js"))
+}
+
 func TestInitAgentHooksMuseNeverExpandsUserPolicy(t *testing.T) {
 	home := isolateAgentHookHomes(t)
 	dir := t.TempDir()

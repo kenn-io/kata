@@ -165,6 +165,12 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 		if !remove && cmd.Flags().Changed("source") && source == "" {
 			return agentHookUsage("--source must not be empty")
 		}
+		if !remove && cmd.Flags().Changed("source") && scope == "user" && !filepath.IsAbs(source) {
+			source, err = filepath.Abs(source)
+			if err != nil {
+				return fmt.Errorf("resolve user-scope --source: %w", err)
+			}
+		}
 		dir, err := agentHookWorkspacePath()
 		if err != nil {
 			return err

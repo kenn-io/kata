@@ -84,10 +84,12 @@ reported as `partial` unless `--contract-only` was selected. Legacy init output
 is unchanged.
 
 Repeatable `--with-agent-hooks <harness>` retains its existing full project
-bundle behavior. The older `--with-hooks` and `--with-codex-hooks` also preserve
-their commands and trust identities. Combining any legacy hook selector with
-`--agent-hooks` or `--contract-only` is rejected before writes; `--with-agents`
-may accompany either setup flow.
+bundle behavior. `--with-agent-hooks opencode` detects and pins the installed
+runtime API before daemon contact while preserving legacy output. The older
+`--with-hooks` and `--with-codex-hooks` also preserve their commands and trust
+identities. Combining any legacy hook selector with `--agent-hooks` or
+`--contract-only` is rejected before writes; `--with-agents` may accompany
+either setup flow.
 
 Pass `--with-codex-hooks` to install additive `SessionStart` and `SessionEnd` hooks in the
 workspace's `.codex/hooks.json`. The contract hook injects the same canonical
@@ -315,7 +317,9 @@ remove the names from Muse settings to revoke it.
 without a native config override reject it. Default roots honor the original
 Kit environment selectors plus native Pi, OpenClaw, Kimi Code, Grok and XDG
 selectors. Installer `--source` applies only to owned code adapters, as literal
-prompt-file data. It is rejected for command codecs. Authored custom prompt
+prompt-file data. Relative user-scope paths are saved as absolute paths from the
+install command's working directory; project-scope paths stay relative to the
+selected workspace. It is rejected for command codecs. Authored custom prompt
 commands remain foreign and are preserved.
 
 Command codecs register `<kata> agent-hooks contract <harness>` on their native
