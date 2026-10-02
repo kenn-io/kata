@@ -1525,7 +1525,10 @@ kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --re
 
 `kata federation enroll --project <project> --hub-url <url>` sends the
 enrollment API call to `<url>` using `--hub-token` or a daemon catalog
-credential whose URL matches the hub origin. It never forwards the local
+credential whose URL matches the hub origin. When entries share an origin,
+the matching URL path takes precedence. A selected `--daemon` entry chooses
+the hub credential only when its full base URL matches `--hub-url`.
+It never forwards the local
 daemon's global `KATA_AUTH_TOKEN` to the hub; callers that used that variable
 for enrollment must pass the hub credential through `--hub-token` or a matching
 catalog entry. It creates `<project>` on that hub if it does

@@ -2794,7 +2794,7 @@ func TestFederationEnrollCLIJSONIncludesRunnableJoinCommand(t *testing.T) {
 }
 
 func TestFederationEnrollHTTPClientPinsCatalogCredentials(t *testing.T) {
-	for _, scenario := range []string{"selected alias", "foreign catalog", "local token"} {
+	for _, scenario := range []string{"selected alias", "selected spoke shares hub origin", "foreign catalog", "local token"} {
 		t.Run(scenario, func(t *testing.T) {
 			resetFlags(t)
 			home := t.TempDir()
@@ -2806,6 +2806,7 @@ func TestFederationEnrollHTTPClientPinsCatalogCredentials(t *testing.T) {
 				w.WriteHeader(http.StatusNoContent)
 			}))
 			t.Cleanup(hub.Close)
+			hubBaseURL := hub.URL
 			settings := "[auth]\ntoken = \"local-daemon-token\"\n"
 			want := ""
 			switch scenario {
@@ -2813,14 +2814,19 @@ func TestFederationEnrollHTTPClientPinsCatalogCredentials(t *testing.T) {
 				settings += fmt.Sprintf("[[daemon]]\nname=\"other-admin\"\nurl=%q\ntoken=\"other-token\"\n[[daemon]]\nname=\"hub-admin\"\nurl=%q\ntoken=\"hub-token\"\n", hub.URL, hub.URL)
 				flags.Daemon = "hub-admin"
 				want = "Bearer hub-token"
+			case "selected spoke shares hub origin":
+				hubBaseURL += "/hub"
+				settings += fmt.Sprintf("[[daemon]]\nname=\"spoke\"\nurl=%q\ntoken=\"spoke-token\"\n[[daemon]]\nname=\"hub\"\nurl=%q\ntoken=\"hub-token\"\n", hub.URL+"/spoke", hubBaseURL)
+				flags.Daemon = "spoke"
+				want = "Bearer hub-token"
 			case "foreign catalog":
 				settings += "[[daemon]]\nname=\"foreign-admin\"\nurl=\"https://other.example\"\ntoken=\"foreign-token\"\n"
 				flags.Daemon = "foreign-admin"
 			}
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(settings), 0600))
-			client, err := federationEnrollHTTPClient(t.Context(), hub.URL, false)
+			client, err := federationEnrollHTTPClient(t.Context(), hubBaseURL, false)
 			require.NoError(t, err)
-			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, hub.URL+"/api/v1/projects", nil)
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, hubBaseURL+"/api/v1/projects", nil)
 			require.NoError(t, err)
 			response, err := client.Do(request)
 			require.NoError(t, err)

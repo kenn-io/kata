@@ -254,9 +254,10 @@ func federationEnrollHTTPClientPolicy(ctx context.Context, hubBaseURL string, al
 	}
 	in := hubAuthInputs{hubURL: hubBaseURL, hubToken: hubToken, allowInsecure: allowInsecure}
 	if selected := catalogByName(cat, flags.Daemon); selected != nil {
-		selectedOrigin, originErr := httpurl.CanonicalHTTPOrigin(selected.URL)
-		hubOrigin, hubErr := httpurl.CanonicalHTTPOrigin(hubBaseURL)
-		if originErr == nil && hubErr == nil && selectedOrigin == hubOrigin {
+		// --daemon selects the spoke; reuse its credential only for the same hub endpoint.
+		selectedBaseURL, selectedErr := canonicalHubBaseURL(selected.URL)
+		targetBaseURL, hubErr := canonicalHubBaseURL(hubBaseURL)
+		if selectedErr == nil && hubErr == nil && selectedBaseURL == targetBaseURL {
 			in.hubName = selected.Name
 		}
 	}
