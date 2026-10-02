@@ -26,6 +26,12 @@ assert.deepEqual(calls().find(c=>c.args[0]==='agent-contract-hook').args,['agent
 process.env.KATA_REF='changed';fs.writeFileSync(path.join(root,'contract'),'second');fs.writeFileSync(path.join(root,'inbox'),'');
 let second=await registrations.get('before_prompt_build')({prompt:'next',messages:[]},ctx);assert.equal(second.prependSystemContext,'contract:second');assert.equal(second.prependContext,'');
 assert.equal(calls().filter(c=>c.args[3]==='start').length,1);
+const unavailable='Kata agent contract is unavailable. Stop before making project changes and tell the user to check kata agent-hooks status openclaw.';
+fs.writeFileSync(path.join(root,'inbox'),'request-fallback');fs.writeFileSync(path.join(root,'fail-contract'),'');
+const failedContract=await registrations.get('before_prompt_build')({prompt:'failed contract',messages:[]},ctx);assert.equal(failedContract.prependSystemContext,unavailable);assert.equal(failedContract.prependContext,'request-fallback');
+fs.rmSync(path.join(root,'fail-contract'));fs.writeFileSync(path.join(root,'no-contract-context'),'');
+const missingContext=await registrations.get('before_prompt_build')({prompt:'missing contract context',messages:[]},ctx);assert.equal(missingContext.prependSystemContext,unavailable);assert.equal(missingContext.prependContext,'request-fallback');
+fs.rmSync(path.join(root,'no-contract-context'));
 // Reload must retain ownership without overwriting a handoff baseline.
 await services[0].stop({});
 const host=globalThis[Symbol.for('kata.openclaw.hooks.v1')];host.sessions.clear();

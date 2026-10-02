@@ -9,7 +9,7 @@ const loader=await published('loader-runtime-load-','loadOpenClawPlugins'),hooks
 const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
 const registry=loader({config,workspaceDir:workspace,logger:{info(){},warn(){},error(){},debug(){}}});
 const owned=registry.plugins.find(p=>p.id==='kata-hooks-user');assert.ok(owned);assert.equal(owned.status,'loaded',JSON.stringify(owned));
-assert.deepEqual(registry.typedHooks.filter(h=>h.pluginId==='kata-hooks-user').map(h=>h.hookName).sort(),['before_prompt_build','session_end','session_start']);
+assert.deepEqual(registry.typedHooks.filter(h=>h.pluginId==='kata-hooks-user').map(h=>h.hookName).sort(),['before_prompt_build','session_end','session_start','subagent_progress','subagent_spawned']);
 const runner=hooks(registry);
 const start=startBuilder({sessionId:'native-one',sessionKey:'agent:example-agent:main',agentId:'example-agent'});
 assert.equal(start.context.workspaceDir,undefined);await runner.runSessionStart(start.event,start.context);

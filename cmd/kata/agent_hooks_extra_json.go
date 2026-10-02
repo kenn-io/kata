@@ -58,6 +58,7 @@ func planExtraJSONHooks(opts nativeAgentHookOptions, remove bool, path string, d
 	nonemptyBlocks := map[string]bool{}
 	globalEnabled := true
 	globalDisabledPolicy := false
+	globalEnabledUnset := false
 	if opts.Agent == "antigravity" {
 		for name, value := range root {
 			object, ok := value.(map[string]any)
@@ -83,6 +84,8 @@ func planExtraJSONHooks(opts nativeAgentHookOptions, remove bool, path string, d
 		if opts.Agent == "zcode" {
 			globalEnabled = section["enabled"] == true
 			globalDisabledPolicy = section["enabled"] == false
+			_, enabledConfigured := section["enabled"]
+			globalEnabledUnset = !enabledConfigured
 			if enabled, exists := section["enabled"]; exists {
 				if _, ok := enabled.(bool); !ok {
 					return nativeAgentHookPlan{}, nil, errors.New("ZCode hooks.enabled must be boolean")
@@ -98,6 +101,15 @@ func planExtraJSONHooks(opts nativeAgentHookOptions, remove bool, path string, d
 	registrations, err := extraJSONRegistrations(opts.Agent, sections)
 	if err != nil {
 		return nativeAgentHookPlan{}, nil, err
+	}
+	preserveUnsetDisabledPolicy := false
+	if opts.Agent == "zcode" && globalEnabledUnset {
+		for _, registration := range registrations {
+			if extraHookKind(opts.Agent, registration.handler) == "" {
+				preserveUnsetDisabledPolicy = true
+				break
+			}
+		}
 	}
 	museTypesValid := opts.Agent != "muse" || extraMuseRegistrationTypesValid(registrations)
 	var current [3]bool
@@ -120,6 +132,9 @@ func planExtraJSONHooks(opts nativeAgentHookOptions, remove bool, path string, d
 	}
 	if globalDisabledPolicy {
 		plan.Warnings = append(plan.Warnings, "ZCode hooks.enabled=false is an existing operator policy; enable it in the native config to activate Kata hooks")
+	}
+	if preserveUnsetDisabledPolicy {
+		plan.Warnings = append(plan.Warnings, "ZCode hooks.enabled is unset while other hooks are present; preserving the disabled policy. Set hooks.enabled=true to activate configured hooks")
 	}
 	if remove {
 		selectedOwned := false
@@ -199,7 +214,7 @@ func planExtraJSONHooks(opts nativeAgentHookOptions, remove bool, path string, d
 		}
 	}
 	if opts.Agent == "zcode" && !remove && (desired[0] || desired[1]) {
-		if !globalDisabledPolicy {
+		if !globalDisabledPolicy && !preserveUnsetDisabledPolicy {
 			root["hooks"].(map[string]any)["enabled"] = true
 			globalEnabled = true
 		}

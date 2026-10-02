@@ -98,7 +98,7 @@ func planMuseAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHo
 			settings["schema_version"] = 1
 		}
 	}
-	allowlist, err := validateExtraMuseAllowlist(settings)
+	allowlist, err := validateExtraMuseAllowlist(settings, false)
 	if err != nil {
 		return nativeAgentHookPlan{}, err
 	}
@@ -135,6 +135,11 @@ func planMuseAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHo
 		return nativeAgentHookPlan{}, errors.New("Muse managed_hooks_path cannot refer to its settings file") //nolint:staticcheck // ST1005: preserve the native product name in this user-facing payload error.
 	}
 	reuseManaged := opts.Scope == "user" && configuredManaged && extraMuseForwardsAttention(allowlist)
+	if !remove && opts.Attention && (opts.ManagedAttention || reuseManaged) {
+		if _, err := validateExtraMuseAllowlist(settings, true); err != nil {
+			return nativeAgentHookPlan{}, err
+		}
+	}
 	if !remove && opts.Attention && !opts.ManagedAttention && !reuseManaged {
 		return nativeAgentHookPlan{}, errMuseAttentionPermission
 	}
@@ -258,7 +263,7 @@ func extraMuseSchemaOne(value any) bool {
 	return err == nil && string(encoded) == "1"
 }
 
-func validateExtraMuseAllowlist(settings map[string]any) ([]string, error) {
+func validateExtraMuseAllowlist(settings map[string]any, rejectProviderCredentials bool) ([]string, error) {
 	raw, exists := settings["managed_hooks_env_vars"]
 	if !exists {
 		return nil, nil
@@ -279,7 +284,7 @@ func validateExtraMuseAllowlist(settings map[string]any) ([]string, error) {
 			return nil, errors.New("duplicate Muse managed_hooks_env_vars name")
 		}
 		seen[folded] = true
-		if strings.HasSuffix(strings.ToUpper(name), "_API_KEY") {
+		if rejectProviderCredentials && strings.HasSuffix(strings.ToUpper(name), "_API_KEY") {
 			return nil, fmt.Errorf("Muse provider credential name %q cannot be forwarded", name) //nolint:staticcheck // ST1005: preserve the native product name in this user-facing payload error.
 		}
 		names = append(names, name)

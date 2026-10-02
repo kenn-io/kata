@@ -191,6 +191,31 @@ func TestOpenClawGeneratedNativeBehavior(t *testing.T) {
 	})
 }
 
+func TestOpenClawSubagentSessionsDoNotOwnAttention(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	opts := openClawTestOptions(t)
+	opts.Executable = openClawInstallRecorder(t, filepath.Join(opts.Home, "record-kata"))
+	require.NoError(t, os.MkdirAll(opts.Dir, 0700))
+	plan, err := planOpenClawAgentHooks(opts, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+	var plugin string
+	for _, change := range plan.Changes {
+		if filepath.Base(change.Path) == "index.js" {
+			plugin = change.Path
+		}
+	}
+
+	cmd := exec.Command(node, "testdata/openclaw/subagent.mjs", plugin, opts.Dir) //nolint:gosec // G204: published Node executable runs a fixed lifecycle fixture against isolated paths.
+	cmd.Env = append(os.Environ(), "KATA_REF=launch-ref", "OPENCLAW_TEST_ROOT="+opts.Home, "TMPDIR="+opts.Home)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+}
+
 func openClawGeneratedNativeBehavior(t *testing.T, platform string) {
 	openClawGeneratedNativeBehaviorWithContract(t, platform, "first")
 }

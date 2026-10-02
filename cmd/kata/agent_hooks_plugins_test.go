@@ -169,10 +169,12 @@ func TestNativePluginsRuntime(t *testing.T) {
 		modes := []string{"both", "project-contract", "project-attention", "project-unloaded"}
 		if api == "v2" {
 			modes = append(modes, "project-pending-context")
+			modes = append(modes, "oversized-contract")
 		}
 		if api == "amp" {
 			modes = []string{"single-user", "single-project", "single-user-contract-retry"}
 		}
+		modes = append(modes, "large-contract")
 		for _, mode := range modes {
 			t.Run(api+"/"+mode, func(t *testing.T) {
 				root := t.TempDir()
@@ -186,7 +188,7 @@ func TestNativePluginsRuntime(t *testing.T) {
 				fake := filepath.Join(root, "kata executable.js")
 				fakeJS := `#!/usr/bin/env node
 const fs=require('node:fs'); const a=process.argv.slice(2);fs.appendFileSync(process.env.KATA_PLUGIN_LOG,JSON.stringify({args:a,cwd:process.cwd(),ref:process.env.KATA_REF,server:process.env.KATA_SERVER})+'\n');
-if(a.includes('agent-contract-hook')){if(process.env.KATA_PLUGIN_CONTRACT_DELAY==='1')Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,75);const n=Number(fs.readFileSync(process.env.KATA_PLUGIN_CONTRACT_ATTEMPTS,'utf8'));fs.writeFileSync(process.env.KATA_PLUGIN_CONTRACT_ATTEMPTS,String(n+1));if(process.env.KATA_PLUGIN_CONTRACT_FAIL_FIRST==='1'&&n===0)process.exit(1);console.log(JSON.stringify({hookSpecificOutput:{additionalContext:'contract:'+a.at(-1)}}));}
+if(a.includes('agent-contract-hook')){if(process.env.KATA_PLUGIN_CONTRACT_DELAY==='1')Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,75);const n=Number(fs.readFileSync(process.env.KATA_PLUGIN_CONTRACT_ATTEMPTS,'utf8'));fs.writeFileSync(process.env.KATA_PLUGIN_CONTRACT_ATTEMPTS,String(n+1));if(process.env.KATA_PLUGIN_CONTRACT_FAIL_FIRST==='1'&&n===0)process.exit(1);const size=Number(process.env.KATA_PLUGIN_CONTRACT_SIZE||0);const text=size?'x'.repeat(size):'contract:'+a.at(-1);console.log(JSON.stringify({hookSpecificOutput:{additionalContext:text}}));}
 else if(a.includes('inbox')){let s=fs.readFileSync(process.env.KATA_PLUGIN_STATE,'utf8');if(s==='fail')process.exit(1);process.stdout.write(s);}
 `
 				if err = os.WriteFile(fake, []byte(fakeJS), 0700); err != nil { //nolint:gosec // G306: executable permission is required for the native launcher fixture.
@@ -234,6 +236,12 @@ else if(a.includes('inbox')){let s=fs.readFileSync(process.env.KATA_PLUGIN_STATE
 				cmd := exec.Command(node, "testdata/agent-hooks/plugins-native.mjs", api, plan.Path, project.Path, workspace, otherWorkspace, mode) //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
 				cmd.Env = append(os.Environ(), "KATA_PLUGIN_LOG="+log, "KATA_PLUGIN_STATE="+state, "KATA_REF=spoke-project#abc4", "KATA_INBOX_USER=actor/worker", "KATA_SERVER=http://127.0.0.1:7777")
 				cmd.Env = append(cmd.Env, "KATA_PLUGIN_CONTRACT_ATTEMPTS="+contractAttempts)
+				switch mode {
+				case "large-contract":
+					cmd.Env = append(cmd.Env, "KATA_PLUGIN_CONTRACT_SIZE=2097152")
+				case "oversized-contract":
+					cmd.Env = append(cmd.Env, "KATA_PLUGIN_CONTRACT_SIZE=17825792")
+				}
 				if api == "amp" && mode == "single-user-contract-retry" {
 					cmd.Env = append(cmd.Env, "KATA_PLUGIN_CONTRACT_FAIL_FIRST=1", "KATA_PLUGIN_CONTRACT_DELAY=1")
 				}

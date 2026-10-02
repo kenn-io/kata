@@ -462,7 +462,9 @@ import path from 'node:path';
 const options = __OPTIONS__;
 const run = promisify(execFile);
 const stateSymbol = Symbol.for('kata.openclaw.hooks.v1');
-const host = globalThis[stateSymbol] ||= { registrations: new Map(), sessions: new Map(), pending: new Map(), queues: new Map(), launch: String(process.pid)+'-'+String(Math.round(Date.now()-process.uptime()*1000)) };
+const host = globalThis[stateSymbol] ||= { registrations: new Map(), sessions: new Map(), pending: new Map(), queues: new Map(), children: new Set(), childSessions: new Map(), launch: String(process.pid)+'-'+String(Math.round(Date.now()-process.uptime()*1000)) };
+host.children ||= new Set();
+host.childSessions ||= new Map();
 const stateDir = path.join(os.tmpdir(),'kata-openclaw-'+String(process.getuid?.() ?? 'owner')+'-'+host.launch);
 const statePath = path.join(stateDir,'sessions.json');
 function privatePath(p, directory) {
@@ -496,6 +498,49 @@ loadState();
 function allowed(api,id=options.id) {
  const p=api.config?.plugins,e=p?.entries?.[id],h=e?.hooks;
  return p?.enabled!==false && e?.enabled===true && (!Array.isArray(p?.allow)||p.allow.length===0||p.allow.includes(id)) && !p?.deny?.includes(id) && h?.allowConversationAccess===true && h?.allowPromptInjection!==false;
+}
+function rememberChild(event,ctx) {
+ const key=event?.childSessionKey||ctx?.childSessionKey;
+ if(typeof key!=='string'||!key)return Promise.resolve();
+ host.children.add(key);
+ const tasks=[];
+ for(const pendingKey of host.pending.keys()) {
+  const parts=pendingKey.split('\u0000');
+  if(parts.length===3&&parts[2]===key) {
+   host.childSessions.set(parts[1],key);
+   host.pending.delete(pendingKey);
+  }
+ }
+ for(const row of host.sessions.values()) {
+  if(row.key!==key)continue;
+  host.childSessions.set(row.session,key);
+  tasks.push(serial(row.slot,async()=>{
+   if(host.sessions.get(row.slot)!==row)return;
+   await reconcileChildAttention(row);
+  }));
+ }
+ return Promise.all(tasks);
+}
+function childSession(session,key) {
+ if(typeof key==='string'&&host.children.has(key))return key;
+ const known=host.childSessions.get(session);
+ return typeof known==='string'&&host.children.has(known)?known:undefined;
+}
+async function reconcileChildAttention(row) {
+ if(host.sessions.get(row.slot)===row)host.sessions.delete(row.slot);
+ const owner=[...host.sessions.values()].find(candidate=>candidate.workspace===row.workspace&&candidate.ref===row.ref&&candidate.started);
+ try {
+  if(owner)await serial(owner.slot,async()=>{
+   if(host.sessions.get(owner.slot)!==owner||!owner.started) {
+    await command(attentionArgs('end',row),row.workspace,500,row.executable||options.executable);
+    return;
+   }
+   await command(attentionArgs('start',owner),owner.workspace,500,owner.executable||options.executable);
+   if(host.sessions.get(owner.slot)!==owner||!owner.started)await command(attentionArgs('end',owner),owner.workspace,500,owner.executable||options.executable);
+  });
+  else await command(attentionArgs('end',row),row.workspace,500,row.executable||options.executable);
+ }catch{if(owner&&host.sessions.get(owner.slot)===owner)owner.childFallback=row}
+ saveState();
 }
 function serial(slot,task) {
  const previous=host.queues.get(slot)||Promise.resolve();
@@ -536,14 +581,29 @@ export default {
      await serial(slot,async()=>{
       ctx.hookInvocation?.assertActive();
       if(!owns(workspace,'attention'))return;
+      if(childSession(session,key)) {
+       host.pending.delete(options.id+'\u0000'+session+'\u0000'+key);
+       return;
+      }
       const existing=host.sessions.get(slot);
-      if(existing?.session===session&&existing.started){existing.owner=options.id;saveState();return;}
+      if(existing?.session===session&&existing.started){
+       existing.owner=options.id;
+       if(existing.childFallback)try {
+        await command(attentionArgs('start',existing),existing.workspace,500,existing.executable||options.executable);
+        if(host.sessions.get(slot)===existing&&existing.started)delete existing.childFallback;
+       }catch{}
+       saveState();return;
+      }
       const pendingKey=options.id+'\u0000'+session+'\u0000'+key;
       const ref=host.pending.get(pendingKey)?.ref || process.env.KATA_REF;
       host.pending.delete(pendingKey);
       if(!ref)return;
       const row={slot,session,key,workspace:path.resolve(workspace),ref,owner:options.id,executable:options.executable,started:true,time:Date.now()};
-      try {await command(attentionArgs('start',row),row.workspace,500);host.sessions.set(slot,row);while(host.sessions.size>64)host.sessions.delete(host.sessions.keys().next().value);saveState()}catch{}
+      try {
+       await command(attentionArgs('start',row),row.workspace,500);
+       if(childSession(session,key)){await reconcileChildAttention(row);return}
+       host.sessions.set(slot,row);while(host.sessions.size>64)host.sessions.delete(host.sessions.keys().next().value);saveState();
+      }catch{}
      });
      ctx.hookInvocation?.assertActive();
     }
@@ -553,17 +613,29 @@ export default {
     const [contractRead,inboxRead]=await Promise.allSettled([command(source,workspace),recipient?command(['inbox','--for',recipient,'--context'],workspace):Promise.resolve({stdout:''})]);
     ctx.hookInvocation?.assertActive();
     if(!owns(workspace,'contract'))return;
-    let system;
+    let system='Kata agent contract is unavailable. Stop before making project changes and tell the user to check kata agent-hooks status openclaw.';
     if(contractRead.status==='fulfilled')try {const text=JSON.parse(contractRead.value.stdout).hookSpecificOutput?.additionalContext;if(typeof text==='string')system=text}catch{}
     const inbox=inboxRead.status==='fulfilled'?inboxRead.value.stdout:'Kata inbox unavailable for this prompt.';
-    return {...(system!==undefined?{prependSystemContext:system}:{}),prependContext:inbox};
+    return {prependSystemContext:system,prependContext:inbox};
    }catch{return}
   },{timeoutMs:1500});
   if(options.attention) {
+   // These accepted-spawn hooks carry OpenClaw's exact child session key.
+   // Keep contract injection available in child prompts; attention uses only
+   // verified lifecycle identity, never session-key spelling heuristics.
+   // Retain each identity until its exact session_end: a completed child run
+   // can reuse its session, so run completion or bounded eviction can let a
+   // live child acquire parent attention.
+   api.on('subagent_progress',(event,ctx)=>event.phase==='started'?rememberChild(event,ctx):undefined, {timeoutMs:700});
+   api.on('subagent_spawned',rememberChild, {timeoutMs:700});
    // Native session_start has no verified workspace. The first prompt captures
    // it, including image-only and resumed sessions; start is idempotent per host.
    api.on('session_start',(event,ctx)=>{
     const session=event.sessionId||ctx.sessionId,key=event.sessionKey||ctx.sessionKey||ctx.agentId,ref=process.env.KATA_REF;
+    if(registration.active && typeof session==='string' && typeof key==='string' && host.children.has(key)){
+     host.childSessions.set(session,key);
+     return;
+    }
     if(registration.active && typeof session==='string' && typeof key==='string' && ref){
      host.pending.set(options.id+'\u0000'+session+'\u0000'+key,{ref});
      while(host.pending.size>64)host.pending.delete(host.pending.keys().next().value);
@@ -572,6 +644,13 @@ export default {
    api.on('session_end',async(event,ctx)=>{
     const session=event.sessionId||ctx.sessionId,key=event.sessionKey||ctx.sessionKey;
     if(typeof session!=='string')return;
+    const child=childSession(session,key);
+    if(child){
+     host.childSessions.delete(session);
+     host.children.delete(child);
+     host.pending.delete(options.id+'\u0000'+session+'\u0000'+child);
+     return;
+    }
     // A project can unload or lose authority before another prompt. Terminal
     // responsibility follows active scope policy and the captured executable.
     const rows=[...host.sessions.values()].filter(row=>row.session===session&&(!key||row.key===key));
@@ -579,6 +658,15 @@ export default {
     const work=Promise.all(rows.map(row=>serial(row.slot,async()=>{
      const executable=row.executable || (row.owner===options.id?options.executable:undefined);
      if(Date.now()>=deadline || !executable || !owns(row.workspace,'attention')||host.sessions.get(row.slot)!==row||!row.started)return;
+     if(row.childFallback) {
+      let complete=true;
+      for(const owner of [row,row.childFallback]) {
+       if(Date.now()>=deadline){complete=false;break}
+       try {await command(attentionArgs('end',owner),owner.workspace,Math.min(650,Math.max(1,deadline-Date.now())),owner.executable||executable)}catch{complete=false}
+      }
+      if(complete&&host.sessions.get(row.slot)===row){host.sessions.delete(row.slot);saveState()}
+      return;
+     }
      try {await command(attentionArgs('end',row),row.workspace,Math.min(650,Math.max(1,deadline-Date.now())),executable);if(host.sessions.get(row.slot)===row)host.sessions.delete(row.slot);saveState()}catch{}
     })));
     let timer;try {await Promise.race([work,new Promise(resolve=>{timer=setTimeout(resolve,750)})])}finally{clearTimeout(timer)}
