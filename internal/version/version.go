@@ -5,7 +5,14 @@
 //nolint:revive // var-naming flags `version` as stdlib-conflicting but no such stdlib package exists.
 package version
 
-import "runtime/debug"
+import (
+	"regexp"
+	"runtime/debug"
+	"strings"
+
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
+)
 
 const (
 	defaultVersion   = "dev"
@@ -66,6 +73,14 @@ func versionFromVCS() string {
 		}
 	}
 	if rev == "" {
+		// Module-proxy installations carry their tag in Main.Version rather
+		// than VCS settings. Keep that identity for release migration policy.
+		if semver.IsValid(info.Main.Version) {
+			if dirty {
+				return info.Main.Version + dirtySuffix
+			}
+			return info.Main.Version
+		}
 		return defaultVersion
 	}
 	if len(rev) > shortHashLen {
@@ -105,4 +120,16 @@ func buildDateFromVCS() string {
 		}
 	}
 	return unknown
+}
+
+var describeVersion = regexp.MustCompile(`-[0-9]+-g[0-9a-f]+$`)
+
+// IsDevelopment reports builds without a clean release version, including
+// bare VCS revisions and git-describe builds ahead of a release tag.
+func IsDevelopment() bool {
+	v := Version
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return !semver.IsValid(v) || module.IsPseudoVersion(v) || strings.Contains(v, "dirty") || describeVersion.MatchString(v)
 }

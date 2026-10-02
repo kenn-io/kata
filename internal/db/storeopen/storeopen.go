@@ -19,8 +19,10 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
+	"go.kenn.io/kata/internal/version"
 )
 
 // Backend identifies the storage implementation selected by a DSN.
@@ -37,6 +39,9 @@ const (
 // are replaced with that backend's standalone defaults.
 type Config struct {
 	Postgres pgstore.Config
+	// SQLiteLock passes an already-held lock for this SQLite DSN. The caller
+	// keeps ownership and releases it after the returned storage is closed.
+	SQLiteLock *sqlitelock.Lock
 }
 
 // InstalledFreshPostgresSchema reports whether store's open created its
@@ -107,6 +112,9 @@ func OpenWithConfig(ctx context.Context, dsn string, openConfig Config, opts ...
 		return nil, err
 	}
 	if backend == BackendPostgres {
+		if openConfig.SQLiteLock != nil {
+			return nil, errors.New("SQLite database lock cannot be used for a PostgreSQL DSN")
+		}
 		pgConfig := openConfig.Postgres
 		if pgConfig == (pgstore.Config{}) {
 			pgConfig = pgstore.DefaultConfig()
@@ -118,7 +126,7 @@ func OpenWithConfig(ctx context.Context, dsn string, openConfig Config, opts ...
 	if hasScheme {
 		path = strings.TrimPrefix(dsn, "sqlite://")
 	}
-	return openSQLite(ctx, path, cfg, opts)
+	return openSQLite(ctx, path, cfg, opts, openConfig.SQLiteLock)
 }
 
 // PeekSchemaVersion reads a target's schema version without applying
@@ -177,7 +185,41 @@ func OpenReadOnly(ctx context.Context, dsn string, opts ...db.OpenOption) (db.St
 	return Open(ctx, dsn, append(opts, db.ReadOnly())...)
 }
 
-func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.OpenOption) (db.Storage, error) {
+func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.OpenOption, heldLock *sqlitelock.Lock) (db.Storage, error) {
+	if cfg.ReadOnly {
+		if heldLock != nil {
+			return nil, errors.New("read-only SQLite open cannot use a database lock")
+		}
+		return sqlitestore.Open(ctx, path, opts...)
+	}
+
+	lock := heldLock
+	var ownedLock *sqlitelock.Lock
+	if lock == nil {
+		var err error
+		ownedLock, err = sqlitelock.Acquire(path)
+		if err != nil {
+			return nil, err
+		}
+		lock = ownedLock
+	} else if err := lock.Matches(path); err != nil {
+		return nil, fmt.Errorf("validate pre-acquired SQLite database lock: %w", err)
+	}
+
+	storage, err := openSQLiteDatabase(ctx, path, cfg, opts)
+	if err != nil {
+		if ownedLock != nil {
+			ownedLock.Release()
+		}
+		return nil, err
+	}
+	if ownedLock != nil {
+		return &lockedStorage{Store: storage, lock: ownedLock}, nil
+	}
+	return storage, nil
+}
+
+func openSQLiteDatabase(ctx context.Context, path string, cfg db.OpenConfig, opts []db.OpenOption) (*sqlitestore.Store, error) {
 	if cfg.ReadOnly {
 		return sqlitestore.Open(ctx, path, opts...)
 	}
@@ -195,6 +237,13 @@ func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.O
 			if !hasTables {
 				break
 			}
+		}
+		if version.IsDevelopment() && !DevMigrationAllowed(ctx) {
+			home, err := config.KataHome()
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("development build %s refuses to migrate database %s in KATA_HOME %s from schema %d to %d; use a temporary KATA_HOME and KATA_DB, or explicitly opt in with --allow-dev-migration or KATA_ALLOW_DEV_MIGRATION=1", version.Version, path, home, ver, db.CurrentSchemaVersion())
 		}
 		// Pre-current SQLite gets upgraded through JSONL cutover, which
 		// exports the legacy shape and re-imports it into a fresh
@@ -232,4 +281,18 @@ func splitScheme(dsn string) (scheme, rest string, hasScheme bool) {
 		return "", dsn, false
 	}
 	return before, after, true
+}
+
+type devMigrationKey struct{}
+
+// WithDevMigrationAllowed records explicit CLI consent for this invocation.
+func WithDevMigrationAllowed(ctx context.Context, allow bool) context.Context {
+	return context.WithValue(ctx, devMigrationKey{}, allow)
+}
+
+// DevMigrationAllowed also recognizes the explicit environment opt-in so
+// auto-started and detached daemon children receive the same policy.
+func DevMigrationAllowed(ctx context.Context) bool {
+	allow, _ := ctx.Value(devMigrationKey{}).(bool)
+	return allow || os.Getenv("KATA_ALLOW_DEV_MIGRATION") == "1"
 }

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-01
+last_edited: 2026-10-02
 ---
 
 # CLI reference
@@ -1220,7 +1220,7 @@ after login. Kata never puts a remote token or another credential in the URL.
 ## Daemon and diagnostics
 
 ```sh
-kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly]
+kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly] [--allow-dev-migration]
 kata daemon status
 kata daemon locate [--json | --agent]
 kata daemon diagnose [--expect-project-uid <uid>] [--json | --agent]
@@ -1297,6 +1297,23 @@ fails to start, or the running daemon does not support automatic restart, the co
 returns an error identifying the installed version and directs you to
 `kata daemon restart` with the daemon's original startup options. Remote
 daemons must be updated on their own hosts.
+
+Development builds refuse to upgrade an existing older SQLite database and
+report its database and `KATA_HOME` paths. Use an isolated temporary home and
+database for manual checks; see [Building](../development/contributing.md#building).
+To deliberately upgrade an existing database, stop its daemon and pass
+`daemon start --allow-dev-migration`, or set `KATA_ALLOW_DEV_MIGRATION=1` for
+that invocation. This consent does not bypass integrity checks. Fresh databases
+and databases already at the binary's schema need no opt-in. Clean release
+versions keep automatic upgrades. Tagged Go module installs count as releases;
+Go pseudo-versions still require development migration consent.
+
+Each SQLite daemon locks the canonical database path before opening or
+migrating it. Another daemon cannot start against that file through a different
+home, socket, or TCP listener. Stop the existing daemon before switching builds;
+leave the `.daemon.lock` file in place. The OS releases the lock when the process
+exits. Startup also checks live runtime records for older releases that predate
+this lock. Stop those older daemons before using the database from another home.
 
 Local commands auto-start the daemon when appropriate. `daemon start` starts a
 background daemon and returns after startup is confirmed. If the running local

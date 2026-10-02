@@ -22,6 +22,27 @@ documented.
 
 ## Building
 
+Use the installed release binary to track repository issues. For manual checks
+of the current checkout, run:
+
+```sh
+make dev-kata ARGS="version"
+make dev-kata ARGS="daemon start --foreground"
+```
+
+Each invocation builds a disposable binary and runs it with a temporary
+`KATA_HOME`, `KATA_DB`, and workspace. The wrapper passes only OS and toolchain
+settings to child processes. It clears inherited daemon/database targets,
+credentials, proxies, and hosted `PORT` settings. When the command exits, it
+stops the temporary daemon and removes that invocation's state. `make tui`
+uses the same wrapper. These Go-only checks use the web asset stub; use
+[Browser UI development](#browser-ui-development) for the full UI.
+
+Always isolate direct `go run`, built-binary checks, and test subprocesses in
+the same way. Never point development builds at the default or a shared home.
+Development builds require explicit consent to upgrade existing SQLite state;
+see [daemon commands](../reference/cli.md#daemon-and-diagnostics).
+
 Release binaries are pure Go (`CGO_ENABLED=0`): `modernc.org/sqlite` provides
 both the database driver and the sqlite-vec extension. Development builds on
 machines with a C toolchain default to `CGO_ENABLED=1`, where kit's sqlitevec

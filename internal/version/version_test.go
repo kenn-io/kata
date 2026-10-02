@@ -56,3 +56,29 @@ func TestBuildDateReturnsUnknownWhenBuildInfoMissingTime(t *testing.T) {
 	mockBuildInfo(t, "1697674abcdef", "", false)
 	assert.Equal(t, "unknown", buildDateFromVCS())
 }
+
+// Tagged module-proxy installs are releases even without VCS settings. Local
+// modules and pseudo-version installs still require migration consent.
+func TestModuleBuildMigrationClassification(t *testing.T) {
+	for _, tc := range []struct {
+		moduleVersion string
+		development   bool
+	}{
+		{"v0.18.0", false}, {"v0.19.0-rc.1", false},
+		{"(devel)", true}, {"", true},
+		{"v0.18.1-0.20261001000000-123456789abc", true},
+	} {
+		t.Run(tc.moduleVersion, func(t *testing.T) {
+			originalReader, originalVersion := readBuildInfo, Version
+			t.Cleanup(func() { readBuildInfo, Version = originalReader, originalVersion })
+			readBuildInfo = func() (*debug.BuildInfo, bool) {
+				return &debug.BuildInfo{Main: debug.Module{Version: tc.moduleVersion}}, true
+			}
+			Version = versionFromVCS()
+			assert.Equal(t, tc.development, IsDevelopment())
+			if tc.moduleVersion != "" && tc.moduleVersion != "(devel)" {
+				assert.Equal(t, tc.moduleVersion, Version)
+			}
+		})
+	}
+}
