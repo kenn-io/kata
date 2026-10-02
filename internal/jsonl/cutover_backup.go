@@ -44,11 +44,8 @@ func checkCutoverIntegrity(ctx context.Context, path string) error {
 }
 
 // VACUUM INTO copies a consistent SQLite image, including committed WAL data.
-// Checking both source and copy prevents cutover from concealing corruption.
+// AutoCutover has already checked the source; validate the backup before use.
 func backupCutoverSource(ctx context.Context, path, backup string) (returnErr error) {
-	if err := checkCutoverIntegrity(ctx, path); err != nil {
-		return err
-	}
 	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
 	if err != nil {
 		return err

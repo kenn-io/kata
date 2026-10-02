@@ -110,6 +110,8 @@ func TestDevelopmentVersionStrings(t *testing.T) {
 		version     string
 		development bool
 	}{
+		{"dev", true}, {"(devel)", true}, {"g1234567", true},
+		{"v0.18.0-dirty", true}, {"v0.18.0-3-g1234567", true},
 		{"1234567", true}, {"v1234567", true}, {"v1.2", true},
 		{"v0.18.0-SNAPSHOT-abcdef0", true},
 		{"v0.18.0", false}, {"0.18.0", false}, {"v0.19.0-rc.1", false},

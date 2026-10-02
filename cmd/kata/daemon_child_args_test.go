@@ -4,21 +4,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/db/storeopen"
 )
 
 func TestDetachedDaemonReceivesMigrationConsent(t *testing.T) {
 	for _, tc := range []struct {
-		name, env  string
-		flag, want bool
-	}{
-		{"no consent", "", false, false}, {"flag consent", "", true, true},
-		{"environment consent", "1", false, true}, {"invalid environment", "true", false, false},
-	} {
+		name string
+		want bool
+	}{{"no consent", false}, {"consent", true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("KATA_ALLOW_DEV_MIGRATION", tc.env)
-			ctx := storeopen.WithDevMigrationAllowed(t.Context(), tc.flag)
-			args := detachedDaemonArgs(ctx, "127.0.0.1:0", true)
+			args := detachedDaemonArgs("127.0.0.1:0", true, tc.want)
 			if tc.want {
 				require.Contains(t, args, "--allow-dev-migration")
 			} else {
