@@ -613,10 +613,10 @@ export default {
     const [contractRead,inboxRead]=await Promise.allSettled([command(source,workspace),recipient?command(['inbox','--for',recipient,'--context'],workspace):Promise.resolve({stdout:''})]);
     ctx.hookInvocation?.assertActive();
     if(!owns(workspace,'contract'))return;
-    let system;
+    let system='Kata agent contract is unavailable. Stop before making project changes and tell the user to check kata agent-hooks status openclaw.';
     if(contractRead.status==='fulfilled')try {const text=JSON.parse(contractRead.value.stdout).hookSpecificOutput?.additionalContext;if(typeof text==='string')system=text}catch{}
     const inbox=inboxRead.status==='fulfilled'?inboxRead.value.stdout:'Kata inbox unavailable for this prompt.';
-    return {...(system!==undefined?{prependSystemContext:system}:{}),prependContext:inbox};
+    return {prependSystemContext:system,prependContext:inbox};
    }catch{return}
   },{timeoutMs:1500});
   if(options.attention) {

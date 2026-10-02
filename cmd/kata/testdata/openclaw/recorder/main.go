@@ -52,15 +52,22 @@ func openClawRecordNative(args []string) int {
 			time.Sleep(5 * time.Second)
 		}
 	case "agent-contract-hook":
-		text := ""
-		if !exists("fail-contract") {
-			content, err := os.ReadFile(filepath.Join(root, "contract"))
-			if err != nil {
+		if exists("fail-contract") {
+			return 1
+		}
+		if exists("no-contract-context") {
+			if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "SessionStart"}}); err != nil {
 				return 1
 			}
-			text = "contract:" + string(content)
+			return 0
 		}
-		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]string{"additionalContext": text}}); err != nil {
+		text := ""
+		content, err := os.ReadFile(filepath.Join(root, "contract"))
+		if err != nil {
+			return 1
+		}
+		text = "contract:" + string(content)
+		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "SessionStart", "additionalContext": text}}); err != nil {
 			return 1
 		}
 	case "inbox":
