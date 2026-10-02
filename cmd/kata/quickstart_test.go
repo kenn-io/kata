@@ -9,6 +9,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestQuickstart_ExternalAgentOnboardingFormats(t *testing.T) {
+	for _, format := range []string{"human", "agent", "json"} {
+		t.Run(format, func(t *testing.T) {
+			resetFlags(t)
+			t.Setenv("KATA_HOME", t.TempDir())
+			out := executeRoot(t, newRootCmd(), "quickstart", "--format", format)
+			instructions := string(out)
+			if format == "json" {
+				var payload struct {
+					Quickstart string `json:"quickstart"`
+				}
+				require.NoError(t, json.Unmarshal(out, &payload))
+				instructions = payload.Quickstart
+			}
+			assert.Contains(t, instructions, "kata federation identity")
+			assert.Contains(t, instructions, "hub administrator")
+			assert.Contains(t, instructions, "Keep the selected daemon pointed at the spoke")
+			assert.Contains(t, instructions, "https://katatracker.com/docs/operations/federation/")
+			assert.Contains(t, instructions, "https://katatracker.com/docs/guide/semantic-search/")
+
+		})
+	}
+}
+
 func TestQuickstart_HelpExplainsFormatsAndSessionSetup(t *testing.T) {
 	for _, args := range [][]string{
 		{"quickstart", "--help"},
@@ -26,6 +50,8 @@ func TestQuickstart_HelpExplainsFormatsAndSessionSetup(t *testing.T) {
 				"--format contract: the canonical managed contract",
 				"exactly what kata agent-hooks contract injects",
 				"kata agent-hooks install --all",
+				"Without hooks, run kata quickstart at session start",
+				"Setup guides cover federation enrollment and optional embeddings",
 			} {
 				assert.Contains(t, out, text)
 			}

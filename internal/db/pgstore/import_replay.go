@@ -55,6 +55,7 @@ func (s *Store) importReplayTx(
 	opts db.ImportOptions,
 ) error {
 	preservedInstanceUID := s.instanceUID
+	var preservedCreatedAt string
 	var err error
 	if opts.MergeProject {
 		records, err = s.prepareProjectMergeTx(ctx, tx, records)
@@ -62,7 +63,7 @@ func (s *Store) importReplayTx(
 			return err
 		}
 	} else {
-		preservedInstanceUID, err = s.pgReplayClearTarget(ctx, tx, opts)
+		preservedInstanceUID, preservedCreatedAt, err = s.pgReplayClearTarget(ctx, tx, opts)
 		if err != nil {
 			return err
 		}
@@ -113,6 +114,9 @@ func (s *Store) importReplayTx(
 		return fmt.Errorf("restore target instance_uid: %w", mapSQLError(err, nil))
 	}
 	if !opts.MergeProject {
+		if err := pgReplayRestoreInstanceCreatedAt(ctx, tx, preservedInstanceUID, preservedCreatedAt); err != nil {
+			return err
+		}
 		if err := s.replayAPITokens(ctx, tx); err != nil {
 			return err
 		}
@@ -126,27 +130,53 @@ func (s *Store) importReplayTx(
 	return nil
 }
 
+// pgReplayRestoreInstanceCreatedAt keeps the creation time paired with the
+// instance UID replay ends with: the target's own when its UID survived, or
+// only what the source supplied when the source's UID replaced it.
+func pgReplayRestoreInstanceCreatedAt(ctx context.Context, tx *sql.Tx, targetUID, targetCreatedAt string) error {
+	var finalUID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&finalUID); err != nil {
+		return fmt.Errorf("read restored instance_uid: %w", mapSQLError(err, nil))
+	}
+	var err error
+	switch {
+	case finalUID != targetUID:
+		return nil
+	case targetCreatedAt == "":
+		_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, db.MetaKeyInstanceCreatedAt)
+	default:
+		_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
+ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, db.MetaKeyInstanceCreatedAt, targetCreatedAt)
+	}
+	if err != nil {
+		return fmt.Errorf("restore %s: %w", db.MetaKeyInstanceCreatedAt, mapSQLError(err, nil))
+	}
+	return nil
+}
+
 // pgReplayClearTarget makes replay an atomic whole-schema replacement. The
 // table inventory comes from the selected schema, so future migration-owned
 // tables participate without a second hand-maintained list. NewInstance keeps
-// the target identity in memory while meta is replaced with the snapshot.
+// the target identity and its creation time in memory while meta is replaced
+// with the snapshot.
 func (s *Store) pgReplayClearTarget(
 	ctx context.Context,
 	tx *sql.Tx,
 	opts db.ImportOptions,
-) (string, error) {
+) (string, string, error) {
 	if err := acquireExclusiveServingLease(ctx, tx, s.schema); err != nil {
-		return "", fmt.Errorf("quiesce serving daemons for import: %w", err)
+		return "", "", fmt.Errorf("quiesce serving daemons for import: %w", err)
 	}
 	if err := acquireSchemaMigrationLock(ctx, tx); err != nil {
-		return "", fmt.Errorf("lock schema migrations for import: %w", mapSQLError(err, nil))
+		return "", "", fmt.Errorf("lock schema migrations for import: %w", mapSQLError(err, nil))
 	}
 	allTables, err := schemaTableNames(ctx, tx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if len(allTables) == 0 {
-		return "", nil
+		return "", "", nil
 	}
 	quotedAll := make([]string, len(allTables))
 	for i, table := range allTables {
@@ -154,23 +184,28 @@ func (s *Store) pgReplayClearTarget(
 	}
 	if _, err := tx.ExecContext(ctx,
 		`LOCK TABLE `+strings.Join(quotedAll, ", ")+` IN ACCESS EXCLUSIVE MODE`); err != nil {
-		return "", fmt.Errorf("lock import target tables: %w", mapSQLError(err, nil))
+		return "", "", fmt.Errorf("lock import target tables: %w", mapSQLError(err, nil))
 	}
 	if opts.RequireFreshTarget {
 		if err := validateFreshSchema(ctx, tx, allTables, s.instanceUID); err != nil {
-			return "", fmt.Errorf("import requires a fresh target: %w", err)
+			return "", "", fmt.Errorf("import requires a fresh target: %w", err)
 		}
 	}
-	var preservedInstanceUID string
+	var preservedInstanceUID, preservedCreatedAt string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&preservedInstanceUID); err != nil {
-		return "", fmt.Errorf("preserve target instance_uid: %w", mapSQLError(err, nil))
+		return "", "", fmt.Errorf("preserve target instance_uid: %w", mapSQLError(err, nil))
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(value), '') FROM meta WHERE key=$1`,
+		db.MetaKeyInstanceCreatedAt).Scan(&preservedCreatedAt); err != nil {
+		return "", "", fmt.Errorf("preserve target %s: %w", db.MetaKeyInstanceCreatedAt, mapSQLError(err, nil))
 	}
 	if _, err := tx.ExecContext(ctx,
 		`TRUNCATE TABLE `+strings.Join(quotedAll, ", ")+` RESTART IDENTITY`); err != nil {
-		return "", fmt.Errorf("clear import target: %w", mapSQLError(err, nil))
+		return "", "", fmt.Errorf("clear import target: %w", mapSQLError(err, nil))
 	}
-	return preservedInstanceUID, nil
+	return preservedInstanceUID, preservedCreatedAt, nil
 }
 
 func (s *Store) importReplayRecord(

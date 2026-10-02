@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -55,13 +56,40 @@ type hubAdminAuth struct {
 // the global daemon token, which would send the wrong credential to the hub.
 func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAuth, error) {
 	out := hubAdminAuth{url: strings.TrimRight(in.hubURL, "/"), allowInsecure: in.allowInsecure}
-	if strings.TrimSpace(in.hubToken) != "" {
-		out.token = in.hubToken
-		return out, nil
-	}
 	hubOrigin, err := httpurl.CanonicalHTTPOrigin(out.url)
 	if err != nil {
 		return hubAdminAuth{}, fmt.Errorf("canonicalize spoke hub origin: %w", err)
+	}
+	if strings.TrimSpace(in.hubToken) != "" {
+		out.token = in.hubToken
+		// The explicit token selects the credential, but transport policy still
+		// comes from a catalog entry at this hub origin. Never read that entry's
+		// token when an explicit token was supplied.
+		if cat != nil {
+			var e *config.CatalogDaemonConfig
+			if name := strings.TrimSpace(in.hubName); name != "" {
+				e = catalogByName(cat, name)
+			} else {
+				// Ambiguity need not select a credential on this path. Inherit
+				// policy only when one entry unambiguously matches the target.
+				e, err = catalogByOrigin(cat, hubOrigin, out.url)
+				if err != nil {
+					if cli, ok := errors.AsType[*cliError](err); !ok || cli.Code != "hub_catalog_origin_ambiguous" {
+						return hubAdminAuth{}, err
+					}
+				}
+			}
+			if e != nil {
+				entryOrigin, err := httpurl.CanonicalHTTPOrigin(e.URL)
+				if err != nil {
+					return hubAdminAuth{}, err
+				}
+				if entryOrigin == hubOrigin {
+					out.allowInsecure = out.allowInsecure || e.AllowInsecure
+				}
+			}
+		}
+		return out, nil
 	}
 	if name := strings.TrimSpace(in.hubName); name != "" {
 		var e *config.CatalogDaemonConfig

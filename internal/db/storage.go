@@ -19,6 +19,9 @@ type Storage interface {
 	// identity / lifecycle
 	InstanceUID() string
 	RefreshInstanceUID(ctx context.Context) error
+	// InstanceCreatedAt reports when InstanceUID was generated, or zero when
+	// the instance predates recording it.
+	InstanceCreatedAt(ctx context.Context) (time.Time, error)
 	SchemaVersion(ctx context.Context) (int, error)
 	Path() string
 	Close() error

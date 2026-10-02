@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"path/filepath"
@@ -1358,6 +1359,7 @@ func (s *spyStorage) RefreshIssueSyncBinding(ctx context.Context, p db.IssueSync
 }
 
 type fakeRunnerFetcher struct {
+	parentRequests     []ParentRequest
 	mu                 sync.Mutex
 	repo               Repository
 	repos              map[string]Repository
@@ -1445,7 +1447,8 @@ func (f *fakeRunnerFetcher) Comments(_ context.Context, _ Binding, issueNumber i
 	return append([]Comment(nil), f.comments[issueNumber]...), nil
 }
 
-func (f *fakeRunnerFetcher) ParentData(_ context.Context, _ Binding) (ParentData, error) {
+func (f *fakeRunnerFetcher) ParentData(_ context.Context, _ Binding, request ParentRequest) (ParentData, error) {
+	f.parentRequests = append(f.parentRequests, request)
 	if f.parentMapErr != nil {
 		return ParentData{}, f.parentMapErr
 	}
@@ -1940,4 +1943,128 @@ func TestRunnerParentOnlyRefreshDoesNotObserveLocalEditAsSourceVersion(t *testin
 	require.Len(t, labels, 1)
 	require.Equal(t, "github", labels[0].Label)
 	require.Equal(t, localTitle, issueTitleByID(h.ctx, t, h.db, *mapping.IssueID))
+}
+
+func setParentRunnerConfig(t *testing.T, h *runnerHarness, backfilled bool, cutoff *time.Time) {
+	t.Helper()
+	cfg, err := DecodeConfig(h.binding.Config)
+	require.NoError(t, err)
+	if backfilled {
+		cfg.ParentLinksVersion = currentParentLinksVersion
+	}
+	if cutoff != nil {
+		cfg.Since = cutoff.Format(time.RFC3339)
+	}
+	raw, err := EncodeConfig(cfg)
+	require.NoError(t, err)
+	_, err = h.db.RefreshIssueSyncBinding(h.ctx, db.IssueSyncBindingUpdateParams{BindingID: h.binding.ID, DisplayName: cfg.DisplayName(), Config: raw})
+	require.NoError(t, err)
+}
+
+func TestRunnerIncrementalParentScopeUsesCursorAndEligibleIssueNumbers(t *testing.T) {
+	h := newRunnerHarness(t)
+	cursor := h.now.Add(-10 * time.Minute)
+	cutoff := h.now.Add(-5 * time.Minute)
+	setParentRunnerConfig(t, h, true, &cutoff)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, cursor)
+	h.fetcher.issues = []Issue{testIssue(101, 1, "old", cursor), testIssue(102, 2, "new", h.now), testIssue(103, 3, "pull", h.now)}
+	h.fetcher.issues[2].PullRequest = &PullRequest{}
+	h.fetcher.parentDataSet = true
+	h.fetcher.parentData = ParentData{Scan: ParentScanIncremental, ScannedChildIDs: map[int]int64{2: 102}}
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	require.Len(t, h.fetcher.parentRequests, 1)
+	require.NotNil(t, h.fetcher.parentRequests[0].Since)
+	assert.Equal(t, cursor.Add(-2*time.Minute), *h.fetcher.parentRequests[0].Since)
+	assert.Equal(t, []int{2}, h.fetcher.parentRequests[0].IssueNumbers)
+	assert.Equal(t, cutoff, *h.fetcher.issueCalls[0].since)
+}
+
+func TestRunnerIncrementalParentReconcilesEventOnlyChildOutsideCutoff(t *testing.T) {
+	for _, parent := range []int64{0, 103} {
+		t.Run(fmt.Sprint(parent), func(t *testing.T) {
+			h := newRunnerHarness(t)
+			seedSourceParentLink(t, h, h.now.Add(-2*time.Hour))
+			// Seed the replacement parent using normal import mapping.
+			batch := BuildImportBatch(h.binding.SourceKey, []Issue{testIssue(103, 3, "new parent", h.now.Add(-time.Hour))}, nil, h.now)
+			batch.ProjectID = h.project.ID
+			_, _, err := h.db.ImportBatch(h.ctx, batch)
+			require.NoError(t, err)
+			cutoff := h.now.Add(-5 * time.Minute)
+			setParentRunnerConfig(t, h, true, &cutoff)
+			cursor := h.now.Add(-10 * time.Minute)
+			recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, cursor)
+			h.fetcher.issues = nil
+			h.fetcher.parentDataSet = true
+			h.fetcher.parentData = ParentData{Scan: ParentScanIncremental, ScannedChildIDs: map[int]int64{1: 101, 4: 104}, ParentByChild: map[int]int64{}}
+			if parent != 0 {
+				h.fetcher.parentData.ParentByChild[1] = parent
+			}
+			result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+			require.NoError(t, err)
+			assert.Equal(t, 0, result.Import.Created)
+			if parent == 0 {
+				assertNoParent(t, h, "issue-id:101")
+			} else {
+				assertSourceParent(t, h, "issue-id:101", "issue-id:103")
+			}
+			assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+		})
+	}
+}
+
+// A child imported while its parent was outside the cutoff has its parent link
+// dropped. When that parent is imported later, its children must be re-checked.
+func TestRunnerIncrementalParentRechecksChildrenOfNewlyImportedOldIssues(t *testing.T) {
+	h := newRunnerHarness(t)
+	cutoff := h.now.Add(-5 * time.Minute)
+	setParentRunnerConfig(t, h, true, &cutoff)
+	child := testIssue(101, 1, "child", h.now.Add(-time.Minute))
+	mapped := testIssue(104, 4, "mapped old issue", h.now.Add(-time.Minute))
+	batch := BuildImportBatch(h.binding.SourceKey, []Issue{child, mapped}, nil, h.now)
+	batch.ProjectID = h.project.ID
+	_, _, err := h.db.ImportBatch(h.ctx, batch)
+	require.NoError(t, err)
+	cursor := h.now.Add(-time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, cursor)
+
+	oldParent := testIssue(102, 2, "old parent", h.now)
+	oldParent.CreatedAt = new(cutoff.Add(-time.Hour))
+	newIssue := testIssue(103, 3, "new issue", h.now)
+	newIssue.CreatedAt = new(cutoff.Add(time.Minute))
+	mapped.CreatedAt = new(cutoff.Add(-time.Hour))
+	mapped.UpdatedAt = new(h.now)
+	h.fetcher.issues = []Issue{oldParent, newIssue, mapped}
+	h.fetcher.parentDataSet = true
+	h.fetcher.parentData = ParentData{
+		Scan:            ParentScanIncremental,
+		ScannedChildIDs: map[int]int64{1: 101, 2: 102, 3: 103, 4: 104},
+		ParentByChild:   map[int]int64{1: 102},
+	}
+	_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	require.Len(t, h.fetcher.parentRequests, 1)
+	assert.Equal(t, []int{2}, h.fetcher.parentRequests[0].ChildrenOf)
+	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
+}
+
+func TestRunnerUnsupportedPendingParentBackfillKeepsIncrementalREST(t *testing.T) {
+	h := newRunnerHarness(t)
+	cursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, cursor)
+	h.fetcher.parentDataSet = true
+	h.fetcher.parentData = ParentData{Scan: ParentScanUnsupported}
+	for range 2 {
+		result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+		require.NoError(t, err)
+		cfg, err := DecodeConfig(result.Binding.Config)
+		require.NoError(t, err)
+		assert.True(t, cfg.NeedsParentLinkBackfill())
+		call := h.fetcher.issueCalls[len(h.fetcher.issueCalls)-1]
+		require.NotNil(t, call.since)
+		assert.Equal(t, cursor.Add(-2*time.Minute), *call.since)
+		assert.Nil(t, h.fetcher.parentRequests[len(h.fetcher.parentRequests)-1].Since)
+		cursor = h.now
+		h.advance(5 * time.Minute)
+	}
 }

@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-01
+last_edited: 2026-10-02
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -10,11 +10,18 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Set up consumer Muse with standing instructions, a Kata skill, and a recurring
-  poll specification using `kata agent-hooks instructions install muse`.
+  poll specification using `kata agent-hooks instructions install muse --home <path>`.
   Preview the files with `--dry --json`. Reinstall preserves file bytes;
   uninstall keeps foreign content. This relies on instruction-following and
   provides no native attention support. Choose CLI token-file or connector
   authentication explicitly. See [Hookless harnesses](workflows/agents.md#hookless-harnesses).
+
+- Enroll external agents against login-mode federation hubs and run the returned
+  join command on the spoke. Join reads current hub metadata when it runs,
+  including after a hub purge. **Enrollment credential change:** callers that
+  used `KATA_AUTH_TOKEN` for the hub must now pass `--hub-token` or configure a
+  daemon catalog entry matching `--hub-url`. The local daemon token is no longer
+  sent to the hub. See the [enrollment runbook](operations/federation.md#external-agent-onboarding-without-hooks).
 
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.
   Embedding requests no longer send `"dimensions": 0` unless dimensions are

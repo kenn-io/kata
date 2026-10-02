@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff/v7"
 	"github.com/spf13/cobra"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -299,68 +300,46 @@ func runEventsTail(cmd *cobra.Command, opts eventsTailOptions) error {
 	out := cmd.OutOrStdout()
 	mode := currentOutputMode()
 	cursor := opts.LastEventID
-	backoff := tailBackoffStart
-	for {
+	bo := backoff.NewExponentialBackOff()
+	bo.InitialInterval = tailBackoffStart
+	bo.MaxInterval = tailBackoffMax
+	bo.Multiplier = 2
+	var streamErr error
+	_, err = backoff.Retry(ctx, func() (struct{}, error) {
 		if ctx.Err() != nil {
-			return nil
+			return struct{}{}, nil
 		}
 		res, sErr := streamOnce(ctx, apiClient, query, cursor, out, mode)
+		streamErr = sErr
 		if errors.Is(sErr, errTerminalHTTP) {
-			return sErr
+			return struct{}{}, backoff.Permanent(sErr)
 		}
-		if sErr != nil && !flags.Quiet {
-			fmt.Fprintln(os.Stderr, "kata: stream error:", sErr,
-				"(reconnecting in", backoff.Round(time.Second), ")")
+		if res.Reset != nil {
+			cursor = res.Reset.newCursor
+			return struct{}{}, backoff.RetryAfter(0, io.EOF)
 		}
-		next, reset := applyAttemptResult(res, cursor, backoff)
-		cursor = next.cursor
-		if reset {
-			backoff = next.backoff
-			continue
+		if res.Progress.lastID > cursor {
+			cursor = res.Progress.lastID
+			bo.Reset()
 		}
-		if waitErr := waitBackoff(ctx, next.backoff); waitErr != nil {
-			return nil
+		// A clean stream EOF still needs a reconnect.
+		if sErr == nil {
+			sErr = io.EOF
 		}
-		backoff = nextBackoff(next.backoff)
+		return struct{}{}, sErr
+	}, backoff.WithBackOff(bo), backoff.WithMaxTries(0), backoff.WithMaxElapsedTime(0),
+		backoff.WithNotify(func(_ error, delay time.Duration) {
+			if streamErr != nil && !flags.Quiet {
+				fmt.Fprintln(os.Stderr, "kata: stream error:", streamErr, "(reconnecting in", delay.Round(time.Second), ")")
+			}
+		}))
+	if err != nil {
+		retryErr := backoff.AsRetryError(err)
+		if errors.Is(retryErr.Cause, backoff.ErrPermanent) {
+			return retryErr.LastErr
+		}
 	}
-}
-
-type tailState struct {
-	cursor  int64
-	backoff time.Duration
-}
-
-// applyAttemptResult folds streamOnce's typed result into (next cursor,
-// next backoff). The bool return is true iff the stream signalled a reset
-// (caller should skip the backoff wait and retry immediately).
-func applyAttemptResult(res streamResult, cursor int64, backoff time.Duration) (tailState, bool) {
-	if res.Reset != nil {
-		return tailState{cursor: res.Reset.newCursor, backoff: tailBackoffStart}, true
-	}
-	if res.Progress.lastID > cursor {
-		return tailState{cursor: res.Progress.lastID, backoff: tailBackoffStart}, false
-	}
-	return tailState{cursor: cursor, backoff: backoff}, false
-}
-
-func waitBackoff(ctx context.Context, d time.Duration) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(d):
-		return nil
-	}
-}
-
-func nextBackoff(cur time.Duration) time.Duration {
-	if cur >= tailBackoffMax {
-		return tailBackoffMax
-	}
-	doubled := cur * 2
-	if doubled > tailBackoffMax {
-		return tailBackoffMax
-	}
-	return doubled
+	return nil
 }
 
 // frameState accumulates the lines of a single SSE frame and drains them

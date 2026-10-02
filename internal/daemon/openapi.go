@@ -40,7 +40,32 @@ func OpenAPIDocument() *huma.OpenAPI {
 func openAPIClientDocument() *huma.OpenAPI {
 	doc := baseOpenAPIDocument()
 	clearResponseAdditionalProperties(doc)
+	allowEmptyFederationJoinClientStrings(doc)
 	return doc
+}
+
+// Required JSON properties specify presence, not a nonempty string. These
+// fields are intentionally empty when no origin is configured or a grant
+// cannot support a runnable join. Override the Go generator's inferred
+// nonzero-value validation without making the wire properties optional.
+func allowEmptyFederationJoinClientStrings(doc *huma.OpenAPI) {
+	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
+		return
+	}
+	join := doc.Components.Schemas.Map()["FederationJoinInstructions"]
+	if join == nil {
+		return
+	}
+	for _, name := range []string{"hub_url", "join_command"} {
+		property := join.Properties[name]
+		if property == nil {
+			continue
+		}
+		if property.Extensions == nil {
+			property.Extensions = map[string]any{}
+		}
+		property.Extensions["x-oapi-codegen-extra-tags"] = map[string]any{"validate": "omitempty"}
+	}
 }
 
 func baseOpenAPIDocument() *huma.OpenAPI {

@@ -191,6 +191,8 @@ type FederationViolationSummary struct {
 // credential for one spoke.
 type CreateFederationEnrollmentRequest struct {
 	Body struct {
+		HubURL                       string `json:"hub_url,omitempty"`
+		AllowInsecure                bool   `json:"allow_insecure,omitempty,omitzero"`
 		SpokeInstanceUID             string `json:"spoke_instance_uid"`
 		ProjectID                    *int64 `json:"project_id"`
 		Capabilities                 string `json:"capabilities"`
@@ -203,15 +205,35 @@ type CreateFederationEnrollmentRequest struct {
 // FederationEnrollmentOut is the API-owned enrollment representation. It
 // deliberately omits token_hash; Token is populated only on creation.
 type FederationEnrollmentOut struct {
-	ID               int64      `json:"id"`
-	SpokeInstanceUID string     `json:"spoke_instance_uid"`
-	ProjectID        *int64     `json:"project_id"`
-	Capabilities     string     `json:"capabilities"`
-	Actor            string     `json:"actor"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
-	RevokedAt        *time.Time `json:"revoked_at,omitempty"`
-	Token            string     `json:"token,omitempty"`
+	ID               int64                       `json:"id"`
+	SpokeInstanceUID string                      `json:"spoke_instance_uid"`
+	ProjectID        *int64                      `json:"project_id"`
+	Capabilities     string                      `json:"capabilities"`
+	Actor            string                      `json:"actor"`
+	CreatedAt        time.Time                   `json:"created_at"`
+	UpdatedAt        time.Time                   `json:"updated_at"`
+	RevokedAt        *time.Time                  `json:"revoked_at,omitempty"`
+	Token            string                      `json:"token,omitempty"`
+	Join             *FederationJoinInstructions `json:"join,omitempty"`
+}
+
+// FederationJoinInstructions describes the exact project and transport authority
+// for a spoke join. JoinCommand is empty when the grant cannot support a join
+// or no hub URL was supplied or configured.
+type FederationJoinInstructions struct {
+	HubURL                 string `json:"hub_url"`
+	HubProjectID           int64  `json:"hub_project_id"`
+	HubProjectUID          string `json:"hub_project_uid"`
+	ProjectName            string `json:"project_name"`
+	BaselineThroughEventID int64  `json:"baseline_through_event_id"`
+	ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
+	Token                  string `json:"token"`
+	Actor                  string `json:"actor"`
+	Capabilities           string `json:"capabilities"`
+	PushEnabled            bool   `json:"push_enabled"`
+	AdoptExisting          bool   `json:"adopt_existing"`
+	AllowInsecure          bool   `json:"allow_insecure"`
+	JoinCommand            string `json:"join_command"`
 }
 
 // CreateFederationEnrollmentResponse wraps FederationEnrollmentOut.

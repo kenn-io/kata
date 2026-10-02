@@ -653,7 +653,9 @@ func (c ConnectorOut) Validate() error {
 type CreateFederationEnrollmentRequestBody struct {
 	Actor                        *string `json:"actor,omitempty"`
 	AllowAdoptionSnapshotAuthors *bool   `json:"allow_adoption_snapshot_authors,omitempty"`
+	AllowInsecure                *bool   `json:"allow_insecure,omitempty"`
 	Capabilities                 string  `json:"capabilities" validate:"required"`
+	HubURL                       *string `json:"hub_url,omitempty"`
 	ProjectID                    int64   `json:"project_id"`
 	SpokeInstanceUID             string  `json:"spoke_instance_uid" validate:"required"`
 	Token                        *string `json:"token,omitempty"`
@@ -1445,19 +1447,46 @@ type FederationConfigHealth struct {
 }
 
 type FederationEnrollmentOut struct {
-	Actor            string     `json:"actor" validate:"required"`
-	Capabilities     string     `json:"capabilities" validate:"required"`
-	CreatedAt        time.Time  `json:"created_at" validate:"required"`
-	ID               int64      `json:"id"`
-	ProjectID        int64      `json:"project_id"`
-	RevokedAt        *time.Time `json:"revoked_at,omitempty"`
-	SpokeInstanceUID string     `json:"spoke_instance_uid" validate:"required"`
-	Token            *string    `json:"token,omitempty"`
-	UpdatedAt        time.Time  `json:"updated_at" validate:"required"`
+	Actor            string                      `json:"actor" validate:"required"`
+	Capabilities     string                      `json:"capabilities" validate:"required"`
+	CreatedAt        time.Time                   `json:"created_at" validate:"required"`
+	ID               int64                       `json:"id"`
+	Join             *FederationJoinInstructions `json:"join,omitempty"`
+	ProjectID        int64                       `json:"project_id"`
+	RevokedAt        *time.Time                  `json:"revoked_at,omitempty"`
+	SpokeInstanceUID string                      `json:"spoke_instance_uid" validate:"required"`
+	Token            *string                     `json:"token,omitempty"`
+	UpdatedAt        time.Time                   `json:"updated_at" validate:"required"`
 }
 
 func (f FederationEnrollmentOut) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.Actor, "required"); err != nil {
+		errors = errors.Append("Actor", err)
+	}
+	if err := typesValidator.Var(f.Capabilities, "required"); err != nil {
+		errors = errors.Append("Capabilities", err)
+	}
+	if err := typesValidator.Var(f.CreatedAt, "required"); err != nil {
+		errors = errors.Append("CreatedAt", err)
+	}
+	if f.Join != nil {
+		if v, ok := any(f.Join).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Join", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(f.SpokeInstanceUID, "required"); err != nil {
+		errors = errors.Append("SpokeInstanceUID", err)
+	}
+	if err := typesValidator.Var(f.UpdatedAt, "required"); err != nil {
+		errors = errors.Append("UpdatedAt", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type FederationIngestEventEnvelope struct {
@@ -1507,6 +1536,26 @@ func (f FederationIngestEventsRequestBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type FederationJoinInstructions struct {
+	Actor                  string `json:"actor" validate:"required"`
+	AdoptExisting          bool   `json:"adopt_existing"`
+	AllowInsecure          bool   `json:"allow_insecure"`
+	BaselineThroughEventID int64  `json:"baseline_through_event_id"`
+	Capabilities           string `json:"capabilities" validate:"required"`
+	HubProjectID           int64  `json:"hub_project_id"`
+	HubProjectUID          string `json:"hub_project_uid" validate:"required"`
+	HubURL                 string `json:"hub_url" validate:"omitempty"`
+	JoinCommand            string `json:"join_command" validate:"omitempty"`
+	ProjectName            string `json:"project_name" validate:"required"`
+	PushEnabled            bool   `json:"push_enabled"`
+	ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
+	Token                  string `json:"token" validate:"required"`
+}
+
+func (f FederationJoinInstructions) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
 type FederationProjectStatus struct {

@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-09-28
+last_edited: 2026-10-01
 ---
 
 # Semantic search
@@ -59,13 +59,16 @@ speaks the wire format and never bundles a model.
    credential source configured, Kata sends requests without an `Authorization`
    header; local Ollama needs no placeholder key. For a provider that requires
    a key, use `api_key_file = "~/.config/kata/embedding.key"` with an owner-only
-   file (`chmod 600` on Unix), or inline `api_key`. Use an absolute file path
+   file (`chmod 600` on Unix), or `api_key_env` supplied to the daemon's launch
+   environment. Keep literal keys outside `config.toml`. Use an absolute file path
    or a path starting with `~/`; symlinks are accepted. See the
    [configuration reference](../reference/configuration.md#semantic-search).
    `api_key_env` works when the variable is set in the daemon environment.
    A daemon autostarted by a CLI command inherits that command’s environment;
-   it does not pick up keys exported later in another shell. A file or inline
-   key is more reliable across autostart and service launches.
+   it does not pick up keys exported later in another shell. A key file is more
+   reliable across autostart and service launches. See
+   [first-run embeddings setup](../get-started/quickstart.md#optional-first-run-embeddings-setup)
+   for secure hosted-provider examples and verification commands.
    Credential precedence is inline > file > env. An unavailable selected source
    does not fall back to another source. Run `kata daemon reload` after replacing
    the key file; model or endpoint changes require a restart. See

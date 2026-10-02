@@ -81,7 +81,7 @@ func TestHTTPFetcherParentDataPaginatesAndIncludesRESTDatabaseIDs(t *testing.T) 
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanComplete, data.Scan)
@@ -116,7 +116,7 @@ func TestHTTPFetcherParentDataReturnsAuthoritativeEmptyForScannedChildrenWithout
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanComplete, data.Scan)
@@ -149,7 +149,7 @@ func TestHTTPFetcherParentDataScanCoverageCarriesRESTIDsForEveryChild(t *testing
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanComplete, data.Scan)
@@ -184,7 +184,7 @@ func TestHTTPFetcherParentDataMissingChildIDIsFatalAndYieldsNoScanCoverage(t *te
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.Error(t, err)
 
 	assert.Contains(t, err.Error(), "child issue 12 missing fullDatabaseId")
@@ -213,7 +213,7 @@ func TestHTTPFetcherParentDataFeatureUnsupportedIsNonFatal(t *testing.T) {
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanUnsupported, data.Scan)
@@ -244,7 +244,7 @@ func TestHTTPFetcherParentDataFeatureUnsupportedFromSchemaFieldNameWithoutPath(t
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanUnsupported, data.Scan)
@@ -272,7 +272,7 @@ func TestHTTPFetcherParentDataFeatureUnsupportedFromStructuredClassOnly(t *testi
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanUnsupported, data.Scan)
@@ -301,7 +301,7 @@ func TestHTTPFetcherParentDataFeatureUnsupportedFromStructuredFieldAndValidation
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanUnsupported, data.Scan)
@@ -326,7 +326,7 @@ func TestHTTPFetcherParentDataFeatureUnsupportedFromMessageOnlySchemaError(t *te
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanUnsupported, data.Scan)
@@ -370,12 +370,12 @@ func TestHTTPFetcherParentDataAmbiguousMessageOnlyFieldErrorIsFatalAndUncached(t
 	fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
 	binding := Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}
 
-	_, err := fetcher.ParentData(context.Background(), binding)
+	_, err := fetcher.ParentData(context.Background(), binding, ParentRequest{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field parent resolver timed out")
 	assert.Equal(t, 1, requests)
 
-	data, err := fetcher.ParentData(context.Background(), binding)
+	data, err := fetcher.ParentData(context.Background(), binding, ParentRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, ParentScanComplete, data.Scan)
 	assert.Contains(t, data.ScannedChildIDs, 10)
@@ -432,7 +432,7 @@ func TestHTTPFetcherParentDataGraphQLRateLimitRetriesHTTP200Errors(t *testing.T)
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, 2, attempts)
@@ -469,7 +469,7 @@ func TestHTTPFetcherParentDataRetryAfterCapReturnsFatal(t *testing.T) {
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.Error(t, err)
 
 	assert.Equal(t, 1, attempts)
@@ -504,7 +504,7 @@ func TestHTTPFetcherParentDataRetryAfterOverflowIsFatal(t *testing.T) {
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.Error(t, err)
 
 	assert.Equal(t, 1, attempts)
@@ -576,7 +576,7 @@ func TestHTTPFetcherParentDataRetryTotalBudgetSpansPages(t *testing.T) {
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.Error(t, err)
 
 	assert.Equal(t, 5, attempts)
@@ -619,7 +619,7 @@ func TestHTTPFetcherParentDataNonAdvancingCursorIsFatal(t *testing.T) {
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.Error(t, err)
 
 	assert.Equal(t, 2, requests)
@@ -650,7 +650,7 @@ func TestHTTPFetcherParentDataParentWithoutFullDatabaseIDIsFatal(t *testing.T) {
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parent issue 2")
 	assert.Contains(t, err.Error(), "fullDatabaseId")
@@ -703,7 +703,7 @@ func TestHTTPFetcherParentDataRequestUsesOwnerRepoVariablesAllowedByAuthGuard(t 
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	require.Len(t, rewrite.seen, 1)
@@ -760,7 +760,7 @@ func TestHTTPFetcherParentDataEnterpriseRequestUsesOwnerRepoVariablesAllowedByAu
 		Host:  "github.example",
 		Owner: "example-owner",
 		Repo:  "example-repo",
-	})
+	}, ParentRequest{})
 	require.NoError(t, err)
 
 	require.Len(t, rewrite.seen, 1)
@@ -811,18 +811,18 @@ func TestParentCapabilityCacheReusesUnsupportedAndExpires(t *testing.T) {
 	fetcher.parentCapabilities = newParentCapabilityCache(time.Hour, fetcher.graphQLNow)
 	binding := Binding{Host: "github.example", Owner: "example-owner", Repo: "example-repo"}
 
-	first, err := fetcher.ParentData(context.Background(), binding)
+	first, err := fetcher.ParentData(context.Background(), binding, ParentRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, ParentScanUnsupported, first.Scan)
 	assert.Equal(t, 1, requests)
 
-	second, err := fetcher.ParentData(context.Background(), binding)
+	second, err := fetcher.ParentData(context.Background(), binding, ParentRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, ParentScanUnsupported, second.Scan)
 	assert.Equal(t, 1, requests)
 
 	now = now.Add(time.Hour + time.Nanosecond)
-	third, err := fetcher.ParentData(context.Background(), binding)
+	third, err := fetcher.ParentData(context.Background(), binding, ParentRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, ParentScanComplete, third.Scan)
 	assert.Contains(t, third.ScannedChildIDs, 8)
@@ -867,11 +867,11 @@ func TestParentCapabilityCacheDoesNotCacheTransientErrors(t *testing.T) {
 	fetcher := newParentGraphQLTestFetcher(server.URL + "/graphql")
 	binding := Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}
 
-	_, err := fetcher.ParentData(context.Background(), binding)
+	_, err := fetcher.ParentData(context.Background(), binding, ParentRequest{})
 	require.Error(t, err)
 	assert.Equal(t, 1, requests)
 
-	data, err := fetcher.ParentData(context.Background(), binding)
+	data, err := fetcher.ParentData(context.Background(), binding, ParentRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, ParentScanComplete, data.Scan)
 	assert.Contains(t, data.ScannedChildIDs, 9)

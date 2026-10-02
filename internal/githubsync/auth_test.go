@@ -429,3 +429,17 @@ func (rt *recordingRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 		Request:    req,
 	}, nil
 }
+
+func TestGraphQLIncrementalParentQueryGuardAcceptsOnlyGeneratedShape(t *testing.T) {
+	query := `query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { i0: issue(number: 3) { number fullDatabaseId parent { number fullDatabaseId } } } }`
+	assert.True(t, graphQLQueryMatchesParentQuery(query))
+	for _, bad := range []string{
+		strings.Replace(query, "number: 3", "number: -3", 1),
+		strings.Replace(query, "i0:", "i1:", 1),
+		strings.Replace(query, "fullDatabaseId parent", "title fullDatabaseId parent", 1),
+		strings.Replace(query, "query(", "mutation(", 1),
+		strings.Replace(query, "name: $repo", "name: \"foreign-repo\"", 1),
+	} {
+		assert.False(t, graphQLQueryMatchesParentQuery(bad))
+	}
+}

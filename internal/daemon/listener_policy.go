@@ -69,7 +69,7 @@ func ApplyListenerPolicy(next http.Handler, policy ListenerPolicy) (http.Handler
 				api.WriteEnvelope(w, http.StatusBadRequest, "host_invalid", "Host header does not match listener authority")
 				return
 			}
-			if policy.Kind == ListenerBrowser || isBrowserRequest(r) {
+			if (policy.Kind == ListenerBrowser && !ordinaryAPIBearerRequest(r)) || isBrowserRequest(r) {
 				if isMutation(r.Method) && !browserMutationOriginAllowed(r, policy.Origin) {
 					api.WriteEnvelope(w, http.StatusForbidden, "origin_forbidden", "Origin header does not match browser origin")
 					return
@@ -163,7 +163,8 @@ func addAllowedAuthority(allowed map[string]struct{}, authority string) {
 
 func isBrowserRequest(r *http.Request) bool {
 	if strings.HasPrefix(r.URL.Path, "/api/v1/ui/") ||
-		r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" {
+		r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" ||
+		r.Header.Get(webCSRFHeader) != "" || r.Header.Get("Sec-Fetch-Site") != "" {
 		return true
 	}
 	for _, cookie := range r.Cookies() {
@@ -173,6 +174,16 @@ func isBrowserRequest(r *http.Request) bool {
 		}
 	}
 	return !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml"
+}
+
+// ordinaryAPIBearerRequest classifies CLI and federation traffic, leaving
+// credential validation to the normal daemon authentication stack. Browser
+// evidence always takes precedence over a bearer header.
+func ordinaryAPIBearerRequest(r *http.Request) bool {
+	return strings.HasPrefix(r.URL.Path, "/api/v1/") &&
+		!strings.HasPrefix(r.URL.Path, "/api/v1/ui/") &&
+		hasBearerHeader(r.Header.Get(authHeader)) &&
+		r.Header.Get("Cookie") == "" && !isBrowserRequest(r)
 }
 
 // CheckWebStartup applies the daemon's existing remote-access policy to a

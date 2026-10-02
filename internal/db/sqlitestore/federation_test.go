@@ -1123,10 +1123,12 @@ func TestFederationTokenHash(t *testing.T) {
 func TestCanonicalFederationCapabilities(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"push,pull,push": "pull,push",
-		" pull , push ":  "pull,push",
-		"pull":           "pull",
-		"push":           "push",
+		"push,pull,push":   "pull,push",
+		" pull , push ":    "pull,push",
+		"pull":             "pull",
+		"push":             "push",
+		"lease,pull,push":  "claim,pull,push",
+		"claim,lease,pull": "claim,pull",
 	}
 	for raw, want := range cases {
 		t.Run(raw, func(t *testing.T) {

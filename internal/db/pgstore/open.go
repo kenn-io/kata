@@ -705,10 +705,29 @@ func (s *Store) ensureInstanceUID(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("generate instance_uid: %w", err)
 	}
-	if _, err := s.ExecContext(ctx,
+	tx, err := s.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin seed instance_uid: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO meta(key, value) VALUES ('instance_uid', $1)
-		 ON CONFLICT (key) DO NOTHING`, fresh); err != nil {
+		 ON CONFLICT (key) DO NOTHING`, fresh)
+	if err != nil {
 		return fmt.Errorf("seed instance_uid: %w", err)
+	}
+	// Only the opener that created the UID records its creation time.
+	if seeded, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("seed instance_uid: %w", err)
+	} else if seeded == 1 {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO meta(key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
+			db.MetaKeyInstanceCreatedAt, db.FormatInstanceCreatedAt(time.Now())); err != nil {
+			return fmt.Errorf("seed %s: %w", db.MetaKeyInstanceCreatedAt, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit seed instance_uid: %w", err)
 	}
 	var stored string
 	if err := s.QueryRowContext(ctx,

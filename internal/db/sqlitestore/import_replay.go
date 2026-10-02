@@ -76,6 +76,17 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 			return err
 		}
 	}
+	var targetIdentity replayInstanceIdentity
+	if !opts.MergeProject {
+		if targetIdentity, err = readReplayInstanceIdentity(ctx, tx); err != nil {
+			return err
+		}
+		// meta survives the clear; drop the target's creation time so a source
+		// UID never inherits it.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.MetaKeyInstanceCreatedAt); err != nil {
+			return fmt.Errorf("clear import target %s: %w", db.MetaKeyInstanceCreatedAt, err)
+		}
+	}
 
 	var skippedMissingPeer, skippedDup, skippedMappings int
 	skippedLinkIDs := make(map[int64]struct{})
@@ -115,6 +126,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		return err
 	}
 	if !opts.MergeProject {
+		if err := restoreReplayInstanceCreatedAt(ctx, tx, targetIdentity); err != nil {
+			return err
+		}
 		if err := replayAPITokenProjection(ctx, tx); err != nil {
 			return err
 		}
@@ -275,6 +289,52 @@ func clearReplayTarget(
 	return nil
 }
 
+// replayInstanceIdentity is the target's instance UID and creation time
+// before replay; createdAt is empty when the UID predates recording it.
+type replayInstanceIdentity struct {
+	uid       string
+	createdAt string
+}
+
+func readReplayInstanceIdentity(ctx context.Context, tx *sql.Tx) (replayInstanceIdentity, error) {
+	var identity replayInstanceIdentity
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(CASE WHEN key='instance_uid' THEN value END), ''),
+		       COALESCE(MAX(CASE WHEN key=? THEN value END), '')
+		FROM meta`, db.MetaKeyInstanceCreatedAt).Scan(&identity.uid, &identity.createdAt)
+	if err != nil {
+		return identity, fmt.Errorf("read import target instance identity: %w", err)
+	}
+	return identity, nil
+}
+
+// restoreReplayInstanceCreatedAt keeps the creation time paired with the
+// instance UID replay ends with: the target's own when its UID survived, or
+// only what the source supplied when the source's UID replaced it.
+func restoreReplayInstanceCreatedAt(ctx context.Context, tx *sql.Tx, target replayInstanceIdentity) error {
+	var finalUID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&finalUID); err != nil {
+		return fmt.Errorf("read restored instance_uid: %w", err)
+	}
+	var err error
+	switch {
+	case finalUID != target.uid:
+		return nil
+	case target.createdAt == "":
+		_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.MetaKeyInstanceCreatedAt)
+	default:
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO meta(key, value) VALUES(?, ?)
+			 ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+			db.MetaKeyInstanceCreatedAt, target.createdAt)
+	}
+	if err != nil {
+		return fmt.Errorf("restore %s: %w", db.MetaKeyInstanceCreatedAt, err)
+	}
+	return nil
+}
+
 func validateFreshReplayTarget(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -287,7 +347,7 @@ func validateFreshReplayTarget(
 		SELECT COUNT(*),
 		       COALESCE(MAX(CASE WHEN key='instance_uid' THEN value END), ''),
 		       COALESCE(MAX(CASE WHEN key='schema_version' THEN value END), '')
-		FROM meta`).Scan(&metaRows, &instanceUID, &schemaVersion); err != nil {
+		FROM meta WHERE key<>?`, db.MetaKeyInstanceCreatedAt).Scan(&metaRows, &instanceUID, &schemaVersion); err != nil {
 		return fmt.Errorf("inspect fresh import metadata: %w", err)
 	}
 	if metaRows != 3 || instanceUID != expectedInstanceUID ||

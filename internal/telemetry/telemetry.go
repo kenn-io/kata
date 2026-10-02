@@ -4,6 +4,7 @@ package telemetry
 import (
 	"log/slog"
 	"testing"
+	"time"
 
 	kittelemetry "go.kenn.io/kit/telemetry"
 )
@@ -30,8 +31,12 @@ type Reporter = kittelemetry.PostHogReporter
 // Options configures a telemetry reporter instance.
 type Options struct {
 	DistinctID string
-	Version    string
-	Commit     string
+	// InstalledAt is when DistinctID was created; events carry its age as
+	// install_age_hours. Zero, for an install that predates recording it,
+	// sends events without an age.
+	InstalledAt time.Time
+	Version     string
+	Commit      string
 }
 
 // EnabledFromEnv reports whether anonymous telemetry is enabled by the environment.
@@ -51,6 +56,7 @@ func NewReporter(opts Options) (*Reporter, error) {
 		Application: applicationName,
 		EnvPrefix:   envPrefix,
 		DistinctID:  opts.DistinctID,
+		InstalledAt: opts.InstalledAt,
 		Version:     opts.Version,
 		Commit:      opts.Commit,
 		Source:      "daemon",

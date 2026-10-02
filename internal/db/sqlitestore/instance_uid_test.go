@@ -4,9 +4,11 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -153,4 +155,42 @@ func TestPurgeLogUIDNotNullRejected(t *testing.T) {
 		        strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
 		freshUID)
 	require.Error(t, err, "purge_log.origin_instance_uid NOT NULL must reject INSERT without origin")
+}
+
+func TestInstanceCreatedAtSurvivesReopen(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	first, path := openTestDBWithPath(t)
+	createdAt, err := first.InstanceCreatedAt(ctx)
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Now(), createdAt, time.Minute)
+	require.NoError(t, first.Close())
+
+	second, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = second.Close() })
+	reopened, err := second.InstanceCreatedAt(ctx)
+	require.NoError(t, err)
+	assert.True(t, createdAt.Equal(reopened), "reopen read %v, want %v", reopened, createdAt)
+}
+
+// TestInstanceCreatedAtStaysZeroForExistingInstanceUID covers databases
+// created before the creation time was recorded: reopening must not stamp
+// the current time onto an instance UID that already existed.
+func TestInstanceCreatedAtStaysZeroForExistingInstanceUID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	first, path := openTestDBWithPath(t)
+	original := first.InstanceUID()
+	_, err := first.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.MetaKeyInstanceCreatedAt)
+	require.NoError(t, err)
+	require.NoError(t, first.Close())
+
+	second, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = second.Close() })
+	assert.Equal(t, original, second.InstanceUID())
+	createdAt, err := second.InstanceCreatedAt(ctx)
+	require.NoError(t, err)
+	assert.True(t, createdAt.IsZero(), "existing instance read creation time %v", createdAt)
 }
