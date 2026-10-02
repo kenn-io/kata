@@ -427,14 +427,16 @@ is enabled, creation returns a `join` object containing
 its hub project ID/UID, local project name, baseline and replay cursors, actor,
 capabilities, token, transport options, and `join_command`. Supply `hub_url`
 as an HTTP(S) base URL reachable by the spoke, optionally with a federation
-API reverse-proxy prefix; web callers can use the
-configured browser origin. Plaintext private-network hostnames require the
-explicit `allow_insecure` option. HTTPS still verifies certificates.
+API reverse-proxy prefix. The server does not infer a federation address
+from its browser origin; dedicated browser listeners and authentication proxies
+may not serve federation transport. Plaintext private-network hostnames require
+the explicit `allow_insecure` option. HTTPS still verifies certificates.
 
-The returned command includes `--project`, UID and cursor flags, plus any
-push/adoption options. Treat the response and command as secrets. Wildcard
-grants have no project join object; grants without `pull`, or servers without a
-supplied/configured hub URL, have no runnable join command. Legacy API callers
+The returned command includes `--project` and the hub project ID, plus any
+push/adoption options. Join fetches the current UID and cursors from the hub
+when it runs, so a purge after enrollment does not leave it using an old baseline.
+Treat the response and command as secrets. Wildcard grants have no project join object; grants without `pull`, or servers without a
+supplied hub URL, have no runnable join command. Legacy API callers
 omitting `hub_url` may issue a grant before enabling federation; those responses
 omit `join` until hub metadata exists. Listing grants
 never returns plaintext tokens or join commands.

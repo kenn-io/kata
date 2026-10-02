@@ -306,3 +306,19 @@ trust_private_network = true
 	require.NoError(t, err)
 	assert.NotNil(t, hc)
 }
+
+func TestResolveHubAdminAuthExplicitTokenWithSharedOrigin(t *testing.T) {
+	cat := catalog(
+		config.CatalogDaemonConfig{Name: "a", URL: "https://hub.example", TokenEnv: "UNSET_HUB_TOKEN", AllowInsecure: true}, //nolint:gosec // G101: synthetic environment-variable name, not a credential.
+		config.CatalogDaemonConfig{Name: "b", URL: "https://hub.example", Token: "unused"},
+	)
+	t.Setenv("UNSET_HUB_TOKEN", "")
+	for _, name := range []string{"a", "b", ""} {
+		t.Run(name, func(t *testing.T) {
+			out, err := resolveHubAdminAuth(cat, hubAuthInputs{hubURL: "https://hub.example", hubToken: "explicit", hubName: name})
+			require.NoError(t, err)
+			assert.Equal(t, "explicit", out.token)
+			assert.Equal(t, name == "a", out.allowInsecure)
+		})
+	}
+}

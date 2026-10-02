@@ -154,11 +154,11 @@ homes. These commands are not included in 0.18.0.
 ## External agents without session hooks
 
 An external agent can read `kata quickstart` at the start of each session
-without installing hooks. This prints instructions and inspects the local
-`<KATA_HOME>/config.toml` for embeddings settings; it does not initialize a
-project, write configuration, enroll a spoke, or install a wakeup integration.
-The compact `--agent` and structured `--json` formats include the same first-run
-guidance. `--format contract` remains the static managed contract.
+without installing hooks. This prints the session contract and links to
+federation and optional embeddings setup. The compact `--agent` and structured
+`--json` formats include the same setup links. Quickstart does not contact a
+daemon or read or write configuration. `--format contract` remains the static
+managed contract.
 
 When work is shared through federation, first run `kata federation identity`
 against the agent's spoke daemon and give that instance UID to the hub

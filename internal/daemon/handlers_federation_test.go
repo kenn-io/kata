@@ -3948,7 +3948,7 @@ func TestFederationEnrollmentJoinInstructions(t *testing.T) {
 	}{
 		{name: "supplied URL with lease alias", supplied: "https://HUB.example:443/", caps: "lease,pull,push", wantHubURL: "https://hub.example", adopt: true},
 		{name: "reverse proxy API prefix", supplied: "https://hub.example/tasks", caps: "pull", wantHubURL: "https://hub.example/tasks"},
-		{name: "configured web origin", origin: "https://hub.example", caps: "claim,pull", wantHubURL: "https://hub.example"},
+		{name: "browser origin is not a federation address", origin: "https://browser.example", caps: "claim,pull"},
 		{name: "explicit private HTTP", supplied: "http://hub.example", caps: "pull,push", wantHubURL: "http://hub.example", insecure: true},
 		{name: "without URL compatibility", caps: "pull"},
 		{name: "inferred loopback origin is not runnable remotely", origin: "http://127.0.0.1:7373", caps: "pull"},
@@ -3995,9 +3995,6 @@ func TestFederationEnrollmentJoinInstructions(t *testing.T) {
 				command, ok := join["join_command"].(string)
 				require.True(t, ok)
 				assert.Contains(t, command, "kata federation join --project hub-project --hub-url "+tc.wantHubURL)
-				assert.Contains(t, command, "--hub-project-uid "+project.UID)
-				assert.Contains(t, command, "--baseline-through ")
-				assert.Contains(t, command, "--replay-horizon ")
 				assert.Contains(t, command, "--actor 'Example User'")
 				assert.Equal(t, tc.insecure, strings.Contains(command, "--allow-insecure"))
 				assert.Equal(t, tc.adopt, strings.Contains(command, "--adopt-existing"))

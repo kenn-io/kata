@@ -17,18 +17,17 @@ func Build(in api.FederationJoinInstructions) string {
 	caps, err := db.CanonicalFederationCapabilities(in.Capabilities)
 	if err != nil || !slices.Contains(strings.Split(caps, ","), "pull") ||
 		in.HubURL == "" || in.ProjectName == "" || in.HubProjectID <= 0 ||
-		in.HubProjectUID == "" || in.Token == "" || in.Actor == "" ||
-		in.ReplayHorizonEventID <= 0 || in.BaselineThroughEventID < 0 ||
+		in.Token == "" || in.Actor == "" ||
 		(in.PushEnabled && !slices.Contains(strings.Split(caps, ","), "push")) ||
 		(in.AdoptExisting && !in.PushEnabled) {
 		return ""
 	}
+	// Join fetches current metadata with the enrollment token, even if the hub
+	// has purged history since these instructions were issued.
 	args := []string{
 		"kata", "federation", "join", "--project", in.ProjectName, "--hub-url", in.HubURL,
-		"--hub-project-id", strconv.FormatInt(in.HubProjectID, 10), "--hub-project-uid", in.HubProjectUID,
-		"--baseline-through", strconv.FormatInt(in.BaselineThroughEventID, 10),
-		"--replay-horizon", strconv.FormatInt(in.ReplayHorizonEventID, 10), "--token", in.Token,
-		"--capabilities", caps, "--actor", in.Actor,
+		"--hub-project-id", strconv.FormatInt(in.HubProjectID, 10), "--token", in.Token,
+		"--capabilities", strings.ReplaceAll(caps, "claim", "lease"), "--actor", in.Actor,
 	}
 	if in.PushEnabled {
 		args = append(args, "--push")

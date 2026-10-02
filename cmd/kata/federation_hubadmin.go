@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -65,12 +66,27 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 		// comes from a catalog entry at this hub origin. Never read that entry's
 		// token when an explicit token was supplied.
 		if cat != nil {
-			e, err := catalogByOrigin(cat, hubOrigin, out.url)
-			if err != nil {
-				return hubAdminAuth{}, err
+			var e *config.CatalogDaemonConfig
+			if name := strings.TrimSpace(in.hubName); name != "" {
+				e = catalogByName(cat, name)
+			} else {
+				// Ambiguity need not select a credential on this path. Inherit
+				// policy only when one entry unambiguously matches the target.
+				e, err = catalogByOrigin(cat, hubOrigin, out.url)
+				if err != nil {
+					if cli, ok := errors.AsType[*cliError](err); !ok || cli.Code != "hub_catalog_origin_ambiguous" {
+						return hubAdminAuth{}, err
+					}
+				}
 			}
 			if e != nil {
-				out.allowInsecure = out.allowInsecure || e.AllowInsecure
+				entryOrigin, err := httpurl.CanonicalHTTPOrigin(e.URL)
+				if err != nil {
+					return hubAdminAuth{}, err
+				}
+				if entryOrigin == hubOrigin {
+					out.allowInsecure = out.allowInsecure || e.AllowInsecure
+				}
 			}
 		}
 		return out, nil

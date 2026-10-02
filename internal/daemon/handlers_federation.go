@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -21,20 +19,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
 )
-
-func isLoopbackHTTPOrigin(raw string) bool {
-	origin, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	host := strings.TrimSuffix(strings.ToLower(origin.Hostname()), ".")
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return true
-	}
-	ipHost, _, _ := strings.Cut(host, "%")
-	ip := net.ParseIP(ipHost)
-	return ip != nil && ip.IsLoopback()
-}
 
 func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
@@ -213,14 +197,6 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		hubURL := in.Body.HubURL
 		allowInsecure := in.Body.AllowInsecure
-		if hubURL == "" && cfg.WebSessions != nil {
-			browserOrigin := cfg.WebSessions.Origin()
-			if !isLoopbackHTTPOrigin(browserOrigin) {
-				hubURL = browserOrigin
-				// The configured browser origin already passed deployment policy.
-				allowInsecure = allowInsecure || cfg.Auth.TrustPrivateNetwork
-			}
-		}
 		if hubURL != "" {
 			baseURL, err := httpurl.CanonicalHTTPBaseURL(hubURL)
 			if err != nil {

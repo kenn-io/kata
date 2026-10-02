@@ -53,11 +53,12 @@ type callInitOpts struct {
 // path with command-specific recovery semantics.
 // Message is the human-readable text. ExitCode is what main() exits with.
 type cliError struct {
-	Message  string
-	Kind     errKind
-	Code     string
-	ExitCode int
-	Data     jsontext.Value
+	HTTPStatus int
+	Message    string
+	Kind       errKind
+	Code       string
+	ExitCode   int
+	Data       jsontext.Value
 }
 
 func (e *cliError) Error() string { return e.Message }
@@ -593,18 +594,20 @@ func apiErrFromBody(status int, bs []byte) *cliError {
 	}
 	if err := json.Unmarshal(bs, &env); err != nil {
 		return &cliError{
-			Message:  errors.New(string(bs)).Error(),
-			Code:     "",
-			Kind:     kindForStatus(status),
-			ExitCode: mapStatusToExit(status, ""),
+			HTTPStatus: status,
+			Message:    errors.New(string(bs)).Error(),
+			Code:       "",
+			Kind:       kindForStatus(status),
+			ExitCode:   mapStatusToExit(status, ""),
 		}
 	}
 	return &cliError{
-		Message:  env.Error.Message,
-		Code:     env.Error.Code,
-		Kind:     kindForStatus(status),
-		ExitCode: mapStatusToExit(status, env.Error.Code),
-		Data:     env.Error.Data,
+		HTTPStatus: status,
+		Message:    env.Error.Message,
+		Code:       env.Error.Code,
+		Kind:       kindForStatus(status),
+		ExitCode:   mapStatusToExit(status, env.Error.Code),
+		Data:       env.Error.Data,
 	}
 }
 

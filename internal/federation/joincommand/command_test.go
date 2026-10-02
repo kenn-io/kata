@@ -1,4 +1,4 @@
-package federation_test
+package joincommand_test
 
 import (
 	"os/exec"
@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/federation/joincommand"
 )
 
 func TestJoinCommandPreservesArguments(t *testing.T) {
@@ -25,15 +25,14 @@ func TestJoinCommandPreservesArguments(t *testing.T) {
 			}
 			// Execute only shell argument parsing. The kata function captures arguments
 			// as NUL-separated words rather than launching the enrollment command.
-			script := `kata() { printf '%s\0' "$@"; }; ` + federation.JoinCommand(in)
+			script := `kata() { printf '%s\0' "$@"; }; ` + joincommand.Build(in)
 			out, err := exec.Command("sh", "-c", script).CombinedOutput() //nolint:gosec // G204: tests the generated command against a shell stub that only captures arguments.
 			require.NoError(t, err, "%s", out)
 			args := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
 			assert.Equal(t, []string{
 				"federation", "join", "--project", value, "--hub-url", "https://hub.example",
-				"--hub-project-id", "42", "--hub-project-uid", "01HZNQ7VFPK1XGD8R5MABCD4EA",
-				"--baseline-through", "0", "--replay-horizon", "7", "--token", value,
-				"--capabilities", "claim,pull,push", "--actor", value, "--push", "--allow-insecure", "--adopt-existing",
+				"--hub-project-id", "42", "--token", value,
+				"--capabilities", "lease,pull,push", "--actor", value, "--push", "--allow-insecure", "--adopt-existing",
 			}, args)
 		})
 	}
@@ -46,17 +45,13 @@ func TestJoinCommandRequiresJoinAuthority(t *testing.T) {
 		func(in *api.FederationJoinInstructions) { in.HubURL = "" },
 		func(in *api.FederationJoinInstructions) { in.ProjectName = "" },
 		func(in *api.FederationJoinInstructions) { in.HubProjectID = 0 },
-		func(in *api.FederationJoinInstructions) { in.HubProjectUID = "" },
 		func(in *api.FederationJoinInstructions) { in.Token = "" },
 		func(in *api.FederationJoinInstructions) { in.Actor = "" },
-		func(in *api.FederationJoinInstructions) { in.ReplayHorizonEventID = 0 },
-		func(in *api.FederationJoinInstructions) { in.ReplayHorizonEventID = -1 },
-		func(in *api.FederationJoinInstructions) { in.BaselineThroughEventID = -1 },
 		func(in *api.FederationJoinInstructions) { in.PushEnabled = true },
 		func(in *api.FederationJoinInstructions) { in.AdoptExisting = true },
 	} {
 		in := base
 		mutate(&in)
-		assert.Empty(t, federation.JoinCommand(in))
+		assert.Empty(t, joincommand.Build(in))
 	}
 }

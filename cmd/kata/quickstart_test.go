@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,81 +23,13 @@ func TestQuickstart_ExternalAgentOnboardingFormats(t *testing.T) {
 				require.NoError(t, json.Unmarshal(out, &payload))
 				instructions = payload.Quickstart
 			}
-			for _, command := range []string{
-				"kata federation identity", "kata --daemon <spoke-profile> federation enroll",
-				"--spoke-instance", "--actor", "kata federation join",
-				"https://hub.example", "KATA_AUTHOR", "kata federation status",
-				"kata inbox", "kata events", "reset_required", "--clear",
-			} {
-				assert.Contains(t, instructions, command)
-			}
+			assert.Contains(t, instructions, "kata federation identity")
 			assert.Contains(t, instructions, "hub administrator")
-			assert.Contains(t, instructions, "certificate")
-			assert.Contains(t, instructions, "--allow-insecure does not bypass TLS")
 			assert.Contains(t, instructions, "Keep the selected daemon pointed at the spoke")
-			assert.Contains(t, instructions, "hub catalog entry")
-			assert.Contains(t, instructions, "matching origin")
-			assert.NotContains(t, instructions, "--daemon hub-admin federation enroll")
-			assert.NotContains(t, instructions, "export KATA_AUTHOR=external-agent")
-			assert.Contains(t, instructions, "For request-actor spokes, set KATA_AUTHOR")
-			assert.Contains(t, instructions, "Identity-mode spokes")
-			assert.Contains(t, instructions, "KATA_AUTHOR cannot")
-			assert.Contains(t, instructions, "enrollment actor")
-		})
-	}
-}
+			assert.Contains(t, instructions, "https://katatracker.com/docs/operations/federation/")
+			assert.Contains(t, instructions, "https://katatracker.com/docs/guide/semantic-search/")
 
-func TestQuickstart_LocalEmbeddingsDetectionIsReadOnly(t *testing.T) {
-	for _, tc := range []struct {
-		name, config, status string
-	}{
-		{"missing file", "", "not configured"},
-		{"no embeddings", "[display]\n", "not configured"},
-		{"configured key file", "[search.embeddings]\nbase_url='https://api.voyageai.com/v1'\nmodel='voyage-3-large'\napi_key_file='/missing/embedding.key'\n", "configured"},
-		{"configured env", "[search.embeddings]\nbase_url='https://api.openai.com/v1'\nmodel='text-embedding-3-small'\napi_key_env='EXAMPLE_EMBEDDING_KEY'\n", "configured"},
-		{"keyless provider", "[search.embeddings]\nbase_url='http://localhost:11434/v1'\nmodel='nomic-embed-text'\n", "configured"},
-		{"partial config", "[search.embeddings]\nbase_url='https://embedding.example/v1'\n", "could not inspect"},
-		{"malformed secret", "[search.embeddings]\napi_key='private-key-sentinel\n", "could not inspect"},
-	} {
-		for _, format := range []string{"human", "agent", "json"} {
-			t.Run(tc.name+"/"+format, func(t *testing.T) {
-				resetFlags(t)
-				home := t.TempDir()
-				t.Setenv("KATA_HOME", home)
-				t.Setenv("KATA_SERVER", "https://unreachable.example")
-				t.Setenv("EXAMPLE_EMBEDDING_KEY", "private-key-sentinel")
-				path := filepath.Join(home, "config.toml")
-				if tc.config != "" {
-					require.NoError(t, os.WriteFile(path, []byte(tc.config), 0600))
-				}
-				out := executeRoot(t, newRootCmd(), "quickstart", "--format", format)
-				instructions := string(out)
-				if format == "json" {
-					var payload struct {
-						Quickstart string `json:"quickstart"`
-					}
-					require.NoError(t, json.Unmarshal(out, &payload))
-					instructions = payload.Quickstart
-				}
-				assert.Contains(t, instructions, "Local embeddings config: "+tc.status)
-				assert.NotContains(t, instructions, "private-key-sentinel")
-				assert.Contains(t, instructions, "kata health --json")
-				assert.Contains(t, instructions, "kata search")
-				assert.Contains(t, instructions, "api_key_file")
-				assert.Contains(t, instructions, "api_key_env")
-				assert.Contains(t, instructions, "optional")
-				entries, err := os.ReadDir(home)
-				require.NoError(t, err)
-				if tc.config == "" {
-					assert.Empty(t, entries)
-				} else {
-					require.Len(t, entries, 1)
-					got, err := os.ReadFile(path) //nolint:gosec // G304: path is created under t.TempDir().
-					require.NoError(t, err)
-					assert.Equal(t, tc.config, string(got))
-				}
-			})
-		}
+		})
 	}
 }
 
@@ -121,7 +51,7 @@ func TestQuickstart_HelpExplainsFormatsAndSessionSetup(t *testing.T) {
 				"exactly what kata agent-hooks contract injects",
 				"kata agent-hooks install --all",
 				"Without hooks, run kata quickstart at session start",
-				"Reads local embeddings settings without changing config or contacting a daemon",
+				"Setup guides cover federation enrollment and optional embeddings",
 			} {
 				assert.Contains(t, out, text)
 			}

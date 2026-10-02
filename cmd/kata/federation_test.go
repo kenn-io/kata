@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
@@ -429,9 +430,6 @@ func TestFederationEnrollCLIPrintsJoinCommand(t *testing.T) {
 	assert.Contains(t, out, "--hub-project-id "+strconv.FormatInt(pid, 10))
 	assert.Contains(t, out, "--project kata")
 	assert.Contains(t, out, "--actor wesm")
-	assert.Contains(t, out, "--hub-project-uid")
-	assert.Contains(t, out, "--replay-horizon")
-	assert.Contains(t, out, "--baseline-through")
 	assert.Contains(t, out, "--push")
 	// The single-daemon setup makes the spoke project the hub project itself
 	// (same UID), which is the rejoin shape: no adoption is auto-marked.
@@ -1712,7 +1710,7 @@ func TestFederationEnrollmentsListCLIShowsHubEnrollments(t *testing.T) {
 
 	assert.Contains(t, out, "01HZNQ7VFPK1XGD8R5MABCD4EF")
 	assert.Contains(t, out, "project: "+strconv.FormatInt(project.ID, 10))
-	assert.Contains(t, out, "capabilities: claim,pull,push")
+	assert.Contains(t, out, "capabilities: pull,push,lease")
 	assert.Contains(t, out, "active")
 	assert.NotContains(t, out, "list-token")
 }
@@ -2780,15 +2778,17 @@ func TestFederationEnrollCLIJSONIncludesRunnableJoinCommand(t *testing.T) {
 	env := testenv.New(t)
 	out := requireCmdOutput(t, env, "--json", "--project", "hub-project", "federation", "enroll", "--spoke-instance", env.DB.InstanceUID(), "--hub-url", env.URL, "--actor", "external-agent", "--capabilities", "pull")
 	var body struct {
-		Join map[string]any `json:"join"`
+		Enrollment map[string]any `json:"enrollment"`
+		Join       map[string]any `json:"join"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &body))
 	for _, field := range []string{"hub_url", "hub_project_id", "hub_project_uid", "project_name", "baseline_through_event_id", "replay_horizon_event_id", "join_command"} {
 		assert.Contains(t, body.Join, field)
 	}
+	assert.NotContains(t, body.Enrollment, "join")
 	command, ok := body.Join["join_command"].(string)
 	require.True(t, ok, "JSON must carry the same executable join instructions as human output")
-	for _, flag := range []string{"--project hub-project", "--hub-url " + env.URL, "--hub-project-id", "--hub-project-uid", "--baseline-through", "--replay-horizon", "--token", "--actor external-agent"} {
+	for _, flag := range []string{"--project hub-project", "--hub-url " + env.URL, "--hub-project-id", "--token", "--actor external-agent"} {
 		assert.Contains(t, command, flag)
 	}
 }
@@ -2833,7 +2833,15 @@ func TestFederationEnrollHTTPClientPinsCatalogCredentials(t *testing.T) {
 func TestFederationEnrollCLIJoinCommandBindsSpoke(t *testing.T) {
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
+	project, err := hub.DB.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "purged issue", Author: "tester"})
+	require.NoError(t, err)
 	out := requireCmdOutput(t, hub, "--json", "--project", "hub-project", "federation", "enroll", "--spoke-instance", spoke.DB.InstanceUID(), "--hub-url", hub.URL, "--actor", "external-agent", "--capabilities", "pull")
+	purge, err := hub.DB.PurgeIssue(t.Context(), issue.ID, "tester", nil)
+	require.NoError(t, err)
+	require.NotNil(t, purge.PurgeResetAfterEventID)
+
 	var body struct {
 		Join struct {
 			Command string `json:"join_command"`
@@ -2855,7 +2863,7 @@ func TestFederationEnrollCLIJoinCommandBindsSpoke(t *testing.T) {
 	assert.Equal(t, remote.UID, local.UID)
 	assert.Equal(t, remote.ID, binding.HubProjectID)
 	assert.Equal(t, hub.URL, binding.HubURL)
-	assert.Positive(t, binding.ReplayHorizonEventID)
+	assert.Greater(t, binding.ReplayHorizonEventID, *purge.PurgeResetAfterEventID)
 	assert.Equal(t, "external-agent", binding.Actor)
 }
 
@@ -2893,7 +2901,85 @@ func TestFederationCapabilityAliasesHaveCanonicalCLIOutput(t *testing.T) {
 			apiCaps, displayCaps, err := normalizeFederationCapabilities(input)
 			require.NoError(t, err)
 			assert.Equal(t, "claim,pull,push", apiCaps)
-			assert.Equal(t, apiCaps, displayCaps)
+			assert.Equal(t, "pull,push,lease", displayCaps)
 		})
 	}
+}
+
+// Older hubs reject unknown enrollment properties during rolling upgrades.
+func TestFederationEnrollCLIAgainstOlderHub(t *testing.T) {
+	env := testenv.New(t)
+	handler := daemon.NewServer(daemon.ServerConfig{DB: env.DB}).Handler()
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/federation/enrollments" {
+			raw, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			var request struct {
+				SpokeInstanceUID             string `json:"spoke_instance_uid"`
+				ProjectID                    int64  `json:"project_id"`
+				Capabilities                 string `json:"capabilities"`
+				Token                        string `json:"token"`
+				Actor                        string `json:"actor"`
+				AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors"`
+			}
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&request); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(hub.Close)
+	out := requireCmdOutput(t, env, "--project", "hub-project", "federation", "enroll", "--hub-url", hub.URL, "--spoke-instance", env.DB.InstanceUID(), "--actor", "external-agent", "--capabilities", "pull")
+	assert.Contains(t, out, "--hub-url "+hub.URL)
+	grants, err := env.DB.ListFederationEnrollments(t.Context())
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+}
+
+func TestFederationEnrollCLIUnauthorizedExplainsHubCredentials(t *testing.T) {
+	for _, path := range []string{"/api/v1/projects", "/federation/enable", "/api/v1/federation/enrollments"} {
+		for _, structured := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/structured=%t", path, structured), func(t *testing.T) {
+				env := testenv.New(t)
+				_, err := env.DB.CreateProject(t.Context(), "hub-project")
+				require.NoError(t, err)
+				t.Setenv("KATA_AUTH_TOKEN", "local-token")
+				handler := daemon.NewServer(daemon.ServerConfig{DB: env.DB}).Handler()
+				hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Empty(t, r.Header.Get("Authorization"))
+					if strings.HasSuffix(r.URL.Path, path) {
+						if structured {
+							api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required", "authentication required")
+						} else {
+							http.Error(w, "login required", http.StatusUnauthorized)
+						}
+						return
+					}
+					handler.ServeHTTP(w, r)
+				}))
+				t.Cleanup(hub.Close)
+				_, err = runCmdOutput(t, env, "--project", "hub-project", "federation", "enroll", "--hub-url", hub.URL, "--spoke-instance", env.DB.InstanceUID(), "--capabilities", "pull")
+				require.Error(t, err)
+				cli := cliErrorForErr(err, true)
+				assert.Contains(t, cli.Message, "--hub-token")
+				assert.Contains(t, cli.Message, "catalog")
+				assert.Contains(t, cli.Message, "KATA_AUTH_TOKEN")
+			})
+		}
+	}
+}
+
+func TestPrintFederationEnrollmentExplainsMissingJoinCommand(t *testing.T) {
+	resetFlags(t)
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	err := printFederationEnrollment(cmd, "hub-project", "spoke", api.FederationEnrollmentOut{ID: 7, Token: "issued-token"}, federationJoinBundle{Token: "issued-token"})
+	require.NoError(t, err)
+	assert.Contains(t, out.String(), "join command unavailable")
+	assert.Contains(t, out.String(), "issued-token")
 }

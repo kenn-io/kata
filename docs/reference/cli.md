@@ -1526,12 +1526,16 @@ kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --re
 `kata federation enroll --project <project> --hub-url <url>` sends the
 enrollment API call to `<url>` using `--hub-token` or a daemon catalog
 credential whose URL matches the hub origin. It never forwards the local
-daemon's global token to the hub. It creates `<project>` on that hub if it does
+daemon's global `KATA_AUTH_TOKEN` to the hub; callers that used that variable
+for enrollment must pass the hub credential through `--hub-token` or a matching
+catalog entry. It creates `<project>` on that hub if it does
 not already exist, then enables federation and creates the enrollment. The CLI
 should otherwise remain pointed at the spoke daemon so the printed join
 command can include `--adopt-existing` when the spoke project already exists.
 Use `kata federation enroll --adopt-existing` when adopting a differently named
-spoke project, then edit the printed join command's `--project` value.
+spoke project, then edit the printed join command's `--project` value. Join
+fetches the current hub metadata when run. CLI and TUI output call the coordination
+capability `lease`; JSON and API fields use `claim`.
 
 `--adopt-existing` is a current-state cutover. It removes the spoke project's
 pre-adoption event history from the live event stream and queues fresh snapshots

@@ -130,15 +130,16 @@ the agent the hub's administration token.
    it. It does not grant general hub API access.
 
 3. On the spoke, run the generated `kata federation join` command. Keep its
-   hub project ID/UID, replay and baseline cursors, actor, and capability values
-   intact. A manual command has this shape:
+   hub URL, project ID, actor, and capability values intact. Join reads the
+   current project UID and replay/baseline cursors from the hub when it runs.
+   A manual command has this shape:
 
    ```sh
    kata federation join --project spoke-project \
      --hub-url https://hub.example \
      --hub-project-id <hub-project-id> \
      --token <enrollment-token> \
-     --capabilities claim,pull,push \
+     --capabilities pull,push,lease \
      --actor external-agent --push
    ```
 
@@ -480,7 +481,7 @@ Expected shape:
 
 ```text
 enrolled <spoke-instance-uid> for <hub-project>
-join: kata federation join --project <hub-project> --hub-url <hub-api-url> --hub-project-id <hub-project-id> --hub-project-uid <hub-project-uid> --baseline-through <baseline-event-id> --replay-horizon <replay-event-id> --token <enrollment-token> --capabilities claim,pull,push --actor <actor> --push --adopt-existing
+join: kata federation join --project <hub-project> --hub-url <hub-api-url> --hub-project-id <hub-project-id> --token <enrollment-token> --capabilities pull,push,lease --actor <actor> --push --adopt-existing
 ```
 
 When a spoke project named `<hub-project>` already exists, the printed command
@@ -513,7 +514,7 @@ kata federation join --project <spoke-project> \
   --hub-url <hub-api-url> \
   --hub-project-id <hub-project-id> \
   --token <enrollment-token> \
-  --capabilities claim,pull,push \
+  --capabilities pull,push,lease \
   --actor <actor> \
   --push \
   --adopt-existing
@@ -558,7 +559,7 @@ kata federation join --project <spoke-project> \
   --hub-url http://hub.internal:7787 \
   --hub-project-id <hub-project-id> \
   --token <enrollment-token> \
-  --capabilities claim,pull,push \
+  --capabilities pull,push,lease \
   --actor <actor> \
   --push \
   --adopt-existing \
@@ -591,7 +592,9 @@ kata federation identity
 Create one enrollment per trusted spoke. `--hub-url` selects the hub daemon
 for this command. The hub API request uses `--hub-token` or a daemon catalog
 credential whose URL matches the hub origin; the local daemon's global token
-is not forwarded:
+is not forwarded. If you previously exported `KATA_AUTH_TOKEN` for enrollment,
+pass that hub credential with `--hub-token` or store it in a matching catalog
+entry instead. A hub `401` explains these options:
 
 ```sh
 kata federation enroll --project fedlab \
@@ -616,8 +619,8 @@ fragment.
 The CLI prints a pasteable `kata federation join ...` command containing the
 generated token. Treat that command as secret-bearing material.
 
-Enrollment output uses canonical `claim,pull,push` capabilities. Both the CLI
-and enrollment API accept `lease` as an alias for `claim`.
+CLI and TUI output use `lease` for coordination. The API and JSON capability
+fields use the canonical `claim` name; both spellings are accepted as input.
 
 ## Spoke setup
 
@@ -659,7 +662,7 @@ private network.
 
 Enrollment capabilities and local spoke behavior are separate:
 
-- `--capabilities claim,pull,push` on the hub says what the token may do;
+- `--capabilities pull,push,lease` on the hub says what the token may do;
 - `--push` on the spoke says this replica should actually push local-origin
   events back to the hub.
 
