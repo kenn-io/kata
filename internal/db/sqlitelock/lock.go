@@ -14,9 +14,8 @@ import (
 // Lock is the process-lifetime lock for one canonical SQLite database. It
 // must be acquired before opening or replacing the database.
 type Lock struct {
-	file     *os.File
-	database string
-	release  sync.Once
+	file    *os.File
+	release sync.Once
 }
 
 // Acquire takes a non-blocking lock beside the canonical SQLite database. Its
@@ -43,26 +42,7 @@ func Acquire(path string) (*Lock, error) {
 		_ = file.Close()
 		return nil, fmt.Errorf("daemon already running or database lock unavailable for %s; stop the other daemon before starting: %w", database, err)
 	}
-	return &Lock{file: file, database: database}, nil
-}
-
-// Matches reports whether this live lock protects path's canonical SQLite
-// database. It lets daemon startup pass its existing lock into storeopen.
-func (l *Lock) Matches(path string) error {
-	if l == nil || l.file == nil {
-		return errors.New("SQLite database lock is missing")
-	}
-	if _, err := l.file.Stat(); err != nil {
-		return fmt.Errorf("inspect SQLite database lock: %w", err)
-	}
-	database, err := canonicalDatabasePath(path)
-	if err != nil {
-		return err
-	}
-	if database != l.database {
-		return fmt.Errorf("SQLite database lock for %s does not match database %s", l.database, database)
-	}
-	return nil
+	return &Lock{file: file}, nil
 }
 
 // Release drops this process's ownership while leaving the lock file in place.

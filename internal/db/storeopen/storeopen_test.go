@@ -176,7 +176,6 @@ func TestOpen_UnknownSchemeIsUnsupported(t *testing.T) {
 // schema_version is below db.CurrentSchemaVersion() and confirms storeopen
 // runs jsonl.AutoCutover before opening.
 func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
-	t.Setenv("KATA_ALLOW_DEV_MIGRATION", "1")
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -195,7 +194,6 @@ func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 }
 
 func TestOpenWritableSQLiteLocksCutoverAndHandleLifetime(t *testing.T) {
-	t.Setenv("KATA_ALLOW_DEV_MIGRATION", "1")
 	t.Setenv("KATA_HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "kata.db")
 	stageLegacyPreCutoverFixture(t, path, db.CurrentSchemaVersion()-1)
@@ -228,31 +226,7 @@ func TestOpenWritableSQLiteLocksCutoverAndHandleLifetime(t *testing.T) {
 	lock.Release()
 }
 
-func TestOpenWithConfigReusesPreAcquiredSQLiteLock(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	path := filepath.Join(t.TempDir(), "kata.db")
-	lock, err := sqlitelock.Acquire(path)
-	require.NoError(t, err)
-	config := storeopen.DefaultConfig()
-	config.SQLiteLock = lock
-
-	store, err := storeopen.OpenWithConfig(t.Context(), path, config)
-	require.NoError(t, err)
-	require.NoError(t, store.Close())
-	secondLock, err := sqlitelock.Acquire(path)
-	if secondLock != nil {
-		secondLock.Release()
-	}
-	require.ErrorContains(t, err, "daemon already running", "storeopen must leave a caller-owned lock held")
-
-	lock.Release()
-	secondLock, err = sqlitelock.Acquire(path)
-	require.NoError(t, err)
-	secondLock.Release()
-}
-
 func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {
-	t.Setenv("KATA_ALLOW_DEV_MIGRATION", "1")
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -389,7 +363,6 @@ func TestOpenResolvedFromStorageDSNKeepsPasswordOutOfError(t *testing.T) {
 // separately by TestImport_LinkWithStrayProjectIDKeyIsIgnored in
 // internal/jsonl/cutover_test.go.
 func TestOpen_V14CutoverCarriesLinks(t *testing.T) {
-	t.Setenv("KATA_ALLOW_DEV_MIGRATION", "1")
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")

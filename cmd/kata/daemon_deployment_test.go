@@ -91,7 +91,7 @@ func TestDeploymentNoAutoTokenFlagReachesStartAndRestart(t *testing.T) {
 			old := startDetachedDaemon
 			t.Cleanup(func() { startDetachedDaemon = old })
 			var disabled bool
-			startDetachedDaemon = func(_ context.Context, _ string, _ bool, noAutoToken bool) (daemonStartOutput, error) {
+			startDetachedDaemon = func(_ context.Context, _ string, _ bool, noAutoToken bool, _ bool) (daemonStartOutput, error) {
 				disabled = noAutoToken
 				return daemonStartOutput{Action: "started"}, nil
 			}

@@ -27,7 +27,6 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
@@ -240,13 +239,13 @@ func daemonStartCmd() *cobra.Command {
 					ExitCode: ExitUsage,
 				}
 			}
-			cmd.SetContext(storeopen.WithDevMigrationAllowed(cmd.Context(), allowDevMigration))
+			allowMigration := allowDevMigration || os.Getenv("KATA_ALLOW_DEV_MIGRATION") == "1"
 			if foreground {
 				ctx, cancel := context.WithCancel(cmd.Context())
 				defer cancel()
-				return runDaemonForeground(ctx, listen, insecureReadonly, noAutoToken)
+				return runDaemonForeground(ctx, listen, insecureReadonly, noAutoToken, allowMigration)
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
+			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken, allowMigration)
 			if err != nil {
 				return err
 			}
@@ -284,7 +283,7 @@ func daemonStartCmd() *cobra.Command {
 	return cmd
 }
 
-func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
+func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly, noAutoToken, allowDevMigration bool) (daemonStartOutput, error) {
 	ns, err := daemon.NewNamespace()
 	if err != nil {
 		return daemonStartOutput{}, err
@@ -316,7 +315,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		}
 		replacedPID = rec.PID
 	}
-	out, err := launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly, noAutoToken)
+	out, err := launchDetachedDaemon(ctx, ns.DataDir, listen, insecureReadonly, noAutoToken, allowDevMigration)
 	if err != nil {
 		return daemonStartOutput{}, err
 	}
@@ -359,9 +358,9 @@ func daemonRecordAdvertisesIdleShutdown(ctx context.Context, rec kitdaemon.Runti
 	return health.IdleShutdown != nil
 }
 
-func detachedDaemonArgs(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) []string {
+func detachedDaemonArgs(listen string, insecureReadonly, noAutoToken, allowDevMigration bool) []string {
 	args := []string{"daemon", "start", "--foreground"}
-	if storeopen.DevMigrationAllowed(ctx) {
+	if allowDevMigration {
 		args = append(args, "--allow-dev-migration")
 	}
 	if listen != "" {
@@ -377,9 +376,9 @@ func detachedDaemonArgs(ctx context.Context, listen string, insecureReadonly, no
 }
 
 func defaultLaunchDetachedDaemon(
-	ctx context.Context, dataDir, listen string, insecureReadonly, noAutoToken bool,
+	ctx context.Context, dataDir, listen string, insecureReadonly, noAutoToken, allowDevMigration bool,
 ) (daemonStartOutput, error) {
-	args := detachedDaemonArgs(ctx, listen, insecureReadonly, noAutoToken)
+	args := detachedDaemonArgs(listen, insecureReadonly, noAutoToken, allowDevMigration)
 	opts := kitdaemon.StartDetachedOptions{
 		Args:            args,
 		Env:             os.Environ(),
@@ -804,7 +803,7 @@ func daemonRestartCmd() *cobra.Command {
 			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
 				return err
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
+			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken, os.Getenv("KATA_ALLOW_DEV_MIGRATION") == "1")
 			if err != nil {
 				return err
 			}
@@ -1056,7 +1055,7 @@ type daemonReloadOutput struct {
 // --foreground` with the platform default endpoint and by the auto-start child
 // process spawned by ensureDaemon.
 func runDaemon(ctx context.Context) error {
-	return runDaemonWithListen(ctx, "", false, false)
+	return runDaemonWithListen(ctx, "", false, false, os.Getenv("KATA_ALLOW_DEV_MIGRATION") == "1")
 }
 
 // redactRuntimeDSN returns dsn safe for inclusion in the runtime file and
@@ -1112,16 +1111,16 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // When the daemon shuts down because it received the restart signal, it
 // re-executes itself only after every listener and the runtime record have
 // been released.
-func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
+func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken, allowDevMigration bool) error {
 	restart := newDaemonRestart(os.Stderr)
-	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart); err != nil {
+	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, allowDevMigration, restart); err != nil {
 		return err
 	}
 	return restart.exec(ctx)
 }
 
 func runDaemonProcess(
-	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart,
+	ctx context.Context, listen string, insecureReadonly, noAutoToken, allowDevMigration bool, restart *daemonRestart,
 ) (returnErr error) {
 	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly, noAutoToken)
 	if err != nil {
@@ -1161,15 +1160,13 @@ func runDaemonProcess(
 		} else if ok {
 			return fmt.Errorf("daemon already running pid=%d version=%s for database %s; stop it before starting", rec.PID, rec.Version, dbPath)
 		}
-		lock, err := sqlitelock.Acquire(strings.TrimPrefix(dbPath, "sqlite://"))
-		if err != nil {
-			return err
-		}
-		defer lock.Release()
-		startup.StoreConfig.SQLiteLock = lock
 	}
+	startup.StoreConfig.RequireMigrationConsent = version.IsDevelopment() && !allowDevMigration
 	store, err := storeopen.OpenWithConfig(ctx, dbPath, startup.StoreConfig, db.Serving())
 	if err != nil {
+		if errors.Is(err, storeopen.ErrMigrationConsentRequired) {
+			return fmt.Errorf("development build %s refuses to migrate in KATA_HOME %s: %w; use a temporary KATA_HOME and KATA_DB, or explicitly opt in with --allow-dev-migration or KATA_ALLOW_DEV_MIGRATION=1", version.Version, startup.KataHome, err)
+		}
 		return err
 	}
 	defer func() {

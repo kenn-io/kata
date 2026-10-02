@@ -1471,7 +1471,7 @@ returns an error identifying the installed version and directs you to
 `kata daemon restart` with the daemon's original startup options. Remote
 daemons must be updated on their own hosts.
 
-Development builds refuse to upgrade an existing older SQLite database and
+Development CLI daemons refuse to upgrade an existing older SQLite database and
 report its database and `KATA_HOME` paths. Use an isolated temporary home and
 database for manual checks; see [Building](../development/contributing.md#building).
 To deliberately upgrade an existing database, stop its daemon and pass
@@ -1479,7 +1479,10 @@ To deliberately upgrade an existing database, stop its daemon and pass
 that invocation. This consent does not bypass integrity checks. Fresh databases
 and databases already at the binary's schema need no opt-in. Clean release
 versions keep automatic upgrades. Tagged Go module installs count as releases;
-Go pseudo-versions still require development migration consent.
+Go pseudo-versions, snapshot builds, and bare commit hashes still require
+development migration consent. This CLI policy does not apply to programs
+embedding `kata.Service` or to explicit `kata import` operations. It covers
+SQLite; PostgreSQL retains its configured schema startup policy.
 
 Each SQLite daemon locks the canonical database path before opening or
 migrating it. Another daemon cannot start against that file through a different

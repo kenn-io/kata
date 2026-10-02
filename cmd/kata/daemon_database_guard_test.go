@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,9 +11,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitelock"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -64,7 +66,7 @@ func TestDaemonRefusesCrossVersionRuntimeBeforeMigration(t *testing.T) {
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	err = runDaemonWithListen(ctx, "127.0.0.1:0", false)
+	err = runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false)
 	require.ErrorContains(t, err, "daemon already running")
 	ver, err := sqlitestore.PeekSchemaVersion(t.Context(), path)
 	require.NoError(t, err)
@@ -96,23 +98,74 @@ func TestDaemonRefusesLegacyRuntimeRecordAcrossSQLiteSymlink(t *testing.T) {
 	t.Setenv("KATA_DB", alias)
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	err = runDaemonWithListen(ctx, "127.0.0.1:0", false)
+	err = runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false)
 	require.ErrorContains(t, err, "daemon already running")
 }
 
-func TestDaemonStartAcceptsExplicitDevMigrationFlag(t *testing.T) {
-	setupKataEnv(t)
-	original := runDaemonForeground
-	t.Cleanup(func() { runDaemonForeground = original })
-	called := false
-	runDaemonForeground = func(ctx context.Context, _ string, _ bool) error {
-		called = true
-		require.True(t, storeopen.DevMigrationAllowed(ctx))
-		return nil
+func TestDaemonStartResolvesMigrationConsent(t *testing.T) {
+	for _, tc := range []struct {
+		name, env  string
+		flag, want bool
+	}{
+		{"default", "", false, false}, {"flag", "", true, true},
+		{"environment", "1", false, true}, {"invalid environment", "true", false, false},
+	} {
+		for _, foreground := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/foreground=%t", tc.name, foreground), func(t *testing.T) {
+				setupKataEnv(t)
+				t.Setenv("KATA_ALLOW_DEV_MIGRATION", tc.env)
+				originalRun, originalStart := runDaemonForeground, startDetachedDaemon
+				t.Cleanup(func() { runDaemonForeground, startDetachedDaemon = originalRun, originalStart })
+				called := false
+				runDaemonForeground = func(_ context.Context, _ string, _, _ bool, allow bool) error {
+					require.True(t, foreground)
+					called = true
+					require.Equal(t, tc.want, allow)
+					return nil
+				}
+				startDetachedDaemon = func(_ context.Context, _ string, _, _ bool, allow bool) (daemonStartOutput, error) {
+					require.False(t, foreground)
+					called = true
+					require.Equal(t, tc.want, allow)
+					return daemonStartOutput{}, nil
+				}
+				args := []string{"daemon", "start"}
+				if foreground {
+					args = append(args, "--foreground")
+				}
+				if tc.flag {
+					args = append(args, "--allow-dev-migration")
+				}
+				_, _, err := executeRootCapture(t, t.Context(), args...)
+				require.NoError(t, err)
+				require.True(t, called)
+			})
+		}
 	}
-	_, _, err := executeRootCapture(t, t.Context(), "daemon", "start", "--foreground", "--allow-dev-migration")
+}
+
+func TestDevelopmentDaemonRefusesUpgradeWithoutConsent(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("KATA_ALLOW_DEV_MIGRATION", "")
+	original := version.Version
+	version.Version = "dev"
+	t.Cleanup(func() { version.Version = original })
+	path := filepath.Join(home, "kata.db")
+	s, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
-	require.True(t, called)
+	_, err = s.ExecContext(t.Context(), `UPDATE meta SET value=? WHERE key='schema_version'`, db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+	before, err := os.ReadFile(path) //nolint:gosec // G304: temporary test database.
+	require.NoError(t, err)
+	_, _, err = executeRootCapture(t, t.Context(), "daemon", "start", "--foreground", "--listen", "127.0.0.1:0")
+	require.ErrorContains(t, err, "development build")
+	require.ErrorContains(t, err, home)
+	require.ErrorContains(t, err, path)
+	require.ErrorContains(t, err, "--allow-dev-migration")
+	after, err := os.ReadFile(path) //nolint:gosec // G304: temporary test database.
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 }
 
 func TestDaemonRefusesDatabaseHeldOutsideHome(t *testing.T) {
@@ -128,5 +181,5 @@ func TestDaemonRefusesDatabaseHeldOutsideHome(t *testing.T) {
 	// Leave KATA_DB pointing to the same file, but use another home and socket.
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	require.ErrorContains(t, runDaemonWithListen(ctx, "127.0.0.1:0", false), "daemon already running")
+	require.ErrorContains(t, runDaemonWithListen(ctx, "127.0.0.1:0", false, false, false), "daemon already running")
 }
