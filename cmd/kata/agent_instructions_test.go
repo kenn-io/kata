@@ -179,7 +179,7 @@ func TestAgentInstructionsMuseLifecycle(t *testing.T) {
 	foreign := []byte("# Existing instructions\r\nKeep this exact text without a final newline.")
 	require.NoError(t, os.WriteFile(instructions, foreign, 0o640)) //nolint:gosec // G306: exercise preservation of an existing fixture mode.
 	t.Setenv("KATA_AUTH_TOKEN", "secret-must-not-appear")
-	args := []string{"agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent", "--json"}
+	args := []string{"agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent", "--json"}
 	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, append(args, "--dry")...)
 	require.NoError(t, err, stderr)
 	var report struct {
@@ -237,14 +237,14 @@ func TestAgentInstructionsMuseLifecycle(t *testing.T) {
 	}
 	// Foreign suffixes added after install must also survive uninstall.
 	require.NoError(t, os.WriteFile(instructions, append(installed[instructions], []byte("Foreign suffix\n")...), 0o640)) //nolint:gosec // G306: retain the existing fixture mode.
-	out, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "status", "muse", "--home", home, "--json")
+	out, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "status", "muse", "--home", home, "--json")
 	require.NoError(t, err, stderr)
 	require.NoError(t, json.Unmarshal([]byte(out), &report))
 	for _, a := range report.Artifacts {
 		require.Equal(t, "installed", a.State)
 	}
 	for range 2 {
-		_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home)
+		_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "uninstall", "muse", "--home", home)
 		require.NoError(t, err, stderr)
 	}
 	data, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
@@ -259,7 +259,7 @@ func TestAgentInstructionsMuseLifecycle(t *testing.T) {
 func TestAgentInstructionsUninstallDryPreviewDoesNotWrite(t *testing.T) {
 	resetFlags(t)
 	home := t.TempDir()
-	installOut, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent", "--json")
+	installOut, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent", "--json")
 	require.NoError(t, err, stderr)
 
 	var installed struct {
@@ -278,7 +278,7 @@ func TestAgentInstructionsUninstallDryPreviewDoesNotWrite(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home, "--dry", "--json")
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "uninstall", "muse", "--home", home, "--dry", "--json")
 	require.NoError(t, err, stderr)
 	var report struct {
 		DryRun    bool `json:"dry_run"`
@@ -323,15 +323,15 @@ func TestAgentInstructionsJSONOmitsContentsOutsideDryRuns(t *testing.T) {
 		}
 	}
 
-	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent", "--json")
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent", "--json")
 	require.NoError(t, err, stderr)
 	assertNoArtifactContents(out)
 
-	out, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "status", "muse", "--home", home, "--json")
+	out, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "status", "muse", "--home", home, "--json")
 	require.NoError(t, err, stderr)
 	assertNoArtifactContents(out)
 
-	out, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home, "--json")
+	out, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "uninstall", "muse", "--home", home, "--json")
 	require.NoError(t, err, stderr)
 	assertNoArtifactContents(out)
 
@@ -346,11 +346,11 @@ func TestAgentInstructionsRejectsDryRunAlias(t *testing.T) {
 			resetFlags(t)
 			home := t.TempDir()
 			if verb == "uninstall" {
-				_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
+				_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
 				require.NoError(t, err, stderr)
 			}
 
-			args := []string{"agent-hooks", "instructions", verb, "muse", "--home", home}
+			args := []string{"agent-hook", "instructions", verb, "muse", "--home", home}
 			if verb == "install" {
 				args = append(args, "--actor", "example-agent")
 			}
@@ -370,7 +370,7 @@ func TestAgentInstructionsRefusesForeignAndMalformedBeforeWriting(t *testing.T) 
 			skill := filepath.Join(home, "workspace", "skills", "kata", "SKILL.md")
 			require.NoError(t, os.MkdirAll(filepath.Dir(skill), 0o700))
 			require.NoError(t, os.WriteFile(skill, []byte(content), 0o600))
-			out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
+			out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
 			require.Error(t, err)
 			require.Empty(t, out)
 			_, err = os.Stat(filepath.Join(home, "AGENTS.md"))
@@ -394,14 +394,14 @@ func TestAgentInstructionsUsageAndQuickstartHelp(t *testing.T) {
 		{"uninstall", "muse"},
 		{"status", "muse"},
 	} {
-		out, _, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "instructions"}, tail...)...)
+		out, _, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hook", "instructions"}, tail...)...)
 		require.Error(t, err)
 		require.Empty(t, out)
 		require.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered))
 	}
 	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "quickstart", "--help")
 	require.NoError(t, err, stderr)
-	require.Contains(t, out, "agent-hooks instructions install muse")
+	require.Contains(t, out, "agent-hook instructions install muse")
 	require.Contains(t, out, "instruction-following")
 	// Setup must never change the native briefing bytes.
 	out, stderr, err = executeAgentHook(t, unreadableHookInput{}, "quickstart", "--format", "contract")
@@ -425,7 +425,7 @@ func TestAgentInstructionsUninstallAfterLineEndingEdits(t *testing.T) {
 			home := t.TempDir()
 			instructions := filepath.Join(home, "AGENTS.md")
 			require.NoError(t, os.WriteFile(instructions, []byte("# Existing\n"), 0o600))
-			_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
+			_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
 			require.NoError(t, err, stderr)
 			skill := filepath.Join(home, "workspace", "skills", "kata", "SKILL.md")
 			poll := filepath.Join(home, "workspace", "skills", "kata", "POLL.md")
@@ -435,7 +435,7 @@ func TestAgentInstructionsUninstallAfterLineEndingEdits(t *testing.T) {
 				require.NoError(t, os.WriteFile(path, []byte(tc.edit(string(data))), 0o600))
 			}
 
-			_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home)
+			_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "uninstall", "muse", "--home", home)
 			require.NoError(t, err, stderr)
 			data, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
 			require.NoError(t, err)
@@ -454,13 +454,13 @@ func TestAgentInstructionsUninstallAfterBlankLineRemoved(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "AGENTS.md")
 	require.NoError(t, os.WriteFile(path, []byte("# Existing\n"), 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
 	require.NoError(t, err, stderr)
 	data, err := os.ReadFile(path) //nolint:gosec // G304: fixture under TempDir.
 	require.NoError(t, err)
 	edited := strings.Replace(string(data), "# Existing\n\n", "# Existing\n", 1) + "# Additional instructions\n"
 	require.NoError(t, os.WriteFile(path, []byte(edited), 0o600)) //nolint:gosec // G703: path is the test-owned AGENTS.md under TempDir.
-	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home)
+	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "uninstall", "muse", "--home", home)
 	require.NoError(t, err, stderr)
 	data, err = os.ReadFile(path) //nolint:gosec // G304: fixture under TempDir.
 	require.NoError(t, err)
@@ -473,9 +473,9 @@ func TestAgentInstructionsActorContainingMarkerPhrase(t *testing.T) {
 		t.Run(actor, func(t *testing.T) {
 			resetFlags(t)
 			home := t.TempDir()
-			_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", actor)
+			_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", actor)
 			require.NoError(t, err, stderr)
-			out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "status", "muse", "--home", home, "--json")
+			out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "status", "muse", "--home", home, "--json")
 			require.NoError(t, err, stderr)
 			var report struct {
 				Artifacts []struct {
@@ -487,7 +487,7 @@ func TestAgentInstructionsActorContainingMarkerPhrase(t *testing.T) {
 			for _, a := range report.Artifacts {
 				require.Equal(t, "installed", a.State)
 			}
-			_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home)
+			_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "uninstall", "muse", "--home", home)
 			require.NoError(t, err, stderr)
 			_, err = os.Stat(filepath.Join(home, "workspace", "skills", "kata", "SKILL.md"))
 			require.ErrorIs(t, err, os.ErrNotExist)
@@ -502,9 +502,9 @@ func TestAgentInstructionsUninstallKeepsEmptyAgentsFile(t *testing.T) {
 	home := t.TempDir()
 	instructions := filepath.Join(home, "AGENTS.md")
 	require.NoError(t, os.WriteFile(instructions, nil, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "install", "muse", "--home", home, "--actor", "example-agent")
 	require.NoError(t, err, stderr)
-	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "instructions", "uninstall", "muse", "--home", home)
+	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "instructions", "uninstall", "muse", "--home", home)
 	require.NoError(t, err, stderr)
 	data, err := os.ReadFile(instructions) //nolint:gosec // G304: fixture under TempDir.
 	require.NoError(t, err)

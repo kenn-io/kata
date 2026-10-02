@@ -24,16 +24,16 @@ for(const reason of ['new','resume','fork','reload']) {
  const initial=await old.emitBeforeAgentStart('initial',undefined,base);
  assert.equal(initial.systemPromptOptions.sections.kata_contract,'old contract');
  assert.equal(calls().filter(c=>c.args[0]==='agent-contract-hook').at(-1).args[2],'project.txt');
- const before=calls().filter(c=>c.args[0]==='agent-hooks').length;
+ const before=calls().filter(c=>c.args[0]==='agent-hook').length;
  await old.emit({type:'session_shutdown',reason});old.invalidate();
- assert.equal(calls().filter(c=>c.args[0]==='agent-hooks').length,before,'replacement teardown must not end attention');
+ assert.equal(calls().filter(c=>c.args[0]==='agent-hook').length,before,'replacement teardown must not end attention');
  // Discovery now omits the removed/disabled project extension. Recreate the
  // host runtime and extension APIs exactly as Pi's native replacement does.
  const manager=reason==='reload'?oldManager:SessionManager.inMemory(cwd);
  const current=await load(manager,false);
  await current.emit({type:'session_start',reason});
- assert.equal(calls().filter(c=>c.args[0]==='agent-hooks').length,before+(reason==='reload'?0:1),'user attention fallback must become active');
- const activeStart=calls().filter(c=>c.args[0]==='agent-hooks').at(-1);
+ assert.equal(calls().filter(c=>c.args[0]==='agent-hook').length,before+(reason==='reload'?0:1),'user attention fallback must become active');
+ const activeStart=calls().filter(c=>c.args[0]==='agent-hook').at(-1);
  writeFileSync(process.env.KATA_PI_TEST_STATE,JSON.stringify({contract:'fresh user contract',inbox:'fresh user request'}));
  const fresh=await current.emitBeforeAgentStart('replacement',undefined,base);
  assert.equal(fresh.systemPromptOptions.sections.kata_contract,'fresh user contract',reason+' must retire stale project contract');
@@ -42,7 +42,7 @@ for(const reason of ['new','resume','fork','reload']) {
  assert.deepEqual(calls().filter(c=>c.args[0]==='agent-contract-hook').at(-1).args,['agent-contract-hook','--source','user.txt']);
  process.env.KATA_REF='later-unrelated-ref';
  await current.emit({type:'session_shutdown',reason:'quit'});
- const terminal=calls().filter(c=>c.args[0]==='agent-hooks').at(-1);
+ const terminal=calls().filter(c=>c.args[0]==='agent-hook').at(-1);
  assert.equal(terminal.args[3],'end');assert.equal(terminal.args[9],'captured-'+reason,'cleanup retains captured ref across replacement/reload');
  assert.equal(terminal.executable,activeStart.executable,'cleanup uses the executable that started this session');
  current.invalidate();

@@ -119,13 +119,13 @@ func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agen
 	case args[0] == "attention-hook" && len(args) >= 2 && (args[1] == "start" || args[1] == "end"):
 		kind = agentHookKind(args[1])
 		tail = args[2:]
-	case len(args) >= 3 && args[0] == "agent-hooks" && args[1] == "contract" && args[2] == string(agent):
+	case len(args) >= 3 && args[0] == "agent-hook" && args[1] == "contract" && args[2] == string(agent):
 		kind = contractHook
 		tail = args[3:]
-	case len(args) >= 4 && args[0] == "agent-hooks" && args[1] == "attention-native" && args[2] == string(agent) && (args[3] == "start" || args[3] == "end"):
+	case len(args) >= 4 && args[0] == "agent-hook" && args[1] == "attention-native" && args[2] == string(agent) && (args[3] == "start" || args[3] == "end"):
 		kind = agentHookKind(args[3])
 		tail = args[4:]
-	case len(args) >= 3 && args[0] == "agent-hooks" && args[1] == "attention" && (args[2] == "start" || args[2] == "end"):
+	case len(args) >= 3 && args[0] == "agent-hook" && args[1] == "attention" && (args[2] == "start" || args[2] == "end"):
 		kind = agentHookKind(args[2])
 		tail = args[3:]
 	default:

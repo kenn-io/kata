@@ -146,7 +146,7 @@ get committed.
 --with-hooks / --with-codex-hooks: this workspace's Claude Code / Codex hooks.
 --agent-hooks=codex,pi: project contract and available attention hooks; --contract-only opts out of attention.
 --with-agent-hooks <harness>: project contract and available attention hooks (repeatable).
-kata agent-hooks install: discover configured agents and install contract plus available attention hooks.
+kata agent-hook install: discover configured agents and install contract plus available attention hooks.
 Name agents for explicit setup; use --local for project scope. If a user-level hook exists, --with-codex-hooks skips the workspace contract hook unless the workspace config is tracked.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Flags().Changed("agent-hooks") {

@@ -80,7 +80,7 @@ func TestAgentContractHooksLegacyMarkerKeepsBuiltInContract(t *testing.T) {
 		require.NoError(t, err, stderr)
 		assertCodexPrompt(t, out, agentContractText)
 		for _, agent := range []agenthook.Agent{agenthook.AgentClaude, agenthook.AgentCodex} {
-			out, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agent)), "agent-hooks", "contract", string(agent), "--source", "kata-agent-contract-hook")
+			out, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agent)), "agent-hook", "contract", string(agent), "--source", "kata-agent-contract-hook")
 			require.NoError(t, err, stderr)
 			assertNativePrompt(t, agent, out, agentContractText)
 		}
@@ -165,7 +165,7 @@ func TestAgentContractHookUsage(t *testing.T) {
 func TestAgentHooksContractCustomSource(t *testing.T) {
 	t.Chdir(t.TempDir())
 	require.NoError(t, os.WriteFile("custom.txt", []byte("replacement"), 0o600))
-	out, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agenthook.AgentCodex)), "agent-hooks", "contract", "codex", "--source", "custom.txt")
+	out, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agenthook.AgentCodex)), "agent-hook", "contract", "codex", "--source", "custom.txt")
 	require.NoError(t, err, stderr)
 	assertCodexPrompt(t, out, "replacement")
 }
@@ -177,10 +177,10 @@ func TestAgentHooksContractSourceAllHarnesses(t *testing.T) {
 	require.NoError(t, os.WriteFile("empty.txt", nil, 0o600))
 	for _, agent := range []agenthook.Agent{agenthook.AgentClaude, agenthook.AgentCodex, agenthook.AgentCopilot, agenthook.AgentCursor, agenthook.AgentGemini, agenthook.AgentHermes, agenthook.AgentQwen} {
 		t.Run(string(agent), func(t *testing.T) {
-			out, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agent)), "agent-hooks", "contract", string(agent), "--source", "prompt.txt")
+			out, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agent)), "agent-hook", "contract", string(agent), "--source", "prompt.txt")
 			require.NoError(t, err, stderr)
 			assertNativePrompt(t, agent, out, prompt)
-			out, stderr, err = executeAgentHook(t, strings.NewReader(contractHookPayload(agent)), "agent-hooks", "contract", string(agent), "--source", "empty.txt")
+			out, stderr, err = executeAgentHook(t, strings.NewReader(contractHookPayload(agent)), "agent-hook", "contract", string(agent), "--source", "empty.txt")
 			require.NoError(t, err, stderr)
 			var response map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(out), &response))

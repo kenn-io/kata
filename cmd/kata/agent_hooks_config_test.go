@@ -19,17 +19,17 @@ func TestAgentHooksExactOwnershipInspection(t *testing.T) {
 		owned                    bool
 	}{
 		{"bare", "kata agent-contract-hook", "", true},
-		{"native", "kata agent-hooks contract codex", "", true},
-		{"old", "kata agent-hooks contract codex --source kata-agent-contract-hook", "", true},
+		{"native", "kata agent-hook contract codex", "", true},
+		{"old", "kata agent-hook contract codex --source kata-agent-contract-hook", "", true},
 		{"custom", "kata agent-contract-hook --source prompt.txt", "", false},
-		{"wrapper", "notify kata agent-hooks contract codex --source kata-agent-contract-hook", "", false},
-		{"wrapper path", "/opt/wrappers/notify agent-hooks contract codex", "", false},
-		{"Windows wrapper path", "kata agent-hooks contract codex", `"C:\\wrappers\\notify.exe" agent-hooks contract codex`, false},
+		{"wrapper", "notify kata agent-hook contract codex --source kata-agent-contract-hook", "", false},
+		{"wrapper path", "/opt/wrappers/notify agent-hook contract codex", "", false},
+		{"Windows wrapper path", "kata agent-hook contract codex", `"C:\\wrappers\\notify.exe" agent-hook contract codex`, false},
 		{"pipeline", "kata agent-contract-hook | cat", "", false},
 		{"environment", "MODE=1 kata agent-contract-hook", "", false},
-		{"wrong harness", "kata agent-hooks contract claude", "", false},
+		{"wrong harness", "kata agent-hook contract claude", "", false},
 		{"custom Windows", "kata agent-contract-hook", "kata agent-contract-hook --source prompt.txt", false},
-		{"wrapped Windows", "kata agent-hooks contract codex --source kata-agent-contract-hook", "notify kata agent-contract-hook", false},
+		{"wrapped Windows", "kata agent-hook contract codex --source kata-agent-contract-hook", "notify kata agent-contract-hook", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := map[string]any{"type": "command", "command": tc.command}
@@ -97,10 +97,10 @@ func TestAgentHooksInstallAndUninstallProtectForeignVariants(t *testing.T) {
 	t.Chdir(t.TempDir())
 	foreign := []map[string]any{
 		{"type": "command", "command": "kata agent-contract-hook --source prompt.txt"},
-		{"type": "command", "command": "notify kata agent-hooks contract codex --source kata-agent-contract-hook"},
-		{"type": "command", "command": "kata agent-hooks contract codex --source kata-agent-contract-hook", "commandWindows": "kata agent-contract-hook --source windows.txt"},
+		{"type": "command", "command": "notify kata agent-hook contract codex --source kata-agent-contract-hook"},
+		{"type": "command", "command": "kata agent-hook contract codex --source kata-agent-contract-hook", "commandWindows": "kata agent-contract-hook --source windows.txt"},
 		{"type": "command", "command": "kata agent-contract-hook", "args": []any{"--source", "extra.txt"}},
-		{"type": "command", "command": "/opt/wrappers/notify agent-hooks contract codex"},
+		{"type": "command", "command": "/opt/wrappers/notify agent-hook contract codex"},
 	}
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	raw, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": foreign}}}})
@@ -108,7 +108,7 @@ func TestAgentHooksInstallAndUninstallProtectForeignVariants(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, raw, 0o640)) //nolint:gosec // G306: deliberately verify preservation of non-default fixture permissions.
 	beforeInfo, err := os.Stat(path)
 	require.NoError(t, err)
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "--contract-only", "codex", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "--contract-only", "codex", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	handlers := nativeContractHandlers(t, agenthook.AgentCodex, path)
 	require.Len(t, handlers, len(foreign)+1)
@@ -117,7 +117,7 @@ func TestAgentHooksInstallAndUninstallProtectForeignVariants(t *testing.T) {
 		require.Equal(t, expected, handlers[i])
 	}
 	require.Contains(t, handlers[len(foreign)]["command"], "--source kata-agent-contract-hook")
-	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "uninstall", "codex", "--config", path)
+	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "uninstall", "codex", "--config", path)
 	require.NoError(t, err, stderr)
 	handlers = nativeContractHandlers(t, agenthook.AgentCodex, path)
 	require.Len(t, handlers, len(foreign))
@@ -217,7 +217,7 @@ func TestAgentHooksHermesLiteralMergeKeysRemainMetadata(t *testing.T) {
 			raw := []byte(key + ":\n  hooks:\n    pre_llm_call:\n      - command: echo metadata\n")
 			require.NoError(t, os.WriteFile(path, raw, 0o600))
 			install := func() {
-				_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+				_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 				require.NoError(t, err, stderr)
 			}
 			install()
@@ -245,9 +245,9 @@ func TestAgentHooksHermesPreservesYAMLNodes(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	raw := []byte("# configuration\nlarge: 184467440737095516160\nprompt: &prompt 'kata agent-hooks contract hermes --source kata-agent-contract-hook' # custom anchor\nalias: *prompt\nhooks:\n  pre_llm_call:\n    - command: *prompt\n      args: [custom]\n    - command: 'notify kata agent-hooks contract hermes --source kata-agent-contract-hook' # wrapper\n")
+	raw := []byte("# configuration\nlarge: 184467440737095516160\nprompt: &prompt 'kata agent-hook contract hermes --source kata-agent-contract-hook' # custom anchor\nalias: *prompt\nhooks:\n  pre_llm_call:\n    - command: *prompt\n      args: [custom]\n    - command: 'notify kata agent-hook contract hermes --source kata-agent-contract-hook' # wrapper\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o640)) //nolint:gosec // G306: deliberately verify preservation of non-default fixture permissions.
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	after, err := os.ReadFile(path) //nolint:gosec // G304: isolated installer fixture under TempDir.
 	require.NoError(t, err)
@@ -260,7 +260,7 @@ func TestAgentHooksHermesPreservesYAMLNodes(t *testing.T) {
 	require.Contains(t, string(after), "# wrapper")
 	require.Contains(t, string(after), "# custom anchor")
 	require.Len(t, nativeContractHandlers(t, agenthook.AgentHermes, path), 3)
-	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	again, err := os.ReadFile(path) //nolint:gosec // G304: isolated installer fixture under TempDir.
 	require.NoError(t, err)
@@ -300,13 +300,13 @@ func TestAgentHooksCodexDefaultSupplyRequiresUnconditionalBothPlatforms(t *testi
 		want           bool
 	}{
 		{"default", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook"}, nil, true},
-		{"old default", map[string]any{"command": "kata agent-hooks contract codex --source kata-agent-contract-hook", "commandWindows": "kata agent-hooks contract codex --source kata-agent-contract-hook"}, nil, true},
+		{"old default", map[string]any{"command": "kata agent-hook contract codex --source kata-agent-contract-hook", "commandWindows": "kata agent-hook contract codex --source kata-agent-contract-hook"}, nil, true},
 		{"custom prompt", map[string]any{"command": "kata agent-contract-hook --source prompt.txt", "commandWindows": "kata agent-contract-hook --source prompt.txt"}, nil, false},
 		{"extra args", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook", "args": []any{"custom"}}, nil, false},
 		{"condition", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook", "if": "some condition"}, nil, false},
 		{"group condition", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook"}, map[string]any{"if": "some condition"}, false},
 		{"missing Windows", map[string]any{"command": "kata agent-contract-hook"}, nil, false},
-		{"wrong harness", map[string]any{"command": "kata agent-hooks contract claude", "commandWindows": "kata agent-hooks contract claude"}, nil, false},
+		{"wrong harness", map[string]any{"command": "kata agent-hook contract claude", "commandWindows": "kata agent-hook contract claude"}, nil, false},
 		{"custom alternate", map[string]any{"command": "kata agent-contract-hook", "commandWindows": "kata agent-contract-hook --source windows.txt"}, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -319,7 +319,7 @@ func TestAgentHooksCodexDefaultSupplyRequiresUnconditionalBothPlatforms(t *testi
 
 func TestAgentHooksInspectionGeneratedQuoting(t *testing.T) {
 	for _, path := range []string{"/opt/example path's/bin/kata", "/opt/example\\path/kata", "/opt/example\"path/kata", `C:\Program Files\example's\kata.exe`} {
-		commands, err := agenthook.BuildCommand(path, "agent-hooks", "contract", "codex")
+		commands, err := agenthook.BuildCommand(path, "agent-hook", "contract", "codex")
 		require.NoError(t, err)
 		for _, tc := range []struct{ field, command string }{{"command", commands.Native}, {"commandWindows", commands.Windows}, {"bash", commands.POSIX}, {"powershell", commands.PowerShell}} {
 			t.Run(path+tc.field, func(t *testing.T) {
@@ -338,10 +338,10 @@ func TestAgentHooksHermesMaterializesReferencesToRemovedOwnedAnchor(t *testing.T
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	original := "kata agent-hooks contract hermes --source kata-agent-contract-hook"
+	original := "kata agent-hook contract hermes --source kata-agent-contract-hook"
 	raw := []byte("hooks:\n  pre_llm_call:\n    - &default\n      command: '" + original + "' # original command\n      timeout: 10\n    - <<: *default\n      args: [custom]\n      integer: 184467440737095516160\n  on_session_end:\n    - <<: *default\n      args: [other]\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	after, err := os.ReadFile(path) //nolint:gosec // G304: isolated installer fixture under TempDir.
 	require.NoError(t, err)
@@ -361,10 +361,10 @@ func TestAgentHooksHermesOwnEventAliasKeepsTemplate(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	original := "kata agent-hooks contract hermes --source kata-agent-contract-hook"
+	original := "kata agent-hook contract hermes --source kata-agent-contract-hook"
 	raw := []byte("templates: &templates\n  - command: '" + original + "'\nhooks:\n  pre_llm_call: *templates\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	doc := nativeHookDocument(t, agenthook.AgentHermes, path)
 	require.Equal(t, original, doc["templates"].([]any)[0].(map[string]any)["command"])
@@ -391,7 +391,7 @@ func TestAgentHooksInstallKeepsCanonicalContractInMixedGroup(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "hooks.json")
-	commands, err := agenthook.BuildCommand(os.Args[0], "agent-hooks", "contract", "codex", "--source", "kata-agent-contract-hook")
+	commands, err := agenthook.BuildCommand(os.Args[0], "agent-hook", "contract", "codex", "--source", "kata-agent-contract-hook")
 	require.NoError(t, err)
 	raw, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{
 		"matcher": "startup|resume|clear|compact", "note": "keep registration metadata",
@@ -399,7 +399,7 @@ func TestAgentHooksInstallKeepsCanonicalContractInMixedGroup(t *testing.T) {
 	}}}})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "--contract-only", "codex", "--config", path, "--executable", os.Args[0])
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "--contract-only", "codex", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	require.Contains(t, out, "unchanged")
 	after, err := os.ReadFile(path) //nolint:gosec // G304: isolated installer fixture under TempDir.
@@ -411,26 +411,26 @@ func TestAgentHooksHermesMergedEventsPreserveForeignCommands(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	raw := []byte("templates: &templates\n  pre_llm_call:\n    - command: kata agent-hooks contract hermes\n    - command: echo foreign\nhooks:\n  <<: *templates\n")
+	raw := []byte("templates: &templates\n  pre_llm_call:\n    - command: kata agent-hook contract hermes\n    - command: echo foreign\nhooks:\n  <<: *templates\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	doc := nativeHookDocument(t, agenthook.AgentHermes, path)
 	handlers := doc["hooks"].(map[string]any)["pre_llm_call"].([]any)
 	require.Len(t, handlers, 2)
 	require.Equal(t, "echo foreign", handlers[0].(map[string]any)["command"])
 	templates := doc["templates"].(map[string]any)["pre_llm_call"].([]any)
-	require.Equal(t, "kata agent-hooks contract hermes", templates[0].(map[string]any)["command"])
+	require.Equal(t, "kata agent-hook contract hermes", templates[0].(map[string]any)["command"])
 }
 
 func TestAgentHooksHermesReferencesToMutatedEventAnchorStayOriginal(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	original := "kata agent-hooks contract hermes"
+	original := "kata agent-hook contract hermes"
 	raw := []byte("hooks:\n  pre_llm_call: &template\n    - command: " + original + "\nmirror: *template\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	doc := nativeHookDocument(t, agenthook.AgentHermes, path)
 	require.Equal(t, []any{map[string]any{"command": original}}, doc["mirror"])
@@ -442,7 +442,7 @@ func TestAgentHooksDecodedScalarCannotCollideWithProtectionToken(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	raw := []byte(`{"note":"\u006bata-protected-hook-0","hooks":{"SessionStart":[{"hooks":[{"command":"echo foreign"}]}]}}`)
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "codex", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "codex", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	require.Equal(t, "kata-protected-hook-0", nativeHookDocument(t, agenthook.AgentCodex, path)["note"])
 }
@@ -451,10 +451,10 @@ func TestAgentHooksHermesOwnedHandlerMergeKeepsTemplateCommand(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	original := "kata agent-hooks contract hermes"
+	original := "kata agent-hook contract hermes"
 	raw := []byte("template: &template\n  command: " + original + "\nhooks:\n  pre_llm_call:\n    - <<: *template\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	doc := nativeHookDocument(t, agenthook.AgentHermes, path)
 	require.Equal(t, original, doc["template"].(map[string]any)["command"])
@@ -464,9 +464,9 @@ func TestAgentHooksHermesUninstallShadowsInheritedOwnedEvent(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	raw := []byte("templates: &templates\n  pre_llm_call:\n    - command: kata agent-hooks contract hermes\nhooks:\n  <<: *templates\n")
+	raw := []byte("templates: &templates\n  pre_llm_call:\n    - command: kata agent-hook contract hermes\nhooks:\n  <<: *templates\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "uninstall", "hermes", "--config", path)
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "uninstall", "hermes", "--config", path)
 	require.NoError(t, err, stderr)
 	require.Empty(t, nativeContractHandlers(t, agenthook.AgentHermes, path))
 	status, err := readAgentHookStatus(agenthook.AgentHermes, path, "")
@@ -480,7 +480,7 @@ func TestAgentHooksHermesForeignOnlyEventAnchorMirrorStaysOriginal(t *testing.T)
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	raw := []byte("hooks:\n  pre_llm_call: &template\n    - command: echo foreign\nmirror: *template\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	doc := nativeHookDocument(t, agenthook.AgentHermes, path)
 	require.Equal(t, []any{map[string]any{"command": "echo foreign"}}, doc["mirror"])
@@ -491,12 +491,12 @@ func TestAgentHooksHermesHookMappingAnchorMirrorStaysOriginal(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	raw := []byte("hooks: &hook_map\n  pre_llm_call:\n    - command: kata agent-hooks contract hermes\nmirror: *hook_map\n")
+	raw := []byte("hooks: &hook_map\n  pre_llm_call:\n    - command: kata agent-hook contract hermes\nmirror: *hook_map\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	doc := nativeHookDocument(t, agenthook.AgentHermes, path)
-	require.Equal(t, map[string]any{"pre_llm_call": []any{map[string]any{"command": "kata agent-hooks contract hermes"}}}, doc["mirror"])
+	require.Equal(t, map[string]any{"pre_llm_call": []any{map[string]any{"command": "kata agent-hook contract hermes"}}}, doc["mirror"])
 }
 
 func TestAgentHooksHermesDirectHooksAliasKeepsAnchorReferences(t *testing.T) {
@@ -505,7 +505,7 @@ func TestAgentHooksHermesDirectHooksAliasKeepsAnchorReferences(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	raw := []byte("template: &hook_map\n  pre_llm_call:\n    - command: echo foreign\nhooks: *hook_map\nmirror: *hook_map\n")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "hermes", "--contract-only", "--config", path, "--executable", os.Args[0])
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "hermes", "--contract-only", "--config", path, "--executable", os.Args[0])
 	require.NoError(t, err, stderr)
 	doc := nativeHookDocument(t, agenthook.AgentHermes, path)
 	expectedTemplate := map[string]any{"pre_llm_call": []any{map[string]any{"command": "echo foreign"}}}
@@ -526,7 +526,7 @@ func TestAgentHooksHermesDirectHooksAliasKeepsAnchorReferences(t *testing.T) {
 	}
 	require.Equal(t, 1, contractCount)
 
-	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "uninstall", "hermes", "--config", path)
+	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "uninstall", "hermes", "--config", path)
 	require.NoError(t, err, stderr)
 	doc = nativeHookDocument(t, agenthook.AgentHermes, path)
 	require.Equal(t, expectedTemplate, doc["template"])

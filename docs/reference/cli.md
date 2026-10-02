@@ -126,7 +126,7 @@ timeout below the workspace contract's 10 seconds also does not qualify.
 Single-platform defaults, such as a native `command` without
 `commandWindows`, also do not qualify. Init keeps the workspace contract in
 that case, so the user hook can inject a second copy on the platform where it
-runs. Normalize the user config with `kata agent-hooks install codex`, then
+runs. Normalize the user config with `kata agent-hook install codex`, then
 rerun `kata init --with-codex-hooks`; init removes an untracked duplicate and
 keeps a tracked workspace hook for teammates.
 
@@ -168,17 +168,24 @@ not mutate workspace files, and comes from the same canonical text that
 its `agent-instructions` alias; it conflicts with `--json` and `--agent` like
 the other output modes.
 
-[`kata agent-hooks contract <harness>`](#contract-injection) injects this text in a harness-native response by default. To load it in every session, see
+[`kata agent-hook contract <harness>`](#contract-injection) injects this text in a harness-native response by default. To load it in every session, see
 [Contract in every session](../workflows/agents.md#contract-in-every-session).
 
-## Agent hooks
+## Agent hook
 
 These commands are available on `main`; they are not included in 0.18.0.
+
+The command group has been renamed from `kata agent-hooks` to
+`kata agent-hook`. This is a breaking change: the plural spelling fails as an
+unknown command. Update scripts and hook configurations to use the singular
+name. Reinstall user hooks with `kata agent-hook install`. For workspace hooks,
+re-run `kata agent-hook install <harness> --local` or the `kata init` hook
+option that installed them.
 
 Run Kata's contract and attention hooks from coding-agent configurations:
 
 ```text
-kata agent-hooks
+kata agent-hook
   contract <harness>          Read stdin and emit a harness-native contract response
   attention start            Establish the attention baseline at session start
   attention end              Raise attention if the session ended without a hand-off
@@ -196,7 +203,7 @@ These commands are coding-agent hooks. Daemon event hooks configured in
 
 ### Hookless instructions
 
-`kata agent-hooks instructions install muse --home <path> --actor <actor>
+`kata agent-hook instructions install muse --home <path> --actor <actor>
 [--dry]` generates consumer Muse's instruction block, skill, and scheduled
 poll specification. `--home` and `--actor` are required; `--actor` may name an
 exact actor/teammate inbox. With `--dry --json`, the response
@@ -222,7 +229,7 @@ stdin command. Kimi CLI and Grok support attention only. The harness name is
 positional. For example, a Codex SessionStart hook can run:
 
 ```sh
-kata agent-hooks contract codex
+kata agent-hook contract codex
 ```
 
 The command reads one finite native JSON payload from stdin through EOF and
@@ -269,12 +276,12 @@ response on stdout.
 ### User installation and removal
 
 ```sh
-kata agent-hooks install
-kata agent-hooks install codex pi
-kata agent-hooks install codex --config /path/to/second-codex-home/hooks.json
-kata agent-hooks install claude --executable /path/to/stable/bin/kata
-kata agent-hooks uninstall codex
-kata agent-hooks uninstall --all
+kata agent-hook install
+kata agent-hook install codex pi
+kata agent-hook install codex --config /path/to/second-codex-home/hooks.json
+kata agent-hook install claude --executable /path/to/stable/bin/kata
+kata agent-hook uninstall codex
+kata agent-hook uninstall --all
 ```
 
 User scope is the default; `--local` or `--scope project` selects the workspace.
@@ -289,12 +296,12 @@ contract, attention and project-discovery capabilities. Installation and status
 completion offer canonical target names; documented aliases remain accepted.
 
 ```sh
-kata agent-hooks install codex --local
-kata agent-hooks install opencode
-kata agent-hooks install muse --managed-attention
-kata agent-hooks install codex --contract-only
+kata agent-hook install codex --local
+kata agent-hook install opencode
+kata agent-hook install muse --managed-attention
+kata agent-hook install codex --contract-only
 kata init --agent-hooks=codex,pi
-kata agent-hooks uninstall pi --contract-only
+kata agent-hook uninstall pi --contract-only
 ```
 
 Installation requests contracts plus every available native attention
@@ -336,7 +343,7 @@ install command's working directory; project-scope paths stay relative to the
 selected workspace. It is rejected for command codecs. Authored custom prompt
 commands remain foreign and are preserved.
 
-Command codecs register `<kata> agent-hooks contract <harness>` on their native
+Command codecs register `<kata> agent-hook contract <harness>` on their native
 context event. Native code providers install owned extensions/plugins instead.
 Attention bundles use a session-aware bridge that captures native IDs and
 workspace routing, preserves handoffs on duplicate starts, and fences old
@@ -405,8 +412,8 @@ while it existed may have no contract hook; rerun
 ### Hook status and output
 
 ```sh
-kata agent-hooks status
-kata agent-hooks status codex --config /path/to/second-codex-home/hooks.json --json
+kata agent-hook status
+kata agent-hook status codex --config /path/to/second-codex-home/hooks.json --json
 ```
 
 `status` needs no daemon or initialized Kata workspace and never writes files.
@@ -493,8 +500,8 @@ silently ignore missing refs or daemon failures. `CLAUDE_PROJECT_DIR`, when
 present, supplies the workspace used for project resolution.
 
 The hidden `kata attention-hook` command accepts only `start` or `end`. Its
-visible forms are `kata agent-hooks attention start` and
-`kata agent-hooks attention end`; each also accepts its matching legacy
+visible forms are `kata agent-hook attention start` and
+`kata agent-hook attention end`; each also accepts its matching legacy
 ownership marker, `--source kata-agent-hook-start` or
 `--source kata-agent-hook-end`. New installs use the bare forms. Empty,
 foreign, or cross-mode markers return usage exit code `2`.

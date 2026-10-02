@@ -897,7 +897,7 @@ async function start(adapter, id, cwd) {
   if (registry.starts.has(key)) return;
   const baseline = { id, cwd, ref: process.env.KATA_REF || "", hostPID: String(options.agent === "amp" ? process.ppid : process.pid), env: { ...process.env } };
   registry.starts.set(key, baseline);
-  try { await run(["agent-hooks", "attention-native", options.agent, "start", "--session", baseline.id,
+  try { await run(["agent-hook", "attention-native", options.agent, "start", "--session", baseline.id,
     "--host-pid", baseline.hostPID, "--ref", baseline.ref], baseline.cwd, baseline.env); }
   catch { if (registry.starts.get(key) === baseline) registry.starts.delete(key); }
 }

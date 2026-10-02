@@ -277,7 +277,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 				}
 				if !opts.ManagedAttention {
 					opts.Attention = false
-					result.Reason = "contract configured; attention permission needed: kata agent-hooks install muse --managed-attention (user scope)"
+					result.Reason = "contract configured; attention permission needed: kata agent-hook install muse --managed-attention (user scope)"
 				}
 				plan, err = planNativeAgentHooks(opts, false)
 			}

@@ -1,7 +1,7 @@
 ---
 title: Agent orchestration
 description: Coordinate agent work through Kata issues, attention metadata, branches, and fan-out/join workflows.
-last_edited: 2026-10-01
+last_edited: 2026-10-02
 ---
 
 # Agent orchestration
@@ -83,8 +83,8 @@ work.branch agent/widget-export` is equivalent and safe to retry.
 ## Keep attention truthful with hooks
 
 To load the contract in every session, use
-[`kata agent-hooks install --all`](../workflows/agents.md#contract-in-every-session).
-The [agent-hooks reference](../reference/cli.md#agent-hooks) covers user contract
+[`kata agent-hook install --all`](../workflows/agents.md#contract-in-every-session).
+The [agent-hook reference](../reference/cli.md#agent-hook) covers user contract
 hooks and attention bundles in user or project scope. Add `--attention` to the
 installer; the launcher must provide the tracked issue in `KATA_REF`.
 
@@ -168,7 +168,7 @@ ownership, config selection, and the tracked-file exception.
 
 The Codex init flag now installs `kata attention-hook end` on genuine native
 SessionEnd. Existing start commands retain their trust identities. For
-session-aware ownership fencing, use `kata agent-hooks install codex --scope
+session-aware ownership fencing, use `kata agent-hook install codex --scope
 project --attention` or `kata init --with-agent-hooks codex`.
 
 Older runtimes and targets without native terminal events need launcher

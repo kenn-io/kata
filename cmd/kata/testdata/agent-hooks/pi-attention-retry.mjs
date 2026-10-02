@@ -33,7 +33,7 @@ function fail(operation) {
   else operation.resolve({...result, code: failure === 'nonzero' ? 1 : 0, killed: failure === 'killed'});
 }
 function assertRoute(call, id, ref) {
-  assert.deepEqual(call.args, ['agent-hooks', 'attention-native', 'pi', call.args[3],
+  assert.deepEqual(call.args, ['agent-hook', 'attention-native', 'pi', call.args[3],
     '--session', id, '--host-pid', String(process.pid), '--ref', ref, '--workspace', path.resolve(cwd)]);
   assert.equal(call.options.cwd, path.resolve(cwd));
   assert.equal(call.options.timeout, 10000);

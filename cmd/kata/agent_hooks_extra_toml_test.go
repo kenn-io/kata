@@ -63,7 +63,7 @@ func TestExtraTOMLRejectsComplexHookLayoutsBeforeWriting(t *testing.T) {
 
 func FuzzExtraTOMLForeignPreservation(f *testing.F) {
 	f.Add("echo native", "operator note")
-	f.Add("kata agent-hooks contract kimi-code --source local.txt", "[[hooks]]")
+	f.Add("kata agent-hook contract kimi-code --source local.txt", "[[hooks]]")
 	f.Fuzz(func(t *testing.T, command, note string) {
 		// TOML encodes arbitrary strings (including header-looking data) itself.
 		var input struct {

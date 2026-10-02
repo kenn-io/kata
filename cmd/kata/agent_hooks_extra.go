@@ -290,9 +290,9 @@ func extraHookEvent(target string, kind agentHookKind) string {
 
 func extraHookArguments(target string, kind agentHookKind) []string {
 	if kind == contractHook {
-		return []string{"agent-hooks", "contract", target}
+		return []string{"agent-hook", "contract", target}
 	}
-	return []string{"agent-hooks", "attention-native", target, string(kind)}
+	return []string{"agent-hook", "attention-native", target, string(kind)}
 }
 
 func extraHookHandler(opts nativeAgentHookOptions, kind agentHookKind) (map[string]any, error) {

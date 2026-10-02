@@ -191,7 +191,7 @@ export default function kataHooks(pi) {
   }
   async function attention(mode, baseline) {
     try {
-      const result = await pi.exec(baseline.executable, ["agent-hooks", "attention-native", "pi", mode,
+      const result = await pi.exec(baseline.executable, ["agent-hook", "attention-native", "pi", mode,
         "--session", baseline.id, "--host-pid", String(process.pid), "--ref", baseline.ref,
         "--workspace", baseline.cwd], { cwd: baseline.cwd, timeout: 10000 });
       return result.code === 0 && !result.killed;

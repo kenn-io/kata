@@ -31,7 +31,7 @@ func TestExtraAgentCommandFixture(_ *testing.T) {
 			break
 		}
 	}
-	if len(argv) < 3 || argv[0] != "agent-hooks" {
+	if len(argv) < 3 || argv[0] != "agent-hook" {
 		fmt.Fprintln(os.Stderr, "unexpected native hook argv")
 		os.Exit(2)
 	}
@@ -241,7 +241,7 @@ func FuzzExtraJSONForeignPreservation(f *testing.F) {
 			if target == "muse" {
 				root["schema_version"] = 1
 				delete(handler, "args")
-				handler["command"] = "kata agent-hooks contract muse"
+				handler["command"] = "kata agent-hook contract muse"
 				handler["command_windows"] = "echo " + command
 			}
 		}

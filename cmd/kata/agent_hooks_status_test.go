@@ -15,7 +15,7 @@ import (
 
 func agentHooksStatusJSON(t *testing.T, args ...string) map[string]any {
 	t.Helper()
-	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "status", "--json"}, args...)...)
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hook", "status", "--json"}, args...)...)
 	require.NoError(t, err, stderr)
 	var report map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out), &report))
@@ -71,7 +71,7 @@ func TestAgentHooksStatusSchemaAndExecutable(t *testing.T) {
 	entry = report["harnesses"].([]any)[0].(map[string]any)["user"].(map[string]any)["entries"].([]any)[0].(map[string]any)
 	require.Equal(t, false, entry["executable_exists"])
 	for _, mode := range []string{"", "--agent"} {
-		args := []string{"agent-hooks", "status", "codex", "--config", userConfig, "--workspace", workspace}
+		args := []string{"agent-hook", "status", "codex", "--config", userConfig, "--workspace", workspace}
 		if mode != "" {
 			args = append(args, mode)
 		}
@@ -101,7 +101,7 @@ func agentHookStatusKeys(m map[string]any) []string {
 }
 
 func TestAgentHookCommandForPlatformSelectsNativeVariant(t *testing.T) {
-	windowsCommand := `"C:\Program Files\Kata\kata.exe" agent-hooks contract codex --source kata-agent-contract-hook`
+	windowsCommand := `"C:\Program Files\Kata\kata.exe" agent-hook contract codex --source kata-agent-contract-hook`
 	for _, tc := range []struct {
 		name   string
 		agent  agenthook.Agent
@@ -113,24 +113,24 @@ func TestAgentHookCommandForPlatformSelectsNativeVariant(t *testing.T) {
 		{
 			name:  "Codex on Windows",
 			agent: agenthook.AgentCodex,
-			entry: agentHookEntry{Command: `"/usr/local/bin/kata" agent-hooks contract codex --source kata-agent-contract-hook`, Fields: map[string]any{"commandWindows": windowsCommand}},
+			entry: agentHookEntry{Command: `"/usr/local/bin/kata" agent-hook contract codex --source kata-agent-contract-hook`, Fields: map[string]any{"commandWindows": windowsCommand}},
 			goos:  "windows",
 			want:  windowsCommand,
 		},
 		{
 			name:   "Copilot on Windows",
 			agent:  agenthook.AgentCopilot,
-			entry:  agentHookEntry{Command: "kata agent-hooks contract copilot", Fields: map[string]any{"bash": "kata agent-hooks contract copilot", "powershell": "& 'C:\\Program Files\\Kata\\kata.exe' agent-hooks contract copilot"}},
+			entry:  agentHookEntry{Command: "kata agent-hook contract copilot", Fields: map[string]any{"bash": "kata agent-hook contract copilot", "powershell": "& 'C:\\Program Files\\Kata\\kata.exe' agent-hook contract copilot"}},
 			goos:   "windows",
-			want:   "& 'C:\\Program Files\\Kata\\kata.exe' agent-hooks contract copilot",
+			want:   "& 'C:\\Program Files\\Kata\\kata.exe' agent-hook contract copilot",
 			wantPS: true,
 		},
 		{
 			name:  "Codex on Unix",
 			agent: agenthook.AgentCodex,
-			entry: agentHookEntry{Command: `"/usr/local/bin/kata" agent-hooks contract codex --source kata-agent-contract-hook`, Fields: map[string]any{"commandWindows": windowsCommand}},
+			entry: agentHookEntry{Command: `"/usr/local/bin/kata" agent-hook contract codex --source kata-agent-contract-hook`, Fields: map[string]any{"commandWindows": windowsCommand}},
 			goos:  "linux",
-			want:  `"/usr/local/bin/kata" agent-hooks contract codex --source kata-agent-contract-hook`,
+			want:  `"/usr/local/bin/kata" agent-hook contract codex --source kata-agent-contract-hook`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,7 +207,7 @@ func TestAgentHooksStatusMissingAndSameFile(t *testing.T) {
 func TestAgentHooksStatusUsage(t *testing.T) {
 	isolateAgentHookHomes(t)
 	for _, args := range [][]string{{"claude", "codex"}, {"unknown"}, {"--config", "example"}, {"codex", "--config="}, {"--all"}} {
-		out, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "status"}, args...)...)
+		out, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hook", "status"}, args...)...)
 		require.Error(t, err, strings.Join(args, " "))
 		require.Empty(t, out)
 		require.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered), stderr)
@@ -232,7 +232,7 @@ func TestAgentHooksStatusHermesEventAndNestedGuidance(t *testing.T) {
 	harness := report["harnesses"].([]any)[0].(map[string]any)
 	require.Equal(t, false, harness["user"].(map[string]any)["present"])
 	require.Equal(t, false, harness["overlap"])
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "install", "--contract-only", "hermes", "--executable", os.Args[0], "--workspace", workspace)
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "--contract-only", "hermes", "--executable", os.Args[0], "--workspace", workspace)
 	require.NoError(t, err, stderr)
 	report = agentHooksStatusJSON(t, "hermes", "--workspace", workspace)
 	harness = report["harnesses"].([]any)[0].(map[string]any)
@@ -272,7 +272,7 @@ func TestAgentHooksStatusWorkspaceFailuresAreAdvisory(t *testing.T) {
 			require.Equal(t, []any{}, report["workspace"].(map[string]any)["committed_guidance"])
 			require.Contains(t, fmt.Sprint(report["warnings"]), warning)
 			for _, mode := range []string{"human", "agent"} {
-				out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "status", "codex", "--config", config, "--format", mode)
+				out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "status", "codex", "--config", config, "--format", mode)
 				require.NoError(t, err, stderr)
 				require.Contains(t, out, warning)
 			}

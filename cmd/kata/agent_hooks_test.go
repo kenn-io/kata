@@ -81,11 +81,11 @@ func executeAgentHookRoot(t *testing.T, cmd *cobra.Command, input io.Reader, arg
 func TestAgentHooksContractTerminal(t *testing.T) {
 	resetFlags(t)
 	root := newRootCmd()
-	group, _, err := root.Find([]string{"agent-hooks"})
+	group, _, err := root.Find([]string{"agent-hook"})
 	require.NoError(t, err)
 	root.RemoveCommand(group)
 	root.AddCommand(newAgentHooksCmdWithTerminalCheck(func(io.Reader) bool { return true }))
-	stdout, stderr, err := executeAgentHookRoot(t, root, unreadableHookInput{}, "agent-hooks", "contract", "claude")
+	stdout, stderr, err := executeAgentHookRoot(t, root, unreadableHookInput{}, "agent-hook", "contract", "claude")
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered))
 	assert.Empty(t, stdout)
@@ -97,7 +97,7 @@ type failedHookInput struct{}
 func (failedHookInput) Read([]byte) (int, error) { return 0, errors.New("input failed\nextra detail") }
 
 func TestAgentHooksContractReadError(t *testing.T) {
-	stdout, stderr, err := executeAgentHook(t, failedHookInput{}, "agent-hooks", "contract", "cursor")
+	stdout, stderr, err := executeAgentHook(t, failedHookInput{}, "agent-hook", "contract", "cursor")
 	require.Error(t, err)
 	assert.Equal(t, ExitInternal, exitCodeForErr(err, runEEntered))
 	assert.Empty(t, stdout)
@@ -106,12 +106,12 @@ func TestAgentHooksContractReadError(t *testing.T) {
 }
 
 func TestAgentHooksContractCursorOnlySessionStart(t *testing.T) {
-	stdout, stderr, err := executeAgentHook(t, strings.NewReader(`{"hook_event_name":"sessionEnd","session_id":"example-session","reason":"complete"}`), "agent-hooks", "contract", "cursor")
+	stdout, stderr, err := executeAgentHook(t, strings.NewReader(`{"hook_event_name":"sessionEnd","session_id":"example-session","reason":"complete"}`), "agent-hook", "contract", "cursor")
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
 	assert.JSONEq(t, `{}`, stdout)
 	for _, payload := range []string{`{"hook_event_name":"sessionStart"`, `{"hook_event_name":"unknown"}`} {
-		stdout, stderr, err := executeAgentHook(t, strings.NewReader(payload), "agent-hooks", "contract", "cursor")
+		stdout, stderr, err := executeAgentHook(t, strings.NewReader(payload), "agent-hook", "contract", "cursor")
 		require.Error(t, err)
 		assert.Equal(t, ExitInternal, exitCodeForErr(err, runEEntered))
 		assert.Empty(t, stdout)
@@ -120,7 +120,7 @@ func TestAgentHooksContractCursorOnlySessionStart(t *testing.T) {
 }
 
 func TestAgentHooksContractHermesSessionStartIsNeutral(t *testing.T) {
-	stdout, stderr, err := executeAgentHook(t, strings.NewReader(`{"hook_event_name":"on_session_start","session_id":"example-session","extra":{"is_first_turn":true}}`), "agent-hooks", "contract", "hermes")
+	stdout, stderr, err := executeAgentHook(t, strings.NewReader(`{"hook_event_name":"on_session_start","session_id":"example-session","extra":{"is_first_turn":true}}`), "agent-hook", "contract", "hermes")
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
 	assert.JSONEq(t, `{}`, stdout)
@@ -134,7 +134,7 @@ func TestAgentHooksContractNativeResponses(t *testing.T) {
 		}
 		t.Run(string(profile.Agent), func(t *testing.T) {
 			for _, outputFlag := range []string{"", "--agent", "--json"} {
-				args := []string{"agent-hooks", "contract", string(profile.Agent)}
+				args := []string{"agent-hook", "contract", string(profile.Agent)}
 				if outputFlag != "" {
 					args = append(args, outputFlag)
 				}
@@ -165,7 +165,7 @@ func TestAgentHooksContractUsage(t *testing.T) {
 		"empty source":    {"claude", "--source="},
 	} {
 		t.Run(name, func(t *testing.T) {
-			stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "contract"}, args...)...)
+			stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hook", "contract"}, args...)...)
 			require.Error(t, err)
 			assert.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered))
 			assert.Empty(t, stdout)
@@ -186,7 +186,7 @@ func TestAgentHooksContractPayloadErrors(t *testing.T) {
 		"oversized": strings.Repeat(" ", (16<<20)+1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			stdout, stderr, err := executeAgentHook(t, strings.NewReader(payload), "agent-hooks", "contract", "claude")
+			stdout, stderr, err := executeAgentHook(t, strings.NewReader(payload), "agent-hook", "contract", "claude")
 			require.Error(t, err)
 			assert.Equal(t, ExitInternal, exitCodeForErr(err, runEEntered))
 			assert.Empty(t, stdout)
@@ -203,7 +203,7 @@ func TestAgentHooksContractHermesFirstTurn(t *testing.T) {
 				flag = `,"is_first_turn":` + firstTurn
 			}
 			payload := `{"hook_event_name":"pre_llm_call","session_id":"example-session","extra":{"user_message":"example prompt"` + flag + `}}`
-			stdout, stderr, err := executeAgentHook(t, strings.NewReader(payload), "agent-hooks", "contract", "hermes")
+			stdout, stderr, err := executeAgentHook(t, strings.NewReader(payload), "agent-hook", "contract", "hermes")
 			require.NoError(t, err)
 			assert.Empty(t, stderr)
 			if firstTurn == "true" {
@@ -219,7 +219,8 @@ func TestAgentHooksHelp(t *testing.T) {
 	stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, "--help")
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
-	assert.Equal(t, 1, strings.Count(stdout, "agent-hooks"))
+	assert.Equal(t, 1, strings.Count(stdout, "agent-hook"))
+	assert.NotContains(t, stdout, "agent-hooks")
 	assert.Contains(t, stdout, "agent-contract-hook")
 	assert.NotContains(t, stdout, "attention-hook")
 }
@@ -231,11 +232,12 @@ func TestAgentHooksCompletion(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"agent-hooks", "contract", ""}, []string{"claude", "codex", "copilot", "cursor", "gemini", "hermes", "qwen", "droid", "antigravity", "kimi-code", "muse", "zcode"}},
-		{[]string{"agent-hooks", "contract", "c"}, []string{"claude", "codex", "copilot", "cursor"}},
-		{[]string{"agent-hooks", "contract", "claude", ""}, nil},
-		{[]string{"agent-hooks", "attention", "start", ""}, nil},
-		{[]string{"agent-hooks", "attention", "end", ""}, nil},
+		{[]string{"agent-h"}, []string{"agent-hook"}},
+		{[]string{"agent-hook", "contract", ""}, []string{"claude", "codex", "copilot", "cursor", "gemini", "hermes", "qwen", "droid", "antigravity", "kimi-code", "muse", "zcode"}},
+		{[]string{"agent-hook", "contract", "c"}, []string{"claude", "codex", "copilot", "cursor"}},
+		{[]string{"agent-hook", "contract", "claude", ""}, nil},
+		{[]string{"agent-hook", "attention", "start", ""}, nil},
+		{[]string{"agent-hook", "attention", "end", ""}, nil},
 	} {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
 			stdout, _, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"__complete"}, tc.args...)...)
@@ -251,6 +253,26 @@ func TestAgentHooksCompletion(t *testing.T) {
 				names = append(names, name)
 			}
 			assert.ElementsMatch(t, tc.want, names)
+		})
+	}
+}
+
+// The singular-only public contract deliberately rejects the old spelling.
+func TestAgentHookPluralCommandRejected(t *testing.T) {
+	isolateAgentHookHomes(t)
+	t.Chdir(t.TempDir())
+	for _, suffix := range [][]string{
+		nil, {"--help"}, {"contract", "claude"}, {"attention", "start"},
+		{"install", "codex"}, {"uninstall", "codex"}, {"status"},
+		{"status", "--agent"}, {"status", "--json"},
+	} {
+		t.Run(strings.Join(suffix, "_"), func(t *testing.T) {
+			stdout, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agenthook.AgentClaude)), append([]string{"agent-hooks"}, suffix...)...)
+			require.ErrorContains(t, err, `unknown command "agent-hooks"`)
+			assert.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered))
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, "unknown command")
+			assert.Contains(t, stderr, "agent-hooks")
 		})
 	}
 }

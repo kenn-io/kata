@@ -18,7 +18,7 @@ func newAgentHooksCmd() *cobra.Command {
 
 func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.Command {
 	group := &cobra.Command{
-		Use:   "agent-hooks",
+		Use:   "agent-hook",
 		Short: "Manage Kata hooks for coding agents",
 		Long: "Manage Kata's contract and attention hooks in coding-agent configurations.\n\n" +
 			"These contract and attention entry points are distinct from daemon event\n" +
@@ -45,7 +45,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 				return err
 			}
 			if capability.Name == "pi" || capability.Name == "openclaw" || capability.Name == "amp" || capability.Name == "opencode" {
-				return agentHookUsage(capability.Name + " uses a native extension; install it with kata agent-hooks install " + capability.Name)
+				return agentHookUsage(capability.Name + " uses a native extension; install it with kata agent-hook install " + capability.Name)
 			}
 			if !capability.Contract {
 				return agentHookUsage(capability.Name + " does not consume hook contract context; use committed AGENTS.md")

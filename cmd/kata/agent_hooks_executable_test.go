@@ -81,7 +81,7 @@ func TestDefaultAgentHookExecutableEnvPreservesStableDirectoryAlias(t *testing.T
 
 func TestAgentHookExecutableCommandParsing(t *testing.T) {
 	for _, path := range []string{"/tmp/example/bin/kata", "/tmp/example path/kata", "/tmp/example's path/kata", `C:\Program Files\example\kata.exe`, `C:\example\quoted"kata.exe`, `C:\example path\`} {
-		commands, err := agenthook.BuildCommand(path, "agent-hooks", "contract", "codex", "--source", legacyAgentContractHookSource)
+		commands, err := agenthook.BuildCommand(path, "agent-hook", "contract", "codex", "--source", legacyAgentContractHookSource)
 		require.NoError(t, err)
 		for _, tc := range []struct {
 			command, goos string

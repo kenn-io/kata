@@ -47,7 +47,7 @@ func TestAgentHooksKitContractRegistration(t *testing.T) {
 		}
 		_, err := agenthook.PlanInstall(profile.Agent, agenthook.InstallOptions{
 			ConfigPath: filepath.Join(t.TempDir(), profile.ConfigFilename), Executable: os.Args[0],
-			Arguments: []string{"agent-hooks", "contract", string(profile.Agent), "--source", legacyAgentContractHookSource},
+			Arguments: []string{"agent-hook", "contract", string(profile.Agent), "--source", legacyAgentContractHookSource},
 			Marker:    "--source " + legacyAgentContractHookSource, Hooks: []agenthook.Hook{hook},
 		})
 		require.NoError(t, err)

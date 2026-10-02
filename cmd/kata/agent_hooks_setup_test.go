@@ -15,7 +15,7 @@ import (
 func runHookSetup(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	resetFlags(t)
-	out, _, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks"}, args...)...)
+	out, _, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hook"}, args...)...)
 	return out, err
 }
 

@@ -9,8 +9,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Manage coding-agent hooks with `kata agent-hook`, matching Roborev and Forge.
+  **Breaking rename:** `kata agent-hooks` now fails as an unknown command;
+  there is no alias. Update scripts and reinstall user hooks with
+  `kata agent-hook install`. For workspace hooks, re-run
+  `kata agent-hook install <harness> --local` or the `kata init` hook option
+  that installed them. See the [agent-hook reference](reference/cli.md#agent-hook).
+
 - Set up consumer Muse with standing instructions, a Kata skill, and a recurring
-  poll specification using `kata agent-hooks instructions install muse --home <path>`.
+  poll specification using `kata agent-hook instructions install muse --home <path>`.
   Preview the files with `--dry --json`. Reinstall preserves file bytes;
   uninstall keeps foreign content. This relies on instruction-following and
   provides no native attention support. Choose CLI token-file or connector
@@ -23,7 +30,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   daemon catalog entry matching `--hub-url`. The local daemon token is no longer
   sent to the hub. See the [enrollment runbook](operations/federation.md#external-agent-onboarding-without-hooks).
 
-- Set up configured coding agents with `kata agent-hooks install`, or choose
+- Set up configured coding agents with `kata agent-hook install`, or choose
   names explicitly. Setup covers 18 native targets and now enables the contract
   plus every available attention hook by default; scripts needing contract-only
   setup should pass `--contract-only` or `--attention=false`. Default uninstall
@@ -41,7 +48,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   finalization and Codex init gains SessionEnd. See
   [target coverage](workflows/agents.md#hook-target-coverage) for runtime limits.
 
-- Inspect both hook scopes with bare `kata agent-hooks status`. JSON keeps user
+- Inspect both hook scopes with bare `kata agent-hook status`. JSON keeps user
   rows in `harnesses` and project rows in `workspace.harnesses`, with project
   details under `config`. An unreadable or malformed selected config now exits
   nonzero and returns the partial report in `error.data`. See
@@ -74,7 +81,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   matching init option to normalize installed hooks to the bare form.
   Codex user hooks suppress the workspace contract only when both native
   command platforms are complete and no explicit timeout is below 10 seconds;
-  normalize an older incomplete entry with `kata agent-hooks install codex`
+  normalize an older incomplete entry with `kata agent-hook install codex`
   before rerunning init.
 
 - Use OpenAI-compatible embedding servers that reject a `dimensions` field.
@@ -93,18 +100,18 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Find every-session contract setup in `kata init --help`,
   `kata quickstart --help`, the quickstart guide, and the README. Install it
-  with `kata agent-hooks install --all`; Codex requires trust through `/hooks`.
+  with `kata agent-hook install --all`; Codex requires trust through `/hooks`.
   See [Contract in every session](workflows/agents.md#contract-in-every-session).
 
 - Load the contract in every coding-agent session with
-  `kata agent-hooks install --all`, remove user hooks with `uninstall`, and
+  `kata agent-hook install --all`, remove user hooks with `uninstall`, and
   inspect user/workspace registrations with daemon-free `status`. Repeated
   canonical installs preserve file bytes and hook indexes. Codex hooks still
   require `/hooks` trust; Hermes injects on its first `pre_llm_call` turn.
   See [Contract in every session](workflows/agents.md#contract-in-every-session).
 
 - Run discoverable contract and attention hooks with
-  [`kata agent-hooks`](reference/cli.md#agent-hooks). Contract responses use
+  [`kata agent-hook`](reference/cli.md#agent-hook). Contract responses use
   each supported harness's native format, including Cursor SessionStart
   context and Hermes's first `pre_llm_call` turn. Claude Code and Codex can
   use the visible workspace attention commands. The canonical contract text

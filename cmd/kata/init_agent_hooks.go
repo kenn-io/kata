@@ -114,7 +114,7 @@ func prepareInitHookOptions(ctx context.Context, opts callInitOpts) (callInitOpt
 			return opts, err
 		}
 		if modern && !capability.Project {
-			return opts, agentHookUsage(capability.Name + " has no verified project hook discovery; use kata agent-hooks install in user scope")
+			return opts, agentHookUsage(capability.Name + " has no verified project hook discovery; use kata agent-hook install in user scope")
 		}
 		if modern && !capability.Contract && opts.ContractOnly {
 			return opts, agentHookUsage(capability.Name + " supports attention only; omit --contract-only")
@@ -124,7 +124,7 @@ func prepareInitHookOptions(ctx context.Context, opts callInitOpts) (callInitOpt
 	if openCode && opts.OpenCodeAPI == "" {
 		api, _, err := resolveOpenCodeRuntimeAPI(ctx, "")
 		if err != nil {
-			return opts, fmt.Errorf("init agent hooks: %w; alternatively initialize without hooks and run kata agent-hooks install opencode --local --api v1|v2", err)
+			return opts, fmt.Errorf("init agent hooks: %w; alternatively initialize without hooks and run kata agent-hook install opencode --local --api v1|v2", err)
 		}
 		opts.OpenCodeAPI = api
 	}

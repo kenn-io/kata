@@ -143,7 +143,7 @@ Consumer Muse can use a standing instruction block, skill, and recurring poll
 specification. Preview the bundle before installing it:
 
 ```sh
-kata agent-hooks instructions install muse --home /path/to/muse-home --actor example-agent --dry --json
+kata agent-hook instructions install muse --home /path/to/muse-home --actor example-agent --dry --json
 ```
 
 This unreleased support relies on instruction-following and has no native
@@ -157,7 +157,7 @@ With a build from `main`, load Kata's contract in every coding-agent session
 on this machine:
 
 ```sh
-kata agent-hooks install
+kata agent-hook install
 ```
 
 For Codex, open Codex and run `/hooks` to trust the new hook. See

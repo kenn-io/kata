@@ -22,7 +22,7 @@ func TestAgentHooksAttentionUsage(t *testing.T) {
 				{"--source", "kata-agent-hook-" + map[string]string{"start": "end", "end": "start"}[mode]},
 			} {
 				t.Run(strings.Join(args, "_"), func(t *testing.T) {
-					stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "attention", mode}, args...)...)
+					stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hook", "attention", mode}, args...)...)
 					require.Error(t, err)
 					assert.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered))
 					assert.Empty(t, stdout)
@@ -30,14 +30,14 @@ func TestAgentHooksAttentionUsage(t *testing.T) {
 				})
 			}
 			for _, marker := range [][]string{nil, {"--source", "kata-agent-hook-" + mode}} {
-				stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hooks", "attention", mode}, marker...)...)
+				stdout, stderr, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent-hook", "attention", mode}, marker...)...)
 				require.NoError(t, err)
 				assert.Empty(t, stdout)
 				assert.Empty(t, stderr)
 			}
 		})
 	}
-	_, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "attention", "unknown", "claude")
+	_, _, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "attention", "unknown", "claude")
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForErr(err, runEEntered))
 }
@@ -105,7 +105,7 @@ func TestE2E_AgentHooksAttentionParity(t *testing.T) {
 				t.Setenv("KATA_REF", ref)
 				args := []string{"attention-hook", scenario.mode}
 				if visible {
-					args = []string{"agent-hooks", "attention", scenario.mode}
+					args = []string{"agent-hook", "attention", scenario.mode}
 				}
 				payload := `{"hook_event_name":"SessionStart","session_id":"example-session","source":"startup"}`
 				if scenario.mode == "end" {

@@ -41,7 +41,7 @@ func openClawRecordNative(args []string) int {
 	}
 	exists := func(name string) bool { _, err := os.Stat(filepath.Join(root, name)); return err == nil }
 	switch args[0] {
-	case "agent-hooks":
+	case "agent-hook":
 		if isOpenClawAttentionCall(args, "start", "retry-parent-session") && exists("fail-parent-start") {
 			return 1
 		}
@@ -84,7 +84,7 @@ func openClawRecordNative(args []string) int {
 	default:
 		return 2
 	}
-	if len(args) > 1 && args[0] == "agent-hooks" && args[1] == "attention-native" {
+	if len(args) > 1 && args[0] == "agent-hook" && args[1] == "attention-native" {
 		completion, err := json.Marshal(struct {
 			Args []string `json:"args"`
 		}{args})
@@ -105,5 +105,5 @@ func openClawRecordNative(args []string) int {
 }
 
 func isOpenClawAttentionCall(args []string, mode, session string) bool {
-	return len(args) >= 6 && args[0] == "agent-hooks" && args[1] == "attention-native" && args[3] == mode && args[4] == "--session" && args[5] == session
+	return len(args) >= 6 && args[0] == "agent-hook" && args[1] == "attention-native" && args[3] == mode && args[4] == "--session" && args[5] == session
 }

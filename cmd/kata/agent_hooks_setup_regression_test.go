@@ -79,7 +79,7 @@ func TestAgentHooksStatusReturnsParseFailureWithFileAndPartialReport(t *testing.
 	path := filepath.Join(home, "claude", "settings.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
 	require.NoError(t, os.WriteFile(path, []byte("{invalid"), 0600))
-	out, diagnostic, err := executeAgentHook(t, unreadableHookInput{}, "agent-hooks", "status", "claude", "--json")
+	out, diagnostic, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "status", "claude", "--json")
 	require.Error(t, err)
 	require.Equal(t, ExitInternal, exitCodeForErr(err, true))
 	require.Empty(t, out)

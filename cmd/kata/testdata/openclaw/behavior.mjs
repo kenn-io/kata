@@ -20,13 +20,13 @@ await registrations.get('session_start')({sessionId:'one',sessionKey:ctx.session
 const prompt=await registrations.get('before_prompt_build')({prompt:'',messages:[{role:'user',content:[{type:'image'}]}]},ctx);
 assert.equal(prompt.prependSystemContext,'contract:'+initialContract);assert.equal(prompt.prependContext,'request-one');assert.ok(checks>=2);
 let calls=()=>fs.readFileSync(path.join(root,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
-const start=calls().find(c=>c.args[0]==='agent-hooks');assert.deepEqual(start.args,['agent-hooks','attention-native','openclaw','start','--session','one','--host-pid',String(process.pid),'--ref','abcd','--workspace',workspace]);
+const start=calls().find(c=>c.args[0]==='agent-hook');assert.deepEqual(start.args,['agent-hook','attention-native','openclaw','start','--session','one','--host-pid',String(process.pid),'--ref','abcd','--workspace',workspace]);
 assert.equal(start.cwd,workspace);assert.equal(start.recipient,'actor/worker');
 assert.deepEqual(calls().find(c=>c.args[0]==='agent-contract-hook').args,['agent-contract-hook','--source','prompt with spaces;literal.txt']);
 process.env.KATA_REF='changed';fs.writeFileSync(path.join(root,'contract'),'second');fs.writeFileSync(path.join(root,'inbox'),'');
 let second=await registrations.get('before_prompt_build')({prompt:'next',messages:[]},ctx);assert.equal(second.prependSystemContext,'contract:second');assert.equal(second.prependContext,'');
 assert.equal(calls().filter(c=>c.args[3]==='start').length,1);
-const unavailable='Kata agent contract is unavailable. Stop before making project changes and tell the user to check kata agent-hooks status openclaw.';
+const unavailable='Kata agent contract is unavailable. Stop before making project changes and tell the user to check kata agent-hook status openclaw.';
 fs.writeFileSync(path.join(root,'inbox'),'request-fallback');fs.writeFileSync(path.join(root,'fail-contract'),'');
 const failedContract=await registrations.get('before_prompt_build')({prompt:'failed contract',messages:[]},ctx);assert.equal(failedContract.prependSystemContext,unavailable);assert.equal(failedContract.prependContext,'request-fallback');
 fs.rmSync(path.join(root,'fail-contract'));fs.writeFileSync(path.join(root,'no-contract-context'),'');
