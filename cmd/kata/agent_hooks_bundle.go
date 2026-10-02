@@ -46,7 +46,15 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 				hook = agenthook.Hook{Event: agenthook.EventSessionStart, Timeout: 10 * time.Second}
 				if kind == attentionEndHook {
 					hook.Event = agenthook.EventSessionEnd
-				} else if agent == agenthook.AgentCodex {
+				}
+				if agent == agenthook.AgentClaude {
+					for _, spec := range claudeHookSpecs() {
+						if spec.event == hook.Event {
+							hook.Matcher = spec.matcher
+							break
+						}
+					}
+				} else if agent == agenthook.AgentCodex && kind == attentionStartHook {
 					hook.Matcher = "startup|resume|clear"
 				}
 			}
@@ -120,6 +128,13 @@ func kitAgentHookMatcherCoversLifecycle(agent agenthook.Agent, entry agentHookEn
 		return false
 	}
 	if entry.Kind == attentionEndHook {
+		if agent == agenthook.AgentClaude {
+			for _, spec := range claudeHookSpecs() {
+				if spec.event == agenthook.EventSessionEnd {
+					return entry.Matcher == spec.matcher
+				}
+			}
+		}
 		return entry.Matcher == ".*" || entry.Matcher == "^.*$"
 	}
 	pattern, err := regexp.Compile(entry.Matcher)

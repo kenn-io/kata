@@ -69,6 +69,50 @@ func TestKitAgentHookAttentionBundle(t *testing.T) {
 	}
 }
 
+func TestKitAgentHookClaudeAttentionUsesLifecycleMatchers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	plan, err := planKitAgentHooks(nativeAgentHookOptions{
+		Agent: "claude", ConfigPath: path, Executable: "kata", Contract: true, Attention: true,
+	}, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+
+	entries, err := inspectAgentHookEntries(agenthook.AgentClaude, path)
+	require.NoError(t, err)
+	var start, end, contract []agentHookEntry
+	for _, entry := range entries {
+		switch entry.Kind {
+		case attentionStartHook:
+			start = append(start, entry)
+		case attentionEndHook:
+			end = append(end, entry)
+		case contractHook:
+			contract = append(contract, entry)
+		}
+	}
+	require.Len(t, start, 1)
+	require.Equal(t, "SessionStart", start[0].Event)
+	require.Equal(t, "startup|resume|clear", start[0].Matcher)
+	require.Len(t, end, 1)
+	require.Equal(t, "SessionEnd", end[0].Event)
+	require.Equal(t, "logout|prompt_input_exit|bypass_permissions_disabled|other", end[0].Matcher)
+	require.Len(t, contract, 1)
+	require.Empty(t, contract[0].Matcher, "attention lifecycle filters must not narrow contract delivery")
+}
+
+func TestKitAgentHookClaudeTerminalMatcherCountsAsCoverage(t *testing.T) {
+	entry := agentHookEntry{
+		Kind:    attentionEndHook,
+		Event:   "SessionEnd",
+		Matcher: "logout|prompt_input_exit|bypass_permissions_disabled|other",
+	}
+	require.True(t, kitAgentHookMatcherCoversLifecycle(agenthook.AgentClaude, entry))
+
+	entry.Matcher = "logout"
+	require.False(t, kitAgentHookMatcherCoversLifecycle(agenthook.AgentClaude, entry), "a subset of terminal reasons is not complete coverage")
+}
+
 func TestKitAgentHookBundlePreservesForeignHandlers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	foreign := []byte(`{"theme":"authored","hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"echo authored-before"},{"command":"kata agent-hooks attention-native claude start && echo custom"}]}],"SessionEnd":[{"hooks":[{"command":"echo authored-end"}]}]}}`)
