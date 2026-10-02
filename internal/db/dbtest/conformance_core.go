@@ -170,6 +170,21 @@ func checkInstanceCreatedAt(t *testing.T, store db.Storage) error {
 		return err
 	}
 	assert.True(t, got.IsZero(), "restored identity without a creation time read %v", got)
+
+	// A target without a creation time keeps none when a new-instance replay
+	// supplies the source's.
+	if err := store.ImportReplay(ctx, []db.ImportRecord{
+		&db.MetaKV{Key: "instance_uid", Value: replayInstanceUID},
+		&db.MetaKV{Key: db.MetaKeyInstanceCreatedAt, Value: sourceCreatedAt},
+	}, db.ImportOptions{NewInstance: true}); err != nil {
+		return fmt.Errorf("legacy new-instance replay: %w", err)
+	}
+	assert.Equal(t, legacyInstanceUID, store.InstanceUID())
+	got, err = store.InstanceCreatedAt(ctx)
+	if err != nil {
+		return err
+	}
+	assert.True(t, got.IsZero(), "new-instance replay gave a legacy target creation time %v", got)
 	return nil
 }
 
