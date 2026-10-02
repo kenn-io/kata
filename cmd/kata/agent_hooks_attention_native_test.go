@@ -1,9 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -56,6 +63,104 @@ func TestNativeAttentionInvalidPayloadIsSilent(t *testing.T) {
 	}
 }
 
+func TestNativeAttentionReportsTransientDaemonLookupFailure(t *testing.T) {
+	resetFlags(t)
+	var issueLookups atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			require.Equal(t, http.MethodPost, r.Method)
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"project": map[string]any{"id": 42, "name": "example-project"},
+			}))
+		case "/api/v1/projects/42/issues/abc4":
+			require.Equal(t, http.MethodGet, r.Method)
+			issueLookups.Add(1)
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	workspace := t.TempDir()
+	stderr, err := executeNativeAttentionForTest(t, server.URL,
+		"agent-hooks", "attention-native", "pi", "start", "--session", "retry-session",
+		"--host-pid", strconv.Itoa(os.Getpid()), "--ref", "abc4", "--workspace", workspace)
+	require.EqualValuesf(t, 1, issueLookups.Load(), "stderr=%q err=%v", stderr, err)
+	require.ErrorContains(t, err, "native attention start: issue lookup unavailable")
+	require.Contains(t, stderr, "native attention start: issue lookup unavailable")
+}
+
+func TestNativeAttentionReportsTransientMetadataWriteFailure(t *testing.T) {
+	for _, mode := range []string{"start", "end"} {
+		t.Run(mode, func(t *testing.T) {
+			resetFlags(t)
+			const session = "retry-session"
+			hostPID := os.Getpid()
+			generation, err := nativeAttentionLaunchGeneration(hostPID)
+			require.NoError(t, err)
+			sum := sha256.Sum256([]byte("pi\x00" + generation + "\x00" + session))
+			owner := hex.EncodeToString(sum[:])
+			var metadataWrites atomic.Int32
+			storedOwner := "prior-owner"
+			if mode == "end" {
+				storedOwner = owner
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/v1/projects/resolve":
+					require.Equal(t, http.MethodPost, r.Method)
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+						"project": map[string]any{"id": 42, "name": "example-project"},
+					}))
+				case "/api/v1/projects/42/issues/abc4":
+					require.Equal(t, http.MethodGet, r.Method)
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"issue": map[string]any{
+						"short_id": "abc4", "status": "open", "revision": int64(17),
+						"metadata": map[string]string{attentionKey: attnValueOK, attentionSessionKey: storedOwner},
+					}}))
+				case "/api/v1/projects/42/issues/abc4/metadata":
+					require.Equal(t, http.MethodPost, r.Method)
+					metadataWrites.Add(1)
+					w.WriteHeader(http.StatusServiceUnavailable)
+				default:
+					t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			workspace := t.TempDir()
+			stderr, err := executeNativeAttentionForTest(t, server.URL,
+				"agent-hooks", "attention-native", "pi", mode, "--session", session,
+				"--host-pid", strconv.Itoa(hostPID), "--ref", "abc4", "--workspace", workspace)
+			require.EqualValuesf(t, 1, metadataWrites.Load(), "stderr=%q err=%v", stderr, err)
+			want := "native attention " + mode + ": metadata update failed"
+			require.ErrorContains(t, err, want)
+			require.Contains(t, stderr, want)
+		})
+	}
+}
+
+func executeNativeAttentionForTest(t *testing.T, baseURL string, args ...string) (string, error) {
+	t.Helper()
+	cmd := newRootCmd()
+	flags.Project = "example-project"
+	cmd.SetContext(contextWithBaseURL(t.Context(), baseURL))
+	var output bytes.Buffer
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	if err != nil {
+		emitRootError(&output, cmd, args, err, runEEntered)
+	}
+	return output.String(), err
+}
+
 func TestNativeAttentionLaunchGeneration(t *testing.T) {
 	t.Setenv("KATA_SESSION_ID", "")
 	first, err := nativeAttentionLaunchGeneration(os.Getpid())
@@ -86,9 +191,60 @@ func TestNativeAttentionEndConflictRechecksSessionOwner(t *testing.T) {
 		{kind: lookupOpen, attention: "ok", session: "old-owner", revision: 3},
 		{kind: lookupOpen, attention: "ok", session: "new-owner", revision: 4},
 	}, conditionalResults: []attnWriteResult{attnWriteConflict}}
-	attnEndSession(d, "abc4", "old-owner")
+	require.NoError(t, attnEndSession(d, "abc4", "old-owner"))
 	require.Len(t, d.conditionalWrites, 1)
 	require.Equal(t, map[string]string{attentionSessionKey: "ended:old-owner", attentionKey: "needs-human", attentionMsgKey: "session ended without hand-off"}, d.conditionalWrites[0].patch)
+}
+
+func TestNativeAttentionSessionHelpersReportTransientFailures(t *testing.T) {
+	for _, mode := range []string{"start", "end"} {
+		for _, failure := range []string{"lookup", "write", "conflicts"} {
+			t.Run(mode+"/"+failure, func(t *testing.T) {
+				owner := "previous-owner"
+				if mode == "end" {
+					owner = "current-owner"
+				}
+				open := attnLookup{kind: lookupOpen, attention: attnValueOK, session: owner, revision: 13}
+				d := &fakeAttnDaemon{lookups: map[string]attnLookup{"abc4": open}}
+				want := "native attention " + mode + ": "
+				switch failure {
+				case "lookup":
+					d.lookupSequence = []attnLookup{{kind: lookupTransient}}
+					want += "issue lookup unavailable"
+				case "write":
+					d.conditionalResults = []attnWriteResult{attnWriteFailed}
+					want += "metadata update failed"
+				case "conflicts":
+					d.lookupSequence = make([]attnLookup, attnWriteAttempts)
+					d.conditionalResults = make([]attnWriteResult, attnWriteAttempts)
+					for i := range d.lookupSequence {
+						d.lookupSequence[i] = open
+						d.conditionalResults[i] = attnWriteConflict
+					}
+					want += "metadata changed repeatedly"
+				}
+
+				var err error
+				if mode == "start" {
+					err = attnStartSession(d, "abc4", "current-owner")
+				} else {
+					err = attnEndSession(d, "abc4", owner)
+				}
+				require.ErrorContains(t, err, want)
+			})
+		}
+	}
+}
+
+func TestNativeAttentionSessionHelpersKeepNonActionableCasesSilent(t *testing.T) {
+	missing := &fakeAttnDaemon{lookups: map[string]attnLookup{"abc4": {kind: lookupGone}}}
+	require.NoError(t, attnStartSession(missing, "abc4", "current-owner"))
+	require.NoError(t, attnEndSession(missing, "abc4", "current-owner"))
+	stale := &fakeAttnDaemon{lookups: map[string]attnLookup{"abc4": {
+		kind: lookupOpen, attention: attnValueOK, session: "new-owner", revision: 14,
+	}}}
+	require.NoError(t, attnEndSession(stale, "abc4", "old-owner"))
+	require.Empty(t, stale.conditionalWrites)
 }
 
 func TestNativeAttentionExplicitHostResumeWithoutLauncherOverride(t *testing.T) {

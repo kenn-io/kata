@@ -94,11 +94,9 @@ func newNativeAgentAttentionCmd() *cobra.Command {
 			defer cmd.SetContext(previous)
 			d := &liveAttnDaemon{cmd: cmd}
 			if args[1] == "start" {
-				attnStartSession(d, ref, owner)
-			} else {
-				attnEndSession(d, ref, owner)
+				return attnStartSession(d, ref, owner)
 			}
-			return nil
+			return attnEndSession(d, ref, owner)
 		},
 	}
 	cmd.Flags().StringVar(&session, "session", "", "native session ID; bypasses stdin")
@@ -285,38 +283,72 @@ func nativeAttentionAncestorGeneration() (string, error) {
 	return "", errors.New("native host ancestor depth exceeded")
 }
 
-func attnStartSession(d attnDaemon, kataRef, owner string) {
+func attnStartSession(d attnDaemon, kataRef, owner string) error {
 	ref, ok := attentionRef(kataRef)
 	if !ok || owner == "" {
-		return
+		return nil
 	}
 	for range attnWriteAttempts {
 		lookup := d.lookup(ref)
-		if lookup.kind != lookupOpen || lookup.session == owner {
-			return
+		switch lookup.kind {
+		case lookupTransient:
+			return errors.New("native attention start: issue lookup unavailable")
+		case lookupGone:
+			return nil
+		case lookupOpen:
+		default:
+			return errors.New("native attention start: issue lookup unavailable")
 		}
-		if d.setMetaIfRevision(ref, map[string]string{attentionKey: attnValueOK, attentionSessionKey: owner}, lookup.revision) != attnWriteConflict {
-			return
+		if lookup.session == owner {
+			return nil
+		}
+		switch d.setMetaIfRevision(ref, map[string]string{attentionKey: attnValueOK, attentionSessionKey: owner}, lookup.revision) {
+		case attnWriteApplied:
+			return nil
+		case attnWriteFailed:
+			return errors.New("native attention start: metadata update failed")
+		case attnWriteConflict:
+			continue
+		default:
+			return errors.New("native attention start: metadata update failed")
 		}
 	}
+	return errors.New("native attention start: metadata changed repeatedly")
 }
-func attnEndSession(d attnDaemon, kataRef, owner string) {
+func attnEndSession(d attnDaemon, kataRef, owner string) error {
 	ref, ok := attentionRef(kataRef)
 	if !ok || owner == "" {
-		return
+		return nil
 	}
 	for range attnWriteAttempts {
 		lookup := d.lookup(ref)
-		if lookup.kind != lookupOpen || lookup.session != owner {
-			return
+		switch lookup.kind {
+		case lookupTransient:
+			return errors.New("native attention end: issue lookup unavailable")
+		case lookupGone:
+			return nil
+		case lookupOpen:
+		default:
+			return errors.New("native attention end: issue lookup unavailable")
+		}
+		if lookup.session != owner {
+			return nil
 		}
 		patch := map[string]string{attentionSessionKey: "ended:" + owner}
 		if lookup.attention == attnValueOK {
 			patch[attentionKey] = attnValueNeedsHuman
 			patch[attentionMsgKey] = attnHandoffMsg
 		}
-		if d.setMetaIfRevision(ref, patch, lookup.revision) != attnWriteConflict {
-			return
+		switch d.setMetaIfRevision(ref, patch, lookup.revision) {
+		case attnWriteApplied:
+			return nil
+		case attnWriteFailed:
+			return errors.New("native attention end: metadata update failed")
+		case attnWriteConflict:
+			continue
+		default:
+			return errors.New("native attention end: metadata update failed")
 		}
 	}
+	return errors.New("native attention end: metadata changed repeatedly")
 }
