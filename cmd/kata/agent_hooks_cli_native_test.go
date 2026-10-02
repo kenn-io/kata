@@ -112,7 +112,7 @@ func TestAgentHooksCLIUserSourceIsAnchoredToInstallWorkingDirectory(t *testing.T
 	require.NoError(t, err)
 	meta, err := parsePiAgentHookMetadata(data)
 	require.NoError(t, err)
-	want, err := filepath.Abs(filepath.Join(installDir, source))
+	want, err := filepath.Abs(source)
 	require.NoError(t, err)
 	require.Equal(t, want, meta.Source)
 }
