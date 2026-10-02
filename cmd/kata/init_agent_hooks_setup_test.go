@@ -100,7 +100,7 @@ func TestInitAgentHooksCodexRespectsUserContractAndTrackedWorkspace(t *testing.T
 				if tracked {
 					runGit(t, dir, "add", ".codex/hooks.json")
 				}
-				_, err := runHookSetup(t, "install", "codex", "--contract-only", "--executable", "kata")
+				_, err := runHookSetup(t, "install", "codex", "--contract-only", "--executable", os.Args[0])
 				require.NoError(t, err)
 				userPath, err := agenthook.ConfigPath(agenthook.AgentCodex)
 				require.NoError(t, err)
