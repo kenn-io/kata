@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// ParentScan states which of three outcomes produced a ParentData value.
+// ParentScan states which fetch outcome produced a ParentData value.
 type ParentScan uint8
 
 const (
@@ -28,6 +28,8 @@ const (
 	// ParentScanComplete means a full repository parent scan succeeded and
 	// ScannedChildIDs is its coverage.
 	ParentScanComplete
+	// ParentScanIncremental covers only selected changed/event children.
+	ParentScanIncremental
 )
 
 // ParentData carries GitHub parent relationship data plus scan coverage.
@@ -63,14 +65,24 @@ func (d ParentData) ChildScanned(childNumber int) bool {
 	return ok
 }
 
+// ParentRequest selects a full scan (nil Since) or changed children plus recent
+// parent relationship events since the inclusive lower bound. ChildrenOf names
+// issues imported for the first time; their same-repository sub-issues are also
+// checked, because a link to a parent outside the cutoff was dropped earlier.
+type ParentRequest struct {
+	Since        *time.Time
+	IssueNumbers []int
+	ChildrenOf   []int
+}
+
 // Fetcher reads GitHub repository data needed by the sync importer.
 type Fetcher interface {
 	Repository(ctx context.Context, host, owner, repo string) (Repository, error)
 	Issues(ctx context.Context, binding Binding, since *time.Time) ([]Issue, error)
 	Comments(ctx context.Context, binding Binding, issueNumber int) ([]Comment, error)
 	// ParentData returns child issue parent REST IDs plus the child numbers
-	// covered by the scan. Unsupported providers should return Unsupported.
-	ParentData(ctx context.Context, binding Binding) (ParentData, error)
+	// covered by the scan. Unsupported providers should return ParentScanUnsupported.
+	ParentData(ctx context.Context, binding Binding, request ParentRequest) (ParentData, error)
 }
 
 // BindingSessionFetcher can provide a Fetcher that reuses binding-scoped

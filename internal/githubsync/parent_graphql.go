@@ -3,6 +3,7 @@ package githubsync
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -42,19 +43,26 @@ var errParentFeatureUnsupported = errors.New("GitHub parent GraphQL feature unsu
 
 // ParentData fetches child->parent REST database IDs through GitHub GraphQL
 // using a single-use binding session.
-func (f *HTTPFetcher) ParentData(ctx context.Context, binding Binding) (ParentData, error) {
+func (f *HTTPFetcher) ParentData(ctx context.Context, binding Binding, request ParentRequest) (ParentData, error) {
 	session, err := f.ForBinding(ctx, binding)
 	if err != nil {
 		return ParentData{}, err
 	}
-	return session.ParentData(ctx, binding)
+	return session.ParentData(ctx, binding, request)
 }
 
-func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Client, binding Binding) (ParentData, error) {
+func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Client, binding Binding, request ParentRequest) (ParentData, error) {
 	cache := f.parentCapabilityCache()
 	if cache.featureUnsupported(binding.Host) {
 		return ParentData{Scan: ParentScanUnsupported}, nil
 	}
+	if request.Since != nil {
+		return f.incrementalParentData(ctx, client, binding, request)
+	}
+	return f.fullParentData(ctx, client, binding)
+}
+
+func (f *HTTPFetcher) fullParentData(ctx context.Context, client *http.Client, binding Binding) (ParentData, error) {
 	requestURL, err := f.graphQLEndpointURL(binding)
 	if err != nil {
 		return ParentData{}, err
@@ -67,10 +75,10 @@ func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Cli
 	var after *string
 	retryBudget := &gitHubRetryBudget{}
 	for {
-		page, err := f.fetchParentGraphQLPage(ctx, client, requestURL, binding, after, retryBudget)
+		page, err := f.fetchParentGraphQLPage(ctx, client, requestURL, binding, after, retryBudget, nil)
 		if err != nil {
 			if errors.Is(err, errParentFeatureUnsupported) {
-				cache.markUnsupported(binding.Host)
+				f.parentCapabilityCache().markUnsupported(binding.Host)
 				return ParentData{Scan: ParentScanUnsupported}, nil
 			}
 			return ParentData{}, err
@@ -106,9 +114,9 @@ func (f *HTTPFetcher) parentDataWithClient(ctx context.Context, client *http.Cli
 	}
 }
 
-func (f *HTTPFetcher) fetchParentGraphQLPage(ctx context.Context, client *http.Client, requestURL string, binding Binding, after *string, budget *gitHubRetryBudget) (parentGraphQLIssues, error) {
+func (f *HTTPFetcher) fetchParentGraphQLPage(ctx context.Context, client *http.Client, requestURL string, binding Binding, after *string, budget *gitHubRetryBudget, numbers []int) (parentGraphQLIssues, error) {
 	for attempt := 1; attempt <= gitHubMaxRetryAttempts; attempt++ {
-		page, retry, err := f.fetchParentGraphQLPageOnce(ctx, client, requestURL, binding, after)
+		page, retry, err := f.fetchParentGraphQLPageOnce(ctx, client, requestURL, binding, after, numbers)
 		if err == nil {
 			return page, nil
 		}
@@ -139,9 +147,13 @@ func (f *HTTPFetcher) fetchParentGraphQLPage(ctx context.Context, client *http.C
 	return parentGraphQLIssues{}, fmt.Errorf("%s exhausted retries", parentGraphQLResource)
 }
 
-func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *http.Client, requestURL string, binding Binding, after *string) (parentGraphQLIssues, gitHubRetry, error) {
+func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *http.Client, requestURL string, binding Binding, after *string, numbers []int) (parentGraphQLIssues, gitHubRetry, error) {
+	query := parentGraphQLQuery
+	if numbers != nil {
+		query = targetedParentGraphQLQuery(numbers)
+	}
 	body, err := json.Marshal(parentGraphQLRequest{
-		Query: parentGraphQLQuery,
+		Query: query,
 		Variables: map[string]any{
 			"owner": binding.Owner,
 			"repo":  binding.Repo,
@@ -189,6 +201,10 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 	if err := json.UnmarshalRead(resp.Body, &out); err != nil {
 		return parentGraphQLIssues{}, gitHubRetry{}, fmt.Errorf("decode %s: %w", parentGraphQLResource, err)
 	}
+	var missingChildren map[int]bool
+	if numbers != nil {
+		out.Errors, missingChildren = parentErrorsWithoutMissingChildren(out.Errors, out.Data, len(numbers))
+	}
 	if len(out.Errors) > 0 {
 		if graphQLErrorsRateLimited(out.Errors) {
 			f.deferStatusRequests(binding, retryWait(resp.Header, f.now()))
@@ -205,7 +221,42 @@ func (f *HTTPFetcher) fetchParentGraphQLPageOnce(ctx context.Context, client *ht
 	if out.Data == nil || out.Data.Repository == nil {
 		return parentGraphQLIssues{}, gitHubRetry{}, fmt.Errorf("%s response missing repository data", parentGraphQLResource)
 	}
-	return out.Data.Repository.Issues, gitHubRetry{}, nil
+	if numbers != nil {
+		page := parentGraphQLIssues{}
+		for i, number := range numbers {
+			raw, ok := out.Data.Repository[fmt.Sprintf("i%d", i)]
+			if !ok {
+				return page, gitHubRetry{}, fmt.Errorf("%s response missing child %d", parentGraphQLResource, number)
+			}
+			if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+				if missingChildren[i] {
+					continue
+				}
+				return page, gitHubRetry{}, fmt.Errorf("%s response null child %d", parentGraphQLResource, number)
+			}
+			var fields map[string]jsontext.Value
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				return page, gitHubRetry{}, err
+			}
+			if _, ok := fields["parent"]; !ok {
+				return page, gitHubRetry{}, fmt.Errorf("%s response missing parent for child %d", parentGraphQLResource, number)
+			}
+			var node parentGraphQLNode
+			if err := json.Unmarshal(raw, &node); err != nil {
+				return page, gitHubRetry{}, err
+			}
+			if node.Number != number {
+				return page, gitHubRetry{}, fmt.Errorf("%s returned child %d for requested %d", parentGraphQLResource, node.Number, number)
+			}
+			page.Nodes = append(page.Nodes, node)
+		}
+		return page, gitHubRetry{}, nil
+	}
+	var page parentGraphQLIssues
+	if err := json.Unmarshal(out.Data.Repository["issues"], &page); err != nil {
+		return page, gitHubRetry{}, fmt.Errorf("decode %s issues: %w", parentGraphQLResource, err)
+	}
+	return page, gitHubRetry{}, nil
 }
 
 func (f *HTTPFetcher) graphQLEndpointURL(binding Binding) (string, error) {
@@ -370,11 +421,7 @@ type parentGraphQLResponse struct {
 }
 
 type parentGraphQLData struct {
-	Repository *parentGraphQLRepository `json:"repository"`
-}
-
-type parentGraphQLRepository struct {
-	Issues parentGraphQLIssues `json:"issues"`
+	Repository map[string]jsontext.Value `json:"repository"`
 }
 
 type parentGraphQLIssues struct {

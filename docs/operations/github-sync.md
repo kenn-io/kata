@@ -168,10 +168,25 @@ Changing the binding config resets the incremental cursor and fetches eligible
 history again. Existing imported issues remain in kata when a narrower cutoff
 excludes them; filtering never deletes them.
 
-Parent relationships still require a full repository scan because GitHub
-reparenting may not update an issue's timestamp. That scan also reconciles
-links for already imported issues outside the cutoff, so a filtered run can
-still spend time in the `parents` phase.
+Incremental parent fetching combines eligible changed issues with children from
+recent repository `parent_issue_added` and `parent_issue_removed` events, then
+reads their current parents in GraphQL batches of at most 100 children. GitHub
+parent changes do not update the child's `updated_at`, so the event feed is
+needed to reconcile relationship-only changes. Event discovery uses the sync
+cursor with a two-minute overlap and also reconciles already imported children
+outside the cutoff; it does not import old, unmapped event children. With a
+cutoff, a child's link to a parent outside the cutoff is skipped. When a later
+run first imports an issue created before the cutoff, it lists that issue's
+sub-issues and checks the parents of those in the same repository, so skipped
+links are restored. An idle incremental run makes no parent GraphQL requests. GitHub serves only the newest
+30,000 repository issue events. When the events since the last cursor exceed
+that limit, such as after a long pause, the run falls back to a full repository
+parent scan.
+
+Initial sync and the one-time parent-link backfill still scan the full repository
+for parent coverage. Issue imports and comments continue to respect `--since`
+during those scans. Hosts without parent support retain incremental issue
+fetching and preserve existing parent links.
 
 Enablement validates the repository through the daemon before storing the
 binding. The binding, sync cursor, interval, status, and import mappings live
@@ -208,10 +223,13 @@ GitHub sync running
 Progress: comments — 25/120 completed; updated 2026-01-02T12:34:56Z
 ```
 
-The phases are `repository`, `parents`, `issues`, `comments`, `importing`, and
-`finalizing`. Counts reset when the phase changes. Parent and issue fetches
-count rows as pages arrive; their total is unknown. The issue count includes
-pull-request rows and rows the cutoff may subsequently exclude. Comments count
+Incremental runs use the phases `repository`, `issues`, `parents`, `comments`,
+`importing`, and `finalizing`. Initial sync and parent-link backfill check
+`parents` before `issues`. Counts reset when the phase changes. Incremental
+parent progress counts selected children checked against GitHub, with the
+selected total known once recent events have been read. Full parent scans and
+issue fetches count rows as pages arrive; their total is unknown. The issue count
+includes pull-request rows and rows the cutoff may subsequently exclude. Comments count
 eligible issues checked, including issues with no comments, rather than comment
 rows. Importing counts committed batch items, including parent reconciliation
 items. A zero total means unknown or an empty phase; no percentage is guessed.

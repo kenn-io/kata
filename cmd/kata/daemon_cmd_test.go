@@ -2729,7 +2729,7 @@ func (f *daemonGitHubSyncFetcher) Comments(_ context.Context, _ githubsync.Bindi
 	return append([]githubsync.Comment(nil), f.comments[issueNumber]...), nil
 }
 
-func (f *daemonGitHubSyncFetcher) ParentData(_ context.Context, _ githubsync.Binding) (githubsync.ParentData, error) {
+func (f *daemonGitHubSyncFetcher) ParentData(_ context.Context, _ githubsync.Binding, _ githubsync.ParentRequest) (githubsync.ParentData, error) {
 	return githubsync.ParentData{}, nil
 }
 

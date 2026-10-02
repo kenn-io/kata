@@ -72,7 +72,7 @@ func BuildImportBatchWithConfig(sourceKey string, config Config, issues []Issue,
 		switch parentData.Scan {
 		case ParentScanUnsupported:
 			item.LinkTypesAuthoritative = map[string]bool{"parent": false}
-		case ParentScanComplete:
+		case ParentScanComplete, ParentScanIncremental:
 			item.LinkTypesAuthoritative = map[string]bool{"parent": parentData.ChildScanned(issue.Number)}
 		case ParentScanAbsent:
 			// Leave LinkTypesAuthoritative nil: the import layer defaults an

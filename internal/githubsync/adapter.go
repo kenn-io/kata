@@ -52,20 +52,26 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 		}
 	}
 
-	reportProgress(ctx, "parents", 0, 0)
-	parentData, err := fetcher.ParentData(ctx, ghConfig.Binding())
+	cutoff, err := ghConfig.SinceTime()
 	if err != nil {
 		return issuesync.Prepared{Binding: binding}, err
+	}
+	// Probe unsupported hosts before forcing a backfill REST pass. Otherwise
+	// their permanently pending marker would force full issue reads every run.
+	preflightParents := binding.LastCursorAt == nil || ghConfig.NeedsParentLinkBackfill()
+	var parentData ParentData
+	if preflightParents {
+		reportProgress(ctx, "parents", 0, 0)
+		parentData, err = fetcher.ParentData(ctx, ghConfig.Binding(), ParentRequest{})
+		if err != nil {
+			return issuesync.Prepared{Binding: binding}, err
+		}
 	}
 	parentLinkBackfill := ghConfig.NeedsParentLinkBackfill() && parentData.Scan == ParentScanComplete
 
 	since := syncSince(binding.LastCursorAt)
 	if reconcileLegacyTitles || parentLinkBackfill {
 		since = nil
-	}
-	cutoff, err := ghConfig.SinceTime()
-	if err != nil {
-		return issuesync.Prepared{Binding: binding}, err
 	}
 	if cutoff != nil && (since == nil || cutoff.After(*since)) {
 		since = cutoff
@@ -84,6 +90,25 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 		}
 		issues = eligible
 	}
+	if !preflightParents {
+		numbers := make([]int, 0, len(issues))
+		for _, issue := range issues {
+			if !IsPullRequestIssue(issue) && issue.Number > 0 {
+				numbers = append(numbers, issue.Number)
+			}
+		}
+		childrenOf, err := r.firstImportsBeforeCutoff(ctx, binding, issues, cutoff)
+		if err != nil {
+			return issuesync.Prepared{Binding: binding}, err
+		}
+		reportProgress(ctx, "parents", 0, len(numbers))
+		// Relationship changes do not update updatedAt. Event discovery uses the
+		// cursor overlap even if the issue cutoff excludes an already imported child.
+		parentData, err = fetcher.ParentData(ctx, ghConfig.Binding(), ParentRequest{Since: syncSince(binding.LastCursorAt), IssueNumbers: numbers, ChildrenOf: childrenOf})
+		if err != nil {
+			return issuesync.Prepared{Binding: binding}, err
+		}
+	}
 	comments, err := r.fetchComments(ctx, fetcher, ghConfig, issues)
 	if err != nil {
 		return issuesync.Prepared{Binding: binding}, err
@@ -92,7 +117,7 @@ func (r *adapter) Prepare(ctx context.Context, binding db.IssueSyncBinding, sync
 	batch := BuildImportBatchWithConfig(binding.SourceKey, ghConfig, issues, comments, parentData, syncStartedAt)
 	batch.ProjectID = binding.ProjectID
 	batch.PreserveLocalParentConflicts = true
-	if parentData.Scan == ParentScanComplete {
+	if parentData.Scan == ParentScanComplete || parentData.Scan == ParentScanIncremental {
 		batch.ReconcileLinkTypesForUnchanged = map[string]bool{"parent": true}
 		batch.Items, err = r.appendScannedParentReconcileItems(ctx, batch, parentData, cutoff != nil)
 		if err != nil {
@@ -207,8 +232,33 @@ func (r *adapter) fetchComments(ctx context.Context, fetcher Fetcher, ghConfig C
 	return out, nil
 }
 
+// firstImportsBeforeCutoff returns issues created before the cutoff that have no
+// import mapping yet. Earlier runs dropped links from imported children to these
+// issues, so their children need a parent check once they are imported.
+func (r *adapter) firstImportsBeforeCutoff(ctx context.Context, binding db.IssueSyncBinding, issues []Issue, cutoff *time.Time) ([]int, error) {
+	if cutoff == nil {
+		return nil, nil
+	}
+	var numbers []int
+	for _, issue := range issues {
+		if IsPullRequestIssue(issue) || issue.Number <= 0 || issue.CreatedAt == nil || issue.CreatedAt.After(*cutoff) {
+			continue
+		}
+		externalID := issueExternalID(issue)
+		_, err := r.config.Store.ImportMappingBySource(ctx, binding.ProjectID, binding.SourceKey, "issue", externalID)
+		if errors.Is(err, db.ErrNotFound) {
+			numbers = append(numbers, issue.Number)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("lookup github issue mapping %q: %w", externalID, err)
+		}
+	}
+	return numbers, nil
+}
+
 func (r *adapter) appendScannedParentReconcileItems(ctx context.Context, batch db.ImportBatchParams, parentData ParentData, hasCutoff bool) ([]db.ImportItem, error) {
-	if parentData.Scan != ParentScanComplete || len(parentData.ScannedChildIDs) == 0 {
+	if (parentData.Scan != ParentScanComplete && parentData.Scan != ParentScanIncremental) || len(parentData.ScannedChildIDs) == 0 {
 		return batch.Items, nil
 	}
 	present := make(map[string]struct{}, len(batch.Items))

@@ -393,7 +393,7 @@ func graphQLStringVariable(variables map[string]jsontext.Value, name string) (st
 }
 
 func graphQLQueryMatchesParentQuery(query string) bool {
-	return compactGraphQLQuery(query) == compactGraphQLQuery(parentGraphQLQuery)
+	return compactGraphQLQuery(query) == compactGraphQLQuery(parentGraphQLQuery) || matchesTargetedParentQuery(query)
 }
 
 func compactGraphQLQuery(query string) string {

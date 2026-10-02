@@ -700,7 +700,7 @@ func (f *fakeGitHubSyncFetcher) Comments(_ context.Context, _ githubsync.Binding
 	return f.comments[issueNumber], nil
 }
 
-func (f *fakeGitHubSyncFetcher) ParentData(_ context.Context, _ githubsync.Binding) (githubsync.ParentData, error) {
+func (f *fakeGitHubSyncFetcher) ParentData(_ context.Context, _ githubsync.Binding, _ githubsync.ParentRequest) (githubsync.ParentData, error) {
 	return githubsync.ParentData{}, nil
 }
 

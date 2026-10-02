@@ -326,7 +326,7 @@ func TestGitHubStatusCooldownAlsoFencesContentRESTAndGraphQL(t *testing.T) {
 	require.ErrorAs(t, err, &rate)
 	require.Positive(t, rate.RetryAfter)
 	require.Equal(t, 1, calls)
-	_, err = raw.ParentData(t.Context(), statusConfig().Binding())
+	_, err = raw.ParentData(t.Context(), statusConfig().Binding(), ParentRequest{})
 	require.ErrorAs(t, err, &rate)
 	require.Positive(t, rate.RetryAfter)
 	require.Equal(t, 1, calls)
@@ -346,7 +346,7 @@ func TestGitHubContentRateLimitFencesNextStatusRead(t *testing.T) {
 			raw, err := f.ForBinding(t.Context(), statusConfig().Binding())
 			require.NoError(t, err)
 			if graphql {
-				_, err = raw.ParentData(t.Context(), statusConfig().Binding())
+				_, err = raw.ParentData(t.Context(), statusConfig().Binding(), ParentRequest{})
 			} else {
 				_, err = raw.Repository(t.Context(), "github.com", "example-owner", "example-repo")
 			}
