@@ -13,6 +13,8 @@ import type {
   AuditClosesResponseBody,
   BindExternalRootPathParameters,
   BindExternalRootRequestBody,
+  CaptureTelemetryEventRequestBody,
+  CaptureTelemetryEventResponseBody,
   ClaimActionBody,
   ClaimActionResponseBody,
   ClaimIssuePathParameters,
@@ -4920,5 +4922,53 @@ export const readUISnapshot = async (
   return orvalFetch<readUISnapshotResponse>(getReadUISnapshotUrl(params), {
     ...options,
     method: 'GET',
+  })
+}
+
+export type captureTelemetryEventResponse202 = {
+  data: CaptureTelemetryEventResponseBody
+  status: 202
+}
+
+export type captureTelemetryEventResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 202>
+}
+
+export type captureTelemetryEventResponseSuccess = captureTelemetryEventResponse202 & {
+  headers: Headers
+}
+export type captureTelemetryEventResponseError = captureTelemetryEventResponseDefault & {
+  headers: Headers
+}
+
+export type captureTelemetryEventResponse =
+  | captureTelemetryEventResponseSuccess
+  | captureTelemetryEventResponseError
+
+export const getCaptureTelemetryEventUrl = () => {
+  return `/api/v1/ui/telemetry`
+}
+
+/**
+ * @summary Report a browser telemetry event
+ */
+export const captureTelemetryEvent = async (
+  captureTelemetryEventRequestBody: CaptureTelemetryEventRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<captureTelemetryEventResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<captureTelemetryEventResponse>(getCaptureTelemetryEventUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(captureTelemetryEventRequestBody),
   })
 }

@@ -104,7 +104,6 @@
     {@render primary()}
   </div>
   <SplitResizeHandle
-    class="sash-handle"
     orientation={effectiveOrientation}
     {ariaLabel}
     ariaValueMin={minPrimary}
@@ -149,10 +148,5 @@
 
   .pane-secondary {
     flex: 1 1 auto;
-  }
-
-  :global(.sash-handle) {
-    flex: 0 0 auto;
-    background: var(--border-default);
   }
 </style>

@@ -18,9 +18,13 @@ func main() {
 		}
 	}()
 
-	if reporter.Enabled() {
+	switch {
+	case reporter.Enabled():
 		fmt.Println("enabled")
-		return
+	case !reporter.EventAllowed("app_opened"):
+		// The capture route answers disabled only while the allowlist survives opt-out.
+		fmt.Println("disabled without allowlist")
+	default:
+		fmt.Println("disabled")
 	}
-	fmt.Println("disabled")
 }

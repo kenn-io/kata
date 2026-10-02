@@ -84,6 +84,8 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "proxied project metadata", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/projects/7/metadata", want: http.StatusNoContent},
 		{name: "proxied federation", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/federation/replicas", want: http.StatusForbidden},
 		{name: "project creation", method: http.MethodPost, path: "/api/v1/projects", want: http.StatusNoContent},
+		{name: "telemetry", method: http.MethodPost, path: "/api/v1/ui/telemetry", want: http.StatusNoContent},
+		{name: "proxied telemetry", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/ui/telemetry", want: http.StatusForbidden},
 		{name: "project metadata", method: http.MethodPost, path: "/api/v1/projects/7/metadata", want: http.StatusNoContent},
 		{name: "full issue lookup", method: http.MethodGet, path: "/api/v1/projects/7/issues/abc4", want: http.StatusForbidden},
 		{name: "deleted issue lookup", method: http.MethodGet, path: "/api/v1/projects/7/issues/abc4?include_deleted=true", want: http.StatusForbidden},

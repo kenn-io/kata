@@ -183,6 +183,32 @@ func (b BindExternalRootRequestBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(b))
 }
 
+type CaptureTelemetryEventRequestBody struct {
+	Event      string         `json:"event" validate:"required,min=1"`
+	Properties map[string]any `json:"properties,omitempty"`
+}
+
+func (c CaptureTelemetryEventRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CaptureTelemetryEventResponseBody struct {
+	Status CaptureTelemetryEventResponseBodyStatus `json:"status" validate:"required"`
+}
+
+func (c CaptureTelemetryEventResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(c.Status).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Status", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type ChildCounts struct {
 	Open  int64 `json:"open"`
 	Total int64 `json:"total"`

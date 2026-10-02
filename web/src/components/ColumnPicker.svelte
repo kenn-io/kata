@@ -22,7 +22,7 @@
     if (!open) return
     const cleanups = [
       dismissable({ owners: () => [trigger, panel], dismiss: close, escapeFocus: () => trigger }),
-      autoReposition(() => panel, position),
+      autoReposition(() => [panel], position),
     ]
     return () => cleanups.forEach((cleanup) => cleanup())
   })

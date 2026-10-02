@@ -94,6 +94,10 @@ type ServerConfig struct {
 	// the browser-only routes and middleware disabled for embedded/API-only use.
 	WebSessions *WebSessionManager
 
+	// Telemetry receives UI telemetry events. Nil makes the capture
+	// operation answer 503, as in embedded Service construction.
+	Telemetry TelemetryReporter
+
 	// WebDaemons is the client daemon catalog exposed to the first-class web
 	// UI. Credentials remain server-side and are used only by the selected-
 	// daemon proxy. ActiveWebDaemon selects the initial catalog entry.
@@ -633,6 +637,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerAuditHandlers(humaAPI, cfg)
 	registerUIHandlers(humaAPI, cfg)
 	registerUILaunchHandler(humaAPI, cfg)
+	registerTelemetryHandlers(humaAPI, cfg)
 }
 
 // registerHealth registers /api/v1/ping and /api/v1/health.

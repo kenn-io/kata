@@ -105,3 +105,5 @@ type CreateRecurrenceBody = CreateRecurrenceRequestBody
 type PatchRecurrenceBody = PatchRecurrenceRequestBody
 
 type CreateTokenBody = CreateTokenRequestBody
+
+type CaptureTelemetryEventBody = CaptureTelemetryEventRequestBody

@@ -1127,7 +1127,7 @@
 
   .tree-action:disabled {
     cursor: default;
-    opacity: 0.45;
+    opacity: var(--opacity-disabled);
   }
 
   .table {

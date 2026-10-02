@@ -1,14 +1,12 @@
-// Package telemetry emits anonymous, opt-out daemon usage events.
+// Package telemetry emits anonymous, opt-out daemon and web UI usage events.
 package telemetry
 
 import (
 	"log/slog"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
-	kittelemetry "go.kenn.io/kit/telemetry"
+	"go.kenn.io/kit/telemetry/posthog"
 )
 
 const (
@@ -22,13 +20,13 @@ const (
 )
 
 // ErrUnsupportedEvent is returned when callers try to capture an event outside the allowlist.
-var ErrUnsupportedEvent = kittelemetry.ErrUnsupportedTelemetryEvent
+var ErrUnsupportedEvent = posthog.ErrUnsupportedEvent
 
 // Client is the daemon-facing telemetry reporter contract.
-type Client = kittelemetry.PostHogClient
+type Client = posthog.Client
 
 // Reporter sanitizes and submits anonymous telemetry events to PostHog.
-type Reporter = kittelemetry.PostHogReporter
+type Reporter = posthog.Reporter
 
 // Options configures a telemetry reporter instance.
 type Options struct {
@@ -43,25 +41,18 @@ type Options struct {
 
 // EnabledFromEnv reports whether anonymous telemetry is enabled by the environment.
 func EnabledFromEnv() bool {
-	return !testing.Testing() && !optedOut(os.Getenv(EnabledEnv)) && kittelemetry.PostHogTelemetryEnabledFromEnv(envPrefix)
+	return !testing.Testing() && posthog.EnabledFromEnv(envPrefix)
 }
 
-func optedOut(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "0", "false", "no", "off":
-		return true
-	default:
-		return false
-	}
-}
-
-// NewReporter builds an enabled reporter or returns a disabled reporter when opted out.
+// NewReporter builds an enabled reporter, or a disabled one that keeps the
+// allowlist when telemetry is opted out or running under go test.
 func NewReporter(opts Options) (*Reporter, error) {
-	if !EnabledFromEnv() {
-		return DisabledReporter(), nil
+	if testing.Testing() {
+		// Go tests never send telemetry; kit's disabled reporter still admits allowed events.
+		posthog.DisableProcess()
 	}
 
-	return kittelemetry.NewPostHogReporter(kittelemetry.PostHogOptions{
+	return posthog.NewReporter(posthog.Options{
 		APIKey:      postHogAPIKey,
 		Endpoint:    postHogEndpoint,
 		Application: applicationName,
@@ -72,18 +63,19 @@ func NewReporter(opts Options) (*Reporter, error) {
 		Commit:      opts.Commit,
 		Source:      "daemon",
 	},
-		kittelemetry.WithAllowedEvent("daemon_active",
-			kittelemetry.AllowTelemetryProperty("project_count", kittelemetry.AllowTelemetryNumber),
+		posthog.WithAllowedEvent("daemon_active",
+			posthog.AllowProperty("project_count", posthog.AllowNumber),
 		),
-		kittelemetry.WithAllowedEvent("daemon_started",
-			kittelemetry.AllowTelemetryProperty("project_count", kittelemetry.AllowTelemetryNumber),
+		posthog.WithAllowedEvent("daemon_started",
+			posthog.AllowProperty("project_count", posthog.AllowNumber),
 		),
+		posthog.WithAllowedEvent("app_opened"),
 	)
 }
 
 // DisabledReporter returns a reporter that drops events without network calls.
 func DisabledReporter() *Reporter {
-	return kittelemetry.DisabledPostHogReporter()
+	return posthog.DisabledReporter()
 }
 
 // NewReporterOrDisabled builds a reporter and falls back to a disabled reporter on errors.

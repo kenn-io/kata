@@ -266,7 +266,7 @@
 
   .refresh-button:disabled {
     cursor: wait;
-    opacity: 0.55;
+    opacity: var(--opacity-disabled);
   }
 
   .filters {

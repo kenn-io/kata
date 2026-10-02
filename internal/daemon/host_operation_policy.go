@@ -27,6 +27,7 @@ type HostOperationKind string
 
 const (
 	hostOperationServiceRead               HostOperationKind = "service_read"
+	hostOperationServiceMutation           HostOperationKind = "service_mutation"
 	hostOperationProjectRead               HostOperationKind = "project_read"
 	hostOperationTaskRead                  HostOperationKind = "task_read"
 	hostOperationTaskMutation              HostOperationKind = "task_mutation"
@@ -100,4 +101,8 @@ func registerServiceOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationServiceRead, Capability: hostCapabilityRead,
 	}, "ping", "health", "instance", "openAPI")
+	registerHostOperations(policies, HostOperationPolicy{
+		Kind: hostOperationServiceMutation, Capability: hostCapabilityWrite,
+		Mutation: true, restricted: true,
+	}, "captureTelemetryEvent")
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Button, cleanupTheme, initTheme, setThemeMode } from '@kenn-io/kit-ui'
+  import { startAppOpenedReporting } from '@kenn-io/kit-ui/utils/app-opened'
   import { onMount } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
 
@@ -13,6 +14,7 @@
   import {
     addLabel as addLabelRequest,
     assignIssue,
+    captureTelemetryEvent,
     claimIssue as claimIssueRequest,
     closeIssue as closeIssueRequest,
     createComment,
@@ -155,6 +157,15 @@
     rejectCredentialsAndRequireAuthentication,
   )
   setGeneratedFetch(browserFetch)
+  let stopAppOpened: (() => void) | undefined
+  // Only a signed-in tab counts as an opening; anonymous viewers send nothing.
+  function reportAppOpened(): void {
+    stopAppOpened ??= startAppOpenedReporting({
+      route: '/api/v1/ui/telemetry',
+      surface: 'web',
+      post: (_route, event) => captureTelemetryEvent(event),
+    })
+  }
   const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
   const mutations = new MutationController({
     authority: () => ({
@@ -226,6 +237,7 @@
     const credentialRefreshTimer = window.setInterval(() => {
       if (!document.hidden && !credentialLoading) void refreshCredentials()
     }, 30_000)
+    if (loadSessionCredentials() !== undefined) reportAppOpened()
     if (route.kind !== 'route-error' && launch.kind !== 'login') {
       if (loadSessionCredentials() !== undefined) {
         void startAuthority()
@@ -241,6 +253,7 @@
       window.removeEventListener('popstate', popstate)
       window.removeEventListener('kata:versionMismatch', showVersionMismatch)
       window.clearInterval(credentialRefreshTimer)
+      stopAppOpened?.()
       scheduler.stop()
       stream.stop()
       invalidations.stop()
@@ -269,6 +282,7 @@
   }
 
   async function navigateAfterAuthentication(target: string): Promise<boolean> {
+    reportAppOpened()
     const parsed = new URL(target, window.location.origin)
     const canonicalTarget =
       parsed.pathname === '/'

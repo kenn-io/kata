@@ -1315,6 +1315,8 @@ func runDaemonProcess(
 	if err != nil {
 		return fmt.Errorf("build embedded web handler: %w", err)
 	}
+	// Test fakes that can't check the allowlist leave UI capture unavailable.
+	uiTelemetry, _ := telemetryReporter.(daemon.TelemetryReporter)
 	srv := daemon.NewServer(daemon.ServerConfig{
 		DB:                     store,
 		DefaultTimezone:        dcfg.Timezone,
@@ -1348,6 +1350,7 @@ func runDaemonProcess(
 		},
 		Auth:                   dcfg.Auth,
 		WebSessions:            webSessions,
+		Telemetry:              uiTelemetry,
 		WebHandler:             webHandler,
 		InsecureReadonly:       insecureReadonly,
 		Embedder:               embedder,

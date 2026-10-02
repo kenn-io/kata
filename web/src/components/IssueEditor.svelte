@@ -654,7 +654,7 @@
 
   .workspace-action:disabled {
     cursor: default;
-    opacity: 0.65;
+    opacity: var(--opacity-disabled);
   }
 
   .icon-detail-action {
@@ -816,7 +816,7 @@
   .ghost-button:disabled,
   .accent-button:disabled {
     cursor: default;
-    opacity: 0.62;
+    opacity: var(--opacity-disabled);
   }
 
   /* Stack the title above the action row once the pane is narrow. The actions
