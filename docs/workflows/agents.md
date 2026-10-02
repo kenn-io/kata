@@ -1,11 +1,88 @@
 ---
-last_edited: 2026-09-28
+last_edited: 2026-10-01
 ---
 
 # Agent workflows
 
 kata is designed to survive the parts of agent work that chat does not: context
 compaction, multiple workers, incomplete attempts, and close discipline.
+
+## Hookless harnesses
+
+For consumer Muse, generate standing instructions, a Kata skill, and a recurring
+poll specification. This support is unreleased.
+
+```sh
+kata agent-hooks instructions install muse --home /path/to/muse-home --actor example-agent --dry --json
+kata agent-hooks instructions install muse --home /path/to/muse-home --actor example-agent
+kata agent-hooks instructions status muse --home /path/to/muse-home
+kata agent-hooks instructions uninstall muse --home /path/to/muse-home
+```
+
+`--home` is required and names the Muse home directory. The installer manages a
+block in `AGENTS.md`, `workspace/skills/kata/SKILL.md`, and
+`workspace/skills/kata/POLL.md` beneath that home. `--dry`
+reads existing files and prints the proposed contents without writing files or
+creating directories. All three artifacts include the canonical hook contract.
+
+Installation preserves bytes outside the marked blocks and existing file modes.
+Reinstalling identical instructions leaves files untouched. Each marker must stay
+on its own line; LF or CRLF line endings and a missing final newline are accepted. An existing unmarked
+skill or poll file, malformed markers, or a symlink at the home or inside its
+managed tree causes an error before writes. Parent aliases such as macOS's
+`/var` are resolved before planning; reported artifact paths use that resolved
+prefix. Uninstall removes the managed blocks and keeps foreign text. It deletes
+the skill and poll files when they become empty but keeps `AGENTS.md`, even when
+empty. It does not remove directories, poll
+state, credentials, or a task created in Muse. Cancel that task in Muse first.
+
+These are instruction-following prompts, not enforcement. Muse must read its
+instructions and skill at conversation start and before claiming completion.
+The generated instructions ask it to read the exact actor's inbox, the bound
+project's ready and attention views, and record evidence before reporting done.
+`status` reports files on disk; it cannot establish that Muse loaded them.
+There are no native attention hooks, idle wakeup, or guaranteed session-end
+handling. The agent updates `work.attention` and `work.attention_msg` itself.
+
+### Create the recurring poll
+
+After choosing authentication, ask Muse to create a task from `POLL.md` through
+its own scheduled-task UI or agent interface. Kata installs neither cron nor a
+Muse task. The spec proposes a five-minute interval; the human confirms the
+schedule, workspace, daemon, actor, and delivery destination in Muse.
+
+Each run reads `kata inbox --for <actor> --json` and drains
+`kata events --after <cursor> --limit 100 --json`. Keep the cursor and previously
+delivered request identities in durable state scoped to that daemon, project,
+and exact actor. Save state atomically after successful reads and delivery.
+Notify the human only about new or changed inbox requests, not every event or
+every unchanged poll. Do not clear a request merely because it was read.
+On `reset_required`, discard cached projections, refresh the inbox and ready
+and attention views, then resume from `reset_after_id`. Failures retain the
+last successfully processed state and retry on the next run.
+
+### Choose authentication explicitly
+
+Installation chooses neither of these options and never reads or prints
+credentials:
+
+- **Owner-only token file:** the human provisions a token file with mode `0600`
+  in a directory with mode `0700`. A private launcher reads it into
+  `KATA_AUTH_TOKEN` for each CLI invocation. Never put the token on argv, in the
+  instruction files, or in poll state; do not enable shell tracing. Kata has no
+  client `auth.token_file` setting. This option exposes the secret to the local
+  process and filesystem, which the human must approve.
+- **Custom connector:** the human hosts `kata mcp serve --http` behind an HTTPS
+  endpoint and configures a Muse connector whose outbound bearer comes from the
+  connector's secret settings. The MCP listener bearer is separate from the bridge's daemon
+  credential. Follow the [HTTP transport rules](../reference/mcp.md#transport).
+  The generated CLI poll is not automatically a connector integration: map its
+  inbox, events, ready, and attention reads to connector tools and confirm the
+  equivalent cursor and notification behavior before enabling the task.
+
+For federation enrollment, follow the [federation guide](../operations/federation.md)
+and verify the joined project before selecting it for polling. This installer
+does not enroll an agent, initialize a project, or configure embeddings.
 
 ## Contract in every session
 

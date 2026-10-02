@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Set up consumer Muse with standing instructions, a Kata skill, and a recurring
+  poll specification using `kata agent-hooks instructions install muse --home <path>`.
+  Preview the files with `--dry --json`. Reinstall preserves file bytes;
+  uninstall keeps foreign content. This relies on instruction-following and
+  provides no native attention support. Choose CLI token-file or connector
+  authentication explicitly. See [Hookless harnesses](workflows/agents.md#hookless-harnesses).
+
 - Enroll external agents against login-mode federation hubs and run the returned
   join command on the spoke. Join reads current hub metadata when it runs,
   including after a hub purge. **Enrollment credential change:** callers that

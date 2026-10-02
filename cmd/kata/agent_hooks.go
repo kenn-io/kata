@@ -66,7 +66,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 		RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	attention.AddCommand(newAgentHookAttentionCmd("start"), newAgentHookAttentionCmd("end"))
-	group.AddCommand(contract, attention, newAgentHooksInstallCmd(), newAgentHooksUninstallCmd(), newAgentHooksStatusCmd())
+	group.AddCommand(contract, attention, newAgentHooksInstallCmd(), newAgentHooksUninstallCmd(), newAgentHooksStatusCmd(), newAgentInstructionsCmd())
 	return group
 }
 

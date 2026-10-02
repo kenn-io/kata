@@ -137,6 +137,20 @@ keep the original. kata prints where the sidecar landed. For safety, a symlinked
 `AGENTS.md` is refused before it is read; replace it with a regular file before
 using `--with-agents`.
 
+## Set up a hookless agent
+
+Consumer Muse can use a standing instruction block, skill, and recurring poll
+specification. Preview the bundle before installing it:
+
+```sh
+kata agent-hooks instructions install muse --home /path/to/muse-home --actor example-agent --dry --json
+```
+
+This unreleased support relies on instruction-following and has no native
+attention hooks. Choose authentication explicitly and create the task in Muse.
+Follow [Hookless harnesses](../workflows/agents.md#hookless-harnesses) for installation
+and both authentication options.
+
 ## Load the contract in every session
 
 With a build from `main`, load Kata's contract in every coding-agent session
