@@ -55,6 +55,7 @@ import type {
   DigestResponseBody,
   DisableIssueSyncPathParameters,
   DisableIssueSyncRequestBody,
+  DoctorResponseBody,
   EditCommentPathParameters,
   EditCommentRequestBody,
   EditIssuePathParameters,
@@ -603,6 +604,38 @@ export const digestGlobal = async (
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<digestGlobalResponse> => {
   return orvalFetch<digestGlobalResponse>(getDigestGlobalUrl(params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type doctorResponse200 = {
+  data: DoctorResponseBody
+  status: 200
+}
+
+export type doctorResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type doctorResponseSuccess = doctorResponse200 & {
+  headers: Headers
+}
+export type doctorResponseError = doctorResponseDefault & {
+  headers: Headers
+}
+
+export type doctorResponse = doctorResponseSuccess | doctorResponseError
+
+export const getDoctorUrl = () => {
+  return `/api/v1/doctor`
+}
+
+export const doctor = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<doctorResponse> => {
+  return orvalFetch<doctorResponse>(getDoctorUrl(), {
     ...options,
     method: 'GET',
   })

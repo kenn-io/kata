@@ -51,6 +51,8 @@ for machine readers.
   mirror one task data source with read-only daemon polling and explicit completion mappings
 - [Configuration](https://katatracker.com/docs/reference/configuration.md):
   config.toml reference
+- [Diagnosing setup](https://katatracker.com/docs/operations/doctor.md):
+  read-only configuration, daemon, project and hook diagnostics with `kata doctor`
 - [Backup and restore](https://katatracker.com/docs/operations/backup-restore.md):
   JSONL export and import
 - [Architecture](https://katatracker.com/docs/design/architecture.md): design

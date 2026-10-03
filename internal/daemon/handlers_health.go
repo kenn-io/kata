@@ -59,6 +59,7 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 			h := cfg.ReconcilerHealth()
 			out.Body.Embeddings = &api.EmbeddingsHealth{
 				Configured:      h.Configured,
+				ErrorPresent:    h.LastError != "",
 				LastSuccessAt:   h.LastSuccessAt,
 				LastErrorStatus: h.LastErrorStatus,
 				Embedded:        h.Embedded,

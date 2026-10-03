@@ -12,6 +12,7 @@ import (
 	"iter"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -98,14 +99,29 @@ type liveDaemon struct {
 	Info       PingInfo
 }
 
+type runtimeRecordReader func(string) ([]kitdaemon.RuntimeRecord, error)
+
+type liveDaemonScanner func(context.Context, string) iter.Seq2[liveDaemon, error]
+
 // liveDaemons scans the namespace's runtime records lazily. A successful
 // result contains a live daemon; an error result preserves store, context, or
 // unreachable-endpoint failures for callers that must distinguish them from
 // an empty store. Laziness is load bearing: Discover runs on every CLI
 // invocation and must stop after the first live record.
 func liveDaemons(ctx context.Context, dataDir string) iter.Seq2[liveDaemon, error] {
+	return liveDaemonsUsing(ctx, dataDir, readRuntimeRecordsForDiscovery)
+}
+
+// liveDaemonsReadOnly scans runtime records without creating or repairing
+// their directory. Diagnostics use this path so inspection cannot change
+// runtime state.
+func liveDaemonsReadOnly(ctx context.Context, dataDir string) iter.Seq2[liveDaemon, error] {
+	return liveDaemonsUsing(ctx, dataDir, readRuntimeRecords)
+}
+
+func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRecordReader) iter.Seq2[liveDaemon, error] {
 	return func(yield func(liveDaemon, error) bool) {
-		recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
+		recs, err := readRecords(dataDir)
 		if err != nil {
 			yield(liveDaemon{}, err)
 			return
@@ -147,6 +163,24 @@ func liveDaemons(ctx context.Context, dataDir string) iter.Seq2[liveDaemon, erro
 			}
 		}
 	}
+}
+
+// readRuntimeRecordsForDiscovery retains RuntimeStore.List's repair of an
+// existing owner-owned runtime directory while keeping discovery from
+// creating runtime state when that directory does not exist yet.
+func readRuntimeRecordsForDiscovery(dir string) ([]kitdaemon.RuntimeRecord, error) {
+	if dir == "" {
+		return nil, errors.New("runtime dir is empty")
+	}
+	if !filepath.IsAbs(dir) {
+		return nil, fmt.Errorf("runtime dir %q must be absolute", dir)
+	}
+	if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	return (kitdaemon.RuntimeStore{Dir: dir}).List()
 }
 
 // Discover scans the namespace's runtime files and returns the base URL of
@@ -202,7 +236,10 @@ func Ping(ctx context.Context, client *http.Client, base string) bool {
 
 // Probe returns the daemon identity from GET base+/api/v1/ping.
 func Probe(ctx context.Context, client *http.Client, base string) (PingInfo, error) {
-	apiClient, err := generated.NewDefaultClient(base, runtime.WithHTTPClient(probeRequestDoer{client}))
+	// Discovery identifies the configured origin itself, never a redirect.
+	probeClient := *client
+	probeClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	apiClient, err := generated.NewDefaultClient(base, runtime.WithHTTPClient(probeRequestDoer{&probeClient}))
 	if err != nil {
 		return PingInfo{}, err
 	}

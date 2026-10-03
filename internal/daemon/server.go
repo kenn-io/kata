@@ -607,6 +607,7 @@ func isMutation(method string) bool {
 // contract around the Huma streaming route.
 func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerHealth(humaAPI, cfg)
+	registerDoctorHandlers(humaAPI, cfg)
 	registerInstanceHandlers(humaAPI, cfg)
 	registerTokenHandlers(humaAPI, cfg)
 	registerProjects(humaAPI, cfg)

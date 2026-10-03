@@ -812,6 +812,13 @@ components:
     DisableIssueSyncRequestBody:
       additionalProperties: false
       type: object
+    DoctorResponseBody:
+      properties:
+        hooks:
+          $ref: "#/components/schemas/Hooks"
+      required:
+        - hooks
+      type: object
     EditCommentRequestBody:
       additionalProperties: false
       properties:
@@ -884,6 +891,8 @@ components:
         embedded:
           format: int64
           type: integer
+        error_present:
+          type: boolean
         eta_seconds:
           format: int64
           type: integer
@@ -1792,6 +1801,62 @@ components:
         - version
         - uptime
         - started_at
+      type: object
+    Hook:
+      properties:
+        command:
+          type: string
+        executable_available:
+          type: boolean
+        index:
+          format: int64
+          type: integer
+        working_directory_available:
+          type: boolean
+      required:
+        - index
+        - command
+        - executable_available
+        - working_directory_available
+      type: object
+    Hooks:
+      properties:
+        available:
+          type: boolean
+        dropped:
+          format: int64
+          type: integer
+        history_incomplete:
+          type: boolean
+        hooks:
+          items:
+            $ref: "#/components/schemas/Hook"
+          type: array
+        in_flight:
+          format: int32
+          type: integer
+        queue_capacity:
+          format: int64
+          type: integer
+        queue_length:
+          format: int64
+          type: integer
+        recent_failures:
+          format: int64
+          type: integer
+        recent_runs:
+          format: int64
+          type: integer
+      required:
+        - available
+        - hooks
+        - queue_length
+        - queue_capacity
+        - in_flight
+        - dropped
+        - recent_runs
+        - recent_failures
+        - history_incomplete
       type: object
     IdleShutdownHealth:
       properties:
@@ -4896,6 +4961,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DigestResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/doctor:
+    get:
+      operationId: doctor
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DoctorResponseBody"
           description: OK
         default:
           content:

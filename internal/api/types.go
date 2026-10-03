@@ -88,6 +88,7 @@ type UISessionResponse struct {
 // an absent block means semantic search is disabled. It mirrors
 // daemon.ReconcilerHealth.
 type EmbeddingsHealth struct {
+	ErrorPresent     bool       `json:"error_present,omitempty,omitzero"`
 	Credential       string     `json:"credential,omitempty" enum:"missing,rejected,ok" doc:"Embedding credential state; an advisory warning that does not change health.ok."`
 	CredentialSource string     `json:"credential_source,omitempty" doc:"Selected credential source: inline, file:<path>, env:<NAME>, or none; never the key value."`
 	CredentialReason string     `json:"credential_reason,omitempty" doc:"Readable missing or rejected credential reason, without provider response bodies."`
