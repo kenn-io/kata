@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/BurntSushi/toml"
@@ -29,6 +30,7 @@ type FederationCredentials struct {
 // UID. Tokens intentionally live outside SQLite and outside committed
 // workspace config.
 type FederationCredential struct {
+	Signing             *federationsigning.Source     `toml:"signing,omitempty"`
 	HubURL              string                        `toml:"hub_url"`
 	HubProjectID        int64                         `toml:"hub_project_id"`
 	Token               string                        `toml:"token"`

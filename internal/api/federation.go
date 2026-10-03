@@ -300,6 +300,9 @@ type CreateFederationReplicaRequest struct {
 		ProjectName            string `json:"project_name"`
 		ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
 		BaselineThroughEventID int64  `json:"baseline_through_event_id,omitempty,omitzero"`
+		SigningKeyID           string `json:"signing_key_id,omitempty"`
+		SigningKeyFile         string `json:"signing_key_file,omitempty"`
+		SigningKeyEnv          string `json:"signing_key_env,omitempty"`
 		Token                  string `json:"token,omitempty"`
 		Capabilities           string `json:"capabilities,omitempty"`
 		Actor                  string `json:"actor,omitempty"`

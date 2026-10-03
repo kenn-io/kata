@@ -677,6 +677,9 @@ type CreateFederationReplicaRequestBody struct {
 	ProjectName            string  `json:"project_name" validate:"required"`
 	PushEnabled            *bool   `json:"push_enabled,omitempty"`
 	ReplayHorizonEventID   int64   `json:"replay_horizon_event_id"`
+	SigningKeyEnv          *string `json:"signing_key_env,omitempty"`
+	SigningKeyFile         *string `json:"signing_key_file,omitempty"`
+	SigningKeyID           *string `json:"signing_key_id,omitempty"`
 	Token                  *string `json:"token,omitempty"`
 }
 

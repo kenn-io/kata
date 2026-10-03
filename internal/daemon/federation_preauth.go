@@ -32,12 +32,15 @@ func withFederationIngestPreauthorization(cfg ServerConfig, next http.Handler) h
 			return
 		}
 		authHeader := r.Header.Get("Authorization")
-		authorization, err := evaluateFederationRequest(
-			ctx, cfg, authHeader, projectID, "push", operation,
+		authorization, cached := federationAuthorizationFromContext(
+			ctx, authHeader, projectID, "push", operation,
 		)
-		if err != nil {
-			writeFederationPreauthorizationError(w, err)
-			return
+		if !cached {
+			authorization, err = evaluateFederationRequest(ctx, cfg, authHeader, projectID, "push", operation)
+			if err != nil {
+				writeFederationPreauthorizationError(w, err)
+				return
+			}
 		}
 		ctx = withFederationAuthorization(
 			ctx, authHeader, projectID, "push", operation, authorization,

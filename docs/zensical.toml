@@ -50,6 +50,7 @@ nav = [
     {"Notion sync" = "operations/notion-sync.md"},
     {"Plane sync" = "operations/plane-sync.md"},
     {"Federation" = "operations/federation.md"},
+    {"Federation request signing" = "operations/federation-signing.md"},
     {"Agent orchestration" = "operations/agent-orchestration.md"},
     {"Hosted mode" = "operations/hosted-mode.md"},
     {"Containers" = "operations/containers.md"},

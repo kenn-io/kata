@@ -507,6 +507,12 @@ components:
         replay_horizon_event_id:
           format: int64
           type: integer
+        signing_key_env:
+          type: string
+        signing_key_file:
+          type: string
+        signing_key_id:
+          type: string
         token:
           type: string
       required:

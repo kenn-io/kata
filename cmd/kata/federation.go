@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	hubclient "go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federation/joincommand"
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -37,6 +38,7 @@ func newFederationCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		federationIdentityCmd(),
+		federationSigningCmd(),
 		federationEnableCmd(),
 		federationEnrollCmd(),
 		federationEnrollmentsCmd(),
@@ -616,6 +618,7 @@ func federationRevokeCmd() *cobra.Command {
 
 func federationJoinCmd() *cobra.Command {
 	var bundle federationJoinBundle
+	var signingID, signingFile, signingEnv string
 	cmd := &cobra.Command{
 		Use:   "join",
 		Short: "join a hub project as a spoke",
@@ -651,6 +654,11 @@ func federationJoinCmd() *cobra.Command {
 			if err := validateFederationJoinCapabilities(internalCaps, bundle.PushEnabled); err != nil {
 				return err
 			}
+			source, err := signingSource(bundle.HubURL, signingID, signingFile, signingEnv)
+			if err != nil {
+				return err
+			}
+			bundle.Signing = source
 			ctx := cmd.Context()
 			if err := hydrateFederationJoinMetadata(ctx, &bundle); err != nil {
 				return err
@@ -673,7 +681,13 @@ func federationJoinCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			callResp, callErr := apiClient.CreateFederationReplicaWithResponse(a.ctx, &generated.CreateFederationReplicaRequestOptions{Body: &generated.CreateFederationReplicaBody{HubURL: strings.TrimRight(bundle.HubURL, "/"), HubProjectID: bundle.HubProjectID, HubProjectUID: bundle.HubProjectUID, ProjectName: bundle.ProjectName, ReplayHorizonEventID: bundle.ReplayHorizonEventID, BaselineThroughEventID: &bundle.BaselineThroughEventID, Token: &bundle.Token, Capabilities: &internalCaps, Actor: new(strings.TrimSpace(bundle.Actor)), AllowInsecure: &bundle.AllowInsecure, PushEnabled: &bundle.PushEnabled, AdoptExisting: &bundle.AdoptExisting}})
+			var signingKeyID, signingKeyFile, signingKeyEnv *string
+			if bundle.Signing != nil {
+				signingKeyID = &bundle.Signing.KeyID
+				signingKeyFile = &bundle.Signing.KeyFile
+				signingKeyEnv = &bundle.Signing.KeyEnv
+			}
+			callResp, callErr := apiClient.CreateFederationReplicaWithResponse(a.ctx, &generated.CreateFederationReplicaRequestOptions{Body: &generated.CreateFederationReplicaBody{HubURL: strings.TrimRight(bundle.HubURL, "/"), HubProjectID: bundle.HubProjectID, HubProjectUID: bundle.HubProjectUID, ProjectName: bundle.ProjectName, ReplayHorizonEventID: bundle.ReplayHorizonEventID, BaselineThroughEventID: &bundle.BaselineThroughEventID, Token: &bundle.Token, Capabilities: &internalCaps, Actor: new(strings.TrimSpace(bundle.Actor)), AllowInsecure: &bundle.AllowInsecure, PushEnabled: &bundle.PushEnabled, AdoptExisting: &bundle.AdoptExisting, SigningKeyID: signingKeyID, SigningKeyFile: signingKeyFile, SigningKeyEnv: signingKeyEnv}})
 			if err := externalCLITransportError(callResp, callErr); err != nil {
 				return err
 			}
@@ -690,6 +704,9 @@ func federationJoinCmd() *cobra.Command {
 			return printFederationJoin(cmd, bs)
 		},
 	}
+	cmd.Flags().StringVar(&signingID, "signing-key-id", "", "public signing key ID")
+	cmd.Flags().StringVar(&signingFile, "signing-key-file", "", "owner-only signing secret file on the spoke")
+	cmd.Flags().StringVar(&signingEnv, "signing-key-env", "", "signing secret environment variable on the spoke")
 	cmd.Flags().StringVar(&bundle.HubURL, "hub-url", "", "hub URL")
 	cmd.Flags().Int64Var(&bundle.HubProjectID, "hub-project-id", 0, "hub project ID")
 	cmd.Flags().StringVar(&bundle.HubProjectUID, "hub-project-uid", "", "hub project UID")
@@ -1222,25 +1239,26 @@ func federationStatusCmd() *cobra.Command {
 }
 
 type federationJoinBundle struct {
-	HubURL                 string `json:"hub_url"`
-	HubProjectID           int64  `json:"hub_project_id"`
-	HubProjectUID          string `json:"hub_project_uid"`
-	ProjectName            string `json:"project_name"`
-	ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
-	BaselineThroughEventID int64  `json:"baseline_through_event_id"`
-	Token                  string `json:"token"`
-	Capabilities           string `json:"capabilities,omitempty"`
-	DisplayCapabilities    string `json:"-"`
-	JoinCommand            string `json:"join_command"`
-	Actor                  string `json:"actor,omitempty"`
-	AllowInsecure          bool   `json:"allow_insecure,omitzero"`
-	PushEnabled            bool   `json:"push_enabled,omitzero"`
-	AdoptExisting          bool   `json:"adopt_existing,omitzero"`
+	HubURL                 string                    `json:"hub_url"`
+	HubProjectID           int64                     `json:"hub_project_id"`
+	HubProjectUID          string                    `json:"hub_project_uid"`
+	ProjectName            string                    `json:"project_name"`
+	ReplayHorizonEventID   int64                     `json:"replay_horizon_event_id"`
+	BaselineThroughEventID int64                     `json:"baseline_through_event_id"`
+	Token                  string                    `json:"token"`
+	Capabilities           string                    `json:"capabilities,omitempty"`
+	DisplayCapabilities    string                    `json:"-"`
+	JoinCommand            string                    `json:"join_command"`
+	Actor                  string                    `json:"actor,omitempty"`
+	AllowInsecure          bool                      `json:"allow_insecure,omitzero"`
+	PushEnabled            bool                      `json:"push_enabled,omitzero"`
+	AdoptExisting          bool                      `json:"adopt_existing,omitzero"`
+	Signing                *federationsigning.Source `json:"-"`
 }
 
 var fetchFederationJoinMetadata = func(ctx context.Context, bundle federationJoinBundle) (api.ProjectFederationBody, error) {
 	client, err := hubclient.NewClient(ctx, bundle.HubURL, bundle.Token,
-		clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout), AllowInsecure: bundle.AllowInsecure})
+		clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout), AllowInsecure: bundle.AllowInsecure, FederationSigning: bundle.Signing})
 	if err != nil {
 		return api.ProjectFederationBody{}, err
 	}

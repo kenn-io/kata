@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-02
+last_edited: 2026-10-03
 ---
 
 # CLI reference
@@ -1335,6 +1335,7 @@ sharing, or enrolling a project in federation; it is not a historical event
 redaction tool. If `<project>` is omitted, kata resolves the project from
 `--project` or the current workspace.
 
+
 ## Web UI
 
 ```sh
@@ -1748,6 +1749,24 @@ project, direction, event range, creation time, and retained error. Use
 retrying or skipping. Retry preserves the push cursor and resends the same
 events; skip advances past the range and means those events will not reach the
 hub. Do not repair quarantine state by editing SQLite directly.
+
+### Signing source references
+
+`kata federation join` accepts `--signing-key-id` and exactly one of
+`--signing-key-env` or `--signing-key-file`. These select an independent
+secret source for native outbound federation, including metadata, replication
+and leases. The source must be available to both the CLI and spoke daemon.
+
+`kata federation signing configure --project-uid <uid> --key-id <id>` selects
+`--key-env <variable>` or `--key-file <path>` for an existing credential through
+an exact replacement. Optional `--hub-url <https-base>` explicitly authorizes
+a new signing target for native rebind. The enrollment bearer is retained.
+
+`kata federation signing init-replay [--state-file <absolute-path>]` creates
+new hub replay state without overwriting an existing file. See
+[Federation request signing](../operations/federation-signing.md) for required
+hub policy, private ingress, restart warmup, rotation and loss recovery.
+
 
 ## Ref forms
 

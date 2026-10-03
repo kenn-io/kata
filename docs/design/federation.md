@@ -766,3 +766,6 @@ design rationale, and its limitations. The original phased design spec and the
 per-phase implementation plans were folded into this document and the
 [architecture](architecture.md) and [data model](data-model.md) notes after the
 work shipped; the superseded drafts remain available in version control.
+
+Native optional signing and restricted ingress are described in
+[Native federation request signing](federation-request-signing.md).

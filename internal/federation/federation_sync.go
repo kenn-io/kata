@@ -1039,6 +1039,7 @@ func recordFederationSyncError(ctx context.Context, store db.Storage, projectID 
 }
 
 func clientOptsForCredential(opts clientpkg.Opts, creds config.FederationCredential) clientpkg.Opts {
+	opts.FederationSigning = creds.Signing
 	opts = clientOptsWithDefault(opts)
 	if creds.AllowInsecure {
 		opts.AllowInsecure = true
