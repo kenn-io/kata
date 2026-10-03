@@ -12,6 +12,10 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// Leave the local lease check and mutation time inside the CLI request budget.
+// Explicit lease actions retain the hub client's longer timeout.
+const mutationClaimStatusRefreshTimeout = 500 * time.Millisecond
+
 func requireFederatedIssueClaim(
 	ctx context.Context,
 	cfg ServerConfig,
@@ -107,14 +111,16 @@ func refreshSpokeClaimStatusForGate(
 	binding db.FederationBinding,
 	issue db.Issue,
 ) error {
-	remote, cred, err := claimForwardClient(ctx, cfg, binding)
+	remoteCtx, cancelRemote := context.WithTimeout(ctx, mutationClaimStatusRefreshTimeout)
+	defer cancelRemote()
+	remote, cred, err := claimForwardClient(remoteCtx, cfg, binding)
 	if err != nil {
-		if isOfflineClaimRefreshError(err) {
+		if remoteCtx.Err() != nil || isOfflineClaimRefreshError(err) {
 			return nil
 		}
 		return err
 	}
-	resp, err := remote.ClaimStatus(ctx, cred.HubProjectID, issue.ShortID)
+	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.ShortID)
 	if err != nil {
 		if isTransportClaimError(err) {
 			return nil
