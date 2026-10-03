@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -298,4 +299,134 @@ func TestCaptureTelemetrySharedTCPBearerClient(t *testing.T) {
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 		assert.Equal(t, []string{tuiTelemetryBody}, capture.bodies)
 	})
+}
+
+func TestAppOpenedGate(t *testing.T) {
+	queued := func(calls *int) func() bool {
+		return func() bool {
+			*calls++
+			return true
+		}
+	}
+
+	t.Run("one forward per surface per UTC day", func(t *testing.T) {
+		now := time.Date(2026, 10, 2, 23, 0, 0, 0, time.UTC)
+		gate := newAppOpenedGate(func() time.Time { return now })
+		var calls int
+
+		assert.False(t, gate.capture("cli", queued(&calls)))
+		assert.True(t, gate.capture("cli", queued(&calls)), "same surface the same day must skip")
+		assert.False(t, gate.capture("tui", queued(&calls)), "another surface keeps its own day")
+		assert.False(t, gate.capture("", queued(&calls)), "an empty surface is its own bucket")
+		assert.True(t, gate.capture("", queued(&calls)))
+		assert.Equal(t, 3, calls)
+
+		now = now.Add(2 * time.Hour)
+		assert.False(t, gate.capture("cli", queued(&calls)), "a new UTC day forwards again")
+		assert.Equal(t, 4, calls)
+	})
+
+	t.Run("forward that did not queue leaves the surface unmarked", func(t *testing.T) {
+		gate := newAppOpenedGate(time.Now)
+		var calls int
+
+		assert.False(t, gate.capture("cli", func() bool { calls++; return false }))
+		assert.False(t, gate.capture("cli", queued(&calls)))
+		assert.True(t, gate.capture("cli", queued(&calls)))
+		assert.Equal(t, 2, calls)
+	})
+
+	t.Run("concurrent first calls wait for the first outcome", func(t *testing.T) {
+		gate := newAppOpenedGate(time.Now)
+		var forwards atomic.Int32
+		inForward := make(chan struct{})
+		release := make(chan struct{})
+		forward := func() bool {
+			if forwards.Add(1) == 1 {
+				close(inForward)
+				<-release
+			}
+			return true
+		}
+		firstSkipped := make(chan bool, 1)
+		go func() { firstSkipped <- gate.capture("cli", forward) }()
+		<-inForward
+		secondSkipped := make(chan bool, 1)
+		go func() { secondSkipped <- gate.capture("cli", forward) }()
+
+		select {
+		case <-secondSkipped:
+			t.Fatal("second caller returned while the first forward was still pending")
+		case <-time.After(50 * time.Millisecond):
+		}
+		close(release)
+
+		assert.False(t, <-firstSkipped)
+		assert.True(t, <-secondSkipped)
+		assert.Equal(t, int32(1), forwards.Load())
+	})
+}
+
+func TestCaptureTelemetryEventForwardsOneAppOpenedPerSurfacePerDay(t *testing.T) {
+	capture := &recordingTelemetryCapture{}
+	server := newTelemetryTestServer(t, capture, Principal{Kind: PrincipalWebLocal})
+	webBody := `{"event":"app_opened","properties":{"surface":"web"}}`
+
+	first := server.post(t.Context(), t, tuiTelemetryBody)
+	duplicate := server.post(t.Context(), t, tuiTelemetryBody)
+	web := server.post(t.Context(), t, webBody)
+	paddedSurface := server.post(t.Context(), t, `{"event":"app_opened","properties":{"surface":" tui "}}`)
+	paddedEvent := server.post(t.Context(), t, `{"event":" app_opened ","properties":{"surface":"tui"}}`)
+
+	for _, response := range []*httptest.ResponseRecorder{first, duplicate, web, paddedSurface, paddedEvent} {
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+		assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
+	}
+	assert.Equal(t, []string{tuiTelemetryBody, webBody}, capture.bodies)
+}
+
+func TestCaptureTelemetryEventUnknownEventStillRejected(t *testing.T) {
+	server := newTelemetryTestServer(t, newReporterCaptureHandler(t), Principal{Kind: PrincipalWebLocal})
+
+	opened := server.post(t.Context(), t, `{"event":"app_opened","properties":{"surface":"web"}}`)
+	unknown := server.post(t.Context(), t, `{"event":"app_loaded"}`)
+
+	require.Equal(t, http.StatusAccepted, opened.Code, opened.Body.String())
+	require.Equal(t, http.StatusBadRequest, unknown.Code, unknown.Body.String())
+	assert.Equal(t, "unsupported_telemetry_event", decodeErrorCode(t, unknown))
+}
+
+func TestCaptureTelemetryEventDisabledReporterIsNotDeduped(t *testing.T) {
+	server := newTelemetryTestServer(t, newReporterCaptureHandler(t), Principal{Kind: PrincipalWebLocal})
+	body := `{"event":"app_opened","properties":{"surface":"cli"}}`
+
+	for range 2 {
+		response := server.post(t.Context(), t, body)
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+		assert.JSONEq(t, `{"status":"disabled"}`, response.Body.String())
+	}
+}
+
+func TestCaptureTelemetryEventFailureDoesNotConsumeDay(t *testing.T) {
+	var calls int
+	capture := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"queued"}`))
+	})
+	server := newTelemetryTestServer(t, capture, Principal{Kind: PrincipalWebLocal})
+	body := `{"event":"app_opened","properties":{"surface":"cli"}}`
+
+	failed := server.post(t.Context(), t, body)
+	retried := server.post(t.Context(), t, body)
+
+	require.Equal(t, http.StatusInternalServerError, failed.Code, failed.Body.String())
+	require.Equal(t, http.StatusAccepted, retried.Code, retried.Body.String())
+	assert.JSONEq(t, `{"status":"queued"}`, retried.Body.String())
+	assert.Equal(t, 2, calls, "the retry after a failed capture must reach the capture handler")
 }

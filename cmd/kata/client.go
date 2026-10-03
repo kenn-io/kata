@@ -560,6 +560,8 @@ func dialResolved(
 	if err != nil {
 		return daemonAPI{}, err
 	}
+	// Recorded here, not in ensureDaemonResolved, so the use report carries only credentials this command sent.
+	recordCLIUseTarget(resolved)
 	ctx = context.WithValue(ctx, resolvedDaemonContextKey{}, resolved)
 	return daemonAPI{ctx: ctx, baseURL: resolved.BaseURL, client: hc, resolved: resolved}, nil
 }

@@ -98,7 +98,7 @@ func TestAppOpenedSurfaceAllowlist(t *testing.T) {
 	reporter, err := NewReporter(Options{DistinctID: "anonymous-instance-id"})
 	require.NoError(t, err)
 
-	for _, surface := range []string{"tui", "web"} {
+	for _, surface := range []string{"cli", "tui", "web"} {
 		props, err := reporter.SanitizeProperties("app_opened", map[string]any{"surface": surface, "path": "/example"})
 		require.NoError(t, err)
 		assert.Equal(t, surface, props["surface"])
