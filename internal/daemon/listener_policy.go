@@ -17,6 +17,8 @@ type ListenerKind string
 const (
 	// ListenerSocket preserves the owner-local Unix-socket browser-Origin ban.
 	ListenerSocket ListenerKind = "socket"
+	// ListenerFederation exposes only scoped native federation operations.
+	ListenerFederation ListenerKind = "federation"
 	// ListenerBrowser is a dedicated browser-facing TCP listener.
 	ListenerBrowser ListenerKind = "browser"
 	// ListenerSharedTCP serves both ordinary daemon clients and browsers.

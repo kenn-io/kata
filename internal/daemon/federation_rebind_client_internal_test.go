@@ -12,7 +12,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/federationsigning"
 )
 
 func TestFederationRebindPreflightUsesEnrollmentTokenAndPreservesPath(t *testing.T) {
@@ -152,6 +154,42 @@ func TestFederationRebindPreflightClassifiesEnrollmentRejection(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrFederationReplicaCredentialConflict)
 	assert.False(t, errors.Is(err, ErrFederationReplicaHubUnavailable))
+}
+
+func TestFederationRebindPreflightClassifiesPinnedSigningBaseMismatch(t *testing.T) {
+	t.Setenv("TEST_REBIND_SIGNING_KEY", strings.Repeat("k", 64))
+	requestReachedHub := false
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requestReachedHub = true
+	}))
+	t.Cleanup(server.Close)
+
+	originalFactory := newFederationRebindHTTPClient
+	newFederationRebindHTTPClient = func(
+		_ context.Context, baseURL, token string,
+	) (*http.Client, error) {
+		return federationRebindTestBearerClient(t, server.Client(), baseURL, token), nil
+	}
+	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
+
+	source := &federationsigning.Source{
+		KeyID: "key-a", KeyEnv: "TEST_REBIND_SIGNING_KEY",
+		HubURL: "https://hub.example/old-prefix",
+	}
+	_, err := fetchFederationRebindMetadataWithSigning(
+		context.Background(), server.URL+"/new-prefix", "enrollment-token", 41, source,
+	)
+	require.ErrorIs(t, err, ErrFederationReplicaInvalidInput)
+
+	publicErr := federationReplicaAPIError(err)
+	var apiErr *api.APIError
+	require.ErrorAs(t, publicErr, &apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.Status)
+	assert.Equal(t, "validation", apiErr.Code)
+	assert.Contains(t, apiErr.Message, "pinned to a different hub base")
+	assert.Contains(t, apiErr.Hint, "kata federation signing configure")
+	assert.Contains(t, apiErr.Hint, "--hub-url")
+	assert.False(t, requestReachedHub)
 }
 
 func federationRebindTestBearerClient(

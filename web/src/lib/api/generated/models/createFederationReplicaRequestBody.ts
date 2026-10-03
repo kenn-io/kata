@@ -14,5 +14,8 @@ export interface CreateFederationReplicaRequestBody {
   project_name: string
   push_enabled?: boolean
   replay_horizon_event_id: number
+  signing_key_env?: string
+  signing_key_file?: string
+  signing_key_id?: string
   token?: string
 }
