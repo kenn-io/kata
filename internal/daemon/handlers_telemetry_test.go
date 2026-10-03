@@ -3,9 +3,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,12 +54,19 @@ func newDisabledReporter(t *testing.T) TelemetryReporter {
 }
 
 type fakeTelemetryReporter struct {
+	failNext bool
 	captured []map[string]any
 }
 
-func (*fakeTelemetryReporter) EventAllowed(event string) bool { return event == "app_opened" }
-func (*fakeTelemetryReporter) Enabled() bool                  { return true }
+func (*fakeTelemetryReporter) EventAllowed(event string) bool {
+	return strings.TrimSpace(event) == "app_opened"
+}
+func (*fakeTelemetryReporter) Enabled() bool { return true }
 func (f *fakeTelemetryReporter) Capture(_ string, properties map[string]any) error {
+	if f.failNext {
+		f.failNext = false
+		return errors.New("capture failed")
+	}
 	f.captured = append(f.captured, properties)
 	return nil
 }
@@ -221,4 +230,90 @@ func TestCaptureTelemetryAcceptsBearerClientOnEitherListener(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestAppOpenedGate(t *testing.T) {
+	var calls int
+	forward := func(captured bool) func() bool {
+		return func() bool {
+			calls++
+			return captured
+		}
+	}
+
+	t.Run("one capture per surface per UTC day", func(t *testing.T) {
+		calls = 0
+		now := time.Date(2026, 10, 2, 23, 0, 0, 0, time.UTC)
+		gate := newAppOpenedGate(func() time.Time { return now })
+
+		gate.capture("cli", forward(true))
+		gate.capture("cli", forward(true))
+		gate.capture("tui", forward(true))
+		gate.capture("", forward(true))
+		gate.capture("", forward(true))
+		assert.Equal(t, 3, calls, "each surface, the empty one included, captures once a day")
+
+		now = now.Add(2 * time.Hour)
+		gate.capture("cli", forward(true))
+		assert.Equal(t, 4, calls, "a new UTC day captures again")
+	})
+
+	t.Run("a failed capture leaves the surface unmarked", func(t *testing.T) {
+		calls = 0
+		gate := newAppOpenedGate(time.Now)
+
+		gate.capture("cli", forward(false))
+		gate.capture("cli", forward(true))
+		gate.capture("cli", forward(true))
+		assert.Equal(t, 2, calls)
+	})
+
+	t.Run("concurrent first calls wait for the first outcome", func(t *testing.T) {
+		gate := newAppOpenedGate(time.Now)
+		var forwards atomic.Int32
+		inForward := make(chan struct{})
+		release := make(chan struct{})
+		blocking := func() bool {
+			if forwards.Add(1) == 1 {
+				close(inForward)
+				<-release
+			}
+			return true
+		}
+		done := make(chan struct{}, 2)
+		go func() { gate.capture("cli", blocking); done <- struct{}{} }()
+		<-inForward
+		go func() { gate.capture("cli", blocking); done <- struct{}{} }()
+
+		select {
+		case <-done:
+			t.Fatal("a caller returned while the first capture was still pending")
+		case <-time.After(50 * time.Millisecond):
+		}
+		close(release)
+		<-done
+		<-done
+		assert.Equal(t, int32(1), forwards.Load())
+	})
+}
+
+func TestCaptureTelemetryEventCapturesOneAppOpenedPerSurfacePerDay(t *testing.T) {
+	reporter := &fakeTelemetryReporter{failNext: true}
+	server := newTelemetryTestServer(t, reporter, Principal{Kind: PrincipalWebLocal})
+	tui := `{"event":"app_opened","properties":{"surface":"tui"}}`
+
+	failed := server.post(t.Context(), t, tui)
+	require.Equal(t, http.StatusInternalServerError, failed.Code, failed.Body.String())
+	for _, body := range []string{
+		tui, tui,
+		`{"event":"app_opened","properties":{"surface":"web"}}`,
+		`{"event":"app_opened","properties":{"surface":" tui "}}`,
+		`{"event":" app_opened ","properties":{"surface":"tui"}}`,
+	} {
+		response := server.post(t.Context(), t, body)
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+		assert.JSONEq(t, `{"status":"queued"}`, response.Body.String())
+	}
+	assert.Equal(t, []map[string]any{{"surface": "tui"}, {"surface": "web"}}, reporter.captured,
+		"a failed capture leaves the day open; later duplicates are dropped")
 }

@@ -315,6 +315,9 @@ func exitCodeOf(err error) int {
 	return -1
 }
 
+// HookVersionEnv is set on every hook child process; hook config cannot set KATA_ keys.
+const HookVersionEnv = "KATA_HOOK_VERSION"
+
 // buildEnv composes the child process's environment from baseEnv ⊕
 // the hook's user-defined env ⊕ the KATA_* contract vars. Alias-related
 // env is fed by the caller (runJob) which resolved it once for both
@@ -323,7 +326,7 @@ func buildEnv(baseEnv, userEnv []string, evt db.Event, asnap AliasSnapshot, hasA
 	env := append([]string{}, baseEnv...)
 	env = append(env, userEnv...)
 	env = append(env,
-		"KATA_HOOK_VERSION=1",
+		HookVersionEnv+"=1",
 		"KATA_EVENT_ID="+strconv.FormatInt(evt.ID, 10),
 		"KATA_EVENT_TYPE="+evt.Type,
 		"KATA_ACTOR="+evt.Actor,

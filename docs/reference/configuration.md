@@ -858,16 +858,28 @@ when the page loads, and again on the first window focus of each later UTC day.
 Background refreshes of an open tab do not count. The daemon sends the event to
 PostHog with the same fields, distinct ID, and opt-out as its own events; the
 browser never contacts PostHog. Only signed-in sessions with write access on the
-serving daemon are counted. Delivery is best effort, and tabs opened together
-can each report, so count distinct installs rather than events.
+serving daemon are counted.
 
-`app_opened` carries one property, `surface`, set to `web` or `tui`; the daemon
-drops any other value. `kata tui` sends `app_opened` once per launch to the
-daemon it connects to, after connecting. It goes through that daemon the same
-way the web UI's event does, so the daemon's install ID and the daemon's
-`KATA_TELEMETRY_ENABLED` setting apply, and a TUI pointed at a shared daemon
-counts that daemon's install. Switching daemons inside the TUI sends nothing
-more. Delivery is best effort and never shows in the terminal.
+`app_opened` carries one property, `surface`, set to `web`, `tui` or `cli`; the
+daemon drops any other value. `kata tui` reports `app_opened` to the daemon it
+connects to, after connecting. Switching daemons inside the TUI sends nothing
+more.
+
+Typed CLI commands such as `kata create` or `kata list` report `app_opened`
+with `surface: cli` to the daemon they used, after the command succeeds. The
+report never starts a daemon, waits at most one second and prints nothing.
+Probes and local commands such as `kata health` or `kata version` send
+nothing. Agent output mode (`--agent`, `--format agent`), `kata mcp serve`,
+agent hooks and daemon hook children send nothing either. kata recognizes an
+agent only by agent output mode or the daemon hook marker, so a script or agent
+that runs ordinary commands without `--agent` counts like a person.
+
+Each client's event goes through the daemon it used, so that daemon's install
+ID and its `KATA_TELEMETRY_ENABLED` setting apply, and a TUI or CLI pointed at
+a shared daemon counts that daemon's install. The daemon forwards one
+`app_opened` per surface per UTC day and forgets what it sent when it restarts,
+so a restart can send another the same day. Delivery is best effort and never
+shows in the terminal; count distinct installs rather than events.
 
 Disable telemetry with:
 

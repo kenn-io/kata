@@ -1,8 +1,9 @@
-// Package telemetry emits anonymous, opt-out daemon and web UI usage events.
+// Package telemetry emits anonymous, opt-out daemon, web UI, TUI and CLI usage events.
 package telemetry
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,9 +70,26 @@ func NewReporter(opts Options) (*Reporter, error) {
 			posthog.AllowProperty("project_count", posthog.AllowNumber),
 		),
 		posthog.WithAllowedEvent("app_opened",
-			posthog.AllowProperty("surface", posthog.AllowStringValues("web", "tui")),
+			posthog.AllowProperty("surface", appOpenedSurfaces),
 		),
 	)
+}
+
+// appOpenedSurfaces is the app_opened surface filter shared by the allowlist and the daemon's daily gate.
+var appOpenedSurfaces = posthog.AllowStringValues("web", "tui", "cli")
+
+// AppOpenedSurface returns the surface the reporter would keep for app_opened, or "" when it would keep none.
+func AppOpenedSurface(properties map[string]any) string {
+	for key, value := range properties {
+		if strings.TrimSpace(key) != "surface" {
+			continue
+		}
+		if kept, ok := appOpenedSurfaces(value); ok {
+			surface, _ := kept.(string)
+			return surface
+		}
+	}
+	return ""
 }
 
 // DisabledReporter returns a reporter that drops events without network calls.

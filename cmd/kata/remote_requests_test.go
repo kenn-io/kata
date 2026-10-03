@@ -38,9 +38,12 @@ func TestRemoteMutationsWithoutPreflight(t *testing.T) {
 			var mu sync.Mutex
 			var paths []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				mu.Lock()
-				paths = append(paths, r.Method+" "+r.URL.Path)
-				mu.Unlock()
+				// The use report follows the command; it is not a preflight.
+				if r.URL.Path != "/api/v1/ui/telemetry" {
+					mu.Lock()
+					paths = append(paths, r.Method+" "+r.URL.Path)
+					mu.Unlock()
+				}
 				r.Host = target.Host
 				proxy.ServeHTTP(w, r)
 			}))
