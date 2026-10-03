@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/telemetry"
 )
 
@@ -205,10 +206,15 @@ func (c *recordingTelemetryCapture) ServeHTTP(w http.ResponseWriter, r *http.Req
 	_, _ = w.Write([]byte(`{"status":"queued"}`))
 }
 
-func newSharedTCPTelemetryHandler(t *testing.T, token, origin string, capture http.Handler) http.Handler {
+func newSharedTCPTelemetryHandler(t *testing.T, auth config.AuthConfig, origin string, capture http.Handler, identityTokens ...string) http.Handler {
 	t.Helper()
 	store := openAuthTestDB(t)
-	auth := config.AuthConfig{Token: token}
+	for _, token := range identityTokens {
+		_, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+			PlaintextToken: token, Actor: "alice", AdminActor: db.BootstrapActor,
+		})
+		require.NoError(t, err)
+	}
 	manager, err := NewWebSessionManager(WebSessionManagerConfig{
 		Origin: origin, InstanceID: "instance_a", Writable: true, Auth: auth, DB: store,
 	})
@@ -256,7 +262,7 @@ func TestCaptureTelemetrySharedTCPBearerClient(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			capture := &recordingTelemetryCapture{}
-			handler := newSharedTCPTelemetryHandler(t, "configured-token", "https://daemon.example", capture)
+			handler := newSharedTCPTelemetryHandler(t, config.AuthConfig{Token: "configured-token"}, "https://daemon.example", capture)
 
 			response := postSharedTCPTelemetry(t, handler, "daemon.example", test.headers)
 
@@ -274,9 +280,20 @@ func TestCaptureTelemetrySharedTCPBearerClient(t *testing.T) {
 
 	t.Run("keyless loopback client", func(t *testing.T) {
 		capture := &recordingTelemetryCapture{}
-		handler := newSharedTCPTelemetryHandler(t, "", "http://127.0.0.1:7777", capture)
+		handler := newSharedTCPTelemetryHandler(t, config.AuthConfig{}, "http://127.0.0.1:7777", capture)
 
 		response := postSharedTCPTelemetry(t, handler, "127.0.0.1:7777", nil)
+
+		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+		assert.Equal(t, []string{tuiTelemetryBody}, capture.bodies)
+	})
+	// Identity mode can't start without a bootstrap token, so the no-token case is unreachable.
+	t.Run("identity token", func(t *testing.T) {
+		capture := &recordingTelemetryCapture{}
+		auth := config.AuthConfig{Token: "configured-token", RequireTokenIdentity: true}
+		handler := newSharedTCPTelemetryHandler(t, auth, "https://daemon.example", capture, "user-token")
+
+		response := postSharedTCPTelemetry(t, handler, "daemon.example", map[string]string{"Authorization": "Bearer user-token"})
 
 		require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
 		assert.Equal(t, []string{tuiTelemetryBody}, capture.bodies)
